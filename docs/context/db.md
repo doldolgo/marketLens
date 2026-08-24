@@ -1,0 +1,30 @@
+# db.md — 저장소
+
+> 이 문서는 **목표 상태**를 쓴다. 실제 구현 여부는 `status.md` 가 말한다.
+
+## 엔진
+- InfluxDB **2.7 OSS**. org `marketlens`, bucket `marketlens` 하나. 쿼리는 Flux, Python 클라이언트는 `influxdb-client`.
+- 이유: 김프 이력은 (거래소쌍·코인) 태그 × 시각 × 수치 2개라는 전형적 시계열이고, 시간 버킷 집계가 엔진 기본 기능이라 앱 코드가 줄어든다. 3 Core 는 기본 쿼리 범위 ~72시간이라 92일 백필·월간 조회에 부적합해 2.7 을 쓴다.
+
+## measurement
+같은 tag set + 같은 time 은 Influx 가 덮어쓴다. 이것이 유일키 역할이라 별도 중복 방지 코드가 없다.
+- **premium** — 김프/역프 한 점. tag `dom`·`fx`·`base`, field `fwd`·`rev`(float, %), time = 수집 시각. 한 점 = (dom, fx, base, time). `/history/*` 전부의 유일한 원천.
+- **dw_fail** — 입출금 조회 실패 관측. tag `exchange`, field `v`=1, time = 관측 시각. 한 점 = (exchange, time). 읽는 HTTP 엔드포인트 없음 — 사람이 Influx UI 에서 본다.
+
+## 시각 단위
+- Influx time 은 ns 지만 기록 정밀도는 **초**. API 응답의 `*_ts` 는 epoch 초, `fetched_at` 은 epoch ms.
+
+## 보존
+- bucket retention 은 **무제한**. `dw_fail` 의 "최근 24시간" 은 쿼리 range(-24h) 로 처리한다 — retention 을 걸면 `premium` 까지 지워진다.
+
+## 쓰는 쪽
+- persist 루프(60초, 앱 진입점 소관): 메모리 스프레드에서 (dom, fx, base) 별 fwd/rev 를 `premium` 에. 입출금 실패 관측 시 `dw_fail` 1점. 한 회차 = 쓰기 1번. 실패는 로그 후 다음 회차.
+- 백필 스크립트: 업비트 초봉 × 바이낸스 1초봉 → 과거 92일 `premium`. 기존 기록의 앞·뒤 빈 구간만 채운다.
+- Influx 가 닿지 않아도 앱은 뜬다. `INFLUX_TOKEN` 없으면 저장 루프 비활성.
+
+## 읽는 쪽
+- `features/history` 의 `/history/premium`·`/history/streaks`·`/history/streaks/bulk` 만. 다른 조회 API 는 DB 를 0회 접근한다(메모리가 진실). 저장소 불가 시 503 `storage_unavailable`.
+
+## 로컬 접속
+- dev compose 로 Influx 2.7 하나 띄운다. env 는 `INFLUX_URL`(기본 `http://localhost:8086`)·`INFLUX_TOKEN` 둘.
+- UI: `http://localhost:8086` (토큰 = `INFLUX_TOKEN`). 점검은 UI 에서 `premium` 점 수를 세는 정도면 된다.
