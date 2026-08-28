@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from app.core.collector import CycleResult
 from app.core.live_store import LiveStore
 from app.core.models import Row
+from app.core.networks import pick_domestic
 from app.core.premium import premium_percent
 from app.features.spreads.models import (
     RefreshFailure,
@@ -35,6 +36,42 @@ class MarketDataNotFoundError(Exception):
         super().__init__(message)
         self.message = message
         self.detail = detail
+
+
+def _wallet_fields(
+    dom_row: Row, fx_row: Row
+) -> tuple[str | None, bool | None, bool | None, bool | None, bool | None]:
+    """행의 입출금 5필드 (netDom, depDom, wdDom, depFx, wdFx) — 스펙 006 §3.7.
+
+    국내 망이 기준이다. status=fail 행도 같은 규칙.
+    """
+    if not dom_row.networks:
+        # 1. 국내 망 목록이 비면(키 없음·망 정보 없는 과도기) 코인 단위 값 그대로
+        return (
+            None,
+            dom_row.deposit_enabled,
+            dom_row.withdrawal_enabled,
+            fx_row.deposit_enabled,
+            fx_row.withdrawal_enabled,
+        )
+    # 2. 국내 망·판정·해외 망을 고른다 (§3.6 tie-break)
+    dom_net, verdict, fx_net = pick_domestic(dom_row.networks, fx_row.networks)
+    dep_fx: bool | None
+    wd_fx: bool | None
+    if verdict == "matched" and fx_net is not None:
+        # 3. 맞춘 해외 망의 값
+        dep_fx, wd_fx = fx_net.dep, fx_net.wd
+    elif verdict == "absent":
+        # 4. 해외가 그 망을 안 다룸 = 옮길 길 없음
+        dep_fx = wd_fx = False
+    elif fx_row.networks:
+        # 5. 해외 망이 있는데 못 맞춤 = 모른다고 말한다 — 코인 단위로 접으면 낙관 편향
+        dep_fx = wd_fx = None
+    else:
+        # 5. 해외 망 정보가 아예 없으면 해외 코인 단위 값
+        dep_fx = fx_row.deposit_enabled
+        wd_fx = fx_row.withdrawal_enabled
+    return (dom_net.name, dom_net.dep, dom_net.wd, dep_fx, wd_fx)
 
 
 def _age_seconds(row: Row, now: datetime) -> float:
@@ -84,6 +121,9 @@ def _build_row(
         row_rate_bid = rate_bid
         status = "stale" if age >= STALE_AFTER_SEC else "ok"
 
+    # 입출금 5필드는 망 판정으로 채운다 — fail 행도 같은 규칙 (006 §3.7)
+    net_dom, dep_dom, wd_dom, dep_fx, wd_fx = _wallet_fields(dom_row, fx_row)
+
     return SpreadRow(
         sym=base,
         dom=dom_row.exchange,
@@ -98,11 +138,11 @@ def _build_row(
         liq_fx=liq_fx,
         rate_ask=row_rate_ask,
         rate_bid=row_rate_bid,
-        net_dom=None,  # 망 판정은 006(wallet-status) 몫
-        dep_dom=dom_row.deposit_enabled,
-        wd_dom=dom_row.withdrawal_enabled,
-        dep_fx=fx_row.deposit_enabled,
-        wd_fx=fx_row.withdrawal_enabled,
+        net_dom=net_dom,
+        dep_dom=dep_dom,
+        wd_dom=wd_dom,
+        dep_fx=dep_fx,
+        wd_fx=wd_fx,
     )
 
 
@@ -177,7 +217,13 @@ def build_refresh(result: CycleResult, store: LiveStore) -> RefreshResponse:
     `snapshots[]` 는 거래소당 1항목이고 001 요약의 호출 수도 여기 싣는다(006 이 원소를 확장).
     """
     snapshots = [
-        RefreshSnapshot(exchange=ex, saved=n, calls=result.calls.get(ex, 0))
+        RefreshSnapshot(
+            exchange=ex,
+            saved=n,
+            calls=result.calls.get(ex, 0),
+            # 입출금 조회 성공 여부 — 조회 자체가 없으면(006 배선 전 테스트 등) false (006 §3.5)
+            wallet_status_available=result.wallet_status_available.get(ex, False),
+        )
         for ex, n in result.saved.items()
     ]
     usdkrw: list[RefreshRate] = []
