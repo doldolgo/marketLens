@@ -9,6 +9,7 @@ dependencies = [
     "httpx>=0.27",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
+    "influxdb-client>=1.45",
 ]
 
 [project.optional-dependencies]
