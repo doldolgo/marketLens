@@ -37,7 +37,7 @@
   1. `cd ~/marketlens` (기존 be·fe 폴더와 다른 폴더)
   2. `server/.env` 가 없거나 `INFLUX_TOKEN` 이 비어 있으면 **배포 실패**. 토큰 없이 뜨면 저장 루프가 꺼진 채 조용히 데이터를 잃는다.
   3. `git pull origin main`
-  4. `docker compose up -d --build`
+  4. `docker compose --env-file .env --env-file server/.env up -d --build` — `WEB_PORT` 는 루트 `.env`, Influx 첫 기동 admin 토큰(`DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN}`)은 `server/.env` 에서 치환한다. `--env-file` 을 명시하면 기본 `./.env` 자동 로드가 꺼지므로 둘 다 적는다.
   5. `docker image prune -f` — 오래된 레이어가 EC2 디스크를 채우지 않게.
 - Secrets 는 `EC2_HOST`·`EC2_USER`·`EC2_SSH_KEY` 셋(기존 be·fe 레포와 같은 값). 값은 어디에도 적지 않는다.
 - PR 템플릿은 conventions.md 규칙 그대로 3줄 골격: 무엇을 / 왜 / 테스트.

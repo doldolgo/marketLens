@@ -20,6 +20,7 @@
 ### 3.1 설정·로컬 DB
 env(`INFLUX_URL`·`INFLUX_TOKEN`)·org·bucket 은 `db.md` 대로. 저장 주기 60초는 코드 상수다.
 dev compose 는 Influx 2.7 하나만 띄운다. 첫 기동 시 org·bucket `marketlens` 가 만들어지고 admin 토큰은 `.env` 의 `INFLUX_TOKEN` 과 같아야 한다 — 앱이 그 토큰으로 붙기 때문이다. 데이터는 볼륨에 남는다.
+컨테이너에는 `DOCKER_INFLUXDB_INIT_*` 환경변수로 전달하되 값은 compose 변수 치환 `${INFLUX_TOKEN}` 으로 `server/.env` 에서 온다 — 기동은 `docker compose --env-file server/.env -f docker-compose.dev.yml up -d`. 토큰을 파일 한 곳에만 두기 위해서다.
 **Influx 가 닿지 않아도 앱은 뜬다**: 기동 시 연결 실패는 에러 로그 1줄. 저장 루프가 다음 회차에 재시도하고, 조회는 메모리로 정상 동작한다. `/health` 는 200, `/history/*` 만 503 `storage_unavailable`. `INFLUX_TOKEN` 이 없으면 저장 루프 비활성·`/history/*` 503. 수집·조회가 저장소 장애에 볼모 잡히면 안 되기 때문이다.
 
 ### 3.2 measurement
