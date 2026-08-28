@@ -38,6 +38,8 @@
 
 ## 계약 규칙 (BE ↔ FE)
 - BE 내부는 snake_case. 응답 JSON 은 **행(row) 객체 키는 camelCase, 최상위 키는 snake_case**. FE types 도 같은 모양.
+- casing 예외 — FE 소비자가 없는 BE 전용 응답은 전부 snake_case: 004 분석 6개 경로(`/premium` `/premium/scan` `/matrix` `/orderbook/*` `/slippage/*` `/arbitrage`), 005 `/history/*`. FE 가 쓰게 되는 날 그 스펙에서 바꾼다.
+- 응답 압축: GZip 미들웨어를 앱 전역에 켠다 — `/history/streaks/bulk` 같은 수 MB JSON 때문. 설정은 001 의 앱 골격 소관.
 - 응답 스키마 변경 = 같은 스펙 안에서 `features/<name>/models.py` 와 `web/src/features/<name>/types.ts` 를 동시에 바꾼다.
 - 에러 형식 고정: `{"error": {"code": str, "message": str, "detail": any}}`.
 - CORS `*`.
@@ -55,15 +57,10 @@ web/src/features/<name>/
 
 ## 배포 토폴로지
 EC2 1대. 루트 `docker compose up -d --build` 로 server·web·influxdb 컨테이너(compose 기본 네트워크, Influx 포트 비공개). CI(GitHub Actions): PR → pytest + web build. main push → SSH 배포. 상세는 스펙 007(deploy).
+같은 EC2 에 기존 marketlens-be(:8000)·fe(:80) 가 운영 중이라 이 레포의 web 은 `WEB_PORT=8080` 으로 공존한다. 80 이관·서버 분리(DB/파싱 분리)는 추후 별도 스펙으로 검토한다.
 
 ## 현재 구조 (개발 후 갱신 — 실행 세션이 §7 보고와 함께 채운다)
 스펙이 DONE 될 때마다 그 기능의 실제 구조를 여기 짧게 적는다: 주요 클래스·모듈과 역할, 왜 그렇게 나눴는지. 위 "원칙"과 어긋나면 원칙을 바꾸지 말고 코드를 고친다.
 - (아직 없음)
 
 
-## AWS 배포 서버
-- DB 서버 (용량떄문에) - 100GB 시작 
-- Front, Backend 서버 
-- Parsing 서버 (CPU 사용량) 
-
-사용량 체크해보고 낮추기 
