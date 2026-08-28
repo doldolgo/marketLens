@@ -6,6 +6,8 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from app.core.networks import Network
+
 
 @dataclass
 class Row:
@@ -21,9 +23,9 @@ class Row:
     ]  # [price, size] 오름차순, 누적액 상한까지 (바이낸스는 1단계)
     bids: list[list[float]]  # [price, size] 내림차순, 같은 규칙
     price_timestamp: int  # 거래소 시세 시각 epoch ms (바이낸스는 수집 시각)
-    deposit_enabled: bool | None = None  # 006 전까지 항상 None(모름)
-    withdrawal_enabled: bool | None = None  # 006 전까지 항상 None(모름)
-    networks: list[object] = field(default_factory=list)  # 006 전까지 항상 빈 목록
+    deposit_enabled: bool | None = None  # 3-state, None=모름 — 006 이 채운다
+    withdrawal_enabled: bool | None = None  # 3-state — 006 이 채운다
+    networks: list[Network] = field(default_factory=list)  # 빈 리스트 = 망 정보 없음
     updated_at: datetime | None = None  # 적재 시각(tz-aware UTC). 저장소가 채운다
 
 
