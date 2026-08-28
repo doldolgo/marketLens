@@ -4,6 +4,7 @@
 테스트는 같은 시그니처의 fake 를 넣어 Influx 없이 돈다 (architecture.md 원칙).
 """
 
+import re
 import time
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Literal, Protocol
@@ -90,6 +91,13 @@ def build_premium_history(
     if date_str is None:
         day = datetime.now(UTC).date()
     else:
+        # fromisoformat 은 3.11+ 에서 20260828·2026-W35-4 같은 변형도 받으므로 형식을 먼저 고정한다
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str):
+            raise HistoryApiError(
+                400,
+                "invalid_request",
+                f"date 형식이 잘못됐습니다: {date_str!r} (YYYY-MM-DD)",
+            )
         try:
             day = date.fromisoformat(date_str)
         except ValueError:
@@ -98,6 +106,13 @@ def build_premium_history(
                 "invalid_request",
                 f"date 형식이 잘못됐습니다: {date_str!r} (YYYY-MM-DD)",
             ) from None
+        if not 1970 <= day.year <= 2100:
+            # period_bounds 의 연도 연산이 넘치지 않는 안전 범위 — 밖이면 형식 오류와 같은 400
+            raise HistoryApiError(
+                400,
+                "invalid_request",
+                f"date 는 1970~2100 범위여야 합니다: {date_str!r}",
+            )
     start_dt, end_dt = period_bounds(unit, day)
     start_sec = int(start_dt.timestamp())
     end_sec = int(end_dt.timestamp())
@@ -247,6 +262,9 @@ def build_streaks(
 ) -> StreaksResponse:
     now_sec = int(time.time())
     end_eff = end if end is not None else now_sec + 1
+    if end is not None and end_eff <= 0:
+        # start 기본값(첫 ts ≥ 0)보다 항상 작거나 같다 — end ≤ start 규칙의 특수형
+        raise HistoryApiError(400, "invalid_request", f"end({end_eff})가 0 이하입니다.")
     if start is not None and end_eff <= start:
         raise HistoryApiError(
             400,

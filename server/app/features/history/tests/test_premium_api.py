@@ -159,3 +159,21 @@ def test_storage_unavailable_503() -> None:
     )
     assert res.status_code == 503
     assert res.json()["error"]["code"] == "storage_unavailable"
+
+
+# ---- 리뷰 확정 결함 회귀: 극단 날짜·비표준 형식은 500 이 아니라 400 (005 §3.4) ----
+
+
+def test_extreme_date_returns_400_not_500():
+    client = make_client(FakeInfluxReader())
+    for unit in ("month", "week"):
+        res = client.get(f"/history/premium?base=BTC&unit={unit}&date=9999-12-31")
+        assert res.status_code == 400
+        assert res.json()["error"]["code"] == "invalid_request"
+
+
+def test_non_dashed_date_formats_are_rejected():
+    client = make_client(FakeInfluxReader())
+    for bad in ("20260828", "2026-W35-4", "2026-8-28"):
+        res = client.get(f"/history/premium?base=BTC&unit=week&date={bad}")
+        assert res.status_code == 400, bad

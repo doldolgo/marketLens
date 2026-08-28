@@ -149,3 +149,21 @@ def test_negative_threshold_422() -> None:
 
 def test_storage_unavailable_503() -> None:
     assert get(make_client(None)).status_code == 503
+
+
+# ---- 리뷰 확정 결함 회귀: 경계 밖 start/end 는 422, end<=0 은 400 (005 §3.4) ----
+
+
+def test_out_of_range_epoch_params_are_422_not_500():
+    client = make_client(FakeInfluxReader())
+    assert client.get("/history/streaks?base=BTC&end=253402300800").status_code == 422
+    assert client.get("/history/streaks?base=BTC&start=-1").status_code == 422
+    assert client.get("/history/streaks/bulk?end=999999999999999").status_code == 422
+    assert client.get("/history/streaks/bulk?start=-99999999999999").status_code == 422
+
+
+def test_nonpositive_end_is_400():
+    client = make_client(FakeInfluxReader())
+    res = client.get("/history/streaks?base=BTC&end=0")
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "invalid_request"
