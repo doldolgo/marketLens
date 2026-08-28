@@ -27,7 +27,7 @@ const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
 ]
 
 function Header({ tab, onTab, now }: { tab: TabId; onTab: (t: TabId) => void; now: number }) {
-  const clock = new Date(now).toLocaleTimeString('ko-KR', {
+  const clock = new Date(now).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', 
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
