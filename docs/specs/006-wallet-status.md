@@ -18,8 +18,8 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 
 **바꾸는 기존 것**
 1. 스펙 003 `/spreads` — 행의 입출금 5필드 계산을 "코인 단위 값 복사" 에서 **§3.6 망 판정** 으로 교체한다. 다른 필드·정렬·수식은 손대지 않는다.
-2. 스펙 001 수집 루프 — 001 이 비워 둔 입출금 조회 자리(필드를 `null` 로 둔 곳)에 세 거래소 조회기를 끼운다. 주기·캐시는 001 것을 그대로 쓰고, 실패 시 경고 1줄을 `/refresh` 의 `warnings` 에 넣는다.
-3. 스펙 003 `POST /refresh` — 거래소별 항목에 `wallet_status_available: bool` 을 추가한다.
+2. 스펙 001 수집 루프 — 001 이 비워 둔 입출금 조회 자리(필드를 `null` 로 둔 곳)에 세 거래소 조회기를 끼운다. 주기 60초·사이 사이클 캐시는 이 스펙 §3.5 가 정의한다(001 에는 정의가 없다 — 자리만 있다). 실패 시 경고 1줄을 `/refresh` 의 `warnings` 에 넣는다.
+3. 스펙 003 `POST /refresh` — 응답 `snapshots[]`(거래소당 1항목)의 각 원소에 `wallet_status_available: bool` 을 추가한다. 바이낸스 항목에도 붙는다 — `usdkrw[]` 는 국내 전용이라 쓸 수 없다.
 
 ## 3. 동작
 
@@ -94,7 +94,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 1. matched 이고 **국내 입금 ok 이면서 해외 출금 ok**(해외→국내로 실제 옮길 수 있는 길)인 첫 망을 즉시 채택.
 2. 없으면 matched 인 첫 망. 막혀 있어도 맞는 망을 보여준다.
 3. 그것도 없으면 첫 국내 망의 판정.
-4. 국내 망 목록이 비면 `unknown`.
+4. 국내 망 목록이 비는 경우는 여기까지 오지 않는다 — §3.7-1 이 먼저 코인 단위 값으로 처리한다.
 
 ### 3.7 `/spreads` 행의 5필드 (스펙 003 문단 대체)
 행의 국내 스냅샷 망 목록을 D, 해외(바이낸스) 망 목록을 F 라 할 때:
@@ -129,8 +129,8 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 - tie-break: 국내 망 2개 중 두 번째만 "국내 입금 ok + 해외 출금 ok" 이면 두 번째를 고른다.
 - `/spreads` 5케이스(§3.7 1~5): 빈 D → 코인 값·`netDom null`. GRT → wdFx false. QKC → depFx·wdFx false. SEI → `null, null`. unknown + F 빈 목록 → 해외 코인 값.
 - 실패 사이클 후 `/spreads` 의 해당 거래소 행은 전부 `null`(직전 성공값 미유지).
-- 키 없이 기동: `/spreads` 모든 행에 `netDom depDom wdDom depFx wdFx` 5키가 있고 값은 `true/false/null` 뿐, 빗썸 행 중 `depDom` 이 null 이 아닌 행이 있다(키 불필요). `/refresh` 의 빗썸 `wallet_status_available` true, 업비트·바이낸스 false + 입출금 경고 2줄.
-- 수동: 실키를 env 파일에 넣고 기동 → `/refresh` 경고 없음·세 거래소 모두 true, `/spreads` 에 `netDom` 이 채워진 행이 다수.
+- 키 없이 기동: `/spreads` 모든 행에 `netDom depDom wdDom depFx wdFx` 5키가 있다. `depDom wdDom depFx wdFx` 값은 `true/false/null` 뿐이고 `netDom` 은 문자열 또는 null. 빗썸 행 중 `depDom` 이 null 이 아닌 행이 있다(키 불필요). `/refresh` 의 빗썸 `wallet_status_available` true, 업비트·바이낸스 false + 입출금 경고 2줄.
+- 수동: 실키를 env 파일에 넣고(키 투입은 사람이 한다 — CLAUDE.md §5 접근 규칙) 기동 → `/refresh` 경고 없음·세 거래소 모두 true, `/spreads` 에 `netDom` 이 채워진 행이 다수.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
