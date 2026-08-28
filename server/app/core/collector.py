@@ -7,8 +7,9 @@
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Protocol
 
 import httpx
 
@@ -32,12 +33,35 @@ class CycleResult:
     calls: dict[str, int]  # 거래소별 호출 수 (실패 거래소는 빠짐)
     duration_ms: float
     fetched_at: int  # epoch ms
+    # 거래소별 입출금 조회 성공 여부 — 003 /refresh 가 snapshots[].wallet_status_available 로 노출 (006 §3.5)
+    wallet_status_available: dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass
 class _Failure:
     error_code: str
     message: str
+
+
+class WalletStatusProvider(Protocol):
+    """입출금 상태 조회기 묶음의 계약 — 실물은 features/wallet_status (006), 배선은 main.py.
+
+    core 가 features 를 import 하지 않도록 구조적 타입으로만 안다.
+    """
+
+    async def refresh_if_due(self, client: httpx.AsyncClient) -> dict[str, int] | None:
+        """60초가 지났으면 병렬 조회 후 거래소별 호출 수, 캐시 사이클은 None."""
+        ...
+
+    def apply(self, rows: list[Row], exchange: str) -> None:
+        """캐시를 스냅샷 행(dep/wd/networks)에 반영한다."""
+        ...
+
+    def availability(self) -> dict[str, bool]: ...
+
+    def warnings(self) -> list[str]: ...
+
+    def failed(self) -> list[str]: ...
 
 
 class Collector:
@@ -48,16 +72,18 @@ class Collector:
         foreign: ExchangeConnector,
         client: httpx.AsyncClient,
         interval: float = COLLECT_INTERVAL,
+        wallet: WalletStatusProvider | None = None,
     ) -> None:
         self._store = store
         self._domestic = domestic
         self._foreign = foreign
         self._client = client
         self._interval = interval
+        self._wallet = wallet
         # 사이클은 동시에 두 개 돌지 않는다 — 루프와 수동 트리거(003 /refresh)가 겹치면 뒤가 기다린다
         self._lock = asyncio.Lock()
-        # 이번 사이클에 입출금 조회가 실패한 거래소 id — 저장 루프(005)가 읽는다.
-        # 006 전에는 입출금 조회 자체가 없어 항상 빈 목록이다 (스펙 005 §3.2).
+        # 입출금 조회가 실패 상태인 거래소 id — 저장 루프(005)가 읽어 dw_fail 점을 쓴다.
+        # 다음 성공 조회까지 유지된다(60초 캐시라 사이클마다 조회하지 않는다 — 006 §3.5).
         self.dw_failed: list[str] = []
 
     @property
@@ -86,6 +112,11 @@ class Collector:
         warnings: list[str] = []
         calls: dict[str, int] = {}
         saved: dict[str, int] = {}
+
+        # 입출금 상태(006)는 시세 수집과 겹쳐서 진행한다 — 60초에 한 번만 실제 호출이 나간다
+        wallet_task: asyncio.Task[dict[str, int] | None] | None = None
+        if self._wallet is not None:
+            wallet_task = asyncio.create_task(self._wallet.refresh_if_due(self._client))
 
         # 1. 국내(업비트·빗썸) 동시 수집
         domestic_outcomes = await asyncio.gather(
@@ -143,6 +174,13 @@ class Collector:
             foreign_rows = foreign_outcome.rows
             calls[self._foreign.id] = foreign_outcome.calls
 
+        # 입출금 조회 합류 — 실제 호출이 나간 사이클만 거래소별 호출 카운트를 올린다 (006 §3.5)
+        if wallet_task is not None:
+            wallet_calls = await wallet_task
+            if wallet_calls:
+                for ex, n in wallet_calls.items():
+                    calls[ex] = calls.get(ex, 0) + n
+
         # 4. 교집합 필터 — "이번 사이클 성공 거래소 + 유지된 거래소" 전체로 계산한다
         domestic_union: set[str] = set()
         for conn in self._domestic:
@@ -181,8 +219,18 @@ class Collector:
         for exchange, (ask, bid) in observed.items():
             self._store.set_rate(exchange, ask, bid, now)
         self._store.mark_received(int(time.time()))
-        # 입출금 조회는 006 몫 — 006 이 사이클마다 실패 거래소를 여기에 채운다
-        self.dw_failed = []
+
+        # 6. 입출금 캐시 반영 — 유지된(이번 사이클 실패) 거래소의 행에도 덮어써야
+        #    "실패 사이클은 직전 성공값을 유지하지 않는다"(006 §3.5)가 성립한다
+        wallet_available: dict[str, bool] = {}
+        if self._wallet is not None:
+            for ex in [*(c.id for c in self._domestic), self._foreign.id]:
+                self._wallet.apply(self._store.get_all(exchange=ex), ex)
+            warnings.extend(self._wallet.warnings())
+            self.dw_failed = self._wallet.failed()
+            wallet_available = self._wallet.availability()
+        else:
+            self.dw_failed = []
 
         return CycleResult(
             saved=saved,
@@ -192,6 +240,7 @@ class Collector:
             calls=calls,
             duration_ms=(time.monotonic() - started) * 1000,
             fetched_at=fetched_at,
+            wallet_status_available=wallet_available,
         )
 
     async def _safe_fetch(self, conn: ExchangeConnector) -> FetchResult | _Failure:
