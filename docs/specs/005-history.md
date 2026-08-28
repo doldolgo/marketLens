@@ -49,7 +49,7 @@ dev compose 는 Influx 2.7 하나만 띄운다. 첫 기동 시 org·bucket `mark
 - `summary` = `{first_fwd,last_fwd,min_fwd,max_fwd}` — 구간 전체 통계.
 - `events` = `[{dt,fwd,rev}…]` 컴팩트 — 절대시각 대신 `dt`=직전 기록으로부터 경과 초(구간 첫 기록은 0).
 
-**`/history/streaks?base&threshold&start&end&max_gap`** — `threshold ≥ 0`(기본 0). `start`/`end` 없으면 그 코인 기록의 첫 ts / 지금+1초. 코인 기록이 전혀 없으면 404, `end ≤ start` 면 400. 구간(streak) 규칙:
+**`/history/streaks?base&threshold&start&end&max_gap`** — `threshold ≥ 0`(기본 0). `start`/`end` 없으면 그 코인 기록의 첫 ts / 지금+1초. 조회 구간 안에 기록이 0건이면 404(구간 밖 기록 유무는 보지 않는다), `end ≤ start` 면 400. 구간(streak) 규칙:
 1. ts 오름차순으로 값이 `threshold` **이상**인 연속 기록을 한 구간으로 묶는다(같은 값 포함).
 2. 값이 미만이거나 직전 기록과 `max_gap` 초보다 벌어지면 구간을 닫는다(끊긴 수집을 이어 붙여 "3시간 연속" 을 만들지 않는다).
 3. fwd(kimp) 와 rev(reverse) 를 절댓값 없이 **각각** 계산한다.
@@ -77,7 +77,7 @@ dev compose 는 Influx 2.7 하나만 띄운다. 첫 기동 시 org·bucket `mark
 - 바이낸스: 현물 API `GET /api/v3/klines?symbol={BASE}USDT&interval=1s&startTime={ms}&limit=1000`(과거→현재, 다음 `startTime = 마지막 closeTime+1`). 쓰는 필드 `k[0]` open ms·`k[4]` 종가 문자열·`k[6]` closeTime. **모든 초**가 있다(밀집).
   418/429 는 2·4·6s, 5xx 는 1·2·3s 대기 재시도. 페이지마다 0.1s. 가중치 2/호출.
 - 합치기: 세 변동 목록(업비트 초봉·바이낸스 1초봉·환율 분봉, 각각 직전과 같은 값은 제거)을 ts 로 병합해 forward-fill. 셋이 다 갖춰지기 전 ts 는 건너뛰고, `fwd` 가 직전과 같으면 기록하지 않는다. 환율 씨앗은 하루 시작 이전 최신 분봉(목표 시작 6시간 전부터 수집).
-- **재실행 안전**: 환율은 전체 구간 한 번만 수집(0건이면 중단). base 마다 `premium` 의 (첫 time, 마지막 time) 을 보고 `[목표시작, 첫 time)` 과 `[마지막 time+1, 지금)` 만 채운다(가운데는 건드리지 않는다). "이미 전부 채워져" 판정은 해당 구간 count 로.
+- **재실행 안전**: 환율은 전체 구간 한 번만 수집(0건이면 중단). base 마다 `premium` 의 (첫 time, 마지막 time) 을 보고 `[목표시작, 첫 time)` 과 `[마지막 time+1, 목표 끝)` 만 채운다(가운데는 건드리지 않는다). 목표 끝 = **오늘 UTC 0시로 내림** — 오늘 치는 persist 루프 몫이라, live 기록과 겹쳐 재실행마다 소량 재수집되는 것을 막는다. "이미 전부 채워져" 판정은 해당 구간 count 로.
   **UTC 하루 단위로 처리·날마다 쓴다**. 기존 기록 이전 구간은 최신 날부터 거꾸로(중단돼도 미완 구간이 첫 time 밖에 남아 다음 실행이 다시 잡는다). 같은 시각 점은 덮어쓴다.
   Ctrl-C 로 중단하면 exit 130. 다시 실행하면 남은 구간부터 이어진다.
 
@@ -111,7 +111,12 @@ dev compose 는 Influx 2.7 하나만 띄운다. 첫 기동 시 org·bucket `mark
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q   # 163 passed (신규 46)
+cd web && npm run lint && npm run build
+docker compose --env-file server/.env -f docker-compose.dev.yml up -d   # + uvicorn :8020
+# 기동 60초 뒤 /history/premium?base=BTC&unit=week → count 1, events[0].dt 0
+# influxdb stop → /health 200·/spreads 정상·/history/* 503, 로그 "DB 저장 실패 (연속 1회)"
+cd server && .venv/bin/python -m scripts.backfill BTC --days 1   # 55,090건, 재실행 "이미 전부 채워져 있습니다"
 ```
 
 ## 6. 갱신할 문서
@@ -123,6 +128,7 @@ dev compose 는 Influx 2.7 하나만 띄운다. 첫 기동 시 org·bucket `mark
 - `CLAUDE.md` 스펙 인덱스 상태.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-- 남은 빚: 캔들 수집기·백필 실호출 테스트 없음 / 기록 탭 실데이터 연결(후속 스펙)
+- 만든 것: `core/influx.py`(클라이언트)·`core/persist.py`(60초 루프), `features/history/`(models·service·router·tests 24개), `scripts/backfill.py`, 루트 `docker-compose.dev.yml`, `web/features/history/Tab.tsx`. 수정: `collector.py`(락 공개·dw_failed 자리)·`main.py`(lifespan 배선)·`App.tsx`(기록 탭·선택 심볼 `'BTC'`)·`pyproject.toml`(influxdb-client).
+- 추측한 지점: `fx` 를 Literal 쿼리로 노출(422 경로), `base` 패턴 검증(Flux 주입 방어), 빈 방향 요약은 0.0·빈 segments, 하루 조각 skip 판정 = count>0, dev compose UI 비밀번호도 `${INFLUX_TOKEN}` 재사용, bulk coins 는 base 오름차순, 기간 내부값 7d/30d/90d.
+- 실행 중 함께 고친 스펙 절: §3.5 백필 목표 끝 = 오늘 UTC 0시 내림(live persist 와 겹침 해소), §3.4 streaks 404 = 조회 구간 안 0건 판정.
+- 남은 빚: 캔들 수집기·백필 실호출 자동 테스트 없음(순수 계산만 테스트) / 기록 탭 실데이터 연결·spark 채우기(후속 스펙) / bulk 92일 전 코인 응답 성능 미실측
