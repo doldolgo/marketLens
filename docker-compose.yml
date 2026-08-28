@@ -1,0 +1,54 @@
+# 배포용 compose — server·web·influxdb 3컨테이너 (스펙 007). dev 는 docker-compose.dev.yml(Influx 하나).
+# 기동(EC2): docker compose --env-file .env --env-file server/.env up -d --build
+#   WEB_PORT 는 루트 .env 에서, INFLUX_TOKEN 은 server/.env 에서 치환된다.
+#   --env-file 을 명시하면 기본 ./.env 자동 로드가 꺼지므로 둘 다 적는다.
+# 호스트에 여는 포트는 web 하나(${WEB_PORT:-80}) — server·influx 는 compose 내부 네트워크만.
+
+# 프로젝트 이름 고정 — 같은 폴더의 dev compose(프로젝트=폴더명)와 influxdb 서비스명이 겹쳐
+# 서로의 컨테이너를 재생성하는 사고를 막고, EC2 폴더명(~/marketlens)과도 일치시킨다.
+name: marketlens
+
+services:
+  server:
+    build: ./server
+    container_name: marketlens-server
+    restart: unless-stopped
+    # 시크릿은 이미지가 아니라 여기서만 주입된다 — 이미지 레이어에 .env 없음 (스펙 007 §3)
+    env_file:
+      - ./server/.env
+    environment:
+      # 컨테이너 안에서 Influx 는 서비스명으로 접근 — server/.env 의 localhost 값을 덮는다
+      INFLUX_URL: http://influxdb:8086
+    depends_on:
+      - influxdb
+
+  web:
+    build: ./web
+    container_name: marketlens-web
+    restart: unless-stopped
+    ports:
+      # 현 EC2 는 기존 fe(:80)·be(:8000) 가 점유 — 루트 .env 의 WEB_PORT=8080 으로 공존한다
+      - "${WEB_PORT:-80}:80"
+    depends_on:
+      - server
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: marketlens-influxdb
+    restart: unless-stopped
+    # dev compose 와 같은 첫 기동 설정 — org·bucket marketlens, admin 토큰 = INFLUX_TOKEN
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: marketlens
+      # UI 로그인(사람용)도 .env 의 토큰 값 하나로 통일한다
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_TOKEN}
+      DOCKER_INFLUXDB_INIT_ORG: marketlens
+      DOCKER_INFLUXDB_INIT_BUCKET: marketlens
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN}
+      # retention 무제한 — dw_fail 의 "최근 24시간" 은 쿼리 range 로 처리한다 (db.md)
+      DOCKER_INFLUXDB_INIT_RETENTION: "0"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+
+volumes:
+  influxdb-data:
