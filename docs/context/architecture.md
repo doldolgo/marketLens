@@ -35,6 +35,7 @@
 - `fetch` 폴링만 사용. 상태관리·라우터·스타일 라이브러리 없음.
 - API base: `VITE_API_BASE` (미설정 시 `/api`). dev 는 vite proxy `/api → http://localhost:8000` (prefix strip), 배포는 nginx `/api/ → server:8000/`.
 - 폴링 실패 시 직전 데이터 유지.
+- 셸의 공유 피드가 탭 공통 데이터를 들고, 1.5초 tick 은 셸이 돌린다. `/spreads` 1초 폴링은 spreads 기능(003)이 제공한다.
 
 ## 계약 규칙 (BE ↔ FE)
 - BE 내부는 snake_case. 응답 JSON 은 **행(row) 객체 키는 camelCase, 최상위 키는 snake_case**. FE types 도 같은 모양.
@@ -62,5 +63,6 @@ EC2 1대. 루트 `docker compose up -d --build` 로 server·web·influxdb 컨테
 ## 현재 구조 (개발 후 갱신 — 실행 세션이 §7 보고와 함께 채운다)
 스펙이 DONE 될 때마다 그 기능의 실제 구조를 여기 짧게 적는다: 주요 클래스·모듈과 역할, 왜 그렇게 나눴는지. 위 "원칙"과 어긋나면 원칙을 바꾸지 말고 코드를 고친다.
 - **collect (001)**: `core/collector.py`(사이클 5단계 + 락 + 1초 루프, `CycleResult` 반환), `core/live_store.py`(스냅샷·환율·received_at, 거래소 단위 통째 교체), `core/connectors/{base,upbit,bithumb,binance}.py`(공통 ABC + 거래소별 quirk 흡수, 코드 비공유), `core/rows.py`(행 조립 순수 함수 — 누적액 상한·가격 폴백), `core/models.py`(`Row`·`Rate`), `core/errors.py`(502/504 에러 계약), `core/config.py`(상수 + pydantic-settings). 앱 골격·GZip·CORS·수집 루프 기동은 `app/main.py` lifespan.
+- **web-shell (002)**: `shared/`(theme.css·index.css 사본, `feed.ts` 공유 피드, `mock.ts` 결정론 mock, `format.ts` 포맷 8종, `ui.tsx` 조작 조각 3종, `rand.ts` 시드 rng), `App.tsx`(헤더·KPI·탭 전환 — 탭은 숨김 유지), `features/{gap,pp,health,flow}/Tab.tsx`. spreads·history 는 placeholder.
 
 

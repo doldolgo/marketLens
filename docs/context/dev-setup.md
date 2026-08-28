@@ -1,7 +1,7 @@
 # dev-setup.md — 로컬 실행
 
 ## 사전 준비
-- Python 3.12, Node 22, Docker Desktop
+- Python 3.12, Node 22(CI·배포 고정 — 로컬은 v26 도 동작 확인), Docker Desktop
 - `:8000` `:5173` `:8086` 비어 있어야 함.
 
 ## server

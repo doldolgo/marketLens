@@ -7,7 +7,7 @@
 | 기능 | server | web | 비고 |
 |---|---|---|---|
 | collect | 1초 수집 루프·커넥터 3종·`/health` 동작 | - | `/refresh` 노출은 003 몫 |
-| web-shell | - | 없음 | |
+| web-shell | - | 셸·KPI·mock 탭 4종 동작 | spreads/history 탭은 placeholder |
 | spreads | 없음 | 없음 | |
 | analysis | 없음 | - | |
 | history | 없음 | 없음 | |
