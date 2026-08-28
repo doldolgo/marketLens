@@ -254,3 +254,85 @@ async def test_connector_interface_is_satisfied_by_fakes() -> None:
     # 공통 인터페이스 하나로 collector 가 동작한다 — 새 거래소 추가 = 구현체 추가
     assert issubclass(FakeConnector, ExchangeConnector)
     assert isinstance(FetchResult(rows=[], calls=0), FetchResult)
+
+
+# ---- 리뷰 확정 결함 회귀: 지갑 조회가 시세 교체를 막지 않는다 (006 §3.5) ----
+
+
+class GatedWallet:
+    """gate 를 열어줄 때까지 refresh_if_due 가 매달리는 fake — 지연·취소 관찰용."""
+
+    def __init__(self) -> None:
+        self.gate = asyncio.Event()
+        self.cancelled = False
+        self.applied = 0
+
+    async def refresh_if_due(self, client: httpx.AsyncClient) -> dict[str, int] | None:
+        try:
+            await self.gate.wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        return {}
+
+    def apply(self, rows, exchange: str) -> None:
+        self.applied += 1
+
+    def warnings(self) -> list[str]:
+        return []
+
+    def failed(self) -> list[str]:
+        return []
+
+    def availability(self) -> dict[str, bool]:
+        return {}
+
+
+def build_with_wallet(
+    store: LiveStore, wallet: GatedWallet, client: httpx.AsyncClient
+) -> Collector:
+    upbit = FakeConnector("upbit", [[usdt_row("upbit"), make_row("upbit", "BTC")]])
+    bithumb = FakeConnector("bithumb", [[usdt_row("bithumb")]])
+    binance = FakeConnector("binance", [[make_row("binance", "BTC", quote="USDT")]])
+    return Collector(
+        store=store,
+        domestic=[upbit, bithumb],
+        foreign=binance,
+        client=client,
+        wallet=wallet,
+    )
+
+
+async def test_hanging_wallet_does_not_delay_snapshot_replacement(unused_client):
+    store = LiveStore()
+    wallet = GatedWallet()
+    collector = build_with_wallet(store, wallet, unused_client)
+    cycle = asyncio.create_task(collector.run_cycle())
+    # 지갑이 매달려 있어도(gate 닫힘) 시세 교체·mark_received 는 끝나 있어야 한다
+    for _ in range(200):
+        if store.get_all(exchange="upbit"):
+            break
+        await asyncio.sleep(0.005)
+    assert store.get_all(exchange="upbit"), "지갑 대기 중에 시세 교체가 일어나지 않았다"
+    assert not cycle.done()
+    wallet.gate.set()
+    result = await cycle
+    assert result.saved["upbit"] >= 1
+    assert wallet.applied > 0  # 합류 뒤 캐시 반영은 여전히 수행된다
+
+
+async def test_cancelled_cycle_cancels_wallet_task(unused_client):
+    store = LiveStore()
+    wallet = GatedWallet()
+    collector = build_with_wallet(store, wallet, unused_client)
+    cycle = asyncio.create_task(collector.run_cycle())
+    for _ in range(200):
+        if store.get_all(exchange="upbit"):
+            break
+        await asyncio.sleep(0.005)
+    cycle.cancel()
+    try:
+        await cycle
+    except asyncio.CancelledError:
+        pass
+    assert wallet.cancelled, "사이클 취소 시 지갑 태스크가 고아로 남았다"
