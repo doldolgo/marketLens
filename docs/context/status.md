@@ -12,7 +12,7 @@
 | analysis | 6개 엔드포인트 동작 | - | BE 전용, snake_case |
 | history | Influx 영속·persist 60초·`/history/*` 3종·백필 | 기록 탭 (mock) | `/history/*` 실데이터 연결은 후속 |
 | wallet-status | 3거래소 조회·60초 캐시·`/spreads` 망 판정 | - | 표시는 spreads 탭이 담당 |
-| deploy | 없음 | 없음 | |
+| deploy | Dockerfile·compose 3컨테이너·CI/deploy 워크플로 | nginx 서빙(:${WEB_PORT}) | 로컬 검증 완료 — EC2 반영·PR check 는 GitHub 권한 대기 |
 
 ## 알려진 빚
 (없음)

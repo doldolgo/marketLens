@@ -68,5 +68,6 @@ EC2 1대. 루트 `docker compose up -d --build` 로 server·web·influxdb 컨테
 - **analysis (004)**: `features/analysis/` — `walk.py`(호가창 소진 순수 계산), `service.py`(6개 빌더·거래소 레지스트리, `core/premium` import), `router.py`(6 엔드포인트, snake_case 응답), `models.py`. web 없음.
 - **history (005)**: `core/influx.py`(2.7 클라이언트 — 쓰기 1회/회차·조회, 실패는 `InfluxUnavailableError` 로 통일), `core/persist.py`(60초 루프 — 수집 락 안에서 점 조립·락 밖 쓰기), `features/history/`(service 순수 계산 + 리더 Protocol, router 3 라우트), `scripts/backfill.py`(업비트 초봉×바이낸스 1s, UTC 하루 단위·재실행 안전), 루트 `docker-compose.dev.yml`. web `features/history/Tab.tsx`(mock).
 - **wallet-status (006)**: `core/networks.py`(망 정규화·판정·tie-break), `features/wallet_status/`(거래소별 조회 3파일 + service 60초 캐시·병렬·실패 시 unknown 덮기). collector 에 Protocol 주입, spreads 가 §3.7 5케이스로 5필드 계산.
+- **deploy (007)**: `server/Dockerfile`(3.12-slim·워커 1), `web/Dockerfile`(node 22 빌드→nginx 1.27, `/api/` 접두 제거 프록시·SPA fallback), 루트 `docker-compose.yml`(호스트 노출은 web `${WEB_PORT:-80}` 하나, `INFLUX_URL` 은 compose 가 `http://influxdb:8086` 으로 오버라이드), `.github/workflows/{ci,deploy}.yml`.
 
 
