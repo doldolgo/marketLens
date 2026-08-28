@@ -14,10 +14,15 @@ except Exception:
 
 cmd = (data.get("tool_input") or {}).get("command", "")
 tokens = re.findall(r"\S+", cmd)
-bad = [
-    t for t in tokens
-    if re.search(r"(^|/)\.env(\.\w+)?[\"']?$", t) and ".env.example" not in t
-]
+bad = []
+for i, t in enumerate(tokens):
+    if not re.search(r"(^|/)\.env(\.\w+)?[\"']?$", t) or ".env.example" in t:
+        continue
+    # `--env-file server/.env` / `--env-file=…` 는 값을 화면에 내지 않고
+    # 프로그램(compose)에 넘기는 경로라 허용한다 (CLAUDE.md §5).
+    if t.startswith("--env-file=") or (i > 0 and tokens[i - 1] == "--env-file"):
+        continue
+    bad.append(t)
 if bad:
     sys.stderr.write(
         f"차단: {' '.join(sorted(set(bad)))} — .env 는 읽기·쓰기·출력 전부 금지 (CLAUDE.md §5). "
