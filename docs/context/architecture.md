@@ -66,5 +66,6 @@ EC2 1대. 루트 `docker compose up -d --build` 로 server·web·influxdb 컨테
 - **web-shell (002)**: `shared/`(theme.css·index.css 사본, `feed.ts` 공유 피드, `mock.ts` 결정론 mock, `format.ts` 포맷 8종, `ui.tsx` 조작 조각 3종, `rand.ts` 시드 rng), `App.tsx`(헤더·KPI·탭 전환 — 탭은 숨김 유지), `features/{gap,pp,health,flow}/Tab.tsx`. spreads·history 는 placeholder(003 이 spreads 교체).
 - **spreads (003)**: server `core/premium.py`(`premium_percent`), `features/spreads/`(service 순수 계산·router 2 엔드포인트·models). `/refresh` 응답 = `{snapshots[]: {exchange,saved,calls} 거래소당 1항목, usdkrw[], total_saved, duration_ms, failures[], warnings[], fetched_at}`. web `features/spreads/`(1초 폴링 api.ts·Tab.tsx, `ApiSpreadRow extends SpreadRow` 로 rateAsk·rateBid 수용).
 - **analysis (004)**: `features/analysis/` — `walk.py`(호가창 소진 순수 계산), `service.py`(6개 빌더·거래소 레지스트리, `core/premium` import), `router.py`(6 엔드포인트, snake_case 응답), `models.py`. web 없음.
+- **history (005)**: `core/influx.py`(2.7 클라이언트 — 쓰기 1회/회차·조회, 실패는 `InfluxUnavailableError` 로 통일), `core/persist.py`(60초 루프 — 수집 락 안에서 점 조립·락 밖 쓰기), `features/history/`(service 순수 계산 + 리더 Protocol, router 3 라우트), `scripts/backfill.py`(업비트 초봉×바이낸스 1s, UTC 하루 단위·재실행 안전), 루트 `docker-compose.dev.yml`. web `features/history/Tab.tsx`(mock).
 
 

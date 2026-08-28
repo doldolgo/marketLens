@@ -10,7 +10,7 @@
 | web-shell | - | 셸·KPI·mock 탭 4종 동작 | spreads/history 탭은 placeholder |
 | spreads | `/spreads`·`/refresh` 동작 (입출금 전부 null) | 실데이터 탭·1초 폴링 | `spark` 빈 배열, 망 판정은 006 |
 | analysis | 6개 엔드포인트 동작 | - | BE 전용, snake_case |
-| history | 없음 | 없음 | |
+| history | Influx 영속·persist 60초·`/history/*` 3종·백필 | 기록 탭 (mock) | `/history/*` 실데이터 연결은 후속 |
 | wallet-status | 없음 | - | |
 | deploy | 없음 | 없음 | |
 

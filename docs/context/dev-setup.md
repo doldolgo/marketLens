@@ -6,7 +6,8 @@
 
 ## server
 1. env 파일을 만든다(env 예시 파일 복사). 전부 선택값. `INFLUX_TOKEN` 은 dev compose 가 admin 토큰으로 쓴다.
-2. dev compose(Influx 하나) 기동 → InfluxDB 2.7 `:8086` (005 이후). 첫 기동(setup)이 org/bucket `marketlens` 생성.
+2. dev compose 기동(005 이후): `docker compose --env-file server/.env -f docker-compose.dev.yml up -d` → InfluxDB 2.7 `:8086`. 첫 기동(setup)이 org/bucket `marketlens` 를 만들고 admin 토큰 = `INFLUX_TOKEN`. Influx 가 없어도 앱은 뜬다(`/history/*` 만 503).
+   백필: `cd server && .venv/bin/python -m scripts.backfill BTC ETH --days 92` (재실행 안전 — 앞뒤 빈 구간만 채움).
 3. 가상환경(uv, Python 3.12) 만들고 의존성 설치.
 4. 서버를 `:8000` 에 띄운다(reload).
 ```bash
@@ -55,6 +56,10 @@ curl -s localhost:8000/spreads | head -c 600
 curl -s "localhost:8000/slippage/upbit?symbol=BTC/KRW&amount=1000000" | head -c 300
 ```
 `slippage_percent ≥ 0`, `levels_consumed ≥ 1` 이면 정상 (004).
+```bash
+curl -s "localhost:8000/history/premium?base=BTC&unit=week" | head -c 300
+```
+(dev compose 기동 + 60초 뒤) `count ≥ 1` 이면 정상, Influx 없으면 503 `storage_unavailable` (005).
 
 ## 로컬 메모 (개인)
 - `:8000` 은 이 머신에서 소마 캘린더가 점유할 수 있다. `lsof -i :8000` 으로 확인 후 정리하거나, `--port 8020` 으로 띄우고 curl 포트도 8020 으로 맞춘다.
