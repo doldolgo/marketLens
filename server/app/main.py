@@ -30,6 +30,7 @@ from app.core.connectors.bithumb import BithumbConnector
 from app.core.connectors.upbit import UpbitConnector
 from app.core.errors import ExchangeError
 from app.core.live_store import LiveStore
+from app.features.analysis.router import router as analysis_router
 from app.features.spreads.router import router as spreads_router
 
 
@@ -98,6 +99,7 @@ def create_app() -> FastAPI:
         return {"status": "ok", "version": APP_VERSION}
 
     app.include_router(spreads_router)
+    app.include_router(analysis_router)
 
     return app
 
