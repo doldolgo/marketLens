@@ -49,8 +49,8 @@ npm run lint       # oxlint
 ```bash
 curl -s localhost:8000/spreads | head -c 600
 ```
-`rows` 배열의 각 행에 다음 키가 전부 있으면 정상:
-`sym, dom, fx, fwd, rev, usd, spark, status, age, liqDom, liqFx, rateAsk, rateBid, depDom, wdDom, depFx, wdFx, netDom`
+최상위 `rate > 1000`, 행 수 > 100, 각 행의 키가 정확히 다음 18개면 정상 (003 §4 기준):
+`sym, dom, fx, fwd, rev, usd, spark, status, age, liqDom, liqFx, rateAsk, rateBid, netDom, depDom, wdDom, depFx, wdFx`
 
 ## 로컬 메모 (개인)
 - `:8000` 은 이 머신에서 소마 캘린더가 점유할 수 있다. `lsof -i :8000` 으로 확인 후 정리하거나, `--port 8020` 으로 띄우고 curl 포트도 8020 으로 맞춘다.
