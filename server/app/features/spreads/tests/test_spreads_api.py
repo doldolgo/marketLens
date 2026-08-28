@@ -278,3 +278,47 @@ def test_row_keys_are_exactly_the_18_camel_case_keys() -> None:
     # 입출금 4개 값은 수집기가 준 코인 단위 값 그대로 — 001 은 전부 null 을 준다
     assert row["depDom"] is None and row["wdDom"] is None
     assert row["depFx"] is None and row["wdFx"] is None
+
+
+# ---- 리뷰 결함 회귀: 국내 호가 가격 0 은 500 이 아니라 그 행 fail (003 §3.2-4 방어) ----
+
+
+def test_zero_domestic_ask_price_fails_row_not_500():
+    store = LiveStore()
+    store.replace_exchange(
+        "upbit",
+        [
+            make_row("upbit", "BTC", asks=[[0.0, 1.0]], bids=[[99_000_000.0, 1.0]]),
+            make_row(
+                "upbit", "ETH", bids=[[5_000_000.0, 1.0]], asks=[[5_010_000.0, 1.0]]
+            ),
+        ],
+        NOW,
+    )
+    store.replace_exchange(
+        "binance",
+        [
+            make_row(
+                "binance",
+                "BTC",
+                price=71_000.0,
+                bids=[[70_990.0, 1.0]],
+                asks=[[71_010.0, 1.0]],
+            ),
+            make_row(
+                "binance",
+                "ETH",
+                price=3_550.0,
+                bids=[[3_549.0, 1.0]],
+                asks=[[3_551.0, 1.0]],
+            ),
+        ],
+        NOW,
+    )
+    store.set_rate("upbit", 1400.0, 1390.0, NOW)
+    store.mark_received(1_787_000_000)
+    res = make_client(store).get("/spreads")
+    assert res.status_code == 200
+    rows = {r["sym"]: r for r in res.json()["rows"]}
+    assert rows["BTC"]["status"] == "fail" and rows["BTC"]["rev"] == 0
+    assert rows["ETH"]["status"] in ("ok", "stale")
