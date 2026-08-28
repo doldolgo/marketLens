@@ -78,7 +78,7 @@ marketlens/
 | 003 | spreads | DONE | 김프 표 — `/spreads` `/refresh` + 스프레드 탭 |
 | 004 | analysis | DONE | 단일 종목 분석 — premium·matrix·orderbook·slippage·arbitrage (BE 전용) |
 | 005 | history | DONE | Influx 영속·김프 아카이브·`/history/*`·백필 + history 탭 |
-| 006 | wallet-status | TODO | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
+| 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
 | 007 | deploy | TODO | Docker·compose·CI·EC2 배포 |
 
 실행 순서 = 번호 순.

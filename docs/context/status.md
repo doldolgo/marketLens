@@ -11,7 +11,7 @@
 | spreads | `/spreads`·`/refresh` 동작 (입출금 전부 null) | 실데이터 탭·1초 폴링 | `spark` 빈 배열, 망 판정은 006 |
 | analysis | 6개 엔드포인트 동작 | - | BE 전용, snake_case |
 | history | Influx 영속·persist 60초·`/history/*` 3종·백필 | 기록 탭 (mock) | `/history/*` 실데이터 연결은 후속 |
-| wallet-status | 없음 | - | |
+| wallet-status | 3거래소 조회·60초 캐시·`/spreads` 망 판정 | - | 표시는 spreads 탭이 담당 |
 | deploy | 없음 | 없음 | |
 
 ## 알려진 빚
