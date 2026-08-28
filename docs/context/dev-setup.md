@@ -51,6 +51,10 @@ curl -s localhost:8000/spreads | head -c 600
 ```
 최상위 `rate > 1000`, 행 수 > 100, 각 행의 키가 정확히 다음 18개면 정상 (003 §4 기준):
 `sym, dom, fx, fwd, rev, usd, spark, status, age, liqDom, liqFx, rateAsk, rateBid, netDom, depDom, wdDom, depFx, wdFx`
+```bash
+curl -s "localhost:8000/slippage/upbit?symbol=BTC/KRW&amount=1000000" | head -c 300
+```
+`slippage_percent ≥ 0`, `levels_consumed ≥ 1` 이면 정상 (004).
 
 ## 로컬 메모 (개인)
 - `:8000` 은 이 머신에서 소마 캘린더가 점유할 수 있다. `lsof -i :8000` 으로 확인 후 정리하거나, `--port 8020` 으로 띄우고 curl 포트도 8020 으로 맞춘다.

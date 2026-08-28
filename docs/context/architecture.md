@@ -65,5 +65,6 @@ EC2 1대. 루트 `docker compose up -d --build` 로 server·web·influxdb 컨테
 - **collect (001)**: `core/collector.py`(사이클 5단계 + 락 + 1초 루프, `CycleResult` 반환), `core/live_store.py`(스냅샷·환율·received_at, 거래소 단위 통째 교체), `core/connectors/{base,upbit,bithumb,binance}.py`(공통 ABC + 거래소별 quirk 흡수, 코드 비공유), `core/rows.py`(행 조립 순수 함수 — 누적액 상한·가격 폴백), `core/models.py`(`Row`·`Rate`), `core/errors.py`(502/504 에러 계약), `core/config.py`(상수 + pydantic-settings). 앱 골격·GZip·CORS·수집 루프 기동은 `app/main.py` lifespan.
 - **web-shell (002)**: `shared/`(theme.css·index.css 사본, `feed.ts` 공유 피드, `mock.ts` 결정론 mock, `format.ts` 포맷 8종, `ui.tsx` 조작 조각 3종, `rand.ts` 시드 rng), `App.tsx`(헤더·KPI·탭 전환 — 탭은 숨김 유지), `features/{gap,pp,health,flow}/Tab.tsx`. spreads·history 는 placeholder(003 이 spreads 교체).
 - **spreads (003)**: server `core/premium.py`(`premium_percent`), `features/spreads/`(service 순수 계산·router 2 엔드포인트·models). `/refresh` 응답 = `{snapshots[]: {exchange,saved,calls} 거래소당 1항목, usdkrw[], total_saved, duration_ms, failures[], warnings[], fetched_at}`. web `features/spreads/`(1초 폴링 api.ts·Tab.tsx, `ApiSpreadRow extends SpreadRow` 로 rateAsk·rateBid 수용).
+- **analysis (004)**: `features/analysis/` — `walk.py`(호가창 소진 순수 계산), `service.py`(6개 빌더·거래소 레지스트리, `core/premium` import), `router.py`(6 엔드포인트, snake_case 응답), `models.py`. web 없음.
 
 
