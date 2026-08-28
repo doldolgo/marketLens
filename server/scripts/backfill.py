@@ -66,6 +66,16 @@ def plan_day_slices(
     return front + back
 
 
+def is_full_day(slice_start: int, slice_stop: int) -> bool:
+    """완전한 하루 조각인가 — 빈 응답 → 중단 규칙은 이 조각에만 적용한다.
+
+    첫/마지막 기록·목표 경계와 맞닿은 부분 조각은 그 창에 체결이 없었을 뿐일 수
+    있다(예: [그날 00:00, 첫 기록) 은 정의상 업비트 초봉이 없다). 거기서 중단하면
+    재실행이 매번 같은 자리에서 멈춰 §3.5 의 이어가기 보장이 깨진다.
+    """
+    return slice_start % DAY == 0 and slice_stop - slice_start == DAY
+
+
 def dedup_changes(points: list[tuple[int, float]]) -> list[tuple[int, float]]:
     """ts 오름차순 정렬 후 직전과 같은 값을 제거한 변동 목록 (§3.5 합치기 1단계)."""
     out: list[tuple[int, float]] = []
@@ -320,6 +330,9 @@ def run(coins: list[str], days: int) -> int:
                     fetch_upbit_seconds(client, base, slice_start, slice_stop)
                 )
                 if not dom_changes:
+                    if not is_full_day(slice_start, slice_stop):
+                        # 부분 조각(기존 기록·경계와 맞닿음)은 체결이 없었을 뿐 — 계속
+                        continue
                     # 초봉은 롤링 3개월 보관·상장 이전은 빈 응답 → 이 코인은 여기서 중단
                     print(
                         f"{base}: {_day_label(slice_start)} 업비트 초봉 없음(보관/상장 범위 밖) — 이 코인 중단"
@@ -330,6 +343,8 @@ def run(coins: list[str], days: int) -> int:
                     fetch_binance_1s(client, base, slice_start, slice_stop)
                 )
                 if not fx_changes:
+                    if not is_full_day(slice_start, slice_stop):
+                        continue
                     print(
                         f"{base}: {_day_label(slice_start)} 바이낸스 1초봉 없음 — 이 코인 중단"
                     )
