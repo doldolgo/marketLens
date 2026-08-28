@@ -6,7 +6,7 @@
 ## 이 레포
 | 기능 | server | web | 비고 |
 |---|---|---|---|
-| collect | 없음 | - | 스펙 001 대기 |
+| collect | 1초 수집 루프·커넥터 3종·`/health` 동작 | - | `/refresh` 노출은 003 몫 |
 | web-shell | - | 없음 | |
 | spreads | 없음 | 없음 | |
 | analysis | 없음 | - | |
