@@ -9,6 +9,8 @@ COPY pyproject.toml ./
 RUN pip install --no-cache-dir .
 
 COPY app ./app
+# 백필은 컨테이너 안에서 돈다 (ec2-setup.md 8단계 — Influx 가 호스트에 비노출이라)
+COPY scripts ./scripts
 
 EXPOSE 8000
 # 워커 1개 고정 — 메모리가 진실이라 프로세스가 둘이면 진실도 둘 (architecture.md)
