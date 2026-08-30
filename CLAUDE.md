@@ -73,13 +73,14 @@ marketlens/
 ## 4. 스펙 인덱스
 | 번호 | 이름 | 상태 | 범위 |
 |---|---|---|---|
-| 001 | collect | DONE | 업비트·빗썸·바이낸스 1초 수집 → 메모리, 환율 추출, `/health` |
+| 001 | collect | DONE | 업비트·빗썸·바이낸스 1초 수집 → 메모리, USDT 시세 추출, `/health` |
 | 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·mock 탭(갭/선선갭/수집상태/입출금레이더) |
 | 003 | spreads | DONE | 김프 표 — `/spreads` `/refresh` + 스프레드 탭 |
 | 004 | analysis | DONE | 단일 종목 분석 — premium·matrix·orderbook·slippage·arbitrage (BE 전용) |
 | 005 | history | DONE | Influx 영속·김프 아카이브·`/history/*`·백필 + history 탭 |
 | 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
 | 007 | deploy | DONE | Docker·compose·CI·EC2 배포 |
+| 008 | usdt-staleness | TODO | "환율" 표기 정리(→ USDT 시세) + USDT 시세 미갱신 경고 + 문구 표시 경고 레벨 |
 
 실행 순서 = 번호 순.
 상태: TODO → IN_PROGRESS → DONE. DONE 이후 스펙 파일은 수정하지 않는다.
