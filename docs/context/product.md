@@ -14,6 +14,7 @@
 - **rev(역프 %)**: 국내에서 사서 해외에서 팔 때. 받은 USDT 를 원화로 **판다**(rate bid). `(fx_bid × rate_bid / dom_ask − 1) × 100`
   (정확한 수식·엣지는 스펙 003 에 명시)
 - **선선갭**: 해외 거래소 간 **선물–선물** 가격 갭.
+- **streak(구간)**: 김프/역프가 임계값 이상으로 유지된 연속 기록 구간. `/history/streaks` 가 계산한다.
 - **입출금 상태**: 3-state. 가능 `true`, 중단 `false`, 모름 `null`. 코인 단위가 아니라 **망(network) 단위**로 판정한다.
 - **시각 단위**: 저장소·API 의 `ts` 는 epoch **초**. API 응답의 `fetched_at`·`updated_at` 은 epoch **ms**.
 

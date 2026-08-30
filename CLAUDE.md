@@ -73,13 +73,13 @@ marketlens/
 ## 4. 스펙 인덱스
 | 번호 | 이름 | 상태 | 범위 |
 |---|---|---|---|
-| 001 | collect | TODO | 업비트·빗썸·바이낸스 1초 수집 → 메모리, 환율 추출, `/health` |
-| 002 | web-shell | TODO | 화면 골격·탭·KPI·테마·mock 탭(갭/선선갭/수집상태/입출금레이더) |
-| 003 | spreads | TODO | 김프 표 — `/spreads` `/refresh` + 스프레드 탭 |
-| 004 | analysis | TODO | 단일 종목 분석 — premium·matrix·orderbook·slippage·arbitrage (BE 전용) |
-| 005 | history | TODO | Influx 영속·김프 아카이브·`/history/*`·백필 + history 탭 |
-| 006 | wallet-status | TODO | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
-| 007 | deploy | TODO | Docker·compose·CI·EC2 배포 |
+| 001 | collect | DONE | 업비트·빗썸·바이낸스 1초 수집 → 메모리, 환율 추출, `/health` |
+| 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·mock 탭(갭/선선갭/수집상태/입출금레이더) |
+| 003 | spreads | DONE | 김프 표 — `/spreads` `/refresh` + 스프레드 탭 |
+| 004 | analysis | DONE | 단일 종목 분석 — premium·matrix·orderbook·slippage·arbitrage (BE 전용) |
+| 005 | history | DONE | Influx 영속·김프 아카이브·`/history/*`·백필 + history 탭 |
+| 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
+| 007 | deploy | DONE | Docker·compose·CI·EC2 배포 |
 
 실행 순서 = 번호 순.
 상태: TODO → IN_PROGRESS → DONE. DONE 이후 스펙 파일은 수정하지 않는다.
@@ -88,7 +88,7 @@ marketlens/
 읽기 순서는 문서 머리의 규칙 그대로: 이 문서 → `docs/context/*` → 지정된 스펙 1개.
 
 접근 금지 (예외 없음):
-- **`.env`** — `server/.env` 를 포함한 모든 `.env*` 파일(`.env.example` 제외)을 읽지도, 쓰지도, 출력하지도 않는다. 키 목록의 진실은 `server/.env.example` 이고, 값을 만들고 바꾸는 것은 **사람**이다. 키·토큰·시크릿 값은 코드·문서·로그·커밋 어디에도 적지 않는다.
+- **`.env`** — `server/.env` 를 포함한 모든 `.env*` 파일(`.env.example` 제외)을 읽지도, 쓰지도, 출력하지도 않는다. 값을 화면에 내지 않고 프로그램에 넘기는 것(`docker compose --env-file server/.env …`)만 허용. 키 목록의 진실은 `server/.env.example` 이고, 값을 만들고 바꾸는 것은 **사람**이다. 키·토큰·시크릿 값은 코드·문서·로그·커밋 어디에도 적지 않는다.
 - **이 레포 밖의 코드** — 기존 marketlens-be·fe 를 포함해 읽지 않는다. 필요한 계약은 스펙 안에 복사돼 있다. 막히면 추측하고 스펙 §7 실행 보고에 적는다.
 - **DONE 스펙** — 수정하지 않는다(§4). 고칠 게 있으면 새 fix 스펙.
 - **다른 사람 담당 스펙** — 결함을 발견해도 고치지 않는다. `파일:절 — 문서 주장 → 실제` 형식으로 보고만 한다.
