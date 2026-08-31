@@ -58,10 +58,11 @@ FE:
 ```
 
 ## 6. 갱신할 문서
-- `docs/context/product.md` — 용어 절(이미 설계 세션에서 "USDT 시세"로 반영됨 — 확인만).
-- `docs/context/architecture.md` — 계약 규칙에 `/spreads` 최상위 `warnings` 한 줄.
-- `docs/context/status.md` — spreads/web-shell 행에 경고 표시 반영.
-- `CLAUDE.md` 스펙 인덱스 상태.
+- `docs/context/status.md` — spreads 행 server 칸에 "`/spreads` 최상위 `warnings`(USDT 시세 60초 미갱신 경고)" 추가, web-shell 행 web 칸에 "KPI `USDT 시세` 경고색·문구 줄 warning 레벨" 추가.
+- `CLAUDE.md` — 스펙 인덱스 008 행 상태 → DONE.
+- `docs/context/architecture.md` — "계약 규칙 (BE ↔ FE)" 절에 한 줄 추가: "`/spreads` 최상위 `warnings: list[str]` — USDT 시세 미갱신 경고. 경고 없으면 빈 배열(키는 항상 존재)."
+- `docs/context/dev-setup.md` — 검증용 스모크의 `/spreads` 설명에 "최상위 `warnings` 는 평상시 빈 배열" 1줄 추가(18키 행 기준은 불변).
+- `docs/context/product.md` — 용어 절 "USDT 시세" 는 설계 세션(2026-08-30)에서 이미 반영됨 — 문구가 §3.5 와 일치하는지 확인만 한다.
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):

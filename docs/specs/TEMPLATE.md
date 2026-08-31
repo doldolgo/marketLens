@@ -36,10 +36,13 @@
 ```
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — <name> 행
-- `docs/context/architecture.md` / `product.md` — 바뀌는 절이 있으면
-- `docs/context/db.md` — 저장 모델이 바뀌면
-- `CLAUDE.md` 스펙 인덱스 상태
+이 스펙이 끝나는 순간 **거짓말이 되는 살아있는 문서**를 문서·절·행 단위로 지목한다. 실행 세션은 새 컨텍스트라 이 목록이 곧 지시다 — "바뀌면" 같은 조건부로 남기지 말고 설계 시점에 판단해 확정하고, 항목마다 "어느 절/행을 어떤 내용으로" 까지 쓴다. 해당 없는 문서는 줄을 지운다("해당 없음" 을 남기지 않는다). 이 목록 완료는 스펙 완료 조건이다(conventions.md).
+- `docs/context/status.md` — <name> 행을 `| <name> | server: <실제 동작> | web: <실제 동작> | <비고> |` 로. **항상 포함.** 이 스펙이 빚을 만들거나 갚으면 "알려진 빚" 항목도.
+- `CLAUDE.md` — 스펙 인덱스 <NNN> 행 상태 → DONE. **항상 포함.**
+- `docs/context/architecture.md` — "현재 구조" 절에 <name> 항목(주요 모듈·역할·나눈 이유 1~3줄). 원칙·데이터 흐름·계약 규칙 절의 문구가 바뀌면 그 절 이름과 바뀔 문구를 적는다.
+- `docs/context/dev-setup.md` — 새 명령(기동·테스트·백필·스모크)이 생기면 어느 절에 어떤 명령/기대값을 넣는지.
+- `docs/context/product.md` — 새 용어는 용어 절의 정의 문장까지, 기능 설명이 바뀌면 기능 목록의 행을.
+- `docs/context/db.md` — measurement·tag/field·보존·읽는/쓰는 쪽 정의가 바뀌면 어떤 문장이 바뀌는지.
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
