@@ -46,6 +46,12 @@ npm run lint       # oxlint
 
 **API 키는 .env 에만. 코드·문서·커밋에 절대 넣지 않는다.**
 
+## docker 통합 기동 (배포와 같은 구성)
+```bash
+WEB_PORT=8080 docker compose --env-file server/.env up -d --build
+```
+`localhost:8080` 에 화면, `/api/*` 는 nginx 가 server 로 프록시(접두 제거). 내릴 때 `docker compose down`(볼륨 유지).
+
 ## 검증용 스모크
 ```bash
 curl -s localhost:8000/spreads | head -c 600

@@ -41,9 +41,9 @@ dev compose 는 Influx 2.7 하나만 띄운다. 첫 기동 시 org·bucket `mark
 
 ### 3.4 `GET /history/*`
 응답 키는 snake_case 유지(FE 소비자 없음). 모든 시각 `*_ts` 는 epoch 초, `fetched_at` 은 ms.
-공통 파라미터: `dom` ∈ {upbit, bithumb}(기본 upbit), `fx` = binance 고정. `max_gap`(기본 600, ≥1) 은 streaks·bulk 만 받는다 — premium 은 구간 전체를 그대로 돌려주므로 gap 개념이 없다.
+공통 파라미터: `dom` ∈ {upbit, bithumb}(기본 upbit), `fx` = binance 고정. `max_gap`(기본 600, ≥1) 은 streaks·bulk 만 받는다 — premium 은 구간 전체를 그대로 돌려주므로 gap 개념이 없다. streaks·bulk 의 `start`·`end` 는 0 ≤ 값 ≤ 4,102,444,800(2100-01-01) — 밖이면 422(연도 오버플로 500 방지). `end ≤ 0` 은 400(end ≤ start 의 특수형).
 
-**`/history/premium?base&unit&date`** — `base`·`unit ∈ {week, month}` 필수. `date=YYYY-MM-DD`(없으면 오늘 UTC).
+**`/history/premium?base&unit&date`** — `base`·`unit ∈ {week, month}` 필수. `date=YYYY-MM-DD`(정확히 이 형식·연도 1970~2100, 밖이면 400. 없으면 오늘 UTC).
 구간 = `date` 가 속한 ISO 주(월 00:00 UTC ~ 다음 월) 또는 달(1일 ~ 다음 달 1일), end exclusive. 구간에 기록 없으면 404. 구간 전체를 한 번에 반환한다. 응답 키:
 - `dom`·`fx`·`base`·`unit` 은 요청 그대로. `start`·`end` 는 구간 경계(ISO 8601, UTC). `first_ts` 는 구간 첫 기록 시각, `count` 는 기록 수, `fetched_at`.
 - `summary` = `{first_fwd,last_fwd,min_fwd,max_fwd}` — 구간 전체 통계.
@@ -77,7 +77,7 @@ dev compose 는 Influx 2.7 하나만 띄운다. 첫 기동 시 org·bucket `mark
 - 바이낸스: 현물 API `GET /api/v3/klines?symbol={BASE}USDT&interval=1s&startTime={ms}&limit=1000`(과거→현재, 다음 `startTime = 마지막 closeTime+1`). 쓰는 필드 `k[0]` open ms·`k[4]` 종가 문자열·`k[6]` closeTime. **모든 초**가 있다(밀집).
   418/429 는 2·4·6s, 5xx 는 1·2·3s 대기 재시도. 페이지마다 0.1s. 가중치 2/호출.
 - 합치기: 세 변동 목록(업비트 초봉·바이낸스 1초봉·환율 분봉, 각각 직전과 같은 값은 제거)을 ts 로 병합해 forward-fill. 셋이 다 갖춰지기 전 ts 는 건너뛰고, `fwd` 가 직전과 같으면 기록하지 않는다. 환율 씨앗은 하루 시작 이전 최신 분봉(목표 시작 6시간 전부터 수집).
-- **재실행 안전**: 환율은 전체 구간 한 번만 수집(0건이면 중단). base 마다 `premium` 의 (첫 time, 마지막 time) 을 보고 `[목표시작, 첫 time)` 과 `[마지막 time+1, 목표 끝)` 만 채운다(가운데는 건드리지 않는다). 목표 끝 = **오늘 UTC 0시로 내림** — 오늘 치는 persist 루프 몫이라, live 기록과 겹쳐 재실행마다 소량 재수집되는 것을 막는다. "이미 전부 채워져" 판정은 해당 구간 count 로.
+- **재실행 안전**: 환율은 전체 구간 한 번만 수집(0건이면 중단). base 마다 `premium` 의 (첫 time, 마지막 time) 을 보고 `[목표시작, 첫 time)` 과 `[마지막 time+1, 목표 끝)` 만 채운다(가운데는 건드리지 않는다). 목표 끝 = **오늘 UTC 0시로 내림** — 오늘 치는 persist 루프 몫이라, live 기록과 겹쳐 재실행마다 소량 재수집되는 것을 막는다. 빈 응답 → 중단 규칙은 **완전한 하루 조각에만** 적용한다 — 첫·마지막 기록이나 목표 경계와 맞닿은 부분 조각의 빈 응답은 그 창에 체결이 없었을 뿐이므로 건너뛰고 계속한다(예: [그날 00:00, 첫 기록) 은 정의상 비어 있다). "이미 전부 채워져" 판정은 해당 구간 count 로.
   **UTC 하루 단위로 처리·날마다 쓴다**. 기존 기록 이전 구간은 최신 날부터 거꾸로(중단돼도 미완 구간이 첫 time 밖에 남아 다음 실행이 다시 잡는다). 같은 시각 점은 덮어쓴다.
   Ctrl-C 로 중단하면 exit 130. 다시 실행하면 남은 구간부터 이어진다.
 
