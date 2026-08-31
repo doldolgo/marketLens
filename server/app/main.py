@@ -36,6 +36,7 @@ from app.core.persist import PersistLoop
 from app.features.analysis.router import router as analysis_router
 from app.features.history.router import router as history_router
 from app.features.spreads.router import router as spreads_router
+from app.features.wallet_status.service import WalletStatusService
 
 logger = logging.getLogger("marketlens.main")
 
@@ -47,17 +48,25 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         headers={"User-Agent": USER_AGENT},
     )
     store = LiveStore()
+    settings = app.state.settings
+    # 입출금 상태 60초 캐시(006) — 키 없는 거래소는 unknown, 빗썸은 키 불필요
+    wallet = WalletStatusService(
+        upbit_api_key=settings.upbit_api_key,
+        upbit_secret_key=settings.upbit_secret_key,
+        binance_api_key=settings.binance_api_key,
+        binance_secret_key=settings.binance_secret_key,
+    )
     collector = Collector(
         store=store,
         domestic=[UpbitConnector(), BithumbConnector()],
         foreign=BinanceConnector(),
         client=client,
+        wallet=wallet,
     )
     app.state.live_store = store
     app.state.collector = collector
 
     # Influx — 토큰 없으면 저장 루프 비활성·/history/* 503, 앱은 뜬다 (스펙 005 §3.1)
-    settings = app.state.settings
     influx: InfluxClient | None = None
     persist_task: asyncio.Task[None] | None = None
     if settings.influx_token:

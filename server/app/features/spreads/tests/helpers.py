@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.core.collector import CycleResult
 from app.core.live_store import LiveStore
 from app.core.models import Row
+from app.core.networks import Network
 from app.main import create_app
 
 
@@ -21,6 +22,7 @@ def make_row(
     bids: list[list[float]] | None = None,
     dep: bool | None = None,
     wd: bool | None = None,
+    networks: list[Network] | None = None,
 ) -> Row:
     if quote is None:
         quote = "USDT" if exchange == "binance" else "KRW"
@@ -36,6 +38,7 @@ def make_row(
         price_timestamp=1_700_000_000_000,
         deposit_enabled=dep,
         withdrawal_enabled=wd,
+        networks=networks if networks is not None else [],
     )
 
 
@@ -58,6 +61,7 @@ def make_cycle_result(
     failures: list[dict[str, str]] | None = None,
     warnings: list[str] | None = None,
     calls: dict[str, int] | None = None,
+    wallet_status_available: dict[str, bool] | None = None,
 ) -> CycleResult:
     return CycleResult(
         saved=saved if saved is not None else {"upbit": 0, "bithumb": 0, "binance": 0},
@@ -67,6 +71,7 @@ def make_cycle_result(
         calls=calls or {},
         duration_ms=12.5,
         fetched_at=1_787_139_510_000,
+        wallet_status_available=wallet_status_available or {},
     )
 
 

@@ -57,17 +57,34 @@ def test_refresh_response_shape_maps_cycle_result() -> None:
             ],
             warnings=["경고 한 줄"],
             calls={"upbit": 2, "binance": 2},
+            wallet_status_available={"binance": True},
         )
     )
     body = make_client(store, collector=collector).post("/refresh").json()
     assert set(body) == {
         "snapshots", "usdkrw", "total_saved", "failures", "warnings", "duration_ms", "fetched_at",
     }  # fmt: skip
-    # snapshots[] 는 거래소당 1항목 — 실패 거래소(bithumb)는 saved·calls 0
+    # snapshots[] 는 거래소당 1항목 — 실패 거래소(bithumb)는 saved·calls 0.
+    # wallet_status_available 은 006 — 입출금 조회 결과가 없으면 false
     assert body["snapshots"] == [
-        {"exchange": "upbit", "saved": 132, "calls": 2},
-        {"exchange": "bithumb", "saved": 0, "calls": 0},
-        {"exchange": "binance", "saved": 210, "calls": 2},
+        {
+            "exchange": "upbit",
+            "saved": 132,
+            "calls": 2,
+            "wallet_status_available": False,
+        },
+        {
+            "exchange": "bithumb",
+            "saved": 0,
+            "calls": 0,
+            "wallet_status_available": False,
+        },
+        {
+            "exchange": "binance",
+            "saved": 210,
+            "calls": 2,
+            "wallet_status_available": True,
+        },
     ]
     assert body["usdkrw"] == [{"exchange": "upbit", "ask": 1400.0, "bid": 1390.0}]
     assert body["total_saved"] == 342

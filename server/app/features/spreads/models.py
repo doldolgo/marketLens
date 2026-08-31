@@ -43,11 +43,13 @@ class SpreadsResponse(BaseModel):
 
 
 class RefreshSnapshot(BaseModel):
-    """거래소당 1항목 — 후속 스펙 006 이 각 원소에 `wallet_status_available` 를 추가한다."""
+    """거래소당 1항목."""
 
     exchange: str
     saved: int  # 이번 실행에서 저장된 행 수 (실패 거래소는 0)
     calls: int  # 이번 실행에서 나간 HTTP 호출 수 (실패 거래소는 0)
+    # 입출금 조회 성공 여부 — 바이낸스 항목에도 붙는다 (006 §2)
+    wallet_status_available: bool
 
 
 class RefreshRate(BaseModel):
