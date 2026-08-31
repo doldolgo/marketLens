@@ -139,7 +139,7 @@
 ```
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — collect 행을 `| collect | 1초 수집 루프·커넥터 3종·\`/health\` 동작 | - | \`/refresh\` 노출은 003 몫 |` 로. **항상 포함.**
+- `docs/context/status.md` — collect 행을 `| collect | 1초 수집 루프·커넥터 3종·/health 동작 | - | /refresh 노출은 003 몫 |` 로. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 001 행 상태 → DONE. **항상 포함.**
 - `docs/context/architecture.md` — "현재 구조" 절에 collect 항목: `core/collector.py`(사이클 5단계+락+1초 루프)·`core/live_store.py`(통째 교체)·`core/connectors/{base,upbit,bithumb,binance}.py`(quirk 격리)·`core/rows.py`·`core/errors.py`·`core/config.py`, 앱 골격·GZip·CORS 는 `main.py` lifespan. 데이터 흐름(BE)·USDT 시세 추출·quirk 서술은 구현과 일치해 본문 변경 없음.
 

@@ -148,7 +148,7 @@ FE 수동 확인:
 (실행 후 기록)
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — spreads 행을 `| spreads | \`/spreads\`·\`/refresh\` 동작 (입출금 전부 null) | 실데이터 탭·1초 폴링 | \`spark\` 빈 배열, 망 판정은 006 |` 로. **항상 포함.**
+- `docs/context/status.md` — spreads 행을 `| spreads | /spreads·/refresh 동작 (입출금 전부 null) | 실데이터 탭·1초 폴링 | spark 빈 배열, 망 판정은 006 |` 로. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 003 행 상태 → DONE. **항상 포함.**
 - `docs/context/dev-setup.md` — 검증용 스모크를 §4 실서버 기준으로 교체: 최상위 `rate > 1000`·행 수 > 100·행 키 정확히 18개(키 순서는 §3.2 응답 예시와 동일).
 - `docs/context/architecture.md` — "현재 구조" 절에 spreads 항목: `core/premium.py`(`premium_percent`), `features/spreads/`(service 순수 계산·router 2 엔드포인트·models), `/refresh` 응답 모양(`snapshots[]` 거래소당 1항목 등), web `features/spreads/`(1초 폴링·확장 타입). FE 데이터 흐름 문구는 002 §6 에서 이미 반영됨 — 확인만.
