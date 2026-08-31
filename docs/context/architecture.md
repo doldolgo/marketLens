@@ -26,9 +26,9 @@
                               60초마다 persist 루프 ──▶ InfluxDB
                                 (`premium` 에 fwd/rev 쓰기, 입출금 조회 실패 시 `dw_fail` 1점)
 ```
-- 입출금 상태(거래소 private API)는 수집 루프가 60초 주기로만 조회해 캐시한다. 키가 없으면 `null`(모름).
+- 입출금 상태(거래소 private API)는 수집 루프가 60초 주기로만 조회해 캐시한다. 키가 없으면 `null`(모름). 망 판정은 `/spreads` 에서 하고, 빗썸은 키 불필요.
 - `GET /health` 와 수집 루프는 기능 폴더가 아니라 앱 진입점 소관(시스템).
-- 환율은 별도 호출 없이 국내 거래소의 KRW 마켓 일괄 호가 중 USDT 호가에서 추출한다. 최우선 매도호가가 rate_ask(USDT 살 때), 최우선 매수호가가 rate_bid. 거래소별 ask/bid. 커넥터는 USDT 를 특별 취급하지 않는다.
+- USDT 시세는 별도 호출 없이 국내 거래소의 KRW 마켓 일괄 호가 중 USDT 항목에서 추출한다. 최우선 매도호가가 rate_ask(USDT 살 때), 최우선 매수호가가 rate_bid. 거래소별 ask/bid. 커넥터는 USDT 를 특별 취급하지 않는다. 은행 환율은 어디에도 쓰지 않는다(product.md 용어).
 - 외부 호출 실패 시 live_store 는 직전 값을 유지하고 `age` 가 커진다. FE 는 age 로 stale 표시. 재기동 시 Influx 에서 되읽는 폴백은 없다 — 메모리는 첫 수집으로만 채워진다.
 
 ## 데이터 흐름 (FE)
@@ -66,5 +66,8 @@ EC2 1대. 루트 `docker compose up -d --build` 로 server·web·influxdb 컨테
 - **web-shell (002)**: `shared/`(theme.css·index.css 사본, `feed.ts` 공유 피드, `mock.ts` 결정론 mock, `format.ts` 포맷 8종, `ui.tsx` 조작 조각 3종, `rand.ts` 시드 rng), `App.tsx`(헤더·KPI·탭 전환 — 탭은 숨김 유지), `features/{gap,pp,health,flow}/Tab.tsx`. spreads·history 는 placeholder(003 이 spreads 교체).
 - **spreads (003)**: server `core/premium.py`(`premium_percent`), `features/spreads/`(service 순수 계산·router 2 엔드포인트·models). `/refresh` 응답 = `{snapshots[]: {exchange,saved,calls} 거래소당 1항목, usdkrw[], total_saved, duration_ms, failures[], warnings[], fetched_at}`. web `features/spreads/`(1초 폴링 api.ts·Tab.tsx, `ApiSpreadRow extends SpreadRow` 로 rateAsk·rateBid 수용).
 - **analysis (004)**: `features/analysis/` — `walk.py`(호가창 소진 순수 계산), `service.py`(6개 빌더·거래소 레지스트리, `core/premium` import), `router.py`(6 엔드포인트, snake_case 응답), `models.py`. web 없음.
+- **history (005)**: `core/influx.py`(2.7 클라이언트 — 쓰기 1회/회차·조회, 실패는 `InfluxUnavailableError` 로 통일), `core/persist.py`(60초 루프 — 수집 락 안에서 점 조립·락 밖 쓰기), `features/history/`(service 순수 계산 + 리더 Protocol, router 3 라우트), `scripts/backfill.py`(업비트 초봉×바이낸스 1s, UTC 하루 단위·재실행 안전), 루트 `docker-compose.dev.yml`. web `features/history/Tab.tsx`(mock).
+- **wallet-status (006)**: `core/networks.py`(망 정규화·판정·tie-break), `features/wallet_status/`(거래소별 조회 3파일 + service 60초 캐시·병렬·실패 시 unknown 덮기). collector 에 Protocol 주입, spreads 가 §3.7 5케이스로 5필드 계산.
+- **deploy (007)**: `server/Dockerfile`(3.12-slim·워커 1), `web/Dockerfile`(node 22 빌드→nginx 1.27, `/api/` 접두 제거 프록시·SPA fallback), 루트 `docker-compose.yml`(호스트 노출은 web `${WEB_PORT:-80}` 하나, `INFLUX_URL` 은 compose 가 `http://influxdb:8086` 으로 오버라이드), `.github/workflows/{ci,deploy}.yml`.
 
 
