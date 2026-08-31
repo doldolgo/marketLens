@@ -1,0 +1,142 @@
+"""바이낸스 커넥터 — 문자열 가격·USDT 접미사·0 가격 처리 (스펙 001 §3.5, §4)."""
+
+import time
+
+import httpx
+
+from app.core.connectors.binance import BinanceConnector
+
+
+def make_client(
+    price_list: list[dict[str, str]], book_list: list[dict[str, str]]
+) -> httpx.AsyncClient:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v3/ticker/price":
+            return httpx.Response(200, json=price_list)
+        if request.url.path == "/api/v3/ticker/bookTicker":
+            return httpx.Response(200, json=book_list)
+        return httpx.Response(404, text="not found")
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+async def test_string_prices_become_floats_one_level_only() -> None:
+    client = make_client(
+        [{"symbol": "BTCUSDT", "price": "100.50000000"}],
+        [
+            {
+                "symbol": "BTCUSDT",
+                "bidPrice": "99.0",
+                "bidQty": "2.0",
+                "askPrice": "101.0",
+                "askQty": "3.0",
+            }
+        ],
+    )
+    result = await BinanceConnector().fetch_rows(client)
+    row = result.rows[0]
+    assert (row.exchange, row.base, row.quote, row.native_symbol) == (
+        "binance",
+        "BTC",
+        "USDT",
+        "BTCUSDT",
+    )
+    assert row.price == 100.5
+    assert row.asks == [[101.0, 3.0]]
+    assert row.bids == [[99.0, 2.0]]
+    assert result.calls == 2
+
+
+async def test_non_usdt_suffix_and_zero_price_symbols_are_dropped() -> None:
+    client = make_client(
+        [
+            {"symbol": "BTCUSDT", "price": "100.0"},
+            {"symbol": "ETHBTC", "price": "5.0"},  # USDT 로 끝나지 않음
+            {"symbol": "DEADUSDT", "price": "0.00000000"},  # 거래 없음
+        ],
+        [
+            {
+                "symbol": "BTCUSDT",
+                "bidPrice": "99.0",
+                "bidQty": "2.0",
+                "askPrice": "101.0",
+                "askQty": "3.0",
+            },
+            {
+                "symbol": "ETHBTC",
+                "bidPrice": "4.9",
+                "bidQty": "1.0",
+                "askPrice": "5.1",
+                "askQty": "1.0",
+            },
+            {
+                "symbol": "DEADUSDT",
+                "bidPrice": "0.0",
+                "bidQty": "0.0",
+                "askPrice": "0.0",
+                "askQty": "0.0",
+            },
+        ],
+    )
+    result = await BinanceConnector().fetch_rows(client)
+    assert [r.base for r in result.rows] == ["BTC"]
+
+
+async def test_missing_last_price_falls_back_to_mid() -> None:
+    client = make_client(
+        [],
+        [
+            {
+                "symbol": "NEWUSDT",
+                "bidPrice": "10.0",
+                "bidQty": "1.0",
+                "askPrice": "12.0",
+                "askQty": "1.0",
+            }
+        ],
+    )
+    row = (await BinanceConnector().fetch_rows(client)).rows[0]
+    assert row.price == 11.0
+
+
+async def test_price_timestamp_is_collection_time_ms() -> None:
+    client = make_client(
+        [{"symbol": "BTCUSDT", "price": "100.0"}],
+        [
+            {
+                "symbol": "BTCUSDT",
+                "bidPrice": "99.0",
+                "bidQty": "2.0",
+                "askPrice": "101.0",
+                "askQty": "3.0",
+            }
+        ],
+    )
+    before = int(time.time() * 1000)
+    row = (await BinanceConnector().fetch_rows(client)).rows[0]
+    after = int(time.time() * 1000)
+    assert before <= row.price_timestamp <= after
+
+
+async def test_zero_bid_or_ask_skips_symbol() -> None:
+    client = make_client(
+        [{"symbol": "ONEUSDT", "price": "1.0"}, {"symbol": "TWOUSDT", "price": "2.0"}],
+        [
+            {
+                "symbol": "ONEUSDT",
+                "bidPrice": "0.0",
+                "bidQty": "0.0",
+                "askPrice": "1.1",
+                "askQty": "1.0",
+            },
+            {
+                "symbol": "TWOUSDT",
+                "bidPrice": "1.9",
+                "bidQty": "1.0",
+                "askPrice": "2.1",
+                "askQty": "1.0",
+            },
+        ],
+    )
+    result = await BinanceConnector().fetch_rows(client)
+    assert [r.base for r in result.rows] == ["TWO"]
