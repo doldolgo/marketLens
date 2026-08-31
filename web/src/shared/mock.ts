@@ -47,14 +47,15 @@ function drawAge(r: () => number, status: FeedStatus): number {
   return status === 'stale' ? uniform(r, 45, 345) : uniform(r, 0, 8)
 }
 
-/** 코인별 현물·선물 목록 — (코인 idx + 거래소 idx) % 3 이 1 이 아니면 현물, 2 가 아니면 선물. */
+/** 코인별 현물·선물 목록 — (코인 idx + 거래소 idx) % 3 이 1 이 아니면 현물, 2 가 아니면 선물.
+ * 단 Hyperliquid 는 perp 전용이라 현물 목록에서 뺀다(수집 상태 탭의 현물 구독 0 과 일치). */
 export function buildMarkets(): MockMarket[] {
   return COINS.map(([sym, base], i) => {
     const spot: SpotItem[] = []
     const perp: PerpItem[] = []
     FX_EXS.forEach((ex, j) => {
       const mod = (i + j) % 3
-      if (mod !== 1) {
+      if (mod !== 1 && ex !== 'Hyperliquid') {
         const r = rng(`gap|${sym}|${ex}|spot`)
         const status = drawStatus(r)
         spot.push({ ex, off: uniform(r, -0.15, 0.15), status, age: drawAge(r, status) })

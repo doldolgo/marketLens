@@ -103,6 +103,9 @@ def _build_row(
         or fx_bid is None
         or fx_ask is None
         or fx_ask[0] <= 0
+        # 국내 호가 0 은 스펙 문면엔 없지만 rev 의 분모라 0 나눗셈 500 을 만든다 — fail 로 방어
+        or dom_ask[0] <= 0
+        or dom_bid[0] <= 0
     )
     if failed:
         # fail 이어도 입출금 값과 age 는 싣는다

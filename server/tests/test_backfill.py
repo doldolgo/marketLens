@@ -144,3 +144,29 @@ def test_rates_for_slice_includes_seed() -> None:
 def test_rates_for_slice_without_seed() -> None:
     rates = [(D0 + 30, 1401.0)]
     assert rates_for_slice(rates, D0, D0 + DAY) == [(D0 + 30, 1401.0)]
+
+
+# ---- 리뷰 확정 결함 회귀: 부분 조각 빈 응답은 중단이 아니다 (005 §3.5) ----
+
+
+def test_is_full_day_only_for_whole_day_slices():
+    from scripts.backfill import DAY, is_full_day
+
+    assert is_full_day(0, DAY)
+    assert is_full_day(DAY * 3, DAY * 4)
+    # 첫 기록과 맞닿은 부분 조각 [그날 00:00, 첫 기록) — 정의상 업비트 초봉이 없다
+    assert not is_full_day(DAY * 9, DAY * 9 + 3)
+    # 목표 경계와 맞닿은 부분 조각
+    assert not is_full_day(DAY * 2 + 100, DAY * 3)
+    assert not is_full_day(DAY * 2 + 100, DAY * 2 + 200)
+
+
+def test_plan_newest_front_slice_is_partial_when_first_not_on_boundary():
+    from scripts.backfill import DAY, is_full_day, plan_day_slices
+
+    # 첫 기록이 자정 3초 뒤: 가장 먼저 처리되는 front 조각은 3초짜리 부분 조각이고,
+    # 이 조각에서 빈 응답이 나도 중단하지 않아야 남은 과거 날들이 채워진다
+    slices = plan_day_slices(0, DAY * 10, (DAY * 9 + 3, DAY * 9 + 500))
+    assert slices[0] == (DAY * 9, DAY * 9 + 3)
+    assert not is_full_day(*slices[0])
+    assert all(is_full_day(*s) for s in slices[1:10])

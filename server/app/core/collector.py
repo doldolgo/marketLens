@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -118,6 +119,29 @@ class Collector:
         if self._wallet is not None:
             wallet_task = asyncio.create_task(self._wallet.refresh_if_due(self._client))
 
+        try:
+            return await self._cycle_body(
+                wallet_task, started, fetched_at, failures, warnings, calls, saved
+            )
+        except BaseException:
+            # 사이클이 취소·실패하면 지갑 태스크를 고아로 남기지 않는다 — 닫힌
+            # httpx 클라이언트를 뒤늦게 쓰다 종료 로그를 오염시키는 것을 막는다
+            if wallet_task is not None and not wallet_task.done():
+                wallet_task.cancel()
+                with contextlib.suppress(BaseException):
+                    await wallet_task
+            raise
+
+    async def _cycle_body(
+        self,
+        wallet_task: asyncio.Task[dict[str, int] | None] | None,
+        started: float,
+        fetched_at: int,
+        failures: list[dict[str, str]],
+        warnings: list[str],
+        calls: dict[str, int],
+        saved: dict[str, int],
+    ) -> CycleResult:
         # 1. 국내(업비트·빗썸) 동시 수집
         domestic_outcomes = await asyncio.gather(
             *[self._safe_fetch(c) for c in self._domestic]
@@ -174,13 +198,6 @@ class Collector:
             foreign_rows = foreign_outcome.rows
             calls[self._foreign.id] = foreign_outcome.calls
 
-        # 입출금 조회 합류 — 실제 호출이 나간 사이클만 거래소별 호출 카운트를 올린다 (006 §3.5)
-        if wallet_task is not None:
-            wallet_calls = await wallet_task
-            if wallet_calls:
-                for ex, n in wallet_calls.items():
-                    calls[ex] = calls.get(ex, 0) + n
-
         # 4. 교집합 필터 — "이번 사이클 성공 거래소 + 유지된 거래소" 전체로 계산한다
         domestic_union: set[str] = set()
         for conn in self._domestic:
@@ -219,6 +236,15 @@ class Collector:
         for exchange, (ask, bid) in observed.items():
             self._store.set_rate(exchange, ask, bid, now)
         self._store.mark_received(int(time.time()))
+
+        # 입출금 조회 합류 — 시세 교체(4~5단계) **뒤**에 기다린다. 지갑 API 가 10초까지
+        # 매달려도 시세 신선도(age)와 메모리 교체는 영향받지 않는다 (006 §3.5).
+        # 실제 호출이 나간 사이클만 거래소별 호출 카운트를 올린다.
+        if wallet_task is not None:
+            wallet_calls = await wallet_task
+            if wallet_calls:
+                for ex, n in wallet_calls.items():
+                    calls[ex] = calls.get(ex, 0) + n
 
         # 6. 입출금 캐시 반영 — 유지된(이번 사이클 실패) 거래소의 행에도 덮어써야
         #    "실패 사이클은 직전 성공값을 유지하지 않는다"(006 §3.5)가 성립한다

@@ -78,16 +78,23 @@ def test_suspicious_when_abs_premium_at_least_5_percent():
 
 
 def test_excluded_bases_are_skipped_and_reported():
-    """제외 코인(AI·PROS)은 빠지고 excluded_bases 에 보인다 (§3.0·§4)."""
+    """제외 코인(AI·PROS·MANTRA)은 빠지고 excluded_bases 에 보인다 (§3.0·§4)."""
     store = standard_store(
         extra={
-            "upbit": [seeded_row("upbit", "AI", 1_000, dep=True, wd=True)],
-            "binance": [seeded_row("binance", "AI", 0.7, dep=True, wd=True)],
+            "upbit": [
+                seeded_row("upbit", "AI", 1_000, dep=True, wd=True),
+                seeded_row("upbit", "MANTRA", 1_000, dep=True, wd=True),
+            ],
+            "binance": [
+                seeded_row("binance", "AI", 0.7, dep=True, wd=True),
+                seeded_row("binance", "MANTRA", 0.7, dep=True, wd=True),
+            ],
         }
     )
     body = make_client(store).get("/premium/scan").json()
-    assert body["excluded_bases"] == ["AI"]
-    assert all(i["sym"] != "AI" for i in body["top_fwd"] + body["top_rev"])
+    assert sorted(body["excluded_bases"]) == ["AI", "MANTRA"]
+    excluded = {"AI", "MANTRA"}
+    assert all(i["sym"] not in excluded for i in body["top_fwd"] + body["top_rev"])
     assert body["scanned_coins"] == 3  # 제외 코인은 검사 수에 안 들어간다
 
 
