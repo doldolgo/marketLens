@@ -6,6 +6,7 @@
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -29,9 +30,14 @@ from app.core.connectors.binance import BinanceConnector
 from app.core.connectors.bithumb import BithumbConnector
 from app.core.connectors.upbit import UpbitConnector
 from app.core.errors import ExchangeError
+from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
+from app.core.persist import PersistLoop
 from app.features.analysis.router import router as analysis_router
+from app.features.history.router import router as history_router
 from app.features.spreads.router import router as spreads_router
+
+logger = logging.getLogger("marketlens.main")
 
 
 @asynccontextmanager
@@ -49,13 +55,41 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.live_store = store
     app.state.collector = collector
+
+    # Influx — 토큰 없으면 저장 루프 비활성·/history/* 503, 앱은 뜬다 (스펙 005 §3.1)
+    settings = app.state.settings
+    influx: InfluxClient | None = None
+    persist_task: asyncio.Task[None] | None = None
+    if settings.influx_token:
+        influx = InfluxClient(url=settings.influx_url, token=settings.influx_token)
+        if not await asyncio.to_thread(influx.ping):
+            # 기동 시 연결 실패는 에러 로그 1줄 — 저장 루프가 다음 회차에 재시도한다
+            logger.error(
+                "InfluxDB 연결 실패: %s — 저장 루프가 회차마다 재시도한다",
+                settings.influx_url,
+            )
+        persist = PersistLoop(store=store, collector=collector, influx=influx)
+        persist_task = asyncio.create_task(persist.run_loop())
+    else:
+        logger.warning(
+            "INFLUX_TOKEN 이 없어 저장 루프를 켜지 않는다 — /history/* 는 503"
+        )
+    app.state.influx = influx
+
     task = asyncio.create_task(collector.run_loop())
     try:
         yield
     finally:
         task.cancel()
+        if persist_task is not None:
+            persist_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        if persist_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await persist_task
+        if influx is not None:
+            influx.close()
         await client.aclose()
 
 
@@ -100,6 +134,7 @@ def create_app() -> FastAPI:
 
     app.include_router(spreads_router)
     app.include_router(analysis_router)
+    app.include_router(history_router)
 
     return app
 

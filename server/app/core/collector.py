@@ -56,6 +56,14 @@ class Collector:
         self._interval = interval
         # 사이클은 동시에 두 개 돌지 않는다 — 루프와 수동 트리거(003 /refresh)가 겹치면 뒤가 기다린다
         self._lock = asyncio.Lock()
+        # 이번 사이클에 입출금 조회가 실패한 거래소 id — 저장 루프(005)가 읽는다.
+        # 006 전에는 입출금 조회 자체가 없어 항상 빈 목록이다 (스펙 005 §3.2).
+        self.dw_failed: list[str] = []
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        """수집과 저장(005 persist)이 같은 락을 잡는다 — 교체 도중 읽으면 반쪽이 남는다."""
+        return self._lock
 
     async def run_loop(self) -> None:
         """앱 시작과 함께 돌고 종료 시 취소된다. 한 사이클이 끝난 뒤 interval 만큼 쉰다."""
@@ -173,6 +181,8 @@ class Collector:
         for exchange, (ask, bid) in observed.items():
             self._store.set_rate(exchange, ask, bid, now)
         self._store.mark_received(int(time.time()))
+        # 입출금 조회는 006 몫 — 006 이 사이클마다 실패 거래소를 여기에 채운다
+        self.dw_failed = []
 
         return CycleResult(
             saved=saved,
