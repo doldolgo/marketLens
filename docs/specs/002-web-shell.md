@@ -89,7 +89,7 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
 ### 3.6 mock 공통
 - 코인 24개(순서·기준가 USD): BTC 118420, ETH 4123, XRP 2.91, SOL 182.4, DOGE 0.2134, ADA 0.887, TRX 0.302, LINK 24.6, AVAX 41.2, DOT 8.42, SUI 4.05, APT 10.8, ARB 1.12, OP 2.31, SEI 0.512, ATOM 9.14, NEAR 6.72, HBAR 0.246, ETC 31.5, STX 2.04, ONDO 1.42, PEPE 0.0000162, WLD 3.86, TIA 6.18.
 - 해외 거래소 6곳: Binance, Bybit, Bitget, MEXC, Gate.io, Hyperliquid.
-- 코인마다 현물 거래소 목록과 선물 거래소 목록을 정한다. (코인 index + 거래소 index) 을 3 으로 나눈 나머지가 1 이 아니면 현물, 2 가 아니면 선물.
+- 코인마다 현물 거래소 목록과 선물 거래소 목록을 정한다. (코인 index + 거래소 index) 을 3 으로 나눈 나머지가 1 이 아니면 현물, 2 가 아니면 선물. 단 **Hyperliquid 는 perp 전용**이라 현물 목록에서 뺀다 — 수집 상태 탭(§3.9)의 현물 구독 0 과 일치시키기 위해서다.
 - 현물 항목 = `{ex, off, status, age}`. `off` 는 기준가 대비 편차 ±0.15% 내, age 0~8s. 선물 항목 = `{ex, prem, funding, status, age}`. `prem` 은 현물 대비 프리미엄 ±0.7% 내, `funding` 은 ±0.04% 소수 3자리.
 - status 는 3% `fail`, 6% `stale`, 나머지 `ok`. stale 항목의 age 는 45~345s.
 - tick(1.5초): `fail` 은 그대로. `stale` 아닌 항목은 25% 확률로 값이 흔들리고(`prem ±0.03`, `off ±0.015`, `funding ±0.002`) age 0 으로, 아니면 age +1.5. 레이더 행도 age +1.5.
