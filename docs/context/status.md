@@ -15,4 +15,4 @@
 | deploy | Dockerfile·compose 3컨테이너·CI/deploy 워크플로 | nginx 서빙(:${WEB_PORT}) | 로컬 검증 완료 — EC2 반영·PR check 는 GitHub 권한 대기 |
 
 ## 알려진 빚
-(없음)
+- (005) 초 단위 백필 92일(BTC ≈ 457만 점) 위에서 **전 구간** `/history/streaks` 는 EC2(4GB)의 Influx 를 재시작시킨다(60초+ 후 504, 2026-08-30 실측). `start` 로 범위를 준 조회(7일 ≈ 8초)는 정상. 후속 스펙 후보: 오래된 데이터 1m 롤업 또는 조회 구간 상한. nginx read timeout(60초)도 함께 볼 것.
