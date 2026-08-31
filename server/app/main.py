@@ -33,6 +33,7 @@ from app.core.errors import ExchangeError
 from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
 from app.core.persist import PersistLoop
+from app.core.serialization import camelize_json
 from app.features.analysis.router import router as analysis_router
 from app.features.history.router import router as history_router
 from app.features.spreads.router import router as spreads_router
@@ -104,7 +105,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def _error_body(code: str, message: str, detail: object) -> dict[str, object]:
     """앱 에러 응답 형식은 항상 이 모양이다 (architecture.md 계약 규칙)."""
-    return {"error": {"code": code, "message": message, "detail": detail}}
+    return camelize_json(
+        {"error": {"code": code, "message": message, "detail": detail}}
+    )
 
 
 async def _exchange_error_handler(request: Request, exc: ExchangeError) -> JSONResponse:

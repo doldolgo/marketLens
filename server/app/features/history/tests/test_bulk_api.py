@@ -19,43 +19,44 @@ def test_empty_records_returns_empty_coins() -> None:
     assert res.status_code == 200
     body = res.json()
     assert body["coins"] == []
-    assert body["coin_count"] == 0
+    assert body["coinCount"] == 0
 
 
 def test_coin_count_and_shapes() -> None:
     res = make_client(seeded_reader()).get(
-        "/history/streaks/bulk", params={"threshold": 0}
+        "/history/streaks/bulk", params={"threshold": 0, "maxGap": 123}
     )
     assert res.status_code == 200
     body = res.json()
     # coin_count == len(coins), dom 기본 upbit 의 코인만 (§4)
-    assert body["coin_count"] == len(body["coins"]) == 2
+    assert body["coinCount"] == len(body["coins"]) == 2
     assert [c["base"] for c in body["coins"]] == ["BTC", "ETH"]
     eth = body["coins"][1]
     assert set(eth.keys()) == {
         "base",
         "scanned",
-        "last_ts",
+        "lastTs",
         "kimp",
         "reverse",
         "overall",
     }
     assert eth["scanned"] == 2
-    assert eth["last_ts"] == T0 + 60
+    assert eth["lastTs"] == T0 + 60
     assert eth["kimp"]["count"] == 1
     assert eth["kimp"]["segments"][0]["samples"] == 2
     # start 기본 0 (§3.4)
-    assert body["start_ts"] == 0
+    assert body["startTs"] == 0
+    assert body["maxGapSeconds"] == 123
     assert set(body.keys()) == {
         "dom",
         "fx",
-        "threshold_percent",
-        "max_gap_seconds",
-        "start_ts",
-        "end_ts",
-        "coin_count",
+        "thresholdPercent",
+        "maxGapSeconds",
+        "startTs",
+        "endTs",
+        "coinCount",
         "coins",
-        "fetched_at",
+        "fetchedAt",
     }
 
 

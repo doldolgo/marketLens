@@ -20,29 +20,27 @@ def test_standard_seed_grid():
     syms = [c["sym"] for c in body["coins"]]
     assert syms == ["XRP", "BTC", "ETH"]  # fwd 김프 내림차순
     assert "SOL" not in syms  # 국내 미상장은 격자에서 빠진다
-    assert body["scanned_coins"] == 3 == len(body["coins"])
-    assert body["scanned_combinations"] == 5  # BTC 2×1 + ETH 1×1 + XRP 2×1
-    assert body["dom_list"] == ["bithumb", "upbit"]
-    assert body["fx_list"] == ["binance"]
-    assert body["amount_krw"] == 10_000_000  # 기본값
+    assert body["scannedCoins"] == 3 == len(body["coins"])
+    assert body["scannedCombinations"] == 5  # BTC 2×1 + ETH 1×1 + XRP 2×1
+    assert body["domList"] == ["bithumb", "upbit"]
+    assert body["fxList"] == ["binance"]
+    assert body["amountKrw"] == 10_000_000  # 기본값
 
     btc = next(c for c in body["coins"] if c["sym"] == "BTC")
-    assert btc["fwd"]["buy_exchange"] == "binance"
-    assert (
-        btc["fwd"]["sell_exchange"] == "bithumb"
-    )  # 국내 매도는 비싼 bithumb 쪽이 최대
-    assert btc["fwd"]["deposit_available"] is False  # 매도처 bithumb 입금 막힘
-    assert btc["fwd"]["withdrawal_available"] is True  # 매수처 binance 출금
-    assert btc["fwd"]["premium_percent"] == pytest.approx(0.603, abs=1e-3)
+    assert btc["fwd"]["buyExchange"] == "binance"
+    assert btc["fwd"]["sellExchange"] == "bithumb"  # 국내 매도는 비싼 bithumb 쪽이 최대
+    assert btc["fwd"]["depositAvailable"] is False  # 매도처 bithumb 입금 막힘
+    assert btc["fwd"]["withdrawalAvailable"] is True  # 매수처 binance 출금
+    assert btc["fwd"]["premiumPercent"] == pytest.approx(0.603, abs=1e-3)
     assert btc["suspicious"] is False
 
     xrp = body["coins"][0]
-    assert xrp["fwd"]["sell_exchange"] == "bithumb"
-    assert xrp["fwd"]["premium_percent"] == pytest.approx(1.053, abs=1e-3)
+    assert xrp["fwd"]["sellExchange"] == "bithumb"
+    assert xrp["fwd"]["premiumPercent"] == pytest.approx(1.053, abs=1e-3)
 
     # rev 최대 조합 — upbit 쪽이 덜 나쁘다 (−0.699% vs bithumb −0.799%)
-    assert btc["rev"]["buy_exchange"] == "upbit"
-    assert btc["rev"]["sell_exchange"] == "binance"
+    assert btc["rev"]["buyExchange"] == "upbit"
+    assert btc["rev"]["sellExchange"] == "binance"
 
     # 입출금 막힘 표시 조합이 있어 경고, 수수료 문구는 그 앞 (§3.2-8 순서)
     fee_idx = next(i for i, w in enumerate(body["warnings"]) if "미반영 이론값" in w)
@@ -51,12 +49,12 @@ def test_standard_seed_grid():
 
 
 def test_large_amount_exhausts_depth():
-    """amount_krw=50,000,000 이면 depth_exhausted=true — 한쪽 5단계 합 1,500만원 (§4)."""
+    """amountKrw=50,000,000 이면 depthExhausted=true — 한쪽 5단계 합 1,500만원 (§4)."""
     client = make_client(standard_store())
-    body = client.get("/matrix", params={"amount_krw": 50_000_000}).json()
+    body = client.get("/matrix", params={"amountKrw": 50_000_000}).json()
     btc = next(c for c in body["coins"] if c["sym"] == "BTC")
-    assert btc["fwd"]["depth_exhausted"] is True
-    assert btc["rev"]["depth_exhausted"] is True
+    assert btc["fwd"]["depthExhausted"] is True
+    assert btc["rev"]["depthExhausted"] is True
 
 
 def test_sell_side_exhaustion_rematches_buy():
@@ -86,12 +84,12 @@ def test_sell_side_exhaustion_rematches_buy():
     )
     store.set_rate("upbit", SEED_RATE, SEED_RATE, FIXED_DT)
     store.mark_received(FIXED_SEC)
-    body = make_client(store).get("/matrix", params={"amount_krw": 500_000}).json()
+    body = make_client(store).get("/matrix", params={"amountKrw": 500_000}).json()
     tt = body["coins"][0]
     # 표면 김프 = (141,000/140,000 − 1)×100, 되맞춘 실효 수익률도 같아 총 슬리피지 ≈ 0
-    assert tt["fwd"]["premium_percent"] == pytest.approx((141_000 / 140_000 - 1) * 100)
-    assert tt["fwd"]["total_slippage_percent"] == pytest.approx(0.0, abs=1e-9)
-    assert tt["fwd"]["depth_exhausted"] is True
+    assert tt["fwd"]["premiumPercent"] == pytest.approx((141_000 / 140_000 - 1) * 100)
+    assert tt["fwd"]["totalSlippagePercent"] == pytest.approx(0.0, abs=1e-9)
+    assert tt["fwd"]["depthExhausted"] is True
 
 
 def test_rateless_domestic_combos_are_skipped():
@@ -135,17 +133,17 @@ def test_rateless_domestic_combos_are_skipped():
     )
     store.set_rate("upbit", SEED_RATE, SEED_RATE, FIXED_DT)  # bithumb 환율은 없음
     store.mark_received(FIXED_SEC)
-    body = make_client(store).get("/matrix", params={"amount_krw": 500_000}).json()
+    body = make_client(store).get("/matrix", params={"amountKrw": 500_000}).json()
     tt = body["coins"][0]
-    assert tt["fwd"]["sell_exchange"] == "upbit"
-    assert body["dom_list"] == ["upbit"]
-    assert body["scanned_combinations"] == 1
+    assert tt["fwd"]["sellExchange"] == "upbit"
+    assert body["domList"] == ["upbit"]
+    assert body["scannedCombinations"] == 1
 
 
 def test_cap_warning_order():
     """한도 10억원 초과 경고가 맨 앞, 그 다음 수수료 문구 (§3.2-8)."""
     client = make_client(standard_store())
-    body = client.get("/matrix", params={"amount_krw": 2_000_000_000}).json()
+    body = client.get("/matrix", params={"amountKrw": 2_000_000_000}).json()
     assert "저장 한도" in body["warnings"][0]
     assert "미반영 이론값" in body["warnings"][1]
 
@@ -167,4 +165,4 @@ def test_empty_store_and_no_rates_are_404():
 
 def test_negative_amount_is_422():
     client = make_client(standard_store())
-    assert client.get("/matrix", params={"amount_krw": -1}).status_code == 422
+    assert client.get("/matrix", params={"amountKrw": -1}).status_code == 422

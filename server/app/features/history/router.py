@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.core.influx import InfluxUnavailableError
+from app.core.serialization import camelize_json
 from app.features.history.service import (
     HistoryApiError,
     PremiumReader,
@@ -31,7 +32,9 @@ _BASE_PATTERN = r"^[A-Za-z0-9]{1,20}$"
 def _error(status: int, code: str, message: str, detail: object = None) -> JSONResponse:
     return JSONResponse(
         status_code=status,
-        content={"error": {"code": code, "message": message, "detail": detail}},
+        content=camelize_json(
+            {"error": {"code": code, "message": message, "detail": detail}}
+        ),
     )
 
 
@@ -51,7 +54,7 @@ async def _respond(
         return _error(exc.http_status, exc.code, exc.message, exc.detail)
     except InfluxUnavailableError as exc:
         return _error(503, "storage_unavailable", f"저장소 조회에 실패했습니다: {exc}")
-    return JSONResponse(content=payload.model_dump())
+    return JSONResponse(content=camelize_json(payload.model_dump()))
 
 
 @router.get("/premium")
@@ -78,7 +81,7 @@ async def get_streaks(
     threshold: float = Query(0, ge=0),
     start: int | None = Query(None, ge=0, le=4_102_444_800),
     end: int | None = Query(None, ge=0, le=4_102_444_800),
-    max_gap: int = Query(600, ge=1),
+    max_gap: int = Query(600, ge=1, alias="maxGap"),
     dom: Literal["upbit", "bithumb"] = Query("upbit"),
     fx: Literal["binance"] = Query("binance"),
 ) -> JSONResponse:
@@ -103,7 +106,7 @@ async def get_streaks_bulk(
     threshold: float = Query(0, ge=0),
     start: int = Query(0, ge=0, le=4_102_444_800),
     end: int | None = Query(None, ge=0, le=4_102_444_800),
-    max_gap: int = Query(600, ge=1),
+    max_gap: int = Query(600, ge=1, alias="maxGap"),
     dom: Literal["upbit", "bithumb"] = Query("upbit"),
     fx: Literal["binance"] = Query("binance"),
 ) -> JSONResponse:

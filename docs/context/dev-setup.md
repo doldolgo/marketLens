@@ -61,7 +61,7 @@ curl -s localhost:8000/spreads | head -c 600
 ```bash
 curl -s "localhost:8000/slippage/upbit?symbol=BTC/KRW&amount=1000000" | head -c 300
 ```
-`slippage_percent ≥ 0`, `levels_consumed ≥ 1` 이면 정상 (004).
+`slippagePercent ≥ 0`, `levelsConsumed ≥ 1` 이면 정상 (004).
 ```bash
 curl -s "localhost:8000/history/premium?base=BTC&unit=week" | head -c 300
 ```

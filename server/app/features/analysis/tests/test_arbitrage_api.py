@@ -20,20 +20,20 @@ def test_auto_selects_cheapest_ask_and_highest_bid():
     assert body["buy"]["exchange"] == "binance"
     assert body["sell"]["exchange"] == "bithumb"
     assert body["candidates"][0]["exchange"] == "binance"  # 싼 순(best_ask)
-    assert body["premium_capture_percent"] == pytest.approx(100.0)
+    assert body["premiumCapturePercent"] == pytest.approx(100.0)
     # 표면 김프 = binance 매수→bithumb 매도 +0.603% (§4 표준 시드)
-    assert body["premium_percent"] == pytest.approx(0.603, abs=1e-3)
+    assert body["premiumPercent"] == pytest.approx(0.603, abs=1e-3)
     expected_prem = (
         (100_100_000 * (1 - 0.0005)) / (71_000 * (1 + 0.0005) * SEED_RATE) - 1
     ) * 100
-    assert body["premium_percent"] == pytest.approx(expected_prem)
-    assert body["profit_krw"] > 0
-    assert body["profit_percent"] == pytest.approx(expected_prem)
-    assert body["input_amount_krw"] == 1_000_000
-    assert body["usd_krw_rate"] == SEED_RATE
+    assert body["premiumPercent"] == pytest.approx(expected_prem)
+    assert body["profitKrw"] > 0
+    assert body["profitPercent"] == pytest.approx(expected_prem)
+    assert body["inputAmountKrw"] == 1_000_000
+    assert body["usdKrwRate"] == SEED_RATE
     # 1단계 안에서 끝나 슬리피지 0
-    assert body["buy"]["slippage_percent"] == 0.0
-    assert body["sell"]["slippage_percent"] == 0.0
+    assert body["buy"]["slippagePercent"] == 0.0
+    assert body["sell"]["slippagePercent"] == 0.0
 
 
 def test_single_candidate_is_409():
@@ -50,8 +50,8 @@ def test_blocked_deposit_at_sell_side_warns():
     """입금 false 인 매도처(표준 시드 bithumb) → deposit_available=false + 경고 (§4)."""
     client = make_client(standard_store())
     body = client.get("/arbitrage", params={"sym": "BTC", "amount": 1_000_000}).json()
-    assert body["deposit_available"] is False
-    assert body["withdrawal_available"] is True  # 매수처 binance 출금
+    assert body["depositAvailable"] is False
+    assert body["withdrawalAvailable"] is True  # 매수처 binance 출금
     assert any("입금이 막혀" in w for w in body["warnings"])
     # 항상 마지막은 수수료 미반영 문구 (§3.0)
     assert "미반영 이론값" in body["warnings"][-1]
@@ -65,7 +65,7 @@ def test_null_deposit_warns_do_not_assume_open():
         .get("/arbitrage", params={"sym": "BTC", "amount": 1_000_000})
         .json()
     )
-    assert body["deposit_available"] is None
+    assert body["depositAvailable"] is None
     assert any("확인 못" in w and "가정하지" in w for w in body["warnings"])
 
 
@@ -107,8 +107,8 @@ def test_per_exchange_rates_and_matching_sides():
     # 매수 = bithumb ask 101×1,350(자기 ask), 매도 = binance bid 99×1,390(기준 bid)
     assert body["buy"]["exchange"] == "bithumb"
     assert body["sell"]["exchange"] == "binance"
-    assert body["buy"]["average_price_krw"] == pytest.approx(101.0 * 1_350.0)
-    assert body["sell"]["average_price_krw"] == pytest.approx(99.0 * 1_390.0)
+    assert body["buy"]["averagePriceKrw"] == pytest.approx(101.0 * 1_350.0)
+    assert body["sell"]["averagePriceKrw"] == pytest.approx(99.0 * 1_390.0)
     assert body["quantity"] == pytest.approx(1.0)
 
 
@@ -148,11 +148,11 @@ def test_sell_side_exhaustion_rematches_buy():
     assert body["sell"]["exchange"] == "upbit"
     assert body["quantity"] == pytest.approx(0.5)  # 실제 판 수량
     # 되맞춘 매수액 = 0.5 × 140,000 = 70,000, 매도액 = 0.5 × 141,000 = 70,500
-    assert body["buy"]["amount_krw"] == pytest.approx(70_000)
-    assert body["sell"]["amount_krw"] == pytest.approx(70_500)
-    assert body["profit_percent"] == pytest.approx((70_500 / 70_000 - 1) * 100)
-    assert body["profit_percent"] > -50  # 쓰레기 값 방지가 목적
-    assert body["sell"]["depth_exhausted"] is True
+    assert body["buy"]["amountKrw"] == pytest.approx(70_000)
+    assert body["sell"]["amountKrw"] == pytest.approx(70_500)
+    assert body["profitPercent"] == pytest.approx((70_500 / 70_000 - 1) * 100)
+    assert body["profitPercent"] > -50  # 쓰레기 값 방지가 목적
+    assert body["sell"]["depthExhausted"] is True
     assert any("되맞췄" in w for w in body["warnings"])
 
 
@@ -160,7 +160,7 @@ def test_buy_side_exhaustion_warns_partial_fill():
     """매수측 소진 → '투입 금액 중 X원만 체결' 경고 + 실제 체결분 계산 (§3.2-9·§3.3)."""
     client = make_client(standard_store())
     body = client.get("/arbitrage", params={"sym": "BTC", "amount": 100_000_000}).json()
-    assert body["buy"]["depth_exhausted"] is True
+    assert body["buy"]["depthExhausted"] is True
     assert any("원만 체결" in w for w in body["warnings"])
 
 

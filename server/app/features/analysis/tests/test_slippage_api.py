@@ -35,13 +35,13 @@ def test_amount_walk_partial_fill_mid_level():
     asks, _ = seed_levels(100_000_000, "KRW")
     # 1단계 300만원 전량 + 2단계에서 150만원 부분 체결
     expected_qty = asks[0][1] + 1_500_000 / asks[1][0]
-    assert body["levels_consumed"] == 2
-    assert body["depth_exhausted"] is False
+    assert body["levelsConsumed"] == 2
+    assert body["depthExhausted"] is False
     assert body["amount"] == pytest.approx(4_500_000)
     assert body["quantity"] == pytest.approx(expected_qty)
-    assert body["requested_amount"] == 4_500_000
-    assert body["requested_quantity"] is None
-    assert body["depth_available"] == 5
+    assert body["requestedAmount"] == 4_500_000
+    assert body["requestedQuantity"] is None
+    assert body["depthAvailable"] == 5
 
 
 def test_amount_walk_exhausted_returns_actual_amount():
@@ -50,8 +50,8 @@ def test_amount_walk_exhausted_returns_actual_amount():
     body = client.get(
         "/slippage/upbit", params={"symbol": "BTC/KRW", "amount": 20_000_000}
     ).json()
-    assert body["depth_exhausted"] is True
-    assert body["levels_consumed"] == 5
+    assert body["depthExhausted"] is True
+    assert body["levelsConsumed"] == 5
     assert body["amount"] == pytest.approx(5 * LEVEL_KRW)  # 5단계 합 1,500만원
 
 
@@ -64,7 +64,7 @@ def test_quantity_walk_shortfall_returns_actual_quantity():
     ).json()
     _, bids = seed_levels(100_000_000, "KRW")
     capacity = sum(lv[1] for lv in bids)
-    assert body["depth_exhausted"] is True
+    assert body["depthExhausted"] is True
     assert body["quantity"] == pytest.approx(capacity)
     assert body["amount"] == pytest.approx(5 * LEVEL_KRW)
 
@@ -77,10 +77,10 @@ def test_spec_example_two_levels():
         "/slippage/upbit", params={"symbol": "TT/KRW", "amount": 220}
     ).json()
     assert body["quantity"] == pytest.approx(2.0)
-    assert body["average_price"] == pytest.approx(110.0)
-    assert body["slippage_percent"] == pytest.approx(10.0)
-    assert body["levels_consumed"] == 2
-    assert body["best_price"] == 100.0
+    assert body["averagePrice"] == pytest.approx(110.0)
+    assert body["slippagePercent"] == pytest.approx(10.0)
+    assert body["levelsConsumed"] == 2
+    assert body["bestPrice"] == 100.0
 
 
 def test_sell_slippage_positive_when_average_below_best():
@@ -92,8 +92,8 @@ def test_sell_slippage_positive_when_average_below_best():
         "/slippage/upbit",
         params={"symbol": "BTC/KRW", "side": "sell", "quantity": quantity},
     ).json()
-    assert body["average_price"] < body["best_price"]
-    assert body["slippage_percent"] > 0
+    assert body["averagePrice"] < body["bestPrice"]
+    assert body["slippagePercent"] > 0
 
 
 def test_sell_slippage_clamped_at_zero():
@@ -103,8 +103,8 @@ def test_sell_slippage_clamped_at_zero():
     body = client.get(
         "/slippage/upbit", params={"symbol": "TT/KRW", "side": "sell", "quantity": 6.0}
     ).json()
-    assert body["average_price"] > body["best_price"]
-    assert body["slippage_percent"] == 0.0
+    assert body["averagePrice"] > body["bestPrice"]
+    assert body["slippagePercent"] == 0.0
 
 
 def test_amount_and_quantity_validation_is_400_before_snapshot():
@@ -130,8 +130,8 @@ def test_single_level_fill_has_zero_slippage_and_warning():
     body = client.get(
         "/slippage/upbit", params={"symbol": "BTC/KRW", "amount": 1_000_000}
     ).json()
-    assert body["slippage_percent"] == 0.0
-    assert body["levels_consumed"] == 1
+    assert body["slippagePercent"] == 0.0
+    assert body["levelsConsumed"] == 1
     assert any("규모를 키우면" in w for w in body["warnings"])
     # 항상 마지막은 수수료 미반영 문구 (§3.0)
     assert "미반영 이론값" in body["warnings"][-1]
@@ -145,8 +145,8 @@ def test_depth_param_limits_walked_levels():
         "/slippage/upbit",
         params={"symbol": "BTC/KRW", "amount": 4_500_000, "depth": 1},
     ).json()
-    assert body["depth_exhausted"] is True
-    assert body["levels_consumed"] == 1
+    assert body["depthExhausted"] is True
+    assert body["levelsConsumed"] == 1
     assert body["amount"] == pytest.approx(LEVEL_KRW)
 
 
@@ -170,5 +170,5 @@ def test_exchange_name_and_symbol_echo():
     ).json()
     assert body["name"] == "업비트"
     assert body["symbol"] == "BTC/KRW"
-    assert body["quote_currency"] == "KRW"
+    assert body["quoteCurrency"] == "KRW"
     assert body["side"] == "buy"

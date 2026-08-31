@@ -1,19 +1,15 @@
 """GET /spreads·POST /refresh 응답 모델 — 스펙 003 §3.2·§3.3.
 
-행(row) 객체 키는 camelCase, 최상위 키는 snake_case (architecture.md 계약 규칙).
-BE 내부 필드명은 snake_case 로 두고 직렬화 시 alias 로 camelCase 를 만든다.
+BE 내부 필드명은 snake_case 로 두고 HTTP 직렬화 경계에서 camelCase 로 변환한다.
 """
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
-from pydantic.alias_generators import to_camel
+from pydantic import BaseModel
 
 
 class SpreadRow(BaseModel):
     """(국내 거래소 × 해외 거래소 × 코인) 페어 1행. 키 순서는 스펙 §3.2 예시와 같다."""
-
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     sym: str
     dom: str

@@ -1,7 +1,6 @@
-"""분석 API 6개의 응답 모델 — 스펙 004 §3.2.
+"""분석 API 6개의 내부 응답 모델 — 스펙 004 §3.2.
 
-FE 소비자가 없는 BE 전용 응답이라 전부 snake_case 다
-(architecture.md 계약 규칙의 명시 예외 — FE 가 쓰게 되는 날 그 스펙에서 바꾼다).
+Python 필드는 snake_case로 두고 라우터의 HTTP 직렬화 경계에서 camelCase로 변환한다.
 """
 
 from typing import Literal

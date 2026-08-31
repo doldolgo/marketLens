@@ -40,27 +40,27 @@ dev compose 는 Influx 2.7 하나만 띄운다. 첫 기동 시 org·bucket `mark
 - 저장 실패(Influx 다운 등): 로그 `DB 저장 실패 (연속 n회)` 를 남기고 다음 회차에 재시도한다. **메모리와 수집 루프는 영향 없다.** 놓친 회차는 기록에 구멍으로 남는다(소급 안 함).
 
 ### 3.4 `GET /history/*`
-응답 키는 snake_case 유지(FE 소비자 없음). 모든 시각 `*_ts` 는 epoch 초, `fetched_at` 은 ms.
-공통 파라미터: `dom` ∈ {upbit, bithumb}(기본 upbit), `fx` = binance 고정. `max_gap`(기본 600, ≥1) 은 streaks·bulk 만 받는다 — premium 은 구간 전체를 그대로 돌려주므로 gap 개념이 없다. streaks·bulk 의 `start`·`end` 는 0 ≤ 값 ≤ 4,102,444,800(2100-01-01) — 밖이면 422(연도 오버플로 500 방지). `end ≤ 0` 은 400(end ≤ start 의 특수형).
+HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*Ts` 는 epoch 초, `fetchedAt` 은 ms.
+공통 파라미터: `dom` ∈ {upbit, bithumb}(기본 upbit), `fx` = binance 고정. `maxGap`(기본 600, ≥1) 은 streaks·bulk 만 받는다 — premium 은 구간 전체를 그대로 돌려주므로 gap 개념이 없다. streaks·bulk 의 `start`·`end` 는 0 ≤ 값 ≤ 4,102,444,800(2100-01-01) — 밖이면 422(연도 오버플로 500 방지). `end ≤ 0` 은 400(end ≤ start 의 특수형).
 
 **`/history/premium?base&unit&date`** — `base`·`unit ∈ {week, month}` 필수. `date=YYYY-MM-DD`(정확히 이 형식·연도 1970~2100, 밖이면 400. 없으면 오늘 UTC).
 구간 = `date` 가 속한 ISO 주(월 00:00 UTC ~ 다음 월) 또는 달(1일 ~ 다음 달 1일), end exclusive. 구간에 기록 없으면 404. 구간 전체를 한 번에 반환한다. 응답 키:
-- `dom`·`fx`·`base`·`unit` 은 요청 그대로. `start`·`end` 는 구간 경계(ISO 8601, UTC). `first_ts` 는 구간 첫 기록 시각, `count` 는 기록 수, `fetched_at`.
-- `summary` = `{first_fwd,last_fwd,min_fwd,max_fwd}` — 구간 전체 통계.
+- `dom`·`fx`·`base`·`unit` 은 요청 그대로. `start`·`end` 는 구간 경계(ISO 8601, UTC). `firstTs` 는 구간 첫 기록 시각, `count` 는 기록 수, `fetchedAt`.
+- `summary` = `{firstFwd,lastFwd,minFwd,maxFwd}` — 구간 전체 통계.
 - `events` = `[{dt,fwd,rev}…]` 컴팩트 — 절대시각 대신 `dt`=직전 기록으로부터 경과 초(구간 첫 기록은 0).
 
-**`/history/streaks?base&threshold&start&end&max_gap`** — `threshold ≥ 0`(기본 0). `start`/`end` 없으면 그 코인 기록의 첫 ts / 지금+1초. 조회 구간 안에 기록이 0건이면 404(구간 밖 기록 유무는 보지 않는다), `end ≤ start` 면 400. 구간(streak) 규칙:
+**`/history/streaks?base&threshold&start&end&maxGap`** — `threshold ≥ 0`(기본 0). `start`/`end` 없으면 그 코인 기록의 첫 ts / 지금+1초. 조회 구간 안에 기록이 0건이면 404(구간 밖 기록 유무는 보지 않는다), `end ≤ start` 면 400. 구간(streak) 규칙:
 1. ts 오름차순으로 값이 `threshold` **이상**인 연속 기록을 한 구간으로 묶는다(같은 값 포함).
-2. 값이 미만이거나 직전 기록과 `max_gap` 초보다 벌어지면 구간을 닫는다(끊긴 수집을 이어 붙여 "3시간 연속" 을 만들지 않는다).
+2. 값이 미만이거나 직전 기록과 `maxGap` 초보다 벌어지면 구간을 닫는다(끊긴 수집을 이어 붙여 "3시간 연속" 을 만들지 않는다).
 3. fwd(kimp) 와 rev(reverse) 를 절댓값 없이 **각각** 계산한다.
-4. 구간 = `{start_ts,end_ts,start,end(KST),duration_seconds=end−start(1개면 0),samples,max_percent,avg_percent}`.
-5. 방향 요약 = `{count,max_duration_seconds,avg_duration_seconds,max_percent,avg_percent(샘플 수 가중),segments}`.
-6. `overall` = `{max_kimp_percent,avg_kimp_percent,max_reverse_percent,avg_reverse_percent}` 는 기준치 무관 **전체 행** 기준. `max_duration_seconds,avg_duration_seconds,segment_count` 는 두 방향 구간 합집합.
-7. 최상위 응답 = `{base,dom,fx,threshold_percent,max_gap_seconds,start_ts,end_ts,kimp,reverse,overall,scanned,last_updated_ts,last_updated,fetched_at}`. 방향 요약 키 이름은 bulk 와 같은 `kimp`(fwd)·`reverse`(rev). `scanned` 는 전체 행 수, `last_updated` 는 KST.
+4. 구간 = `{startTs,endTs,start,end(KST),durationSeconds=end−start(1개면 0),samples,maxPercent,avgPercent}`.
+5. 방향 요약 = `{count,maxDurationSeconds,avgDurationSeconds,maxPercent,avgPercent(샘플 수 가중),segments}`.
+6. `overall` = `{maxKimpPercent,avgKimpPercent,maxReversePercent,avgReversePercent}` 는 기준치 무관 **전체 행** 기준. `maxDurationSeconds,avgDurationSeconds,segmentCount` 는 두 방향 구간 합집합.
+7. 최상위 응답 = `{base,dom,fx,thresholdPercent,maxGapSeconds,startTs,endTs,kimp,reverse,overall,scanned,lastUpdatedTs,lastUpdated,fetchedAt}`. 방향 요약 키 이름은 bulk 와 같은 `kimp`(fwd)·`reverse`(rev). `scanned` 는 전체 행 수, `lastUpdated` 는 KST.
 예: 값 `0 1 3 6 29 4 31`(60초 간격), threshold 4 → 구간 1개(samples 4, max 31); threshold 5 → 2개.
 
-**`/history/streaks/bulk?threshold&start&end&max_gap`** — 전 코인 한 번에. `start` 기본 0.
-응답 `{dom,fx,threshold_percent,max_gap_seconds,start_ts,end_ts,coin_count,coins:[{base,scanned,last_ts,kimp,reverse,overall}…],fetched_at}`. **기록 없으면 404 가 아니라 빈 `coins`.**
+**`/history/streaks/bulk?threshold&start&end&maxGap`** — 전 코인 한 번에. `start` 기본 0.
+응답 `{dom,fx,thresholdPercent,maxGapSeconds,startTs,endTs,coinCount,coins:[{base,scanned,lastTs,kimp,reverse,overall}…],fetchedAt}`. **기록 없으면 404 가 아니라 빈 `coins`.**
 수 MB 응답이라 압축(gzip)해 보낸다.
 
 오류 응답:
@@ -101,12 +101,12 @@ dev compose 는 Influx 2.7 하나만 띄운다. 첫 기동 시 org·bucket `mark
 - Influx 가 닿지 않는 상태로 기동해도 `/health` 200, `/spreads` 가 메모리로 동작하고, 저장 루프는 실패 로그만 남기며, `/history/*` 는 503 `storage_unavailable`
 - `INFLUX_TOKEN` 없이 기동 → 저장 루프 비활성, `/history/*` 503
 - `/history/premium`: 구간 밖 기록은 안 잡힘, `events[0].dt==0`, `count==len(events)`, `summary` 가 구간 전체 기준, 기록 없으면 404, `date=abc` 400
-- 구간 판정 예시: `0 1 3 6 29 4 31` threshold 4 → 1구간(samples 4, max 31), threshold 5 → 2구간; `max_gap` 초과 간격에서 구간이 끊긴다; 방향 avg 는 샘플 가중
-- `/history/streaks`: `end<=start` 400, 기록 없는 코인 404, `threshold=-1` 422, `last_updated` 가 `+09:00` 으로 끝난다
+- 구간 판정 예시: `0 1 3 6 29 4 31` threshold 4 → 1구간(samples 4, max 31), threshold 5 → 2구간; `maxGap` 초과 간격에서 구간이 끊긴다; 방향 avg 는 샘플 가중
+- `/history/streaks`: `end<=start` 400, 기록 없는 코인 404, `threshold=-1` 422, `lastUpdated` 가 `+09:00` 으로 끝난다
 - `/history/streaks/bulk`: 기록 없으면 200 + 빈 `coins`
 - 백필 대상 구간 계산: 기록 없음 → 전체 구간, 기록 있음 → 앞·뒤 빈 구간만(가운데는 건드리지 않음); 주/월 구간 경계가 ISO 주·달력 월과 일치, 잘못된 unit 거부
 - 캔들 병합: 세 값이 갖춰지기 전 ts 는 건너뜀, fwd 불변이면 기록 없음, 종가 대칭식 결과
-- `/history/streaks/bulk?threshold=0`: `coin_count == len(coins)` 이고 100 을 넘는다(전 코인)
+- `/history/streaks/bulk?threshold=0`: `coinCount == len(coins)` 이고 100 을 넘는다(전 코인)
 - 수동: dev compose + 서버 기동 후 **기동 약 60초 뒤**(§3.3 — 먼저 60초 잔다) `premium` 에 첫 점이 쌓이고, 75초 시점에 `/history/premium?base=BTC&unit=week` 가 `count ≥ 1`·`events[0].dt == 0` 을 돌려준다. Influx 컨테이너를 내리면 저장 실패 로그가 회차마다 찍히되 `/spreads` 는 계속 갱신, `/history/premium` 은 503. 백필 스크립트 1일 실행 → "구간 완료, 김프 기록 N건" 에서 N > 1000, 재실행 시 "이미 전부 채워져". 스프레드 행 클릭 → 기록 탭에 그 심볼 선택. 마지막으로 서버 테스트·lint, web build·lint 통과.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)

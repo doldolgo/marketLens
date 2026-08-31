@@ -36,7 +36,7 @@ def seed(
 
 
 def only_row(store: LiveStore) -> dict[str, object]:
-    rows = build_spreads(store, now=NOW).model_dump(by_alias=True)["rows"]
+    rows = build_spreads(store, now=NOW).model_dump()["rows"]
     assert len(rows) == 1
     return rows[0]
 
@@ -46,11 +46,11 @@ def test_case1_empty_domestic_networks_uses_coin_values() -> None:
     store = LiveStore()
     seed(store, dom_dep=True, dom_wd=None, fx_dep=False, fx_wd=True)
     row = only_row(store)
-    assert row["netDom"] is None
-    assert row["depDom"] is True
-    assert row["wdDom"] is None
-    assert row["depFx"] is False
-    assert row["wdFx"] is True
+    assert row["net_dom"] is None
+    assert row["dep_dom"] is True
+    assert row["wd_dom"] is None
+    assert row["dep_fx"] is False
+    assert row["wd_fx"] is True
 
 
 def test_case3_grt_matched_shows_matched_network_values() -> None:
@@ -69,11 +69,11 @@ def test_case3_grt_matched_shows_matched_network_values() -> None:
         fx_wd=True,
     )
     row = only_row(store)
-    assert row["netDom"] == "Ethereum"
-    assert row["depDom"] is True
-    assert row["wdDom"] is True
-    assert row["depFx"] is True
-    assert row["wdFx"] is False
+    assert row["net_dom"] == "Ethereum"
+    assert row["dep_dom"] is True
+    assert row["wd_dom"] is True
+    assert row["dep_fx"] is True
+    assert row["wd_fx"] is False
 
 
 def test_case4_qkc_absent_means_no_transfer_path() -> None:
@@ -88,9 +88,9 @@ def test_case4_qkc_absent_means_no_transfer_path() -> None:
         fx_wd=True,
     )
     row = only_row(store)
-    assert row["netDom"] == "Quarkchain"
-    assert row["depFx"] is False
-    assert row["wdFx"] is False
+    assert row["net_dom"] == "Quarkchain"
+    assert row["dep_fx"] is False
+    assert row["wd_fx"] is False
 
 
 def test_case5_sei_unknown_with_foreign_networks_is_null() -> None:
@@ -105,10 +105,10 @@ def test_case5_sei_unknown_with_foreign_networks_is_null() -> None:
         fx_wd=True,
     )
     row = only_row(store)
-    assert row["netDom"] == "Sei"
-    assert row["depDom"] is True
-    assert row["depFx"] is None
-    assert row["wdFx"] is None
+    assert row["net_dom"] == "Sei"
+    assert row["dep_dom"] is True
+    assert row["dep_fx"] is None
+    assert row["wd_fx"] is None
 
 
 def test_case5_unknown_with_empty_foreign_networks_uses_fx_coin_values() -> None:
@@ -122,10 +122,10 @@ def test_case5_unknown_with_empty_foreign_networks_uses_fx_coin_values() -> None
         fx_wd=True,
     )
     row = only_row(store)
-    assert row["netDom"] == "Ethereum"
-    assert row["wdDom"] is False  # 고른 국내 망의 값 — 코인 값이 아니다
-    assert row["depFx"] is True
-    assert row["wdFx"] is True
+    assert row["net_dom"] == "Ethereum"
+    assert row["wd_dom"] is False  # 고른 국내 망의 값 — 코인 값이 아니다
+    assert row["dep_fx"] is True
+    assert row["wd_fx"] is True
 
 
 def test_fail_row_still_applies_network_verdict() -> None:
@@ -158,6 +158,6 @@ def test_fail_row_still_applies_network_verdict() -> None:
     store.mark_received(1_787_000_000)
     row = only_row(store)
     assert row["status"] == "fail"
-    assert row["netDom"] == "Ethereum"
-    assert row["depFx"] is True
-    assert row["wdFx"] is False
+    assert row["net_dom"] == "Ethereum"
+    assert row["dep_fx"] is True
+    assert row["wd_fx"] is False

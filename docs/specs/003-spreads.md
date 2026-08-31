@@ -67,16 +67,16 @@
    - `status`: `age ≥ 5.0` → `stale`, 아니면 `ok`. 단 호가 4개 중 하나라도 비었거나, 해외 ask·국내 bid/ask 가격이 0 이하면 `fail` 이고(국내 0 을 통과시키면 rev 분모가 0 이 된다) `fwd` `rev` `usd` `liqDom` `liqFx` `rateAsk` `rateBid` 는 전부 0. **fail 이어도 입출금 값과 age 는 싣는다.**
    - 입출금 5필드(`netDom depDom wdDom depFx wdFx`): **006 §3.7 의 망 판정**으로 채운다. 국내 망 정보가 없으면(키 없음 등) 코인 단위 값·`netDom` null 로 강등된다 — 그래서 키 없이 기동해도 5키는 항상 존재한다.
 5. 행 정렬: `(sym, dom, fx)` 오름차순 고정.
-6. 최상위 `rate` = 기준 거래소(`upbit`) 환율 **ask**(표시용). `data_received_at` = 저장소 마지막 수신 시각(ms), 수신 기록이 아직 없으면 null(스냅샷이 아예 없는 경우는 위 1·2 에서 이미 404 다). `fetched_at` = 응답 시각(ms).
+6. 최상위 `rate` = 기준 거래소(`upbit`) 환율 **ask**(표시용). `dataReceivedAt` = 저장소 마지막 수신 시각(ms), 수신 기록이 아직 없으면 null(스냅샷이 아예 없는 경우는 위 1·2 에서 이미 404 다). `fetchedAt` = 응답 시각(ms).
 
-응답 예시 (행 키는 camelCase, 최상위 키는 snake_case. `spark`·`netDom`·입출금의 빈 값 모양을 보인다):
+응답 예시 (모든 HTTP JSON 키는 camelCase. `spark`·`netDom`·입출금의 빈 값 모양을 보인다):
 ```json
 {"rate": 1392.0,
  "rows": [{"sym": "BTC", "dom": "bithumb", "fx": "binance", "fwd": 0.53, "rev": -0.72, "usd": 64950.3,
            "spark": [], "status": "ok", "age": 0.8, "liqDom": 2140.25, "liqFx": 2141.78,
            "rateAsk": 1392.0, "rateBid": 1391.0,
            "netDom": null, "depDom": null, "wdDom": null, "depFx": null, "wdFx": null}],
- "data_received_at": 1787139510649, "fetched_at": 1787139510712}
+ "dataReceivedAt": 1787139510649, "fetchedAt": 1787139510712}
 ```
 행 키의 의미:
 - `sym` 코인. `dom` 국내 거래소 id. `fx` 해외 거래소 id.
@@ -89,7 +89,7 @@
 - `netDom` 판정된 국내 망 이름(문자열, 못 정하면 null). `depDom` `wdDom` 국내 입금/출금. `depFx` `wdFx` 해외 입금/출금. 값은 true 열림, false 막힘, null 모름 — **null 을 열림으로 읽는 코드는 버그다.**
 
 ### 3.3 보조 엔드포인트
-- `POST /refresh` 200: 001 수집 서비스의 1회 실행 결과를 반환한다 — `snapshots[]`(거래소당 1항목 `{exchange, saved, calls, wallet_status_available}`)·`usdkrw[]`(관측된 국내 거래소 `{exchange, ask, bid}`)·`total_saved`·`duration_ms`·`failures[]`(`{exchange, error_code, message}`)·`warnings[]`·`fetched_at`. 거래소 일부 실패는 HTTP 에러가 아니라 `failures`/`warnings` 에 담긴다. 수집 루프가 이미 1초마다 도니 **수동 트리거·진단용**이며 동시 호출은 직렬화된다.
+- `POST /refresh` 200: 001 수집 서비스의 1회 실행 결과를 반환한다 — `snapshots[]`(거래소당 1항목 `{exchange, saved, calls, walletStatusAvailable}`)·`usdkrw[]`(관측된 국내 거래소 `{exchange, ask, bid}`)·`totalSaved`·`durationMs`·`failures[]`(`{exchange, errorCode, message}`)·`warnings[]`·`fetchedAt`. 거래소 일부 실패는 HTTP 에러가 아니라 `failures`/`warnings` 에 담긴다. 수집 루프가 이미 1초마다 도니 **수동 트리거·진단용**이며 동시 호출은 직렬화된다.
   - 토큰: `REFRESH_TOKEN` 이 빈 문자열이면 검사 없음. 설정돼 있으면 헤더 `X-Refresh-Token` 이 없거나 다르면 **401** `{"detail": "X-Refresh-Token 헤더가 없거나 올바르지 않습니다."}` (FastAPI 기본 형식 — `error` 포장 없음). 비교는 타이밍 안전 비교.
 
 ### 3.4 FE — 폴링과 002 와의 계약
@@ -134,7 +134,7 @@ BE (네트워크 없음 — 저장소에 직접 시드):
 - 행 키 집합이 정확히 `sym dom fx fwd rev usd spark status age liqDom liqFx rateAsk rateBid depDom wdDom depFx wdFx netDom` 18개다.
 - 첫 행 `status` 는 `ok`·`stale`·`fail` 중 하나, `spark==[]`, `netDom is None`.
 - 전체 행이 `(sym, dom, fx)` 오름차순이다.
-- `POST /refresh` 의 `total_saved > 100`.
+- `POST /refresh` 의 `totalSaved > 100`.
 - `REFRESH_TOKEN` 을 설정해 띄운 서버에 헤더 없이 `POST /refresh` → 401.
 
 FE 수동 확인:

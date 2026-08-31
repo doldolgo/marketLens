@@ -12,7 +12,7 @@
 - **dw_fail** — 입출금 조회 실패 관측. tag `exchange`, field `v`=1, time = 관측 시각. 한 점 = (exchange, time). 읽는 HTTP 엔드포인트 없음 — 사람이 Influx UI 에서 본다.
 
 ## 시각 단위
-- Influx time 은 ns 지만 기록 정밀도는 **초**. API 응답의 `*_ts` 는 epoch 초, `fetched_at` 은 epoch ms.
+- Influx time 은 ns 지만 기록 정밀도는 **초**. API 응답의 `*Ts` 는 epoch 초, `fetchedAt` 은 epoch ms.
 
 ## 보존
 - bucket retention 은 **무제한**. `dw_fail` 의 "최근 24시간" 은 쿼리 range(-24h) 로 처리한다 — retention 을 걸면 `premium` 까지 지워진다.

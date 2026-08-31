@@ -128,10 +128,10 @@ def test_fwd_rev_use_directional_quotes_and_rates() -> None:
     assert row["rateBid"] == 1390.0
     assert row["usd"] == 71_480.0
     assert row["status"] == "ok"
-    # 최상위 값: rate 는 기준 거래소 환율 ask, data_received_at 은 ms
+    # 최상위 값: rate 는 기준 거래소 환율 ask, dataReceivedAt 은 ms
     assert body["rate"] == 1400.0
-    assert body["data_received_at"] == 1_787_000_000_000
-    assert body["fetched_at"] > 1_700_000_000_000
+    assert body["dataReceivedAt"] == 1_787_000_000_000
+    assert body["fetchedAt"] > 1_700_000_000_000
 
 
 def test_equal_ask_bid_rate_matches_single_rate_formula() -> None:

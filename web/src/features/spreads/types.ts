@@ -9,10 +9,10 @@ export interface ApiSpreadRow extends SpreadRow {
   rateBid: number
 }
 
-/** 최상위 키는 snake_case (architecture.md 계약 규칙). */
+/** HTTP 응답 키는 camelCase (architecture.md 계약 규칙). */
 export interface SpreadsResponse {
   rate: number
   rows: ApiSpreadRow[]
-  data_received_at: number | null
-  fetched_at: number
+  dataReceivedAt: number | null
+  fetchedAt: number
 }

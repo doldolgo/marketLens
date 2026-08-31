@@ -38,7 +38,7 @@ def test_exchange_timeout_becomes_504() -> None:
     assert body["error"]["code"] == "exchange_timeout"
     assert body["error"]["detail"]["exchange"] == "upbit"
     assert body["error"]["detail"]["url"] == "https://api.upbit.com/v1/ticker"
-    assert "status_code" not in body["error"]["detail"]
+    assert "statusCode" not in body["error"]["detail"]
 
 
 def test_exchange_api_error_becomes_502_with_body_truncated() -> None:
@@ -60,5 +60,5 @@ def test_exchange_api_error_becomes_502_with_body_truncated() -> None:
     assert body["error"]["code"] == "exchange_api_error"
     detail = body["error"]["detail"]
     assert detail["exchange"] == "binance"
-    assert detail["status_code"] == 500
+    assert detail["statusCode"] == 500
     assert len(detail["body"]) == 500  # 본문 앞 500자만
