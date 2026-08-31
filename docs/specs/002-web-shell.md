@@ -167,10 +167,10 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
 ```
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — web-shell 행(web: 셸·mock 탭 4개 동작, spreads/history 는 placeholder).
-- `docs/context/dev-setup.md` — web 절 명령이 실제와 같은지 확인.
-- `docs/context/architecture.md` — 데이터 흐름(FE) 절에 "셸의 공유 피드가 탭 공통 데이터를 들고, 1.5초 tick 은 셸, `/spreads` 폴링은 spreads 기능(003)이 제공" 한 줄.
-- `CLAUDE.md` 스펙 인덱스 002 상태.
+- `docs/context/status.md` — web-shell 행을 `| web-shell | - | 셸·KPI·mock 탭 4종 동작 | spreads/history 탭은 placeholder |` 로. **항상 포함.**
+- `CLAUDE.md` — 스펙 인덱스 002 행 상태 → DONE. **항상 포함.**
+- `docs/context/architecture.md` — 데이터 흐름(FE) 절에 한 줄 추가: "셸의 공유 피드가 탭 공통 데이터를 들고, 1.5초 tick 은 셸이 돌린다. `/spreads` 1초 폴링은 spreads 기능(003)이 제공한다." + "현재 구조" 절에 web-shell 항목(shared 조각들·App.tsx·mock 탭 4종 폴더).
+- `docs/context/dev-setup.md` — web 절 명령(dev/build/lint)은 실제와 일치. 사전 준비의 Node 항목에 "22(CI·배포 고정 — 로컬은 v26 도 동작 확인)" 주석.
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):

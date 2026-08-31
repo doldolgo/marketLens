@@ -143,10 +143,10 @@
 (실행 후 기록)
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — analysis 행 (server: 6개 엔드포인트 동작, web: 없음)
-- `docs/context/architecture.md` — 계약 규칙의 snake_case 예외 목록이 6개 경로와 일치하는지 확인
-- `docs/context/dev-setup.md` — 스모크에 `/slippage` 1줄 추가
-- `CLAUDE.md` 스펙 인덱스 상태
+- `docs/context/status.md` — analysis 행을 `| analysis | 6개 엔드포인트 동작 | - | BE 전용, snake_case |` 로. **항상 포함.**
+- `CLAUDE.md` — 스펙 인덱스 004 행 상태 → DONE. **항상 포함.**
+- `docs/context/architecture.md` — 계약 규칙의 casing 예외 목록이 이 스펙 6개 경로(`/premium` `/premium/scan` `/matrix` `/orderbook/*` `/slippage/*` `/arbitrage`)와 일치하는지 확인(목록 자체는 설계 세션이 계약 규칙 절에 생성함). + "현재 구조" 절에 analysis 항목: `features/analysis/` — `walk.py`(호가창 소진 순수 계산)·`service.py`(6개 빌더·거래소 레지스트리)·`router.py`·`models.py`, web 없음.
+- `docs/context/dev-setup.md` — 검증용 스모크에 `/slippage` 1줄: `curl "localhost:8000/slippage/upbit?symbol=BTC/KRW&amount=1000000"` → `slippage_percent ≥ 0`·`levels_consumed ≥ 1`.
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
