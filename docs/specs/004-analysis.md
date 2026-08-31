@@ -24,7 +24,7 @@
 - 에러는 `{"error": {"code", "message", "detail"}}`. 쿼리 타입/범위 위반은 FastAPI 기본 422. 코드: `invalid_symbol`(400). `invalid_request`(400). `unsupported_exchange`(404, 레지스트리에 없는 거래소 id). `no_arbitrage_opportunity`(409).
 - `market_data_not_found`(404) = 스냅샷/환율/호가가 메모리에 없음. 의미는 "아직 수집 안 됨 또는 미상장". message 에 "수집 루프가 한 사이클 돌았는지 확인" 안내.
 - `sym`/`symbol` 은 대소문자 무관(대문자로 정규화). `symbol` 형식은 `BASE/QUOTE`(`-`·`_` 구분자도 허용, 조각 2개가 아니면 `invalid_symbol`). 요청한 quote 가 저장된 quote 와 다르면 `market_data_not_found` 에 "`BASE/<저장 quote>` 로 다시 요청하세요".
-- 모든 계산은 **수수료·출금 수수료·전송 시간 미반영 이론값**이다. slippage·arbitrage·scan·matrix 는 `warnings` 마지막에 항상 그 문장을 넣는다. warnings 는 `list[str]`, 순서 고정(각 절 참고).
+- 모든 계산은 **수수료·출금 수수료·전송 시간 미반영 이론값**이다. slippage·arbitrage·scan 은 `warnings` 마지막에 항상 그 문장을 넣는다 — matrix 만 §3.2 순서대로 그 문장 **뒤에** 입출금 경고가 온다. warnings 는 `list[str]`, 순서 고정(각 절 참고).
 - `depth` 파라미터(orderbook·slippage·arbitrage)는 ≥1 이고 상한은 **저장된 단계 수** — 넘기면 저장분 전부를 쓴다.
 - 스캔·매트릭스 제외 코인: 현재 `AI`·`PROS`(서로 다른 코인이 같은 티커를 써서 국내·해외 매칭이 틀린다).
 
@@ -45,7 +45,7 @@
 #### `GET /orderbook/{exchange}`
 - 파라미터: `symbol`(필수, `BASE/QUOTE`). `depth` 기본 10.
 - 오류: 미등록 거래소 404. 형식 400 `invalid_symbol`. 스냅샷 없음·quote 불일치 404.
-1. 저장된 호가를 `depth` 단계까지 잘라 돌려준다(자르기만, 계산 없음). 응답 키: `exchange·symbol·base·quote`, `bids/asks[{price,size}]`, `timestamp`(거래소 호가 시각 ms), `data_updated_at`.
+1. 저장된 호가를 `depth` 단계까지 잘라 돌려준다(자르기만, 계산 없음). 응답 키: `exchange·symbol·base·quote`, `bids/asks[{price,size}]`, `timestamp`(스냅샷의 `price_timestamp` = 거래소 시세 시각 ms — 001 계약에 호가 전용 시각은 없다), `data_updated_at`.
 #### `GET /slippage/{exchange}`
 - 파라미터: `symbol`(필수). `side` 는 `buy`|`sell`, 기본 buy. `amount` **또는** `quantity`(정확히 하나, >0). `depth` 기본 100.
 - 오류: amount·quantity 둘 다/둘 다 없음/≤0 → 400 `invalid_request`(스냅샷 조회보다 먼저). 호가 비어 있음 404. 최소 단위도 체결 안 됨 400.
@@ -106,7 +106,7 @@
 - SOL 은 국내 미상장(격자에서 빠지는지 확인용). 환율: upbit·bithumb 모두 ask = bid = 1,400. 단일 환율 시절과 결과가 같아야 하므로 일부러 벌리지 않는다. 방향별 환율 분리를 확인하는 항목만 ask/bid 를 따로 심는다.
 - 호가: 각 스냅샷 5단계. i단계(1~5) ask = 가격×(1+0.0005×i), bid = 가격×(1−0.0005×i). 단계마다 size 는 원화 환산 체결 가능 금액이 300만원이 되게 둔다(USDT 마켓은 가격×1,400 으로 환산). 슬리피지 기대값을 손으로 계산하기 쉽게 한 고정값이다.
 - 입출금: upbit·binance 는 입금·출금 `true`. bithumb 은 입금·출금 모두 `false`(막힌 상황). `null` 은 이 시드로 덮지 않고 해당 항목이 직접 행을 만든다.
-- 시드로부터 나오는 수치: BTC fwd(upbit↔binance) = (99,950,000 / 99,449,700 − 1)×100 = **+0.503%**. BTC rev = (99,350,300 / 100,050,000 − 1)×100 = **−0.699%**. binance 매수→bithumb 매도 표면 김프 = **+0.603%**. XRP fwd 는 bithumb 쪽이 **+1.053%** 로 시드 최대.
+- 시드로부터 나오는 수치: BTC fwd(upbit↔binance) = (99,950,000 / 99,449,700 − 1)×100 = **+0.503%**. BTC rev = (99,350,300 / 100,050,000 − 1)×100 = **−0.699%**. binance 매수→bithumb 매도 표면 김프 = **+0.604%**(정확값 0.60357%). XRP fwd 는 bithumb 쪽이 **+1.053%** 로 시드 최대.
 검증 항목:
 - 금액 walk: 금액이 단계 중간에서 끝나면 부분 체결·`exhausted=false`; 전 단계를 넘으면 `exhausted=true` 이고 `amount` 는 실제 체결액
 - 수량 walk: 수량 부족 시 `quantity` 는 실제 체결량
