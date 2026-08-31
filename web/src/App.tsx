@@ -6,6 +6,8 @@ import FlowTab from './features/flow/Tab'
 import GapTab from './features/gap/Tab'
 import HealthTab from './features/health/Tab'
 import PpTab from './features/pp/Tab'
+import { useSpreadPolling } from './features/spreads/api'
+import SpreadsTab from './features/spreads/Tab'
 import { useFeed } from './shared/feed'
 import { fmtPct, pctColor } from './shared/format'
 import type { Feed } from './shared/types'
@@ -182,17 +184,27 @@ function Placeholder({ text }: { text: string }) {
 
 export default function App() {
   const { feed, now } = useFeed()
+  // 셸이 공유 피드를 만든 직후 /spreads 1초 폴링 시작 (스펙 003 §3.4)
+  useSpreadPolling(feed)
   const [tab, setTab] = useState<TabId>('spread')
+  // 스프레드 행 클릭 → 기록 탭으로 피벗할 선택된 심볼 (005 가 진짜 탭으로 교체)
+  const [selSym, setSelSym] = useState<string | null>(null)
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', fontVariantNumeric: 'tabular-nums' }}>
       <Header tab={tab} onTab={setTab} now={now} />
       <KpiStrip feed={feed} />
       <main style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <TabPane active={tab === 'spread'}>
-          <Placeholder text="spreads — 스펙 003 에서 구현" />
+          <SpreadsTab
+            feed={feed}
+            onPick={(sym) => {
+              setSelSym(sym)
+              setTab('history')
+            }}
+          />
         </TabPane>
         <TabPane active={tab === 'history'}>
-          <Placeholder text="history — 스펙 005 에서 구현" />
+          <Placeholder text={selSym ? `history — 스펙 005 에서 구현 · ${selSym}` : 'history — 스펙 005 에서 구현'} />
         </TabPane>
         <TabPane active={tab === 'gap'}>
           <GapTab feed={feed} now={now} />

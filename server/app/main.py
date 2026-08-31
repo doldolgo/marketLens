@@ -30,6 +30,7 @@ from app.core.connectors.bithumb import BithumbConnector
 from app.core.connectors.upbit import UpbitConnector
 from app.core.errors import ExchangeError
 from app.core.live_store import LiveStore
+from app.features.spreads.router import router as spreads_router
 
 
 @asynccontextmanager
@@ -95,6 +96,8 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         # 수집 루프 상태와 무관하게 항상 ok
         return {"status": "ok", "version": APP_VERSION}
+
+    app.include_router(spreads_router)
 
     return app
 
