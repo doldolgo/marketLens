@@ -42,7 +42,7 @@
 - 환율은 **거래소별 덮어쓰기**다. 이번에 못 받은 거래소는 직전 값을 유지한다.
 - 마지막 수신 시각(epoch 초)을 갱신한다. 저장소는 "스냅샷 0개" 여부와 마지막 수신 시각을 알려준다.
 
-고정값: 기준 거래소는 upbit, 국내 호가통화는 KRW, 해외 호가통화는 USDT, stale 기준은 5.0초, 제외 코인 목록은 기본 비어 있다. 환경변수는 `REFRESH_TOKEN`(기본 빈 문자열) 하나다. env 예시 파일은 이 스펙이 만든다.
+고정값: 기준 거래소는 upbit, 국내 호가통화는 KRW, 해외 호가통화는 USDT, stale 기준은 5.0초, 제외 코인 목록은 기본 비어 있다. 환경변수는 `REFRESH_TOKEN`(기본 빈 문자열) 하나다. 키 목록은 `server/.env.example` 에 있다.
 
 조회 API 는 거래소를 직접 호출하지 않는다. 수집은 001 의 수집 서비스(1회 실행, 결과 = 거래소별 저장 건수·환율·실패·경고)를 통해서만 한다.
 
@@ -64,10 +64,10 @@
      ```
    - `usd` = 해외 스냅샷의 마지막 체결가. `spark` = `[]`(항상).
    - `age` = 현재 시각 − 양측 스냅샷 갱신 시각 중 **오래된 쪽**. 초 단위, 0 미만이면 0.
-   - `status`: `age ≥ 5.0` → `stale`, 아니면 `ok`. 단 호가 4개 중 하나라도 비었거나 해외 ask 가격이 0 이하면 `fail` 이고 `fwd` `rev` `usd` `liqDom` `liqFx` `rateAsk` `rateBid` 는 전부 0. **fail 이어도 입출금 값과 age 는 싣는다.**
+   - `status`: `age ≥ 5.0` → `stale`, 아니면 `ok`. 단 호가 4개 중 하나라도 비었거나, 해외 ask·국내 bid/ask 가격이 0 이하면 `fail` 이고(국내 0 을 통과시키면 rev 분모가 0 이 된다) `fwd` `rev` `usd` `liqDom` `liqFx` `rateAsk` `rateBid` 는 전부 0. **fail 이어도 입출금 값과 age 는 싣는다.**
    - 입출금 5필드(`netDom depDom wdDom depFx wdFx`): **006 §3.7 의 망 판정**으로 채운다. 국내 망 정보가 없으면(키 없음 등) 코인 단위 값·`netDom` null 로 강등된다 — 그래서 키 없이 기동해도 5키는 항상 존재한다.
 5. 행 정렬: `(sym, dom, fx)` 오름차순 고정.
-6. 최상위 `rate` = 기준 거래소(`upbit`) 환율 **ask**(표시용). `data_received_at` = 저장소 마지막 수신 시각(ms), 스냅샷이 없으면 null. `fetched_at` = 응답 시각(ms).
+6. 최상위 `rate` = 기준 거래소(`upbit`) 환율 **ask**(표시용). `data_received_at` = 저장소 마지막 수신 시각(ms), 수신 기록이 아직 없으면 null(스냅샷이 아예 없는 경우는 위 1·2 에서 이미 404 다). `fetched_at` = 응답 시각(ms).
 
 응답 예시 (행 키는 camelCase, 최상위 키는 snake_case. `spark`·`netDom`·입출금의 빈 값 모양을 보인다):
 ```json
