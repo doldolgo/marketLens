@@ -23,9 +23,9 @@ interface Row {
 type SortCol = 'sym' | 'price' | 'gap' | 'funding'
 type Mode = 'entry' | 'exit'
 
-/** 펀딩 주기: Hyperliquid 1h, 그 외 8h. 남은 시간은 epoch 기준 UTC 정시 경계. */
+/** 펀딩 주기: Hyperliquid 1h, Bitget 4h(선선갭 탭과 동일), 그 외 8h. 남은 시간은 epoch 기준 UTC 정시 경계. */
 function fundingEta(ex: string, now: number): string {
-  const cycMs = (ex === 'Hyperliquid' ? 1 : 8) * 3_600_000
+  const cycMs = (ex === 'Hyperliquid' ? 1 : ex === 'Bitget' ? 4 : 8) * 3_600_000
   const remainMin = Math.ceil((cycMs - (now % cycMs)) / 60_000)
   if (remainMin < 60) return `펀딩 ${remainMin}분 후`
   return `펀딩 ${Math.floor(remainMin / 60)}시간 ${remainMin % 60}분 후`
