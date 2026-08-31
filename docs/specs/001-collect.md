@@ -63,7 +63,7 @@
 - `price` — 마지막 체결가. 없으면 `(bid+ask)/2`.
 - `asks` — `[price, size]` 목록, 오름차순, 누적액 상한까지(바이낸스는 1단계만). `bids` — 같은 모양, 내림차순.
 - `price_timestamp` — 거래소 시세 시각 epoch ms(바이낸스는 수집 시각).
-- `deposit_enabled`·`withdrawal_enabled` — 006 전까지 항상 `null`. `networks` — 006 전까지 항상 빈 목록.
+- `deposit_enabled`·`withdrawal_enabled`·`networks` — wallet-status(006) 조회가 60초 주기로 채운다. 키 없음·조회 실패면 `null`·빈 목록.
 - `updated_at` — 이번 사이클 적재 시각, tz-aware UTC. `age = now − updated_at`.
 환율 = 국내 거래소 id 당 1개 `{exchange, ask, bid, updated_at}`. 바이낸스 환율은 없다.
 
