@@ -89,7 +89,7 @@ async def test_keyless_startup_spreads_and_refresh_contract() -> None:
 
     # /refresh — 빗썸 true, 업비트·바이낸스 false + 입출금 경고 2줄 (§4)
     body = make_client(store, collector=FakeCollector(result)).post("/refresh").json()
-    available = {s["exchange"]: s["wallet_status_available"] for s in body["snapshots"]}
+    available = {s["exchange"]: s["walletStatusAvailable"] for s in body["snapshots"]}
     assert available == {"upbit": False, "bithumb": True, "binance": False}
     dw_warnings = [w for w in body["warnings"] if "입출금 상태 조회 실패" in w]
     assert len(dw_warnings) == 2

@@ -34,7 +34,7 @@ class CycleResult:
     calls: dict[str, int]  # 거래소별 호출 수 (실패 거래소는 빠짐)
     duration_ms: float
     fetched_at: int  # epoch ms
-    # 거래소별 입출금 조회 성공 여부 — 003 /refresh 가 snapshots[].wallet_status_available 로 노출 (006 §3.5)
+    # 거래소별 입출금 조회 성공 여부 — /refresh 에서는 walletStatusAvailable 로 노출 (006 §3.5)
     wallet_status_available: dict[str, bool] = field(default_factory=dict)
 
 

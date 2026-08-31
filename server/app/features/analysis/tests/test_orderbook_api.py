@@ -23,8 +23,8 @@ def test_depth_trims_and_keeps_stored_order():
     assert body["base"] == "BTC"
     assert body["quote"] == "KRW"
     assert body["timestamp"] == FIXED_MS
-    assert body["data_updated_at"] == FIXED_MS
-    assert body["data_received_at"] == FIXED_MS
+    assert body["dataUpdatedAt"] == FIXED_MS
+    assert body["dataReceivedAt"] == FIXED_MS
 
 
 def test_depth_beyond_stored_returns_all():

@@ -21,8 +21,8 @@ def test_standard_seed_btc_fwd_and_rev():
     dom_ask = 100_000_000 * (1 + 0.0005)
     fx_ask_krw = 71_000 * (1 + 0.0005) * SEED_RATE
     fx_bid_krw = 71_000 * (1 - 0.0005) * SEED_RATE
-    fwd = body["fwd"]["premium_percent"]
-    rev = body["rev"]["premium_percent"]
+    fwd = body["fwd"]["premiumPercent"]
+    rev = body["rev"]["premiumPercent"]
     assert fwd == pytest.approx((dom_bid / fx_ask_krw - 1) * 100)
     assert rev == pytest.approx((fx_bid_krw / dom_ask - 1) * 100)
     assert fwd == pytest.approx(0.503, abs=1e-3)
@@ -30,13 +30,13 @@ def test_standard_seed_btc_fwd_and_rev():
     assert fwd != pytest.approx(-rev)  # 부호 반전 아님
     assert body["fwd"]["profitable"] is True
     assert body["rev"]["profitable"] is False
-    assert body["best_direction"] == "fwd"
-    assert body["best_premium_percent"] == pytest.approx(fwd)
+    assert body["bestDirection"] == "fwd"
+    assert body["bestPremiumPercent"] == pytest.approx(fwd)
     assert body["sym"] == "BTC"
     assert body["dom"] == "upbit"
     assert body["fx"] == "binance"
-    assert body["dom_price"] == 100_000_000
-    assert body["fwd"]["premium_krw"] == pytest.approx(dom_bid - fx_ask_krw)
+    assert body["domPrice"] == 100_000_000
+    assert body["fwd"]["premiumKrw"] == pytest.approx(dom_bid - fx_ask_krw)
 
 
 def test_fwd_uses_rate_ask_and_rev_uses_rate_bid():
@@ -49,12 +49,12 @@ def test_fwd_uses_rate_ask_and_rev_uses_rate_bid():
     dom_ask = 100_000_000 * (1 + 0.0005)
     fx_ask = 71_000 * (1 + 0.0005)
     fx_bid = 71_000 * (1 - 0.0005)
-    assert body["fwd"]["usd_krw_rate"] == 1_410.0
-    assert body["rev"]["usd_krw_rate"] == 1_390.0
-    assert body["fwd"]["premium_percent"] == pytest.approx(
+    assert body["fwd"]["usdKrwRate"] == 1_410.0
+    assert body["rev"]["usdKrwRate"] == 1_390.0
+    assert body["fwd"]["premiumPercent"] == pytest.approx(
         (dom_bid / (fx_ask * 1_410.0) - 1) * 100
     )
-    assert body["rev"]["premium_percent"] == pytest.approx(
+    assert body["rev"]["premiumPercent"] == pytest.approx(
         (fx_bid * 1_390.0 / dom_ask - 1) * 100
     )
     assert body["fwd"]["usd"] == pytest.approx(fx_ask)
@@ -118,11 +118,11 @@ def test_best_direction_is_less_bad_when_both_lose():
     store.set_rate("upbit", SEED_RATE, SEED_RATE, FIXED_DT)
     store.mark_received(FIXED_SEC)
     body = make_client(store).get("/premium", params={"sym": "NEG"}).json()
-    assert body["fwd"]["premium_percent"] < 0
-    assert body["rev"]["premium_percent"] < 0
-    assert body["fwd"]["premium_percent"] > body["rev"]["premium_percent"]
-    assert body["best_direction"] == "fwd"
-    assert body["best_premium_percent"] == pytest.approx(body["fwd"]["premium_percent"])
+    assert body["fwd"]["premiumPercent"] < 0
+    assert body["rev"]["premiumPercent"] < 0
+    assert body["fwd"]["premiumPercent"] > body["rev"]["premiumPercent"]
+    assert body["bestDirection"] == "fwd"
+    assert body["bestPremiumPercent"] == pytest.approx(body["fwd"]["premiumPercent"])
     assert body["fwd"]["profitable"] is False
 
 

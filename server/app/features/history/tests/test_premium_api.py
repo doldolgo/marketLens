@@ -45,13 +45,13 @@ def test_week_window_and_events() -> None:
     assert body["events"][2]["dt"] == ts_of(2025, 3, 9, 23, 59, 59) - (MON + 60)
     assert body["start"] == "2025-03-03T00:00:00Z"
     assert body["end"] == "2025-03-10T00:00:00Z"
-    assert body["first_ts"] == MON
+    assert body["firstTs"] == MON
     # summary 는 구간 전체 기준 (§4)
     assert body["summary"] == {
-        "first_fwd": 1.0,
-        "last_fwd": 0.5,
-        "min_fwd": 0.5,
-        "max_fwd": 2.5,
+        "firstFwd": 1.0,
+        "lastFwd": 0.5,
+        "minFwd": 0.5,
+        "maxFwd": 2.5,
     }
     assert (body["dom"], body["fx"], body["base"], body["unit"]) == (
         "upbit",

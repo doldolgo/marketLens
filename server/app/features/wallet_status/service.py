@@ -108,7 +108,7 @@ class WalletStatusService:
                 row.networks = list(status.networks)
 
     def availability(self) -> dict[str, bool]:
-        """거래소별 최근 조회 성공 여부 — /refresh 의 wallet_status_available (§3.5)."""
+        """거래소별 최근 조회 성공 여부 — /refresh 의 walletStatusAvailable (§3.5)."""
         return {ex: st.available for ex, st in self._states.items()}
 
     def warnings(self) -> list[str]:

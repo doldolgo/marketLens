@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.collector import Collector
 from app.core.live_store import LiveStore
+from app.core.serialization import camelize_json
 from app.features.spreads.service import (
     MarketDataNotFoundError,
     build_refresh,
@@ -28,16 +29,17 @@ async def get_spreads(request: Request) -> JSONResponse:
     except MarketDataNotFoundError as exc:
         return JSONResponse(
             status_code=404,
-            content={
-                "error": {
-                    "code": "market_data_not_found",
-                    "message": exc.message,
-                    "detail": exc.detail,
+            content=camelize_json(
+                {
+                    "error": {
+                        "code": "market_data_not_found",
+                        "message": exc.message,
+                        "detail": exc.detail,
+                    }
                 }
-            },
+            ),
         )
-    # 행 키는 camelCase(alias), 최상위 키는 snake_case
-    return JSONResponse(content=payload.model_dump(by_alias=True))
+    return JSONResponse(content=camelize_json(payload.model_dump()))
 
 
 @router.post("/refresh")
@@ -55,4 +57,6 @@ async def post_refresh(request: Request) -> JSONResponse:
     # 동시 호출·수집 루프와의 직렬화는 run_cycle 내부 락이 보장한다
     result = await collector.run_cycle()
     store: LiveStore = request.app.state.live_store
-    return JSONResponse(content=build_refresh(result, store).model_dump())
+    return JSONResponse(
+        content=camelize_json(build_refresh(result, store).model_dump())
+    )

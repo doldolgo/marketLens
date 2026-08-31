@@ -17,7 +17,7 @@ USDT 시세는 이 시스템의 **유일한 원화↔USDT 변환값**이다(은�
 
 ### 3.1 읽는 계약 (복사)
 - 001: USDT 시세는 국내 거래소별 `{exchange, ask, bid, updated_at(aware UTC)}`. 매 사이클 KRW 호가에서 추출하고, 관측 실패 시 직전 값을 유지한다(`updated_at` 이 안 바뀜).
-- 003: `GET /spreads` 최상위는 `rate`·`rows`·`data_received_at`·`fetched_at`(snake_case). 행 계산은 각 국내 거래소의 자기 시세를 쓴다.
+- 003: `GET /spreads` 최상위는 `rate`·`rows`·`dataReceivedAt`·`fetchedAt`(camelCase). 행 계산은 각 국내 거래소의 자기 시세를 쓴다.
 
 ### 3.2 staleness 판정 (BE, `/spreads` 계산 시)
 - 임계 **60초** — 코드 상수. 왜 60초인가: 스냅샷 stale 기준(5초)과 달리 USDT 는 유동성이 높아 매 사이클(1초) 관측되는 게 정상이다. 60초 동안 한 번도 관측이 없으면 일시 결측이 아니라 구조적 문제(KRW-USDT 마켓 중단·응답 형식 변화·수집 회귀)로 본다.

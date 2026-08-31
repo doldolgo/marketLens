@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.core.live_store import LiveStore
+from app.core.serialization import camelize_json
 from app.features.analysis.service import (
     AnalysisApiError,
     build_arbitrage,
@@ -32,15 +33,17 @@ def _respond(build: Callable[[], BaseModel]) -> JSONResponse:
     except AnalysisApiError as exc:
         return JSONResponse(
             status_code=exc.http_status,
-            content={
-                "error": {
-                    "code": exc.code,
-                    "message": exc.message,
-                    "detail": exc.detail,
+            content=camelize_json(
+                {
+                    "error": {
+                        "code": exc.code,
+                        "message": exc.message,
+                        "detail": exc.detail,
+                    }
                 }
-            },
+            ),
         )
-    return JSONResponse(content=payload.model_dump())
+    return JSONResponse(content=camelize_json(payload.model_dump()))
 
 
 def _store(request: Request) -> LiveStore:
@@ -118,6 +121,6 @@ async def get_premium_scan(
 @router.get("/matrix")
 async def get_matrix(
     request: Request,
-    amount_krw: float = Query(10_000_000, gt=0),
+    amount_krw: float = Query(10_000_000, gt=0, alias="amountKrw"),
 ) -> JSONResponse:
     return _respond(lambda: build_matrix(_store(request), amount_krw=amount_krw))

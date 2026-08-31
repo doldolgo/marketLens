@@ -62,39 +62,39 @@ def test_refresh_response_shape_maps_cycle_result() -> None:
     )
     body = make_client(store, collector=collector).post("/refresh").json()
     assert set(body) == {
-        "snapshots", "usdkrw", "total_saved", "failures", "warnings", "duration_ms", "fetched_at",
+        "snapshots", "usdkrw", "totalSaved", "failures", "warnings", "durationMs", "fetchedAt",
     }  # fmt: skip
     # snapshots[] 는 거래소당 1항목 — 실패 거래소(bithumb)는 saved·calls 0.
-    # wallet_status_available 은 006 — 입출금 조회 결과가 없으면 false
+    # walletStatusAvailable 은 006 — 입출금 조회 결과가 없으면 false
     assert body["snapshots"] == [
         {
             "exchange": "upbit",
             "saved": 132,
             "calls": 2,
-            "wallet_status_available": False,
+            "walletStatusAvailable": False,
         },
         {
             "exchange": "bithumb",
             "saved": 0,
             "calls": 0,
-            "wallet_status_available": False,
+            "walletStatusAvailable": False,
         },
         {
             "exchange": "binance",
             "saved": 210,
             "calls": 2,
-            "wallet_status_available": True,
+            "walletStatusAvailable": True,
         },
     ]
     assert body["usdkrw"] == [{"exchange": "upbit", "ask": 1400.0, "bid": 1390.0}]
-    assert body["total_saved"] == 342
+    assert body["totalSaved"] == 342
     assert body["failures"] == [
         {
             "exchange": "bithumb",
-            "error_code": "exchange_timeout",
+            "errorCode": "exchange_timeout",
             "message": "응답 시간 초과",
         }
     ]
     assert body["warnings"] == ["경고 한 줄"]
-    assert body["duration_ms"] == 12.5
-    assert body["fetched_at"] == 1_787_139_510_000
+    assert body["durationMs"] == 12.5
+    assert body["fetchedAt"] == 1_787_139_510_000

@@ -1,7 +1,7 @@
-"""GET /history/* 응답 모델 — 스펙 005 §3.4.
+"""GET /history/* 내부 응답 모델 — 스펙 005 §3.4.
 
-FE 소비자가 없는 BE 전용 응답이라 전부 snake_case (architecture.md casing 예외).
-모든 `*_ts` 는 epoch 초, `fetched_at` 은 epoch ms.
+Python 필드는 snake_case로 두고 라우터의 HTTP 직렬화 경계에서 camelCase로 변환한다.
+내부 `*_ts` 는 epoch 초, `fetched_at` 은 epoch ms.
 """
 
 from typing import Literal

@@ -18,13 +18,13 @@ def test_btc_item_matches_premium_fwd():
     client = make_client(standard_store())
     scan = client.get("/premium/scan").json()
     prem = client.get("/premium", params={"sym": "BTC"}).json()
-    btc = next(i for i in scan["top_fwd"] if i["sym"] == "BTC")
-    assert btc["premium_percent"] == pytest.approx(prem["fwd"]["premium_percent"])
-    assert btc["premium_krw"] == pytest.approx(prem["fwd"]["premium_krw"])
+    btc = next(i for i in scan["topFwd"] if i["sym"] == "BTC")
+    assert btc["premiumPercent"] == pytest.approx(prem["fwd"]["premiumPercent"])
+    assert btc["premiumKrw"] == pytest.approx(prem["fwd"]["premiumKrw"])
     assert btc["usd"] == pytest.approx(prem["fwd"]["usd"])
-    assert btc["dom_price"] == prem["dom_price"]
+    assert btc["domPrice"] == prem["domPrice"]
     assert btc["direction"] == "fwd"
-    assert btc["fx_name"] == "Binance"
+    assert btc["fxName"] == "Binance"
 
 
 def test_standard_seed_counts_and_ordering():
@@ -32,30 +32,30 @@ def test_standard_seed_counts_and_ordering():
     body = client.get("/premium/scan").json()
     assert body["dom"] == "upbit"
     assert body["fx"] == "binance"
-    assert body["usd_krw_rate"] == SEED_RATE
-    assert body["scanned_coins"] == 3  # BTC·ETH·XRP (upbit KRW)
-    assert body["scanned_pairs"] == 3  # SOL 은 국내 미상장이라 짝이 없다
-    assert body["excluded_bases"] == []
+    assert body["usdKrwRate"] == SEED_RATE
+    assert body["scannedCoins"] == 3  # BTC·ETH·XRP (upbit KRW)
+    assert body["scannedPairs"] == 3  # SOL 은 국내 미상장이라 짝이 없다
+    assert body["excludedBases"] == []
     # 수익률 내림차순 — 표준 시드 fwd 1위는 XRP
-    assert body["top_fwd"][0]["sym"] == "XRP"
-    values = [i["premium_percent"] for i in body["top_fwd"]]
+    assert body["topFwd"][0]["sym"] == "XRP"
+    values = [i["premiumPercent"] for i in body["topFwd"]]
     assert values == sorted(values, reverse=True)
-    assert body["best_fwd"]["sym"] == "XRP"
-    assert body["suspicious_count"] == 0
+    assert body["bestFwd"]["sym"] == "XRP"
+    assert body["suspiciousCount"] == 0
     # 항상 마지막 두 경고: 1단계 한계 안내 → 수수료 미반영 (§3.0·§3.2-6)
     assert "1단계" in body["warnings"][-2]
     assert "미반영 이론값" in body["warnings"][-1]
     # 유동성 = 양쪽 1단계 체결 가능 금액 중 작은 쪽 — 표준 시드는 단계당 300만원
-    assert body["top_fwd"][0]["liquidity_krw"] == pytest.approx(3_000_000, rel=1e-6)
+    assert body["topFwd"][0]["liquidityKrw"] == pytest.approx(3_000_000, rel=1e-6)
 
 
 def test_limit_returns_top_n_descending():
     """limit=N 은 수익률 내림차순 상위 N 개 (§4)."""
     client = make_client(standard_store())
     body = client.get("/premium/scan", params={"limit": 1}).json()
-    assert len(body["top_fwd"]) == 1
-    assert body["top_fwd"][0]["sym"] == "XRP"
-    assert len(body["top_rev"]) == 1
+    assert len(body["topFwd"]) == 1
+    assert body["topFwd"][0]["sym"] == "XRP"
+    assert len(body["topRev"]) == 1
 
 
 def test_suspicious_when_abs_premium_at_least_5_percent():
@@ -68,12 +68,12 @@ def test_suspicious_when_abs_premium_at_least_5_percent():
         }
     )
     body = make_client(store).get("/premium/scan").json()
-    zzz = next(i for i in body["top_fwd"] if i["sym"] == "ZZZ")
-    assert zzz["premium_percent"] >= 5
+    zzz = next(i for i in body["topFwd"] if i["sym"] == "ZZZ")
+    assert zzz["premiumPercent"] >= 5
     assert zzz["suspicious"] is True
-    assert zzz["suspicion_reason"] is not None
-    assert body["suspicious_count"] >= 1
-    assert body["best_fwd"]["sym"] == "ZZZ"
+    assert zzz["suspicionReason"] is not None
+    assert body["suspiciousCount"] >= 1
+    assert body["bestFwd"]["sym"] == "ZZZ"
     assert any("의심 항목" in w for w in body["warnings"])
 
 
@@ -92,10 +92,10 @@ def test_excluded_bases_are_skipped_and_reported():
         }
     )
     body = make_client(store).get("/premium/scan").json()
-    assert sorted(body["excluded_bases"]) == ["AI", "MANTRA"]
+    assert sorted(body["excludedBases"]) == ["AI", "MANTRA"]
     excluded = {"AI", "MANTRA"}
-    assert all(i["sym"] not in excluded for i in body["top_fwd"] + body["top_rev"])
-    assert body["scanned_coins"] == 3  # 제외 코인은 검사 수에 안 들어간다
+    assert all(i["sym"] not in excluded for i in body["topFwd"] + body["topRev"])
+    assert body["scannedCoins"] == 3  # 제외 코인은 검사 수에 안 들어간다
 
 
 def test_low_liquidity_top_item_warns():
@@ -111,7 +111,7 @@ def test_low_liquidity_top_item_warns():
     assert tiny is not None
     tiny.bids = [[1_449.0, 100.0]]  # 1단계 약 14.5만원
     body = make_client(store).get("/premium/scan").json()
-    assert body["best_fwd"]["sym"] == "TINY"
+    assert body["bestFwd"]["sym"] == "TINY"
     assert any("원뿐" in w for w in body["warnings"])
 
 
