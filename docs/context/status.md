@@ -7,12 +7,12 @@
 | 기능 | server | web | 비고 |
 |---|---|---|---|
 | collect | 1초 수집 루프·커넥터 3종·`/health` 동작 | - | `/refresh` 노출은 003 몫 |
-| web-shell | - | 없음 | |
-| spreads | 없음 | 없음 | |
-| analysis | 없음 | - | |
-| history | 없음 | 없음 | |
-| wallet-status | 없음 | - | |
-| deploy | 없음 | 없음 | |
+| web-shell | - | 셸·KPI·mock 탭 4종 동작 | spreads/history 탭은 placeholder |
+| spreads | `/spreads`·`/refresh` 동작 (입출금 전부 null) | 실데이터 탭·1초 폴링 | `spark` 빈 배열, 망 판정은 006 |
+| analysis | 6개 엔드포인트 동작 | - | BE 전용, snake_case |
+| history | Influx 영속·persist 60초·`/history/*` 3종·백필 | 기록 탭 (mock) | `/history/*` 실데이터 연결은 후속 |
+| wallet-status | 3거래소 조회·60초 캐시·`/spreads` 망 판정 | - | 표시는 spreads 탭이 담당 |
+| deploy | Dockerfile·compose 3컨테이너·CI/deploy 워크플로 | nginx 서빙(:${WEB_PORT}) | 로컬 검증 완료 — EC2 반영·PR check 는 GitHub 권한 대기 |
 
 ## 알려진 빚
-(없음)
+- (005) 초 단위 백필 92일(BTC ≈ 457만 점) 위에서 **전 구간** `/history/streaks` 는 EC2(4GB)의 Influx 를 재시작시킨다(60초+ 후 504, 2026-08-30 실측). `start` 로 범위를 준 조회(7일 ≈ 8초)는 정상. 후속 스펙 후보: 오래된 데이터 1m 롤업 또는 조회 구간 상한. nginx read timeout(60초)도 함께 볼 것.
