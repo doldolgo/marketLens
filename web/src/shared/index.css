@@ -1,0 +1,20 @@
+/* 전역 스타일 — 시안(trading-room.dc.html)의 <style> 블록 포팅.
+   디자인 토큰·컴포넌트 클래스는 theme.css(Nocturne)가 source of truth. */
+@import './theme.css';
+
+body { overflow: hidden; }
+
+/* LIVE 점 깜빡임 */
+@keyframes tr-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #3f424d; border-radius: 5px; border: 2px solid #161826; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* hover 유틸 — 시안의 style-hover 속성 대응.
+   인라인 스타일보다 우선해야 해서 !important 필요. */
+.hv-txt:hover { color: var(--color-accent-300) !important; }
+.hv-row:hover { background: color-mix(in srgb, #e9e9ed 5%, transparent) !important; }
+.hv-row4:hover { background: color-mix(in srgb, #e9e9ed 4%, transparent) !important; }
+.hv-bd:hover { border-color: var(--color-accent) !important; }
+.hv-bd-txt:hover { border-color: var(--color-accent) !important; color: var(--color-accent-300) !important; }
