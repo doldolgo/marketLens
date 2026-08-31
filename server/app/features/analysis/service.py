@@ -48,7 +48,8 @@ FX_EXCHANGE = "binance"  # 해외 거래소는 1곳 (§3.0)
 DOMESTIC_QUOTE = "KRW"
 FOREIGN_QUOTE = "USDT"
 # 스캔·매트릭스 제외 코인 — 서로 다른 코인이 같은 티커를 써서 국내·해외 매칭이 틀린다 (§3.0)
-EXCLUDED_BASES: frozenset[str] = frozenset({"AI", "PROS"})
+# MANTRA: 2026-08-30 EC2 실측 — 스캔 1위 +40.8%, 같은 티커의 다른 코인(스펙 004 §3.0)
+EXCLUDED_BASES: frozenset[str] = frozenset({"AI", "PROS", "MANTRA"})
 SUSPICIOUS_PERCENT = 5.0  # |김프| 가 이 이상이면 의심 (§3.2)
 LOW_LIQUIDITY_KRW = 1_000_000.0  # scan 1위 유동성 경고 문턱 (§3.2)
 
@@ -58,9 +59,7 @@ CAP_WARNING = "요청 금액이 호가 저장 한도(10억원)를 넘어 슬리�
 _NOT_COLLECTED_HINT = (
     "수집 루프가 한 사이클 돌았는지 확인하세요 (아직 수집 안 됨 또는 미상장)."
 )
-_SUSPICION_REASON = (
-    "동명이인 코인이거나 한쪽 입출금 중단 가능성이 있습니다. 거래 전 확인하세요."
-)
+_SUSPICION_REASON = "이름만 같은 다른 코인이거나 한쪽 입출금 중단 가능성이 있습니다. 거래 전 확인하세요."
 
 
 class AnalysisApiError(Exception):

@@ -26,7 +26,7 @@
 - `sym`/`symbol` 은 대소문자 무관(대문자로 정규화). `symbol` 형식은 `BASE/QUOTE`(`-`·`_` 구분자도 허용, 조각 2개가 아니면 `invalid_symbol`). 요청한 quote 가 저장된 quote 와 다르면 `market_data_not_found` 에 "`BASE/<저장 quote>` 로 다시 요청하세요".
 - 모든 계산은 **수수료·출금 수수료·전송 시간 미반영 이론값**이다. slippage·arbitrage·scan·matrix 는 `warnings` 마지막에 항상 그 문장을 넣는다. warnings 는 `list[str]`, 순서 고정(각 절 참고).
 - `depth` 파라미터(orderbook·slippage·arbitrage)는 ≥1 이고 상한은 **저장된 단계 수** — 넘기면 저장분 전부를 쓴다.
-- 스캔·매트릭스 제외 코인: 현재 `AI`·`PROS`(서로 다른 코인이 같은 티커를 써서 국내·해외 매칭이 틀린다).
+- 스캔·매트릭스 제외 코인: 현재 `AI`·`PROS`·`MANTRA` — 서로 다른 코인이 같은 티커를 써서 국내·해외 매칭이 틀린다(MANTRA 는 2026-08-30 실측에서 스캔 1위 +40.8% 로 확인).
 
 ### 3.1 계산 규칙
 호가창 소진(walk). levels 는 체결되는 쪽 호가(살 때 asks, 팔 때 bids), 최우선부터. 금액(quote 통화) 기준으로 사거나, 수량 기준으로 판다. 결과 = 체결 수량·체결 금액·먹은 단계 수·소진 여부.
@@ -76,7 +76,7 @@
 1. 국내 = `dom` 의 KRW 스냅샷. 해외 = binance 의 USDT 스냅샷.
 2. 코인 순으로 국내 상장 코인만 짝짓고(`scanned_coins`=코인 수, `scanned_pairs`=짝 수) 방향별 §3.1 수식을 1단계 호가로 계산한다.
 3. 제외 코인(§3.0)은 건너뛰고 `excluded_bases` 에 표시한다. 항목: `sym·direction·dom·dom_price·fx·fx_name·usd·premium_percent·premium_krw·liquidity_krw·suspicious·suspicion_reason`. `liquidity_krw` = 양쪽 1단계 체결 가능 금액 중 작은 쪽(원화).
-4. **`|premium_percent| ≥ 5%` 면 `suspicious=true`** — 이유 문구: 동명이인 코인이거나 한쪽 입출금 중단 가능성, 거래 전 확인.
+4. **`|premium_percent| ≥ 5%` 면 `suspicious=true`** — 이유 문구: 이름만 같은 다른 코인이거나 한쪽 입출금 중단 가능성, 거래 전 확인.
 5. `best_fwd`/`best_rev` = 방향별 최대. `top_fwd`/`top_rev` = 수익률 내림차순 상위 `limit` 개. `suspicious_count` 는 양방향 합. 최상위 `dom·fx·usd_krw_rate`(표시용 ask)·`rate_updated_at`.
 6. warnings 순서: 1위가 의심이면 "김프/역김프 1위 X 는 의심 항목" → 1위 유동성 < 100만원이면 "체결 가능 금액이 N원뿐" → 항상 "1단계만 보므로 금액 기준은 /matrix 나 /arbitrage 로".
 #### `GET /matrix`
