@@ -36,7 +36,7 @@
 - **deploy 워크플로**: `push`(main) 트리거, `appleboy/ssh-action@v1` 로 EC2 에 SSH. 스크립트 순서:
   1. `cd ~/marketlens` (기존 be·fe 폴더와 다른 폴더)
   2. `server/.env` 가 없거나 `INFLUX_TOKEN` 이 비어 있으면 **배포 실패**(값은 출력하지 않는다). 토큰 없이 뜨면 저장 루프가 꺼진 채 조용히 데이터를 잃는다. 루트 `.env` 는 가드하지 않는다 — 없으면 4단계 `--env-file .env` 가 어차피 시끄럽게 실패한다.
-  3. `git pull origin main`
+  3. `git fetch origin main && git reset --hard origin/main` — pull 이 아니라 **미러 동기화**. 배포 트리는 main 의 사본일 뿐이므로, 서버 쪽 로컬 커밋·갈래가 있어도 항상 main 을 그대로 따른다(첫 배포에서 pull 이 갈래 때문에 실패한 실사례).
   4. `docker compose --env-file .env --env-file server/.env up -d --build` — `WEB_PORT` 는 루트 `.env`, Influx 첫 기동 admin 토큰(`DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN}`)은 `server/.env` 에서 치환한다. `--env-file` 을 명시하면 기본 `./.env` 자동 로드가 꺼지므로 둘 다 적는다.
   5. `docker image prune -f` — 오래된 레이어가 EC2 디스크를 채우지 않게.
 - Secrets 는 `EC2_HOST`·`EC2_USER`·`EC2_SSH_KEY` 셋(기존 be·fe 레포와 같은 값). 값은 어디에도 적지 않는다.
