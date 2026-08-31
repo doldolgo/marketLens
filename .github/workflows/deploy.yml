@@ -26,7 +26,9 @@ jobs:
             if ! grep -q '^INFLUX_TOKEN=.' server/.env; then
               echo "INFLUX_TOKEN 이 비어 있다 — 배포 중단"; exit 1
             fi
-            git pull origin main
+            # pull 대신 미러 동기화 — 서버 쪽에 어떤 로컬 커밋·갈래가 있어도 main 을 그대로 따른다
+            git fetch origin main
+            git reset --hard origin/main
             # WEB_PORT 는 루트 .env, INFLUX_TOKEN 치환은 server/.env 에서.
             # --env-file 명시 시 기본 ./.env 자동 로드가 꺼지므로 둘 다 적는다.
             docker compose --env-file .env --env-file server/.env up -d --build
