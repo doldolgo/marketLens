@@ -18,8 +18,8 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 
 **바꾸는 기존 것**
 1. 스펙 003 `/spreads` — 행의 입출금 5필드 계산을 "코인 단위 값 복사" 에서 **§3.6 망 판정** 으로 교체한다. 다른 필드·정렬·수식은 손대지 않는다.
-2. 스펙 001 수집 루프 — 001 이 비워 둔 입출금 조회 자리(필드를 `null` 로 둔 곳)에 세 거래소 조회기를 끼운다. 주기·캐시는 001 것을 그대로 쓰고, 실패 시 경고 1줄을 `/refresh` 의 `warnings` 에 넣는다.
-3. 스펙 003 `POST /refresh` — 거래소별 항목에 `wallet_status_available: bool` 을 추가한다.
+2. 스펙 001 수집 루프 — 001 이 비워 둔 입출금 조회 자리(필드를 `null` 로 둔 곳)에 세 거래소 조회기를 끼운다. 주기 60초·사이 사이클 캐시는 이 스펙 §3.5 가 정의한다(001 에는 정의가 없다 — 자리만 있다). 실패 시 경고 1줄을 `/refresh` 의 `warnings` 에 넣는다.
+3. 스펙 003 `POST /refresh` — 응답 `snapshots[]`(거래소당 1항목)의 각 원소에 `wallet_status_available: bool` 을 추가한다. 바이낸스 항목에도 붙는다 — `usdkrw[]` 는 국내 전용이라 쓸 수 없다.
 
 ## 3. 동작
 
@@ -66,6 +66,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 - 한 거래소 실패는 그 거래소만 영향. 시세 수집은 무관. 재시도는 다음 60초 사이클(별도 백오프 없음).
 - 실패한 거래소는 사이클 결과에 표시한다(`wallet_status_available=false`). persist 루프가 이를 보고 `dw_fail` 1점을 쓴다.
 - **실패 사이클은 직전 성공값을 유지하지 않고 `unknown` 으로 덮는다.** 오래된 "열림" 을 보여주는 쪽이 더 위험하다.
+- 실패 상태(경고·`dw_failed`·`wallet_status_available=false`)는 조회가 일어난 사이클만이 아니라 **다음 성공 조회까지 매 사이클 유지**한다 — persist(60초)·`/refresh` 가 조회 사이클과 어긋나도 실패가 관측되게.
 - 키·토큰·서명값은 로그·에러 detail 에 절대 남기지 않는다.
 
 ### 3.6 망 맞추기 (국내 망 기준)
@@ -94,7 +95,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 1. matched 이고 **국내 입금 ok 이면서 해외 출금 ok**(해외→국내로 실제 옮길 수 있는 길)인 첫 망을 즉시 채택.
 2. 없으면 matched 인 첫 망. 막혀 있어도 맞는 망을 보여준다.
 3. 그것도 없으면 첫 국내 망의 판정.
-4. 국내 망 목록이 비면 `unknown`.
+4. 국내 망 목록이 비는 경우는 여기까지 오지 않는다 — §3.7-1 이 먼저 코인 단위 값으로 처리한다.
 
 ### 3.7 `/spreads` 행의 5필드 (스펙 003 문단 대체)
 행의 국내 스냅샷 망 목록을 D, 해외(바이낸스) 망 목록을 F 라 할 때:
@@ -129,12 +130,15 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 - tie-break: 국내 망 2개 중 두 번째만 "국내 입금 ok + 해외 출금 ok" 이면 두 번째를 고른다.
 - `/spreads` 5케이스(§3.7 1~5): 빈 D → 코인 값·`netDom null`. GRT → wdFx false. QKC → depFx·wdFx false. SEI → `null, null`. unknown + F 빈 목록 → 해외 코인 값.
 - 실패 사이클 후 `/spreads` 의 해당 거래소 행은 전부 `null`(직전 성공값 미유지).
-- 키 없이 기동: `/spreads` 모든 행에 `netDom depDom wdDom depFx wdFx` 5키가 있고 값은 `true/false/null` 뿐, 빗썸 행 중 `depDom` 이 null 이 아닌 행이 있다(키 불필요). `/refresh` 의 빗썸 `wallet_status_available` true, 업비트·바이낸스 false + 입출금 경고 2줄.
-- 수동: 실키를 env 파일에 넣고 기동 → `/refresh` 경고 없음·세 거래소 모두 true, `/spreads` 에 `netDom` 이 채워진 행이 다수.
+- 키 없이 기동: `/spreads` 모든 행에 `netDom depDom wdDom depFx wdFx` 5키가 있다. `depDom wdDom depFx wdFx` 값은 `true/false/null` 뿐이고 `netDom` 은 문자열 또는 null. 빗썸 행 중 `depDom` 이 null 이 아닌 행이 있다(키 불필요). `/refresh` 의 빗썸 `wallet_status_available` true, 업비트·바이낸스 false + 입출금 경고 2줄.
+- 수동: 실키를 env 파일에 넣고(키 투입은 사람이 한다 — CLAUDE.md §5 접근 규칙) 기동 → `/refresh` 경고 없음·세 거래소 모두 true, `/spreads` 에 `netDom` 이 채워진 행이 다수.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q   # 207 passed (신규 44 — 서명 테스트 포함)
+# 수동(:8020, 실키는 앱이 .env 로 읽음): /refresh → upbit false(401, IP 허용 목록 — unknown 처리·경고 1줄 정상)
+#   bithumb true / binance true. /spreads 494행 전부 5키, 빗썸 294행 netDom 채워짐(matched 262·unknown 32·wdFx=false 17).
+#   업비트 3-true 확인은 허용 IP(EC2)에서 재확인.
 ```
 
 ## 6. 갱신할 문서
@@ -144,6 +148,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 - `CLAUDE.md` 스펙 인덱스 상태.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-- 남은 빚:
+- 만든 것: `core/networks.py`(정규화·판정·tie-break·동일 체인 쌍 표), `features/wallet_status/`(upbit JWT·binance HMAC·bithumb public·service 60초 캐시, tests 4파일), spreads `_wallet_fields()` 교체, collector `WalletStatusProvider` 주입·`dw_failed` 실값, `/refresh` `wallet_status_available`. PyJWT 추가.
+- 추측한 지점: 입출금 조회는 시세 수집과 병행 태스크(10초 타임아웃이 시세를 안 막게), core↔feature 결합은 Protocol 로, 전부 불용어라 토큰 집합이 빈 이름은 규칙 2·3 건너뜀, calls 는 실호출 사이클만 가산.
+- 실행 중 함께 고친 스펙 절: §3.5 실패 상태의 사이클 간 유지 규칙 1줄 추가.
+- 남은 빚: 업비트 실키 3-true 확인은 EC2 에서 / 동일 체인 쌍 표 1쌍뿐(실데이터 unknown 32건 보며 확장 여지)

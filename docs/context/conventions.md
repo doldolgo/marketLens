@@ -6,7 +6,7 @@
 - Python 타입힌트 필수.
 - 주석은 한국어로 **왜** 를 쓴다.
 - 거래소 커넥터는 서로 코드 공유 금지. 각 거래소 quirk 가 섞이면 디버깅 불가.
-- TypeScript: oxlint, 인라인 style 객체 + CSS 변수(`shared/theme.css` 가 토큰의 진실). 라이브러리 추가는 스펙에 명시된 경우만.
+- TypeScript: oxlint, 인라인 style 객체 + CSS 변수(토큰의 진실은 `docs/design/theme.css` — 웹은 `web/src/shared/` 복사본을 쓴다). 라이브러리 추가는 스펙에 명시된 경우만.
 - 기능 간 import 금지. `core/`·`shared/` 만 공유.
 - 추측성 코드 금지: 스펙에 없는 옵션·유연성·에러 핸들링을 넣지 않는다.
 
@@ -19,8 +19,13 @@
 ## Git
 - 브랜치: `feat/<spec-name>`, `fix/…`, `chore/…`. main 직접 push 금지.
 - 커밋: Conventional Commits, **영어**, 제목에 스펙 번호. 예) `feat(spreads): add spreads feature (spec 003)`
+- 커밋 1개의 diff 는 **300줄을 넘기지 않는다**(문서 포함). 넘으면 논리 단위로 쪼갠다 — 리뷰가 한 호흡에 끝나는 크기.
+- 커밋·PR 에 도구 서명을 넣지 않는다(Co-Authored-By, "Generated with …" 류 푸터 금지).
 - PR: 제목·본문 **한글**. 본문 3줄: 무엇을 / 왜 / 테스트.
 - 문서 변경은 코드와 **같은 PR** 에.
+
+## CI/배포
+- PR 은 CI(`server`·`web` 두 check) 통과가 필수다. main 머지 = EC2 자동 배포.
 
 ## 스펙 완료 조건 (실행 세션 체크리스트)
 1. 스펙 §4 의 검증 조건이 모두 통과 (pytest / build / lint / curl 스모크). 실제로 돌린 명령은 스펙 §5 에 기록
