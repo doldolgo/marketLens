@@ -66,6 +66,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 - 한 거래소 실패는 그 거래소만 영향. 시세 수집은 무관. 재시도는 다음 60초 사이클(별도 백오프 없음).
 - 실패한 거래소는 사이클 결과에 표시한다(`wallet_status_available=false`). persist 루프가 이를 보고 `dw_fail` 1점을 쓴다.
 - **실패 사이클은 직전 성공값을 유지하지 않고 `unknown` 으로 덮는다.** 오래된 "열림" 을 보여주는 쪽이 더 위험하다.
+- 실패 상태(경고·`dw_failed`·`wallet_status_available=false`)는 조회가 일어난 사이클만이 아니라 **다음 성공 조회까지 매 사이클 유지**한다 — persist(60초)·`/refresh` 가 조회 사이클과 어긋나도 실패가 관측되게.
 - 키·토큰·서명값은 로그·에러 detail 에 절대 남기지 않는다.
 
 ### 3.6 망 맞추기 (국내 망 기준)
@@ -134,7 +135,10 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q   # 207 passed (신규 44 — 서명 테스트 포함)
+# 수동(:8020, 실키는 앱이 .env 로 읽음): /refresh → upbit false(401, IP 허용 목록 — unknown 처리·경고 1줄 정상)
+#   bithumb true / binance true. /spreads 494행 전부 5키, 빗썸 294행 netDom 채워짐(matched 262·unknown 32·wdFx=false 17).
+#   업비트 3-true 확인은 허용 IP(EC2)에서 재확인.
 ```
 
 ## 6. 갱신할 문서
@@ -144,6 +148,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 - `CLAUDE.md` 스펙 인덱스 상태.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-- 남은 빚:
+- 만든 것: `core/networks.py`(정규화·판정·tie-break·동일 체인 쌍 표), `features/wallet_status/`(upbit JWT·binance HMAC·bithumb public·service 60초 캐시, tests 4파일), spreads `_wallet_fields()` 교체, collector `WalletStatusProvider` 주입·`dw_failed` 실값, `/refresh` `wallet_status_available`. PyJWT 추가.
+- 추측한 지점: 입출금 조회는 시세 수집과 병행 태스크(10초 타임아웃이 시세를 안 막게), core↔feature 결합은 Protocol 로, 전부 불용어라 토큰 집합이 빈 이름은 규칙 2·3 건너뜀, calls 는 실호출 사이클만 가산.
+- 실행 중 함께 고친 스펙 절: §3.5 실패 상태의 사이클 간 유지 규칙 1줄 추가.
+- 남은 빚: 업비트 실키 3-true 확인은 EC2 에서 / 동일 체인 쌍 표 1쌍뿐(실데이터 unknown 32건 보며 확장 여지)

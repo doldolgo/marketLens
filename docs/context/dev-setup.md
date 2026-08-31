@@ -42,9 +42,15 @@ npm run lint       # oxlint
 
 - `INFLUX_URL`·`INFLUX_TOKEN`: InfluxDB 2.7 접속(org·bucket 은 `marketlens` 고정). 토큰이 없으면 저장 루프 비활성·`/history/*` 503 — 앱은 뜬다. 사람용 UI 는 `http://localhost:8086`(같은 토큰).
 - `REFRESH_TOKEN`: 설정 시 `POST /refresh` 에 `X-Refresh-Token` 헤더가 필요하다.
-- 거래소 API 키 4개: 입출금 상태 조회용. 없으면 상태는 `null`(모름).
+- 거래소 API 키 4개: 입출금 상태 조회용. 없으면 해당 거래소 상태는 `null`(모름). 빗썸은 키 불필요. 업비트는 호출 IP 가 Open API 허용 목록에 있어야 한다.
 
 **API 키는 .env 에만. 코드·문서·커밋에 절대 넣지 않는다.**
+
+## docker 통합 기동 (배포와 같은 구성)
+```bash
+WEB_PORT=8080 docker compose --env-file server/.env up -d --build
+```
+`localhost:8080` 에 화면, `/api/*` 는 nginx 가 server 로 프록시(접두 제거). 내릴 때 `docker compose down`(볼륨 유지).
 
 ## 검증용 스모크
 ```bash

@@ -22,8 +22,8 @@
 - 김프 수식 공유 모듈. 004(analysis)·005(history)도 쓰므로 `server/app/core/premium.py` 에 공개 함수 `premium_percent(*, buy_krw: float, sell_krw: float) -> float` 를 둔다. 값은 `(sell/buy − 1) × 100`. 이 스펙의 fwd/rev 도 이 함수로 계산한다.
 
 하지 않는 것:
-- Influx 저장·아카이브. `spark` 는 항상 빈 배열이다(005 history).
-- 망 단위 입출금 판정. `netDom` 은 항상 null, 입출금 4개 값은 수집기가 준 코인 단위 값 그대로다(006 wallet-status).
+- Influx 저장·아카이브. `spark` 는 항상 빈 배열이다 — 채우는 스펙은 아직 없다(후속 스펙 몫).
+- 망 단위 입출금 판정 **규칙**(정규화·매칭·tie-break) — 006 wallet-status 가 정의한다. 이 스펙의 행은 그 규칙의 결과를 싣기만 한다(아래 §3.2-4).
 - 분석 엔드포인트(004 analysis).
 
 바꾸는 기존 것:
@@ -42,7 +42,7 @@
 - 환율은 **거래소별 덮어쓰기**다. 이번에 못 받은 거래소는 직전 값을 유지한다.
 - 마지막 수신 시각(epoch 초)을 갱신한다. 저장소는 "스냅샷 0개" 여부와 마지막 수신 시각을 알려준다.
 
-고정값: 기준 거래소는 upbit, 국내 호가통화는 KRW, 해외 호가통화는 USDT, stale 기준은 5.0초, 제외 코인 목록은 기본 비어 있다. 환경변수는 `REFRESH_TOKEN`(기본 빈 문자열) 하나다. env 예시 파일은 이 스펙이 만든다.
+고정값: 기준 거래소는 upbit, 국내 호가통화는 KRW, 해외 호가통화는 USDT, stale 기준은 5.0초, 제외 코인 목록은 기본 비어 있다. 환경변수는 `REFRESH_TOKEN`(기본 빈 문자열) 하나다. 키 목록은 `server/.env.example` 에 있다.
 
 조회 API 는 거래소를 직접 호출하지 않는다. 수집은 001 의 수집 서비스(1회 실행, 결과 = 거래소별 저장 건수·환율·실패·경고)를 통해서만 한다.
 
@@ -64,10 +64,10 @@
      ```
    - `usd` = 해외 스냅샷의 마지막 체결가. `spark` = `[]`(항상).
    - `age` = 현재 시각 − 양측 스냅샷 갱신 시각 중 **오래된 쪽**. 초 단위, 0 미만이면 0.
-   - `status`: `age ≥ 5.0` → `stale`, 아니면 `ok`. 단 호가 4개 중 하나라도 비었거나 해외 ask 가격이 0 이하면 `fail` 이고 `fwd` `rev` `usd` `liqDom` `liqFx` `rateAsk` `rateBid` 는 전부 0. **fail 이어도 입출금 값과 age 는 싣는다.**
-   - 입출금: `depDom` `wdDom` = 국내 스냅샷의 입금/출금 가능 여부, `depFx` `wdFx` = 해외 것, `netDom` = null. 이 스펙 시점엔 수집기가 전부 null 을 준다.
+   - `status`: `age ≥ 5.0` → `stale`, 아니면 `ok`. 단 호가 4개 중 하나라도 비었거나, 해외 ask·국내 bid/ask 가격이 0 이하면 `fail` 이고(국내 0 을 통과시키면 rev 분모가 0 이 된다) `fwd` `rev` `usd` `liqDom` `liqFx` `rateAsk` `rateBid` 는 전부 0. **fail 이어도 입출금 값과 age 는 싣는다.**
+   - 입출금 5필드(`netDom depDom wdDom depFx wdFx`): **006 §3.7 의 망 판정**으로 채운다. 국내 망 정보가 없으면(키 없음 등) 코인 단위 값·`netDom` null 로 강등된다 — 그래서 키 없이 기동해도 5키는 항상 존재한다.
 5. 행 정렬: `(sym, dom, fx)` 오름차순 고정.
-6. 최상위 `rate` = 기준 거래소(`upbit`) 환율 **ask**(표시용). `data_received_at` = 저장소 마지막 수신 시각(ms), 스냅샷이 없으면 null. `fetched_at` = 응답 시각(ms).
+6. 최상위 `rate` = 기준 거래소(`upbit`) 환율 **ask**(표시용). `data_received_at` = 저장소 마지막 수신 시각(ms), 수신 기록이 아직 없으면 null(스냅샷이 아예 없는 경우는 위 1·2 에서 이미 404 다). `fetched_at` = 응답 시각(ms).
 
 응답 예시 (행 키는 camelCase, 최상위 키는 snake_case. `spark`·`netDom`·입출금의 빈 값 모양을 보인다):
 ```json
@@ -86,10 +86,10 @@
 - `status` `ok`·`stale`·`fail` 중 하나. `age` 오래된 쪽 스냅샷 경과 초.
 - `liqDom` `liqFx` 최우선 호가 체결 가능 금액(USD), 작은 쪽.
 - `rateAsk` `rateBid` 이 행 국내 거래소의 USDT 매수/매도 환율.
-- `netDom` 망(항상 null). `depDom` `wdDom` 국내 입금/출금. `depFx` `wdFx` 해외 입금/출금. 값은 true 열림, false 막힘, null 모름.
+- `netDom` 판정된 국내 망 이름(문자열, 못 정하면 null). `depDom` `wdDom` 국내 입금/출금. `depFx` `wdFx` 해외 입금/출금. 값은 true 열림, false 막힘, null 모름 — **null 을 열림으로 읽는 코드는 버그다.**
 
 ### 3.3 보조 엔드포인트
-- `POST /refresh` 200: 001 수집 서비스의 1회 실행 결과를 그대로 반환한다(`snapshots[]`·`usdkrw[]`·`total_saved`·`failures[]`·`warnings[]`·`fetched_at`). 거래소 일부 실패는 HTTP 에러가 아니라 `failures`/`warnings` 에 담긴다. 수집 루프가 이미 1초마다 도니 **수동 트리거·진단용**이며 동시 호출은 직렬화된다.
+- `POST /refresh` 200: 001 수집 서비스의 1회 실행 결과를 반환한다 — `snapshots[]`(거래소당 1항목 `{exchange, saved, calls, wallet_status_available}`)·`usdkrw[]`(관측된 국내 거래소 `{exchange, ask, bid}`)·`total_saved`·`duration_ms`·`failures[]`(`{exchange, error_code, message}`)·`warnings[]`·`fetched_at`. 거래소 일부 실패는 HTTP 에러가 아니라 `failures`/`warnings` 에 담긴다. 수집 루프가 이미 1초마다 도니 **수동 트리거·진단용**이며 동시 호출은 직렬화된다.
   - 토큰: `REFRESH_TOKEN` 이 빈 문자열이면 검사 없음. 설정돼 있으면 헤더 `X-Refresh-Token` 이 없거나 다르면 **401** `{"detail": "X-Refresh-Token 헤더가 없거나 올바르지 않습니다."}` (FastAPI 기본 형식 — `error` 포장 없음). 비교는 타이밍 안전 비교.
 
 ### 3.4 FE — 폴링과 002 와의 계약
@@ -148,10 +148,10 @@ FE 수동 확인:
 (실행 후 기록)
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — spreads 행(server: 2 엔드포인트 동작·입출금 전부 null / web: 실데이터 탭)
-- `docs/context/dev-setup.md` — 스모크 절을 §4 의 실서버 `/spreads` 확인으로
-- `docs/context/architecture.md` — FE 데이터 흐름에 "폴링은 spreads 기능 폴더, 공유 피드는 mock tick 만" 한 줄
-- `CLAUDE.md` 스펙 인덱스 상태
+- `docs/context/status.md` — spreads 행을 `| spreads | /spreads·/refresh 동작 (입출금 전부 null) | 실데이터 탭·1초 폴링 | spark 빈 배열, 망 판정은 006 |` 로. **항상 포함.**
+- `CLAUDE.md` — 스펙 인덱스 003 행 상태 → DONE. **항상 포함.**
+- `docs/context/dev-setup.md` — 검증용 스모크를 §4 실서버 기준으로 교체: 최상위 `rate > 1000`·행 수 > 100·행 키 정확히 18개(키 순서는 §3.2 응답 예시와 동일).
+- `docs/context/architecture.md` — "현재 구조" 절에 spreads 항목: `core/premium.py`(`premium_percent`), `features/spreads/`(service 순수 계산·router 2 엔드포인트·models), `/refresh` 응답 모양(`snapshots[]` 거래소당 1항목 등), web `features/spreads/`(1초 폴링·확장 타입). FE 데이터 흐름 문구는 002 §6 에서 이미 반영됨 — 확인만.
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
