@@ -35,6 +35,7 @@ class SpreadsResponse(BaseModel):
     rate: float
     rows: list[SpreadRow]
     data_received_at: int | None  # 저장소 마지막 수신 시각 epoch ms, 스냅샷 없으면 null
+    warnings: list[str]  # USDT 시세 미갱신 경고 — 없으면 빈 배열 (스펙 008)
     fetched_at: int  # 응답 시각 epoch ms
 
 
