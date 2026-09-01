@@ -26,6 +26,8 @@ BASE_EXCHANGE = "upbit"
 DOMESTIC_QUOTE = "KRW"
 FOREIGN_QUOTE = "USDT"
 STALE_AFTER_SEC = 5.0
+# USDT 는 매 사이클(1초) 관측이 정상 — 60초 무관측은 구조적 문제다 (스펙 008 §3.2)
+USDT_STALE_WARN_SEC = 60.0
 EXCLUDED_COINS: frozenset[str] = frozenset()
 
 
@@ -204,12 +206,25 @@ def build_spreads(
     # 5. 정렬 고정
     rows_out.sort(key=lambda r: (r.sym, r.dom, r.fx))
 
-    # 6. 최상위 값
+    # 6. 최상위 값 + USDT 시세 미갱신 경고 — 시세가 "있긴 한데 낡은" 거래소만 (스펙 008 §3.2)
+    warnings: list[str] = []
+    for ex in sorted(store.rates()):
+        rate = store.get_rate(ex)
+        if rate is None or rate.ask <= 0 or rate.bid <= 0:
+            continue
+        rate_age = (now - rate.updated_at).total_seconds()
+        if rate_age > USDT_STALE_WARN_SEC:
+            warnings.append(
+                f"{ex} USDT 시세가 {int(rate_age)}초째 갱신되지 않았습니다 — "
+                "이 거래소 행의 김프/역프는 낡은 시세 기준입니다."
+            )
+
     received = store.received_at
     return SpreadsResponse(
         rate=base_rate.ask,
         rows=rows_out,
         data_received_at=received * 1000 if received is not None else None,
+        warnings=warnings,
         fetched_at=int(time.time() * 1000),
     )
 

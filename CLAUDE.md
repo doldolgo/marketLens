@@ -80,7 +80,7 @@ marketlens/
 | 005 | history | DONE | Influx 영속·김프 아카이브·`/history/*`·백필 + history 탭 |
 | 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
 | 007 | deploy | DONE | Docker·compose·CI·EC2 배포 |
-| 008 | usdt-staleness | TODO | "환율" 표기 정리(→ USDT 시세) + USDT 시세 미갱신 경고 + 문구 표시 경고 레벨 |
+| 008 | usdt-staleness | DONE | `/spreads` USDT 시세 미갱신 경고 (BE 전용) |
 
 실행 순서 = 번호 순.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
