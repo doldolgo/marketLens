@@ -37,6 +37,7 @@
 
 ## 계약 규칙 (BE ↔ FE)
 - BE 내부는 snake_case를 사용한다. HTTP JSON 키와 복합어 쿼리 파라미터는 모든 엔드포인트에서 camelCase를 사용한다. 정확한 스키마는 각 기능의 모델과 타입이 정의한다.
+- `/spreads` 최상위 `warnings: list[str]` — USDT 시세 60초 미갱신 경고. 없으면 빈 배열(키는 항상 존재). (스펙 008)
 - 응답 압축: GZip 미들웨어를 앱 전역에 켠다 — `/history/streaks/bulk` 같은 수 MB JSON 때문. 설정은 001 의 앱 골격 소관.
 - FE가 소비하는 응답 스키마를 변경할 때는 같은 변경에서 BE 모델과 FE 타입을 함께 수정한다.
 - 비즈니스 에러는 `{"error": {"code": str, "message": str, "detail": any}}` 형식이다. 인증 실패와 FastAPI 요청 검증 실패(422)는 `{"detail": ...}` 형식을 사용한다.
