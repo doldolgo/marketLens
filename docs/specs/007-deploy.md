@@ -65,7 +65,7 @@ curl localhost:8080/api/health  # {"status":"ok","version":"0.1.0"} — 접두 �
 # server 컨테이너 env 키 7개 존재(값 미출력)·이미지 find 에 .env 0건·호스트 8000/8086 리스너 없음
 # docker stop marketlens-influxdb → /api/health 200·/history/premium 503, 재기동 60초 뒤 count 1 (쓰기/읽기 왕복)
 # 워크플로 YAML 파싱 OK·docker compose config OK (actionlint 미설치 — 생략 기록)
-# EC2 공존·PR check green·자동 배포는 GitHub 권한·배포 대기
+# EC2 확인 완료 (2026-09-03): EC2 안 curl localhost:8080/api/health = {"status":"ok","version":"0.1.0"}, :8080/ = 200, 기존 fe :80 = 200 (공존). main 머지 자동 배포 green, 실 PR CI green(#13~16)
 ```
 
 ## 6. 갱신할 문서
@@ -78,4 +78,4 @@ curl localhost:8080/api/health  # {"status":"ok","version":"0.1.0"} — 접두 �
 - 만든 것: `server/Dockerfile`(+.dockerignore), `web/Dockerfile`·`nginx.conf`(+.dockerignore), 루트 `docker-compose.yml`(name: marketlens, restart, container_name 고정 — 기존 market-lens-* 와 무충돌), `.github/workflows/ci.yml`·`deploy.yml`, PR 템플릿, README(31줄).
 - 추측한 지점: compose 프로젝트명 고정(dev compose 와 컨테이너 재생성 충돌 방지), `.dockerignore` 2개 추가(.env 원천 차단), server 의존성은 pyproject 범위로 `pip install .`, INFLUX_TOKEN 가드는 `grep -q '^INFLUX_TOKEN=.'`, nginx 프록시 헤더 4종.
 - 실행 중 함께 고친 스펙 절: §3 `INFLUX_URL` compose 오버라이드 명시, 배포 가드의 루트 `.env` 비검사 이유.
-- 남은 빚: GitHub 권한 후 — Secrets 3개·branch protection·실 PR CI green / EC2 — `~/marketlens` 클론·env 2개 작성(사람)·자동 배포·공존 확인·EC2 안 `curl localhost:8080/api/health`
+- 남은 빚: 없음 (2026-09-03 확인) — GitHub Secrets 3개·branch protection·실 PR CI green(#13~16), EC2 `~/marketlens` 클론·env 작성(사람)·자동 배포 green·기존 스택 공존·EC2 안 `/api/health` 200 전부 완료.

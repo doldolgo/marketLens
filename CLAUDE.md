@@ -29,7 +29,7 @@ marketlens/
       ec2-setup.md            EC2 최초 1회 설정 (사람용 체크리스트)
   server/                     FastAPI 앱 (Python 3.12)
     app/
-      core/                   공유 인프라 — 커넥터·메모리 저장소·수집 루프·김프 계산·망 매칭·Influx 클라이언트 (모듈 이름은 개발 후 architecture.md "현재 구조"에)
+      core/                   공유 인프라 — 커넥터·메모리 저장소·수집 루프·김프 계산·망 매칭·Influx·S3 클라이언트 (모듈 이름은 개발 후 architecture.md "현재 구조"에)
       features/<name>/        기능 1개 = 폴더 1개: router.py service.py models.py tests/
       main.py
     tests/                    기능 폴더 밖의 통합 테스트만
@@ -76,7 +76,7 @@ marketlens/
 | 001 | collect | DONE | 업비트·빗썸·바이낸스 1초 수집 → 메모리, USDT 시세 추출, `/health` |
 | 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·mock 탭(갭/선선갭/수집상태/입출금레이더) |
 | 003 | spreads | DONE | 김프 표 — `/spreads` `/refresh` + 스프레드 탭 |
-| 004 | analysis | DONE | 단일 종목 분석 — premium·matrix·orderbook·slippage·arbitrage (BE 전용) |
+| 004 | analysis | DONE | 단일 종목 분석 — premium·scan·matrix·orderbook·slippage·arbitrage (BE 전용) |
 | 005 | history | DONE | Influx 영속·김프 아카이브·`/history/*`·백필 + history 탭 |
 | 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
 | 007 | deploy | DONE | Docker·compose·CI·EC2 배포 |

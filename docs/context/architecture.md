@@ -11,7 +11,7 @@
 - **현재 서버는 uvicorn worker 1개만 사용한다.** `live_store`가 프로세스 내부 메모리이기 때문에 다중 worker를 사용하려면 프로세스들이 공유하는 외부 저장소로 먼저 이전해야 한다.
 
 ## 런타임 구성
-- **server/**: Python 3.12, FastAPI, httpx, influxdb-client, boto3, pydantic v2, pydantic-settings. 로컬 포트 8000.
+- **server/**: Python 3.12, FastAPI, httpx, influxdb-client, boto3, pyjwt, pydantic v2, pydantic-settings. 로컬 포트 8000.
 - **web/**: React 19, TypeScript, Vite. 런타임 의존성은 react·react-dom뿐이다. 로컬 포트는 5173이고, 배포 컨테이너의 nginx는 80번 포트를 사용한다. 호스트 포트는 `WEB_PORT`로 정한다.
 - **저장소**: InfluxDB 2.7 OSS(org·bucket `marketlens`, Flux). 김프 이력의 시간 버킷 집계에 사용한다. 모델은 `db.md`가 정의하며 테스트에서는 InfluxDB를 띄우지 않는다. S3(`marketlens-spreads-snapshot`, ap-northeast-2)에는 `/spreads` 행 전체 스냅샷을 60초마다 쌓는다 — 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 IAM 역할), 테스트는 fake 로 대체한다.
 
@@ -65,7 +65,7 @@ EC2 1대. 루트 `docker compose up -d --build`로 server·web·influxdb 컨테�
 
 ## 현재 구조 (개발 후 갱신 — 실행 세션이 §7 보고와 함께 채운다)
 스펙이 DONE 될 때마다 주요 모듈과 역할을 짧게 기록한다. 문서와 코드가 다르면 사람이 올바른 쪽을 결정하고 같은 변경에서 둘을 맞춘다.
-- **collect (001)**: `core/collector.py`(사이클 5단계·락·1초 루프), `core/live_store.py`(거래소별 스냅샷·USDT 시세), `core/connectors/`(공통 인터페이스와 거래소별 구현), `core/rows.py`(행 조립), `core/models.py`, `core/errors.py`, `core/config.py`. 앱 골격과 수집 루프 기동은 `app/main.py` lifespan이 담당한다.
+- **collect (001)**: `core/collector.py`(사이클 5단계·락·1초 루프), `core/live_store.py`(거래소별 스냅샷·USDT 시세), `core/connectors/`(공통 인터페이스와 거래소별 구현), `core/rows.py`(행 조립), `core/models.py`, `core/errors.py`, `core/config.py`, `core/serialization.py`(HTTP 경계 camelCase 변환 — 라우터·스냅샷이 공용). 앱 골격과 수집 루프 기동은 `app/main.py` lifespan이 담당한다.
 - **web-shell (002)**: `shared/`(테마·공유 피드·결정론 mock·포맷·UI 조각), `App.tsx`(헤더·KPI·탭 전환), `features/{gap,pp,health,flow}/Tab.tsx`(mock 탭). spreads와 history는 별도 기능 폴더가 담당한다.
 - **spreads (003)**: server `core/premium.py`, `features/spreads/`(계산·API·응답 모델). web `features/spreads/`(1초 폴링·응답 타입·화면).
 - **analysis (004)**: `features/analysis/`(호가창 소진 계산·6개 분석 API·응답 모델). web 없음.
