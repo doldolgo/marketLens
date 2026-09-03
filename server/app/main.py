@@ -33,7 +33,9 @@ from app.core.errors import ExchangeError
 from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
 from app.core.persist import PersistLoop
+from app.core.s3 import S3Uploader
 from app.core.serialization import camelize_json
+from app.core.snapshot import SnapshotLoop
 from app.features.analysis.router import router as analysis_router
 from app.features.history.router import router as history_router
 from app.features.spreads.router import router as spreads_router
@@ -86,6 +88,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     app.state.influx = influx
 
+    # S3 snapshot — 버킷 없으면 루프 비활성, 앱은 뜬다. persist 루프와 독립 (스펙 010 §3.2)
+    s3: S3Uploader | None = None
+    snapshot_task: asyncio.Task[None] | None = None
+    if settings.s3_bucket:
+        s3 = S3Uploader(bucket=settings.s3_bucket, region=settings.s3_region)
+        if not await asyncio.to_thread(s3.head_bucket):
+            # 기동 시 접근 확인 실패는 에러 로그 1줄 — 루프가 회차마다 다시 시도한다 (§3.3)
+            logger.error(
+                "S3 버킷 접근 확인 실패: %s — snapshot 루프가 회차마다 재시도한다",
+                settings.s3_bucket,
+            )
+        snapshot = SnapshotLoop(store=store, collector=collector, s3=s3)
+        snapshot_task = asyncio.create_task(snapshot.run_loop())
+    else:
+        logger.warning("S3_BUCKET 이 없어 snapshot 루프를 켜지 않는다")
+
     task = asyncio.create_task(collector.run_loop())
     try:
         yield
@@ -93,13 +111,20 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         task.cancel()
         if persist_task is not None:
             persist_task.cancel()
+        if snapshot_task is not None:
+            snapshot_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
         if persist_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await persist_task
+        if snapshot_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await snapshot_task
         if influx is not None:
             influx.close()
+        if s3 is not None:
+            s3.close()
         await client.aclose()
 
 

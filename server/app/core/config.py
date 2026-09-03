@@ -29,6 +29,10 @@ class Settings(BaseSettings):
 
     influx_url: str = "http://localhost:8086"
     influx_token: str | None = None
+    # S3 snapshot(010) — 버킷이 없으면 snapshot 루프 비활성, 앱은 뜬다.
+    # AWS 키는 env 에 두지 않는다: SDK 기본 탐색(~/.aws, EC2 IAM 역할)을 쓴다.
+    s3_bucket: str | None = None
+    s3_region: str = "ap-northeast-2"
     refresh_token: str | None = None
     upbit_api_key: str | None = None
     upbit_secret_key: str | None = None
