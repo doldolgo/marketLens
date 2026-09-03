@@ -9,12 +9,15 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from app.core.collector import Collector
+from app.core.config import Settings
 from app.core.live_store import LiveStore
-from app.core.s3 import S3UnavailableError
+from app.core.s3 import S3UnavailableError, S3Uploader
 from app.core.snapshot import SnapshotLoop, build_object
 from app.features.spreads.service import build_spreads
+from app.main import create_app
 from tests.conftest import FakeConnector, make_row
 
 FIXED_SEC = 1_700_000_000
@@ -259,3 +262,50 @@ async def test_loop_survives_unexpected_exception(
     finally:
         task.cancel()
     assert len(s3.objects) == 1
+
+
+# --- 기동 (lifespan) — 수집 루프는 no-op 으로 막아 네트워크를 차단한다 ---
+
+
+def _startup_app(monkeypatch: pytest.MonkeyPatch, settings: Settings):
+    async def _noop(self: Collector) -> None:
+        return None
+
+    # lifespan 이 수집 루프를 켜지만 실제 거래소 호출은 테스트에서 금지다
+    monkeypatch.setattr(Collector, "run_loop", _noop)
+    app = create_app()
+    app.state.settings = settings
+    return app
+
+
+def test_startup_without_bucket_disables_loop(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # S3_BUCKET 없이 기동 → 루프 비활성·경고 로그, /health 200, /spreads 정상 (§4)
+    settings = Settings(_env_file=None, influx_token=None, s3_bucket=None)
+    app = _startup_app(monkeypatch, settings)
+    with caplog.at_level(logging.WARNING, logger="marketlens.main"):
+        with TestClient(app) as client:
+            assert client.get("/health").status_code == 200
+            # 메모리를 직접 채우면 /spreads 도 정상 동작한다
+            seeded = seeded_store()
+            app.state.live_store._snapshots = seeded._snapshots  # noqa: SLF001
+            app.state.live_store._rates = seeded._rates  # noqa: SLF001
+            app.state.live_store.mark_received(FIXED_SEC)
+            resp = client.get("/spreads")
+            assert resp.status_code == 200
+            assert len(resp.json()["rows"]) == 3
+    assert any("S3_BUCKET" in r.getMessage() for r in caplog.records)
+
+
+def test_startup_with_bucket_but_no_credentials(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # S3_BUCKET 은 있는데 자격증명이 없어도 기동 성공(/health 200) — 실패는 로그로만 (§4)
+    monkeypatch.setattr(S3Uploader, "head_bucket", lambda self: False)
+    settings = Settings(_env_file=None, influx_token=None, s3_bucket="no-such-bucket")
+    app = _startup_app(monkeypatch, settings)
+    with caplog.at_level(logging.ERROR, logger="marketlens.main"):
+        with TestClient(app) as client:
+            assert client.get("/health").status_code == 200
+    assert any("S3 버킷 접근 확인 실패" in r.getMessage() for r in caplog.records)
