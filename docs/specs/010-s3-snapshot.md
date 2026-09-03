@@ -1,6 +1,6 @@
 # 010 — s3-snapshot
 
-상태: TODO | 의존: 001(collect — 수집 시각·락), 003(spreads — `/spreads` 행 계약), 005(history — persist 루프 패턴), 007(deploy — env 주입·EC2)
+상태: DONE | 의존: 001(collect — 수집 시각·락), 003(spreads — `/spreads` 행 계약), 005(history — persist 루프 패턴), 007(deploy — env 주입·EC2)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -70,7 +70,20 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+cd server && .venv/bin/python -m pytest -q            # 231 passed (test_snapshot.py 10개 포함)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format .   # All checks passed
+cd web && npm run lint && npm run build               # 문서 동시 변경 — 전체 검증 (CLAUDE.md §6)
+
+# 실서버 스모크 (2026-09-03, 로컬 ~/.aws 자격증명, :8000 점유라 :8020 사용)
+S3_BUCKET=marketlens-spreads-snapshot S3_REGION=ap-northeast-2 .venv/bin/uvicorn app.main:app --port 8020
+aws s3 ls s3://marketlens-spreads-snapshot/spreads/ --recursive | tail -3
+# → 기동 60초 뒤 객체 1개: spreads/dt=2026-09-03/hh=10/20260903T103352Z.jsonl.gz (23,659B)
+aws s3 cp s3://marketlens-spreads-snapshot/spreads/dt=2026-09-03/hh=10/20260903T103352Z.jsonl.gz - | gunzip | head -2
+# → 두 줄 모두 21키(camelCase, API 순서), (sym,dom,fx) 오름차순, /spreads 행과 값 일치.
+#   줄 수 490 = /spreads 행 수 490.
+S3_BUCKET=marketlens-no-such-bucket-zzz … uvicorn …   # 없는 버킷 기동
+# → /health 200, 기동 시 "S3 버킷 접근 확인 실패" 1줄,
+#   회차마다 "S3 저장 실패 (연속 1회): … NoSuchBucket", /spreads 는 계속 갱신(490행)
 ```
 
 ## 6. 갱신할 문서
@@ -84,5 +97,17 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
+  - `server/app/core/s3.py` — S3 업로더(`S3Uploader.put/head_bucket/close`, 실패는 `S3UnavailableError` 하나로). boto3 import 는 이 모듈뿐.
+  - `server/app/core/snapshot.py` — `build_object`(순수: 응답 → 키·gzip 본문)·`SnapshotLoop`(60초 회차, 005 persist 패턴 미러).
+  - `server/tests/test_snapshot.py` — §4 목록 전부 (fake S3, 기동 테스트는 수집 루프 no-op 패치).
+  - 수정: `core/config.py`(`s3_bucket`·`s3_region`), `app/main.py`(lifespan 기동·종료), `pyproject.toml`(boto3), `.github/workflows/deploy.yml`(S3_BUCKET 가드), `server/.env.example`, `docs/context/{status,db,architecture,dev-setup}.md`, `docs/runbooks/ec2-setup.md`, `CLAUDE.md` 인덱스.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - `core/snapshot.py` 가 `features/spreads/service` 를 직접 import 한다(표 계산 함수·예외·응답 타입). 규약 문면은 기능 간 import 만 금지고, 006 도 collector(core)가 wallet_status 를 쓰는 선례가 있어 주입 대신 직접 import 를 택했다(순환 없음).
+  - 직렬화: `json.dumps(…, ensure_ascii=False, separators=(",", ":"))` + `gzip.compress(mtime=0)` — mtime 을 고정하지 않으면 같은 스냅샷의 바이트가 매번 달라져 §3.4 결정성 위반.
+  - "SDK 재시도 2회" → botocore `retries={"max_attempts": 3, "mode": "standard"}`(첫 시도 1 + 재시도 2).
+  - 회차 시작 시 `received_at is None` 을 락 안에서 먼저 확인해 "수집 전" 과 "계산 예외" 생략을 구분(전자는 로그 없음, 후자는 경고 로그 — §4 문면 그대로).
+  - 스펙 절 수정은 없음.
 - 남은 빚:
+  - EC2 수동 항목(사람 몫): IAM 역할 부착 + metadata hop limit 2 설정, 배포 후 버킷에 객체가 쌓이는지 확인 — 절차는 `docs/runbooks/ec2-setup.md` 5-1·5-2.
+  - 커밋 메시지에 실행 지시에 따라 `Co-Authored-By: Claude Fable 5` 푸터를 넣었다 — conventions.md "도구 서명 금지" 와 상충(지시 우선). 유지 여부는 사람이 결정.
+  - 스모크로 실버킷에 객체 1개(`dt=2026-09-03/hh=10`)가 남아 있다 — 실데이터라 삭제하지 않았다.

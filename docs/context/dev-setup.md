@@ -39,10 +39,14 @@ npm run lint       # oxlint
 | UPBIT_SECRET_KEY | 없음 |
 | BINANCE_API_KEY | 없음 |
 | BINANCE_SECRET_KEY | 없음 |
+| S3_BUCKET | 없음 |
+| S3_REGION | `ap-northeast-2` |
 
 - `INFLUX_URL`·`INFLUX_TOKEN`: InfluxDB 2.7 접속(org·bucket 은 `marketlens` 고정). 토큰이 없으면 저장 루프 비활성·`/history/*` 503 — 앱은 뜬다. 사람용 UI 는 `http://localhost:8086`(같은 토큰).
 - `REFRESH_TOKEN`: 설정 시 `POST /refresh` 에 `X-Refresh-Token` 헤더가 필요하다.
 - 거래소 API 키 4개: 입출금 상태 조회용. 없으면 해당 거래소 상태는 `null`(모름). 빗썸은 키 불필요. 업비트는 호출 IP 가 Open API 허용 목록에 있어야 한다.
+- `S3_BUCKET`: `/spreads` 스냅샷 S3 저장(010). 없으면 snapshot 루프 비활성, 앱은 뜬다.
+- `S3_REGION`: 버킷 리전. AWS 자격증명은 env 가 아니라 `~/.aws`(로컬, `aws configure`)·IAM 역할(EC2)이다.
 
 **API 키는 .env 에만. 코드·문서·커밋에 절대 넣지 않는다.**
 
@@ -66,6 +70,10 @@ curl -s "localhost:8000/slippage/upbit?symbol=BTC/KRW&amount=1000000" | head -c 
 curl -s "localhost:8000/history/premium?base=BTC&unit=week" | head -c 300
 ```
 (dev compose 기동 + 60초 뒤) `count ≥ 1` 이면 정상, Influx 없으면 503 `storage_unavailable` (005).
+```bash
+aws s3 ls s3://<bucket>/spreads/ --recursive | tail -1
+```
+(`S3_BUCKET` 설정 + 기동 60초 뒤) 객체 1개(`spreads/dt=…/hh=…/…Z.jsonl.gz`)면 정상 (010).
 
 ## 로컬 메모 (개인)
 - `:8000` 은 이 머신에서 소마 캘린더가 점유할 수 있다. `lsof -i :8000` 으로 확인 후 정리하거나, `--port 8020` 으로 띄우고 curl 포트도 8020 으로 맞춘다.
