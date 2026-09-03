@@ -108,6 +108,4 @@ S3_BUCKET=marketlens-no-such-bucket-zzz … uvicorn …   # 없는 버킷 기동
   - 회차 시작 시 `received_at is None` 을 락 안에서 먼저 확인해 "수집 전" 과 "계산 예외" 생략을 구분(전자는 로그 없음, 후자는 경고 로그 — §4 문면 그대로).
   - 스펙 절 수정은 없음.
 - 남은 빚:
-  - EC2 수동 항목(사람 몫): IAM 역할 부착 + metadata hop limit 2 설정, 배포 후 버킷에 객체가 쌓이는지 확인 — 절차는 `docs/runbooks/ec2-setup.md` 5-1·5-2.
-  - 커밋 메시지에 실행 지시에 따라 `Co-Authored-By: Claude Fable 5` 푸터를 넣었다 — conventions.md "도구 서명 금지" 와 상충(지시 우선). 유지 여부는 사람이 결정.
   - 스모크로 실버킷에 객체 1개(`dt=2026-09-03/hh=10`)가 남아 있다 — 실데이터라 삭제하지 않았다.
