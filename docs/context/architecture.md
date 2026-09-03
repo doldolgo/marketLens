@@ -11,9 +11,9 @@
 - **현재 서버는 uvicorn worker 1개만 사용한다.** `live_store`가 프로세스 내부 메모리이기 때문에 다중 worker를 사용하려면 프로세스들이 공유하는 외부 저장소로 먼저 이전해야 한다.
 
 ## 런타임 구성
-- **server/**: Python 3.12, FastAPI, httpx, influxdb-client, pydantic v2, pydantic-settings. 로컬 포트 8000.
+- **server/**: Python 3.12, FastAPI, httpx, influxdb-client, boto3, pydantic v2, pydantic-settings. 로컬 포트 8000.
 - **web/**: React 19, TypeScript, Vite. 런타임 의존성은 react·react-dom뿐이다. 로컬 포트는 5173이고, 배포 컨테이너의 nginx는 80번 포트를 사용한다. 호스트 포트는 `WEB_PORT`로 정한다.
-- **저장소**: InfluxDB 2.7 OSS(org·bucket `marketlens`, Flux). 김프 이력의 시간 버킷 집계에 사용한다. 모델은 `db.md`가 정의하며 테스트에서는 InfluxDB를 띄우지 않는다.
+- **저장소**: InfluxDB 2.7 OSS(org·bucket `marketlens`, Flux). 김프 이력의 시간 버킷 집계에 사용한다. 모델은 `db.md`가 정의하며 테스트에서는 InfluxDB를 띄우지 않는다. S3(`marketlens-spreads-snapshot`, ap-northeast-2)에는 `/spreads` 행 전체 스냅샷을 60초마다 쌓는다 — 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 IAM 역할), 테스트는 fake 로 대체한다.
 
 ## 데이터 흐름 (BE)
 ```
@@ -23,6 +23,7 @@
                                                                 │
                               60초마다 persist 루프 ──▶ InfluxDB
                                 (`premium` 에 fwd/rev 쓰기, 입출금 조회 실패 시 `dw_fail` 1점)
+                              60초마다 snapshot 루프 ──▶ S3 (/spreads 행 전체를 .jsonl.gz 로)
 ```
 - 입출금 상태 API는 수집 루프가 60초 주기로만 조회해 캐시한다. 키가 없으면 `null`(모름). 망 판정은 `/spreads`에서 하고, 빗썸은 키가 필요 없다.
 - `GET /health`와 수집 루프는 기능 폴더가 아니라 앱 진입점 소관이다. `/health`는 프로세스 liveness만 나타내며 수집 최신성이나 InfluxDB 상태를 보장하지 않는다.
@@ -71,3 +72,4 @@ EC2 1대. 루트 `docker compose up -d --build`로 server·web·influxdb 컨테�
 - **history (005)**: `core/influx.py`, `core/persist.py`, `features/history/`(이력 조회 API), `scripts/backfill.py`, `docker-compose.dev.yml`. web 기록 탭은 mock 데이터를 사용한다.
 - **wallet-status (006)**: `core/networks.py`(망 정규화·판정), `features/wallet_status/`(거래소별 조회·60초 캐시). collector에 Protocol로 주입하고 spreads가 망 단위 상태를 계산한다.
 - **deploy (007)**: server·web Dockerfile, 배포 compose, CI·배포 GitHub Actions workflow.
+- **s3-snapshot (010)**: `core/s3.py`(S3 업로더 — boto3 는 이 모듈만), `core/snapshot.py`(60초 루프·객체 빌드 — 003 의 표 계산 함수를 그대로 쓴다). 기동·종료는 `app/main.py` lifespan. Influx persist 루프와 별개 태스크다 — 한쪽 저장소 장애가 다른 쪽 기록을 막지 않는다.
