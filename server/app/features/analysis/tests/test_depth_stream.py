@@ -34,6 +34,11 @@ SKEWED_BIDS = [[60_000.0, 1.0], [50_000.0, 1.0]]
 SHALLOW_ASKS = [[71_000.0, 0.01], [72_000.0, 10.0]]
 SHALLOW_BIDS = [[70_900.0, 10.0]]
 
+# REST 최우선(ask 71,035.5)보다 싼 매도호가 — 매수가 유리해져 실효 수익률이 표면 김프를 넘는다.
+# 어떤 규모도 1단계 안에서 끝나게 깊게 둬서 걷기 자체의 슬리피지를 0 으로 만든다.
+BETTER_ASKS = [[70_000.0, 100.0]]
+BETTER_BIDS = [[69_950.0, 100.0]]
+
 
 def _attach_depth(
     store: LiveStore,
@@ -205,3 +210,30 @@ def test_matrix_foreign_leg_walks_stream_depth():
     assert deep["premiumPercent"] == pytest.approx(plain["premiumPercent"])
     assert plain["totalSlippagePercent"] == pytest.approx(0.0, abs=1e-9)
     assert deep["totalSlippagePercent"] > plain["totalSlippagePercent"]
+
+
+def test_matrix_slippage_floors_at_zero_when_stream_beats_rest():
+    """스트림 최우선가가 REST 보다 유리해도 totalSlippagePercent 는 음수가 아니라 0 (§3.1·§4).
+
+    표면 김프는 REST 최우선, 실효 수익률은 스트림 깊이라 출처가 달라 차가 음수로 갈 수 있다.
+    같은 응답의 표면 김프는 그 시드에서도 REST 값 그대로여야 한다.
+    """
+    amount_krw = 2_000_000
+    store = _attach_depth(standard_store(), "binance", "BTC", BETTER_ASKS, BETTER_BIDS)
+    body = make_client(store).get("/matrix", params={"amountKrw": amount_krw}).json()
+    fwd = next(c for c in body["coins"] if c["sym"] == "BTC")["fwd"]
+
+    # 표면 김프는 REST 최우선 그대로 — binance ask[0] 에 사서 bithumb bid[0] 에 판다
+    rest_buy_krw = 71_000 * (1 + 0.0005) * SEED_RATE
+    rest_sell_krw = 100_100_000 * (1 - 0.0005)
+    surface = (rest_sell_krw / rest_buy_krw - 1) * 100
+    assert fwd["buyExchange"] == "binance"
+    assert fwd["sellExchange"] == "bithumb"
+    assert fwd["premiumPercent"] == pytest.approx(surface)
+
+    # 실효 수익률은 싼 스트림 호가로 걸어 표면 김프를 넘는다 — 자르기 전 값이 실제로 음수다
+    quantity = amount_krw / (BETTER_ASKS[0][0] * SEED_RATE)  # 매수 1단계 안에서 끝난다
+    effective = (quantity * rest_sell_krw / amount_krw - 1) * 100  # 매도도 1단계 안
+    assert surface - effective < 0
+
+    assert fwd["totalSlippagePercent"] == 0.0

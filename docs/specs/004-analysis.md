@@ -165,15 +165,15 @@ cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/
 ```
 - `All checks passed!`
 - `172 files already formatted`
-- `311 passed, 1 warning in 1.74s` — 깊이 반영 전 이 브랜치 기준선은 `303 passed`, 늘어난 8개가 §4 "깊이 반영" 항목이다.
+- `312 passed, 1 warning in 1.58s` — 0 으로 자르기 전 이 브랜치 기준선은 `311 passed`, 늘어난 1개가 §4 의 "유리하게 시드해도 음수가 아니라 0" 항목이다.
 
 ```bash
 cd web && npm run lint && npm run build
 ```
 - `oxlint src` — 출력 없음(exit 0)
-- `✓ 44 modules transformed.` / `✓ built in 318ms`
+- `✓ 44 modules transformed.` / `✓ built in 310ms`
 
-회귀를 실제로 잡는지 확인했다 — `walk_levels` 가 `depth_*` 를 무시하도록 잠깐 되돌리자 새 테스트 5개와 003 의 `test_depth_levels_are_used_when_present` 가 깨졌고, 반대로 `/premium`·`/matrix` 의 표면 김프를 `walk_levels` 로 바꾸자 표면값 항목 2개가 깨졌다. 원상 복구 후 다시 전부 통과.
+회귀를 실제로 잡는지 확인했다 — `max(0.0, …)` 를 잠깐 벗기자 새 테스트가 `assert -1.4882142605759263 == 0.0` 으로 깨졌고 나머지 311개는 그대로 통과했다(자르기가 다른 수치를 건드리지 않는다는 뜻이다). 되돌리자 312개 전부 통과. 깨진 실행에서도 같은 시드의 `premiumPercent` 단언은 통과했다 — 표면 김프는 자르기와 무관하게 REST 값이다.
 
 venv 는 `uv` 로 만든 Python 3.12.13 (`server/.venv`, dev-setup.md §server-3).
 실서버 확인(§4 아래 curl 목록)은 이 세션에서 돌리지 않았다 — 로컬 망에서 거래소 호출이 막힌다(dev-setup.md 로컬 메모). HTTP 계약(응답 키·타입)은 이 변경으로 바뀌지 않아 스모크 문장도 그대로다.
@@ -223,4 +223,20 @@ venv 는 `uv` 로 만든 Python 3.12.13 (`server/.venv`, dev-setup.md §server-3
   - `docs/specs/003-spreads.md` §7 — 문서 주장 "004 analysis 는 `depth_*` 를 아직 쓰지 않는다" → 실제 004 의 걷는 4곳이 전부 쓴다. 이 세션이 해소한 항목이다.
 - 남은 빚:
   - `core/orderbook.py` 는 아직 `server/tests/` 직접 단위 테스트가 없다(이관 세션이 남긴 빚 그대로). `walk_levels` 도 `/orderbook`·`/slippage`·`/spreads` HTTP 응답으로만 검증한다.
-  - 깊이가 붙은 바이낸스 행에서는 `/matrix` 의 `totalSlippagePercent` = (REST 표면) − (스트림 기준 실효)라 두 출처가 섞인다. §3.1 이 의도한 설계지만, 스트림 최우선가가 REST 와 크게 벌어진 순간에는 이 값이 음수가 될 수 있다. 지금은 경고도 상한도 두지 않았다 — 실운영에서 관측되면 별도 스펙 거리다.
+
+### 차감폭 0 으로 자르기 세션 (§3.1 닫는 문단·§3.2-5)
+- 만든 것 (파일 목록):
+  - `server/app/features/analysis/service.py` — `/matrix` 의 `total_slippage_percent` 를 `max(0.0, 표면 − 실효)` 로 바꿨다. 003 의 `slip_fwd = max(0.0, fwd_raw - fwd)` 와 같은 표현을 일부러 그대로 썼다 — 같은 이유로 자르는 두 값이 서로 다른 모양이면 다음 사람이 둘을 다른 규칙으로 읽는다. 왜 자르는지(표면은 REST, 실효는 스트림이라 출처가 다르다)를 주석 두 줄로 남겼다.
+  - `server/app/features/analysis/models.py` — `total_slippage_percent` 의 주석을 `max(0, 표면 김프 − 실효 수익률)` 로. 필드 뜻을 코드에서 읽는 유일한 자리다.
+  - `server/app/features/analysis/tests/test_depth_stream.py` — §4 "깊이 반영" 에 새로 붙은 1항목을 테스트 1개(`test_matrix_slippage_floors_at_zero_when_stream_beats_rest`)로. 바이낸스 BTC 행에 REST 최우선(ask 71,035.5)보다 싼 1단계 깊이(70,000)를 얹어 실효 수익률이 표면 김프를 넘게 만든다. 자르기 전 값이 실제로 음수라는 것을 시드에서 손계산해 먼저 단언하고(`surface - effective < 0`), 그다음 응답이 `0.0` 인지 본다 — 이 두 단언이 붙어 있어야 "우연히 0" 이 통과하지 않는다. 같은 응답의 `premiumPercent` 가 REST 기준 값 그대로인지도 나란히 단언한다.
+  - 이 문서 §5, 그리고 이 절.
+- 추측한 지점 (묻지 않고 정한 것) / 실행 중 함께 고친 스펙 절:
+  - **양방향 모두 자른다.** §3.2-5 는 방향을 나눠 말하지 않는다. `/matrix` 의 fwd·rev 는 한 함수(`_matrix_direction`)가 만들고, 자르는 이유(출처가 REST 와 스트림으로 갈린다)가 rev 에도 똑같이 성립한다 — rev 는 해외 다리가 매도 쪽일 뿐 구조가 같다. 그래서 방향 분기 없이 반환 지점 한 곳에서 잘랐다. §4 에 새로 붙은 검증 항목이 fwd 만 말하므로 테스트도 fwd 로 썼다.
+  - **`/arbitrage` 는 건드리지 않았다.** §3.1 이 자르는 필드를 `/matrix` 의 `totalSlippagePercent` 와 003 의 `slipFwd`·`slipRev` 로 열거해 닫았고, arbitrage 에는 REST 로 고정하는 표면값이 아예 없어(§3.2-3) 같은 종류의 음수가 생기지 않는다. `premiumCapturePercent` 는 환산 최우선가와 실효가 **같은 걷는 목록**에서 나오므로 출처가 하나다.
+  - **`docs/context/status.md` 는 고칠 것이 없었다.** analysis 행은 동작하는 엔드포인트 수와 계약 표기만 말하고, 이 변경은 엔드포인트도 응답 키도 늘리거나 줄이지 않았다. "알려진 빚" 에도 이 값에 관한 줄이 없었다(빚은 이 문서 §7 에 있었다). 없는 변경을 만들어 적기보다 여기 적어 둔다 — conventions.md 완료 조건 2 를 건너뛴 것이 아니라, 그 문서가 말하는 내용이 안 바뀐 것이다.
+  - **깊이 반영 세션의 남은 빚 1줄을 지웠다.** "스트림 최우선가가 REST 와 크게 벌어진 순간에는 이 값이 음수가 될 수 있다. 지금은 경고도 상한도 두지 않았다" 가 이 변경으로 거짓이 됐다. 지금 무엇이 도는지를 §3.1·§3.2-5 가 말하므로 §7 에 옛 상태를 남기지 않는다(CLAUDE.md §3-5·§4).
+  - **이 세션은 공유 클론이 아니라 같은 레포의 linked worktree 에서 돌았다.** 작업을 시작한 뒤 다른 세션이 이 클론을 `fix/stale-stream-observability` 로 옮기고 커밋하는 중이었다. 지시대로 `git checkout` 하면 남의 작업 트리를 빼앗으므로, `git worktree add` 로 `fix/matrix-slippage-floor` 를 따로 펼치고 `server/.venv`·`web/node_modules` 를 심볼릭 링크로 빌려 썼다. 커밋은 같은 레포·같은 브랜치에 남으므로 결과물은 다르지 않고, 검증도 그 worktree 안의 코드로 돌았다(`app` 이 worktree 쪽에서 import 되는지 먼저 확인).
+- 보고만 하는 어긋남 (담당 아닌 스펙 — CLAUDE.md §5):
+  - `server/build/lib/` — 커밋된 빌드 산출물이 `server/app/` 과 8개 파일에서 이미 어긋나 있다(이 변경 전부터). `pyproject.toml` 의 `testpaths` 가 `tests`·`app` 뿐이라 테스트는 안 걸리지만 `ruff` 의 `172 files` 에는 들어간다. 담당 스펙이 아니라 손대지 않았다 — 이번 자르기도 그 사본에는 반영되지 않았다.
+- 남은 빚:
+  - 자른 뒤에는 표면과 실효가 **얼마나** 벌어졌는지가 응답에서 사라진다. 원값이 필요하면 `premiumPercent` 쪽을 보라고 §3.1 이 말하지만, 스트림이 REST 를 이기는 빈도 자체는 아무 데도 안 남는다. 실운영에서 이 빈도를 알고 싶으면 별도 스펙 거리다.

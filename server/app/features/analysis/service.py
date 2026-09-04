@@ -717,7 +717,9 @@ def _matrix_direction(
         buy_exchange=buy_ex,
         sell_exchange=sell_ex,
         premium_percent=pick.surface_percent,
-        total_slippage_percent=pick.surface_percent - effective,
+        # 표면 김프는 REST 최우선, 실효 수익률은 스트림 깊이라 출처가 다르다(§3.1). 스트림 쪽이
+        # 유리한 순간 차가 음수가 되는데 "체결로 잃는 폭" 에 음수는 뜻이 없어 0 으로 자른다 (§3.2-5).
+        total_slippage_percent=max(0.0, pick.surface_percent - effective),
         withdrawal_available=buy_row.withdrawal_enabled,
         deposit_available=sell_row.deposit_enabled,
         depth_exhausted=buy_exhausted or sell_walk.exhausted,

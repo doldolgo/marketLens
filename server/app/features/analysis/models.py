@@ -153,7 +153,7 @@ class MatrixDirection(BaseModel):
     buy_exchange: str
     sell_exchange: str
     premium_percent: float  # 1단계 표면 김프 (금액 무관) — 최대 조합 선정 기준
-    total_slippage_percent: float  # 표면 김프 − 실효 수익률
+    total_slippage_percent: float  # max(0, 표면 김프 − 실효 수익률) — 음수는 0 (§3.2-5)
     withdrawal_available: bool | None  # 매수처 출금
     deposit_available: bool | None  # 매도처 입금
     depth_exhausted: bool
