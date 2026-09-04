@@ -38,18 +38,20 @@ def build_object(payload: SpreadsResponse) -> tuple[str, bytes]:
     """한 회차의 (키, gzip 본문) — 순수 계산·결정적 (§3.4).
 
     키: `spreads/dt=YYYY-MM-DD/hh=HH/YYYYMMDDTHHMMSSZ.jsonl.gz`, 전부 UTC,
-    시각은 dataReceivedAt(수집 시각). 한 줄 = 행 18키 + 최상위 `rate`·`dataReceivedAt`·
-    `warnings` 를 붙인 21키 — 줄 하나만 읽어도 맥락이 완결된다. `fetchedAt` 은 응답
-    시각이지 데이터 시각이 아니라 싣지 않는다.
+    시각은 dataReceivedAt(수집 시각). 한 줄 = 행 17키 + 최상위 `rate`·`notional`·
+    `dataReceivedAt`·`warnings` 를 붙인 21키 — 줄 하나만 읽어도 맥락이 완결된다.
+    `notional` 이 없으면 `slipFwd` 가 어느 규모의 값인지 알 수 없어 줄이 자기완결이
+    아니다. `fetchedAt` 은 응답 시각이지 데이터 시각이 아니라 싣지 않는다.
     """
     assert payload.data_received_at is not None  # 호출자가 수집 여부를 먼저 확인한다
     # dataReceivedAt 은 epoch ms 지만 수집 시각의 정밀도는 초다 (001 계약)
     dt = datetime.fromtimestamp(payload.data_received_at // 1000, tz=UTC)
     key = f"spreads/dt={dt:%Y-%m-%d}/hh={dt:%H}/{dt:%Y%m%dT%H%M%SZ}.jsonl.gz"
 
-    # 같은 객체 안 모든 줄에 같은 최상위 세 값 — camelCase, 값·순서는 API 와 동일
+    # 같은 객체 안 모든 줄에 같은 최상위 네 값 — camelCase, 값·순서는 API 와 동일
     context = {
         "rate": payload.rate,
+        "notional": payload.notional,
         "dataReceivedAt": payload.data_received_at,
         "warnings": payload.warnings,
     }

@@ -7,7 +7,7 @@ import { useHealthPolling } from './features/health/api'
 import HealthTab from './features/health/Tab'
 import HistoryTab from './features/history/Tab'
 import PpTab from './features/pp/Tab'
-import { useSpreadPolling } from './features/spreads/api'
+import { NOTIONALS, useSpreadPolling } from './features/spreads/api'
 import SpreadsTab from './features/spreads/Tab'
 import { useFeed } from './shared/feed'
 import { exName, fmtPct, pctColor } from './shared/format'
@@ -23,8 +23,10 @@ const TABS: [TabId, string][] = [
 
 export default function App() {
   const { feed, now } = useFeed()
+  // 체결 규모는 스프레드 탭이 고르고 폴링이 쿼리로 보낸다 — 둘이 같은 값을 봐야 해서 셸이 든다 (003 §3.4)
+  const [notional, setNotional] = useState<number>(NOTIONALS[0])
   // 셸이 공유 피드를 만든 직후 /spreads 1초 폴링 시작 (스펙 003 §3.4), 그 옆에서 /health/collect 5초 폴링 (011 §3.6)
-  useSpreadPolling(feed)
+  useSpreadPolling(feed, notional)
   useHealthPolling(feed)
   const [tab, setTab] = useState<TabId>('spread')
   // 스프레드 행 클릭 → 기록 탭으로 피벗할 선택된 심볼 — 초기값 'BTC' (스펙 005 §2)
@@ -120,7 +122,7 @@ export default function App() {
         </div>
       </div>
 
-      {wrap('spread', <SpreadsTab feed={feed} onPick={(sym) => { setSelSym(sym); setTab('history') }} />)}
+      {wrap('spread', <SpreadsTab feed={feed} notional={notional} onNotional={setNotional} onPick={(sym) => { setSelSym(sym); setTab('history') }} />)}
       {wrap('history', <HistoryTab feed={feed} now={now} selSym={selSym} onSelect={setSelSym} />)}
       {wrap('gap', <GapTab feed={feed} now={now} />)}
       {wrap('pp', <PpTab feed={feed} />)}

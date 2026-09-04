@@ -248,3 +248,12 @@ async def test_non_json_is_bad_response_kind() -> None:
     with pytest.raises(ExchangeApiError) as info:
         await UpbitConnector().fetch_rows(_status_client(200, "<html>oops</html>"))
     assert info.value.kind == "bad_response"
+
+
+async def test_domestic_row_never_carries_depth_fields() -> None:
+    # 국내는 asks/bids 가 이미 깊어 깊이 스트림을 쓰지 않는다 (스펙 012 §3.5, §4)
+    fake = UpbitFake(["KRW-BTC"])
+    fake.set_orderbook("KRW-BTC", UNITS)
+    fake.set_ticker("KRW-BTC", 100.5, 1_700_000_000_123)
+    row = (await UpbitConnector().fetch_rows(fake.client())).rows[0]
+    assert (row.depth_asks, row.depth_bids, row.depth_at) == ([], [], None)

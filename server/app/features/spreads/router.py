@@ -4,14 +4,18 @@
 """
 
 import secrets
+from typing import Annotated
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.core.collector import Collector
 from app.core.live_store import LiveStore
 from app.core.serialization import camelize_json
 from app.features.spreads.service import (
+    DEFAULT_NOTIONAL,
+    MAX_NOTIONAL,
+    MIN_NOTIONAL,
     MarketDataNotFoundError,
     build_refresh,
     build_spreads,
@@ -22,10 +26,16 @@ router = APIRouter()
 
 
 @router.get("/spreads")
-async def get_spreads(request: Request) -> JSONResponse:
+async def get_spreads(
+    request: Request,
+    # 범위·타입 위반은 FastAPI 기본 422 다 — 이 스펙의 {"error":{…}} 포장이 아니다 (§3.2-0)
+    notional: Annotated[
+        float, Query(ge=MIN_NOTIONAL, le=MAX_NOTIONAL)
+    ] = DEFAULT_NOTIONAL,
+) -> JSONResponse:
     store: LiveStore = request.app.state.live_store
     try:
-        payload = build_spreads(store)
+        payload = build_spreads(store, notional=notional)
     except MarketDataNotFoundError as exc:
         return JSONResponse(
             status_code=404,
