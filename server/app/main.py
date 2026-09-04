@@ -28,6 +28,7 @@ from app.core.config import (
     get_settings,
 )
 from app.core.connectors.binance import BinanceConnector
+from app.core.connectors.binance_depth import BinanceDepthStream, DepthCache
 from app.core.connectors.bithumb import BithumbConnector
 from app.core.connectors.upbit import UpbitConnector
 from app.core.errors import ExchangeError
@@ -86,10 +87,19 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     outage_writer_task = asyncio.create_task(outages.run_writer_loop())
     app.state.outages = outages
 
+    # 바이낸스 깊이 스트림(012) — 구독 대상은 메모리의 바이낸스 스냅샷 심볼이라
+    # 이미 국내 교집합이 적용돼 있고 상장·상폐를 자동으로 따라간다. 붙지 못해도 앱은 뜬다.
+    depth_cache = DepthCache()
+    depth_stream = BinanceDepthStream(
+        cache=depth_cache,
+        symbols=lambda: {r.native_symbol for r in store.get_all(exchange="binance")},
+    )
+    depth_stream.start()
+
     collector = Collector(
         store=store,
         domestic=[UpbitConnector(), BithumbConnector()],
-        foreign=BinanceConnector(),
+        foreign=BinanceConnector(depth=depth_cache),
         client=client,
         wallet=wallet,
         outages=outages,
@@ -137,6 +147,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if snapshot_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await snapshot_task
+        # 샤드는 취소하고 기다린 다음 소켓을 닫는다 (012 §3.4)
+        await depth_stream.aclose()
         if influx is not None:
             influx.close()
         if s3 is not None:

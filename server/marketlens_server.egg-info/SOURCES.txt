@@ -20,6 +20,7 @@ app/core/snapshot.py
 app/core/connectors/__init__.py
 app/core/connectors/base.py
 app/core/connectors/binance.py
+app/core/connectors/binance_depth.py
 app/core/connectors/bithumb.py
 app/core/connectors/upbit.py
 app/features/__init__.py
@@ -80,6 +81,7 @@ marketlens_server.egg-info/dependency_links.txt
 marketlens_server.egg-info/requires.txt
 marketlens_server.egg-info/top_level.txt
 tests/test_backfill.py
+tests/test_binance_depth.py
 tests/test_collector.py
 tests/test_connector_binance.py
 tests/test_connector_bithumb.py

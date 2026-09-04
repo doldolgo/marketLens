@@ -12,6 +12,9 @@ dependencies = [
     "influxdb-client>=1.45",
     "pyjwt>=2.8",
     "boto3>=1.34",
+    # 바이낸스 깊이 스트림(012). uvicorn[standard] 의 전이 의존으로도 들어오지만
+    # CI·Dockerfile 두 설치 경로 모두를 보장하려면 직접 의존으로 적어야 한다.
+    "websockets>=13",
 ]
 
 [project.optional-dependencies]
