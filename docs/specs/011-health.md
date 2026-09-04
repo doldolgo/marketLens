@@ -47,7 +47,7 @@
 - **빗썸**(v1 API): 문서상 에러는 HTTP 상태와 함께 `{"error":{"name":…,"message":…}}` 이지만 **실제로는 HTTP 200 에 이 본문을 준다**(`markets=KRW-XXXX` 실호출로 확인). 그래서 200 이어도 본문이 리스트가 아니고 `error` 키가 있으면 실패다. `error.name` 이 정수면 그 값을 HTTP 상태처럼 위 업비트 규칙으로 분류하고, 아니면 `bad_response`. 429/418 의 실제 응답은 문서에 없다(미확인). 이때 `status_code` 는 실제 HTTP 상태(200)다.
 - **바이낸스**: 429 → `rate_limit`, 418 → `banned`(IP 밴, 2분~3일 누진), 둘 다 `Retry-After` 초를 `retry_after_sec` 에. 403 → `banned`(WAF — "rate limit violation or a security block"). 5xx → `unavailable`. 그 외 4xx → `bad_request`. 에러 본문 `{"code":-1003,"msg":…}`.
 - 공통: httpx 타임아웃 → `timeout`. 그 외 httpx 전송 예외(DNS·연결 거부) → `network`. JSON 파싱 실패·예상 밖 모양 → `bad_response`.
-- **`stale_stream`** 은 HTTP 응답이 아니라 상시 연결이 조용히 멈춘 상태다 — 012 의 깊이 스트림이 구독 중인데 30초 무수신이면 그 사이클의 바이낸스 수집이 이 종류로 실패를 던진다. `status_code`·`url` 은 null 이고, 이때도 REST 결과는 유효하므로 그 거래소 행은 직전 스냅샷으로 유지된다. 예외를 던지는 주체가 커넥터라 위 경로(collector → 구간 추적 → `collect_fail`)를 그대로 탄다.
+- **`stale_stream`** 은 HTTP 응답이 아니라 상시 연결이 조용히 멈춘 상태다(FE 유형 칩 라벨 `스트림 정체` — §3.8 의 라벨 표에 함께 있어야 타입이 맞는다) — 012 의 깊이 스트림이 구독 중인데 30초 무수신이면 그 사이클의 바이낸스 수집이 이 종류로 실패를 던진다. `status_code`·`url` 은 null 이고, 이때도 REST 결과는 유효하므로 그 거래소 행은 직전 스냅샷으로 유지된다. 예외를 던지는 주체가 커넥터라 위 경로(collector → 구간 추적 → `collect_fail`)를 그대로 탄다.
 
 ### 3.3 실패 이력 — 구간(outage) 단위로만 기록
 정상 사이클은 기록하지 않는다. 기록 단위는 **거래소별 연속 실패 구간** 1건이다.
@@ -103,9 +103,11 @@
 1. **요약**. 상태 원(down 있으면 빨강, stale 있으면 주황, 아니면 초록) + 문구 `정상` / `일부 지연 — N곳` / `장애 — {이름들} 끊김`. `총 수집 마켓` = `markets` 합. `최근 1시간 수집 성공률` = 최상위 `successRate1h`(`99` 초과 기본색, 아니면 주황). `HH:mm:ss 기준` = `fetchedAt`. 우측 흐리게 `HH:mm 서버 시작` = `serverStartedAt`.
 2. **거래소 카드 3장(3열)**. 상단 상태색 테두리. 이름 + `● 수집 중` / `◌ 지연` / `✕ 끊김`. `마지막 수신` 경과 표기(ok 아니면 주황, 성공 0회면 `–`). `수집 마켓 N`. `성공률 1h`(`99` 이하 주황). `최근 에러` = `lastError` 의 `HH:mm:ss · {유형 라벨} · HTTP {statusCode}`(statusCode null 이면 생략), 없으면 `–`. 진행 중 구간이 있으면 빨강으로 `진행 중 · ×{count}회`.
 3. **타임라인 `실패 구간 · 최근 24시간`**. 거래소 3트랙. 막대 = 구간(`startedAt`~`endedAt`, 진행 중이면 `now` 까지), 색은 `banned`·`rate_limit` 빨강, 그 외 주황. 1분 미만 구간도 최소 2px. 호버 `HH:mm – HH:mm · {유형 라벨} · HTTP {statusCode} · ×{count}회`. 축 5눈금은 002 §3.9 와 같다. 좌측 끝에 `serverStartedAt` 위치 세로 점선(24시간 안이면).
-4. **로그 `최근 실패 구간`**. 열 `시각 거래소 유형 내용`, `startedAt` 내림차순 최대 50행. 유형 칩 라벨: `timeout` 타임아웃, `network` 연결 실패, `rate_limit` rate limit, `banned` 차단, `unavailable` 거래소 오류, `bad_request` 요청 오류, `bad_response` 응답 오류. 칩 색은 `banned`·`rate_limit` 빨강, 그 외 주황. 내용 = `HTTP {statusCode} · {message 앞 120자}` + ` · ×{count}회 · {지속}`(지속 = `endedAt − startedAt` 경과 표기, 진행 중이면 `진행 중`). `retryAfterSec` 있으면 ` · Retry-After {n}s`. 맨 끝(가장 오래된 쪽)에 회색 칩 `서버 시작` 행 1개 = `serverStartedAt`, 내용 `이력 복원 후 수집 시작`. 구간이 없으면 `최근 24시간 실패 없음`.
+4. **로그 `최근 실패 구간`**. 열 `시각 거래소 유형 내용`, `startedAt` 내림차순 최대 50행. 유형 칩 라벨: `timeout` 타임아웃, `network` 연결 실패, `rate_limit` rate limit, `banned` 차단, `unavailable` 거래소 오류, `bad_request` 요청 오류, `bad_response` 응답 오류, `stale_stream` 스트림 정체. 칩 색은 `banned`·`rate_limit` 빨강, 그 외 주황. 라벨 표는 종류 union 을 전부 덮어야 한다(타입이 강제한다) — 종류가 늘면 라벨도 같은 PR 에서 는다. 내용 = `HTTP {statusCode} · {message 앞 120자}` + ` · ×{count}회 · {지속}`(지속 = `endedAt − startedAt` 경과 표기, 진행 중이면 `진행 중`). `retryAfterSec` 있으면 ` · Retry-After {n}s`. 맨 끝(가장 오래된 쪽)에 회색 칩 `서버 시작` 행 1개 = `serverStartedAt`, 내용 `이력 복원 후 수집 시작`. 구간이 없으면 `최근 24시간 실패 없음`.
 
 ## 4. 검증
+
+- FE 유형 라벨 표가 실패 종류 8개를 전부 덮는다(`stale_stream` 포함) — 빠지면 타입 검사가 막는다
 BE(네트워크 없음, 커넥터·Influx 는 fake):
 - 업비트 429 → `rate_limit`, 418 → `banned`, 503 → `unavailable`, 400 → `bad_request`, 타임아웃 → `timeout`, 연결 예외 → `network`, JSON 아님 → `bad_response`. `status_code`·`body`·`url` 이 예외에 남는다.
 - 빗썸 HTTP 200 + `{"error":{"name":429,…}}` → 실패이며 `rate_limit`, `status_code` 200. `error.name` 이 문자열이면 `bad_response`.
