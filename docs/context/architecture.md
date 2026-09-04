@@ -72,7 +72,7 @@ EC2 1대. 루트 `docker compose up -d --build`로 server·web·influxdb 컨테�
 - **collect (001)**: `core/collector.py`(사이클 5단계·락·1초 루프), `core/live_store.py`(거래소별 스냅샷·USDT 시세), `core/connectors/`(공통 인터페이스와 거래소별 구현), `core/rows.py`(행 조립), `core/models.py`, `core/errors.py`, `core/config.py`. 앱 골격과 수집 루프 기동은 `app/main.py` lifespan이 담당한다.
 - **web-shell (002)**: `shared/`(테마·공유 피드·결정론 mock·포맷·UI 조각), `App.tsx`(헤더·KPI·탭 전환), `features/{gap,pp,flow}/Tab.tsx`(mock 탭). spreads와 history는 별도 기능 폴더가 담당한다.
 - **spreads (003)**: server `core/premium.py`(`premium_percent`), `core/orderbook.py`(호가 걷기 — 004 와 공용), `features/spreads/`(service 순수 계산·router 2 엔드포인트·models). 표 계산 함수는 저장소와 체결 규모(`notional`, 기본 $10,000)를 받아 행 17키를 만들고, 두 다리를 수량으로 연결해 걸어 슬리피지 차감 후 순값과 차감폭(`slipFwd`·`slipRev`)을 함께 싣는다. 전 과정이 동기라 수집 락 없이 돈다. web `features/spreads/`(1초 폴링·응답 타입·화면) — 규모 선택값은 셸이 들고 폴링 쿼리로 나가며, FE 는 슬리피지를 계산하지 않는다.
-- **analysis (004)**: `core/orderbook.py`(호가창 소진 walk — 003·004 공용, 함수 전부 동기), `features/analysis/`(6개 분석 API·응답 모델·거래소 레지스트리). web 없음.
+- **analysis (004)**: `core/orderbook.py`(호가창 소진 walk 와 걷을 단계 목록을 고르는 `walk_levels` — 003·004 공용, 함수 전부 동기), `features/analysis/`(6개 분석 API·응답 모델·거래소 레지스트리). web 없음. 걷는 곳(`/orderbook`·`/slippage`·`/arbitrage`·`/matrix` 의 다리)은 전부 `walk_levels` 를 거쳐 012 스트림 깊이를 쓰고, 표면 김프(`/premium`·`/premium/scan`·`/matrix`)만 REST 최우선 호가를 직접 읽는다.
 - **history (005)**: `core/influx.py`, `core/persist.py`, `features/history/`(이력 조회 API), `scripts/backfill.py`, `docker-compose.dev.yml`. web 기록 탭은 mock 데이터를 사용한다.
 - **wallet-status (006)**: `core/networks.py`(망 정규화·판정), `features/wallet_status/`(거래소별 조회·60초 캐시). collector에 Protocol로 주입하고 spreads가 망 단위 상태를 계산한다.
 - **deploy (007)**: server·web Dockerfile, 배포 compose, CI·배포 GitHub Actions workflow.

@@ -20,7 +20,13 @@
 - BE 엔드포인트 `GET /spreads`, `POST /refresh`.
 - FE 스프레드 탭과 1초 폴링.
 - 김프 수식 공유 모듈. 004(analysis)·005(history)도 쓰므로 `server/app/core/premium.py` 에 공개 함수 `premium_percent(*, buy_krw: float, sell_krw: float) -> float` 를 둔다. 값은 `(sell/buy − 1) × 100`. 이 스펙의 fwd/rev 도 이 함수로 계산한다.
-- 호가 걷기도 같은 이유로 공유 모듈이다 — 004(analysis)와 이 스펙이 함께 쓰므로 `server/app/core/orderbook.py` 에 둔다(기능 간 import 금지, CLAUDE.md §2). **함수는 전부 동기다** — `GET /spreads` 는 수집 락을 잡지 않고, 그것이 안전한 유일한 근거가 표 계산 전체가 `await` 없이 끝나 단일 이벤트 루프에서 선점될 수 없다는 점이기 때문이다. 걷기를 async 로 만들면 한 응답이 교체 전후 호가를 섞어 읽는다.
+- 호가 걷기도 같은 이유로 공유 모듈이다 — 004(analysis)와 이 스펙이 함께 쓰므로 `server/app/core/orderbook.py` 에 둔다(기능 간 import 금지, CLAUDE.md §2). 이 모듈의 공개 면은 걷기 함수들과 **단계 목록 선택 함수** 하나다:
+  ```
+  walk_levels(row, side) -> list[list[float]]
+  ```
+  `side` 는 `"asks"`·`"bids"`. 001 §3.3 규칙을 그대로 구현한다 — 그 방향의 `depth_*` 가 비어 있지 않으면 그것을, 비면 같은 방향의 `asks`/`bids` 를 돌려준다. 목록을 복사하지 않고 그대로 돌려주며, 호출자는 읽기만 한다.
+  **걷는 계산은 전부 이 함수를 거친다.** 최우선 1단계만 읽는 표시·판정(`fwdRaw`·`status`·`krw`)은 `row.asks`/`row.bids` 를 직접 읽는다 — 012 가 REST 최우선 호가를 남긴 이유가 조용한 종목의 헤드라인이 스트림 정체로 낡지 않게 하는 것이기 때문이다.
+- **함수는 전부 동기다** — `GET /spreads` 는 수집 락을 잡지 않고, 그것이 안전한 유일한 근거가 표 계산 전체가 `await` 없이 끝나 단일 이벤트 루프에서 선점될 수 없다는 점이기 때문이다. 걷기를 async 로 만들면 한 응답이 교체 전후 호가를 섞어 읽는다.
 
 하지 않는 것:
 - Influx 저장·아카이브. `spark` 는 009(tick-store)가 채운다.

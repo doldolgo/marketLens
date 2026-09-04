@@ -42,7 +42,7 @@ class SlippageResponse(BaseModel):
     slippage_percent: float
     levels_consumed: int
     depth_exhausted: bool
-    depth_available: int  # 저장된 단계 수
+    depth_available: int  # 걷는 목록의 단계 수 (§3.2)
     data_updated_at: int | None
     data_received_at: int | None
     fetched_at: int
