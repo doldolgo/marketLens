@@ -36,6 +36,8 @@
 **최우선 1단계만 읽는 곳은 `walk_levels` 를 쓰지 않는다** — `row.asks[0]`·`row.bids[0]` 를 직접 읽는다. `/premium`·`/premium/scan`·`/matrix` 의 표면 김프(`premium_percent` 입력)와 호가 유무 판정이 여기 해당한다. 012 가 REST 최우선 호가를 그대로 남긴 이유가 조용한 종목의 헤드라인이 스트림 정체로 낡지 않게 하는 것이라, 표면값은 REST 기준으로 고정한다.
 
 즉 한 응답 안에서 **표면값은 REST 최우선, 체결 비용은 스트림 깊이**를 본다. 이 둘의 출처가 다르다는 것은 의도된 설계다.
+
+출처가 다르므로 "표면 − 실효" 로 정의된 차감폭은 스트림이 REST 보다 유리한 순간 음수가 될 수 있다. 그런 필드는 전부 **0 으로 자른다**(`/matrix` 의 `totalSlippagePercent`, 003 의 `slipFwd`·`slipRev`). 자르지 않고 원값을 복원하고 싶으면 표면값 쪽을 보면 된다 — 저장 계층이 남기는 것도 표면값이다.
 1. 단계를 최우선부터 순서대로 먹는다.
 2. 금액 기준 — 한 단계의 `price×size` 가 남은 금액 이상이면 그 단계에서 `남은 금액/price` 만큼 **부분 체결**하고 끝(`exhausted=false`). 모든 단계를 먹어도 남으면 `exhausted=true` 이고 `amount` 는 요청액이 아니라 **실제 체결액**.
 3. 수량 기준도 대칭(부족하면 `quantity` = 실제 체결량).
@@ -92,7 +94,8 @@
 2. 환율은 그 국내 거래소 것. 없으면 **그 국내 거래소 조합은 건너뛴다** — 남의 테더 프리미엄을 빌리지 않는다. 제외 코인은 scan 과 동일.
 3. 조합마다 해외 호가를 원화로 환산한다(asks 는 rate ask, bids 는 rate bid). `premiumPercent` = 1단계 표면 김프(금액 무관). 이것이 최대 조합 선정 기준이다.
 4. 매수 asks 금액 walk(체결 0 이면 조합 없음) → 체결 수량으로 매도 bids 수량 walk. **매도측이 소진돼 못 판 수량이 있으면 판 수량만큼 매수측을 되맞춘다**(arbitrage 와 동일). 못 판 코인을 0원으로 치면 −50% 대 쓰레기 값이 나오기 때문이다.
-5. `totalSlippagePercent` = 표면 김프 − 실효 수익률((매도액/매수액 − 1)×100).
+5. `totalSlippagePercent` = **`max(0, 표면 김프 − 실효 수익률)`**, 실효 수익률 = (매도액/매수액 − 1)×100.
+   0 으로 자르는 이유: 표면 김프는 REST 최우선, 실효 수익률은 스트림 깊이에서 나온다(§3.1). 스트림 최우선가가 REST 보다 유리한 순간에는 차가 음수가 되는데, 이 필드는 "체결로 잃는 폭"이라 음수가 의미를 갖지 않는다. 003 의 `slipFwd`·`slipRev` 도 같은 이유로 같은 규칙이다(003 §3.2-4).
 6. 방향 항목: `buyExchange·sellExchange·premiumPercent·totalSlippagePercent·withdrawalAvailable`(매수처 출금)·`depositAvailable`(매도처 입금)·`depthExhausted`.
 7. 코인 행(`coins[]`): `sym·fwd·rev(없으면 null)·suspicious`(fwd ≥ 5%). 둘 다 없으면 행 제외. 정렬 = fwd 김프 내림차순(fwd 없는 행은 맨 뒤). 최상위 `amountKrw`, `scannedCoins`=행 수, `scannedCombinations`=걸어본 조합 수, `domList`/`fxList` 정렬.
 8. warnings 순서: 한도 10억원 초과 → 항상 수수료 미반영 → 어느 방향이든 출금·입금이 둘 다 `true` 가 아닌 조합이 있으면 "입출금 막힘 표시 조합 있음 — 실제 중단일 수도, 확인 못 한 것일 수도(`null`)".
@@ -113,6 +116,7 @@
 - 국내 거래소 행은 `depth_*` 가 비어 있어 `asks`/`bids` 를 걷는다(단계 수가 REST 그대로)
 - **표면값은 REST 를 쓴다**: `depth_asks[0]` 을 REST `asks[0]` 과 다르게 시드해도 `/premium`·`/matrix` 의 표면 김프는 REST 최우선으로 계산된다
 - `/arbitrage`·`/matrix` 의 해외 다리가 `depth_*` 를 걷는다 — 깊이를 준 시드와 안 준 시드의 실효 수익률이 다르다
+- 스트림 최우선가를 REST 보다 **유리하게** 시드해도 `/matrix` 의 `totalSlippagePercent` 가 음수가 되지 않고 0 이다(같은 시드에서 표면 김프는 REST 값 그대로다)
 
 테스트 입력을 스펙이 고정하는 의도적 예외 — 수식 검증 가능한 기대값을 주기 위해.
 
