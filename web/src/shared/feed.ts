@@ -1,14 +1,8 @@
 // 공유 피드 — 셸이 만들어 모든 탭에 내려주는 객체 하나 (스펙 002 §3.4).
 import { useEffect, useRef, useState } from 'react'
 import { MOCK_TICK_MS } from './config'
-import { buildFlow, buildHealth, buildMarkets, makeEvents, tickMarkets } from './mock'
+import { buildFlow, buildMarkets, makeEvents, tickMarkets } from './mock'
 import type { Feed, IoEntry, SpreadRow } from './types'
-
-/** 수집 상태 mock 의 일 단위 시드 — 하루 동안 같은 모양이어야 한다 (§3.9). */
-function todaySeed(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
-}
 
 /** 교체 시 io 재구성 — 행마다 국내·해외 각각 한 항목, net 은 netDom ?? '–'. */
 function buildIo(rows: SpreadRow[]): Record<string, IoEntry> {
@@ -22,21 +16,22 @@ function buildIo(rows: SpreadRow[]): Record<string, IoEntry> {
 }
 
 export function createFeed(): Feed {
-  const health = buildHealth(todaySeed())
   const flow = buildFlow()
   const feed: Feed = {
     spreads: [], // 이 스펙에서는 항상 빈 배열 — 003 이 replace 로 채운다
     rate: 0,
     io: {},
     markets: buildMarkets(),
-    health: health.cards,
-    healthEvents: health.events,
+    health: null, // 011 이 setHealth 로 채운다
     flowAddrs: flow.addrs,
     flowRows: flow.rows,
     replace(rows, rate) {
       feed.spreads = rows
       feed.rate = rate
       feed.io = buildIo(rows)
+    },
+    setHealth(data) {
+      feed.health = data
     },
     events: makeEvents,
   }

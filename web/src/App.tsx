@@ -7,10 +7,11 @@ import GapTab from './features/gap/Tab'
 import HealthTab from './features/health/Tab'
 import HistoryTab from './features/history/Tab'
 import PpTab from './features/pp/Tab'
+import { useHealthPolling } from './features/health/api'
 import { useSpreadPolling } from './features/spreads/api'
 import SpreadsTab from './features/spreads/Tab'
 import { useFeed } from './shared/feed'
-import { fmtPct, pctColor } from './shared/format'
+import { exName, fmtPct, pctColor } from './shared/format'
 import type { Feed } from './shared/types'
 import { DIM_TEXT } from './shared/ui'
 
@@ -111,14 +112,19 @@ function KpiStrip({ feed }: { feed: Feed }) {
   const btc = feed.spreads.filter((r) => r.sym === 'BTC' && r.status !== 'fail')
   const fwd = btc.length ? Math.max(...btc.map((r) => r.fwd)) : 0
   const rev = btc.length ? Math.max(...btc.map((r) => r.rev)) : 0
-  const okN = feed.health.filter((c) => c.state === 'ok').length
-  const downNames = feed.health.filter((c) => c.state === 'down').map((c) => c.name)
-  const staleN = feed.health.filter((c) => c.state === 'stale').length
-  const healthSub = downNames.length
-    ? `${downNames.join(', ')} 끊김${staleN ? ` · ${staleN}곳 지연` : ''}`
-    : staleN
-      ? `${staleN}곳 지연`
-      : '전체 정상'
+  // 수집 상태 KPI — /health/collect 마지막 응답 기준, 첫 응답 전엔 – (011 §3.7)
+  const exs = feed.health?.exchanges ?? []
+  const okN = exs.filter((c) => c.state === 'ok').length
+  const downNames = exs.filter((c) => c.state === 'down').map((c) => exName(c.exchange))
+  const staleN = exs.filter((c) => c.state === 'stale').length
+  const healthValue = feed.health ? `${exs.length}곳 중 ${okN}곳 정상` : '–'
+  const healthSub = !feed.health
+    ? '수집 상태 조회 전'
+    : downNames.length
+      ? `${downNames.join(', ')} 끊김${staleN ? ` · ${staleN}곳 지연` : ''}`
+      : staleN
+        ? `${staleN}곳 지연`
+        : '전체 정상'
   const symN = new Set(feed.spreads.map((r) => r.sym)).size
   const rateText =
     feed.rate > 0
@@ -141,7 +147,7 @@ function KpiStrip({ feed }: { feed: Feed }) {
       <Kpi label="BTC 김프 · 순방향" value={fmtPct(fwd)} color={pctColor(fwd)} />
       <Kpi label="BTC 김프 · 역방향" value={fmtPct(rev)} color={pctColor(rev)} />
       <KpiDivider />
-      <Kpi label="수집 상태" value={`8곳 중 ${okN}곳 정상`} sub={healthSub} />
+      <Kpi label="수집 상태" value={healthValue} sub={healthSub} />
       <div style={{ marginLeft: 'auto', flex: 'none' }}>
         <Kpi label="추적 페어" value={`${symN}개 코인 · ${feed.spreads.length} 페어`} />
       </div>
@@ -179,8 +185,9 @@ function TabPane({ active, children }: { active: boolean; children: ReactNode })
 
 export default function App() {
   const { feed, now } = useFeed()
-  // 셸이 공유 피드를 만든 직후 /spreads 1초 폴링 시작 (스펙 003 §3.4)
+  // 셸이 공유 피드를 만든 직후 /spreads 1초 폴링 시작 (스펙 003 §3.4), 그 옆에서 /health/collect 5초 폴링 (011 §3.6)
   useSpreadPolling(feed)
+  useHealthPolling(feed)
   const [tab, setTab] = useState<TabId>('spread')
   // 스프레드 행 클릭 → 기록 탭으로 피벗할 선택된 심볼 — 초기값 'BTC' (스펙 005 §2)
   const [selSym, setSelSym] = useState<string>('BTC')
