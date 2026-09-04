@@ -91,10 +91,11 @@ export function ToggleBtn({ on, label, onClick }: { on: boolean; label: string; 
 }
 
 // ── 배지 ─────────────────────────────────────────────────────────────────
-/** 거래소 칩 — 기본은 중립 테두리, accent 는 선물/상대편 거래소 강조. */
-export function exTag(accent = false): CSSProperties {
+/** 거래소 칩 — 기본은 중립 테두리, accent 는 선물/상대편 거래소 강조. small 은 2줄 셀용 소형(선선갭). */
+export function exTag(accent = false, small = false): CSSProperties {
   return {
-    fontSize: 10, letterSpacing: '0.04em', padding: '2px 7px', borderRadius: 'var(--radius-sm)',
+    ...(small ? { fontSize: 9.5, padding: '2px 6px' } : { fontSize: 10, letterSpacing: '0.04em', padding: '2px 7px' }),
+    borderRadius: 'var(--radius-sm)',
     border: `1px solid ${accent ? 'var(--color-accent-800)' : 'var(--color-neutral-800)'}`,
     color: accent ? 'var(--color-accent-300)' : 'var(--color-neutral-400)',
     background: 'var(--color-surface)', whiteSpace: 'nowrap',
