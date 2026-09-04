@@ -289,6 +289,12 @@ def build_collector(
     )
 
 
+def subscribe_all(cache: DepthCache, at: int, count: int = 5) -> None:
+    """샤드 3개 전부가 구독 중인 상태 — 정체 판정 대상이 되는 평상시 모습."""
+    for shard in range(binance_depth.SHARD_COUNT):
+        cache.set_subscribed(shard, count, at)
+
+
 async def test_silence_over_30s_fails_the_cycle_but_keeps_the_snapshot() -> None:
     store = LiveStore()
     cache = DepthCache()
@@ -313,11 +319,52 @@ async def test_silence_over_30s_fails_the_cycle_but_keeps_the_snapshot() -> None
     assert still is not None and still.updated_at == updated_at
 
 
+async def test_one_stalled_shard_of_three_still_fails() -> None:
+    """샤드 3개 중 1개만 무수신이어도 실패다 (§3.6·§4).
+
+    나머지 2샤드는 방금 메시지를 받는 중이다 — 전체 기준으로 판정하면 이 사이클은
+    성공으로 지나가고, 그 샤드가 맡은 심볼 1/3 의 열화가 어디에도 드러나지 않는다.
+    """
+    store = LiveStore()
+    cache = DepthCache()
+    tracker = OutageTracker()
+    collector = build_collector(store, cache, tracker)
+
+    now = now_ms()
+    subscribe_all(cache, now - 31_000)
+    cache.note_message(0, now)  # 샤드 0·1 은 멀쩡하다
+    cache.note_message(1, now)
+    cache.set_subscribed(2, 7, now - 31_000)  # 샤드 2 만 31초 무수신
+
+    result = await collector.run_cycle()
+
+    assert [f["exchange"] for f in result.failures] == ["binance"]
+    open_outage = tracker.open_outage("binance")
+    assert open_outage is not None
+    assert open_outage.kind == "stale_stream"
+    # message 는 정체된 샤드 번호와 그 샤드의 구독 수를 가리킨다
+    assert "샤드 2" in open_outage.message
+    assert "7종목" in open_outage.message
+
+
+async def test_stalled_shard_reports_the_longest_silent_one() -> None:
+    # 둘 다 정체면 가장 오래 조용한 샤드를 고른다 (§3.6)
+    cache = DepthCache()
+    now = now_ms()
+    cache.set_subscribed(0, 4, now - 31_000)
+    cache.set_subscribed(2, 9, now - 90_000)
+
+    stalled = cache.stalled_shard(now)
+
+    assert stalled is not None
+    assert (stalled.index, stalled.subscriptions) == (2, 9)
+
+
 async def test_silence_under_30s_is_not_a_failure() -> None:
     store = LiveStore()
     cache = DepthCache()
     tracker = OutageTracker()
-    cache.set_subscribed(0, 5, now_ms() - 29_000)
+    subscribe_all(cache, now_ms() - 29_000)
     result = await build_collector(store, cache, tracker).run_cycle()
 
     assert result.failures == []
@@ -333,8 +380,20 @@ async def test_no_subscription_means_no_failure() -> None:
     result = await build_collector(store, cache, tracker).run_cycle()
 
     assert result.failures == []
-    assert cache.is_stalled(now_ms()) is False
+    assert cache.stalled_shard(now_ms()) is None
     assert tracker.open_outage("binance") is None
+
+
+async def test_shard_without_subscriptions_is_not_judged() -> None:
+    # 샤드 2 만 구독이 있고 방금 받았다. 구독 0 인 샤드 0·1 은 아무리 조용해도 판정 밖이다
+    cache = DepthCache()
+    now = now_ms()
+    cache.set_subscribed(0, 0, now - 120_000)
+    cache.set_subscribed(1, 0, now - 120_000)
+    cache.set_subscribed(2, 3, now - 120_000)
+    cache.note_message(2, now)
+
+    assert cache.stalled_shard(now) is None
 
 
 async def test_messages_resume_and_close_the_outage() -> None:
@@ -347,7 +406,7 @@ async def test_messages_resume_and_close_the_outage() -> None:
     await collector.run_cycle()
     assert tracker.open_outage("binance") is not None
 
-    cache.note_message(now_ms())  # 스트림 복구
+    cache.note_message(0, now_ms())  # 스트림 복구
     for _ in range(3):  # 연속 성공 3회에 구간이 닫힌다 (011 §3.3)
         await collector.run_cycle()
 

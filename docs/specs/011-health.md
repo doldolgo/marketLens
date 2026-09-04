@@ -107,7 +107,6 @@
 
 ## 4. 검증
 
-- FE 유형 라벨 표가 실패 종류 8개를 전부 덮는다(`stale_stream` 포함) — 빠지면 타입 검사가 막는다
 BE(네트워크 없음, 커넥터·Influx 는 fake):
 - 업비트 429 → `rate_limit`, 418 → `banned`, 503 → `unavailable`, 400 → `bad_request`, 타임아웃 → `timeout`, 연결 예외 → `network`, JSON 아님 → `bad_response`. `status_code`·`body`·`url` 이 예외에 남는다.
 - 빗썸 HTTP 200 + `{"error":{"name":429,…}}` → 실패이며 `rate_limit`, `status_code` 200. `error.name` 이 문자열이면 `bad_response`.
@@ -120,6 +119,9 @@ BE(네트워크 없음, 커넥터·Influx 는 fake):
 - 기동 시 fake Influx 의 24시간 점이 메모리로 복원되고 `ended_ts` 없는 점은 진행 중이 된다. Influx 없음/예외/3초 초과면 빈 목록으로 기동한다.
 - `GET /health/collect`: 거래소 3곳 고정 순서, `state` 경계(4.9초 ok · 5초 stale · 60초 down · 성공 0회 down), `successRate1h` 가 창과 겹친 초로 계산되고 창 밖 구간은 무시된다, `outages` 내림차순, 진행 중 구간이 `openOutage` 와 `outages` 양쪽에 있다.
 - `GET /health` 는 여전히 `{"status":"ok","version":…}` 이다. `POST /refresh` 응답 키는 바뀌지 않는다.
+
+FE:
+- 유형 라벨 표가 실패 종류 8개를 전부 덮는다(`stale_stream` 포함) — 빠지면 타입 검사가 막는다
 - ruff·pytest 통과. web `npm run lint && npm run build` 통과.
 
 수동(실서버):
@@ -142,6 +144,20 @@ curl -s -X POST localhost:8020/refresh | head -c 300   # 응답 키 불변(snaps
 ```
 수동 항목 중 `/etc/hosts` 빗썸 차단·재기동 복원은 sudo 와 Influx 가 필요해 로컬 실행 세션에서 돌리지 않았다(사람 몫 — EC2 또는 dev compose).
 
+§3.2·§3.8 에 `stale_stream` 칩 라벨을 채운 뒤 (2026-09-04):
+```bash
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q
+# All checks passed! / 172 files already formatted / 314 passed
+
+cd web && npm run lint && npm run build
+# oxlint src — 출력 없음(경고 0) / tsc -b + vite build 성공 (44 modules, built in 297ms)
+```
+`OutageKind` 에 값만 먼저 넣고 라벨을 비운 채 build 를 돌려 §4 의 "빠지면 타입 검사가 막는다" 를 실제로 확인했다:
+```
+src/features/health/types.ts(5,14): error TS2741: Property 'stale_stream' is missing in type
+'{ timeout: string; … bad_response: string; }' but required in type 'Record<OutageKind, string>'.
+```
+
 ## 6. 갱신할 문서
 - `docs/context/status.md` — 행 추가 `| health | /health/collect·실패 구간 추적·collect_fail 쓰기/복원 | 실데이터 탭·5초 폴링·KPI 수집 상태 | 백오프는 013 |`. web-shell 행의 `mock 탭 4종` → `mock 탭 3종(gap·pp·flow)`. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 011 행 상태 → DONE. **항상 포함.**
@@ -156,6 +172,7 @@ curl -s -X POST localhost:8020/refresh | head -c 300   # 응답 키 불변(snaps
 - 만든 것 (파일 목록):
   - server: `core/errors.py`(kind·retry_after_sec·FAIL_KINDS), `core/connectors/{upbit,bithumb,binance}.py`(분류·Retry-After·리스트 아님 → bad_response), `core/influx.py`(int/str 필드 line protocol, `CollectFailRow`·`collect_fail_point`·`query_collect_fail`), `core/outages.py`(추적기 신규), `core/collector.py`(사이클 → 추적기), `main.py`(복원 → 쓰기 태스크 → 수집 루프, `/health/collect` 라우터), `features/health/{models,service,router}.py` + `tests/test_collect_api.py`, `tests/test_outages.py`, 커넥터 테스트 3개에 분류 케이스 추가.
   - web: `shared/format.ts`(exName 승격), `shared/types.ts`(HealthData 계약, mock health 타입 삭제), `shared/feed.ts`(health null + setHealth), `shared/mock.ts`(buildHealth 삭제), `shared/config.ts`(HEALTH_POLL_MS), `features/health/{api,types,Tab}.tsx`, `features/spreads/api.ts`(exName import), `App.tsx`(KPI·폴링 호출).
+  - **`stale_stream` 칩 라벨 (2026-09-04)**: `shared/types.ts`(`OutageKind` 에 `stale_stream` 추가), `features/health/types.ts`(`KIND_LABELS` 에 `스트림 정체`). 같은 변경에서 012 의 샤드별 정체 판정도 함께 갔다.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
   - §3.6 을 함께 고쳤다: exName 은 `shared/format.ts` 로, HealthData 는 `shared/types.ts` 로(기능 간 import 금지와 충돌 — 사람 합의).
   - Influx 쓰기는 사이클 안에서 동기 호출하지 않고 **큐 + 별도 태스크**가 순서대로 1점씩 쓴다. 이유: Influx 가 죽으면 쓰기 1회가 클라이언트 타임아웃(60초)까지 매달려 1초 사이클을 막는다. 순서를 지키는 이유는 열림 점이 닫힘 점 뒤에 도착하면 `count` 가 1 로 되돌아가기 때문.
@@ -168,6 +185,8 @@ curl -s -X POST localhost:8020/refresh | head -c 300   # 응답 키 불변(snaps
   - FE: 로그 내용에서 `statusCode` null 이면 `HTTP …` 조각을 생략. 진행 중 구간의 타임라인 호버 종료 시각은 `now`. 유형 칩은 `Chip` 에 색만 덧입힌 outline 형태. `HealthTab` 은 `health` null 이면 본문 가운데 한 줄만.
   - 커밋 `feat(web): replace health mock …` 단독으로는 옛 Tab.tsx 가 tsc 에 걸린다(다음 커밋이 Tab 을 교체). 300줄 규칙 때문에 나눴다.
   - CLAUDE.md 인덱스 002 행의 "mock 탭(…수집상태…)" 도 함께 고쳤다(§6 목록엔 없지만 지금 동작과 달라서).
+  - `stale_stream` 칩 **색**은 새로 정하지 않았다. §3.8 의 "`banned`·`rate_limit` 빨강, 그 외 주황" 이 이미 전 종류를 덮어 주황이 된다 — 정체는 일시적이고 재시도가 의미 있는 쪽이라 이 분류가 맞다.
+  - §4 의 FE 라벨 검증 항목이 "BE(…):" 머리글 위에 떠 있어 BE 목록의 첫 줄처럼 읽혔다. 문구는 그대로 두고 새 `FE:` 머리글 아래로 옮겼다.
 - 남은 빚:
   - `/etc/hosts` 차단·재기동 복원 수동 검증 미실행(로컬 Influx 없음). EC2 배포 후 확인 필요.
   - 백오프·Retry-After 존중·서킷은 013. 지금은 429 를 받아도 1초마다 재호출한다.

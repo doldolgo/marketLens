@@ -93,13 +93,18 @@ class BinanceConnector(ExchangeConnector):
             )
 
         # 소켓이 조용히 멈추면 예외가 없어 /health/collect 가 초록인 채로 깊이만 얼어붙는다.
-        # 정체를 수집 실패로 승격해 011 의 기존 경로를 그대로 태운다. REST 결과는 유효하지만
-        # 001 규칙대로 직전 스냅샷이 유지되므로 표에서 행이 사라지지는 않는다 (012 §3.6).
-        if self._depth is not None and self._depth.is_stalled(now_ms):
+        # 판정은 샤드 하나 단위다 — 전체 기준으로 보면 샤드 1개가 죽어 심볼 1/3 이 1단계로
+        # 되돌아간 열화가 어디에도 안 드러난다. 정체를 수집 실패로 승격해 011 의 기존 경로를
+        # 그대로 태운다. REST 결과는 유효하지만 001 규칙대로 직전 스냅샷이 유지되므로
+        # 표에서 행이 사라지지는 않는다 (012 §3.6).
+        stalled = self._depth.stalled_shard(now_ms) if self._depth is not None else None
+        if stalled is not None:
             raise ExchangeApiError(
                 self.id,
                 None,
-                f"바이낸스 깊이 스트림 정체: {STALE_AFTER_MS // 1000}초 이상 무수신",
+                f"바이낸스 깊이 스트림 정체: 샤드 {stalled.index} "
+                f"(구독 {stalled.subscriptions}종목) "
+                f"{STALE_AFTER_MS // 1000}초 이상 무수신",
                 kind="stale_stream",
             )
         return FetchResult(rows=rows, calls=calls)
