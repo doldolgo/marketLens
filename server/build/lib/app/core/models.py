@@ -23,6 +23,12 @@ class Row:
     ]  # [price, size] 오름차순, 누적액 상한까지 (바이낸스는 1단계)
     bids: list[list[float]]  # [price, size] 내림차순, 같은 규칙
     price_timestamp: int  # 거래소 시세 시각 epoch ms (바이낸스는 수집 시각)
+    # 바이낸스 깊이 스트림(012)이 채우는 최대 20단계. 국내 거래소는 항상 빈 목록이다
+    # (자기 asks/bids 가 이미 깊다). 스트림이 없거나 낡으면 빈 목록.
+    # 호가를 걷는 계산은 depth_* 가 비어 있지 않으면 그것을, 비면 asks/bids 를 쓴다.
+    depth_asks: list[list[float]] = field(default_factory=list)
+    depth_bids: list[list[float]] = field(default_factory=list)
+    depth_at: int | None = None  # 깊이 수신 시각 epoch ms. 없으면 None
     deposit_enabled: bool | None = None  # 3-state, None=모름 — 006 이 채운다
     withdrawal_enabled: bool | None = None  # 3-state — 006 이 채운다
     networks: list[Network] = field(default_factory=list)  # 빈 리스트 = 망 정보 없음

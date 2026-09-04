@@ -6,6 +6,7 @@ pydantic-settings>=2.3
 influxdb-client>=1.45
 pyjwt>=2.8
 boto3>=1.34
+websockets>=13
 
 [dev]
 pytest>=8

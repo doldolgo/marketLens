@@ -2,6 +2,7 @@
 
 전 종목 일괄 2회 호출(ticker/price + bookTicker). 단일 심볼 조회보다 weight 가 싸다.
 ticker/24hr 는 쓰지 않는다 — closeTime 은 윈도우 끝이지 체결 시각이 아니다.
+다단계 호가는 REST 로는 한도에 걸려 불가능하다 — 012 의 깊이 스트림 캐시를 읽어 싣는다.
 """
 
 import asyncio
@@ -10,8 +11,10 @@ import time
 import httpx
 
 from app.core.connectors.base import ExchangeConnector, FetchResult
+from app.core.connectors.binance_depth import STALE_AFTER_MS, DepthSource
 from app.core.errors import ExchangeApiError, ExchangeTimeoutError
 from app.core.models import Row
+from app.core.rows import NOTIONAL_CAP_USDT, truncate_levels
 
 _BASE_URL = "https://api.binance.com"
 _QUOTE = "USDT"
@@ -19,6 +22,11 @@ _QUOTE = "USDT"
 
 class BinanceConnector(ExchangeConnector):
     id = "binance"
+
+    def __init__(self, depth: DepthSource | None = None) -> None:
+        # 깊이 캐시는 주입한다 — fetch_rows 시그니처와 커넥터 공통 인터페이스는 불변이라
+        # collector 는 012 를 모른다 (012 §3.4). 없으면 depth_* 가 늘 빈 목록이다.
+        self._depth = depth
 
     async def fetch_rows(self, client: httpx.AsyncClient) -> FetchResult:
         results = await asyncio.gather(
@@ -61,6 +69,9 @@ class BinanceConnector(ExchangeConnector):
             price = prices.get(symbol)
             if price is None:
                 price = (bid + ask) / 2
+            # 최우선 호가·체결가는 REST 값 그대로 둔다. WS 북과 섞으면 교차 북이 나와
+            # 003 의 fwd/rev 정의가 바뀐다 — 깊이는 별도 필드로만 싣는다 (012 §3.5).
+            entry = self._depth.get(symbol, now_ms) if self._depth is not None else None
             rows.append(
                 Row(
                     exchange=self.id,
@@ -71,7 +82,25 @@ class BinanceConnector(ExchangeConnector):
                     asks=[[ask, ask_qty]],
                     bids=[[bid, bid_qty]],
                     price_timestamp=now_ms,
+                    depth_asks=truncate_levels(entry.asks, NOTIONAL_CAP_USDT)
+                    if entry is not None
+                    else [],
+                    depth_bids=truncate_levels(entry.bids, NOTIONAL_CAP_USDT)
+                    if entry is not None
+                    else [],
+                    depth_at=entry.at if entry is not None else None,
                 )
+            )
+
+        # 소켓이 조용히 멈추면 예외가 없어 /health/collect 가 초록인 채로 깊이만 얼어붙는다.
+        # 정체를 수집 실패로 승격해 011 의 기존 경로를 그대로 태운다. REST 결과는 유효하지만
+        # 001 규칙대로 직전 스냅샷이 유지되므로 표에서 행이 사라지지는 않는다 (012 §3.6).
+        if self._depth is not None and self._depth.is_stalled(now_ms):
+            raise ExchangeApiError(
+                self.id,
+                None,
+                f"바이낸스 깊이 스트림 정체: {STALE_AFTER_MS // 1000}초 이상 무수신",
+                kind="stale_stream",
             )
         return FetchResult(rows=rows, calls=calls)
 

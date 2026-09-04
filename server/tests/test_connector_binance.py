@@ -1,4 +1,7 @@
-"""바이낸스 커넥터 — 문자열 가격·USDT 접미사·0 가격 처리 (스펙 001 §3.5, §4)."""
+"""바이낸스 커넥터 — 문자열 가격·USDT 접미사·0 가격 처리 (스펙 001 §3.5, §4).
+
+깊이 캐시 주입(012 §3.4~3.5)도 여기서 본다 — Row 의 depth_* 를 채우는 주체가 커넥터다.
+"""
 
 import time
 
@@ -6,6 +9,7 @@ import httpx
 import pytest
 
 from app.core.connectors.binance import BinanceConnector
+from app.core.connectors.binance_depth import DepthCache, now_ms
 from app.core.errors import ExchangeApiError
 
 
@@ -180,3 +184,90 @@ async def test_418_is_banned_and_5xx_unavailable() -> None:
     with pytest.raises(ExchangeApiError) as info:
         await BinanceConnector().fetch_rows(_status_client(500))
     assert info.value.kind == "unavailable"
+
+
+# ── 깊이 캐시 주입 (스펙 012 §3.4~3.5, §4) ─────────────────────────────────────
+
+_BTC_PRICE = [{"symbol": "BTCUSDT", "price": "100.0"}]
+_BTC_BOOK = [
+    {
+        "symbol": "BTCUSDT",
+        "bidPrice": "99.0",
+        "bidQty": "2.0",
+        "askPrice": "101.0",
+        "askQty": "3.0",
+    }
+]
+
+
+def btc_client() -> httpx.AsyncClient:
+    return make_client(_BTC_PRICE, _BTC_BOOK)
+
+
+async def test_fresh_cache_entry_fills_depth_fields() -> None:
+    cache = DepthCache()
+    at = now_ms()
+    asks = [[101.0, 1.0], [102.0, 2.0]]
+    bids = [[99.0, 1.0], [98.0, 2.0]]
+    cache.put("BTCUSDT", asks, bids, at)
+
+    row = (await BinanceConnector(depth=cache).fetch_rows(btc_client())).rows[0]
+    assert row.depth_asks == asks
+    assert row.depth_bids == bids
+    assert row.depth_at == at
+
+
+async def test_entry_older_than_ttl_is_treated_as_absent() -> None:
+    cache = DepthCache()
+    cache.put("BTCUSDT", [[101.0, 1.0]], [[99.0, 1.0]], now_ms() - 10_001)
+
+    row = (await BinanceConnector(depth=cache).fetch_rows(btc_client())).rows[0]
+    assert (row.depth_asks, row.depth_bids, row.depth_at) == ([], [], None)
+
+
+async def test_symbol_missing_from_cache_keeps_one_level_rest_book() -> None:
+    cache = DepthCache()
+    cache.put("ETHUSDT", [[3550.0, 1.0]], [[3540.0, 1.0]], now_ms())
+
+    row = (await BinanceConnector(depth=cache).fetch_rows(btc_client())).rows[0]
+    assert (row.depth_asks, row.depth_bids, row.depth_at) == ([], [], None)
+    assert row.asks == [[101.0, 3.0]] and row.bids == [[99.0, 2.0]]
+
+
+async def test_depth_is_truncated_at_one_million_usdt() -> None:
+    # 한 단계 300,000 USDT → 4단계째에 누적 1,200,000 으로 상한에 도달하고 잘린다
+    levels = [[1000.0, 300.0] for _ in range(6)]
+    cache = DepthCache()
+    cache.put("BTCUSDT", levels, levels, now_ms())
+
+    row = (await BinanceConnector(depth=cache).fetch_rows(btc_client())).rows[0]
+    assert len(row.depth_asks) == 4
+    assert len(row.depth_bids) == 4
+
+
+async def test_first_level_over_the_cap_is_still_kept() -> None:
+    cache = DepthCache()
+    over = [[1000.0, 5000.0], [1001.0, 1.0]]  # 첫 단계가 이미 5,000,000 USDT
+    cache.put("BTCUSDT", over, over, now_ms())
+
+    row = (await BinanceConnector(depth=cache).fetch_rows(btc_client())).rows[0]
+    assert row.depth_asks == [[1000.0, 5000.0]]
+    assert row.depth_bids == [[1000.0, 5000.0]]
+
+
+async def test_rest_calls_per_cycle_stay_two_with_the_stream_on() -> None:
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/api/v3/ticker/price":
+            return httpx.Response(200, json=_BTC_PRICE)
+        return httpx.Response(200, json=_BTC_BOOK)
+
+    cache = DepthCache()
+    cache.put("BTCUSDT", [[101.0, 1.0]], [[99.0, 1.0]], now_ms())
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    result = await BinanceConnector(depth=cache).fetch_rows(client)
+
+    assert sorted(paths) == ["/api/v3/ticker/bookTicker", "/api/v3/ticker/price"]
+    assert result.calls == 2

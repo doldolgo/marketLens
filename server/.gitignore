@@ -1,2 +1,5 @@
 .pytest_cache/
 .ruff_cache/
+
+# 빌드 메타데이터 — `uv pip install -e` 가 만든다 (dev-setup.md)
+*.egg-info/

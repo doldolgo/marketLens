@@ -7,6 +7,10 @@
 # 국내 호가는 누적 price×size 가 이 값(KRW)에 도달한 단계까지만 저장한다 — 스펙 001 §3.1
 NOTIONAL_CAP_KRW: float = 1_000_000_000
 
+# 바이낸스 깊이(012)는 국내 상한과 대칭으로 누적 이만큼(USDT)까지만 담는다 — 스펙 001 §3.4-6.
+# 003 이 제공하는 최대 체결 규모 $500k 의 2배 여유다.
+NOTIONAL_CAP_USDT: float = 1_000_000
+
 
 def truncate_levels(
     levels: list[list[float]], cap: float = NOTIONAL_CAP_KRW
