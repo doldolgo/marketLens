@@ -140,15 +140,41 @@
 - `/premium` BTC `dom=binance` → 400. `/orderbook/coinbase` → 404. `/matrix?amountKrw=-1` → 422
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
-(실행 후 기록)
+
+`walk.py` → `core/orderbook.py` 이관(§2) 세션에서 이관 **전**(main)·**후** 같은 명령을 돌려 테스트 수가 같은지 확인했다. 순수 이관이라 새 테스트를 만들지 않았다.
+
+```bash
+cd server && .venv/bin/ruff check . && .venv/bin/python -m pytest -q
+```
+- 이관 전(main): `All checks passed!` / `265 passed, 2 warnings in 1.12s`
+- 이관 후: `All checks passed!` / `265 passed, 2 warnings in 1.12s`
+- `.venv/bin/ruff format --check .` → `92 files already formatted`
+
+venv 는 `uv`(0.11.28) 로 만든 Python 3.12.13 (`server/.venv`, dev-setup.md §server-3).
+실서버 확인(§4 아래 curl 목록)은 이 세션에서 돌리지 않았다 — 이관은 HTTP 계약을 건드리지 않고, 로컬 망에서 거래소 호출이 막힌다(dev-setup.md 로컬 메모).
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — analysis 행을 `| analysis | 6개 엔드포인트 동작 | - | HTTP 계약 camelCase |` 로. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 004 행 상태 → DONE. **항상 포함.**
-- `docs/context/architecture.md` — 계약 규칙의 camelCase 원칙과 이 스펙 6개 경로(`/premium` `/premium/scan` `/matrix` `/orderbook/*` `/slippage/*` `/arbitrage`)가 일치하는지 확인. + "현재 구조" 절에 analysis 항목: `features/analysis/` — `walk.py`(호가창 소진 순수 계산)·`service.py`(6개 빌더·거래소 레지스트리)·`router.py`·`models.py`, web 없음.
+- `docs/context/architecture.md` — 계약 규칙의 camelCase 원칙과 이 스펙 6개 경로(`/premium` `/premium/scan` `/matrix` `/orderbook/*` `/slippage/*` `/arbitrage`)가 일치하는지 확인. + "현재 구조" 절에 analysis 항목: `core/orderbook.py`(호가창 소진 순수 계산 — 003 과 공용) + `features/analysis/` — `service.py`(6개 빌더·거래소 레지스트리)·`router.py`·`models.py`, web 없음.
 - `docs/context/dev-setup.md` — 검증용 스모크에 `/slippage` 1줄: `curl "localhost:8000/slippage/upbit?symbol=BTC/KRW&amount=1000000"` → `slippagePercent ≥ 0`·`levelsConsumed ≥ 1`.
 
 ## 7. 실행 보고 (실행 세션이 채움)
+
+### walk → `core/orderbook.py` 이관 세션 (§2)
 - 만든 것 (파일 목록):
+  - `server/app/core/orderbook.py` — `server/app/features/analysis/walk.py` 를 `git mv` 로 옮겼다. `WalkResult`·`_EPSILON`·함수 4개(`walk_amount`·`walk_quantity`·`average_price`·`slippage_percent`)의 본문은 한 글자도 안 바꿨다. 모듈 docstring 만 고쳐 (a) 003·004 공용 core 모듈이라는 것과 (b) **함수를 async 로 바꾸지 말라**는 근거를 적었다 — `GET /spreads` 가 수집 락 없이 안전한 이유가 "표 조립 전체에 await 가 없다" 하나뿐이라, await 지점이 생기면 응답 하나가 스냅샷 교체 전·후 호가를 섞는다.
+  - `server/app/features/analysis/service.py` — import 를 `app.core.orderbook` 으로. 서버 트리에서 이 모듈을 쓰는 유일한 곳이었다.
+  - `server/app/features/analysis/tests/test_slippage_api.py` — 모듈 위치를 말하던 docstring 1줄만 갱신.
+  - `docs/context/architecture.md` "현재 구조" analysis 항목, 이 문서 §5·§6.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - **테스트 파일은 옮기지 않았다.** walk 를 직접 부르는 테스트가 없었다 — 소진 계산의 검증 항목(§4 의 금액·수량 walk, 부분 체결, 매도 슬리피지, 2단계 예시)은 전부 `/slippage` **HTTP 응답**으로 확인하는 004 §4 항목이라 `features/analysis/tests/` 가 맞는 자리다(conventions.md "기능 테스트는 기능 폴더"). core 모듈이라고 다 `server/tests/` 에 단위 테스트가 있는 것도 아니다 — `core/premium.py` 는 기능 테스트(`features/spreads/tests/`)와 `tests/test_backfill.py` 를 통해서만 검증한다. `core/rows.py`·`core/networks.py` 처럼 `server/tests/test_orderbook.py` 를 새로 만들면 테스트 수가 늘어 "이관 전후 같은 수(265)" 확인이 깨지므로 이번 변경에는 넣지 않았다(남은 빚).
+  - `server/.venv` 가 이미 있어서(Python 3.12.13, 의존성 설치 완료 — 동시 진행 중인 012 세션이 만든 것으로 보인다) `--clear` 로 다시 만들지 않고 그대로 썼다. 남이 쓰는 venv 를 지우면 그 세션이 깨진다.
+  - 작업 트리에 012 세션의 커밋 안 된 `server/pyproject.toml` 수정(websockets 의존)이 있었다. 읽기만 하고 손대지 않았으며 커밋에도 넣지 않았다(파일을 지정해 add).
+  - 003 §2 는 이 이관을 003 이 할 일로 적어 두었다. 004 담당이라 003 문장은 건드리지 않았다 — 003 세션이 정리하면 된다.
+  - 이 문서 머리의 `상태: TODO` 가 CLAUDE.md 인덱스의 `DONE` 과 어긋난다. 이관 범위 밖이라 그대로 뒀다.
+  - **커밋이 둘로 갈렸다.** 이 클론의 pre-commit 훅이 `docs/`·`CLAUDE.md` 밖의 경로를 막는다("이 폴더는 docs 만 커밋합니다. 코드 변경은 marketlens-space 에서"). 훅을 우회하지 않았다 — `refactor/walk-to-core-impl` 브랜치에는 문서만 커밋했고, 검증을 끝낸 코드 3파일은 작업 트리에 staged 로 남겼다. 코드 커밋은 marketlens-space 에서 한다.
 - 남은 빚:
+  - `core/orderbook.py` 에 `server/tests/` 직접 단위 테스트가 없다. 003 이 이 모듈을 실제로 import 할 때(spreads 슬리피지) 같이 만드는 것이 자연스럽다.
+  - `docs/context/status.md` 는 이번 변경으로 고칠 것이 없었다 — 이관은 엔드포인트·응답 모양을 안 바꿔서 analysis 행 문구가 그대로 맞다.
+  - §7 의 나머지(6개 엔드포인트 구현 당시의 판단)는 원래 구현 세션이 비워 둔 채라 git 기록에만 있다. 여기 적은 것은 이관 세션 몫뿐이다.
