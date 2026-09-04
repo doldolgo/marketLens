@@ -79,6 +79,10 @@ aws s3 ls s3://<bucket>/spreads/ --recursive | tail -1
 curl -s localhost:8000/health/collect | head -c 400
 ```
 `exchanges` 에 거래소 3곳(`upbit`·`bithumb`·`binance` 순), 기동 몇 초 뒤 각 `state: "ok"` 면 정상 (011).
+```bash
+grep -c "깊이 샤드" <서버 로그>     # 기동 60초 뒤 (012)
+```
+로그에 `바이낸스 깊이 샤드 N 구독 완료` 3줄(샤드 0·1·2)이면 정상. 깊이는 HTTP 로 노출되지 않으므로 값 확인은 로그로 한다 — 스트림이 안 붙어도 `/spreads` 는 최우선 1단계로 정상 동작하고, 30초 무수신이면 `/health/collect` 의 바이낸스가 `stale_stream` 구간을 보인다.
 
 ## 로컬 메모 (개인)
 - `:8000` 은 이 머신에서 소마 캘린더가 점유할 수 있다. `lsof -i :8000` 으로 확인 후 정리하거나, `--port 8020` 으로 띄우고 curl 포트도 8020 으로 맞춘다.
