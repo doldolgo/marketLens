@@ -20,6 +20,7 @@
 - 컨테이너 3개:
   - `server` — FastAPI + uvicorn 워커 1개(python 3.12 slim). 컨테이너 포트 8000, **호스트에 노출하지 않는다**(compose 내부 네트워크만).
   - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 `/api/` 를 `server:8000/` 로 프록시하고, 없는 경로는 index.html 을 준다(SPA).
+    캐시 규칙: `index.html` 은 `no-store, must-revalidate` — 배포가 FE·BE 를 함께 바꾸므로 캐시된 셸이 남으면 열려 있던 탭이 구 번들로 새 API 계약을 계속 친다. `/assets/` 의 해시 박힌 파일은 `max-age=31536000, immutable` — 내용이 바뀌면 파일명이 바뀌어 무효화가 필요 없다.
   - `influxdb` — 2.7, dev compose 와 같은 첫 기동 설정(org·bucket `marketlens`, admin 토큰 = `INFLUX_TOKEN`). named volume, 호스트 비노출.
 
 ### 규칙 (왜 가 있는 것)
