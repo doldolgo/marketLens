@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { HIGHLIGHT_PCT, STALE_SEC } from '../../shared/config'
 import { fmtKrw, fmtPct, pctColor } from '../../shared/format'
 import type { Feed, IoState, SpreadRow } from '../../shared/types'
-import { Chip, DIM_TEXT, NumField, Seg, Toggle } from '../../shared/ui'
+import { Chip, DIM_TEXT, NumField, Seg, segOpt, Toggle } from '../../shared/ui'
 import type { ApiSpreadRow } from './types'
 
 type View = 'kimp' | 'rev'
@@ -198,15 +198,7 @@ export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym:
           }}
         />
         <span style={{ fontSize: 11, color: DIM_TEXT }}>기준 국내 거래소</span>
-        <Seg
-          options={[
-            { id: 'all', label: '모두' },
-            { id: '업비트', label: '업비트' },
-            { id: '빗썸', label: '빗썸' },
-          ]}
-          value={domFilter}
-          onChange={(id) => setDomFilter(id as DomFilter)}
-        />
+        <Seg opts={[['all', '모두'], ['업비트', '업비트'], ['빗썸', '빗썸']].map(([id, l]) => segOpt(l, domFilter === id, () => setDomFilter(id as DomFilter)))} />
         <NumField label="임계값" value={thr} onChange={setThr} step={0.1} />
         <Toggle label="임계 초과만" on={onlyThr} onChange={setOnlyThr} />
         <Toggle label="입출금 가능만" on={onlyIo} onChange={setOnlyIo} />
@@ -218,14 +210,7 @@ export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym:
       {/* 필터바 2행 */}
       <div style={barStyle}>
         <span style={{ fontSize: 11, color: DIM_TEXT }}>기준 보기</span>
-        <Seg
-          options={[
-            { id: 'kimp', label: '김프' },
-            { id: 'rev', label: '역프' },
-          ]}
-          value={view}
-          onChange={(id) => switchView(id as View)}
-        />
+        <Seg opts={[['kimp', '김프'], ['rev', '역프']].map(([id, l]) => segOpt(l, view === id, () => switchView(id as View)))} />
         <span style={{ fontSize: 11, color: DIM_TEXT }}>
           김프 = 해외 매수 → 국내 매도 · 역프 = 국내 매수 → 해외 매도. 행 클릭 시 기록 탭으로.
         </span>

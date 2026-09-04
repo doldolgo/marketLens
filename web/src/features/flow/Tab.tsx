@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { fmtQty, fmtTime, fmtUsd } from '../../shared/format'
 import { DOM_EXS, FLOW_PRICES } from '../../shared/mock'
 import type { Feed, FlowRow } from '../../shared/types'
-import { Chip, DIM_TEXT, Seg } from '../../shared/ui'
+import { Chip, DIM_TEXT, Seg, segOpt } from '../../shared/ui'
 
 type Pivot = { kind: 'coin'; sym: string } | { kind: 'addr'; id: string }
 type Dir = 'all' | 'in' | 'out'
@@ -154,15 +154,7 @@ export default function FlowTab({ feed, now }: { feed: Feed; now: number }) {
           }}
         />
         {miss && <span style={{ fontSize: 12, color: 'var(--color-warn)' }}>일치하는 코인·주소 없음</span>}
-        <Seg
-          options={[
-            { id: 'all', label: '전체' },
-            { id: 'in', label: '입금' },
-            { id: 'out', label: '출금' },
-          ]}
-          value={dir}
-          onChange={(id) => setDir(id as Dir)}
-        />
+        <Seg opts={[['all', '전체'], ['in', '입금'], ['out', '출금']].map(([id, l]) => segOpt(l, dir === id, () => setDir(id as Dir)))} />
         <span style={{ marginLeft: 'auto', fontSize: 11, color: DIM_TEXT }}>
           {shown.length} / {rowsAll.length}건 표시
         </span>
@@ -171,15 +163,7 @@ export default function FlowTab({ feed, now }: { feed: Feed; now: number }) {
       {/* 바 2: 권역 · 거래소 칩 · 필터 초기화 */}
       <div style={barStyle}>
         <span style={{ fontSize: 11, color: DIM_TEXT }}>권역</span>
-        <Seg
-          options={[
-            { id: 'all', label: '전체' },
-            { id: 'fx', label: '해외' },
-            { id: 'dom', label: '국내' },
-          ]}
-          value={region}
-          onChange={(id) => setRegion(id as Region)}
-        />
+        <Seg opts={[['all', '전체'], ['fx', '해외'], ['dom', '국내']].map(([id, l]) => segOpt(l, region === id, () => setRegion(id as Region)))} />
         <span style={{ fontSize: 11, color: DIM_TEXT }}>거래소</span>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {exChips.map(([ex, n]) => (

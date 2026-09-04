@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { STALE_SEC } from '../../shared/config'
 import { fmtFunding3, fmtPct, fmtUsdt, pctColor } from '../../shared/format'
 import type { Feed } from '../../shared/types'
-import { Chip, DIM_TEXT, NumField, Seg, Toggle } from '../../shared/ui'
+import { Chip, DIM_TEXT, NumField, Seg, segOpt, Toggle } from '../../shared/ui'
 
 interface Combo {
   spotEx: string
@@ -137,14 +137,7 @@ export default function GapTab({ feed, now }: { feed: Feed; now: number }) {
             borderRadius: 'var(--radius-md)',
           }}
         />
-        <Seg
-          options={[
-            { id: 'entry', label: '진입 기준' },
-            { id: 'exit', label: '정리 기준' },
-          ]}
-          value={mode}
-          onChange={(id) => switchMode(id as Mode)}
-        />
+        <Seg opts={[['entry', '진입 기준'], ['exit', '정리 기준']].map(([id, l]) => segOpt(l, mode === id, () => switchMode(id as Mode)))} />
         <NumField label="하이라이트 임계값" value={thr} onChange={setThr} step={0.1} />
         <Toggle label="임계 초과만" on={only} onChange={setOnly} />
         <span style={{ fontSize: 11, color: DIM_TEXT }}>

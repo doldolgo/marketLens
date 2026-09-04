@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { fmtAgo, fmtPct, fmtTime, pctColor } from '../../shared/format'
 import type { Feed, MockEvent } from '../../shared/types'
-import { DIM_TEXT, NumField, Seg } from '../../shared/ui'
+import { DIM_TEXT, NumField, Seg, segOpt } from '../../shared/ui'
 
 type Per = '7d' | '30d' | '90d'
 type TypeFilter = 'all' | 'kimp' | 'rev'
@@ -205,33 +205,9 @@ export default function HistoryTab({
       {/* 필터바 (§3.6) */}
       <div style={barStyle}>
         <span style={{ fontSize: 11, color: DIM_TEXT }}>기간</span>
-        <Seg
-          options={[
-            { id: '7d', label: '1주' },
-            { id: '30d', label: '1달' },
-            { id: '90d', label: '3달' },
-          ]}
-          value={per}
-          onChange={(id) => setPer(id as Per)}
-        />
-        <Seg
-          options={[
-            { id: 'all', label: '전체' },
-            { id: 'kimp', label: '김프만' },
-            { id: 'rev', label: '역프만' },
-          ]}
-          value={type}
-          onChange={(id) => setType(id as TypeFilter)}
-        />
-        <Seg
-          options={[
-            { id: 'all', label: '전체' },
-            { id: '업비트', label: '업비트' },
-            { id: '빗썸', label: '빗썸' },
-          ]}
-          value={dom}
-          onChange={(id) => setDom(id as DomFilter)}
-        />
+        <Seg opts={(['7d', '30d', '90d'] as Per[]).map((p) => segOpt(PER_LABEL[p], per === p, () => setPer(p)))} />
+        <Seg opts={[['all', '전체'], ['kimp', '김프만'], ['rev', '역프만']].map(([id, l]) => segOpt(l, type === id, () => setType(id as TypeFilter)))} />
+        <Seg opts={[['all', '전체'], ['업비트', '업비트'], ['빗썸', '빗썸']].map(([id, l]) => segOpt(l, dom === id, () => setDom(id as DomFilter)))} />
         <NumField label="사건 기준 스프레드 ≥" value={thr} onChange={setThr} step={0.1} />
         <span style={{ marginLeft: 'auto', fontSize: 11, color: DIM_TEXT }}>
           사건 = 스프레드가 기준값 이상으로 출현한 시점부터 소멸까지 · 기간 내 {events.length}건
