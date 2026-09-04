@@ -65,11 +65,12 @@
 값의 모양:
 - 피드 상태 `FeedStatus` — `ok`·`stale`·`fail` 셋 중 하나.
 - 입출금 상태 `IoState` — 열림 / 막힘 / 확인 불가(null) 셋 중 하나. 확인 불가는 초록으로 칠하지 않는다.
-- `SpreadRow` — 국내×해외 페어 1개. 003 의 `GET /spreads` 응답 행의 **부분집합**이다 — `rateAsk`·`rateBid` 는 spreads 기능(003)이 확장 타입으로 얹는다. 키:
+- `SpreadRow` — 국내×해외 페어 1개. 003 의 `GET /spreads` 응답 행과 같은 키다. 값:
   - `sym` 코인, `dom` 국내 거래소 표시명, `fx` 해외 거래소 표시명
-  - `fwd` 순방향 김프 %, `rev` 역방향 김프 %, `usd` 해외 USD 가격, `spark` 스파크라인용 최근 값 배열
+  - `fwd` 순방향 김프 %, `rev` 역방향 김프 % — 둘 다 **슬리피지 차감 후 순값**이다(003 §3.2). `usd` 해외 USD 가격, `spark` 스파크라인용 최근 값 배열
   - `status` 피드 상태, `age` 마지막 수신 후 초
-  - `liqDom`·`liqFx` 국내·해외 유동성, `netDom` 국내 입출금 망 이름(없으면 null)
+  - `slipFwd`·`slipRev` 각 방향에서 차감된 폭(%p, 양수 — 원값이 필요하면 `fwd + slipFwd`), `krw` 국내 거래소 최우선 매수호가(KRW)
+  - `netDom` 국내 입출금 망 이름(없으면 null)
   - `depDom`·`wdDom`·`depFx`·`wdFx` 국내·해외 입금/출금 상태(`IoState`)
 
 `events(per, now)` — 005(기록/통계)가 실 DB 전에 화면을 채우는 mock 사건 목록. 인자: 조회 기간 문자열 `"<N>h"|"<N>d"|"<N>w"`(해석 불가면 24h — 기록 탭은 `7d`·`30d`·`90d` 를 쓴다)·현재 시각 epoch ms. 반환: 사건 배열. 사건 하나는 `{sym, type, dom, start, durMin, peak}` — `type` 은 김프(`kimp`)·역프(`rev`), `dom` 은 국내 거래소 표시명, `start` 는 시작 시각 epoch ms, `durMin` 은 지속 분, `peak` 는 최고 %.
