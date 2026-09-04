@@ -82,3 +82,10 @@ export function pctColor(v: number): string {
   if (v < 0) return 'var(--color-down)'
   return 'var(--color-text)'
 }
+
+/** 거래소 id → 표시명 (003 §3.4). 모르는 id 는 그대로. spreads·health 가 같이 쓴다. */
+const EX_NAMES: Record<string, string> = { upbit: '업비트', bithumb: '빗썸', binance: 'Binance' }
+
+export function exName(id: string): string {
+  return EX_NAMES[id] ?? id
+}
