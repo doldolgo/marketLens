@@ -8,6 +8,8 @@ export const STALE_SEC = 5
 export const MOCK_TICK_MS = 1500
 /** 스프레드 폴링(ms) — 003 이 사용, 셸은 값만 들고 있다. */
 export const SPREAD_POLL_MS = 1000
+/** 수집 상태 폴링(ms) — 011 이 사용, 셸은 값만 들고 있다. */
+export const HEALTH_POLL_MS = 5000
 /** 색 규약 — 한국식: 빨강=상승, 파랑=하락 (§3.3). */
 export const COLOR_CONVENTION = '한국식'
 

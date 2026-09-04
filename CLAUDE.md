@@ -74,7 +74,7 @@ marketlens/
 | 번호 | 이름 | 상태 | 범위 |
 |---|---|---|---|
 | 001 | collect | DONE | 업비트·빗썸·바이낸스 1초 수집 → 메모리, USDT 시세 추출, `/health` |
-| 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·mock 탭(갭/선선갭/수집상태/입출금레이더) |
+| 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·mock 탭(갭/선선갭/입출금레이더) |
 | 003 | spreads | DONE | 김프 표 — `/spreads` `/refresh` + 스프레드 탭 |
 | 004 | analysis | DONE | 단일 종목 분석 — premium·matrix·orderbook·slippage·arbitrage (BE 전용) |
 | 005 | history | DONE | Influx 영속·김프 아카이브·`/history/*`·백필 + history 탭 |
@@ -83,7 +83,7 @@ marketlens/
 | 008 | usdt-staleness | DONE | `/spreads` USDT 시세 미갱신 경고 (BE 전용) |
 | 009 | tick-store | TODO | 3계층 저장 — Redis 초단위 틱 스트림(1h)·flusher·`spark` 채움 |
 | 010 | s3-snapshot | DONE | `/spreads` 행 전체를 60초마다 S3 에 `.jsonl.gz` 로 저장 (BE 전용) |
-| 011 | health | TODO | 거래소별 수집 실패 구간 이력·분류 → `/health/collect` + 수집 상태 탭 실데이터, Influx `collect_fail` 복원 |
+| 011 | health | DONE | 거래소별 수집 실패 구간 이력·분류 → `/health/collect` + 수집 상태 탭 실데이터, Influx `collect_fail` 복원 |
 
 실행 순서 = 번호 순.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).

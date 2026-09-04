@@ -34,7 +34,8 @@ class InfluxPoint:
 
     measurement: str
     tags: dict[str, str]
-    fields: dict[str, float]
+    # float 는 그대로, int 는 정수형(`i` 접미), str 은 따옴표 문자열로 쓴다 (db.md collect_fail)
+    fields: dict[str, float | int | str]
     ts: int  # epoch 초 — 기록 정밀도는 초 (db.md)
 
 
@@ -67,6 +68,45 @@ def dw_fail_point(*, exchange: str, ts: int) -> InfluxPoint:
     )
 
 
+@dataclass(frozen=True)
+class CollectFailRow:
+    """`collect_fail` 점 1개 — 수집 실패 구간(스펙 011 §3.4). 값이 없는 필드는 None."""
+
+    exchange: str
+    kind: str
+    started_ts: int  # epoch 초 = 점의 time
+    count: int
+    last_failed_ts: int
+    status_code: int | None
+    message: str
+    url: str | None
+    retry_after_sec: int | None
+    ended_ts: int | None  # None = 진행 중(닫힘 쓰기가 아직 없다)
+
+
+def collect_fail_point(row: CollectFailRow) -> InfluxPoint:
+    """실패 구간 1점 — 열릴 때와 닫힐 때 같은 (tag, time) 으로 써서 필드를 합친다.
+
+    None 은 0·빈 문자열로 쓴다(Influx 에 null 이 없다). `ended_ts` 는 닫힐 때만 실린다.
+    """
+    fields: dict[str, float | int | str] = {
+        "count": row.count,
+        "last_failed_ts": row.last_failed_ts,
+        "status_code": row.status_code or 0,
+        "message": row.message,
+        "url": row.url or "",
+        "retry_after_sec": row.retry_after_sec or 0,
+    }
+    if row.ended_ts is not None:
+        fields["ended_ts"] = row.ended_ts
+    return InfluxPoint(
+        measurement="collect_fail",
+        tags={"exchange": row.exchange, "kind": row.kind},
+        fields=fields,
+        ts=row.started_ts,
+    )
+
+
 def _esc_tag(v: str) -> str:
     """line protocol 태그 값 이스케이프 — 콤마·공백·등호."""
     return (
@@ -86,10 +126,23 @@ def _rfc3339(ts: int) -> str:
     return datetime.fromtimestamp(ts, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _esc_field_str(v: str) -> str:
+    """line protocol 문자열 필드 이스케이프 — 역슬래시·따옴표."""
+    return v.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _field_literal(v: float | int | str) -> str:
+    if isinstance(v, str):
+        return f'"{_esc_field_str(v)}"'
+    if isinstance(v, int):
+        return f"{v}i"
+    return repr(v)
+
+
 def to_line(p: InfluxPoint) -> str:
     """InfluxPoint → line protocol (초 정밀도)."""
     tags = ",".join(f"{k}={_esc_tag(v)}" for k, v in sorted(p.tags.items()))
-    fields = ",".join(f"{k}={v!r}" for k, v in sorted(p.fields.items()))
+    fields = ",".join(f"{k}={_field_literal(v)}" for k, v in sorted(p.fields.items()))
     return f"{p.measurement},{tags} {fields} {p.ts}"
 
 
@@ -213,6 +266,44 @@ from(bucket: "{self.bucket}")
             if not found:
                 return None
         return (out[0], out[1])
+
+    # --- 읽기 (collect_fail — 기동 시 복원 1회, HTTP 조회 없음. 스펙 011 §3.4) ---
+
+    def query_collect_fail(self, *, start: int) -> list[CollectFailRow]:
+        """start(epoch 초) 이후에 시작한 실패 구간 전부 — 진행 중(ended_ts 없음) 포함."""
+        flux = f"""
+from(bucket: "{self.bucket}")
+  |> range(start: {_rfc3339(start)})
+  |> filter(fn: (r) => r._measurement == "collect_fail")
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> group()
+  |> sort(columns: ["_time"])
+"""
+        rows: list[CollectFailRow] = []
+        for record in self._records(flux):
+            v = record.values
+            if v.get("count") is None or v.get("last_failed_ts") is None:
+                continue  # 열림 쓰기가 유실된 반쪽 점은 복원하지 않는다
+            ended = v.get("ended_ts")
+            rows.append(
+                CollectFailRow(
+                    exchange=str(v.get("exchange", "")),
+                    kind=str(v.get("kind", "")),
+                    started_ts=int(v["_time"].timestamp()),
+                    count=int(v["count"]),
+                    last_failed_ts=int(v["last_failed_ts"]),
+                    status_code=int(v["status_code"]) or None
+                    if v.get("status_code") is not None
+                    else None,
+                    message=str(v.get("message") or ""),
+                    url=str(v.get("url") or "") or None,
+                    retry_after_sec=int(v["retry_after_sec"]) or None
+                    if v.get("retry_after_sec") is not None
+                    else None,
+                    ended_ts=int(ended) if ended is not None else None,
+                )
+            )
+        return rows
 
     def _records(self, flux: str):  # noqa: ANN202 — influxdb-client 내부 타입 비노출
         try:

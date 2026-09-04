@@ -105,11 +105,17 @@ class UpbitConnector(ExchangeConnector):
             resp = await client.get(url, params=params)
         except httpx.TimeoutException as exc:
             raise ExchangeTimeoutError(
-                self.id, url, f"업비트 응답 시간 초과: {type(exc).__name__}: {exc}"
+                self.id,
+                url,
+                f"업비트 응답 시간 초과: {type(exc).__name__}: {exc}",
+                kind="timeout",
             ) from exc
         except httpx.HTTPError as exc:
             raise ExchangeApiError(
-                self.id, url, f"업비트 연결 실패: {type(exc).__name__}: {exc}"
+                self.id,
+                url,
+                f"업비트 연결 실패: {type(exc).__name__}: {exc}",
+                kind="network",
             ) from exc
         if resp.status_code != 200:
             raise ExchangeApiError(
@@ -118,10 +124,41 @@ class UpbitConnector(ExchangeConnector):
                 f"업비트 비-200 응답: {resp.status_code}",
                 status_code=resp.status_code,
                 body=resp.text,
+                kind=_classify(resp.status_code),
+                retry_after_sec=_retry_after(resp),
             )
         try:
-            return resp.json()
+            data = resp.json()
         except ValueError as exc:
             raise ExchangeApiError(
-                self.id, url, f"업비트 JSON 파싱 실패: {exc}"
+                self.id, url, f"업비트 JSON 파싱 실패: {exc}", kind="bad_response"
             ) from exc
+        if not isinstance(data, list):
+            raise ExchangeApiError(
+                self.id,
+                url,
+                "업비트 응답이 리스트가 아니다",
+                status_code=resp.status_code,
+                body=resp.text,
+                kind="bad_response",
+            )
+        return data
+
+
+def _classify(status: int) -> str:
+    """업비트 규칙(스펙 011 §3.2): 429 한도초과, 418 누적 차단, 5xx 장애(점검 포함), 그 외 4xx 요청오류."""
+    if status == 429:
+        return "rate_limit"
+    if status == 418:
+        return "banned"
+    if 500 <= status < 600:
+        return "unavailable"
+    if 400 <= status < 500:
+        return "bad_request"
+    return "bad_response"  # 문서에 없는 상태(3xx 등)는 응답오류로 두고 body 를 남긴다
+
+
+def _retry_after(resp: httpx.Response) -> int | None:
+    """Retry-After 가 초 단위 정수일 때만 값을 남긴다 — 날짜 형식은 무시."""
+    raw = resp.headers.get("Retry-After")
+    return int(raw) if raw is not None and raw.isdigit() else None

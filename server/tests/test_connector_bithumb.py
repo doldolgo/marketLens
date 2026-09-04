@@ -3,8 +3,10 @@
 import time
 
 import httpx
+import pytest
 
 from app.core.connectors.bithumb import BithumbConnector
+from app.core.errors import ExchangeApiError
 
 _KST_OFFSET_MS = 32_400_000
 
@@ -122,3 +124,38 @@ async def test_all_ghost_side_skips_coin() -> None:
     fake.set_ticker("KRW-BTC", 100.0, 1_700_000_000_000)
     result = await BithumbConnector().fetch_rows(fake.client())
     assert result.rows == []
+
+
+# ── HTTP 200 + error 본문 quirk (스펙 011 §3.2, §4) ────────────────────────────
+
+
+def _body_client(body: str, status: int = 200) -> httpx.AsyncClient:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, text=body)
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+async def test_http_200_with_error_body_is_failure_classified_by_name() -> None:
+    body = '{"error":{"name":429,"message":"Too many requests"}}'
+    with pytest.raises(ExchangeApiError) as info:
+        await BithumbConnector().fetch_rows(_body_client(body))
+    exc = info.value
+    assert exc.kind == "rate_limit"
+    assert exc.status_code == 200  # 실제 HTTP 상태
+    assert exc.body == body
+
+
+async def test_http_200_with_string_error_name_is_bad_response() -> None:
+    body = '{"error":{"name":"invalid_market","message":"x"}}'
+    with pytest.raises(ExchangeApiError) as info:
+        await BithumbConnector().fetch_rows(_body_client(body))
+    assert info.value.kind == "bad_response"
+    assert info.value.status_code == 200
+
+
+async def test_non_200_is_classified_by_status() -> None:
+    with pytest.raises(ExchangeApiError) as info:
+        await BithumbConnector().fetch_rows(_body_client("", status=502))
+    assert info.value.kind == "unavailable"
+    assert info.value.status_code == 502

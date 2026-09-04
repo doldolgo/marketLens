@@ -6,12 +6,28 @@ main.py 의 예외 핸들러가 한다. 여기는 예외 자체와 detail 조립
 
 _BODY_LIMIT = 500  # 비-200 본문은 앞 500자만 담는다 — 스펙 001 §3.1
 
+# 실패 종류 7종 — 스펙 011 §3.2. 분류는 각 커넥터가 자기 거래소 규칙으로 정한다.
+FAIL_KINDS = (
+    "timeout",
+    "network",
+    "rate_limit",
+    "banned",
+    "unavailable",
+    "bad_request",
+    "bad_response",
+)
+
 
 class ExchangeError(Exception):
-    """거래소 호출 실패의 공통 부모. code·http_status 는 하위 클래스가 정한다."""
+    """거래소 호출 실패의 공통 부모. code·http_status 는 하위 클래스가 정한다.
+
+    kind 는 실패 이력(011)이 구간을 나누는 기준이다. 하위 클래스의 기본값이 있어
+    커넥터가 안 넘기면 그 기본값이 된다(타임아웃 → timeout, 그 외 → bad_response).
+    """
 
     code = "exchange_api_error"
     http_status = 502
+    default_kind = "bad_response"
 
     def __init__(
         self,
@@ -20,6 +36,8 @@ class ExchangeError(Exception):
         message: str,
         status_code: int | None = None,
         body: str | None = None,
+        kind: str | None = None,
+        retry_after_sec: int | None = None,
     ) -> None:
         super().__init__(message)
         self.exchange = exchange
@@ -27,6 +45,8 @@ class ExchangeError(Exception):
         self.message = message
         self.status_code = status_code
         self.body = body[:_BODY_LIMIT] if body is not None else None
+        self.kind = kind if kind is not None else self.default_kind
+        self.retry_after_sec = retry_after_sec
 
     def detail(self) -> dict[str, object]:
         d: dict[str, object] = {"exchange": self.exchange, "url": self.url}
@@ -41,6 +61,7 @@ class ExchangeTimeoutError(ExchangeError):
 
     code = "exchange_timeout"
     http_status = 504
+    default_kind = "timeout"
 
 
 class ExchangeApiError(ExchangeError):

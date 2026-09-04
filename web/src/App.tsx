@@ -3,13 +3,14 @@
 import { useState, type ReactNode } from 'react'
 import FlowTab from './features/flow/Tab'
 import GapTab from './features/gap/Tab'
+import { useHealthPolling } from './features/health/api'
 import HealthTab from './features/health/Tab'
 import HistoryTab from './features/history/Tab'
 import PpTab from './features/pp/Tab'
 import { useSpreadPolling } from './features/spreads/api'
 import SpreadsTab from './features/spreads/Tab'
 import { useFeed } from './shared/feed'
-import { fmtPct, pctColor } from './shared/format'
+import { exName, fmtPct, pctColor } from './shared/format'
 import { kicker, vDivider } from './shared/ui'
 
 type TabId = 'spread' | 'history' | 'gap' | 'pp' | 'health' | 'flow'
@@ -22,16 +23,26 @@ const TABS: [TabId, string][] = [
 
 export default function App() {
   const { feed, now } = useFeed()
-  // 셸이 공유 피드를 만든 직후 /spreads 1초 폴링 시작 (스펙 003 §3.4)
+  // 셸이 공유 피드를 만든 직후 /spreads 1초 폴링 시작 (스펙 003 §3.4), 그 옆에서 /health/collect 5초 폴링 (011 §3.6)
   useSpreadPolling(feed)
+  useHealthPolling(feed)
   const [tab, setTab] = useState<TabId>('spread')
   // 스프레드 행 클릭 → 기록 탭으로 피벗할 선택된 심볼 — 초기값 'BTC' (스펙 005 §2)
   const [selSym, setSelSym] = useState<string>('BTC')
 
-  // 수집 상태 요약 — KPI 스트립은 전 탭 공통이라 여기서 계산 (수집 상태 탭과 같은 mock 카드)
-  const cards = feed.health
-  const downNames = cards.filter((c) => c.state === 'down').map((c) => c.name)
-  const staleN = cards.filter((c) => c.state === 'stale').length
+  // 수집 상태 KPI — /health/collect 마지막 응답 기준, 첫 응답 전엔 – (011 §3.7)
+  const exs = feed.health?.exchanges ?? []
+  const okN = exs.filter((c) => c.state === 'ok').length
+  const downNames = exs.filter((c) => c.state === 'down').map((c) => exName(c.exchange))
+  const staleN = exs.filter((c) => c.state === 'stale').length
+  const healthValue = feed.health ? `${exs.length}곳 중 ${okN}곳 정상` : '–'
+  const healthSub = !feed.health
+    ? '수집 상태 조회 전'
+    : downNames.length
+      ? `${downNames.join(', ')} 끊김${staleN ? ` · ${staleN}곳 지연` : ''}`
+      : staleN
+        ? `${staleN}곳 지연`
+        : '전체 정상'
 
   // BTC 김프 KPI — fail 제외 전 페어 중 최고값
   const btcLive = feed.spreads.filter((r) => r.sym === 'BTC' && r.status !== 'fail')
@@ -99,10 +110,8 @@ export default function App() {
         <div style={{ flex: 'none' }}>
           <div style={{ ...kicker, marginBottom: 2 }}>수집 상태</div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)', fontSize: 14 }}>
-            <span>{cards.length}곳 중 {cards.length - downNames.length}곳 정상</span>
-            <span style={{ fontSize: 11, color: 'var(--color-neutral-500)' }}>
-              {downNames.length ? `${downNames.join(', ')} 끊김 · ${staleN}곳 지연` : staleN ? `${staleN}곳 지연` : '전체 정상'}
-            </span>
+            <span>{healthValue}</span>
+            <span style={{ fontSize: 11, color: 'var(--color-neutral-500)' }}>{healthSub}</span>
           </div>
         </div>
         <div style={{ flex: 'none', marginLeft: 'auto', textAlign: 'right' }}>

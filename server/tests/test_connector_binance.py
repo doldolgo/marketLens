@@ -3,8 +3,10 @@
 import time
 
 import httpx
+import pytest
 
 from app.core.connectors.binance import BinanceConnector
+from app.core.errors import ExchangeApiError
 
 
 def make_client(
@@ -140,3 +142,41 @@ async def test_zero_bid_or_ask_skips_symbol() -> None:
     )
     result = await BinanceConnector().fetch_rows(client)
     assert [r.base for r in result.rows] == ["TWO"]
+
+
+# ── 실패 분류 + Retry-After (스펙 011 §3.2, §4) ────────────────────────────────
+
+
+def _status_client(
+    status: int, headers: dict[str, str] | None = None
+) -> httpx.AsyncClient:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status, text='{"code":-1003,"msg":"x"}', headers=headers or {}
+        )
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+async def test_429_with_retry_after_is_rate_limit() -> None:
+    with pytest.raises(ExchangeApiError) as info:
+        await BinanceConnector().fetch_rows(_status_client(429, {"Retry-After": "10"}))
+    assert info.value.kind == "rate_limit"
+    assert info.value.retry_after_sec == 10
+    assert info.value.status_code == 429
+
+
+async def test_403_is_banned() -> None:
+    with pytest.raises(ExchangeApiError) as info:
+        await BinanceConnector().fetch_rows(_status_client(403))
+    assert info.value.kind == "banned"
+    assert info.value.retry_after_sec is None
+
+
+async def test_418_is_banned_and_5xx_unavailable() -> None:
+    with pytest.raises(ExchangeApiError) as info:
+        await BinanceConnector().fetch_rows(_status_client(418, {"Retry-After": "120"}))
+    assert (info.value.kind, info.value.retry_after_sec) == ("banned", 120)
+    with pytest.raises(ExchangeApiError) as info:
+        await BinanceConnector().fetch_rows(_status_client(500))
+    assert info.value.kind == "unavailable"

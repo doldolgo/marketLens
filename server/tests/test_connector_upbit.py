@@ -184,3 +184,67 @@ async def test_timeout_raises_exchange_timeout_error() -> None:
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     with pytest.raises(ExchangeTimeoutError):
         await UpbitConnector().fetch_rows(client)
+
+
+# ── 실패 분류 (스펙 011 §3.2, §4) ─────────────────────────────────────────────
+
+
+def _status_client(
+    status: int, body: str = "", headers: dict[str, str] | None = None
+) -> httpx.AsyncClient:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, text=body, headers=headers or {})
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def _raising_client(exc: Exception) -> httpx.AsyncClient:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise exc
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.parametrize(
+    ("status", "kind"),
+    [(429, "rate_limit"), (418, "banned"), (503, "unavailable"), (400, "bad_request")],
+)
+async def test_http_status_is_classified_by_upbit_rules(status: int, kind: str) -> None:
+    body = '{"error":{"name":' + str(status) + ',"message":"x"}}'
+    with pytest.raises(ExchangeApiError) as info:
+        await UpbitConnector().fetch_rows(_status_client(status, body))
+    exc = info.value
+    assert exc.kind == kind
+    assert exc.status_code == status
+    assert exc.body == body
+    assert exc.url == "https://api.upbit.com/v1/market/all"
+    assert exc.retry_after_sec is None
+
+
+async def test_retry_after_seconds_header_is_kept() -> None:
+    with pytest.raises(ExchangeApiError) as info:
+        await UpbitConnector().fetch_rows(
+            _status_client(429, headers={"Retry-After": "3"})
+        )
+    assert info.value.retry_after_sec == 3
+
+
+async def test_timeout_is_timeout_kind() -> None:
+    with pytest.raises(ExchangeTimeoutError) as info:
+        await UpbitConnector().fetch_rows(_raising_client(httpx.ReadTimeout("slow")))
+    assert info.value.kind == "timeout"
+    assert info.value.status_code is None
+
+
+async def test_connect_error_is_network_kind() -> None:
+    with pytest.raises(ExchangeApiError) as info:
+        await UpbitConnector().fetch_rows(
+            _raising_client(httpx.ConnectError("refused"))
+        )
+    assert info.value.kind == "network"
+
+
+async def test_non_json_is_bad_response_kind() -> None:
+    with pytest.raises(ExchangeApiError) as info:
+        await UpbitConnector().fetch_rows(_status_client(200, "<html>oops</html>"))
+    assert info.value.kind == "bad_response"

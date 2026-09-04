@@ -19,6 +19,7 @@ from app.core.connectors.base import ExchangeConnector, FetchResult
 from app.core.errors import ExchangeError
 from app.core.live_store import LiveStore
 from app.core.models import Row
+from app.core.outages import OutageTracker
 
 logger = logging.getLogger("marketlens.collector")
 
@@ -42,6 +43,8 @@ class CycleResult:
 class _Failure:
     error_code: str
     message: str
+    # 실패 이력(011)에 넘길 분류·원문 — 커넥터 예외가 아닌 예상 밖 예외면 None
+    error: ExchangeError | None = None
 
 
 class WalletStatusProvider(Protocol):
@@ -74,6 +77,7 @@ class Collector:
         client: httpx.AsyncClient,
         interval: float = COLLECT_INTERVAL,
         wallet: WalletStatusProvider | None = None,
+        outages: OutageTracker | None = None,
     ) -> None:
         self._store = store
         self._domestic = domestic
@@ -81,6 +85,7 @@ class Collector:
         self._client = client
         self._interval = interval
         self._wallet = wallet
+        self._outages = outages
         # 사이클은 동시에 두 개 돌지 않는다 — 루프와 수동 트리거(003 /refresh)가 겹치면 뒤가 기다린다
         self._lock = asyncio.Lock()
         # 입출금 조회가 실패 상태인 거래소 id — 저장 루프(005)가 읽어 dw_fail 점을 쓴다.
@@ -198,6 +203,14 @@ class Collector:
             foreign_rows = foreign_outcome.rows
             calls[self._foreign.id] = foreign_outcome.calls
 
+        # 거래소별 성공/실패를 실패 이력 추적기에 넘긴다 (011 §3.3). 사이클 시각 = fetched_at.
+        if self._outages is not None:
+            for conn, outcome in [
+                *zip(self._domestic, domestic_outcomes, strict=True),
+                (self._foreign, foreign_outcome),
+            ]:
+                self._track(self._outages, conn.id, outcome, fetched_at)
+
         # 4. 교집합 필터 — "이번 사이클 성공 거래소 + 유지된 거래소" 전체로 계산한다
         domestic_union: set[str] = set()
         for conn in self._domestic:
@@ -269,13 +282,47 @@ class Collector:
             wallet_status_available=wallet_available,
         )
 
+    @staticmethod
+    def _track(
+        tracker: OutageTracker,
+        exchange: str,
+        outcome: FetchResult | _Failure,
+        fetched_at: int,
+    ) -> None:
+        if not isinstance(outcome, _Failure):
+            tracker.record_success(exchange, fetched_at)
+            return
+        exc = outcome.error
+        if exc is None:
+            # 커넥터 밖의 예상 밖 예외(버그) — 거래소 응답을 해석 못 한 것으로 본다
+            tracker.record_failure(
+                exchange,
+                fetched_at,
+                kind="bad_response",
+                message=outcome.message,
+                status_code=None,
+                url=None,
+                retry_after_sec=None,
+            )
+            return
+        tracker.record_failure(
+            exchange,
+            fetched_at,
+            kind=exc.kind,
+            # 거래소 원문 body 가 있으면 그것, 없으면 커넥터 message (011 §3.3)
+            message=exc.body if exc.body else exc.message,
+            status_code=exc.status_code,
+            url=exc.url,
+            retry_after_sec=exc.retry_after_sec,
+        )
+
     async def _safe_fetch(self, conn: ExchangeConnector) -> FetchResult | _Failure:
         """거래소 하나의 실패가 사이클을 죽이지 않게 예외를 실패 기록으로 바꾼다."""
         try:
             return await conn.fetch_rows(self._client)
         except ExchangeError as exc:
             logger.warning("%s 수집 실패: %s", conn.id, exc)
-            return _Failure(error_code=exc.code, message=str(exc))
+            return _Failure(error_code=exc.code, message=str(exc), error=exc)
         except Exception as exc:
             logger.exception("%s 수집 중 예상 밖 예외", conn.id)
             return _Failure(

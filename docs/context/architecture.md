@@ -24,9 +24,10 @@
                               60초마다 persist 루프 ──▶ InfluxDB
                                 (`premium` 에 fwd/rev 쓰기, 입출금 조회 실패 시 `dw_fail` 1점)
                               60초마다 snapshot 루프 ──▶ S3 (/spreads 행 전체를 .jsonl.gz 로)
+수집 사이클 → 실패 이력(메모리, 구간 단위) → Influx collect_fail(열림/닫힘 시)·기동 시 복원
 ```
 - 입출금 상태 API는 수집 루프가 60초 주기로만 조회해 캐시한다. 키가 없으면 `null`(모름). 망 판정은 `/spreads`에서 하고, 빗썸은 키가 필요 없다.
-- `GET /health`와 수집 루프는 기능 폴더가 아니라 앱 진입점 소관이다. `/health`는 프로세스 liveness만 나타내며 수집 최신성이나 InfluxDB 상태를 보장하지 않는다.
+- `GET /health`와 수집 루프는 기능 폴더가 아니라 앱 진입점 소관이다. `/health`는 프로세스 liveness만 나타내며 수집 최신성이나 InfluxDB 상태를 보장하지 않는다. 상세는 `/health/collect`(011).
 - USDT 시세는 별도 호출 없이 국내 거래소의 KRW 마켓 일괄 호가 중 USDT 항목에서 추출한다. 최우선 매도호가가 rate_ask(USDT 살 때), 최우선 매수호가가 rate_bid. 거래소별 ask/bid. 커넥터는 USDT 를 특별 취급하지 않는다. 은행 환율은 어디에도 쓰지 않는다(product.md 용어).
 - 시세 호출 실패 시 `live_store`는 해당 거래소의 직전 시세를 유지하고 `age`가 커진다. 입출금 상태 조회 실패는 `unknown`으로 기록한다. FE는 age로 stale을 표시한다. 재기동 시 InfluxDB에서 되읽는 폴백은 없으며 메모리는 첫 수집으로만 채워진다.
 
@@ -66,10 +67,11 @@ EC2 1대. 루트 `docker compose up -d --build`로 server·web·influxdb 컨테�
 ## 현재 구조 (개발 후 갱신 — 실행 세션이 §7 보고와 함께 채운다)
 스펙이 DONE 될 때마다 주요 모듈과 역할을 짧게 기록한다. 문서와 코드가 다르면 사람이 올바른 쪽을 결정하고 같은 변경에서 둘을 맞춘다.
 - **collect (001)**: `core/collector.py`(사이클 5단계·락·1초 루프), `core/live_store.py`(거래소별 스냅샷·USDT 시세), `core/connectors/`(공통 인터페이스와 거래소별 구현), `core/rows.py`(행 조립), `core/models.py`, `core/errors.py`, `core/config.py`. 앱 골격과 수집 루프 기동은 `app/main.py` lifespan이 담당한다.
-- **web-shell (002)**: `shared/`(테마·공유 피드·결정론 mock·포맷·UI 조각), `App.tsx`(헤더·KPI·탭 전환), `features/{gap,pp,health,flow}/Tab.tsx`(mock 탭). spreads와 history는 별도 기능 폴더가 담당한다.
+- **web-shell (002)**: `shared/`(테마·공유 피드·결정론 mock·포맷·UI 조각), `App.tsx`(헤더·KPI·탭 전환), `features/{gap,pp,flow}/Tab.tsx`(mock 탭). spreads와 history는 별도 기능 폴더가 담당한다.
 - **spreads (003)**: server `core/premium.py`, `features/spreads/`(계산·API·응답 모델). web `features/spreads/`(1초 폴링·응답 타입·화면).
 - **analysis (004)**: `features/analysis/`(호가창 소진 계산·6개 분석 API·응답 모델). web 없음.
 - **history (005)**: `core/influx.py`, `core/persist.py`, `features/history/`(이력 조회 API), `scripts/backfill.py`, `docker-compose.dev.yml`. web 기록 탭은 mock 데이터를 사용한다.
 - **wallet-status (006)**: `core/networks.py`(망 정규화·판정), `features/wallet_status/`(거래소별 조회·60초 캐시). collector에 Protocol로 주입하고 spreads가 망 단위 상태를 계산한다.
 - **deploy (007)**: server·web Dockerfile, 배포 compose, CI·배포 GitHub Actions workflow.
 - **s3-snapshot (010)**: `core/s3.py`(S3 업로더 — boto3 는 이 모듈만), `core/snapshot.py`(60초 루프·객체 빌드 — 003 의 표 계산 함수를 그대로 쓴다). 기동·종료는 `app/main.py` lifespan. Influx persist 루프와 별개 태스크다 — 한쪽 저장소 장애가 다른 쪽 기록을 막지 않는다.
+- **health (011)**: `core/outages.py`(실패 구간 추적기 — 수집기가 쓰므로 core. 열림/닫힘 시 `collect_fail` 1점을 순서 보장 큐로 쓰고, 기동 시 24시간 복원), 커넥터 3개가 예외에 `kind` 분류, `features/health/`(읽기 API `/health/collect`), web `features/health/`(5초 폴링·탭). 응답 타입 `HealthData` 와 거래소 표시명 `exName` 은 `shared/` 에 있다(셸 KPI·spreads 가 같이 쓴다).

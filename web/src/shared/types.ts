@@ -60,30 +60,59 @@ export interface MockMarket {
   perp: PerpItem[]
 }
 
-/** 수집 상태 (일 단위 시드). */
+// ── 수집 상태 — GET /health/collect 응답 (011 §3.5, BE features/health/models.py 와 1:1) ──
+// 셸 KPI 와 공유 피드가 알아야 해서 shared 에 둔다. 시각은 전부 epoch ms.
+
 export type HealthState = 'ok' | 'stale' | 'down'
 
-/** 결측 구간 — 지금 기준 몇 분 전에 시작해 몇 분 지속. */
-export interface HealthGap {
-  startAgoMin: number
-  durMin: number
+export type OutageKind =
+  | 'timeout'
+  | 'network'
+  | 'rate_limit'
+  | 'banned'
+  | 'unavailable'
+  | 'bad_request'
+  | 'bad_response'
+
+/** 실패 구간 1건 — openOutage 와 outages 항목이 같은 모양. endedAt null = 진행 중. */
+export interface HealthOutage {
+  exchange: string
+  kind: OutageKind
+  startedAt: number
+  endedAt: number | null
+  lastFailedAt: number
+  count: number
+  statusCode: number | null
+  message: string
+  url: string | null
+  retryAfterSec: number | null
 }
 
-export interface HealthEx {
-  name: string
-  spot: number
-  perp: number
+export interface HealthLastError {
+  at: number
+  kind: OutageKind
+  statusCode: number | null
+  message: string
+}
+
+export interface HealthExchange {
+  exchange: string
   state: HealthState
-  failRate: number
-  lastRecvSec: number
-  gaps: HealthGap[]
+  lastSuccessAt: number | null
+  markets: number
+  successRate1h: number
+  openOutage: HealthOutage | null
+  lastError: HealthLastError | null
 }
 
-export interface HealthEvent {
-  ageMin: number
-  ex: string
-  kind: string
-  msg: string
+export interface HealthData {
+  serverStartedAt: number
+  fetchedAt: number
+  successRate1h: number
+  /** 거래소 3곳 고정 순서 upbit·bithumb·binance. */
+  exchanges: HealthExchange[]
+  /** 24시간 구간 전부(진행 중 포함), startedAt 내림차순. */
+  outages: HealthOutage[]
 }
 
 /** 입출금 레이더 주소. */
@@ -128,12 +157,14 @@ export interface Feed {
   /** 키 "{sym}|{거래소 표시명}" → 입출금 상태. */
   io: Record<string, IoEntry>
   markets: MockMarket[]
-  health: HealthEx[]
-  healthEvents: HealthEvent[]
+  /** /health/collect 마지막 응답 — 첫 응답 전 null (011). */
+  health: HealthData | null
   flowAddrs: FlowAddr[]
   flowRows: FlowRow[]
   /** spreads 행 + rate 통째 교체 — 003 이 1초 폴링으로 호출. io 는 새 행들로부터 재구성. */
   replace(rows: SpreadRow[], rate: number): void
+  /** 수집 상태 적용 — 011 이 5초 폴링으로 호출. */
+  setHealth(data: HealthData): void
   /** 005 가 실 DB 전에 화면을 채우는 mock 사건 목록. per: 기간 선택값, now: epoch ms. */
   events(per: string, now: number): MockEvent[]
 }

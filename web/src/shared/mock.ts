@@ -5,9 +5,6 @@ import type {
   FeedStatus,
   FlowAddr,
   FlowRow,
-  HealthEvent,
-  HealthEx,
-  HealthState,
   MockEvent,
   MockMarket,
   PerpItem,
@@ -48,7 +45,7 @@ function drawAge(r: () => number, status: FeedStatus): number {
 }
 
 /** 코인별 현물·선물 목록 — (코인 idx + 거래소 idx) % 3 이 1 이 아니면 현물, 2 가 아니면 선물.
- * 단 Hyperliquid 는 perp 전용이라 현물 목록에서 뺀다(수집 상태 탭의 현물 구독 0 과 일치). */
+ * 단 Hyperliquid 는 perp 전용이라 현물 목록에서 뺀다. */
 export function buildMarkets(): MockMarket[] {
   return COINS.map(([sym, base], i) => {
     const spot: SpotItem[] = []
@@ -99,53 +96,6 @@ export function tickMarkets(markets: MockMarket[]): void {
       p.age = 0
     }
   }
-}
-
-// ── 수집 상태 (§3.9, 일 단위 시드) ─────────────────────────────────────────
-
-/** 거래소 8곳 (현물/선물 구독 수 고정). */
-export const HEALTH_EXS: ReadonlyArray<readonly [string, number, number]> = [
-  ['업비트', 132, 0], ['빗썸', 98, 0], ['Binance', 210, 168], ['Bybit', 174, 152],
-  ['Bitget', 140, 128], ['MEXC', 188, 0], ['Gate.io', 164, 96], ['Hyperliquid', 0, 118],
-]
-
-export function buildHealth(dateSeed: string): { cards: HealthEx[]; events: HealthEvent[] } {
-  const cards: HealthEx[] = HEALTH_EXS.map(([name, spot, perp]) => {
-    const r = rng(`health|${dateSeed}|${name}`)
-    const v = r()
-    const state: HealthState = v < 0.72 ? 'ok' : v < 0.9 ? 'stale' : 'down'
-    const failRate = state === 'down' ? 100 : state === 'stale' ? uniform(r, 2, 8) : uniform(r, 0, 0.8)
-    const lastRecvSec =
-      state === 'down' ? uniform(r, 30 * 60, 90 * 60) : state === 'stale' ? uniform(r, 60, 460) : uniform(r, 0, 5)
-    const nGaps = state === 'down' ? 3 : state === 'stale' ? 2 : r() < 0.5 ? 0 : 1
-    const gaps = []
-    for (let k = 0; k < nGaps; k++) {
-      // 구간 길이는 스펙에 없어 4~28분으로 정했다.
-      const durMin = uniform(r, 4, 28)
-      gaps.push({ startAgoMin: uniform(r, durMin, 1440), durMin })
-    }
-    // down 은 마지막 수신 이후 지금까지가 결측 구간.
-    if (state === 'down') gaps.push({ startAgoMin: lastRecvSec / 60, durMin: lastRecvSec / 60 })
-    return { name, spot, perp, state, failRate, lastRecvSec, gaps }
-  })
-
-  const r = rng(`health|${dateSeed}|events`)
-  const events: HealthEvent[] = []
-  for (let k = 0; k < 12; k++) {
-    const ex = pick(r, HEALTH_EXS)[0]
-    const kv = r()
-    const kind = kv < 0.4 ? '재연결' : kv < 0.65 ? '지연' : kv < 0.85 ? 'rate limit' : '구독 실패'
-    const ageMin = uniform(r, 2, 1400)
-    const n = Math.round(uniform(r, 2, 45))
-    const msg =
-      kind === '재연결' ? `WebSocket 재연결 완료 · 끊김 ${n}초`
-      : kind === '지연' ? `호가 수신 지연 ${n}초 관측`
-      : kind === 'rate limit' ? `REST 429 응답 — ${n}초 백오프 후 재개`
-      : `${Math.max(1, Math.round(n / 3))}개 마켓 구독 실패 · 재시도 예약`
-    events.push({ ageMin, ex, kind, msg })
-  }
-  events.sort((a, b) => a.ageMin - b.ageMin) // 최신순
-  return { cards, events }
 }
 
 // ── 입출금 레이더 (§3.10, 시현용) ──────────────────────────────────────────
