@@ -7,11 +7,11 @@
 
 ## 1. 목적
 수집 상태 탭이 mock 대신 **실제 수집기의 거래소별 실패 이력**을 보여준다. 거래소가 실패하면 "언제, 어느 거래소가, 어떤 종류로(rate limit·차단·타임아웃·거래소 오류…), 거래소가 뭐라고 했는지" 를 카드·24시간 타임라인·로그에서 본다. 이력은 서버를 껐다 켜도 복원된다.
-백오프·재시도 정책 같은 **대응**은 이 스펙이 아니다(후속 012). 이 스펙은 관측과 기록까지다.
+백오프·재시도 정책 같은 **대응**은 이 스펙이 아니다(후속 013). 이 스펙은 관측과 기록까지다.
 
 ## 2. 범위
 - 만드는 것: `GET /health/collect`(BE, `server/app/features/health/`), 수집 실패 이력 추적(core — 수집기가 쓴다), Influx `collect_fail` 쓰기·기동 시 복원, `web/src/features/health/` 실데이터 탭(api·types 추가).
-- 하지 않는 것: `GET /health` 변경(001 계약 "항상 ok" 유지 — 007 배포 헬스체크·005/010 장애 격리 검증이 여기에 걸려 있다). 백오프·`Retry-After` 존중·서킷브레이커(012). 입출금 조회·Influx persist·S3 snapshot 루프의 상태 표시. `collect_fail` 을 읽는 HTTP 이력 조회 API(메모리가 진실, Influx 는 복원용). FE 테스트 러너.
+- 하지 않는 것: `GET /health` 변경(001 계약 "항상 ok" 유지 — 007 배포 헬스체크·005/010 장애 격리 검증이 여기에 걸려 있다). 백오프·`Retry-After` 존중·서킷브레이커(013). 입출금 조회·Influx persist·S3 snapshot 루프의 상태 표시. `collect_fail` 을 읽는 HTTP 이력 조회 API(메모리가 진실, Influx 는 복원용). FE 테스트 러너.
 - 바꾸는 기존 것:
   1. 001 커넥터 3개 — 실패 예외에 **종류(kind)** 와 거래소 원문을 싣는다(§3.2). 빗썸은 HTTP 200 + 에러 본문을 실패로 판정한다. 성공 경로·행 조립·`/refresh` 응답 모양은 불변.
   2. 001 수집 사이클 — 거래소별 성공/실패를 매 사이클 이력 추적기에 넘긴다. 사이클 순서·메모리 교체 규칙 불변.
@@ -38,6 +38,7 @@
 | `unavailable` | 거래소장애 |
 | `bad_request` | 요청오류 |
 | `bad_response` | 응답오류 |
+| `stale_stream` | 스트림정체 |
 
 `bad_request` 만 재시도 무의미(우리 요청이 틀림)이고 나머지는 일시적이다. 응답에 함께 남기는 것: `status_code`, `body` 앞 500자, `url`, `retry_after_sec`(헤더 `Retry-After` 가 초 단위 정수로 있을 때만, 아니면 null).
 
@@ -46,6 +47,7 @@
 - **빗썸**(v1 API): 문서상 에러는 HTTP 상태와 함께 `{"error":{"name":…,"message":…}}` 이지만 **실제로는 HTTP 200 에 이 본문을 준다**(`markets=KRW-XXXX` 실호출로 확인). 그래서 200 이어도 본문이 리스트가 아니고 `error` 키가 있으면 실패다. `error.name` 이 정수면 그 값을 HTTP 상태처럼 위 업비트 규칙으로 분류하고, 아니면 `bad_response`. 429/418 의 실제 응답은 문서에 없다(미확인). 이때 `status_code` 는 실제 HTTP 상태(200)다.
 - **바이낸스**: 429 → `rate_limit`, 418 → `banned`(IP 밴, 2분~3일 누진), 둘 다 `Retry-After` 초를 `retry_after_sec` 에. 403 → `banned`(WAF — "rate limit violation or a security block"). 5xx → `unavailable`. 그 외 4xx → `bad_request`. 에러 본문 `{"code":-1003,"msg":…}`.
 - 공통: httpx 타임아웃 → `timeout`. 그 외 httpx 전송 예외(DNS·연결 거부) → `network`. JSON 파싱 실패·예상 밖 모양 → `bad_response`.
+- **`stale_stream`** 은 HTTP 응답이 아니라 상시 연결이 조용히 멈춘 상태다 — 012 의 깊이 스트림이 구독 중인데 30초 무수신이면 그 사이클의 바이낸스 수집이 이 종류로 실패를 던진다. `status_code`·`url` 은 null 이고, 이때도 REST 결과는 유효하므로 그 거래소 행은 직전 스냅샷으로 유지된다. 예외를 던지는 주체가 커넥터라 위 경로(collector → 구간 추적 → `collect_fail`)를 그대로 탄다.
 
 ### 3.3 실패 이력 — 구간(outage) 단위로만 기록
 정상 사이클은 기록하지 않는다. 기록 단위는 **거래소별 연속 실패 구간** 1건이다.
@@ -139,7 +141,7 @@ curl -s -X POST localhost:8020/refresh | head -c 300   # 응답 키 불변(snaps
 수동 항목 중 `/etc/hosts` 빗썸 차단·재기동 복원은 sudo 와 Influx 가 필요해 로컬 실행 세션에서 돌리지 않았다(사람 몫 — EC2 또는 dev compose).
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — 행 추가 `| health | /health/collect·실패 구간 추적·collect_fail 쓰기/복원 | 실데이터 탭·5초 폴링·KPI 수집 상태 | 백오프는 012 |`. web-shell 행의 `mock 탭 4종` → `mock 탭 3종(gap·pp·flow)`. **항상 포함.**
+- `docs/context/status.md` — 행 추가 `| health | /health/collect·실패 구간 추적·collect_fail 쓰기/복원 | 실데이터 탭·5초 폴링·KPI 수집 상태 | 백오프는 013 |`. web-shell 행의 `mock 탭 4종` → `mock 탭 3종(gap·pp·flow)`. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 011 행 상태 → DONE. **항상 포함.**
 - `docs/specs/002-web-shell.md` — §1 "mock 데이터로 도는 탭 4개(…수집 상태…)" 에서 수집 상태 제외, §2 기능 폴더 목록에서 `features/health` 를 "→ 011" 로, §3.5 KPI `수집 상태` 줄을 "011 §3.7" 로 교체, §3.9 본문을 "011 §3.8 로 대체" 한 줄로, §3.6 mock 공통의 Hyperliquid 현물 제외 사유("수집 상태 탭과 일치")를 지운다. §4 육안 체크 8번(수집 상태)을 011 §4 로 넘긴다.
 - `docs/specs/001-collect.md` — §3.1 에러 형식에 `kind` 7종과 `retry_after_sec` 를 한 줄로 추가하고 "분류는 커넥터가 한다(011 §3.2)" 를 적는다. §3.5 빗썸 quirk 에 "HTTP 200 + `error` 본문은 실패" 를 추가한다. §3.2 사이클 5단계 뒤에 "거래소별 성공/실패를 이력 추적기에 넘긴다(011 §3.3)" 를 추가한다.
@@ -166,5 +168,5 @@ curl -s -X POST localhost:8020/refresh | head -c 300   # 응답 키 불변(snaps
   - CLAUDE.md 인덱스 002 행의 "mock 탭(…수집상태…)" 도 함께 고쳤다(§6 목록엔 없지만 지금 동작과 달라서).
 - 남은 빚:
   - `/etc/hosts` 차단·재기동 복원 수동 검증 미실행(로컬 Influx 없음). EC2 배포 후 확인 필요.
-  - 백오프·Retry-After 존중·서킷은 012. 지금은 429 를 받아도 1초마다 재호출한다.
+  - 백오프·Retry-After 존중·서킷은 013. 지금은 429 를 받아도 1초마다 재호출한다.
   - Influx 가 느릴 때 쓰기 큐가 무한히 쌓일 수 있다(구간 열림/닫힘 시에만 넣으므로 실제로는 몇 점 수준).

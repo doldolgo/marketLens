@@ -21,7 +21,7 @@
 - 앱 이름은 `MarketLens Backend`, 버전은 `0.1.0`. `/health` 응답과 User-Agent(`marketlens-server/<version>`)에 쓴다.
 - 거래소 호출 타임아웃은 3.0초, 연결은 1.5초 — httpx 의 단계별(connect/read) 타임아웃이라, 응답이 조금씩 흘러오는 극단에선 요청 전체가 더 길어질 수 있다.
 - 수집 주기는 1초다. 한 사이클이 **끝난 뒤** 이만큼 쉰다. 사이클이 길어져도 겹치지 않는다.
-- 호가는 누적 `price×size` 가 10억 KRW 에 도달한 단계까지만 저장한다(§3.4 행 조립 규칙).
+- 국내 호가는 누적 `price×size` 가 10억 KRW 에 도달한 단계까지만 저장한다(§3.4 행 조립 규칙). 바이낸스 깊이(012)는 대칭으로 누적 1,000,000 USDT 까지 자른다.
 - 국내 마켓 통화는 `KRW`, 해외 마켓 통화는 `USDT`.
 - 거래소 주소는 §3.5 의 공식 URL 이다.
 - 커넥터는 `docs/context/architecture.md` 원칙대로 공통 인터페이스를 구현한다.
@@ -39,7 +39,7 @@
 1. **국내(업비트·빗썸) 동시 수집**: 거래소마다 KRW 전 마켓의 호가(깊이는 응답이 정한다 — 업비트 30단계 고정·빗썸 최대 15단계, §3.5)와 마지막 체결가를 받는다.
 2. **환율 추출**: 국내 거래소마다 KRW 호가 결과 중 base 가 `USDT` 인 항목에서 `asks[0].price` → `rate.ask`(USDT 살 때), `bids[0].price` → `rate.bid`(USDT 팔 때). 추가 HTTP 호출 없음.
    USDT 항목이 없거나 한쪽 호가가 비었거나 0 이하면 그 거래소 환율은 이번 사이클에 **관측 없음**.
-3. **바이낸스 수집**: USDT 현물 전 종목의 마지막 가격과 최우선 호가(1단계)를 받되, **국내 어느 거래소든 KRW 마켓에 있는 코인만** 남긴다.
+3. **바이낸스 수집**: USDT 현물 전 종목의 마지막 가격과 최우선 호가(1단계)를 받되, **국내 어느 거래소든 KRW 마켓에 있는 코인만** 남긴다. 깊이 스트림(012) 캐시에 그 심볼의 신선한 호가가 있으면 `depth_*` 에 함께 싣는다.
 4. **행 조립**(§3.4) 후 **교집합 필터**: base 가 `(국내 거래소 합집합) ∩ (바이낸스)` 에 드는 행만 남긴다. 국내 전용 코인·바이낸스 전용 코인은 메모리에 없다.
    `USDT` 자신도 바이낸스에 USDT/USDT 가 없으므로 빠진다(환율로만 쓰인다).
 5. **메모리 교체**: 아래 규칙대로 스냅샷과 환율을 갱신하고, 저장소의 `received_at`(epoch 초)을 지금으로 갱신한다.
@@ -65,6 +65,8 @@
 - `exchange` — `upbit`·`bithumb`·`binance` 중 하나. `base` — 코인(예 `BTC`). `quote` — 국내 `KRW`, 해외 `USDT`. `native_symbol` — 거래소 원본 심볼(예 `KRW-BTC`, `BTCUSDT`).
 - `price` — 마지막 체결가. 없으면 `(bid+ask)/2`.
 - `asks` — `[price, size]` 목록, 오름차순, 누적액 상한까지(바이낸스는 1단계만). `bids` — 같은 모양, 내림차순.
+- `depth_asks`·`depth_bids` — 바이낸스 깊이 스트림(012)이 채우는 최대 20단계, `[price, size]`. 국내 거래소는 항상 빈 목록이다(자기 `asks`/`bids` 가 이미 깊다). 스트림이 없거나 낡으면 빈 목록. `depth_at` — 그 깊이 수신 시각 epoch ms, 없으면 `null`.
+- **호가를 걷는 계산은 `depth_*` 가 비어 있지 않으면 그것을, 비면 `asks`/`bids` 를 쓴다.** 이 규칙 하나로 세 거래소가 균일하게 처리된다.
 - `price_timestamp` — 거래소 시세 시각 epoch ms(바이낸스는 수집 시각).
 - `deposit_enabled`·`withdrawal_enabled`·`networks` — wallet-status(006) 조회가 60초 주기로 채운다. 키 없음·조회 실패면 `null`·빈 목록.
 - `updated_at` — 이번 사이클 적재 시각, tz-aware UTC. `age = now − updated_at`.
@@ -81,7 +83,7 @@
 3. 국내 호가는 누적 `price×size` 가 10억 KRW 에 **도달한 단계까지 포함**하고 자른다.
 4. 국내는 bid·ask 어느 한쪽이라도 비면 그 코인을 건너뛴다.
 5. 바이낸스는 `bid`·`ask` 가 없거나 0 이하면 건너뛴다.
-6. 바이낸스는 `asks=[[ask, ask_size]]`, `bids=[[bid, bid_size]]` 로 1단계만 담는다. size 없으면 0.
+6. 바이낸스는 `asks=[[ask, ask_size]]`, `bids=[[bid, bid_size]]` 로 1단계만 담는다. size 없으면 0. 깊이 스트림(012) 캐시에 TTL(10초) 안의 항목이 있으면 `depth_asks`·`depth_bids` 에 누적 1,000,000 USDT 도달 단계까지 담고 `depth_at` 을 채운다. 없으면 세 필드는 빈 목록·`null` 이다.
 
 ### 3.5 외부 의존 (public API, 인증 없음)
 **업비트** `https://api.upbit.com`
@@ -110,7 +112,7 @@
 - `GET /api/v3/ticker/price`(마지막 가격) / `GET /api/v3/ticker/bookTicker`(최우선 호가). 심볼 파라미터 없이 **전 종목 한 번에**(~3,700개, weight 4). 사이클 2회.
   단일 심볼이 weight 2 라 2종목만 넘어도 전체가 싸다.
 - `symbol` 이 `USDT` 로 **끝나는** 것만, base = 접미사 뗀 나머지. 가격·수량은 **문자열** → float. `0` 은 거래 없음이므로 건너뜀.
-- 일괄 호가 깊이 조회는 **없다**(이 스펙에선 1단계만 저장).
+- 일괄 호가 깊이 조회는 **없다**. `GET /api/v3/depth` 는 심볼당 1회이고 `limit ≤ 100` 이 weight 5 라, ~300종목 × 1초 주기면 분당 90,000 weight 로 IP 한도 6,000/분을 15배 넘긴다. 그래서 REST 는 최우선 1단계만 담고, 다단계는 012 의 WebSocket 깊이 스트림이 `depth_*` 에 채운다.
 - **`ticker/24hr` 금지** — `closeTime` 은 윈도우 끝이지 체결 시각이 아니다.
 ```json
 [{"symbol":"BTCUSDT","bidPrice":"99.0","bidQty":"2.0","askPrice":"101.0","askQty":"3.0"}]
@@ -135,7 +137,7 @@
 - 거래소 타임아웃은 504 `exchange_timeout`, 비-200 은 502 `exchange_api_error` 로 변환되고 HTTP `detail` 에 `statusCode`·`body` 가 담긴다.
 - 스냅샷 `updated_at` 은 tz-aware UTC 다.
 - 테스트 전부 통과, ruff lint·format 위반 0. 서버를 :8000 에 띄우면 `/health` 가 위 응답을 준다.
-- 선택(실 네트워크, 실패해도 완료를 막지 않음 — 결과를 §7 에 붙인다): 한 사이클을 직접 돌려 저장 수 100 이상, 환율에 upbit·bithumb 둘 다 관측, 거래소 호출 수는 정상 사이클 18회·첫 사이클(market/all 포함) 20회 이하. 1초 주기로 1분 돌려도 rate limit 실패 없음.
+- 선택(실 네트워크, 실패해도 완료를 막지 않음 — 결과를 §7 에 붙인다): 한 사이클을 직접 돌려 저장 수 100 이상, 환율에 upbit·bithumb 둘 다 관측, 거래소 호출 수는 정상 사이클 18회·첫 사이클(market/all 포함) 20회 이하 — 012 의 깊이 스트림은 상시 연결이라 이 수에 들어가지 않는다. 1초 주기로 1분 돌려도 rate limit 실패 없음.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
