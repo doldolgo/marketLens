@@ -1,7 +1,13 @@
-"""호가창 소진(walk) 계산 — 스펙 004 §3.1. analysis 기능 폴더 안에만 산다 (§2).
+"""호가창 소진(walk) 계산 — 스펙 004 §3.1. 003(spreads)·004(analysis) 공용이라 core 에 산다
+(기능 간 import 금지, CLAUDE.md §2).
 
 levels 는 체결되는 쪽 호가([price, size] 목록, 최우선부터).
 금액(quote 통화) 기준으로 사거나 팔고, 수량 기준도 대칭이다.
+
+**이 모듈의 함수는 전부 동기다 — async 로 바꾸지 않는다.** `GET /spreads` 가 수집 락 없이도
+안전한 근거가 "표 조립 전체에 await 가 없다"는 것뿐이기 때문이다. 여기에 await 지점이 생기면
+그 사이에 수집 루프가 `live_store` 를 통째로 교체할 수 있고, 응답 하나가 교체 전·후 호가를
+섞어 담게 된다.
 """
 
 from dataclasses import dataclass
