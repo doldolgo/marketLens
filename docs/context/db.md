@@ -9,12 +9,16 @@
 
 ## measurement
 같은 tag set + 같은 time 은 Influx 가 덮어쓴다. 이것이 유일키 역할이라 별도 중복 방지 코드가 없다.
-- **premium** — 김프/역프 한 점. tag `dom`·`fx`·`base`, field `fwd`·`rev`(float, %), time = 수집 시각. 한 점 = (dom, fx, base, time). `/history/*` 전부의 유일한 원천.
+- **premium** — 김프/역프 한 점. tag `dom`·`fx`·`base`, field `fwd`·`rev`(float, %), time = 수집 시각. 한 점 = (dom, fx, base, time). `/history/*` 전부의 유일한 원천. 값은 최우선 1단계 기준의 **슬리피지 차감 전 원값**이다 — 저장 시점에는 체결 규모가 정의되지 않기 때문이고, `/spreads` 의 순값과는 `fwd + slipFwd` 관계다(003 §2).
 - **dw_fail** — 입출금 조회 실패 관측. tag `exchange`, field `v`=1, time = 관측 시각. 한 점 = (exchange, time). 읽는 HTTP 엔드포인트 없음 — 사람이 Influx UI 에서 본다.
 - **collect_fail** — 수집 실패 구간 1건(스펙 011 §3.4). tag `exchange`·`kind`, time = `started_at`(초), field `count`(int)·`last_failed_ts`(int 초)·`status_code`(int, 없으면 0)·`message`(string)·`url`(string)·`retry_after_sec`(int, 없으면 0)·`ended_ts`(int 초, 닫힐 때만). 한 점 = (exchange, kind, started_at). 열 때 쓰고 닫을 때 같은 키로 덮어써 필드를 합친다.
 
+## 메모리 저장소 (영속 대상 아님)
+`live_store` 는 저장 엔진이 아니지만 여기 적어 둔다 — 어떤 데이터가 **디스크에 남지 않는지**의 경계이기 때문이다.
+- 행의 깊이 3필드(`depth_asks`·`depth_bids`·`depth_at`, 스펙 012)는 바이낸스 WS 스트림이 채우는 최대 20단계다. Influx 에도 S3 에도 쓰지 않는다 — `premium` 은 fwd/rev 2개뿐이고 `/spreads` 스냅샷의 행 키에도 없다. 재기동하면 사라지고 다음 스트림 메시지로 복구된다.
+
 ## 시각 단위
-- Influx time 은 ns 지만 기록 정밀도는 **초**. API 응답의 `*Ts` 는 epoch 초, `fetchedAt` 은 epoch ms.
+- Influx time 은 ns 지만 기록 정밀도는 **초**. API 응답의 `*Ts` 는 epoch 초, `fetchedAt` 은 epoch ms. 깊이의 `depth_at` 도 epoch ms.
 
 ## 보존
 - bucket retention 은 **무제한**. `dw_fail` 의 "최근 24시간" 은 쿼리 range(-24h) 로 처리한다 — retention 을 걸면 `premium` 까지 지워진다.

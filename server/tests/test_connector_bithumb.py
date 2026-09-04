@@ -159,3 +159,15 @@ async def test_non_200_is_classified_by_status() -> None:
         await BithumbConnector().fetch_rows(_body_client("", status=502))
     assert info.value.kind == "unavailable"
     assert info.value.status_code == 502
+
+
+async def test_domestic_row_never_carries_depth_fields() -> None:
+    # 국내는 asks/bids 가 이미 깊어 깊이 스트림을 쓰지 않는다 (스펙 012 §3.5, §4)
+    fake = BithumbFake(["KRW-BTC"])
+    fake.set_orderbook(
+        "KRW-BTC",
+        [{"ask_price": 101.0, "bid_price": 99.0, "ask_size": 1.0, "bid_size": 1.0}],
+    )
+    fake.set_ticker("KRW-BTC", 100.0, 1_700_000_000_000)
+    row = (await BithumbConnector().fetch_rows(fake.client())).rows[0]
+    assert (row.depth_asks, row.depth_bids, row.depth_at) == ([], [], None)

@@ -17,8 +17,9 @@
 
 ### 3.1 읽는 계약 (복사)
 - 001: 수집 루프는 1초마다 거래소 호가를 메모리에 **통째 교체**하며 락을 잡는다. 저장소는 마지막 수신 시각(epoch 초)을 갖는다. 수집이 한 번도 안 돌았으면 수신 시각은 없음.
-- 003: `/spreads` 표 계산은 저장소를 받아 응답 모양 `{rate, rows, dataReceivedAt, warnings, fetchedAt}` 를 돌려주는 공개 함수 하나로 이뤄진다. 행은 다음 18키(camelCase)이고 `(sym, dom, fx)` 오름차순으로 고정돼 있다:
-  `sym, dom, fx, fwd, rev, usd, spark, status, age, liqDom, liqFx, rateAsk, rateBid, netDom, depDom, wdDom, depFx, wdFx`
+- 003: `/spreads` 표 계산은 저장소와 체결 규모를 받아 응답 모양 `{rate, notional, rows, warnings, dataReceivedAt, fetchedAt}` 를 돌려주는 공개 함수 하나로 이뤄진다. 규모를 안 주면 기본 $10,000 이다. 행은 다음 17키(camelCase)이고 `(sym, dom, fx)` 오름차순으로 고정돼 있다:
+  `sym, dom, fx, fwd, rev, usd, spark, status, age, slipFwd, slipRev, krw, netDom, depDom, wdDom, depFx, wdFx`
+  `fwd`·`rev` 는 슬리피지 차감 후 순값이고, 원값은 `fwd + slipFwd` 로 복원된다.
   기준 거래소(업비트) 시세가 없거나 국내·해외 스냅샷이 비면 계산은 "시장 데이터 없음" 예외를 던진다(라우터는 404).
 - 005: persist 루프는 기동 후 먼저 60초 잔 뒤 회차를 반복하고, 수집과 같은 락을 잡고 메모리를 읽으며, 저장 실패는 로그 후 다음 회차 재시도, 놓친 회차는 구멍으로 남긴다. 켜는 조건은 시크릿 존재(`INFLUX_TOKEN`). 이 스펙의 루프는 **같은 규칙**을 따른다.
 
@@ -39,10 +40,11 @@
 ### 3.4 객체 — 키·내용
 - 한 회차 = 객체 1개 = `PutObject` 1번(전부 성공 또는 전부 없음).
 - 키: `spreads/dt=YYYY-MM-DD/hh=HH/YYYYMMDDTHHMMSSZ.jsonl.gz` — 전부 **UTC**, 시각은 `dataReceivedAt`(수집 시각, 초 정밀도). `dt=`·`hh=` 는 Athena/Glue 의 Hive 파티션 관례라 나중에 테이블을 얹을 수 있고, 콘솔에서도 날짜·시간 폴더로 보인다. 예: `spreads/dt=2026-09-02/hh=01/20260902T011507Z.jsonl.gz`.
-- 내용: gzip 압축한 JSON Lines. **한 줄 = `/spreads` 의 한 행**(18키, camelCase, 값·순서 API 와 동일) 에 최상위 세 값을 그대로 붙인 **21키**: `rate`(업비트 USDT ask, `/spreads` 의 `rate`), `dataReceivedAt`(epoch ms), `warnings`(문자열 배열, 보통 빈 배열). 같은 객체 안 모든 줄의 이 세 값은 같다 — 줄 하나만 읽어도 맥락이 완결되게 하기 위해서다. `fetchedAt` 은 싣지 않는다(응답 시각이지 데이터 시각이 아니다). `spark` 는 API 값 그대로 싣는다(009 tick-store 구현 전까지는 빈 배열).
+- 내용: gzip 압축한 JSON Lines. **한 줄 = `/spreads` 의 한 행**(17키, camelCase, 값·순서 API 와 동일) 에 최상위 네 값을 그대로 붙인 **21키**: `rate`(업비트 USDT ask), `notional`(그 줄의 슬리피지가 계산된 체결 규모 USD), `dataReceivedAt`(epoch ms), `warnings`(문자열 배열, 보통 빈 배열). 같은 객체 안 모든 줄의 이 네 값은 같다 — 줄 하나만 읽어도 맥락이 완결되게 하기 위해서다. `notional` 이 없으면 `slipFwd` 가 어느 규모의 값인지 알 수 없어 줄이 자기완결이 아니다. `fetchedAt` 은 싣지 않는다(응답 시각이지 데이터 시각이 아니다).
+- snapshot 루프는 표 계산 함수를 **규모 인자 없이** 부른다 — 아카이브 규모는 003 의 기본값($10,000)이고, 그 값이 매 줄의 `notional` 로 남는다.
 - 줄 순서 = API 행 순서 `(sym, dom, fx)`. 같은 시각 스냅샷을 다시 만들면 바이트까지 같아야 한다(결정적).
 - 메타데이터: `Content-Type: application/x-ndjson`, `Content-Encoding: gzip`.
-- 크기 감: 행 ~150 × 21키 ≈ 압축 전 30~50KB, gzip 후 5~10KB. 하루 1,440 객체.
+- 크기 감: 실측(2026-09-03 스모크) 490행 × 21키 = gzip 후 23,659B. 하루 1,440 객체 ≈ 34MB, 1년 ≈ 12GB. 009 가 `spark` 를 채우면 줄마다 30개 실수가 더해져 객체가 3~4배가 된다.
 
 ### 3.5 snapshot 루프 (60초)
 - 기동 후 **먼저 60초 잔 뒤** 첫 회차(직후엔 메모리가 비어 있다).
@@ -57,7 +59,8 @@
 ## 4. 검증
 네트워크 없음 — S3 는 `put(key, body, ...)` 시그니처의 fake 로 대체한다(005 의 FakeInflux 와 같은 방식, moto 안 씀). CI 에 AWS 자격증명이 없으므로 테스트가 실제 S3 를 만지면 실패해야 정상이다.
 - 수집 1회 후 회차 → 객체 1개, 키가 `spreads/dt=YYYY-MM-DD/hh=HH/…Z.jsonl.gz` 형식이고 시각이 `dataReceivedAt` 의 UTC 와 일치한다
-- 객체를 gunzip 해 줄 수를 세면 같은 저장소로 만든 `/spreads` 의 행 수와 같고, 각 줄이 정확히 21키(18 + `rate`·`dataReceivedAt`·`warnings`)이며 같은 행의 값이 API 응답과 동일하다
+- 객체를 gunzip 해 줄 수를 세면 같은 저장소로 만든 `/spreads` 의 행 수와 같고, 각 줄이 정확히 21키(17 + `rate`·`notional`·`dataReceivedAt`·`warnings`)이며 같은 행의 값이 API 응답과 동일하다
+- 줄의 `fwd` 는 같은 시각 Influx `premium` 의 fwd 와 다르고, 그 차이가 정확히 `slipFwd` 다(아카이브 둘의 관계를 고정)
 - 줄 순서가 `(sym, dom, fx)` 오름차순이고, 같은 저장소로 두 번 만든 바이트가 같다
 - 수집 없이 회차 2번 → 객체 1개(두 번째는 `dataReceivedAt` 같아 생략); 수집이 한 번 더 돈 뒤 회차 → 객체 2개
 - 수집이 아직 안 돌았을 때 회차 → 아무것도 안 올리고 0 반환

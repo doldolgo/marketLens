@@ -36,7 +36,7 @@ dev compose 는 Influx 2.7 하나만 띄운다. 첫 기동 시 org·bucket `mark
   2. 입출금 조회 실패가 관측된 거래소마다 `dw_fail` 1점(time = 수집 시각).
   3. 모은 점을 한 번에 쓴다.
 - **김프 점 규칙**: base 마다 (국내 거래소 × 해외 거래소) 조합. 국내 행은 호가가 있고 **그 거래소의 환율**이 있어야 한다(환율 없는 국내 거래소는 빠진다 — 남의 환율을 빌리지 않는다). 해외 행도 호가 필수.
-  수식은 003 의 `core/premium.py` 공개 함수 `premium_percent(*, buy_krw: float, sell_krw: float) -> float` = `(sell/buy − 1) × 100` 을 import 해 쓴다(재정의 금지). `fwd = premium_percent(buy_krw=fx_ask × rate_ask, sell_krw=dom_bid)`, `rev = premium_percent(buy_krw=dom_ask, sell_krw=fx_bid × rate_bid)` — `/spreads` 와 같은 식이 되고, 여섯 값 중 하나라도 ≤ 0 이면 건너뜀. 점 `(dom, fx, base, time=수집 시각 초, fwd, rev)`. 수집이 멈춰 같은 시각이면 같은 점을 덮어쓴다 — 주기가 곧 DB 증가 속도.
+  수식은 003 의 `core/premium.py` 공개 함수 `premium_percent(*, buy_krw: float, sell_krw: float) -> float` = `(sell/buy − 1) × 100` 을 import 해 쓴다(재정의 금지). `fwd = premium_percent(buy_krw=fx_ask × rate_ask, sell_krw=dom_bid)`, `rev = premium_percent(buy_krw=dom_ask, sell_krw=fx_bid × rate_bid)` — **최우선 1단계 기준의 원값(raw)** 이다. `/spreads` 는 같은 식을 체결 규모만큼 걸은 평균가에 적용해 슬리피지 차감 후 순값을 내므로(003 §3.2-4) 두 값은 다르고, 그 차이가 `/spreads` 의 `slipFwd`·`slipRev` 다 — 저장 시점에는 체결 규모가 정의되지 않아 아카이브는 원값을 쓴다(003 §2). 여섯 값 중 하나라도 ≤ 0 이면 건너뜀. 점 `(dom, fx, base, time=수집 시각 초, fwd, rev)`. 수집이 멈춰 같은 시각이면 같은 점을 덮어쓴다 — 주기가 곧 DB 증가 속도.
 - 저장 실패(Influx 다운 등): 로그 `DB 저장 실패 (연속 n회)` 를 남기고 다음 회차에 재시도한다. **메모리와 수집 루프는 영향 없다.** 놓친 회차는 기록에 구멍으로 남는다(소급 안 함).
 
 ### 3.4 `GET /history/*`
@@ -94,7 +94,7 @@ HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*
 - 수집 1회 후 persist → `premium` 점 수 = 메모리의 (dom, fx, base) 조합 수
 - 수집 없이 persist 2번 → 같은 시각이라 점 수 불변(덮어쓰기); 수집이 한 번 더 돈 뒤 persist → 점 수 증가
 - 환율 없는 국내 거래소는 그 회차 `premium` 에 dom 으로 등장하지 않는다
-- `premium` 의 fwd/rev 값이 같은 호가로 계산한 `/spreads` 의 fwd/rev 와 일치한다
+- `premium` 의 fwd/rev 는 슬리피지 차감 **전** 원값이다 — 같은 호가로 만든 `/spreads` 행의 `fwd + slipFwd`·`rev + slipRev` 와 일치한다(호가를 여러 단계 걷는 시드로 확인해 차감이 0 이 아닌 상태에서 고정한다)
 - 입출금 조회 실패 사이클 → 그 거래소 `dw_fail` 1점; 실패 없으면 0점
 - 한 회차의 점이 한 번의 쓰기로 나간다
 - 수집은 아직 안 돌았는데 persist 호출 → 아무것도 쓰지 않고 0 반환

@@ -60,8 +60,9 @@ WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 ```bash
 curl -s localhost:8000/spreads | head -c 600
 ```
-최상위 `rate > 1000`, 행 수 > 100, `warnings` 는 평상시 빈 배열(008), 각 행의 키가 정확히 다음 18개면 정상 (003 §4 기준):
-`sym, dom, fx, fwd, rev, usd, spark, status, age, liqDom, liqFx, rateAsk, rateBid, netDom, depDom, wdDom, depFx, wdFx`
+최상위 `rate > 1000`·`notional == 10000`, 행 수 > 100, `warnings` 는 평상시 빈 배열(008), 각 행의 키가 정확히 다음 17개면 정상 (003 §4 기준):
+`sym, dom, fx, fwd, rev, usd, spark, status, age, slipFwd, slipRev, krw, netDom, depDom, wdDom, depFx, wdFx`
+체결 규모를 바꿔 슬리피지가 커지는지 본다 — `curl -s "localhost:8000/spreads?notional=500000"` 의 같은 행 `slipFwd` 가 기본값보다 크거나 같아야 한다.
 ```bash
 curl -s "localhost:8000/slippage/upbit?symbol=BTC/KRW&amount=1000000" | head -c 300
 ```
@@ -78,6 +79,10 @@ aws s3 ls s3://<bucket>/spreads/ --recursive | tail -1
 curl -s localhost:8000/health/collect | head -c 400
 ```
 `exchanges` 에 거래소 3곳(`upbit`·`bithumb`·`binance` 순), 기동 몇 초 뒤 각 `state: "ok"` 면 정상 (011).
+```bash
+grep -c "깊이 샤드" <서버 로그>     # 기동 60초 뒤 (012)
+```
+로그에 `바이낸스 깊이 샤드 N 구독 완료` 3줄(샤드 0·1·2)이면 정상. 깊이는 HTTP 로 노출되지 않으므로 값 확인은 로그로 한다 — 스트림이 안 붙어도 `/spreads` 는 최우선 1단계로 정상 동작하고, 30초 무수신이면 `/health/collect` 의 바이낸스가 `stale_stream` 구간을 보인다.
 
 ## 로컬 메모 (개인)
 - `:8000` 은 이 머신에서 소마 캘린더가 점유할 수 있다. `lsof -i :8000` 으로 확인 후 정리하거나, `--port 8020` 으로 띄우고 curl 포트도 8020 으로 맞춘다.

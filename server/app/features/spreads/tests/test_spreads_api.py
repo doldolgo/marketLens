@@ -9,11 +9,14 @@ from app.features.spreads.tests.helpers import make_client, make_row
 
 NOW = datetime.now(UTC)
 
-# 스펙 §4: 응답 행 키는 정확히 이 18개다
+# 스펙 §4: 응답 행 키는 정확히 이 17개다
 ROW_KEYS = {
     "sym", "dom", "fx", "fwd", "rev", "usd", "spark", "status", "age",
-    "liqDom", "liqFx", "rateAsk", "rateBid", "depDom", "wdDom", "depFx", "wdFx", "netDom",
+    "slipFwd", "slipRev", "krw", "netDom", "depDom", "wdDom", "depFx", "wdFx",
 }  # fmt: skip
+
+# 최상위 6키 (§4)
+TOP_KEYS = {"rate", "notional", "rows", "warnings", "dataReceivedAt", "fetchedAt"}
 
 
 def seed_basic(store: LiveStore, *, now: datetime = NOW) -> None:
@@ -121,15 +124,18 @@ def test_fwd_rev_use_directional_quotes_and_rates() -> None:
     seed_basic(store)
     body = make_client(store).get("/spreads").json()
     [row] = body["rows"]
+    # 규모가 1단계 안에서 끝나는 시드라 순값 = 원값이다 — 원값 수식이 그대로 드러난다.
     # fwd: 해외 ask 에 사서(환율 ask) 국내 bid 에 판다 / rev: 국내 ask 에 사서 해외 bid 에 판다(환율 bid)
     assert row["fwd"] == pytest.approx((100_000_000.0 / (71_500.0 * 1400.0) - 1) * 100)
     assert row["rev"] == pytest.approx((71_450.0 * 1390.0 / 100_100_000.0 - 1) * 100)
-    assert row["rateAsk"] == 1400.0
-    assert row["rateBid"] == 1390.0
+    assert row["slipFwd"] == 0.0
+    assert row["slipRev"] == 0.0
     assert row["usd"] == 71_480.0
     assert row["status"] == "ok"
     # 최상위 값: rate 는 기준 거래소 환율 ask, dataReceivedAt 은 ms
+    assert set(body) == TOP_KEYS
     assert body["rate"] == 1400.0
+    assert body["notional"] == 10000.0
     assert body["dataReceivedAt"] == 1_787_000_000_000
     assert body["fetchedAt"] > 1_700_000_000_000
 
@@ -150,10 +156,16 @@ def test_each_domestic_exchange_uses_its_own_rate() -> None:
     store.set_rate("bithumb", 1410.0, 1405.0, NOW)
     rows = make_client(store).get("/spreads").json()["rows"]
     by_dom = {r["dom"]: r for r in rows}
-    assert by_dom["upbit"]["rateAsk"] == 1400.0
-    assert by_dom["upbit"]["rateBid"] == 1390.0
-    assert by_dom["bithumb"]["rateAsk"] == 1410.0
-    assert by_dom["bithumb"]["rateBid"] == 1405.0
+    # 환율은 응답에 없다 — 각 행의 krw(그 거래소 최우선 매수호가)와 순값으로 확인한다
+    assert by_dom["upbit"]["krw"] == 100_000_000.0
+    assert by_dom["bithumb"]["krw"] == 99.0
+    # 1단계 안에서 끝나는 시드라 순값 = 원값이고, 각 행이 자기 거래소 환율만 쓴다
+    assert by_dom["upbit"]["fwd"] == pytest.approx(
+        (100_000_000.0 / (71_500.0 * 1400.0) - 1) * 100
+    )
+    assert by_dom["bithumb"]["fwd"] == pytest.approx(
+        (99.0 / (71_500.0 * 1410.0) - 1) * 100
+    )
 
 
 def test_empty_orderbook_is_fail_with_zero_numbers_and_kept_io() -> None:
@@ -170,12 +182,36 @@ def test_empty_orderbook_is_fail_with_zero_numbers_and_kept_io() -> None:
     )
     [row] = make_client(store).get("/spreads").json()["rows"]
     assert row["status"] == "fail"
-    for key in ("fwd", "rev", "usd", "liqDom", "liqFx", "rateAsk", "rateBid"):
+    for key in ("fwd", "rev", "usd", "slipFwd", "slipRev", "krw"):
         assert row[key] == 0
     # fail 이어도 입출금 값과 age 는 싣는다
     assert row["depFx"] is True
     assert row["wdFx"] is False
     assert row["age"] >= 0
+
+
+def test_zero_size_best_quote_is_fail() -> None:
+    # 잔량 0 은 걷어도 체결 수량이 0 이라 평균가가 0 이 된다 — 가격 0 과 같이 fail (§3.2-4)
+    store = LiveStore()
+    seed_basic(store)
+    store.replace_exchange(
+        "binance",
+        [
+            make_row(
+                "binance",
+                "BTC",
+                price=71_480.0,
+                bids=[[71_450.0, 1.5]],
+                asks=[[71_500.0, 0.0]],
+                dep=True,
+            )
+        ],
+        NOW,
+    )
+    [row] = make_client(store).get("/spreads").json()["rows"]
+    assert row["status"] == "fail"
+    assert row["fwd"] == 0 and row["slipFwd"] == 0 and row["krw"] == 0
+    assert row["depFx"] is True  # fail 이어도 입출금 값은 싣는다
 
 
 def test_stale_ok_and_age_follow_older_snapshot() -> None:
@@ -224,15 +260,15 @@ def test_stale_ok_and_age_follow_older_snapshot() -> None:
     assert 0.4 <= row["age"] <= 2.0
 
 
-def test_liq_is_min_side_notional_over_rate_ask() -> None:
+def test_krw_is_domestic_best_bid_price() -> None:
+    # krw 는 그 행 국내 거래소의 최우선 매수호가 — 환율·슬리피지와 무관하다 (§3.2-4)
     store = LiveStore()
     seed_basic(store)
     [row] = make_client(store).get("/spreads").json()["rows"]
-    # 국내: min(1억×0.5, 1.001억×0.4)/1400, 해외: min(71450×1.5, 71500×2.0)
-    assert row["liqDom"] == pytest.approx(
-        min(100_000_000.0 * 0.5, 100_100_000.0 * 0.4) / 1400.0
-    )
-    assert row["liqFx"] == pytest.approx(min(71_450.0 * 1.5, 71_500.0 * 2.0))
+    assert row["krw"] == 100_000_000.0
+    # 규모를 키워 슬리피지가 생겨도 국내 시세 자체는 그대로다
+    [big] = make_client(store).get("/spreads?notional=500000").json()["rows"]
+    assert big["krw"] == 100_000_000.0
 
 
 def test_rows_sorted_by_sym_dom_fx() -> None:
@@ -268,7 +304,7 @@ def test_rows_sorted_by_sym_dom_fx() -> None:
     ]
 
 
-def test_row_keys_are_exactly_the_18_camel_case_keys() -> None:
+def test_row_keys_are_exactly_the_17_camel_case_keys() -> None:
     store = LiveStore()
     seed_basic(store)
     [row] = make_client(store).get("/spreads").json()["rows"]

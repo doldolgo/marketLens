@@ -11,6 +11,7 @@ from app.core.collector import CycleResult
 from app.core.live_store import LiveStore
 from app.core.models import Row
 from app.core.networks import pick_domestic
+from app.core.orderbook import average_price, walk_amount, walk_quantity
 from app.core.premium import premium_percent
 from app.features.spreads.models import (
     RefreshFailure,
@@ -29,6 +30,11 @@ STALE_AFTER_SEC = 5.0
 # USDT 는 매 사이클(1초) 관측이 정상 — 60초 무관측은 구조적 문제다 (스펙 008 §3.2)
 USDT_STALE_WARN_SEC = 60.0
 EXCLUDED_COINS: frozenset[str] = frozenset()
+
+# 체결 규모(USD) — 표의 모든 행이 이 규모로 호가를 걷는다 (스펙 003 §3.2-0)
+DEFAULT_NOTIONAL = 10_000.0
+MIN_NOTIONAL = 1.0
+MAX_NOTIONAL = 10_000_000.0
 
 
 class MarketDataNotFoundError(Exception):
@@ -76,6 +82,34 @@ def _wallet_fields(
     return (dom_net.name, dom_net.dep, dom_net.wd, dep_fx, wd_fx)
 
 
+def _walk_levels(row: Row, side: str) -> list[list[float]]:
+    """걷을 호가 — `depth_*` 가 비어 있지 않으면 그것을, 비면 `asks`/`bids` (001 §3.3).
+
+    국내 행은 `depth_*` 가 항상 비어 있고, 해외는 012 스트림이 살아 있으면 최대 20단계다.
+    """
+    if side == "asks":
+        return row.depth_asks or row.asks
+    return row.depth_bids or row.bids
+
+
+def _cross_walk(
+    buy_levels: list[list[float]],
+    sell_levels: list[list[float]],
+    buy_amount: float,
+) -> tuple[float, float]:
+    """양쪽 다리를 **수량으로 연결해** 건넌 (평균 매수가, 평균 매도가) — 스펙 003 §3.2-4.
+
+    각 다리를 따로 걸으면 사지도 않은 수량을 파는 값이 나온다. 매도측이 소진돼 못 판
+    수량이 있으면 판 수량만큼 매수측을 되맞춘다 — 못 판 코인을 0원으로 치면 −50% 대
+    쓰레기 값이 나오기 때문이다(004 §3.2·§3.3 과 같은 규칙).
+    """
+    buy = walk_amount(buy_levels, buy_amount)
+    sell = walk_quantity(sell_levels, buy.quantity)
+    if sell.exhausted and sell.quantity < buy.quantity:
+        buy = walk_quantity(buy_levels, sell.quantity)
+    return average_price(buy), average_price(sell)
+
+
 def _age_seconds(row: Row, now: datetime) -> float:
     """스냅샷 경과 초. updated_at 은 저장소 적재 시각이라 항상 채워져 있다."""
     assert row.updated_at is not None
@@ -89,6 +123,7 @@ def _build_row(
     rate_ask: float,
     rate_bid: float,
     now: datetime,
+    notional: float,
 ) -> SpreadRow:
     """행 하나의 규칙 — 스펙 003 §3.2-4."""
     dom_bid = dom_row.bids[0] if dom_row.bids else None
@@ -99,31 +134,45 @@ def _build_row(
     # age 는 양측 중 오래된 쪽 기준, 0 미만이면 0
     age = max(0.0, _age_seconds(dom_row, now), _age_seconds(fx_row, now))
 
-    failed = (
-        dom_bid is None
-        or dom_ask is None
-        or fx_bid is None
-        or fx_ask is None
-        or fx_ask[0] <= 0
-        # 국내 호가 0 은 스펙 문면엔 없지만 rev 의 분모라 0 나눗셈 500 을 만든다 — fail 로 방어
-        or dom_ask[0] <= 0
-        or dom_bid[0] <= 0
+    best = (dom_bid, dom_ask, fx_bid, fx_ask)
+    failed = any(level is None for level in best) or any(
+        # 가격뿐 아니라 잔량도 본다 — 잔량 0 이면 걷어도 체결 수량이 0 이라
+        # 평균가가 0 이 되고 순값 계산이 0 으로 나눈다 (§3.2-4)
+        level[0] <= 0 or level[1] <= 0
+        for level in best
+        if level is not None
     )
     if failed:
         # fail 이어도 입출금 값과 age 는 싣는다
-        fwd = rev = usd = liq_dom = liq_fx = 0.0
-        row_rate_ask = row_rate_bid = 0.0
+        fwd = rev = usd = krw = slip_fwd = slip_rev = 0.0
         status = "fail"
     else:
-        # 체결되는 쪽 호가: 김프는 해외 ask 에 사서 국내 bid 에 판다, 역프는 반대
-        fwd = premium_percent(buy_krw=fx_ask[0] * rate_ask, sell_krw=dom_bid[0])
-        rev = premium_percent(buy_krw=dom_ask[0], sell_krw=fx_bid[0] * rate_bid)
-        # 유동성은 최우선 1단계의 매수·매도 금액 중 작은 쪽
-        liq_dom = min(dom_bid[0] * dom_bid[1], dom_ask[0] * dom_ask[1]) / rate_ask
-        liq_fx = min(fx_bid[0] * fx_bid[1], fx_ask[0] * fx_ask[1])
+        assert dom_bid is not None and dom_ask is not None
+        assert fx_bid is not None and fx_ask is not None
+        # 원값(raw) — 최우선 1단계 기준. 저장 계층(005·009)이 쓰는 값이고 응답에는 안 나간다.
+        # 체결되는 쪽 호가: 김프는 해외 ask 에 사서 국내 bid 에 판다, 역프는 반대.
+        fwd_raw = premium_percent(buy_krw=fx_ask[0] * rate_ask, sell_krw=dom_bid[0])
+        rev_raw = premium_percent(buy_krw=dom_ask[0], sell_krw=fx_bid[0] * rate_bid)
+
+        # 걷기 — 김프는 해외 asks 를 notional(USDT)로, 역프는 국내 asks 를 그 원화 환산액으로
+        fx_ask_avg, dom_bid_avg = _cross_walk(
+            _walk_levels(fx_row, "asks"), _walk_levels(dom_row, "bids"), notional
+        )
+        dom_ask_avg, fx_bid_avg = _cross_walk(
+            _walk_levels(dom_row, "asks"),
+            _walk_levels(fx_row, "bids"),
+            notional * rate_ask,
+        )
+
+        # 순값과 차감폭 — 반올림하지 않는다(상한도 없다)
+        fwd = premium_percent(buy_krw=fx_ask_avg * rate_ask, sell_krw=dom_bid_avg)
+        rev = premium_percent(buy_krw=dom_ask_avg, sell_krw=fx_bid_avg * rate_bid)
+        slip_fwd = max(0.0, fwd_raw - fwd)
+        slip_rev = max(0.0, rev_raw - rev)
+
+        # 국내 시세 자체라 환율·슬리피지와 무관하다 — FE 가 그대로 표시한다
+        krw = dom_bid[0]
         usd = fx_row.price
-        row_rate_ask = rate_ask
-        row_rate_bid = rate_bid
         status = "stale" if age >= STALE_AFTER_SEC else "ok"
 
     # 입출금 5필드는 망 판정으로 채운다 — fail 행도 같은 규칙 (006 §3.7)
@@ -136,13 +185,12 @@ def _build_row(
         fwd=fwd,
         rev=rev,
         usd=usd,
-        spark=[],  # 항상 빈 배열 — 005(history) 몫
+        spark=[],  # 항상 빈 배열 — 009(tick-store) 몫
         status=status,
         age=age,
-        liq_dom=liq_dom,
-        liq_fx=liq_fx,
-        rate_ask=row_rate_ask,
-        rate_bid=row_rate_bid,
+        slip_fwd=slip_fwd,
+        slip_rev=slip_rev,
+        krw=krw,
         net_dom=net_dom,
         dep_dom=dep_dom,
         wd_dom=wd_dom,
@@ -156,8 +204,13 @@ def build_spreads(
     *,
     now: datetime | None = None,
     excluded: Collection[str] | None = None,
+    notional: float = DEFAULT_NOTIONAL,
 ) -> SpreadsResponse:
-    """전 (국내 × 해외 × 코인) 페어의 김프/역프 표 — 스펙 003 §3.2."""
+    """전 (국내 × 해외 × 코인) 페어의 김프/역프 표 — 스펙 003 §3.2.
+
+    표 조립 전체가 `await` 없이 끝난다 — 그것이 이 함수가 수집 락 없이도 한 응답 안에서
+    스냅샷 교체 전·후 호가를 섞지 않는 유일한 근거다(§2). 걷기를 async 로 만들지 않는다.
+    """
     now = now if now is not None else datetime.now(UTC)
     excluded_upper = {
         c.upper() for c in (excluded if excluded is not None else EXCLUDED_COINS)
@@ -199,7 +252,13 @@ def build_spreads(
                     continue
                 rows_out.append(
                     _build_row(
-                        base, dom_table[base], fx_table[base], rate.ask, rate.bid, now
+                        base,
+                        dom_table[base],
+                        fx_table[base],
+                        rate.ask,
+                        rate.bid,
+                        now,
+                        notional,
                     )
                 )
 
@@ -222,9 +281,10 @@ def build_spreads(
     received = store.received_at
     return SpreadsResponse(
         rate=base_rate.ask,
+        notional=notional,
         rows=rows_out,
-        data_received_at=received * 1000 if received is not None else None,
         warnings=warnings,
+        data_received_at=received * 1000 if received is not None else None,
         fetched_at=int(time.time() * 1000),
     )
 

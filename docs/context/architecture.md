@@ -11,24 +11,27 @@
 - **현재 서버는 uvicorn worker 1개만 사용한다.** `live_store`가 프로세스 내부 메모리이기 때문에 다중 worker를 사용하려면 프로세스들이 공유하는 외부 저장소로 먼저 이전해야 한다.
 
 ## 런타임 구성
-- **server/**: Python 3.12, FastAPI, httpx, influxdb-client, boto3, pydantic v2, pydantic-settings. 로컬 포트 8000.
+- **server/**: Python 3.12, FastAPI, httpx, influxdb-client, boto3, pydantic v2, pydantic-settings, websockets. 로컬 포트 8000. REST 수집 루프와 별개로 바이낸스 깊이 WS 샤드 태스크 3개가 상시 돌아간다(012).
 - **web/**: React 19, TypeScript, Vite. 런타임 의존성은 react·react-dom뿐이다. 로컬 포트는 5173이고, 배포 컨테이너의 nginx는 80번 포트를 사용한다. 호스트 포트는 `WEB_PORT`로 정한다.
 - **저장소**: InfluxDB 2.7 OSS(org·bucket `marketlens`, Flux). 김프 이력의 시간 버킷 집계에 사용한다. 모델은 `db.md`가 정의하며 테스트에서는 InfluxDB를 띄우지 않는다. S3(`marketlens-spreads-snapshot`, ap-northeast-2)에는 `/spreads` 행 전체 스냅샷을 60초마다 쌓는다 — 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 IAM 역할), 테스트는 fake 로 대체한다.
 
 ## 데이터 흐름 (BE)
 ```
+[바이낸스 WS 3샤드] ── 1초마다 ──▶ 깊이 캐시 (심볼 → 20단계, 동기 읽기)
+                                                                │ 주입
 [거래소 REST]  ── 1초마다 ──▶  collector  ──▶  live_store (메모리, 통째 교체)
                                                                 │
                          실시간 조회 API ◀── 읽기 ───────────┘
                                                                 │
                               60초마다 persist 루프 ──▶ InfluxDB
-                                (`premium` 에 fwd/rev 쓰기, 입출금 조회 실패 시 `dw_fail` 1점)
+                                (`premium` 에 차감 전 원값 fwd/rev, 입출금 조회 실패 시 `dw_fail` 1점)
                               60초마다 snapshot 루프 ──▶ S3 (/spreads 행 전체를 .jsonl.gz 로)
 수집 사이클 → 실패 이력(메모리, 구간 단위) → Influx collect_fail(열림/닫힘 시)·기동 시 복원
 ```
 - 입출금 상태 API는 수집 루프가 60초 주기로만 조회해 캐시한다. 키가 없으면 `null`(모름). 망 판정은 `/spreads`에서 하고, 빗썸은 키가 필요 없다.
 - `GET /health`와 수집 루프는 기능 폴더가 아니라 앱 진입점 소관이다. `/health`는 프로세스 liveness만 나타내며 수집 최신성이나 InfluxDB 상태를 보장하지 않는다. 상세는 `/health/collect`(011).
 - USDT 시세는 별도 호출 없이 국내 거래소의 KRW 마켓 일괄 호가 중 USDT 항목에서 추출한다. 최우선 매도호가가 rate_ask(USDT 살 때), 최우선 매수호가가 rate_bid. 거래소별 ask/bid. 커넥터는 USDT 를 특별 취급하지 않는다. 은행 환율은 어디에도 쓰지 않는다(product.md 용어).
+- 바이낸스 깊이는 REST 가 아니라 상시 WS 스트림이 채운다(012). 캐시는 커넥터에 주입되고 읽기에 `await` 가 없어 락이 없다 — 호가를 걷는 계산이 동기 함수인 근거다. 스트림이 없거나 낡으면(TTL 10초) 깊이는 빈 목록이고 소비자는 최우선 1단계로 되돌아간다. 구독 중 30초 무수신은 그 사이클의 바이낸스 수집 실패(`stale_stream`)로 승격된다.
 - 시세 호출 실패 시 `live_store`는 해당 거래소의 직전 시세를 유지하고 `age`가 커진다. 입출금 상태 조회 실패는 `unknown`으로 기록한다. FE는 age로 stale을 표시한다. 재기동 시 InfluxDB에서 되읽는 폴백은 없으며 메모리는 첫 수집으로만 채워진다.
 
 ## 데이터 흐름 (FE)
@@ -68,10 +71,11 @@ EC2 1대. 루트 `docker compose up -d --build`로 server·web·influxdb 컨테�
 스펙이 DONE 될 때마다 주요 모듈과 역할을 짧게 기록한다. 문서와 코드가 다르면 사람이 올바른 쪽을 결정하고 같은 변경에서 둘을 맞춘다.
 - **collect (001)**: `core/collector.py`(사이클 5단계·락·1초 루프), `core/live_store.py`(거래소별 스냅샷·USDT 시세), `core/connectors/`(공통 인터페이스와 거래소별 구현), `core/rows.py`(행 조립), `core/models.py`, `core/errors.py`, `core/config.py`. 앱 골격과 수집 루프 기동은 `app/main.py` lifespan이 담당한다.
 - **web-shell (002)**: `shared/`(테마·공유 피드·결정론 mock·포맷·UI 조각), `App.tsx`(헤더·KPI·탭 전환), `features/{gap,pp,flow}/Tab.tsx`(mock 탭). spreads와 history는 별도 기능 폴더가 담당한다.
-- **spreads (003)**: server `core/premium.py`, `features/spreads/`(계산·API·응답 모델). web `features/spreads/`(1초 폴링·응답 타입·화면).
-- **analysis (004)**: `features/analysis/`(호가창 소진 계산·6개 분석 API·응답 모델). web 없음.
+- **spreads (003)**: server `core/premium.py`(`premium_percent`), `core/orderbook.py`(호가 걷기 — 004 와 공용), `features/spreads/`(service 순수 계산·router 2 엔드포인트·models). 표 계산 함수는 저장소와 체결 규모(`notional`, 기본 $10,000)를 받아 행 17키를 만들고, 두 다리를 수량으로 연결해 걸어 슬리피지 차감 후 순값과 차감폭(`slipFwd`·`slipRev`)을 함께 싣는다. 전 과정이 동기라 수집 락 없이 돈다. web `features/spreads/`(1초 폴링·응답 타입·화면) — 규모 선택값은 셸이 들고 폴링 쿼리로 나가며, FE 는 슬리피지를 계산하지 않는다.
+- **analysis (004)**: `core/orderbook.py`(호가창 소진 walk — 003·004 공용, 함수 전부 동기), `features/analysis/`(6개 분석 API·응답 모델·거래소 레지스트리). web 없음.
 - **history (005)**: `core/influx.py`, `core/persist.py`, `features/history/`(이력 조회 API), `scripts/backfill.py`, `docker-compose.dev.yml`. web 기록 탭은 mock 데이터를 사용한다.
 - **wallet-status (006)**: `core/networks.py`(망 정규화·판정), `features/wallet_status/`(거래소별 조회·60초 캐시). collector에 Protocol로 주입하고 spreads가 망 단위 상태를 계산한다.
 - **deploy (007)**: server·web Dockerfile, 배포 compose, CI·배포 GitHub Actions workflow.
 - **s3-snapshot (010)**: `core/s3.py`(S3 업로더 — boto3 는 이 모듈만), `core/snapshot.py`(60초 루프·객체 빌드 — 003 의 표 계산 함수를 그대로 쓴다). 기동·종료는 `app/main.py` lifespan. Influx persist 루프와 별개 태스크다 — 한쪽 저장소 장애가 다른 쪽 기록을 막지 않는다.
 - **health (011)**: `core/outages.py`(실패 구간 추적기 — 수집기가 쓰므로 core. 열림/닫힘 시 `collect_fail` 1점을 순서 보장 큐로 쓰고, 기동 시 24시간 복원), 커넥터 3개가 예외에 `kind` 분류, `features/health/`(읽기 API `/health/collect`), web `features/health/`(5초 폴링·탭). 응답 타입 `HealthData` 와 거래소 표시명 `exName` 은 `shared/` 에 있다(셸 KPI·spreads 가 같이 쓴다).
+- **binance-depth (012)**: `core/connectors/binance_depth.py`(깊이 캐시 + 샤드 3개 + 안정 해시 배정 + 구독 재조정 + 정체 판정). 커넥터 `binance.py` 가 캐시를 생성자로 주입받아 `Row.depth_*` 를 채우고, 정체면 `stale_stream` 예외를 던진다 — `fetch_rows` 시그니처와 collector 는 그대로다. 샤드 태스크 기동·종료는 `app/main.py` lifespan(취소·대기 뒤 소켓 close).

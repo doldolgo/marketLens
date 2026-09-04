@@ -9,21 +9,23 @@ from pydantic import BaseModel
 
 
 class SpreadRow(BaseModel):
-    """(국내 거래소 × 해외 거래소 × 코인) 페어 1행. 키 순서는 스펙 §3.2 예시와 같다."""
+    """(국내 거래소 × 해외 거래소 × 코인) 페어 1행. 키 순서는 스펙 §3.2 예시와 같다.
+
+    선언 순서가 곧 아카이브 스키마다 — 010 의 S3 줄이 이 순서를 그대로 쓴다.
+    """
 
     sym: str
     dom: str
     fx: str
-    fwd: float
+    fwd: float  # 슬리피지 차감 후 순값 (원값은 fwd + slip_fwd)
     rev: float
     usd: float
     spark: list[float]
     status: Literal["ok", "stale", "fail"]
     age: float
-    liq_dom: float
-    liq_fx: float
-    rate_ask: float
-    rate_bid: float
+    slip_fwd: float  # 그 방향에서 차감된 폭(%p, 양수)
+    slip_rev: float
+    krw: float  # 이 행 국내 거래소의 최우선 매수호가(KRW)
     net_dom: str | None
     dep_dom: bool | None
     wd_dom: bool | None
@@ -33,9 +35,10 @@ class SpreadRow(BaseModel):
 
 class SpreadsResponse(BaseModel):
     rate: float
+    notional: float  # 이 응답의 슬리피지가 계산된 체결 규모(USD) — 010 이 줄마다 싣는다
     rows: list[SpreadRow]
-    data_received_at: int | None  # 저장소 마지막 수신 시각 epoch ms, 스냅샷 없으면 null
     warnings: list[str]  # USDT 시세 미갱신 경고 — 없으면 빈 배열 (스펙 008)
+    data_received_at: int | None  # 저장소 마지막 수신 시각 epoch ms, 스냅샷 없으면 null
     fetched_at: int  # 응답 시각 epoch ms
 
 
