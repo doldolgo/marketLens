@@ -3,6 +3,7 @@
 
 levels 는 체결되는 쪽 호가([price, size] 목록, 최우선부터).
 금액(quote 통화) 기준으로 사거나 팔고, 수량 기준도 대칭이다.
+그 목록을 고르는 규칙도 여기 있다 — `walk_levels` (004 §3.1).
 
 **이 모듈의 함수는 전부 동기다 — async 로 바꾸지 않는다.** `GET /spreads` 가 수집 락 없이도
 안전한 근거가 "표 조립 전체에 await 가 없다"는 것뿐이기 때문이다. 여기에 await 지점이 생기면
@@ -12,8 +13,26 @@ levels 는 체결되는 쪽 호가([price, size] 목록, 최우선부터).
 
 from dataclasses import dataclass
 
+from app.core.models import Row
+
 # 부동소수 잔액 찌꺼기를 "소진"으로 오판하지 않기 위한 허용 오차
 _EPSILON = 1e-9
+
+
+def walk_levels(row: Row, side: str) -> list[list[float]]:
+    """걷을 호가 — `depth_*` 가 비어 있지 않으면 그것을, 비면 `asks`/`bids` (004 §3.1).
+
+    국내 행은 `depth_*` 가 항상 비어 있어 자기 `asks`/`bids` 를 쓰고, 해외는 012 스트림이
+    살아 있으면 최대 20단계다. 003·004 의 **모든 걷기가 이 함수를 거친다** — 같은 규칙이
+    두 벌 있으면 한쪽만 고쳐져 표와 분석이 다른 호가를 걷는다.
+
+    최우선 1단계만 읽는 표면값(`/premium`·`/premium/scan`·`/matrix` 의 표면 김프와
+    그쪽의 호가 유무 판정)은 이 함수를 쓰지 않고 REST 호가를 직접 읽는다 — 조용한 종목의
+    헤드라인이 스트림 정체로 낡지 않게 하려는 012 의 의도다.
+    """
+    if side == "asks":
+        return row.depth_asks or row.asks
+    return row.depth_bids or row.bids
 
 
 @dataclass

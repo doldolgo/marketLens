@@ -14,6 +14,7 @@ from app.core.orderbook import (
     average_price,
     slippage_percent,
     walk_amount,
+    walk_levels,
     walk_quantity,
 )
 from app.core.premium import premium_percent
@@ -157,7 +158,10 @@ def build_orderbook(
     _require_exchange(exchange)
     base, quote = _parse_symbol(symbol)
     row = _get_row(store, exchange, base, quote)
-    if not row.asks and not row.bids:
+    # 슬리피지가 실제로 소비하는 호가를 그대로 보여주는 것이 이 엔드포인트의 쓸모다 (§3.2)
+    asks = walk_levels(row, "asks")
+    bids = walk_levels(row, "bids")
+    if not asks and not bids:
         raise _not_found(f"{exchange} 의 {base}/{quote} 호가가 비어 있습니다.")
     # 저장 순서 그대로 depth 단계까지 자르기만 한다 — 계산 없음
     return OrderbookResponse(
@@ -165,8 +169,8 @@ def build_orderbook(
         symbol=f"{base}/{quote}",
         base=base,
         quote=quote,
-        bids=[OrderbookLevel(price=lv[0], size=lv[1]) for lv in row.bids[:depth]],
-        asks=[OrderbookLevel(price=lv[0], size=lv[1]) for lv in row.asks[:depth]],
+        bids=[OrderbookLevel(price=lv[0], size=lv[1]) for lv in bids[:depth]],
+        asks=[OrderbookLevel(price=lv[0], size=lv[1]) for lv in asks[:depth]],
         timestamp=row.price_timestamp,
         data_updated_at=_ms(row.updated_at),
         data_received_at=_received_ms(store),
@@ -204,7 +208,8 @@ def build_slippage(
         )
 
     row = _get_row(store, exchange, base, quote)
-    stored = row.asks if side == "buy" else row.bids  # 살 때 asks, 팔 때 bids
+    # 살 때 asks, 팔 때 bids — 목록은 walk_levels 가 고른다 (§3.1)
+    stored = walk_levels(row, "asks" if side == "buy" else "bids")
     if not stored:
         raise _not_found(
             f"{exchange} 의 {base}/{quote} {side} 쪽 호가가 비어 있습니다."
@@ -284,7 +289,10 @@ def build_arbitrage(
     for row in sorted(rows, key=lambda r: r.exchange):
         if row.quote not in (DOMESTIC_QUOTE, FOREIGN_QUOTE):
             continue  # KRW/USDT 가 아니면 후보 풀에서 제외 (§3.2-2)
-        if not row.asks or not row.bids:
+        # 걷는 목록 기준으로 판정·환산한다 — 이 다리가 실제로 먹는 호가다 (§3.1)
+        row_asks = walk_levels(row, "asks")
+        row_bids = walk_levels(row, "bids")
+        if not row_asks or not row_bids:
             failures.append(
                 ArbitrageFailure(exchange=row.exchange, reason="호가가 비어 있습니다.")
             )
@@ -310,8 +318,8 @@ def build_arbitrage(
         candidates.append(
             _Candidate(
                 row=row,
-                asks_krw=[[lv[0] * ask_mult, lv[1]] for lv in row.asks[:depth]],
-                bids_krw=[[lv[0] * bid_mult, lv[1]] for lv in row.bids[:depth]],
+                asks_krw=[[lv[0] * ask_mult, lv[1]] for lv in row_asks[:depth]],
+                bids_krw=[[lv[0] * bid_mult, lv[1]] for lv in row_bids[:depth]],
             )
         )
 
@@ -676,15 +684,19 @@ def _matrix_direction(
 ) -> MatrixDirection | None:
     """최대 조합을 amount_krw 로 walk 한다. 체결 0 이면 조합 없음 (§3.2-4)."""
     if direction == "fwd":
-        # 해외 asks 에 사서(rate ask 환산) 국내 bids 에 판다
-        buy_levels = [[lv[0] * pick.rate.ask, lv[1]] for lv in pick.fx_row.asks]
-        sell_levels = pick.dom_row.bids
+        # 해외 asks 에 사서(rate ask 환산) 국내 bids 에 판다. 목록은 walk_levels (§3.1)
+        buy_levels = [
+            [lv[0] * pick.rate.ask, lv[1]] for lv in walk_levels(pick.fx_row, "asks")
+        ]
+        sell_levels = walk_levels(pick.dom_row, "bids")
         buy_ex, sell_ex = pick.fx_ex, pick.dom_ex
         buy_row, sell_row = pick.fx_row, pick.dom_row
     else:
         # 국내 asks 에 사서 해외 bids 에 판다(rate bid 환산)
-        buy_levels = pick.dom_row.asks
-        sell_levels = [[lv[0] * pick.rate.bid, lv[1]] for lv in pick.fx_row.bids]
+        buy_levels = walk_levels(pick.dom_row, "asks")
+        sell_levels = [
+            [lv[0] * pick.rate.bid, lv[1]] for lv in walk_levels(pick.fx_row, "bids")
+        ]
         buy_ex, sell_ex = pick.dom_ex, pick.fx_ex
         buy_row, sell_row = pick.dom_row, pick.fx_row
 
@@ -705,7 +717,9 @@ def _matrix_direction(
         buy_exchange=buy_ex,
         sell_exchange=sell_ex,
         premium_percent=pick.surface_percent,
-        total_slippage_percent=pick.surface_percent - effective,
+        # 표면 김프는 REST 최우선, 실효 수익률은 스트림 깊이라 출처가 다르다(§3.1). 스트림 쪽이
+        # 유리한 순간 차가 음수가 되는데 "체결로 잃는 폭" 에 음수는 뜻이 없어 0 으로 자른다 (§3.2-5).
+        total_slippage_percent=max(0.0, pick.surface_percent - effective),
         withdrawal_available=buy_row.withdrawal_enabled,
         deposit_available=sell_row.deposit_enabled,
         depth_exhausted=buy_exhausted or sell_walk.exhausted,

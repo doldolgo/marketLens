@@ -15,7 +15,7 @@
 | deploy | Dockerfile·compose 3컨테이너·CI/deploy 워크플로 | nginx 서빙(:${WEB_PORT}) | 로컬 검증 완료 — EC2 반영·PR check 는 GitHub 권한 대기 |
 | s3-snapshot | 60초 snapshot 루프·S3 업로드 | - | 읽기 API 없음, 버킷 lifecycle 은 사람 몫 |
 | health | /health/collect·실패 구간 추적·collect_fail 쓰기/복원 | 실데이터 탭·5초 폴링·KPI 수집 상태 | 백오프는 013 |
-| binance-depth | WS 깊이 스트림 3샤드·깊이 캐시·정체 watchdog | - | 해외 최대 20단계, HTTP 계약 무변경 |
+| binance-depth | WS 깊이 스트림 3샤드·깊이 캐시·정체 watchdog | - | 해외 최대 20단계, HTTP 계약 무변경. 003·004 의 걷기가 공용 `walk_levels` 로 이 깊이를 쓴다(표면 김프는 REST 최우선) |
 
 ## 알려진 빚
 - (011·012) 새 실패 종류 `stale_stream` 은 BE 만 안다. 수집 상태 탭의 유형 칩 라벨(`web/src/features/health/types.ts`)과 `OutageKind` 유니온에 이 값이 없어, 정체 구간이 생기면 칩 라벨이 빈다. 012 는 BE 전용 범위라 web 을 건드리지 않았다.
