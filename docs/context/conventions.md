@@ -6,7 +6,7 @@
 - Python 타입힌트 필수.
 - 주석은 한국어로 **왜** 를 쓴다.
 - 거래소 커넥터는 서로 코드 공유 금지. 각 거래소 quirk 가 섞이면 디버깅 불가.
-- TypeScript: oxlint, 인라인 style 객체 + CSS 변수(토큰의 진실은 `docs/design/theme.css` — 웹은 `web/src/shared/` 복사본을 쓴다). 라이브러리 추가는 스펙에 명시된 경우만.
+- TypeScript: oxlint, 인라인 style 객체 + CSS 변수(토큰의 진실은 `docs/design/theme.css`, 화면 구조의 진실은 `docs/design/reference/` — 웹은 `web/src/shared/` 복사본을 쓴다). 라이브러리 추가는 스펙에 명시된 경우만.
 - 기능 간 import 금지. `core/`·`shared/` 만 공유.
 - 추측성 코드 금지: 스펙에 없는 옵션·유연성·에러 핸들링을 넣지 않는다.
 
