@@ -29,6 +29,7 @@
 에러 형식:
 - 앱 에러 응답 형식은 항상 `{"error": {"code": str, "message": str, "detail": object}}`.
 - 거래소 타임아웃은 504 `exchange_timeout`. 그 외 거래소 호출 실패(비-200, JSON 아님, 연결 실패)는 502 `exchange_api_error`.
+- 실패 예외에는 `kind` 7종(`timeout` `network` `rate_limit` `banned` `unavailable` `bad_request` `bad_response`)과 `retry_after_sec`(헤더 `Retry-After` 초 정수, 없으면 null)이 실린다. 분류는 커넥터가 한다(011 §3.2).
 - HTTP `detail` 에는 `exchange`·`url` 을 담는다. 비-200 이면 `statusCode` 와 본문 앞 500자도 담는다.
 - CORS·GZip·uvicorn 워커 1개는 `docs/context/architecture.md` 규칙대로(메모리가 진실이므로 워커가 둘이면 서로 다른 메모리를 본다).
 - `GET /health` → `200 {"status": "ok", "version": "0.1.0"}`. 수집 루프 상태와 무관하게 항상 ok.
@@ -42,6 +43,8 @@
 4. **행 조립**(§3.4) 후 **교집합 필터**: base 가 `(국내 거래소 합집합) ∩ (바이낸스)` 에 드는 행만 남긴다. 국내 전용 코인·바이낸스 전용 코인은 메모리에 없다.
    `USDT` 자신도 바이낸스에 USDT/USDT 가 없으므로 빠진다(환율로만 쓰인다).
 5. **메모리 교체**: 아래 규칙대로 스냅샷과 환율을 갱신하고, 저장소의 `received_at`(epoch 초)을 지금으로 갱신한다.
+
+거래소별 성공/실패를 이력 추적기에 넘긴다(011 §3.3).
 
 메모리 교체 규칙:
 1. 스냅샷은 **거래소 단위로 통째 교체**한다.
@@ -96,6 +99,7 @@
 - KRW 마켓 ~480개 → 청크 5개, 사이클 10회. rate limit 초당 150회.
 - 호가는 응답 자체가 **최대 15단계**.
 - **잔량 0 인 유령 호가**가 드물게 섞인다 → `size<=0` 단계는 버린다. 최우선 호가도 잔량>0 인 첫 단계다.
+- **HTTP 200 + `error` 본문은 실패**다(에러를 200 으로 준다 — 011 §3.2 가 분류한다).
 - `ticker.trade_timestamp` 가 **KST 벽시계를 epoch 처럼 찍어 정확히 9시간(32,400,000ms) 미래**로 온다(호가의 `timestamp` 는 정상).
   현재보다 1시간 이상 미래면 9시간을 뺀다, 아니면 그대로(빗썸이 고치면 자동 통과).
 ```json

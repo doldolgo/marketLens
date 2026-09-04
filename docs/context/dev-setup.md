@@ -74,6 +74,10 @@ curl -s "localhost:8000/history/premium?base=BTC&unit=week" | head -c 300
 aws s3 ls s3://<bucket>/spreads/ --recursive | tail -1
 ```
 (`S3_BUCKET` 설정 + 기동 60초 뒤) 객체 1개(`spreads/dt=…/hh=…/…Z.jsonl.gz`)면 정상 (010).
+```bash
+curl -s localhost:8000/health/collect | head -c 400
+```
+`exchanges` 에 거래소 3곳(`upbit`·`bithumb`·`binance` 순), 기동 몇 초 뒤 각 `state: "ok"` 면 정상 (011).
 
 ## 로컬 메모 (개인)
 - `:8000` 은 이 머신에서 소마 캘린더가 점유할 수 있다. `lsof -i :8000` 으로 확인 후 정리하거나, `--port 8020` 으로 띄우고 curl 포트도 8020 으로 맞춘다.
