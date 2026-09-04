@@ -27,7 +27,7 @@ services:
     container_name: marketlens-web
     restart: unless-stopped
     ports:
-      # 현 EC2 는 기존 fe(:80)·be(:8000) 가 점유 — 루트 .env 의 WEB_PORT=8080 으로 공존한다
+      # 호스트 포트는 루트 .env 의 WEB_PORT (EC2 는 80)
       - "${WEB_PORT:-80}:80"
     depends_on:
       - server
