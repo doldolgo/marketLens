@@ -11,14 +11,19 @@ export interface SpreadRow {
   sym: string
   dom: string
   fx: string
+  /** 순방향 김프 % — 서버가 체결 규모만큼 호가를 걷고 슬리피지를 뺀 **순값**이다 (003 §3.2). */
   fwd: number
+  /** 역방향 김프 % — 마찬가지로 순값. */
   rev: number
   usd: number | null
   spark: number[]
   status: FeedStatus
   age: number
-  liqDom: number
-  liqFx: number
+  /** 그 방향에서 차감된 폭(%p, 양수). 원값이 필요하면 fwd + slipFwd. */
+  slipFwd: number
+  slipRev: number
+  /** 이 행 국내 거래소의 최우선 매수호가(KRW) — FE 는 환산하지 않고 그대로 쓴다. */
+  krw: number
   netDom: string | null
   depDom: IoState
   wdDom: IoState
