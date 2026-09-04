@@ -7,6 +7,7 @@
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -32,11 +33,13 @@ from app.core.connectors.upbit import UpbitConnector
 from app.core.errors import ExchangeError
 from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
+from app.core.outages import OutageTracker
 from app.core.persist import PersistLoop
 from app.core.s3 import S3Uploader
 from app.core.serialization import camelize_json
 from app.core.snapshot import SnapshotLoop
 from app.features.analysis.router import router as analysis_router
+from app.features.health.router import router as health_router
 from app.features.history.router import router as history_router
 from app.features.spreads.router import router as spreads_router
 from app.features.wallet_status.service import WalletStatusService
@@ -59,16 +62,6 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         binance_api_key=settings.binance_api_key,
         binance_secret_key=settings.binance_secret_key,
     )
-    collector = Collector(
-        store=store,
-        domestic=[UpbitConnector(), BithumbConnector()],
-        foreign=BinanceConnector(),
-        client=client,
-        wallet=wallet,
-    )
-    app.state.live_store = store
-    app.state.collector = collector
-
     # Influx — 토큰 없으면 저장 루프 비활성·/history/* 503, 앱은 뜬다 (스펙 005 §3.1)
     influx: InfluxClient | None = None
     persist_task: asyncio.Task[None] | None = None
@@ -80,13 +73,33 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "InfluxDB 연결 실패: %s — 저장 루프가 회차마다 재시도한다",
                 settings.influx_url,
             )
-        persist = PersistLoop(store=store, collector=collector, influx=influx)
-        persist_task = asyncio.create_task(persist.run_loop())
     else:
         logger.warning(
             "INFLUX_TOKEN 이 없어 저장 루프를 켜지 않는다 — /history/* 는 503"
         )
     app.state.influx = influx
+
+    # 수집 실패 이력(011) — 복원은 수집 루프 시작 전에 끝난다. 쓰기는 별도 태스크가 순서대로.
+    outages = OutageTracker(writer=influx)
+    app.state.started_at = int(time.time() * 1000)
+    await outages.restore(influx, app.state.started_at)
+    outage_writer_task = asyncio.create_task(outages.run_writer_loop())
+    app.state.outages = outages
+
+    collector = Collector(
+        store=store,
+        domestic=[UpbitConnector(), BithumbConnector()],
+        foreign=BinanceConnector(),
+        client=client,
+        wallet=wallet,
+        outages=outages,
+    )
+    app.state.live_store = store
+    app.state.collector = collector
+
+    if influx is not None:
+        persist = PersistLoop(store=store, collector=collector, influx=influx)
+        persist_task = asyncio.create_task(persist.run_loop())
 
     # S3 snapshot — 버킷 없으면 루프 비활성, 앱은 뜬다. persist 루프와 독립 (스펙 010 §3.2)
     s3: S3Uploader | None = None
@@ -109,12 +122,15 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         task.cancel()
+        outage_writer_task.cancel()
         if persist_task is not None:
             persist_task.cancel()
         if snapshot_task is not None:
             snapshot_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        with contextlib.suppress(asyncio.CancelledError):
+            await outage_writer_task
         if persist_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await persist_task
@@ -172,6 +188,7 @@ def create_app() -> FastAPI:
     app.include_router(spreads_router)
     app.include_router(analysis_router)
     app.include_router(history_router)
+    app.include_router(health_router)
 
     return app
 
