@@ -123,11 +123,17 @@ class BithumbConnector(ExchangeConnector):
             resp = await client.get(url, params=params)
         except httpx.TimeoutException as exc:
             raise ExchangeTimeoutError(
-                self.id, url, f"빗썸 응답 시간 초과: {type(exc).__name__}: {exc}"
+                self.id,
+                url,
+                f"빗썸 응답 시간 초과: {type(exc).__name__}: {exc}",
+                kind="timeout",
             ) from exc
         except httpx.HTTPError as exc:
             raise ExchangeApiError(
-                self.id, url, f"빗썸 연결 실패: {type(exc).__name__}: {exc}"
+                self.id,
+                url,
+                f"빗썸 연결 실패: {type(exc).__name__}: {exc}",
+                kind="network",
             ) from exc
         if resp.status_code != 200:
             raise ExchangeApiError(
@@ -136,8 +142,60 @@ class BithumbConnector(ExchangeConnector):
                 f"빗썸 비-200 응답: {resp.status_code}",
                 status_code=resp.status_code,
                 body=resp.text,
+                kind=_classify(resp.status_code),
+                retry_after_sec=_retry_after(resp),
             )
         try:
-            return resp.json()
+            data = resp.json()
         except ValueError as exc:
-            raise ExchangeApiError(self.id, url, f"빗썸 JSON 파싱 실패: {exc}") from exc
+            raise ExchangeApiError(
+                self.id, url, f"빗썸 JSON 파싱 실패: {exc}", kind="bad_response"
+            ) from exc
+        if isinstance(data, list):
+            return data
+        # 빗썸 quirk: 에러를 HTTP 200 + {"error":{"name","message"}} 본문으로 준다 (스펙 011 §3.2).
+        # error.name 이 정수면 HTTP 상태처럼 분류하고, 아니면 응답오류. status_code 는 실제 값(200).
+        error = data.get("error") if isinstance(data, dict) else None
+        if isinstance(error, dict):
+            name = error.get("name")
+            kind = (
+                _classify(name)
+                if isinstance(name, int) and not isinstance(name, bool)
+                else "bad_response"
+            )
+            raise ExchangeApiError(
+                self.id,
+                url,
+                f"빗썸 에러 응답: {name} {error.get('message', '')}",
+                status_code=resp.status_code,
+                body=resp.text,
+                kind=kind,
+                retry_after_sec=_retry_after(resp),
+            )
+        raise ExchangeApiError(
+            self.id,
+            url,
+            "빗썸 응답이 리스트가 아니다",
+            status_code=resp.status_code,
+            body=resp.text,
+            kind="bad_response",
+        )
+
+
+def _classify(status: int) -> str:
+    """빗썸 규칙(스펙 011 §3.2) — 업비트와 같은 v1 규칙이지만 코드는 공유하지 않는다."""
+    if status == 429:
+        return "rate_limit"
+    if status == 418:
+        return "banned"
+    if 500 <= status < 600:
+        return "unavailable"
+    if 400 <= status < 500:
+        return "bad_request"
+    return "bad_response"  # 문서에 없는 값은 응답오류로 두고 body 를 남긴다
+
+
+def _retry_after(resp: httpx.Response) -> int | None:
+    """Retry-After 가 초 단위 정수일 때만 값을 남긴다 — 날짜 형식은 무시."""
+    raw = resp.headers.get("Retry-After")
+    return int(raw) if raw is not None and raw.isdigit() else None
