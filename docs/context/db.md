@@ -9,7 +9,7 @@
 
 ## measurement
 같은 tag set + 같은 time 은 Influx 가 덮어쓴다. 이것이 유일키 역할이라 별도 중복 방지 코드가 없다.
-- **premium** — 김프/역프 한 점. tag `dom`·`fx`·`base`, field `fwd`·`rev`(float, %), time = 수집 시각. 한 점 = (dom, fx, base, time). `/history/*` 전부의 유일한 원천.
+- **premium** — 김프/역프 한 점. tag `dom`·`fx`·`base`, field `fwd`·`rev`(float, %), time = 수집 시각. 한 점 = (dom, fx, base, time). `/history/*` 전부의 유일한 원천. 값은 최우선 1단계 기준의 **슬리피지 차감 전 원값**이다 — 저장 시점에는 체결 규모가 정의되지 않기 때문이고, `/spreads` 의 순값과는 `fwd + slipFwd` 관계다(003 §2).
 - **dw_fail** — 입출금 조회 실패 관측. tag `exchange`, field `v`=1, time = 관측 시각. 한 점 = (exchange, time). 읽는 HTTP 엔드포인트 없음 — 사람이 Influx UI 에서 본다.
 - **collect_fail** — 수집 실패 구간 1건(스펙 011 §3.4). tag `exchange`·`kind`, time = `started_at`(초), field `count`(int)·`last_failed_ts`(int 초)·`status_code`(int, 없으면 0)·`message`(string)·`url`(string)·`retry_after_sec`(int, 없으면 0)·`ended_ts`(int 초, 닫힐 때만). 한 점 = (exchange, kind, started_at). 열 때 쓰고 닫을 때 같은 키로 덮어써 필드를 합친다.
 

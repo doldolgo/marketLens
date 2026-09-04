@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 import httpx
+import pytest
 
 from app.core.collector import Collector
 from app.core.influx import InfluxPoint, InfluxUnavailableError
@@ -136,19 +137,59 @@ async def test_dom_without_rate_is_absent(unused_client: httpx.AsyncClient) -> N
     assert doms == {"upbit"}
 
 
-async def test_values_match_spreads(unused_client: httpx.AsyncClient) -> None:
-    # premium 의 fwd/rev 가 같은 호가로 계산한 /spreads 의 fwd/rev 와 일치한다 (§4)
+def deep_store() -> LiveStore:
+    """seeded_store 의 upbit×binance BTC 호가만 2단계로 — $10,000 이 1단계를 넘긴다."""
     store = seeded_store()
+    store.replace_exchange(
+        "upbit",
+        [
+            make_row(
+                "upbit",
+                "BTC",
+                asks=[[101_000_000.0, 0.1], [102_000_000.0, 1.0]],
+                bids=[[100_000_000.0, 0.05], [99_000_000.0, 1.0]],
+            ),
+            make_row(
+                "upbit", "ETH", asks=[[5_050_000.0, 1.0]], bids=[[5_000_000.0, 1.0]]
+            ),
+            make_row("upbit", "USDT", asks=[[1401.0, 1.0]], bids=[[1399.0, 1.0]]),
+        ],
+        FIXED_DT,
+    )
+    store.replace_exchange(
+        "binance",
+        [
+            make_row(
+                "binance",
+                "BTC",
+                asks=[[71_000.0, 0.1], [72_000.0, 1.0]],
+                bids=[[70_900.0, 0.05], [70_000.0, 1.0]],
+            ),
+            make_row("binance", "ETH", asks=[[3_550.0, 1.0]], bids=[[3_540.0, 1.0]]),
+        ],
+        FIXED_DT,
+    )
+    return store
+
+
+async def test_values_are_the_raw_premium_behind_spreads(
+    unused_client: httpx.AsyncClient,
+) -> None:
+    # premium 은 슬리피지 차감 **전** 원값이다 — /spreads 의 fwd + slipFwd 와 같다
+    # (003 §2·§4, 005 §4). 저장 시점에는 체결 규모가 정의되지 않기 때문이다.
+    store = deep_store()
     influx = FakeInflux()
     loop, _ = make_loop(store, influx, unused_client)
     await loop.persist_once()
     spreads = build_spreads(store, now=FIXED_DT)
+    # 차감이 0 인 시드면 이 테스트가 아무것도 고정하지 못한다
+    assert any(row.slip_fwd > 0 and row.slip_rev > 0 for row in spreads.rows)
     for row in spreads.rows:
         fields = influx.fields_of(
             "premium", {"dom": row.dom, "fx": row.fx, "base": row.sym}
         )
-        assert fields["fwd"] == row.fwd
-        assert fields["rev"] == row.rev
+        assert fields["fwd"] == pytest.approx(row.fwd + row.slip_fwd)
+        assert fields["rev"] == pytest.approx(row.rev + row.slip_rev)
 
 
 async def test_dw_fail_point_per_failed_exchange(

@@ -23,11 +23,11 @@ from tests.conftest import FakeConnector, make_row
 FIXED_SEC = 1_700_000_000
 FIXED_DT = datetime.fromtimestamp(FIXED_SEC, tz=UTC)
 
-# 한 줄의 키는 정확히 21개 — 행 18키(API 순서) + 최상위 3키 (§3.4)
+# 한 줄의 키는 정확히 21개 — 행 17키(API 순서) + 최상위 4키 (§3.4)
 EXPECTED_KEYS = [
     "sym", "dom", "fx", "fwd", "rev", "usd", "spark", "status", "age",
-    "liqDom", "liqFx", "rateAsk", "rateBid", "netDom", "depDom", "wdDom",
-    "depFx", "wdFx", "rate", "dataReceivedAt", "warnings",
+    "slipFwd", "slipRev", "krw", "netDom", "depDom", "wdDom", "depFx", "wdFx",
+    "rate", "notional", "dataReceivedAt", "warnings",
 ]  # fmt: skip
 
 
@@ -141,10 +141,14 @@ async def test_lines_match_spreads_rows(unused_client: httpx.AsyncClient) -> Non
         assert line["fx"] == row.fx
         assert line["fwd"] == row.fwd
         assert line["rev"] == row.rev
-        assert line["liqDom"] == row.liq_dom
+        assert line["slipFwd"] == row.slip_fwd
+        assert line["slipRev"] == row.slip_rev
+        assert line["krw"] == row.krw
         assert line["netDom"] == row.net_dom
-        # 최상위 세 값은 모든 줄에서 같고 API 최상위 값과 같다
+        # 최상위 네 값은 모든 줄에서 같고 API 최상위 값과 같다
         assert line["rate"] == api.rate
+        # 규모 인자 없이 부르므로 003 의 기본값이 매 줄에 남는다 (§3.4)
+        assert line["notional"] == api.notional == 10_000.0
         assert line["dataReceivedAt"] == api.data_received_at == FIXED_SEC * 1000
         # age·warnings 는 현재 시각 의존이라 루프 회차 값과 다르다 — 모든 줄에서 같은지만 본다
         assert line["warnings"] == lines[0]["warnings"]

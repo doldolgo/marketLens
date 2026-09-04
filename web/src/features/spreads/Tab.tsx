@@ -8,20 +8,15 @@ import {
   Empty, GridHeader, gridRow, NumField, Seg, segOpt, SymCell, TableFrame, ToggleBtn,
   bar, count, exTag, hint, label, searchInput, vDivider, type Header,
 } from '../../shared/ui'
-import type { ApiSpreadRow } from './types'
+import { NOTIONALS } from './api'
 
 type View = 'kimp' | 'rev'
 type DomFilter = 'all' | '업비트' | '빗썸'
-/** 가격 기준 — 현재가(최우선 호가) / 슬리피지 반영(체결 규모만큼 호가를 먹는다고 가정). */
-type Basis = 'mid' | 'slip'
-/** 체결 규모(USD) 선택지. 기본 $10k. */
-const NOTIONALS = [10000, 50000, 100000, 500000]
 type SortCol = 'sym' | 'price' | 'val' | 'io' | 'net'
 
-/** 심볼 | 국내가 KRW | 김프 | 입출금 | 네트워크 — 국내가 열만 가변 폭. */
-const GRID = '112px 1fr 264px 148px 88px'
-/** 슬리피지 반영이면 김프 셀에 `슬 −N.NN%p` 배지가 붙어 열을 그만큼 넓힌다 — 안 넓히면 국내가 숫자와 겹친다. */
-const GRID_SLIP = '112px 1fr 344px 148px 88px'
+/** 심볼 | 국내가 KRW | 김프 | 입출금 | 네트워크 — 국내가 열만 가변 폭.
+ *  김프 열은 `슬 −N.NN%p` 배지 자리를 항상 비워 둔다 — 규모를 바꿀 때마다 표가 흔들리지 않게. */
+const GRID = '112px 1fr 344px 148px 88px'
 
 /** 코인 1개의 집계 행. */
 interface CoinRow {
@@ -37,23 +32,10 @@ interface CoinRow {
   wd: IoState
   dep: IoState
   net: string
-  /** 국내가 KRW — 김프 최대 행 기준. fail 이거나 usd 없으면 null. */
+  /** 국내가 KRW — 김프 최대 행의 `krw` 그대로. fail 이거나 0 이면 null. */
   price: number | null
-  /** 슬리피지 차감폭(%p) — 현재가 기준이면 null. */
-  slip: number | null
-}
-
-/** 슬리피지 차감이 적용된 행. fwdRaw 는 차감 전 fwd — 국내가 계산에만 쓴다. */
-type CalcRow = SpreadRow & { slip?: number; fwdRaw?: number }
-
-/** 체결 규모 대비 최우선 호가 유동성으로 한쪽 슬리피지 추정. 상한 6% (스펙 003 §3.5). */
-function slipOf(notional: number, liq: number): number {
-  return Math.min(6, 100 * Math.pow(notional / Math.max(liq, 1), 0.85))
-}
-
-/** 확장 키 rateAsk 는 런타임에 실려 온다(구조적 타이핑) — 없으면 셸 환율로 폴백. */
-function rateOf(row: SpreadRow, fallback: number): number {
-  return (row as Partial<ApiSpreadRow>).rateAsk ?? fallback
+  /** 그 방향에서 서버가 차감한 폭(%p, 양수). 0 이면 배지를 숨긴다. */
+  slip: number
 }
 
 /** 입출금 정렬 순위: 가능(둘 다 true) > 모름 > 중단(하나라도 false). */
@@ -64,18 +46,14 @@ function ioRank(wd: IoState, dep: IoState): number {
 }
 
 function aggregate(
-  feed: Feed, domFilter: DomFilter, fxOff: Record<string, boolean>, view: View, basis: Basis, notional: number,
+  feed: Feed, domFilter: DomFilter, fxOff: Record<string, boolean>, view: View,
 ): CoinRow[] {
-  const byCoin = new Map<string, CalcRow[]>()
-  for (const r0 of feed.spreads) {
-    if (domFilter !== 'all' && r0.dom !== domFilter) continue
-    if (fxOff[r0.fx]) continue
-    let r: CalcRow = r0
-    if (basis === 'slip') {
-      // 매수·매도 양측 슬리피지를 합산해 김프·역프에서 차감. 이후 판단은 전부 차감된 값 기준.
-      const sl = slipOf(notional, r0.liqFx) + slipOf(notional, r0.liqDom)
-      r = { ...r0, fwd: Math.round((r0.fwd - sl) * 100) / 100, rev: Math.round((r0.rev - sl) * 100) / 100, slip: sl, fwdRaw: r0.fwd }
-    }
+  // 응답의 fwd·rev 가 이미 순값이라 FE 는 슬리피지를 계산하지 않는다 — 그 값이 그대로
+  // 최대 행 선택·강조·임계 필터·정렬·표시에 쓰인다 (§3.5).
+  const byCoin = new Map<string, SpreadRow[]>()
+  for (const r of feed.spreads) {
+    if (domFilter !== 'all' && r.dom !== domFilter) continue
+    if (fxOff[r.fx]) continue
     const list = byCoin.get(r.sym)
     if (list) list.push(r)
     else byCoin.set(r.sym, [r])
@@ -83,20 +61,14 @@ function aggregate(
   const out: CoinRow[] = []
   for (const [sym, rows] of byCoin) {
     const live = rows.filter((r) => r.status !== 'fail')
-    let fwdBest: CalcRow | null = null
-    let revBest: CalcRow | null = null
+    let fwdBest: SpreadRow | null = null
+    let revBest: SpreadRow | null = null
     for (const r of live) {
       if (!fwdBest || r.fwd > fwdBest.fwd) fwdBest = r
       if (!revBest || r.rev > revBest.rev) revBest = r
     }
     const best = view === 'kimp' ? fwdBest : revBest
     const age = live.length ? Math.min(...live.map((r) => r.age)) : 0
-    let price: number | null = null
-    if (fwdBest && fwdBest.usd) {
-      const rate = rateOf(fwdBest, feed.rate)
-      // 체결 비용은 국내 시세를 바꾸지 않으므로 차감 전 fwd 로 환산
-      if (rate > 0) price = fwdBest.usd * rate * (1 + (fwdBest.fwdRaw ?? fwdBest.fwd) / 100)
-    }
     out.push({
       sym,
       allFail: live.length === 0,
@@ -109,8 +81,9 @@ function aggregate(
       wd: best ? (view === 'kimp' ? best.wdFx : best.wdDom) : null,
       dep: best ? (view === 'kimp' ? best.depDom : best.depFx) : null,
       net: best ? (best.netDom ?? '–') : '–',
-      price,
-      slip: best?.slip ?? null,
+      // 서버가 그 행 국내 거래소의 최우선 매수호가를 그대로 준다 — 환산도 보정도 하지 않는다
+      price: fwdBest && fwdBest.krw > 0 ? fwdBest.krw : null,
+      slip: best ? (view === 'kimp' ? best.slipFwd : best.slipRev) : 0,
     })
   }
   return out
@@ -131,7 +104,15 @@ const ioLabel = (kind: string, state: IoState) => (state === null ? `${kind} ?` 
 const fxCheck = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' } as const
 const checkbox = { accentColor: 'var(--color-accent)', width: 13, height: 13, cursor: 'pointer' } as const
 
-export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym: string) => void }) {
+/** 체결 규모는 셸이 들고 있다 — 같은 값이 폴링 URL 의 `notional` 로도 나가야 하기 때문 (§3.4). */
+interface Props {
+  feed: Feed
+  notional: number
+  onNotional: (v: number) => void
+  onPick: (sym: string) => void
+}
+
+export default function SpreadsTab({ feed, notional, onNotional, onPick }: Props) {
   const [q, setQ] = useState('')
   const [domFilter, setDomFilter] = useState<DomFilter>('all')
   const [view, setView] = useState<View>('kimp')
@@ -139,13 +120,11 @@ export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym:
   const [onlyThr, setOnlyThr] = useState(false)
   const [onlyIo, setOnlyIo] = useState(false)
   const [sort, setSort] = useState<{ col: SortCol; asc: boolean }>({ col: 'val', asc: false })
-  const [basis, setBasis] = useState<Basis>('mid')
-  const [notional, setNotional] = useState(NOTIONALS[0])
   /** 체크 해제된 해외 거래소 — 키가 있으면 제외. 비어 있으면 전부 켜짐. */
   const [fxOff, setFxOff] = useState<Record<string, boolean>>({})
   const fxAllOn = FX_EXS.every((fx) => !fxOff[fx])
 
-  const all = aggregate(feed, domFilter, fxOff, view, basis, notional)
+  const all = aggregate(feed, domFilter, fxOff, view)
 
   const ql = q.trim().toLowerCase()
   let coins = all.filter((c) => c.sym.toLowerCase().includes(ql))
@@ -184,7 +163,6 @@ export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym:
     setSort({ col: 'val', asc: false })
   }
 
-  const grid = basis === 'slip' ? GRID_SLIP : GRID
   const headers: Header[] = [
     ['sym', '심볼', 'left'], ['price', '국내가 KRW', 'right'],
     ['val', view === 'kimp' ? '김프' : '역프', 'right'], ['io', '입출금', 'right'], ['net', '네트워크', 'right'],
@@ -205,17 +183,10 @@ export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym:
           <span style={label}>기준 보기</span>
           <Seg pad="4px 10px" opts={[['kimp', '김프 기준'], ['rev', '역프 기준']].map(([id, l]) => segOpt(l, view === id, () => switchView(id as View)))} />
           {vDivider}
-          <span style={label}>가격 기준</span>
-          <Seg pad="4px 10px" opts={[['mid', '현재가'], ['slip', '슬리피지 반영']].map(([id, l]) => segOpt(l, basis === id, () => setBasis(id as Basis)))} />
-          {basis === 'slip' && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-              <span style={label}>체결 규모</span>
-              <Seg pad="4px 9px" opts={NOTIONALS.map((v) => segOpt('$' + v / 1000 + 'k', notional === v, () => setNotional(v)))} />
-            </span>
-          )}
-          <span style={hint}>
-            {basis === 'slip' ? '호가창 시장가 체결 기준 · 매수·매도 양측 슬리피지 차감' : '최우선 호가 기준 · 체결 비용 미반영'}
-          </span>
+          {/* 차감은 항상 적용된다 — 가격 기준(현재가/슬리피지 반영) 세그먼트는 없다 (§3.5) */}
+          <span style={label}>체결 규모</span>
+          <Seg pad="4px 9px" opts={NOTIONALS.map((v) => segOpt('$' + v / 1000 + 'k', notional === v, () => onNotional(v)))} />
+          <span style={hint}>호가창 시장가 체결 기준 · 매수·매도 양측 슬리피지 차감</span>
           {vDivider}
           <span style={label}>비교 해외 거래소</span>
           <label style={{ ...fxCheck, color: fxAllOn ? 'var(--color-accent-300)' : 'var(--color-neutral-400)' }}>
@@ -232,14 +203,14 @@ export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym:
       </div>
 
       <TableFrame minWidth={820}>
-        <GridHeader cols={grid} headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} />
+        <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} />
         {feed.spreads.length === 0 && <Empty>백엔드에서 스프레드를 받는 중입니다…</Empty>}
         {feed.spreads.length > 0 && coins.length === 0 && <Empty>조건에 맞는 코인이 없습니다. 필터를 넓혀 보세요.</Empty>}
         {coins.map((c) => {
           const hot = !c.allFail && !c.allStale && c.val !== null && c.val >= thr
           return (
             <div key={c.sym} onClick={() => onPick(c.sym)} className="hv-row"
-              style={{ ...gridRow(grid, { hot, stale: c.allStale }), cursor: 'pointer' }}>
+              style={{ ...gridRow(GRID, { hot, stale: c.allStale }), cursor: 'pointer' }}>
               <SymCell sym={c.sym} hot={hot} />
               <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                 {c.price !== null ? '₩' + fmtKrw(c.price) : '–'}
@@ -249,7 +220,7 @@ export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym:
                 <span style={{ fontSize: 10, color: 'var(--color-neutral-600)' }}>→</span>
                 <span style={exTag()}>{c.to ?? '–'}</span>
                 <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-600)', whiteSpace: 'nowrap' }}>
-                  {c.slip !== null ? '슬 −' + c.slip.toFixed(2) + '%p' : ''}
+                  {c.slip > 0 ? '슬 −' + c.slip.toFixed(2) + '%p' : ''}
                 </span>
                 <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 72, textAlign: 'right', color: c.val !== null ? pctColor(c.val) : 'var(--color-neutral-700)' }}>
                   {c.val !== null ? fmtPct(c.val) : '–'}
