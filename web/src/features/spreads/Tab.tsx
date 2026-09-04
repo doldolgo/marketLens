@@ -1,14 +1,20 @@
-// 실시간 스프레드 탭 — 코인 1개 = 행 1개 집계 표 (스펙 003 §3.5).
+// 실시간 스프레드 탭 — 코인 1개 = 행 1개 집계 표 (스펙 003 §3.5, 구조는 docs/design/reference/tabs/SpreadTab.tsx).
 import { useState } from 'react'
 import { HIGHLIGHT_PCT, STALE_SEC } from '../../shared/config'
 import { fmtKrw, fmtPct, pctColor } from '../../shared/format'
 import type { Feed, IoState, SpreadRow } from '../../shared/types'
-import { Chip, DIM_TEXT, NumField, Seg, segOpt, Toggle } from '../../shared/ui'
+import {
+  Empty, GridHeader, gridRow, NumField, Seg, segOpt, SymCell, TableFrame, ToggleBtn,
+  bar, count, exTag, hint, label, searchInput, type Header,
+} from '../../shared/ui'
 import type { ApiSpreadRow } from './types'
 
 type View = 'kimp' | 'rev'
 type DomFilter = 'all' | '업비트' | '빗썸'
 type SortCol = 'sym' | 'price' | 'val' | 'io' | 'net'
+
+/** 심볼 | 국내가 KRW | 김프 | 입출금 | 네트워크 — 국내가 열만 가변 폭. */
+const GRID = '112px 1fr 264px 148px 88px'
 
 /** 코인 1개의 집계 행. */
 interface CoinRow {
@@ -82,34 +88,17 @@ function aggregate(feed: Feed, domFilter: DomFilter, view: View): CoinRow[] {
   return out
 }
 
-/** 입출금 태그 — true 강조색 실선, false 중립색 실선, null 은 점선(모름을 한눈에 구분). */
-function IoTag({ kind, state }: { kind: '출금' | '입금'; state: IoState }) {
-  const label = state === true ? '가능' : state === false ? '중단' : '?'
-  const color = state === true ? 'var(--color-accent)' : state === false ? 'var(--color-neutral-500)' : DIM_TEXT
-  const border =
-    state === true
-      ? '1px solid var(--color-accent)'
-      : state === false
-        ? '1px solid var(--color-neutral-500)'
-        : '1px dashed var(--color-neutral-500)'
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        fontSize: 11,
-        padding: '2px 8px',
-        borderRadius: 'calc(var(--radius-md) * 0.75)',
-        whiteSpace: 'nowrap',
-        border,
-        color,
-      }}
-    >
-      {kind} {label}
-    </span>
-  )
-}
+// 세 상태를 세 모양으로 그린다. 확인 불가(null)를 초록(열림)으로 칠하지 않고, 중단과도 다르게(점선) 그린다.
+const okC = 'var(--color-accent-300)'
+const badC = 'var(--color-neutral-600)'
+const unkC = 'var(--color-neutral-500)'
+const tagStyle = (state: IoState) => ({
+  fontSize: 10, padding: '2px 6px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap' as const,
+  border: state === null ? '1px dashed var(--color-neutral-800)' : `1px solid ${state ? 'var(--color-accent-800)' : 'var(--color-neutral-800)'}`,
+  color: state === null ? unkC : state ? okC : badC,
+})
+// 확인 불가는 '?' 로 — "가능/중단" 어느 쪽으로도 읽히면 안 된다
+const ioLabel = (kind: string, state: IoState) => (state === null ? `${kind} ?` : state ? `${kind} 가능` : `${kind} 중단`)
 
 export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym: string) => void }) {
   const [q, setQ] = useState('')
@@ -148,9 +137,10 @@ export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym:
     return d * dir || a.sym.localeCompare(b.sym)
   })
 
-  function clickSort(col: SortCol) {
+  function clickSort(col: string) {
+    const c = col as SortCol
     // 같은 키 재클릭 = 방향 반전. 새 키는 심볼·네트워크만 오름차순.
-    setSort((s) => (s.col === col ? { col, asc: !s.asc } : { col, asc: col === 'sym' || col === 'net' }))
+    setSort((s) => (s.col === c ? { col: c, asc: !s.asc } : { col: c, asc: c === 'sym' || c === 'net' }))
   }
 
   function switchView(v: View) {
@@ -158,168 +148,61 @@ export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym:
     setSort({ col: 'val', asc: false })
   }
 
-  const cols: { id: SortCol; label: string; width?: number; align?: 'right' }[] = [
-    { id: 'sym', label: '심볼', width: 130 },
-    { id: 'price', label: '국내가 KRW', align: 'right' },
-    { id: 'val', label: view === 'kimp' ? '김프 · 해외 → 국내' : '역프 · 국내 → 해외', width: 340 },
-    { id: 'io', label: '입출금', width: 230 },
-    { id: 'net', label: '네트워크', width: 120 },
+  const headers: Header[] = [
+    ['sym', '심볼', 'left'], ['price', '국내가 KRW', 'right'],
+    ['val', view === 'kimp' ? '김프' : '역프', 'right'], ['io', '입출금', 'right'], ['net', '네트워크', 'right'],
   ]
 
-  const barStyle = {
-    display: 'flex',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 10,
-    padding: '8px 16px',
-    borderBottom: '1px solid var(--color-divider)',
-    flex: 'none',
-  } as const
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      {/* 필터바 1행 */}
-      <div style={barStyle}>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="심볼 검색"
-          style={{
-            width: 130,
-            minHeight: 28,
-            padding: '2px 10px',
-            font: 'inherit',
-            fontSize: 12,
-            color: 'var(--color-text)',
-            caretColor: 'var(--color-accent)',
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-divider)',
-            borderRadius: 'var(--radius-md)',
-          }}
-        />
-        <span style={{ fontSize: 11, color: DIM_TEXT }}>기준 국내 거래소</span>
+    <>
+      {/* 필터바 — 2행은 flexBasis 100% 로 같은 바 안에서 줄을 바꾼다 */}
+      <div style={bar}>
+        <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={searchInput} />
+        <span style={label}>기준 국내 거래소</span>
         <Seg opts={[['all', '모두'], ['업비트', '업비트'], ['빗썸', '빗썸']].map(([id, l]) => segOpt(l, domFilter === id, () => setDomFilter(id as DomFilter)))} />
-        <NumField label="임계값" value={thr} onChange={setThr} step={0.1} />
-        <Toggle label="임계 초과만" on={onlyThr} onChange={setOnlyThr} />
-        <Toggle label="입출금 가능만" on={onlyIo} onChange={setOnlyIo} />
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: DIM_TEXT }}>
-          {coins.length} / {all.length} 코인 표시
-        </span>
+        <NumField label="하이라이트 임계값" value={thr} step={0.1} onChange={setThr} />
+        <ToggleBtn on={onlyThr} label="임계 초과만" onClick={() => setOnlyThr(!onlyThr)} />
+        <ToggleBtn on={onlyIo} label="입출금 가능만" onClick={() => setOnlyIo(!onlyIo)} />
+        <span style={count}>{coins.length} / {all.length} 코인 표시</span>
+        <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+          <span style={label}>기준 보기</span>
+          <Seg pad="4px 10px" opts={[['kimp', '김프 기준'], ['rev', '역프 기준']].map(([id, l]) => segOpt(l, view === id, () => switchView(id as View)))} />
+          <span style={hint}>김프 = 해외 매수 → 국내 매도 · 역프 = 국내 매수 → 해외 매도 · 행 클릭 시 기록 탭으로</span>
+        </div>
       </div>
 
-      {/* 필터바 2행 */}
-      <div style={barStyle}>
-        <span style={{ fontSize: 11, color: DIM_TEXT }}>기준 보기</span>
-        <Seg opts={[['kimp', '김프'], ['rev', '역프']].map(([id, l]) => segOpt(l, view === id, () => switchView(id as View)))} />
-        <span style={{ fontSize: 11, color: DIM_TEXT }}>
-          김프 = 해외 매수 → 국내 매도 · 역프 = 국내 매수 → 해외 매도. 행 클릭 시 기록 탭으로.
-        </span>
-      </div>
-
-      {/* 본문 */}
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '0 16px' }}>
-        {feed.spreads.length === 0 ? (
-          <div style={{ padding: '48px 0', textAlign: 'center', color: DIM_TEXT, fontSize: 13 }}>
-            백엔드에서 스프레드를 받는 중입니다…
-          </div>
-        ) : coins.length === 0 ? (
-          <div style={{ padding: '48px 0', textAlign: 'center', color: DIM_TEXT, fontSize: 13 }}>
-            조건에 맞는 코인이 없습니다. 필터를 넓혀 보세요.
-          </div>
-        ) : (
-          <table className="table" style={{ tableLayout: 'auto' }}>
-            <thead>
-              <tr>
-                {cols.map((c) => {
-                  const active = sort.col === c.id
-                  return (
-                    <th
-                      key={c.id}
-                      onClick={() => clickSort(c.id)}
-                      className="hv-txt"
-                      style={{
-                        cursor: 'pointer',
-                        position: 'sticky',
-                        top: 0,
-                        zIndex: 1,
-                        background: 'var(--color-bg)',
-                        whiteSpace: 'nowrap',
-                        width: c.width, // 국내가 열만 가변 폭
-                        textAlign: c.align ?? 'left',
-                        color: active ? 'var(--color-accent)' : undefined,
-                      }}
-                    >
-                      {c.label}
-                      {active ? (sort.asc ? ' ▴' : ' ▾') : ''}
-                    </th>
-                  )
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {coins.map((c) => {
-                const hot = !c.allFail && !c.allStale && c.val !== null && c.val >= thr
-                const dim = c.allFail || c.allStale
-                return (
-                  <tr
-                    key={c.sym}
-                    className="hv-row"
-                    onClick={() => onPick(c.sym)}
-                    style={{
-                      cursor: 'pointer',
-                      opacity: dim ? 0.45 : 1,
-                      background: hot ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)' : undefined,
-                    }}
-                  >
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      {hot && (
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            width: 6,
-                            height: 6,
-                            borderRadius: '50%',
-                            background: 'var(--color-accent)',
-                            marginRight: 8,
-                            verticalAlign: 'middle',
-                          }}
-                        />
-                      )}
-                      <span style={{ fontWeight: 600, color: hot ? 'var(--color-accent)' : undefined }}>{c.sym}</span>
-                    </td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      {c.price !== null ? `₩${fmtKrw(c.price)}` : <span style={{ color: DIM_TEXT }}>–</span>}
-                    </td>
-                    <td>
-                      {c.val !== null ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                          <Chip tone="neutral">{c.from}</Chip>
-                          <span style={{ color: DIM_TEXT, fontSize: 11 }}>→</span>
-                          <Chip tone="outline">{c.to}</Chip>
-                          <span style={{ fontWeight: 700, color: pctColor(c.val) }}>{fmtPct(c.val)}</span>
-                        </div>
-                      ) : (
-                        <span style={{ color: DIM_TEXT }}>–</span>
-                      )}
-                    </td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      {c.from !== null ? (
-                        <span style={{ display: 'inline-flex', gap: 6 }}>
-                          <IoTag kind="출금" state={c.wd} />
-                          <IoTag kind="입금" state={c.dep} />
-                        </span>
-                      ) : (
-                        <span style={{ color: DIM_TEXT }}>–</span>
-                      )}
-                    </td>
-                    <td style={{ whiteSpace: 'nowrap', color: c.net === '–' ? DIM_TEXT : undefined }}>{c.net}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
+      <TableFrame minWidth={820}>
+        <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} />
+        {feed.spreads.length === 0 && <Empty>백엔드에서 스프레드를 받는 중입니다…</Empty>}
+        {feed.spreads.length > 0 && coins.length === 0 && <Empty>조건에 맞는 코인이 없습니다. 필터를 넓혀 보세요.</Empty>}
+        {coins.map((c) => {
+          const hot = !c.allFail && !c.allStale && c.val !== null && c.val >= thr
+          return (
+            <div key={c.sym} onClick={() => onPick(c.sym)} className="hv-row"
+              style={{ ...gridRow(GRID, { hot, stale: c.allStale }), cursor: 'pointer' }}>
+              <SymCell sym={c.sym} hot={hot} />
+              <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                {c.price !== null ? '₩' + fmtKrw(c.price) : '–'}
+              </div>
+              <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
+                <span style={exTag()}>{c.from ?? '–'}</span>
+                <span style={{ fontSize: 10, color: 'var(--color-neutral-600)' }}>→</span>
+                <span style={exTag()}>{c.to ?? '–'}</span>
+                <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 72, textAlign: 'right', color: c.val !== null ? pctColor(c.val) : 'var(--color-neutral-700)' }}>
+                  {c.val !== null ? fmtPct(c.val) : '–'}
+                </span>
+              </div>
+              <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 5 }}>
+                <span style={tagStyle(c.wd)}>{ioLabel('출금', c.wd)}</span>
+                <span style={tagStyle(c.dep)}>{ioLabel('입금', c.dep)}</span>
+              </div>
+              <div style={{ padding: '0 8px', textAlign: 'right', fontSize: 11, color: 'var(--color-neutral-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {c.net}
+              </div>
+            </div>
+          )
+        })}
+      </TableFrame>
+    </>
   )
 }
