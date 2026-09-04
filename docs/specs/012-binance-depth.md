@@ -64,11 +64,11 @@ REST 로는 불가능하다. `GET /api/v3/depth` 는 심볼당 1회이고 `limit
 011 의 구간 추적은 **커넥터가 예외를 던질 때만** 동작한다. 소켓이 조용히 멈추면 예외가 없어 `/health/collect` 가 계속 초록인 채로 깊이만 얼어붙는다. 그래서 정체를 명시적으로 실패로 승격한다.
 
 - 새 실패 종류 **`stale_stream`** 을 011 의 종류 목록에 추가한다.
-- 판정: 구독 중인 심볼이 있는데 **어느 샤드도 30초 동안 메시지를 받지 못하면** 그 사이클의 바이낸스 수집이 `ExchangeError(kind="stale_stream")` 을 던진다. 커넥터가 던지므로 011 의 기존 경로(collector → 구간 추적기 → `collect_fail`)를 그대로 탄다. 예외는 `exchange_api_error` 이고 `url`·`status_code` 는 null 이다.
-- 무수신을 세는 기준 시각은 **마지막 깊이 메시지 수신 시각**, 아직 한 번도 못 받았으면 **구독을 시작한 시각**이다. 구독이 0개로 돌아가면 판정 대상이 아니다.
+- 판정 단위는 **샤드 하나**다. 구독 중인 심볼이 있는 샤드가 **30초 동안 메시지를 받지 못하면**, 다른 샤드가 멀쩡해도 그 사이클의 바이낸스 수집이 `ExchangeError(kind="stale_stream")` 을 던진다. 샤드 하나가 죽으면 그 샤드의 심볼(전체의 약 1/3)만 TTL 10초 뒤 조용히 1단계로 되돌아가는데, 전체 기준으로 판정하면 그 열화가 어디에도 드러나지 않는다. message 에 정체된 샤드 번호와 그 샤드의 구독 수를 담는다. 커넥터가 던지므로 011 의 기존 경로(collector → 구간 추적기 → `collect_fail`)를 그대로 탄다. 예외는 `exchange_api_error` 이고 `url`·`status_code` 는 null 이다.
+- 무수신을 세는 기준 시각은 **그 샤드의** 마지막 깊이 메시지 수신 시각, 아직 한 번도 못 받았으면 그 샤드가 구독을 시작한 시각이다. 구독이 0개인 샤드는 판정 대상이 아니다(기동 직후 첫 재조정 전이 그렇다).
 - 예외는 REST 호출 **뒤에** 던진다. 호출 수가 줄면 안 되고(§4 회귀), 사이클 시각의 최우선 호가는 정상적으로 받아둬야 다음 성공 사이클이 이어진다.
 - 이때도 REST 결과는 유효하므로 **행이 사라지면 안 된다** — 예외는 사이클을 실패로 기록하되, 001 의 "실패한 거래소는 직전 스냅샷을 유지한다" 규칙에 따라 표는 계속 뜬다.
-- 정체가 풀리면 다음 사이클이 성공으로 기록돼 구간이 닫힌다.
+- 정체가 풀리면 다음 사이클이 성공으로 기록돼 구간이 닫힌다. 여러 샤드가 동시에 정체면 구간은 여전히 1건이다 — 011 의 기록 단위가 거래소별 연속 실패 구간이기 때문이다. 구간이 1건이니 message 가 가리키는 샤드도 하나다: **가장 오래 조용한 샤드**를 고르고, 무수신 시간이 같으면 번호가 작은 쪽이다.
 
 ### 3.7 장애 격리
 - 스트림이 한 번도 못 붙어도 앱은 뜬다. 경고 로그 1줄, 샤드는 백오프로 재시도, `depth_*` 는 빈 목록이라 소비자는 §3.5 규칙대로 1단계로 되돌아간다.
@@ -93,6 +93,9 @@ REST 로는 불가능하다. `GET /api/v3/depth` 는 심볼당 1회이고 `limit
 
 **watchdog**
 - 구독 중인데 30초 무수신 → 그 사이클이 `stale_stream` 으로 실패 기록되고, 표의 바이낸스 행은 직전 스냅샷으로 유지된다
+- **샤드 3개 중 1개만** 30초 무수신이어도 실패로 잡히고, message 에 그 샤드 번호가 담긴다(나머지 2샤드가 메시지를 받는 중이어도 마찬가지)
+- 여러 샤드가 정체면 message 가 가장 오래 조용한 샤드를 가리킨다
+- 구독이 0개인 샤드는 아무리 조용해도 판정에서 빠진다(구독 있는 샤드가 방금 받았으면 정체 아님)
 - 무수신이 30초 미만이면 실패로 치지 않는다
 - 메시지가 다시 오면 다음 사이클이 성공으로 기록돼 구간이 닫힌다
 - 구독 대상이 0개면(기동 직후) 무수신이어도 실패가 아니다
@@ -129,6 +132,22 @@ cd server && .venv/bin/python <샤드 3개를 8초 돌려 캐시를 찍는 스�
 # BTCUSDT asks 20 bids 20 top [81097.6, 4.66569] … 6종목 전부 20단계, stalled: False
 ```
 
+§3.6 을 샤드별 판정으로 고친 뒤 (2026-09-04):
+```bash
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q
+# All checks passed! / 172 files already formatted / 314 passed (기존 311 + 신규 3)
+
+cd web && npm run lint && npm run build
+# oxlint src — 출력 없음(경고 0) / tsc -b + vite build 성공 (44 modules, built in 297ms)
+
+# 새 테스트가 회귀를 실제로 잡는지 확인 — DepthCache.stalled_shard 만 옛 전체-스트림
+# 판정으로 되돌린 임시 pytest 플러그인으로 같은 파일을 돌렸다(레포에 남기지 않음)
+# FAILED test_one_stalled_shard_of_three_still_fails — assert [] == ['binance']
+# FAILED test_stalled_shard_reports_the_longest_silent_one — assert (0, 4) == (2, 9)
+# 기존 watchdog 테스트 4개는 옛 판정에서도 통과한다 — 3샤드를 다 굶기는 테스트로는
+# 이 회귀를 못 잡는다는 뜻이라 "1개만 굶기는" 케이스가 따로 있어야 한다
+```
+
 ## 6. 갱신할 문서
 - `docs/specs/001-collect.md` — §3.2 바이낸스 수집 단계에 캐시 읽기, §3.3 계약에 `depth_asks`·`depth_bids`·`depth_at` 과 소비자 규칙, §3.4-6 에 상한 문장, §3.5 바이낸스 절에 스트림·weight 근거, §4 의 호출 수 문구(스트림은 사이클당 호출이 아니다).
 - `docs/specs/011-health.md` — §3.2 분류 표에 `stale_stream` 행. **그리고 "후속 012" 로 백오프·서킷브레이커를 가리키는 3곳(§1·§2·§7)을 013 으로 고친다.**
@@ -145,6 +164,7 @@ cd server && .venv/bin/python <샤드 3개를 8초 돌려 캐시를 찍는 스�
   - 수정: `core/models.py`(`Row` 에 깊이 3필드), `core/rows.py`(`NOTIONAL_CAP_USDT`), `core/errors.py`(`FAIL_KINDS` 에 `stale_stream`, `url` 을 nullable 로), `core/connectors/binance.py`(캐시 생성자 주입·`depth_*` 적재·정체 예외), `main.py`(캐시 생성·스트림 기동/종료·커넥터 주입), `pyproject.toml`(`websockets>=13`), `server/.gitignore`(`*.egg-info/` — dev-setup 의 `uv pip install -e` 가 만든다), 커넥터 테스트 3개(깊이 8개 추가).
   - 문서: 이 스펙(§3.2·3.3·3.4·3.5·3.6·§4 수동·§5), `011-health.md`(분류 "7종"→"8종"), `CLAUDE.md`(012 DONE), `context/{status,architecture,db,dev-setup}.md`.
   - `001-collect.md` 는 §6 이 요구한 문장(§3.1 상한·§3.2-3 캐시 읽기·§3.3 계약·§3.4-6·§3.5 weight 근거·§4 호출 수)이 이미 전부 들어 있어 바꿀 것이 없었다. 011 의 "후속 012 → 013" 3곳도 이미 반영돼 있었다.
+  - **§3.6 샤드별 판정 (2026-09-04)**: `core/connectors/binance_depth.py`(무수신 시계를 `_ShardClock` 으로 샤드마다 나누고 `is_stalled` → `StalledShard | None` 을 돌려주는 `stalled_shard` 로 교체, `note_message` 가 샤드 번호를 받는다), `core/connectors/binance.py`(예외 message 에 샤드 번호·구독 수), `tests/test_binance_depth.py`(watchdog 절 개정 + 신규 3개 — 1개만 정체·가장 오래 조용한 샤드·구독 0 샤드 제외). 같은 변경에서 011 의 FE 라벨(`web/src/shared/types.ts` 의 `OutageKind` 에 `stale_stream`, `features/health/types.ts` 라벨 표)도 채웠다.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
   - **캐시 키**를 바이낸스 원본 심볼 대문자로 정했다(§3.4 에 적음). 스트림 이름과 `native_symbol` 이 같은 값이라 base↔symbol 변환이 사라진다.
   - **정체 예외**는 `exchange_api_error`(`kind="stale_stream"`, `url`·`status_code` null)로 던진다. 전용 예외 클래스를 만들지 않은 이유는 011 의 경로가 `kind` 만 보기 때문이다. 이 때문에 `ExchangeError.url` 을 `str | None` 으로 넓혔다(§3.4·§3.6 에 적음).
@@ -155,9 +175,11 @@ cd server && .venv/bin/python <샤드 3개를 8초 돌려 캐시를 찍는 스�
   - **종료 시 소켓 close 상한 2초**를 §3.4 에 추가했다. 실서버 종료를 재보니 순차 close 로 **22초**가 걸렸다 — 배포의 `docker stop`(10초)보다 길어 SIGKILL 이 난다. 동시 close + 상한으로 3초가 됐다.
   - 재조정 대기는 별도 태스크 없이 `recv()` 에 남은 시간을 타임아웃으로 걸어 처리한다(websockets 문서가 보장하는 취소 안전성). 샤드 1개 = 태스크 1개다.
   - 안정 해시는 `zlib.crc32`. `hash()` 는 `PYTHONHASHSEED` 때문에 프로세스마다 달라져 재기동 시 전 종목이 재배정된다 — 서브프로세스 2개로 검증하는 테스트를 뒀다.
+  - **여러 샤드가 동시에 정체일 때 message 가 가리킬 샤드**를 정했다: 가장 오래 조용한 샤드, 동률이면 작은 번호(§3.6 에 적음). 구간은 1건인데 message 는 하나뿐이라 고를 수밖에 없고, 가장 오래 죽어 있는 쪽이 사람이 먼저 볼 값이다.
+  - **정체 여부를 읽는 방법**을 불리언에서 `StalledShard | None`(샤드 번호 + 그 샤드 구독 수)로 바꿨다. message 에 두 값을 담으라는 §3.6 요구를 커넥터가 캐시를 한 번만 읽고 만족하려면 판정 결과가 그 두 값을 들고 와야 한다 — §3.4 의 "커넥터가 캐시에서 읽는 것은 심볼 조회와 정체 여부 둘뿐"은 그대로다.
+  - **구독 수가 0 으로 줄어든 샤드**는 그 시점부터 판정 대상에서 빠지고, 다시 구독이 생기면 무수신 시계를 그 순간부터 새로 센다(0 → 양수 전이에서만 시작 시각을 찍는다). 재조정으로 잠깐 빈 샤드가 곧바로 30초 정체로 잡히지 않게 하기 위해서다.
+  - 남은 빚 첫 줄("이 클론에는 코드가 커밋되지 않았다")을 지웠다. 012 코드는 `marketlens-space` 에 커밋돼 있다(`07da589`) — 문서만 docs 전용 클론 시점의 문구로 남아 있었다.
 - 남은 빚:
-  - **이 클론에는 코드가 커밋되지 않았다.** `.git/hooks/pre-commit` 이 `marketLens` 를 docs 전용으로 막는다("코드 변경은 marketlens-space 에서"). server 변경 12개 파일은 작업 트리에만 있고, 같은 변경을 `marketlens-space` 에서 커밋해야 문서와 코드가 맞는다. 훅을 우회하지 않았다.
-  - 새 종류 `stale_stream` 이 FE 에 없다. `web/src/shared/types.ts` 의 `OutageKind` 와 `features/health/types.ts` 의 칩 라벨에 값이 빠져 정체 구간의 라벨이 빈다. 012 는 BE 전용 범위라 손대지 않았다 — status.md 알려진 빚에 적었다.
   - 이 망은 `api.binance.com` 을 막아 앱 안에서의 구독(첫 재조정 → 실제 깊이 적재)까지는 로컬에서 못 봤다. WS 호스트는 통해서 같은 모듈로 6종목 20단계를 직접 받아 확인했다. `/health/collect` 의 `stale_stream` 구간·복구는 EC2 몫이다.
   - 24시간 강제 종료(바이낸스가 연결을 끊는 시각)를 실제로 겪는 경로는 재연결 백오프뿐이다 — 예상대로 도는지는 EC2 장기 관측 필요.
-  - 샤드 1개가 오래 죽어 있어도 나머지 2개가 메시지를 받으면 정체로 잡히지 않는다(§3.6 이 "어느 샤드도" 를 그렇게 정의한다). 그 1/3 은 TTL 10초 뒤 1단계로 되돌아갈 뿐 `/health/collect` 에는 안 보인다.
+  - 샤드 하나가 정체면 구간 1건이 열릴 뿐 `/health/collect` 응답에 **어느 샤드인지는 message 문자열로만** 남는다. 구조화된 필드가 아니라 화면에서 골라 보긴 어렵다 — 011 의 구간 모양을 바꾸지 않으려고 그렇게 뒀다.

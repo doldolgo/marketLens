@@ -53,12 +53,20 @@ class DepthEntry:
     at: int  # 수신 시각 epoch ms
 
 
+@dataclass(frozen=True)
+class StalledShard:
+    """정체로 판정된 샤드 1개. 예외 message 가 번호와 구독 수를 싣는다 (§3.6)."""
+
+    index: int
+    subscriptions: int
+
+
 class DepthSource(Protocol):
     """커넥터가 보는 깊이 캐시 계약 — 동기 읽기 둘뿐이다. 테스트는 가짜를 넣는다."""
 
     def get(self, symbol: str, now_ms: int) -> DepthEntry | None: ...
 
-    def is_stalled(self, now_ms: int) -> bool: ...
+    def stalled_shard(self, now_ms: int) -> StalledShard | None: ...
 
 
 def now_ms() -> int:
@@ -79,18 +87,25 @@ def stream_name(symbol: str) -> str:
     return f"{symbol.lower()}@depth{DEPTH_LEVELS}{suffix}"
 
 
+@dataclass
+class _ShardClock:
+    """샤드 1개의 정체 판정 재료. 시계가 샤드마다 따로여야 1/3 열화가 드러난다 (§3.6)."""
+
+    subscriptions: int = 0
+    subscribed_since: int | None = None
+    last_message_at: int | None = None
+
+
 class DepthCache:
     """심볼 → 깊이. 샤드 태스크가 쓰고 커넥터가 읽는 평범한 dict 다 (§3.4).
 
-    스트림 정체 판정에 필요한 두 값(구독 수·마지막 수신 시각)도 여기 있다.
+    스트림 정체 판정에 필요한 값(샤드별 구독 수·마지막 수신 시각)도 여기 있다.
     커넥터에 주입되는 것이 하나여야 `fetch_rows` 시그니처가 그대로 남는다.
     """
 
     def __init__(self) -> None:
         self._entries: dict[str, DepthEntry] = {}
-        self._subscribed: dict[int, int] = {}  # 샤드 → 구독 심볼 수
-        self._last_message_at: int | None = None
-        self._subscribed_since: int | None = None
+        self._clocks: dict[int, _ShardClock] = {}
 
     # --- 쓰기 (샤드 태스크) ---
 
@@ -103,16 +118,17 @@ class DepthCache:
         """구독을 끊은 심볼의 깊이는 지운다 — 상폐 코인의 낡은 북을 남기지 않는다."""
         self._entries.pop(symbol, None)
 
-    def note_message(self, at: int) -> None:
-        """어느 샤드든 깊이 메시지를 받으면 부른다 — 정체 판정의 기준 시각."""
-        self._last_message_at = at
+    def note_message(self, shard: int, at: int) -> None:
+        """그 샤드가 깊이 메시지를 받으면 부른다 — 그 샤드 정체 판정의 기준 시각."""
+        self._clock(shard).last_message_at = at
 
     def set_subscribed(self, shard: int, count: int, at: int) -> None:
-        was = self.subscribed_count()
-        self._subscribed[shard] = count
-        if was == 0 and self.subscribed_count() > 0:
-            # 무수신 시계는 구독한 순간부터 센다 — 기동 직후 구독 0 은 실패가 아니다
-            self._subscribed_since = at
+        clock = self._clock(shard)
+        was = clock.subscriptions
+        clock.subscriptions = count
+        if was == 0 and count > 0:
+            # 무수신 시계는 그 샤드가 구독한 순간부터 센다 — 구독 0 은 판정 대상이 아니다
+            clock.subscribed_since = at
 
     # --- 읽기 (커넥터, 동기 — await 없음) ---
 
@@ -122,22 +138,40 @@ class DepthCache:
             return None
         return entry
 
-    def subscribed_count(self) -> int:
-        return sum(self._subscribed.values())
+    def stalled_shard(self, now_ms: int) -> StalledShard | None:
+        """30초 무수신인 샤드 하나. 없으면 None (§3.6).
 
-    def silent_ms(self, now_ms: int) -> int | None:
+        여러 샤드가 동시에 정체면 **가장 오래 조용한** 샤드를 고른다(동률이면 작은 번호).
+        구간은 어차피 1건이라 message 는 가장 나쁜 샤드를 가리키는 편이 쓸모 있다.
+        """
+        worst: tuple[int, StalledShard] | None = None
+        for index in sorted(self._clocks):
+            silent = self._silent_ms(self._clocks[index], now_ms)
+            if silent is None or silent < STALE_AFTER_MS:
+                continue
+            if worst is None or silent > worst[0]:
+                worst = (
+                    silent,
+                    StalledShard(
+                        index=index, subscriptions=self._clocks[index].subscriptions
+                    ),
+                )
+        return worst[1] if worst is not None else None
+
+    # --- 내부 ---
+
+    def _clock(self, shard: int) -> _ShardClock:
+        return self._clocks.setdefault(shard, _ShardClock())
+
+    @staticmethod
+    def _silent_ms(clock: _ShardClock, now_ms: int) -> int | None:
         """구독 중일 때 마지막 수신 이후 경과 ms. 구독이 없으면 None(판정 대상 아님)."""
-        if self.subscribed_count() == 0:
+        if clock.subscriptions == 0:
             return None
-        since = max(self._last_message_at or 0, self._subscribed_since or 0)
+        since = max(clock.last_message_at or 0, clock.subscribed_since or 0)
         if since == 0:
             return None
         return max(0, now_ms - since)
-
-    def is_stalled(self, now_ms: int) -> bool:
-        """어느 샤드도 30초 동안 메시지를 못 받았는가 (§3.6)."""
-        silent = self.silent_ms(now_ms)
-        return silent is not None and silent >= STALE_AFTER_MS
 
 
 async def open_socket(url: str) -> Any:
@@ -293,7 +327,7 @@ class _Shard:
             return
         at = now_ms()
         self._cache.put(symbol, asks, bids, at)
-        self._cache.note_message(at)
+        self._cache.note_message(self._index, at)
 
 
 class BinanceDepthStream:

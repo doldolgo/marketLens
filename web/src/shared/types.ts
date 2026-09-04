@@ -78,6 +78,8 @@ export type OutageKind =
   | 'unavailable'
   | 'bad_request'
   | 'bad_response'
+  /** 상시 연결(012 깊이 스트림)이 조용히 멈춘 상태 — HTTP 응답이 아니라 statusCode·url 이 null 이다. */
+  | 'stale_stream'
 
 /** 실패 구간 1건 — openOutage 와 outages 항목이 같은 모양. endedAt null = 진행 중. */
 export interface HealthOutage {
