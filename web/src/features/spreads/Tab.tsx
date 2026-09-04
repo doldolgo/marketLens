@@ -20,6 +20,8 @@ type SortCol = 'sym' | 'price' | 'val' | 'io' | 'net'
 
 /** 심볼 | 국내가 KRW | 김프 | 입출금 | 네트워크 — 국내가 열만 가변 폭. */
 const GRID = '112px 1fr 264px 148px 88px'
+/** 슬리피지 반영이면 김프 셀에 `슬 −N.NN%p` 배지가 붙어 열을 그만큼 넓힌다 — 안 넓히면 국내가 숫자와 겹친다. */
+const GRID_SLIP = '112px 1fr 344px 148px 88px'
 
 /** 코인 1개의 집계 행. */
 interface CoinRow {
@@ -182,6 +184,7 @@ export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym:
     setSort({ col: 'val', asc: false })
   }
 
+  const grid = basis === 'slip' ? GRID_SLIP : GRID
   const headers: Header[] = [
     ['sym', '심볼', 'left'], ['price', '국내가 KRW', 'right'],
     ['val', view === 'kimp' ? '김프' : '역프', 'right'], ['io', '입출금', 'right'], ['net', '네트워크', 'right'],
@@ -229,14 +232,14 @@ export default function SpreadsTab({ feed, onPick }: { feed: Feed; onPick: (sym:
       </div>
 
       <TableFrame minWidth={820}>
-        <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} />
+        <GridHeader cols={grid} headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} />
         {feed.spreads.length === 0 && <Empty>백엔드에서 스프레드를 받는 중입니다…</Empty>}
         {feed.spreads.length > 0 && coins.length === 0 && <Empty>조건에 맞는 코인이 없습니다. 필터를 넓혀 보세요.</Empty>}
         {coins.map((c) => {
           const hot = !c.allFail && !c.allStale && c.val !== null && c.val >= thr
           return (
             <div key={c.sym} onClick={() => onPick(c.sym)} className="hv-row"
-              style={{ ...gridRow(GRID, { hot, stale: c.allStale }), cursor: 'pointer' }}>
+              style={{ ...gridRow(grid, { hot, stale: c.allStale }), cursor: 'pointer' }}>
               <SymCell sym={c.sym} hot={hot} />
               <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                 {c.price !== null ? '₩' + fmtKrw(c.price) : '–'}
