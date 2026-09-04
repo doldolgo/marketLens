@@ -11,7 +11,7 @@ from app.core.collector import CycleResult
 from app.core.live_store import LiveStore
 from app.core.models import Row
 from app.core.networks import pick_domestic
-from app.core.orderbook import average_price, walk_amount, walk_quantity
+from app.core.orderbook import average_price, walk_amount, walk_levels, walk_quantity
 from app.core.premium import premium_percent
 from app.features.spreads.models import (
     RefreshFailure,
@@ -82,16 +82,6 @@ def _wallet_fields(
     return (dom_net.name, dom_net.dep, dom_net.wd, dep_fx, wd_fx)
 
 
-def _walk_levels(row: Row, side: str) -> list[list[float]]:
-    """걷을 호가 — `depth_*` 가 비어 있지 않으면 그것을, 비면 `asks`/`bids` (001 §3.3).
-
-    국내 행은 `depth_*` 가 항상 비어 있고, 해외는 012 스트림이 살아 있으면 최대 20단계다.
-    """
-    if side == "asks":
-        return row.depth_asks or row.asks
-    return row.depth_bids or row.bids
-
-
 def _cross_walk(
     buy_levels: list[list[float]],
     sell_levels: list[list[float]],
@@ -156,11 +146,11 @@ def _build_row(
 
         # 걷기 — 김프는 해외 asks 를 notional(USDT)로, 역프는 국내 asks 를 그 원화 환산액으로
         fx_ask_avg, dom_bid_avg = _cross_walk(
-            _walk_levels(fx_row, "asks"), _walk_levels(dom_row, "bids"), notional
+            walk_levels(fx_row, "asks"), walk_levels(dom_row, "bids"), notional
         )
         dom_ask_avg, fx_bid_avg = _cross_walk(
-            _walk_levels(dom_row, "asks"),
-            _walk_levels(fx_row, "bids"),
+            walk_levels(dom_row, "asks"),
+            walk_levels(fx_row, "bids"),
             notional * rate_ask,
         )
 
