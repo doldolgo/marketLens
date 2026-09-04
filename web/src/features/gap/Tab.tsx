@@ -1,9 +1,15 @@
-// 선물–현물 갭 탭 (mock) — 스펙 002 §3.7.
+// 선물–현물 갭 탭 (mock) — 스펙 002 §3.7, 구조는 docs/design/reference/tabs/GapTab.tsx.
 import { useState } from 'react'
 import { STALE_SEC } from '../../shared/config'
 import { fmtFunding3, fmtPct, fmtUsdt, pctColor } from '../../shared/format'
 import type { Feed } from '../../shared/types'
-import { Chip, DIM_TEXT, NumField, Seg, segOpt, Toggle } from '../../shared/ui'
+import {
+  GridHeader, gridRow, NumField, Seg, segOpt, SymCell, TableFrame, ToggleBtn,
+  bar, count, exTag, hint, label, searchInput, type Header,
+} from '../../shared/ui'
+
+/** 심볼 | 현물가 USDT | 갭(가변) | 펀딩비 */
+const GRID = '100px 1fr 320px 150px'
 
 interface Combo {
   spotEx: string
@@ -96,148 +102,56 @@ export default function GapTab({ feed, now }: { feed: Feed; now: number }) {
     setSort({ col: 'gap', asc: m === 'exit' })
   }
 
-  function clickSort(col: SortCol) {
-    setSort((s) => (s.col === col ? { col, asc: !s.asc } : { col, asc: col === 'sym' }))
+  function clickSort(col: string) {
+    const c = col as SortCol
+    setSort((s) => (s.col === c ? { col: c, asc: !s.asc } : { col: c, asc: c === 'sym' }))
   }
 
-  const cols: { id: SortCol; label: string; width?: number; align?: 'right' }[] = [
-    { id: 'sym', label: '심볼', width: 110 },
-    { id: 'price', label: '현물가 USDT', width: 150, align: 'right' },
-    { id: 'gap', label: mode === 'entry' ? '진입 갭 · 현물 → 선물' : '정리 갭 · 현물 → 선물' },
-    { id: 'funding', label: '펀딩비', width: 170 },
+  const headers: Header[] = [
+    ['sym', '심볼', 'left'], ['price', '현물가 USDT', 'right'],
+    ['gap', mode === 'entry' ? '진입 갭 · 현물 → 선물' : '정리 갭 · 현물 → 선물', 'right'], ['funding', '펀딩비', 'right'],
   ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: 10,
-          padding: '10px 16px',
-          borderBottom: '1px solid var(--color-divider)',
-          flex: 'none',
-        }}
-      >
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="심볼 검색"
-          style={{
-            width: 130,
-            minHeight: 28,
-            padding: '2px 10px',
-            font: 'inherit',
-            fontSize: 12,
-            color: 'var(--color-text)',
-            caretColor: 'var(--color-accent)',
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-divider)',
-            borderRadius: 'var(--radius-md)',
-          }}
-        />
-        <Seg opts={[['entry', '진입 기준'], ['exit', '정리 기준']].map(([id, l]) => segOpt(l, mode === id, () => switchMode(id as Mode)))} />
-        <NumField label="하이라이트 임계값" value={thr} onChange={setThr} step={0.1} />
-        <Toggle label="임계 초과만" on={only} onChange={setOnly} />
-        <span style={{ fontSize: 11, color: DIM_TEXT }}>
-          양의 갭 = perp &gt; 현물 → 현물 매수 + 선물 숏 · 음의 갭 = 반대 방향
-        </span>
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: DIM_TEXT }}>
-          {rows.length} / {all.length} 코인 표시
-        </span>
+    <>
+      <div style={bar}>
+        <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={searchInput} />
+        <span style={label}>기준 보기</span>
+        <Seg pad="4px 10px" opts={[['entry', '진입 기준'], ['exit', '정리 기준']].map(([id, l]) => segOpt(l, mode === id, () => switchMode(id as Mode)))} />
+        <NumField label="하이라이트 임계값" value={thr} step={0.1} onChange={setThr} />
+        <ToggleBtn on={only} label="임계 초과만" onClick={() => setOnly(!only)} />
+        <span style={hint}>양의 갭 = perp &gt; 현물 → 현물 매수 + 선물 숏 · 음의 갭 = 반대 방향</span>
+        <span style={count}>{rows.length} / {all.length} 코인 표시</span>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '0 16px' }}>
-        <table className="table" style={{ tableLayout: 'auto' }}>
-          <thead>
-            <tr>
-              {cols.map((c) => {
-                const active = sort.col === c.id
-                return (
-                  <th
-                    key={c.id}
-                    onClick={() => clickSort(c.id)}
-                    className="hv-txt"
-                    style={{
-                      cursor: 'pointer',
-                      position: 'sticky',
-                      top: 0,
-                      zIndex: 1,
-                      background: 'var(--color-bg)',
-                      whiteSpace: 'nowrap',
-                      width: c.width,
-                      textAlign: c.align ?? 'left',
-                      color: active ? 'var(--color-accent)' : undefined,
-                    }}
-                  >
-                    {c.label}
-                    {active ? (sort.asc ? ' ▴' : ' ▾') : ''}
-                  </th>
-                )
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => {
-              const c = combo(r)
-              const stale = c !== null && c.age >= STALE_SEC
-              const hot = c !== null && !stale && meets(c.gap)
-              const dotColor = !c ? 'var(--color-up)' : stale ? 'var(--color-warn)' : 'var(--color-ok)'
-              return (
-                <tr
-                  key={r.sym}
-                  className="hv-row"
-                  style={{
-                    opacity: stale ? 0.45 : 1,
-                    background: hot ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)' : undefined,
-                  }}
-                >
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        width: 6,
-                        height: 6,
-                        borderRadius: '50%',
-                        background: dotColor,
-                        marginRight: 8,
-                        verticalAlign: 'middle',
-                      }}
-                    />
-                    <span style={{ fontWeight: 600, color: hot ? 'var(--color-accent)' : undefined }}>{r.sym}</span>
-                  </td>
-                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    {c ? fmtUsdt(c.price) : <span style={{ color: DIM_TEXT }}>–</span>}
-                  </td>
-                  <td>
-                    {c ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <Chip tone="neutral">{c.spotEx} 현물</Chip>
-                        <span style={{ color: DIM_TEXT, fontSize: 11 }}>→</span>
-                        <Chip tone="outline">{c.perpEx} 선물</Chip>
-                        <span style={{ fontWeight: 700, color: pctColor(c.gap) }}>{fmtPct(c.gap)}</span>
-                      </div>
-                    ) : (
-                      <span style={{ color: DIM_TEXT }}>–</span>
-                    )}
-                  </td>
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {c ? (
-                      <>
-                        <div style={{ fontSize: 13, color: pctColor(c.funding) }}>{fmtFunding3(c.funding)}</div>
-                        <div style={{ fontSize: 11, color: DIM_TEXT }}>{fundingEta(c.perpEx, now)}</div>
-                      </>
-                    ) : (
-                      <span style={{ color: DIM_TEXT }}>–</span>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
+      <TableFrame minWidth={760}>
+        <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={mul} onSort={clickSort} />
+        {rows.map((r) => {
+          const c = combo(r)
+          const stale = c !== null && c.age >= STALE_SEC
+          const hot = c !== null && !stale && meets(c.gap)
+          return (
+            <div key={r.sym} className="hv-row" style={gridRow(GRID, { hot, stale })}>
+              <SymCell sym={r.sym} hot={hot} />
+              <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-300)' }}>
+                {c ? fmtUsdt(c.price) : '–'}
+              </div>
+              <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
+                <span style={exTag()}>{c ? c.spotEx : '–'} 현물</span>
+                <span style={{ fontSize: 10, color: 'var(--color-neutral-600)' }}>→</span>
+                <span style={exTag(true)}>{c ? c.perpEx : '–'} 선물</span>
+                <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 66, textAlign: 'right', color: c ? pctColor(c.gap) : 'var(--color-neutral-700)' }}>
+                  {c ? fmtPct(c.gap) : '–'}
+                </span>
+              </div>
+              <div style={{ padding: '0 8px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: c ? pctColor(c.funding) : 'var(--color-neutral-700)' }}>{c ? fmtFunding3(c.funding) : '–'}</span>
+                <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-600)' }}>{c ? fundingEta(c.perpEx, now) : ''}</span>
+              </div>
+            </div>
+          )
+        })}
+      </TableFrame>
+    </>
   )
 }
