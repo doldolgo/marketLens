@@ -60,8 +60,9 @@ WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 ```bash
 curl -s localhost:8000/spreads | head -c 600
 ```
-최상위 `rate > 1000`, 행 수 > 100, `warnings` 는 평상시 빈 배열(008), 각 행의 키가 정확히 다음 18개면 정상 (003 §4 기준):
-`sym, dom, fx, fwd, rev, usd, spark, status, age, liqDom, liqFx, rateAsk, rateBid, netDom, depDom, wdDom, depFx, wdFx`
+최상위 `rate > 1000`·`notional == 10000`, 행 수 > 100, `warnings` 는 평상시 빈 배열(008), 각 행의 키가 정확히 다음 17개면 정상 (003 §4 기준):
+`sym, dom, fx, fwd, rev, usd, spark, status, age, slipFwd, slipRev, krw, netDom, depDom, wdDom, depFx, wdFx`
+체결 규모를 바꿔 슬리피지가 커지는지 본다 — `curl -s "localhost:8000/spreads?notional=500000"` 의 같은 행 `slipFwd` 가 기본값보다 크거나 같아야 한다.
 ```bash
 curl -s "localhost:8000/slippage/upbit?symbol=BTC/KRW&amount=1000000" | head -c 300
 ```
