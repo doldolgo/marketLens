@@ -1,6 +1,6 @@
 # 004 — analysis
 
-상태: IN_PROGRESS | 의존: 001(collect — 메모리 스냅샷·USDT 시세·호가 단계), 003(spreads — `core/premium.py` 의 `premium_percent`)
+상태: DONE | 의존: 001(collect — 메모리 스냅샷·USDT 시세·호가 단계), 003(spreads — `core/premium.py` 의 `premium_percent`)
 
 > 이 문서는 **사람이 끝까지 읽는** 문서다. 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -149,22 +149,26 @@
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 
 ```bash
-cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
 ```
 - `All checks passed!`
-- `172 files already formatted`
-- `311 passed, 1 warning in 1.74s` — 깊이 반영 전 이 브랜치 기준선은 `303 passed`, 늘어난 8개가 §4 "깊이 반영" 항목이다.
+- `181 files left unchanged`
+- `419 passed, 1 warning in 4.71s` — 이 브랜치 기준선은 `417 passed`, 늘어난 2개가 §4 "깊이 반영" 셋째 항목(`/arbitrage`·`/matrix` 해외 다리 20단계)이다. analysis 폴더만은 `56 passed`.
+
+회귀를 실제로 잡는지 확인했다 — `core/orderbook.py` 의 걷기 목록을 최우선 1단계로 잠깐 자르자 `test_twenty_levels.py` 4개가 전부 깨졌고, 원상 복구 후 다시 통과.
 
 ```bash
-cd web && npm run lint && npm run build
+cd server && .venv/bin/python -m uvicorn app.main:app --port 8041   # 거래소 도메인이 막힌 로컬 망 — 스냅샷 없는 상태의 오류 경로만
+curl -s localhost:8041/health                                       # {"status":"ok","version":"0.1.0"}
+curl -s 'localhost:8041/premium?sym=BTC&dom=binance'                # 400 invalid_request (선택 가능: upbit, bithumb)
+curl -s 'localhost:8041/orderbook/coinbase?symbol=BTC/KRW'          # 404 unsupported_exchange
+curl -s -o /dev/null -w '%{http_code}' 'localhost:8041/matrix?amountKrw=-1'   # 422
+curl -s 'localhost:8041/slippage/upbit?symbol=BTC/KRW'              # 400 invalid_request (amount 또는 quantity 중 정확히 하나)
+curl -s 'localhost:8041/orderbook/upbit?symbol=BTC/KRW&depth=3'     # 404 market_data_not_found — message 에 "스트림이 첫 스냅샷을 받았는지 확인하세요"
 ```
-- `oxlint src` — 출력 없음(exit 0)
-- `✓ 44 modules transformed.` / `✓ built in 318ms`
+프로세스는 확인 뒤 종료했다. web 은 건드리지 않았다(lint·build 생략).
 
-회귀를 실제로 잡는지 확인했다 — `walk_levels` 가 `depth_*` 를 무시하도록 잠깐 되돌리자 새 테스트 5개와 003 의 `test_depth_levels_are_used_when_present` 가 깨졌고, 반대로 `/premium`·`/matrix` 의 표면 김프를 `walk_levels` 로 바꾸자 표면값 항목 2개가 깨졌다. 원상 복구 후 다시 전부 통과.
-
-venv 는 `uv` 로 만든 Python 3.12.13 (`server/.venv`, dev-setup.md §server-3).
-실서버 확인(§4 아래 curl 목록)은 이 세션에서 돌리지 않았다 — 로컬 망에서 거래소 호출이 막힌다(dev-setup.md 로컬 메모). HTTP 계약(응답 키·타입)은 이 변경으로 바뀌지 않아 스모크 문장도 그대로다.
+**EC2 에서 확인 필요** — §4 "실서버 확인" 중 스냅샷이 있어야 하는 항목(`/orderbook/upbit` depth=3 asks 3단계, `/slippage/upbit` amount=1,000,000 의 `slippagePercent ≥ 0`·`levelsConsumed ≥ 1`, `/arbitrage` BTC 의 `profitKrw`·`buy.exchange ≠ sell.exchange`, `/premium` BTC 의 fwd·rev, `/premium/scan?limit=5`, `/matrix?amountKrw=1000000` 의 `scannedCoins == len(coins)`)은 이 망에서 거래소 WebSocket 이 막혀 돌리지 못했다(dev-setup.md 로컬 메모). 응답 키·타입은 이 세션에서 바뀌지 않았다.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — analysis 행을 `| analysis | 6개 엔드포인트 동작 | - | HTTP 계약 camelCase |` 로. **항상 포함.**
@@ -174,41 +178,21 @@ venv 는 `uv` 로 만든 Python 3.12.13 (`server/.venv`, dev-setup.md §server-3
 
 ## 7. 실행 보고 (실행 세션이 채움)
 
-### walk → `core/orderbook.py` 이관 세션 (§2)
-- 만든 것 (파일 목록):
-  - `server/app/core/orderbook.py` — `server/app/features/analysis/walk.py` 를 `git mv` 로 옮겼다. `WalkResult`·`_EPSILON`·함수 4개(`walk_amount`·`walk_quantity`·`average_price`·`slippage_percent`)의 본문은 한 글자도 안 바꿨다. 모듈 docstring 만 고쳐 (a) 003·004 공용 core 모듈이라는 것과 (b) **함수를 async 로 바꾸지 말라**는 근거를 적었다 — `GET /spreads` 가 수집 락 없이 안전한 이유가 "표 조립 전체에 await 가 없다" 하나뿐이라, await 지점이 생기면 응답 하나가 스냅샷 교체 전·후 호가를 섞는다.
-  - `server/app/features/analysis/service.py` — import 를 `app.core.orderbook` 으로. 서버 트리에서 이 모듈을 쓰는 유일한 곳이었다.
-  - `server/app/features/analysis/tests/test_slippage_api.py` — 모듈 위치를 말하던 docstring 1줄만 갱신.
-  - `docs/context/architecture.md` "현재 구조" analysis 항목, 이 문서 §5·§6.
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-  - **테스트 파일은 옮기지 않았다.** walk 를 직접 부르는 테스트가 없었다 — 소진 계산의 검증 항목(§4 의 금액·수량 walk, 부분 체결, 매도 슬리피지, 2단계 예시)은 전부 `/slippage` **HTTP 응답**으로 확인하는 004 §4 항목이라 `features/analysis/tests/` 가 맞는 자리다(conventions.md "기능 테스트는 기능 폴더"). core 모듈이라고 다 `server/tests/` 에 단위 테스트가 있는 것도 아니다 — `core/premium.py` 는 기능 테스트(`features/spreads/tests/`)와 `tests/test_backfill.py` 를 통해서만 검증한다. `core/rows.py`·`core/networks.py` 처럼 `server/tests/test_orderbook.py` 를 새로 만들면 테스트 수가 늘어 "이관 전후 같은 수(265)" 확인이 깨지므로 이번 변경에는 넣지 않았다(남은 빚).
-  - `server/.venv` 가 이미 있어서(Python 3.12.13, 의존성 설치 완료 — 동시 진행 중인 012 세션이 만든 것으로 보인다) `--clear` 로 다시 만들지 않고 그대로 썼다. 남이 쓰는 venv 를 지우면 그 세션이 깨진다.
-  - 작업 트리에 012 세션의 커밋 안 된 `server/pyproject.toml` 수정(websockets 의존)이 있었다. 읽기만 하고 손대지 않았으며 커밋에도 넣지 않았다(파일을 지정해 add).
-  - 003 §2 는 이 이관을 003 이 할 일로 적어 두었다. 004 담당이라 003 문장은 건드리지 않았다 — 003 세션이 정리하면 된다.
-  - **커밋이 둘로 갈렸다.** 이 클론의 pre-commit 훅이 `docs/`·`CLAUDE.md` 밖의 경로를 막는다("이 폴더는 docs 만 커밋합니다. 코드 변경은 marketlens-space 에서"). 훅을 우회하지 않았다 — `refactor/walk-to-core-impl` 브랜치에는 문서만 커밋했고, 검증을 끝낸 코드 3파일은 작업 트리에 staged 로 남겼다. 코드 커밋은 marketlens-space 에서 한다.
-- 남은 빚:
-  - `core/orderbook.py` 에 `server/tests/` 직접 단위 테스트가 없다. 003 이 이 모듈을 실제로 import 할 때(spreads 슬리피지) 같이 만드는 것이 자연스럽다.
-  - `docs/context/status.md` 는 이번 변경으로 고칠 것이 없었다 — 이관은 엔드포인트·응답 모양을 안 바꿔서 analysis 행 문구가 그대로 맞다.
-  - §7 의 나머지(6개 엔드포인트 구현 당시의 판단)는 원래 구현 세션이 비워 둔 채라 git 기록에만 있다. 여기 적은 것은 이관 세션 몫뿐이다.
+재구축(001 스트림 파이프라인) 뒤 이 스펙을 다시 확인한 세션이다. 6개 엔드포인트·모델·라우터는 이미 스트림 스냅샷(`asks`/`bids` 그대로)을 걷고 있어 코드 변경은 문구 하나와 테스트 2개뿐이다.
 
-### 깊이 반영 세션 (§2·§3.1 — 모든 걷기가 `walk_levels` 를 거치게)
 - 만든 것 (파일 목록):
-  - `server/app/core/orderbook.py` — `walk_levels(row, side)` 를 공개 함수로 추가했다(003 §2 가 이 모듈의 공개 면으로 예고한 그 함수다). 본문은 003 이 spreads service 안에 두고 쓰던 사적 헬퍼를 그대로 옮긴 것이라 동작이 같다. docstring 에 (a) 003·004 의 모든 걷기가 이 함수를 거친다는 것과 (b) 표면값은 이 함수를 쓰지 않는다는 것을 적었다. 모듈의 "전부 동기" 조항은 그대로다 — `walk_levels` 도 목록을 고르기만 하고 `await` 가 없다.
-  - `server/app/features/spreads/service.py` — 사적 헬퍼 `_walk_levels` 를 지우고 `core` 의 것을 import 한다. 호출 4곳의 인자·결과가 같아 003 의 테스트는 한 줄도 고치지 않았다.
-  - `server/app/features/analysis/service.py` — 걷는 4곳을 `walk_levels` 로 돌렸다: `/orderbook` 이 돌려주는 목록, `/slippage` 의 walk 대상(`depthAvailable`·`bestPrice` 포함), `/arbitrage` 후보의 KRW 환산 호가, `/matrix` 의 양쪽 다리. `/premium`·`/premium/scan`·`/matrix` 의 표면 김프와 그쪽 호가 유무 판정은 `row.asks[0]`·`row.bids[0]` 직접 읽기 그대로 뒀다(§3.1).
-  - `server/app/features/analysis/models.py` — `depth_available` 주석을 "걷는 목록의 단계 수"로.
-  - `server/app/features/analysis/tests/test_depth_stream.py` (새 파일) — §4 "깊이 반영" 6항목을 8개 테스트로. 회귀를 잡는 항목은 **여러 단계를 심은** 깊이로 규모를 키워 `slippagePercent` 가 0 → 양수가 되는지 보고, 같은 규모에서 1단계짜리 REST 행은 0 이 나오는 것을 나란히 단언한다 — 1단계만 심으면 평균가 = 최우선가라 되돌려도 통과하기 때문이다.
-  - `docs/context/architecture.md`·`docs/context/status.md`, 이 문서 §3.2·§3.3·§5.
+  - `server/app/features/analysis/service.py` — `market_data_not_found` 의 안내 문구를 §3.0 대로 "스트림이 첫 스냅샷을 받았는지 확인하세요" 로. 모듈 docstring 의 "1초 수집" 도 "WebSocket 으로 실시간 교체" 로.
+  - `server/app/features/analysis/models.py` — `data_received_at` 주석을 "마지막 틱 시각(001 의 `received_at`)" 으로.
+  - `server/app/features/analysis/tests/test_orderbook_api.py` — 옛 문구를 단언하던 1줄을 새 문구로.
+  - `server/app/features/analysis/tests/test_twenty_levels.py` — §4 "깊이 반영" 셋째 항목 테스트 2개 추가(`/arbitrage`·`/matrix`). 같은 코인을 바이낸스 1단계 시드와 20단계 시드로 두 번 심고, 국내(upbit) 쪽은 1단계에 10 BTC 를 둬 해외 다리만 여러 단계를 먹게 했다 — 1단계 시드는 `depthExhausted=true`·슬리피지 0, 20단계 시드는 `depthExhausted=false`·슬리피지 양수·실효 수익률이 더 낮다. matrix 는 fwd(asks)·rev(bids) 양쪽을 단언하고 표면 김프는 두 시드에서 같음을 함께 확인한다.
+  - `docs/context/status.md`(재구축 안내 문단에서 004 제외)·`CLAUDE.md`(004 DONE, 재구축 순서 005 → 006 → 007)·`docs/context/architecture.md`("현재 구조" analysis 항목), 이 문서 머리·§5·§7.
 - 추측한 지점 (묻지 않고 정한 것) / 실행 중 함께 고친 스펙 절:
-  - **빈 호가 판정을 어느 목록으로 하는지**를 스펙이 말하지 않았다. 걷는 절(orderbook·slippage·arbitrage)은 `walk_levels` 결과로, 표면값만 보는 절(premium·scan·matrix)은 REST 로 판정하기로 하고 §3.3 에 한 줄 넣었다 — 응답에 실리는 목록과 "비었다"고 판정하는 목록이 다르면 REST 가 비고 스트림만 살아 있는 행에서 404 와 응답이 엇갈린다. §3.1 이 REST 직접 읽기의 예외를 세 절로만 한정한 것과 같은 결론이다.
-  - **arbitrage 후보의 최우선가**도 걷는 목록 기준으로 뒀다(§3.2-3 에 한 문장 추가). arbitrage 는 §3.1 의 REST 고정 목록에 없고, 매수·매도처 선정과 `slippagePercent` 의 기준가가 실제로 먹는 호가와 달라지면 슬리피지가 음수로도 나온다.
-  - **§3.2 `/slippage` 응답 키 목록의 `depthAvailable`(저장된 단계 수)** 는 같은 항목 앞 문장·§4 와 어긋나 있었다. "걷는 목록의 단계 수"로 고쳤다 — 앞 문장과 §4 검증이 둘 다 걷는 목록을 가리키므로 괄호 쪽이 낡은 표현이다.
-  - **문서 머리 `상태: TODO`** 를 `DONE` 으로 고쳤다. CLAUDE.md 인덱스와 어긋난 채였고(이관 세션이 범위 밖이라 남겨 둔 것), 이번엔 004 가 담당 스펙이라 고칠 자리다.
-  - **§5 를 이번 세션 기록으로 갈아 끼웠다.** 이관 세션의 `265 passed` 는 지금 트리와 맞지 않는 수치라 남기면 다음 세션이 기준선을 잘못 읽는다. 옛 문구는 git 에 있다(CLAUDE.md §4).
-  - 표준 시드(§4)에는 깊이를 얹지 않았다. 깊이가 붙은 시드는 새 테스트 파일 안에서만 만든다 — 표준 시드가 바뀌면 기존 검증 항목의 손계산 기대값(+0.503% 등)이 전부 흔들린다.
-- 보고만 하는 어긋남 (담당 아닌 스펙 — CLAUDE.md §5):
-  - `docs/specs/003-spreads.md` §7 — 문서 주장 "단계 선택 규칙을 `core/` 공개 함수로 빼지 않았다 … spreads service 안의 사적 헬퍼로 뒀다" → 실제 `server/app/features/spreads/service.py` 는 `app.core.orderbook.walk_levels` 를 부른다. 003 §2 의 계약(공개 면에 `walk_levels`)은 이제 코드와 맞는다.
-  - `docs/specs/003-spreads.md` §7 — 문서 주장 "004 analysis 는 `depth_*` 를 아직 쓰지 않는다" → 실제 004 의 걷는 4곳이 전부 쓴다. 이 세션이 해소한 항목이다.
+  - **`core/orderbook.py` 의 `walk_levels(row, side)` 를 남겼다.** §2 는 이제 이 함수를 이름으로 부르지 않고 "걷기는 스냅샷의 `asks`/`bids` 그대로" 라고만 말한다. 함수는 정확히 그것(`row.asks` 또는 `row.bids`)을 돌려주는 통과 함수이고 003 의 spreads service 가 import 하고 있어, 지우면 003 코드를 건드리게 된다(범위 밖). 동작 차이가 없으므로 스펙 본문에는 적지 않았다.
+  - **실서버 확인을 두 갈래로 나눴다.** 스냅샷이 필요 없는 오류 경로 4개(+빈 저장소의 404)는 빈 포트 8041 에 띄워 로컬에서 돌렸고, 스냅샷이 필요한 항목은 §5 에 "EC2 에서 확인 필요" 로 남겼다.
+  - **테스트 파일 이름은 `test_twenty_levels.py` 그대로.** 이전 보고가 부르던 `test_depth_stream.py` 는 트리에 없다 — 001 재구축 때 정리된 이름이고, 지금 파일이 §4 "깊이 반영" 세 항목을 전부 담는다.
+  - **§7 의 이전 세션 서술(이관 세션·깊이 반영 세션)을 지웠다.** `depth_*`·"표면값은 REST" 등 지금 스펙·코드에 없는 구조를 말하고 있어 남기면 다음 세션이 잘못 읽는다. 과거 판단은 git 에 있다(CLAUDE.md §4).
+- 보고만 하는 어긋남 (담당 아닌 스펙 — CLAUDE.md §5): 없음. 003 스펙은 `walk_levels` 를 더 이상 언급하지 않아 코드와 어긋나지 않는다.
 - 남은 빚:
-  - `core/orderbook.py` 는 아직 `server/tests/` 직접 단위 테스트가 없다(이관 세션이 남긴 빚 그대로). `walk_levels` 도 `/orderbook`·`/slippage`·`/spreads` HTTP 응답으로만 검증한다.
-  - 깊이가 붙은 바이낸스 행에서는 `/matrix` 의 `totalSlippagePercent` = (REST 표면) − (스트림 기준 실효)라 두 출처가 섞인다. §3.1 이 의도한 설계지만, 스트림 최우선가가 REST 와 크게 벌어진 순간에는 이 값이 음수가 될 수 있다. 지금은 경고도 상한도 두지 않았다 — 실운영에서 관측되면 별도 스펙 거리다.
+  - `core/orderbook.py` 는 `server/tests/` 직접 단위 테스트가 없다 — 걷기 4함수와 `walk_levels` 는 `/orderbook`·`/slippage`·`/arbitrage`·`/matrix`·`/spreads` HTTP 응답으로만 검증한다.
+  - §4 실서버 확인의 스냅샷 필요 항목은 EC2 대기(§5).
+  - `/matrix` 의 `totalSlippagePercent` 는 표면 김프(1단계) − 실효 수익률이라, 매수측이 1단계 안에서 소진되면 실효 = 표면이 되어 0 이다 — 소진은 `depthExhausted` 로만 드러난다(새 테스트의 1단계 시드가 이 경우다). 스펙이 의도한 정의이고 경고는 두지 않았다.
