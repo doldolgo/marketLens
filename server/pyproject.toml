@@ -26,6 +26,8 @@ dev = [
     "ruff>=0.6",
     # 009 테스트 — Redis 를 띄우지 않고 Stream 명령을 흉내낸다
     "fakeredis>=2.26",
+    # 007 테스트 — compose·워크플로 YAML 을 읽어 배포 계약을 단언한다
+    "pyyaml>=6",
 ]
 
 [tool.pytest.ini_options]
