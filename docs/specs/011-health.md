@@ -20,7 +20,7 @@
 ## 3. 동작
 
 ### 3.1 읽는 계약 (복사)
-- 001: 틱은 1초 주기, 거래소 3곳(`upbit`·`bithumb`·`binance`). 매 틱 거래소마다 판정한다 — 성공 = 스트림 연결 + 마지막 시세 메시지 30초 이내, 실패 = 미연결(그 연결 오류의 kind) 또는 30초 무수신(`stale_stream`). 실패에는 `kind`·`message`·`status_code`(핸드셰이크·REST 의 HTTP 상태, 없으면 null)·`url`(WebSocket URL 또는 REST URL)·`retry_after_sec` 가 실린다. 스트림이 끊겨도 행은 그대로 남는다(행은 메시지로만 바뀐다). 실패 예외는 `ExchangeError` 공통 부모에 `exchange`·`url`·`message`·`status_code`·`body`(앞 500자) 를 가진다. 타임아웃은 `exchange_timeout`, 그 외는 `exchange_api_error`.
+- 001: 틱은 1초 주기, 거래소 3곳(`upbit`·`bithumb`·`binance`). 매 틱 거래소마다 판정한다 — 성공 = 스트림 연결 + 마지막 시세 메시지 30초 이내, 실패 = 미연결(그 연결 오류의 kind) 또는 30초 무수신(`stale_stream`). 실패에는 `kind`·`message`·`status_code`(핸드셰이크의 HTTP 상태, 없으면 null)·`url`(WebSocket URL)·`body`(핸드셰이크 거부 응답 본문 앞 500자, 없으면 null)·`retry_after_sec` 가 실린다. 스트림이 끊겨도 행은 그대로 남는다(행은 메시지로만 바뀐다). 실패 예외는 `ExchangeError` 공통 부모에 `exchange`·`url`·`message`·`status_code`·`body`(앞 500자) 를 가진다. 타임아웃은 `exchange_timeout`, 그 외는 `exchange_api_error`.
 - 002: 셸은 1.5초 tick 으로 `now` 를 갱신하고, 탭은 언마운트하지 않고 숨긴다. 경과 표기 `N초 전`/`N분 전`/`N시간 전`. 상태색 정상 초록·지연 주황·끊김 빨강.
 - 003: FE 폴링은 기능 폴더 안의 훅 하나(`setInterval` + 즉시 1회, 재진입 방지, 실패는 무시하고 직전 데이터 유지). 거래소 표시명 `upbit→업비트` `bithumb→빗썸` `binance→Binance`.
 - 005: Influx org·bucket `marketlens`, `INFLUX_TOKEN` 없으면 Influx 비활성. 같은 tag set + 같은 time 은 덮어쓴다. Influx 가 닿지 않아도 앱은 뜬다.
@@ -42,7 +42,7 @@
 
 `bad_request` 만 재시도 무의미(우리 요청이 틀림)이고 나머지는 일시적이다. 응답에 함께 남기는 것: `status_code`, `body` 앞 500자, `url`, `retry_after_sec`(헤더 `Retry-After` 가 초 단위 정수로 있을 때만, 아니면 null).
 
-거래소별 HTTP 규칙 — REST(마켓 목록·입출금)와 WebSocket 핸드셰이크 거부 응답에 적용한다(공식 문서 2026-09-03 확인. 미확인 응답은 `bad_response` 로 두고 원문 body 를 남겨 분류표를 채운다):
+거래소별 HTTP 규칙 — REST(마켓 목록·입출금)와 WebSocket 핸드셰이크 거부 응답에 적용한다(공식 문서 2026-09-03 확인. 미확인 응답은 `bad_response` 로 두고 원문 body 를 남겨 분류표를 채운다). REST 쪽 분류는 예외(`ExchangeError.kind`)와 `/refresh` 응답의 `failures` 에만 쓰인다 — 이력(§3.3)에 들어가는 실패는 WebSocket 판정뿐이다:
 - **업비트**: HTTP 429 → `rate_limit`("다음 초 경계까지 대기 후 재시도"). 418 → `banned`(429 누적 차단, 반복 시 차단 시간 누진). 5xx → `unavailable`(500 이 점검을 겸한다). 그 외 4xx → `bad_request`. 에러 본문은 `{"error":{"name":<int>,"message":…}}`.
 - **빗썸**(v1 API): 문서상 에러는 HTTP 상태와 함께 `{"error":{"name":…,"message":…}}` 이지만 **실제로는 HTTP 200 에 이 본문을 준다**(`markets=KRW-XXXX` 실호출로 확인). 그래서 200 이어도 본문이 리스트가 아니고 `error` 키가 있으면 실패다. `error.name` 이 정수면 그 값을 HTTP 상태처럼 위 업비트 규칙으로 분류하고, 아니면 `bad_response`. 429/418 의 실제 응답은 문서에 없다(미확인). 이때 `status_code` 는 실제 HTTP 상태(200)다.
 - **바이낸스**: 429 → `rate_limit`, 418 → `banned`(IP 밴, 2분~3일 누진), 둘 다 `Retry-After` 초를 `retry_after_sec` 에. 403 → `banned`(WAF — "rate limit violation or a security block"). 5xx → `unavailable`. 그 외 4xx → `bad_request`. 에러 본문 `{"code":-1003,"msg":…}`.
@@ -52,7 +52,8 @@
 
 ### 3.3 실패 이력 — 구간(outage) 단위로만 기록
 정상 틱은 기록하지 않는다. 기록 단위는 **거래소별 연속 실패 구간** 1건이다.
-- 구간 1건: `exchange`, `kind`, `started_at`(첫 실패 틱 시각, epoch ms), `ended_at`(null = 진행 중), `count`(실패 틱 수), `last_failed_at`(가장 최근 실패 틱 시각), `status_code`, `message`(거래소 원문 body 가 있으면 body, 없으면 커넥터 message. 300자 상한), `url`, `retry_after_sec`. 유일키 = (`exchange`, `started_at`).
+- 입력은 매 틱의 스트림 판정(§3.1)뿐이다. REST(마켓 목록·입출금) 실패는 이력에 넣지 않는다 — 시세는 WebSocket 으로만 오고 REST 는 목록·상태 보조라, 그 실패는 로그와 `/refresh` 응답의 `failures` 로만 드러난다.
+- 구간 1건: `exchange`, `kind`, `started_at`(첫 실패 틱 시각, epoch ms), `ended_at`(null = 진행 중), `count`(실패 틱 수), `last_failed_at`(가장 최근 실패 틱 시각), `status_code`, `message`(핸드셰이크 거부 응답 `body` 가 있으면 그 body, 없으면 커넥터 message. 300자 상한), `url`, `retry_after_sec`. 유일키 = (`exchange`, `started_at`).
 - 열기: 열린 구간이 없는 거래소가 실패하면 연다. 이미 열려 있으면 `count` 를 올리고 `last_failed_at`·`status_code`·`message`·`url`·`retry_after_sec` 는 **최신 실패로 덮어쓴다**.
 - `kind` 가 바뀌면(예: `timeout` → `rate_limit`) 현재 구간을 그 시각에 닫고 새 구간을 연다. 원인 전환이 이력에 남아야 한다.
 - 닫기: 그 거래소가 **연속 3틱 성공**하면 닫는다. `ended_at` 은 그 연속 성공의 **첫 성공 틱 시각**이다(잠깐 성공했다 바로 다시 실패하면 같은 구간이 이어진다 — 플래핑을 한 구간으로 본다).
@@ -77,13 +78,14 @@
   "exchanges": [
     {"exchange": "upbit", "state": "ok", "lastSuccessAt": 1756903599000, "markets": 132,
      "successRate1h": 100.0, "openOutage": null,
-     "lastError": {"at": 1756900123000, "kind": "timeout", "statusCode": null, "message": "업비트 응답 시간 초과: ReadTimeout"}}
+     "lastError": {"at": 1756900123000, "kind": "timeout", "statusCode": null, "message": "업비트 WebSocket 실패: TimeoutError"}}
     /* at = 그 구간의 lastFailedAt */
   ],
   "outages": [
     {"exchange": "binance", "kind": "rate_limit", "startedAt": 1756903000000, "endedAt": 1756903012000, "lastFailedAt": 1756903011000, "count": 12,
      "statusCode": 429, "message": "{\"code\":-1003,\"msg\":\"Too much request weight used; ...\"}",
-     "url": "https://api.binance.com/api/v3/exchangeInfo", "retryAfterSec": 10}
+     "url": "wss://data-stream.binance.vision/stream", "retryAfterSec": 10}
+    /* 핸드셰이크 429 거부 — message 는 그 거부 응답의 body */
   ]
 }
 ```
@@ -112,6 +114,8 @@ BE(네트워크 없음, 커넥터·Influx 는 fake):
 - 빗썸 HTTP 200 + `{"error":{"name":429,…}}` → 실패이며 `rate_limit`, `status_code` 200. `error.name` 이 문자열이면 `bad_response`.
 - 바이낸스 429 + `Retry-After: 10` → `rate_limit`, `retry_after_sec` 10. 403 → `banned`. 헤더 없으면 null.
 - 스트림 판정: 연결 + 최근 시세 메시지 → 성공. 핸드셰이크 429 → `rate_limit`, 연결 실패 → `network`, 30초 무수신 → `stale_stream`(url = WS URL, status_code null). 바이낸스 샤드 하나만 정체 → `stale_stream` 이고 message 에 샤드 번호.
+- 핸드셰이크 거부 응답의 본문이 실패의 `body`(앞 500자)에 실린다(세 거래소 모두). 본문이 없으면 null.
+- 추적기의 구간 `message` 는 `body` 가 있으면 body, 없으면 커넥터 message 다. 마켓 목록 REST 실패는 구간을 만들지 않는다(`/refresh` 의 `failures` 로만 보인다).
 - 첫 실패에 구간이 열리고 `count` 1, 연속 실패에 `count` 만 오르고 `message` 는 최신으로 바뀐다.
 - 연속 성공 2회 뒤 실패면 같은 구간이 이어지고, 연속 성공 3회면 `ended_at` = 첫 성공 시각으로 닫힌다.
 - `kind` 가 바뀌면 이전 구간이 닫히고 새 구간이 열린다.
@@ -131,7 +135,7 @@ BE(네트워크 없음, 커넥터·Influx 는 fake):
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 181 files left unchanged / 403 passed (2026-09-05 — REST 연결 예외 network·url 잔존 3건, 복원 진행 중 구간의 성공률 1건 포함)
+# All checks passed! / 181 files left unchanged / 414 passed (2026-09-05 — 핸드셰이크 거부 body 전파 8건·추적기 body 우선 message 2건·REST 실패 무구간 1건 포함)
 cd web && npm run lint && npm run build
 # oxlint 경고 0 / tsc -b + vite build 성공 (index-*.js 255 kB)
 # 실서버(로컬, INFLUX_TOKEN·S3_BUCKET 없음, Redis 없음 — :8000 대신 빈 포트 :8041, 끝나고 kill)
@@ -156,10 +160,10 @@ EC2 에서 확인 필요(이 망에서 못 돌린 수동 항목): 기동 몇 초
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-  - server: `core/errors.py`(`FAIL_KINDS` 8종·`kind`·`retry_after_sec`), `core/models.py`(`StreamError`·`StreamState.url/connected_since`), `core/streams/{upbit,bithumb,binance}.py`(REST·핸드셰이크 분류·`Retry-After`·빗썸 200+`error` 판정·구독 거부 `bad_request`, 바이낸스는 샤드별 `stale_stream` 판정과 message 의 샤드 번호), `core/ticks.py`(`judge_state` + `TickLoop._judge_all` — 매 틱 거래소별 판정을 추적기에 넘긴다), `core/contracts.py`(`OutageSink`·`Verdict`·`StreamJudge`), `core/outages.py`(`OutageTracker` — 구간 열기·세기·닫기·kind 전환·24시간 보관·`collect_fail` 쓰기 큐·기동 복원 3초 상한), `core/influx.py`(`CollectFailRow`·`collect_fail_point`·`query_collect_fail`), `main.py`(복원 → 쓰기 태스크 → 틱 루프 배선, `/health/collect` 라우터), `features/health/{models,service,router}.py` + `tests/test_collect_api.py`, `tests/test_outages.py`(추적기·쓰기·복원·틱→추적기), 커넥터 테스트 3개의 분류 케이스(이 세션은 바이낸스 REST `Retry-After` 부재 → null 1건을 추가).
-  - web: `shared/types.ts`(`HealthData` 계약, `OutageKind` 8종 — 이 세션이 `stale_stream` 추가), `shared/format.ts`(`exName`), `shared/feed.ts`(`health` + `setHealth`), `shared/config.ts`(`HEALTH_POLL_MS`), `features/health/{api,types,Tab}.tsx`(이 세션이 칩 라벨 `스트림 정체` 추가), `App.tsx`(KPI·폴링 호출).
+  - server: `core/errors.py`(`FAIL_KINDS` 8종·`kind`·`retry_after_sec`), `core/models.py`(`StreamError` — `body` 포함·`StreamState.url/connected_since`), `core/streams/{upbit,bithumb,binance}.py`(REST·핸드셰이크 분류·거부 응답 `body`·`Retry-After`·빗썸 200+`error` 판정·구독 거부 `bad_request`, 바이낸스는 샤드별 `stale_stream` 판정과 message 의 샤드 번호), `core/ticks.py`(`judge_state` + `TickLoop._judge_all` — 매 틱 거래소별 판정을 추적기에 넘긴다), `core/contracts.py`(`OutageSink`·`Verdict`·`StreamJudge`), `core/outages.py`(`OutageTracker` — 구간 열기·세기·닫기·kind 전환·`body` 우선 message·24시간 보관·`collect_fail` 쓰기 큐·기동 복원 3초 상한), `core/influx.py`(`CollectFailRow`·`collect_fail_point`·`query_collect_fail`), `main.py`(복원 → 쓰기 태스크 → 틱 루프 배선, `/health/collect` 라우터), `features/health/{models,service,router}.py` + `tests/test_collect_api.py`, `tests/test_outages.py`(추적기·쓰기·복원·틱→추적기), 커넥터 테스트 3개의 분류·`body` 케이스.
+  - web: `shared/types.ts`(`HealthData` 계약, `OutageKind` 8종), `shared/format.ts`(`exName`), `shared/feed.ts`(`health` + `setHealth`), `shared/config.ts`(`HEALTH_POLL_MS`), `features/health/{api,types,Tab}.tsx`, `App.tsx`(KPI·폴링 호출).
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-  - 이 세션은 001·009·010·012 가 WebSocket 구조로 끝난 뒤의 마무리 회차다 — 추적기·API·탭은 이미 그 구조 위에 배선돼 있었고, FE `OutageKind`·칩 라벨의 `stale_stream` 과 바이낸스 REST 의 `Retry-After` 부재 케이스를 채우고 §4 검증을 전부 다시 돌렸다.
+  - 이력의 입력은 스트림 판정뿐이고 REST 실패는 넣지 않는다(§3.2·§3.3 에 확정): 선택지는 (a) 마켓 목록·입출금 REST 실패도 구간으로 기록, (b) 스트림 판정만 기록. 시세는 WebSocket 으로만 오고 REST 는 10분·60초 주기 보조라 (a) 는 1초 틱 단위 구간 모델(`count` ≈ 지속 초)과 맞지 않고 같은 거래소에 성격이 다른 실패가 한 구간에 섞인다 — (b) 를 택했다. 거래소 원문은 핸드셰이크 거부 응답의 `body` 로 싣는다.
   - 복원된 진행 중 구간과 꺼져 있던 시간(§3.4·§3.5 에 확정): 선택지는 (a) 성공률에서 꺼진 시간을 잘라내기, (b) 복원 시 `last_failed_ts` 로 닫고 기동 후 첫 실패에 새로 열기, (c) 꺼진 시간을 포함해 잇기. 열 때 쓴 점의 `last_failed_ts` 는 `started_at` 과 같아 (a)(b) 는 재기동 전 지속 시간을 통째로 잃고 타임라인과 성공률이 서로 다른 구간을 보게 된다 — (c) 를 택했다.
   - §3.6 의 결정 그대로: `exName` 은 `shared/format.ts`, `HealthData` 는 `shared/types.ts`(기능 간 import 금지).
   - Influx 쓰기는 틱 안에서 동기 호출하지 않고 **큐 + 별도 태스크**가 순서대로 1점씩 쓴다 — Influx 가 죽으면 쓰기 1회가 클라이언트 타임아웃까지 매달려 1초 틱을 막기 때문. 순서를 지키는 이유는 열림 점이 닫힘 점 뒤에 도착하면 `count` 가 1 로 되돌아가기 때문.
