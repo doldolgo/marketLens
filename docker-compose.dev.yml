@@ -1,7 +1,7 @@
 # 프로젝트명을 배포 compose(name: marketlens)와 분리 — 같은 폴더에서 둘을 혼용해도
 # 운영 influxdb 컨테이너·볼륨을 dev 가 가로채지 않는다
 name: marketlens-dev
-# 개발용 compose — InfluxDB 2.7 하나만 (스펙 005 §3.1). 배포용 compose 는 스펙 007 몫.
+# 개발용 compose — InfluxDB 2.7(스펙 005 §3.1) + Redis 7(스펙 009 §3.8). 배포용 compose 는 스펙 007 몫.
 # 기동: docker compose --env-file server/.env -f docker-compose.dev.yml up -d
 #   토큰을 파일 한 곳(server/.env)에만 두기 위해 값은 compose 변수 치환으로 온다.
 #   첫 기동(setup)이 org·bucket `marketlens` 를 만들고 admin 토큰을 INFLUX_TOKEN 으로 맞춘다.
@@ -24,5 +24,17 @@ services:
     volumes:
       - influxdb-data:/var/lib/influxdb2
 
+  redis:
+    image: redis:7-alpine
+    container_name: marketlens-redis-dev
+    # AOF — 재기동해도 Influx 로 아직 안 옮긴 틱이 남는다 (009 §3.4)
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      # 로컬 서버(:8000)가 host 에서 붙는다 — REDIS_URL 기본값 redis://localhost:6379/0
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
 volumes:
   influxdb-data:
+  redis-data:

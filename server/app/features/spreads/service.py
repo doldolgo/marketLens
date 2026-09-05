@@ -181,7 +181,8 @@ def _build_row(
         fwd=fwd,
         rev=rev,
         usd=usd,
-        spark=[],  # 항상 빈 배열 — 009(tick-store) 몫
+        # 009 가 게시한 fwd 원값 추이(1분 버킷 ≤30개) — fail 행도 싣는다, 없으면 빈 배열
+        spark=store.spark(dom_row.exchange, fx_row.exchange, base),
         status=status,
         age=age,
         slip_fwd=slip_fwd,

@@ -2,7 +2,8 @@
 
 /health 와 틱 루프는 기능 폴더가 아니라 여기(시스템) 소관이다.
 메모리가 진실이므로 uvicorn 워커는 1개여야 한다 — 워커가 둘이면 서로 다른 메모리를 본다.
-시작 순서: 011 이력 복원 → 마켓 우주 → 스트림 기동(국내 2 + 바이낸스 3샤드) → 틱 루프. 어느 것이 실패해도 앱은 뜬다.
+시작 순서: Influx·Redis 연결 확인 → 011 이력 복원 → 009 spark 복원 → 마켓 우주 → 스트림 기동(국내 2 + 바이낸스 3샤드)
+→ 틱 루프 → 009 인계 보내기 태스크·flusher. 어느 것이 실패해도 앱은 뜬다.
 """
 
 import asyncio
@@ -28,16 +29,19 @@ from app.core.config import (
     USER_AGENT,
     get_settings,
 )
-from app.core.contracts import noop_handoff, noop_record
+from app.core.contracts import noop_record
 from app.core.errors import ExchangeError
 from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
 from app.core.outages import OutageTracker
 from app.core.quotes import QuoteSink
+from app.core.redis_stream import RedisTickStream
 from app.core.serialization import camelize_json
+from app.core.spark import SparkBuffer, restore_spark
 from app.core.streams.binance import BinanceStream
 from app.core.streams.bithumb import BithumbStream
 from app.core.streams.upbit import UpbitStream
+from app.core.tick_store import Flusher, TickRelay
 from app.core.ticks import TickLoop
 from app.core.universe import UniverseRefresher
 from app.features.analysis.router import router as analysis_router
@@ -58,9 +62,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = app.state.settings
     store = LiveStore()
     sink = QuoteSink(store)
-    # 원문 싱크(010)·틱 인계(009)는 아직 없다 — 아무것도 하지 않는 구현
+    # 원문 싱크(010)는 아직 없다 — 아무것도 하지 않는 구현
     record = noop_record
-    handoff = noop_handoff
 
     # 입출금 상태 60초 캐시(006) — 키 없는 거래소는 unknown, 빗썸은 키 불필요
     wallet = WalletStatusService(
@@ -82,12 +85,25 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("INFLUX_TOKEN 이 없어 Influx 를 쓰지 않는다 — /history/* 는 503")
     app.state.influx = influx
 
+    # Redis — 틱 버퍼(009). 불달이면 경고 1줄, 인계된 틱은 버려지고 앱은 뜬다
+    tick_stream = RedisTickStream.from_url(settings.redis_url)
+    if not await tick_stream.ping():
+        logger.warning(
+            "Redis 연결 실패: %s — 인계된 틱은 버려진다 (명령마다 재시도)",
+            settings.redis_url,
+        )
+    spark = SparkBuffer()
+    handoff = TickRelay(stream=tick_stream, store=store, spark=spark)
+
     # 1. 수집 실패 이력(011) 복원 — 틱 루프 시작 전에 끝난다. 쓰기는 별도 태스크가 순서대로.
     outages = OutageTracker(writer=influx)
     app.state.started_at = int(time.time() * 1000)
     await outages.restore(influx, app.state.started_at)
     outage_writer_task = asyncio.create_task(outages.run_writer_loop())
     app.state.outages = outages
+
+    # 1-2. spark 복원(009 §3.6) — 최근 30분 1분 버킷, 10초 상한. 틱 루프 시작 전에 끝난다.
+    await restore_spark(influx, spark, store, app.state.started_at // 1000)
 
     # 2~3. 마켓 우주 → 스트림 기동. 목록을 못 받으면 5초 간격 재시도, 그동안 구독은 없다.
     # 바이낸스 커넥터(012)가 심볼 집합 계약도 맡는다 — 우주가 확정되면 그 심볼만 구독한다.
@@ -113,6 +129,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     ticks.start()
 
+    # 5. 009 — 인계 큐 보내기 태스크와 flusher(60초, Influx 토큰 없으면 비활성)
+    handoff.start()
+    flusher: Flusher | None = None
+    if influx is not None:
+        flusher = Flusher(stream=tick_stream, writer=influx)
+        flusher.start()
+
     app.state.live_store = store
     app.state.collector = CollectService(
         store=store, universe=universe, streams=streams, client=client, wallet=wallet
@@ -121,6 +144,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await ticks.aclose()  # 슬롯의 마지막 틱을 인계한다
+        await handoff.aclose()  # 큐에 남은 틱을 Redis 로 한 번씩 보내 본다
+        if flusher is not None:
+            await flusher.aclose()
         await universe.aclose()
         await asyncio.gather(*(s.aclose() for s in streams))
         outage_writer_task.cancel()
@@ -128,6 +154,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await outage_writer_task
         if influx is not None:
             influx.close()
+        await tick_stream.aclose()
         await client.aclose()
 
 
