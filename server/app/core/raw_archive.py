@@ -1,9 +1,11 @@
-"""거래소 원문 아카이브 — 원문 싱크·거래소별 버퍼·객체 조립·업로드 루프 (스펙 010).
+"""거래소 원문 아카이브 — 원문 싱크·거래소별 버퍼·객체 조립·닫기 회차·업로드 워커 (스펙 010).
 
 기록 함수는 001 의 core 계약 `record(exchange, source, received_at_ms, payload)`(동기·무예외)을
 구현한다. 줄을 만들어 그 거래소 버퍼에 붙이는 메모리 작업뿐이라 수신 경로를 막지 않는다.
-버퍼를 닫고(60초 또는 32MB) gzip 해 S3 에 올리는 일은 별도 태스크가 매초 스레드에서 한다 —
-어떤 실패도 수집·/spreads·Redis·Influx 경로에 번지지 않는다. S3 를 읽는 코드는 없다.
+닫기 회차(태스크, 매초)가 버퍼를 닫아(60초 또는 32MB) 스레드에서 gzip 해 대기열에 넣고,
+업로드 워커(데몬 스레드 하나)가 대기열 머리부터 S3 에 올린다 — 둘은 잠금으로만 만나고
+닫기 주기는 업로드 결과와 무관하다. 어떤 실패도 수집·/spreads·Redis·Influx 경로에 번지지
+않는다. S3 를 읽는 코드는 없다.
 """
 
 import asyncio
@@ -11,6 +13,7 @@ import contextlib
 import gzip
 import json
 import logging
+import threading
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -23,9 +26,11 @@ logger = logging.getLogger("marketlens.raw_archive")
 CLOSE_AFTER_MS = 60_000  # 버퍼를 닫는 경과 시간 — 첫 줄의 receivedAt 기준 (§3.5)
 CLOSE_AT_BYTES = 32 * 1024 * 1024  # 비압축 32MB 도달 시 60초 전에 닫는다 (§3.5)
 QUEUE_LIMIT_BYTES = 256 * 1024 * 1024  # 대기열 상한 — 거래소 합산 압축 후 (§3.6)
-LOOP_INTERVAL_SEC = 1.0
-DRAIN_DEADLINE_SEC = 5.0  # 종료 시 열린 버퍼 업로드 합계 상한 (§3.6)
+LOOP_INTERVAL_SEC = 1.0  # 닫기 회차 주기
+RETRY_INTERVAL_SEC = 1.0  # 실패한 머리 객체를 워커가 다시 시도하는 간격 (§3.6)
+DRAIN_DEADLINE_SEC = 5.0  # 종료 시 대기열 비우기 합계 상한 (§3.6)
 KEY_PREFIX = "raw"
+WORKER_NAME = "raw-archive-upload"
 
 
 class Uploader(Protocol):
@@ -119,24 +124,32 @@ class RawArchive:
         clock: Callable[[], int] = _now_ms,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         drain_deadline_sec: float = DRAIN_DEADLINE_SEC,
+        retry_interval_sec: float = RETRY_INTERVAL_SEC,
     ) -> None:
         self._uploader = uploader
         self._clock = clock
         self._sleep = sleep
         self._drain_deadline_sec = drain_deadline_sec
+        self._retry_interval_sec = retry_interval_sec
+        # 버퍼는 이벤트 루프 스레드만 만진다 — 기록 함수와 닫기 회차.
         self._buffers: dict[str, _Buffer] = {}
-        # 거래소를 합쳐 닫힌 순서 하나의 FIFO — 스레드 회차와 종료 경로만 만진다 (§3.6)
+        # 거래소를 합쳐 닫힌 순서 하나의 FIFO. 넣기·상한 버림(닫기 회차)과 머리 빼기(워커)는
+        # 전부 `_changed`(잠금 + 조건변수) 아래에서만 한다 (§3.6).
         self._queue: deque[RawObject] = deque()
         self._queued_bytes = 0
         self._failures = 0  # 연속 업로드 실패 횟수
+        self._changed = threading.Condition()
+        self._closing = False  # 종료 — 워커가 빠져나온다
+        self._worker: threading.Thread | None = None
         self._task: asyncio.Task[None] | None = None
+        self._packing: asyncio.Future[None] | None = None  # 진행 중인 gzip·넣기
 
     # --- 원문 싱크 계약 (001 §3.7) ---
 
     def record(
         self, exchange: str, source: str, received_at_ms: int, payload: str
     ) -> None:
-        """동기·무예외·즉시 반환 — 줄을 만들어 그 거래소 버퍼에 붙인다. 닫는 것은 루프의 몫."""
+        """동기·무예외·즉시 반환 — 줄을 만들어 그 거래소 버퍼에 붙인다. 닫는 것은 닫기 회차의 몫."""
         try:
             line = format_line(exchange, source, received_at_ms, payload)
             buf = self._buffers.get(exchange)
@@ -158,31 +171,40 @@ class RawArchive:
     @property
     def pending(self) -> int:
         """업로드 대기열의 객체 수."""
-        return len(self._queue)
+        with self._changed:
+            return len(self._queue)
 
     @property
     def consecutive_failures(self) -> int:
-        return self._failures
+        with self._changed:
+            return self._failures
 
-    # --- 업로드 루프 (§3.6) ---
+    # --- 닫기 회차 (§3.6) ---
 
     def start(self) -> None:
         self._task = asyncio.create_task(self.run())
 
     async def run(self) -> None:
-        """매초: 닫을 버퍼를 닫고 대기열을 올린다. 회차 안 예외는 밖으로 나오지 않는다."""
+        """매초 닫기 회차. 회차 안 예외는 밖으로 나오지 않는다."""
         while True:
             await self._sleep(LOOP_INTERVAL_SEC)
             await self.run_once()
 
     async def run_once(self, *, force_close: bool = False) -> int:
-        """회차 1번 — 닫는 조건을 만족한 버퍼(force 면 전부)를 닫고, 스레드에서 gzip·업로드. 올린 수를 돌려준다."""
+        """회차 1번 — 닫는 조건을 만족한 버퍼(force 면 전부)를 닫고 스레드에서 gzip 해 대기열에 넣는다.
+
+        업로드는 기다리지 않는다(워커의 몫). 닫은 객체 수를 돌려준다.
+        """
         closed = self._close_due(self._clock(), force=force_close)
-        try:
-            return await asyncio.to_thread(self._pack_and_upload, closed)
-        except Exception:
-            logger.exception("원문 업로드 회차 중 예외 — 다음 회차에 이어간다")
+        if not closed:
             return 0
+        # 회차가 취소돼도(종료) gzip·넣기는 끝까지 간다 — 닫힌 버퍼는 이미 버퍼 목록에서 빠졌으므로
+        # 여기서 잃으면 되돌릴 수 없다. aclose 가 이 future 를 기다린다.
+        self._packing = asyncio.ensure_future(
+            asyncio.to_thread(self._pack_and_enqueue, closed)
+        )
+        await asyncio.shield(self._packing)
+        return len(closed)
 
     def _close_due(self, now_ms: int, *, force: bool) -> list[_Closed]:
         closed: list[_Closed] = []
@@ -200,13 +222,22 @@ class RawArchive:
                 )
         return closed
 
-    def _pack_and_upload(self, closed: list[_Closed]) -> int:
-        """스레드에서 — 닫힌 버퍼를 gzip 해 대기열 꼬리에 넣고, 머리부터 하나씩 올린다."""
+    def _pack_and_enqueue(self, closed: list[_Closed]) -> None:
+        """스레드에서 — 닫힌 버퍼를 gzip 해 대기열 꼬리에 넣고 워커를 깨운다. 예외를 내지 않는다."""
         for item in closed:
-            self._enqueue(RawObject(item.key, pack(item.lines), len(item.lines)))
-        return self._upload_queue()
+            try:
+                obj = RawObject(item.key, pack(item.lines), len(item.lines))
+            except Exception:
+                logger.exception(
+                    "원문 객체 직렬화 실패 — 이 객체는 잃는다 key=%s", item.key
+                )
+                continue
+            with self._changed:
+                self._enqueue_locked(obj)
+                self._changed.notify_all()
+        self._ensure_worker()
 
-    def _enqueue(self, obj: RawObject) -> None:
+    def _enqueue_locked(self, obj: RawObject) -> None:
         self._queue.append(obj)
         self._queued_bytes += len(obj.body)
         # 상한(압축 후 256MB)을 넘으면 가장 오래된 것부터 버린다 — 방금 넣은 새 객체는 남는다 (§3.6)
@@ -220,44 +251,104 @@ class RawArchive:
                 dropped.lines,
             )
 
-    def _upload_queue(self) -> int:
-        """머리부터 순서대로. 실패하면 그 객체를 머리에 그대로 두고 멈춘다 — 순서가 바뀌지 않는다."""
-        uploaded = 0
-        while self._queue:
-            obj = self._queue[0]
+    # --- 업로드 워커 (§3.6) ---
+
+    def _ensure_worker(self) -> None:
+        """워커 스레드는 첫 객체가 생길 때 하나만 띄운다. 데몬이라 진행 중인 put 이 프로세스 종료를 붙들지 않는다."""
+        with self._changed:
+            if self._closing or (self._worker is not None and self._worker.is_alive()):
+                return
+            self._worker = threading.Thread(
+                target=self._upload_forever, name=WORKER_NAME, daemon=True
+            )
+            self._worker.start()
+
+    def _upload_forever(self) -> None:
+        """머리 객체를 올리고 성공하면 뺀다. 실패하면 머리에 그대로 두고 1초 뒤 다시 — 순서가 바뀌지 않는다."""
+        while True:
+            with self._changed:
+                while not self._queue and not self._closing:
+                    self._changed.wait()
+                if self._closing:
+                    return
+                obj = self._queue[0]
             try:
                 self._uploader.put(obj.key, obj.body)
             except Exception as exc:
-                self._failures += 1
-                logger.warning(
-                    "S3 원문 업로드 실패 (연속 %d회) key=%s: %r",
-                    self._failures,
-                    obj.key,
-                    exc,
-                )
-                return uploaded
+                self._after_failure(obj, exc)
+                continue
+            self._after_success(obj)
+
+    def _after_failure(self, obj: RawObject, exc: Exception) -> None:
+        with self._changed:
+            if not self._queue or self._queue[0] is not obj:
+                return  # 올리는 사이 상한으로 버려진 객체 — 다음 머리로
+            self._failures += 1
+            # 횟수와 로그 줄은 같은 잠금 안에서 — 관찰자가 둘을 따로 보지 않는다
+            logger.warning(
+                "S3 원문 업로드 실패 (연속 %d회) key=%s: %r",
+                self._failures,
+                obj.key,
+                exc,
+            )
+            if not self._closing:
+                self._changed.wait(self._retry_interval_sec)
+
+    def _after_success(self, obj: RawObject) -> None:
+        with self._changed:
+            if not self._queue or self._queue[0] is not obj:
+                return  # 올리는 사이 버려진 객체 — 대기열에는 반영할 것이 없다
             self._queue.popleft()
             self._queued_bytes -= len(obj.body)
-            uploaded += 1
-        if self._failures and uploaded:
-            logger.info("S3 원문 업로드 재개 — 밀린 객체 %d개 적재", uploaded)
-        self._failures = 0
-        return uploaded
+            recovered = self._failures
+            self._failures = 0
+            self._changed.notify_all()  # 종료 대기가 "비었다" 를 본다
+        if recovered:
+            logger.info(
+                "S3 원문 업로드 재개 — 연속 실패 %d회 뒤 적재 key=%s",
+                recovered,
+                obj.key,
+            )
+
+    # --- 종료 (§3.6) ---
 
     async def aclose(self) -> None:
-        """루프를 멈추고 열린 버퍼를 전부 닫아 합계 5초 안에서 올려 본다. 넘으면 남은 것은 잃는다 (§3.6)."""
+        """닫기 회차를 멈추고 열린 버퍼를 전부 닫아 넣은 뒤, 워커가 비우기를 합계 5초 안에서 기다린다.
+
+        넘으면 남은 객체는 버리고 경고 1줄. 워커는 데몬이라 진행 중인 put 은 기다리지 않는다.
+        """
+        deadline = time.monotonic() + self._drain_deadline_sec
         if self._task is not None:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._task
             self._task = None
-        try:
-            await asyncio.wait_for(
-                self.run_once(force_close=True), self._drain_deadline_sec
-            )
-        except TimeoutError:
+        if self._packing is not None and not self._packing.done():
+            with contextlib.suppress(Exception):
+                await (
+                    self._packing
+                )  # 취소된 회차의 gzip·넣기가 끝나야 그 객체가 대기열에 있다
+        await self.run_once(force_close=True)
+        drained = await asyncio.to_thread(self._wait_drained, deadline)
+        with self._changed:
+            dropped = 0 if drained else len(self._queue)
+            self._queue.clear()
+            self._queued_bytes = 0
+            self._closing = True
+            self._changed.notify_all()
+        if dropped:
             logger.warning(
                 "종료 원문 업로드 데드라인(%.0f초) 초과 — 대기열 %d개 객체를 잃는다",
                 self._drain_deadline_sec,
-                len(self._queue),
+                dropped,
             )
+
+    def _wait_drained(self, deadline: float) -> bool:
+        """스레드에서 — 대기열이 빌 때까지 deadline 안에서 기다린다. 비었으면 True."""
+        with self._changed:
+            while self._queue:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._changed.wait(remaining)
+            return True
