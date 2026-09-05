@@ -21,7 +21,7 @@
 | binance-stream | WS 3샤드 depth20+miniTicker·exchangeInfo 10분·샤드 단위 정체 판정 | - | 해외 최대 20단계 |
 
 ## 알려진 빚
-- (001) `server/build/`(setuptools 산출물 76파일)와 `server/marketlens_server.egg-info/` 가 git 에 추적돼 있다 — ruff 기본 제외라 검증엔 무해하지만 별도 chore 로 지울 것. venv 의 패키지는 editable 설치만 허용한다(dev-setup.md) — 비-editable 사본이 남아 있으면 `server/` 밖 cwd 에서 옛 모듈을 import 한다.
+- (001) `server/build/`(setuptools 산출물 76파일)와 `server/marketlens_server.egg-info/` 가 git 에 추적돼 있다 — `ruff check .` 가 이 사본(76파일)도 검사한다. 별도 chore 로 지울 것. venv 의 패키지는 editable 설치만 허용한다(dev-setup.md) — 비-editable 사본이 남아 있으면 `server/` 밖 cwd 에서 옛 모듈을 import 한다.
 - (001·006) 입출금 REST 응답 본문은 아직 원문 싱크에 기록되지 않는다 — `WalletStatusService` 에 `record` 주입 자리가 없다. 006 세션 몫.
 - (010) 원문 유입은 하루 10~20GB(gzip 후) **추정** — EC2 에서 1분 객체 크기·초당 줄 수를 실측한 뒤 버킷 lifecycle 을 정한다. 입출금 REST 응답 본문은 006 이 `record` 를 주입하기 전까지 아카이브에 없다.
 - (003·005) `/spreads` 의 `fwd`·`rev` 는 슬리피지 차감 후 순값이고 Influx `premium` 은 차감 전 원값이다. 저장 시점에 체결 규모가 정의되지 않기 때문이며, 그 대가로 `/history/streaks?threshold=` 는 화면 값보다 큰 값을 기준으로 구간을 센다. 백필(캔들 기반)도 원값만 만들 수 있어 아카이브 동질성 쪽을 택했다.

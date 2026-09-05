@@ -90,7 +90,7 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
    - 블록 사이 세로 구분선은 1번 뒤와 3번 뒤.
 3. **탭 본문**. 탭은 **언마운트하지 않고 숨긴다**. 각 탭의 검색어·필터·드릴다운 상태가 전환 후에도 유지되어야 하기 때문이다.
    - 숨김 탭은 레이아웃에 참여하지 않는다. 보이는 탭은 컨트롤 바(고정) + 본문(가변, 자체 스크롤).
-   - `spread`·`history` 는 placeholder: 가운데 정렬 한 줄 `spreads — 스펙 003 에서 구현` / `history — 스펙 005 에서 구현`.
+   - `spread` 탭은 003 이, `history` 탭은 005 가 채운다(그 전까지 `history` 는 mock — 셸이 넘긴 선택 심볼을 선택 티커로 보인다).
 4. **푸터**. `flow` 탭에서는 탭 자체 푸터로 대체.
    - 문구: `암묵환율 = 국내 거래소 USDT/KRW 체결가 기준`, `순방향 = 해외 매수 → 국내 매도 · 역방향 = 국내 매수 → 해외 매도`. 우측 `수집 실패 값은 보간 없이 –로 표시`.
 
@@ -159,7 +159,7 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
 8. 수집 상태: 011 §4.
 9. 레이더: 코인 칩 9개 → 클릭 시 브레드크럼 `전체 → BTC`, 코인 카드 + 표에서 코인 열 사라짐. 주소 클릭 → 주소 카드. `← 뒤로` 동작. 푸터가 ⚠️ 안내로 바뀐다.
 10. 레이더 검색에 `eth` Enter → ETH 코인 뷰, `winter` Enter → Wintermute 주소 뷰, `zzz` → `일치하는 코인·주소 없음`.
-11. 실시간 스프레드·기록/통계 탭은 placeholder 문구 한 줄.
+11. 실시간 스프레드 탭은 003 §4 가 본다. 기록/통계 탭은 mock(005 가 교체)이고 스프레드 행 클릭으로 넘어온 심볼이 선택돼 있다.
 12. 1.5초마다 갭 탭 일부 값이 흔들리고, 탭을 오래 두면 stale 행이 늘지 않는다(ok 항목은 age 가 리셋되므로).
 13. 6탭 전부 표가 grid(행 40px·sticky 헤더)이고 헤더·KPI·카드 생김새가 `docs/design/reference/` 와 같다. `<table>` 요소가 남아 있지 않다.
 
@@ -169,7 +169,7 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
 ```
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — web-shell 행을 `| web-shell | - | 셸·KPI·mock 탭 3종(gap·pp·flow) 동작 | spreads/history 탭은 placeholder |` 로. **항상 포함.**
+- `docs/context/status.md` — web-shell 행을 `| web-shell | - | 셸·KPI·mock 탭 3종(gap·pp·flow) 동작 | spreads 탭은 003 실데이터, history 탭은 mock(005 가 교체) |` 로. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 002 행 상태 → DONE. **항상 포함.**
 - `docs/context/architecture.md` — 데이터 흐름(FE) 절에 한 줄 추가: "셸의 공유 피드가 탭 공통 데이터를 들고, 1.5초 tick 은 셸이 돌린다. `/spreads` 1초 폴링은 spreads 기능(003)이 제공한다." + "현재 구조" 절에 web-shell 항목(shared 조각들·App.tsx·mock 탭 3종 폴더).
 - `docs/context/dev-setup.md` — web 절 명령(dev/build/lint)은 실제와 일치. 사전 준비의 Node 항목에 "22(CI·배포 고정 — 로컬은 v26 도 동작 확인)" 주석.

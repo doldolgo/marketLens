@@ -25,7 +25,7 @@
 
 하지 않는 것:
 - Influx 저장·아카이브. `spark` 는 009(tick-store)가 채운다.
-- 저장 계층의 값 변경. 005 Influx `premium` 과 009 틱 레코드는 **슬리피지 차감 전 원값(raw)** 을 쓴다. 순값은 HTTP 응답(과 그것을 그대로 미러하는 010 S3)에만 있다 — 저장 시점에는 체결 규모가 정의되지 않기 때문이다.
+- 저장 계층의 값 변경. 005 Influx `premium` 과 009 틱 레코드는 **슬리피지 차감 전 원값(raw)** 을 쓴다. 순값은 HTTP 응답에만 있다 — 어디에도 저장되지 않는다(S3 는 거래소 원문만 담는다, 010). 저장 시점에는 체결 규모가 정의되지 않기 때문이다.
 - 망 단위 입출금 판정 **규칙**(정규화·매칭·tie-break) — 006 wallet-status 가 정의한다. 이 스펙의 행은 그 규칙의 결과를 싣기만 한다(아래 §3.2-4).
 - 분석 엔드포인트(004 analysis).
 
@@ -53,7 +53,7 @@
 조회 API 는 거래소를 직접 호출하지 않는다. `POST /refresh` 는 001 의 즉시 갱신 트리거(마켓 우주 갱신 → 재구독 → 입출금 재조회)를 부를 뿐 시세를 REST 로 묻지 않는다.
 
 ### 3.2 `GET /spreads` — 표 계산
-0. 파라미터 `notional` — 체결 규모(USD, 기본 `10000`). 표의 모든 행이 이 규모로 호가를 걷는다. 허용 범위 `1 ≤ notional ≤ 10_000_000`, 실수 허용. 범위·타입 위반은 **FastAPI 기본 422**(`{"detail":[…]}` — 이 스펙의 `{"error":{…}}` 포장이 아니다). 다른 파라미터는 없다. 응답 최상위에 쓰인 값을 `notional` 로 되돌려 싣는다 — 010 이 S3 줄을 자기완결로 만들려면 `slipFwd` 가 어느 규모의 값인지 줄 안에 있어야 한다.
+0. 파라미터 `notional` — 체결 규모(USD, 기본 `10000`). 표의 모든 행이 이 규모로 호가를 걷는다. 허용 범위 `1 ≤ notional ≤ 10_000_000`, 실수 허용. 범위·타입 위반은 **FastAPI 기본 422**(`{"detail":[…]}` — 이 스펙의 `{"error":{…}}` 포장이 아니다). 다른 파라미터는 없다. 응답 최상위에 쓰인 값을 `notional` 로 되돌려 싣는다 — 소비자가 `slipFwd` 가 어느 규모의 값인지 응답만 보고 알게 하기 위해서다(응답은 어디에도 저장되지 않는다).
 1. 기준 거래소(`upbit`)의 환율이 없거나 ask/bid 가 0 이하 → **404** `market_data_not_found`. message: "메모리에 upbit 거래소의 KRW-USDT 환율이 없습니다. POST /refresh 로 수집했는지 확인하세요.", detail `{"exchange": "upbit"}`.
 2. 스냅샷을 호가통화로 나눈다. `KRW` → 국내, `USDT` → 해외, 그 외 무시. 어느 한쪽이 비면 **404** `market_data_not_found`. message: "스프레드를 계산할 스냅샷이 부족합니다 (국내 KRW / 해외 USDT). 먼저 POST /refresh 로 수집하세요.", detail 에 양쪽 거래소 목록. 수집 전 빈 메모리는 1 또는 2 에서 404 가 나며 구분하지 않는다.
 3. 페어 생성. 국내 거래소마다 **그 거래소 자신의 환율**을 쓴다. 환율이 없는 국내 거래소는 **행 전체가 빠진다** — 남의 환율을 빌리면 테더 프리미엄이 섞이기 때문이다. 해외 거래소마다, 양쪽에 **모두 상장된** 코인만 행이 된다(한쪽 상장은 페어 아님). 제외 코인 목록(대소문자 무시)의 코인은 제외한다. 국내==해외 거래소 조합은 만들지 않는다.
@@ -124,7 +124,7 @@
 - 김프 셀의 값 왼쪽에 `슬 −N.NN%p` 배지를 보인다. 값은 그 행의 `slipFwd`(역프 기준이면 `slipRev`)를 소수 2자리로 반올림한 것이고, 0 이면 배지를 숨긴다(열 폭은 유지 — 규모를 바꿀 때마다 표가 흔들리지 않게).
 - 규모 세그먼트 아래 안내: `호가창 시장가 체결 기준 · 매수·매도 양측 슬리피지 차감`. 가격 기준 세그먼트(`현재가`/`슬리피지 반영`)는 없앤다 — 이제 차감이 항상 적용된다.
 - 김프 셀 = `[출발 거래소 태그] → [도착 거래소 태그] [+1.23%]`. 김프 보기면 해외→국내, 역프 보기면 국내→해외. 값 색은 퍼센트 색 규칙(한국식: 양수 빨강·음수 파랑·0 중립). 값 없으면 `–`.
-- 입출금 셀 = 태그 2개 `출금 가능|중단|?` `입금 가능|중단|?`. 출금 거래소는 출발, 입금 거래소는 도착. 테두리 규칙: true 강조색 실선, false 중립색 실선, **null 은 점선** — 모름을 열림·막힘과 한눈에 구분하기 위해서다. 이 스펙에선 전부 null 이라 **모든 행이 `?` 점선**이다. 네트워크 셀 = `net`(없으면 `–`).
+- 입출금 셀 = 태그 2개 `출금 가능|중단|?` `입금 가능|중단|?`. 출금 거래소는 출발, 입금 거래소는 도착. 테두리 규칙: true 강조색 실선, false 중립색 실선, **null 은 점선** — 모름을 열림·막힘과 한눈에 구분하기 위해서다. null 인 셀(키 없는 거래소·해외 망 미매칭, 006 §3.7)만 `?` 점선이다 — 빗썸은 키 없이도 실값이 오므로(006) 빗썸 셀은 실선이다. 네트워크 셀 = `net`(없으면 `–`).
 - **null 은 열림이 아니다.** "입출금 가능만" 필터는 출금·입금 둘 다 true 일 때만 통과한다.
 - 강조: fail 아님, stale 아님, 값 ≥ 임계값이면 강조 행이다. 임계값 기본 **1.5%**, 숫자 입력으로 0.1 단위 조정. 강조 행은 배경을 옅은 강조색으로 칠하고 심볼을 강조색 + 점으로 표시한다. `stale` 행은 흐리게(반투명) 보인다.
 - 필터바 1행: 심볼 검색(대소문자 무시), 기준 국내 거래소 분절 버튼, 임계값 숫자 입력, "임계 초과만"(전부 fail 아니고 값 ≥ 임계), "입출금 가능만", 우측 `N / M 코인 표시`.
@@ -152,17 +152,17 @@ BE (네트워크 없음 — 저장소에 직접 시드):
 - 양쪽 다리가 수량으로 연결된다 — 해외에서 산 수량 `Qf` 를 국내에서 판 평균가로 순값이 나온다(다리를 따로 걸은 값과 다름을 시드로 고정).
 - 같은 호가에서 규모를 키우면 slip 이 **줄지 않는다**(단조성). 호가가 소진돼도 마찬가지다.
 - 호가가 소진되면 실제 체결된 만큼의 평균가를 쓴다(요청 규모를 채운 척하지 않고, `status` 도 바뀌지 않는다).
-- 바이낸스 행의 `asks`/`bids` 가 20단계면 그 전부를 걷는다(1단계 시드와 20단계 시드의 `slipFwd` 가 다르다).
+- 바이낸스 행의 `asks`/`bids` 가 20단계면 그 전부를 걷는다 — 20단계를 모두 소진하는 규모에서 `fwd` 가 시드로 손계산한 값(20단계 전체 평균가로 산 수량을 국내에서 판 값)과 같고, 같은 시드를 19단계로 자르면 값이 달라진다.
 - `notional` 미지정이면 10000 이 쓰이고 응답 최상위에 그 값이 실린다. 0·음수·상한 초과·문자열은 **422** 다.
 - 응답 `fwd`·`rev` 는 저장 계층이 쓰는 원값과 다르다 — 같은 저장소로 만든 `premium` 점의 fwd 는 `fwd + slipFwd` 와 같다.
 - 행은 `(sym, dom, fx)` 오름차순이다.
-- 응답 행 키가 camelCase(`slipFwd`·`krw`…) 이고 `netDom is None`.
+- 응답 행 키가 camelCase(`slipFwd`·`krw`…) 이고, 망 정보 없이 시드한 행은 `netDom is None`(망이 있는 행의 5필드는 006 §4 가 본다).
 - `REFRESH_TOKEN` 설정 + 헤더 없음 → 401. 올바른 헤더 → 200. 미설정이면 헤더 없이 200.
 
 실서버 확인 (기동 후 수 초 뒤 실제 `/spreads` 호출):
 - 최상위 `rate > 1000`, 행 수 > 100.
 - 행 키 집합이 정확히 `sym dom fx fwd rev usd spark status age slipFwd slipRev krw netDom depDom wdDom depFx wdFx` **17개**다. 최상위는 `rate notional rows warnings dataReceivedAt fetchedAt` 6개다.
-- 첫 행 `status` 는 `ok`·`stale`·`fail` 중 하나, `netDom is None`.
+- 첫 행 `status` 는 `ok`·`stale`·`fail` 중 하나, `netDom` 은 문자열 또는 None(정렬상 첫 행은 빗썸 행이고, 빗썸은 키 없이도 망 코드를 준다 — 006).
 - `?notional=500000` 으로 부르면 같은 행의 `fwd` 가 기본 규모보다 작거나 같고 `slipFwd` 가 크거나 같다.
 - 전체 행이 `(sym, dom, fx)` 오름차순이다.
 - `POST /refresh` 의 `totalSaved > 100`.
@@ -170,7 +170,7 @@ BE (네트워크 없음 — 저장소에 직접 시드):
 
 FE 수동 확인:
 - 수백 행 표시, 1초마다 값이 변한다. KPI 환율이 `₩1,3xx.x` 로 보인다.
-- 입출금 태그 전부 `?` 점선, 네트워크 `–`.
+- 입출금 태그: 출발·도착 거래소가 빗썸인 셀은 실값 실선(키 불필요), 키 없는 업비트·Binance 셀은 `?` 점선. 네트워크는 국내 거래소가 빗썸인 행이면 망 코드, 업비트면 `–`.
 - 임계값 1.5 이상 코인만 배경 강조·심볼 점. 임계값 바꾸면 즉시 반영된다.
 - 서버 kill → 표는 남고 약 5초 뒤 행이 흐려진다. 서버 복구 → 다시 선명해진다.
 - 역프 기준 토글 시 화살표 방향·값이 바뀐다. 행 클릭 → 기록 탭으로 전환되며 심볼이 보인다.
@@ -186,64 +186,41 @@ cd server && .venv/bin/python -m pytest -q     # 417 passed, 1 warning in 4.73s
 cd web && npm run lint                         # oxlint src — 출력 없음(error 0)
 cd web && npm run build                        # tsc -b && vite build — ✓ built in 293ms
 ```
-착수 시점의 pytest 는 416 passed 였다. 늘어난 1개는 §4 "응답 `fwd`·`rev` 는 저장 계층이 쓰는 원값과 다르다"를 이 기능 폴더에서 고정한 `test_slippage.py` 의 항목이다(같은 관계는 009 의 `tests/test_tick_store.py` 도 본다).
+§4 의 BE 항목마다 `server/app/features/spreads/tests/` 에 최소 1개가 있다(§7 파일 목록).
 
 기동 스모크(실거래소 없이 — 이 망은 거래소 도메인을 막는다): `.venv/bin/python -m uvicorn app.main:app --port 8041` 로 띄워 `GET /health` → `{"status":"ok","version":"0.1.0"}`, `GET /spreads` → 404 `market_data_not_found`(detail `{"exchange":"upbit"}`, §3.2-1 문구 그대로), `GET /spreads?notional=0`·`?notional=abc` → 422 `{"detail":[…]}`. 확인 후 프로세스를 죽였다.
 
-FE 육안 확인은 `/spreads` 계약을 그대로 흉내낸 로컬 스텁(17키 행 6개 — ok 4·stale 1·fail 1, `notional` 에 비례해 `slipFwd` 가 커지는 값)을 `:8041` 에 띄우고 `VITE_API_BASE=http://localhost:8041 npm run dev` 로 봤다. 확인한 것: KPI 환율 `₩1,392.4`; 입출금 태그 전부 `?` 점선, 네트워크 `–`; 임계 1.5 이상(BTC·ETH)만 배경 강조·심볼 점; `슬 −0.08%p` 배지; 규모를 `$500k` 로 바꾸면 **다음 폴링부터** `?notional=500000` 이 나가고(스텁 요청 로그로 확인) 배지가 `−4.00%p` 로 커지며 김프가 `+2.23% → −1.69%` 로 작아지고 국내가 `₩100,000,000` 는 그대로; 역프 기준 토글 시 화살표가 `업비트 → Binance` 로 뒤집히고 값이 바뀜; Binance 체크 해제 → `조건에 맞는 코인이 없습니다…`(0 / 0), `모두` 로 복구; 행 클릭 → 기록 탭에 BTC 선택; 스텁을 죽이면 표는 남고 5초 뒤 전 행이 흐려지며 다시 띄우면 선명해진다.
+FE 육안 확인은 `/spreads` 계약을 그대로 흉내낸 로컬 스텁(17키 행 6개 — ok 4·stale 1·fail 1, `notional` 에 비례해 `slipFwd` 가 커지는 값)을 `:8041` 에 띄우고 `VITE_API_BASE=http://localhost:8041 npm run dev` 로 봤다. 확인한 것: KPI 환율 `₩1,392.4`; 입출금 5필드를 전부 null 로 준 스텁이라 입출금 태그 전부 `?` 점선, 네트워크 `–`(빗썸 실값 셀의 실선·망 코드 표시는 아래 EC2 항목); 임계 1.5 이상(BTC·ETH)만 배경 강조·심볼 점; `슬 −0.08%p` 배지; 규모를 `$500k` 로 바꾸면 **다음 폴링부터** `?notional=500000` 이 나가고(스텁 요청 로그로 확인) 배지가 `−4.00%p` 로 커지며 김프가 `+2.23% → −1.69%` 로 작아지고 국내가 `₩100,000,000` 는 그대로; 역프 기준 토글 시 화살표가 `업비트 → Binance` 로 뒤집히고 값이 바뀜; Binance 체크 해제 → `조건에 맞는 코인이 없습니다…`(0 / 0), `모두` 로 복구; 행 클릭 → 기록 탭에 BTC 선택; 스텁을 죽이면 표는 남고 5초 뒤 전 행이 흐려지며 다시 띄우면 선명해진다.
 
-§4 "실서버 확인"(행 수 > 100·`rate > 1000`·`POST /refresh` 의 `totalSaved > 100`·`REFRESH_TOKEN` 401·`?notional=500000` 비교)은 실거래소 수집이 필요해 **EC2 에서 확인 필요** — 이 세션에서는 못 돌렸다(§7 남은 빚).
+§4 "실서버 확인"(행 수 > 100·`rate > 1000`·`POST /refresh` 의 `totalSaved > 100`·`REFRESH_TOKEN` 401·`?notional=500000` 비교·첫 행 `netDom`)과 FE 의 빗썸 셀 실값 표시는 실거래소 수집이 필요해 **EC2 에서 확인 필요** — 이 망에서는 못 돌린다(§7 남은 빚).
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — spreads 행의 server 칸에 `notional` 규모로 호가를 걷어 슬리피지를 차감한다는 것, web 칸에 규모 세그먼트, 비고에 행 17키. 알려진 빚에 저장 계층(원값)과 응답(순값)의 차이. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 003 행 범위에 서버 슬리피지. **항상 포함.**
-- `docs/specs/002-web-shell.md` — §3.4 `SpreadRow` 계약에서 `liqDom`·`liqFx` 를 빼고 `slipFwd`·`slipRev`·`krw` 를 넣는다.
+- `docs/specs/002-web-shell.md` — §3.4 `SpreadRow` 계약에서 `liqDom`·`liqFx` 를 빼고 `slipFwd`·`slipRev`·`krw` 를 넣는다. §3.5-3·§4-11·§6 은 "spread 탭은 003 이, history 탭은 005 가 채운다(그 전까지 history 는 mock)" 로 — 셸에 placeholder 탭은 없다.
 - `docs/specs/004-analysis.md` — walk 가 `core/orderbook.py` 로 이관된 것을 반영(§2·§3.1).
 - `docs/specs/009-tick-store.md` — 복사해 둔 원값 수식·조합 자격.
 - `docs/context/dev-setup.md` — 검증용 스모크를 §4 실서버 기준으로 교체: 최상위 `rate > 1000`·행 수 > 100·행 키 정확히 17개(키 순서는 §3.2 응답 예시와 동일)·`?notional=` 로 규모를 바꾸면 `slipFwd` 가 커지는지.
 - `docs/context/architecture.md` — "현재 구조" 절에 spreads 항목: `core/premium.py`(`premium_percent`), `features/spreads/`(service 순수 계산·router 2 엔드포인트·models), `/refresh` 응답 모양(`snapshots[]` 거래소당 1항목 등), web `features/spreads/`(1초 폴링·확장 타입). FE 데이터 흐름 문구는 002 §6 에서 이미 반영됨 — 확인만.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-
-### 서버 슬리피지 반영 세션 (2026-09-04)
+001(WebSocket 수집·틱)·012(바이낸스 스트림) 위에서 돌아가는 현재 구현의 보고다.
 - 만든 것 (파일 목록):
-  - `server/app/features/spreads/service.py` — 걷기 2회(다리를 수량으로 연결)·순값·차감폭, `notional` 인자와 범위 상수. 단계 선택(`depth_*` 우선)과 다리 연결은 이 파일의 사적 헬퍼 2개다.
-  - `server/app/features/spreads/models.py` — 행 17키(`slipFwd`·`slipRev`·`krw` 추가, `liqDom`·`liqFx`·`rateAsk`·`rateBid` 제거), 최상위 `notional`.
-  - `server/app/features/spreads/router.py` — `notional` 쿼리 파라미터(FastAPI `Query(ge, le)`).
-  - `server/app/core/snapshot.py` — S3 줄의 최상위 맥락에 `notional` 추가(010 §3.4).
-  - `server/app/features/spreads/tests/test_slippage.py` — **신규**. §4 "슬리피지" 8항목.
-  - `server/app/features/spreads/tests/test_spreads_api.py`·`server/tests/test_persist.py`·`server/tests/test_snapshot.py` — 키·관계 갱신.
-  - `web/src/shared/types.ts`(002 §3.4 계약)·`web/src/features/spreads/{types.ts,api.ts,Tab.tsx}`·`web/src/App.tsx`.
-- 추측한 지점 (묻지 않고 정한 것 — 전부 문서에 반영):
-  - **단계 선택 규칙을 `core/` 공개 함수로 빼지 않았다.** §2 가 열거한 공유 모듈은 `premium.py`·`orderbook.py` 둘뿐이고, 004 는 아직 `depth_*` 를 코드로 쓰지 않아 core 에 두면 부르는 곳 없는 공개 함수가 된다(conventions "추측성 코드 금지"). spreads service 안의 사적 헬퍼로 뒀다.
-  - **최우선 호가의 잔량 0 도 `fail`** — §3.2-4·§4 에 적었다. "fail 이 아니면 체결 수량이 0 이 되는 경우는 없다"는 스펙의 단언은 가격만 검사해서는 참이 되지 않는다(잔량 0 → 평균가 0 → 순값의 0 나눗셈으로 500).
-  - **최상위 키 순서**를 §3.2 예시대로 `rate notional rows warnings dataReceivedAt fetchedAt` 로 맞췄다(직전 코드는 `rows` 다음이 `dataReceivedAt`).
-  - **체결 규모 선택값은 셸 상태**다 — 탭의 분절 버튼과 폴링 URL 이 같은 값을 봐야 한다. §3.4 에 한 문장 추가.
-- 실행 중 함께 고친 절:
-  - 003 §3.2-4(잔량 0)·§3.4(규모 상태 위치)·§3.5 필터바 2행·§4(잔량 0 검증·FE 육안 문구)·§6(status.md 지시). §3.5 본문은 "가격 기준 세그먼트를 없앤다"인데 필터바 2행 목록에는 그 세그먼트가 남아 있어 서로 어긋나 있었다. §6 의 status.md 지시 문구는 006·008 이전 것이라 현재 문서보다 뒤처져 있었다(status.md 본문은 이미 이 변경과 맞아 손대지 않았다).
-  - 005 §3.3·§4 — `premium` 이 **차감 전 원값**이라는 것과 `/spreads` 순값과의 관계(`fwd + slipFwd`). "`/spreads` 의 fwd/rev 와 일치한다"는 §4 문장은 이 변경으로 거짓이 되므로 관계식으로 바꾸고, 차감이 0 이 아닌 시드로 고정하도록 적었다.
-  - `docs/context/architecture.md`("현재 구조" spreads 항목, BE 흐름의 `premium` 원값 표기)·`docs/context/db.md`(`premium` 원값).
+  - `server/app/core/premium.py`(`premium_percent`)·`server/app/core/orderbook.py`(호가 걷기 — 004 와 공용, 전부 동기).
+  - `server/app/features/spreads/service.py` — 표 계산(걷기 2회를 수량으로 연결·순값·차감폭·`notional` 범위 상수), 입출금 5필드(006 §3.7), 스트림 기준 `age`, `/refresh` 응답 조립.
+  - `server/app/features/spreads/models.py` — 행 17키·최상위 6키(`notional` 포함)·`/refresh` 응답. 행은 어디에도 저장되지 않는다.
+  - `server/app/features/spreads/router.py` — `GET /spreads`(`notional` 은 FastAPI `Query(ge, le)` → 422)·`POST /refresh`(토큰 타이밍 안전 비교).
+  - `server/app/features/spreads/tests/` — `helpers.py`(저장소 시드·lifespan 없는 앱), `test_spreads_api.py`(404·페어·정렬·17키·age), `test_slippage.py`(§4 "슬리피지" 전 항목 + 저장 원값과의 관계 — core 의 `build_tick` 으로 같은 저장소의 틱을 만들어 `fwd + slipFwd` 와 비교), `test_refresh_api.py`, `test_spreads_service.py`, `test_usdt_staleness.py`(008), `test_wallet_fields.py`(006 §3.7 의 5케이스).
+  - `web/src/shared/types.ts`(002 §3.4 계약)·`web/src/features/spreads/{types.ts,api.ts,Tab.tsx}`·`web/src/App.tsx`(첫 탭·규모 상태·행 클릭 → 기록 탭).
+- 추측한 지점 (묻지 않고 정한 것 — 전부 본문에 반영):
+  - **최우선 호가의 잔량 0 도 `fail`**(§3.2-4·§4). 가격만 검사하면 잔량 0 → 평균가 0 → 순값의 0 나눗셈으로 500 이 난다.
+  - **최상위 키 순서**는 §3.2 예시대로 `rate notional rows warnings dataReceivedAt fetchedAt`.
+  - **체결 규모 선택값은 셸 상태**(§3.4) — 탭의 분절 버튼과 폴링 URL 이 같은 값을 봐야 한다.
+  - **원값 비교 테스트의 자리** — 009 의 `tests/test_tick_store.py` 가 같은 관계를 보지만 §4 항목마다 이 기능 폴더에 최소 1개를 두는 규칙(conventions.md)대로 `test_slippage.py` 에도 둔다. 저장 계층 코드 대신 core 의 `build_tick` 을 쓰는 이유는 Influx·Redis 없이 "같은 저장소로 만든 점"을 얻는 유일한 공개 경로이기 때문이다.
+  - **20단계 걷기 검증**은 20단계 시드의 `fwd` 를 시드에서 손으로 계산한 값과 같은지 보고, 19단계로 자른 시드와 값이 다른지 본다 — "slipFwd > 0" 만으로는 앞 10단계만 걷는 회귀를 못 잡는다.
+  - **FE 육안 확인은 스텁으로** — 이 망은 거래소 도메인을 막는다(dev-setup.md 로컬 메모). 스텁은 레포 밖(스크래치)에 두고 커밋하지 않는다.
 - 남은 빚:
-  - §4 "실서버 확인"(행 수 > 100·`rate > 1000`·`totalSaved > 100`·`?notional=500000` 비교)을 못 돌렸다. 이 망에서 거래소 도메인이 막혀 실수집이 안 된다 — **EC2 에서 한 번 돌려야 한다**.
-  - `core/orderbook.py` 는 여전히 단독 단위 테스트가 없다(004 §7 이 남긴 빚). 003 이 이 모듈을 실제로 쓰기 시작했지만 검증은 `/spreads`·`/slippage` HTTP 응답을 통해서만 한다.
-  - `server/build/lib/` 이 git 에 추적돼 있고 앱 트리의 낡은 사본이다(`liqDom` 시절 `spreads/service.py` 포함). `ruff check .` 가 이 사본까지 본다(171 파일). 삭제는 이 스펙 범위 밖이라 손대지 않았다.
-  - 012 의 `test_spreads_payload_is_identical_with_and_without_depth` 는 그 시드의 $10,000 이 1단계 안에서 끝나 통과한다. 시드를 조금만 얕게 잡으면 깨진다 — 012 는 "HTTP 계약 무변경"을 뜻했지 "값 무변경"이 아니므로 담당 스펙이 다시 볼 자리다.
-  - 004 analysis 는 `depth_*` 를 아직 쓰지 않는다 — `docs/specs/004-analysis.md` §3.1: 문서 주장 "`depth_*` 가 비어 있지 않으면 그것을 쓴다" → 실제 `server/app/features/analysis/service.py` 는 `row.asks`/`row.bids` 만 본다. 담당 스펙이 아니라 보고만 한다.
-
-### 재구축 검증 세션 (2026-09-06)
-001(WebSocket 수집·틱)·012(바이낸스 스트림) 위에서 이 스펙의 코드·테스트가 스펙과 같은지 확인하고 DONE 으로 올린 세션. 동작 변경은 없다.
-- 만든·고친 것 (파일 목록):
-  - `server/app/features/spreads/tests/test_slippage.py` — §4 "응답 `fwd`·`rev` 는 저장 계층이 쓰는 원값과 다르다" 항목을 이 기능 폴더에서 고정(core 의 공개 함수 `build_tick` 으로 같은 저장소의 틱을 만들어 `fwd + slipFwd`·`rev + slipRev` 와 비교).
-  - `server/app/features/spreads/models.py` — `RefreshSnapshot.saved`·`calls` 주석을 §3.3(지금 메모리에 있는 행 수·이 트리거로 나간 REST 호출 수)에 맞췄다. 값은 이미 그 뜻이었다.
-  - `docs/specs/003-spreads.md`(상태·§3.4·§5·§7), `CLAUDE.md`(인덱스 003 DONE·재구축 순서), `docs/context/status.md`(재구축 문단·spreads 행).
-- 추측한 지점 (묻지 않고 정한 것):
-  - 원값 비교 테스트의 자리 — 009 의 `tests/test_tick_store.py` 가 이미 같은 관계를 보지만, §4 항목마다 이 기능 폴더에 최소 1개를 두는 규칙(conventions.md)대로 spreads 테스트에도 넣었다. 저장 계층 코드 대신 core 의 `build_tick` 을 쓴 이유는 Influx·Redis 없이 "같은 저장소로 만든 점"을 얻는 유일한 공개 경로이기 때문이다.
-  - FE 육안 확인을 스텁으로 한 것 — 이 망에서 거래소 도메인이 막혀 실수집이 안 된다(dev-setup.md 로컬 메모). 스텁은 레포 밖(스크래치)에 두고 커밋하지 않았다.
-- 실행 중 함께 고친 절:
-  - §3.4 마지막 문장 — 기록 탭을 "placeholder" 라고 하던 문구를 현재 동작(002 의 mock 탭이 넘겨받은 심볼을 선택 티커로 보인다)으로 바꿨다.
-  - status.md 재구축 안내 문단에서 003 을 빼고, spreads 행을 새 런타임(메모리만 읽음·스트림 기준 `age`·`/refresh` 는 001 트리거 노출)으로 적었다.
-- 남은 빚:
-  - §4 "실서버 확인" 전부 — **EC2 에서 확인 필요**(행 수 > 100·`rate > 1000`·`totalSaved > 100`·`REFRESH_TOKEN` 401·`?notional=500000` 비교).
+  - §4 "실서버 확인" 전부와 FE 의 빗썸 셀 실값 표시 — **EC2 에서 확인 필요**(행 수 > 100·`rate > 1000`·`totalSaved > 100`·`REFRESH_TOKEN` 401·`?notional=500000` 비교·첫 행 `netDom`).
   - `core/orderbook.py` 단독 단위 테스트 없음(004 §7 이 남긴 빚 그대로). 검증은 `/spreads`·`/slippage` HTTP 응답을 통해서만.
-  - `server/build/lib/`(76파일)·`marketlens_server.egg-info/` 가 git 에 추적돼 있다(status.md 알려진 빚 001). `ruff check .` 가 이 사본까지 본다(181 파일). 이 스펙 범위 밖이라 손대지 않았다.
+  - `server/build/lib/`(76파일)·`marketlens_server.egg-info/` 가 git 에 추적돼 있고 `ruff check .` 가 그 사본까지 검사한다(status.md 알려진 빚 001). 이 스펙 범위 밖이라 손대지 않는다.
   - 스파크라인 렌더는 후속(status.md 비고).
