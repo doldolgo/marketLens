@@ -7,7 +7,7 @@
 2. 인바운드는 기존 그대로(80 HTTP, 22 SSH 내 IP). 새 스택을 밖에서 보려면 **8080** 을 추가로 연다. EC2 안에서 `curl localhost:8080` 으로만 확인할 거면 불필요.
 3. `git clone <repo> ~/marketlens` — 기존 `~/marketlens-be`·`~/marketlens-fe` 와 별개 폴더.
 4. `~/marketlens/server/.env` 작성 (git 에 없음):
-   - `INFLUX_URL` — compose 안 Influx 서비스 주소(서비스명으로 접근, localhost 아님)
+   - `INFLUX_URL`·`REDIS_URL` — `server/.env.example` 의 기본값(localhost) 그대로 둔다. compose 가 `environment` 로 `http://influxdb:8086`·`redis://redis:6379/0` 을 덮어쓰므로 컨테이너 안에서는 이 값이 쓰이지 않는다(007 §3).
    - `INFLUX_TOKEN`, `REFRESH_TOKEN` — `openssl rand -hex 32`. `INFLUX_TOKEN` 은 Influx **첫 기동 전**에 정해야 한다 (setup 이 그 값을 admin 토큰으로 쓴다).
    - 거래소 키는 선택 — 같은 계정을 쓰면 기존 `~/marketlens-be/.env` 의 `UPBIT_*`·`BINANCE_*` 값을 복사해도 된다(업비트 허용 목록에 EC2 IP 는 이미 등록돼 있다).
    - `S3_BUCKET=marketlens-spreads-snapshot` — 거래소 원문 아카이브(010, 접두사 `raw/`). AWS 키는 넣지 않는다(아래 IAM 역할).

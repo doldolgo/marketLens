@@ -12,7 +12,7 @@
 ## 2. 범위
 - 만드는 것: 공유 인프라의 **원문 싱크**(수신 경로가 호출하는 기록 함수 — 거래소별 버퍼·객체 조립·닫기 회차·업로드 워커), S3 업로더(연결·쓰기), env `S3_BUCKET`·`S3_REGION`, 테스트.
 - 하지 않는 것: 원문을 읽는 HTTP 엔드포인트(사람이 S3 콘솔·CLI·pandas 로 본다). 재생(replay) 도구 — 재생이 **가능하도록 줄 모양을 고정**하는 것까지가 이 스펙이다(§3.7). 보존기간·lifecycle(버킷 설정은 사람 몫, 코드는 관여하지 않는다). 소급 업로드. FE 표시. 가공된 표·김프의 S3 저장 — 하지 않는다.
-- 바꾸는 기존 것: 배포 워크플로(`.github/workflows/deploy.yml`)의 env 가드(`server/.env` 의 `S3_BUCKET` 이 비어 있으면 배포 중단)는 그대로. `docs/runbooks/ec2-setup.md` 의 IAM 정책 접두사를 `raw/*` 로.
+- 바꾸는 기존 것: `docs/runbooks/ec2-setup.md` 의 IAM 정책 접두사를 `raw/*` 로. 배포 가드(`server/.env` 의 `S3_BUCKET` 이 비어 있으면 배포 중단)는 007 §3 의 계약이라 여기서 바꾸지 않는다.
 
 ## 3. 동작
 
@@ -20,7 +20,7 @@
 - 001·012: 거래소 수신 경로는 **WebSocket 상시 연결**(업비트·빗썸 `wss://…/websocket/v1`, 바이낸스 `wss://data-stream.binance.vision/stream`)과 **REST 호출**(마켓 목록 `/v1/market/all`, 바이낸스 `/api/v3/exchangeInfo`, 006 의 입출금 상태 3종)이다. 수신 경로는 페이로드를 **해석하기 전에** 원문 싱크의 기록 함수를 부른다. 프레임이 바이너리면 UTF-8 로 디코드한 문자열, 압축(permessage-deflate)이면 라이브러리가 푼 뒤의 문자열이 원문이다.
 - 001: 원문 싱크의 계약은 core 공개 함수 하나 — `record(exchange: str, source: str, received_at_ms: int, payload: str) -> None`. **동기이며 예외를 던지지 않는다**(수신 경로를 한 줄도 막지 않기 위해). `source` 는 `"ws:<경로>"` 또는 `"rest:<경로>"`(예 `ws:/websocket/v1`, `rest:/v1/market/all`, `rest:/sapi/v1/capital/config/getall`). `received_at_ms` 는 서버가 받은 시각(epoch ms).
 - 006: 입출금 상태 REST 응답 본문(성공·실패 모두)도 조회기 3종이 같은 함수로 기록한다(`main.py` 가 주입). 키·서명·토큰은 **요청** 쪽에만 있고 응답 본문에는 없다.
-- 배포 워크플로(`.github/workflows/deploy.yml` — 007 스펙 본문에는 이 가드가 없다): `server/.env` 의 `S3_BUCKET` 이 비어 있으면 배포를 중단한다. 앱의 켜는 조건은 `S3_BUCKET` 존재(§3.2). 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 는 IAM 역할 — `docs/runbooks/ec2-setup.md`).
+- 007 §3(배포 워크플로 `.github/workflows/deploy.yml`): `server/.env` 의 `S3_BUCKET` 이 비어 있으면 배포를 중단한다. 앱의 켜는 조건은 `S3_BUCKET` 존재(§3.2). 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 는 IAM 역할 — `docs/runbooks/ec2-setup.md`).
 
 ### 3.2 설정·인증
 - env 두 개(`server/.env`, 사람이 채운다): `S3_BUCKET` — 없거나 비어 있으면 **아카이브 비활성**(기록 함수는 아무것도 하지 않고, 앱은 뜬다, 경고 로그 1줄). `S3_REGION` — 기본 `ap-northeast-2`. 비어 있으면(`S3_REGION=`) 기본값으로 본다.
@@ -129,15 +129,11 @@ curl -s -m 4 -o /dev/null -w '%{http_code}' https://api.upbit.com/v1/market/all 
   - §3.6 — 닫기 회차 태스크는 회차 안 예외(스레드 실행기 종료 등)를 로그 1줄로 삼키고 다음 회차를 돈다 — 009 Flusher 와 같은 루프 공통 규칙. 태스크가 죽으면 기록은 계속 붙는데 버퍼가 닫히지 않아 메모리가 무한히 자라기 때문이다.
   - §3.6 — 실패 뒤 재시도 대기는 `time.monotonic` 데드라인까지 반복 대기로 확정 — 선택지는 ① 조건변수 한 번 대기(다른 거래소 객체가 들어올 때마다 깨어나 1초 전에 재시도한다 — 운영에서 분당 수 회 추가 시도) ② 데드라인 반복 대기, 종료만 조기 탈출(추천 — 스펙의 '1초 뒤' 가 그대로 성립하고 종료 지연도 없다).
   - §3.2 — 빈 `S3_REGION` 은 기본 리전(boto3 는 빈 문자열을 즉시 거부한다), S3 클라이언트 생성 실패는 에러 1줄 + 비활성으로 확정 — 원문 아카이브의 어떤 실패도 기동을 막지 않는다는 §3.6 원칙의 연장.
-  - §2·§3.1 — `S3_BUCKET` 배포 가드의 원본은 007 스펙 본문이 아니라 `.github/workflows/deploy.yml` 이므로 그 파일을 가리키게 고쳤다.
   - §3.4 — 유효한 JSON 의 기준을 표준(RFC 8259)으로 확정. 파서가 `NaN`·`Infinity` 를 받아들이면 줄 전체가 표준 파서에서 깨져 재생이 안 되므로 비표준 상수는 문자열 감싸기 경로로 보낸다.
   - §3.5 — gzip 레벨 6 으로 확정(실측: 32MB 원문 레벨 6 0.31초·압축률 0.218, 레벨 9 1.13초·0.210). 열린 버퍼 상한을 "32MB + 한 회차치(1초 + gzip 시간)" 로, 회차가 gzip·넣기 완료까지를 한 회차로 본다는 것을 명시.
   - §3.6 — 원문이 기록되지 않는 경로 둘(디코드 불가 바이너리 프레임, 회차 예외로 잃은 닫힌 줄)을 명시하고 회차 예외 로그에 잃은 객체·줄 수를 싣는다.
   - `server/app/features/spreads/models.py` 의 주석 두 곳(`SpreadRow` docstring·`notional`)이 "010 의 S3 줄이 행 순서를 그대로 쓴다/줄마다 싣는다" 고 010 의 계약을 반대로 적고 있어 "행은 어디에도 저장되지 않는다 — S3 는 원문(010), Influx 는 원값(009)" 으로 고쳤다. 동작 변경 없음(주석만).
   - 코드 내부(동작 불변): 기록 함수가 `json.loads` 로 유효성을 판단하므로 프레임마다 파싱이 2회(커넥터 1회 + 여기 1회) 일어난다 — 초당 1~2MB 에서 수십 ms/초 수준. SDK 재시도 "2회" 는 botocore `max_attempts=3`(standard) 로 옮겼다. 테스트용 관찰자 `buffered(exchange)`·`pending`·`consecutive_failures` 와 `run_once(force_close=)`(닫은 객체 수를 돌려준다), 주입값 `retry_interval_sec`·`drain_deadline_sec` 를 공개했다. 닫기 회차가 취소돼도(종료) 진행 중인 gzip·넣기는 끝까지 가고 `aclose` 가 그것을 기다린 뒤 강제 닫기를 한다. "자격증명 없이 기동" 테스트는 실제 boto3 를 쓰되 env(`AWS_EC2_METADATA_DISABLED` 등)로 탐색을 막아 네트워크 없이 즉시 실패시킨다. 실패 로그는 warning(업로드·종료 버림)·error(상한 버림·HeadBucket·클라이언트 생성) 레벨이다.
-- 다른 스펙 보고(고치지 않음):
-  - `docs/specs/007-deploy.md:§3 규칙 — 배포 가드는 INFLUX_TOKEN 만 적는다 → 실제 `.github/workflows/deploy.yml` 은 `S3_BUCKET` 이 비어 있어도 배포를 중단한다. 007 세션이 §3 에 `S3_BUCKET` 가드와 EC2 IAM 역할 전제를 적어야 자기완결이 된다.
-  - `docs/specs/003-spreads.md:§2 하지 않는 것·§3.2-0·§7 서버 슬리피지 반영 세션` — "순값은 HTTP 응답(과 그것을 그대로 미러하는 010 S3)에만 있다", "010 이 S3 줄을 자기완결로 만들려면 `slipFwd` 가 어느 규모의 값인지 줄 안에 있어야 한다", "`server/app/core/snapshot.py` — S3 줄의 최상위 맥락에 `notional` 추가(010 §3.4)", "`server/tests/test_persist.py`·`server/tests/test_snapshot.py`" → 실제: S3 에는 원문(`raw/`)만 있고 `/spreads` 행·순값·`notional` 은 어디에도 저장되지 않는다(§1·§2). `snapshot.py`·`persist.py`·`test_persist.py`·`test_snapshot.py` 는 없다. 003 세션이 이 문장들을 지워야 md 만 보고 구현하는 세션이 가공 표의 S3 저장을 되살리지 않는다.
 - 남은 빚:
   - Redis·S3 가 동시에 무응답이면 종료가 인계 5초 + 아카이브 5초 = 10초에 닿아 `docker stop` 기본 10초와 같다 — 실측 후 필요하면 두 비우기를 병렬로.
   - §3.5 크기 추정(하루 10~20GB)은 미실측 — EC2 배포 후 1분 객체 크기·초당 줄 수를 §5 에 적고 lifecycle 을 정한다.

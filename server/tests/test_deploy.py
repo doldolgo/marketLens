@@ -135,7 +135,9 @@ def test_web_shell_title_is_the_smoke_string() -> None:
 def test_health_stays_up_without_storage_and_history_is_503() -> None:
     # lifespan 없이 띄우면 Influx·Redis 가 없는 상태 — Influx 컨테이너를 내린 것과 같다
     client = TestClient(create_app())
-    assert client.get("/health").status_code == 200
+    health = client.get("/health")
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"
     resp = client.get("/history/premium", params={"base": "BTC", "unit": "week"})
     assert resp.status_code == 503
     assert resp.json()["error"]["code"] == "storage_unavailable"

@@ -51,7 +51,7 @@
 - README 는 30줄 안팎: 한 줄 정의, "문서 진입점은 CLAUDE.md", 퀵스타트, 배포 한 줄. 협업 규칙은 conventions.md 에만.
 
 ## 4. 검증
-- env 파일(없으면 env 예시 파일에서 만든다)을 둔 채 `WEB_PORT=8080 docker compose up -d --build` 하면 네 컨테이너가 살아 있다.
+- env 파일(없으면 env 예시 파일에서 만든다)을 둔 채 `WEB_PORT=8080 docker compose --env-file server/.env up -d --build` 하면 네 컨테이너가 살아 있다(compose 변수 치환은 셸 env 와 `--env-file` 만 읽으므로 `INFLUX_TOKEN` 을 위해 `server/.env` 를 명시한다).
 - `curl localhost:8080/` 에 `트레이딩룸 · MarketLens` 가 있고, `curl localhost:8080/foo` 도 index.html 을 준다.
 - `curl localhost:8080/api/health` 가 server 의 `/health` 응답을 그대로 준다(`status == "ok"`).
 - server 컨테이너 env 에 `.env` 값이 있고, 이미지 안에는 `.env` 파일이 없다.
@@ -91,6 +91,6 @@ cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/pyth
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것: `server/Dockerfile`(+.dockerignore), `web/Dockerfile`·`nginx.conf`(+.dockerignore), 루트 `docker-compose.yml`(name: marketlens, restart, container_name 고정 — 기존 market-lens-* 와 무충돌), `.github/workflows/ci.yml`·`deploy.yml`, PR 템플릿, README(29줄), `server/tests/test_deploy.py`(설정 계약 17개 — §4 항목마다 1개 이상), `pyproject` dev 의존성 `pyyaml`.
-- 추측한 지점: compose 프로젝트명 고정(dev compose 와 컨테이너 재생성 충돌 방지), `.dockerignore` 2개(.env 원천 차단), server 의존성은 pyproject 범위로 `pip install .`, 가드는 `grep -q '^KEY=.'` 로 존재·비어있지 않음만(§3 에 `S3_BUCKET` 가드·IAM 역할 전제를 확정 문구로 적음 — 010 §7 의 요청), nginx 프록시 헤더 4종·`/api` 자체는 404, 배포 계약 테스트는 파일을 읽는 방식(§3 — Docker 없는 CI 에서 도는 유일한 회귀 장치)이고 YAML 파싱에 `pyyaml` 을 dev 의존성으로 추가, 앱 수준 격리(저장소 없이 `/health` 200·`/history` 503)는 lifespan 없는 `create_app()` 으로 단언.
-- 실행 중 함께 고친 스펙 절: §3 배포 가드(`S3_BUCKET`·IAM 역할), §3 배포 설정 계약 테스트 항목, §5 를 4컨테이너·Redis 격리·캐시 헤더 확인으로.
+- 추측한 지점: compose 프로젝트명 고정(dev compose 와 컨테이너 재생성 충돌 방지), `.dockerignore` 2개(.env 원천 차단), server 의존성은 pyproject 범위로 `pip install .`, 가드는 `grep -q '^KEY=.'` 로 존재·비어있지 않음만(§3 에 `S3_BUCKET` 가드·IAM 역할 전제를 확정 문구로 적음 — 010 의 켜는 조건이 `S3_BUCKET` 존재라 버킷 없이 뜨면 원문 아카이브가 조용히 꺼지고, 그 가드의 계약은 배포를 소유하는 이 스펙에 있어야 010 이 복사만 하면 되기 때문), nginx 프록시 헤더 4종·`/api` 자체는 404, 배포 계약 테스트는 파일을 읽는 방식(§3 — Docker 없는 CI 에서 도는 유일한 회귀 장치)이고 YAML 파싱에 `pyyaml` 을 dev 의존성으로 추가, 앱 수준 격리(저장소 없이 `/health` 200·`/history` 503)는 lifespan 없는 `create_app()` 으로 단언.
+- 실행 중 함께 고친 스펙 절: §3 배포 가드(`S3_BUCKET`·IAM 역할), §3 배포 설정 계약 테스트 항목, §4 기동 명령에 `--env-file server/.env`, §5 를 4컨테이너·Redis 격리·캐시 헤더 확인으로. 010 §2·§3.1 — `S3_BUCKET` 배포 가드의 원본을 007 §3 으로 가리킨다(가드 계약이 두 스펙에 서로 다르게 적히지 않도록). 010 §7 의 다른 스펙 보고(007 §3 가드·003 의 가공 표 S3 저장 문장)는 두 스펙 모두 해소돼 지웠다. `docs/runbooks/ec2-setup.md` 4 — `INFLUX_URL`·`REDIS_URL` 은 compose 가 서비스명으로 덮어쓰므로 `.env.example` 기본값 그대로.
 - 남은 빚: GitHub 권한 후 — Secrets 3개·branch protection·실 PR CI green / EC2 — `~/marketlens` 클론·env 2개 작성(사람)·자동 배포·공존 확인·EC2 안 `curl localhost:8080/api/health`·행이 있는 `/spreads` 의 Redis 격리·Influx 첫 점 왕복. 워크플로 lint(actionlint)는 미설치라 YAML 파싱 + 테스트 단언으로 갈음.
