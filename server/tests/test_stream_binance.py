@@ -763,7 +763,10 @@ def test_boot_with_every_connection_failing_keeps_health_200(
         "AsyncClient",
         lambda **kw: real_client(transport=httpx.MockTransport(rest), **kw),
     )
-    monkeypatch.setattr("app.main.get_settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr(
+        "app.main.get_settings",
+        lambda: Settings(_env_file=None, redis_url="redis://127.0.0.1:1/0"),
+    )
     app = create_app()
     with (
         caplog.at_level(logging.WARNING, logger="marketlens.stream.binance"),

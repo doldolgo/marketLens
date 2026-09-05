@@ -214,15 +214,77 @@ async def test_sender_task_sends_in_order_without_blocking_the_handoff() -> None
     assert [e.ts for e in await stream.read_all()] == [T0, T0 + 1, T0 + 2]
 
 
+async def test_close_drains_within_a_total_deadline_and_drops_the_rest(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class SlowFailingStream(RedisTickStream):
+        """무응답 Redis — 틱마다 타임아웃 뒤 실패."""
+
+        async def add(self, ts: int, data: bytes) -> str:
+            await asyncio.sleep(0.05)
+            raise TimeoutError("무응답 (테스트)")
+
+    relay = TickRelay(
+        stream=SlowFailingStream(fakeredis.aioredis.FakeRedis()),
+        store=LiveStore(),
+        drain_deadline_sec=0.2,
+    )
+    for i in range(40):  # 틱마다 0.05초 → 한 번씩 다 시도하면 2초
+        relay(tick(T0 + i))
+    started = asyncio.get_running_loop().time()
+    with caplog.at_level(logging.WARNING, logger="marketlens.tick_store"):
+        await relay.aclose()
+    assert asyncio.get_running_loop().time() - started < 1.0
+    assert relay.pending == 0
+    [warning] = [r for r in caplog.records if "데드라인" in r.getMessage()]
+    assert "남은 틱" in warning.getMessage() and "건을 버린다" in warning.getMessage()
+    tried = sum("Redis 인계 실패" in r.getMessage() for r in caplog.records)
+    assert 0 < tried < 40
+
+
 # ---- flusher ----
 
 
+class CountingStream(RedisTickStream):
+    """페이지 읽기·XDEL 호출을 센다 — 읽는 시점의 스트림 길이도 남긴다(페이지 단위 진행 확인용)."""
+
+    def __init__(self) -> None:
+        super().__init__(fakeredis.aioredis.FakeRedis())
+        self.lengths_at_read: list[int] = []
+        self.deletes = 0
+
+    async def read_page(self, after: str | None = None) -> list[StreamEntry]:
+        self.lengths_at_read.append(await self.length())
+        return await super().read_page(after)
+
+    async def delete(self, ids: list[str]) -> int:
+        self.deletes += 1
+        return await super().delete(ids)
+
+
 async def test_empty_stream_skips_the_round() -> None:
-    stream, _ = make_stream()
+    stream = CountingStream()
     influx = FakeInflux()
     flusher = Flusher(stream=stream, writer=influx)
     assert await flusher.flush_once() is True
-    assert influx.writes == [] and flusher.consecutive_failures == 0
+    assert influx.writes == [] and stream.deletes == 0
+    assert flusher.consecutive_failures == 0
+
+
+async def test_empty_stream_after_a_failed_round_warns_truncation_and_resets_failures(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    stream, _ = make_stream()
+    influx = FakeInflux()
+    influx.fail = True
+    ids = [await stream.add(T0 + i, encode_tick(tick(T0 + i))) for i in range(2)]
+    flusher = Flusher(stream=stream, writer=influx)
+    assert await flusher.flush_once() is False and flusher.consecutive_failures == 1
+    await stream.delete(ids)  # 실패한 구간이 통째로 잘렸다(MAXLEN)
+    with caplog.at_level(logging.WARNING, logger="marketlens.tick_store"):
+        assert await flusher.flush_once() is True  # 빈 회차 = 읽기 성공
+    assert sum("Redis 스트림 잘림" in r.getMessage() for r in caplog.records) == 1
+    assert flusher.consecutive_failures == 0 and influx.writes == []
 
 
 async def test_points_per_tick_and_dw_fail_points_then_stream_is_emptied() -> None:
@@ -253,9 +315,9 @@ async def test_entries_added_after_the_read_survive_the_round() -> None:
     late = tick(T0 + 9)
 
     class StreamWithLateAdd(RedisTickStream):
-        async def read_all(self) -> list[StreamEntry]:
-            entries = await super().read_all()
-            await self.add(late.ts, encode_tick(late))  # 1단계 뒤 새 엔트리
+        async def read_page(self, after: str | None = None) -> list[StreamEntry]:
+            entries = await super().read_page(after)
+            await self.add(late.ts, encode_tick(late))  # 페이지를 읽은 뒤 새 엔트리
             return entries
 
     stream = StreamWithLateAdd(fakeredis.aioredis.FakeRedis())
@@ -302,6 +364,60 @@ async def test_one_failed_batch_fails_the_round_and_big_ranges_load_fully() -> N
     assert await flusher.flush_once() is True
     assert len(influx.stored("premium")) == 3 * per_tick
     assert await stream.length() == 0
+
+
+async def test_multi_page_range_moves_one_page_at_a_time_and_resumes_at_the_failed_page(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    stream = CountingStream()
+    n = PAGE + 3
+    for i in range(n):
+        await stream.add(T0 + i, encode_tick(tick(T0 + i, 1)))
+    influx = FakeInflux()
+    influx.fail_after_batches = 1  # 첫 페이지(1배치)는 성공, 둘째 페이지에서 실패
+    flusher = Flusher(stream=stream, writer=influx)
+    assert await flusher.flush_once() is False
+    # 둘째 페이지를 읽는 시점에 첫 페이지는 이미 쓰고 지웠다 — 메모리는 페이지 크기에 비례
+    assert stream.lengths_at_read == [n, 3] and stream.deletes == 1
+    assert await stream.length() == 3 and len(influx.stored("premium")) == PAGE
+    assert flusher.consecutive_failures == 1
+    influx.fail_after_batches = None
+    with caplog.at_level(logging.INFO, logger="marketlens.tick_store"):
+        assert await flusher.flush_once() is True  # 둘째 페이지부터 다시 — 같은 첫 ID
+    msgs = [r.getMessage() for r in caplog.records]
+    assert not any("잘림" in m for m in msgs) and any("밀린 틱 3건" in m for m in msgs)
+    assert await stream.length() == 0 and len(influx.stored("premium")) == n
+    assert stream.lengths_at_read == [n, 3, 3]
+
+
+async def test_xdel_failure_fails_the_round_but_leaves_no_truncation_reference(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class StreamWithLostDeleteReply(RedisTickStream):
+        """XDEL 이 Redis 에 닿았지만 응답을 못 받은 경우 — 지운 뒤 예외."""
+
+        lose_reply = True
+
+        async def delete(self, ids: list[str]) -> int:
+            removed = await super().delete(ids)
+            if self.lose_reply:
+                self.lose_reply = False
+                raise TimeoutError("XDEL 응답 없음 (테스트)")
+            return removed
+
+    stream = StreamWithLostDeleteReply(fakeredis.aioredis.FakeRedis())
+    for i in range(2):
+        await stream.add(T0 + i, encode_tick(tick(T0 + i)))
+    influx = FakeInflux()
+    flusher = Flusher(stream=stream, writer=influx)
+    with caplog.at_level(logging.WARNING, logger="marketlens.tick_store"):
+        assert await flusher.flush_once() is False
+        assert flusher.consecutive_failures == 1 and await stream.length() == 0
+        assert await flusher.flush_once() is True  # 빈 스트림이지만 잘림이 아니다
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any("DB 저장 실패 (연속 1회)" in m for m in msgs)
+    assert not any("잘림" in m for m in msgs)
+    assert flusher.consecutive_failures == 0 and len(influx.stored("premium")) == 4
 
 
 async def test_loading_the_same_range_twice_is_idempotent() -> None:
