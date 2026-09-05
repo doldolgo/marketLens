@@ -12,12 +12,14 @@ APP_NAME = "MarketLens Backend"
 APP_VERSION = "0.1.0"
 USER_AGENT = f"marketlens-server/{APP_VERSION}"
 
-# 거래소 호출 타임아웃(초) — 스펙 001 §3.1
+# 거래소 3곳 고정 순서 — 스펙 001 §3.3. 국내 둘은 KRW, 바이낸스는 USDT 마켓
+EXCHANGES = ("upbit", "bithumb", "binance")
+DOMESTIC_EXCHANGES = ("upbit", "bithumb")
+
+# 거래소 REST(마켓 목록) 타임아웃(초)·WebSocket 핸드셰이크 타임아웃(초) — 스펙 001 §3.1
 EXCHANGE_TIMEOUT_TOTAL = 3.0
 EXCHANGE_TIMEOUT_CONNECT = 1.5
-
-# 수집 주기(초) — 한 사이클이 끝난 뒤 이만큼 쉰다. 사이클이 길어져도 겹치지 않는다.
-COLLECT_INTERVAL = 1.0
+WS_OPEN_TIMEOUT = 5.0
 
 
 class Settings(BaseSettings):
