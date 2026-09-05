@@ -314,6 +314,21 @@ def test_row_keys_are_exactly_the_17_camel_case_keys() -> None:
     assert row["depFx"] is None and row["wdFx"] is None
 
 
+def test_spark_is_taken_from_the_published_map_including_fail_rows() -> None:
+    """009 가 게시한 (dom, fx, base) 맵이 행의 `spark` 로 실린다 — 키 17개·타입은 불변."""
+    store = LiveStore()
+    seed_basic(store)
+    seed_rows(store, [make_row("upbit", "ETH", bids=[], asks=[[3_000.0, 1.0]])], NOW)
+    seed_rows(store, [make_row("binance", "ETH")], NOW)
+    store.set_spark(
+        {("upbit", "binance", "BTC"): [1.5, 2.0], ("upbit", "binance", "ETH"): [0.3]}
+    )
+    rows = {r["sym"]: r for r in make_client(store).get("/spreads").json()["rows"]}
+    assert set(rows["BTC"]) == ROW_KEYS
+    assert rows["BTC"]["spark"] == [1.5, 2.0]
+    assert rows["ETH"]["status"] == "fail" and rows["ETH"]["spark"] == [0.3]
+
+
 # ---- 리뷰 결함 회귀: 국내 호가 가격 0 은 500 이 아니라 그 행 fail (003 §3.2-4 방어) ----
 
 

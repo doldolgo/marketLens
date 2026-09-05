@@ -1,7 +1,14 @@
 """collect(core) 테스트 공용 도구 — 네트워크 호출 없음, 거래소는 fake 로 대체."""
 
+import time
 from dataclasses import dataclass
 
+from app.core.influx import (
+    InfluxPoint,
+    InfluxUnavailableError,
+    PremiumRow,
+    SparkBucketRow,
+)
 from app.core.models import Row, StreamError
 from app.core.ticks import StreamVerdict
 
@@ -70,3 +77,62 @@ class RawLog:
 
     def payloads(self, source: str | None = None) -> list[str]:
         return [e[3] for e in self.entries if source is None or e[1] == source]
+
+
+class FakeInflux:
+    """Influx fake — (measurement, 태그, 시각) 을 유일키로 덮어쓴다(db.md). 009 flusher·spark 복원용.
+
+    `write`·`query_premium`·`query_spark` 는 core.influx.InfluxClient 와 같은 시그니처다.
+    """
+
+    def __init__(self) -> None:
+        self.points: dict[
+            tuple[str, tuple[tuple[str, str], ...], int], InfluxPoint
+        ] = {}
+        self.writes: list[int] = []  # 쓰기 호출마다 점 수
+        self.fail = False
+        self.fail_after_batches: int | None = None  # 이만큼 성공한 뒤의 배치부터 실패
+        self.spark_rows: list[SparkBucketRow] = []
+        self.spark_fail = False
+        self.spark_delay_sec = 0.0
+
+    def write(self, points: list[InfluxPoint]) -> None:
+        if self.fail or (
+            self.fail_after_batches is not None
+            and len(self.writes) >= self.fail_after_batches
+        ):
+            raise InfluxUnavailableError("쓰기 실패 (테스트)")
+        self.writes.append(len(points))
+        for p in points:
+            self.points[(p.measurement, tuple(sorted(p.tags.items())), p.ts)] = p
+
+    def stored(self, measurement: str) -> list[InfluxPoint]:
+        return [p for p in self.points.values() if p.measurement == measurement]
+
+    def query_premium(
+        self, *, dom: str, fx: str, base: str | None, start: int, stop: int
+    ) -> list[PremiumRow]:
+        if self.fail:
+            raise InfluxUnavailableError("조회 실패 (테스트)")
+        out = [
+            PremiumRow(
+                base=p.tags["base"],
+                ts=p.ts,
+                fwd=float(p.fields["fwd"]),
+                rev=float(p.fields["rev"]),
+            )
+            for p in self.stored("premium")
+            if p.tags["dom"] == dom
+            and p.tags["fx"] == fx
+            and (base is None or p.tags["base"] == base.upper())
+            and start <= p.ts < stop
+        ]
+        out.sort(key=lambda r: r.ts)
+        return out
+
+    def query_spark(self, *, start: int, stop: int) -> list[SparkBucketRow]:
+        if self.spark_fail:
+            raise InfluxUnavailableError("조회 실패 (테스트)")
+        if self.spark_delay_sec:
+            time.sleep(self.spark_delay_sec)
+        return [r for r in self.spark_rows if start <= r.bucket_ts < stop]
