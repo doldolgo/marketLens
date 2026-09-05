@@ -64,7 +64,7 @@ web/src/features/<name>/
 
 ## 배포 토폴로지
 EC2 1대. 루트 `docker compose up -d --build`로 server·web·influxdb 컨테이너를 실행한다. 컨테이너는 compose 기본 네트워크를 사용하며 InfluxDB 포트는 호스트에 공개하지 않는다. PR CI는 server lint·format·pytest와 web lint·build를 실행한다. main push는 EC2에 SSH로 접속해 배포한다. 상세는 스펙 007(deploy).
-같은 EC2 에 기존 marketlens-be(:8000)·fe(:80) 가 운영 중이라 이 레포의 web 은 `WEB_PORT=8080` 으로 공존한다. 80 이관·서버 분리(DB/파싱 분리)는 추후 별도 스펙으로 검토한다.
+이 레포의 web 이 `WEB_PORT=80` 으로 서빙한다(기존 marketlens-be·fe 컨테이너는 2026-09-04 정지). server 는 호스트에 포트를 열지 않고 nginx 가 `/api/` 로 프록시한다. 서버 분리(DB/파싱 분리)는 추후 별도 스펙으로 검토한다.
 배포 workflow의 성공은 EC2 명령 실행 성공만 뜻한다. 외부 URL 확인과 실패 시 자동 롤백은 아직 없다.
 
 ## 현재 구조 (개발 후 갱신 — 실행 세션이 §7 보고와 함께 채운다)
