@@ -1,6 +1,6 @@
 # 005 — history
 
-상태: IN_PROGRESS | 의존: 001(collect — 틱), 002(web-shell), 003(spreads — 원값 수식), 009(tick-store — Influx 쓰기)
+상태: DONE | 의존: 001(collect — 틱), 002(web-shell), 003(spreads — 원값 수식), 009(tick-store — Influx 쓰기)
 
 > 이 문서는 **사람이 끝까지 읽는** 문서다. 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -12,8 +12,8 @@
 
 ## 2. 범위
 - 만드는 것: 공유 인프라의 Influx 클라이언트(연결·읽기/쓰기), 기능 폴더 `features/history`(`/history/premium` `/history/streaks` `/history/streaks/bulk`), 백필 스크립트(코인 목록·일수 인자), dev compose(Influx 하나, 2.7 — 루트 `docker-compose.dev.yml`. 배포용 `docker-compose.yml` 은 007 몫), `web/src/features/history/`(기록 탭 화면).
-- 하지 않는 것: Influx 쓰기 루프 — `premium`·`dw_fail` 은 009 의 flusher 가 60초마다 Redis 전량을 옮겨 쓴다. 기록 탭을 `/history/*` 실데이터에 연결하는 것과 `/spreads` 의 `spark` 채우기(둘 다 같은 후속 스펙 몫). 빗썸 페어 백필(빗썸엔 초봉 API 없음 — 빗썸×바이낸스는 실시간 기록으로만 쌓인다). 보존기간 정리(retention 무제한). 배포 compose(스펙 007). 재기동 직후 조회 API 의 DB 폴백 — 메모리가 비면 기존 404 그대로다.
-- 바꾸는 기존 것: 002/003 의 앱 셸: history placeholder → 기록 탭, 선택된 심볼 초기값 `null` → `'BTC'`.
+- 하지 않는 것: Influx 쓰기 루프 — `premium`·`dw_fail` 은 009 의 flusher 가 60초마다 Redis 전량을 옮겨 쓴다. `/spreads` 의 `spark` 도 009 가 채운다. 기록 탭을 `/history/*` 실데이터에 연결하는 것(후속 스펙 몫). 빗썸 페어 백필(빗썸엔 초봉 API 없음 — 빗썸×바이낸스는 실시간 기록으로만 쌓인다). 보존기간 정리(retention 무제한). 배포 compose(스펙 007). 재기동 직후 조회 API 의 DB 폴백 — 메모리가 비면 기존 404 그대로다.
+- 앱 셸(002/003)과의 접점: 셸의 기록 탭 자리는 이 기능의 `web/src/features/history/Tab.tsx` 이고, 스프레드 행 클릭이 넘기는 선택된 심볼의 초기값은 `'BTC'` 다.
 
 ## 3. 동작
 
@@ -102,25 +102,52 @@ HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*
 - 수동: dev compose + 서버 기동 후 **기동 약 60초 뒤**(009 flusher 첫 회차) `premium` 에 첫 점이 쌓이고, 75초 시점에 `/history/premium?base=BTC&unit=week` 가 `count ≥ 1`·`events[0].dt == 0` 을 돌려준다. Influx 컨테이너를 내리면 flusher 실패 로그가 회차마다 찍히되 `/spreads` 는 계속 갱신, `/history/premium` 은 503. 다시 올리면 밀린 구간이 한 회차에 들어가 `count` 에 구멍이 없다. 백필 스크립트 1일 실행 → "구간 완료, 김프 기록 N건" 에서 N > 1000, 재실행 시 "이미 전부 채워져". 스프레드 행 클릭 → 기록 탭에 그 심볼 선택. 마지막으로 서버 테스트·lint, web build·lint 통과.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
+재구축 검증 세션(2026-09-06). 다섯 명령 모두 통과해야 커밋한다.
 ```bash
-cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q   # 163 passed (신규 46)
-cd web && npm run lint && npm run build
-docker compose --env-file server/.env -f docker-compose.dev.yml up -d   # + uvicorn :8020
-# 기동 60초 뒤 /history/premium?base=BTC&unit=week → count 1, events[0].dt 0
-# influxdb stop → /health 200·/spreads 정상·/history/* 503, 로그 "DB 저장 실패 (연속 1회)"
-cd server && .venv/bin/python -m scripts.backfill BTC --days 1   # 55,090건, 재실행 "이미 전부 채워져 있습니다"
+cd server && .venv/bin/ruff check .            # All checks passed!
+cd server && .venv/bin/ruff format .           # 182 files left unchanged
+cd server && .venv/bin/python -m pytest -q     # 426 passed, 1 warning in 4.79s (history 34·backfill 14·tick_store_history 2)
+cd web && npm run lint                         # oxlint src — 출력 없음(error 0)
+cd web && npm run build                        # tsc -b && vite build — ✓ built in 292ms
 ```
+§4 의 BE 항목마다 `server/app/features/history/tests/` 에 최소 1개가 있다(§7 파일 목록). 틱 → Redis → flusher → `/history/*` 전 경로는 `server/tests/test_tick_store_history.py`(009) 가 fake Influx 로 본다.
+
+기동 스모크(Influx·Redis·거래소 없이 — 이 망은 거래소 도메인을 막는다): `.venv/bin/python -m uvicorn app.main:app --port 8041` 을 env 만 바꿔 두 번 띄웠다.
+- `INFLUX_TOKEN=`(없음): `GET /health` → 200 `{"status":"ok"}`, `GET /spreads` → 404 `market_data_not_found`(메모리 경로 정상 — 시세가 없을 뿐), `/history/premium?base=BTC&unit=week`·`/history/streaks?base=BTC`·`/history/streaks/bulk` → 503 `storage_unavailable`("INFLUX_TOKEN 이 설정되지 않았습니다"). 로그 `INFLUX_TOKEN 이 없어 Influx 를 쓰지 않는다 — /history/* 는 503` 1줄.
+- `INFLUX_TOKEN=x INFLUX_URL=http://127.0.0.1:1`(닿지 않음): 기동 로그 `InfluxDB 연결 실패: … — 회차마다 재시도한다` 1줄(이력·spark 복원은 빈 채로 시작), `/health` 200, `/history/*` 3종 → 503 `storage_unavailable`("저장소 조회에 실패했습니다: …"), `date=abc` → 400 `invalid_request`, `threshold=-1` → 422 `{"detail":[…]}`.
+확인 후 프로세스를 죽였다(`lsof -i :8041` 비어 있음).
+
+§4 의 수동 항목(dev compose 위 첫 점 ≈60초·75초 시점 `count ≥ 1`·Influx 를 내렸다 올리면 `count` 에 구멍 없음·백필 1일 N > 1000·재실행 "이미 전부 채워져")과 `bulk?threshold=0` 의 실데이터 100코인 초과는 실거래소 수집·Influx 가 필요해 **EC2 에서 확인 필요**(§7 남은 빚). 스프레드 행 클릭 → 기록 탭 심볼 선택은 003 §5 의 스텁 FE 확인에 포함돼 있다.
 
 ## 6. 갱신할 문서
 - `docs/context/db.md` — measurement·tag/field·시각 단위·쓰는 쪽/읽는 쪽·로컬 접속을 이 스펙 §3.1~3.2 와 일치시킨다.
 - `docs/context/status.md` — history 행(server: Influx·flusher(009)·3 라우트·bulk / web: mock, `/history/*` 미연결).
 - `docs/context/dev-setup.md` — DB 절(compose 기동·Influx UI :8086·Influx 없어도 앱은 뜸). env 표를 `INFLUX_URL`·`INFLUX_TOKEN` 으로, 스모크에 `/history/premium`, 백필 스크립트 실행법.
-- `docs/context/architecture.md` — 런타임 절 DB 문구를 InfluxDB 2.7 로. DB 흐름에 2 measurement 반영, casing 예외 목록에 `/history/*`.
+- `docs/context/architecture.md` — 런타임 절의 저장소 문구(InfluxDB 2.7), BE 흐름의 `premium`·`dw_fail`, "현재 구조" 의 history 항목. 계약 규칙은 전 엔드포인트 camelCase 라 `/history/*` 예외 목록은 없다.
 - `docs/context/product.md` — 용어 절에 streak(구간) 1줄.
 - `CLAUDE.md` 스펙 인덱스 상태.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것: `core/influx.py`(클라이언트)·`core/persist.py`(60초 루프), `features/history/`(models·service·router·tests 24개), `scripts/backfill.py`, 루트 `docker-compose.dev.yml`, `web/features/history/Tab.tsx`. 수정: `collector.py`(락 공개·dw_failed 자리)·`main.py`(lifespan 배선)·`App.tsx`(기록 탭·선택 심볼 `'BTC'`)·`pyproject.toml`(influxdb-client).
-- 추측한 지점: `fx` 를 Literal 쿼리로 노출(422 경로), `base` 패턴 검증(Flux 주입 방어), 빈 방향 요약은 0.0·빈 segments, 하루 조각 skip 판정 = count>0, dev compose UI 비밀번호도 `${INFLUX_TOKEN}` 재사용, bulk coins 는 base 오름차순, 기간 내부값 7d/30d/90d.
-- 실행 중 함께 고친 스펙 절: §3.5 백필 목표 끝 = 오늘 UTC 0시 내림(live persist 와 겹침 해소), §3.4 streaks 404 = 조회 구간 안 0건 판정.
-- 남은 빚: 캔들 수집기·백필 실호출 자동 테스트 없음(순수 계산만 테스트) / 기록 탭 실데이터 연결·spark 채우기(후속 스펙) / bulk 92일 전 코인 응답 성능 미실측
+001(틱)·009(flusher)·012(바이낸스 스트림) 위에서 돌아가는 현재 구현의 보고다.
+- 만든 것 (파일 목록):
+  - `server/app/core/influx.py` — influxdb-client 를 import 하는 유일한 곳. `InfluxPoint`·`premium_point`·`dw_fail_point`(모델은 db.md), line protocol 직렬화(초 정밀도), `InfluxClient`(lazy 연결·`ping`·`write`·`query_premium`·`count_premium`·`first_last_premium`, 009 의 `query_spark`, 011 의 `collect_fail` 점·조회). 모든 실패는 `InfluxUnavailableError` 하나 — 호출자는 "재시도 또는 503" 으로만 다룬다.
+  - `server/app/features/history/service.py` — 순수 계산: 주/월 구간 경계, `/premium` 의 컴팩트 events·summary, streak 구간 판정(threshold 이상·maxGap)·방향 요약(샘플 가중)·overall(전체 행 + 두 방향 합집합), bulk 코인별 집계. 리더는 `query_premium` 하나만 쓰는 Protocol 로 받는다.
+  - `server/app/features/history/router.py` — 3 엔드포인트. 파라미터 검증은 FastAPI `Query`(422), 업무 오류는 `{"error":…}`(400·404), 저장소 없음·실패는 503. Influx 클라이언트는 동기라 스레드에서 돌린다.
+  - `server/app/features/history/models.py` — 응답 모델(snake_case → 라우터에서 camelCase).
+  - `server/app/features/history/tests/` — `helpers.py`(fake 리더 + lifespan 없는 앱, 선택적 LiveStore), `test_premium_api.py`·`test_streaks_api.py`·`test_bulk_api.py`(§3.4 계약·오류 4종·경계값), `test_point_rules.py`(§3.3 점 규칙·원값·`dw_fail`·저장소 장애 격리·bulk 100코인 초과).
+  - `server/scripts/backfill.py` — §3.5 그대로. 순수 계산(`plan_day_slices`·`is_full_day`·`dedup_changes`·`merge_premiums`·`rates_for_slice`)과 거래소 호출(거래소별 재시도 정책·페이지 간격)을 나눈다. 테스트 `server/tests/test_backfill.py` 는 순수 계산만.
+  - 루트 `docker-compose.dev.yml` — Influx 2.7 + Redis 7(009), 토큰은 `${INFLUX_TOKEN}` 치환.
+  - `web/src/features/history/Tab.tsx` — §3.6 mock 탭. `web/src/App.tsx` 가 선택 심볼(초기 `'BTC'`)과 탭 전환을 든다. mock 사건 목록은 `web/src/shared/mock.ts`(002).
+  - `server/app/main.py` — 토큰이 있을 때만 `InfluxClient` 를 만들어 `app.state.influx` 에 두고 ping 실패는 에러 1줄. flusher(009)·이력 복원(011)·spark 복원(009)이 같은 클라이언트를 쓴다.
+- 추측한 지점 (묻지 않고 정한 것 — 전부 본문에 반영):
+  - `fx` 는 `Literal["binance"]` 쿼리로 노출한다 — 다른 값은 FastAPI 422(§3.4 오류 표의 "파라미터 검증 실패").
+  - `base` 는 `^[A-Za-z0-9]{1,20}$` 패턴으로 검증한다(422) — Flux 문자열에 들어가므로 이스케이프와 함께 이중 방어.
+  - 빈 방향 요약은 `count 0`·수치 0.0·빈 `segments`, bulk 의 `coins` 는 base 오름차순.
+  - 백필의 "이미 채워진 날" 판정은 그 조각의 `count > 0`. dev compose 의 UI 비밀번호도 `${INFLUX_TOKEN}` 재사용.
+  - 기록 탭의 기간 내부값은 `7d/30d/90d`, 필터의 "peak ≥ 기준" 은 역프(음수 peak)를 크기로 비교한다.
+  - 저장소 장애 검증은 lifespan 없이 앱 상태에 fake 리더(실패)·빈 리더를 꽂아 본다 — 실제 기동 경로는 §5 의 :8041 스모크 두 번이 대신한다.
+- 실행 중 함께 고친 절: §2 — `/spreads` 의 `spark` 는 009 가 채운다(이 스펙의 후속 몫이 아니다), 앱 셸 접점을 지금 모양(기록 탭 = 이 기능의 Tab, 선택 심볼 초기값 `'BTC'`)으로. §6 — architecture.md 항목을 지금 문서 구조(계약 규칙에 casing 예외 목록 없음)로.
+- 남은 빚:
+  - §4 수동 항목 전부(첫 점·`count` 구멍·백필 1일·재실행 문구)와 `bulk` 실데이터 100코인 초과 — **EC2 에서 확인 필요**.
+  - 캔들 수집기(`fetch_*`)·백필 실호출의 자동 테스트 없음(순수 계산만).
+  - 기록 탭 실데이터 연결(후속 스펙), 전 구간 `/history/streaks` 의 Influx 과부하(status.md 알려진 빚).
