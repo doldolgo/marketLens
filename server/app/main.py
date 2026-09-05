@@ -2,7 +2,7 @@
 
 /health 와 틱 루프는 기능 폴더가 아니라 여기(시스템) 소관이다.
 메모리가 진실이므로 uvicorn 워커는 1개여야 한다 — 워커가 둘이면 서로 다른 메모리를 본다.
-시작 순서: 011 이력 복원 → 마켓 우주 → 스트림 기동 → 틱 루프. 어느 것이 실패해도 앱은 뜬다.
+시작 순서: 011 이력 복원 → 마켓 우주 → 스트림 기동(국내 2 + 바이낸스 3샤드) → 틱 루프. 어느 것이 실패해도 앱은 뜬다.
 """
 
 import asyncio
@@ -28,13 +28,14 @@ from app.core.config import (
     USER_AGENT,
     get_settings,
 )
-from app.core.contracts import NoForeignSymbols, noop_handoff, noop_record
+from app.core.contracts import noop_handoff, noop_record
 from app.core.errors import ExchangeError
 from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
 from app.core.outages import OutageTracker
 from app.core.quotes import QuoteSink
 from app.core.serialization import camelize_json
+from app.core.streams.binance import BinanceStream
 from app.core.streams.bithumb import BithumbStream
 from app.core.streams.upbit import UpbitStream
 from app.core.ticks import TickLoop
@@ -57,10 +58,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = app.state.settings
     store = LiveStore()
     sink = QuoteSink(store)
-    # 원문 싱크(010)·틱 인계(009)·바이낸스 심볼(012)은 아직 없다 — 아무것도 하지 않는 구현
+    # 원문 싱크(010)·틱 인계(009)는 아직 없다 — 아무것도 하지 않는 구현
     record = noop_record
     handoff = noop_handoff
-    foreign = NoForeignSymbols()
 
     # 입출금 상태 60초 캐시(006) — 키 없는 거래소는 unknown, 빗썸은 키 불필요
     wallet = WalletStatusService(
@@ -90,11 +90,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.outages = outages
 
     # 2~3. 마켓 우주 → 스트림 기동. 목록을 못 받으면 5초 간격 재시도, 그동안 구독은 없다.
+    # 바이낸스 커넥터(012)가 심볼 집합 계약도 맡는다 — 우주가 확정되면 그 심볼만 구독한다.
     upbit = UpbitStream(store=store, sink=sink, record=record)
     bithumb = BithumbStream(store=store, sink=sink, record=record)
-    streams = [upbit, bithumb]
+    binance = BinanceStream(store=store, sink=sink, record=record)
+    streams = [upbit, bithumb, binance]
     universe = UniverseRefresher(
-        sink=sink, streams=streams, foreign=foreign, client=client
+        sink=sink, streams=[upbit, bithumb], foreign=binance, client=client
     )
     universe.start()
     for stream in streams:
