@@ -17,7 +17,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 - 하지 않는 것: 입출금 수수료·최소 출금량, 지갑 상태의 영속(저장하지 않는다), FE 변경(spreads 탭이 이미 `netDom ?? '–'` 와 `depDom/wdDom/depFx/wdFx` 를 그린다), 입출금 레이더 탭(온체인 mock, 무관).
 
 **바꾸는 기존 것**
-1. 스펙 003 `/spreads` — 행의 입출금 5필드 계산을 "코인 단위 값 복사" 에서 **§3.6 망 판정** 으로 교체한다. 다른 필드·정렬·수식은 손대지 않는다.
+1. 스펙 003 `/spreads` — 행의 입출금 5필드는 **§3.6 망 판정** 으로 채운다(§3.7). 다른 필드·정렬·수식은 손대지 않는다.
 2. 스펙 001 틱 루프 — 매초 도는 틱 루프가 이 조회기를 부른다(60초에 한 번 실호출, 사이 틱은 캐시 — §3.5). 실패 시 경고 1줄을 `/refresh` 의 `warnings` 에 넣는다.
 3. 스펙 003 `POST /refresh` — 응답 `snapshots[]`(거래소당 1항목)의 각 원소에 `walletStatusAvailable: bool` 을 추가한다. 바이낸스 항목에도 붙는다 — `usdkrw[]` 는 국내 전용이라 쓸 수 없다.
 
@@ -85,7 +85,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 **국내 망 1개 vs 해외 망 목록 판정** (순서대로 첫 히트):
 0. 해외 망 목록이 비면 `unknown`. 정보 없음 ≠ 그 망 없음.
 1. 코드 대문자 일치 → matched. 국내 코드가 비면 이 규칙은 건너뛴다.
-2. 토큰 집합 완전 일치 → matched.
+2. 토큰 집합 완전 일치 → matched. 국내 망의 토큰 집합이 비면(이름이 전부 불용어 — 예 `Mainnet`) 규칙 2~4 를 보지 않고 **`unknown`** 으로 끝낸다 — 빈 집합끼리의 완전 일치는 아무 망이나 맞다는 뜻이 되고, 이름에 정보가 없으니 `absent`(해외가 그 망을 안 다룸) 라고도 말할 수 없다.
 3. 토큰을 정렬해 붙인 문자열 일치 (`AssetHub Polkadot` ↔ `Asset Hub Polkadot`) → matched. 확인된 동일 체인 쌍 표(초기값 `{metal,l2}` ↔ `{metal,dao,l2}`, 양방향)도 matched. 규칙을 느슨하게 푸는 대신 이 표를 늘린다.
 4. 못 찾음: 어느 해외 망과든 토큰이 하나라도 겹치거나, 길이 3 이상 토큰끼리 한쪽이 다른 쪽 접두사(`kat` ↔ `katana`)면 `unknown`. 아니면 `absent`.
 
@@ -99,7 +99,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 
 ### 3.7 `/spreads` 행의 5필드 (스펙 003 문단 대체)
 행의 국내 스냅샷 망 목록을 D, 해외(바이낸스) 망 목록을 F 라 할 때:
-1. D 비면(키 없음·망 정보 없는 과도기) → 5필드는 **코인 단위 값 그대로**. `depDom/wdDom` = 국내 코인 값, `depFx/wdFx` = 해외 코인 값, `netDom = null`. 기존 동작.
+1. D 비면(키 없음·망 정보 없는 과도기) → 5필드는 **코인 단위 값 그대로**. `depDom/wdDom` = 국내 코인 값, `depFx/wdFx` = 해외 코인 값, `netDom = null`.
 2. D 있으면 §3.6 으로 국내 망·판정·해외 망을 고른다. `netDom` = 고른 국내 망 name, `depDom/wdDom` = 그 망의 dep/wd.
 3. matched → `depFx/wdFx` = 맞춘 해외 망의 dep/wd.
 4. absent → `depFx = wdFx = false`. 해외가 그 망을 안 다룸 = 옮길 길 없음.
@@ -126,7 +126,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 - 키 없는 업비트·바이낸스 → 호출 0회로 실패, `/refresh` 의 `warnings` 에 각 1줄, `walletStatusAvailable` false. 빗썸은 키 없이 true.
 - HTTP 500 응답 → 실패 메시지에 상태 코드, detail body 500자 이하, secret 미포함.
 - 정규화: `Ethereum (ERC20)` = {ethereum}, `Polygon POS` = {polygon}, `AVAX C-Chain` = `Avalanche C-Chain`.
-- 판정: 코드 일치 matched, SEI vs SEIEVM unknown, QKC vs ETH absent, 해외 망 빈 목록 unknown, AssetHub Polkadot 경계 무시 matched.
+- 판정: 코드 일치 matched, SEI vs SEIEVM unknown, QKC vs ETH absent, 해외 망 빈 목록 unknown, AssetHub Polkadot 경계 무시 matched, 국내 망 이름이 전부 불용어(`Mainnet`)이고 코드가 안 맞으면 unknown(해외 이름이 `Ethereum` 이든 `Network` 든).
 - tie-break: 국내 망 2개 중 두 번째만 "국내 입금 ok + 해외 출금 ok" 이면 두 번째를 고른다.
 - `/spreads` 5케이스(§3.7 1~5): 빈 D → 코인 값·`netDom null`. GRT → wdFx false. QKC → depFx·wdFx false. SEI → `null, null`. unknown + F 빈 목록 → 해외 코인 값.
 - 실패한 회차 뒤 `/spreads` 의 해당 거래소 행은 전부 `null`(직전 성공값 미유지).
@@ -138,8 +138,8 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 182 files formatted / 434 passed, 1 warning in 4.85s
-#   (006 몫 52개: features/wallet_status/tests 4파일 31 + tests/test_networks.py 13 + tests/test_wallet_integration.py 2
+# All checks passed! / 182 files left unchanged / 435 passed, 1 warning in 4.78s
+#   (006 몫 53개: features/wallet_status/tests 4파일 31 + tests/test_networks.py 14 + tests/test_wallet_integration.py 2
 #    + features/spreads/tests/test_wallet_fields.py 6 — 서명 테스트 2개(업비트 JWT·바이낸스 HMAC)와 원문 싱크 기록 8개 포함)
 # 키 없이 기동(:8041, 거래소 도메인 차단 망): /health → {"status":"ok","version":"0.1.0"}, 트레이스백 0.
 #   /spreads 는 404(마켓 목록을 못 받아 우주가 빔 — dev-setup.md 로컬 메모의 정상 동작). 키 없는 /spreads 5키·빗썸 depDom 비-null·/refresh 경고 2줄은 tests/test_wallet_integration.py 가 같은 배선으로 단언한다.
@@ -154,6 +154,6 @@ EC2 에서 확인 필요(이 망은 거래소 REST 를 막는다): 실키 기동
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 소요 파일: `server/app/core/networks.py`(`Network`·`normalize_name`·`match_network`·`pick_domestic`·동일 체인 쌍 표), `server/app/core/contracts.py`(`WalletStatusProvider` Protocol), `server/app/features/wallet_status/`(`upbit.py`·`binance.py`·`bithumb.py` 조회기 — 코드 공유 없음, `service.py` `WalletStatusService`, `models.py`, `tests/` 4파일 + `helpers.py` 의 `Capture`·`FakeRecorder`), `server/app/core/ticks.py`(틱마다 `apply`·`failed`, 조회는 별도 태스크), `server/app/core/collect.py`(`force=True` 조회·`wallet_status_available`), `server/app/features/spreads/service.py`(`_wallet_fields` §3.7)·`models.py`(`walletStatusAvailable`), `server/app/main.py`(키 4개·`record` 주입), `server/tests/test_networks.py`·`test_wallet_integration.py`, `server/pyproject.toml`(PyJWT).
-- 추측한 지점(스펙에 확정 문구로 적음): (1) 원문 기록 시점·범위 — §3.5: 응답을 받는 즉시 상태 코드 해석 전에 본문을 남기고, 응답이 없는 실패(타임아웃·연결 오류)는 남기지 않으며, 기록 함수는 배선 시 조회기 묶음에 주입(미주입이면 무동작). 바이낸스 `source` 는 경로만 — 쿼리의 timestamp·서명은 요청 쪽이라 제외. (2) 입출금 조회는 틱 루프와 별도 태스크(10초 타임아웃이 시세를 막지 않게, 겹치지 않게 하나만). (3) core↔feature 결합은 Protocol 로, 배선은 `main.py`. (4) 전부 불용어라 토큰 집합이 빈 망 이름은 §3.6 규칙 2·3 을 건너뛴다(빈 집합끼리의 "완전 일치"는 아무 망이나 맞다는 뜻이 되기 때문). (5) `/refresh` 의 `calls` 는 실호출이 나간 조회만 더한다(키 없음은 0).
+- 추측한 지점(스펙에 확정 문구로 적음): (1) 원문 기록 시점·범위 — §3.5: 응답을 받는 즉시 상태 코드 해석 전에 본문을 남기고, 응답이 없는 실패(타임아웃·연결 오류)는 남기지 않으며, 기록 함수는 배선 시 조회기 묶음에 주입(미주입이면 무동작). 바이낸스 `source` 는 경로만 — 쿼리의 timestamp·서명은 요청 쪽이라 제외. (2) 입출금 조회는 틱 루프와 별도 태스크(10초 타임아웃이 시세를 막지 않게, 겹치지 않게 하나만). (3) core↔feature 결합은 Protocol 로, 배선은 `main.py`. (4) 전부 불용어라 토큰 집합이 빈 국내 망 이름은 코드가 안 맞으면 `unknown` — §3.6-2 에 확정 문구. (5) `/refresh` 의 `calls` 는 실호출이 나간 조회만 더한다(키 없음은 0).
 - 실행 중 함께 고친 절: §3.5 원문 기록 규칙 문장(위 1번).
 - 남은 빚: 실키 3-true·`netDom` 채움·S3 `rest:` 줄 확인은 EC2(§5) / 동일 체인 쌍 표는 1쌍뿐 — 실서버 `unknown` 을 보며 늘린다(status.md 빚).
