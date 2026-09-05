@@ -11,7 +11,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 ## 2. 범위
 - 만드는 것: `core/streams/binance.py` 의 바이낸스 스트림 커넥터(샤드 3개·구독 재조정·디코딩·핑·재연결·정체 판정), 심볼 목록 REST 조회, 001 스트림 상태 계약의 바이낸스 구현, 테스트. 라이브러리 `websockets`(001 이 이미 쓴다 — 추가 의존 없음).
 - 바꾸는 기존 것: 001 의 바이낸스 심볼 집합 계약(`core/contracts.py` `ForeignSymbolSource`)에 `set_universe(bases)` 를 더하고, 마켓 우주(`core/universe.py`)가 우주를 확정할 때마다 그것을 부른다(§3.3). `main.py` lifespan 이 커넥터를 우주·틱 루프·`/refresh` 트리거에 꽂는다.
-- 하지 않는 것: REST 시세 호출(없다). diff depth 와 로컬 북 재구성(§3.2). 깊이를 쓰는 계산(003·004). HTTP 계약 변경. web(수집 상태 탭의 `stale_stream` 라벨은 status.md 의 빚).
+- 하지 않는 것: REST 시세 호출(없다). diff depth 와 로컬 북 재구성(§3.2). 깊이를 쓰는 계산(003·004). HTTP 계약 변경. web.
 
 ## 3. 동작
 
@@ -112,8 +112,5 @@ EC2 에서 확인 필요(로컬에서 재현 불가): 네트워크를 끊고 30�
   12. `connected_since` 는 첫 SUBSCRIBE 묶음을 다 보낸 시각(§3.5, 001 §3.3 의 "구독 시각" 그대로). 보내는 동안(≤0.75초) 소켓이 열린 시각을 임시로 두는 이유는 판정 규칙이 001 과 같아야 해서다 — 그 값이 없으면 직전 연결의 수신 시각으로 정체가 되거나(재연결) 무한 조용함이 된다(첫 연결).
 - 실행 중 함께 고친 스펙 절: §2(경로·바꾸는 기존 것), §3.3(계약·재조정·소켓에 묶인 구독 집합·간격·백오프·keepalive·분류), §3.4(시각·맵 밖), §3.5(샤드 판정·구독 시각의 정의·집계), §3.6(재조정 태스크 포함 종료), §4(재조정 도중 재연결·구독 시각·lifespan 기동).
 - 남은 빚:
-  - 수집 상태 탭의 `stale_stream` 칩 라벨(status.md 기존 빚 — web 은 이 스펙 밖).
   - EC2 확인 항목(§5): 네트워크 차단 → `stale_stream` → 복구, 24시간 강제 종료 재연결, 실제 대역폭.
-  - 원문 싱크는 아직 무동작(010) — exchangeInfo 본문·모든 프레임의 `record` 호출은 들어가 있다.
   - 로컬 스모크에서 업비트 입출금 API 가 401 — 키·허용 IP 문제(006 소관), 이 스펙과 무관.
-  - 다른 스펙의 어긋남(보고만, CLAUDE.md §5): `docs/specs/001-collect.md:§3.8 — "바이낸스는 012 §3.6(샤드 단위)" → 샤드 판정은 012 §3.5(§3.6 은 장애 격리)`. `docs/specs/001-collect.md:§7 남은 빚 — "012 전에는 … /spreads 는 404 … 012 가 ForeignSymbolSource 를 꽂으면 풀린다"·"012 §2 core/connectors/ → core/streams/ … 012 담당 세션 몫" → 둘 다 이 스펙이 DONE 이 되며 해소됐다(지울 것)`. `docs/specs/011-health.md:§7 만든 것 — core/connectors/{upbit,bithumb,binance}.py·core/collector.py → 그 파일들은 없고 분류는 core/streams/*.py 에 있다`.
