@@ -75,7 +75,7 @@ def test_missing_snapshot_is_404():
     res = client.get("/orderbook/upbit", params={"symbol": "SOL/KRW"})
     assert res.status_code == 404
     assert res.json()["error"]["code"] == "market_data_not_found"
-    assert "수집 루프가 한 사이클" in res.json()["error"]["message"]
+    assert "스트림이 첫 스냅샷을 받았는지" in res.json()["error"]["message"]
 
 
 def test_depth_below_one_is_422():

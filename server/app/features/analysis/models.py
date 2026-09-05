@@ -23,7 +23,9 @@ class OrderbookResponse(BaseModel):
     # 001 메모리 계약에는 "호가 시각" 필드가 없어 시세 시각(price_timestamp)을 싣는다 — §7 보고 참고
     timestamp: int  # epoch ms
     data_updated_at: int | None  # 스냅샷 적재 시각 epoch ms
-    data_received_at: int | None  # 수집 루프 마지막 교체 시각 epoch ms (§3.0 공통 꼬리)
+    data_received_at: (
+        int | None
+    )  # 마지막 틱 시각 epoch ms — 001 의 received_at (§3.0 공통 꼬리)
     fetched_at: int  # 응답 생성 시각 epoch ms
 
 
