@@ -6,11 +6,15 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
+from app.core.config import Settings
 from app.core.errors import ExchangeApiError, ExchangeTimeoutError
 from app.core.live_store import LiveStore
 from app.core.streams.binance import (
@@ -21,6 +25,7 @@ from app.core.streams.binance import (
     BinanceStream,
     shard_of,
 )
+from app.main import create_app
 from tests.conftest import RawLog
 from tests.stream_fakes import (
     Clock,
@@ -733,6 +738,52 @@ async def test_boot_without_any_connection_logs_one_warning_per_shard(
         and verdict.error.kind == "network"
     )
     assert store.get_all(exchange="binance") == []
+
+
+def test_boot_with_every_connection_failing_keeps_health_200(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """lifespan 을 실제로 돌린다 — 소켓 3종은 거부, REST 는 마켓 목록만 성공(우주 = BTC)."""
+
+    async def refuse(url: str) -> Any:
+        raise OSError("refused")
+
+    def rest(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/market/all":
+            return httpx.Response(200, json=[{"market": "KRW-BTC"}])
+        if request.url.path == "/api/v3/exchangeInfo":
+            return httpx.Response(200, json=exchange_info(["BTCUSDT"]))
+        raise httpx.ConnectError("down", request=request)
+
+    real_client = httpx.AsyncClient
+    for module in ("upbit", "bithumb", "binance"):
+        monkeypatch.setattr(f"app.core.streams.{module}.open_socket", refuse)
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(rest), **kw),
+    )
+    monkeypatch.setattr("app.main.get_settings", lambda: Settings(_env_file=None))
+    app = create_app()
+    with (
+        caplog.at_level(logging.WARNING, logger="marketlens.stream.binance"),
+        TestClient(app) as client,
+    ):
+        resp = client.get("/health")
+        assert resp.status_code == 200 and resp.json()["status"] == "ok"
+        for _ in range(100):  # 우주 확정 → BTC 샤드 연결 시도 1회 → 경고 1줄
+            if any(r.name == "marketlens.stream.binance" for r in caplog.records):
+                break
+            time.sleep(0.02)
+        assert client.get("/health").status_code == 200
+        state = app.state.live_store.stream_state("binance")
+        assert (
+            state is not None and not state.connected
+        )  # last_error 는 틱의 judge 가 채운다
+    warnings = [r for r in caplog.records if r.name == "marketlens.stream.binance"]
+    assert (
+        len(warnings) == 1 and f"샤드 {BTC_SHARD} 연결 실패" in warnings[0].getMessage()
+    )
 
 
 async def test_aclose_cancels_tasks_and_closes_all_sockets() -> None:
