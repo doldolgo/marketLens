@@ -114,8 +114,8 @@ def standard_store(
         for exchange, extra_rows in extra.items():
             rows.setdefault(exchange, []).extend(extra_rows)
     store = LiveStore()
-    for exchange, exchange_rows in rows.items():
-        store.replace_exchange(exchange, exchange_rows, FIXED_DT)
+    for exchange_rows in rows.values():
+        store.put_rows(exchange_rows, FIXED_DT)
     store.set_rate("upbit", SEED_RATE, SEED_RATE, FIXED_DT)
     store.set_rate("bithumb", SEED_RATE, SEED_RATE, FIXED_DT)
     store.mark_received(FIXED_SEC)
@@ -123,7 +123,7 @@ def standard_store(
 
 
 def make_app(store: LiveStore | None = None) -> FastAPI:
-    """lifespan 없이 앱을 만들고 상태를 직접 채운다 — 수집 루프·네트워크가 돌지 않는다."""
+    """lifespan 없이 앱을 만들고 상태를 직접 채운다 — 스트림·틱 루프·네트워크가 돌지 않는다."""
     app = create_app()
     app.state.live_store = store if store is not None else LiveStore()
     app.state.settings = SimpleNamespace(refresh_token=None)

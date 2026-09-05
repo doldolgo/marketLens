@@ -7,7 +7,7 @@ import time
 from collections.abc import Collection
 from datetime import UTC, datetime
 
-from app.core.collector import CycleResult
+from app.core.collect import RefreshSummary
 from app.core.live_store import LiveStore
 from app.core.models import Row
 from app.core.networks import pick_domestic
@@ -100,8 +100,15 @@ def _cross_walk(
     return average_price(buy), average_price(sell)
 
 
-def _age_seconds(row: Row, now: datetime) -> float:
-    """스냅샷 경과 초. updated_at 은 저장소 적재 시각이라 항상 채워져 있다."""
+def _age_seconds(row: Row, store: LiveStore, now: datetime) -> float:
+    """그 거래소 스트림의 마지막 시세 수신 이후 경과 초 (§3.2-4).
+
+    행 자체의 갱신 시각이 아니다 — 조용한 코인은 메시지가 안 와도 호가는 현재값이다.
+    스트림 상태에 수신 시각이 없으면(시드 등) 행의 `updated_at` 을 쓴다.
+    """
+    state = store.stream_state(row.exchange)
+    if state is not None and state.last_message_at is not None:
+        return (now.timestamp() * 1000 - state.last_message_at) / 1000
     assert row.updated_at is not None
     return (now - row.updated_at).total_seconds()
 
@@ -112,6 +119,7 @@ def _build_row(
     fx_row: Row,
     rate_ask: float,
     rate_bid: float,
+    store: LiveStore,
     now: datetime,
     notional: float,
 ) -> SpreadRow:
@@ -121,8 +129,8 @@ def _build_row(
     fx_bid = fx_row.bids[0] if fx_row.bids else None
     fx_ask = fx_row.asks[0] if fx_row.asks else None
 
-    # age 는 양측 중 오래된 쪽 기준, 0 미만이면 0
-    age = max(0.0, _age_seconds(dom_row, now), _age_seconds(fx_row, now))
+    # age 는 양측 스트림 중 오래된 쪽 기준, 0 미만이면 0
+    age = max(0.0, _age_seconds(dom_row, store, now), _age_seconds(fx_row, store, now))
 
     best = (dom_bid, dom_ask, fx_bid, fx_ask)
     failed = any(level is None for level in best) or any(
@@ -247,6 +255,7 @@ def build_spreads(
                         fx_table[base],
                         rate.ask,
                         rate.bid,
+                        store,
                         now,
                         notional,
                     )
@@ -279,10 +288,10 @@ def build_spreads(
     )
 
 
-def build_refresh(result: CycleResult, store: LiveStore) -> RefreshResponse:
-    """001 수집 사이클 결과 → POST /refresh 응답 — 스펙 003 §3.3.
+def build_refresh(result: RefreshSummary, store: LiveStore) -> RefreshResponse:
+    """001 즉시 갱신 트리거 요약 → POST /refresh 응답 — 스펙 003 §3.3.
 
-    `snapshots[]` 는 거래소당 1항목이고 001 요약의 호출 수도 여기 싣는다(006 이 원소를 확장).
+    `snapshots[]` 는 거래소당 1항목이고 001 요약의 REST 호출 수도 여기 싣는다(006 이 원소를 확장).
     """
     snapshots = [
         RefreshSnapshot(

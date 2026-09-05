@@ -31,11 +31,9 @@ def seed(
     fx_bids: list[list[float]] | None = None,
     dom_bids: list[list[float]] | None = None,
     dom_asks: list[list[float]] | None = None,
-    depth: tuple[list[list[float]], list[list[float]]] | None = None,
 ) -> LiveStore:
-    """upbit × binance 한 페어. depth 를 주면 해외 행에 012 스트림 깊이를 얹는다."""
-    store.replace_exchange(
-        "upbit",
+    """upbit × binance 한 페어."""
+    store.put_rows(
         [
             make_row(
                 "upbit",
@@ -53,10 +51,7 @@ def seed(
         asks=fx_asks if fx_asks is not None else FX_ASKS,
         bids=fx_bids if fx_bids is not None else FX_BIDS,
     )
-    if depth is not None:
-        fx_row.depth_asks, fx_row.depth_bids = depth
-        fx_row.depth_at = 1_757_000_000_000
-    store.replace_exchange("binance", [fx_row], NOW)
+    store.put_rows([fx_row], NOW)
     store.set_rate("upbit", RATE, RATE, NOW)
     store.mark_received(1_787_000_000)
     return store
@@ -145,22 +140,20 @@ def test_exhausted_book_uses_actually_filled_average_and_keeps_status() -> None:
     assert row["fwd"] > -50.0
 
 
-def test_depth_levels_are_used_when_present() -> None:
-    # 해외에 depth_* 가 있으면 그것을, 없으면 1단계 asks/bids 를 쓴다 (012 스트림 유무, §4)
+def test_all_stored_levels_are_walked_even_at_twenty() -> None:
+    # 바이낸스 행의 asks/bids 가 20단계면 그 전부를 걷는다 — 1단계 시드와 slipFwd 가 다르다 (§4)
     shallow = seed(LiveStore(), fx_asks=[FX_ASKS[0]], fx_bids=[FX_BIDS[0]])
-    streamed = seed(
-        LiveStore(),
-        fx_asks=[FX_ASKS[0]],
-        fx_bids=[FX_BIDS[0]],
-        depth=(FX_ASKS, FX_BIDS),
-    )
+    deep_asks = [
+        [100.0 + i, 5.0] for i in range(20)
+    ]  # 단계당 ≈$500 → $10,000 에 20단계
+    deep = seed(LiveStore(), fx_asks=deep_asks, fx_bids=[FX_BIDS[0]])
     # 1단계만 있으면 $5,000 어치(50개)밖에 못 사고 그 평균은 최우선가 그대로다
     assert only_row(shallow)["slipFwd"] == 0.0
-    # 깊이가 실리면 2단계까지 먹어 평균이 나빠진다 — 2단계 시드와 같은 값
-    assert only_row(streamed)["fwd"] == pytest.approx(25.0)
-    assert only_row(streamed)["slipFwd"] == pytest.approx(75.0)
-    # 깊이는 응답에 노출되지 않는다 (001 §3.3 — 저장도 안 한다)
-    assert all("depth" not in key for key in only_row(streamed))
+    # 20단계를 다 걸으면 평균이 나빠진다
+    assert only_row(deep)["slipFwd"] > 0.0
+    assert only_row(deep)["fwd"] < only_row(shallow)["fwd"]
+    # 깊이 전용 필드는 응답에 없다 (001 §3.3 — 행의 asks/bids 가 전부다)
+    assert all("depth" not in key for key in only_row(deep))
 
 
 def test_default_notional_is_10000_and_echoed_at_top_level() -> None:

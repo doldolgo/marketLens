@@ -21,8 +21,7 @@ TOP_KEYS = {"rate", "notional", "rows", "warnings", "dataReceivedAt", "fetchedAt
 
 def seed_basic(store: LiveStore, *, now: datetime = NOW) -> None:
     """upbit BTC + binance BTC + upbit 환율 — 계산 가능한 최소 시드."""
-    store.replace_exchange(
-        "upbit",
+    store.put_rows(
         [
             make_row(
                 "upbit", "BTC", bids=[[100_000_000.0, 0.5]], asks=[[100_100_000.0, 0.4]]
@@ -30,8 +29,7 @@ def seed_basic(store: LiveStore, *, now: datetime = NOW) -> None:
         ],
         now,
     )
-    store.replace_exchange(
-        "binance",
+    store.put_rows(
         [
             make_row(
                 "binance",
@@ -57,8 +55,8 @@ def test_empty_memory_is_404_market_data_not_found() -> None:
 
 def test_snapshots_without_base_rate_is_404() -> None:
     store = LiveStore()
-    store.replace_exchange("upbit", [make_row("upbit", "BTC")], NOW)
-    store.replace_exchange("binance", [make_row("binance", "BTC")], NOW)
+    store.put_rows([make_row("upbit", "BTC")], NOW)
+    store.put_rows([make_row("binance", "BTC")], NOW)
     resp = make_client(store).get("/spreads")
     assert resp.status_code == 404
     body = resp.json()
@@ -68,7 +66,7 @@ def test_snapshots_without_base_rate_is_404() -> None:
 
 def test_rate_without_foreign_snapshots_is_404_with_exchange_lists() -> None:
     store = LiveStore()
-    store.replace_exchange("upbit", [make_row("upbit", "BTC")], NOW)
+    store.put_rows([make_row("upbit", "BTC")], NOW)
     store.set_rate("upbit", 1400.0, 1390.0, NOW)
     resp = make_client(store).get("/spreads")
     assert resp.status_code == 404
@@ -81,7 +79,7 @@ def test_domestic_exchange_without_rate_is_dropped_entirely() -> None:
     store = LiveStore()
     seed_basic(store)
     # bithumb 은 스냅샷은 있지만 환율이 없다 → bithumb 행 전체가 빠진다
-    store.replace_exchange("bithumb", [make_row("bithumb", "BTC")], NOW)
+    store.put_rows([make_row("bithumb", "BTC")], NOW)
     rows = make_client(store).get("/spreads").json()["rows"]
     assert {r["dom"] for r in rows} == {"upbit"}
     assert [r["sym"] for r in rows] == ["BTC"]
@@ -91,8 +89,7 @@ def test_one_side_listing_makes_no_row() -> None:
     store = LiveStore()
     seed_basic(store)
     # ETH 는 국내에만, SOL 은 해외에만 상장 → 둘 다 행 없음
-    store.replace_exchange(
-        "upbit",
+    store.put_rows(
         [
             make_row(
                 "upbit", "BTC", bids=[[100_000_000.0, 0.5]], asks=[[100_100_000.0, 0.4]]
@@ -101,8 +98,7 @@ def test_one_side_listing_makes_no_row() -> None:
         ],
         NOW,
     )
-    store.replace_exchange(
-        "binance",
+    store.put_rows(
         [
             make_row(
                 "binance",
@@ -152,7 +148,7 @@ def test_equal_ask_bid_rate_matches_single_rate_formula() -> None:
 def test_each_domestic_exchange_uses_its_own_rate() -> None:
     store = LiveStore()
     seed_basic(store)
-    store.replace_exchange("bithumb", [make_row("bithumb", "BTC")], NOW)
+    store.put_rows([make_row("bithumb", "BTC")], NOW)
     store.set_rate("bithumb", 1410.0, 1405.0, NOW)
     rows = make_client(store).get("/spreads").json()["rows"]
     by_dom = {r["dom"]: r for r in rows}
@@ -171,8 +167,8 @@ def test_each_domestic_exchange_uses_its_own_rate() -> None:
 def test_empty_orderbook_is_fail_with_zero_numbers_and_kept_io() -> None:
     store = LiveStore()
     seed_basic(store)
-    store.replace_exchange(
-        "binance",
+    store.remove_row("binance", "BTC")  # 교체하면 입출금 3필드를 물려받는다 (001 §3.3)
+    store.put_rows(
         [
             make_row(
                 "binance", "BTC", asks=[], bids=[[71_450.0, 1.5]], dep=True, wd=False
@@ -194,8 +190,8 @@ def test_zero_size_best_quote_is_fail() -> None:
     # 잔량 0 은 걷어도 체결 수량이 0 이라 평균가가 0 이 된다 — 가격 0 과 같이 fail (§3.2-4)
     store = LiveStore()
     seed_basic(store)
-    store.replace_exchange(
-        "binance",
+    store.remove_row("binance", "BTC")  # 교체하면 입출금 3필드를 물려받는다 (001 §3.3)
+    store.put_rows(
         [
             make_row(
                 "binance",
@@ -214,20 +210,19 @@ def test_zero_size_best_quote_is_fail() -> None:
     assert row["depFx"] is True  # fail 이어도 입출금 값은 싣는다
 
 
-def test_stale_ok_and_age_follow_older_snapshot() -> None:
+def test_stale_ok_and_age_follow_older_stream_not_row() -> None:
     store = LiveStore()
     now = datetime.now(UTC)
-    store.replace_exchange(
-        "upbit",
+    old = now - timedelta(seconds=60)  # 행 자체는 1분 전 — 조용한 코인
+    store.put_rows(
         [
             make_row(
                 "upbit", "BTC", bids=[[100_000_000.0, 0.5]], asks=[[100_100_000.0, 0.4]]
             )
         ],
-        now - timedelta(seconds=6),
+        old,
     )
-    store.replace_exchange(
-        "binance",
+    store.put_rows(
         [
             make_row(
                 "binance",
@@ -237,23 +232,20 @@ def test_stale_ok_and_age_follow_older_snapshot() -> None:
                 asks=[[71_500.0, 2.0]],
             )
         ],
-        now - timedelta(seconds=0.5),
+        old,
     )
     store.set_rate("upbit", 1400.0, 1390.0, now)
+    ms = lambda dt: int(dt.timestamp() * 1000)  # noqa: E731
+    store.stream("upbit").last_message_at = ms(now - timedelta(seconds=6))
+    store.stream("binance").last_message_at = ms(now - timedelta(seconds=0.5))
     [row] = make_client(store).get("/spreads").json()["rows"]
-    # age 는 양측 중 오래된 쪽(6초) 기준 → stale
+    # age 는 양측 스트림 중 오래된 쪽(6초) 기준 → stale
     assert row["status"] == "stale"
     assert 5.9 <= row["age"] <= 8.0
 
-    # 양쪽 다 0.5초 전이면 ok
-    store.replace_exchange(
-        "upbit",
-        [
-            make_row(
-                "upbit", "BTC", bids=[[100_000_000.0, 0.5]], asks=[[100_100_000.0, 0.4]]
-            )
-        ],
-        datetime.now(UTC) - timedelta(seconds=0.5),
+    # 스트림이 둘 다 0.5초 전이면 행 갱신 시각이 1분 전이어도 ok
+    store.stream("upbit").last_message_at = ms(
+        datetime.now(UTC) - timedelta(seconds=0.5)
     )
     [row] = make_client(store).get("/spreads").json()["rows"]
     assert row["status"] == "ok"
@@ -273,16 +265,12 @@ def test_krw_is_domestic_best_bid_price() -> None:
 
 def test_rows_sorted_by_sym_dom_fx() -> None:
     store = LiveStore()
-    store.replace_exchange(
-        "upbit",
+    store.put_rows(
         [make_row("upbit", "ETH"), make_row("upbit", "BTC"), make_row("upbit", "ADA")],
         NOW,
     )
-    store.replace_exchange(
-        "bithumb", [make_row("bithumb", "BTC"), make_row("bithumb", "ADA")], NOW
-    )
-    store.replace_exchange(
-        "binance",
+    store.put_rows([make_row("bithumb", "BTC"), make_row("bithumb", "ADA")], NOW)
+    store.put_rows(
         [
             make_row("binance", "ADA"),
             make_row("binance", "BTC"),
@@ -321,8 +309,7 @@ def test_row_keys_are_exactly_the_17_camel_case_keys() -> None:
 
 def test_zero_domestic_ask_price_fails_row_not_500():
     store = LiveStore()
-    store.replace_exchange(
-        "upbit",
+    store.put_rows(
         [
             make_row("upbit", "BTC", asks=[[0.0, 1.0]], bids=[[99_000_000.0, 1.0]]),
             make_row(
@@ -331,8 +318,7 @@ def test_zero_domestic_ask_price_fails_row_not_500():
         ],
         NOW,
     )
-    store.replace_exchange(
-        "binance",
+    store.put_rows(
         [
             make_row(
                 "binance",

@@ -60,8 +60,7 @@ def test_large_amount_exhausts_depth():
 def test_sell_side_exhaustion_rematches_buy():
     """매도측 소진 시 매수를 되맞춰 실효 수익률이 −50% 대로 떨어지지 않는다 (§4)."""
     store = LiveStore()
-    store.replace_exchange(
-        "upbit",
+    store.put_rows(
         [
             make_row(
                 "upbit",
@@ -73,8 +72,7 @@ def test_sell_side_exhaustion_rematches_buy():
         ],
         FIXED_DT,
     )
-    store.replace_exchange(
-        "binance",
+    store.put_rows(
         [
             make_row(
                 "binance", "TT", price=100.0, asks=[[100.0, 5.0]], bids=[[99.0, 5.0]]
@@ -95,8 +93,7 @@ def test_sell_side_exhaustion_rematches_buy():
 def test_rateless_domestic_combos_are_skipped():
     """환율 없는 국내 거래소 조합은 빠진다 — 남의 테더 프리미엄을 빌리지 않는다 (§3.2-2·§4)."""
     store = LiveStore()
-    store.replace_exchange(
-        "upbit",
+    store.put_rows(
         [
             make_row(
                 "upbit",
@@ -109,8 +106,7 @@ def test_rateless_domestic_combos_are_skipped():
         FIXED_DT,
     )
     # bithumb 이 더 비싸게 사 주지만 환율이 없다 → 조합에서 빠져야 한다
-    store.replace_exchange(
-        "bithumb",
+    store.put_rows(
         [
             make_row(
                 "bithumb",
@@ -122,8 +118,7 @@ def test_rateless_domestic_combos_are_skipped():
         ],
         FIXED_DT,
     )
-    store.replace_exchange(
-        "binance",
+    store.put_rows(
         [
             make_row(
                 "binance", "TT", price=100.0, asks=[[100.0, 5.0]], bids=[[99.0, 5.0]]
@@ -154,9 +149,7 @@ def test_empty_store_and_no_rates_are_404():
     assert res.json()["error"]["code"] == "market_data_not_found"
 
     store = LiveStore()
-    store.replace_exchange(
-        "upbit", [make_row("upbit", "BTC", price=100_000_000)], FIXED_DT
-    )
+    store.put_rows([make_row("upbit", "BTC", price=100_000_000)], FIXED_DT)
     store.mark_received(FIXED_SEC)
     res = make_client(store).get("/matrix")
     assert res.status_code == 404

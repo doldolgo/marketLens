@@ -1,15 +1,21 @@
-"""키 없이 기동한 수집 사이클 + /spreads·/refresh 통합 — 스펙 006 §4 (네트워크 없음).
+"""키 없이 기동한 틱 루프 + /spreads·/refresh 통합 — 스펙 006 §4 (네트워크 없음).
 
-시세는 fake 커넥터, 입출금은 실제 WalletStatusService + MockTransport(빗썸만 응답).
+시세는 저장소에 직접 시드, 입출금은 실제 WalletStatusService + MockTransport(빗썸만 응답).
 """
+
+from datetime import UTC, datetime
 
 import httpx
 
-from app.core.collector import Collector
+from app.core.collect import CollectService
+from app.core.contracts import NoForeignSymbols
 from app.core.live_store import LiveStore
+from app.core.quotes import QuoteSink
+from app.core.ticks import TickLoop
+from app.core.universe import UniverseRefresher
 from app.features.spreads.tests.helpers import FakeCollector, make_client
 from app.features.wallet_status.service import WalletStatusService
-from tests.conftest import FakeConnector, make_row
+from tests.conftest import make_row
 
 _BITHUMB_WALLET = {
     "status": "0000",
@@ -22,6 +28,7 @@ _BITHUMB_WALLET = {
         }
     ],
 }
+NOW = datetime.now(UTC)
 
 
 def wallet_client(responses: list[httpx.Response]) -> httpx.AsyncClient:
@@ -35,13 +42,24 @@ def wallet_client(responses: list[httpx.Response]) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
-def usdt_row(exchange: str):
-    return make_row(exchange, "USDT", asks=[[1400.0, 1000.0]], bids=[[1390.0, 900.0]])
+def seeded_store() -> LiveStore:
+    store = LiveStore()
+    store.put_rows(
+        [
+            make_row("upbit", "BTC"),
+            make_row("bithumb", "BTC"),
+            make_row("binance", "BTC"),
+        ],
+        NOW,
+    )
+    store.set_rate("upbit", 1400.0, 1390.0, NOW)
+    store.set_rate("bithumb", 1400.0, 1390.0, NOW)
+    return store
 
 
-def build_collector(
+def build(
     store: LiveStore, client: httpx.AsyncClient, *, interval: float = 60.0
-) -> Collector:
+) -> tuple[TickLoop, CollectService, WalletStatusService]:
     wallet = WalletStatusService(
         upbit_api_key=None,
         upbit_secret_key=None,
@@ -49,28 +67,25 @@ def build_collector(
         binance_secret_key=None,
         interval=interval,
     )
-    return Collector(
-        store=store,
-        domestic=[
-            FakeConnector("upbit", [[make_row("upbit", "BTC"), usdt_row("upbit")]]),
-            FakeConnector(
-                "bithumb", [[make_row("bithumb", "BTC"), usdt_row("bithumb")]]
-            ),
-        ],
-        foreign=FakeConnector("binance", [[make_row("binance", "BTC")]]),
-        client=client,
-        wallet=wallet,
+    ticks = TickLoop(store=store, streams=[], client=client, wallet=wallet)
+    universe = UniverseRefresher(
+        sink=QuoteSink(store), streams=[], foreign=NoForeignSymbols(), client=client
     )
+    collect = CollectService(
+        store=store, universe=universe, streams=[], client=client, wallet=wallet
+    )
+    return ticks, collect, wallet
 
 
 async def test_keyless_startup_spreads_and_refresh_contract() -> None:
-    store = LiveStore()
+    store = seeded_store()
     client = wallet_client([httpx.Response(200, json=_BITHUMB_WALLET)])
-    collector = build_collector(store, client)
-    result = await collector.run_cycle()
+    ticks, collect, wallet = build(store, client)
+    await wallet.refresh_if_due(client)
+    tick = ticks.tick(1_787_000_000)
 
-    # 실패 상태 거래소는 dw_failed 로 — persist 가 dw_fail 점을 쓴다 (§3.5)
-    assert collector.dw_failed == ["upbit", "binance"]
+    # 실패 상태 거래소는 틱의 dwFailed 로 — 009 가 dw_fail 점을 쓴다 (§3.5)
+    assert tick.dw_failed == ("upbit", "binance")
 
     # /spreads — 모든 행에 5키, 값은 true/false/null 뿐, netDom 은 문자열 또는 null (§4)
     rows = make_client(store).get("/spreads").json()["rows"]
@@ -88,6 +103,7 @@ async def test_keyless_startup_spreads_and_refresh_contract() -> None:
     assert all(r["depDom"] is None for r in rows if r["dom"] == "upbit")
 
     # /refresh — 빗썸 true, 업비트·바이낸스 false + 입출금 경고 2줄 (§4)
+    result = await collect.refresh_now()
     body = make_client(store, collector=FakeCollector(result)).post("/refresh").json()
     available = {s["exchange"]: s["walletStatusAvailable"] for s in body["snapshots"]}
     assert available == {"upbit": False, "bithumb": True, "binance": False}
@@ -95,26 +111,28 @@ async def test_keyless_startup_spreads_and_refresh_contract() -> None:
     assert len(dw_warnings) == 2
     assert dw_warnings[0].startswith("upbit ")
     assert dw_warnings[1].startswith("binance ")
-    # 빗썸 항목의 calls 에 입출금 호출 1회가 더해진다 (§3.5)
+    # 트리거는 입출금을 즉시 다시 조회한다 — 빗썸 항목의 calls 에 그 1회 (§3.5)
     calls = {s["exchange"]: s["calls"] for s in body["snapshots"]}
-    assert calls["bithumb"] == 2  # 시세 1 + 입출금 1
-    assert calls["upbit"] == 1  # 키 없음 → 호출 0회로 실패
+    assert calls["bithumb"] == 1
+    assert calls["upbit"] == 0  # 키 없음 → 호출 0회로 실패
 
 
-async def test_failure_cycle_overwrites_rows_to_unknown_in_spreads() -> None:
-    # 실패 사이클 후 /spreads 의 해당 거래소 행은 전부 null — 직전 성공값 미유지 (§4)
-    store = LiveStore()
+async def test_failure_refresh_overwrites_rows_to_unknown_in_spreads() -> None:
+    # 실패 회차 후 /spreads 의 해당 거래소 행은 전부 null — 직전 성공값 미유지 (§4)
+    store = seeded_store()
     client = wallet_client(
         [httpx.Response(200, json=_BITHUMB_WALLET), httpx.Response(500, text="oops")]
     )
-    collector = build_collector(store, client, interval=0.0)
+    ticks, _, wallet = build(store, client, interval=0.0)
 
-    await collector.run_cycle()
+    await wallet.refresh_if_due(client)
+    ticks.tick(1_787_000_000)
     rows = make_client(store).get("/spreads").json()["rows"]
     assert any(r["depDom"] is True for r in rows if r["dom"] == "bithumb")
 
-    await collector.run_cycle()  # 이번엔 빗썸 500
-    assert "bithumb" in collector.dw_failed
+    await wallet.refresh_if_due(client)  # 이번엔 빗썸 500
+    tick = ticks.tick(1_787_000_001)
+    assert "bithumb" in tick.dw_failed
     rows = make_client(store).get("/spreads").json()["rows"]
     for row in (r for r in rows if r["dom"] == "bithumb"):
         assert row["depDom"] is None

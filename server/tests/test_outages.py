@@ -3,16 +3,17 @@
 import asyncio
 import time
 
-from app.core.collector import Collector
-from app.core.errors import ExchangeApiError, ExchangeTimeoutError
+import httpx
+
 from app.core.influx import CollectFailRow, InfluxPoint, InfluxUnavailableError
 from app.core.live_store import LiveStore
 from app.core.outages import RETENTION_MS, OutageTracker
-from tests.conftest import FakeConnector, make_row
+from app.core.ticks import TickLoop
+from tests.conftest import FakeStream
 
 T0 = 1_700_000_000_000  # epoch ms
 SEC = 1_000
-URL = "https://api.upbit.com/v1/orderbook"
+URL = "wss://api.upbit.com/websocket/v1"
 
 
 class FakeInflux:
@@ -232,37 +233,27 @@ async def test_restore_without_influx_or_on_error_or_timeout_starts_empty(
     assert t.outages() == []
 
 
-# ── 수집 사이클 → 추적기 연결 (011 §2 바꾸는 것 2) ─────────────────────────────
+# ── 틱 판정 → 추적기 연결 (011 §2 바꾸는 것 2, 001 §3.8) ─────────────────────────
 
 
-async def test_cycle_feeds_tracker_with_connector_kind_and_body(unused_client) -> None:
-    store = LiveStore()
-    upbit = FakeConnector("upbit", [[make_row("upbit", "BTC")]])
-    bithumb = FakeConnector(
-        "bithumb",
-        [
-            ExchangeApiError(
-                "bithumb",
-                URL,
-                "비-200",
-                status_code=429,
-                body='{"error":429}',
-                kind="rate_limit",
-                retry_after_sec=2,
-            )
-        ],
+def test_tick_feeds_tracker_with_stream_kind_and_message() -> None:
+    upbit = FakeStream("upbit")
+    upbit.succeed()
+    bithumb = FakeStream("bithumb")
+    bithumb.fail(
+        "rate_limit", '{"error":429}', status_code=429, url=URL, retry_after_sec=2
     )
-    binance = FakeConnector("binance", [ExchangeTimeoutError("binance", URL, "느림")])
+    binance = FakeStream("binance")
+    binance.fail("timeout", "느림", url=URL)
     t = OutageTracker()
-    collector = Collector(
-        store=store,
-        domestic=[upbit, bithumb],
-        foreign=binance,
-        client=unused_client,
+    loop = TickLoop(
+        store=LiveStore(),
+        streams=[upbit, bithumb, binance],
+        client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: None)),
         outages=t,
     )
-    result = await collector.run_cycle()
-    assert t.last_success_at("upbit") == result.fetched_at
+    loop.tick(T0 // 1000)
+    assert t.last_success_at("upbit") == T0
     b = t.open_outage("bithumb")
     assert b is not None and (b.kind, b.status_code, b.message, b.retry_after_sec) == (
         "rate_limit",
@@ -271,15 +262,12 @@ async def test_cycle_feeds_tracker_with_connector_kind_and_body(unused_client) -
         2,
     )
     n = t.open_outage("binance")
-    assert n is not None and (n.kind, n.message, n.status_code) == (
+    assert n is not None and (n.kind, n.message, n.status_code, n.url) == (
         "timeout",
         "느림",
         None,
+        URL,
     )
-    # /refresh 가 쓰는 failures 모양은 불변
-    assert [sorted(f) for f in result.failures] == [
-        ["error_code", "exchange", "message"]
-    ] * 2
 
 
 async def test_writer_loop_drains_queue_in_order() -> None:

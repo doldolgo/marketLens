@@ -83,7 +83,7 @@ def test_missing_pieces_are_404():
     """국내 스냅샷 없음·환율 없음·binance 스냅샷 없음 → 404 (§4)."""
     # 국내 스냅샷 없음
     store = LiveStore()
-    store.replace_exchange("binance", [seeded_row("binance", "BTC", 71_000)], FIXED_DT)
+    store.put_rows([seeded_row("binance", "BTC", 71_000)], FIXED_DT)
     store.set_rate("upbit", SEED_RATE, SEED_RATE, FIXED_DT)
     store.mark_received(FIXED_SEC)
     res = make_client(store).get("/premium", params={"sym": "BTC"})
@@ -92,8 +92,8 @@ def test_missing_pieces_are_404():
 
     # 환율 없음
     store = LiveStore()
-    store.replace_exchange("upbit", [seeded_row("upbit", "BTC", 100_000_000)], FIXED_DT)
-    store.replace_exchange("binance", [seeded_row("binance", "BTC", 71_000)], FIXED_DT)
+    store.put_rows([seeded_row("upbit", "BTC", 100_000_000)], FIXED_DT)
+    store.put_rows([seeded_row("binance", "BTC", 71_000)], FIXED_DT)
     store.mark_received(FIXED_SEC)
     res = make_client(store).get("/premium", params={"sym": "BTC"})
     assert res.status_code == 404
@@ -101,7 +101,7 @@ def test_missing_pieces_are_404():
 
     # binance 스냅샷 없음
     store = LiveStore()
-    store.replace_exchange("upbit", [seeded_row("upbit", "BTC", 100_000_000)], FIXED_DT)
+    store.put_rows([seeded_row("upbit", "BTC", 100_000_000)], FIXED_DT)
     store.set_rate("upbit", SEED_RATE, SEED_RATE, FIXED_DT)
     store.mark_received(FIXED_SEC)
     res = make_client(store).get("/premium", params={"sym": "BTC"})
@@ -113,8 +113,8 @@ def test_best_direction_is_less_bad_when_both_lose():
     """둘 다 손해면 덜 나쁜 쪽 (§3.2-3·§4)."""
     store = LiveStore()
     # 국내가 해외×환율보다 아주 살짝만 비싸 양방향 모두 손해가 나는 시드
-    store.replace_exchange("upbit", [seeded_row("upbit", "NEG", 1_400_140)], FIXED_DT)
-    store.replace_exchange("binance", [seeded_row("binance", "NEG", 1_000)], FIXED_DT)
+    store.put_rows([seeded_row("upbit", "NEG", 1_400_140)], FIXED_DT)
+    store.put_rows([seeded_row("binance", "NEG", 1_000)], FIXED_DT)
     store.set_rate("upbit", SEED_RATE, SEED_RATE, FIXED_DT)
     store.mark_received(FIXED_SEC)
     body = make_client(store).get("/premium", params={"sym": "NEG"}).json()

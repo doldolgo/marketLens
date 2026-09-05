@@ -7,8 +7,7 @@ from app.features.spreads.tests.helpers import make_client, make_row
 
 
 def seed_pair(store: LiveStore, now: datetime) -> None:
-    store.replace_exchange(
-        "upbit",
+    store.put_rows(
         [
             make_row(
                 "upbit", "BTC", bids=[[100_000_000.0, 1.0]], asks=[[100_100_000.0, 1.0]]
@@ -16,8 +15,7 @@ def seed_pair(store: LiveStore, now: datetime) -> None:
         ],
         now,
     )
-    store.replace_exchange(
-        "binance",
+    store.put_rows(
         [
             make_row(
                 "binance",

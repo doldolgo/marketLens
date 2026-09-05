@@ -20,19 +20,13 @@ _EPSILON = 1e-9
 
 
 def walk_levels(row: Row, side: str) -> list[list[float]]:
-    """걷을 호가 — `depth_*` 가 비어 있지 않으면 그것을, 비면 `asks`/`bids` (004 §3.1).
+    """걷을 호가 — 행의 `asks`/`bids` 그 자체다 (001 §3.3, 004 §3.1).
 
-    국내 행은 `depth_*` 가 항상 비어 있어 자기 `asks`/`bids` 를 쓰고, 해외는 012 스트림이
-    살아 있으면 최대 20단계다. 003·004 의 **모든 걷기가 이 함수를 거친다** — 같은 규칙이
-    두 벌 있으면 한쪽만 고쳐져 표와 분석이 다른 호가를 걷는다.
-
-    최우선 1단계만 읽는 표면값(`/premium`·`/premium/scan`·`/matrix` 의 표면 김프와
-    그쪽의 호가 유무 판정)은 이 함수를 쓰지 않고 REST 호가를 직접 읽는다 — 조용한 종목의
-    헤드라인이 스트림 정체로 낡지 않게 하려는 012 의 의도다.
+    세 거래소 모두 WebSocket 호가라 업비트 최대 30·빗썸 최대 15·바이낸스 최대 20단계가
+    들어 있고 별도의 깊이 필드는 없다. 003·004 의 **모든 걷기가 이 함수를 거친다** — 표면값
+    (최우선 1단계)과 걷기가 같은 목록을 보므로 한 응답 안에서 출처가 갈리지 않는다.
     """
-    if side == "asks":
-        return row.depth_asks or row.asks
-    return row.depth_bids or row.bids
+    return row.asks if side == "asks" else row.bids
 
 
 @dataclass

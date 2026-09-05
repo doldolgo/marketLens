@@ -21,13 +21,11 @@ def seed(
     fx_wd: bool | None = None,
     base: str = "GRT",
 ) -> None:
-    store.replace_exchange(
-        "upbit",
+    store.put_rows(
         [make_row("upbit", base, dep=dom_dep, wd=dom_wd, networks=dom_networks)],
         NOW,
     )
-    store.replace_exchange(
-        "binance",
+    store.put_rows(
         [make_row("binance", base, dep=fx_dep, wd=fx_wd, networks=fx_networks)],
         NOW,
     )
@@ -131,8 +129,7 @@ def test_case5_unknown_with_empty_foreign_networks_uses_fx_coin_values() -> None
 def test_fail_row_still_applies_network_verdict() -> None:
     # status=fail 행도 같은 규칙 (§3.7)
     store = LiveStore()
-    store.replace_exchange(
-        "upbit",
+    store.put_rows(
         [
             make_row(
                 "upbit",
@@ -142,8 +139,7 @@ def test_fail_row_still_applies_network_verdict() -> None:
         ],
         NOW,
     )
-    store.replace_exchange(
-        "binance",
+    store.put_rows(
         [
             make_row(
                 "binance",

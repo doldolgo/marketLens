@@ -14,12 +14,8 @@ NOW = datetime.now(UTC)
 
 def seed_two_coins() -> LiveStore:
     store = LiveStore()
-    store.replace_exchange(
-        "upbit", [make_row("upbit", "BTC"), make_row("upbit", "XRP")], NOW
-    )
-    store.replace_exchange(
-        "binance", [make_row("binance", "BTC"), make_row("binance", "XRP")], NOW
-    )
+    store.put_rows([make_row("upbit", "BTC"), make_row("upbit", "XRP")], NOW)
+    store.put_rows([make_row("binance", "BTC"), make_row("binance", "XRP")], NOW)
     store.set_rate("upbit", 1400.0, 1390.0, NOW)
     return store
 

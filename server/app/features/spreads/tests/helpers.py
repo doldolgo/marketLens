@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.core.collector import CycleResult
+from app.core.collect import RefreshSummary
 from app.core.live_store import LiveStore
 from app.core.models import Row
 from app.core.networks import Network
@@ -43,13 +43,13 @@ def make_row(
 
 
 class FakeCollector:
-    """미리 정한 CycleResult 를 돌려주는 가짜 — /refresh 가 거래소를 부르지 않게."""
+    """미리 정한 RefreshSummary 를 돌려주는 가짜 — /refresh 가 거래소를 부르지 않게."""
 
-    def __init__(self, result: CycleResult) -> None:
+    def __init__(self, result: RefreshSummary) -> None:
         self._result = result
         self.cycles = 0
 
-    async def run_cycle(self) -> CycleResult:
+    async def refresh_now(self) -> RefreshSummary:
         self.cycles += 1
         return self._result
 
@@ -62,8 +62,8 @@ def make_cycle_result(
     warnings: list[str] | None = None,
     calls: dict[str, int] | None = None,
     wallet_status_available: dict[str, bool] | None = None,
-) -> CycleResult:
-    return CycleResult(
+) -> RefreshSummary:
+    return RefreshSummary(
         saved=saved if saved is not None else {"upbit": 0, "bithumb": 0, "binance": 0},
         rates_observed=rates_observed or [],
         failures=failures or [],

@@ -76,8 +76,8 @@ def test_response_shape_fixed_exchange_order_and_open_outage_in_both(
 ) -> None:
     store = LiveStore()
     now = datetime.now(UTC)
-    store.replace_exchange("upbit", [row("upbit", "BTC"), row("upbit", "ETH")], now)
-    store.replace_exchange("binance", [row("binance", "BTC")], now)
+    store.put_rows([row("upbit", "BTC"), row("upbit", "ETH")], now)
+    store.put_rows([row("binance", "BTC")], now)
     t = OutageTracker()
     now_ms = T0 + 100 * SEC
     for ex in ("upbit", "bithumb"):
