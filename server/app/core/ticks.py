@@ -46,15 +46,15 @@ def judge_state(state: StreamState, now_ms: int, url: str) -> StreamVerdict | No
     """§3.8 — 성공 = 연결 + 마지막 시세 30초 이내. 미연결이면 last_error, 무수신이면 stale_stream.
 
     첫 연결 시도의 결과가 아직 없으면(미연결·오류 없음·수신 없음) None — 판정 대상이 아니다.
-    연결 뒤 아직 시세가 없으면 구독 시각부터 센다.
+    무수신은 이번 연결의 구독 시각과 마지막 시세 수신 시각 중 최신부터 센다 — 오래 끊겼다가
+    재연결한 직후 첫 프레임 전에 직전 연결의 수신 시각으로 정체가 되지 않게.
     """
     if not state.connected:
         if state.last_error is None:
             return None if state.last_message_at is None else _closed(url)
         return StreamVerdict(ok=False, error=state.last_error)
-    since = state.last_message_at
-    if since is None:
-        since = state.connected_since
+    marks = [m for m in (state.last_message_at, state.connected_since) if m is not None]
+    since = max(marks) if marks else None
     if since is not None and now_ms - since >= STALE_AFTER_MS:
         return StreamVerdict(
             ok=False,

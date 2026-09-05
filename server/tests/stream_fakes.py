@@ -21,9 +21,11 @@ class FakeSocket:
         self.sent: list[str] = []
         self.closed = False
         self.drained = asyncio.Event()  # 프레임을 다 준 시점 — 테스트가 기다린다
+        self.subscribed = asyncio.Event()  # 첫 send(구독 메시지)가 온 시점
 
     async def send(self, data: str) -> None:
         self.sent.append(data)
+        self.subscribed.set()
 
     async def recv(self) -> str | bytes:
         if not self._frames:

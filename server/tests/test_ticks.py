@@ -262,6 +262,24 @@ def test_judge_state_rules() -> None:
         _state(connected=True, connected_since=now - STALE_AFTER_MS), now, URL
     )
     assert quiet is not None and not quiet.ok
+    # 오래 끊겼다가 재연결한 직후(직전 수신 60초 전·구독 1초 전) 첫 프레임 전은 성공
+    reconnected = judge_state(
+        _state(
+            connected=True, last_message_at=now - 60_000, connected_since=now - 1_000
+        ),
+        now,
+        URL,
+    )
+    assert reconnected is not None and reconnected.ok
+    # 구독이 오래됐어도 최근에 시세를 받았으면 성공 — 둘 중 최신이 기준
+    active = judge_state(
+        _state(
+            connected=True, last_message_at=now - 1_000, connected_since=now - 60_000
+        ),
+        now,
+        URL,
+    )
+    assert active is not None and active.ok
     # 시세를 받았다가 오류 기록 없이 닫히면 network
     closed = judge_state(_state(last_message_at=now - 5000), now, URL)
     assert closed is not None and closed.error is not None

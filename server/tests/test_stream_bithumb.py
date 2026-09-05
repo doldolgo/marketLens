@@ -205,6 +205,24 @@ async def test_judge_stale_after_thirty_seconds() -> None:
     await stream.aclose()
 
 
+async def test_reconnect_after_long_outage_is_ok_before_first_frame() -> None:
+    first = FakeSocket([orderbook()])  # 시세 1건 뒤 서버가 끊는다
+    second = FakeSocket([], hold=True)  # 재연결 — 아직 프레임이 없다
+    stream, _, _, _, clock, store = build([first, second])
+    stream.start()
+    await until(first.drained)
+    clock.now = T0 + 60_000  # 60초 끊겨 있었다
+    await until(second.subscribed)
+    state = store.stream_state("bithumb")
+    assert state is not None and state.connected and state.last_message_at is not None
+    assert (
+        state.last_message_at < clock.now - 30_000
+    )  # 직전 연결의 수신 시각은 오래됐다
+    verdict = stream.judge(clock.now + 1000)  # 구독 시각부터 세므로 정체가 아니다
+    assert verdict is not None and verdict.ok
+    await stream.aclose()
+
+
 def _client(handler) -> httpx.AsyncClient:  # type: ignore[no-untyped-def]
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 

@@ -22,6 +22,7 @@ from tests.stream_fakes import (
 )
 
 T0 = 1_787_727_947_000
+STALE_LIMIT = 30_000  # §3.8 무수신 상한(ms)
 
 
 def orderbook(code: str = "KRW-BTC", levels: int = 2, ts: int = T0 - 100) -> str:
@@ -267,6 +268,27 @@ async def test_stale_stream_recovers_when_a_quote_frame_returns() -> None:
     sock.push(orderbook(ts=clock.now - 50))  # 시세 프레임이 다시 오면 성공으로 돌아온다
     await until(sock.delivered)
     assert stream.judge(clock.now + 1000).ok  # type: ignore[union-attr]
+    await stream.aclose()
+
+
+async def test_reconnect_after_long_outage_is_ok_before_first_frame() -> None:
+    first = FakeSocket([orderbook()])  # 시세 1건 뒤 서버가 끊는다
+    second = FakeSocket([], hold=True)  # 재연결 — 아직 프레임이 없다
+    stream, _, _, _, clock, store = build([first, second])
+    stream.start()
+    await until(first.drained)
+    clock.now = T0 + 60_000  # 60초 끊겨 있었다
+    await until(second.subscribed)
+    state = store.stream_state("upbit")
+    assert state is not None and state.connected and state.last_message_at is not None
+    assert (
+        state.last_message_at < clock.now - STALE_LIMIT
+    )  # 직전 연결의 수신 시각은 오래됐다
+    verdict = stream.judge(clock.now + 1000)  # 구독 시각부터 세므로 정체가 아니다
+    assert verdict is not None and verdict.ok
+    stale = stream.judge(clock.now + STALE_LIMIT)  # 재구독 뒤에도 30초 무수신이면 정체
+    assert stale is not None and stale.error is not None
+    assert stale.error.kind == "stale_stream"
     await stream.aclose()
 
 
