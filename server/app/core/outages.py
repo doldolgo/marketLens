@@ -112,10 +112,12 @@ class OutageTracker:
         )
         for o in restored:
             if o.ended_at is None:
-                # 같은 거래소에 진행 중이 둘 이상이면(닫힘 쓰기 유실) 최신만 진행 중으로 둔다
+                # 같은 거래소에 진행 중이 둘 이상이면(닫힘 쓰기 유실) 최신만 진행 중으로 두고
+                # 옛것은 닫아 닫힘 점을 쓴다 — 안 쓰면 재기동마다 다시 진행 중으로 복원된다 (§3.4)
                 prev = self._open.get(o.exchange)
                 if prev is not None:
                     prev.ended_at = prev.last_failed_at
+                    self._enqueue(prev)
                 self._open[o.exchange] = o
             self._outages.append(o)
         self._prune(now_ms)
@@ -138,8 +140,10 @@ class OutageTracker:
         body: str | None = None,
     ) -> None:
         self._streak.pop(exchange, None)
-        # 거래소가 뭐라고 했는지가 우선 — 핸드셰이크 거부 응답 본문이 있으면 그것이 message 다 (§3.3)
-        message = (body if body else message)[:MESSAGE_LIMIT]
+        # 거래소가 뭐라고 했는지가 우선 — 핸드셰이크 거부 응답 본문이 있으면 그것이 message 다 (§3.3).
+        # 줄바꿈은 공백 하나로 — Influx line protocol 이 필드 값의 개행을 거부하고(HTML 차단 페이지가
+        # 전형), 로그 행도 한 줄이다.
+        message = " ".join((body if body else message).splitlines())[:MESSAGE_LIMIT]
         cur = self._open.get(exchange)
         if cur is not None and cur.kind != kind:
             # 원인이 바뀌면 이력에 남긴다 — 현재 구간을 이 시각에 닫고 새로 연다

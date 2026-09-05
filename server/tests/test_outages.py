@@ -6,7 +6,13 @@ import time
 import httpx
 
 from app.core.errors import ExchangeApiError
-from app.core.influx import CollectFailRow, InfluxPoint, InfluxUnavailableError
+from app.core.influx import (
+    CollectFailRow,
+    InfluxPoint,
+    InfluxUnavailableError,
+    collect_fail_point,
+    to_line,
+)
 from app.core.live_store import LiveStore
 from app.core.outages import RETENTION_MS, OutageTracker
 from app.core.ticks import TickLoop
@@ -213,6 +219,30 @@ async def test_restore_fills_memory_and_open_points_continue() -> None:
     assert t2.open_outage("binance") is None and t2.outages()[0].ended_at == T0
 
 
+async def test_restore_closes_older_duplicate_open_point_and_writes_it() -> None:
+    influx = FakeInflux()
+    s0 = T0 // 1000
+    old = _row("upbit", s0 - 600, ended=None, kind="network", count=7)
+    influx.rows = [old, _row("upbit", s0 - 60, ended=None, kind="timeout")]
+    t = OutageTracker(writer=influx)
+    await t.restore(influx, T0)
+    open_ = t.open_outage("upbit")
+    assert open_ is not None and open_.started_at == (s0 - 60) * 1000
+    older = next(o for o in t.outages() if o.started_at == (s0 - 600) * 1000)
+    assert older.ended_at == old.last_failed_ts * 1000
+    await t.flush()
+    assert (
+        influx.write_calls == 1
+    )  # 옛 점의 닫힘 쓰기 1회 — 다음 재기동에 다시 진행 중이 되지 않는다
+    key = (
+        "collect_fail",
+        frozenset({("exchange", "upbit"), ("kind", "network")}),
+        s0 - 600,
+    )
+    assert influx.data[key]["ended_ts"] == old.last_failed_ts
+    assert influx.data[key]["count"] == 7
+
+
 async def test_restore_without_influx_or_on_error_or_timeout_starts_empty(
     monkeypatch,
 ) -> None:
@@ -300,6 +330,35 @@ def test_outage_message_prefers_handshake_body_over_connector_message() -> None:
         body=None,
     )
     assert o.message == "업비트 WebSocket 실패: InvalidStatus: HTTP 429"
+
+
+async def test_multiline_rejection_body_is_one_line_and_writes_open_and_close() -> None:
+    influx = FakeInflux()
+    t = OutageTracker(writer=influx)
+    html = "<html>\r\n<head><title>403 Forbidden</title></head>\n<body>\nblocked\n</body></html>"
+    t.record_failure(
+        "binance",
+        T0,
+        kind="banned",
+        message="바이낸스 WebSocket 실패: InvalidStatus: HTTP 403",
+        status_code=403,
+        url=BINANCE_URL,
+        retry_after_sec=None,
+        body=html,
+    )
+    o = t.open_outage("binance")
+    assert o is not None
+    assert o.message == (
+        "<html> <head><title>403 Forbidden</title></head> <body> blocked </body></html>"
+    )
+    for i in range(1, 4):
+        t.record_success("binance", T0 + i * SEC)
+    await t.flush()
+    assert influx.write_calls == 2  # 열림·닫힘 둘 다 성공
+    assert influx.only()["ended_ts"] == T0 // 1000 + 1
+    # line protocol 한 줄 — 개행이 있으면 Influx 가 배치를 400 으로 거부한다
+    lines = [to_line(collect_fail_point(x.to_row())) for x in t.outages()]
+    assert all("\n" not in line and "\r" not in line for line in lines)
 
 
 def test_tick_passes_handshake_body_into_outage_message() -> None:
