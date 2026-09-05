@@ -18,7 +18,7 @@
 
 ### 3.1 읽는 계약 (복사)
 - 001·012: 거래소 수신 경로는 **WebSocket 상시 연결**(업비트·빗썸 `wss://…/websocket/v1`, 바이낸스 `wss://data-stream.binance.vision/stream`)과 **REST 호출**(마켓 목록 `/v1/market/all`, 바이낸스 `/api/v3/exchangeInfo`, 006 의 입출금 상태 3종)이다. 수신 경로는 페이로드를 **해석하기 전에** 원문 싱크의 기록 함수를 부른다. 프레임이 바이너리면 UTF-8 로 디코드한 문자열, 압축(permessage-deflate)이면 라이브러리가 푼 뒤의 문자열이 원문이다.
-- 001: 원문 싱크의 계약은 core 공개 함수 하나 — `record(exchange: str, source: str, received_at_ms: int, payload: str) -> None`. **동기이며 예외를 던지지 않는다**(수신 경로를 한 줄도 막지 않기 위해). `source` 는 `"ws:<경로>"` 또는 `"rest:<경로>"`(예 `ws:/websocket/v1`, `rest:/v1/market/all`, `rest:/sapi/v1/capital/config/getall`). `received_at_ms` 는 서버가 받은 시각(epoch ms).
+- 001: 원문 싱크의 계약은 core 공개 함수 하나 — `record(exchange: str, source: str, received_at_ms: int, payload: str) -> None`. **동기이며 예외를 던지지 않는다**(수신 경로를 한 줄도 막지 않기 위해). `source` 는 `"ws:<경로>"`(스트림 프레임) · `"ws-handshake:<경로>"`(핸드셰이크를 거부한 HTTP 응답 본문 전문) · `"rest:<경로>"`(예 `ws:/websocket/v1`, `ws-handshake:/stream`, `rest:/v1/market/all`, `rest:/sapi/v1/capital/config/getall`). `received_at_ms` 는 서버가 받은 시각(epoch ms).
 - 006: 입출금 상태 REST 응답 본문(성공·실패 모두)도 조회기 3종이 같은 함수로 기록한다(`main.py` 가 주입). 키·서명·토큰은 **요청** 쪽에만 있고 응답 본문에는 없다.
 - 007 §3(배포 워크플로 `.github/workflows/deploy.yml`): `server/.env` 의 `S3_BUCKET` 이 비어 있으면 배포를 중단한다. 앱의 켜는 조건은 `S3_BUCKET` 존재(§3.2). 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 는 IAM 역할 — `docs/runbooks/ec2-setup.md`).
 

@@ -447,3 +447,18 @@ async def test_fetch_markets_connect_error_is_network() -> None:
         REST_URL + MARKETS_PATH,
     )
     assert raw.entries == []  # 응답 본문이 없으니 원문도 없다
+
+
+async def test_handshake_rejection_body_is_recorded_verbatim() -> None:
+    """거부 응답 본문은 이력의 500자 절단과 별개로 전문이 원문 싱크에 남는다 (001 §3.7)."""
+    body = b'{"error":{"name":429,"message":"' + b"x" * 600 + b'"}}'
+    stream, connector, _, raw, _, _ = build([HandshakeRejected(429, body=body)])
+    await run_until_exhausted(stream, connector)
+    assert raw.payloads("ws-handshake:/websocket/v1") == [body.decode()]
+    assert [e[0] for e in raw.entries if e[1].startswith("ws-handshake")] == ["upbit"]
+
+
+async def test_handshake_rejection_without_body_records_nothing() -> None:
+    stream, connector, _, raw, _, _ = build([HandshakeRejected(418), OSError("dns")])
+    await run_until_exhausted(stream, connector)
+    assert raw.payloads("ws-handshake:/websocket/v1") == []

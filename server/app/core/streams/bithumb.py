@@ -32,6 +32,7 @@ logger = logging.getLogger("marketlens.stream.bithumb")
 
 WS_URL = "wss://ws-api.bithumb.com/websocket/v1"
 WS_SOURCE = "ws:/websocket/v1"
+HANDSHAKE_SOURCE = "ws-handshake:/websocket/v1"  # 핸드셰이크 거부 응답 본문의 원문 싱크 source (010 §3.1)
 REST_URL = "https://api.bithumb.com"
 MARKETS_PATH = "/v1/market/all"
 _BODY_LIMIT = 500  # 핸드셰이크 거부 응답 본문 상한 — 001 §3.1 과 같은 500자
@@ -194,6 +195,12 @@ class BithumbStream:
                 self._close_socket(), max(0.0, deadline - time.monotonic())
             )
 
+    def _record_rejection(self, exc: BaseException) -> None:
+        """빗썸가 핸드셰이크를 거부하며 준 HTTP 본문도 원문이다 — 해석 전에 싱크로 (001 §3.7)."""
+        text = _response_text(getattr(exc, "response", None))
+        if text:
+            self._record(self.id, HANDSHAKE_SOURCE, self._clock(), text)
+
     async def run(self) -> None:
         while True:
             if not self._markets:
@@ -205,6 +212,7 @@ class BithumbStream:
                 raise
             except Exception as exc:
                 self._state.last_error = _classify(exc)
+                self._record_rejection(exc)
                 logger.warning(
                     "빗썸 스트림 연결 실패 — %.0f초 뒤 재시도: %s",
                     self._backoff,
@@ -230,6 +238,7 @@ class BithumbStream:
                 )
             except Exception as exc:
                 self._state.last_error = _classify(exc)
+                self._record_rejection(exc)
             finally:
                 self._state.connected = False
                 self._state.connected_since = None
@@ -369,15 +378,20 @@ def _classify(exc: BaseException) -> StreamError:
 
 def _response_body(response: object) -> str | None:
     """핸드셰이크 거부 응답 본문 앞 500자 — 거래소가 뭐라고 했는지 이력에 남긴다 (011 §3.3)."""
+    text = _response_text(response)
+    return text[:_BODY_LIMIT] if text is not None else None
+
+
+def _response_text(response: object) -> str | None:
+    """핸드셰이크 거부 응답 본문 전문 — 거래소가 준 것이라 원문 싱크에 그대로 넘긴다 (001 §3.7)."""
     raw = getattr(response, "body", None)
     if not raw:
         return None
-    text = (
+    return (
         raw.decode("utf-8", "replace")
         if isinstance(raw, bytes | bytearray)
         else str(raw)
     )
-    return text[:_BODY_LIMIT]
 
 
 def _classify_rest_status(status: int) -> str:

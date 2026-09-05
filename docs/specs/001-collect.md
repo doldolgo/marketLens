@@ -73,7 +73,7 @@ USDT 시세 = 국내 거래소 id 당 `{exchange, ask, bid, updated_at}`. 바이
 앱 시작 순서: 011 이력 복원 → 009 spark 복원 → 마켓 우주 → 스트림 기동 → 틱 루프. 어느 것이 실패해도 앱은 뜬다.
 
 ### 3.7 원문 싱크 계약 (010 이 구현)
-core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payload: str) -> None` — **동기, 예외 없음, 즉시 반환**. 커넥터는 **받은 모든 프레임**(시세·`{"status":"UP"}`·구독 응답·에러 응답 포함)과 **모든 REST 응답 본문**을 해석하기 **전에** 이 함수에 넘긴다. 바이너리 프레임은 UTF-8 디코드한 문자열, 압축 프레임은 라이브러리가 푼 문자열이 원문이다. `source` = `"ws:<경로>"` 또는 `"rest:<경로>"`(예 `ws:/websocket/v1`, `rest:/v1/market/all`). 010 이 없으면(`S3_BUCKET` 미설정) 아무것도 하지 않는 구현이 꽂힌다.
+core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payload: str) -> None` — **동기, 예외 없음, 즉시 반환**. 커넥터는 **받은 모든 프레임**(시세·`{"status":"UP"}`·구독 응답·에러 응답 포함)과 **모든 REST 응답 본문**을 해석하기 **전에** 이 함수에 넘긴다. 바이너리 프레임은 UTF-8 디코드한 문자열, 압축 프레임은 라이브러리가 푼 문자열이 원문이다. `source` = `"ws:<경로>"`(스트림 프레임) · `"ws-handshake:<경로>"`(핸드셰이크를 거부한 HTTP 응답 본문 — 거래소가 준 것이라 이것도 원문이다) · `"rest:<경로>"`(예 `ws:/websocket/v1`, `ws-handshake:/websocket/v1`, `rest:/v1/market/all`). 010 이 없으면(`S3_BUCKET` 미설정) 아무것도 하지 않는 구현이 꽂힌다.
 
 ### 3.8 판정 (매 틱, 011 이 기록)
 거래소마다: **성공** = 스트림이 연결돼 있고 30초 안에 시세를 받았다. 무수신 30초는 **이번 연결의 구독 시각과 마지막 시세 수신 시각 중 최신**부터 센다 — 연결 뒤 아직 시세가 없으면 구독 시각이 기준이고, 오래 끊겼다가 재연결한 직후 첫 프레임 전에도 구독 시각이 기준이라 직전 연결의 수신 시각 때문에 정체로 판정되지 않는다(스냅샷 한 바퀴가 오기까지 1~2초를 실패 구간으로 남기지 않는다). **실패**는 다음 순서로 종류를 정한다 — 미연결이면 `last_error.kind`(핸드셰이크·연결 실패의 분류: DNS·거부·TLS·연결 끊김 `network`, 핸드셰이크 타임아웃 `timeout`, 핸드셰이크가 HTTP 상태로 거부되면 011 §3.2 의 **그 거래소 REST 규칙** — 업비트·빗썸은 429 `rate_limit`·418 `banned`·5xx `unavailable`·그 외 4xx `bad_request`(403 도 `bad_request` — `banned` 로 보는 403 은 바이낸스 WAF 규칙뿐), 그 밖의 상태 `bad_response`; 구독 에러 응답 `bad_request`; 응답 없는 그 외 예외 `bad_response`); 연결됐는데 30초 무수신이면 `stale_stream`. 첫 연결 시도의 결과가 아직 없으면(미연결·오류 없음·수신 없음) 그 틱은 판정하지 않는다 — 기동 직후 1~2초가 실패 구간으로 남지 않게. 시세를 받았던 스트림이 오류 기록 없이 닫혀 있으면 `network`. 실패에는 `message`·`status_code`(없으면 null)·`url`(WebSocket URL)·`body`(핸드셰이크 거부 응답 본문 앞 500자, 없으면 null)·`retry_after_sec` 가 실린다. 디코드 실패 프레임은 버리고 셀 뿐 그 자체로 실패가 아니다(무효 프레임만 30초 이어지면 `stale_stream`). 바이낸스는 012 §3.5(샤드 단위).
@@ -127,7 +127,7 @@ core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payl
 - 마켓 목록 갱신이 거래소 예외가 아닌 예외로 끝나도 갱신 루프는 다음 회차(5초 재시도·10분)를 계속 돈다.
 - 재연결 백오프가 1·2·4…30 으로 자라고 **구독 뒤 첫 시세 프레임**을 받은 뒤에만 1로 돌아온다 — 연결 실패 2회 뒤 구독이 거부되면 세 번째 대기는 1 이 아니라 4 다(두 커넥터 모두). 구독 에러 응답은 `bad_request`.
 - 종료: 소켓 `close()` 가 돌아오지 않아도 `aclose` 는 2초 상한 안에 끝난다.
-- 모든 프레임(시세·UP·에러)과 마켓 목록 응답 본문이 원문 싱크(fake)에 `exchange`·`source`·수신 시각과 함께 원문 그대로 기록된다 — 해석보다 먼저.
+- 모든 프레임(시세·UP·에러)과 마켓 목록 응답 본문이 원문 싱크(fake)에 `exchange`·`source`·수신 시각과 함께 원문 그대로 기록된다 — 해석보다 먼저. 핸드셰이크가 HTTP 본문과 함께 거부되면 그 본문 전문이 `ws-handshake:<경로>` 로 기록된다(본문 없는 거부는 기록 없음).
 - 트리거(§3.9): 우주 갱신 REST 가 호출되고 `calls` 에 반영, `saved` 가 현재 행 수, 실패 중인 스트림이 `failures` 에 담긴다. 동시 호출은 직렬화된다.
 - 거래소 타임아웃은 504 `exchange_timeout`, 비-200 은 502 `exchange_api_error`(HTTP `detail` 에 `statusCode`·`body`).
 - 테스트 전부 통과, ruff lint·format 위반 0.

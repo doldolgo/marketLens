@@ -873,3 +873,20 @@ async def test_aclose_closes_sockets_concurrently_within_budget(
     assert asyncio.get_running_loop().time() - started < 1.0
     assert [s.close_calls for s in socks] == [1, 1, 1]  # 셋을 동시에 닫는다
     assert store.stream_state("binance").connected is False  # type: ignore[union-attr]
+
+
+async def test_handshake_rejection_body_is_recorded_verbatim() -> None:
+    """거부 응답 본문은 이력의 500자 절단과 별개로 전문이 원문 싱크에 남는다 (001 §3.7)."""
+    body = b'{"code":-1003,"msg":"' + b"z" * 600 + b'"}'
+    stream, connector, _, raw, _, _ = await build(
+        [HandshakeRejected(429, {"Retry-After": "10"}, body=body)]
+    )
+    await run_until_exhausted(stream, connector)
+    assert raw.payloads("ws-handshake:/stream") == [body.decode()]
+    assert [e[0] for e in raw.entries if e[1].startswith("ws-handshake")] == ["binance"]
+
+
+async def test_handshake_rejection_without_body_records_nothing() -> None:
+    stream, connector, _, raw, _, _ = await build([HandshakeRejected(418)])
+    await run_until_exhausted(stream, connector)
+    assert raw.payloads("ws-handshake:/stream") == []
