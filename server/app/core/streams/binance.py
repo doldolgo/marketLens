@@ -85,7 +85,9 @@ class _Shard:
         self.has_work = (
             asyncio.Event()
         )  # 배정이 생기면 set — 배정 없는 샤드는 연결하지 않는다
-        self.subscribed: set[str] = set()  # 열린 소켓에 실제로 구독된 심볼
+        self.subscribed: set[str] = (
+            set()
+        )  # 이 소켓에 실제로 구독된 심볼 — 소켓이 바뀌면 비운다
         self.ws: Any | None = None
         self.task: asyncio.Task[None] | None = None
         self.backoff = BACKOFF_START
@@ -327,11 +329,16 @@ class BinanceStream:
             shard.ws = ws
             shard.subscribed = set()
             shard.state.connected = True
+            # 구독을 보내는 동안은 소켓이 열린 시각을 임시로 — 직전 연결의 수신 시각으로 정체가 되지 않게 (§3.5)
             shard.state.connected_since = self._clock()
             self._publish()
             immediate = False
             try:
                 await self._sync_shard(shard)
+                shard.state.connected_since = (
+                    self._clock()
+                )  # 구독 시각 = 첫 묶음을 다 보낸 시각
+                self._publish()
                 await self._pump(shard, ws)
             except asyncio.CancelledError:
                 raise
@@ -420,6 +427,8 @@ class BinanceStream:
                         )
                     )
                     await self._sleep(CONTROL_INTERVAL)
+            if shard.ws is not ws:
+                return  # 보내는 도중 소켓이 바뀌었다 — 죽은 소켓의 구독을 새 소켓 것으로 세지 않는다 (§3.3)
             shard.subscribed = wanted
             shard.state.subscribed = len(wanted)
             self._publish()

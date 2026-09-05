@@ -105,18 +105,38 @@ def _client(handler) -> httpx.AsyncClient:  # type: ignore[no-untyped-def]
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
+class TicketSleeps(Sleeps):
+    """제어 메시지 간격(0.25초)마다 표 하나를 기다린다 — 전송 도중의 시점을 테스트가 고른다."""
+
+    def __init__(self, tickets: int = 0) -> None:
+        super().__init__()
+        self._tickets = asyncio.Semaphore(tickets)
+
+    def release(self, n: int = 1) -> None:
+        for _ in range(n):
+            self._tickets.release()
+
+    async def __call__(self, seconds: float) -> None:
+        self.values.append(seconds)
+        if seconds == CONTROL_INTERVAL:
+            await self._tickets.acquire()
+        else:
+            await asyncio.sleep(0)
+
+
 async def build(
     outcomes: list[FakeSocket | BaseException],
     *,
     symbols: list[str] | None = None,
     universe: set[str] | None = None,
+    sleep: Sleeps | None = None,
 ) -> tuple[BinanceStream, FakeConnector, Sleeps, RawLog, Clock, LiveStore]:
     """exchangeInfo(fake REST) 로 심볼 맵을 채우고 우주를 넣은 커넥터 — 배정 있는 샤드만 연결한다."""
     symbols = symbols if symbols is not None else ["BTCUSDT"]
     bases = {base_of(s) for s in symbols}
     store, sink = store_with_universe(universe if universe is not None else bases)
     connector = FakeConnector(outcomes)
-    sleeps = Sleeps()
+    sleeps = sleep if sleep is not None else Sleeps()
     raw = RawLog()
     clock = Clock(T0)
     stream = BinanceStream(
@@ -407,6 +427,45 @@ async def test_rebalance_subscribes_new_unsubscribes_dropped_and_removes_rows() 
     await stream.aclose()
 
 
+async def test_rebalance_in_flight_does_not_outlive_the_socket_it_was_sent_on() -> None:
+    # 재조정이 c 를 구독하고 0.25초 쉬는 사이 serverShutdown → 즉시 재연결.
+    # 죽은 소켓에 보낸 구독을 새 소켓 것으로 세면 새 소켓은 아무것도 구독하지 않는다 (§3.3)
+    a, b, c = symbols_for(BTC_SHARD, 3)
+    first, second = GatedSocket(), GatedSocket()
+    sleeps = TicketSleeps(tickets=1)  # 첫 소켓의 SUBSCRIBE(a·b) 한 묶음만 통과
+    stream, connector, _, _, _, store = await build(
+        [first, second],
+        symbols=[a, b, c],
+        universe={base_of(a), base_of(b)},
+        sleep=sleeps,
+    )
+    stream.start()
+    await until(first.subscribed)
+    await asyncio.sleep(0.01)
+    stream.set_universe({base_of(a), base_of(b), base_of(c)})  # c 상장 → 재조정
+    await asyncio.sleep(0.01)
+    assert subscribe_params(first)[-1] == [
+        f"{c.lower()}@depth20",
+        f"{c.lower()}@miniTicker",
+    ]
+    first.push(SHUTDOWN)  # 재조정이 쉬는 동안 첫 소켓이 끊긴다
+    await asyncio.sleep(0.01)
+    assert connector.urls == [WS_URL, WS_URL] and first.closed
+    assert second.sent == []  # 새 소켓의 구독은 재조정이 끝나길 기다린다
+    sleeps.release(2)  # 죽은 소켓의 재조정 → 새 소켓의 SUBSCRIBE
+    await until(second.subscribed)
+    await asyncio.sleep(0.01)
+    [params] = subscribe_params(second)
+    assert sorted(params) == sorted(
+        n
+        for s in (a, b, c)
+        for n in (f"{s.lower()}@depth20", f"{s.lower()}@miniTicker")
+    )
+    state = store.stream_state("binance")
+    assert state is not None and state.connected and state.subscribed == 3
+    await stream.aclose()
+
+
 # --- 판정 (§3.5) ---
 
 
@@ -449,6 +508,25 @@ async def test_only_the_silent_shard_fails_the_tick_and_recovers_on_message() ->
     await until(socks[2].delivered)
     assert stream.judge(clock.now + 1000).ok  # type: ignore[union-attr]
     assert state.last_error is None
+    await stream.aclose()
+
+
+async def test_connected_since_is_stamped_when_the_subscribe_batch_is_sent() -> None:
+    sock = FakeSocket([], hold=True)
+    sleeps = TicketSleeps()
+    stream, _, _, _, clock, store = await build([sock], sleep=sleeps)
+    stream.start()
+    await until(sock.subscribed)
+    state = store.stream_state("binance")
+    assert state is not None and state.connected
+    assert state.connected_since == T0  # 보내는 동안은 소켓이 열린 시각
+    clock.now = T0 + 700
+    sleeps.release()
+    await asyncio.sleep(0.01)
+    assert state.connected_since == T0 + 700  # 구독 시각 = 묶음을 다 보낸 시각
+    assert stream.judge(T0 + 700 + STALE_LIMIT - 1).ok  # type: ignore[union-attr]
+    verdict = stream.judge(T0 + 700 + STALE_LIMIT)  # 정체 30초는 여기서부터
+    assert verdict is not None and not verdict.ok
     await stream.aclose()
 
 
