@@ -136,9 +136,8 @@ def _get_row(store: LiveStore, exchange: str, base: str, quote: str) -> Row:
     if row is None:
         raise _not_found(f"{exchange} 에 {base} 스냅샷이 없습니다.")
     if row.quote != quote:
-        raise AnalysisApiError(
-            404,
-            "market_data_not_found",
+        # §3.0 — market_data_not_found 는 quote 불일치여도 첫 스냅샷 안내를 함께 싣는다
+        raise _not_found(
             f"{exchange} 의 {base} 마켓은 {row.quote} 표시입니다. `{base}/{row.quote}` 로 다시 요청하세요.",
             {"stored_quote": row.quote},
         )

@@ -160,6 +160,20 @@ def test_buy_side_exhaustion_warns_partial_fill():
     assert any("원만 체결" in w for w in body["warnings"])
 
 
+def test_cap_warning_precedes_fee_sentence():
+    """한도 10억원 초과 경고(f)는 마지막 수수료 문구(g) 바로 앞 (§3.2-9)."""
+    client = make_client(standard_store())
+    body = client.get(
+        "/arbitrage", params={"sym": "BTC", "amount": 2_000_000_000}
+    ).json()
+    warnings = body["warnings"]
+    assert "저장 한도" in warnings[-2]
+    assert "미반영 이론값" in warnings[-1]
+
+    below = client.get("/arbitrage", params={"sym": "BTC", "amount": 1_000_000}).json()
+    assert not any("저장 한도" in w for w in below["warnings"])
+
+
 def test_missing_snapshot_and_missing_base_rate_are_404():
     client = make_client(standard_store())
     res = client.get("/arbitrage", params={"sym": "NOPE", "amount": 1_000_000})

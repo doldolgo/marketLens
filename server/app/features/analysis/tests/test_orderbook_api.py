@@ -45,6 +45,7 @@ def test_quote_mismatch_is_404_with_stored_quote_hint():
     error = res.json()["error"]
     assert error["code"] == "market_data_not_found"
     assert "BTC/KRW" in error["message"]
+    assert "첫 스냅샷을 받았는지 확인" in error["message"]
 
 
 def test_unknown_exchange_is_404_unsupported():
