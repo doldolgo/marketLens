@@ -144,7 +144,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await ticks.aclose()  # 슬롯의 마지막 틱을 인계한다
-        await handoff.aclose()  # 큐에 남은 틱을 Redis 로 한 번씩 보내 본다
+        await handoff.aclose()  # 큐에 남은 틱을 Redis 로 한 번씩 보내 본다(총 5초 상한)
         if flusher is not None:
             await flusher.aclose()
         await universe.aclose()

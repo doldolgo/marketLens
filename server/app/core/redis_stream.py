@@ -60,23 +60,30 @@ class RedisTickStream:
         )
         return _text(entry_id)
 
+    async def read_page(self, after: str | None = None) -> list[StreamEntry]:
+        """`XRANGE ticks <after 다음> +` 로 PAGE 건까지 — flusher 회차의 한 페이지. 실패는 예외.
+
+        `after` 가 None 이면 스트림 처음부터. PAGE 건 미만이면 마지막 페이지다.
+        """
+        start = "-" if after is None else "(" + after  # 마지막 ID 제외(exclusive)
+        page = await self._client.xrange(STREAM_KEY, start, "+", count=PAGE)
+        return [
+            StreamEntry(
+                id=_text(raw_id), ts=int(fields[b"ts"]), data=bytes(fields[b"data"])
+            )
+            for raw_id, fields in page
+        ]
+
     async def read_all(self) -> list[StreamEntry]:
-        """`XRANGE ticks - +` 전량 — PAGE 건씩 페이지를 넘겨 읽는다. 실패는 예외."""
+        """전량 — 페이지를 끝까지 넘겨 모은다(테스트·스모크용 보조. flusher 는 페이지 단위로 돈다)."""
         out: list[StreamEntry] = []
-        start = "-"
+        after: str | None = None
         while True:
-            page = await self._client.xrange(STREAM_KEY, start, "+", count=PAGE)
-            for raw_id, fields in page:
-                out.append(
-                    StreamEntry(
-                        id=_text(raw_id),
-                        ts=int(fields[b"ts"]),
-                        data=bytes(fields[b"data"]),
-                    )
-                )
+            page = await self.read_page(after)
+            out.extend(page)
             if len(page) < PAGE:
                 return out
-            start = "(" + out[-1].id  # 마지막 ID 제외(exclusive) 다음 페이지
+            after = out[-1].id
 
     async def delete(self, ids: list[str]) -> int:
         """읽은 ID 만 지운다 — PAGE 개씩 XDEL. 지운 수를 돌려주고 실패는 예외."""
