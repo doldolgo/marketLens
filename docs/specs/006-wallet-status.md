@@ -1,6 +1,6 @@
 # 006 — wallet-status
 
-상태: IN_PROGRESS | 의존: 001(collect — 틱 루프·행 교체 규칙), 003(spreads), 004(analysis), 010(raw-archive — 응답 원문 기록)
+상태: DONE | 의존: 001(collect — 틱 루프·행 교체 규칙), 003(spreads), 004(analysis), 010(raw-archive — 응답 원문 기록)
 
 > 이 문서는 **사람이 끝까지 읽는** 문서다. 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -137,11 +137,14 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q   # 207 passed (신규 44 — 서명 테스트 포함)
-# 수동(:8020, 실키는 앱이 .env 로 읽음): /refresh → upbit false(401, IP 허용 목록 — unknown 처리·경고 1줄 정상)
-#   bithumb true / binance true. /spreads 494행 전부 5키, 빗썸 294행 netDom 채워짐(matched 262·unknown 32·wdFx=false 17).
-#   업비트 3-true 확인은 허용 IP(EC2)에서 재확인.
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
+# All checks passed! / 182 files formatted / 434 passed, 1 warning in 4.85s
+#   (006 몫 52개: features/wallet_status/tests 4파일 31 + tests/test_networks.py 13 + tests/test_wallet_integration.py 2
+#    + features/spreads/tests/test_wallet_fields.py 6 — 서명 테스트 2개(업비트 JWT·바이낸스 HMAC)와 원문 싱크 기록 8개 포함)
+# 키 없이 기동(:8041, 거래소 도메인 차단 망): /health → {"status":"ok","version":"0.1.0"}, 트레이스백 0.
+#   /spreads 는 404(마켓 목록을 못 받아 우주가 빔 — dev-setup.md 로컬 메모의 정상 동작). 키 없는 /spreads 5키·빗썸 depDom 비-null·/refresh 경고 2줄은 tests/test_wallet_integration.py 가 같은 배선으로 단언한다.
 ```
+EC2 에서 확인 필요(이 망은 거래소 REST 를 막는다): 실키 기동 후 `/refresh` 경고 없음·세 거래소 `walletStatusAvailable` true(업비트는 EC2 IP 가 허용 목록에 있어야 한다), `/spreads` 에 `netDom` 채워진 행 다수, S3 `raw/exchange=<id>/` 객체에 `rest:/v1/status/wallet`·`rest:/public/assetsstatus/multichain/ALL`·`rest:/sapi/v1/capital/config/getall` 줄이 60초마다 1개씩.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — wallet-status 행. server: 3거래소 조회·`/spreads` 망 판정. web: 없음(spreads 탭이 표시).
@@ -150,7 +153,7 @@ cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/
 - `CLAUDE.md` 스펙 인덱스 상태.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것: `core/networks.py`(정규화·판정·tie-break·동일 체인 쌍 표), `features/wallet_status/`(upbit JWT·binance HMAC·bithumb public·service 60초 캐시, tests 4파일), spreads `_wallet_fields()` 교체, collector `WalletStatusProvider` 주입·`dw_failed` 실값, `/refresh` `walletStatusAvailable`. PyJWT 추가.
-- 추측한 지점: 입출금 조회는 시세 수집과 병행 태스크(10초 타임아웃이 시세를 안 막게), core↔feature 결합은 Protocol 로, 전부 불용어라 토큰 집합이 빈 이름은 규칙 2·3 건너뜀, calls 는 실호출 사이클만 가산.
-- 실행 중 함께 고친 스펙 절: §3.5 실패 상태의 사이클 간 유지 규칙 1줄 추가.
-- 남은 빚: 업비트 실키 3-true 확인은 EC2 에서 / 동일 체인 쌍 표 1쌍뿐(실데이터 unknown 32건 보며 확장 여지)
+- 소요 파일: `server/app/core/networks.py`(`Network`·`normalize_name`·`match_network`·`pick_domestic`·동일 체인 쌍 표), `server/app/core/contracts.py`(`WalletStatusProvider` Protocol), `server/app/features/wallet_status/`(`upbit.py`·`binance.py`·`bithumb.py` 조회기 — 코드 공유 없음, `service.py` `WalletStatusService`, `models.py`, `tests/` 4파일 + `helpers.py` 의 `Capture`·`FakeRecorder`), `server/app/core/ticks.py`(틱마다 `apply`·`failed`, 조회는 별도 태스크), `server/app/core/collect.py`(`force=True` 조회·`wallet_status_available`), `server/app/features/spreads/service.py`(`_wallet_fields` §3.7)·`models.py`(`walletStatusAvailable`), `server/app/main.py`(키 4개·`record` 주입), `server/tests/test_networks.py`·`test_wallet_integration.py`, `server/pyproject.toml`(PyJWT).
+- 추측한 지점(스펙에 확정 문구로 적음): (1) 원문 기록 시점·범위 — §3.5: 응답을 받는 즉시 상태 코드 해석 전에 본문을 남기고, 응답이 없는 실패(타임아웃·연결 오류)는 남기지 않으며, 기록 함수는 배선 시 조회기 묶음에 주입(미주입이면 무동작). 바이낸스 `source` 는 경로만 — 쿼리의 timestamp·서명은 요청 쪽이라 제외. (2) 입출금 조회는 틱 루프와 별도 태스크(10초 타임아웃이 시세를 막지 않게, 겹치지 않게 하나만). (3) core↔feature 결합은 Protocol 로, 배선은 `main.py`. (4) 전부 불용어라 토큰 집합이 빈 망 이름은 §3.6 규칙 2·3 을 건너뛴다(빈 집합끼리의 "완전 일치"는 아무 망이나 맞다는 뜻이 되기 때문). (5) `/refresh` 의 `calls` 는 실호출이 나간 조회만 더한다(키 없음은 0).
+- 실행 중 함께 고친 절: §3.5 원문 기록 규칙 문장(위 1번).
+- 남은 빚: 실키 3-true·`netDom` 채움·S3 `rest:` 줄 확인은 EC2(§5) / 동일 체인 쌍 표는 1쌍뿐 — 실서버 `unknown` 을 보며 늘린다(status.md 빚).
