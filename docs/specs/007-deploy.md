@@ -1,6 +1,6 @@
 # 007 — deploy
 
-상태: IN_PROGRESS | 의존: 001(collect), 002(web-shell), 005(history), 009(tick-store — redis 컨테이너)
+상태: DONE | 의존: 001(collect), 002(web-shell), 005(history), 009(tick-store — redis 컨테이너)
 
 > 이 문서는 **사람이 끝까지 읽는** 문서다. 코드를 산문으로 옮기지 않는다.
 > 구현 구조(파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -37,12 +37,13 @@
 - **main 은 PR 로만 머지한다.** main 푸시 = 배포이므로 CI 를 우회할 길을 막는다. branch protection(§사람이 하는 것)으로 강제한다.
 - **deploy 워크플로**: `push`(main) 트리거, `appleboy/ssh-action@v1` 로 EC2 에 SSH. 스크립트 순서:
   1. `cd ~/marketlens` (기존 be·fe 폴더와 다른 폴더)
-  2. `server/.env` 가 없거나 `INFLUX_TOKEN` 이 비어 있으면 **배포 실패**(값은 출력하지 않는다). 토큰 없이 뜨면 저장 루프가 꺼진 채 조용히 데이터를 잃는다. 루트 `.env` 는 가드하지 않는다 — 없으면 4단계 `--env-file .env` 가 어차피 시끄럽게 실패한다.
+  2. `server/.env` 가 없거나 `INFLUX_TOKEN`·`S3_BUCKET` 중 하나라도 비어 있으면 **배포 실패**(값은 출력하지 않는다 — 존재·비어있지 않음만 `grep -q '^KEY=.'` 로 본다). 토큰 없이 뜨면 저장 루프가, 버킷 없이 뜨면 원문 아카이브(010)가 꺼진 채 조용히 데이터를 잃는다. S3 자격증명은 env 가 아니라 EC2 인스턴스의 IAM 역할(`docs/runbooks/ec2-setup.md` 5-2)이므로 가드 대상이 아니다. 루트 `.env` 는 가드하지 않는다 — 없으면 4단계 `--env-file .env` 가 어차피 시끄럽게 실패한다.
   3. `git fetch origin main && git reset --hard origin/main` — pull 이 아니라 **미러 동기화**. 배포 트리는 main 의 사본일 뿐이므로, 서버 쪽 로컬 커밋·갈래가 있어도 항상 main 을 그대로 따른다(첫 배포에서 pull 이 갈래 때문에 실패한 실사례).
   4. `docker compose --env-file .env --env-file server/.env up -d --build` — `WEB_PORT` 는 루트 `.env`, Influx 첫 기동 admin 토큰(`DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN}`)은 `server/.env` 에서 치환한다. `--env-file` 을 명시하면 기본 `./.env` 자동 로드가 꺼지므로 둘 다 적는다.
   5. `docker image prune -f` — 오래된 레이어가 EC2 디스크를 채우지 않게.
 - Secrets 는 `EC2_HOST`·`EC2_USER`·`EC2_SSH_KEY` 셋(기존 be·fe 레포와 같은 값). 값은 어디에도 적지 않는다.
 - PR 템플릿은 conventions.md 규칙 그대로 3줄 골격: 무엇을 / 왜 / 테스트.
+- **배포 설정의 계약은 테스트가 지킨다.** `server/tests/test_deploy.py` 가 루트 `docker-compose.yml`·워크플로 2개·Dockerfile·`.dockerignore`·`nginx.conf`·PR 템플릿·README 를 **파일로 읽어** §4 의 조건(컨테이너 4개, 호스트 노출은 web 하나, `.env` 는 `env_file` 로만·이미지 제외, `INFLUX_URL`·`REDIS_URL` 덮어쓰기, CI job 2개 무필터, deploy 스크립트의 가드·미러 동기화·`up -d --build`·prune 순서, nginx 접두 제거·캐시 규칙, 워커 1개)을 단언한다. Docker 가 없는 CI 에서 도는 유일한 회귀 장치라 pytest 안에 둔다. YAML 파싱은 dev 의존성 `pyyaml`(설치가 이미 전이 의존으로 들어오지만 명시해야 두 설치 경로가 같다). 워크플로의 `docker compose config`·컨테이너 기동 검증은 Docker 가 있는 로컬·EC2 에서 사람이 §5 명령으로 돈다.
 
 ### 사람이 하는 것
 - EC2 최초 설정은 `docs/runbooks/ec2-setup.md`.
@@ -61,13 +62,25 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-WEB_PORT=8080 docker compose --env-file server/.env up -d --build   # 3컨테이너 Up, 호스트 노출은 :8080 하나
-curl localhost:8080/            # 트레이딩룸 · MarketLens (/foo 도 index.html)
-curl localhost:8080/api/health  # {"status":"ok","version":"0.1.0"} — 접두 제거 확인
-# server 컨테이너 env 키 7개 존재(값 미출력)·이미지 find 에 .env 0건·호스트 8000/8086 리스너 없음
-# docker stop marketlens-influxdb → /api/health 200·/history/premium 503, 재기동 60초 뒤 count 1 (쓰기/읽기 왕복)
-# 워크플로 YAML 파싱 OK·docker compose config OK (actionlint 미설치 — 생략 기록)
-# EC2 공존·PR check green·자동 배포는 GitHub 권한·배포 대기
+# 로컬(Mac, OrbStack Docker 29 / compose v5) — 2026-09-06. 거래소 도메인은 이 망에서 차단(REST·WS 모두 ConnectTimeout).
+WEB_PORT=8080 docker compose --env-file server/.env up -d --build
+#   → marketlens-influxdb·redis·server·web 4컨테이너 Up, 호스트 노출은 web 의 :8080 하나(ps Ports 열)
+curl localhost:8080/            # <title>트레이딩룸 · MarketLens</title>  /foo → 200, 같은 index.html
+curl -sI localhost:8080/index.html          # Cache-Control: no-store, must-revalidate
+curl -sI localhost:8080/assets/index-*.js   # Cache-Control: public, max-age=31536000, immutable
+curl localhost:8080/api/health  # {"status":"ok","version":"0.1.0"} 200 — 접두 제거 확인, /api 자체는 404
+# server 컨테이너 env: server/.env 의 키가 이름만으로 확인됨(값 미출력), INFLUX_URL=http://influxdb:8086·REDIS_URL=redis://redis:6379/0 로 덮임
+# 이미지 안 .env: marketlens-server 0건, marketlens-web 0건 (find / -xdev -name .env)
+# 호스트 8000·8086 LISTEN 0건(lsof)
+docker stop marketlens-influxdb   # → /api/health 200, /api/history/premium 503 storage_unavailable
+docker stop marketlens-redis      # → /api/health 200, /api/spreads 는 내리기 전과 같은 응답(009 격리)
+#   ※ 이 망은 거래소가 막혀 우주가 비어 /spreads 는 전후 모두 404 market_data_not_found — 행이 있는 상태의 확인은 EC2 에서
+# influx 재기동 65초 뒤 /api/history/premium → 404 "기록이 없습니다"(저장소 조회 성공, 틱 행이 없어 점 0) — 첫 점 왕복은 EC2 에서
+docker compose --env-file server/.env config --quiet   # OK
+python -c "import yaml; ..."   # ci.yml·deploy.yml·compose 2개 파싱 OK (actionlint 미설치 — 생략)
+docker compose --env-file server/.env down               # 검증 후 정리(볼륨 유지)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q   # 452 passed (test_deploy.py 17)
+# EC2 에서 확인 필요: 기존 market-lens-fe·be 공존(curl localhost:80)·PR check green·main 머지 자동 배포·EC2 안 curl localhost:8080/api/health·행이 있는 /spreads 의 Redis 격리·Influx 첫 점 왕복
 ```
 
 ## 6. 갱신할 문서
@@ -77,7 +90,7 @@ curl localhost:8080/api/health  # {"status":"ok","version":"0.1.0"} — 접두 �
 - `docs/context/status.md` — deploy 행. `CLAUDE.md` 인덱스 → DONE.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것: `server/Dockerfile`(+.dockerignore), `web/Dockerfile`·`nginx.conf`(+.dockerignore), 루트 `docker-compose.yml`(name: marketlens, restart, container_name 고정 — 기존 market-lens-* 와 무충돌), `.github/workflows/ci.yml`·`deploy.yml`, PR 템플릿, README(31줄).
-- 추측한 지점: compose 프로젝트명 고정(dev compose 와 컨테이너 재생성 충돌 방지), `.dockerignore` 2개 추가(.env 원천 차단), server 의존성은 pyproject 범위로 `pip install .`, INFLUX_TOKEN 가드는 `grep -q '^INFLUX_TOKEN=.'`, nginx 프록시 헤더 4종.
-- 실행 중 함께 고친 스펙 절: §3 `INFLUX_URL` compose 오버라이드 명시, 배포 가드의 루트 `.env` 비검사 이유.
-- 남은 빚: GitHub 권한 후 — Secrets 3개·branch protection·실 PR CI green / EC2 — `~/marketlens` 클론·env 2개 작성(사람)·자동 배포·공존 확인·EC2 안 `curl localhost:8080/api/health`
+- 만든 것: `server/Dockerfile`(+.dockerignore), `web/Dockerfile`·`nginx.conf`(+.dockerignore), 루트 `docker-compose.yml`(name: marketlens, restart, container_name 고정 — 기존 market-lens-* 와 무충돌), `.github/workflows/ci.yml`·`deploy.yml`, PR 템플릿, README(29줄), `server/tests/test_deploy.py`(설정 계약 17개 — §4 항목마다 1개 이상), `pyproject` dev 의존성 `pyyaml`.
+- 추측한 지점: compose 프로젝트명 고정(dev compose 와 컨테이너 재생성 충돌 방지), `.dockerignore` 2개(.env 원천 차단), server 의존성은 pyproject 범위로 `pip install .`, 가드는 `grep -q '^KEY=.'` 로 존재·비어있지 않음만(§3 에 `S3_BUCKET` 가드·IAM 역할 전제를 확정 문구로 적음 — 010 §7 의 요청), nginx 프록시 헤더 4종·`/api` 자체는 404, 배포 계약 테스트는 파일을 읽는 방식(§3 — Docker 없는 CI 에서 도는 유일한 회귀 장치)이고 YAML 파싱에 `pyyaml` 을 dev 의존성으로 추가, 앱 수준 격리(저장소 없이 `/health` 200·`/history` 503)는 lifespan 없는 `create_app()` 으로 단언.
+- 실행 중 함께 고친 스펙 절: §3 배포 가드(`S3_BUCKET`·IAM 역할), §3 배포 설정 계약 테스트 항목, §5 를 4컨테이너·Redis 격리·캐시 헤더 확인으로.
+- 남은 빚: GitHub 권한 후 — Secrets 3개·branch protection·실 PR CI green / EC2 — `~/marketlens` 클론·env 2개 작성(사람)·자동 배포·공존 확인·EC2 안 `curl localhost:8080/api/health`·행이 있는 `/spreads` 의 Redis 격리·Influx 첫 점 왕복. 워크플로 lint(actionlint)는 미설치라 YAML 파싱 + 테스트 단언으로 갈음.

@@ -56,7 +56,7 @@ npm run lint       # oxlint
 ```bash
 WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 ```
-`localhost:8080` 에 화면, `/api/*` 는 nginx 가 server 로 프록시(접두 제거). 내릴 때 `docker compose down`(볼륨 유지).
+server·web·influxdb·redis 네 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 뜨고 호스트에는 web 하나만 열린다. `localhost:8080` 에 화면, `/api/*` 는 nginx 가 server 로 프록시(접두 제거). 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
 
 ## 검증용 스모크
 ```bash
