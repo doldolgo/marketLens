@@ -186,7 +186,6 @@ curl -s -X POST localhost:8041/refresh # usdkrw upbit·bithumb 각 ask 1367·bid
 - 남은 빚:
   - §4 선택 항목 중 "기동 10초 안 행 100 이상" 은 012 가 바이낸스 심볼을 꽂은 뒤 앱 기준으로 다시 본다(§5 의 실측은 관찰용으로 우주를 국내 KRW 전체로 둔 값). 실측 유입량(≈1.4 MB/s 비압축, 국내 둘)은 010 세션이 용량 추정에 쓴다.
   - 012 전에는 바이낸스 심볼이 없어 우주가 비고 `/spreads` 는 404 다(국내 행도 저장되지 않는다). 012 가 `ForeignSymbolSource` 를 꽂으면 풀린다.
-  - 입출금 REST 응답 본문(006 §3.5·010 §3.1)은 아직 원문 싱크에 기록되지 않는다 — `WalletStatusService` 가 `record` 를 주입받는 자리가 없다. 006 세션이 `record=` 를 받아 조회 3종에서 부르고 `main.py` 가 꽂는다. 지금 원문 싱크 밖에 남은 REST 경로는 이것뿐이다.
   - 004 스펙 §4 "깊이 반영" 문구는 004 세션 몫으로 남긴다(`docs/specs/004-analysis.md:§7 깊이 반영 세션 — depth_* 우선 서술 → 행의 asks/bids 만 존재`).
   - `docs/specs/012-binance-stream.md:§2 — "core/connectors/ 의 바이낸스 스트림 커넥터" → 실제 디렉터리는 core/streams/ (architecture.md 현재 구조도 core/streams/binance.py)`. 012 담당 세션 몫.
   - `server/build/`·`server/marketlens_server.egg-info/` 추적 정리는 별도 chore(editable 설치가 egg-info 를 다시 쓴다).

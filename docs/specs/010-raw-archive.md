@@ -19,7 +19,7 @@
 ### 3.1 읽는 계약 (복사)
 - 001·012: 거래소 수신 경로는 **WebSocket 상시 연결**(업비트·빗썸 `wss://…/websocket/v1`, 바이낸스 `wss://data-stream.binance.vision/stream`)과 **REST 호출**(마켓 목록 `/v1/market/all`, 바이낸스 `/api/v3/exchangeInfo`, 006 의 입출금 상태 3종)이다. 수신 경로는 페이로드를 **해석하기 전에** 원문 싱크의 기록 함수를 부른다. 프레임이 바이너리면 UTF-8 로 디코드한 문자열, 압축(permessage-deflate)이면 라이브러리가 푼 뒤의 문자열이 원문이다.
 - 001: 원문 싱크의 계약은 core 공개 함수 하나 — `record(exchange: str, source: str, received_at_ms: int, payload: str) -> None`. **동기이며 예외를 던지지 않는다**(수신 경로를 한 줄도 막지 않기 위해). `source` 는 `"ws:<경로>"` 또는 `"rest:<경로>"`(예 `ws:/websocket/v1`, `rest:/v1/market/all`, `rest:/sapi/v1/capital/config/getall`). `received_at_ms` 는 서버가 받은 시각(epoch ms).
-- 006(006 구현 시): 입출금 상태 REST 응답 본문(성공·실패 모두)도 같은 함수로 기록된다. 키·서명·토큰은 **요청** 쪽에만 있고 응답 본문에는 없다. 006 이 `record` 를 주입하기 전까지 입출금 REST 응답은 아카이브에 없다.
+- 006: 입출금 상태 REST 응답 본문(성공·실패 모두)도 조회기 3종이 같은 함수로 기록한다(`main.py` 가 주입). 키·서명·토큰은 **요청** 쪽에만 있고 응답 본문에는 없다.
 - 배포 워크플로(`.github/workflows/deploy.yml` — 007 스펙 본문에는 이 가드가 없다): `server/.env` 의 `S3_BUCKET` 이 비어 있으면 배포를 중단한다. 앱의 켜는 조건은 `S3_BUCKET` 존재(§3.2). 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 는 IAM 역할 — `docs/runbooks/ec2-setup.md`).
 
 ### 3.2 설정·인증
@@ -112,7 +112,7 @@ curl -s -m 4 -o /dev/null -w '%{http_code}' https://api.upbit.com/v1/market/all 
 - **EC2 에서 확인 필요**(거래소 차단으로 로컬에서 원문이 0건): `aws s3 ls s3://<bucket>/raw/ --recursive | tail -3` 에 거래소 3곳 객체, `aws s3 cp <key> - | gunzip | head -2` 두 줄이 §3.4 모양, 1분 객체 크기·초당 줄 수 실측(§3.5 추정치 대체), 없는 버킷으로 기동 시 객체마다(1초 간격) 실패 로그가 찍히되 `/spreads` 는 계속 갱신, 배포 후 객체가 쌓이는지.
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — 행을 `| raw-archive | 거래소 원문 전량 S3 적재(거래소별 60초·32MB 객체) | - | 읽기 API·재생 도구 없음, lifecycle 은 사람 몫. `S3_BUCKET` 없으면 비활성. 입출금 REST 응답은 006 이 `record` 를 꽂기 전까지 제외 |` 로. **항상 포함.** 알려진 빚에 "하루 10~20GB 추정 — 실측 후 lifecycle 결정".
+- `docs/context/status.md` — 행을 `| raw-archive | 거래소 원문 전량 S3 적재(거래소별 60초·32MB 객체) — WS 프레임·마켓 목록·입출금 REST 응답 | - | 읽기 API·재생 도구 없음, lifecycle 은 사람 몫. `S3_BUCKET` 없으면 비활성 |` 로. **항상 포함.** 알려진 빚에 "하루 10~20GB 추정 — 실측 후 lifecycle 결정".
 - `CLAUDE.md` — 스펙 인덱스 010 행 상태 → DONE. **항상 포함.**
 - `docs/context/db.md` — "두 번째 저장소 S3" 문장을 원문 아카이브(접두사 `raw/`, 줄 모양, 거래소별 객체)로. "쓰는 쪽" 의 S3 줄을 닫기 회차·업로드 워커(닫는 조건·실패·상한)로.
 - `docs/context/architecture.md` — 데이터 흐름(BE) 그림의 S3 가지를 "수신 경로 → 원문 싱크 → S3 raw/" 로. "현재 구조" 절에 raw-archive 항목(모듈·역할·수신 경로와 분리한 이유 1~2줄).
@@ -139,7 +139,6 @@ curl -s -m 4 -o /dev/null -w '%{http_code}' https://api.upbit.com/v1/market/all 
   - `docs/specs/007-deploy.md:§3 규칙 — 배포 가드는 INFLUX_TOKEN 만 적는다 → 실제 `.github/workflows/deploy.yml` 은 `S3_BUCKET` 이 비어 있어도 배포를 중단한다. 007 세션이 §3 에 `S3_BUCKET` 가드와 EC2 IAM 역할 전제를 적어야 자기완결이 된다.
   - `docs/specs/003-spreads.md:§2 하지 않는 것·§3.2-0·§7 서버 슬리피지 반영 세션` — "순값은 HTTP 응답(과 그것을 그대로 미러하는 010 S3)에만 있다", "010 이 S3 줄을 자기완결로 만들려면 `slipFwd` 가 어느 규모의 값인지 줄 안에 있어야 한다", "`server/app/core/snapshot.py` — S3 줄의 최상위 맥락에 `notional` 추가(010 §3.4)", "`server/tests/test_persist.py`·`server/tests/test_snapshot.py`" → 실제: S3 에는 원문(`raw/`)만 있고 `/spreads` 행·순값·`notional` 은 어디에도 저장되지 않는다(§1·§2). `snapshot.py`·`persist.py`·`test_persist.py`·`test_snapshot.py` 는 없다. 003 세션이 이 문장들을 지워야 md 만 보고 구현하는 세션이 가공 표의 S3 저장을 되살리지 않는다.
 - 남은 빚:
-  - 입출금 REST 응답 본문은 아직 기록되지 않는다 — `WalletStatusService` 에 `record` 주입 자리가 없다(status.md 알려진 빚, 006 세션 몫).
   - Redis·S3 가 동시에 무응답이면 종료가 인계 5초 + 아카이브 5초 = 10초에 닿아 `docker stop` 기본 10초와 같다 — 실측 후 필요하면 두 비우기를 병렬로.
   - §3.5 크기 추정(하루 10~20GB)은 미실측 — EC2 배포 후 1분 객체 크기·초당 줄 수를 §5 에 적고 lifecycle 을 정한다.
   - 원문 유효성 판단의 2회 파싱이 CPU 에 보이면 유효성 판단·줄 조립을 스레드(닫는 시점)로 미루는 선택지가 있다 — 그때 32MB 계산은 페이로드 길이 근사가 된다.
