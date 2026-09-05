@@ -4,7 +4,9 @@ import asyncio
 import gzip
 import json
 import logging
+import threading
 import time
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -13,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.core import raw_archive
 from app.core.config import Settings
-from app.core.raw_archive import RawArchive, format_line, pack
+from app.core.raw_archive import WORKER_NAME, RawArchive, format_line, pack
 from app.core.streams.binance import BinanceStream
 from app.core.streams.upbit import UpbitStream
 from app.main import create_app
@@ -34,22 +36,33 @@ MINUTE = 60_000
 
 
 class FakeS3:
-    """`put(key, body)` 만 있는 S3 흉내 — 실패 스위치 하나."""
+    """`put(key, body)` 만 있는 S3 흉내 — 실패 스위치 하나. 워커 스레드가 부르므로 목록은 잠금 아래."""
 
     def __init__(self) -> None:
         self.puts: list[tuple[str, bytes]] = []
         self.fail = False
+        self._lock = threading.Lock()
 
     def put(self, key: str, body: bytes) -> None:
         if self.fail:
             raise RuntimeError("s3 down")
-        self.puts.append((key, body))
+        with self._lock:
+            self.puts.append((key, body))
 
 
 def build(**kw: Any) -> tuple[RawArchive, FakeS3, Clock]:
     s3 = FakeS3()
     clock = Clock(T0)
+    kw.setdefault("retry_interval_sec", 0.01)
     return RawArchive(uploader=s3, clock=clock, sleep=Sleeps(), **kw), s3, clock
+
+
+async def settled(pred: Callable[[], bool], timeout: float = 2.0) -> None:
+    """워커 스레드의 결과를 기다린다 — 조건이 참이 될 때까지 폴링."""
+    deadline = time.monotonic() + timeout
+    while not pred():
+        assert time.monotonic() < deadline, "워커가 기대한 상태에 이르지 않았다"
+        await asyncio.sleep(0.005)
 
 
 def lines_of(body: bytes) -> list[bytes]:
@@ -129,12 +142,14 @@ async def test_buffer_closes_after_sixty_seconds_with_key_from_first_line() -> N
     assert await archive.run_once() == 0 and s3.puts == []
     clock.now = T0 + MINUTE
     assert await archive.run_once() == 1
+    await settled(lambda: archive.pending == 0)
     [(key, body)] = s3.puts
     assert (
         key == "raw/exchange=binance/dt=2026-09-05/hh=09/20260905T092000.123Z.jsonl.gz"
     )
     assert archive.buffered("binance") == 0
     assert json.loads(lines_of(body)[0])["receivedAt"] == T0
+    await archive.aclose()
 
 
 async def test_uncompressed_size_limit_closes_before_sixty_seconds(
@@ -151,9 +166,11 @@ async def test_uncompressed_size_limit_closes_before_sixty_seconds(
     archive.record("upbit", WS, T0 + 25, big)
     clock.now = T0 + 30
     assert await archive.run_once() == 1
+    await settled(lambda: archive.pending == 0)
     keys = [k for k, _ in s3.puts]
     assert len(set(keys)) == 2 and keys[0].endswith("T092000.123Z.jsonl.gz")
     assert keys[1].endswith("T092000.143Z.jsonl.gz")  # 같은 분 — ms 로 구분된다
+    await archive.aclose()
 
 
 async def test_exchanges_get_separate_objects_and_empty_buffers_make_none() -> None:
@@ -162,6 +179,7 @@ async def test_exchanges_get_separate_objects_and_empty_buffers_make_none() -> N
     archive.record("bithumb", WS, T0 + 1, "{}")
     clock.now = T0 + MINUTE + 1
     assert await archive.run_once() == 2
+    await settled(lambda: archive.pending == 0)
     assert [k.split("/")[1] for k, _ in s3.puts] == [
         "exchange=upbit",
         "exchange=bithumb",
@@ -170,6 +188,7 @@ async def test_exchanges_get_separate_objects_and_empty_buffers_make_none() -> N
     assert await archive.run_once() == 0  # 기록이 없던 회차 — 빈 객체는 없다
     assert await archive.run_once(force_close=True) == 0
     assert len(s3.puts) == 2
+    await archive.aclose()
 
 
 async def test_gunzip_line_count_and_order_match_calls_and_pack_is_deterministic() -> (
@@ -181,6 +200,7 @@ async def test_gunzip_line_count_and_order_match_calls_and_pack_is_deterministic
         archive.record("upbit", WS, T0 + i, p)
     clock.now = T0 + MINUTE
     await archive.run_once()
+    await settled(lambda: archive.pending == 0)
     [(_, body)] = s3.puts
     lines = lines_of(body)
     assert len(lines) == 50
@@ -190,9 +210,10 @@ async def test_gunzip_line_count_and_order_match_calls_and_pack_is_deterministic
     ]
     again = pack([format_line("upbit", WS, T0 + i, p) for i, p in enumerate(payloads)])
     assert again == body and pack([ln + b"\n" for ln in lines]) == body
+    await archive.aclose()
 
 
-# --- 업로드 루프 (§3.6) ---
+# --- 닫기 회차와 업로드 워커 (§3.6) ---
 
 
 async def test_failed_upload_stays_at_head_and_is_retried_with_same_key(
@@ -203,24 +224,28 @@ async def test_failed_upload_stays_at_head_and_is_retried_with_same_key(
     clock.now = T0 + MINUTE
     s3.fail = True
     with caplog.at_level(logging.WARNING, logger="marketlens.raw_archive"):
-        assert await archive.run_once() == 0
-        assert await archive.run_once() == 0
+        assert await archive.run_once() == 1
+        await settled(lambda: archive.consecutive_failures >= 2)
     msgs = [r.getMessage() for r in caplog.records]
     assert any("S3 원문 업로드 실패 (연속 1회)" in m for m in msgs)
     assert any("S3 원문 업로드 실패 (연속 2회)" in m for m in msgs)
-    assert archive.pending == 1 and archive.consecutive_failures == 2
+    assert all("T092000.123Z" in m for m in msgs if "업로드 실패" in m)  # 같은 키
+    assert archive.pending == 1
     archive.record(
         "bithumb", WS, T0 + MINUTE, "{}"
     )  # 실패 중 닫힌 다음 객체는 뒤에서 기다린다
     clock.now = T0 + 2 * MINUTE
+    assert await archive.run_once() == 1
+    assert archive.pending == 2 and s3.puts == []
     s3.fail = False
-    assert await archive.run_once() == 2
-    assert archive.pending == 0 and archive.consecutive_failures == 0
+    await settled(lambda: archive.pending == 0)
+    assert archive.consecutive_failures == 0
     assert [k.split("/")[1] for k, _ in s3.puts] == [
         "exchange=upbit",
         "exchange=bithumb",
     ]
     assert s3.puts[0][0].endswith("T092000.123Z.jsonl.gz")
+    await archive.aclose()
 
 
 async def test_queue_over_limit_drops_oldest_and_logs_its_key(
@@ -243,13 +268,53 @@ async def test_queue_over_limit_drops_oldest_and_logs_its_key(
         len(errors) == 2 and "T092000.123Z" in errors[0] and "T092100.123Z" in errors[1]
     )
     assert archive.pending == 2
+    # 워커가 지금의 머리(T092200)로 한 번 더 실패한 뒤에 S3 를 살린다 — 버려진 객체를 들고 있지 않다
+    seen = archive.consecutive_failures
+    await settled(lambda: archive.consecutive_failures > seen)
     s3.fail = False
-    clock.now = T0 + 10 * MINUTE
-    assert await archive.run_once() == 2
+    await settled(lambda: archive.pending == 0)
     assert [k[-21:] for k, _ in s3.puts] == [
         "T092200.123Z.jsonl.gz",
         "T092300.123Z.jsonl.gz",
     ]
+    await archive.aclose()
+
+
+async def test_closing_keeps_running_while_upload_is_stuck(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """업로드가 멈춰 있어도 닫기 회차는 돈다 — 32MB 에 닿은 버퍼가 그 회차에 닫혀 대기열로 간다."""
+
+    class Stuck:
+        def __init__(self) -> None:
+            self.release = threading.Event()
+            self.entered = threading.Event()
+            self.puts: list[str] = []
+
+        def put(self, key: str, body: bytes) -> None:
+            self.entered.set()
+            assert self.release.wait(2.0)
+            self.puts.append(key)
+
+    monkeypatch.setattr(raw_archive, "CLOSE_AT_BYTES", 300)
+    s3 = Stuck()
+    clock = Clock(T0)
+    archive = RawArchive(
+        uploader=s3, clock=clock, sleep=Sleeps(), retry_interval_sec=0.01
+    )
+    archive.record("upbit", WS, T0, "{}")
+    clock.now = T0 + MINUTE
+    assert await archive.run_once() == 1
+    await asyncio.to_thread(s3.entered.wait, 2.0)  # 워커가 put 안에서 멈춰 있다
+    big = json.dumps({"pad": "x" * 200})
+    archive.record("bithumb", WS, clock.now, big)
+    archive.record("bithumb", WS, clock.now + 1, big)
+    assert await archive.run_once() == 1  # 업로드와 무관하게 닫힌다
+    assert archive.pending == 2 and archive.buffered("bithumb") == 0
+    s3.release.set()
+    await settled(lambda: archive.pending == 0)
+    assert [k.split("/")[1] for k in s3.puts] == ["exchange=upbit", "exchange=bithumb"]
+    await archive.aclose()
 
 
 async def test_uploader_exception_never_reaches_record_and_loop_continues() -> None:
@@ -262,17 +327,19 @@ async def test_uploader_exception_never_reaches_record_and_loop_continues() -> N
 
     s3 = Exploding()
     clock = Clock(T0)
-    sleeps = Sleeps()
-    archive = RawArchive(uploader=s3, clock=clock, sleep=sleeps)
+    archive = RawArchive(
+        uploader=s3,
+        clock=clock,
+        sleep=Sleeps(),
+        retry_interval_sec=0.01,
+        drain_deadline_sec=0.05,
+    )
     archive.record("upbit", WS, T0, "{}")
     clock.now = T0 + MINUTE
     archive.start()
-    for _ in range(100):
-        if s3.calls >= 2:
-            break
-        await asyncio.sleep(0.005)
+    await settled(lambda: s3.calls >= 2)
     archive.record("upbit", WS, clock.now, "{}")  # 실패 중에도 기록은 즉시 돌아온다
-    assert s3.calls >= 2 and archive.buffered("upbit") == 1
+    assert archive.buffered("upbit") == 1
     await archive.aclose()
 
 
@@ -286,7 +353,37 @@ async def test_aclose_closes_open_buffers_and_uploads_once() -> None:
     assert archive.buffered("upbit") == 0 and archive.buffered("binance") == 0
 
 
-async def test_aclose_gives_up_after_deadline() -> None:
+async def test_aclose_during_slow_upload_uploads_every_object_exactly_once() -> None:
+    """진행 중이던 업로드와 종료 시 닫힌 객체가 각각 정확히 1회 — 대기열을 만지는 손은 워커 하나다."""
+
+    class Slow:
+        def __init__(self) -> None:
+            self.puts: list[str] = []
+            self.threads: set[int] = set()
+            self.entered = threading.Event()
+            self._lock = threading.Lock()
+
+        def put(self, key: str, body: bytes) -> None:
+            self.entered.set()
+            self.threads.add(threading.get_ident())
+            time.sleep(0.2)
+            with self._lock:
+                self.puts.append(key)
+
+    s3 = Slow()
+    clock = Clock(T0)
+    archive = RawArchive(uploader=s3, clock=clock, sleep=Sleeps())
+    archive.record("upbit", WS, T0, "{}")
+    clock.now = T0 + MINUTE
+    archive.start()
+    await asyncio.to_thread(s3.entered.wait, 2.0)  # 워커가 upbit 객체를 올리는 중
+    archive.record("bithumb", WS, clock.now, "{}")  # 종료 시 강제로 닫힐 객체
+    await archive.aclose()
+    assert [k.split("/")[1] for k in s3.puts] == ["exchange=upbit", "exchange=bithumb"]
+    assert archive.pending == 0 and len(s3.threads) == 1
+
+
+async def test_aclose_gives_up_after_deadline_and_leaves_only_a_daemon_thread() -> None:
     class Hanging:
         def put(self, key: str, body: bytes) -> None:
             time.sleep(0.5)
@@ -298,6 +395,11 @@ async def test_aclose_gives_up_after_deadline() -> None:
     started = time.monotonic()
     await archive.aclose()
     assert time.monotonic() - started < 0.4
+    assert archive.pending == 0  # 못 올린 객체는 버렸다
+    workers = [t for t in threading.enumerate() if t.name == WORKER_NAME]
+    assert workers and all(
+        t.daemon for t in workers
+    )  # 남은 put 이 종료를 붙들지 않는다
 
 
 # --- 재생 가능성 (§3.7) ---
@@ -326,6 +428,7 @@ async def test_replaying_an_upbit_line_rebuilds_the_same_row() -> None:
     original = await _upbit_row(orderbook(levels=3), archive.record)
     clock.now = T0 + MINUTE
     await archive.run_once()
+    await settled(lambda: archive.pending == 0)
     [(_, body)] = s3.puts
     line = next(
         ln for ln in lines_of(body) if json.loads(ln)["raw"].get("type") == "orderbook"
@@ -339,6 +442,7 @@ async def test_replaying_an_upbit_line_rebuilds_the_same_row() -> None:
         original.price_timestamp,
     )
     assert replayed.native_symbol == original.native_symbol == "KRW-BTC"
+    await archive.aclose()
 
 
 async def _binance_row(frame: str, record: Any) -> Any:
@@ -371,6 +475,7 @@ async def test_replaying_a_binance_depth_line_rebuilds_the_same_row() -> None:
     original = await _binance_row(depth(levels=20), archive.record)
     clock.now = T0 + MINUTE
     await archive.run_once()
+    await settled(lambda: archive.pending == 0)
     [(_, body)] = s3.puts
     line = next(
         ln
@@ -386,6 +491,7 @@ async def test_replaying_a_binance_depth_line_rebuilds_the_same_row() -> None:
         original.price,
     )
     assert len(replayed.asks) == 20 and replayed.native_symbol == "BTCUSDT"
+    await archive.aclose()
 
 
 # --- 기동 (§3.2·§3.3) ---
@@ -432,7 +538,7 @@ def test_boot_without_bucket_disables_archive_and_keeps_health_200(
     assert any("S3_BUCKET 이 없어" in r.getMessage() for r in caplog.records)
 
 
-def test_boot_with_bucket_but_no_credentials_still_starts(
+def test_boot_with_bucket_but_no_credentials_still_starts_with_one_error_line(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Any
 ) -> None:
     """실제 boto3 로 HeadBucket 을 시도하되 자격증명 탐색을 전부 막는다 — 네트워크 없이 즉시 실패한다."""
@@ -453,7 +559,48 @@ def test_boot_with_bucket_but_no_credentials_still_starts(
         assert client.get("/health").status_code == 200
         time.sleep(0.05)
         assert client.get("/health").status_code == 200
-    assert any(
-        "S3 버킷 marketlens-test-bucket 접근 실패" in r.getMessage()
+    errors = [
+        r.getMessage()
         for r in caplog.records
-    )
+        if r.levelno == logging.ERROR and "접근 실패" in r.getMessage()
+    ]
+    assert len(errors) == 1 and "S3 버킷 marketlens-test-bucket 접근 실패" in errors[0]
+
+
+def test_blank_region_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert Settings(_env_file=None, s3_region="").s3_region == "ap-northeast-2"
+    assert Settings(_env_file=None, s3_region="  ").s3_region == "ap-northeast-2"
+    assert Settings(_env_file=None, s3_region="us-east-1").s3_region == "us-east-1"
+
+    built: dict[str, Any] = {}
+
+    class Recording:
+        def __init__(self, **kw: Any) -> None:
+            built.update(kw)
+
+        def head_bucket(self) -> None:
+            return None
+
+        def put(self, key: str, body: bytes) -> None:
+            return None
+
+    monkeypatch.setattr("app.main.S3Uploader", Recording)
+    app = _boot(monkeypatch, s3_bucket="b", s3_region="")
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+    assert built == {"bucket": "b", "region": "ap-northeast-2"}
+
+
+def test_boot_survives_s3_client_construction_failure(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    class Broken:
+        def __init__(self, **kw: Any) -> None:
+            raise ValueError("Invalid endpoint")
+
+    monkeypatch.setattr("app.main.S3Uploader", Broken)
+    app = _boot(monkeypatch, s3_bucket="b")
+    with caplog.at_level(logging.ERROR, logger="marketlens.main"), TestClient(app) as c:
+        assert c.get("/health").status_code == 200
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1 and "S3 클라이언트 생성 실패" in errors[0]
