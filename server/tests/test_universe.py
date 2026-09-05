@@ -159,6 +159,18 @@ async def test_startup_retries_foreign_symbols_alone_when_only_they_failed() -> 
     assert refresher.missing() == [] and refresher.universe == {"BTC"}
 
 
+async def test_unexpected_error_during_refresh_does_not_stop_the_loop() -> None:
+    # 거래소 예외가 아닌 예외(버그·예상 밖 타입)로도 갱신 루프는 다음 회차를 돈다 (§3.2)
+    refresher, up, bt, _, _ = build(
+        [RuntimeError("bug"), ["KRW-BTC"]], [["KRW-BTC"]], {"BTC"}
+    )
+    slept = await run_until_full_refresh(refresher)
+    # 첫 갱신이 예외로 끝남 → 업비트만 5초 재시도 → 성공 후 10분 주기
+    assert slept == [RETRY_INTERVAL, UNIVERSE_INTERVAL]
+    assert up.calls == 2 and bt.calls == 1
+    assert refresher.missing() == [] and refresher.universe == {"BTC"}
+
+
 async def test_full_refresh_calls_every_exchange_including_foreign() -> None:
     foreign = FakeForeign({"BTC"})
     refresher, up, bt, _, _ = build([["KRW-BTC"]], [["KRW-BTC"]], foreign)

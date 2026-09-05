@@ -180,6 +180,19 @@ async def test_subscribe_error_response_is_bad_request() -> None:
     assert state.connected is False and sleeps.values[:1] == [1.0]
 
 
+async def test_backoff_is_not_reset_by_subscribe_before_first_quote() -> None:
+    sock = FakeSocket(['{"error":{"name":"NO_CODES","message":"x"}}'])
+    stream, connector, sleeps, _, _, store = build(
+        [OSError("refused"), OSError("refused"), sock]
+    )
+    await run_until_exhausted(stream, connector)
+    # 구독 메시지를 보낸 것만으로는 성공이 아니다 — 거부 응답 뒤 세 번째 대기는 1 이 아니라 4 (§3.11)
+    assert sleeps.values[:3] == [1.0, 2.0, 4.0]
+    state = store.stream_state("upbit")
+    assert state is not None and state.last_error is not None
+    assert state.last_error.kind == "bad_request"
+
+
 async def test_backoff_grows_to_thirty_and_resets_after_first_quote() -> None:
     failures: list[FakeSocket | BaseException] = [OSError("refused")] * 7
     good = FakeSocket([orderbook()])

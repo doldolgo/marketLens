@@ -114,16 +114,29 @@ class UniverseRefresher:
         self._task = asyncio.create_task(self.run())
 
     async def run(self) -> None:
-        """기동 시 못 받은 거래소만 5초 간격으로 재시도, 그 뒤 10분마다 전체 갱신."""
-        await self.refresh()
+        """기동 시 못 받은 거래소만 5초 간격으로 재시도, 그 뒤 10분마다 전체 갱신.
+
+        예상 밖 예외는 로그 후 다음 회차 — 갱신 루프는 멈추지 않는다 (§3.2).
+        """
+        await self._guarded(self.refresh())
         while True:
             missing = self.missing()
             if missing:
                 await self._sleep(RETRY_INTERVAL)
-                await self._refresh(missing)
+                await self._guarded(self._refresh(missing))
                 continue
             await self._sleep(UNIVERSE_INTERVAL)
-            await self.refresh()
+            await self._guarded(self.refresh())
+
+    async def _guarded(self, refresh: Awaitable[RefreshOutcome]) -> None:
+        # 거래소 예외는 _refresh 가 삼킨다. 그 밖의 예외(버그·예상 밖 타입)로 태스크가 조용히
+        # 죽으면 10분 갱신·5초 재시도가 영구 정지하므로 여기서 막는다 (§3.2)
+        try:
+            await refresh
+        except Exception:
+            logger.exception(
+                "마켓 우주 갱신이 예상 밖 예외로 끝났다 — 다음 회차에 계속"
+            )
 
     async def aclose(self) -> None:
         if self._task is None:
