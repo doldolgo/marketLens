@@ -14,8 +14,8 @@
 | analysis | 6개 엔드포인트 동작 | - | HTTP 계약 camelCase |
 | history | `/history/*` 3종·백필 (Influx `premium`·`dw_fail` 쓰기는 009 flusher) | 기록 탭 (mock) | `/history/*` 실데이터 연결은 후속 |
 | wallet-status | 3거래소 조회·60초 캐시·`/spreads` 망 판정 | - | 표시는 spreads 탭이 담당 |
-| deploy | Dockerfile·compose 3컨테이너·CI/deploy 워크플로 | nginx 서빙(:${WEB_PORT}) | 로컬 검증 완료 — EC2 반영·PR check 는 GitHub 권한 대기 |
-| tick-store | 틱 인계 큐(600) → Redis Stream `ticks` → 60초 flusher → Influx `premium`·`dw_fail`(멱등), spark 30분 링버퍼·기동 복원 | - | Redis·Influx 불달이어도 앱은 뜬다. 실서버(EC2) 수동 확인은 대기 |
+| deploy | Dockerfile·compose 4컨테이너(server·web·influxdb·redis)·CI/deploy 워크플로 | nginx 서빙(:${WEB_PORT}) | 로컬 검증 완료 — EC2 반영·PR check 는 GitHub 권한 대기 |
+| tick-store | 틱 인계 큐(600, 종료 시 비우기 5초 상한) → Redis Stream `ticks` → 60초 flusher(1,000건 페이지 단위로 쓰고 지움) → Influx `premium`·`dw_fail`(멱등), spark 30분 링버퍼·기동 복원 | - | Redis·Influx 불달이어도 앱은 뜬다. 실서버(EC2) 수동 확인은 대기 |
 | raw-archive | 없음 — 010 이 원문 싱크·버퍼·업로드 루프·`core/s3.py` 를 만든다 | - | 그 전까지 `record` 는 무동작 |
 | health | /health/collect·실패 구간 추적·collect_fail 쓰기/복원 | 실데이터 탭·5초 폴링·KPI 수집 상태 | 백오프는 013 |
 | binance-stream | WS 3샤드 depth20+miniTicker·exchangeInfo 10분·샤드 단위 정체 판정 | - | 해외 최대 20단계 |

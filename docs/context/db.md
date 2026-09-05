@@ -16,7 +16,7 @@
 ## Redis
 - 키 하나: Stream **`ticks`**. 엔트리 = 틱 1개 — 필드 `ts`(epoch 초), `data`(틱 레코드 `{ts, rows:[{dom,fx,base,fwd,rev}], dwFailed:[…]}` 를 gzip 한 JSON, ≈3KB).
 - 쓰는 쪽: 009 의 인계기 — LiveStore 틱 슬롯에서 물러난 직전 틱을 `XADD ticks MAXLEN ~ 86400`. 평상시 길이 60 안팎.
-- 읽고 지우는 쪽: 009 의 flusher — 60초마다 `XRANGE - +` 전량을 Influx 에 쓰고, **모든 배치가 성공한 뒤에만** 읽은 ID 를 `XDEL` 한다. 실패하면 지우지 않고 다음 회차가 같은 구간을 다시 보낸다(Influx 덮어쓰기라 무해).
+- 읽고 지우는 쪽: 009 의 flusher — 60초마다 전량을 `XRANGE` 1,000건 페이지로 잘라 한 페이지씩 Influx 에 쓰고, **그 페이지의 모든 배치가 성공한 뒤에만** 그 페이지의 ID 를 `XDEL` 한다(메모리는 페이지 크기에 비례). 페이지가 실패하면 그 페이지부터는 지우지 않고 다음 회차가 같은 구간을 다시 보낸다(Influx 덮어쓰기라 무해).
 - `MAXLEN ~ 86400`(24시간)은 Influx 가 하루 넘게 막혔을 때만 작동하는 안전 상한이다. 잘리면 유실이고 flusher 가 다음 회차 로그로 알린다.
 - env `REDIS_URL`(기본 `redis://localhost:6379/0`, compose 안에서는 `redis://redis:6379/0`). Redis 가 없어도 앱은 뜬다 — 인계된 틱은 버려지고(경고 로그) 원문은 S3 에 있어 재생 가능하다.
 
