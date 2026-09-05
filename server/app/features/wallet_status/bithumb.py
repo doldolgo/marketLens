@@ -4,27 +4,38 @@
 코인 단위 엔드포인트(/public/assetsstatus/ALL)는 망을 모르므로 쓰지 않는다.
 """
 
+import time
+
 import httpx
 
+from app.core.contracts import RawRecorder, noop_record
 from app.core.networks import Network
 from app.features.wallet_status.models import CoinStatus, WalletStatusError
 
 _BASE_URL = "https://api.bithumb.com"
+_STATUS_PATH = "/public/assetsstatus/multichain/ALL"
 _TIMEOUT = 10.0  # 요청별 타임아웃 — 시세용 3초보다 길다 (§3.5)
 
 _FORMAT_MESSAGE = "빗썸 자산 상태 응답 형식이 올바르지 않습니다."
 
 
-async def fetch_bithumb(client: httpx.AsyncClient) -> dict[str, CoinStatus]:
-    """GET /public/assetsstatus/multichain/ALL — 코인 심볼(대문자) → CoinStatus."""
-    url = _BASE_URL + "/public/assetsstatus/multichain/ALL"
+async def fetch_bithumb(
+    client: httpx.AsyncClient, *, record: RawRecorder = noop_record
+) -> dict[str, CoinStatus]:
+    """GET /public/assetsstatus/multichain/ALL — 코인 심볼(대문자) → CoinStatus.
+
+    응답 본문은 상태 코드를 해석하기 전에 원문 싱크에 남긴다 (§3.5).
+    """
+    url = _BASE_URL + _STATUS_PATH
     try:
         resp = await client.get(url, timeout=_TIMEOUT)
     except httpx.HTTPError as exc:
+        # 응답 자체가 없으므로 원문 싱크에 남길 본문도 없다
         raise WalletStatusError(
             f"빗썸 지갑 상태 API 호출 실패: {type(exc).__name__}: {exc}",
             detail={"exchange": "bithumb"},
         ) from exc
+    record("bithumb", f"rest:{_STATUS_PATH}", int(time.time() * 1000), resp.text)
     if resp.status_code != 200:
         raise WalletStatusError(
             f"빗썸 지갑 상태 API 가 {resp.status_code} 를 반환했습니다.",

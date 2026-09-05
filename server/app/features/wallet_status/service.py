@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from app.core.contracts import RawRecorder, noop_record
 from app.core.models import Row
 from app.features.wallet_status.binance import fetch_binance
 from app.features.wallet_status.bithumb import fetch_bithumb
@@ -46,12 +47,14 @@ class WalletStatusService:
         binance_api_key: str | None,
         binance_secret_key: str | None,
         interval: float = WALLET_REFRESH_INTERVAL,
+        record: RawRecorder = noop_record,  # 010 원문 싱크 — 주입하지 않으면 무동작 (§3.5)
     ) -> None:
         self._upbit_api_key = upbit_api_key
         self._upbit_secret_key = upbit_secret_key
         self._binance_api_key = binance_api_key
         self._binance_secret_key = binance_secret_key
         self._interval = interval
+        self._record = record
         self._last_at: float | None = None
         self._states: dict[str, _ExchangeState] = {}
 
@@ -81,15 +84,17 @@ class WalletStatusService:
                     client,
                     api_key=self._upbit_api_key,
                     secret_key=self._upbit_secret_key,
+                    record=self._record,
                 ),
             ),
-            self._fetch_one("bithumb", fetch_bithumb(client)),
+            self._fetch_one("bithumb", fetch_bithumb(client, record=self._record)),
             self._fetch_one(
                 "binance",
                 fetch_binance(
                     client,
                     api_key=self._binance_api_key,
                     secret_key=self._binance_secret_key,
+                    record=self._record,
                 ),
             ),
         )

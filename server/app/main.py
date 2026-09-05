@@ -98,12 +98,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         record = archive.record
         archive.start()
 
-    # 입출금 상태 60초 캐시(006) — 키 없는 거래소는 unknown, 빗썸은 키 불필요
+    # 입출금 상태 60초 캐시(006) — 키 없는 거래소는 unknown, 빗썸은 키 불필요.
+    # 응답 본문은 시세 원문과 같은 싱크(010)에 남는다.
     wallet = WalletStatusService(
         upbit_api_key=settings.upbit_api_key,
         upbit_secret_key=settings.upbit_secret_key,
         binance_api_key=settings.binance_api_key,
         binance_secret_key=settings.binance_secret_key,
+        record=record,
     )
 
     # Influx — 토큰 없으면 /history/* 503·이력 복원 없음, 앱은 뜬다 (스펙 005·011)

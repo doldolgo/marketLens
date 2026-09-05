@@ -1,10 +1,18 @@
 """빗썸 입출금 조회 — public·정수 비교·형식 검사 (스펙 006 §3.4·§4)."""
 
+import time
+
+import httpx
 import pytest
 
 from app.features.wallet_status.bithumb import fetch_bithumb
 from app.features.wallet_status.models import WalletStatusError
-from app.features.wallet_status.tests.helpers import json_client
+from app.features.wallet_status.tests.helpers import (
+    Capture,
+    FakeRecorder,
+    assert_recorded_only,
+    json_client,
+)
 
 
 async def test_no_auth_needed_and_integer_one_means_ok() -> None:
@@ -88,3 +96,34 @@ async def test_empty_currency_skipped() -> None:
     )
     out = await fetch_bithumb(client)
     assert out == {}
+
+
+async def test_response_body_recorded_as_received() -> None:
+    # 원문은 받은 그대로 — 재직렬화하지 않는다 (§3.5·§4)
+    body = '{"status":"0000","data":[{"currency":"BTC","net_type":"BTC","deposit_status":1,"withdrawal_status":1}]}'
+    cap = Capture([httpx.Response(200, content=body.encode())])
+    recorder = FakeRecorder()
+    before = int(time.time() * 1000)
+    await fetch_bithumb(cap.client(), record=recorder)
+    assert_recorded_only(
+        recorder,
+        exchange="bithumb",
+        source="rest:/public/assetsstatus/multichain/ALL",
+        body=body,
+        before_ms=before,
+    )
+
+
+async def test_http_500_body_is_recorded_too() -> None:
+    cap = Capture([httpx.Response(500, text="bithumb-down")])
+    recorder = FakeRecorder()
+    before = int(time.time() * 1000)
+    with pytest.raises(WalletStatusError):
+        await fetch_bithumb(cap.client(), record=recorder)
+    assert_recorded_only(
+        recorder,
+        exchange="bithumb",
+        source="rest:/public/assetsstatus/multichain/ALL",
+        body="bithumb-down",
+        before_ms=before,
+    )
