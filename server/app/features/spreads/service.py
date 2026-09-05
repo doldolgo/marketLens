@@ -104,13 +104,11 @@ def _age_seconds(row: Row, store: LiveStore, now: datetime) -> float:
     """그 거래소 스트림의 마지막 시세 수신 이후 경과 초 (§3.2-4).
 
     행 자체의 갱신 시각이 아니다 — 조용한 코인은 메시지가 안 와도 호가는 현재값이다.
-    스트림 상태에 수신 시각이 없으면(시드 등) 행의 `updated_at` 을 쓴다.
+    행은 스트림 메시지로만 생기므로 행이 있는 거래소의 수신 시각은 항상 있다.
     """
     state = store.stream_state(row.exchange)
-    if state is not None and state.last_message_at is not None:
-        return (now.timestamp() * 1000 - state.last_message_at) / 1000
-    assert row.updated_at is not None
-    return (now - row.updated_at).total_seconds()
+    assert state is not None and state.last_message_at is not None
+    return (now.timestamp() * 1000 - state.last_message_at) / 1000
 
 
 def _build_row(

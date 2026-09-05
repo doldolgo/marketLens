@@ -1,5 +1,6 @@
 """spreads 테스트 공용 도구 — 네트워크 없음, 저장소에 직접 시드 (스펙 003 §4)."""
 
+from datetime import datetime
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -40,6 +41,17 @@ def make_row(
         withdrawal_enabled=wd,
         networks=networks if networks is not None else [],
     )
+
+
+def seed_rows(store: LiveStore, rows: list[Row], now: datetime) -> None:
+    """행을 시드하면서 그 거래소 스트림의 수신 시각도 `now` 로 둔다.
+
+    런타임에서 행은 스트림 메시지로만 생기므로 행이 있는 거래소의 `last_message_at` 은 항상
+    있다 — 저장소를 직접 시드하는 테스트만 이 헬퍼로 같은 전제를 만든다(`age` 는 스트림 기준).
+    """
+    store.put_rows(rows, now)
+    for exchange in {row.exchange for row in rows}:
+        store.stream(exchange).last_message_at = int(now.timestamp() * 1000)
 
 
 class FakeCollector:

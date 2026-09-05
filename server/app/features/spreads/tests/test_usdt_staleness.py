@@ -3,11 +3,12 @@
 from datetime import UTC, datetime, timedelta
 
 from app.core.live_store import LiveStore
-from app.features.spreads.tests.helpers import make_client, make_row
+from app.features.spreads.tests.helpers import make_client, make_row, seed_rows
 
 
 def seed_pair(store: LiveStore, now: datetime) -> None:
-    store.put_rows(
+    seed_rows(
+        store,
         [
             make_row(
                 "upbit", "BTC", bids=[[100_000_000.0, 1.0]], asks=[[100_100_000.0, 1.0]]
@@ -15,7 +16,8 @@ def seed_pair(store: LiveStore, now: datetime) -> None:
         ],
         now,
     )
-    store.put_rows(
+    seed_rows(
+        store,
         [
             make_row(
                 "binance",

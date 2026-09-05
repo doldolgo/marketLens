@@ -9,7 +9,7 @@ import pytest
 
 from app.core.live_store import LiveStore
 from app.core.models import Row
-from app.features.spreads.tests.helpers import make_client, make_row
+from app.features.spreads.tests.helpers import make_client, make_row, seed_rows
 
 NOW = datetime.now(UTC)
 
@@ -33,7 +33,8 @@ def seed(
     dom_asks: list[list[float]] | None = None,
 ) -> LiveStore:
     """upbit × binance 한 페어."""
-    store.put_rows(
+    seed_rows(
+        store,
         [
             make_row(
                 "upbit",
@@ -51,7 +52,7 @@ def seed(
         asks=fx_asks if fx_asks is not None else FX_ASKS,
         bids=fx_bids if fx_bids is not None else FX_BIDS,
     )
-    store.put_rows([fx_row], NOW)
+    seed_rows(store, [fx_row], NOW)
     store.set_rate("upbit", RATE, RATE, NOW)
     store.mark_received(1_787_000_000)
     return store

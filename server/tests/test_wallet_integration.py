@@ -13,7 +13,7 @@ from app.core.live_store import LiveStore
 from app.core.quotes import QuoteSink
 from app.core.ticks import TickLoop
 from app.core.universe import UniverseRefresher
-from app.features.spreads.tests.helpers import FakeCollector, make_client
+from app.features.spreads.tests.helpers import FakeCollector, make_client, seed_rows
 from app.features.wallet_status.service import WalletStatusService
 from tests.conftest import make_row
 
@@ -44,7 +44,8 @@ def wallet_client(responses: list[httpx.Response]) -> httpx.AsyncClient:
 
 def seeded_store() -> LiveStore:
     store = LiveStore()
-    store.put_rows(
+    seed_rows(
+        store,
         [
             make_row("upbit", "BTC"),
             make_row("bithumb", "BTC"),

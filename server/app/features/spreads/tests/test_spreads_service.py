@@ -7,15 +7,15 @@ import pytest
 from app.core.live_store import LiveStore
 from app.core.premium import premium_percent
 from app.features.spreads.service import build_spreads
-from app.features.spreads.tests.helpers import make_row
+from app.features.spreads.tests.helpers import make_row, seed_rows
 
 NOW = datetime.now(UTC)
 
 
 def seed_two_coins() -> LiveStore:
     store = LiveStore()
-    store.put_rows([make_row("upbit", "BTC"), make_row("upbit", "XRP")], NOW)
-    store.put_rows([make_row("binance", "BTC"), make_row("binance", "XRP")], NOW)
+    seed_rows(store, [make_row("upbit", "BTC"), make_row("upbit", "XRP")], NOW)
+    seed_rows(store, [make_row("binance", "BTC"), make_row("binance", "XRP")], NOW)
     store.set_rate("upbit", 1400.0, 1390.0, NOW)
     return store
 
