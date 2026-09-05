@@ -1,143 +1,125 @@
 # 001 — collect
 
-상태: TODO | 의존: 없음
+상태: IN_PROGRESS | 의존: 없음 (이 스펙이 계약을 **제공**한다: 009 틱 인계, 010 원문 싱크, 011 판정, 012 바이낸스 스트림)
 
-> 이 문서는 **사람이 끝까지 읽는** 문서다. 코드를 산문으로 옮기지 않는다.
+> 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
 
 ## 1. 목적
-서버를 띄우면 업비트·빗썸·바이낸스의 시세가 **1초마다 메모리에 쌓인다**. `GET /health` 로 서버가 살아 있는지 확인할 수 있다.
-이후 스펙(003 spreads 등)은 거래소를 직접 부르지 않고 이 메모리만 읽는다. DB 없음, 화면 없음.
+서버를 띄우면 업비트·빗썸의 호가·체결가가 **WebSocket 상시 연결로 메시지마다** 메모리에 갱신되고(바이낸스는 012 가 같은 방식으로), **매초 틱** 하나가 만들어져 저장 계층(009)으로 흘러간다. 거래소가 주는 모든 페이로드는 해석 전에 원문 싱크(010)에 넘어간다. `GET /health` 로 서버가 살아 있는지 확인한다.
+REST 폴링은 마켓 목록 갱신에만 남는다 — 시세를 REST 로 묻지 않는다. 거래소 3곳 모두 시세 WebSocket 을 제공하고 SSE 는 제공하지 않으므로 선택지는 WebSocket 뿐이다.
 
 ## 2. 범위
-- 만드는 것: `server/` 앱 골격(FastAPI, 에러 응답 형식), `GET /health`, 수집 루프, 메모리 저장소, 거래소 커넥터 3개(public API 만).
-- 하지 않는 것: `/health` 외 엔드포인트, DB·영속(005), 입출금 상태 조회(006), 바이낸스 선물, Docker(007).
-- 입출금 상태 조회는 이 스펙에선 비워두고 필드를 `null` 로 둔다. 006이 조회기를 끼워 넣고, 실패 시 경고 1줄을 `/refresh` warnings에 넣는다.
-- 바꾸는 기존 것: 없음.
+- 만드는 것: `server/` 앱 골격(FastAPI, 에러 형식), `GET /health`, **LiveStore**(최신 시세·USDT 시세·스트림 상태·틱 슬롯·spark 자리), 업비트·빗썸 **스트림 커넥터** 2개(연결·구독·디코딩·핑·재연결), **마켓 우주** 갱신(REST), **틱 루프**(1초), 원문 싱크·틱 인계·판정의 **계약**(구현은 010·009·011) 과 그 호출, 즉시 갱신 트리거(`POST /refresh` 가 부른다 — 003).
+- 하지 않는 것: `/health` 외 엔드포인트, Redis·Influx·S3 저장 자체(009·010), 입출금 조회(006 — 자리만), 바이낸스(012), Docker(007).
+- 바꾸는 기존 것(이 스펙이 토대라 소비자를 같은 PR 에서 함께 고친다): ① 003 `POST /refresh` 가 §3.9 트리거를 부른다. ② 003·004 의 걷기가 행의 `asks`/`bids` 를 쓴다(행의 별도 깊이 필드는 없다). ③ 011 추적기 호출을 §3.8 판정으로. ④ 005 의 persist 루프·010 의 snapshot 루프는 이 구조에 없다 — 지운다(쓰기는 009·010 이 새로 만든다; 그 전까지 Influx·S3 쓰기는 없다). ⑤ 기존 바이낸스 REST 커넥터·깊이 캐시는 지운다 — 012 세션이 스트림 커넥터를 새로 만든다(그 전까지 바이낸스 행은 비어 있다).
 
 ## 3. 동작
 
 ### 3.1 서버 골격
-- 앱 이름은 `MarketLens Backend`, 버전은 `0.1.0`. `/health` 응답과 User-Agent(`marketlens-server/<version>`)에 쓴다.
-- 거래소 호출 타임아웃은 3.0초, 연결은 1.5초 — httpx 의 단계별(connect/read) 타임아웃이라, 응답이 조금씩 흘러오는 극단에선 요청 전체가 더 길어질 수 있다.
-- 수집 주기는 1초다. 한 사이클이 **끝난 뒤** 이만큼 쉰다. 사이클이 길어져도 겹치지 않는다.
-- 국내 호가는 누적 `price×size` 가 10억 KRW 에 도달한 단계까지만 저장한다(§3.4 행 조립 규칙). 바이낸스 깊이(012)는 대칭으로 누적 1,000,000 USDT 까지 자른다.
-- 국내 마켓 통화는 `KRW`, 해외 마켓 통화는 `USDT`.
-- 거래소 주소는 §3.5 의 공식 URL 이다.
-- 커넥터는 `docs/context/architecture.md` 원칙대로 공통 인터페이스를 구현한다.
+- 앱 이름 `MarketLens Backend`, 버전 `0.1.0`. `/health` 응답과 User-Agent(`marketlens-server/<version>`)에 쓴다.
+- REST(마켓 목록) 타임아웃 3.0초, 연결 1.5초. WebSocket 핸드셰이크 타임아웃 5초.
+- 국내 호가는 누적 `price×size` 가 10억 KRW 에 도달한 단계까지 저장한다(§3.5). 바이낸스는 1,000,000 USDT(012).
+- 국내 마켓 통화 `KRW`, 해외 `USDT`. 거래소 주소는 §3.10.
+- 에러 형식은 항상 `{"error": {"code": str, "message": str, "detail": object}}`. 거래소 타임아웃 504 `exchange_timeout`, 그 외 거래소 실패 502 `exchange_api_error`. 실패 예외에는 `kind` 8종(`timeout` `network` `rate_limit` `banned` `unavailable` `bad_request` `bad_response` `stale_stream`)과 `retry_after_sec`(헤더 `Retry-After` 초 정수, 없으면 null)이 실리고 분류는 커넥터가 한다(011 §3.2). HTTP `detail` 에는 `exchange`·`url`, 비-200 이면 `statusCode` 와 본문 앞 500자.
+- CORS·GZip·uvicorn 워커 1개(메모리가 진실 — 워커가 둘이면 진실도 둘).
+- `GET /health` → `200 {"status": "ok", "version": "0.1.0"}`. 스트림 상태와 무관하게 항상 ok.
 
-에러 형식:
-- 앱 에러 응답 형식은 항상 `{"error": {"code": str, "message": str, "detail": object}}`.
-- 거래소 타임아웃은 504 `exchange_timeout`. 그 외 거래소 호출 실패(비-200, JSON 아님, 연결 실패)는 502 `exchange_api_error`.
-- 실패 예외에는 `kind` 7종(`timeout` `network` `rate_limit` `banned` `unavailable` `bad_request` `bad_response`)과 `retry_after_sec`(헤더 `Retry-After` 초 정수, 없으면 null)이 실린다. 분류는 커넥터가 한다(011 §3.2).
-- HTTP `detail` 에는 `exchange`·`url` 을 담는다. 비-200 이면 `statusCode` 와 본문 앞 500자도 담는다.
-- CORS·GZip·uvicorn 워커 1개는 `docs/context/architecture.md` 규칙대로(메모리가 진실이므로 워커가 둘이면 서로 다른 메모리를 본다).
-- `GET /health` → `200 {"status": "ok", "version": "0.1.0"}`. 수집 루프 상태와 무관하게 항상 ok.
-
-### 3.2 수집 루프
-앱 시작과 함께 백그라운드로 돌고 종료 시 취소된다. 한 사이클은 순서대로:
-1. **국내(업비트·빗썸) 동시 수집**: 거래소마다 KRW 전 마켓의 호가(깊이는 응답이 정한다 — 업비트 30단계 고정·빗썸 최대 15단계, §3.5)와 마지막 체결가를 받는다.
-2. **환율 추출**: 국내 거래소마다 KRW 호가 결과 중 base 가 `USDT` 인 항목에서 `asks[0].price` → `rate.ask`(USDT 살 때), `bids[0].price` → `rate.bid`(USDT 팔 때). 추가 HTTP 호출 없음.
-   USDT 항목이 없거나 한쪽 호가가 비었거나 0 이하면 그 거래소 환율은 이번 사이클에 **관측 없음**.
-3. **바이낸스 수집**: USDT 현물 전 종목의 마지막 가격과 최우선 호가(1단계)를 받되, **국내 어느 거래소든 KRW 마켓에 있는 코인만** 남긴다. 깊이 스트림(012) 캐시에 그 심볼의 신선한 호가가 있으면 `depth_*` 에 함께 싣는다.
-4. **행 조립**(§3.4) 후 **교집합 필터**: base 가 `(국내 거래소 합집합) ∩ (바이낸스)` 에 드는 행만 남긴다. 국내 전용 코인·바이낸스 전용 코인은 메모리에 없다.
-   `USDT` 자신도 바이낸스에 USDT/USDT 가 없으므로 빠진다(환율로만 쓰인다).
-5. **메모리 교체**: 아래 규칙대로 스냅샷과 환율을 갱신하고, 저장소의 `received_at`(epoch 초)을 지금으로 갱신한다.
-
-거래소별 성공/실패를 이력 추적기에 넘긴다(011 §3.3).
-
-메모리 교체 규칙:
-1. 스냅샷은 **거래소 단위로 통째 교체**한다.
-2. 이번 사이클에 성공한 거래소는 직전 세트를 버리고 이번 세트로 바꾼다. 상폐 코인은 자동 소멸한다.
-3. 실패한 거래소는 직전 세트를 그대로 유지한다. `updated_at` 이 안 바뀌어 age 가 자라고, 조회 쪽에서 stale 로 드러난다.
-4. 환율은 **이번에 관측된 거래소만 덮어쓰고** 못 받은 거래소는 직전 값을 유지한다. 환율은 초 단위로 급변하지 않아 낡은 값이 없는 것보다 낫다.
-
-부분 실패·장애:
-- 한 거래소 호출이 실패(타임아웃·비-200·형식 오류 등 어떤 예외든)하면 그 거래소는 **이번 사이클 결과가 빈 것**으로 취급하고 내부 실패 목록에 `{exchange, error_code, message}` 로 기록한다. 다른 거래소 결과는 정상 반영한다. 사이클은 예외를 밖으로 던지지 않는다.
-- 실패한 거래소의 스냅샷은 **직전 값이 남는다**. 사라지게 두면 바이낸스가 1초 끊길 때마다 표 전체가 빈다.
-- 교집합 필터는 "이번 사이클 성공 거래소 + 유지된 거래소" 전체로 계산한다. 거래소가 **한 번도** 성공한 적 없으면 당연히 비어 있다.
-- 환율을 못 구한 국내 거래소가 있으면 경고 문구를 남긴다: `"KRW-USDT 호가가 없어 환율을 못 구한 거래소: upbit, bithumb (해당 국내 거래소의 김프 계산은 이번 회차에 빠진다)."`
-- 사이클 한 번의 내부 결과 요약(거래소별 저장 수, 관측된 환율 목록, 실패·경고 목록, 거래소별 호출 수, 소요 ms, `fetched_at` epoch ms)은 호출자에게 돌려준다. 스펙 003 이 `POST /refresh`에서 camelCase HTTP JSON으로 노출한다.
-- 사이클은 동시에 두 개 돌지 않는다. 루프와 수동 트리거가 겹치면 뒤의 것이 기다린다.
+### 3.2 마켓 우주(universe)
+- 기동 시 REST 로 목록을 받는다: 업비트·빗썸 `GET /v1/market/all` 에서 `KRW-` 로 시작하는 마켓, 바이낸스 USDT 현물 심볼 집합(012 §3.2 가 제공). **10분마다** 갱신하고 `/refresh` 트리거(§3.9)가 즉시 갱신한다.
+- 우주 = `(업비트 KRW base ∪ 빗썸 KRW base) ∩ 바이낸스 USDT base`. `USDT` 자신은 우주에 없다(바이낸스에 USDT/USDT 가 없다) — 시세 원천으로만 쓴다.
+- 구독 대상: 국내 거래소는 **자기 KRW 전 마켓**(`KRW-USDT` 포함). 바이낸스는 우주의 심볼(012). 목록이 바뀌면 그 차이만 추가 구독·해지한다.
+- 저장 규칙: 우주 밖 base 의 행은 메모리에 넣지 않는다 — 국내 전용·해외 전용 코인은 메모리에 없다. 갱신으로 우주에서 빠진 base 는 그 시점에 메모리에서 지운다(상폐 소멸).
+- 기동 시 목록을 못 받으면 5초 간격으로 재시도하고 그동안 구독은 없다. 갱신 실패는 직전 목록 유지 + 경고 로그, 판정(§3.8)에는 영향 없다. 응답 본문은 원문 싱크에 기록한다(`rest:/v1/market/all`).
 
 ### 3.3 메모리 저장소 계약 (후속 스펙이 복사해 쓴다)
-스냅샷 1개 = `(exchange, base)` 당 1행. 필드:
-- `exchange` — `upbit`·`bithumb`·`binance` 중 하나. `base` — 코인(예 `BTC`). `quote` — 국내 `KRW`, 해외 `USDT`. `native_symbol` — 거래소 원본 심볼(예 `KRW-BTC`, `BTCUSDT`).
-- `price` — 마지막 체결가. 없으면 `(bid+ask)/2`.
-- `asks` — `[price, size]` 목록, 오름차순, 누적액 상한까지(바이낸스는 1단계만). `bids` — 같은 모양, 내림차순.
-- `depth_asks`·`depth_bids` — 바이낸스 깊이 스트림(012)이 채우는 최대 20단계, `[price, size]`. 국내 거래소는 항상 빈 목록이다(자기 `asks`/`bids` 가 이미 깊다). 스트림이 없거나 낡으면 빈 목록. `depth_at` — 그 깊이 수신 시각 epoch ms, 없으면 `null`.
-- **호가를 걷는 계산은 `depth_*` 가 비어 있지 않으면 그것을, 비면 `asks`/`bids` 를 쓴다.** 이 규칙 하나로 세 거래소가 균일하게 처리된다.
-- `price_timestamp` — 거래소 시세 시각 epoch ms(바이낸스는 수집 시각).
-- `deposit_enabled`·`withdrawal_enabled`·`networks` — wallet-status(006) 조회가 60초 주기로 채운다. 키 없음·조회 실패면 `null`·빈 목록.
-- `updated_at` — 이번 사이클 적재 시각, tz-aware UTC. `age = now − updated_at`.
-환율 = 국내 거래소 id 당 1개 `{exchange, ask, bid, updated_at}`. 바이낸스 환율은 없다.
+스냅샷 1행 = `(exchange, base)`:
+- `exchange` — `upbit`·`bithumb`·`binance`. `base` — 코인. `quote` — `KRW`/`USDT`. `native_symbol` — 원본 심볼(`KRW-BTC`, `BTCUSDT`).
+- `price` — 마지막 체결가. 없으면 `(bid+ask)/2`. `price_timestamp` — 거래소 체결 시각 epoch ms(없으면 수신 시각).
+- `asks` — `[price, size]` 오름차순, `bids` — 내림차순. 받은 단계 전부(업비트 최대 30·빗썸 최대 15·바이낸스 최대 20)를 누적액 상한까지 담는다. **호가를 걷는 계산은 이 두 목록을 그대로 쓴다** — 별도의 깊이 필드는 없다.
+- `deposit_enabled`·`withdrawal_enabled`·`networks` — 006 이 60초마다 채운다. 행이 새 메시지로 교체될 때 이 3필드는 직전 행 값을 물려받는다. 없으면 `null`·빈 목록.
+- `updated_at` — 이 행이 마지막으로 갱신된 시각(tz-aware UTC).
 
-조회 기능:
-- 전체 목록. 거래소·base 로 필터할 수 있고 base 는 대소문자를 무시한다.
-- 단건. 없으면 `None`.
-- 거래소별 환율, 전체 환율 사본, `received_at`, 비었는지 여부.
+거래소별 **스트림 상태**(011·003 이 읽는다): `connected`(bool), `last_message_at`(마지막 **시세** 메시지 수신 epoch ms, 없으면 null), `last_error`(`{kind, message, status_code, url}` 또는 null), `subscribed`(구독 심볼 수). 바이낸스는 012 가 샤드 3개를 합쳐 같은 모양으로 낸다.
+USDT 시세 = 국내 거래소 id 당 `{exchange, ask, bid, updated_at}`. 바이낸스 시세는 없다.
+`received_at` = 마지막 틱 시각(epoch 초). **틱 슬롯** = 가장 최근 틱 1개(§3.6). spark 맵 = 009 가 게시하는 `(dom, fx, base) → number[]`.
+조회: 전체 목록(거래소·base 필터, base 대소문자 무시), 단건(없으면 `None`), 거래소별 시세·전체 시세 사본, 스트림 상태, `received_at`, 비었는지 여부. 조회는 전부 동기(await 없음)다.
 
-### 3.4 행 조립 규칙
-1. `price` = 마지막 체결가. 없거나 0 이하면 `(bid+ask)/2`. 그것도 없으면 **그 코인은 건너뜀**.
-2. 국내 호가는 받은 순서대로 `[price, size]` 를 담는다.
-3. 국내 호가는 누적 `price×size` 가 10억 KRW 에 **도달한 단계까지 포함**하고 자른다.
-4. 국내는 bid·ask 어느 한쪽이라도 비면 그 코인을 건너뛴다.
-5. 바이낸스는 `bid`·`ask` 가 없거나 0 이하면 건너뛴다.
-6. 바이낸스는 `asks=[[ask, ask_size]]`, `bids=[[bid, bid_size]]` 로 1단계만 담는다. size 없으면 0. 깊이 스트림(012) 캐시에 TTL(10초) 안의 항목이 있으면 `depth_asks`·`depth_bids` 에 누적 1,000,000 USDT 도달 단계까지 담고 `depth_at` 을 채운다. 없으면 세 필드는 빈 목록·`null` 이다.
+### 3.4 USDT 시세
+국내 거래소의 `KRW-USDT` **호가 메시지가 올 때마다** `asks[0].price → ask`, `bids[0].price → bid` 로 그 거래소 시세를 갱신한다(`updated_at` = 수신 시각). 한쪽이 비거나 ≤0 이면 갱신하지 않는다. 추가 호출 없음. 관측이 없으면 직전 값이 남는다(경고는 008).
 
-### 3.5 외부 의존 (public API, 인증 없음)
-**업비트** `https://api.upbit.com`
-- `GET /v1/market/all` → `[{"market":"KRW-BTC","korean_name":"비트코인",...}]`. `KRW-` 로 시작하는 `market` 만. 10분 캐시.
-- `GET /v1/orderbook?markets=KRW-BTC,KRW-ETH,...` / `GET /v1/ticker?markets=...`. 마켓 **100개씩 청크**로 나눠 동시 호출(URI 길이 414 방지). KRW ~280개 → 청크 3개.
-- rate limit: 엔드포인트 그룹별 **초당 10회**. 한 사이클 호가 3 + 티커 3 = 6회.
-- 호가 raw: 마켓당 1원소. `orderbook_units` 는 같은 단계의 bid/ask 가 한 쌍이고 정렬돼 온다. 깊이 파라미터 없이 **항상 30단계**.
-```json
-[{"market":"KRW-BTC","timestamp":1700000000000,"orderbook_units":[{"ask_price":101.0,"bid_price":99.0,"ask_size":1.0,"bid_size":2.0}]}]
-```
-- 티커 raw: `[{"market":"KRW-BTC","trade_price":90916000.0,"trade_timestamp":1786074475649,...}]`. `trade_price`·`trade_timestamp` 만 쓴다.
+### 3.5 행 갱신 규칙 (메시지 → 행)
+1. **호가 메시지**: 그 `(exchange, base)` 행의 `asks`·`bids` 를 통째 교체하고 `updated_at` 을 수신 시각으로. 받은 순서대로 `[price, size]` 를 담되 **잔량 ≤ 0 단계는 버리고**, 누적 `price×size` 가 상한에 도달한 단계까지 포함하고 자른다. 어느 한쪽이 비면 그 행은 저장하지 않는다(있던 행은 지운다).
+2. **체결가 메시지**: `price`·`price_timestamp` 갱신. 행이 아직 없으면(호가 스냅샷 전) 값만 보류했다가 호가가 오면 함께 싣는다. 체결가가 없거나 ≤0 이면 mid.
+3. 우주 밖 base 는 버린다(§3.2). 입출금 3필드는 물려받는다(§3.3).
+4. 갱신은 메시지 단위·행 단위다 — 거래소 단위 통째 교체는 없다.
 
-**빗썸** `https://api.bithumb.com`
-- 경로·응답 형태가 업비트 v1 과 같다(`/v1/market/all`, `/v1/orderbook`, `/v1/ticker`, `markets=` 파라미터, 100개 청크). **커넥터 코드는 공유하지 않는다.**
-- KRW 마켓 ~480개 → 청크 5개, 사이클 10회. rate limit 초당 150회.
-- 호가는 응답 자체가 **최대 15단계**.
-- **잔량 0 인 유령 호가**가 드물게 섞인다 → `size<=0` 단계는 버린다. 최우선 호가도 잔량>0 인 첫 단계다.
-- **HTTP 200 + `error` 본문은 실패**다(에러를 200 으로 준다 — 011 §3.2 가 분류한다).
-- `ticker.trade_timestamp` 가 **KST 벽시계를 epoch 처럼 찍어 정확히 9시간(32,400,000ms) 미래**로 온다(호가의 `timestamp` 는 정상).
-  현재보다 1시간 이상 미래면 9시간을 뺀다, 아니면 그대로(빗썸이 고치면 자동 통과).
-```json
-[{"market":"KRW-BTC","trade_price":90900000.0,"trade_timestamp":1786106875649}]
-```
+### 3.6 틱 루프 (1초)
+앱 시작과 함께 돌고 종료 시 취소된다. 매초 경계에 순서대로:
+1. 006 조회기가 있으면 `refresh_if_due` (60초에 한 번 실호출, 시세 갱신을 막지 않게 별도 태스크).
+2. **틱 생성**(동기, `await` 없음 — 한 틱 안에서 교체 전후 호가가 섞이지 않는 근거): `ts` = 이 초(epoch 초), `rows` = 전 조합 중 자격 통과분의 `{dom, fx, base, fwd, rev}`(원값 — 자격·수식은 003 §3.2-4 의 raw 규칙: 국내×해외 다른 거래소, 양쪽 호가 존재, 그 국내 거래소 자신의 USDT 시세, 여섯 값 > 0), `dwFailed` = 조회기의 실패 상태 거래소 목록.
+3. 틱 슬롯에 새 틱을 넣고 **직전 틱**을 009 의 인계 함수(`handoff(tick)`, 동기·무예외)에 넘긴다. 슬롯이 비어 있었으면(첫 틱) 인계 없음.
+4. `received_at` = `ts`.
+5. 거래소 3곳을 판정해(§3.8) 011 추적기에 성공/실패로 넘긴다.
+앱 종료 시 슬롯의 틱도 인계한다. 틱 루프는 예외를 밖으로 던지지 않는다(버그 하나로 멈추지 않게 로그 후 다음 초).
+앱 시작 순서: 011 이력 복원 → 009 spark 복원 → 마켓 우주 → 스트림 기동 → 틱 루프. 어느 것이 실패해도 앱은 뜬다.
 
-**바이낸스** `https://api.binance.com`
-- `GET /api/v3/ticker/price`(마지막 가격) / `GET /api/v3/ticker/bookTicker`(최우선 호가). 심볼 파라미터 없이 **전 종목 한 번에**(~3,700개, weight 4). 사이클 2회.
-  단일 심볼이 weight 2 라 2종목만 넘어도 전체가 싸다.
-- `symbol` 이 `USDT` 로 **끝나는** 것만, base = 접미사 뗀 나머지. 가격·수량은 **문자열** → float. `0` 은 거래 없음이므로 건너뜀.
-- 일괄 호가 깊이 조회는 **없다**. `GET /api/v3/depth` 는 심볼당 1회이고 `limit ≤ 100` 이 weight 5 라, ~300종목 × 1초 주기면 분당 90,000 weight 로 IP 한도 6,000/분을 15배 넘긴다. 그래서 REST 는 최우선 1단계만 담고, 다단계는 012 의 WebSocket 깊이 스트림이 `depth_*` 에 채운다.
-- **`ticker/24hr` 금지** — `closeTime` 은 윈도우 끝이지 체결 시각이 아니다.
-```json
-[{"symbol":"BTCUSDT","bidPrice":"99.0","bidQty":"2.0","askPrice":"101.0","askQty":"3.0"}]
-```
+### 3.7 원문 싱크 계약 (010 이 구현)
+core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payload: str) -> None` — **동기, 예외 없음, 즉시 반환**. 커넥터는 **받은 모든 프레임**(시세·`{"status":"UP"}`·구독 응답·에러 응답 포함)과 **모든 REST 응답 본문**을 해석하기 **전에** 이 함수에 넘긴다. 바이너리 프레임은 UTF-8 디코드한 문자열, 압축 프레임은 라이브러리가 푼 문자열이 원문이다. `source` = `"ws:<경로>"` 또는 `"rest:<경로>"`(예 `ws:/websocket/v1`, `rest:/v1/market/all`). 010 이 없으면(`S3_BUCKET` 미설정) 아무것도 하지 않는 구현이 꽂힌다.
+
+### 3.8 판정 (매 틱, 011 이 기록)
+거래소마다: **성공** = 스트림이 연결돼 있고 마지막 시세 메시지가 30초 이내. **실패**는 다음 순서로 종류를 정한다 — 미연결이면 `last_error.kind`(핸드셰이크·연결 실패의 분류: DNS·거부·TLS `network`, 핸드셰이크 타임아웃 `timeout`, 핸드셰이크 HTTP 429 `rate_limit`, 403/418 `banned`, 5xx `unavailable`, 구독 에러 응답 `bad_request`, 그 외 `bad_response`); 연결됐는데 30초 무수신이면 `stale_stream`. 실패에는 `message`·`status_code`(없으면 null)·`url`(WebSocket URL)·`retry_after_sec` 가 실린다. 디코드 실패 프레임은 버리고 셀 뿐 그 자체로 실패가 아니다(무효 프레임만 30초 이어지면 `stale_stream`). 바이낸스는 012 §3.6(샤드 단위).
+
+### 3.9 즉시 갱신 트리거 (`POST /refresh` 가 부른다 — 003)
+순서: 마켓 우주 즉시 갱신(REST) → 변경분 재구독 → 006 조회 즉시 실행 → 요약 반환. 요약 = 거래소별 `{saved: 현재 메모리 행 수, calls: 이 트리거로 나간 REST 호출 수}`, 시세가 있는 국내 거래소 목록, `failures[{exchange, error_code, message}]`(트리거 중 REST 실패 + 지금 실패 판정인 스트림), `warnings[]`(006 경고 + USDT 시세 없는 국내 거래소 경고 `"KRW-USDT 호가가 없어 USDT 시세를 못 구한 거래소: upbit (해당 국내 거래소의 김프 계산은 빠진다)."`), `duration_ms`, `fetched_at`(epoch ms). 동시 호출은 직렬화한다. 틱 루프와는 독립이다.
+
+### 3.10 외부 의존 (public WebSocket·REST, 인증 없음)
+**업비트** WS `wss://api.upbit.com/websocket/v1`, REST `https://api.upbit.com`
+- 구독 요청(연결 직후 1회, 텍스트 프레임): `[{"ticket":"<uuid>"},{"type":"orderbook","codes":["KRW-BTC",…]},{"type":"ticker","codes":["KRW-BTC",…]},{"format":"DEFAULT"}]`. `codes` 는 대문자. 스냅샷 + 실시간을 모두 받는다(`is_only_*` 를 주지 않는다) — 재연결 직후 스냅샷 한 바퀴로 전 마켓이 복구된다. 호가 단계는 `codes` 에 `.unit` 을 붙여 정하며(1·5·15·30) 안 붙이면 **30단계**다. `level`(모아보기)은 주지 않는다.
+- 호가 메시지: `{"type":"orderbook","code":"KRW-BTC","timestamp":1787727947526,"total_ask_size":…,"total_bid_size":…,"orderbook_units":[{"ask_price":109950000.0,"bid_price":109880000.0,"ask_size":0.0034,"bid_size":0.188},…],"stream_type":"SNAPSHOT|REALTIME","level":0}` — `orderbook_units` 는 같은 단계의 ask/bid 가 한 쌍이고 정렬돼 온다. `timestamp` 는 ms.
+- 체결가 메시지: `{"type":"ticker","code":"KRW-BTC","trade_price":109868000.0,"trade_timestamp":1787729040682,"timestamp":1787729042606,"stream_type":"REALTIME",…}` — `trade_price`·`trade_timestamp`(ms) 만 쓴다.
+- 프레임은 바이너리(UTF-8 JSON)로 올 수 있다 — bytes 면 디코드한다. 압축(permessage-deflate)은 라이브러리 옵션이며 켜도 원문은 같다.
+- 연결 유지: 서버는 **120초** 무송수신이면 끊는다. **30초마다 PING 프레임**을 보낸다. 텍스트 `PING` 을 보내면 `{"status":"UP"}` 이 10초 간격으로 오는데, 이 프레임은 시세 수신으로 세지 않는다.
+- 한도: `websocket-connect` IP 당 초당 5회, `websocket-message` 커넥션당 초당 5회·분당 100회. 마켓 목록 REST 는 10분에 1회.
+- 에러 응답 `{"error":{"name":"WRONG_FORMAT|NO_TICKET|NO_TYPE|NO_CODES|INVALID_PARAM|INVALID_AUTH","message":…}}` → `bad_request` 로 실패, 재연결 백오프.
+- 마켓 목록 `GET /v1/market/all` → `[{"market":"KRW-BTC",…}]`.
+
+**빗썸** WS `wss://ws-api.bithumb.com/websocket/v1`, REST `https://api.bithumb.com`
+- 요청·응답 형식이 업비트 v1 과 같다(`ticket`·`type`·`codes`·`format`, 메시지 필드명 동일). **커넥터 코드는 공유하지 않는다.**
+- 호가는 응답 자체가 **최대 15단계**. 호가 메시지의 `timestamp` 는 **microseconds** 다 → ms 로 바꿔 쓴다. 체결가 메시지의 `trade_timestamp`·`timestamp` 는 ms.
+- **잔량 0 인 유령 호가**가 드물게 섞인다 → §3.5-1 의 필터가 걸러 최우선 호가도 잔량>0 인 단계가 된다.
+- `trade_timestamp` 가 현재보다 1시간 이상 미래면 9시간(32,400,000ms)을 뺀다(KST 벽시계 버그 방어), 아니면 그대로.
+- 연결 유지: 업비트와 같다(120초 idle, 30초마다 PING, `{"status":"UP"}`). permessage-deflate 를 지원한다(선택).
+- 한도: 연결 요청 IP 당 **초당 10회**, 넘으면 429, 지속 시 **10분 차단**. 재연결 백오프(§3.11)가 이 안에 있다.
+- 마켓 목록 `GET /v1/market/all` (KRW ~480개). REST 는 HTTP 200 + `{"error":…}` 본문이 실패다(011 §3.2).
+
+**바이낸스** → 012.
+
+### 3.11 스트림 커넥터 공통 규칙 (두 국내 커넥터가 각자 구현한다)
+- 연결 → 구독 메시지 1회 → 메시지 펌프. 메시지마다: 원문 싱크 기록(§3.7) → 디코드 → 행 갱신(§3.5)·USDT 시세(§3.4) → `last_message_at` 갱신(시세 메시지만).
+- 끊기면 지수 백오프 1·2·4·…초(상한 30초)로 재연결하고 **구독까지 성공하면 1초로 되돌린다**. 연결 실패 1회 = 경고 로그 1줄 + `last_error`.
+- 마켓 목록이 바뀌면 그 차이만 추가 구독/해지한다 — 업비트·빗썸은 구독 메시지를 다시 보내면 전체가 교체되므로 **전 목록으로 재구독**한다(메시지 한도 안).
+- 종료: 태스크 취소 후 소켓 close, 합계 2초 상한.
 
 ## 4. 검증
-- `GET /health` 가 200 과 `{"status":"ok","version":...}` 을 돌려준다.
-- 존재하지 않는 경로는 404 다.
-- 업비트 raw 호가·티커가 스냅샷 모양(`asks/bids` 의 `[price,size]`, `price`=체결가, `price_timestamp`)으로 바뀐다.
-- 업비트 마켓 101개는 2개 청크로 나뉘어 호출된다.
-- 빗썸 잔량 0 단계는 호가에서 빠지고 최우선 호가도 잔량>0 인 단계가 된다.
-- 빗썸 `trade_timestamp` 가 1시간 이상 미래면 9시간을 빼고, 정상 값이면 그대로 둔다.
-- 바이낸스 문자열 가격이 float 가 되고, `USDT` 로 끝나지 않는 심볼은 빠진다. 마지막 가격 0 은 체결 없음으로 보고 호가가 있으면 mid 로 대체하며, 호가까지 0 이면 빠진다(§3.4).
-- 바이낸스 행은 국내에 상장된 코인만 남는다.
-- 메모리에는 국내∩바이낸스 교집합만 들어가고, `USDT` 는 들어가지 않는다.
-- 성공한 거래소에서 직전 사이클에 있던 코인이 이번 결과에 없으면 메모리에서 사라진다(거래소 단위 통째 교체).
-- 한 거래소가 실패한 사이클에는 그 거래소의 직전 스냅샷이 `updated_at` 그대로 남고, 다른 거래소는 갱신된다.
-- 환율은 국내 거래소별로 `ask=asks[0].price`, `bid=bids[0].price` 가 되며, USDT 호가를 못 받은 거래소는 직전 환율을 유지하고 경고가 남는다.
-- 국내 호가는 누적 `price×size` 가 상한에 도달한 단계까지만 저장된다(`inf` 면 전부, 빈 입력은 빈 목록).
-- 체결가가 없으면 mid 로 대체하고, 둘 다 없으면 그 코인은 저장되지 않는다.
-- 한 거래소 호출이 예외를 던져도 사이클은 끝까지 돌고, 그 거래소는 내부 실패 목록에 `error_code` 와 함께 기록되며 나머지 거래소는 저장된다.
-- 거래소 타임아웃은 504 `exchange_timeout`, 비-200 은 502 `exchange_api_error` 로 변환되고 HTTP `detail` 에 `statusCode`·`body` 가 담긴다.
-- 스냅샷 `updated_at` 은 tz-aware UTC 다.
-- 테스트 전부 통과, ruff lint·format 위반 0. 서버를 :8000 에 띄우면 `/health` 가 위 응답을 준다.
-- 선택(실 네트워크, 실패해도 완료를 막지 않음 — 결과를 §7 에 붙인다): 한 사이클을 직접 돌려 저장 수 100 이상, 환율에 upbit·bithumb 둘 다 관측, 거래소 호출 수는 정상 사이클 18회·첫 사이클(market/all 포함) 20회 이하 — 012 의 깊이 스트림은 상시 연결이라 이 수에 들어가지 않는다. 1초 주기로 1분 돌려도 rate limit 실패 없음.
+네트워크 없음 — 가짜 소켓(메시지를 주입하는 async 제너레이터)과 가짜 REST 로 검증한다.
+- `GET /health` 가 200 과 `{"status":"ok","version":…}`. 존재하지 않는 경로는 404.
+- 업비트 호가 메시지 1건 → 그 행의 `asks/bids` 가 `[price,size]` 목록으로 교체되고 `updated_at` 이 수신 시각. 30단계가 전부 들어온다(상한 전이면).
+- 업비트 체결가 메시지 → `price`·`price_timestamp` 갱신, 호가는 그대로. 호가 전에 온 체결가는 보류됐다가 호가와 함께 실린다.
+- 빗썸 잔량 0 단계는 빠지고 최우선 호가도 잔량>0 인 단계. 빗썸 호가 `timestamp`(µs) 가 ms 로 바뀐다. `trade_timestamp` 가 1시간 이상 미래면 9시간을 뺀다.
+- 우주 밖 base 의 메시지는 저장되지 않는다. 우주에서 base 가 빠지면 그 행이 사라진다. `USDT` 행은 없다.
+- `KRW-USDT` 호가 메시지마다 시세 `ask=asks[0].price`·`bid=bids[0].price` 갱신, 한쪽이 비면 직전 시세 유지.
+- 국내 호가는 누적 `price×size` 상한에 도달한 단계까지만 저장된다(`inf` 면 전부).
+- 행 교체 시 입출금 3필드가 유지된다.
+- 매 초 틱이 생기고 `rows` 가 자격 규칙(다른 거래소·양쪽 호가·자기 시세·여섯 값 > 0)과 원값 수식을 따른다. 두 번째 틱에서 첫 틱이 인계되고, 종료 시 마지막 틱이 인계된다.
+- `received_at` 이 매 틱 갱신된다. 틱 생성 중 `await` 가 없다(가짜 스토어로 재진입이 없음을 확인).
+- 판정: 연결 + 30초 이내 메시지 → 성공. 연결 실패(`network`)·핸드셰이크 429(`rate_limit`)·30초 무수신(`stale_stream`, url = WS URL)이 각각 실패로 기록되고 메시지가 다시 오면 성공으로 돌아온다. `{"status":"UP"}`·구독 응답은 수신으로 세지 않는다.
+- 재연결 백오프가 1·2·4…30 으로 자라고 구독 성공 후 1로 돌아온다. 구독 에러 응답은 `bad_request`.
+- 모든 프레임(시세·UP·에러)과 마켓 목록 응답 본문이 원문 싱크(fake)에 `exchange`·`source`·수신 시각과 함께 원문 그대로 기록된다 — 해석보다 먼저.
+- 트리거(§3.9): 우주 갱신 REST 가 호출되고 `calls` 에 반영, `saved` 가 현재 행 수, 실패 중인 스트림이 `failures` 에 담긴다. 동시 호출은 직렬화된다.
+- 거래소 타임아웃은 504 `exchange_timeout`, 비-200 은 502 `exchange_api_error`(HTTP `detail` 에 `statusCode`·`body`).
+- 테스트 전부 통과, ruff lint·format 위반 0.
+- 선택(실 네트워크, 실패해도 완료를 막지 않음 — §7 에 기록): EC2 에서 기동 → 10초 안에 업비트·빗썸 행 각 100 이상, USDT 시세 둘 다, 1분 동안 재연결 0회, 초당 메시지 수와 원문 바이트 수를 §5 에 적는다(010 의 용량 추정 갱신).
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
@@ -145,9 +127,10 @@
 ```
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — collect 행을 `| collect | 1초 수집 루프·커넥터 3종·/health 동작 | - | /refresh 노출은 003 몫 |` 로. **항상 포함.**
+- `docs/context/status.md` — collect 행을 `| collect | 업비트·빗썸 WS 실시간 갱신·마켓 우주 10분·1초 틱·/health | - | 바이낸스는 012 |` 로. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 001 행 상태 → DONE. **항상 포함.**
-- `docs/context/architecture.md` — "현재 구조" 절에 collect 항목: `core/collector.py`(사이클 5단계+락+1초 루프)·`core/live_store.py`(통째 교체)·`core/connectors/{base,upbit,bithumb,binance}.py`(quirk 격리)·`core/rows.py`·`core/errors.py`·`core/config.py`, 앱 골격·GZip·CORS 는 `main.py` lifespan. 데이터 흐름(BE)·USDT 시세 추출·quirk 서술은 구현과 일치해 본문 변경 없음.
+- `docs/context/architecture.md` — "현재 구조" 절의 collect 항목을 실제 모듈로(스트림 커넥터 2개·LiveStore·틱 루프·우주 갱신·계약 Protocol 들).
+- `docs/context/dev-setup.md` — 스모크의 `/spreads` 확인 시점을 "기동 10초 뒤" 로, 로컬 망에서 WS 도메인 차단 시 EC2 확인 메모.
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
