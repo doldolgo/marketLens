@@ -1,6 +1,6 @@
 # 010 — raw-archive
 
-상태: TODO | 의존: 001(collect — 원문 싱크 계약·거래소별 수신 경로), 006(wallet-status — REST 응답 원문), 007(deploy — env 주입·EC2 IAM 역할), 012(binance-stream — 바이낸스 수신 경로)
+상태: DONE | 의존: 001(collect — 원문 싱크 계약·거래소별 수신 경로), 006(wallet-status — REST 응답 원문), 007(deploy — env 주입·EC2 IAM 역할), 012(binance-stream — 바이낸스 수신 경로)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -40,22 +40,25 @@
 ```
 - `exchange` — `upbit`·`bithumb`·`binance`. `source` — §3.1 의 문자열. `receivedAt` — 서버 수신 시각(epoch ms).
 - `raw` — 페이로드 **원문 그대로**. 페이로드가 유효한 JSON 텍스트면 그 바이트를 줄 안에 **그대로 이어 붙인다**(파싱→재직렬화 금지 — 공백·숫자 표기가 바뀌면 원문이 아니다). 유효한 JSON 이 아니면(HTML 오류 페이지 등) JSON 문자열로 감싼다. 읽는 쪽은 `raw` 의 타입(객체·배열 vs 문자열)으로 둘을 구분한다.
+- 그대로 이어 붙이는 조건은 셋 다 만족할 때다: ① 유효한 JSON 텍스트 ② 최상위 값이 객체 또는 배열 ③ 줄바꿈 문자(`\n`·`\r`)가 없음. 하나라도 어긋나면(HTML 오류 페이지, 숫자·문자열 같은 스칼라 JSON, 줄바꿈이 든 pretty-printed JSON, 빈 문자열) JSON 문자열로 감싼다 — 줄바꿈은 문자열 이스케이프로 보존되므로 바이트는 잃지 않고, "한 레코드 = 한 줄" 이 유지된다.
 - 줄 안에 가공값·파싱 결과·계산값을 넣지 않는다. 이 세 메타키 외의 키가 생기면 안 된다.
 
 ### 3.5 버퍼와 객체
 - 거래소마다 버퍼 하나. 기록 함수는 줄을 만들어 그 거래소 버퍼에 붙인다(동기, 메모리만).
-- **닫는 조건** 둘 중 먼저 오는 것: ① 60초 경과 ② 버퍼의 비압축 바이트가 32MB 도달. 닫힌 버퍼 = 객체 1개. 두 값은 코드 상수다.
+- **닫는 조건** 둘 중 먼저 오는 것: ① 60초 경과 ② 버퍼의 비압축 바이트가 32MB 도달. 닫힌 버퍼 = 객체 1개. 두 값은 코드 상수다. "60초 경과" 는 그 버퍼 **첫 줄의 `receivedAt`** 부터 업로드 루프의 현재 시각까지 60,000ms 이상이다. 닫는 주체는 업로드 루프뿐이다 — 기록 함수는 붙이기만 하므로 32MB 는 다음 회차(≤1초 뒤)에 닫힌다.
 - 키: `raw/exchange=<id>/dt=YYYY-MM-DD/hh=HH/YYYYMMDDTHHMMSS.mmmZ.jsonl.gz` — 전부 **UTC**, 시각은 그 객체 **첫 줄의 `receivedAt`**. `exchange=`·`dt=`·`hh=` 는 Hive 파티션 관례라 Athena 를 얹을 수 있다. 예: `raw/exchange=binance/dt=2026-09-05/hh=03/20260905T031500.123Z.jsonl.gz`.
 - 내용: gzip 압축 JSON Lines, 줄 순서 = 수신 순서. 메타데이터 `Content-Type: application/x-ndjson`, `Content-Encoding: gzip`. 같은 버퍼를 두 번 직렬화하면 바이트까지 같다(gzip mtime 0 고정).
 - 빈 버퍼는 객체를 만들지 않는다.
 - 크기 감(실측 전 추정): 업비트 KRW 전 마켓 호가·현재가 실시간 + 빗썸 동일 + 바이낸스 300종목 depth20(1초) + 전 종목 미니티커(1초) ≈ 초당 1~2MB 원문 → 하루 원문 90~170GB, gzip 후 **10~20GB/일**. S3 저장비는 GB 당 월 $0.025 수준이라 한 달치가 월 $10 안팎이다. 보존 기간을 정하면 버킷 lifecycle 로 — 코드는 관여하지 않는다. 실측값은 실행 세션이 §5 에 적는다.
 
 ### 3.6 업로드 루프
-- 앱 기동이 관리하는 태스크 하나. 매 초 거래소별 버퍼를 보고 §3.5 닫는 조건을 만족한 버퍼를 닫아 **업로드 대기열**(거래소별, 순서 유지)에 넣는다. 대기열은 오래된 객체부터 하나씩 `PutObject` 한다. 직렬화·gzip·업로드는 이벤트 루프를 막지 않게 스레드에서 한다(동기 SDK).
+- 앱 기동이 관리하는 태스크 하나. 매 초 거래소별 버퍼를 보고 §3.5 닫는 조건을 만족한 버퍼를 닫아 **업로드 대기열**에 넣는다. 대기열은 오래된 객체부터 하나씩 `PutObject` 한다. 직렬화·gzip·업로드는 이벤트 루프를 막지 않게 스레드에서 한다(동기 SDK).
+- 대기열은 거래소를 합쳐 **닫힌 순서 하나의 FIFO** 다 — 거래소마다의 순서는 그 안에서 유지된다. 머리 객체가 실패하면 다른 거래소의 객체도 뒤에서 기다린다(실패 원인은 거의 항상 S3·자격증명 쪽이라 거래소별로 나눠도 이득이 없고, 상한 계산이 하나로 끝난다).
 - 실패(자격증명 없음·권한 거부·네트워크·타임아웃): 로그 `S3 원문 업로드 실패 (연속 n회)` 후 그 객체를 대기열 **머리에 그대로 두고** 다음 회차에 다시 시도한다 — 순서가 바뀌지 않는다. 성공하면 연속 횟수 0.
 - 대기열 상한: 거래소 합산 **압축 후 256MB**(코드 상수). 넘치면 가장 오래된 객체부터 버리고 에러 로그에 버린 객체의 키(=시간대)를 남긴다. S3 가 오래 막히면 원문이 유실될 수 있다는 뜻이며, 그 상한이 곧 장애 내성이다.
 - 어떤 실패도 수집·`/spreads`·Redis·Influx 경로에 번지지 않는다. 기록 함수는 항상 즉시 돌아온다.
-- 종료: 열려 있는 버퍼를 전부 닫아 대기열에 넣고 **합계 5초** 안에서 업로드를 시도한다. 시간 안에 못 올린 것은 잃는다(`docker stop` 의 10초 안에 끝나야 한다).
+- 종료: 열려 있는 버퍼를 전부 닫아 대기열에 넣고 **합계 5초** 안에서 업로드를 시도한다. 시간 안에 못 올린 것은 잃는다(`docker stop` 의 10초 안에 끝나야 한다). 순서는 스트림이 전부 닫힌 **뒤**(마지막 프레임까지 기록된 뒤)다 — 009 의 인계 큐 비우기(5초 상한)와 직렬이라 Redis·S3 가 동시에 무응답이면 합계가 10초에 닿을 수 있다.
+- 기동 시 `S3_BUCKET` 이 있으면 `HeadBucket` 1회로 접근을 확인하고 실패는 에러 로그 1줄이다(§3.3). 자격증명이 없어도 앱은 뜬다 — 그 뒤 실패는 회차마다의 업로드 실패 로그로만 보인다.
 
 ### 3.7 재생 가능성 (이 스펙이 보장하는 성질)
 - 줄 하나에서 `exchange`·`source`·`raw` 만으로 001·012 의 해석 규칙(행 조립·USDT 시세 추출)을 **다시 적용할 수 있어야** 한다. 해석에 필요한 정보가 줄 밖(다른 줄·서버 상태)에 있으면 안 된다.
@@ -82,8 +85,18 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
+# All checks passed! / 181 files left unchanged / 391 passed, 1 warning in 3.58s  (tests/test_raw_archive.py 21개 포함)
+
+# /health 스모크 — 빈 포트에 띄워 확인 후 즉시 SIGINT (2026-09-05)
+S3_BUCKET= .venv/bin/uvicorn app.main:app --port 8041
+# → /health 200 {"status":"ok"} · 로그 "S3_BUCKET 이 없어 원문 아카이브를 쓰지 않는다" · 종료 exit 0
+S3_BUCKET=marketlens-nonexistent-bucket-spec010-smoke .venv/bin/uvicorn app.main:app --port 8042
+# → /health 200 · 로그 "S3 버킷 접근 실패 … HeadBucket … 400" + "원문 업로드는 회차마다 다시 시도한다" · 앱은 뜨고 종료 exit 0
+
+curl -s -m 4 -o /dev/null -w '%{http_code}' https://api.upbit.com/v1/market/all   # → 000 (이 망은 거래소 차단)
 ```
+- **EC2 에서 확인 필요**(거래소 차단으로 로컬에서 원문이 0건): `aws s3 ls s3://<bucket>/raw/ --recursive | tail -3` 에 거래소 3곳 객체, `aws s3 cp <key> - | gunzip | head -2` 두 줄이 §3.4 모양, 1분 객체 크기·초당 줄 수 실측(§3.5 추정치 대체), 없는 버킷으로 기동 시 회차마다 실패 로그가 찍히되 `/spreads` 는 계속 갱신, 배포 후 객체가 쌓이는지.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — 행을 `| raw-archive | 거래소 원문 전량 S3 적재(거래소별 60초·32MB 객체) | - | 읽기 API·재생 도구 없음, lifecycle 은 사람 몫 |` 로. **항상 포함.** 알려진 빚에 "하루 10~20GB 추정 — 실측 후 lifecycle 결정".
@@ -95,6 +108,14 @@
 - `server/.env.example` — `S3_BUCKET` 주석을 원문 아카이브로.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
+- 만든 것 (파일 목록): `server/app/core/s3.py`(boto3 를 import 하는 유일한 곳 — `S3Uploader.put`·`head_bucket`), `server/app/core/raw_archive.py`(`format_line`·`object_key`·`pack`, `RawArchive` — `record` 계약 구현·거래소별 버퍼·단일 FIFO 대기열·매초 루프·종료 5초), `server/app/main.py`(lifespan 배선 — 기동 시 HeadBucket, 스트림이 닫힌 뒤 `aclose`), `server/tests/test_raw_archive.py`(21개), 문서 `docs/context/status.md`·`architecture.md`·`db.md`, `CLAUDE.md`.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - §3.4 — `raw` 를 그대로 이어 붙이는 조건 3개(유효 JSON·최상위 객체/배열·줄바꿈 없음)를 확정. 스칼라 JSON·pretty-printed JSON·빈 문자열은 문자열로 감싼다.
+  - §3.5 — "60초 경과" 의 기준을 첫 줄 `receivedAt` 과 루프 시계의 차이로, 닫는 주체를 루프 하나로 확정(32MB 는 다음 회차에 닫힌다).
+  - §3.6 — 대기열을 거래소 합산 단일 FIFO 로 확정. 종료 순서(스트림 닫힌 뒤, 009 인계 비우기와 직렬)와 기동 시 HeadBucket 실패 로그 1줄을 명시.
+  - 코드 내부(동작 불변): 기록 함수가 `json.loads` 로 유효성을 판단하므로 프레임마다 파싱이 2회(커넥터 1회 + 여기 1회) 일어난다 — 초당 1~2MB 에서 수십 ms/초 수준. SDK 재시도 "2회" 는 botocore `max_attempts=3`(standard) 로 옮겼다. 테스트용 관찰자 `buffered(exchange)`·`pending`·`consecutive_failures` 와 `run_once(force_close=)` 를 공개했다. "자격증명 없이 기동" 테스트는 실제 boto3 를 쓰되 env(`AWS_EC2_METADATA_DISABLED` 등)로 탐색을 막아 네트워크 없이 즉시 실패시킨다. 실패 로그는 warning(업로드)·error(버림·HeadBucket) 레벨이다.
 - 남은 빚:
+  - 입출금 REST 응답 본문은 아직 기록되지 않는다 — `WalletStatusService` 에 `record` 주입 자리가 없다(status.md 알려진 빚, 006 세션 몫).
+  - Redis·S3 가 동시에 무응답이면 종료가 인계 5초 + 아카이브 5초 = 10초에 닿아 `docker stop` 기본 10초와 같다 — 실측 후 필요하면 두 비우기를 병렬로.
+  - §3.5 크기 추정(하루 10~20GB)은 미실측 — EC2 배포 후 1분 객체 크기·초당 줄 수를 §5 에 적고 lifecycle 을 정한다.
+  - 원문 유효성 판단의 2회 파싱이 CPU 에 보이면 유효성 판단·줄 조립을 스레드(닫는 시점)로 미루는 선택지가 있다 — 그때 32MB 계산은 페이로드 길이 근사가 된다.
