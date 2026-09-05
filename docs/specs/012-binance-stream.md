@@ -74,8 +74,8 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 172 files left unchanged / 336 passed, 1 warning in 2.02s
-# (이 스펙의 tests/test_stream_binance.py 39개 포함 — 6회 반복 실행 모두 39 passed)
+# All checks passed! / 172 files left unchanged / 339 passed, 1 warning in 2.15s
+# (이 스펙의 tests/test_stream_binance.py 42개 포함 — 6회 반복 실행 모두 42 passed)
 
 # 실서버 스모크 — 2026-09-05 로컬(이 시각 api.upbit.com·api.bithumb.com·api.binance.com 이 200 으로 열려 있어 로컬에서 돌렸다), 빈 포트 8041, 끝나고 kill
 .venv/bin/uvicorn app.main:app --port 8041
@@ -85,6 +85,7 @@ curl -s "localhost:8041/orderbook/binance?symbol=BTC/USDT&depth=20"   # asks 20 
 curl -s localhost:8041/spreads                                        # rows 461 · warnings [] · notional 10000 · rate > 1000 · 행 17키
 curl -s "localhost:8041/spreads?notional=500000"                      # BTC slipFwd 0.0056 → 0.0237 (규모가 커지면 슬리피지 증가)
 # SIGTERM → 0.1초 뒤 포트 해제. 로그에 "바이낸스 샤드 N" 연결 실패 경고·트레이스백 없음
+# 재검증(구독 집합 소켓 결속·구독 시각 수정 뒤, 이 Mac 망이 거래소를 막은 상태): 8041 기동 6초 뒤 /health 200, /health/collect 200(3거래소 down — 목록 REST 가 ConnectTimeout), 트레이스백 없음, kill 뒤 포트 해제
 ```
 EC2 에서 확인 필요(로컬에서 재현 불가): 네트워크를 끊고 30초 뒤 `/health/collect` 의 바이낸스가 `stale_stream`(message 에 샤드 번호)이고 복구하면 닫히는지, 24시간 강제 종료 뒤 샤드가 각자 재연결하는지, 우주 ≈300 종목의 실제 대역폭.
 
@@ -95,9 +96,9 @@ EC2 에서 확인 필요(로컬에서 재현 불가): 네트워크를 끊고 30�
 - `docs/context/dev-setup.md` — 스모크에 `/orderbook/binance … depth=20` 확인 1줄.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록): `server/app/core/streams/binance.py`(커넥터 — `BinanceStream`·`shard_of`), `server/tests/test_stream_binance.py`(39 테스트, 001 의 `tests/stream_fakes.py` 재사용). 바꾼 것: `server/app/core/contracts.py`(`ForeignSymbolSource.set_universe` + `NoForeignSymbols`), `server/app/core/universe.py`(우주 확정 시 `set_universe` 호출), `server/tests/test_universe.py`(FakeForeign 에 `set_universe`), `server/app/main.py`(커넥터를 우주 `foreign`·스트림·틱 루프·`/refresh` 에 배선), `docs/context/status.md`·`architecture.md`·`dev-setup.md`, `CLAUDE.md` 인덱스, 이 스펙.
+- 만든 것 (파일 목록): `server/app/core/streams/binance.py`(커넥터 — `BinanceStream`·`shard_of`), `server/tests/test_stream_binance.py`(42 테스트, 001 의 `tests/stream_fakes.py` 재사용 + 제어 메시지 간격을 표로 막는 `TicketSleeps`). 바꾼 것: `server/app/core/contracts.py`(`ForeignSymbolSource.set_universe` + `NoForeignSymbols`), `server/app/core/universe.py`(우주 확정 시 `set_universe` 호출), `server/tests/test_universe.py`(FakeForeign 에 `set_universe`), `server/app/main.py`(커넥터를 우주 `foreign`·스트림·틱 루프·`/refresh` 에 배선), `docs/context/status.md`·`architecture.md`·`dev-setup.md`, `CLAUDE.md` 인덱스, 이 스펙.
 - 추측한 지점 (묻지 않고 정한 것 — 전부 §3 에 확정 문구로 적었다):
-  1. 모듈 경로 `core/streams/binance.py` — 스펙 §2 의 `core/connectors/` 대신 architecture.md·001 코드의 `core/streams/` 로 통일(§2).
+  1. 모듈 경로는 architecture.md·001 과 같은 `core/streams/binance.py`(§2).
   2. 우주 → 커넥터 전달. 선택지: (a) 커넥터가 `QuoteSink.universe` 를 60초마다 읽는다 — `/refresh` 즉시 반영이 안 된다, (b) `UniverseRefresher` 에 콜백 인자 — 심볼 집합과 구독 대상이 두 계약으로 갈린다, (c) `ForeignSymbolSource` 에 `set_universe(bases)` 추가하고 우주가 확정될 때마다 부른다 — 채택(§2·§3.3). 커넥터 하나가 `refresh`·`bases`·`set_universe` 를 전부 구현한다.
   3. 재조정 = `set_universe` 가 깨우거나 60초마다, 연결된 샤드의 차이만 전송. 빠진 심볼의 행 삭제는 `set_universe` 에서 동기로(§3.3). 배정 0 인 샤드는 폴링 대신 이벤트 대기(§3.3).
   4. 제어 메시지마다 0.25초 대기(초당 4개), `id` 는 샤드별 1부터, ack 는 시세 아님, `error` 키 응답은 `bad_request`(§3.3).
@@ -115,3 +116,4 @@ EC2 에서 확인 필요(로컬에서 재현 불가): 네트워크를 끊고 30�
   - EC2 확인 항목(§5): 네트워크 차단 → `stale_stream` → 복구, 24시간 강제 종료 재연결, 실제 대역폭.
   - 원문 싱크는 아직 무동작(010) — exchangeInfo 본문·모든 프레임의 `record` 호출은 들어가 있다.
   - 로컬 스모크에서 업비트 입출금 API 가 401 — 키·허용 IP 문제(006 소관), 이 스펙과 무관.
+  - 다른 스펙의 어긋남(보고만, CLAUDE.md §5): `docs/specs/001-collect.md:§3.8 — "바이낸스는 012 §3.6(샤드 단위)" → 샤드 판정은 012 §3.5(§3.6 은 장애 격리)`. `docs/specs/001-collect.md:§7 남은 빚 — "012 전에는 … /spreads 는 404 … 012 가 ForeignSymbolSource 를 꽂으면 풀린다"·"012 §2 core/connectors/ → core/streams/ … 012 담당 세션 몫" → 둘 다 이 스펙이 DONE 이 되며 해소됐다(지울 것)`. `docs/specs/011-health.md:§7 만든 것 — core/connectors/{upbit,bithumb,binance}.py·core/collector.py → 그 파일들은 없고 분류는 core/streams/*.py 에 있다`.
