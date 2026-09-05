@@ -132,7 +132,7 @@ export default function App() {
       {/* 푸터 — 입출금 레이더 탭은 FlowTab 이 자체 푸터를 그림 */}
       {tab !== 'flow' && (
         <div style={{ flex: 'none', display: 'flex', gap: 'var(--space-6)', padding: 'var(--space-2) var(--space-6)', borderTop: '1px solid var(--color-divider)', fontSize: 11, color: 'var(--color-neutral-600)' }}>
-          <span>암묵환율 = 국내 거래소 USDT/KRW 체결가 기준</span>
+          <span>암묵환율 = 국내 거래소 USDT/KRW 최우선 매도호가(ask) 기준</span>
           <span>순방향 = 해외 매수 → 국내 매도 · 역방향 = 국내 매수 → 해외 매도</span>
           <span style={{ marginLeft: 'auto' }}>수집 실패 값은 보간 없이 –로 표시</span>
         </div>
