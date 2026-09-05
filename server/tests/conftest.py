@@ -1,13 +1,9 @@
 """collect(core) 테스트 공용 도구 — 네트워크 호출 없음, 거래소는 fake 로 대체."""
 
-import asyncio
-from dataclasses import replace
+from dataclasses import dataclass
 
-import httpx
-import pytest
-
-from app.core.connectors.base import ExchangeConnector, FetchResult
-from app.core.models import Row
+from app.core.models import Row, StreamError
+from app.core.ticks import StreamVerdict
 
 
 def make_row(
@@ -35,45 +31,42 @@ def make_row(
     )
 
 
-class FakeConnector(ExchangeConnector):
-    """사이클마다 미리 정한 결과(행 목록 또는 예외)를 순서대로 돌려준다. 마지막 결과는 반복된다."""
+@dataclass
+class FakeStream:
+    """미리 정한 판정을 돌려주는 가짜 스트림 — 틱 루프·트리거의 판정 배선용."""
 
-    def __init__(
-        self,
-        exchange_id: str,
-        results: list[list[Row] | Exception],
-        calls: int = 1,
-        delay: float = 0.0,
+    id: str
+    verdict: StreamVerdict | None = None
+
+    def judge(self, now_ms: int) -> StreamVerdict | None:
+        return self.verdict
+
+    def fail(self, kind: str, message: str = "실패", **kw: object) -> None:
+        self.verdict = StreamVerdict(
+            ok=False,
+            error=StreamError(
+                kind=kind,
+                message=message,
+                status_code=kw.get("status_code"),  # type: ignore[arg-type]
+                url=kw.get("url", "wss://x/websocket/v1"),  # type: ignore[arg-type]
+                retry_after_sec=kw.get("retry_after_sec"),  # type: ignore[arg-type]
+            ),
+        )
+
+    def succeed(self) -> None:
+        self.verdict = StreamVerdict(ok=True)
+
+
+class RawLog:
+    """원문 싱크 fake — record(exchange, source, received_at_ms, payload) 를 그대로 쌓는다."""
+
+    def __init__(self) -> None:
+        self.entries: list[tuple[str, str, int, str]] = []
+
+    def __call__(
+        self, exchange: str, source: str, received_at_ms: int, payload: str
     ) -> None:
-        self.id = exchange_id
-        self._results = list(results)
-        self.calls = calls
-        self.delay = delay
-        self.active = 0
-        self.max_active = 0
+        self.entries.append((exchange, source, received_at_ms, payload))
 
-    async def fetch_rows(self, client: httpx.AsyncClient) -> FetchResult:
-        self.active += 1
-        self.max_active = max(self.max_active, self.active)
-        try:
-            if self.delay:
-                await asyncio.sleep(self.delay)
-            result = (
-                self._results.pop(0) if len(self._results) > 1 else self._results[0]
-            )
-            if isinstance(result, Exception):
-                raise result
-            # 저장소가 행을 변경(updated_at)하므로 사이클마다 새 객체를 준다
-            return FetchResult(rows=[replace(r) for r in result], calls=self.calls)
-        finally:
-            self.active -= 1
-
-
-@pytest.fixture
-def unused_client() -> httpx.AsyncClient:
-    """fake 커넥터용 — 실제로 요청이 나가면 실패한다."""
-
-    def _fail(request: httpx.Request) -> httpx.Response:
-        raise AssertionError(f"테스트에서 네트워크 호출 발생: {request.url}")
-
-    return httpx.AsyncClient(transport=httpx.MockTransport(_fail))
+    def payloads(self, source: str | None = None) -> list[str]:
+        return [e[3] for e in self.entries if source is None or e[1] == source]

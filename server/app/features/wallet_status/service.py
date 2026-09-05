@@ -1,6 +1,6 @@
-"""입출금 상태 60초 캐시 — 수집 루프에 등록되는 조회기 묶음 (스펙 006 §3.5).
+"""입출금 상태 60초 캐시 — 틱 루프에 등록되는 조회기 묶음 (스펙 006 §3.5).
 
-collector(core) 는 이 클래스를 Protocol(WalletStatusProvider) 로만 알고,
+틱 루프(core) 는 이 클래스를 Protocol(WalletStatusProvider) 로만 알고,
 배선은 main.py lifespan 이 한다 — core 가 features 를 import 하지 않게.
 키는 생성자로 주입받는다 — .env 는 pydantic-settings 가 런타임에 읽는다.
 """
@@ -57,14 +57,21 @@ class WalletStatusService:
 
     # --- 수집 루프(core.collector)가 부르는 계약 ---
 
-    async def refresh_if_due(self, client: httpx.AsyncClient) -> dict[str, int] | None:
+    async def refresh_if_due(
+        self, client: httpx.AsyncClient, *, force: bool = False
+    ) -> dict[str, int] | None:
         """60초가 지났으면 세 거래소를 병렬 조회하고 거래소별 호출 수를 돌려준다.
 
-        캐시가 유효한 사이클은 None. 기동 첫 사이클은 캐시가 비어 즉시 호출한다.
+        캐시가 유효한 틱은 None. 기동 첫 틱은 캐시가 비어 즉시 호출한다. `force` 는
+        001 의 즉시 갱신 트리거(`/refresh`)가 주기와 무관하게 조회시키는 길이다.
         한 거래소 실패는 그 거래소만 unknown 으로 — 예외는 여기서 삼킨다 (§3.5).
         """
         now = time.monotonic()
-        if self._last_at is not None and now - self._last_at < self._interval:
+        if (
+            not force
+            and self._last_at is not None
+            and now - self._last_at < self._interval
+        ):
             return None
         self._last_at = now
         calls = await asyncio.gather(
@@ -123,7 +130,7 @@ class WalletStatusService:
         return out
 
     def failed(self) -> list[str]:
-        """현재 실패 상태인 거래소 id — persist 루프가 dw_fail 점을 쓴다 (§3.5)."""
+        """현재 실패 상태인 거래소 id — 틱의 `dwFailed` 가 되어 009 가 dw_fail 점을 쓴다 (§3.5)."""
         return [
             ex
             for ex in _EXCHANGES
