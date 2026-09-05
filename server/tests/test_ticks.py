@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from app.core.live_store import LiveStore
-from app.core.models import StreamError, StreamState, Tick
+from app.core.models import Rate, Row, StreamError, StreamState, Tick
 from app.core.premium import premium_percent
 from app.core.ticks import STALE_AFTER_MS, TickLoop, build_tick, judge_state
 from tests.conftest import FakeStream, make_row
@@ -90,6 +90,107 @@ def test_tick_is_synchronous_and_hands_off_previous_tick() -> None:
     second = loop.tick(T0 + 1)
     assert handed == [first]  # 두 번째 틱에서 첫 틱이 인계된다
     assert store.received_at == T0 + 1 and store.tick is second
+
+
+class ReentrancyStore(LiveStore):
+    """저장소 호출마다 이벤트 루프 회전 수를 적는다 — 틱 도중 다른 태스크가 돌면 값이 달라진다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.turns = 0
+        self.seen: list[int] = []
+
+    def get_all(
+        self, exchange: str | None = None, base: str | None = None
+    ) -> list[Row]:
+        self.seen.append(self.turns)
+        return super().get_all(exchange, base)
+
+    def rates(self) -> dict[str, Rate]:
+        self.seen.append(self.turns)
+        return super().rates()
+
+    def push_tick(self, tick: Tick) -> Tick | None:
+        self.seen.append(self.turns)
+        return super().push_tick(tick)
+
+    def mark_received(self, ts: int) -> None:
+        self.seen.append(self.turns)
+        super().mark_received(ts)
+
+
+async def test_tick_does_not_yield_to_other_tasks_while_building() -> None:
+    store = ReentrancyStore()
+    store.put_rows(seeded().get_all(), NOW)
+    store.set_rate("upbit", 1400.0, 1390.0, NOW)
+
+    async def spin() -> None:
+        while True:
+            store.turns += 1
+            await asyncio.sleep(0)
+
+    spinner = asyncio.create_task(spin())
+    await asyncio.sleep(0.01)  # 스피너가 돌고 있다
+    loop = TickLoop(store=store, streams=[], client=_client())
+    tick = loop.tick(T0)
+    spinner.cancel()
+    assert tick.rows and len(store.seen) >= 4
+    # 읽기·슬롯·received_at 사이에 이벤트 루프가 한 번도 돌지 않았다
+    assert len(set(store.seen)) == 1
+
+
+async def test_wallet_refresh_task_is_not_duplicated_while_pending() -> None:
+    release = asyncio.Event()
+
+    class Wallet:
+        calls = 0
+
+        async def refresh_if_due(
+            self, client: httpx.AsyncClient, *, force: bool = False
+        ) -> dict[str, int] | None:
+            self.calls += 1
+            await release.wait()
+            return None
+
+        def apply(self, rows: list[object], exchange: str) -> None:
+            pass
+
+        def availability(self) -> dict[str, bool]:
+            return {}
+
+        def warnings(self) -> list[str]:
+            return []
+
+        def failed(self) -> list[str]:
+            return []
+
+    wallet = Wallet()
+    times = iter([T0 + 0.5, T0 + 1.5, T0 + 2.5])
+    slept = 0
+    stop = asyncio.Event()
+
+    async def sleep(seconds: float) -> None:
+        nonlocal slept
+        slept += 1
+        if slept == 3:
+            stop.set()
+            await asyncio.Event().wait()
+        await asyncio.sleep(0)  # 조회 태스크가 첫 await(release 대기)까지 돈다
+
+    loop = TickLoop(
+        store=seeded(),
+        streams=[],
+        client=_client(),
+        wallet=wallet,  # type: ignore[arg-type]
+        clock=lambda: next(times),
+        sleep=sleep,
+    )
+    loop.start()
+    await asyncio.wait_for(stop.wait(), 1.0)
+    # 두 틱이 지났지만 직전 조회 태스크가 안 끝나 새 태스크를 만들지 않았다
+    assert wallet.calls == 1
+    release.set()
+    await loop.aclose()
 
 
 async def test_aclose_hands_off_last_tick_and_run_ticks_on_second_boundary() -> None:

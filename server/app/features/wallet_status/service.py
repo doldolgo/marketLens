@@ -55,7 +55,7 @@ class WalletStatusService:
         self._last_at: float | None = None
         self._states: dict[str, _ExchangeState] = {}
 
-    # --- 수집 루프(core.collector)가 부르는 계약 ---
+    # --- 틱 루프(core.ticks)가 부르는 계약(core.contracts.WalletStatusProvider) ---
 
     async def refresh_if_due(
         self, client: httpx.AsyncClient, *, force: bool = False

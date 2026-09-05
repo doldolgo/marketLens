@@ -6,7 +6,7 @@ import pytest
 
 from app.core.live_store import LiveStore
 from app.core.quotes import QuoteSink
-from app.core.rows import NOTIONAL_CAP_KRW
+from app.core.rows import NOTIONAL_CAP_KRW, clean_levels
 
 T0 = 1_700_000_000_000
 
@@ -105,7 +105,7 @@ def test_levels_are_truncated_at_cumulative_cap() -> None:
     _book(sink, asks=asks, bids=[[99.0, 1.0]])
     row = store.get("upbit", "BTC")
     assert row is not None and len(row.asks) == 2  # 2단계에서 누적 상한 도달
-    assert math.isinf(math.inf)
+    assert clean_levels(asks, math.inf) == asks  # 상한이 inf 면 전부 남는다
 
 
 def test_empty_side_removes_existing_row() -> None:

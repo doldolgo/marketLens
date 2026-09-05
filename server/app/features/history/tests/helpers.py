@@ -42,7 +42,7 @@ class FakeInfluxReader:
 
 
 def make_client(reader: FakeInfluxReader | None) -> TestClient:
-    """lifespan 없이 앱 상태를 직접 채운다 — 수집 루프·persist 루프·네트워크가 돌지 않는다."""
+    """lifespan 없이 앱 상태를 직접 채운다 — 스트림·틱 루프·네트워크가 돌지 않는다."""
     app: FastAPI = create_app()
     app.state.live_store = LiveStore()
     app.state.settings = SimpleNamespace(refresh_token=None)

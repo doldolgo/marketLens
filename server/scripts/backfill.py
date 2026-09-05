@@ -292,7 +292,7 @@ def run(coins: list[str], days: int) -> int:
         return 1
     influx = InfluxClient(url=settings.influx_url, token=settings.influx_token)
 
-    # UTC 하루 단위로 처리한다 — 목표 끝은 오늘 0시(오늘은 라이브 persist 루프 몫)
+    # UTC 하루 단위로 처리한다 — 목표 끝은 오늘 0시(오늘은 라이브 틱 → 009 flusher 몫)
     target_end = int(time.time()) // DAY * DAY
     target_start = target_end - days * DAY
     print(

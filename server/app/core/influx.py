@@ -1,6 +1,6 @@
 """InfluxDB 2.7 클라이언트 — 연결·읽기/쓰기 공유 인프라 (스펙 005 §3.1~3.2).
 
-influxdb-client 를 import 하는 곳은 이 모듈뿐이다. persist 루프·history 서비스·백필은
+influxdb-client 를 import 하는 곳은 이 모듈뿐이다. 009 flusher·011 이력 추적기·history 서비스·백필은
 `InfluxPoint` 와 아래 메서드 시그니처에만 의존한다 — 테스트는 같은 시그니처의 fake 를 쓴다.
 모든 실패는 `InfluxUnavailableError` 하나로 모은다: 호출자는 원인 구분 없이
 "저장소 불가"(재시도 또는 503) 로만 다룬다.
