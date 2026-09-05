@@ -36,7 +36,7 @@
 셸·표·KPI·카드·배지의 **구조와 인라인 스타일**(크기·간격·어느 토큰을 쓰는지)은 `docs/design/reference/`(App.tsx·ui.tsx·tabs/ 6개)가 진실이다. 컴파일 대상이 아닌 참조 원본이며 import 대응표는 그 폴더의 README 에 있다. 참조와 이 스펙 문구가 어긋나면 참조 파일이 우선이다. 참조에 없는 동작(003 입출금 배지·망 열, 005 실데이터 등)은 이 레포의 스펙대로 유지하고 겉모습만 참조를 따른다.
 - 표는 `<table>` 이 아니라 CSS grid. 탭마다 컬럼 폭 문자열 1개. 행 높이 40px. 헤더는 sticky·10.5px·uppercase·`letter-spacing 0.07em`, 정렬 활성 열은 `accent-300`.
 - hot 행 = accent 8% 배경 + 심볼 `accent-300`. stale 행 = `opacity 0.45`. 실패값 `–`.
-- 흐린 글자는 `--color-neutral-500`(보조)·`-600`(캡션·kicker) 램프를 쓴다. `color-mix` 로 재해석하지 않는다.
+- 흐린 글자는 `--color-neutral-500`(보조)·`-600`(캡션·kicker) 램프를 쓴다. `color-mix` 로 재해석하지 않는다. 이 규칙은 **글자색**에만 적용된다 — 배경·구분선 강조(hot 행 배경, 토글·칩 배경, 표 행 밑선, 타임라인 트랙)는 참조 원본과 `theme.css` 그대로 `color-mix` 를 쓴다.
 - 카드 = surface + `radius-md` + `shadow-sm`. KPI 스트립은 카드가 아닌 flex 스트립이고 블록 사이는 세로 그라디언트 선.
 - kicker·card·세로선·grid 표·거래소/상태 배지는 shared 에 한 번만 두고 탭에서 다시 정의하지 않는다. 참조 원본은 탭마다 중복돼 있으니 추출해서 쓴다.
 
@@ -194,5 +194,4 @@ curl -s localhost:5173 | grep -o "<title>[^<]*</title>"   # <title>트레이딩�
   - mock tick 에서 `stale` 항목은 값을 고정하고 age 만 +1.5(§3.6). 레이더의 usd 가 null 인 행도 수량은 감춰진 금액으로 계산한다(§3.10).
   - 숨김 탭은 `display:none`, 보이는 탭은 `display:contents` 로 셸의 세로 flex 에 직접 참여한다(§3.5-3 "숨김 탭은 레이아웃에 참여하지 않는다" 의 구현).
 - 남은 빚:
-  - `shared/ui.tsx` 의 흐린 글자 조각 `DIM_TEXT` 는 `color-mix` 로 만든다(수집 상태 탭이 쓴다) — §3.2 "램프를 쓴다" 와 어긋난다. 011 이 `--color-neutral-500` 램프로 바꿀 몫.
   - §5 에서 조작하지 않은 항목(§4-4·6·10·12)의 실제 조작 확인.
