@@ -53,7 +53,7 @@
 ### 3.3 실패 이력 — 구간(outage) 단위로만 기록
 정상 틱은 기록하지 않는다. 기록 단위는 **거래소별 연속 실패 구간** 1건이다.
 - 입력은 매 틱의 스트림 판정(§3.1)뿐이다. REST(마켓 목록·입출금) 실패는 이력에 넣지 않는다 — 시세는 WebSocket 으로만 오고 REST 는 목록·상태 보조라, 그 실패는 로그와 `/refresh` 응답의 `failures` 로만 드러난다.
-- 구간 1건: `exchange`, `kind`, `started_at`(첫 실패 틱 시각, epoch ms), `ended_at`(null = 진행 중), `count`(실패 틱 수), `last_failed_at`(가장 최근 실패 틱 시각), `status_code`, `message`(핸드셰이크 거부 응답 `body` 가 있으면 그 body, 없으면 커넥터 message. 300자 상한), `url`, `retry_after_sec`. 유일키 = (`exchange`, `started_at`).
+- 구간 1건: `exchange`, `kind`, `started_at`(첫 실패 틱 시각, epoch ms), `ended_at`(null = 진행 중), `count`(실패 틱 수), `last_failed_at`(가장 최근 실패 틱 시각), `status_code`, `message`(핸드셰이크 거부 응답 `body` 가 있으면 그 body, 없으면 커넥터 message. 줄바꿈(`\r\n`·`\n`·`\r`)은 공백 하나로 바꾼 뒤 300자로 자른다 — Influx line protocol 은 필드 값의 개행을 받지 않고, 로그 행도 한 줄이다. WAF 차단 페이지 같은 HTML 본문이 전형이다), `url`, `retry_after_sec`. 유일키 = (`exchange`, `started_at`).
 - 열기: 열린 구간이 없는 거래소가 실패하면 연다. 이미 열려 있으면 `count` 를 올리고 `last_failed_at`·`status_code`·`message`·`url`·`retry_after_sec` 는 **최신 실패로 덮어쓴다**.
 - `kind` 가 바뀌면(예: `timeout` → `rate_limit`) 현재 구간을 그 시각에 닫고 새 구간을 연다. 원인 전환이 이력에 남아야 한다.
 - 닫기: 그 거래소가 **연속 3틱 성공**하면 닫는다. `ended_at` 은 그 연속 성공의 **첫 성공 틱 시각**이다(잠깐 성공했다 바로 다시 실패하면 같은 구간이 이어진다 — 플래핑을 한 구간으로 본다).
@@ -65,7 +65,7 @@
 - measurement `collect_fail`. tag `exchange`·`kind`, time = `started_at`(초 정밀도), field `count`(int)·`last_failed_ts`(int epoch 초)·`status_code`(int, 없으면 0)·`message`(string)·`url`(string)·`retry_after_sec`(int, 없으면 0)·`ended_ts`(int epoch 초, **닫힐 때만** 쓴다). 한 구간 = 점 1개. 복원 시 0 은 null 로 돌린다.
 - 구간이 **열릴 때** 1점 쓰고, **닫힐 때** 같은 (tag, time) 으로 다시 써서 `ended_ts`·최종 `count` 등을 합친다. 매초 쓰지 않는다. 진행 중 구간의 `count` 는 메모리에만 있다.
 - 쓰기 실패는 로그 1줄 후 무시한다. 열 때 실패했어도 닫을 때의 쓰기가 점을 만든다.
-- **기동 시 복원**: `started_at` 이 최근 24시간인 `collect_fail` 점을 읽어 메모리 목록을 채운다(조회 range 의 기준은 점의 time = `started_at` — 24시간보다 전에 시작해 24시간 안에 끝난 구간은 복원되지 않는다). `ended_ts` 없는 점은 진행 중 구간으로 복원한다 — 첫 틱에서 성공하면 위 닫기 규칙대로 닫히고, 실패하면 이어서 센다. 복원된 진행 중 구간은 서버가 **꺼져 있던 시간을 포함해** 하나로 이어진다(`started_at` 부터 지금까지가 실패 구간이고 타임라인·성공률도 그렇게 본다) — 열 때 쓴 점에는 재기동 전 마지막 실패 시각이 없고(`last_failed_ts` 는 열 때·닫을 때만 쓴다) 꺼지기 전까지 실패 중이었으며 복구를 관측한 적도 없으므로 그 사이를 잘라내지 않는다. 복원된 진행 중 구간의 `count` 는 열 때 쓴 값에서 이어 센다(재기동 전 실패 횟수는 잃는다). Influx 가 없거나(`INFLUX_TOKEN` 미설정) 닿지 않거나 조회가 **3초**를 넘기면 빈 목록으로 시작하고 경고 로그 1줄. 복원은 틱 루프 시작 **전에** 끝난다.
+- **기동 시 복원**: `started_at` 이 최근 24시간인 `collect_fail` 점을 읽어 메모리 목록을 채운다(조회 range 의 기준은 점의 time = `started_at` — 24시간보다 전에 시작해 24시간 안에 끝난 구간은 복원되지 않는다). `ended_ts` 없는 점은 진행 중 구간으로 복원한다 — 첫 틱에서 성공하면 위 닫기 규칙대로 닫히고, 실패하면 이어서 센다. 같은 거래소에 `ended_ts` 없는 점이 둘 이상이면(닫힘 쓰기 유실) `started_at` 이 가장 늦은 것만 진행 중으로 두고 나머지는 `ended_at = last_failed_at` 으로 닫으며, 그 닫힘 점을 Influx 에 쓴다(안 쓰면 재기동마다 다시 진행 중으로 복원된다). 복원된 진행 중 구간은 서버가 **꺼져 있던 시간을 포함해** 하나로 이어진다(`started_at` 부터 지금까지가 실패 구간이고 타임라인·성공률도 그렇게 본다) — 열 때 쓴 점에는 재기동 전 마지막 실패 시각이 없고(`last_failed_ts` 는 열 때·닫을 때만 쓴다) 꺼지기 전까지 실패 중이었으며 복구를 관측한 적도 없으므로 그 사이를 잘라내지 않는다. 복원된 진행 중 구간의 `count` 는 열 때 쓴 값에서 이어 센다(재기동 전 실패 횟수는 잃는다). Influx 가 없거나(`INFLUX_TOKEN` 미설정) 닿지 않거나 조회가 **3초**를 넘기면 빈 목록으로 시작하고 경고 로그 1줄. 복원은 틱 루프 시작 **전에** 끝난다.
 - 서버 자체가 꺼져 있던 시간만으로는 구간을 **만들지** 않는다 — 기동 시 그 거래소에 복원된 진행 중 구간이 없으면 첫 실패 틱부터 센다. 지난 재기동 시각은 기록하지 않는다(현재 기동 시각만 응답에 싣는다).
 
 ### 3.5 `GET /health/collect`
@@ -105,7 +105,7 @@
 세로 카드 4개. `health` 가 null 이면 본문 가운데 `수집 상태 조회 전` 한 줄.
 1. **요약**. 상태 원(down 있으면 빨강, stale 있으면 주황, 아니면 초록) + 문구 `정상` / `일부 지연 — N곳` / `장애 — {이름들} 끊김`. `총 수집 마켓` = `markets` 합. `최근 1시간 수집 성공률` = 최상위 `successRate1h`(`99` 초과 기본색, 아니면 주황). `HH:mm:ss 기준` = `fetchedAt`. 우측 흐리게 `HH:mm 서버 시작` = `serverStartedAt`.
 2. **거래소 카드 3장(3열)**. 상단 상태색 테두리. 이름 + `● 수집 중` / `◌ 지연` / `✕ 끊김`. `마지막 수신` 경과 표기(ok 아니면 주황, 성공 0회면 `–`). `수집 마켓 N`. `성공률 1h`(`99` 이하 주황). `최근 에러` = `lastError` 의 `HH:mm:ss · {유형 라벨} · HTTP {statusCode}`(statusCode null 이면 생략), 없으면 `–`. 진행 중 구간이 있으면 빨강으로 `진행 중 · ×{count}회`.
-3. **타임라인 `실패 구간 · 최근 24시간`**. 거래소 3트랙. 막대 = 구간(`startedAt`~`endedAt`, 진행 중이면 `now` 까지), 색은 `banned`·`rate_limit` 빨강, 그 외 주황. 1분 미만 구간도 최소 2px. 호버 `HH:mm – HH:mm · {유형 라벨} · HTTP {statusCode} · ×{count}회`. 축 5눈금은 002 §3.9 와 같다. 좌측 끝에 `serverStartedAt` 위치 세로 점선(24시간 안이면).
+3. **타임라인 `실패 구간 · 최근 24시간`**. 거래소 3트랙. 막대 = 구간(`startedAt`~`endedAt`, 진행 중이면 `now` 까지), 색은 `banned`·`rate_limit` 빨강, 그 외 주황. 1분 미만 구간도 최소 2px. 호버 `HH:mm – HH:mm · {유형 라벨} · HTTP {statusCode} · ×{count}회`. 축 눈금 5개 — 24시간 창(`now − 24h` ~ `now`)을 5등분한 1/5·2/5·3/5·4/5 지점에 그 지점 시각의 `HH:00`(분은 버림), 우측 끝에 `지금`. 좌측 끝에 `serverStartedAt` 위치 세로 점선(24시간 안이면).
 4. **로그 `최근 실패 구간`**. 열 `시각 거래소 유형 내용`, `startedAt` 내림차순 최대 50행. 유형 칩 라벨: `timeout` 타임아웃, `network` 연결 실패, `rate_limit` rate limit, `banned` 차단, `unavailable` 거래소 오류, `bad_request` 요청 오류, `bad_response` 응답 오류, `stale_stream` 스트림 정체. 칩 색은 `banned`·`rate_limit` 빨강, 그 외 주황. 내용 = `HTTP {statusCode} · {message 앞 120자}` + ` · ×{count}회 · {지속}`(지속 = `endedAt − startedAt` 경과 표기, 진행 중이면 `진행 중`). `retryAfterSec` 있으면 ` · Retry-After {n}s`. 맨 끝(가장 오래된 쪽)에 회색 칩 `서버 시작` 행 1개 = `serverStartedAt`, 내용 `이력 복원 후 수집 시작`. 구간이 없으면 `최근 24시간 실패 없음`.
 
 ## 4. 검증
@@ -116,12 +116,13 @@ BE(네트워크 없음, 커넥터·Influx 는 fake):
 - 스트림 판정: 연결 + 최근 시세 메시지 → 성공. 핸드셰이크 429 → `rate_limit`, 연결 실패 → `network`, 30초 무수신 → `stale_stream`(url = WS URL, status_code null). 바이낸스 샤드 하나만 정체 → `stale_stream` 이고 message 에 샤드 번호.
 - 핸드셰이크 거부 응답의 본문이 실패의 `body`(앞 500자)에 실린다(세 거래소 모두). 본문이 없으면 null.
 - 추적기의 구간 `message` 는 `body` 가 있으면 body, 없으면 커넥터 message 다. 마켓 목록 REST 실패는 구간을 만들지 않는다(`/refresh` 의 `failures` 로만 보인다).
+- 줄바꿈이 든 거부 본문(HTML 차단 페이지)으로 구간이 열리고 닫히면 `message` 의 줄바꿈은 공백 하나이고, 열림·닫힘 두 점의 line protocol 출력에 개행이 없다.
 - 첫 실패에 구간이 열리고 `count` 1, 연속 실패에 `count` 만 오르고 `message` 는 최신으로 바뀐다.
 - 연속 성공 2회 뒤 실패면 같은 구간이 이어지고, 연속 성공 3회면 `ended_at` = 첫 성공 시각으로 닫힌다.
 - `kind` 가 바뀌면 이전 구간이 닫히고 새 구간이 열린다.
 - 24시간 지난 닫힌 구간은 목록에서 빠지고, 진행 중 구간은 남는다.
 - 구간 열림·닫힘에 Influx 쓰기가 각 1회씩 호출되고, 연속 실패 중에는 호출되지 않는다. 쓰기 예외는 삼켜진다. 닫힘 쓰기에 `ended_ts`·`last_failed_ts`·최종 `count` 가 실린다.
-- 기동 시 fake Influx 의 24시간 점이 메모리로 복원되고 `ended_ts` 없는 점은 진행 중이 된다. Influx 없음/예외/3초 초과면 빈 목록으로 기동한다. 기동 전에 시작한 복원된 진행 중 구간은 `started_at` 부터 now 까지 성공률 창과 겹치고(꺼져 있던 시간 포함), 기동 후 닫히면 `endedAt` 은 기동 후의 첫 성공 틱이다.
+- 기동 시 fake Influx 의 24시간 점이 메모리로 복원되고 `ended_ts` 없는 점은 진행 중이 된다. Influx 없음/예외/3초 초과면 빈 목록으로 기동한다. 기동 전에 시작한 복원된 진행 중 구간은 `started_at` 부터 now 까지 성공률 창과 겹치고(꺼져 있던 시간 포함), 기동 후 닫히면 `endedAt` 은 기동 후의 첫 성공 틱이다. 같은 거래소에 진행 중 점이 둘이면 최신만 진행 중이고 옛 점은 `ended_at = last_failed_at` 으로 닫혀 그 닫힘 점(`ended_ts`)이 Influx 에 쓰인다.
 - `GET /health/collect`: 거래소 3곳 고정 순서, `state` 경계(4.9초 ok · 5초 stale · 60초 down · 성공 0회 down), `successRate1h` 가 창과 겹친 초로 계산되고 창 밖 구간은 무시된다, `outages` 내림차순, 진행 중 구간이 `openOutage` 와 `outages` 양쪽에 있다.
 - `GET /health` 는 여전히 `{"status":"ok","version":…}` 이다. `POST /refresh` 응답 키는 바뀌지 않는다.
 - 수집 상태 탭의 유형 칩 라벨에 `stale_stream`(`스트림 정체`)이 있다 — FE `OutageKind` 유니온에 값이 있어야 빌드된다.
@@ -135,7 +136,7 @@ BE(네트워크 없음, 커넥터·Influx 는 fake):
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 181 files left unchanged / 414 passed (2026-09-05 — 핸드셰이크 거부 body 전파 8건·추적기 body 우선 message 2건·REST 실패 무구간 1건 포함)
+# All checks passed! / 181 files left unchanged / 416 passed (2026-09-05 — 핸드셰이크 거부 body 전파 8건·추적기 body 우선 message 2건·REST 실패 무구간 1건·줄바꿈 본문 한 줄화 1건·복원 중복 진행 중 점 닫힘 쓰기 1건 포함)
 cd web && npm run lint && npm run build
 # oxlint 경고 0 / tsc -b + vite build 성공 (index-*.js 255 kB)
 # 실서버(로컬, INFLUX_TOKEN·S3_BUCKET 없음, Redis 없음 — :8000 대신 빈 포트 :8041, 끝나고 kill)
@@ -168,7 +169,8 @@ EC2 에서 확인 필요(이 망에서 못 돌린 수동 항목): 기동 몇 초
   - §3.6 의 결정 그대로: `exName` 은 `shared/format.ts`, `HealthData` 는 `shared/types.ts`(기능 간 import 금지).
   - Influx 쓰기는 틱 안에서 동기 호출하지 않고 **큐 + 별도 태스크**가 순서대로 1점씩 쓴다 — Influx 가 죽으면 쓰기 1회가 클라이언트 타임아웃까지 매달려 1초 틱을 막기 때문. 순서를 지키는 이유는 열림 점이 닫힘 점 뒤에 도착하면 `count` 가 1 로 되돌아가기 때문.
   - 복원 3초 상한은 `asyncio.wait_for` — 스레드의 실제 조회는 Influx 클라이언트 타임아웃까지 돌 수 있지만 기동은 막지 않는다. 복원 range 는 §3.4 대로 `started_at` 기준 `-24h` 다.
-  - 복원 시 같은 거래소에 진행 중 점이 둘 이상이면(닫힘 쓰기 유실) 최신만 진행 중으로 두고 나머지는 `ended_at = last_failed_at` 으로 닫는다. Influx 의 `url` 빈 문자열은 복원 시 null 로 돌린다.
+  - 복원 시 같은 거래소에 진행 중 점이 둘 이상이면(닫힘 쓰기 유실) 최신만 진행 중으로 두고 나머지는 `ended_at = last_failed_at` 으로 닫아 그 닫힘 점을 쓴다(§3.4 에 확정): 선택지는 (a) 메모리에서만 닫기, (b) 닫힘 점도 쓰기. (a) 는 Influx 에 `ended_ts` 없는 점이 남아 24시간 안의 재기동마다 다시 진행 중으로 복원된다 — (b) 를 택했다. Influx 의 `url` 빈 문자열은 복원 시 null 로 돌린다.
+  - 구간 `message` 의 줄바꿈은 공백 하나로 바꾼다(§3.3 에 확정): 선택지는 (a) line protocol 직렬화에서 개행을 `\n` 두 글자로 이스케이프, (b) 추적기에서 한 줄로 정규화. Influx 는 문자열 필드의 `\n` 을 되돌리지 않아 (a) 는 복원된 message 가 메모리와 달라지고, 로그 행은 어차피 한 줄이다 — (b) 를 택했다. 개행이 그대로 가면 Influx 가 그 배치를 400 으로 거부해 열림·닫힘 점이 둘 다 사라진다.
   - 문서에 없는 HTTP 상태(3xx 등)는 `bad_response`. `Retry-After` 는 세 커넥터 모두 파싱한다(스펙은 바이낸스만 명시). 업비트·빗썸 핸드셰이크 403 은 `bad_request`(`banned` 로 보는 403 은 바이낸스 WAF 뿐 — 001 §3.8 과 일치).
   - 첫 연결 시도의 결과가 아직 없는 스트림은 판정하지 않는다(001 §3.8) — 이 망처럼 마켓 목록을 못 받아 구독이 없으면 구간이 생기지 않고 `state` 만 `down` 이다.
   - 응답 키 `successRate1h`: 공용 `camelize_json` 이 `successRate1H` 를 만들어 health 모델은 pydantic alias 로 직접 camelCase 를 만든다.

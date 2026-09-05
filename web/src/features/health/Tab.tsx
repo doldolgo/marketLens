@@ -125,7 +125,7 @@ function Timeline({ data, now }: { data: HealthData; now: number }) {
           </div>
         ))}
       </div>
-      {/* 축 5눈금: HH:00 ×4 + 지금 (002 §3.9 와 같다) */}
+      {/* 축 눈금 5개 — 24시간 창을 5등분한 1/5·2/5·3/5·4/5 지점의 HH:00 + 우측 끝 지금 (§3.8 3번) */}
       <div style={{ position: 'relative', height: 16, marginTop: 6, marginLeft: 94, fontSize: 10, color: DIM_TEXT }}>
         {[1, 2, 3, 4].map((i) => {
           const t = new Date(now - (1 - i / 5) * DAY_MS)
