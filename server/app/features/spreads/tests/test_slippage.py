@@ -9,6 +9,7 @@ import pytest
 
 from app.core.live_store import LiveStore
 from app.core.models import Row
+from app.core.ticks import build_tick
 from app.features.spreads.tests.helpers import make_client, make_row, seed_rows
 
 NOW = datetime.now(UTC)
@@ -187,3 +188,17 @@ def test_boundary_notional_values_are_accepted() -> None:
         resp = make_client(store).get(f"/spreads?notional={value}")
         assert resp.status_code == 200
         assert resp.json()["notional"] == float(value)
+
+
+def test_net_values_differ_from_stored_raw_by_the_deducted_width() -> None:
+    # 응답 fwd·rev 는 저장 계층(009 틱 → 005 premium)이 쓰는 원값과 다르다 —
+    # 같은 저장소로 만든 틱의 fwd 는 응답의 fwd + slipFwd 와 같다 (§4)
+    store = seed(LiveStore())
+    row = only_row(store)
+    [point] = build_tick(store, ts=1_787_000_000, dw_failed=()).rows
+    assert (point.dom, point.fx, point.base) == ("upbit", "binance", "BTC")
+    # 차감이 0 이 아닌 시드라 두 값이 실제로 다르다
+    assert row["slipFwd"] > 0 and row["slipRev"] > 0
+    assert point.fwd != pytest.approx(row["fwd"])
+    assert point.fwd == pytest.approx(row["fwd"] + row["slipFwd"])
+    assert point.rev == pytest.approx(row["rev"] + row["slipRev"])
