@@ -128,7 +128,7 @@ core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payl
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 170 files left unchanged / 293 passed, 1 warning in 1.44s  (2026-09-05)
+# All checks passed! / 170 files left unchanged / 295 passed, 1 warning in 1.51s  (2026-09-05)
 # 001 몫: tests/test_store.py test_quotes.py test_stream_upbit.py test_stream_bithumb.py test_ticks.py test_universe.py test_collect_trigger.py test_health.py test_rows.py (§4 항목당 1개 이상)
 
 cd server && .venv/bin/python -m uvicorn app.main:app --port 8041   # 로컬 스모크 (8000 은 다른 프로세스가 점유할 수 있어 빈 포트)
@@ -171,4 +171,5 @@ curl -s localhost:8041/health/collect  # 거래소 3곳, 기동 직후 state "do
   - 012 전에는 바이낸스 심볼이 없어 우주가 비고 `/spreads` 는 404 다(국내 행도 저장되지 않는다). 012 가 `ForeignSymbolSource` 를 꽂으면 풀린다.
   - 입출금 REST 응답 본문(006 §3.5·010 §3.1)은 아직 원문 싱크에 기록되지 않는다 — `WalletStatusService` 가 `record` 를 주입받는 자리가 없다. 006 세션이 `record=` 를 받아 조회 3종에서 부르고 `main.py` 가 꽂는다. 지금 원문 싱크 밖에 남은 REST 경로는 이것뿐이다.
   - 004 스펙 §4 "깊이 반영" 문구는 004 세션 몫으로 남긴다(`docs/specs/004-analysis.md:§7 깊이 반영 세션 — depth_* 우선 서술 → 행의 asks/bids 만 존재`).
+  - `docs/specs/012-binance-stream.md:§2 — "core/connectors/ 의 바이낸스 스트림 커넥터" → 실제 디렉터리는 core/streams/ (architecture.md 현재 구조도 core/streams/binance.py)`. 012 담당 세션 몫.
   - `server/build/`·`server/marketlens_server.egg-info/` 추적 정리는 별도 chore(editable 설치가 egg-info 를 다시 쓴다).

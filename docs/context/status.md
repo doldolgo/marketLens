@@ -8,7 +8,7 @@
 
 | 기능 | server | web | 비고 |
 |---|---|---|---|
-| collect | 업비트·빗썸 WS 실시간 갱신·마켓 우주 10분·1초 틱·/health | - | 바이낸스는 012. 원문 싱크·틱 인계는 무동작 기본 구현(010·009 전) |
+| collect | 업비트·빗썸 WS 실시간 갱신·마켓 우주 10분·1초 틱·/health | - | 바이낸스는 012 |
 | web-shell | - | 셸·KPI·mock 탭 3종(gap·pp·flow) 동작 | spreads/history 탭은 placeholder |
 | spreads | `/spreads`·`/refresh` 동작, `notional` 규모로 호가를 걷어 슬리피지 차감, USDT 시세 미갱신 경고 | 실데이터 탭·1초 폴링·규모 세그먼트 | 행 17키, `spark` 는 009 몫 |
 | analysis | 6개 엔드포인트 동작 | - | HTTP 계약 camelCase |
