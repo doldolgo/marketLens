@@ -29,6 +29,7 @@ QUEUE_LIMIT_BYTES = 256 * 1024 * 1024  # 대기열 상한 — 거래소 합산 �
 LOOP_INTERVAL_SEC = 1.0  # 닫기 회차 주기
 RETRY_INTERVAL_SEC = 1.0  # 실패한 머리 객체를 워커가 다시 시도하는 간격 (§3.6)
 DRAIN_DEADLINE_SEC = 5.0  # 종료 시 대기열 비우기 합계 상한 (§3.6)
+GZIP_LEVEL = 6  # 32MB 에 0.3초 안팎 — 레벨 9 는 3배 넘게 걸리고 이득은 1% 미만 (§3.5)
 KEY_PREFIX = "raw"
 WORKER_NAME = "raw-archive-upload"
 
@@ -46,12 +47,17 @@ def _now_ms() -> int:
 # --- 레코드 한 줄 (§3.4) ---
 
 
+def _reject_constant(name: str) -> None:
+    """`NaN`·`Infinity` 는 표준 JSON 이 아니다 — 그대로 붙이면 줄 전체가 표준 파서에서 깨진다 (§3.4)."""
+    raise ValueError(f"non-standard JSON constant {name}")
+
+
 def _is_verbatim_json(payload: str) -> bool:
-    """원문을 그대로 이어 붙여도 되는가 — 유효한 JSON 이고 최상위가 객체·배열이며 줄바꿈이 없다."""
+    """원문을 그대로 이어 붙여도 되는가 — 표준 JSON 이고 최상위가 객체·배열이며 줄바꿈이 없다."""
     if "\n" in payload or "\r" in payload:
         return False
     try:
-        value = json.loads(payload)
+        value = json.loads(payload, parse_constant=_reject_constant)
     except ValueError:
         return False
     return isinstance(value, dict | list)
@@ -77,8 +83,8 @@ def object_key(exchange: str, first_received_at_ms: int) -> str:
 
 
 def pack(lines: list[bytes]) -> bytes:
-    """줄들을 순서대로 이어 gzip — mtime 0 고정이라 같은 입력은 바이트까지 같다 (§3.5)."""
-    return gzip.compress(b"".join(lines), mtime=0)
+    """줄들을 순서대로 이어 gzip — 레벨·mtime 0 고정이라 같은 입력은 바이트까지 같다 (§3.5)."""
+    return gzip.compress(b"".join(lines), compresslevel=GZIP_LEVEL, mtime=0)
 
 
 # --- 거래소별 버퍼와 닫힌 객체 (§3.5) ---
@@ -204,10 +210,20 @@ class RawArchive:
             return 0
         # 회차가 취소돼도(종료) gzip·넣기는 끝까지 간다 — 닫힌 버퍼는 이미 버퍼 목록에서 빠졌으므로
         # 여기서 잃으면 되돌릴 수 없다. aclose 가 이 future 를 기다린다.
-        self._packing = asyncio.ensure_future(
-            asyncio.to_thread(self._pack_and_enqueue, closed)
-        )
-        await asyncio.shield(self._packing)
+        try:
+            self._packing = asyncio.ensure_future(
+                asyncio.to_thread(self._pack_and_enqueue, closed)
+            )
+            await asyncio.shield(self._packing)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # 스레드 실행기 종료 등 — 이미 닫힌 줄들은 대기열에 이르지 못했다. 잃은 양을 로그에 남긴다 (§3.6)
+            logger.exception(
+                "원문 닫기 회차 예외 — 닫힌 객체 %d개(%d줄)를 잃는다, 다음 회차를 이어간다",
+                len(closed),
+                sum(len(item.lines) for item in closed),
+            )
         return len(closed)
 
     def _close_due(self, now_ms: int, *, force: bool) -> list[_Closed]:

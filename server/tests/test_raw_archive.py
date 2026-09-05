@@ -127,13 +127,18 @@ def test_json_payload_is_embedded_byte_for_byte(payload: str) -> None:
         "123",  # 스칼라 JSON 은 객체·배열이 아니다 — 문자열로 감싼다
         '"quoted"',
         '{\n  "pretty": true\n}',  # 줄바꿈이 든 JSON — 한 레코드 = 한 줄을 지키려 감싼다
+        '{"a": NaN, "b": Infinity}',  # 비표준 상수 — 그대로 붙이면 줄 전체가 표준 파서에서 깨진다
     ],
 )
 def test_non_json_payload_is_wrapped_as_string_verbatim(payload: str) -> None:
     line = format_line("upbit", "rest:/v1/market/all", T0, payload)
     assert line.count(b"\n") == 1 and line.endswith(b"\n")
-    parsed = json.loads(line)
+    parsed = json.loads(line, parse_constant=_reject_constant)  # 표준 파서처럼 읽는다
     assert isinstance(parsed["raw"], str) and parsed["raw"] == payload
+
+
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"non-standard JSON constant {name}")
 
 
 # --- 버퍼와 객체 (§3.5) ---
@@ -364,17 +369,22 @@ async def test_loop_survives_a_round_exception_and_keeps_closing(
     monkeypatch.setattr(raw_archive.asyncio, "to_thread", flaky)
     archive, s3, clock = build()
     archive.record("upbit", WS, T0, "{}")
-    clock.now = T0 + MINUTE
+    archive.record("upbit", WS, T0 + 1, "{}")
+    archive.record("bithumb", WS, T0 + 2, "{}")
+    clock.now = T0 + MINUTE + 2
     with caplog.at_level(logging.ERROR, logger="marketlens.raw_archive"):
         archive.start()
         await settled(lambda: calls >= 1)
         await asyncio.sleep(0.02)  # 예외 뒤에도 회차가 몇 번 더 돈다
     errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
-    assert errors == ["원문 닫기 회차 예외 — 다음 회차를 이어간다"]
+    assert errors == [
+        "원문 닫기 회차 예외 — 닫힌 객체 2개(3줄)를 잃는다, 다음 회차를 이어간다"
+    ]
+    assert archive.buffered("upbit") == 0 and archive.buffered("bithumb") == 0
     archive.record("upbit", WS, clock.now, "{}")  # 다음 60초 버퍼
     clock.now += MINUTE
     await settled(lambda: len(s3.puts) == 1)  # 살아 있는 회차가 닫아 올렸다
-    assert s3.puts[0][0].endswith("T092100.123Z.jsonl.gz")
+    assert s3.puts[0][0].endswith("T092100.125Z.jsonl.gz")
     await archive.aclose()
 
 
