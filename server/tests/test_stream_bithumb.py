@@ -7,7 +7,13 @@ import httpx
 import pytest
 
 from app.core.errors import ExchangeApiError
-from app.core.streams.bithumb import KST_OFFSET_MS, WS_URL, BithumbStream
+from app.core.streams.bithumb import (
+    KST_OFFSET_MS,
+    MARKETS_PATH,
+    REST_URL,
+    WS_URL,
+    BithumbStream,
+)
 from tests.conftest import RawLog
 from tests.stream_fakes import (
     Clock,
@@ -248,3 +254,23 @@ async def test_fetch_markets_200_with_error_body_is_failure() -> None:
             _client(lambda r: httpx.Response(200, json=text_err))
         )
     assert info2.value.kind == "bad_response"
+    assert info.value.url == info2.value.url == REST_URL + MARKETS_PATH
+
+
+async def test_fetch_markets_connect_error_is_network() -> None:
+    # httpx 전송 예외(DNS·연결 거부) → network, status_code 없음, url 은 REST URL (011 §3.2·§4)
+    stream, _, _, raw, _, _ = build([])
+
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down", request=request)
+
+    with pytest.raises(ExchangeApiError) as info:
+        await stream.fetch_markets(_client(down))
+    exc = info.value
+    assert (exc.kind, exc.status_code, exc.body, exc.url) == (
+        "network",
+        None,
+        None,
+        REST_URL + MARKETS_PATH,
+    )
+    assert raw.entries == []

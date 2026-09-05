@@ -19,7 +19,9 @@ from app.core.errors import ExchangeApiError, ExchangeTimeoutError
 from app.core.live_store import LiveStore
 from app.core.streams.binance import (
     CONTROL_INTERVAL,
+    EXCHANGE_INFO_PATH,
     PARAMS_PER_MESSAGE,
+    REST_URL,
     SHARDS,
     WS_URL,
     BinanceStream,
@@ -302,7 +304,27 @@ async def test_exchange_info_non_200_is_classified_by_binance_rule(
         7,
     )
     assert exc.body is not None and len(exc.body) == 500
+    assert exc.url == REST_URL + EXCHANGE_INFO_PATH
     assert stream.bases() == set()  # 실패 시 직전 목록 유지
+
+
+async def test_exchange_info_connect_error_is_network() -> None:
+    # httpx 전송 예외(DNS·연결 거부) → network, status_code 없음, url 은 REST URL (011 §3.2·§4)
+    stream = BinanceStream(store=LiveStore(), sink=store_with_universe(set())[1])
+
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down", request=request)
+
+    with pytest.raises(ExchangeApiError) as info:
+        await stream.refresh(_client(down))
+    exc = info.value
+    assert (exc.kind, exc.status_code, exc.body, exc.url) == (
+        "network",
+        None,
+        None,
+        REST_URL + EXCHANGE_INFO_PATH,
+    )
+    assert stream.bases() == set()
 
 
 async def test_exchange_info_429_without_retry_after_leaves_it_null() -> None:
@@ -323,7 +345,11 @@ async def test_exchange_info_timeout_and_bad_json() -> None:
 
     with pytest.raises(ExchangeTimeoutError) as info:
         await stream.refresh(_client(slow))
-    assert (info.value.kind, info.value.http_status) == ("timeout", 504)
+    assert (info.value.kind, info.value.http_status, info.value.url) == (
+        "timeout",
+        504,
+        REST_URL + EXCHANGE_INFO_PATH,
+    )
     with pytest.raises(ExchangeApiError) as bad:
         await stream.refresh(_client(lambda r: httpx.Response(200, text="<html>")))
     assert bad.value.kind == "bad_response"

@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from app.core.errors import ExchangeApiError, ExchangeTimeoutError
-from app.core.streams.upbit import WS_URL, UpbitStream
+from app.core.streams.upbit import MARKETS_PATH, REST_URL, WS_URL, UpbitStream
 from tests.conftest import RawLog
 from tests.stream_fakes import (
     Clock,
@@ -386,6 +386,7 @@ async def test_fetch_markets_non_200_is_exchange_api_error(
     )
     assert exc.body is not None and len(exc.body) == 500
     assert exc.retry_after_sec == 7
+    assert exc.url == REST_URL + MARKETS_PATH
 
 
 async def test_fetch_markets_timeout_and_bad_json() -> None:
@@ -396,9 +397,32 @@ async def test_fetch_markets_timeout_and_bad_json() -> None:
 
     with pytest.raises(ExchangeTimeoutError) as info:
         await stream.fetch_markets(_client(slow))
-    assert (info.value.kind, info.value.http_status) == ("timeout", 504)
+    assert (info.value.kind, info.value.http_status, info.value.url) == (
+        "timeout",
+        504,
+        REST_URL + MARKETS_PATH,
+    )
     with pytest.raises(ExchangeApiError) as bad:
         await stream.fetch_markets(
             _client(lambda r: httpx.Response(200, text="<html>"))
         )
     assert bad.value.kind == "bad_response"
+
+
+async def test_fetch_markets_connect_error_is_network() -> None:
+    # httpx 전송 예외(DNS·연결 거부) → network, status_code 없음, url 은 REST URL (011 §3.2·§4)
+    stream, _, _, raw, _, _ = build([])
+
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down", request=request)
+
+    with pytest.raises(ExchangeApiError) as info:
+        await stream.fetch_markets(_client(down))
+    exc = info.value
+    assert (exc.kind, exc.status_code, exc.body, exc.url) == (
+        "network",
+        None,
+        None,
+        REST_URL + MARKETS_PATH,
+    )
+    assert raw.entries == []  # 응답 본문이 없으니 원문도 없다
