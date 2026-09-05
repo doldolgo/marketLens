@@ -67,23 +67,36 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     sink = QuoteSink(store)
 
     # 원문 아카이브(010) — S3_BUCKET 이 없으면 비활성(기록 함수는 무동작), 앱은 뜬다.
-    # HeadBucket 실패는 에러 1줄뿐이다 — 자격증명이 없어도 뜨고, 이후 실패는 회차 로그로만.
+    # 클라이언트 생성 실패도 비활성 + 에러 1줄. HeadBucket 실패는 에러 1줄뿐이다 — 자격증명이
+    # 없어도 뜨고, 이후 실패는 업로드 워커 로그로만.
     archive: RawArchive | None = None
     record = noop_record
-    if settings.s3_bucket:
-        uploader = S3Uploader(bucket=settings.s3_bucket, region=settings.s3_region)
-        if not await asyncio.to_thread(uploader.head_bucket):
+    uploader: S3Uploader | None = None
+    if not settings.s3_bucket:
+        logger.warning(
+            "S3_BUCKET 이 없어 원문 아카이브를 쓰지 않는다 — 원문은 남지 않는다"
+        )
+    else:
+        try:
+            uploader = S3Uploader(bucket=settings.s3_bucket, region=settings.s3_region)
+        except Exception as exc:
             logger.error(
-                "S3 버킷 %s 접근 실패 — 원문 업로드는 회차마다 다시 시도한다",
+                "S3 클라이언트 생성 실패 (region=%s) — 원문 아카이브를 쓰지 않는다: %r",
+                settings.s3_region,
+                exc,
+            )
+    if uploader is not None:
+        try:
+            await asyncio.to_thread(uploader.head_bucket)
+        except Exception as exc:
+            logger.error(
+                "S3 버킷 %s 접근 실패 — 원문 업로드는 워커가 객체마다 다시 시도한다: %r",
                 settings.s3_bucket,
+                exc,
             )
         archive = RawArchive(uploader=uploader)
         record = archive.record
         archive.start()
-    else:
-        logger.warning(
-            "S3_BUCKET 이 없어 원문 아카이브를 쓰지 않는다 — 원문은 남지 않는다"
-        )
 
     # 입출금 상태 60초 캐시(006) — 키 없는 거래소는 unknown, 빗썸은 키 불필요
     wallet = WalletStatusService(

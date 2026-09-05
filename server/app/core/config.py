@@ -6,6 +6,7 @@
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 APP_NAME = "MarketLens Backend"
@@ -42,6 +43,14 @@ class Settings(BaseSettings):
     upbit_secret_key: str | None = None
     binance_api_key: str | None = None
     binance_secret_key: str | None = None
+
+    @field_validator("s3_region", mode="before")
+    @classmethod
+    def _blank_region_is_default(cls, value: object) -> object:
+        """`S3_REGION=` 처럼 비워 두면 기본 리전이다 — 빈 문자열은 boto3 가 즉시 거부한다 (010 §3.2)."""
+        if isinstance(value, str) and not value.strip():
+            return "ap-northeast-2"
+        return value
 
 
 @lru_cache
