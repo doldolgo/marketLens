@@ -22,7 +22,7 @@ marketlens/
     specs/                    기능별 스펙 (항상 최신으로 유지한다 — 과거 버전은 git 에 남는다)
       TEMPLATE.md
       NNN-<name>.md
-    design/                   디자인 파일 원본 (theme.css·index.css) — 스펙은 값을 옮겨 적지 않고 이 파일을 복사하게 한다
+    design/                   디자인 원본 — theme.css·index.css(토큰) + reference/(App.tsx·ui.tsx·tabs/ — 화면 구조). 스펙은 값을 옮겨 적지 않고 이 파일을 복사하게 한다
     runbooks/
       execute-spec.md         실행 세션에 줄 프롬프트
       drift-check.md          문서↔코드 어긋남 점검 절차
