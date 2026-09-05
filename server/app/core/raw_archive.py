@@ -185,10 +185,14 @@ class RawArchive:
         self._task = asyncio.create_task(self.run())
 
     async def run(self) -> None:
-        """매초 닫기 회차. 회차 안 예외는 밖으로 나오지 않는다."""
+        """매초 닫기 회차. 회차 안 예외는 밖으로 나오지 않는다 — 태스크가 죽으면 기록은 계속 붙는데
+        버퍼가 닫히지 않아 메모리가 무한히 자라므로, 예상 밖 예외는 로그 1줄로 삼키고 다음 회차를 돈다."""
         while True:
             await self._sleep(LOOP_INTERVAL_SEC)
-            await self.run_once()
+            try:
+                await self.run_once()
+            except Exception:
+                logger.exception("원문 닫기 회차 예외 — 다음 회차를 이어간다")
 
     async def run_once(self, *, force_close: bool = False) -> int:
         """회차 1번 — 닫는 조건을 만족한 버퍼(force 면 전부)를 닫고 스레드에서 gzip 해 대기열에 넣는다.
@@ -291,8 +295,13 @@ class RawArchive:
                 obj.key,
                 exc,
             )
-            if not self._closing:
-                self._changed.wait(self._retry_interval_sec)
+            # 간격이 다 지나야 다시 시도한다 — 다른 객체가 들어오는 notify 에 앞당기지 않고, 종료만 끊는다
+            deadline = time.monotonic() + self._retry_interval_sec
+            while not self._closing:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._changed.wait(remaining)
 
     def _after_success(self, obj: RawObject) -> None:
         with self._changed:

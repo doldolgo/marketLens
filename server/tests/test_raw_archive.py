@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.core import raw_archive
 from app.core.config import Settings
+from app.core.contracts import noop_record
 from app.core.raw_archive import WORKER_NAME, RawArchive, format_line, pack
 from app.core.streams.binance import BinanceStream
 from app.core.streams.upbit import UpbitStream
@@ -40,10 +41,13 @@ class FakeS3:
 
     def __init__(self) -> None:
         self.puts: list[tuple[str, bytes]] = []
+        self.attempts = 0  # 실패한 시도까지 센다
         self.fail = False
         self._lock = threading.Lock()
 
     def put(self, key: str, body: bytes) -> None:
+        with self._lock:
+            self.attempts += 1
         if self.fail:
             raise RuntimeError("s3 down")
         with self._lock:
@@ -343,6 +347,60 @@ async def test_uploader_exception_never_reaches_record_and_loop_continues() -> N
     await archive.aclose()
 
 
+async def test_loop_survives_a_round_exception_and_keeps_closing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """닫기 회차 한 번이 예외로 끝나도(gzip 스레드 실행 실패) 로그 1줄 뒤 다음 회차가 돈다 (§3.6)."""
+    real_to_thread = asyncio.to_thread
+    calls = 0
+
+    async def flaky(fn: Any, *args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("cannot schedule new futures after shutdown")
+        return await real_to_thread(fn, *args, **kwargs)
+
+    monkeypatch.setattr(raw_archive.asyncio, "to_thread", flaky)
+    archive, s3, clock = build()
+    archive.record("upbit", WS, T0, "{}")
+    clock.now = T0 + MINUTE
+    with caplog.at_level(logging.ERROR, logger="marketlens.raw_archive"):
+        archive.start()
+        await settled(lambda: calls >= 1)
+        await asyncio.sleep(0.02)  # 예외 뒤에도 회차가 몇 번 더 돈다
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert errors == ["원문 닫기 회차 예외 — 다음 회차를 이어간다"]
+    archive.record("upbit", WS, clock.now, "{}")  # 다음 60초 버퍼
+    clock.now += MINUTE
+    await settled(lambda: len(s3.puts) == 1)  # 살아 있는 회차가 닫아 올렸다
+    assert s3.puts[0][0].endswith("T092100.123Z.jsonl.gz")
+    await archive.aclose()
+
+
+async def test_retry_waits_the_full_interval_even_when_new_objects_arrive() -> None:
+    """실패 재시도 간격 안에 다른 객체가 들어와도 머리 객체의 재시도는 앞당겨지지 않는다 (§3.6)."""
+    archive, s3, clock = build(retry_interval_sec=0.5)
+    s3.fail = True
+    archive.record("upbit", WS, T0, "{}")
+    clock.now = T0 + MINUTE
+    assert await archive.run_once() == 1
+    await settled(lambda: s3.attempts == 1)
+    first_attempt = time.monotonic()
+    for _ in range(3):  # 0.5초 안에 다른 거래소 객체 3개가 대기열에 들어온다
+        archive.record("bithumb", WS, clock.now, "{}")
+        clock.now += MINUTE
+        assert await archive.run_once() == 1
+        await asyncio.sleep(0.04)
+    assert archive.pending == 4 and s3.attempts == 1
+    await settled(lambda: s3.attempts >= 2)
+    assert time.monotonic() - first_attempt >= 0.4
+    s3.fail = False
+    await settled(lambda: archive.pending == 0)
+    assert [k.split("/")[1] for k, _ in s3.puts][0] == "exchange=upbit"
+    await archive.aclose()
+
+
 async def test_aclose_closes_open_buffers_and_uploads_once() -> None:
     archive, s3, clock = build()
     archive.start()
@@ -497,8 +555,21 @@ async def test_replaying_a_binance_depth_line_rebuilds_the_same_row() -> None:
 # --- 기동 (§3.2·§3.3) ---
 
 
-def _boot(monkeypatch: pytest.MonkeyPatch, **settings: Any) -> Any:
-    """lifespan 을 실제로 돌린다 — 소켓·REST 전부 거부, Redis 불달. 원문 아카이브 배선만 본다."""
+def _boot(
+    monkeypatch: pytest.MonkeyPatch, **settings: Any
+) -> tuple[Any, dict[str, Any]]:
+    """lifespan 을 실제로 돌린다 — 소켓·REST 전부 거부, Redis 불달. 원문 아카이브 배선만 본다.
+
+    앱과 함께, 스트림에 넘겨진 기록 함수(`wired["record"]`)를 돌려준다.
+    """
+    wired: dict[str, Any] = {}
+
+    class CapturingUpbit(UpbitStream):
+        def __init__(self, **kw: Any) -> None:
+            wired["record"] = kw["record"]
+            super().__init__(**kw)
+
+    monkeypatch.setattr("app.main.UpbitStream", CapturingUpbit)
 
     async def refuse(url: str) -> Any:
         raise OSError("refused")
@@ -518,7 +589,7 @@ def _boot(monkeypatch: pytest.MonkeyPatch, **settings: Any) -> Any:
         "app.main.get_settings",
         lambda: Settings(_env_file=None, redis_url="redis://127.0.0.1:1/0", **settings),
     )
-    return create_app()
+    return create_app(), wired
 
 
 def test_boot_without_bucket_disables_archive_and_keeps_health_200(
@@ -529,13 +600,14 @@ def test_boot_without_bucket_disables_archive_and_keeps_health_200(
             raise AssertionError("S3_BUCKET 없이 S3 클라이언트가 만들어졌다")
 
     monkeypatch.setattr("app.main.S3Uploader", NeverBuilt)
-    app = _boot(monkeypatch)
+    app, wired = _boot(monkeypatch)
     with (
         caplog.at_level(logging.WARNING, logger="marketlens.main"),
         TestClient(app) as client,
     ):
         assert client.get("/health").status_code == 200
     assert any("S3_BUCKET 이 없어" in r.getMessage() for r in caplog.records)
+    assert wired["record"] is noop_record  # 스트림에는 무동작 기록 함수가 꽂힌다
 
 
 def test_boot_with_bucket_but_no_credentials_still_starts_with_one_error_line(
@@ -554,7 +626,7 @@ def test_boot_with_bucket_but_no_credentials_still_starts_with_one_error_line(
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
     monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "none"))
     monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "none"))
-    app = _boot(monkeypatch, s3_bucket="marketlens-test-bucket")
+    app, wired = _boot(monkeypatch, s3_bucket="marketlens-test-bucket")
     with caplog.at_level(logging.ERROR), TestClient(app) as client:
         assert client.get("/health").status_code == 200
         time.sleep(0.05)
@@ -562,9 +634,12 @@ def test_boot_with_bucket_but_no_credentials_still_starts_with_one_error_line(
     errors = [
         r.getMessage()
         for r in caplog.records
-        if r.levelno == logging.ERROR and "접근 실패" in r.getMessage()
+        if r.levelno == logging.ERROR and r.name == "marketlens.main"
     ]
     assert len(errors) == 1 and "S3 버킷 marketlens-test-bucket 접근 실패" in errors[0]
+    assert (
+        wired["record"] is not noop_record
+    )  # 아카이브는 켜져 있다 — 실패는 워커 로그로만
 
 
 def test_blank_region_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -585,10 +660,11 @@ def test_blank_region_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> 
             return None
 
     monkeypatch.setattr("app.main.S3Uploader", Recording)
-    app = _boot(monkeypatch, s3_bucket="b", s3_region="")
+    app, wired = _boot(monkeypatch, s3_bucket="b", s3_region="")
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
     assert built == {"bucket": "b", "region": "ap-northeast-2"}
+    assert wired["record"] is not noop_record
 
 
 def test_boot_survives_s3_client_construction_failure(
@@ -599,8 +675,9 @@ def test_boot_survives_s3_client_construction_failure(
             raise ValueError("Invalid endpoint")
 
     monkeypatch.setattr("app.main.S3Uploader", Broken)
-    app = _boot(monkeypatch, s3_bucket="b")
+    app, wired = _boot(monkeypatch, s3_bucket="b")
     with caplog.at_level(logging.ERROR, logger="marketlens.main"), TestClient(app) as c:
         assert c.get("/health").status_code == 200
     errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
     assert len(errors) == 1 and "S3 클라이언트 생성 실패" in errors[0]
+    assert wired["record"] is noop_record
