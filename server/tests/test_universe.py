@@ -42,6 +42,7 @@ class FakeForeign:
         self._calls = calls
         self._failures = failures
         self.refreshes = 0
+        self.universes: list[set[str]] = []  # set_universe 로 받은 우주 (012 §3.3)
 
     async def refresh(self, client: httpx.AsyncClient) -> int:
         self.refreshes += 1
@@ -51,6 +52,9 @@ class FakeForeign:
 
     def bases(self) -> set[str]:
         return set(self._bases) if self.refreshes > self._failures else set()
+
+    def set_universe(self, bases: set[str]) -> None:
+        self.universes.append(set(bases))
 
 
 def _client() -> httpx.AsyncClient:
@@ -95,10 +99,11 @@ async def run_until_full_refresh(refresher: UniverseRefresher) -> list[float]:
 
 
 async def test_universe_is_intersection_and_streams_get_their_own_krw_list() -> None:
+    foreign = FakeForeign({"BTC", "XRP", "SOL"})
     refresher, up, bt, _, sink = build(
         [["KRW-BTC", "KRW-USDT", "KRW-ONLYKR"]],
         [["KRW-BTC", "KRW-XRP", "KRW-USDT"]],
-        {"BTC", "XRP", "SOL"},
+        foreign,
     )
     outcome = await refresher.refresh()
     assert refresher.universe == {"BTC", "XRP"}  # USDT·국내 전용·해외 전용은 없다
@@ -108,6 +113,8 @@ async def test_universe_is_intersection_and_streams_get_their_own_krw_list() -> 
     assert bt.markets[-1] == ["KRW-BTC", "KRW-XRP", "KRW-USDT"]
     assert outcome.calls == {"upbit": 1, "bithumb": 1, "binance": 1}
     assert outcome.failures == []
+    # 바이낸스는 확정된 우주를 받아 그 심볼만 구독한다 (012 §3.3)
+    assert foreign.universes[-1] == {"BTC", "XRP"}
 
 
 async def test_dropped_base_disappears_from_memory_on_refresh() -> None:

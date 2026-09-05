@@ -102,6 +102,8 @@ class UniverseRefresher:
             logger.info("우주 갱신으로 행 %d개 소멸 (상폐·교집합 이탈)", removed)
         for stream in self._streams:
             stream.set_markets(self._markets.get(stream.id, []))
+        # 바이낸스는 우주의 심볼만 구독한다 — 확정된 우주를 넘기면 커넥터가 차이만 재조정한다 (012 §3.3)
+        self._foreign.set_universe(self.universe)
 
     def missing(self) -> list[str]:
         """아직 목록을 한 번도 못 받은 거래소 — 국내 둘과 바이낸스 심볼 집합 (§3.2)."""

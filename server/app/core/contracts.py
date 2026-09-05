@@ -103,12 +103,19 @@ class ForeignSymbolSource(Protocol):
         """현재 알고 있는 USDT 현물 base 집합(대문자). 아직 없으면 빈 집합."""
         ...
 
+    def set_universe(self, bases: set[str]) -> None:
+        """우주가 확정될 때마다(기동·10분·/refresh) 받는다 — 구독 대상 재조정 (012 §3.3). 동기."""
+        ...
+
 
 class NoForeignSymbols:
-    """012 가 아직 없을 때 꽂히는 구현 — 심볼이 없어 우주가 비고 행이 저장되지 않는다."""
+    """바이낸스 커넥터를 꽂지 않을 때(테스트)의 구현 — 심볼이 없어 우주가 비고 행이 저장되지 않는다."""
 
     async def refresh(self, client: httpx.AsyncClient) -> int:
         return 0
 
     def bases(self) -> set[str]:
         return set()
+
+    def set_universe(self, bases: set[str]) -> None:
+        pass
