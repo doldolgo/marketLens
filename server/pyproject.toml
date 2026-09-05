@@ -15,6 +15,8 @@ dependencies = [
     # 바이낸스 깊이 스트림(012). uvicorn[standard] 의 전이 의존으로도 들어오지만
     # CI·Dockerfile 두 설치 경로 모두를 보장하려면 직접 의존으로 적어야 한다.
     "websockets>=13",
+    # 틱 버퍼 Redis Stream(009) — asyncio 클라이언트
+    "redis>=5",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +24,8 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
+    # 009 테스트 — Redis 를 띄우지 않고 Stream 명령을 흉내낸다
+    "fakeredis>=2.26",
 ]
 
 [tool.pytest.ini_options]

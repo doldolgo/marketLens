@@ -31,6 +31,8 @@ class Settings(BaseSettings):
 
     influx_url: str = "http://localhost:8086"
     influx_token: str | None = None
+    # 틱 버퍼 Redis(009) — compose 안에서는 redis://redis:6379/0 으로 덮는다. 불달이어도 앱은 뜬다.
+    redis_url: str = "redis://localhost:6379/0"
     # S3 원문 아카이브(010) — 버킷이 없으면 원문 싱크가 무동작이고 앱은 뜬다.
     # AWS 키는 env 에 두지 않는다: SDK 기본 탐색(~/.aws, EC2 IAM 역할)을 쓴다.
     s3_bucket: str | None = None

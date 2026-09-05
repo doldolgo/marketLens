@@ -49,6 +49,17 @@ class PremiumRow:
     rev: float
 
 
+@dataclass(frozen=True)
+class SparkBucketRow:
+    """spark 복원 조회 결과 1행 — 1분 버킷의 마지막 fwd (스펙 009 §3.6)."""
+
+    dom: str
+    fx: str
+    base: str
+    bucket_ts: int  # 창의 시작 epoch 초(분 경계) — `ts // 60 * 60`
+    fwd: float
+
+
 def premium_point(
     *, dom: str, fx: str, base: str, ts: int, fwd: float, rev: float
 ) -> InfluxPoint:
@@ -266,6 +277,34 @@ from(bucket: "{self.bucket}")
             if not found:
                 return None
         return (out[0], out[1])
+
+    # --- 읽기 (spark 복원 — 기동 시 1회, HTTP 조회 없음. 스펙 009 §3.6) ---
+
+    def query_spark(self, *, start: int, stop: int) -> list[SparkBucketRow]:
+        """[start, stop) 의 `premium.fwd` 를 조합별 1분 버킷 `last` 로 — 버킷 시각은 창의 시작."""
+        flux = f"""
+from(bucket: "{self.bucket}")
+  |> range(start: {_rfc3339(start)}, stop: {_rfc3339(stop)})
+  |> filter(fn: (r) => r._measurement == "premium" and r._field == "fwd")
+  |> aggregateWindow(every: 1m, fn: last, timeSrc: "_start", createEmpty: false)
+  |> keep(columns: ["_time", "_value", "dom", "fx", "base"])
+"""
+        rows: list[SparkBucketRow] = []
+        for record in self._records(flux):
+            v = record.values
+            value = v.get("_value")
+            if value is None:
+                continue
+            rows.append(
+                SparkBucketRow(
+                    dom=str(v.get("dom", "")),
+                    fx=str(v.get("fx", "")),
+                    base=str(v.get("base", "")),
+                    bucket_ts=int(v["_time"].timestamp()),
+                    fwd=float(value),
+                )
+            )
+        return rows
 
     # --- 읽기 (collect_fail — 기동 시 복원 1회, HTTP 조회 없음. 스펙 011 §3.4) ---
 
