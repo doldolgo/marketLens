@@ -2,8 +2,9 @@
 
 /health 와 틱 루프는 기능 폴더가 아니라 여기(시스템) 소관이다.
 메모리가 진실이므로 uvicorn 워커는 1개여야 한다 — 워커가 둘이면 서로 다른 메모리를 본다.
-시작 순서: Influx·Redis 연결 확인 → 011 이력 복원 → 009 spark 복원 → 마켓 우주 → 스트림 기동(국내 2 + 바이낸스 3샤드)
-→ 틱 루프 → 009 인계 보내기 태스크·flusher. 어느 것이 실패해도 앱은 뜬다.
+시작 순서: Influx·Redis 연결 확인 → 010 원문 아카이브(S3_BUCKET 있을 때) → 011 이력 복원 → 009 spark 복원
+→ 마켓 우주 → 스트림 기동(국내 2 + 바이낸스 3샤드) → 틱 루프 → 009 인계 보내기 태스크·flusher.
+어느 것이 실패해도 앱은 뜬다.
 """
 
 import asyncio
@@ -35,7 +36,9 @@ from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
 from app.core.outages import OutageTracker
 from app.core.quotes import QuoteSink
+from app.core.raw_archive import RawArchive
 from app.core.redis_stream import RedisTickStream
+from app.core.s3 import S3Uploader
 from app.core.serialization import camelize_json
 from app.core.spark import SparkBuffer, restore_spark
 from app.core.streams.binance import BinanceStream
@@ -62,8 +65,25 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = app.state.settings
     store = LiveStore()
     sink = QuoteSink(store)
-    # 원문 싱크(010)는 아직 없다 — 아무것도 하지 않는 구현
+
+    # 원문 아카이브(010) — S3_BUCKET 이 없으면 비활성(기록 함수는 무동작), 앱은 뜬다.
+    # HeadBucket 실패는 에러 1줄뿐이다 — 자격증명이 없어도 뜨고, 이후 실패는 회차 로그로만.
+    archive: RawArchive | None = None
     record = noop_record
+    if settings.s3_bucket:
+        uploader = S3Uploader(bucket=settings.s3_bucket, region=settings.s3_region)
+        if not await asyncio.to_thread(uploader.head_bucket):
+            logger.error(
+                "S3 버킷 %s 접근 실패 — 원문 업로드는 회차마다 다시 시도한다",
+                settings.s3_bucket,
+            )
+        archive = RawArchive(uploader=uploader)
+        record = archive.record
+        archive.start()
+    else:
+        logger.warning(
+            "S3_BUCKET 이 없어 원문 아카이브를 쓰지 않는다 — 원문은 남지 않는다"
+        )
 
     # 입출금 상태 60초 캐시(006) — 키 없는 거래소는 unknown, 빗썸은 키 불필요
     wallet = WalletStatusService(
@@ -149,6 +169,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await flusher.aclose()
         await universe.aclose()
         await asyncio.gather(*(s.aclose() for s in streams))
+        if archive is not None:
+            # 스트림이 닫힌 뒤 — 마지막 프레임까지 담아 5초 안에서 올린다 (010 §3.6)
+            await archive.aclose()
         outage_writer_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await outage_writer_task
