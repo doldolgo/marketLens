@@ -305,6 +305,16 @@ async def test_exchange_info_non_200_is_classified_by_binance_rule(
     assert stream.bases() == set()  # 실패 시 직전 목록 유지
 
 
+async def test_exchange_info_429_without_retry_after_leaves_it_null() -> None:
+    # 헤더 `Retry-After` 가 없으면 retry_after_sec 는 null 이다 (011 §3.2·§4)
+    stream = BinanceStream(store=LiveStore(), sink=store_with_universe(set())[1])
+    with pytest.raises(ExchangeApiError) as info:
+        await stream.refresh(
+            _client(lambda r: httpx.Response(429, json={"code": -1003, "msg": "x"}))
+        )
+    assert (info.value.kind, info.value.retry_after_sec) == ("rate_limit", None)
+
+
 async def test_exchange_info_timeout_and_bad_json() -> None:
     stream = BinanceStream(store=LiveStore(), sink=store_with_universe(set())[1])
 
