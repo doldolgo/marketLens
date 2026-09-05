@@ -1,6 +1,6 @@
 # 011 — health
 
-상태: IN_PROGRESS | 의존: 001(collect — 틱 판정·스트림 상태·에러 예외), 012(binance-stream — 샤드 단위 판정), 002(web-shell — 셸·공유 피드·수집 상태 mock 탭), 003(spreads — FE 폴링 패턴), 005(history — Influx 쓰기·읽기)
+상태: DONE | 의존: 001(collect — 틱 판정·스트림 상태·에러 예외), 012(binance-stream — 샤드 단위 판정), 002(web-shell — 셸·공유 피드·수집 상태 mock 탭), 003(spreads — FE 폴링 패턴), 005(history — Influx 쓰기·읽기)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -130,18 +130,19 @@ BE(네트워크 없음, 커넥터·Influx 는 fake):
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/pytest -q
-# All checks passed! / 92 files left unchanged / 265 passed (2026-09-04, 기존 231 + 신규 34)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
+# All checks passed! / 181 files left unchanged / 399 passed (2026-09-05, 기존 398 + 신규 1)
 cd web && npm run lint && npm run build
-# oxlint 경고 0 / tsc -b + vite build 성공
-# 실서버(로컬, INFLUX_TOKEN 없음 — 이 머신은 :8000 을 소마 캘린더가 쓸 수 있어 :8020)
-cd server && .venv/bin/uvicorn app.main:app --port 8020
-curl -s localhost:8020/health            # {"status":"ok","version":"0.1.0"}
-curl -s localhost:8020/health/collect | head -c 400
-# exchanges 3곳 upbit·bithumb·binance 순, 기동 5초 뒤 전부 state:"ok", markets 198/292/293, outages []
-curl -s -X POST localhost:8020/refresh | head -c 300   # 응답 키 불변(snapshots·usdkrw·…)
+# oxlint 경고 0 / tsc -b + vite build 성공 (index-*.js 255 kB)
+# 실서버(로컬, INFLUX_TOKEN·S3_BUCKET 없음, Redis 없음 — :8000 대신 빈 포트 :8041, 끝나고 kill)
+cd server && .venv/bin/uvicorn app.main:app --port 8041
+curl -s localhost:8041/health              # {"status":"ok","version":"0.1.0"}
+curl -s localhost:8041/health/collect | head -c 900
+# exchanges 3곳 upbit·bithumb·binance 순, 200, outages [] — 이 망은 거래소 도메인을 막아 마켓 목록을
+# 못 받고 스트림이 연결되지 않으므로 세 곳 모두 state:"down"·markets 0·lastSuccessAt null (판정 보류 → 구간 없음)
+curl -s -X POST localhost:8041/refresh | head -c 400   # 응답 키 불변(snapshots·usdkrw·totalSaved·failures·…)
 ```
-수동 항목 중 `/etc/hosts` 빗썸 차단·재기동 복원은 sudo 와 Influx 가 필요해 로컬 실행 세션에서 돌리지 않았다(사람 몫 — EC2 또는 dev compose).
+EC2 에서 확인 필요(이 망에서 못 돌린 수동 항목): 기동 몇 초 뒤 `state:"ok"` 3곳과 `markets` > 0, 탭의 카드 3장 `● 수집 중`·로그 `서버 시작` 1행, `/etc/hosts` 로 `api.bithumb.com` 차단 30초 → 빗썸 `✕ 끊김` + `진행 중 · ×N회`(로그 행 수 불변·타임라인 막대 성장) → 복구 시 닫힘 → 재기동 후 Influx `collect_fail` 복원으로 같은 구간이 보이는지.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — 행 추가 `| health | /health/collect·실패 구간 추적·collect_fail 쓰기/복원 | 실데이터 탭·5초 폴링·KPI 수집 상태 | 백오프는 013 |`. web-shell 행의 `mock 탭 4종` → `mock 탭 3종(gap·pp·flow)`. **항상 포함.**
@@ -155,21 +156,19 @@ curl -s -X POST localhost:8020/refresh | head -c 300   # 응답 키 불변(snaps
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-  - server: `core/errors.py`(kind·retry_after_sec·FAIL_KINDS), `core/connectors/{upbit,bithumb,binance}.py`(분류·Retry-After·리스트 아님 → bad_response), `core/influx.py`(int/str 필드 line protocol, `CollectFailRow`·`collect_fail_point`·`query_collect_fail`), `core/outages.py`(추적기 신규), `core/collector.py`(사이클 → 추적기), `main.py`(복원 → 쓰기 태스크 → 수집 루프, `/health/collect` 라우터), `features/health/{models,service,router}.py` + `tests/test_collect_api.py`, `tests/test_outages.py`, 커넥터 테스트 3개에 분류 케이스 추가.
-  - web: `shared/format.ts`(exName 승격), `shared/types.ts`(HealthData 계약, mock health 타입 삭제), `shared/feed.ts`(health null + setHealth), `shared/mock.ts`(buildHealth 삭제), `shared/config.ts`(HEALTH_POLL_MS), `features/health/{api,types,Tab}.tsx`, `features/spreads/api.ts`(exName import), `App.tsx`(KPI·폴링 호출).
+  - server: `core/errors.py`(`FAIL_KINDS` 8종·`kind`·`retry_after_sec`), `core/models.py`(`StreamError`·`StreamState.url/connected_since`), `core/streams/{upbit,bithumb,binance}.py`(REST·핸드셰이크 분류·`Retry-After`·빗썸 200+`error` 판정·구독 거부 `bad_request`, 바이낸스는 샤드별 `stale_stream` 판정과 message 의 샤드 번호), `core/ticks.py`(`judge_state` + `TickLoop._judge_all` — 매 틱 거래소별 판정을 추적기에 넘긴다), `core/contracts.py`(`OutageSink`·`Verdict`·`StreamJudge`), `core/outages.py`(`OutageTracker` — 구간 열기·세기·닫기·kind 전환·24시간 보관·`collect_fail` 쓰기 큐·기동 복원 3초 상한), `core/influx.py`(`CollectFailRow`·`collect_fail_point`·`query_collect_fail`), `main.py`(복원 → 쓰기 태스크 → 틱 루프 배선, `/health/collect` 라우터), `features/health/{models,service,router}.py` + `tests/test_collect_api.py`, `tests/test_outages.py`(추적기·쓰기·복원·틱→추적기), 커넥터 테스트 3개의 분류 케이스(이 세션은 바이낸스 REST `Retry-After` 부재 → null 1건을 추가).
+  - web: `shared/types.ts`(`HealthData` 계약, `OutageKind` 8종 — 이 세션이 `stale_stream` 추가), `shared/format.ts`(`exName`), `shared/feed.ts`(`health` + `setHealth`), `shared/config.ts`(`HEALTH_POLL_MS`), `features/health/{api,types,Tab}.tsx`(이 세션이 칩 라벨 `스트림 정체` 추가), `App.tsx`(KPI·폴링 호출).
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-  - §3.6 을 함께 고쳤다: exName 은 `shared/format.ts` 로, HealthData 는 `shared/types.ts` 로(기능 간 import 금지와 충돌 — 사람 합의).
-  - Influx 쓰기는 사이클 안에서 동기 호출하지 않고 **큐 + 별도 태스크**가 순서대로 1점씩 쓴다. 이유: Influx 가 죽으면 쓰기 1회가 클라이언트 타임아웃(60초)까지 매달려 1초 사이클을 막는다. 순서를 지키는 이유는 열림 점이 닫힘 점 뒤에 도착하면 `count` 가 1 로 되돌아가기 때문.
-  - 복원 3초 상한은 `asyncio.wait_for` 로 둔다 — 스레드의 실제 조회는 Influx 클라이언트 타임아웃까지 계속 돌 수 있지만 기동은 막지 않는다.
-  - 복원 조회 range 는 `-24h`(started_at 기준). 24시간보다 전에 시작해 24시간 안에 끝난 구간은 복원되지 않는다(스펙 "최근 24시간" 문구 그대로).
-  - 복원 시 같은 거래소에 진행 중 점이 둘 이상이면(닫힘 쓰기 유실) 최신만 진행 중으로 두고 나머지는 `ended_at = last_failed_at` 으로 닫는다. `count`·`last_failed_ts` 없는 반쪽 점은 건너뛴다.
-  - 커넥터 밖의 예상 밖 예외(`internal_error`)는 `kind=bad_response`, `url=null`, `status_code=null` 로 구간에 넣는다. Influx 의 `url` 빈 문자열은 복원 시 null 로 돌린다(스펙은 0→null 만 말한다).
-  - 문서에 없는 HTTP 상태(3xx 등)는 `bad_response`. `Retry-After` 는 세 커넥터 모두 파싱한다(스펙은 바이낸스만 명시). `resp.json()` 이 리스트가 아니면 세 커넥터 모두 `bad_response`(빗썸은 `error` 본문 판정 뒤).
+  - 이 세션은 001·009·010·012 가 WebSocket 구조로 끝난 뒤의 마무리 회차다 — 추적기·API·탭은 이미 그 구조 위에 배선돼 있었고, 남은 어긋남은 FE `OutageKind`·칩 라벨에 `stale_stream` 이 없던 것(status.md 의 (011·012) 빚)과 바이낸스 REST 의 `Retry-After` 부재 케이스 미검증뿐이었다. 그 둘을 채우고 §4 검증을 전부 다시 돌렸다.
+  - §3.6 의 결정 그대로: `exName` 은 `shared/format.ts`, `HealthData` 는 `shared/types.ts`(기능 간 import 금지).
+  - Influx 쓰기는 틱 안에서 동기 호출하지 않고 **큐 + 별도 태스크**가 순서대로 1점씩 쓴다 — Influx 가 죽으면 쓰기 1회가 클라이언트 타임아웃까지 매달려 1초 틱을 막기 때문. 순서를 지키는 이유는 열림 점이 닫힘 점 뒤에 도착하면 `count` 가 1 로 되돌아가기 때문.
+  - 복원 3초 상한은 `asyncio.wait_for` — 스레드의 실제 조회는 Influx 클라이언트 타임아웃까지 돌 수 있지만 기동은 막지 않는다. 복원 range 는 `-24h`(started_at 기준) — 24시간보다 전에 시작해 24시간 안에 끝난 구간은 복원되지 않는다.
+  - 복원 시 같은 거래소에 진행 중 점이 둘 이상이면(닫힘 쓰기 유실) 최신만 진행 중으로 두고 나머지는 `ended_at = last_failed_at` 으로 닫는다. Influx 의 `url` 빈 문자열은 복원 시 null 로 돌린다.
+  - 문서에 없는 HTTP 상태(3xx 등)는 `bad_response`. `Retry-After` 는 세 커넥터 모두 파싱한다(스펙은 바이낸스만 명시). 업비트·빗썸 핸드셰이크 403 은 `bad_request`(`banned` 로 보는 403 은 바이낸스 WAF 뿐 — 001 §3.8 과 일치).
+  - 첫 연결 시도의 결과가 아직 없는 스트림은 판정하지 않는다(001 §3.8) — 이 망처럼 마켓 목록을 못 받아 구독이 없으면 구간이 생기지 않고 `state` 만 `down` 이다.
   - 응답 키 `successRate1h`: 공용 `camelize_json` 이 `successRate1H` 를 만들어 health 모델은 pydantic alias 로 직접 camelCase 를 만든다.
-  - FE: 로그 내용에서 `statusCode` null 이면 `HTTP …` 조각을 생략. 진행 중 구간의 타임라인 호버 종료 시각은 `now`. 유형 칩은 `Chip` 에 색만 덧입힌 outline 형태. `HealthTab` 은 `health` null 이면 본문 가운데 한 줄만.
-  - 커밋 `feat(web): replace health mock …` 단독으로는 옛 Tab.tsx 가 tsc 에 걸린다(다음 커밋이 Tab 을 교체). 300줄 규칙 때문에 나눴다.
-  - CLAUDE.md 인덱스 002 행의 "mock 탭(…수집상태…)" 도 함께 고쳤다(§6 목록엔 없지만 지금 동작과 달라서).
+  - FE: `statusCode` null 이면 `HTTP …` 조각 생략. 진행 중 구간의 타임라인 종료 시각은 `now`. `stale_stream` 칩·막대 색은 "그 외" 규칙대로 주황.
 - 남은 빚:
-  - `/etc/hosts` 차단·재기동 복원 수동 검증 미실행(로컬 Influx 없음). EC2 배포 후 확인 필요.
-  - 백오프·Retry-After 존중·서킷은 013. 지금은 429 를 받아도 1초마다 재호출한다.
+  - `/etc/hosts` 차단·재기동 복원 수동 검증 미실행(이 망은 거래소 도메인 차단, 로컬 Influx 없음) — §5 의 "EC2 에서 확인 필요".
+  - 백오프·Retry-After 존중·서킷은 013. 지금은 429 를 받아도 재연결 백오프(1→30초)만 있고 `Retry-After` 값은 기록만 한다.
   - Influx 가 느릴 때 쓰기 큐가 무한히 쌓일 수 있다(구간 열림/닫힘 시에만 넣으므로 실제로는 몇 점 수준).
