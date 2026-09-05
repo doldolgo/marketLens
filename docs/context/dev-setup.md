@@ -62,7 +62,7 @@ WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 ```bash
 curl -s localhost:8000/spreads | head -c 600
 ```
-(기동 10초 뒤 — 스트림 스냅샷이 오는 데 수 초) 최상위 `rate > 1000`·`notional == 10000`, 행 수 > 100, `warnings` 는 평상시 빈 배열(008), 각 행의 키가 정확히 다음 17개면 정상 (003 §4 기준):
+(기동 10초 뒤 — 마켓 목록 REST 1회 + 스트림 스냅샷 한 바퀴. 012 전에는 바이낸스 심볼이 없어 우주가 비므로 404 가 정상) 최상위 `rate > 1000`·`notional == 10000`, 행 수 > 100, `warnings` 는 평상시 빈 배열(008), 각 행의 키가 정확히 다음 17개면 정상 (003 §4 기준):
 `sym, dom, fx, fwd, rev, usd, spark, status, age, slipFwd, slipRev, krw, netDom, depDom, wdDom, depFx, wdFx`
 체결 규모를 바꿔 슬리피지가 커지는지 본다 — `curl -s "localhost:8000/spreads?notional=500000"` 의 같은 행 `slipFwd` 가 기본값보다 크거나 같아야 한다.
 ```bash
@@ -94,4 +94,4 @@ curl -s "localhost:8000/orderbook/binance?symbol=BTC/USDT&depth=20" | head -c 40
 - `:8000` 은 이 머신에서 소마 캘린더가 점유할 수 있다. `lsof -i :8000` 으로 확인 후 정리하거나, `--port 8020` 으로 띄우고 curl 포트도 8020 으로 맞춘다.
 - 이 머신엔 `python3`=3.9 뿐이다. `python3 -m venv` 금지. 가상환경(uv, Python 3.12)으로 만들고 의존성 설치도 uv pip 로(`--python` 에 그 venv 의 파이썬 지정).
 - `actionlint` 미설치. 워크플로 lint 는 건너뛰고 실행 보고에 기록한다.
-- 이 망(통신사 필터)에서 거래소·금융 도메인이 차단될 수 있다(REST·WebSocket 모두). 실거래소 검증이 안 되면 EC2 에서 돌린다.
+- 이 망(통신사 필터)에서 거래소·금융 도메인이 차단될 수 있다(REST·WebSocket 모두 — 2026-09-05 실측: `api.upbit.com`·`api.bithumb.com` ConnectTimeout). 마켓 목록을 못 받으면 서버는 5초마다 재시도하며 뜨고 `/spreads` 는 404 다. 실거래소 검증(001 §4 선택 항목 포함)은 EC2 에서 돌린다.

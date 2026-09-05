@@ -59,7 +59,9 @@
 - 원문 싱크 `record(exchange, source, received_at_ms, payload)` — 동기·무예외(010 구현, 수신 경로가 호출).
 - 틱 인계 `handoff(tick)` — 동기·무예외(009 구현, 틱 루프가 호출).
 - 판정 결과 전달 — 틱 루프가 이력 추적기에 거래소별 성공/실패를 넘긴다(011 구현).
-- 입출금 조회기 `refresh_if_due` / `apply` / `failed` / `warnings` / `availability`(006 구현, 틱 루프가 호출).
+- 입출금 조회기 `refresh_if_due(client, force=False)` / `apply` / `failed` / `warnings` / `availability`(006 구현, 틱 루프가 호출 — `force` 는 `/refresh` 트리거가 쓴다).
+- 바이낸스 USDT 현물 심볼 집합 `refresh(client) -> int` / `bases() -> set[str]`(012 구현, 마켓 우주가 호출). 없으면 빈 집합을 주는 기본 구현.
+- 스트림 판정 `judge(now_ms) -> Verdict | None`(거래소 스트림마다 — 국내는 core 공통 규칙, 바이낸스는 012 샤드 규칙. None = 아직 판정 대상 아님).
 core 는 features 를 import 하지 않는다 — 구조적 타입(Protocol)으로만 알고 배선은 `main.py` lifespan 이 한다.
 
 ## 기능 폴더 기본 구조
@@ -84,14 +86,14 @@ EC2 1대. 루트 `docker compose up -d --build` 로 server·web·influxdb·redis
 
 ## 현재 구조 (개발 후 갱신 — 실행 세션이 §7 보고와 함께 채운다)
 스펙이 DONE 될 때마다 주요 모듈과 역할을 짧게 기록한다. 문서와 코드가 다르면 사람이 올바른 쪽을 결정하고 같은 변경에서 둘을 맞춘다.
-- **collect (001)**: 재구축 중 — 실행 세션이 채운다(스트림 커넥터 2개·LiveStore·틱 루프·마켓 우주·계약 Protocol·`main.py` lifespan 배선).
+- **collect (001)**: `core/models.py`(`Row`·`Rate`·`StreamState`·`StreamError`·`Tick`·`TickRow`), `core/live_store.py`(행 단위 쓰기 `put_row`·`remove_row`·`retain_bases`, 입출금 3필드 물려받기, 스트림 상태 `stream`/`stream_state`, 틱 슬롯 `push_tick`, spark 맵), `core/rows.py`(`clean_levels` — 잔량 필터·누적 상한), `core/quotes.py`(`QuoteSink` — 메시지 → 행 규칙·우주 필터·체결가 보류·USDT 시세), `core/streams/upbit.py`·`core/streams/bithumb.py`(스트림 커넥터 2개 — 연결·구독·펌프·분류·백오프·재구독·`fetch_markets`·`judge`; 코드 공유 없음), `core/universe.py`(`UniverseRefresher` — 10분·5초 재시도·교집합·구독 목록 배포), `core/ticks.py`(`judge_state`·`build_tick`·`TickLoop`), `core/collect.py`(`CollectService.refresh_now` — `/refresh` 트리거·`RefreshSummary`), `core/contracts.py`(원문 싱크·틱 인계·판정·입출금·바이낸스 심볼 Protocol 과 무동작 기본 구현), `core/config.py`(`EXCHANGES`·타임아웃). `main.py` lifespan: 이력 복원 → 우주 → 스트림 → 틱 루프, 종료 시 마지막 틱 인계. 테스트는 `server/tests/`(`stream_fakes.py` 의 가짜 소켓·연결기).
 - **web-shell (002)**: `shared/`(테마·공유 피드·결정론 mock·포맷·UI 조각), `App.tsx`(헤더·KPI·탭 전환), `features/{gap,pp,flow}/Tab.tsx`(mock 탭). spreads 와 history 는 별도 기능 폴더가 담당한다.
 - **spreads (003)**: server `core/premium.py`(`premium_percent`), `core/orderbook.py`(호가 걷기 — 004 와 공용, 전부 동기), `features/spreads/`(service 순수 계산·router 2 엔드포인트·models). 표 계산 함수는 저장소와 체결 규모(`notional`, 기본 $10,000)를 받아 행 17키를 만들고, 두 다리를 수량으로 연결해 걸어 슬리피지 차감 후 순값과 차감폭(`slipFwd`·`slipRev`)을 함께 싣는다. web `features/spreads/`(1초 폴링·응답 타입·화면). `/refresh` 응답 모양과 `age` 기준은 재구축 세션이 맞춘다.
 - **analysis (004)**: `core/orderbook.py`(호가창 소진 walk — 003·004 공용), `features/analysis/`(6개 분석 API·응답 모델·거래소 레지스트리). web 없음.
-- **history (005)**: `core/influx.py`, `features/history/`(이력 조회 API), `scripts/backfill.py`, `docker-compose.dev.yml`. web 기록 탭은 mock 데이터를 사용한다. Influx 쓰기는 009 의 flusher.
+- **history (005)**: `core/influx.py`, `features/history/`(이력 조회 API), `scripts/backfill.py`, `docker-compose.dev.yml`. web 기록 탭은 mock 데이터를 사용한다. Influx 쓰기는 009 의 flusher(001 이 persist 루프를 지웠다).
 - **wallet-status (006)**: `core/networks.py`(망 정규화·판정), `features/wallet_status/`(거래소별 조회·60초 캐시). 틱 루프에 Protocol 로 주입하고 spreads 가 망 단위 상태를 계산한다.
 - **deploy (007)**: server·web Dockerfile, 배포 compose, CI·배포 GitHub Actions workflow.
 - **tick-store (009)**: 재구축 중 — 실행 세션이 채운다(Redis 클라이언트·인계 큐·flusher·spark).
-- **raw-archive (010)**: 재구축 중 — 실행 세션이 채운다(원문 싱크·버퍼·업로드 루프·`core/s3.py`).
+- **raw-archive (010)**: 재구축 중 — 실행 세션이 채운다(원문 싱크·버퍼·업로드 루프·`core/s3.py` — 001 이 옛 snapshot 루프와 `core/s3.py` 를 지웠다).
 - **health (011)**: `core/outages.py`(실패 구간 추적기 — 틱 루프가 쓰므로 core. 열림/닫힘 시 `collect_fail` 1점을 순서 보장 큐로 쓰고, 기동 시 24시간 복원), `features/health/`(읽기 API `/health/collect`), web `features/health/`(5초 폴링·탭). 응답 타입 `HealthData` 와 거래소 표시명 `exName` 은 `shared/` 에 있다.
-- **binance-stream (012)**: 재구축 중 — 실행 세션이 채운다(샤드 3개·구독 재조정·정체 판정·exchangeInfo).
+- **binance-stream (012)**: 재구축 중 — 실행 세션이 채운다(`core/streams/binance.py` — 샤드 3개·구독 재조정·정체 판정·`ForeignSymbolSource` 구현(exchangeInfo)). 001 의 `QuoteSink.orderbook/trade` 와 `store.stream("binance")` 를 쓰고 `StreamJudge` 로 틱 루프에 꽂힌다.
