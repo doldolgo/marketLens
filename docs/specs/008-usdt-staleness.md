@@ -16,7 +16,7 @@ USDT 시세는 이 시스템의 **유일한 원화↔USDT 변환값**이다(은�
 
 ### 3.1 읽는 계약 (복사)
 - 001: USDT 시세는 국내 거래소별 `{exchange, ask, bid, updated_at(aware UTC)}`. KRW-USDT 호가 메시지가 올 때마다 갱신하고, 메시지가 없으면 직전 값이 그대로 남는다(`updated_at` 이 안 바뀜).
-- 003: `GET /spreads` 최상위는 `rate`·`rows`·`dataReceivedAt`·`fetchedAt`(camelCase). 행 계산은 각 국내 거래소의 자기 시세를 쓴다.
+- 003: `GET /spreads` 최상위는 `rate`·`notional`·`rows`·`dataReceivedAt`·`fetchedAt`(camelCase, 이 스펙이 `warnings` 를 더해 6키). 행은 정확히 17키(`sym dom fx fwd rev usd spark status age slipFwd slipRev krw netDom depDom wdDom depFx wdFx`). 행 계산은 각 국내 거래소의 자기 시세를 쓴다.
 
 ### 3.2 staleness 판정 (`/spreads` 계산 시)
 - 임계 **60초** — 코드 상수. 왜 60초인가: 스냅샷 stale 기준(5초)과 달리 USDT 는 유동성이 높아 호가가 초 단위로 바뀌어 매초 메시지가 오는 게 정상이다. 60초 동안 한 번도 없으면 일시 결측이 아니라 구조적 문제(KRW-USDT 마켓 중단·구독 누락·메시지 형식 변화)로 본다.
@@ -30,7 +30,7 @@ USDT 시세는 이 시스템의 **유일한 원화↔USDT 변환값**이다(은�
 - 시세 `updated_at` 이 61초 전인 거래소 → `warnings` 에 그 거래소 1줄, 초 수(≥61)가 메시지에 있다
 - 59초 전 → 빈 배열
 - 두 국내 거래소 다 61초 전 → 2줄, 거래소 id 오름차순
-- `warnings` 키는 경고가 없어도 항상 존재(빈 배열)하고, 기존 최상위 키(`rate`·`rows`·`dataReceivedAt`·`fetchedAt`)·행 18키는 불변이다
+- `warnings` 키는 경고가 없어도 항상 존재(빈 배열)하고, 최상위는 정확히 6키(`rate`·`notional`·`rows`·`warnings`·`dataReceivedAt`·`fetchedAt`), 행은 정확히 17키다
 - 시세를 시드하지 않은 거래소는 경고에 나타나지 않는다
 수동: 배포 후 `/api/spreads` 에 `warnings` 키가 있고 평상시 빈 배열이다.
 

@@ -75,4 +75,17 @@ def test_warnings_key_always_present_and_top_keys_stable() -> None:
     store.set_rate("upbit", 1400.0, 1390.0, now)
     body = make_client(store).get("/spreads").json()
     assert body["warnings"] == []
-    assert {"rate", "rows", "dataReceivedAt", "warnings", "fetchedAt"} <= set(body)
+    # 스펙 008 §4 — 최상위는 정확히 6키, 행은 정확히 17키(003 §3.2 계약 그대로)
+    assert set(body) == {
+        "rate",
+        "notional",
+        "rows",
+        "warnings",
+        "dataReceivedAt",
+        "fetchedAt",
+    }
+    assert body["rows"]
+    for row in body["rows"]:
+        assert set(row) == set(
+            "sym dom fx fwd rev usd spark status age slipFwd slipRev krw netDom depDom wdDom depFx wdFx".split()
+        )
