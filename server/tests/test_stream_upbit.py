@@ -13,7 +13,9 @@ from tests.stream_fakes import (
     Clock,
     FakeConnector,
     FakeSocket,
+    GatedSocket,
     HandshakeRejected,
+    HangingCloseSocket,
     Sleeps,
     store_with_universe,
     until,
@@ -198,9 +200,10 @@ async def test_backoff_grows_to_thirty_and_resets_after_first_quote() -> None:
         (TimeoutError(), "timeout", None, None),
         (HandshakeRejected(429, {"Retry-After": "3"}), "rate_limit", 429, 3),
         (HandshakeRejected(418), "banned", 418, None),
-        (HandshakeRejected(403), "banned", 403, None),
+        (HandshakeRejected(403), "bad_request", 403, None),  # 403 banned 는 바이낸스만
         (HandshakeRejected(503), "unavailable", 503, None),
-        (HandshakeRejected(400), "bad_response", 400, None),
+        (HandshakeRejected(400), "bad_request", 400, None),
+        (HandshakeRejected(302), "bad_response", 302, None),
         (RuntimeError("weird"), "bad_response", None, None),
     ],
 )
@@ -248,6 +251,38 @@ async def test_judge_pending_then_ok_then_stale() -> None:
         None,
     )
     await stream.aclose()
+
+
+async def test_stale_stream_recovers_when_a_quote_frame_returns() -> None:
+    sock = GatedSocket()
+    stream, _, _, _, clock, _ = build([sock])
+    stream.start()
+    sock.push(orderbook())
+    await until(sock.delivered)
+    assert stream.judge(T0 + 1000).ok  # type: ignore[union-attr]
+    clock.now = T0 + 40_000  # 40초 무수신 → 정체
+    stale = stream.judge(clock.now)
+    assert stale is not None and stale.error is not None
+    assert stale.error.kind == "stale_stream"
+    sock.push(orderbook(ts=clock.now - 50))  # 시세 프레임이 다시 오면 성공으로 돌아온다
+    await until(sock.delivered)
+    assert stream.judge(clock.now + 1000).ok  # type: ignore[union-attr]
+    await stream.aclose()
+
+
+async def test_aclose_finishes_within_budget_when_socket_close_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.core.streams.upbit.CLOSE_TIMEOUT", 0.2)  # 실제 2초 대신
+    sock = HangingCloseSocket()
+    stream, _, _, _, _, store = build([sock])
+    stream.start()
+    await asyncio.sleep(0.01)  # 연결·구독까지
+    started = asyncio.get_running_loop().time()
+    await stream.aclose()
+    assert asyncio.get_running_loop().time() - started < 1.0
+    assert sock.close_calls == 1
+    assert store.stream_state("upbit").connected is False  # type: ignore[union-attr]
 
 
 async def test_set_markets_while_connected_resubscribes_full_list() -> None:

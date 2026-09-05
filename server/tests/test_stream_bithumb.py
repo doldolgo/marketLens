@@ -1,5 +1,6 @@
 """빗썸 스트림 커넥터 — 고유 quirk(µs·9시간·유령 호가·200+error)와 공통 규칙 (스펙 001 §3.10, §4)."""
 
+import asyncio
 import json
 
 import httpx
@@ -13,6 +14,7 @@ from tests.stream_fakes import (
     FakeConnector,
     FakeSocket,
     HandshakeRejected,
+    HangingCloseSocket,
     Sleeps,
     store_with_universe,
     until,
@@ -168,6 +170,27 @@ async def test_handshake_429_is_rate_limit_with_retry_after() -> None:
         2,
         WS_URL,
     )
+
+
+async def test_handshake_403_is_bad_request_not_banned() -> None:
+    stream, connector, _, _, _, store = build([HandshakeRejected(403)])
+    await run_until_exhausted(stream, connector)
+    err = store.stream_state("bithumb").last_error  # type: ignore[union-attr]
+    assert err is not None and (err.kind, err.status_code) == ("bad_request", 403)
+
+
+async def test_aclose_finishes_within_budget_when_socket_close_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.core.streams.bithumb.CLOSE_TIMEOUT", 0.2)
+    sock = HangingCloseSocket()
+    stream, _, _, _, _, _ = build([sock])
+    stream.start()
+    await asyncio.sleep(0.01)
+    started = asyncio.get_running_loop().time()
+    await stream.aclose()
+    assert asyncio.get_running_loop().time() - started < 1.0
+    assert sock.close_calls == 1
 
 
 async def test_judge_stale_after_thirty_seconds() -> None:

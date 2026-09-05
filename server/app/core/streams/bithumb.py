@@ -178,7 +178,8 @@ class BithumbStream:
         self._task = asyncio.create_task(self.run())
 
     async def aclose(self) -> None:
-        """태스크 취소 후 소켓 close, 합계 2초 상한 (§3.11)."""
+        """태스크 취소 후 소켓 close, 합계 2초 상한 (§3.11) — 남은 예산만큼만 close 를 기다린다."""
+        deadline = time.monotonic() + CLOSE_TIMEOUT
         tasks = [t for t in (self._task, self._resubscribe) if t is not None]
         for task in tasks:
             task.cancel()
@@ -187,7 +188,10 @@ class BithumbStream:
                 asyncio.gather(*tasks, return_exceptions=True), CLOSE_TIMEOUT
             )
         self._task = self._resubscribe = None
-        await self._close_socket()
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(
+                self._close_socket(), max(0.0, deadline - time.monotonic())
+            )
 
     async def run(self) -> None:
         while True:
@@ -337,22 +341,19 @@ class BithumbStream:
 
 
 def _classify(exc: BaseException) -> StreamError:
-    """연결·핸드셰이크·끊김 분류 (§3.8). 빗썸 429 는 초당 10회 초과, 지속 시 10분 차단."""
+    """연결·핸드셰이크·끊김 분류 (§3.8) — 핸드셰이크 HTTP 거부는 빗썸 REST 규칙(011 §3.2)으로.
+
+    빗썸 429 는 연결 요청 초당 10회 초과, 지속 시 10분 차단(418).
+    """
     response = getattr(exc, "response", None)
     status = getattr(response, "status_code", None)
     message = f"빗썸 WebSocket 실패: {type(exc).__name__}: {exc}"
     if isinstance(status, int):
-        if status == 429:
-            kind = "rate_limit"
-        elif status in (403, 418):
-            kind = "banned"
-        elif 500 <= status < 600:
-            kind = "unavailable"
-        else:
-            kind = "bad_response"
         headers = getattr(response, "headers", None)
         retry = headers.get("Retry-After") if headers is not None else None
-        return StreamError(kind, message, status, WS_URL, _retry_after(retry))
+        return StreamError(
+            _classify_rest_status(status), message, status, WS_URL, _retry_after(retry)
+        )
     if isinstance(exc, TimeoutError):
         return StreamError("timeout", message, None, WS_URL)
     if isinstance(exc, OSError | ConnectionClosed):

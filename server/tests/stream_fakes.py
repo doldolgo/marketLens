@@ -45,6 +45,36 @@ class FakeSocket:
         return [json.loads(s) for s in self.sent]
 
 
+class GatedSocket(FakeSocket):
+    """테스트가 `push` 한 프레임만 준다 — 정체(무수신)와 회복을 시점별로 흉내 낸다."""
+
+    def __init__(self) -> None:
+        super().__init__([], hold=True)
+        self._queue: asyncio.Queue[str] = asyncio.Queue()
+        self.delivered = asyncio.Event()  # 마지막 push 가 소비된 시점
+
+    def push(self, frame: str) -> None:
+        self.delivered.clear()
+        self._queue.put_nowait(frame)
+
+    async def recv(self) -> str | bytes:
+        frame = await self._queue.get()
+        self.delivered.set()
+        return frame
+
+
+class HangingCloseSocket(FakeSocket):
+    """close() 가 돌아오지 않는 소켓 — 종료 상한(§3.11)이 지켜지는지 본다."""
+
+    def __init__(self) -> None:
+        super().__init__([], hold=True)
+        self.close_calls = 0
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        await asyncio.Event().wait()
+
+
 class FakeConnector:
     """연결 시도마다 미리 정한 결과(소켓 또는 예외)를 준다. 다 쓰면 영원히 대기한다."""
 
