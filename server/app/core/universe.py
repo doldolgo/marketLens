@@ -60,12 +60,13 @@ class UniverseRefresher:
         self._client = client
         self._sleep = sleep
         self._markets: dict[str, list[str]] = {}  # 거래소 → KRW 마켓 코드 전체
+        self._foreign_fetched = False  # 바이낸스 심볼 refresh 가 한 번이라도 성공했는가
         self._task: asyncio.Task[None] | None = None
         self.universe: set[str] = set()
 
     async def refresh(self) -> RefreshOutcome:
         """전 거래소 목록을 다시 받아 우주·구독을 갱신한다. 실패는 직전 목록 유지 + 경고."""
-        return await self._refresh([s.id for s in self._streams])
+        return await self._refresh([*(s.id for s in self._streams), FOREIGN])
 
     async def _refresh(self, exchanges: list[str]) -> RefreshOutcome:
         outcome = RefreshOutcome()
@@ -80,11 +81,14 @@ class UniverseRefresher:
                     "%s 마켓 목록 갱신 실패 — 직전 목록 유지: %s", stream.id, exc
                 )
                 outcome.failures.append(exc)
-        try:
-            outcome.calls[FOREIGN] = await self._foreign.refresh(self._client)
-        except ExchangeError as exc:
-            logger.warning("바이낸스 심볼 목록 갱신 실패 — 직전 목록 유지: %s", exc)
-            outcome.failures.append(exc)
+        if FOREIGN in exchanges:
+            # 국내 거래소만 재시도하는 동안에는 바이낸스 심볼 REST 를 부르지 않는다 (§3.2)
+            try:
+                outcome.calls[FOREIGN] = await self._foreign.refresh(self._client)
+                self._foreign_fetched = True
+            except ExchangeError as exc:
+                logger.warning("바이낸스 심볼 목록 갱신 실패 — 직전 목록 유지: %s", exc)
+                outcome.failures.append(exc)
         self._apply()
         return outcome
 
@@ -100,8 +104,11 @@ class UniverseRefresher:
             stream.set_markets(self._markets.get(stream.id, []))
 
     def missing(self) -> list[str]:
-        """아직 목록을 한 번도 못 받은 국내 거래소."""
-        return [s.id for s in self._streams if s.id not in self._markets]
+        """아직 목록을 한 번도 못 받은 거래소 — 국내 둘과 바이낸스 심볼 집합 (§3.2)."""
+        out = [s.id for s in self._streams if s.id not in self._markets]
+        if not self._foreign_fetched:
+            out.append(FOREIGN)
+        return out
 
     def start(self) -> None:
         self._task = asyncio.create_task(self.run())

@@ -35,17 +35,22 @@ class FakeDomestic:
 
 
 class FakeForeign:
-    def __init__(self, bases: set[str], calls: int = 1) -> None:
+    """바이낸스 심볼 집합 fake — 앞의 `failures` 번은 예외, 그 뒤 성공."""
+
+    def __init__(self, bases: set[str], calls: int = 1, failures: int = 0) -> None:
         self._bases = bases
         self._calls = calls
+        self._failures = failures
         self.refreshes = 0
 
     async def refresh(self, client: httpx.AsyncClient) -> int:
         self.refreshes += 1
+        if self.refreshes <= self._failures:
+            raise ExchangeApiError("binance", "u", "down", kind="network")
         return self._calls
 
     def bases(self) -> set[str]:
-        return set(self._bases)
+        return set(self._bases) if self.refreshes > self._failures else set()
 
 
 def _client() -> httpx.AsyncClient:
@@ -57,16 +62,36 @@ def _client() -> httpx.AsyncClient:
 def build(
     upbit: list[list[str] | Exception],
     bithumb: list[list[str] | Exception],
-    foreign: set[str],
+    foreign: set[str] | FakeForeign,
 ) -> tuple[UniverseRefresher, FakeDomestic, FakeDomestic, LiveStore, QuoteSink]:
     store = LiveStore()
     sink = QuoteSink(store)
     up = FakeDomestic("upbit", upbit)
     bt = FakeDomestic("bithumb", bithumb)
+    if not isinstance(foreign, FakeForeign):
+        foreign = FakeForeign(foreign)
     refresher = UniverseRefresher(
-        sink=sink, streams=[up, bt], foreign=FakeForeign(foreign), client=_client()
+        sink=sink, streams=[up, bt], foreign=foreign, client=_client()
     )
     return refresher, up, bt, store, sink
+
+
+async def run_until_full_refresh(refresher: UniverseRefresher) -> list[float]:
+    """기동 재시도가 끝나 10분 주기에 들어갈 때까지 돌리고 sleep 호출 기록을 돌려준다."""
+    slept: list[float] = []
+    stop = asyncio.Event()
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        if seconds == UNIVERSE_INTERVAL:
+            stop.set()
+            await asyncio.Event().wait()
+
+    refresher._sleep = sleep  # type: ignore[attr-defined]
+    refresher.start()
+    await asyncio.wait_for(stop.wait(), 1.0)
+    await refresher.aclose()
+    return slept
 
 
 async def test_universe_is_intersection_and_streams_get_their_own_krw_list() -> None:
@@ -111,21 +136,32 @@ async def test_failure_keeps_previous_list_and_reports() -> None:
 
 async def test_startup_retries_only_missing_exchanges_every_five_seconds() -> None:
     err = ExchangeApiError("bithumb", "u", "down", kind="network")
-    refresher, up, bt, _, _ = build([["KRW-BTC"]], [err, err, ["KRW-BTC"]], {"BTC"})
-    slept: list[float] = []
-    stop = asyncio.Event()
-
-    async def sleep(seconds: float) -> None:
-        slept.append(seconds)
-        if seconds == UNIVERSE_INTERVAL:
-            stop.set()
-            await asyncio.Event().wait()
-
-    refresher._sleep = sleep  # type: ignore[attr-defined]
-    refresher.start()
-    await asyncio.wait_for(stop.wait(), 1.0)
-    await refresher.aclose()
+    foreign = FakeForeign({"BTC"})
+    refresher, up, bt, _, _ = build([["KRW-BTC"]], [err, err, ["KRW-BTC"]], foreign)
+    slept = await run_until_full_refresh(refresher)
     # 첫 갱신 실패 → 5초 재시도 2번(빗썸만) → 성공 후 10분 주기
     assert slept == [RETRY_INTERVAL, RETRY_INTERVAL, UNIVERSE_INTERVAL]
     assert up.calls == 1 and bt.calls == 3
+    assert foreign.refreshes == 1  # 국내만 재시도하는 동안 바이낸스 심볼 REST 는 없다
     assert bt.markets[-1] == ["KRW-BTC"] and up.markets[0] == ["KRW-BTC"]
+
+
+async def test_startup_retries_foreign_symbols_alone_when_only_they_failed() -> None:
+    foreign = FakeForeign({"BTC"}, failures=3)
+    refresher, up, bt, _, _ = build([["KRW-BTC"]], [["KRW-BTC"]], foreign)
+    first = await refresher.refresh()
+    assert refresher.missing() == ["binance"] and len(first.failures) == 1
+    assert refresher.universe == set()  # 심볼이 없으면 우주가 비어 행이 저장되지 않는다
+    slept = await run_until_full_refresh(refresher)
+    # 기동 전체 갱신(실패) → 5초 재시도 2번은 바이낸스만 부른다 → 성공 후 10분 주기
+    assert slept == [RETRY_INTERVAL, RETRY_INTERVAL, UNIVERSE_INTERVAL]
+    assert foreign.refreshes == 4 and up.calls == 2 and bt.calls == 2
+    assert refresher.missing() == [] and refresher.universe == {"BTC"}
+
+
+async def test_full_refresh_calls_every_exchange_including_foreign() -> None:
+    foreign = FakeForeign({"BTC"})
+    refresher, up, bt, _, _ = build([["KRW-BTC"]], [["KRW-BTC"]], foreign)
+    await refresher.refresh()
+    await refresher.refresh()  # 10분 주기·/refresh 트리거 — 셋을 전부 부른다
+    assert (up.calls, bt.calls, foreign.refreshes) == (2, 2, 2)
