@@ -8,7 +8,7 @@
 1. env 파일을 만든다(env 예시 파일 복사). 전부 선택값. `INFLUX_TOKEN` 은 dev compose 가 admin 토큰으로 쓴다.
 2. dev compose 기동: `docker compose --env-file server/.env -f docker-compose.dev.yml up -d` → InfluxDB 2.7 `:8086` + Redis 7 `:6379`(009). 첫 기동(setup)이 org/bucket `marketlens` 를 만들고 admin 토큰 = `INFLUX_TOKEN`. Influx 가 없어도 앱은 뜬다(`/history/*` 만 503). Redis 가 없어도 앱은 뜬다(인계된 틱만 버려진다).
    백필: `cd server && .venv/bin/python -m scripts.backfill BTC ETH --days 92` (재실행 안전 — 앞뒤 빈 구간만 채움).
-3. 가상환경(uv, Python 3.12) 만들고 의존성 설치.
+3. 가상환경(uv, Python 3.12) 만들고 의존성 설치 — **editable 로만**: `uv pip install --python .venv/bin/python -e ".[dev]"`. 비-editable 설치(`-e` 없음)는 금지다 — site-packages 에 앱 사본이 생겨 `server/` 밖 cwd 에서 그 사본(옛 모듈)을 import 한다. 사본이 있으면 `uv pip uninstall --python .venv/bin/python marketlens-server` 뒤 editable 로 다시 설치한다.
 4. 서버를 `:8000` 에 띄운다(reload).
 ```bash
 curl -s localhost:8000/health                       # 확인
