@@ -58,7 +58,14 @@ USDT 시세 = 국내 거래소 id 당 `{exchange, ask, bid, updated_at}`. 바이
 ### 3.6 틱 루프 (1초)
 앱 시작과 함께 돌고 종료 시 취소된다. 매초 경계에 순서대로:
 1. 006 조회기가 있으면 `refresh_if_due` (60초에 한 번 실호출, 시세 갱신을 막지 않게 별도 태스크 — 직전 태스크가 끝나지 않았으면 이번 초는 건너뛴다). 조회기의 캐시는 **매 틱** 세 거래소의 행에 반영한다 — 메시지로 새로 생긴 행도 1초 안에 3필드를 갖는다.
-2. **틱 생성**(동기, `await` 없음 — 한 틱 안에서 교체 전후 호가가 섞이지 않는 근거): `ts` = 이 초(epoch 초), `rows` = 전 조합 중 자격 통과분의 `{dom, fx, base, fwd, rev}`(원값 — 자격·수식은 003 §3.2-4 의 raw 규칙: 국내×해외 다른 거래소, 양쪽 호가 존재, 그 국내 거래소 자신의 USDT 시세, 여섯 값 > 0), `dwFailed` = 조회기의 실패 상태 거래소 목록.
+2. **틱 생성**(동기, `await` 없음 — 한 틱 안에서 교체 전후 호가가 섞이지 않는 근거): `ts` = 이 초(epoch 초), `rows` = 전 조합 중 자격 통과분의 `{dom, fx, base, fwd, rev}`, `dwFailed` = 조회기의 실패 상태 거래소 목록. `fwd`·`rev` 는 **최우선 1단계 기준의 원값**(슬리피지 차감 전 — 003 §3.2-4 의 raw 규칙과 같은 수식, 009 가 Influx `premium` 에 쓰는 값)이다:
+   - 조합 = (국내 거래소 `dom`, 해외 거래소 `fx`, 양쪽에 행이 있는 `base`). 자격: `dom ≠ fx`, 양쪽 행에 `asks[0]`·`bids[0]` 존재, **그 국내 거래소 자신의** USDT 시세(`rate_ask`·`rate_bid`) 존재, 여섯 값(`dom_bid`·`dom_ask`·`fx_bid`·`fx_ask`·`rate_ask`·`rate_bid`) 전부 > 0. 하나라도 빠지면 그 조합은 이 틱에 없다(남의 시세를 빌리지 않는다).
+     ```
+     premium_percent(buy_krw, sell_krw) = (sell_krw / buy_krw − 1) × 100      # core/premium.py, 003 이 제공
+     fwd = premium_percent(buy_krw=fx_ask × rate_ask, sell_krw=dom_bid)       # 원화로 USDT 를 사서(rate_ask) 해외 ask 에 사고 국내 bid 에 판다
+     rev = premium_percent(buy_krw=dom_ask,           sell_krw=fx_bid × rate_bid)   # 국내 ask 에 사서 해외 bid 에 팔고 USDT 를 원화로 판다(rate_bid)
+     ```
+     `dom_bid`=`bids[0].price`, `dom_ask`=`asks[0].price`(국내 행), `fx_bid`·`fx_ask` 도 같은 자리(해외 행). 반올림하지 않는다. 행 정렬은 `(dom, fx, base)` 오름차순.
 3. 틱 슬롯에 새 틱을 넣고 **직전 틱**을 009 의 인계 함수(`handoff(tick)`, 동기·무예외)에 넘긴다. 슬롯이 비어 있었으면(첫 틱) 인계 없음.
 4. `received_at` = `ts`.
 5. 스트림이 등록된 거래소를 판정해(§3.8) 011 추적기에 성공/실패로 넘긴다 — 012 전의 바이낸스처럼 스트림이 없는 거래소는 판정하지 않는다.
@@ -129,16 +136,22 @@ core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payl
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 170 files left unchanged / 295 passed, 1 warning in 1.51s  (2026-09-05)
+# All checks passed! / 170 files left unchanged / 297 passed, 1 warning in 1.41s  (2026-09-05)
 # 001 몫: tests/test_store.py test_quotes.py test_stream_upbit.py test_stream_bithumb.py test_ticks.py test_universe.py test_collect_trigger.py test_health.py test_rows.py (§4 항목당 1개 이상)
 
 cd server && .venv/bin/python -m uvicorn app.main:app --port 8041   # 로컬 스모크 (8000 은 다른 프로세스가 점유할 수 있어 빈 포트)
 curl -s localhost:8041/health          # {"status":"ok","version":"0.1.0"}
 curl -s localhost:8041/no-such         # {"error":{"code":"not_found","message":"Not Found","detail":null}}
-curl -s localhost:8041/spreads         # 404 market_data_not_found — 이 망은 거래소 REST·WS 가 막혀 마켓 목록을 못 받는다(로그: ConnectTimeout, 5초 재시도)
-curl -s localhost:8041/health/collect  # 거래소 3곳, 기동 직후 state "down"(판정 전) — Influx 없음 경고 후 앱은 뜬다. 종료 로그 깨끗함(태스크 취소·소켓 close 2초 상한)
+curl -s localhost:8041/spreads         # 404 market_data_not_found — 012 전에는 바이낸스 심볼이 없어 우주가 비고 행이 없다(detail domestic·foreign 둘 다 [])
+curl -s localhost:8041/health/collect  # 거래소 3곳, 기동 10초 뒤 upbit·bithumb state "ok"(binance 는 스트림 없음 → "down"), 70초 뒤 outages [] — Influx 없음 경고 후 앱은 뜬다. 종료 로그 깨끗함
+curl -s -X POST localhost:8041/refresh # usdkrw upbit·bithumb 각 ask 1367·bid 1366, calls upbit 2·bithumb 2·binance 1, failures []
 ```
-- 선택 항목(EC2 실 네트워크: 기동 10초 안 업비트·빗썸 행 각 100 이상, USDT 시세 둘 다, 1분 재연결 0회, 초당 메시지·원문 바이트) — **EC2 에서 확인 필요**. 이 Mac 망은 거래소 도메인을 막는다(dev-setup.md 로컬 메모). 012 전에는 바이낸스 심볼이 없어 우주가 비므로 "행 100 이상" 은 012 이후에만 성립한다 — USDT 시세·재연결 0회·메시지 수만 먼저 볼 수 있다.
+- 선택 항목(실 네트워크 — 망이 열려 있으면 로컬에서도 가능, 막히면 EC2. 2026-09-05 로컬 실측, 우주 = 국내 KRW 전체(관찰용), 60초):
+  - 마켓 목록 REST 0.26초(업비트 287·빗썸 479 마켓). t+10s 행 upbit 286·bithumb 478, USDT 시세 둘 다(1367/1366), 판정 둘 다 ok, decode 실패 0.
+  - 재연결: 70초 앱 기동 0회. 다른 12초 기동에서는 t+5s 에 업비트가 close 프레임 없이 끊어(`ConnectionClosedError`) 1초 뒤 재연결 1회 — 간헐적이며 백오프·판정은 규칙대로 동작.
+  - 메시지·원문(비압축): 업비트 ws 175 msg/s·442 KB/s(orderbook 9,038·ticker 1,470 /60s), 빗썸 ws 765 msg/s·1,018 KB/s(orderbook 45,000·ticker 924 /60s) → 국내 둘 ≈1.4 MB/s ≈ **130 GB/일**(010 용량 추정의 비압축 기준값).
+  - 실프레임: 업비트 첫 orderbook `orderbook_units` 30단계·`timestamp` 13자리(ms)·`SNAPSHOT`; 빗썸 첫 orderbook 15단계·`timestamp` 16자리(µs) — §3.10 과 일치. 행 `asks` 단계 분포 업비트 30단계 274/286, 빗썸 15단계 455/478(나머지는 누적 상한·잔량 필터).
+  - "행 100 이상" 을 앱 기준(우주 = 교집합)으로 보는 것은 012 이후.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — collect 행을 `| collect | 업비트·빗썸 WS 실시간 갱신·마켓 우주 10분·1초 틱·/health | - | 바이낸스는 012 |` 로. **항상 포함.**
@@ -167,9 +180,11 @@ curl -s localhost:8041/health/collect  # 거래소 3곳, 기동 직후 state "do
   - 구조: `QuoteSink`(공통 규칙)와 커넥터(거래소 형식) 분리. 판정 규칙(`judge_state`)은 스펙 공통 규칙이라 core `ticks.py` 에 두고 두 커넥터가 호출한다(커넥터 간 코드 공유 아님). `TickLoop.tick` 은 동기 메서드이고 `run` 이 초 경계까지 잔다.
   - 디코드 불가 바이너리 프레임(UTF-8 아님)은 문자열이 없어 원문 싱크에 기록하지 못하고 버린다(무효 프레임 카운트만).
   - §3.2 마켓 우주 갱신 루프는 거래소 예외가 아닌 예외도 로그 후 다음 회차 — 틱 루프·스트림 `run` 과 같은 보호 규칙(태스크가 조용히 죽어 10분 갱신이 영구 정지하는 것을 막는다).
+  - §3.6-2 틱 원값 수식·자격을 003 §3.2-4 에서 이 스펙으로 복사했다(자기완결). 003 의 raw 블록과 문구가 어긋나면 003 담당이 맞춘다.
+  - §4 선택 항목(실 네트워크)은 이 Mac 망이 열린 시간에 로컬에서 쟀다 — 차단은 간헐적이다(dev-setup.md 로컬 메모의 확인 명령). 유입량 측정은 앱 커넥터 2개를 우주=국내 KRW 전체로 60초 돌린 관찰용 스크립트(레포 밖)로 했고, 그 밖의 항목은 8041 앱 스모크로 봤다.
   - `server/build/`(setuptools 산출물 76파일)가 git 에 추적돼 있다 — 범위 밖이라 두었다(ruff 기본 제외). venv 에는 패키지를 **editable 로만** 설치한다(dev-setup.md) — 비-editable 사본이 있으면 다른 cwd 에서 옛 모듈을 import 한다.
 - 남은 빚:
-  - 실 네트워크 검증(§4 선택 항목)은 EC2 에서: 업비트·빗썸 접속·구독·재연결·초당 메시지·원문 바이트(010 용량 추정). 업비트 `orderbook_units` 30단계 응답·빗썸 µs `timestamp` 가 실제 프레임과 맞는지도 거기서 확인.
+  - §4 선택 항목 중 "기동 10초 안 행 100 이상" 은 012 가 바이낸스 심볼을 꽂은 뒤 앱 기준으로 다시 본다(§5 의 실측은 관찰용으로 우주를 국내 KRW 전체로 둔 값). 실측 유입량(≈1.4 MB/s 비압축, 국내 둘)은 010 세션이 용량 추정에 쓴다.
   - 012 전에는 바이낸스 심볼이 없어 우주가 비고 `/spreads` 는 404 다(국내 행도 저장되지 않는다). 012 가 `ForeignSymbolSource` 를 꽂으면 풀린다.
   - 입출금 REST 응답 본문(006 §3.5·010 §3.1)은 아직 원문 싱크에 기록되지 않는다 — `WalletStatusService` 가 `record` 를 주입받는 자리가 없다. 006 세션이 `record=` 를 받아 조회 3종에서 부르고 `main.py` 가 꽂는다. 지금 원문 싱크 밖에 남은 REST 경로는 이것뿐이다.
   - 004 스펙 §4 "깊이 반영" 문구는 004 세션 몫으로 남긴다(`docs/specs/004-analysis.md:§7 깊이 반영 세션 — depth_* 우선 서술 → 행의 asks/bids 만 존재`).
