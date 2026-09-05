@@ -211,6 +211,7 @@ class TickLoop:
                 status_code=err.status_code,
                 url=err.url,
                 retry_after_sec=err.retry_after_sec,
+                body=err.body,
             )
 
     async def aclose(self) -> None:

@@ -238,6 +238,27 @@ async def test_connect_failures_are_classified(
     assert state.connected is False
 
 
+@pytest.mark.parametrize(
+    ("exc", "body"),
+    [
+        (
+            HandshakeRejected(429, body=b'{"error":{"name":429}}'),
+            '{"error":{"name":429}}',
+        ),
+        (HandshakeRejected(503, body=b"x" * 600), "x" * 500),  # 앞 500자
+        (HandshakeRejected(418), None),  # 본문 없음
+        (OSError("dns"), None),
+    ],
+)
+async def test_handshake_rejection_body_is_kept(
+    exc: BaseException, body: str | None
+) -> None:
+    stream, connector, _, _, _, store = build([exc])
+    await run_until_exhausted(stream, connector)
+    err = store.stream_state("upbit").last_error  # type: ignore[union-attr]
+    assert err is not None and err.body == body
+
+
 async def test_judge_pending_then_ok_then_stale() -> None:
     hold = asyncio.Event()
 

@@ -31,6 +31,7 @@ WS_URL = "wss://api.upbit.com/websocket/v1"
 WS_SOURCE = "ws:/websocket/v1"
 REST_URL = "https://api.upbit.com"
 MARKETS_PATH = "/v1/market/all"
+_BODY_LIMIT = 500  # 핸드셰이크 거부 응답 본문 상한 — 001 §3.1 과 같은 500자
 
 PING_INTERVAL = 30.0  # 서버는 120초 idle 에 끊는다 — 30초마다 PING 프레임 (§3.10)
 BACKOFF_START = 1.0
@@ -323,13 +324,31 @@ def _classify(exc: BaseException) -> StreamError:
         headers = getattr(response, "headers", None)
         retry = headers.get("Retry-After") if headers is not None else None
         return StreamError(
-            _classify_rest_status(status), message, status, WS_URL, _retry_after(retry)
+            _classify_rest_status(status),
+            message,
+            status,
+            WS_URL,
+            _retry_after(retry),
+            _response_body(response),
         )
     if isinstance(exc, TimeoutError):
         return StreamError("timeout", message, None, WS_URL)
     if isinstance(exc, OSError | ConnectionClosed):
         return StreamError("network", message, None, WS_URL)  # DNS·거부·TLS·끊김
     return StreamError("bad_response", message, None, WS_URL)
+
+
+def _response_body(response: object) -> str | None:
+    """핸드셰이크 거부 응답 본문 앞 500자 — 거래소가 뭐라고 했는지 이력에 남긴다 (011 §3.3)."""
+    raw = getattr(response, "body", None)
+    if not raw:
+        return None
+    text = (
+        raw.decode("utf-8", "replace")
+        if isinstance(raw, bytes | bytearray)
+        else str(raw)
+    )
+    return text[:_BODY_LIMIT]
 
 
 def _classify_rest_status(status: int) -> str:

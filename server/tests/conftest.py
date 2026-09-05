@@ -57,6 +57,7 @@ class FakeStream:
                 status_code=kw.get("status_code"),  # type: ignore[arg-type]
                 url=kw.get("url", "wss://x/websocket/v1"),  # type: ignore[arg-type]
                 retry_after_sec=kw.get("retry_after_sec"),  # type: ignore[arg-type]
+                body=kw.get("body"),  # type: ignore[arg-type]
             ),
         )
 

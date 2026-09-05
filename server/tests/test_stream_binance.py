@@ -756,6 +756,30 @@ async def test_connect_failures_are_classified(
     assert store.stream_state("binance").connected is False  # type: ignore[union-attr]
 
 
+async def test_handshake_rejection_body_is_kept() -> None:
+    body = b'{"code":-1003,"msg":"Too much request weight used"}'
+    stream, connector, _, _, _, _ = await build(
+        [HandshakeRejected(429, {"Retry-After": "10"}, body=body)]
+    )
+    await run_until_exhausted(stream, connector)
+    verdict = stream.judge(T0)
+    assert verdict is not None and verdict.error is not None
+    err = verdict.error
+    assert (err.body, err.retry_after_sec) == (body.decode(), 10)
+    assert f"샤드 {BTC_SHARD}" in err.message  # 커넥터 message 는 그대로 샤드를 말한다
+
+
+async def test_handshake_body_is_cut_at_500_chars_and_none_when_absent() -> None:
+    stream, connector, _, _, _, _ = await build(
+        [HandshakeRejected(503, body=b"y" * 600)]
+    )
+    await run_until_exhausted(stream, connector)
+    assert stream.judge(T0).error.body == "y" * 500  # type: ignore[union-attr]
+    stream, connector, _, _, _, _ = await build([HandshakeRejected(418)])
+    await run_until_exhausted(stream, connector)
+    assert stream.judge(T0).error.body is None  # type: ignore[union-attr]
+
+
 # --- 장애 격리·종료 (§3.6) ---
 
 

@@ -118,15 +118,23 @@ class Clock:
 class HandshakeRejected(Exception):
     """핸드셰이크 거부 흉내 — websockets 의 InvalidStatus 처럼 `.response` 를 가진다."""
 
-    def __init__(self, status: int, headers: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        status: int,
+        headers: dict[str, str] | None = None,
+        body: bytes = b"",
+    ) -> None:
         super().__init__(f"server rejected WebSocket connection: HTTP {status}")
-        self.response = _Response(status, headers or {})
+        self.response = _Response(status, headers or {}, body)
 
 
 class _Response:
-    def __init__(self, status: int, headers: dict[str, str]) -> None:
+    """websockets 17 의 http11.Response 모양 — status_code·headers·body(bytes)."""
+
+    def __init__(self, status: int, headers: dict[str, str], body: bytes) -> None:
         self.status_code = status
         self.headers = headers
+        self.body = body
 
 
 def store_with_universe(bases: set[str]) -> tuple[LiveStore, QuoteSink]:

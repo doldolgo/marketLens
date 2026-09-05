@@ -185,6 +185,23 @@ async def test_handshake_403_is_bad_request_not_banned() -> None:
     assert err is not None and (err.kind, err.status_code) == ("bad_request", 403)
 
 
+async def test_handshake_rejection_body_is_kept_up_to_500_chars() -> None:
+    body = '{"error":{"name":429,"message":"' + "x" * 600 + '"}}'
+    stream, connector, _, _, _, store = build(
+        [HandshakeRejected(429, body=body.encode())]
+    )
+    await run_until_exhausted(stream, connector)
+    err = store.stream_state("bithumb").last_error  # type: ignore[union-attr]
+    assert err is not None and err.body == body[:500]
+
+
+async def test_handshake_without_body_leaves_body_none() -> None:
+    stream, connector, _, _, _, store = build([HandshakeRejected(418)])
+    await run_until_exhausted(stream, connector)
+    err = store.stream_state("bithumb").last_error  # type: ignore[union-attr]
+    assert err is not None and err.body is None
+
+
 async def test_aclose_finishes_within_budget_when_socket_close_hangs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

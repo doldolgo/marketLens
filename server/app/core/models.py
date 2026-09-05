@@ -52,6 +52,9 @@ class StreamError:
     retry_after_sec: int | None = (
         None  # 핸드셰이크 응답의 Retry-After(초 정수). 없으면 None
     )
+    body: str | None = (
+        None  # 핸드셰이크 거부 응답 본문 앞 500자 — 011 이력의 message 가 된다
+    )
 
 
 @dataclass
