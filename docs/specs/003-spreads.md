@@ -1,6 +1,6 @@
 # 003 — spreads
 
-상태: IN_PROGRESS | 의존: 001(collect — 저장소·행·스트림 상태·즉시 갱신 트리거), 002(web-shell — 셸·공유 타입), 012(binance-stream — 해외 20단계 호가)
+상태: DONE | 의존: 001(collect — 저장소·행·스트림 상태·즉시 갱신 트리거), 002(web-shell — 셸·공유 타입), 012(binance-stream — 해외 20단계 호가)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -114,7 +114,7 @@
 - 이 스펙이 1초 폴링을 제공한다. 요청은 `GET ${API_BASE}/spreads?notional=<선택된 규모>` 이고, 규모를 바꾸면 **다음 폴링부터** 그 값으로 나간다(즉시 재요청하지 않는다 — 1초면 갱신되고, 즉시 요청은 폴링과 겹쳐 순서가 뒤집힐 수 있다). 선택된 규모는 **셸이 들고 있다** — 탭의 분절 버튼과 폴링 URL 이 같은 값을 봐야 하기 때문이다(기본값은 $10k 로 서버 기본값과 같다). 성공 시 행의 `dom`/`fx` 를 표시명(`upbit→업비트`, `bithumb→빗썸`, `binance→Binance`, 모르는 id 는 그대로)으로 바꾼 뒤 공유 피드에 적용하고 화면을 갱신한다. **실패(네트워크·비 2xx)는 무시하고 직전 데이터를 유지**한다.
 - 폴링은 spreads 기능 폴더 안에 살고, 셸이 공유 피드를 만든 직후 시작된다. 002 의 `shared/` 는 수정하지 않는다(shared → feature import 금지).
 - 헤더(002 KPI 스트립)의 "USDT/KRW 암묵환율" 은 `/spreads` 최상위 `rate` 로 채워진다. `rate>0` 이면 `₩1,392.0`(소수 1자리 ko-KR), 0 이면 `–`.
-- 셸: 스프레드 placeholder → 스프레드 탭. 행 클릭 → 선택된 심볼을 저장하고 기록 탭으로 전환한다. 기록 탭은 아직 placeholder 이므로 선택된 심볼을 history 탭에 넘겨 `history — ... · BTC` 처럼 보이게 한다(005 가 진짜 탭으로 교체).
+- 셸: 스프레드 탭이 첫 탭이다. 행 클릭 → 선택된 심볼을 저장하고 기록 탭으로 전환한다. 기록 탭(002 의 mock 탭 — 005 가 실데이터로 교체)은 넘겨받은 심볼을 선택 티커로 보인다.
 
 ### 3.5 FE — 스프레드 탭 화면
 - 표 컬럼 순서: **심볼 | 국내가 KRW | 김프(또는 역프) | 입출금 | 네트워크**. 국내가 열만 가변 폭, 나머지는 고정 폭. 코인 1개 = 행 1개(거래소 페어는 코인별로 집계). 색·간격·그림자는 `docs/design/theme.css`, 표 구조는 002 §3.2 를 따른다.
@@ -178,19 +178,21 @@ FE 수동 확인:
 - 비교 해외 거래소에서 Binance 를 풀면 표가 비고 "조건에 맞는 코인이 없습니다" 가 보인다. `모두` 로 되돌리면 복구된다.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
-서버 슬리피지 반영 세션(2026-09-04). 네 명령 모두 통과해야 커밋한다.
+재구축 검증 세션(2026-09-06). 다섯 명령 모두 통과해야 커밋한다.
 ```bash
 cd server && .venv/bin/ruff check .            # All checks passed!
-cd server && .venv/bin/ruff format --check .   # 171 files already formatted
-cd server && .venv/bin/python -m pytest -q     # 303 passed, 1 warning in 1.58s
+cd server && .venv/bin/ruff format .           # 181 files left unchanged
+cd server && .venv/bin/python -m pytest -q     # 417 passed, 1 warning in 4.73s
 cd web && npm run lint                         # oxlint src — 출력 없음(error 0)
-cd web && npm run build                        # tsc -b && vite build — ✓ 44 modules transformed / ✓ built in 282ms
+cd web && npm run build                        # tsc -b && vite build — ✓ built in 293ms
 ```
-착수 시점(깨끗한 main)의 pytest 는 288 passed 였다. 늘어난 15개는 슬리피지 14개(`test_slippage.py`)와 잔량 0 fail 1개다.
+착수 시점의 pytest 는 416 passed 였다. 늘어난 1개는 §4 "응답 `fwd`·`rev` 는 저장 계층이 쓰는 원값과 다르다"를 이 기능 폴더에서 고정한 `test_slippage.py` 의 항목이다(같은 관계는 009 의 `tests/test_tick_store.py` 도 본다).
 
-FE 육안 확인은 `/spreads` 계약을 그대로 흉내낸 로컬 스텁(17키 행 5개)을 `:8000` 에 띄우고 `npm run dev` 로 봤다 — 이 망에서 거래소 도메인이 막혀 실수집이 안 되기 때문이다(dev-setup.md 로컬 메모). 확인한 것: 규모 세그먼트가 항상 보이고 `가격 기준` 세그먼트가 없다, 김프 셀에 `슬 −0.08%p` 배지, 국내가 열이 행 `krw` 그대로(₩152,000,000), 규모를 $500k 로 올리면 **다음 폴링부터** `?notional=500000` 이 나가고 배지가 `−0.84%p` 로 커지며 김프 값이 `+2.23% → +1.47%` 로 작아지고 국내가는 그대로, 임계 1.5 강조가 순값 기준으로 다시 계산된다.
+기동 스모크(실거래소 없이 — 이 망은 거래소 도메인을 막는다): `.venv/bin/python -m uvicorn app.main:app --port 8041` 로 띄워 `GET /health` → `{"status":"ok","version":"0.1.0"}`, `GET /spreads` → 404 `market_data_not_found`(detail `{"exchange":"upbit"}`, §3.2-1 문구 그대로), `GET /spreads?notional=0`·`?notional=abc` → 422 `{"detail":[…]}`. 확인 후 프로세스를 죽였다.
 
-§4 "실서버 확인"(행 수 > 100·`rate > 1000`·`POST /refresh` 의 `totalSaved > 100`)은 실거래소 수집이 필요해 **EC2 에서 돌려야 한다** — 이 세션에서는 못 돌렸다(§7 남은 빚).
+FE 육안 확인은 `/spreads` 계약을 그대로 흉내낸 로컬 스텁(17키 행 6개 — ok 4·stale 1·fail 1, `notional` 에 비례해 `slipFwd` 가 커지는 값)을 `:8041` 에 띄우고 `VITE_API_BASE=http://localhost:8041 npm run dev` 로 봤다. 확인한 것: KPI 환율 `₩1,392.4`; 입출금 태그 전부 `?` 점선, 네트워크 `–`; 임계 1.5 이상(BTC·ETH)만 배경 강조·심볼 점; `슬 −0.08%p` 배지; 규모를 `$500k` 로 바꾸면 **다음 폴링부터** `?notional=500000` 이 나가고(스텁 요청 로그로 확인) 배지가 `−4.00%p` 로 커지며 김프가 `+2.23% → −1.69%` 로 작아지고 국내가 `₩100,000,000` 는 그대로; 역프 기준 토글 시 화살표가 `업비트 → Binance` 로 뒤집히고 값이 바뀜; Binance 체크 해제 → `조건에 맞는 코인이 없습니다…`(0 / 0), `모두` 로 복구; 행 클릭 → 기록 탭에 BTC 선택; 스텁을 죽이면 표는 남고 5초 뒤 전 행이 흐려지며 다시 띄우면 선명해진다.
+
+§4 "실서버 확인"(행 수 > 100·`rate > 1000`·`POST /refresh` 의 `totalSaved > 100`·`REFRESH_TOKEN` 401·`?notional=500000` 비교)은 실거래소 수집이 필요해 **EC2 에서 확인 필요** — 이 세션에서는 못 돌렸다(§7 남은 빚).
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — spreads 행의 server 칸에 `notional` 규모로 호가를 걷어 슬리피지를 차감한다는 것, web 칸에 규모 세그먼트, 비고에 행 17키. 알려진 빚에 저장 계층(원값)과 응답(순값)의 차이. **항상 포함.**
@@ -227,3 +229,21 @@ FE 육안 확인은 `/spreads` 계약을 그대로 흉내낸 로컬 스텁(17키
   - `server/build/lib/` 이 git 에 추적돼 있고 앱 트리의 낡은 사본이다(`liqDom` 시절 `spreads/service.py` 포함). `ruff check .` 가 이 사본까지 본다(171 파일). 삭제는 이 스펙 범위 밖이라 손대지 않았다.
   - 012 의 `test_spreads_payload_is_identical_with_and_without_depth` 는 그 시드의 $10,000 이 1단계 안에서 끝나 통과한다. 시드를 조금만 얕게 잡으면 깨진다 — 012 는 "HTTP 계약 무변경"을 뜻했지 "값 무변경"이 아니므로 담당 스펙이 다시 볼 자리다.
   - 004 analysis 는 `depth_*` 를 아직 쓰지 않는다 — `docs/specs/004-analysis.md` §3.1: 문서 주장 "`depth_*` 가 비어 있지 않으면 그것을 쓴다" → 실제 `server/app/features/analysis/service.py` 는 `row.asks`/`row.bids` 만 본다. 담당 스펙이 아니라 보고만 한다.
+
+### 재구축 검증 세션 (2026-09-06)
+001(WebSocket 수집·틱)·012(바이낸스 스트림) 위에서 이 스펙의 코드·테스트가 스펙과 같은지 확인하고 DONE 으로 올린 세션. 동작 변경은 없다.
+- 만든·고친 것 (파일 목록):
+  - `server/app/features/spreads/tests/test_slippage.py` — §4 "응답 `fwd`·`rev` 는 저장 계층이 쓰는 원값과 다르다" 항목을 이 기능 폴더에서 고정(core 의 공개 함수 `build_tick` 으로 같은 저장소의 틱을 만들어 `fwd + slipFwd`·`rev + slipRev` 와 비교).
+  - `server/app/features/spreads/models.py` — `RefreshSnapshot.saved`·`calls` 주석을 §3.3(지금 메모리에 있는 행 수·이 트리거로 나간 REST 호출 수)에 맞췄다. 값은 이미 그 뜻이었다.
+  - `docs/specs/003-spreads.md`(상태·§3.4·§5·§7), `CLAUDE.md`(인덱스 003 DONE·재구축 순서), `docs/context/status.md`(재구축 문단·spreads 행).
+- 추측한 지점 (묻지 않고 정한 것):
+  - 원값 비교 테스트의 자리 — 009 의 `tests/test_tick_store.py` 가 이미 같은 관계를 보지만, §4 항목마다 이 기능 폴더에 최소 1개를 두는 규칙(conventions.md)대로 spreads 테스트에도 넣었다. 저장 계층 코드 대신 core 의 `build_tick` 을 쓴 이유는 Influx·Redis 없이 "같은 저장소로 만든 점"을 얻는 유일한 공개 경로이기 때문이다.
+  - FE 육안 확인을 스텁으로 한 것 — 이 망에서 거래소 도메인이 막혀 실수집이 안 된다(dev-setup.md 로컬 메모). 스텁은 레포 밖(스크래치)에 두고 커밋하지 않았다.
+- 실행 중 함께 고친 절:
+  - §3.4 마지막 문장 — 기록 탭을 "placeholder" 라고 하던 문구를 현재 동작(002 의 mock 탭이 넘겨받은 심볼을 선택 티커로 보인다)으로 바꿨다.
+  - status.md 재구축 안내 문단에서 003 을 빼고, spreads 행을 새 런타임(메모리만 읽음·스트림 기준 `age`·`/refresh` 는 001 트리거 노출)으로 적었다.
+- 남은 빚:
+  - §4 "실서버 확인" 전부 — **EC2 에서 확인 필요**(행 수 > 100·`rate > 1000`·`totalSaved > 100`·`REFRESH_TOKEN` 401·`?notional=500000` 비교).
+  - `core/orderbook.py` 단독 단위 테스트 없음(004 §7 이 남긴 빚 그대로). 검증은 `/spreads`·`/slippage` HTTP 응답을 통해서만.
+  - `server/build/lib/`(76파일)·`marketlens_server.egg-info/` 가 git 에 추적돼 있다(status.md 알려진 빚 001). `ruff check .` 가 이 사본까지 본다(181 파일). 이 스펙 범위 밖이라 손대지 않았다.
+  - 스파크라인 렌더는 후속(status.md 비고).

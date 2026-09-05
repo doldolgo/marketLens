@@ -4,13 +4,13 @@
 > 표기: `없음` = 만들어야 하는데 아직 없음. `-` = 그 런타임에 해당 기능이 원래 없음.
 
 ## 이 레포
-**재구축 중**: CLAUDE.md §4 에서 IN_PROGRESS·TODO 인 스펙(003·004·005·006·007)은 문서가 목표 구조(WebSocket 수집·틱 인계·원문 아카이브)를 말하고, 아래 표의 그 행들은 아직 **재구축 전 런타임**을 말한다. 각 실행 세션이 끝날 때 그 행을 갱신한다. 001·009·010·011·012 가 끝나 토대(행·틱·계약)·3거래소 스트림·틱 저장 3계층(Redis → Influx `premium`·`dw_fail`)·원문 아카이브(S3 `raw/`)·수집 실패 이력(`/health/collect`·Influx `collect_fail`)은 새 구조다.
+**재구축 중**: CLAUDE.md §4 에서 IN_PROGRESS·TODO 인 스펙(004·005·006·007)은 문서가 목표 구조(WebSocket 수집·틱 인계·원문 아카이브)를 말하고, 아래 표의 그 행들은 아직 **재구축 전 런타임**을 말한다. 각 실행 세션이 끝날 때 그 행을 갱신한다. 001·003·009·010·011·012 가 끝나 토대(행·틱·계약)·3거래소 스트림·김프 표(`/spreads`·`/refresh`)·틱 저장 3계층(Redis → Influx `premium`·`dw_fail`)·원문 아카이브(S3 `raw/`)·수집 실패 이력(`/health/collect`·Influx `collect_fail`)은 새 구조다.
 
 | 기능 | server | web | 비고 |
 |---|---|---|---|
 | collect | 업비트·빗썸 WS 실시간 갱신·마켓 우주 10분·1초 틱·/health | - | 바이낸스 스트림은 012 |
-| web-shell | - | 셸·KPI·mock 탭 3종(gap·pp·flow) 동작 | spreads/history 탭은 placeholder |
-| spreads | `/spreads`·`/refresh` 동작, `notional` 규모로 호가를 걷어 슬리피지 차감, USDT 시세 미갱신 경고, `spark` 는 009 가 게시한 30분 추이 | 실데이터 탭·1초 폴링·규모 세그먼트 | 행 17키. 스파크라인 렌더는 후속 |
+| web-shell | - | 셸·KPI·mock 탭 3종(gap·pp·flow) 동작 | spreads 탭은 003 실데이터, history 탭은 mock(005 가 교체) |
+| spreads | `/spreads` 는 메모리(LiveStore)만 읽어 전 페어 표 — `notional` 규모로 호가를 걷어 슬리피지 차감, `age`·`status` 는 거래소 스트림 수신 시각 기준, USDT 시세 미갱신 경고, `spark` 는 009 가 게시한 30분 추이. `/refresh` 는 001 즉시 갱신 트리거 노출 | 실데이터 탭·1초 폴링·규모 세그먼트·행 클릭 → 기록 탭 | 행 17키. 스파크라인 렌더는 후속. 실거래소 확인(행 수 > 100 등)은 EC2 대기 |
 | analysis | 6개 엔드포인트 동작 | - | HTTP 계약 camelCase |
 | history | `/history/*` 3종·백필 (Influx `premium`·`dw_fail` 쓰기는 009 flusher) | 기록 탭 (mock) | `/history/*` 실데이터 연결은 후속 |
 | wallet-status | 3거래소 조회·60초 캐시·`/spreads` 망 판정 | - | 표시는 spreads 탭이 담당 |
