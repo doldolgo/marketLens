@@ -165,8 +165,18 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+cd web && npm run lint && npm run build   # oxlint src: error 0 / tsc -b && vite build: 44 modules, dist/index.html·assets/index-*.{css,js} 생성 (2026-09-06, Node v26.4.0)
+cd web && npx vite --port 5173 --strictPort   # 육안 확인용 dev 서버 — 확인 후 종료
+curl -s localhost:5173 | grep -o "<title>[^<]*</title>"   # <title>트레이딩룸 · MarketLens</title>
 ```
+육안 확인(`localhost:5173`, 서버 없이 — `/api/*` 는 실패해 spreads 표는 대기 문구, 수집 상태 KPI 는 `–`/`수집 상태 조회 전`):
+- §4-1 헤더 `트레이딩룸` + `실시간 수집 중`, 탭 6개가 §3.5 순서·라벨, 우측 `HH:MM:SS KST` 가 갱신된다. `lang="ko"`.
+- §4-2 KPI `USDT/KRW 암묵환율 –`, `BTC 김프 · 순방향 0.00%`, `역방향 0.00%`, `추적 페어 0개 코인 · 0 페어`. §4-3 활성 탭 밑줄 accent.
+- §4-5 갭 탭 `24 / 24 코인 표시`, 헤더 `진입 갭 · 현물 → 선물 ▾`, 행마다 `{ex} 현물 → {ex} 선물` 칩, 갭 내림차순(+0.85% … +0.06%), 임계 0.5 이상 행 accent 배경, 펀딩 `+0.0xx%` + `펀딩 3분 후`/`펀딩 3시간 3분 후`.
+- §4-7 선선갭 `가격갭 ▾` 내림차순(+1.38% …), `A ↔ B` 칩 + `A 롱 / B 숏`, 펀딩갭 `%/h` + `해당 조합 펀딩갭`.
+- §4-9 레이더 코인 칩 9개(ETH 8건 … DOGE 3건), `44 / 44건 표시`, 거래소 칩 국내 우선(업비트 6건·빗썸 2건 → MEXC 13건 …), 요약 4블록, 브레드크럼 `전체`, 표에 코인·주소 열 모두 있음.
+- §4-13 `document.querySelectorAll('table').length === 0`.
+- 이번 기록에서 조작하지 않은 항목(코드 경로만 확인): §4-4 검색어 유지(탭은 `display:none` 으로 숨김 — 언마운트 없음), §4-6 퍼센트 색(`pctColor`), §4-10 레이더 검색(`toUpperCase` 코인 판정·`일치하는 코인·주소 없음`), §4-12 1.5초 흔들림. §4-8·11 은 011·003·005 가 본다.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — web-shell 행을 `| web-shell | - | 셸·KPI·mock 탭 3종(gap·pp·flow) 동작 | spreads 탭은 003 실데이터, history 탭은 mock(005 가 교체) |` 로. **항상 포함.**
@@ -176,5 +186,13 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
+  - `web/` 프로젝트(Vite + React 19 + TypeScript strict, oxlint, `index.html` 제목·`lang="ko"`·보라 번개 favicon, `vite.config.ts` 의 `/api` 프록시·접두사 제거).
+  - `web/src/shared/` — `theme.css`·`index.css`(`docs/design/` 원본 복사), `config.ts`(§3.1 상수·`API_BASE`), `types.ts`(`FeedStatus`·`IoState`·`SpreadRow`·mock 타입), `feed.ts`(공유 피드 생성·통째 교체·1.5초 tick·`useFeed`), `format.ts`(§3.3 포맷 8종·`pctColor`·`exName`), `rand.ts`(문자열 시드 결정론 난수), `mock.ts`(§3.6 마켓·§3.10 레이더·`events`), `ui.tsx`(kicker·card·세로선·grid 표·배지·분절·숫자 입력·토글).
+  - `web/src/App.tsx`(헤더·탭 6개·KPI 스트립·탭 숨김·푸터), `main.tsx`, `features/gap/Tab.tsx`·`features/pp/Tab.tsx`·`features/flow/Tab.tsx`(mock 탭 3종). `features/spreads`·`features/history`·`features/health` 는 003·005·011 이 채웠다.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - `events(per, now)` 의 기간 문자열은 `<N>h|<N>d|<N>w`(대소문자 무시)로 해석하고 해석 불가면 24h — §3.4 에 적었다.
+  - mock tick 에서 `stale` 항목은 값을 고정하고 age 만 +1.5(§3.6). 레이더의 usd 가 null 인 행도 수량은 감춰진 금액으로 계산한다(§3.10).
+  - 숨김 탭은 `display:none`, 보이는 탭은 `display:contents` 로 셸의 세로 flex 에 직접 참여한다(§3.5-3 "숨김 탭은 레이아웃에 참여하지 않는다" 의 구현).
 - 남은 빚:
+  - `shared/ui.tsx` 의 흐린 글자 조각 `DIM_TEXT` 는 `color-mix` 로 만든다(수집 상태 탭이 쓴다) — §3.2 "램프를 쓴다" 와 어긋난다. 011 이 `--color-neutral-500` 램프로 바꿀 몫.
+  - §5 에서 조작하지 않은 항목(§4-4·6·10·12)의 실제 조작 확인.
