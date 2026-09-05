@@ -64,8 +64,8 @@
 - measurement `collect_fail`. tag `exchange`·`kind`, time = `started_at`(초 정밀도), field `count`(int)·`last_failed_ts`(int epoch 초)·`status_code`(int, 없으면 0)·`message`(string)·`url`(string)·`retry_after_sec`(int, 없으면 0)·`ended_ts`(int epoch 초, **닫힐 때만** 쓴다). 한 구간 = 점 1개. 복원 시 0 은 null 로 돌린다.
 - 구간이 **열릴 때** 1점 쓰고, **닫힐 때** 같은 (tag, time) 으로 다시 써서 `ended_ts`·최종 `count` 등을 합친다. 매초 쓰지 않는다. 진행 중 구간의 `count` 는 메모리에만 있다.
 - 쓰기 실패는 로그 1줄 후 무시한다. 열 때 실패했어도 닫을 때의 쓰기가 점을 만든다.
-- **기동 시 복원**: 최근 24시간 `collect_fail` 을 읽어 메모리 목록을 채운다. `ended_ts` 없는 점은 진행 중 구간으로 복원한다 — 첫 틱에서 성공하면 위 닫기 규칙대로 닫히고, 실패하면 이어서 센다. 복원된 진행 중 구간의 `count` 는 열 때 쓴 값에서 이어 센다(재기동 전 실패 횟수는 잃는다). Influx 가 없거나(`INFLUX_TOKEN` 미설정) 닿지 않거나 조회가 **3초**를 넘기면 빈 목록으로 시작하고 경고 로그 1줄. 복원은 틱 루프 시작 **전에** 끝난다.
-- 서버 자체가 꺼져 있던 시간은 거래소 실패가 아니므로 구간을 만들지 않는다. 지난 재기동 시각은 기록하지 않는다(현재 기동 시각만 응답에 싣는다).
+- **기동 시 복원**: `started_at` 이 최근 24시간인 `collect_fail` 점을 읽어 메모리 목록을 채운다(조회 range 의 기준은 점의 time = `started_at` — 24시간보다 전에 시작해 24시간 안에 끝난 구간은 복원되지 않는다). `ended_ts` 없는 점은 진행 중 구간으로 복원한다 — 첫 틱에서 성공하면 위 닫기 규칙대로 닫히고, 실패하면 이어서 센다. 복원된 진행 중 구간은 서버가 **꺼져 있던 시간을 포함해** 하나로 이어진다(`started_at` 부터 지금까지가 실패 구간이고 타임라인·성공률도 그렇게 본다) — 열 때 쓴 점에는 재기동 전 마지막 실패 시각이 없고(`last_failed_ts` 는 열 때·닫을 때만 쓴다) 꺼지기 전까지 실패 중이었으며 복구를 관측한 적도 없으므로 그 사이를 잘라내지 않는다. 복원된 진행 중 구간의 `count` 는 열 때 쓴 값에서 이어 센다(재기동 전 실패 횟수는 잃는다). Influx 가 없거나(`INFLUX_TOKEN` 미설정) 닿지 않거나 조회가 **3초**를 넘기면 빈 목록으로 시작하고 경고 로그 1줄. 복원은 틱 루프 시작 **전에** 끝난다.
+- 서버 자체가 꺼져 있던 시간만으로는 구간을 **만들지** 않는다 — 기동 시 그 거래소에 복원된 진행 중 구간이 없으면 첫 실패 틱부터 센다. 지난 재기동 시각은 기록하지 않는다(현재 기동 시각만 응답에 싣는다).
 
 ### 3.5 `GET /health/collect`
 메모리만 읽는다. 거래소 호출·Influx 조회 0회. 인증 없음. 항상 200.
@@ -83,12 +83,12 @@
   "outages": [
     {"exchange": "binance", "kind": "rate_limit", "startedAt": 1756903000000, "endedAt": 1756903012000, "lastFailedAt": 1756903011000, "count": 12,
      "statusCode": 429, "message": "{\"code\":-1003,\"msg\":\"Too much request weight used; ...\"}",
-     "url": "https://api.binance.com/api/v3/ticker/bookTicker", "retryAfterSec": 10}
+     "url": "https://api.binance.com/api/v3/exchangeInfo", "retryAfterSec": 10}
   ]
 }
 ```
 - `exchanges` 는 001 의 거래소 3곳 고정 순서(`upbit`, `bithumb`, `binance`). `state`: 마지막 성공 후 경과 `< 5초` → `ok`, `5초 이상 60초 미만` → `stale`, `60초 이상` 또는 기동 후 성공 0회 → `down`. `markets` = 메모리 스냅샷의 그 거래소 행 수. `openOutage` = 진행 중 구간(모양은 `outages` 항목과 같음), 없으면 null. `lastError` = 가장 최근 구간의 최신 실패(진행 중이면 그것), 24시간 안에 없으면 null.
-- `successRate1h` = `(1 − 최근 3600초 창과 겹치는 구간들의 겹친 초 합 / 3600) × 100`, 소수 1자리. 거래소별로 계산하고 최상위는 3곳 평균. 틱이 1초 고정이라 지속 초 ≈ 실패 틱 수다. 기동 후 1시간 미만이면 창은 그대로 3600초다(꺼져 있던 시간은 실패로 세지 않는다).
+- `successRate1h` = `(1 − 최근 3600초 창과 겹치는 구간들의 겹친 초 합 / 3600) × 100`, 소수 1자리. 거래소별로 계산하고 최상위는 3곳 평균. 틱이 1초 고정이라 지속 초 ≈ 실패 틱 수다. 기동 후 1시간 미만이어도 창은 그대로 3600초다 — 꺼져 있던 시간은 복원된 진행 중 구간(§3.4)과 겹치는 만큼만 실패로 센다.
 - `outages` = 메모리의 24시간 구간 전부(진행 중 포함), `startedAt` 내림차순. 시각은 전부 epoch ms.
 
 ### 3.6 FE — 폴링과 피드
@@ -108,7 +108,7 @@
 
 ## 4. 검증
 BE(네트워크 없음, 커넥터·Influx 는 fake):
-- 업비트 429 → `rate_limit`, 418 → `banned`, 503 → `unavailable`, 400 → `bad_request`, 타임아웃 → `timeout`, 연결 예외 → `network`, JSON 아님 → `bad_response`. `status_code`·`body`·`url` 이 예외에 남는다.
+- 업비트 429 → `rate_limit`, 418 → `banned`, 503 → `unavailable`, 400 → `bad_request`, 타임아웃 → `timeout`, 연결 예외 → `network`, JSON 아님 → `bad_response`. `status_code`·`body`·`url` 이 예외에 남는다(연결 예외는 `status_code` null 에 `url` 은 REST URL). 빗썸·바이낸스 REST 의 연결 예외도 같다.
 - 빗썸 HTTP 200 + `{"error":{"name":429,…}}` → 실패이며 `rate_limit`, `status_code` 200. `error.name` 이 문자열이면 `bad_response`.
 - 바이낸스 429 + `Retry-After: 10` → `rate_limit`, `retry_after_sec` 10. 403 → `banned`. 헤더 없으면 null.
 - 스트림 판정: 연결 + 최근 시세 메시지 → 성공. 핸드셰이크 429 → `rate_limit`, 연결 실패 → `network`, 30초 무수신 → `stale_stream`(url = WS URL, status_code null). 바이낸스 샤드 하나만 정체 → `stale_stream` 이고 message 에 샤드 번호.
@@ -117,7 +117,7 @@ BE(네트워크 없음, 커넥터·Influx 는 fake):
 - `kind` 가 바뀌면 이전 구간이 닫히고 새 구간이 열린다.
 - 24시간 지난 닫힌 구간은 목록에서 빠지고, 진행 중 구간은 남는다.
 - 구간 열림·닫힘에 Influx 쓰기가 각 1회씩 호출되고, 연속 실패 중에는 호출되지 않는다. 쓰기 예외는 삼켜진다. 닫힘 쓰기에 `ended_ts`·`last_failed_ts`·최종 `count` 가 실린다.
-- 기동 시 fake Influx 의 24시간 점이 메모리로 복원되고 `ended_ts` 없는 점은 진행 중이 된다. Influx 없음/예외/3초 초과면 빈 목록으로 기동한다.
+- 기동 시 fake Influx 의 24시간 점이 메모리로 복원되고 `ended_ts` 없는 점은 진행 중이 된다. Influx 없음/예외/3초 초과면 빈 목록으로 기동한다. 기동 전에 시작한 복원된 진행 중 구간은 `started_at` 부터 now 까지 성공률 창과 겹치고(꺼져 있던 시간 포함), 기동 후 닫히면 `endedAt` 은 기동 후의 첫 성공 틱이다.
 - `GET /health/collect`: 거래소 3곳 고정 순서, `state` 경계(4.9초 ok · 5초 stale · 60초 down · 성공 0회 down), `successRate1h` 가 창과 겹친 초로 계산되고 창 밖 구간은 무시된다, `outages` 내림차순, 진행 중 구간이 `openOutage` 와 `outages` 양쪽에 있다.
 - `GET /health` 는 여전히 `{"status":"ok","version":…}` 이다. `POST /refresh` 응답 키는 바뀌지 않는다.
 - 수집 상태 탭의 유형 칩 라벨에 `stale_stream`(`스트림 정체`)이 있다 — FE `OutageKind` 유니온에 값이 있어야 빌드된다.
@@ -131,7 +131,7 @@ BE(네트워크 없음, 커넥터·Influx 는 fake):
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 181 files left unchanged / 399 passed (2026-09-05, 기존 398 + 신규 1)
+# All checks passed! / 181 files left unchanged / 403 passed (2026-09-05 — REST 연결 예외 network·url 잔존 3건, 복원 진행 중 구간의 성공률 1건 포함)
 cd web && npm run lint && npm run build
 # oxlint 경고 0 / tsc -b + vite build 성공 (index-*.js 255 kB)
 # 실서버(로컬, INFLUX_TOKEN·S3_BUCKET 없음, Redis 없음 — :8000 대신 빈 포트 :8041, 끝나고 kill)
@@ -148,7 +148,7 @@ EC2 에서 확인 필요(이 망에서 못 돌린 수동 항목): 기동 몇 초
 - `docs/context/status.md` — 행 추가 `| health | /health/collect·실패 구간 추적·collect_fail 쓰기/복원 | 실데이터 탭·5초 폴링·KPI 수집 상태 | 백오프는 013 |`. web-shell 행의 `mock 탭 4종` → `mock 탭 3종(gap·pp·flow)`. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 011 행 상태 → DONE. **항상 포함.**
 - `docs/specs/002-web-shell.md` — §1 "mock 데이터로 도는 탭 4개(…수집 상태…)" 에서 수집 상태 제외, §2 기능 폴더 목록에서 `features/health` 를 "→ 011" 로, §3.5 KPI `수집 상태` 줄을 "011 §3.7" 로 교체, §3.9 본문을 "011 §3.8 로 대체" 한 줄로, §3.6 mock 공통의 Hyperliquid 현물 제외 사유("수집 상태 탭과 일치")를 지운다. §4 육안 체크 8번(수집 상태)을 011 §4 로 넘긴다.
-- `docs/specs/001-collect.md` — §3.1 에러 형식에 `kind` 7종과 `retry_after_sec` 를 한 줄로 추가하고 "분류는 커넥터가 한다(011 §3.2)" 를 적는다. §3.5 빗썸 quirk 에 "HTTP 200 + `error` 본문은 실패" 를 추가한다. §3.2 사이클 5단계 뒤에 "거래소별 성공/실패를 이력 추적기에 넘긴다(011 §3.3)" 를 추가한다.
+- `docs/specs/001-collect.md` — §3.1 에러 형식에 `kind` 8종과 `retry_after_sec` 를 한 줄로 추가하고 "분류는 커넥터가 한다(011 §3.2)" 를 적는다. §3.5 빗썸 quirk 에 "HTTP 200 + `error` 본문은 실패" 를 추가한다. §3.2 사이클 5단계 뒤에 "거래소별 성공/실패를 이력 추적기에 넘긴다(011 §3.3)" 를 추가한다.
 - `docs/context/architecture.md` — 데이터 흐름(BE) 그림에 `수집 사이클 → 실패 이력(메모리, 구간 단위) → Influx collect_fail(열림/닫힘 시)·기동 시 복원` 한 줄. "현재 구조" 절에 health 항목(이력 추적기 모듈은 core — 수집기가 쓰므로 기능 폴더가 아니다 / `features/health/` 는 읽기 API / web `features/health/`). `/health` 문장에 "상세는 `/health/collect`(011)" 를 덧붙인다.
 - `docs/context/db.md` — measurement 절에 `collect_fail` 정의(§3.4 의 tag·field·유일키·시각 단위), 쓰는 쪽에 "이력 추적기: 구간 열림·닫힘 시 1점, 매초 없음", 읽는 쪽에 "기동 시 24시간 복원 1회 — HTTP 조회 없음".
 - `docs/context/product.md` — 기능 목록 `(health) 수집 상태 탭` 행을 `health | 거래소별 실패 구간 이력·상태·성공률(/health/collect). 백오프는 비범위` 로. 용어 절에 `실패 구간(outage)`: "거래소 하나의 연속 실패를 시작·종료·횟수·원문으로 묶은 이력 단위. 연속 성공 3회에 닫힌다."
@@ -159,10 +159,11 @@ EC2 에서 확인 필요(이 망에서 못 돌린 수동 항목): 기동 몇 초
   - server: `core/errors.py`(`FAIL_KINDS` 8종·`kind`·`retry_after_sec`), `core/models.py`(`StreamError`·`StreamState.url/connected_since`), `core/streams/{upbit,bithumb,binance}.py`(REST·핸드셰이크 분류·`Retry-After`·빗썸 200+`error` 판정·구독 거부 `bad_request`, 바이낸스는 샤드별 `stale_stream` 판정과 message 의 샤드 번호), `core/ticks.py`(`judge_state` + `TickLoop._judge_all` — 매 틱 거래소별 판정을 추적기에 넘긴다), `core/contracts.py`(`OutageSink`·`Verdict`·`StreamJudge`), `core/outages.py`(`OutageTracker` — 구간 열기·세기·닫기·kind 전환·24시간 보관·`collect_fail` 쓰기 큐·기동 복원 3초 상한), `core/influx.py`(`CollectFailRow`·`collect_fail_point`·`query_collect_fail`), `main.py`(복원 → 쓰기 태스크 → 틱 루프 배선, `/health/collect` 라우터), `features/health/{models,service,router}.py` + `tests/test_collect_api.py`, `tests/test_outages.py`(추적기·쓰기·복원·틱→추적기), 커넥터 테스트 3개의 분류 케이스(이 세션은 바이낸스 REST `Retry-After` 부재 → null 1건을 추가).
   - web: `shared/types.ts`(`HealthData` 계약, `OutageKind` 8종 — 이 세션이 `stale_stream` 추가), `shared/format.ts`(`exName`), `shared/feed.ts`(`health` + `setHealth`), `shared/config.ts`(`HEALTH_POLL_MS`), `features/health/{api,types,Tab}.tsx`(이 세션이 칩 라벨 `스트림 정체` 추가), `App.tsx`(KPI·폴링 호출).
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-  - 이 세션은 001·009·010·012 가 WebSocket 구조로 끝난 뒤의 마무리 회차다 — 추적기·API·탭은 이미 그 구조 위에 배선돼 있었고, 남은 어긋남은 FE `OutageKind`·칩 라벨에 `stale_stream` 이 없던 것(status.md 의 (011·012) 빚)과 바이낸스 REST 의 `Retry-After` 부재 케이스 미검증뿐이었다. 그 둘을 채우고 §4 검증을 전부 다시 돌렸다.
+  - 이 세션은 001·009·010·012 가 WebSocket 구조로 끝난 뒤의 마무리 회차다 — 추적기·API·탭은 이미 그 구조 위에 배선돼 있었고, FE `OutageKind`·칩 라벨의 `stale_stream` 과 바이낸스 REST 의 `Retry-After` 부재 케이스를 채우고 §4 검증을 전부 다시 돌렸다.
+  - 복원된 진행 중 구간과 꺼져 있던 시간(§3.4·§3.5 에 확정): 선택지는 (a) 성공률에서 꺼진 시간을 잘라내기, (b) 복원 시 `last_failed_ts` 로 닫고 기동 후 첫 실패에 새로 열기, (c) 꺼진 시간을 포함해 잇기. 열 때 쓴 점의 `last_failed_ts` 는 `started_at` 과 같아 (a)(b) 는 재기동 전 지속 시간을 통째로 잃고 타임라인과 성공률이 서로 다른 구간을 보게 된다 — (c) 를 택했다.
   - §3.6 의 결정 그대로: `exName` 은 `shared/format.ts`, `HealthData` 는 `shared/types.ts`(기능 간 import 금지).
   - Influx 쓰기는 틱 안에서 동기 호출하지 않고 **큐 + 별도 태스크**가 순서대로 1점씩 쓴다 — Influx 가 죽으면 쓰기 1회가 클라이언트 타임아웃까지 매달려 1초 틱을 막기 때문. 순서를 지키는 이유는 열림 점이 닫힘 점 뒤에 도착하면 `count` 가 1 로 되돌아가기 때문.
-  - 복원 3초 상한은 `asyncio.wait_for` — 스레드의 실제 조회는 Influx 클라이언트 타임아웃까지 돌 수 있지만 기동은 막지 않는다. 복원 range 는 `-24h`(started_at 기준) — 24시간보다 전에 시작해 24시간 안에 끝난 구간은 복원되지 않는다.
+  - 복원 3초 상한은 `asyncio.wait_for` — 스레드의 실제 조회는 Influx 클라이언트 타임아웃까지 돌 수 있지만 기동은 막지 않는다. 복원 range 는 §3.4 대로 `started_at` 기준 `-24h` 다.
   - 복원 시 같은 거래소에 진행 중 점이 둘 이상이면(닫힘 쓰기 유실) 최신만 진행 중으로 두고 나머지는 `ended_at = last_failed_at` 으로 닫는다. Influx 의 `url` 빈 문자열은 복원 시 null 로 돌린다.
   - 문서에 없는 HTTP 상태(3xx 등)는 `bad_response`. `Retry-After` 는 세 커넥터 모두 파싱한다(스펙은 바이낸스만 명시). 업비트·빗썸 핸드셰이크 403 은 `bad_request`(`banned` 로 보는 403 은 바이낸스 WAF 뿐 — 001 §3.8 과 일치).
   - 첫 연결 시도의 결과가 아직 없는 스트림은 판정하지 않는다(001 §3.8) — 이 망처럼 마켓 목록을 못 받아 구독이 없으면 구간이 생기지 않고 `state` 만 `down` 이다.

@@ -150,7 +150,7 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
 ## 4. 검증
 테스트 러너 없음. 완료 = build 에러 0 + lint error 0(warn 허용) + dev 서버의 index 에 문서 제목 `트레이딩룸 · MarketLens` 가 있음 + 아래 육안 체크(`localhost:5173`):
 1. 헤더: `트레이딩룸` + 깜빡이는 초록 점 `실시간 수집 중`, 탭 6개가 §3.5 순서·라벨, 우측 `HH:MM:SS KST` 가 1.5초마다 바뀐다.
-2. KPI: `USDT/KRW 암묵환율 –`, `BTC 김프 · 순방향 0.00%`(중립색), `역방향 0.00%`, `수집 상태 8곳 중 N곳 정상` + 보조문, 우측 `0개 코인 · 0 페어`.
+2. KPI: `USDT/KRW 암묵환율 –`, `BTC 김프 · 순방향 0.00%`(중립색), `역방향 0.00%`, `수집 상태 3곳 중 N곳 정상`(011 §3.7) + 보조문, 우측 `0개 코인 · 0 페어`.
 3. 활성 탭 밑줄이 accent 색, 비활성은 흐린 글자.
 4. 갭 탭에 검색어 입력 → 다른 탭 갔다 와도 검색어·정렬이 유지된다.
 5. 갭 탭: 24행, 헤더 `진입 갭 · 현물 → 선물 ▾`, 임계 0.5 이상 행 accent 배경, stale 행 반투명, 펀딩 `+0.0xx%` + `펀딩 N분 후`. `정리 기준` 전환 시 헤더 문구·`▴` 로 바뀐다.
@@ -169,9 +169,9 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
 ```
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — web-shell 행을 `| web-shell | - | 셸·KPI·mock 탭 4종 동작 | spreads/history 탭은 placeholder |` 로. **항상 포함.**
+- `docs/context/status.md` — web-shell 행을 `| web-shell | - | 셸·KPI·mock 탭 3종(gap·pp·flow) 동작 | spreads/history 탭은 placeholder |` 로. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 002 행 상태 → DONE. **항상 포함.**
-- `docs/context/architecture.md` — 데이터 흐름(FE) 절에 한 줄 추가: "셸의 공유 피드가 탭 공통 데이터를 들고, 1.5초 tick 은 셸이 돌린다. `/spreads` 1초 폴링은 spreads 기능(003)이 제공한다." + "현재 구조" 절에 web-shell 항목(shared 조각들·App.tsx·mock 탭 4종 폴더).
+- `docs/context/architecture.md` — 데이터 흐름(FE) 절에 한 줄 추가: "셸의 공유 피드가 탭 공통 데이터를 들고, 1.5초 tick 은 셸이 돌린다. `/spreads` 1초 폴링은 spreads 기능(003)이 제공한다." + "현재 구조" 절에 web-shell 항목(shared 조각들·App.tsx·mock 탭 3종 폴더).
 - `docs/context/dev-setup.md` — web 절 명령(dev/build/lint)은 실제와 일치. 사전 준비의 Node 항목에 "22(CI·배포 고정 — 로컬은 v26 도 동작 확인)" 주석.
 
 ## 7. 실행 보고 (실행 세션이 채움)
