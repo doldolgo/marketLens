@@ -1,6 +1,6 @@
 # 012 — binance-stream
 
-상태: IN_PROGRESS | 의존: 001(collect — 행 계약·마켓 우주·틱 판정·원문 싱크·커넥터 공통 규칙), 011(health — 실패 분류·구간 추적), 007(deploy — lifespan)
+상태: DONE | 의존: 001(collect — 행 계약·마켓 우주·틱 판정·원문 싱크·커넥터 공통 규칙), 011(health — 실패 분류·구간 추적), 007(deploy — lifespan)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 
@@ -68,12 +68,24 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 - `!serverShutdown` 수신 → 재연결. 연결 실패 백오프 1·2·4…30, 구독 성공 후 1.
 - 연결 실패 기동 → `/health` 200, 앱 정상, 경고 1줄. 샤드 1개 실패 시 나머지 2샤드 행은 계속 갱신된다.
 - 앱 종료 시 태스크 취소·소켓 close, 잔여 예외 없음.
-- 수동(EC2): 기동 60초 뒤 로그에 샤드 3개 구독 완료, `/spreads` 바이낸스 행의 호가가 `curl -s "localhost:8000/orderbook/binance?symbol=BTC/USDT&depth=20"` 에서 20단계. 네트워크를 끊으면 30초 뒤 `/health/collect` 의 바이낸스가 `stale_stream`, 복구하면 닫힌다.
+- 수동(실서버): 기동 10초 뒤(우주 확정 → 샤드 3개 구독 → 첫 depth20) 로그에 샤드 연결 실패 경고가 없고 `/health/collect` 의 바이낸스가 `ok`, `/spreads` 바이낸스 행의 호가가 `curl -s "localhost:8000/orderbook/binance?symbol=BTC/USDT&depth=20"` 에서 20단계. 네트워크를 끊으면 30초 뒤 `/health/collect` 의 바이낸스가 `stale_stream`, 복구하면 닫힌다.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
+# All checks passed! / 172 files left unchanged / 336 passed, 1 warning in 2.02s
+# (이 스펙의 tests/test_stream_binance.py 39개 포함 — 6회 반복 실행 모두 39 passed)
+
+# 실서버 스모크 — 2026-09-05 로컬(이 시각 api.upbit.com·api.bithumb.com·api.binance.com 이 200 으로 열려 있어 로컬에서 돌렸다), 빈 포트 8041, 끝나고 kill
+.venv/bin/uvicorn app.main:app --port 8041
+curl -s localhost:8041/health                                         # {"status":"ok","version":"0.1.0"}
+curl -s localhost:8041/health/collect                                 # 기동 15초 뒤: upbit ok 198 · bithumb ok 292 · binance ok 273, outages []
+curl -s "localhost:8041/orderbook/binance?symbol=BTC/USDT&depth=20"   # asks 20 · bids 20 (기동 2초 뒤에 이미 20단계)
+curl -s localhost:8041/spreads                                        # rows 461 · warnings [] · notional 10000 · rate > 1000 · 행 17키
+curl -s "localhost:8041/spreads?notional=500000"                      # BTC slipFwd 0.0056 → 0.0237 (규모가 커지면 슬리피지 증가)
+# SIGTERM → 0.1초 뒤 포트 해제. 로그에 "바이낸스 샤드 N" 연결 실패 경고·트레이스백 없음
 ```
+EC2 에서 확인 필요(로컬에서 재현 불가): 네트워크를 끊고 30초 뒤 `/health/collect` 의 바이낸스가 `stale_stream`(message 에 샤드 번호)이고 복구하면 닫히는지, 24시간 강제 종료 뒤 샤드가 각자 재연결하는지, 우주 ≈300 종목의 실제 대역폭.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — binance-stream 행 `| binance-stream | WS 3샤드 depth20+miniTicker·exchangeInfo 10분·샤드 단위 정체 판정 | - | 해외 최대 20단계 |`. **항상 포함.**
@@ -82,6 +94,21 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 - `docs/context/dev-setup.md` — 스모크에 `/orderbook/binance … depth=20` 확인 1줄.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+- 만든 것 (파일 목록): `server/app/core/streams/binance.py`(커넥터 — `BinanceStream`·`shard_of`), `server/tests/test_stream_binance.py`(39 테스트, 001 의 `tests/stream_fakes.py` 재사용). 바꾼 것: `server/app/core/contracts.py`(`ForeignSymbolSource.set_universe` + `NoForeignSymbols`), `server/app/core/universe.py`(우주 확정 시 `set_universe` 호출), `server/tests/test_universe.py`(FakeForeign 에 `set_universe`), `server/app/main.py`(커넥터를 우주 `foreign`·스트림·틱 루프·`/refresh` 에 배선), `docs/context/status.md`·`architecture.md`·`dev-setup.md`, `CLAUDE.md` 인덱스, 이 스펙.
+- 추측한 지점 (묻지 않고 정한 것 — 전부 §3 에 확정 문구로 적었다):
+  1. 모듈 경로 `core/streams/binance.py` — 스펙 §2 의 `core/connectors/` 대신 architecture.md·001 코드의 `core/streams/` 로 통일(§2).
+  2. 우주 → 커넥터 전달. 선택지: (a) 커넥터가 `QuoteSink.universe` 를 60초마다 읽는다 — `/refresh` 즉시 반영이 안 된다, (b) `UniverseRefresher` 에 콜백 인자 — 심볼 집합과 구독 대상이 두 계약으로 갈린다, (c) `ForeignSymbolSource` 에 `set_universe(bases)` 추가하고 우주가 확정될 때마다 부른다 — 채택(§2·§3.3). 커넥터 하나가 `refresh`·`bases`·`set_universe` 를 전부 구현한다.
+  3. 재조정 = `set_universe` 가 깨우거나 60초마다, 연결된 샤드의 차이만 전송. 빠진 심볼의 행 삭제는 `set_universe` 에서 동기로(§3.3). 배정 0 인 샤드는 폴링 대신 이벤트 대기(§3.3).
+  4. 제어 메시지마다 0.25초 대기(초당 4개), `id` 는 샤드별 1부터, ack 는 시세 아님, `error` 키 응답은 `bad_request`(§3.3).
+  5. 백오프 리셋의 증거 = 구독 뒤 첫 시세 프레임(001 과 동일). `!serverShutdown` 은 백오프 없이 즉시 재연결하되 백오프 값은 유지(§3.3).
+  6. 클라이언트 keepalive ping 20초(라이브러리) — 조용히 죽은 TCP 감지용(§3.3).
+  7. 핸드셰이크 HTTP 거부·exchangeInfo 비-200 은 011 의 바이낸스 규칙(403 `banned`)(§3.3).
+  8. depth20 에 거래소 시각이 없어 체결가 없을 때 `price_timestamp` = 수신 시각. 맵에 없는 심볼 프레임은 버린다(§3.4). base 하나에 USDT 심볼이 둘이면 처음 것(§3.3).
+  9. 판정 집계: 판정 대상 = 배정 있는 샤드, 실패 우선 → 전부 판정 없음이면 없음 → 그 밖 성공. 조용한 시간 = 지금 − max(마지막 시세, 연결 중이면 구독 시각), 한 번도 못 받은 미연결 샤드가 가장 조용하다(§3.5). 집계 `StreamState`: `connected` = 배정 있는 샤드 전부 연결, `last_error` 는 성공 판정 시 null, `subscribed` = 실제 구독 합, `connected_since` = 가장 이른 값(§3.5).
+  10. §4 "서브프로세스 2개" 는 `PYTHONHASHSEED` 를 달리한 2회 실행으로, "연결 실패 기동 → /health 200" 은 lifespan 없는 커넥터 단위 테스트(경고 1줄/샤드) + 실서버 스모크로 확인.
+- 실행 중 함께 고친 스펙 절: §2(경로·바꾸는 기존 것), §3.3(계약·재조정·간격·백오프·keepalive·분류), §3.4(시각·맵 밖), §3.5(샤드 판정·집계), §3.6(재조정 태스크 포함 종료).
 - 남은 빚:
+  - 수집 상태 탭의 `stale_stream` 칩 라벨(status.md 기존 빚 — web 은 이 스펙 밖).
+  - EC2 확인 항목(§5): 네트워크 차단 → `stale_stream` → 복구, 24시간 강제 종료 재연결, 실제 대역폭.
+  - 원문 싱크는 아직 무동작(010) — exchangeInfo 본문·모든 프레임의 `record` 호출은 들어가 있다.
+  - 로컬 스모크에서 업비트 입출금 API 가 401 — 키·허용 IP 문제(006 소관), 이 스펙과 무관.

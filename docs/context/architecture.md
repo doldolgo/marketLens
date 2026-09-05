@@ -60,7 +60,7 @@
 - 틱 인계 `handoff(tick)` — 동기·무예외(009 구현, 틱 루프가 호출).
 - 판정 결과 전달 — 틱 루프가 이력 추적기에 거래소별 성공/실패를 넘긴다(011 구현).
 - 입출금 조회기 `refresh_if_due(client, force=False)` / `apply` / `failed` / `warnings` / `availability`(006 구현, 틱 루프가 호출 — `force` 는 `/refresh` 트리거가 쓴다).
-- 바이낸스 USDT 현물 심볼 집합 `refresh(client) -> int` / `bases() -> set[str]`(012 구현, 마켓 우주가 호출). 없으면 빈 집합을 주는 기본 구현.
+- 바이낸스 USDT 현물 심볼 집합 `refresh(client) -> int` / `bases() -> set[str]` / `set_universe(bases)`(012 의 커넥터가 구현, 마켓 우주가 호출 — 우주가 확정될 때마다 `set_universe` 로 구독 대상을 넘긴다). 커넥터를 꽂지 않는 테스트에는 빈 집합을 주는 기본 구현.
 - 스트림 판정 `judge(now_ms) -> Verdict | None`(거래소 스트림마다 — 국내는 core 공통 규칙, 바이낸스는 012 샤드 규칙. None = 아직 판정 대상 아님).
 core 는 features 를 import 하지 않는다 — 구조적 타입(Protocol)으로만 알고 배선은 `main.py` lifespan 이 한다.
 
@@ -96,4 +96,4 @@ EC2 1대. 루트 `docker compose up -d --build` 로 server·web·influxdb·redis
 - **tick-store (009)**: 재구축 중 — 실행 세션이 채운다(Redis 클라이언트·인계 큐·flusher·spark).
 - **raw-archive (010)**: 재구축 중 — 실행 세션이 채운다(원문 싱크·버퍼·업로드 루프·`core/s3.py`).
 - **health (011)**: `core/outages.py`(실패 구간 추적기 — 틱 루프가 쓰므로 core. 열림/닫힘 시 `collect_fail` 1점을 순서 보장 큐로 쓰고, 기동 시 24시간 복원), `features/health/`(읽기 API `/health/collect`), web `features/health/`(5초 폴링·탭). 응답 타입 `HealthData` 와 거래소 표시명 `exName` 은 `shared/` 에 있다.
-- **binance-stream (012)**: 재구축 중 — 실행 세션이 채운다(`core/streams/binance.py` — 샤드 3개·구독 재조정·정체 판정·`ForeignSymbolSource` 구현(exchangeInfo)). 001 의 `QuoteSink.orderbook/trade` 와 `store.stream("binance")` 를 쓰고 `StreamJudge` 로 틱 루프에 꽂힌다.
+- **binance-stream (012)**: `core/streams/binance.py`(`BinanceStream` 하나 — 샤드 3개 각각 소켓·시계·백오프·구독 집합, `shard_of` = crc32 % 3, 재조정 루프 1개(`set_universe` 가 깨우거나 60초), exchangeInfo 심볼 맵으로 `ForeignSymbolSource` 구현, `judge` 는 샤드별 판정 후 가장 조용한 샤드를 고른다). 001 의 `QuoteSink.orderbook/trade` 와 `store.stream("binance")`(샤드 집계) 를 쓰고 `StreamJudge` 로 틱 루프·`/refresh` 트리거에 꽂힌다. 테스트는 `server/tests/test_stream_binance.py`(001 의 `stream_fakes.py` 재사용).

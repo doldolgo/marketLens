@@ -84,9 +84,9 @@ marketlens/
 | 009 | tick-store | TODO | 3계층 저장 — LiveStore 틱 슬롯 → Redis → 60초마다 Influx 전량 적재·비움, `spark` |
 | 010 | raw-archive | TODO | 거래소 원문(WS 프레임·REST 응답) 전량을 거래소별 60초 객체로 S3 `raw/` 에 저장 (BE 전용) |
 | 011 | health | IN_PROGRESS | 거래소별 수집 실패 구간 이력·분류 → `/health/collect` + 수집 상태 탭 실데이터, Influx `collect_fail` 복원 |
-| 012 | binance-stream | IN_PROGRESS | 바이낸스 WS 3샤드 depth20+miniTicker → 해외 호가 최대 20단계, exchangeInfo 심볼 (BE 전용) |
+| 012 | binance-stream | DONE | 바이낸스 WS 3샤드 depth20+miniTicker → 해외 호가 최대 20단계, exchangeInfo 심볼 (BE 전용) |
 
-실행 순서 = 번호 순. 단 재구축 중인 스펙(IN_PROGRESS·TODO)은 **012 → 009 → 010 → 011 → 003 → 004 → 005 → 006 → 007** 순으로 돈다 — 001(DONE)이 토대(행·틱·계약)이고 나머지가 그 위에 얹힌다.
+실행 순서 = 번호 순. 단 재구축 중인 스펙(IN_PROGRESS·TODO)은 **009 → 010 → 011 → 003 → 004 → 005 → 006 → 007** 순으로 돈다 — 001·012(DONE)가 토대(행·틱·계약·3거래소 스트림)이고 나머지가 그 위에 얹힌다.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
 **스펙은 항상 지금 동작과 같아야 한다. DONE 이 된 뒤라도 동작을 바꾸고 싶으면 그 기능의 스펙을 그냥 고치면 된다.** 단, 스펙만 고치면 문서와 코드가 어긋나므로 — 같은 PR 에서 코드와 테스트도 스펙에 맞게 고치고, 그 기능의 §4 검증을 다시 통과시켜야 한다(§6). 변경이 여러 기능에 걸치면 관련 스펙을 전부 고친다. "예전에는 ~였다" 같은 설명은 남기지 않는다 — 과거 버전은 git 에서 보면 된다.
 
