@@ -153,7 +153,7 @@ cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/pyth
 ```
 - `All checks passed!`
 - `181 files left unchanged`
-- `419 passed, 1 warning in 4.71s` — 이 브랜치 기준선은 `417 passed`, 늘어난 2개가 §4 "깊이 반영" 셋째 항목(`/arbitrage`·`/matrix` 해외 다리 20단계)이다. analysis 폴더만은 `56 passed`.
+- `420 passed, 1 warning in 4.75s`. analysis 폴더만은 `57 passed`(§4 검증 항목 + "깊이 반영" 3항목 + §3.2 warnings (f) 한도 경고 위치).
 
 회귀를 실제로 잡는지 확인했다 — `core/orderbook.py` 의 걷기 목록을 최우선 1단계로 잠깐 자르자 `test_twenty_levels.py` 4개가 전부 깨졌고, 원상 복구 후 다시 통과.
 
@@ -178,21 +178,22 @@ curl -s 'localhost:8041/orderbook/upbit?symbol=BTC/KRW&depth=3'     # 404 market
 
 ## 7. 실행 보고 (실행 세션이 채움)
 
-재구축(001 스트림 파이프라인) 뒤 이 스펙을 다시 확인한 세션이다. 6개 엔드포인트·모델·라우터는 이미 스트림 스냅샷(`asks`/`bids` 그대로)을 걷고 있어 코드 변경은 문구 하나와 테스트 2개뿐이다.
+6개 엔드포인트·모델·라우터는 스트림 스냅샷(`asks`/`bids` 그대로)을 걷는다. 이 세션이 손댄 것은 §3.0 안내 문구, §4 "깊이 반영" 테스트, 검수 지적 3건이다.
 
 - 만든 것 (파일 목록):
-  - `server/app/features/analysis/service.py` — `market_data_not_found` 의 안내 문구를 §3.0 대로 "스트림이 첫 스냅샷을 받았는지 확인하세요" 로. 모듈 docstring 의 "1초 수집" 도 "WebSocket 으로 실시간 교체" 로.
-  - `server/app/features/analysis/models.py` — `data_received_at` 주석을 "마지막 틱 시각(001 의 `received_at`)" 으로.
-  - `server/app/features/analysis/tests/test_orderbook_api.py` — 옛 문구를 단언하던 1줄을 새 문구로.
-  - `server/app/features/analysis/tests/test_twenty_levels.py` — §4 "깊이 반영" 셋째 항목 테스트 2개 추가(`/arbitrage`·`/matrix`). 같은 코인을 바이낸스 1단계 시드와 20단계 시드로 두 번 심고, 국내(upbit) 쪽은 1단계에 10 BTC 를 둬 해외 다리만 여러 단계를 먹게 했다 — 1단계 시드는 `depthExhausted=true`·슬리피지 0, 20단계 시드는 `depthExhausted=false`·슬리피지 양수·실효 수익률이 더 낮다. matrix 는 fwd(asks)·rev(bids) 양쪽을 단언하고 표면 김프는 두 시드에서 같음을 함께 확인한다.
-  - `docs/context/status.md`(재구축 안내 문단에서 004 제외)·`CLAUDE.md`(004 DONE, 재구축 순서 005 → 006 → 007)·`docs/context/architecture.md`("현재 구조" analysis 항목), 이 문서 머리·§5·§7.
+  - `server/app/features/analysis/service.py` — `market_data_not_found` 404 는 전부 `_not_found` 를 거쳐 "스트림이 첫 스냅샷을 받았는지 확인하세요" 를 싣는다(quote 불일치 포함 — 그 경우 "`BASE/<저장 quote>` 로 다시 요청하세요" 뒤에 안내가 붙는다). 모듈 docstring 은 "WebSocket 으로 실시간 교체".
+  - `server/app/features/analysis/models.py` — `data_received_at` 주석 "마지막 틱 시각(001 의 `received_at`)".
+  - `server/app/features/analysis/tests/test_orderbook_api.py` — 404 message 의 안내 문구와 quote 불일치의 저장 quote 안내를 함께 단언.
+  - `server/app/features/analysis/tests/test_arbitrage_api.py` — §3.2 warnings (f) 한도 10억원 초과 경고가 수수료 문구 바로 앞에 오는지(`amount=2,000,000,000`), 한도 이하에서는 없는지 단언.
+  - `server/app/features/analysis/tests/test_twenty_levels.py` — §4 "깊이 반영" 세 항목 전부. 셋째 항목(`/arbitrage`·`/matrix` 해외 다리)은 같은 코인을 바이낸스 1단계 시드와 20단계 시드로 두 번 심고, 국내(upbit) 쪽은 1단계에 10 BTC 를 둬 해외 다리만 여러 단계를 먹게 한다 — 1단계 시드는 `depthExhausted=true`·슬리피지 0, 20단계 시드는 `depthExhausted=false`·슬리피지 양수·실효 수익률이 더 낮다. matrix 는 fwd(asks)·rev(bids) 양쪽을 단언하고 표면 김프는 두 시드에서 같음을 함께 확인한다.
+  - `docs/context/status.md`(analysis 행)·`CLAUDE.md`(004 DONE, 재구축 순서 005 → 006 → 007)·`docs/context/architecture.md`("현재 구조" analysis 항목), 이 문서 머리·§5·§7.
 - 추측한 지점 (묻지 않고 정한 것) / 실행 중 함께 고친 스펙 절:
-  - **`core/orderbook.py` 의 `walk_levels(row, side)` 를 남겼다.** §2 는 이제 이 함수를 이름으로 부르지 않고 "걷기는 스냅샷의 `asks`/`bids` 그대로" 라고만 말한다. 함수는 정확히 그것(`row.asks` 또는 `row.bids`)을 돌려주는 통과 함수이고 003 의 spreads service 가 import 하고 있어, 지우면 003 코드를 건드리게 된다(범위 밖). 동작 차이가 없으므로 스펙 본문에는 적지 않았다.
-  - **실서버 확인을 두 갈래로 나눴다.** 스냅샷이 필요 없는 오류 경로 4개(+빈 저장소의 404)는 빈 포트 8041 에 띄워 로컬에서 돌렸고, 스냅샷이 필요한 항목은 §5 에 "EC2 에서 확인 필요" 로 남겼다.
-  - **테스트 파일 이름은 `test_twenty_levels.py` 그대로.** 이전 보고가 부르던 `test_depth_stream.py` 는 트리에 없다 — 001 재구축 때 정리된 이름이고, 지금 파일이 §4 "깊이 반영" 세 항목을 전부 담는다.
-  - **§7 의 이전 세션 서술(이관 세션·깊이 반영 세션)을 지웠다.** `depth_*`·"표면값은 REST" 등 지금 스펙·코드에 없는 구조를 말하고 있어 남기면 다음 세션이 잘못 읽는다. 과거 판단은 git 에 있다(CLAUDE.md §4).
-- 보고만 하는 어긋남 (담당 아닌 스펙 — CLAUDE.md §5): 없음. 003 스펙은 `walk_levels` 를 더 이상 언급하지 않아 코드와 어긋나지 않는다.
+  - **`core/orderbook.py` 는 `walk_levels(row, side)` 를 둔다.** `row.asks` 또는 `row.bids` 를 그대로 돌려주는 통과 함수이고, 003 의 spreads service 가 import 한다. §2 의 "걷기는 스냅샷의 `asks`/`bids` 그대로" 와 동작이 같으므로 스펙 본문에는 이름을 적지 않는다.
+  - **실서버 확인은 두 갈래다.** 스냅샷이 필요 없는 오류 경로 4개(+빈 저장소의 404)는 빈 포트 8041 에 띄워 로컬에서 돌리고, 스냅샷이 필요한 항목은 §5 "EC2 에서 확인 필요" 에 둔다.
+  - **§4 "깊이 반영" 세 항목은 `test_twenty_levels.py` 한 파일이 담는다.**
+  - **quote 불일치 404 도 첫 스냅샷 안내를 싣는다.** §3.0 은 `market_data_not_found` 전체에 안내를 요구하므로 저장 quote 안내와 나란히 둔다 — 코드가 아니라 스펙을 따랐다.
+- 보고만 하는 어긋남 (담당 아닌 스펙 — CLAUDE.md §5): 없음.
 - 남은 빚:
   - `core/orderbook.py` 는 `server/tests/` 직접 단위 테스트가 없다 — 걷기 4함수와 `walk_levels` 는 `/orderbook`·`/slippage`·`/arbitrage`·`/matrix`·`/spreads` HTTP 응답으로만 검증한다.
   - §4 실서버 확인의 스냅샷 필요 항목은 EC2 대기(§5).
-  - `/matrix` 의 `totalSlippagePercent` 는 표면 김프(1단계) − 실효 수익률이라, 매수측이 1단계 안에서 소진되면 실효 = 표면이 되어 0 이다 — 소진은 `depthExhausted` 로만 드러난다(새 테스트의 1단계 시드가 이 경우다). 스펙이 의도한 정의이고 경고는 두지 않았다.
+  - `/matrix` 의 `totalSlippagePercent` 는 표면 김프(1단계) − 실효 수익률이라, 매수측이 1단계 안에서 소진되면 실효 = 표면이 되어 0 이다 — 소진은 `depthExhausted` 로만 드러난다(`test_twenty_levels.py` 의 1단계 시드가 이 경우다). 스펙이 의도한 정의이고 경고는 두지 않았다.
