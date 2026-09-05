@@ -12,7 +12,7 @@ REST 폴링은 마켓 목록 갱신에만 남는다 — 시세를 REST 로 묻�
 ## 2. 범위
 - 만드는 것: `server/` 앱 골격(FastAPI, 에러 형식), `GET /health`, **LiveStore**(최신 시세·USDT 시세·스트림 상태·틱 슬롯·spark 자리), 업비트·빗썸 **스트림 커넥터** 2개(연결·구독·디코딩·핑·재연결), **마켓 우주** 갱신(REST), **틱 루프**(1초), 원문 싱크·틱 인계·판정의 **계약**(구현은 010·009·011) 과 그 호출, 즉시 갱신 트리거(`POST /refresh` 가 부른다 — 003).
 - 하지 않는 것: `/health` 외 엔드포인트, Redis·Influx·S3 저장 자체(009·010), 입출금 조회(006 — 자리만), 바이낸스(012), Docker(007).
-- 소비자가 지키는 계약(이 스펙이 토대다): ① 003 `POST /refresh` 는 §3.9 트리거를 부른다. ② 003·004 의 걷기는 행의 `asks`/`bids` 를 쓴다(행에 별도 깊이 필드는 없다). ③ 011 추적기는 §3.8 판정을 받는다. ④ Influx·S3 쓰기는 009(틱 인계 → flusher)·010(원문 싱크 → 업로드)만 한다 — 이 스펙에는 쓰기 루프가 없다. ⑤ 바이낸스 시세는 012 의 스트림 커넥터만 준다(REST 시세 호출·깊이 캐시는 없다; 012 전에는 바이낸스 행이 없다). ⑥ 006 조회기의 `refresh_if_due` 는 `force` 인자를 받는다 — §3.9 트리거가 60초 주기와 무관하게 조회시키는 길이다. ⑦ 003 `/spreads` 의 `age` 는 스트림 `last_message_at` 기준이다(003 §3.2-4 그대로).
+- 소비자가 지키는 계약(이 스펙이 토대다): ① 003 `POST /refresh` 는 §3.9 트리거를 부른다. ② 003·004 의 걷기는 행의 `asks`/`bids` 를 쓴다(행에 별도 깊이 필드는 없다). ③ 011 추적기는 §3.8 판정을 받는다. ④ Influx·S3 쓰기는 009(틱 인계 → flusher)·010(원문 싱크 → 업로드)만 한다 — 이 스펙에는 쓰기 루프가 없다. ⑤ 바이낸스 시세는 012 의 스트림 커넥터만 준다(REST 시세 호출·깊이 캐시는 없다; 바이낸스 심볼 집합이 비면 바이낸스 행이 없다). ⑥ 006 조회기의 `refresh_if_due` 는 `force` 인자를 받는다 — §3.9 트리거가 60초 주기와 무관하게 조회시키는 길이다. ⑦ 003 `/spreads` 의 `age` 는 스트림 `last_message_at` 기준이다(003 §3.2-4 그대로).
 
 ## 3. 동작
 
@@ -27,7 +27,7 @@ REST 폴링은 마켓 목록 갱신에만 남는다 — 시세를 REST 로 묻�
 
 ### 3.2 마켓 우주(universe)
 - 기동 시 REST 로 목록을 받는다: 업비트·빗썸 `GET /v1/market/all` 에서 `KRW-` 로 시작하는 마켓, 바이낸스 USDT 현물 심볼 집합(012 §3.2 가 제공). **10분마다** 갱신하고 `/refresh` 트리거(§3.9)가 즉시 갱신한다.
-- 바이낸스 심볼 집합은 core 계약 하나로 받는다 — `refresh(client) -> int`(REST 로 목록을 갱신하고 나간 호출 수, 실패는 거래소 예외)와 `bases() -> set[str]`(현재 아는 USDT 현물 base). 012 가 구현하고 `main.py` 가 꽂는다. 012 전에는 빈 집합을 주는 기본 구현이 꽂혀 우주가 비고 **행이 하나도 저장되지 않는다**(USDT 시세는 구독하므로 갱신된다).
+- 바이낸스 심볼 집합은 core 계약 하나로 받는다 — `refresh(client) -> int`(REST 로 목록을 갱신하고 나간 호출 수, 실패는 거래소 예외)와 `bases() -> set[str]`(현재 아는 USDT 현물 base). 012 가 구현하고 `main.py` 가 꽂는다. 빈 집합을 주는 기본 구현(테스트용)이 꽂히면 우주가 비고 **행이 하나도 저장되지 않는다**(USDT 시세는 구독하므로 갱신된다).
 - 우주 = `(업비트 KRW base ∪ 빗썸 KRW base) ∩ 바이낸스 USDT base`. `USDT` 자신은 우주에 없다(바이낸스에 USDT/USDT 가 없다) — 시세 원천으로만 쓴다.
 - 구독 대상: 국내 거래소는 **자기 KRW 전 마켓**(`KRW-USDT` 포함). 바이낸스는 우주의 심볼(012). 목록이 바뀌면 그 차이만 추가 구독·해지한다.
 - 저장 규칙: 우주 밖 base 의 행은 메모리에 넣지 않는다 — 국내 전용·해외 전용 코인은 메모리에 없다. 갱신으로 우주에서 빠진 base 는 그 시점에 메모리에서 지운다(상폐 소멸).
@@ -68,7 +68,7 @@ USDT 시세 = 국내 거래소 id 당 `{exchange, ask, bid, updated_at}`. 바이
      `dom_bid`=`bids[0].price`, `dom_ask`=`asks[0].price`(국내 행), `fx_bid`·`fx_ask` 도 같은 자리(해외 행). 반올림하지 않는다. 행 정렬은 `(dom, fx, base)` 오름차순.
 3. 틱 슬롯에 새 틱을 넣고 **직전 틱**을 009 의 인계 함수(`handoff(tick)`, 동기·무예외)에 넘긴다. 슬롯이 비어 있었으면(첫 틱) 인계 없음.
 4. `received_at` = `ts`.
-5. 스트림이 등록된 거래소를 판정해(§3.8) 011 추적기에 성공/실패로 넘긴다 — 012 전의 바이낸스처럼 스트림이 없는 거래소는 판정하지 않는다.
+5. 스트림이 등록된 거래소를 판정해(§3.8) 011 추적기에 성공/실패로 넘긴다 — 스트림이 등록되지 않은 거래소는 판정하지 않는다.
 앱 종료 시 슬롯의 틱도 인계한다. 틱 루프는 예외를 밖으로 던지지 않는다(버그 하나로 멈추지 않게 로그 후 다음 초).
 앱 시작 순서: 011 이력 복원 → 009 spark 복원 → 마켓 우주 → 스트림 기동 → 틱 루프. 어느 것이 실패해도 앱은 뜬다.
 
@@ -76,7 +76,7 @@ USDT 시세 = 국내 거래소 id 당 `{exchange, ask, bid, updated_at}`. 바이
 core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payload: str) -> None` — **동기, 예외 없음, 즉시 반환**. 커넥터는 **받은 모든 프레임**(시세·`{"status":"UP"}`·구독 응답·에러 응답 포함)과 **모든 REST 응답 본문**을 해석하기 **전에** 이 함수에 넘긴다. 바이너리 프레임은 UTF-8 디코드한 문자열, 압축 프레임은 라이브러리가 푼 문자열이 원문이다. `source` = `"ws:<경로>"` 또는 `"rest:<경로>"`(예 `ws:/websocket/v1`, `rest:/v1/market/all`). 010 이 없으면(`S3_BUCKET` 미설정) 아무것도 하지 않는 구현이 꽂힌다.
 
 ### 3.8 판정 (매 틱, 011 이 기록)
-거래소마다: **성공** = 스트림이 연결돼 있고 30초 안에 시세를 받았다. 무수신 30초는 **이번 연결의 구독 시각과 마지막 시세 수신 시각 중 최신**부터 센다 — 연결 뒤 아직 시세가 없으면 구독 시각이 기준이고, 오래 끊겼다가 재연결한 직후 첫 프레임 전에도 구독 시각이 기준이라 직전 연결의 수신 시각 때문에 정체로 판정되지 않는다(스냅샷 한 바퀴가 오기까지 1~2초를 실패 구간으로 남기지 않는다). **실패**는 다음 순서로 종류를 정한다 — 미연결이면 `last_error.kind`(핸드셰이크·연결 실패의 분류: DNS·거부·TLS·연결 끊김 `network`, 핸드셰이크 타임아웃 `timeout`, 핸드셰이크가 HTTP 상태로 거부되면 011 §3.2 의 **그 거래소 REST 규칙** — 업비트·빗썸은 429 `rate_limit`·418 `banned`·5xx `unavailable`·그 외 4xx `bad_request`(403 도 `bad_request` — `banned` 로 보는 403 은 바이낸스 WAF 규칙뿐), 그 밖의 상태 `bad_response`; 구독 에러 응답 `bad_request`; 응답 없는 그 외 예외 `bad_response`); 연결됐는데 30초 무수신이면 `stale_stream`. 첫 연결 시도의 결과가 아직 없으면(미연결·오류 없음·수신 없음) 그 틱은 판정하지 않는다 — 기동 직후 1~2초가 실패 구간으로 남지 않게. 시세를 받았던 스트림이 오류 기록 없이 닫혀 있으면 `network`. 실패에는 `message`·`status_code`(없으면 null)·`url`(WebSocket URL)·`body`(핸드셰이크 거부 응답 본문 앞 500자, 없으면 null)·`retry_after_sec` 가 실린다. 디코드 실패 프레임은 버리고 셀 뿐 그 자체로 실패가 아니다(무효 프레임만 30초 이어지면 `stale_stream`). 바이낸스는 012 §3.6(샤드 단위).
+거래소마다: **성공** = 스트림이 연결돼 있고 30초 안에 시세를 받았다. 무수신 30초는 **이번 연결의 구독 시각과 마지막 시세 수신 시각 중 최신**부터 센다 — 연결 뒤 아직 시세가 없으면 구독 시각이 기준이고, 오래 끊겼다가 재연결한 직후 첫 프레임 전에도 구독 시각이 기준이라 직전 연결의 수신 시각 때문에 정체로 판정되지 않는다(스냅샷 한 바퀴가 오기까지 1~2초를 실패 구간으로 남기지 않는다). **실패**는 다음 순서로 종류를 정한다 — 미연결이면 `last_error.kind`(핸드셰이크·연결 실패의 분류: DNS·거부·TLS·연결 끊김 `network`, 핸드셰이크 타임아웃 `timeout`, 핸드셰이크가 HTTP 상태로 거부되면 011 §3.2 의 **그 거래소 REST 규칙** — 업비트·빗썸은 429 `rate_limit`·418 `banned`·5xx `unavailable`·그 외 4xx `bad_request`(403 도 `bad_request` — `banned` 로 보는 403 은 바이낸스 WAF 규칙뿐), 그 밖의 상태 `bad_response`; 구독 에러 응답 `bad_request`; 응답 없는 그 외 예외 `bad_response`); 연결됐는데 30초 무수신이면 `stale_stream`. 첫 연결 시도의 결과가 아직 없으면(미연결·오류 없음·수신 없음) 그 틱은 판정하지 않는다 — 기동 직후 1~2초가 실패 구간으로 남지 않게. 시세를 받았던 스트림이 오류 기록 없이 닫혀 있으면 `network`. 실패에는 `message`·`status_code`(없으면 null)·`url`(WebSocket URL)·`body`(핸드셰이크 거부 응답 본문 앞 500자, 없으면 null)·`retry_after_sec` 가 실린다. 디코드 실패 프레임은 버리고 셀 뿐 그 자체로 실패가 아니다(무효 프레임만 30초 이어지면 `stale_stream`). 바이낸스는 012 §3.5(샤드 단위).
 
 ### 3.9 즉시 갱신 트리거 (`POST /refresh` 가 부른다 — 003)
 순서: 마켓 우주 즉시 갱신(REST) → 변경분 재구독 → 006 조회 즉시 실행(`refresh_if_due(client, force=True)` — 60초 주기 무시) → 요약 반환. 요약 = 거래소별 `{saved: 현재 메모리 행 수, calls: 이 트리거로 나간 REST 호출 수}`, 시세가 있는 국내 거래소 목록, `failures[{exchange, error_code, message}]`(트리거 중 REST 실패는 예외의 code — `exchange_timeout`·`exchange_api_error`, 지금 실패 판정인 스트림은 그 실패의 `kind`), `warnings[]`(006 경고 + USDT 시세 없는 국내 거래소 경고 `"KRW-USDT 호가가 없어 USDT 시세를 못 구한 거래소: upbit (해당 국내 거래소의 김프 계산은 빠진다)."`), `duration_ms`, `fetched_at`(epoch ms). 동시 호출은 직렬화한다. 틱 루프와는 독립이다.
@@ -142,8 +142,8 @@ cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/pyth
 cd server && .venv/bin/python -m uvicorn app.main:app --port 8041   # 로컬 스모크 (8000 은 다른 프로세스가 점유할 수 있어 빈 포트)
 curl -s localhost:8041/health          # {"status":"ok","version":"0.1.0"}
 curl -s localhost:8041/no-such         # {"error":{"code":"not_found","message":"Not Found","detail":null}}
-curl -s localhost:8041/spreads         # 404 market_data_not_found — 012 전에는 바이낸스 심볼이 없어 우주가 비고 행이 없다(detail domestic·foreign 둘 다 [])
-curl -s localhost:8041/health/collect  # 거래소 3곳, 기동 10초 뒤 upbit·bithumb state "ok"(binance 는 스트림 없음 → "down"), 70초 뒤 outages [] — Influx 없음 경고 후 앱은 뜬다. 종료 로그 깨끗함
+curl -s localhost:8041/spreads         # 망이 막힌 상태(2026-09-06 재확인): 404 market_data_not_found(detail {"exchange":"upbit"}) — 시세가 없다. 망이 열리면 기동 15초 뒤 행 461(012 §5)
+curl -s localhost:8041/health/collect  # 거래소 3곳. 망이 막힌 상태(2026-09-06 재확인): 셋 다 state "down"·outages [] — Influx·Redis 없음 경고 후 앱은 뜨고 종료 로그 깨끗함. 망이 열리면 기동 15초 뒤 셋 다 "ok"(012 §5)
 curl -s -X POST localhost:8041/refresh # usdkrw upbit·bithumb 각 ask 1367·bid 1366, calls upbit 2·bithumb 2·binance 1, failures []
 ```
 - 선택 항목(실 네트워크 — 망이 열려 있으면 로컬에서도 가능, 막히면 EC2. 2026-09-05 로컬 실측, 우주 = 국내 KRW 전체(관찰용), 60초):
@@ -151,7 +151,7 @@ curl -s -X POST localhost:8041/refresh # usdkrw upbit·bithumb 각 ask 1367·bid
   - 재연결: 70초 앱 기동 0회. 다른 12초 기동에서는 t+5s 에 업비트가 close 프레임 없이 끊어(`ConnectionClosedError`) 1초 뒤 재연결 1회 — 간헐적이며 백오프·판정은 규칙대로 동작.
   - 메시지·원문(비압축): 업비트 ws 175 msg/s·442 KB/s(orderbook 9,038·ticker 1,470 /60s), 빗썸 ws 765 msg/s·1,018 KB/s(orderbook 45,000·ticker 924 /60s) → 국내 둘 ≈1.4 MB/s ≈ **130 GB/일**(010 용량 추정의 비압축 기준값).
   - 실프레임: 업비트 첫 orderbook `orderbook_units` 30단계·`timestamp` 13자리(ms)·`SNAPSHOT`; 빗썸 첫 orderbook 15단계·`timestamp` 16자리(µs) — §3.10 과 일치. 행 `asks` 단계 분포 업비트 30단계 274/286, 빗썸 15단계 455/478(나머지는 누적 상한·잔량 필터).
-  - "행 100 이상" 을 앱 기준(우주 = 교집합)으로 보는 것은 012 이후.
+  - "행 100 이상" 의 앱 기준(우주 = 교집합) 실측은 012 §5 — 기동 15초 뒤 upbit 198·bithumb 292·binance 273.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — collect 행을 `| collect | 업비트·빗썸 WS 실시간 갱신·마켓 우주 10분·1초 틱·/health | - | 바이낸스는 012 |` 로. **항상 포함.**
@@ -169,10 +169,10 @@ curl -s -X POST localhost:8041/refresh # usdkrw upbit·bithumb 각 ask 1367·bid
   - 소비자: `core/orderbook.py` `walk_levels` 가 행의 `asks`/`bids` 만 본다. `features/spreads/`(router `refresh_now`, service `age` 스트림 기준·`RefreshSummary`, 테스트 시드 `put_rows`), `features/analysis/tests/`(시드·20단계 테스트 추가), `features/health/tests/`, `features/wallet_status/service.py`(`force`), `tests/test_outages.py`(틱 판정 배선), `tests/test_wallet_integration.py`(틱 루프 기반).
   - 테스트: `tests/conftest.py`(`make_row`·`FakeStream`·`RawLog`), `tests/stream_fakes.py`, `tests/test_store.py` `test_quotes.py` `test_stream_upbit.py` `test_stream_bithumb.py` `test_ticks.py` `test_universe.py` `test_collect_trigger.py`.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-  - §3.2 바이낸스 심볼 집합의 core 계약(`refresh`/`bases`)과 012 전 기본 구현(빈 집합 → 우주 비어 행 없음). 기동 재시도는 못 받은 거래소만 — 바이낸스 심볼 집합도 같은 규칙(한 번도 성공 못 했으면 재시도 대상, 국내만 재시도할 땐 호출 없음).
+  - §3.2 바이낸스 심볼 집합의 core 계약(`refresh`/`bases`)과 테스트용 기본 구현 `NoForeignSymbols`(빈 집합 → 우주 비어 행 없음). 기동 재시도는 못 받은 거래소만 — 바이낸스 심볼 집합도 같은 규칙(한 번도 성공 못 했으면 재시도 대상, 국내만 재시도할 땐 호출 없음).
   - §3.3 체결가 없을 때 `price_timestamp` = **호가 메시지의 거래소 시각(ms)** — 빗썸 µs→ms 규칙이 관측 가능한 유일한 자리다. `StreamState` 에 판정용 `url`·`connected_since`, `last_error` 에 `retry_after_sec`. 저장소 쓰기 면(`put_row` 등) 명시.
   - §3.4 USDT 시세도 잔량 필터를 거친 최우선 호가. §3.5-2 마지막 체결가는 행 교체 후에도 이어진다.
-  - §3.6 입출금 캐시를 매 틱 행에 반영(60초 apply 만으로는 새 행이 1분간 null). 스트림 없는 거래소(012 전 바이낸스)는 판정하지 않는다.
+  - §3.6 입출금 캐시를 매 틱 행에 반영(60초 apply 만으로는 새 행이 1분간 null). 스트림 없는 거래소는 판정하지 않는다.
   - §3.8 첫 연결 결과 전 판정 보류, 무수신 기준 = 이번 연결의 구독 시각과 마지막 수신 시각 중 최신(재연결 직후 첫 프레임 전은 구독 시각), 오류 없이 닫힌 스트림 = `network`, 연결 끊김(`ConnectionClosed`) = `network`. 핸드셰이크 HTTP 거부의 분류 주인은 011 §3.2 — 업비트·빗썸 4xx 는 429·418 외 전부 `bad_request`(403 포함), 커넥터의 REST 분류 함수를 핸드셰이크에도 쓴다(같은 파일 안 — 커넥터 간 공유 아님).
   - §3.9 006 즉시 조회 = `refresh_if_due(force=True)`(§2 ⑥). 스트림 실패의 `error_code` = `kind`.
   - §3.11 백오프 리셋 시점 = 구독 뒤 첫 시세 프레임. PING 은 라이브러리 keepalive(`ping_interval=30`)로 — 자체 핑 태스크 없음, 테스트에서 검증 불가. 목록이 비면 연결하지 않음. 같은 목록 재구독 안 함. 종료 2초 상한은 태스크 취소 대기와 소켓 close 를 합친 예산이다 — 남은 예산이 없으면 close 를 기다리지 않는다.
@@ -182,10 +182,7 @@ curl -s -X POST localhost:8041/refresh # usdkrw upbit·bithumb 각 ask 1367·bid
   - §3.2 마켓 우주 갱신 루프는 거래소 예외가 아닌 예외도 로그 후 다음 회차 — 틱 루프·스트림 `run` 과 같은 보호 규칙(태스크가 조용히 죽어 10분 갱신이 영구 정지하는 것을 막는다).
   - §3.6-2 틱 원값 수식·자격을 003 §3.2-4 에서 이 스펙으로 복사했다(자기완결). 003 의 raw 블록과 문구가 어긋나면 003 담당이 맞춘다.
   - §4 선택 항목(실 네트워크)은 이 Mac 망이 열린 시간에 로컬에서 쟀다 — 차단은 간헐적이다(dev-setup.md 로컬 메모의 확인 명령). 유입량 측정은 앱 커넥터 2개를 우주=국내 KRW 전체로 60초 돌린 관찰용 스크립트(레포 밖)로 했고, 그 밖의 항목은 8041 앱 스모크로 봤다.
-  - `server/build/`(setuptools 산출물 76파일)가 git 에 추적돼 있다 — 범위 밖이라 두었다(ruff 기본 제외). venv 에는 패키지를 **editable 로만** 설치한다(dev-setup.md) — 비-editable 사본이 있으면 다른 cwd 에서 옛 모듈을 import 한다.
+  - `server/build/`(setuptools 산출물 76파일)가 git 에 추적돼 있다 — 범위 밖이라 두었다. `ruff check .` 가 이 사본도 검사한다(status.md 알려진 빚). venv 에는 패키지를 **editable 로만** 설치한다(dev-setup.md) — 비-editable 사본이 있으면 다른 cwd 에서 옛 모듈을 import 한다.
 - 남은 빚:
-  - §4 선택 항목 중 "기동 10초 안 행 100 이상" 은 012 가 바이낸스 심볼을 꽂은 뒤 앱 기준으로 다시 본다(§5 의 실측은 관찰용으로 우주를 국내 KRW 전체로 둔 값). 실측 유입량(≈1.4 MB/s 비압축, 국내 둘)은 010 세션이 용량 추정에 쓴다.
-  - 012 전에는 바이낸스 심볼이 없어 우주가 비고 `/spreads` 는 404 다(국내 행도 저장되지 않는다). 012 가 `ForeignSymbolSource` 를 꽂으면 풀린다.
-  - 004 스펙 §4 "깊이 반영" 문구는 004 세션 몫으로 남긴다(`docs/specs/004-analysis.md:§7 깊이 반영 세션 — depth_* 우선 서술 → 행의 asks/bids 만 존재`).
-  - `docs/specs/012-binance-stream.md:§2 — "core/connectors/ 의 바이낸스 스트림 커넥터" → 실제 디렉터리는 core/streams/ (architecture.md 현재 구조도 core/streams/binance.py)`. 012 담당 세션 몫.
+  - §4 선택 항목 중 "1분 동안 재연결 0회·초당 메시지 수" 는 §5 의 관찰용 실측(우주 = 국내 KRW 전체)뿐이다 — 앱 기준(우주 = 교집합) 재측정은 EC2 에서 확인 필요. 실측 유입량(≈1.4 MB/s 비압축, 국내 둘)은 010 의 용량 추정 기준값이다.
   - `server/build/`·`server/marketlens_server.egg-info/` 추적 정리는 별도 chore(editable 설치가 egg-info 를 다시 쓴다).
