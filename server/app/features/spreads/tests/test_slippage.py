@@ -142,20 +142,39 @@ def test_exhausted_book_uses_actually_filled_average_and_keeps_status() -> None:
     assert row["fwd"] > -50.0
 
 
+def _expected_fwd(fx_asks: list[list[float]], notional: float) -> float:
+    """시드로 손계산한 fwd — 해외 asks 를 규모로 걸어 산 수량을 국내 DOM_BIDS 에 판 값 (§3.2-4)."""
+    bought_qty = bought_amt = 0.0
+    for price, size in fx_asks:
+        take = min(size, (notional - bought_amt) / price)
+        bought_qty += take
+        bought_amt += take * price
+        if bought_amt >= notional:
+            break
+    sold_qty = sold_amt = 0.0
+    for price, size in DOM_BIDS:
+        take = min(size, bought_qty - sold_qty)
+        sold_qty += take
+        sold_amt += take * price
+    return ((sold_amt / sold_qty) / ((bought_amt / bought_qty) * RATE) - 1) * 100
+
+
 def test_all_stored_levels_are_walked_even_at_twenty() -> None:
-    # 바이낸스 행의 asks/bids 가 20단계면 그 전부를 걷는다 — 1단계 시드와 slipFwd 가 다르다 (§4)
-    shallow = seed(LiveStore(), fx_asks=[FX_ASKS[0]], fx_bids=[FX_BIDS[0]])
-    deep_asks = [
-        [100.0 + i, 5.0] for i in range(20)
-    ]  # 단계당 ≈$500 → $10,000 에 20단계
-    deep = seed(LiveStore(), fx_asks=deep_asks, fx_bids=[FX_BIDS[0]])
-    # 1단계만 있으면 $5,000 어치(50개)밖에 못 사고 그 평균은 최우선가 그대로다
-    assert only_row(shallow)["slipFwd"] == 0.0
-    # 20단계를 다 걸으면 평균이 나빠진다
-    assert only_row(deep)["slipFwd"] > 0.0
-    assert only_row(deep)["fwd"] < only_row(shallow)["fwd"]
+    # 바이낸스 행의 asks 가 20단계면 그 전부를 걷는다 (§4) — 20단계를 모두 소진하는 규모에서
+    # fwd 가 손계산과 같고, 같은 시드를 19단계로 자르면 값이 달라진다(앞 N단계만 걷는 회귀를 잡는다).
+    deep_asks = [[100.0 + i, 5.0] for i in range(20)]  # 단계당 ≈$500, 전체 $10,950
+    notional = 11_000  # 20단계 전부(100개, $10,950)를 먹고도 남는다 → 실제 체결분 평균
+    deep = only_row(seed(LiveStore(), fx_asks=deep_asks), notional=notional)
+    assert deep["fwd"] == pytest.approx(_expected_fwd(deep_asks, notional))
+    # 손계산 그대로: 평균 $109.5 에 100개 → 국내 50@₩200,000 + 50@₩100,000 → 평균 ₩150,000
+    assert deep["fwd"] == pytest.approx((150_000.0 / (109.5 * RATE) - 1) * 100)
+    assert deep["slipFwd"] > 0.0
+
+    truncated = only_row(seed(LiveStore(), fx_asks=deep_asks[:19]), notional=notional)
+    assert truncated["fwd"] == pytest.approx(_expected_fwd(deep_asks[:19], notional))
+    assert truncated["fwd"] != pytest.approx(deep["fwd"])
     # 깊이 전용 필드는 응답에 없다 (001 §3.3 — 행의 asks/bids 가 전부다)
-    assert all("depth" not in key for key in only_row(deep))
+    assert all("depth" not in key for key in deep)
 
 
 def test_default_notional_is_10000_and_echoed_at_top_level() -> None:
