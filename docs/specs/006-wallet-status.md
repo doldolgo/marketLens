@@ -1,6 +1,6 @@
 # 006 — wallet-status
 
-상태: TODO | 의존: 001(collect), 003(spreads), 004(analysis)
+상태: IN_PROGRESS | 의존: 001(collect — 틱 루프·행 교체 규칙), 003(spreads), 004(analysis), 010(raw-archive — 응답 원문 기록)
 
 > 이 문서는 **사람이 끝까지 읽는** 문서다. 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -12,13 +12,13 @@
 API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동작한다.
 
 ## 2. 범위
-- 만드는 것: `server/app/features/wallet_status/` — 업비트·빗썸·바이낸스 입출금 조회 3종과 수집 루프 등록. 망 맞추기 규칙은 spreads 도 쓰므로 `server/app/core/` 에 둔다.
+- 만드는 것: `server/app/features/wallet_status/` — 업비트·빗썸·바이낸스 입출금 조회 3종과 틱 루프 등록. 망 맞추기 규칙은 spreads 도 쓰므로 `server/app/core/` 에 둔다.
 - 이 기능은 **BE 전용**이다. 새 엔드포인트·화면이 없으므로 `web/` 쪽 폴더는 만들지 않는다.
 - 하지 않는 것: 입출금 수수료·최소 출금량, 지갑 상태의 영속(저장하지 않는다), FE 변경(spreads 탭이 이미 `netDom ?? '–'` 와 `depDom/wdDom/depFx/wdFx` 를 그린다), 입출금 레이더 탭(온체인 mock, 무관).
 
 **바꾸는 기존 것**
 1. 스펙 003 `/spreads` — 행의 입출금 5필드 계산을 "코인 단위 값 복사" 에서 **§3.6 망 판정** 으로 교체한다. 다른 필드·정렬·수식은 손대지 않는다.
-2. 스펙 001 수집 루프 — 001 이 비워 둔 입출금 조회 자리(필드를 `null` 로 둔 곳)에 세 거래소 조회기를 끼운다. 주기 60초·사이 사이클 캐시는 이 스펙 §3.5 가 정의한다(001 에는 정의가 없다 — 자리만 있다). 실패 시 경고 1줄을 `/refresh` 의 `warnings` 에 넣는다.
+2. 스펙 001 틱 루프 — 매초 도는 틱 루프가 이 조회기를 부른다(60초에 한 번 실호출, 사이 틱은 캐시 — §3.5). 실패 시 경고 1줄을 `/refresh` 의 `warnings` 에 넣는다.
 3. 스펙 003 `POST /refresh` — 응답 `snapshots[]`(거래소당 1항목)의 각 원소에 `walletStatusAvailable: bool` 을 추가한다. 바이낸스 항목에도 붙는다 — `usdkrw[]` 는 국내 전용이라 쓸 수 없다.
 
 ## 3. 동작
@@ -28,7 +28,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 - `unknown` 이 되는 경우: 키 없음, API 실패, 응답에 그 코인이 없음, 망 매칭 불확실(§3.6).
 - 거래소 조회 결과는 "코인 심볼(대문자) → 코인 단위 deposit/withdrawal + 망 목록" 이다. 망 1개 = `{code, name, dep, wd}`. code 는 대문자, name 은 표시명이며 없으면 code.
 - 같은 코인이 여러 행(망마다 1행)으로 오면 코인 단위 값은 **망별 OR** 이고, 망 목록은 **응답 순서대로 전부 보존**한다. 어느 망이 열렸는지를 §3.6 tie-break 가 쓰기 때문이다. 망 코드가 빈 행은 코인 값에만 반영하고 망 목록엔 넣지 않는다.
-- 이 데이터는 스펙 001 의 live_store 스냅샷에 `deposit_enabled / withdrawal_enabled (bool|null)` 와 `networks (list, 빈 리스트 = 망 정보 없음)` 로 들어간다.
+- 이 데이터는 스펙 001 의 live_store 스냅샷에 `deposit_enabled / withdrawal_enabled (bool|null)` 와 `networks (list, 빈 리스트 = 망 정보 없음)` 로 들어간다. 001 이 새 시세 메시지로 행을 교체할 때 이 3필드는 직전 행의 값을 물려받고, 조회기가 60초마다 그 거래소의 전 행에 덮어쓴다.
 
 ### 3.2 업비트 — JWT 인증 (env `UPBIT_API_KEY` / `UPBIT_SECRET_KEY`)
 - `GET {업비트 base}/v1/status/wallet`. 쿼리 파라미터 없음.
@@ -58,15 +58,15 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 
 ### 3.5 공통 호출 규칙, 60초 캐시, 실패
 - 요청별 타임아웃 10초. 시세용 3초보다 길다.
-- 호출마다 스펙 001 의 거래소별 호출 카운트를 1 올린다.
+- 호출마다 그 거래소의 REST 호출 수를 1 올린다(`/refresh` 의 `calls`). 응답 본문은 성공·실패 모두 받은 그대로 010 의 원문 싱크에 기록한다(`source` = `rest:<경로>`) — 요청 헤더·서명은 기록하지 않는다.
 - HTTP 200 이 아니면 실패: `<거래소 표시명> 지갑 상태 API 가 <status> 를 반환했습니다.` + detail `{exchange, body 앞 500자}`.
-- 조회 3종은 예외를 삼키지 않는다. 삼키는 건 수집 루프(001)다. 실패한 거래소만 경고 1줄 `"<거래소id> 입출금 상태 조회 실패 — <메시지> (해당 거래소의 deposit_enabled / withdrawal_enabled 는 null)"` 을 `/refresh` 의 `warnings` 에 넣고, 그 거래소 전 코인을 `unknown`·망 목록 빈 리스트로 둔다.
+- 조회 3종은 예외를 삼키지 않는다. 삼키는 건 틱 루프(001)다. 실패한 거래소만 경고 1줄 `"<거래소id> 입출금 상태 조회 실패 — <메시지> (해당 거래소의 deposit_enabled / withdrawal_enabled 는 null)"` 을 `/refresh` 의 `warnings` 에 넣고, 그 거래소 전 코인을 `unknown`·망 목록 빈 리스트로 둔다.
 - `/refresh` 의 거래소별 `walletStatusAvailable` 은 조회 성공이면 true.
-- 주기: 60초마다 세 거래소 **병렬** 조회, 사이 사이클은 캐시. 기동 첫 사이클은 캐시가 비어 1초 안에 호출한다(키 없는 거래소는 즉시 실패 → 경고).
-- 한 거래소 실패는 그 거래소만 영향. 시세 수집은 무관. 재시도는 다음 60초 사이클(별도 백오프 없음).
-- 실패한 거래소는 사이클 결과에 표시한다(`walletStatusAvailable=false`). persist 루프가 이를 보고 `dw_fail` 1점을 쓴다.
-- **실패 사이클은 직전 성공값을 유지하지 않고 `unknown` 으로 덮는다.** 오래된 "열림" 을 보여주는 쪽이 더 위험하다.
-- 실패 상태(내부 `dw_failed`, `/refresh`의 경고·`walletStatusAvailable=false`)는 조회가 일어난 사이클만이 아니라 **다음 성공 조회까지 매 사이클 유지**한다 — persist(60초)·`/refresh` 가 조회 사이클과 어긋나도 실패가 관측되게.
+- 주기: 60초마다 세 거래소 **병렬** 조회, 사이 틱은 캐시. 기동 첫 틱은 캐시가 비어 1초 안에 호출한다(키 없는 거래소는 즉시 실패 → 경고).
+- 한 거래소 실패는 그 거래소만 영향. 시세 수집은 무관. 재시도는 다음 60초 회차(별도 백오프 없음).
+- 실패한 거래소는 `/refresh` 응답에 표시된다(`walletStatusAvailable=false`). 틱 루프가 실패 상태인 거래소 목록을 틱의 `dwFailed` 에 싣고, 009 가 그것으로 `dw_fail` 점을 쓴다.
+- **실패한 회차는 직전 성공값을 유지하지 않고 `unknown` 으로 덮는다.** 오래된 "열림" 을 보여주는 쪽이 더 위험하다.
+- 실패 상태(내부 `dw_failed`, `/refresh`의 경고·`walletStatusAvailable=false`)는 조회가 일어난 틱만이 아니라 **다음 성공 조회까지 매 틱 유지**한다 — 틱·`/refresh` 가 조회 회차와 어긋나도 실패가 관측되게.
 - 키·토큰·서명값은 로그·에러 detail 에 절대 남기지 않는다.
 
 ### 3.6 망 맞추기 (국내 망 기준)
@@ -129,7 +129,9 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 - 판정: 코드 일치 matched, SEI vs SEIEVM unknown, QKC vs ETH absent, 해외 망 빈 목록 unknown, AssetHub Polkadot 경계 무시 matched.
 - tie-break: 국내 망 2개 중 두 번째만 "국내 입금 ok + 해외 출금 ok" 이면 두 번째를 고른다.
 - `/spreads` 5케이스(§3.7 1~5): 빈 D → 코인 값·`netDom null`. GRT → wdFx false. QKC → depFx·wdFx false. SEI → `null, null`. unknown + F 빈 목록 → 해외 코인 값.
-- 실패 사이클 후 `/spreads` 의 해당 거래소 행은 전부 `null`(직전 성공값 미유지).
+- 실패한 회차 뒤 `/spreads` 의 해당 거래소 행은 전부 `null`(직전 성공값 미유지).
+- 조회 응답 본문(성공·HTTP 500 실패 모두)이 원문 싱크(fake)에 `exchange`·`rest:<경로>`·수신 시각과 함께 그대로 기록되고, 요청 헤더·서명은 기록되지 않는다.
+- 001 이 같은 코인의 시세 행을 새 메시지로 교체해도 입출금 3필드가 유지된다.
 - 키 없이 기동: `/spreads` 모든 행에 `netDom depDom wdDom depFx wdFx` 5키가 있다. `depDom wdDom depFx wdFx` 값은 `true/false/null` 뿐이고 `netDom` 은 문자열 또는 null. 빗썸 행 중 `depDom` 이 null 이 아닌 행이 있다(키 불필요). `/refresh` 의 빗썸 `walletStatusAvailable` true, 업비트·바이낸스 false + 입출금 경고 2줄.
 - 수동: 실키를 env 파일에 넣고(키 투입은 사람이 한다 — CLAUDE.md §5 접근 규칙) 기동 → `/refresh` 경고 없음·세 거래소 모두 true, `/spreads` 에 `netDom` 이 채워진 행이 다수.
 

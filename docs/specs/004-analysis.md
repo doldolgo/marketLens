@@ -1,6 +1,6 @@
 # 004 — analysis
 
-상태: DONE | 의존: 001(collect — 메모리 스냅샷·환율), 003(spreads — `core/premium.py` 의 `premium_percent`)
+상태: IN_PROGRESS | 의존: 001(collect — 메모리 스냅샷·USDT 시세·호가 단계), 003(spreads — `core/premium.py` 의 `premium_percent`)
 
 > 이 문서는 **사람이 끝까지 읽는** 문서다. 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -10,19 +10,19 @@
 
 ## 2. 범위
 - 만드는 것: 기능 폴더 `analysis` (server 만). 엔드포인트 6개 — `GET /orderbook/{exchange}` `GET /slippage/{exchange}` `GET /arbitrage` `GET /premium` `GET /premium/scan` `GET /matrix`.
-- 호가창 소진(walk) 계산은 `core/orderbook.py` 에 산다 — 003(spreads)과 이 스펙이 함께 쓰는 공유 모듈이다(기능 간 import 금지, CLAUDE.md §2). **함수는 전부 동기다**(003 §2 의 근거). 단계 목록을 고르는 `walk_levels(row, side)` 도 이 모듈의 공개 함수이고, 이 스펙의 **모든 걷기가 그것을 거친다**(§3.1). `core/premium.py` 도 003 이 만든 것을 **import 해서 쓴다**(복사·재정의 금지).
+- 호가창 소진(walk) 계산은 `core/orderbook.py` 에 산다 — 003(spreads)과 이 스펙이 함께 쓰는 공유 모듈이다(기능 간 import 금지, CLAUDE.md §2). **함수는 전부 동기다**(003 §2 의 근거). 이 스펙의 걷기는 전부 스냅샷의 `asks`/`bids` 를 그대로 입력으로 쓴다(§3.1). `core/premium.py` 도 003 이 만든 것을 **import 해서 쓴다**(복사·재정의 금지).
 - 하지 않는 것: FE 없음. Influx 읽기(005). 입출금 상태 수집(006) — 여기서는 스냅샷에 들어 있는 값을 **읽기만** 한다. 거래소 REST 호출 0회.
-- 바꾸는 기존 것: 라우터 등록. 003 이 spreads 서비스 안에 두고 쓰던 단계 선택 로직을 `core/orderbook.py` 의 `walk_levels` 로 올리고, 003 도 그것을 쓰게 한다(같은 규칙이 두 벌 존재하지 않게).
+- 바꾸는 기존 것: 라우터 등록뿐.
 
 ## 3. 동작
 
 ### 3.0 공통 규칙
-- 모든 응답은 메모리 스냅샷(1초 수집)만 읽는다. 스냅샷 1개 = `(exchange, base)` 당 `quote`(KRW 또는 USDT)·`price`(최근 체결가)·`asks`(오름차순)·`bids`(내림차순)·`deposit_enabled`·`withdrawal_enabled`(각 `true/false/null`)·`updated_at`.
+- 모든 응답은 메모리 스냅샷(001 — WebSocket 으로 실시간 교체)만 읽는다. 스냅샷 1개 = `(exchange, base)` 당 `quote`(KRW 또는 USDT)·`price`(최근 체결가)·`asks`(오름차순)·`bids`(내림차순 — 단계 수는 업비트 최대 30·빗썸 최대 15·바이낸스 최대 20)·`deposit_enabled`·`withdrawal_enabled`(각 `true/false/null`)·`updated_at`.
 - 환율 = 국내 거래소별 KRW-USDT `ask`(USDT 살 때)·`bid`(USDT 팔 때). 기준 국내 거래소 = `upbit`. 해외 거래소는 `binance` 1곳.
 - **HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase**다. Python 내부 필드는 snake_case를 유지한다.
-- 공통 꼬리 필드: `dataReceivedAt`(수집 루프가 마지막으로 교체한 시각 ms, 비었으면 `null`). `fetchedAt`(응답 생성 시각 ms).
+- 공통 꼬리 필드: `dataReceivedAt`(마지막 틱 시각 ms — 001 의 `received_at`, 비었으면 `null`). `fetchedAt`(응답 생성 시각 ms).
 - 에러는 `{"error": {"code", "message", "detail"}}`. 쿼리 타입/범위 위반은 FastAPI 기본 422. 코드: `invalid_symbol`(400). `invalid_request`(400). `unsupported_exchange`(404, 레지스트리에 없는 거래소 id). `no_arbitrage_opportunity`(409).
-- `market_data_not_found`(404) = 스냅샷/환율/호가가 메모리에 없음. 의미는 "아직 수집 안 됨 또는 미상장". message 에 "수집 루프가 한 사이클 돌았는지 확인" 안내.
+- `market_data_not_found`(404) = 스냅샷/환율/호가가 메모리에 없음. 의미는 "아직 수집 안 됨 또는 미상장". message 에 "스트림이 첫 스냅샷을 받았는지 확인" 안내.
 - `sym`/`symbol` 은 대소문자 무관(대문자로 정규화). `symbol` 형식은 `BASE/QUOTE`(`-`·`_` 구분자도 허용, 조각 2개가 아니면 `invalid_symbol`). 요청한 quote 가 저장된 quote 와 다르면 `market_data_not_found` 에 "`BASE/<저장 quote>` 로 다시 요청하세요".
 - 모든 계산은 **수수료·출금 수수료·전송 시간 미반영 이론값**이다. slippage·arbitrage·scan 은 `warnings` 마지막에 항상 그 문장을 넣는다 — matrix 만 §3.2 순서대로 그 문장 **뒤에** 입출금 경고가 온다. warnings 는 `list[str]`, 순서 고정(각 절 참고).
 - `depth` 파라미터(orderbook·slippage·arbitrage)는 ≥1 이고 상한은 **저장된 단계 수** — 넘기면 저장분 전부를 쓴다.
@@ -31,11 +31,7 @@
 ### 3.1 계산 규칙
 호가창 소진(walk). levels 는 체결되는 쪽 호가(살 때 asks, 팔 때 bids), 최우선부터. 금액(quote 통화) 기준으로 사거나, 수량 기준으로 판다. 결과 = 체결 수량·체결 금액·먹은 단계 수·소진 여부.
 
-**어느 목록을 걷는가.** 걷기의 입력은 항상 `core/orderbook.py` 의 `walk_levels(row, side)` 가 돌려주는 목록이다(003 §2). 그 방향의 `depth_*` 가 있으면 그것(해외는 012 스트림이 살아 있으면 최대 20단계), 없으면 `asks`/`bids` 다. 국내 행은 `depth_*` 가 항상 비어 있어 자기 `asks`/`bids`(업비트 30·빗썸 15단계)를 쓴다.
-
-**최우선 1단계만 읽는 곳은 `walk_levels` 를 쓰지 않는다** — `row.asks[0]`·`row.bids[0]` 를 직접 읽는다. `/premium`·`/premium/scan`·`/matrix` 의 표면 김프(`premium_percent` 입력)와 호가 유무 판정이 여기 해당한다. 012 가 REST 최우선 호가를 그대로 남긴 이유가 조용한 종목의 헤드라인이 스트림 정체로 낡지 않게 하는 것이라, 표면값은 REST 기준으로 고정한다.
-
-즉 한 응답 안에서 **표면값은 REST 최우선, 체결 비용은 스트림 깊이**를 본다. 이 둘의 출처가 다르다는 것은 의도된 설계다.
+**어느 목록을 걷는가.** 걷기의 입력은 스냅샷의 `asks`/`bids` 그 자체다 — 001 §3.3 대로 세 거래소 모두 WebSocket 호가를 받아 업비트 최대 30·빗썸 최대 15·바이낸스 최대 20단계가 들어 있다. 표면값(최우선 1단계 = `asks[0]`·`bids[0]`)과 걷기가 같은 목록을 보므로 한 응답 안에서 출처가 갈리지 않는다.
 1. 단계를 최우선부터 순서대로 먹는다.
 2. 금액 기준 — 한 단계의 `price×size` 가 남은 금액 이상이면 그 단계에서 `남은 금액/price` 만큼 **부분 체결**하고 끝(`exhausted=false`). 모든 단계를 먹어도 남으면 `exhausted=true` 이고 `amount` 는 요청액이 아니라 **실제 체결액**.
 3. 수량 기준도 대칭(부족하면 `quantity` = 실제 체결량).
@@ -51,11 +47,11 @@
 #### `GET /orderbook/{exchange}`
 - 파라미터: `symbol`(필수, `BASE/QUOTE`). `depth` 기본 10.
 - 오류: 미등록 거래소 404. 형식 400 `invalid_symbol`. 스냅샷 없음·quote 불일치 404.
-1. **걷는 목록**(`walk_levels`, §3.1)을 `depth` 단계까지 잘라 돌려준다(자르기만, 계산 없음) — 슬리피지가 실제로 소비하는 호가를 그대로 보여주는 것이 이 엔드포인트의 쓸모다. 응답 키: `exchange·symbol·base·quote`, `bids/asks[{price,size}]`, `timestamp`(스냅샷의 내부 `price_timestamp` = 거래소 시세 시각 ms — 001 계약에 호가 전용 시각은 없다), `dataUpdatedAt`. 응답 키·타입은 불변이다. 바이낸스는 스트림이 살아 있으면 단계 수가 1 에서 최대 20 으로 늘고, 그 최우선 단계는 REST 최우선 호가와 1초 안쪽으로 다를 수 있다(출처가 다르다 — §3.1).
+1. 저장된 호가(`asks`/`bids`, §3.1)를 `depth` 단계까지 잘라 돌려준다(자르기만, 계산 없음) — 슬리피지가 실제로 소비하는 호가를 그대로 보여주는 것이 이 엔드포인트의 쓸모다. 응답 키: `exchange·symbol·base·quote`, `bids/asks[{price,size}]`, `timestamp`(스냅샷의 내부 `price_timestamp` = 거래소 시세 시각 ms — 001 계약에 호가 전용 시각은 없다), `dataUpdatedAt`.
 #### `GET /slippage/{exchange}`
 - 파라미터: `symbol`(필수). `side` 는 `buy`|`sell`, 기본 buy. `amount` **또는** `quantity`(정확히 하나, >0). `depth` 기본 100.
 - 오류: amount·quantity 둘 다/둘 다 없음/≤0 → 400 `invalid_request`(스냅샷 조회보다 먼저). 호가 비어 있음 404. 최소 단위도 체결 안 됨 400.
-1. 한 거래소·한 방향을 `depth` 단계 호가로 walk 한다(살 때 asks, 팔 때 bids — 목록은 `walk_levels`, §3.1). `depthAvailable` 은 **걷는 목록의 단계 수**이고 `bestPrice` 는 그 목록의 최우선이다. 응답 키: `exchange·name·symbol·quoteCurrency·side`, `requestedAmount`/`requestedQuantity`(안 준 쪽은 `null`), `bestPrice`(최우선), `averagePrice`, `quantity`/`amount`(실제 체결량/액), `slippagePercent`, `levelsConsumed`, `depthExhausted`, `depthAvailable`(걷는 목록의 단계 수), `dataUpdatedAt`, 공통 꼬리 필드, `warnings`.
+1. 한 거래소·한 방향을 `depth` 단계 호가로 walk 한다(살 때 asks, 팔 때 bids). `depthAvailable` 은 저장된 단계 수이고 `bestPrice` 는 최우선이다. 응답 키: `exchange·name·symbol·quoteCurrency·side`, `requestedAmount`/`requestedQuantity`(안 준 쪽은 `null`), `bestPrice`(최우선), `averagePrice`, `quantity`/`amount`(실제 체결량/액), `slippagePercent`, `levelsConsumed`, `depthExhausted`, `depthAvailable`(저장된 단계 수), `dataUpdatedAt`, 공통 꼬리 필드, `warnings`.
 2. 예: asks `[(100,1),(120,10)]`, `amount=220` → 수량 2.0, 평균 110, 슬리피지 10%, 2단계.
 3. warnings 순서: (a) 1단계 안에서 끝나면 "슬리피지 0, 규모를 키우면 생김" (b) 항상 "메모리 스냅샷 기준, 타이밍 슬리피지 미반영".
 #### `GET /arbitrage`
@@ -63,7 +59,7 @@
 - 오류: 스냅샷 0개/기준 환율 없음 404. 후보 <2 또는 매수처=매도처 409.
 1. `sym` 스냅샷 전부 수집(0개면 404) → 기준 환율(upbit) 필수(없으면 404).
 2. 후보 풀: quote 가 KRW/USDT 가 아니면 제외. 호가 한쪽이라도 비면 `failures[]` 후 제외.
-3. 각 후보의 호가를 **KRW 로 환산**한다. 국내 거래소는 자기 환율, 해외는 기준 환율. 환전도 체결되는 쪽 호가를 쓴다: USDT 가격→KRW 표시는 살 때 rate ask / 팔 때 rate bid. `candidates[]` 는 후보마다 `exchange·name·bestBidKrw·bestAskKrw·depthLevels` 를 싼 순(best ask)으로. 환산 대상은 걷는 목록(`walk_levels`, §3.1)이라 `bestBidKrw`·`bestAskKrw`·`depthLevels` 와 매수·매도처 선정도 그 목록 기준이다 — arbitrage 에는 REST 로 고정하는 표면값이 없다.
+3. 각 후보의 호가를 **KRW 로 환산**한다. 국내 거래소는 자기 환율, 해외는 기준 환율. 환전도 체결되는 쪽 호가를 쓴다: USDT 가격→KRW 표시는 살 때 rate ask / 팔 때 rate bid. `candidates[]` 는 후보마다 `exchange·name·bestBidKrw·bestAskKrw·depthLevels` 를 싼 순(best ask)으로.
 4. 후보 <2 → 409(detail 에 성공/실패 목록). 매수처 = 최저 ask, 매도처 = 최고 bid, 같은 거래소면 409.
 5. 매수처 asks 를 `amount` 만큼 금액 walk(체결 0 → 400). 그 **체결 수량**으로 매도처 bids 를 수량 walk. **매도측이 소진돼 못 판 수량이 있으면 판 수량만큼 매수측을 되맞춘다**(matrix 와 동일). 못 판 코인을 0원으로 치면 −50% 대 쓰레기 값이 나오기 때문이다.
 6. `buy`/`sell` 각각 `exchange·name·averagePriceKrw·amountKrw·slippagePercent·levelsConsumed·depthExhausted·dataUpdatedAt`(슬리피지는 환산 호가 최우선가 대비). 최상위에 `sym·quantity`(실제 판 수량)·`usdKrwRate`(기준 환율, 표시용).
@@ -98,8 +94,7 @@
 8. warnings 순서: 한도 10억원 초과 → 항상 수수료 미반영 → 어느 방향이든 출금·입금이 둘 다 `true` 가 아닌 조합이 있으면 "입출금 막힘 표시 조합 있음 — 실제 중단일 수도, 확인 못 한 것일 수도(`null`)".
 
 ### 3.3 엣지 모음
-- 수집 루프가 아직 안 돌았거나(메모리 빔) 미상장 코인 → 전부 `market_data_not_found` 404. 스냅샷은 있는데 호가가 빈 경우: 단일 대상(orderbook·slippage·premium)은 404. 다수 후보(arbitrage)는 `failures[]` 로 내리고 계속. scan·matrix 는 그 짝/조합만 조용히 건너뛴다.
-- **호가가 비었는지는 그 절이 보는 목록으로 판정한다** — 걷는 곳(orderbook·slippage·arbitrage)은 `walk_levels` 결과가, 표면값만 보는 곳(premium·scan·matrix)은 REST `asks`/`bids` 가 기준이다. 응답에 실리는 목록과 비었는지 판정하는 목록이 어긋나면 안 되기 때문이다.
+- 스트림이 아직 안 붙었거나(메모리 빔) 미상장 코인 → 전부 `market_data_not_found` 404. 스냅샷은 있는데 호가가 빈 경우: 단일 대상(orderbook·slippage·premium)은 404. 다수 후보(arbitrage)는 `failures[]` 로 내리고 계속. scan·matrix 는 그 짝/조합만 조용히 건너뛴다.
 - `amount` 가 저장 깊이를 넘으면 오류가 아니라 `depthExhausted=true` + 실제 체결분 계산 + 경고. 호가 저장 한도(10억원)를 넘는 금액은 경고만.
 - 입출금 상태 `null` = 모름. 응답에서 `null` 그대로 내보내고 경고한다. 절대 `true` 로 가정하지 않는다.
 - 환율 ask=bid 인 거래소는 단일 환율 계산과 동일한 결과가 나온다.
@@ -107,12 +102,9 @@
 ## 4. 검증
 
 **깊이 반영 (012 스트림)**
-- `depth_asks` 가 3단계인 바이낸스 행 → `/orderbook/binance` 의 `asks` 가 3개, `depth_*` 가 비면 `asks` 는 REST 1단계
-- 같은 행에서 `/slippage/binance` 의 `depthAvailable` 이 `depth_asks` 길이와 같고, `bestPrice` 는 `depth_asks[0][0]` 이다
-- `depth_*` 가 있는 행에서 규모를 키우면 `slippagePercent` 가 0 에서 양수가 된다 — 1단계뿐이면 평균가가 곧 최우선가라 어떤 규모에도 0 이다(이 항목이 회귀를 잡는다)
-- 국내 거래소 행은 `depth_*` 가 비어 있어 `asks`/`bids` 를 걷는다(단계 수가 REST 그대로)
-- **표면값은 REST 를 쓴다**: `depth_asks[0]` 을 REST `asks[0]` 과 다르게 시드해도 `/premium`·`/matrix` 의 표면 김프는 REST 최우선으로 계산된다
-- `/arbitrage`·`/matrix` 의 해외 다리가 `depth_*` 를 걷는다 — 깊이를 준 시드와 안 준 시드의 실효 수익률이 다르다
+- 바이낸스 행의 `asks` 가 20단계면 `/orderbook/binance` 의 `asks` 도(`depth` 로 자르기 전) 20개이고, `/slippage/binance` 의 `depthAvailable` 이 그 길이와 같다
+- 다단계 바이낸스 행에서 규모를 키우면 `slippagePercent` 가 0 에서 양수가 된다 — 1단계뿐이면 평균가가 곧 최우선가라 어떤 규모에도 0 이다(이 항목이 회귀를 잡는다)
+- `/arbitrage`·`/matrix` 의 해외 다리가 바이낸스 20단계를 걷는다 — 1단계 시드와 20단계 시드의 실효 수익률이 다르다
 
 테스트 입력을 스펙이 고정하는 의도적 예외 — 수식 검증 가능한 기대값을 주기 위해.
 
@@ -144,7 +136,7 @@
 - `/matrix` 매도측 소진 시 매수측을 되맞춰 실효 수익률이 −50% 대로 떨어지지 않는다; 환율 없는 국내 거래소 조합은 빠진다
 - 모든 분석 응답 키는 camelCase이고 에러 본문은 `{"error":{code,message,detail}}`
 
-실서버 확인 (기동 후 수집 루프 한 사이클 뒤 실제 호출):
+실서버 확인 (기동 후 스트림 스냅샷이 온 뒤 — 수 초 — 실제 호출):
 - `/orderbook/upbit` BTC/KRW `depth=3` → `quote=="KRW"`, asks 3단계
 - `/slippage/upbit` BTC/KRW `amount=1,000,000` → `slippagePercent ≥ 0`, `levelsConsumed ≥ 1`
 - `/slippage/upbit` BTC/KRW amount·quantity 없이 → 에러 코드 `invalid_request`
