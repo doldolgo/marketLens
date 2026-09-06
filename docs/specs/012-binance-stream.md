@@ -1,6 +1,6 @@
 # 012 — binance-stream
 
-상태: DONE | 의존: 001(collect — 행 계약·마켓 우주·틱 판정·원문 싱크·커넥터 공통 규칙), 011(health — 실패 분류·구간 추적), 007(deploy — lifespan)
+상태: IN_PROGRESS | 의존: 001(collect — 행 계약·마켓 우주·틱 판정·원문 싱크·커넥터 공통 규칙), 011(health — 실패 분류·구간 추적), 007(deploy — lifespan)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 
@@ -18,7 +18,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 ### 3.1 읽는 계약 (복사)
 - 001 §3.3: 행 = `(exchange, base)` 당 `quote`·`native_symbol`·`price`·`price_timestamp`·`asks`·`bids`(누적 1,000,000 USDT 도달 단계까지, 최소 1단계)·입출금 3필드(물려받음)·`updated_at`. 거래소별 스트림 상태 `{connected, last_message_at, last_error, subscribed}`.
 - 001 §3.2: 마켓 우주 = 국내 KRW base ∩ 바이낸스 USDT base. 이 스펙은 **바이낸스 USDT 현물 심볼 집합**을 제공하고, 우주의 심볼만 구독한다. 10분 갱신·`/refresh` 즉시 갱신.
-- 001 §3.7: 받은 모든 프레임과 REST 응답 본문은 해석 전에 원문 싱크 `record(exchange, source, received_at_ms, payload)` 로.
+- 001 §3.7: 받은 모든 프레임과 REST 응답 본문은 원문 싱크 `record(exchange, source, received_at_ms, payload, key)` 로 넘긴다 — 행·상태 갱신 전에, `payload` 는 받은 텍스트 그대로. 시세 프레임은 `key` = `depth20:<심볼>`·`miniTicker:<심볼>`(대문자 원본 심볼), 구독 응답·`serverShutdown`·깨진 프레임·exchangeInfo 본문은 `key=None`. 010 이 `key` 로 심볼·종류별 분당 마지막 1건만 남긴다.
 - 001 §3.8·011: 매 틱 성공/실패를 판정해 추적기에 넘긴다. 실패 종류 8종.
 
 ### 3.2 스트림
@@ -65,7 +65,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 - `connected_since` 는 첫 SUBSCRIBE 묶음을 다 보낸 시각이고 정체 30초는 거기서부터 센다(보내는 동안은 소켓이 열린 시각).
 - 정체: 샤드 2만 30초 무수신(0·1 은 수신) → 그 틱이 `stale_stream` 실패이고 message 에 "샤드 2". 30초 미만은 성공. 구독 0 샤드는 무시. 메시지가 오면 다음 틱 성공.
 - 미연결 샤드 → 그 샤드 `last_error.kind` 로 실패. 셋 중 둘이 나쁘면 더 오래 조용한 쪽.
-- 모든 프레임(시세·구독 응답·serverShutdown)과 exchangeInfo 본문이 원문 싱크에 원문 그대로 기록된다.
+- 모든 프레임(시세·구독 응답·serverShutdown)과 exchangeInfo 본문이 원문 싱크에 원문 그대로 기록된다 — depth20·miniTicker 프레임은 `key`(`depth20:BTCUSDT` 등)와 함께, 나머지는 `key=None` 으로.
 - `!serverShutdown` 수신 → 재연결. 연결 실패 백오프 1·2·4…30, 구독 성공 후 1.
 - 연결 실패 기동(lifespan 을 실제로 돌리되 소켓·REST 는 가짜) → `/health` 200, 앱 정상, 샤드마다 경고 1줄. 샤드 1개 실패 시 나머지 2샤드 행은 계속 갱신된다.
 - 앱 종료 시 태스크 취소·소켓 close, 잔여 예외 없음.

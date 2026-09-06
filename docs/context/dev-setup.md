@@ -76,7 +76,7 @@ curl -s "localhost:8000/history/premium?base=BTC&unit=week" | head -c 300
 ```bash
 aws s3 ls s3://<bucket>/raw/ --recursive | tail -3
 ```
-(`S3_BUCKET` 설정 + 기동 60초 뒤) 거래소 3곳 객체(`raw/exchange=…/dt=…/hh=…/….jsonl.gz`)면 정상 (010). `aws s3 cp <key> - | gunzip | head -1` 의 줄이 `exchange`·`source`·`receivedAt`·`raw` 4키면 정상.
+(`S3_BUCKET` 설정 + 기동 2분 뒤) 거래소·분마다 객체 1개(`raw/exchange=…/dt=…/hh=…/…HHMM00Z.jsonl.gz`)면 정상 (010). `aws s3 cp <key> - | gunzip | head -1` 의 줄이 `exchange`·`source`·`receivedAt`·`raw` 4키면 정상.
 ```bash
 docker compose -f docker-compose.dev.yml exec redis redis-cli XLEN ticks
 ```
