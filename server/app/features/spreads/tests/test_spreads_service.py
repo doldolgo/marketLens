@@ -9,14 +9,17 @@ from app.core.premium import premium_percent
 from app.features.spreads.service import build_spreads
 from app.features.spreads.tests.helpers import make_row, seed_rows
 
-NOW = datetime.now(UTC)
+
+def _now() -> datetime:
+    """호출 시점의 시계 — import 시각을 상수로 잡으면 느린 CI 에서 수집 뒤 실행까지 STALE_SEC 를 넘겨 행이 낡은 것으로 판정된다."""
+    return datetime.now(UTC)
 
 
 def seed_two_coins() -> LiveStore:
     store = LiveStore()
-    seed_rows(store, [make_row("upbit", "BTC"), make_row("upbit", "XRP")], NOW)
-    seed_rows(store, [make_row("binance", "BTC"), make_row("binance", "XRP")], NOW)
-    store.set_rate("upbit", 1400.0, 1390.0, NOW)
+    seed_rows(store, [make_row("upbit", "BTC"), make_row("upbit", "XRP")], _now())
+    seed_rows(store, [make_row("binance", "BTC"), make_row("binance", "XRP")], _now())
+    store.set_rate("upbit", 1400.0, 1390.0, _now())
     return store
 
 

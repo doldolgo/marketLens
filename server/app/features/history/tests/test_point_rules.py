@@ -18,7 +18,12 @@ from app.core.ticks import TickLoop, build_tick
 from app.features.history.tests.helpers import FakeInfluxReader, make_client
 from tests.conftest import FakeInflux, make_row
 
-NOW = datetime.now(UTC)
+
+def _now() -> datetime:
+    """호출 시점의 시계 — import 시각을 상수로 잡으면 느린 CI 에서 수집 뒤 실행까지 STALE_SEC 를 넘겨 행이 낡은 것으로 판정된다."""
+    return datetime.now(UTC)
+
+
 T0 = 1_787_000_000
 
 
@@ -32,11 +37,11 @@ def _client() -> httpx.AsyncClient:
 def seed(rows: list[Row], *, rates: dict[str, tuple[float, float]]) -> LiveStore:
     """행과 USDT 시세를 시드한다 — 행이 있는 거래소는 스트림 수신 시각도 둔다(`/spreads` 의 age 기준)."""
     store = LiveStore()
-    store.put_rows(rows, NOW)
+    store.put_rows(rows, _now())
     for exchange in {row.exchange for row in rows}:
-        store.stream(exchange).last_message_at = int(NOW.timestamp() * 1000)
+        store.stream(exchange).last_message_at = int(_now().timestamp() * 1000)
     for exchange, (ask, bid) in rates.items():
-        store.set_rate(exchange, ask, bid, NOW)
+        store.set_rate(exchange, ask, bid, _now())
     store.mark_received(T0)
     return store
 
@@ -75,7 +80,7 @@ def test_domestic_exchange_without_its_own_usdt_rate_is_not_a_dom_in_the_tick() 
     rows = build_tick(store, T0, ()).rows
     assert [(r.dom, r.fx, r.base) for r in rows] == [("upbit", "binance", "BTC")]
     # 빗썸 시세가 생기면 그때부터 빗썸 조합이 등장한다
-    store.set_rate("bithumb", 1410.0, 1405.0, NOW)
+    store.set_rate("bithumb", 1410.0, 1405.0, _now())
     assert {r.dom for r in build_tick(store, T0, ()).rows} == {"upbit", "bithumb"}
 
 

@@ -12,7 +12,11 @@ from app.core.models import Row
 from app.core.ticks import build_tick
 from app.features.spreads.tests.helpers import make_client, make_row, seed_rows
 
-NOW = datetime.now(UTC)
+
+def _now() -> datetime:
+    """호출 시점의 시계 — import 시각을 상수로 잡으면 느린 CI 에서 수집 뒤 실행까지 STALE_SEC 를 넘겨 행이 낡은 것으로 판정된다."""
+    return datetime.now(UTC)
+
 
 # 환율 ask=bid=1000 — 슬리피지만 남기려고 테더 프리미엄을 없앤 시드
 RATE = 1000.0
@@ -44,7 +48,7 @@ def seed(
                 bids=dom_bids if dom_bids is not None else DOM_BIDS,
             )
         ],
-        NOW,
+        _now(),
     )
     fx_row: Row = make_row(
         "binance",
@@ -53,8 +57,8 @@ def seed(
         asks=fx_asks if fx_asks is not None else FX_ASKS,
         bids=fx_bids if fx_bids is not None else FX_BIDS,
     )
-    seed_rows(store, [fx_row], NOW)
-    store.set_rate("upbit", RATE, RATE, NOW)
+    seed_rows(store, [fx_row], _now())
+    store.set_rate("upbit", RATE, RATE, _now())
     store.mark_received(1_787_000_000)
     return store
 

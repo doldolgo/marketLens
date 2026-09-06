@@ -7,7 +7,11 @@ import pytest
 from app.core.live_store import LiveStore
 from app.features.spreads.tests.helpers import make_client, make_row, seed_rows
 
-NOW = datetime.now(UTC)
+
+def _now() -> datetime:
+    """호출 시점의 시계 — import 시각을 상수로 잡으면 느린 CI 에서 수집 뒤 실행까지 STALE_SEC 를 넘겨 행이 낡은 것으로 판정된다."""
+    return datetime.now(UTC)
+
 
 # 스펙 §4: 응답 행 키는 정확히 이 17개다
 ROW_KEYS = {
@@ -19,8 +23,9 @@ ROW_KEYS = {
 TOP_KEYS = {"rate", "notional", "rows", "warnings", "dataReceivedAt", "fetchedAt"}
 
 
-def seed_basic(store: LiveStore, *, now: datetime = NOW) -> None:
+def seed_basic(store: LiveStore, *, now: datetime | None = None) -> None:
     """upbit BTC + binance BTC + upbit 환율 — 계산 가능한 최소 시드."""
+    now = now if now is not None else _now()
     seed_rows(
         store,
         [
@@ -57,8 +62,8 @@ def test_empty_memory_is_404_market_data_not_found() -> None:
 
 def test_snapshots_without_base_rate_is_404() -> None:
     store = LiveStore()
-    seed_rows(store, [make_row("upbit", "BTC")], NOW)
-    seed_rows(store, [make_row("binance", "BTC")], NOW)
+    seed_rows(store, [make_row("upbit", "BTC")], _now())
+    seed_rows(store, [make_row("binance", "BTC")], _now())
     resp = make_client(store).get("/spreads")
     assert resp.status_code == 404
     body = resp.json()
@@ -68,8 +73,8 @@ def test_snapshots_without_base_rate_is_404() -> None:
 
 def test_rate_without_foreign_snapshots_is_404_with_exchange_lists() -> None:
     store = LiveStore()
-    seed_rows(store, [make_row("upbit", "BTC")], NOW)
-    store.set_rate("upbit", 1400.0, 1390.0, NOW)
+    seed_rows(store, [make_row("upbit", "BTC")], _now())
+    store.set_rate("upbit", 1400.0, 1390.0, _now())
     resp = make_client(store).get("/spreads")
     assert resp.status_code == 404
     body = resp.json()
@@ -81,7 +86,7 @@ def test_domestic_exchange_without_rate_is_dropped_entirely() -> None:
     store = LiveStore()
     seed_basic(store)
     # bithumb 은 스냅샷은 있지만 환율이 없다 → bithumb 행 전체가 빠진다
-    seed_rows(store, [make_row("bithumb", "BTC")], NOW)
+    seed_rows(store, [make_row("bithumb", "BTC")], _now())
     rows = make_client(store).get("/spreads").json()["rows"]
     assert {r["dom"] for r in rows} == {"upbit"}
     assert [r["sym"] for r in rows] == ["BTC"]
@@ -99,7 +104,7 @@ def test_one_side_listing_makes_no_row() -> None:
             ),
             make_row("upbit", "ETH"),
         ],
-        NOW,
+        _now(),
     )
     seed_rows(
         store,
@@ -113,7 +118,7 @@ def test_one_side_listing_makes_no_row() -> None:
             ),
             make_row("binance", "SOL"),
         ],
-        NOW,
+        _now(),
     )
     rows = make_client(store).get("/spreads").json()["rows"]
     assert [r["sym"] for r in rows] == ["BTC"]
@@ -143,7 +148,7 @@ def test_fwd_rev_use_directional_quotes_and_rates() -> None:
 def test_equal_ask_bid_rate_matches_single_rate_formula() -> None:
     store = LiveStore()
     seed_basic(store)
-    store.set_rate("upbit", 1400.0, 1400.0, NOW)
+    store.set_rate("upbit", 1400.0, 1400.0, _now())
     [row] = make_client(store).get("/spreads").json()["rows"]
     assert row["fwd"] == pytest.approx((100_000_000.0 / (71_500.0 * 1400.0) - 1) * 100)
     assert row["rev"] == pytest.approx((71_450.0 * 1400.0 / 100_100_000.0 - 1) * 100)
@@ -152,8 +157,8 @@ def test_equal_ask_bid_rate_matches_single_rate_formula() -> None:
 def test_each_domestic_exchange_uses_its_own_rate() -> None:
     store = LiveStore()
     seed_basic(store)
-    seed_rows(store, [make_row("bithumb", "BTC")], NOW)
-    store.set_rate("bithumb", 1410.0, 1405.0, NOW)
+    seed_rows(store, [make_row("bithumb", "BTC")], _now())
+    store.set_rate("bithumb", 1410.0, 1405.0, _now())
     rows = make_client(store).get("/spreads").json()["rows"]
     by_dom = {r["dom"]: r for r in rows}
     # 환율은 응답에 없다 — 각 행의 krw(그 거래소 최우선 매수호가)와 순값으로 확인한다
@@ -179,7 +184,7 @@ def test_empty_orderbook_is_fail_with_zero_numbers_and_kept_io() -> None:
                 "binance", "BTC", asks=[], bids=[[71_450.0, 1.5]], dep=True, wd=False
             )
         ],
-        NOW,
+        _now(),
     )
     [row] = make_client(store).get("/spreads").json()["rows"]
     assert row["status"] == "fail"
@@ -208,7 +213,7 @@ def test_zero_size_best_quote_is_fail() -> None:
                 dep=True,
             )
         ],
-        NOW,
+        _now(),
     )
     [row] = make_client(store).get("/spreads").json()["rows"]
     assert row["status"] == "fail"
@@ -347,9 +352,9 @@ def test_rows_sorted_by_sym_dom_fx() -> None:
     seed_rows(
         store,
         [make_row("upbit", "ETH"), make_row("upbit", "BTC"), make_row("upbit", "ADA")],
-        NOW,
+        _now(),
     )
-    seed_rows(store, [make_row("bithumb", "BTC"), make_row("bithumb", "ADA")], NOW)
+    seed_rows(store, [make_row("bithumb", "BTC"), make_row("bithumb", "ADA")], _now())
     seed_rows(
         store,
         [
@@ -357,10 +362,10 @@ def test_rows_sorted_by_sym_dom_fx() -> None:
             make_row("binance", "BTC"),
             make_row("binance", "ETH"),
         ],
-        NOW,
+        _now(),
     )
-    store.set_rate("upbit", 1400.0, 1390.0, NOW)
-    store.set_rate("bithumb", 1410.0, 1405.0, NOW)
+    store.set_rate("upbit", 1400.0, 1390.0, _now())
+    store.set_rate("bithumb", 1410.0, 1405.0, _now())
     rows = make_client(store).get("/spreads").json()["rows"]
     keys = [(r["sym"], r["dom"], r["fx"]) for r in rows]
     assert keys == sorted(keys)
@@ -389,8 +394,8 @@ def test_spark_is_taken_from_the_published_map_including_fail_rows() -> None:
     """009 가 게시한 (dom, fx, base) 맵이 행의 `spark` 로 실린다 — 키 17개·타입은 불변."""
     store = LiveStore()
     seed_basic(store)
-    seed_rows(store, [make_row("upbit", "ETH", bids=[], asks=[[3_000.0, 1.0]])], NOW)
-    seed_rows(store, [make_row("binance", "ETH")], NOW)
+    seed_rows(store, [make_row("upbit", "ETH", bids=[], asks=[[3_000.0, 1.0]])], _now())
+    seed_rows(store, [make_row("binance", "ETH")], _now())
     store.set_spark(
         {("upbit", "binance", "BTC"): [1.5, 2.0], ("upbit", "binance", "ETH"): [0.3]}
     )
@@ -413,7 +418,7 @@ def test_zero_domestic_ask_price_fails_row_not_500():
                 "upbit", "ETH", bids=[[5_000_000.0, 1.0]], asks=[[5_010_000.0, 1.0]]
             ),
         ],
-        NOW,
+        _now(),
     )
     seed_rows(
         store,
@@ -433,9 +438,9 @@ def test_zero_domestic_ask_price_fails_row_not_500():
                 asks=[[3_551.0, 1.0]],
             ),
         ],
-        NOW,
+        _now(),
     )
-    store.set_rate("upbit", 1400.0, 1390.0, NOW)
+    store.set_rate("upbit", 1400.0, 1390.0, _now())
     store.mark_received(1_787_000_000)
     res = make_client(store).get("/spreads")
     assert res.status_code == 200
