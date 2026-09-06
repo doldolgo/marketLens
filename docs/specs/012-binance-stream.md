@@ -74,8 +74,9 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 172 files left unchanged / 339 passed, 1 warning in 2.15s
-# (이 스펙의 tests/test_stream_binance.py 42개 포함 — 6회 반복 실행 모두 42 passed)
+# All checks passed! / 183 files left unchanged / 462 passed, 1 warning in 4.93s  (2026-09-06)
+# (이 스펙의 tests/test_stream_binance.py 49개 포함 — 3회 반복 실행 모두 49 passed)
+# 원문 항목(§4): depth20·miniTicker 프레임은 `key`(`depth20:BTCUSDT`·`miniTicker:BTCUSDT`, 맵에 없는 심볼도)와 함께 행 갱신 전에 기록되고, 구독 응답·`!serverShutdown`·exchangeInfo 본문·핸드셰이크 거부 본문은 `key=None` — `test_every_frame_and_exchange_info_body_are_recorded_verbatim`·`test_shutdown_and_unknown_symbol_frames_get_expected_keys`·`test_handshake_rejection_body_is_recorded_verbatim`
 
 # 실서버 스모크 — 2026-09-05 로컬(이 시각 api.upbit.com·api.bithumb.com·api.binance.com 이 200 으로 열려 있어 로컬에서 돌렸다), 빈 포트 8041, 끝나고 kill
 .venv/bin/uvicorn app.main:app --port 8041
@@ -96,7 +97,7 @@ EC2 에서 확인 필요(로컬에서 재현 불가): 네트워크를 끊고 30�
 - `docs/context/dev-setup.md` — 스모크에 `/orderbook/binance … depth=20` 확인 1줄.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록): `server/app/core/streams/binance.py`(커넥터 — `BinanceStream`·`shard_of`), `server/tests/test_stream_binance.py`(42 테스트, 001 의 `tests/stream_fakes.py` 재사용 + 제어 메시지 간격을 표로 막는 `TicketSleeps`). 바꾼 것: `server/app/core/contracts.py`(`ForeignSymbolSource.set_universe` + `NoForeignSymbols`), `server/app/core/universe.py`(우주 확정 시 `set_universe` 호출), `server/tests/test_universe.py`(FakeForeign 에 `set_universe`), `server/app/main.py`(커넥터를 우주 `foreign`·스트림·틱 루프·`/refresh` 에 배선), `docs/context/status.md`·`architecture.md`·`dev-setup.md`, `CLAUDE.md` 인덱스, 이 스펙.
+- 만든 것 (파일 목록): `server/app/core/streams/binance.py`(커넥터 — `BinanceStream`·`shard_of`), `server/tests/test_stream_binance.py`(49 테스트 — 연결·샤딩·재조정·판정·원문 `key`, 001 의 `tests/stream_fakes.py` 재사용 + 제어 메시지 간격을 표로 막는 `TicketSleeps`). 바꾼 것: `server/app/core/contracts.py`(`ForeignSymbolSource.set_universe` + `NoForeignSymbols`), `server/app/core/universe.py`(우주 확정 시 `set_universe` 호출), `server/tests/test_universe.py`(FakeForeign 에 `set_universe`), `server/app/main.py`(커넥터를 우주 `foreign`·스트림·틱 루프·`/refresh` 에 배선), `docs/context/status.md`·`architecture.md`·`dev-setup.md`, `CLAUDE.md` 인덱스, 이 스펙.
 - 추측한 지점 (묻지 않고 정한 것 — 전부 §3 에 확정 문구로 적었다):
   1. 모듈 경로는 architecture.md·001 과 같은 `core/streams/binance.py`(§2).
   2. 우주 → 커넥터 전달. 선택지: (a) 커넥터가 `QuoteSink.universe` 를 60초마다 읽는다 — `/refresh` 즉시 반영이 안 된다, (b) `UniverseRefresher` 에 콜백 인자 — 심볼 집합과 구독 대상이 두 계약으로 갈린다, (c) `ForeignSymbolSource` 에 `set_universe(bases)` 추가하고 우주가 확정될 때마다 부른다 — 채택(§2·§3.3). 커넥터 하나가 `refresh`·`bases`·`set_universe` 를 전부 구현한다.

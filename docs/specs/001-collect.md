@@ -136,8 +136,9 @@ core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payl
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 170 files left unchanged / 297 passed, 1 warning in 1.41s  (2026-09-05)
-# 001 몫: tests/test_store.py test_quotes.py test_stream_upbit.py test_stream_bithumb.py test_ticks.py test_universe.py test_collect_trigger.py test_health.py test_rows.py (§4 항목당 1개 이상)
+# All checks passed! / 183 files left unchanged / 462 passed, 1 warning in 4.93s  (2026-09-06, 3회 연속 통과)
+# 001 몫: tests/test_store.py test_quotes.py test_stream_upbit.py(39) test_stream_bithumb.py(17) test_ticks.py test_universe.py test_collect_trigger.py test_health.py test_rows.py (§4 항목당 1개 이상)
+# 원문 항목(§4): 모든 프레임이 `key`(`orderbook:KRW-BTC`·`ticker:KRW-BTC`)와 함께 행 갱신 전에 기록되고, UP·구독 응답·REST 본문·핸드셰이크 거부 본문·디코드 실패 프레임은 `key=None` — test_stream_upbit.py `test_every_frame_is_recorded_verbatim_before_interpretation`·`test_quote_frame_is_recorded_before_the_row_changes`·`test_fetch_markets_filters_krw_and_records_body`·`test_handshake_rejection_body_is_recorded_verbatim`, test_stream_bithumb.py `test_frames_recorded_before_interpretation_and_up_not_counted`·`test_fetch_markets_krw_filter_and_raw_record`·`test_handshake_rejection_body_is_recorded_verbatim`
 
 cd server && .venv/bin/python -m uvicorn app.main:app --port 8041   # 로컬 스모크 (8000 은 다른 프로세스가 점유할 수 있어 빈 포트)
 curl -s localhost:8041/health          # {"status":"ok","version":"0.1.0"}
