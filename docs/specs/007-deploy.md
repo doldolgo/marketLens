@@ -20,11 +20,12 @@
 - 컨테이너 4개:
   - `server` — FastAPI + uvicorn 워커 1개(python 3.12 slim). 컨테이너 포트 8000, **호스트에 노출하지 않는다**(compose 내부 네트워크만).
   - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 `/api/` 를 `server:8000/` 로 프록시하고, 없는 경로는 index.html 을 준다(SPA).
-    캐시 규칙: `index.html` 은 `no-store, must-revalidate` — 배포가 FE·BE 를 함께 바꾸므로 캐시된 셸이 남으면 열려 있던 탭이 구 번들로 새 API 계약을 계속 친다. `/assets/` 의 해시 박힌 파일은 `max-age=31536000, immutable` — 내용이 바뀌면 파일명이 바뀌어 무효화가 필요 없다.
+    캐시 규칙: `index.html` 은 `no-store, must-revalidate` **+ `always`** — 배포가 FE·BE 를 함께 바꾸므로 캐시된 셸이 남으면 열려 있던 탭이 구 번들로 새 API 계약을 계속 친다. `/assets/` 의 해시 박힌 파일은 `max-age=31536000, immutable` 이되 **`always` 는 붙이지 않는다** — 붙이면 404 에도 1년 immutable 이 실려, 배포 직전 셸을 든 브라우저가 사라진 번들의 404 를 1년간 캐시한다(재배포로도 되돌릴 수 없다). `always` 없이도 200·304 는 헤더를 받는다.
   - `influxdb` — 2.7, dev compose 와 같은 첫 기동 설정(org·bucket `marketlens`, admin 토큰 = `INFLUX_TOKEN`). named volume, 호스트 비노출.
   - `redis` — `redis:7-alpine`, `--appendonly yes`, named volume, 호스트 비노출(009 의 틱 버퍼 — Influx 로 옮기기 전 틱만 든다).
 
 ### 규칙 (왜 가 있는 것)
+- **앱은 자기 로거(`marketlens.*`)를 INFO 로, 타임스탬프와 함께 stderr 로 낸다.** 설정이 없으면 `logging.lastResort` 가 받아 WARNING 이상만, 시각도 없이 나간다 — 그러면 "S3 원문 업로드 재개"(010 §3.6)·"DB 저장 재개"(009 §3.5) 같은 복구 신호가 아예 보이지 않아 장애가 풀렸는지 알 수 없다. handler 는 루트에 달고 레벨은 `marketlens` 에만 내린다 — 라이브러리 INFO(httpx 의 요청 한 줄 등)는 루트의 WARNING 에 막혀야 로그가 초당 수십 줄로 불어나지 않는다.
 - **컨테이너 로그는 네 서비스 모두 `json-file` 50MB × 3 으로 묶는다.** docker 기본값은 무한이고, 회전 없는 로그가 디스크를 채우면 Influx 가 쓰기를 거부한다 — 그 거부는 **공간을 되찾아도 컨테이너를 재시작하기 전까지 풀리지 않는다**(열지 못한 shard 를 캐시한다). 데몬 설정(`/etc/docker/daemon.json`)이 아니라 compose 에 두는 이유는 이 스택이 자기 한도를 들고 다니게 하기 위해서다.
 - **호스트에 여는 포트는 web 하나.** server 는 compose 안에서만, Influx 는 비공개. 공격면을 하나로.
 - **호스트 포트는 compose 변수 `WEB_PORT`(기본 80).** 현 EC2 는 기존 fe 가 80, be 가 8000 을 점유하므로 **`WEB_PORT=8080` 으로 공존**한다. 기존 컨테이너·crontab 은 이 레포 소관이 아니다 — 절대 내리거나 수정하지 않는다. 기존 스택을 이관·폐기하는 날 80 으로 바꾸는 것은 별도 스펙.
@@ -70,6 +71,7 @@ WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 curl localhost:8080/            # <title>트레이딩룸 · MarketLens</title>  /foo → 200, 같은 index.html
 curl -sI localhost:8080/index.html          # Cache-Control: no-store, must-revalidate
 curl -sI localhost:8080/assets/index-*.js   # Cache-Control: public, max-age=31536000, immutable
+curl -sI localhost:8080/assets/none.js       # 404 이고 Cache-Control 이 없다
 curl localhost:8080/api/health  # {"status":"ok","version":"0.1.0"} 200 — 접두 제거 확인, /api 자체는 404
 # server 컨테이너 env: server/.env 의 키가 이름만으로 확인됨(값 미출력), INFLUX_URL=http://influxdb:8086·REDIS_URL=redis://redis:6379/0 로 덮임
 # 이미지 안 .env: marketlens-server 0건, marketlens-web 0건 (find / -xdev -name .env)

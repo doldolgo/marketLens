@@ -405,6 +405,15 @@ def test_spark_is_taken_from_the_published_map_including_fail_rows() -> None:
     assert rows["ETH"]["status"] == "fail" and rows["ETH"]["spark"] == [0.3]
 
 
+def test_spark_values_are_rounded_to_three_decimals() -> None:
+    """490행 × 30개를 매초 보내므로 배정밀도 그대로면 응답이 몇 배가 된다 (§3.2)."""
+    store = LiveStore()
+    seed_basic(store)
+    store.set_spark({("upbit", "binance", "BTC"): [-1.4799569337290985, 2.0]})
+    [row] = make_client(store).get("/spreads").json()["rows"]
+    assert row["spark"] == [-1.48, 2.0]
+
+
 # ---- 리뷰 결함 회귀: 국내 호가 가격 0 은 500 이 아니라 그 행 fail (003 §3.2-4 방어) ----
 
 
