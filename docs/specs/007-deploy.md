@@ -20,7 +20,7 @@
 - 컨테이너 4개:
   - `server` — FastAPI + uvicorn 워커 1개(python 3.12 slim). 컨테이너 포트 8000, **호스트에 노출하지 않는다**(compose 내부 네트워크만).
   - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 `/api/` 를 `server:8000/` 로 프록시하고, 없는 경로는 index.html 을 준다(SPA).
-    캐시 규칙: `index.html` 은 `no-store, must-revalidate` — 배포가 FE·BE 를 함께 바꾸므로 캐시된 셸이 남으면 열려 있던 탭이 구 번들로 새 API 계약을 계속 친다. `/assets/` 의 해시 박힌 파일은 `max-age=31536000, immutable` — 내용이 바뀌면 파일명이 바뀌어 무효화가 필요 없다.
+    캐시 규칙: `index.html` 은 `no-store, must-revalidate` **+ `always`** — 배포가 FE·BE 를 함께 바꾸므로 캐시된 셸이 남으면 열려 있던 탭이 구 번들로 새 API 계약을 계속 친다. `/assets/` 의 해시 박힌 파일은 `max-age=31536000, immutable` 이되 **`always` 는 붙이지 않는다** — 붙이면 404 에도 1년 immutable 이 실려, 배포 직전 셸을 든 브라우저가 사라진 번들의 404 를 1년간 캐시한다(재배포로도 되돌릴 수 없다). `always` 없이도 200·304 는 헤더를 받는다.
   - `influxdb` — 2.7, dev compose 와 같은 첫 기동 설정(org·bucket `marketlens`, admin 토큰 = `INFLUX_TOKEN`). named volume, 호스트 비노출.
   - `redis` — `redis:7-alpine`, `--appendonly yes`, named volume, 호스트 비노출(009 의 틱 버퍼 — Influx 로 옮기기 전 틱만 든다).
 
@@ -70,6 +70,7 @@ WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 curl localhost:8080/            # <title>트레이딩룸 · MarketLens</title>  /foo → 200, 같은 index.html
 curl -sI localhost:8080/index.html          # Cache-Control: no-store, must-revalidate
 curl -sI localhost:8080/assets/index-*.js   # Cache-Control: public, max-age=31536000, immutable
+curl -sI localhost:8080/assets/none.js       # 404 이고 Cache-Control 이 없다
 curl localhost:8080/api/health  # {"status":"ok","version":"0.1.0"} 200 — 접두 제거 확인, /api 자체는 404
 # server 컨테이너 env: server/.env 의 키가 이름만으로 확인됨(값 미출력), INFLUX_URL=http://influxdb:8086·REDIS_URL=redis://redis:6379/0 로 덮임
 # 이미지 안 .env: marketlens-server 0건, marketlens-web 0건 (find / -xdev -name .env)

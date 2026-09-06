@@ -130,8 +130,11 @@ def test_nginx_cache_rules_for_index_and_hashed_assets() -> None:
     conf = _text("web/nginx.conf")
     index_block = conf.split("location = /index.html", 1)[1].split("}", 1)[0]
     assert '"no-store, must-revalidate"' in index_block
+    assert "always" in index_block  # 셸은 오류 응답에도 캐시 금지가 붙어야 한다
     assets_block = conf.split("location /assets/", 1)[1].split("}", 1)[0]
     assert '"public, max-age=31536000, immutable"' in assets_block
+    # `always` 가 붙으면 404 에도 1년 immutable 이 실려 되돌릴 수 없게 캐시된다
+    assert "always" not in assets_block
 
 
 def test_web_shell_title_is_the_smoke_string() -> None:
