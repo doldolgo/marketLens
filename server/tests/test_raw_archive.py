@@ -31,9 +31,13 @@ from tests.stream_fakes import (
 from tests.test_stream_binance import depth, exchange_info
 from tests.test_stream_upbit import orderbook
 
-T0 = 1_788_600_000_123  # 2026-09-05T09:20:00.123Z
+T0 = 1_788_600_000_123  # 2026-09-05T09:20:00.123Z — 창 20260905T092000Z 의 123ms 지점
 WS = "ws:/websocket/v1"
 MINUTE = 60_000
+NEXT = (
+    T0 - 123 + MINUTE
+)  # 다음 분 창의 첫 ms(09:21:00.000) — 여기부터 닫기 회차가 앞 창을 닫는다
+OB_BTC = "orderbook:KRW-BTC"
 
 
 class FakeS3:
@@ -93,8 +97,9 @@ def raw_part(line: bytes) -> bytes:
 
 
 def test_one_record_is_one_line_with_four_keys_in_order() -> None:
+    """`key` 는 줄에 쓰지 않는다 — 표본화에만 쓴다 (§4)."""
     archive, _, _ = build()
-    archive.record("upbit", WS, T0, '{"type":"orderbook"}')
+    archive.record("upbit", WS, T0, '{"type":"orderbook"}', OB_BTC)
     assert archive.buffered("upbit") == 1
     line = format_line("upbit", WS, T0, '{"type":"orderbook"}')
     parsed = json.loads(line)
@@ -141,44 +146,75 @@ def _reject_constant(name: str) -> Any:
     raise ValueError(f"non-standard JSON constant {name}")
 
 
-# --- 버퍼와 객체 (§3.5) ---
+# --- 분 창·표본화·객체 (§3.5) ---
 
 
-async def test_buffer_closes_after_sixty_seconds_with_key_from_first_line() -> None:
+async def test_window_closes_when_the_next_minute_begins_and_key_is_window_start() -> (
+    None
+):
     archive, s3, clock = build()
     archive.record("binance", "ws:/stream", T0, "{}")
-    clock.now = T0 + MINUTE - 1
+    clock.now = NEXT - 1  # 같은 창 안에서는 59초가 지나도 닫히지 않는다
     assert await archive.run_once() == 0 and s3.puts == []
-    clock.now = T0 + MINUTE
+    clock.now = NEXT
     assert await archive.run_once() == 1
     await settled(lambda: archive.pending == 0)
     [(key, body)] = s3.puts
-    assert (
-        key == "raw/exchange=binance/dt=2026-09-05/hh=09/20260905T092000.123Z.jsonl.gz"
-    )
+    assert key == "raw/exchange=binance/dt=2026-09-05/hh=09/20260905T092000Z.jsonl.gz"
     assert archive.buffered("binance") == 0
     assert json.loads(lines_of(body)[0])["receivedAt"] == T0
     await archive.aclose()
 
 
-async def test_uncompressed_size_limit_closes_before_sixty_seconds(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(raw_archive, "CLOSE_AT_BYTES", 300)
+async def test_same_source_and_key_keeps_only_the_last_line_in_a_window() -> None:
     archive, s3, clock = build()
-    big = json.dumps({"pad": "x" * 200})
-    archive.record("upbit", WS, T0, big)
-    archive.record("upbit", WS, T0 + 5, big)  # 두 줄로 300 바이트를 넘는다
-    clock.now = T0 + 10
-    assert await archive.run_once() == 1
-    archive.record("upbit", WS, T0 + 20, big)
-    archive.record("upbit", WS, T0 + 25, big)
-    clock.now = T0 + 30
+    for i in range(3):
+        archive.record("upbit", WS, T0 + i, json.dumps({"n": i}), OB_BTC)
+    archive.record("upbit", WS, T0 + 3, '{"t":1}', "ticker:KRW-BTC")
+    archive.record("upbit", WS, T0 + 4, '{"e":1}', "orderbook:KRW-ETH")
+    assert archive.buffered("upbit") == 3
+    clock.now = NEXT
+    await archive.run_once()
+    await settled(lambda: archive.pending == 0)
+    [(_, body)] = s3.puts
+    lines = [json.loads(ln) for ln in lines_of(body)]
+    assert [(ln["receivedAt"], ln["raw"]) for ln in lines] == [
+        (T0 + 2, {"n": 2}),  # 마지막 1건만, receivedAt 도 마지막 것
+        (T0 + 3, {"t": 1}),
+        (T0 + 4, {"e": 1}),
+    ]
+    assert all(list(ln) == ["exchange", "source", "receivedAt", "raw"] for ln in lines)
+    await archive.aclose()
+
+
+async def test_lines_without_key_are_all_kept_even_when_identical() -> None:
+    archive, s3, clock = build()
+    for i in range(3):
+        archive.record("upbit", WS, T0 + i, '{"status":"UP"}')
+    archive.record("upbit", "rest:/v1/market/all", T0 + 3, "[]")
+    archive.record("upbit", "rest:/v1/market/all", T0 + 4, "[]")
+    assert archive.buffered("upbit") == 5
+    clock.now = NEXT
+    await archive.run_once()
+    await settled(lambda: archive.pending == 0)
+    [(_, body)] = s3.puts
+    assert len(lines_of(body)) == 5
+    await archive.aclose()
+
+
+async def test_window_is_decided_by_received_at_not_by_the_closing_clock() -> None:
+    archive, s3, clock = build()
+    archive.record("upbit", WS, T0, '{"n":0}', OB_BTC)
+    archive.record("upbit", WS, NEXT + 5, '{"n":1}', OB_BTC)  # 시계는 아직 앞 창
+    assert archive.buffered("upbit") == 2  # 창이 달라 같은 키라도 둘 다 산다
+    assert await archive.run_once() == 0  # clock == T0 — 어느 창도 지나지 않았다
+    clock.now = NEXT
+    assert await archive.run_once() == 1  # 앞 창만
+    clock.now = NEXT + MINUTE
     assert await archive.run_once() == 1
     await settled(lambda: archive.pending == 0)
-    keys = [k for k, _ in s3.puts]
-    assert len(set(keys)) == 2 and keys[0].endswith("T092000.123Z.jsonl.gz")
-    assert keys[1].endswith("T092000.143Z.jsonl.gz")  # 같은 분 — ms 로 구분된다
+    assert [k[-17:] for k, _ in s3.puts] == ["T092000Z.jsonl.gz", "T092100Z.jsonl.gz"]
+    assert [len(lines_of(b)) for _, b in s3.puts] == [1, 1]
     await archive.aclose()
 
 
@@ -186,39 +222,42 @@ async def test_exchanges_get_separate_objects_and_empty_buffers_make_none() -> N
     archive, s3, clock = build()
     archive.record("upbit", WS, T0, "{}")
     archive.record("bithumb", WS, T0 + 1, "{}")
-    clock.now = T0 + MINUTE + 1
+    clock.now = NEXT + 1
     assert await archive.run_once() == 2
     await settled(lambda: archive.pending == 0)
     assert [k.split("/")[1] for k, _ in s3.puts] == [
-        "exchange=upbit",
         "exchange=bithumb",
+        "exchange=upbit",
     ]
-    clock.now = T0 + 3 * MINUTE
+    clock.now = NEXT + 3 * MINUTE
     assert await archive.run_once() == 0  # 기록이 없던 회차 — 빈 객체는 없다
     assert await archive.run_once(force_close=True) == 0
     assert len(s3.puts) == 2
     await archive.aclose()
 
 
-async def test_gunzip_line_count_and_order_match_calls_and_pack_is_deterministic() -> (
+async def test_gunzip_lines_are_sorted_by_received_at_and_pack_is_deterministic() -> (
     None
 ):
     archive, s3, clock = build()
-    payloads = [json.dumps({"i": i}) for i in range(50)]
-    for i, p in enumerate(payloads):
-        archive.record("upbit", WS, T0 + i, p)
-    clock.now = T0 + MINUTE
+    archive.record("upbit", WS, T0 + 1, '{"ob":0}', OB_BTC)  # 나중에 교체된다
+    plain = [json.dumps({"i": i}) for i in range(20)]
+    for p in plain:
+        archive.record("upbit", WS, T0 + 10, p)  # 같은 receivedAt — 기록 순
+    archive.record("upbit", WS, T0 + 40, '{"ob":1}', OB_BTC)
+    clock.now = NEXT
     await archive.run_once()
     await settled(lambda: archive.pending == 0)
     [(_, body)] = s3.puts
     lines = lines_of(body)
-    assert len(lines) == 50
-    assert [json.loads(line)["raw"]["i"] for line in lines] == list(range(50))
-    assert [json.loads(line)["receivedAt"] for line in lines] == [
-        T0 + i for i in range(50)
+    parsed = [json.loads(ln) for ln in lines]
+    assert [ln["receivedAt"] for ln in parsed] == [T0 + 10] * 20 + [T0 + 40]
+    assert [ln["raw"]["i"] for ln in parsed[:20]] == list(range(20))
+    assert parsed[-1]["raw"] == {"ob": 1}
+    expected = [format_line("upbit", WS, T0 + 10, p) for p in plain] + [
+        format_line("upbit", WS, T0 + 40, '{"ob":1}')
     ]
-    again = pack([format_line("upbit", WS, T0 + i, p) for i, p in enumerate(payloads)])
-    assert again == body and pack([ln + b"\n" for ln in lines]) == body
+    assert pack(expected) == body and pack([ln + b"\n" for ln in lines]) == body
     await archive.aclose()
 
 
@@ -230,7 +269,7 @@ async def test_failed_upload_stays_at_head_and_is_retried_with_same_key(
 ) -> None:
     archive, s3, clock = build()
     archive.record("upbit", WS, T0, "{}")
-    clock.now = T0 + MINUTE
+    clock.now = NEXT
     s3.fail = True
     with caplog.at_level(logging.WARNING, logger="marketlens.raw_archive"):
         assert await archive.run_once() == 1
@@ -238,12 +277,12 @@ async def test_failed_upload_stays_at_head_and_is_retried_with_same_key(
     msgs = [r.getMessage() for r in caplog.records]
     assert any("S3 원문 업로드 실패 (연속 1회)" in m for m in msgs)
     assert any("S3 원문 업로드 실패 (연속 2회)" in m for m in msgs)
-    assert all("T092000.123Z" in m for m in msgs if "업로드 실패" in m)  # 같은 키
+    assert all("T092000Z" in m for m in msgs if "업로드 실패" in m)  # 같은 키
     assert archive.pending == 1
     archive.record(
-        "bithumb", WS, T0 + MINUTE, "{}"
+        "bithumb", WS, NEXT, "{}"
     )  # 실패 중 닫힌 다음 객체는 뒤에서 기다린다
-    clock.now = T0 + 2 * MINUTE
+    clock.now = NEXT + MINUTE
     assert await archive.run_once() == 1
     assert archive.pending == 2 and s3.puts == []
     s3.fail = False
@@ -253,7 +292,7 @@ async def test_failed_upload_stays_at_head_and_is_retried_with_same_key(
         "exchange=upbit",
         "exchange=bithumb",
     ]
-    assert s3.puts[0][0].endswith("T092000.123Z.jsonl.gz")
+    assert s3.puts[0][0].endswith("T092000Z.jsonl.gz")
     await archive.aclose()
 
 
@@ -263,36 +302,29 @@ async def test_queue_over_limit_drops_oldest_and_logs_its_key(
     archive, s3, clock = build()
     s3.fail = True
     archive.record("upbit", WS, T0, "{}")
-    clock.now = T0 + MINUTE
+    clock.now = NEXT
     await archive.run_once()
     first = pack([format_line("upbit", WS, T0, "{}")])
     monkeypatch.setattr(raw_archive, "QUEUE_LIMIT_BYTES", len(first) * 2 + 10)
     for n in range(1, 4):
         archive.record("upbit", WS, T0 + n * MINUTE, "{}")
-        clock.now = T0 + (n + 1) * MINUTE
+        clock.now = NEXT + n * MINUTE
         with caplog.at_level(logging.ERROR, logger="marketlens.raw_archive"):
             await archive.run_once()
     errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
-    assert (
-        len(errors) == 2 and "T092000.123Z" in errors[0] and "T092100.123Z" in errors[1]
-    )
+    assert len(errors) == 2 and "T092000Z" in errors[0] and "T092100Z" in errors[1]
     assert archive.pending == 2
     # 워커가 지금의 머리(T092200)로 한 번 더 실패한 뒤에 S3 를 살린다 — 버려진 객체를 들고 있지 않다
     seen = archive.consecutive_failures
     await settled(lambda: archive.consecutive_failures > seen)
     s3.fail = False
     await settled(lambda: archive.pending == 0)
-    assert [k[-21:] for k, _ in s3.puts] == [
-        "T092200.123Z.jsonl.gz",
-        "T092300.123Z.jsonl.gz",
-    ]
+    assert [k[-17:] for k, _ in s3.puts] == ["T092200Z.jsonl.gz", "T092300Z.jsonl.gz"]
     await archive.aclose()
 
 
-async def test_closing_keeps_running_while_upload_is_stuck(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """업로드가 멈춰 있어도 닫기 회차는 돈다 — 32MB 에 닿은 버퍼가 그 회차에 닫혀 대기열로 간다."""
+async def test_closing_keeps_running_while_upload_is_stuck() -> None:
+    """업로드가 멈춰 있어도 닫기 회차는 돈다 — 창이 지난 버퍼가 그 회차에 닫혀 대기열로 간다."""
 
     class Stuck:
         def __init__(self) -> None:
@@ -305,19 +337,18 @@ async def test_closing_keeps_running_while_upload_is_stuck(
             assert self.release.wait(2.0)
             self.puts.append(key)
 
-    monkeypatch.setattr(raw_archive, "CLOSE_AT_BYTES", 300)
     s3 = Stuck()
     clock = Clock(T0)
     archive = RawArchive(
         uploader=s3, clock=clock, sleep=Sleeps(), retry_interval_sec=0.01
     )
     archive.record("upbit", WS, T0, "{}")
-    clock.now = T0 + MINUTE
+    clock.now = NEXT
     assert await archive.run_once() == 1
     await asyncio.to_thread(s3.entered.wait, 2.0)  # 워커가 put 안에서 멈춰 있다
-    big = json.dumps({"pad": "x" * 200})
-    archive.record("bithumb", WS, clock.now, big)
-    archive.record("bithumb", WS, clock.now + 1, big)
+    archive.record("bithumb", WS, clock.now, "{}", OB_BTC)
+    archive.record("bithumb", WS, clock.now + 1, "{}", OB_BTC)
+    clock.now = NEXT + MINUTE
     assert await archive.run_once() == 1  # 업로드와 무관하게 닫힌다
     assert archive.pending == 2 and archive.buffered("bithumb") == 0
     s3.release.set()
@@ -344,7 +375,7 @@ async def test_uploader_exception_never_reaches_record_and_loop_continues() -> N
         drain_deadline_sec=0.05,
     )
     archive.record("upbit", WS, T0, "{}")
-    clock.now = T0 + MINUTE
+    clock.now = NEXT
     archive.start()
     await settled(lambda: s3.calls >= 2)
     archive.record("upbit", WS, clock.now, "{}")  # 실패 중에도 기록은 즉시 돌아온다
@@ -371,7 +402,7 @@ async def test_loop_survives_a_round_exception_and_keeps_closing(
     archive.record("upbit", WS, T0, "{}")
     archive.record("upbit", WS, T0 + 1, "{}")
     archive.record("bithumb", WS, T0 + 2, "{}")
-    clock.now = T0 + MINUTE + 2
+    clock.now = NEXT + 2
     with caplog.at_level(logging.ERROR, logger="marketlens.raw_archive"):
         archive.start()
         await settled(lambda: calls >= 1)
@@ -381,10 +412,10 @@ async def test_loop_survives_a_round_exception_and_keeps_closing(
         "원문 닫기 회차 예외 — 닫힌 객체 2개(3줄)를 잃는다, 다음 회차를 이어간다"
     ]
     assert archive.buffered("upbit") == 0 and archive.buffered("bithumb") == 0
-    archive.record("upbit", WS, clock.now, "{}")  # 다음 60초 버퍼
+    archive.record("upbit", WS, clock.now, "{}")  # 다음 분 창
     clock.now += MINUTE
     await settled(lambda: len(s3.puts) == 1)  # 살아 있는 회차가 닫아 올렸다
-    assert s3.puts[0][0].endswith("T092100.125Z.jsonl.gz")
+    assert s3.puts[0][0].endswith("T092100Z.jsonl.gz")
     await archive.aclose()
 
 
@@ -393,7 +424,7 @@ async def test_retry_waits_the_full_interval_even_when_new_objects_arrive() -> N
     archive, s3, clock = build(retry_interval_sec=0.5)
     s3.fail = True
     archive.record("upbit", WS, T0, "{}")
-    clock.now = T0 + MINUTE
+    clock.now = NEXT
     assert await archive.run_once() == 1
     await settled(lambda: s3.attempts == 1)
     first_attempt = time.monotonic()
@@ -442,7 +473,7 @@ async def test_aclose_during_slow_upload_uploads_every_object_exactly_once() -> 
     clock = Clock(T0)
     archive = RawArchive(uploader=s3, clock=clock, sleep=Sleeps())
     archive.record("upbit", WS, T0, "{}")
-    clock.now = T0 + MINUTE
+    clock.now = NEXT
     archive.start()
     await asyncio.to_thread(s3.entered.wait, 2.0)  # 워커가 upbit 객체를 올리는 중
     archive.record("bithumb", WS, clock.now, "{}")  # 종료 시 강제로 닫힐 객체
@@ -494,7 +525,7 @@ async def _upbit_row(frame: str, record: Any) -> Any:
 async def test_replaying_an_upbit_line_rebuilds_the_same_row() -> None:
     archive, s3, clock = build()
     original = await _upbit_row(orderbook(levels=3), archive.record)
-    clock.now = T0 + MINUTE
+    clock.now = NEXT
     await archive.run_once()
     await settled(lambda: archive.pending == 0)
     [(_, body)] = s3.puts
@@ -541,7 +572,7 @@ async def _binance_row(frame: str, record: Any) -> Any:
 async def test_replaying_a_binance_depth_line_rebuilds_the_same_row() -> None:
     archive, s3, clock = build()
     original = await _binance_row(depth(levels=20), archive.record)
-    clock.now = T0 + MINUTE
+    clock.now = NEXT
     await archive.run_once()
     await settled(lambda: archive.pending == 0)
     [(_, body)] = s3.puts

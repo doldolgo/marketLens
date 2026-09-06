@@ -12,11 +12,32 @@ import httpx
 from app.core.models import Row, StreamError, Tick
 
 # --- 원문 싱크 (스펙 001 §3.7, 구현은 010) ---
-# record(exchange, source, received_at_ms, payload) — 동기·예외 없음·즉시 반환.
-RawRecorder = Callable[[str, str, int, str], None]
 
 
-def noop_record(exchange: str, source: str, received_at_ms: int, payload: str) -> None:
+class RawRecorder(Protocol):
+    """record(exchange, source, received_at_ms, payload, key=None) — 동기·예외 없음·즉시 반환.
+
+    `key` 는 시세 프레임이면 `"<종류>:<원본 심볼>"`(`orderbook:KRW-BTC`·`depth20:BTCUSDT`), 그 밖
+    (REST 본문·핸드셰이크 거부·비시세 프레임·디코드 실패)은 None — 010 이 분당 마지막 1건으로 솎는 데 쓴다.
+    """
+
+    def __call__(
+        self,
+        exchange: str,
+        source: str,
+        received_at_ms: int,
+        payload: str,
+        key: str | None = None,
+    ) -> None: ...
+
+
+def noop_record(
+    exchange: str,
+    source: str,
+    received_at_ms: int,
+    payload: str,
+    key: str | None = None,
+) -> None:
     """S3_BUCKET 이 없거나 010 이 아직 없을 때 꽂히는 구현 — 아무것도 하지 않는다."""
 
 

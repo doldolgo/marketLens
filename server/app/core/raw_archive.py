@@ -1,11 +1,11 @@
-"""거래소 원문 아카이브 — 원문 싱크·거래소별 버퍼·객체 조립·닫기 회차·업로드 워커 (스펙 010).
+"""거래소 원문 아카이브 — 원문 싱크·분 창 버퍼·표본화·객체 조립·닫기 회차·업로드 워커 (스펙 010).
 
-기록 함수는 001 의 core 계약 `record(exchange, source, received_at_ms, payload)`(동기·무예외)을
-구현한다. 줄을 만들어 그 거래소 버퍼에 붙이는 메모리 작업뿐이라 수신 경로를 막지 않는다.
-닫기 회차(태스크, 매초)가 버퍼를 닫아(60초 또는 32MB) 스레드에서 gzip 해 대기열에 넣고,
-업로드 워커(데몬 스레드 하나)가 대기열 머리부터 S3 에 올린다 — 둘은 잠금으로만 만나고
-닫기 주기는 업로드 결과와 무관하다. 어떤 실패도 수집·/spreads·Redis·Influx 경로에 번지지
-않는다. S3 를 읽는 코드는 없다.
+기록 함수는 001 의 core 계약 `record(exchange, source, received_at_ms, payload, key)`(동기·무예외)을
+구현한다. 줄을 만들어 그 거래소의 UTC 분 창 버퍼에 붙이는 메모리 작업뿐이라 수신 경로를 막지 않는다.
+`key` 가 있는 줄(시세 프레임)은 창 안에서 `(source, key)` 마다 마지막 1건만 남기고, 없는 줄은 전량 남긴다.
+닫기 회차(태스크, 매초)가 지난 창을 닫아 스레드에서 gzip 해 대기열에 넣고, 업로드 워커(데몬 스레드 하나)가
+대기열 머리부터 S3 에 올린다 — 둘은 잠금으로만 만나고 닫기 주기는 업로드 결과와 무관하다.
+어떤 실패도 수집·/spreads·Redis·Influx 경로에 번지지 않는다. S3 를 읽는 코드는 없다.
 """
 
 import asyncio
@@ -23,13 +23,12 @@ from typing import Protocol
 
 logger = logging.getLogger("marketlens.raw_archive")
 
-CLOSE_AFTER_MS = 60_000  # 버퍼를 닫는 경과 시간 — 첫 줄의 receivedAt 기준 (§3.5)
-CLOSE_AT_BYTES = 32 * 1024 * 1024  # 비압축 32MB 도달 시 60초 전에 닫는다 (§3.5)
+WINDOW_MS = 60_000  # UTC 분 창 — 창 번호 = receivedAt // WINDOW_MS (§3.5)
 QUEUE_LIMIT_BYTES = 256 * 1024 * 1024  # 대기열 상한 — 거래소 합산 압축 후 (§3.6)
 LOOP_INTERVAL_SEC = 1.0  # 닫기 회차 주기
 RETRY_INTERVAL_SEC = 1.0  # 실패한 머리 객체를 워커가 다시 시도하는 간격 (§3.6)
 DRAIN_DEADLINE_SEC = 5.0  # 종료 시 대기열 비우기 합계 상한 (§3.6)
-GZIP_LEVEL = 6  # 32MB 에 0.3초 안팎 — 레벨 9 는 3배 넘게 걸리고 이득은 1% 미만 (§3.5)
+GZIP_LEVEL = 6  # 레벨 9 는 3배 넘게 걸리고 이득은 1% 미만 (§3.5)
 KEY_PREFIX = "raw"
 WORKER_NAME = "raw-archive-upload"
 
@@ -73,12 +72,12 @@ def format_line(exchange: str, source: str, received_at_ms: int, payload: str) -
     return f'{head[:-1]},"raw":{raw}}}\n'.encode()
 
 
-def object_key(exchange: str, first_received_at_ms: int) -> str:
-    """`raw/exchange=<id>/dt=YYYY-MM-DD/hh=HH/YYYYMMDDTHHMMSS.mmmZ.jsonl.gz` — 전부 UTC, 첫 줄의 수신 시각."""
-    at = datetime.fromtimestamp(first_received_at_ms / 1000, tz=UTC)
-    stamp = f"{at:%Y%m%dT%H%M%S}.{first_received_at_ms % 1000:03d}Z"
+def object_key(exchange: str, window: int) -> str:
+    """`raw/exchange=<id>/dt=YYYY-MM-DD/hh=HH/YYYYMMDDTHHMM00Z.jsonl.gz` — 전부 UTC, 시각 = 창의 시작(분)."""
+    at = datetime.fromtimestamp(window * WINDOW_MS / 1000, tz=UTC)
     return (
-        f"{KEY_PREFIX}/exchange={exchange}/dt={at:%Y-%m-%d}/hh={at:%H}/{stamp}.jsonl.gz"
+        f"{KEY_PREFIX}/exchange={exchange}/dt={at:%Y-%m-%d}/hh={at:%H}/"
+        f"{at:%Y%m%dT%H%M}00Z.jsonl.gz"
     )
 
 
@@ -87,20 +86,32 @@ def pack(lines: list[bytes]) -> bytes:
     return gzip.compress(b"".join(lines), compresslevel=GZIP_LEVEL, mtime=0)
 
 
-# --- 거래소별 버퍼와 닫힌 객체 (§3.5) ---
+# --- 분 창 버퍼와 닫힌 객체 (§3.5) ---
+
+
+@dataclass(frozen=True)
+class _Entry:
+    received_at_ms: int
+    seq: int  # 기록 순 — receivedAt 이 같을 때의 순서
+    line: bytes
 
 
 @dataclass
 class _Buffer:
-    first_received_at_ms: int
-    lines: list[bytes] = field(default_factory=list)
-    size: int = 0  # 비압축 바이트
+    """거래소 하나의 분 창 하나. `keyed` 는 (source, key) 당 마지막 1건, `plain` 은 key 없는 줄 전량."""
 
-    def due(self, now_ms: int) -> bool:
-        return (
-            now_ms - self.first_received_at_ms >= CLOSE_AFTER_MS
-            or self.size >= CLOSE_AT_BYTES
+    keyed: dict[tuple[str, str], _Entry] = field(default_factory=dict)
+    plain: list[_Entry] = field(default_factory=list)
+
+    def __len__(self) -> int:
+        return len(self.keyed) + len(self.plain)
+
+    def lines(self) -> list[bytes]:
+        """줄 순서 = receivedAt 오름차순, 같으면 기록 순 (§3.5)."""
+        entries = sorted(
+            [*self.keyed.values(), *self.plain], key=lambda e: (e.received_at_ms, e.seq)
         )
+        return [e.line for e in entries]
 
 
 @dataclass(frozen=True)
@@ -137,8 +148,9 @@ class RawArchive:
         self._sleep = sleep
         self._drain_deadline_sec = drain_deadline_sec
         self._retry_interval_sec = retry_interval_sec
-        # 버퍼는 이벤트 루프 스레드만 만진다 — 기록 함수와 닫기 회차.
-        self._buffers: dict[str, _Buffer] = {}
+        # 버퍼는 이벤트 루프 스레드만 만진다 — 기록 함수와 닫기 회차. 키 = (거래소, 창 번호).
+        self._buffers: dict[tuple[str, int], _Buffer] = {}
+        self._seq = 0
         # 거래소를 합쳐 닫힌 순서 하나의 FIFO. 넣기·상한 버림(닫기 회차)과 머리 빼기(워커)는
         # 전부 `_changed`(잠금 + 조건변수) 아래에서만 한다 (§3.6).
         self._queue: deque[RawObject] = deque()
@@ -153,26 +165,38 @@ class RawArchive:
     # --- 원문 싱크 계약 (001 §3.7) ---
 
     def record(
-        self, exchange: str, source: str, received_at_ms: int, payload: str
+        self,
+        exchange: str,
+        source: str,
+        received_at_ms: int,
+        payload: str,
+        key: str | None = None,
     ) -> None:
-        """동기·무예외·즉시 반환 — 줄을 만들어 그 거래소 버퍼에 붙인다. 닫는 것은 닫기 회차의 몫."""
+        """동기·무예외·즉시 반환 — 줄을 만들어 그 거래소의 분 창 버퍼에 붙인다. 닫는 것은 닫기 회차의 몫.
+
+        `key` 가 있으면 창 안의 같은 (source, key) 줄을 이 줄로 바꾼다(표본화 — §3.5).
+        """
         try:
             line = format_line(exchange, source, received_at_ms, payload)
-            buf = self._buffers.get(exchange)
+            window = received_at_ms // WINDOW_MS
+            buf = self._buffers.get((exchange, window))
             if buf is None:
-                buf = _Buffer(first_received_at_ms=received_at_ms)
-                self._buffers[exchange] = buf
-            buf.lines.append(line)
-            buf.size += len(line)
+                buf = _Buffer()
+                self._buffers[exchange, window] = buf
+            self._seq += 1
+            entry = _Entry(received_at_ms, self._seq, line)
+            if key is None:
+                buf.plain.append(entry)
+            else:
+                buf.keyed[source, key] = entry
         except Exception:
             logger.exception(
                 "원문 기록 중 예외 — 이 원문은 버린다 %s %s", exchange, source
             )
 
     def buffered(self, exchange: str) -> int:
-        """아직 닫히지 않은 그 거래소 버퍼의 줄 수."""
-        buf = self._buffers.get(exchange)
-        return 0 if buf is None else len(buf.lines)
+        """아직 닫히지 않은 그 거래소 버퍼의 줄 수(표본화 후, 열린 창 전부 합산)."""
+        return sum(len(buf) for (ex, _), buf in self._buffers.items() if ex == exchange)
 
     @property
     def pending(self) -> int:
@@ -201,7 +225,7 @@ class RawArchive:
                 logger.exception("원문 닫기 회차 예외 — 다음 회차를 이어간다")
 
     async def run_once(self, *, force_close: bool = False) -> int:
-        """회차 1번 — 닫는 조건을 만족한 버퍼(force 면 전부)를 닫고 스레드에서 gzip 해 대기열에 넣는다.
+        """회차 1번 — 지난 창의 버퍼(force 면 전부)를 닫고 스레드에서 gzip 해 대기열에 넣는다.
 
         업로드는 기다리지 않는다(워커의 몫). 닫은 객체 수를 돌려준다.
         """
@@ -227,18 +251,17 @@ class RawArchive:
         return len(closed)
 
     def _close_due(self, now_ms: int, *, force: bool) -> list[_Closed]:
+        """지금 시각의 창보다 앞선 창(force 면 전부)을 닫는다 — 닫힌 순서 = 거래소별 창 번호 순."""
+        current = now_ms // WINDOW_MS
         closed: list[_Closed] = []
-        for exchange, buf in list(self._buffers.items()):
-            if not buf.lines:
+        for (exchange, window), buf in sorted(self._buffers.items()):
+            if not len(buf):
+                del self._buffers[exchange, window]
                 continue
-            if force or buf.due(now_ms):
-                del self._buffers[exchange]  # 다음 줄은 새 버퍼(첫 줄 시각이 곧 새 키)
+            if force or window < current:
+                del self._buffers[exchange, window]
                 closed.append(
-                    _Closed(
-                        exchange,
-                        object_key(exchange, buf.first_received_at_ms),
-                        buf.lines,
-                    )
+                    _Closed(exchange, object_key(exchange, window), buf.lines())
                 )
         return closed
 
