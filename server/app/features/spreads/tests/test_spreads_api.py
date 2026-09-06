@@ -219,7 +219,8 @@ def test_zero_size_best_quote_is_fail() -> None:
 def test_stale_ok_and_age_follow_older_stream_not_row() -> None:
     store = LiveStore()
     now = datetime.now(UTC)
-    old = now - timedelta(seconds=60)  # 행 자체는 1분 전 — 조용한 코인
+    # 행 자체는 299초 전 — 조용한 코인. 행 자체 규칙(300초)의 바로 아래라 스트림 기준 그대로다
+    old = now - timedelta(seconds=299)
     seed_rows(
         store,
         [
@@ -251,13 +252,69 @@ def test_stale_ok_and_age_follow_older_stream_not_row() -> None:
     assert row["status"] == "stale"
     assert 5.9 <= row["age"] <= 8.0
 
-    # 스트림이 둘 다 0.5초 전이면 행 갱신 시각이 1분 전이어도 ok
+    # 스트림이 둘 다 0.5초 전이면 행 갱신 시각이 299초 전이어도 ok
     store.stream("upbit").last_message_at = ms(
         datetime.now(UTC) - timedelta(seconds=0.5)
     )
     [row] = make_client(store).get("/spreads").json()["rows"]
     assert row["status"] == "ok"
     assert 0.4 <= row["age"] <= 2.0
+
+
+@pytest.mark.parametrize("silent_exchange", ["upbit", "binance"])
+def test_row_unchanged_for_300s_is_stale_even_with_live_stream(
+    silent_exchange: str,
+) -> None:
+    """행 자체 미갱신 300초 — 거래 정지·심볼 장애 (§3.2-4 예외, §4).
+
+    스트림은 살아 있는데(0.5초 전 수신) 그 코인 행만 301초 전이면 age 는 그 행의
+    실제 경과 초(≥300)라 stale 이다. 국내 행·해외 행 어느 쪽이든 같고, 다른 코인 행은 ok.
+    """
+    store = LiveStore()
+    now = datetime.now(UTC)
+    silent_at = now - timedelta(seconds=301)
+    upbit_rows = {
+        "BTC": make_row(
+            "upbit", "BTC", bids=[[100_000_000.0, 0.5]], asks=[[100_100_000.0, 0.4]]
+        ),
+        "ETH": make_row(
+            "upbit", "ETH", bids=[[5_000_000.0, 1.0]], asks=[[5_010_000.0, 1.0]]
+        ),
+    }
+    binance_rows = {
+        "BTC": make_row(
+            "binance",
+            "BTC",
+            price=71_480.0,
+            bids=[[71_450.0, 1.5]],
+            asks=[[71_500.0, 2.0]],
+        ),
+        "ETH": make_row(
+            "binance",
+            "ETH",
+            price=3_550.0,
+            bids=[[3_549.0, 1.0]],
+            asks=[[3_551.0, 1.0]],
+        ),
+    }
+    for exchange, table in (("upbit", upbit_rows), ("binance", binance_rows)):
+        for base, row in table.items():
+            # 조용한 거래소의 BTC 행만 301초 전, 나머지는 지금
+            seeded_at = (
+                silent_at if (exchange, base) == (silent_exchange, "BTC") else now
+            )
+            seed_rows(store, [row], seeded_at)
+    store.set_rate("upbit", 1400.0, 1390.0, now)
+    ms = lambda dt: int(dt.timestamp() * 1000)  # noqa: E731
+    for exchange in ("upbit", "binance"):
+        store.stream(exchange).last_message_at = ms(now - timedelta(seconds=0.5))
+
+    rows = {r["sym"]: r for r in make_client(store).get("/spreads").json()["rows"]}
+    assert rows["BTC"]["status"] == "stale"
+    assert 300.0 <= rows["BTC"]["age"] <= 303.0
+    # 같은 스트림의 다른 코인 행은 스트림 기준 그대로 ok
+    assert rows["ETH"]["status"] == "ok"
+    assert 0.4 <= rows["ETH"]["age"] <= 2.0
 
 
 def test_krw_is_domestic_best_bid_price() -> None:

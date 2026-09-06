@@ -27,6 +27,8 @@ BASE_EXCHANGE = "upbit"
 DOMESTIC_QUOTE = "KRW"
 FOREIGN_QUOTE = "USDT"
 STALE_AFTER_SEC = 5.0
+# 행 자체가 이만큼 안 바뀌면 스트림이 살아 있어도 그 행의 실제 경과 초를 age 로 낸다 (§3.2-4)
+ROW_STALE_SEC = 300.0
 # USDT 는 매 사이클(1초) 관측이 정상 — 60초 무관측은 구조적 문제다 (스펙 008 §3.2)
 USDT_STALE_WARN_SEC = 60.0
 EXCLUDED_COINS: frozenset[str] = frozenset()
@@ -104,11 +106,20 @@ def _age_seconds(row: Row, store: LiveStore, now: datetime) -> float:
     """그 거래소 스트림의 마지막 시세 수신 이후 경과 초 (§3.2-4).
 
     행 자체의 갱신 시각이 아니다 — 조용한 코인은 메시지가 안 와도 호가는 현재값이다.
-    행은 스트림 메시지로만 생기므로 행이 있는 거래소의 수신 시각은 항상 있다.
+    행은 스트림 메시지로만 생기므로 행이 있는 거래소의 수신 시각과 행의 갱신 시각은 항상 있다.
+
+    예외: 행 자체가 300초 이상 안 바뀌었으면(거래 정지·심볼 장애 — 스트림은 살아 있는데
+    그 코인 프레임만 안 온다) 그 행의 실제 경과 초를 낸다. FE 의 stale 규칙(age ≥ 5)이
+    그대로 잡게 하기 위해서다.
     """
     state = store.stream_state(row.exchange)
     assert state is not None and state.last_message_at is not None
-    return (now.timestamp() * 1000 - state.last_message_at) / 1000
+    assert row.updated_at is not None
+    stream_age = (now.timestamp() * 1000 - state.last_message_at) / 1000
+    row_age = (now - row.updated_at).total_seconds()
+    if row_age >= ROW_STALE_SEC:
+        return max(stream_age, row_age)
+    return stream_age
 
 
 def _build_row(
@@ -127,7 +138,7 @@ def _build_row(
     fx_bid = fx_row.bids[0] if fx_row.bids else None
     fx_ask = fx_row.asks[0] if fx_row.asks else None
 
-    # age 는 양측 스트림 중 오래된 쪽 기준, 0 미만이면 0
+    # age 는 양측 스트림 중 오래된 쪽 기준(행 자체 300초 미갱신이면 그 행의 경과 초), 0 미만이면 0
     age = max(0.0, _age_seconds(dom_row, store, now), _age_seconds(fx_row, store, now))
 
     best = (dom_bid, dom_ask, fx_bid, fx_ask)
