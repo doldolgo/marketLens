@@ -62,7 +62,7 @@ server·web·influxdb·redis 네 컨테이너(프로젝트 `marketlens` — dev 
 ```bash
 curl -s localhost:8000/spreads | head -c 600
 ```
-(기동 10초 뒤 — 마켓 목록·exchangeInfo REST 1회 + 스트림 스냅샷 한 바퀴) 최상위 `rate > 1000`·`notional == 10000`, 행 수 > 100, `warnings` 는 평상시 빈 배열(008), 각 행의 키가 정확히 다음 17개면 정상 (003 §4 기준):
+(기동 10초 뒤 — 마켓 목록·exchangeInfo REST 첫 회차(이후 매초) + 스트림 스냅샷 한 바퀴) 최상위 `rate > 1000`·`notional == 10000`, 행 수 > 100, `warnings` 는 평상시 빈 배열(008), 각 행의 키가 정확히 다음 17개면 정상 (003 §4 기준):
 `sym, dom, fx, fwd, rev, usd, spark, status, age, slipFwd, slipRev, krw, netDom, depDom, wdDom, depFx, wdFx`
 체결 규모를 바꿔 슬리피지가 커지는지 본다 — `curl -s "localhost:8000/spreads?notional=500000"` 의 같은 행 `slipFwd` 가 기본값보다 크거나 같아야 한다.
 ```bash
