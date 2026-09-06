@@ -73,20 +73,20 @@ marketlens/
 ## 4. 스펙 인덱스
 | 번호 | 이름 | 상태 | 범위 |
 |---|---|---|---|
-| 001 | collect | DONE | 업비트·빗썸 WebSocket 실시간 수집 → 메모리, 마켓 우주, USDT 시세, 1초 틱, 원문 싱크·인계·판정 계약, `/health` |
+| 001 | collect | IN_PROGRESS | 업비트·빗썸 WebSocket 실시간 수집 → 메모리, 마켓 우주, USDT 시세, 1초 틱, 원문 싱크·인계·판정 계약, `/health` |
 | 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·mock 탭(갭/선선갭/입출금레이더) |
-| 003 | spreads | DONE | 김프 표 — `/spreads`(체결 규모별 서버 슬리피지) `/refresh`(즉시 갱신 트리거) + 스프레드 탭 |
+| 003 | spreads | IN_PROGRESS | 김프 표 — `/spreads`(체결 규모별 서버 슬리피지) `/refresh`(즉시 갱신 트리거) + 스프레드 탭 |
 | 004 | analysis | DONE | 단일 종목 분석 — premium·matrix·orderbook·slippage·arbitrage (BE 전용) |
 | 005 | history | DONE | Influx `premium` 점 규칙·`/history/*`·백필 + history 탭 (쓰기는 009) |
 | 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
 | 007 | deploy | DONE | Docker·compose(server·web·influxdb·redis)·CI·EC2 배포 |
 | 008 | usdt-staleness | DONE | `/spreads` USDT 시세 미갱신 경고 (BE 전용) |
 | 009 | tick-store | DONE | 3계층 저장 — LiveStore 틱 슬롯 → Redis → 60초마다 Influx 전량 적재·비움, `spark` |
-| 010 | raw-archive | DONE | 거래소 원문(WS 프레임·REST 응답)을 S3 `raw/` 에 — 시세 프레임은 심볼·종류별 분당 마지막 1건, 그 외 전량, 거래소·분마다 객체 1개 (BE 전용) |
+| 010 | raw-archive | IN_PROGRESS | 거래소 원문(WS 프레임·REST 응답)을 S3 `raw/` 에 — 시세 프레임은 심볼·종류별 분당 마지막 1건, 그 외 전량, 거래소·분마다 객체 1개 (BE 전용) |
 | 011 | health | DONE | 거래소별 수집 실패 구간 이력·분류 → `/health/collect` + 수집 상태 탭 실데이터, Influx `collect_fail` 복원 |
-| 012 | binance-stream | DONE | 바이낸스 WS 3샤드 depth20+miniTicker → 해외 호가 최대 20단계, exchangeInfo 심볼 (BE 전용) |
+| 012 | binance-stream | IN_PROGRESS | 바이낸스 WS 3샤드 depth20+miniTicker → 해외 호가 최대 20단계, exchangeInfo 심볼 (BE 전용) |
 
-실행 순서 = 번호 순. 001~012 는 전부 DONE 이다.
+실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 001(마켓 목록 REST 매초 → 우주)·012(exchangeInfo 매초)·010(목록 응답도 분당 1건 표본화)은 001 실행 세션 하나가, 003(행 자체 300초 미갱신 stale)은 003 실행 세션이 구현하고 DONE 으로 되돌린다.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
 **스펙은 항상 지금 동작과 같아야 한다. DONE 이 된 뒤라도 동작을 바꾸고 싶으면 그 기능의 스펙을 그냥 고치면 된다.** 단, 스펙만 고치면 문서와 코드가 어긋나므로 — 같은 PR 에서 코드와 테스트도 스펙에 맞게 고치고, 그 기능의 §4 검증을 다시 통과시켜야 한다(§6). 변경이 여러 기능에 걸치면 관련 스펙을 전부 고친다. "예전에는 ~였다" 같은 설명은 남기지 않는다 — 과거 버전은 git 에서 보면 된다.
 

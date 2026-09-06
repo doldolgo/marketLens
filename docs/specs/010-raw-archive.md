@@ -1,6 +1,6 @@
 # 010 — raw-archive
 
-상태: DONE | 의존: 001(collect — 원문 싱크 계약·거래소별 수신 경로), 006(wallet-status — REST 응답 원문), 007(deploy — env 주입·EC2 IAM 역할), 012(binance-stream — 바이낸스 수신 경로)
+상태: IN_PROGRESS | 의존: 001(collect — 원문 싱크 계약·거래소별 수신 경로), 006(wallet-status — REST 응답 원문), 007(deploy — env 주입·EC2 IAM 역할), 012(binance-stream — 바이낸스 수신 경로)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -19,7 +19,7 @@
 
 ### 3.1 읽는 계약 (복사)
 - 001·012: 거래소 수신 경로는 **WebSocket 상시 연결**(업비트·빗썸 `wss://…/websocket/v1`, 바이낸스 `wss://data-stream.binance.vision/stream`)과 **REST 호출**(마켓 목록 `/v1/market/all`, 바이낸스 `/api/v3/exchangeInfo`, 006 의 입출금 상태 3종)이다. 수신 경로는 페이로드를 **해석하기 전에** 원문 싱크의 기록 함수를 부른다. 프레임이 바이너리면 UTF-8 로 디코드한 문자열, 압축(permessage-deflate)이면 라이브러리가 푼 뒤의 문자열이 원문이다.
-- 001: 원문 싱크의 계약은 core 공개 함수 하나 — `record(exchange: str, source: str, received_at_ms: int, payload: str, key: str | None = None) -> None`. **동기이며 예외를 던지지 않는다**(수신 경로를 한 줄도 막지 않기 위해). `key` 는 시세 프레임이면 `"<종류>:<원본 심볼>"`(업비트·빗썸 `orderbook:KRW-BTC`·`ticker:KRW-BTC`, 바이낸스 `depth20:BTCUSDT`·`miniTicker:BTCUSDT`), 그 밖(REST 본문·핸드셰이크 거부 본문·비시세 프레임·디코드에 실패해 종류를 못 정한 프레임)은 `None`. 커넥터는 프레임을 디코드해 종류·심볼만 뽑은 뒤, **행·시세·상태를 갱신하기 전에** 받은 텍스트 그대로를 `payload` 로 넘긴다. `source` 는 `"ws:<경로>"`(스트림 프레임) · `"ws-handshake:<경로>"`(핸드셰이크를 거부한 HTTP 응답 본문 전문) · `"rest:<경로>"`(예 `ws:/websocket/v1`, `ws-handshake:/stream`, `rest:/v1/market/all`, `rest:/sapi/v1/capital/config/getall`). `received_at_ms` 는 서버가 받은 시각(epoch ms).
+- 001: 원문 싱크의 계약은 core 공개 함수 하나 — `record(exchange: str, source: str, received_at_ms: int, payload: str, key: str | None = None) -> None`. **동기이며 예외를 던지지 않는다**(수신 경로를 한 줄도 막지 않기 위해). `key` 는 시세 프레임이면 `"<종류>:<원본 심볼>"`(업비트·빗썸 `orderbook:KRW-BTC`·`ticker:KRW-BTC`, 바이낸스 `depth20:BTCUSDT`·`miniTicker:BTCUSDT`), 매초 반복되는 마켓 목록 응답은 `markets:all`(업비트·빗썸 `/v1/market/all`)·`symbols:all`(바이낸스 exchangeInfo), 그 밖(입출금 REST 본문·핸드셰이크 거부 본문·비시세 프레임·디코드에 실패해 종류를 못 정한 프레임)은 `None`. 커넥터는 프레임을 디코드해 종류·심볼만 뽑은 뒤, **행·시세·상태를 갱신하기 전에** 받은 텍스트 그대로를 `payload` 로 넘긴다. `source` 는 `"ws:<경로>"`(스트림 프레임) · `"ws-handshake:<경로>"`(핸드셰이크를 거부한 HTTP 응답 본문 전문) · `"rest:<경로>"`(예 `ws:/websocket/v1`, `ws-handshake:/stream`, `rest:/v1/market/all`, `rest:/sapi/v1/capital/config/getall`). `received_at_ms` 는 서버가 받은 시각(epoch ms).
 - 006: 입출금 상태 REST 응답 본문(성공·실패 모두)도 조회기 3종이 같은 함수로 기록한다(`main.py` 가 주입). 키·서명·토큰은 **요청** 쪽에만 있고 응답 본문에는 없다.
 - 007 §3(배포 워크플로 `.github/workflows/deploy.yml`): `server/.env` 의 `S3_BUCKET` 이 비어 있으면 배포를 중단한다. 앱의 켜는 조건은 `S3_BUCKET` 존재(§3.2). 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 는 IAM 역할 — `docs/runbooks/ec2-setup.md`).
 
@@ -48,12 +48,12 @@
 
 ### 3.5 분 창·표본화·객체
 - 시간을 **UTC 분 경계로 자른 60초 창(window)** 으로 나눈다 — 창 번호 = `receivedAt // 60,000`. 버퍼는 `(거래소, 창 번호)` 마다 하나다 — 평상시 거래소당 열린 창은 하나지만, 다음 분의 첫 줄이 닫기 회차보다 먼저 오면 잠깐 둘이 열린다(줄은 언제나 자기 `receivedAt` 의 창으로 간다). 기록 함수는 줄을 만들어 그 창에 붙인다(동기, 메모리만). 수신 경로는 시각을 읽고 기록하기까지 이벤트 루프를 양보하지 않으므로 이미 닫힌 창의 줄이 뒤늦게 오는 일은 없다 — 서버 시계가 뒤로 가는 경우뿐이며, 그때는 그 창의 버퍼가 다시 열려 다음 회차에 같은 키로 올라간다(S3 는 덮어쓰므로 먼저 올린 줄을 잃는다).
-- 기록 함수가 받는 줄은 둘로 나뉜다. **`key` 가 있는 줄(시세 프레임)** 은 그 창 안에서 `(source, key)` 마다 **가장 최근 1건만** 남긴다 — 같은 키가 다시 오면 앞 줄을 버리고 뒤 줄로 바꾼다(`receivedAt` 도 뒤 것). **`key` 가 없는 줄** 은 같은 내용이어도 전부 순서대로 남긴다.
+- 기록 함수가 받는 줄은 둘로 나뉜다. **`key` 가 있는 줄(시세 프레임)** 은 그 창 안에서 `(source, key)` 마다 **가장 최근 1건만** 남긴다 — 같은 키가 다시 오면 앞 줄을 버리고 뒤 줄로 바꾼다(`receivedAt` 도 뒤 것). **`key` 가 없는 줄** 은 같은 내용이어도 전부 순서대로 남긴다. 매초 오는 마켓 목록 응답도 `key` 가 있어 분당 마지막 1건이다 — 목록은 1~2MB(바이낸스)라 전량이면 하루 100GB 를 넘긴다.
 - 창이 지나면(닫기 회차의 현재 시각이 다음 분에 들어온 첫 회차 — 창 번호 < `now // 60,000` 인 버퍼 전부) 그 창의 버퍼가 닫혀 **객체 1개**가 된다. 한 회차에 여러 버퍼가 닫히면 대기열 순서는 거래소 이름·창 번호 순이다. 닫는 조건은 이것 하나다 — 크기 조건은 없다(표본화로 창 하나가 심볼×종류 수 이상 자라지 않는다). 닫기 회차는 매초 돈다.
 - 키: `raw/exchange=<id>/dt=YYYY-MM-DD/hh=HH/YYYYMMDDTHHMM00Z.jsonl.gz` — 전부 **UTC**, 시각은 **창의 시작(분)**. 거래소·분마다 객체가 정확히 하나라 이름이 예측 가능하고, `exchange=`·`dt=`·`hh=` 는 Hive 파티션 관례라 Athena 를 얹을 수 있다. 예: `raw/exchange=binance/dt=2026-09-06/hh=03/20260906T031500Z.jsonl.gz`.
 - 내용: gzip 압축 JSON Lines, 줄 순서 = `receivedAt` 오름차순(같으면 기록 순). 메타데이터 `Content-Type: application/x-ndjson`, `Content-Encoding: gzip`. gzip 레벨 6·mtime 0 고정(코드 상수) — 같은 창을 두 번 직렬화하면 바이트까지 같다.
 - 빈 창은 객체를 만들지 않는다.
-- 크기 감(실측 전 추정): 창 하나 = 심볼×종류당 1줄(업비트 ~200×2 + 빗썸 ~290×2 + 바이낸스 ~300×2 ≈ 1,600줄) + 비시세 소량 ≈ 원문 2MB, gzip 후 200~300KB. 3거래소 합 하루 **0.3~0.5GB**. 보존 기간을 정하면 버킷 lifecycle 로 — 코드는 관여하지 않는다. 실측값은 실행 세션이 §5 에 적는다.
+- 크기 감(실측 전 추정): 창 하나 = 심볼×종류당 1줄(업비트 ~200×2 + 빗썸 ~290×2 + 바이낸스 ~300×2 ≈ 1,600줄) + 목록 응답 3줄(바이낸스 exchangeInfo 1~2MB 포함) + 비시세 소량 ≈ 원문 4MB, gzip 후 400~600KB. 3거래소 합 하루 **0.6~0.9GB**. 보존 기간을 정하면 버킷 lifecycle 로 — 코드는 관여하지 않는다. 실측값은 실행 세션이 §5 에 적는다.
 
 ### 3.6 닫기 회차와 업로드 워커
 - **닫기 회차**: 앱 기동이 관리하는 태스크 하나가 **매 초** 거래소별 버퍼를 보고 §3.5 닫는 조건을 만족한 버퍼를 닫아 gzip 한 뒤 **업로드 대기열** 꼬리에 넣는다. gzip 은 이벤트 루프를 막지 않게 스레드에서 하고, 회차는 그 gzip·넣기가 끝난 뒤에 끝난다(닫힌 줄은 버퍼에서 이미 빠졌으므로 대기열에 들어간 것까지가 한 회차다 — 거래소 3곳이 같은 회차에 닫히면 직렬로 1초 안팎). 닫기 회차는 업로드 결과를 기다리지 않는다.
@@ -120,7 +120,7 @@ curl -s -m 4 -o /dev/null -w '%{http_code}' https://api.upbit.com/v1/market/all 
 - **EC2 에서 확인 필요**(거래소 차단으로 로컬에서 원문이 0건): `aws s3 ls s3://<bucket>/raw/ --recursive | tail -3` 에 거래소 3곳 객체(거래소·분마다 정확히 1개, 이름 `…HHMM00Z`), `aws s3 cp <key> - | gunzip | head -2` 두 줄이 §3.4 모양이고 줄 수가 대략 심볼 수 × 2, 1분 객체 크기 실측(§3.5 추정치 대체), 없는 버킷으로 기동 시 객체마다(1초 간격) 실패 로그가 찍히되 `/spreads` 는 계속 갱신, 배포 후 객체가 쌓이는지.
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — 행을 `| raw-archive | 거래소 원문 S3 적재 — 시세 프레임은 심볼·종류별 분당 마지막 1건, 그 외 전량(거래소·분마다 객체 1개) | - | 읽기 API·재생 도구 없음, lifecycle 은 사람 몫. `S3_BUCKET` 없으면 비활성 |` 로. **항상 포함.** 알려진 빚에 "하루 0.3~0.5GB 추정 — 실측 후 lifecycle 결정".
+- `docs/context/status.md` — 행을 `| raw-archive | 거래소 원문 S3 적재 — 시세 프레임은 심볼·종류별 분당 마지막 1건, 그 외 전량(거래소·분마다 객체 1개) | - | 읽기 API·재생 도구 없음, lifecycle 은 사람 몫. `S3_BUCKET` 없으면 비활성 |` 로. **항상 포함.** 알려진 빚에 "하루 0.6~0.9GB 추정 — 실측 후 lifecycle 결정".
 - `CLAUDE.md` — 스펙 인덱스 010 행 상태 → DONE. **항상 포함.**
 - `docs/context/db.md` — "두 번째 저장소 S3" 문장을 원문 아카이브(접두사 `raw/`, 줄 모양, 거래소별 객체)로. "쓰는 쪽" 의 S3 줄을 닫기 회차·업로드 워커(닫는 조건·실패·상한)로.
 - `docs/context/architecture.md` — 데이터 흐름(BE) 그림의 S3 가지를 "수신 경로 → 원문 싱크 → S3 raw/" 로. "현재 구조" 절에 raw-archive 항목(모듈·역할·수신 경로와 분리한 이유 1~2줄).
@@ -138,7 +138,7 @@ curl -s -m 4 -o /dev/null -w '%{http_code}' https://api.upbit.com/v1/market/all 
   - `RawRecorder` 는 Protocol 이다 — `Callable` 은 기본값 있는 `key` 인자를 표현하지 못한다. 006 의 조회기 3종은 `key` 없이 4인자로 부른다(기본값 None).
   - 코드 내부(동작 불변): 기록 함수가 `json.loads` 로 유효성을 판단하므로 프레임마다 파싱이 2회(커넥터 1회 + 여기 1회). SDK 재시도 "2회" 는 botocore `max_attempts=3`(standard). 테스트용 관찰자 `buffered(exchange)`(열린 창 전부의 표본화 후 줄 수)·`pending`·`consecutive_failures` 와 `run_once(force_close=)`, 주입값 `retry_interval_sec`·`drain_deadline_sec`. "자격증명 없이 기동" 테스트는 실제 boto3 를 쓰되 env(`AWS_EC2_METADATA_DISABLED` 등)로 탐색을 막아 네트워크 없이 즉시 실패시킨다. 실패 로그는 warning(업로드·종료 버림)·error(상한 버림·HeadBucket·클라이언트 생성) 레벨이다.
 - 남은 빚:
-  - §3.5 크기 추정(창 하나 gzip 후 200~300KB, 하루 0.3~0.5GB)은 미실측 — EC2 배포 후 1분 객체 크기를 §5 에 적고 버킷 lifecycle 을 정한다.
+  - §3.5 크기 추정(창 하나 gzip 후 200~300KB, 하루 0.6~0.9GB)은 미실측 — EC2 배포 후 1분 객체 크기를 §5 에 적고 버킷 lifecycle 을 정한다.
   - Redis·S3 가 동시에 무응답이면 종료가 인계 5초 + 아카이브 5초 = 10초에 닿아 `docker stop` 기본 10초와 같다 — 실측 후 필요하면 두 비우기를 병렬로.
   - 원문 유효성 판단의 2회 파싱이 CPU 에 보이면 유효성 판단·줄 조립을 닫는 시점(스레드)으로 미루는 선택지가 있다.
   - 서버 시계가 뒤로 가면 이미 올린 창의 객체를 덮어쓴다(§3.5). 단조 시계로 창을 정하면 `receivedAt` 과 어긋나므로 두지 않았다 — NTP 가 정상이면 생기지 않는다.

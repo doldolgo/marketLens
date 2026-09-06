@@ -1,6 +1,6 @@
 # 012 — binance-stream
 
-상태: DONE | 의존: 001(collect — 행 계약·마켓 우주·틱 판정·원문 싱크·커넥터 공통 규칙), 011(health — 실패 분류·구간 추적), 007(deploy — lifespan)
+상태: IN_PROGRESS | 의존: 001(collect — 행 계약·마켓 우주·틱 판정·원문 싱크·커넥터 공통 규칙), 011(health — 실패 분류·구간 추적), 007(deploy — lifespan)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 
@@ -17,7 +17,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 
 ### 3.1 읽는 계약 (복사)
 - 001 §3.3: 행 = `(exchange, base)` 당 `quote`·`native_symbol`·`price`·`price_timestamp`·`asks`·`bids`(누적 1,000,000 USDT 도달 단계까지, 최소 1단계)·입출금 3필드(물려받음)·`updated_at`. 거래소별 스트림 상태 `{connected, last_message_at, last_error, subscribed}`.
-- 001 §3.2: 마켓 우주 = 국내 KRW base ∩ 바이낸스 USDT base. 이 스펙은 **바이낸스 USDT 현물 심볼 집합**을 제공하고, 우주의 심볼만 구독한다. 10분 갱신·`/refresh` 즉시 갱신.
+- 001 §3.2: 마켓 우주 = 국내 KRW base ∩ 바이낸스 USDT base. 이 스펙은 **바이낸스 USDT 현물 심볼 집합**을 제공하고, 우주의 심볼만 구독한다. 매초 갱신·`/refresh` 즉시 갱신.
 - 001 §3.7: 받은 모든 프레임과 REST 응답 본문은 원문 싱크 `record(exchange, source, received_at_ms, payload, key)` 로 넘긴다 — 행·상태 갱신 전에, `payload` 는 받은 텍스트 그대로. 시세 프레임은 `key` = `depth20:<심볼>`·`miniTicker:<심볼>`(대문자 원본 심볼), 구독 응답·`serverShutdown`·깨진 프레임·exchangeInfo 본문은 `key=None`. 010 이 `key` 로 심볼·종류별 분당 마지막 1건만 남긴다.
 - 001 §3.8·011: 매 틱 성공/실패를 판정해 추적기에 넘긴다. 실패 종류 8종.
 
@@ -30,9 +30,9 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 - 대역폭 감: depth20 ~1.3KB + miniTicker ~0.2KB, 300 종목 × 1/s ≈ 450KB/s.
 
 ### 3.3 심볼 목록과 샤딩
-- 심볼 목록: `GET https://api.binance.com/api/v3/exchangeInfo`(weight 20) 의 `symbols[]` 중 `status == "TRADING"` 이고 `quoteAsset == "USDT"` 인 것. base = `baseAsset`. 10분마다 갱신, 응답 본문은 원문 싱크(`rest:/api/v3/exchangeInfo`). 실패 시 직전 목록 유지 + 경고.
+- 심볼 목록: `GET https://api.binance.com/api/v3/exchangeInfo`(weight 20) 의 `symbols[]` 중 `status == "TRADING"` 이고 `quoteAsset == "USDT"` 인 것. base = `baseAsset`. **매초** 갱신(001 §3.2 — weight 20/초 = 분당 1,200, 한도 6,000 의 20%; 응답이 1~2MB 라 파싱은 스레드가 아니라 이벤트 루프에서 10~40ms 다 — 틱 루프를 막지 않게 파싱 결과가 같으면(심볼 집합 불변) 아무 일도 하지 않는다), 응답 본문은 원문 싱크(`rest:/api/v3/exchangeInfo`). 실패 시 직전 목록 유지 + 경고.
 - 심볼 집합 계약은 커넥터 자신이 구현한다 — `refresh(client) -> int`(exchangeInfo 1회, 실패는 거래소 예외), `bases() -> set[str]`, `set_universe(bases)`. base↔symbol 은 exchangeInfo 의 `baseAsset`→`symbol` 맵 하나이고, 한 base 에 USDT 심볼이 둘 이상이면 처음 것을 쓴다. 우주 base 중 맵에 없는 것은 구독 대상이 아니다.
-- 구독 대상 = 001 의 마켓 우주 심볼. 001 의 우주 갱신(기동·10분·`/refresh`)이 우주를 확정할 때마다 `set_universe(bases)` 를 부르고, 커넥터는 그 자리에서 빠진 심볼의 행을 메모리에서 지운 뒤 재조정을 깨운다. 재조정은 연결된 샤드마다 원하는 구독과 실제 구독의 차이만 보낸다 — 새 심볼은 SUBSCRIBE, 빠진 심볼은 UNSUBSCRIBE. 실제 구독 집합은 **소켓에 묶인다** — 소켓이 바뀌면 빈 집합에서 시작해 연결 직후 배정 전체를 구독하고, 보내는 도중 소켓이 바뀐 재조정은 결과를 남기지 않는다(죽은 소켓에 보낸 구독을 새 소켓 것으로 세면 새 소켓은 차이가 없다고 보고 아무것도 구독하지 않는다). `set_universe` 가 깨우지 않아도 **60초마다** 한 번 돈다(재연결 뒤 등 어긋남을 맞춘다). 기동 직후 우주가 비어 있으면 구독이 없다 — 배정 심볼이 0 인 샤드는 연결하지 않고 배정이 생길 때까지 기다린다.
+- 구독 대상 = 001 의 마켓 우주 심볼. 001 의 우주 갱신(기동·매초·`/refresh`)이 우주를 확정할 때마다 `set_universe(bases)` 를 부르고, 커넥터는 그 자리에서 빠진 심볼의 행을 메모리에서 지운 뒤 재조정을 깨운다. 재조정은 연결된 샤드마다 원하는 구독과 실제 구독의 차이만 보낸다 — 새 심볼은 SUBSCRIBE, 빠진 심볼은 UNSUBSCRIBE. 실제 구독 집합은 **소켓에 묶인다** — 소켓이 바뀌면 빈 집합에서 시작해 연결 직후 배정 전체를 구독하고, 보내는 도중 소켓이 바뀐 재조정은 결과를 남기지 않는다(죽은 소켓에 보낸 구독을 새 소켓 것으로 세면 새 소켓은 차이가 없다고 보고 아무것도 구독하지 않는다). `set_universe` 가 깨우지 않아도 **60초마다** 한 번 돈다(재연결 뒤 등 어긋남을 맞춘다). 기동 직후 우주가 비어 있으면 구독이 없다 — 배정 심볼이 0 인 샤드는 연결하지 않고 배정이 생길 때까지 기다린다.
 - **3 샤드**(소켓 3개). 배정은 **심볼 문자열의 안정 해시(crc32) % 3** — 상장·상폐가 나머지 심볼의 배정을 흔들지 않고 재기동해도 같다. 한 소켓이 죽어도 1/3 만 잃고, 24시간 강제 종료가 샤드마다 다른 시각에 걸린다. 심볼의 두 스트림은 같은 샤드에 둔다. 샤드당 ≈ 200 스트림(한도 1,024).
 - 구독은 연결 후 `{"method":"SUBSCRIBE","params":["btcusdt@depth20","btcusdt@miniTicker",…],"id":<int>}` 로 한다. 한 메시지의 `params` 는 **100 개 이하**, 제어 메시지는 **초당 4개 이하**로 보낸다(한도: 연결당 수신 메시지 5개/초 — PING·PONG 포함) — 제어 메시지 하나를 보낼 때마다 **0.25초** 를 쉰다. `id` 는 샤드별로 1부터 올라가는 정수. 응답 `{"result":null,"id":…}` 은 시세로 세지 않는다. `error` 키가 있는 응답(구독 거부)은 `bad_request` 로 실패하고 재연결한다.
 - 연결 시도는 IP 당 5분에 300회 한도 — 재연결은 지수 백오프(1·2·4…30초 상한), **구독까지 성공하면 1초로 리셋** — 성공의 증거는 구독 뒤 그 샤드의 **첫 시세 프레임**이다(001 과 같은 규칙 — 구독 메시지를 보낸 것만으로는 성공이 아니다). 서버는 20초마다 ping 프레임을 보내고 1분 안에 pong 이 없으면 끊는다 — 라이브러리의 자동 pong 을 쓴다. 클라이언트도 20초 간격의 라이브러리 keepalive ping 을 보낸다(20초 안에 pong 이 없으면 끊고 재연결 — 조용히 죽은 TCP 를 40초 안에 감지한다). 연결은 24시간에 한 번 서버가 끊으므로 재연결이 정상 경로다. `!serverShutdown` 뒤 재연결은 백오프 없이 즉시이고 백오프 값은 그대로 둔다.
@@ -65,7 +65,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 - `connected_since` 는 첫 SUBSCRIBE 묶음을 다 보낸 시각이고 정체 30초는 거기서부터 센다(보내는 동안은 소켓이 열린 시각).
 - 정체: 샤드 2만 30초 무수신(0·1 은 수신) → 그 틱이 `stale_stream` 실패이고 message 에 "샤드 2". 30초 미만은 성공. 구독 0 샤드는 무시. 메시지가 오면 다음 틱 성공.
 - 미연결 샤드 → 그 샤드 `last_error.kind` 로 실패. 셋 중 둘이 나쁘면 더 오래 조용한 쪽.
-- 모든 프레임(시세·구독 응답·serverShutdown)과 exchangeInfo 본문이 원문 싱크에 원문 그대로 기록된다 — depth20·miniTicker 프레임은 `key`(`depth20:BTCUSDT` 등)와 함께, 나머지는 `key=None` 으로.
+- 모든 프레임(시세·구독 응답·serverShutdown)과 exchangeInfo 본문이 원문 싱크에 원문 그대로 기록된다 — depth20·miniTicker 프레임은 `key`(`depth20:BTCUSDT` 등), exchangeInfo 본문은 `key=symbols:all`, 나머지는 `key=None` 으로.
 - `!serverShutdown` 수신 → 재연결. 연결 실패 백오프 1·2·4…30, 구독 성공 후 1.
 - 연결 실패 기동(lifespan 을 실제로 돌리되 소켓·REST 는 가짜) → `/health` 200, 앱 정상, 샤드마다 경고 1줄. 샤드 1개 실패 시 나머지 2샤드 행은 계속 갱신된다.
 - 앱 종료 시 태스크 취소·소켓 close, 잔여 예외 없음.
@@ -91,7 +91,7 @@ curl -s "localhost:8041/spreads?notional=500000"                      # BTC slip
 EC2 에서 확인 필요(로컬에서 재현 불가): 네트워크를 끊고 30초 뒤 `/health/collect` 의 바이낸스가 `stale_stream`(message 에 샤드 번호)이고 복구하면 닫히는지, 24시간 강제 종료 뒤 샤드가 각자 재연결하는지, 우주 ≈300 종목의 실제 대역폭.
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — binance-stream 행 `| binance-stream | WS 3샤드 depth20+miniTicker·exchangeInfo 10분·샤드 단위 정체 판정 | - | 해외 최대 20단계 |`. **항상 포함.**
+- `docs/context/status.md` — binance-stream 행 `| binance-stream | WS 3샤드 depth20+miniTicker·exchangeInfo 매초·샤드 단위 정체 판정 | - | 해외 최대 20단계 |`. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 012 행 → DONE. **항상 포함.**
 - `docs/context/architecture.md` — "현재 구조" 의 binance-stream 항목(모듈·샤드·판정).
 - `docs/context/dev-setup.md` — 스모크에 `/orderbook/binance … depth=20` 확인 1줄.

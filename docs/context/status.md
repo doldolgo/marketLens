@@ -8,7 +8,7 @@
 
 | 기능 | server | web | 비고 |
 |---|---|---|---|
-| collect | 업비트·빗썸 WS 실시간 갱신·마켓 우주 10분·1초 틱·/health | - | 바이낸스 스트림은 012 |
+| collect | 업비트·빗썸 WS 실시간 갱신·마켓 목록 REST 매초(우주)·1초 틱·/health | - | 바이낸스 스트림은 012 |
 | web-shell | - | 셸·KPI·mock 탭 3종(gap·pp·flow) 동작 | spreads 탭은 003 실데이터, history 탭은 005 의 mock 탭(실데이터 연결은 후속) |
 | spreads | `/spreads` 는 메모리(LiveStore)만 읽어 전 페어 표 — `notional` 규모로 호가를 걷어 슬리피지 차감, `age`·`status` 는 거래소 스트림 수신 시각 기준, USDT 시세 미갱신 경고, `spark` 는 009 가 게시한 30분 추이. `/refresh` 는 001 즉시 갱신 트리거 노출 | 실데이터 탭·1초 폴링·규모 세그먼트·행 클릭 → 기록 탭 | 행 17키. 스파크라인 렌더는 후속. 실거래소 확인(행 수 > 100 등)은 EC2 대기 |
 | analysis | 6개 엔드포인트 동작 | - | HTTP 계약 camelCase |
@@ -18,7 +18,7 @@
 | tick-store | 틱 인계 큐(600, 종료 시 비우기 5초 상한) → Redis Stream `ticks` → 60초 flusher(1,000건 페이지 단위로 쓰고 지움) → Influx `premium`·`dw_fail`(멱등), spark 30분 링버퍼·기동 복원 | - | Redis·Influx 불달이어도 앱은 뜬다. 실서버(EC2) 수동 확인은 대기 |
 | raw-archive | 거래소 원문 S3 적재 — 시세 프레임은 심볼·종류별 분당 마지막 1건, 그 외 전량(거래소·분마다 객체 1개 `…HHMM00Z.jsonl.gz`), 매초 닫기 회차 + 업로드 워커(실패 재시도·256MB 상한) | - | 읽기 API·재생 도구 없음, lifecycle 은 사람 몫. `S3_BUCKET` 없으면 비활성. EC2 에서 객체 적재·1분 객체 크기 실측 대기 |
 | health | /health/collect·틱 판정(연결·30초 무수신·샤드) → 실패 구간 추적·collect_fail 쓰기/복원 | 실데이터 탭·5초 폴링·KPI 수집 상태 | 백오프는 013. EC2 에서 차단·재기동 복원 수동 확인 대기 |
-| binance-stream | WS 3샤드 depth20+miniTicker·exchangeInfo 10분·샤드 단위 정체 판정 | - | 해외 최대 20단계 |
+| binance-stream | WS 3샤드 depth20+miniTicker·exchangeInfo 매초·샤드 단위 정체 판정 | - | 해외 최대 20단계 |
 
 ## 알려진 빚
 - (001) `server/build/`(setuptools 산출물 76파일)와 `server/marketlens_server.egg-info/` 가 git 에 추적돼 있다 — `ruff check .` 가 이 사본(76파일)도 검사한다. 별도 chore 로 지울 것. venv 의 패키지는 editable 설치만 허용한다(dev-setup.md) — 비-editable 사본이 남아 있으면 `server/` 밖 cwd 에서 옛 모듈을 import 한다.
