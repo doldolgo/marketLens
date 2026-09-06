@@ -1,12 +1,12 @@
 # 010 — raw-archive
 
-상태: IN_PROGRESS | 의존: 001(collect — 원문 싱크 계약·거래소별 수신 경로), 006(wallet-status — REST 응답 원문), 007(deploy — env 주입·EC2 IAM 역할), 012(binance-stream — 바이낸스 수신 경로)
+상태: DONE | 의존: 001(collect — 원문 싱크 계약·거래소별 수신 경로), 006(wallet-status — REST 응답 원문), 007(deploy — env 주입·EC2 IAM 역할), 012(binance-stream — 바이낸스 수신 경로)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
 
 ## 1. 목적
-거래소에서 서버로 들어오는 응답을 **받은 그대로**(가공 없이) S3 에 남긴다. 시세 프레임(호가·체결가)은 심볼·종류마다 **분당 마지막 1건**만 남기고, 그 밖의 응답(마켓·심볼 목록, 입출금 REST 본문, 핸드셰이크 거부 본문, 구독 응답 같은 비시세 프레임)은 전부 남긴다. 한 건이 한 줄이고, 줄에는 원문 외에 "어느 거래소에서, 어느 경로로, 언제 받았는가" 세 가지만 덧붙는다.
+거래소에서 서버로 들어오는 응답을 **받은 그대로**(가공 없이) S3 에 남긴다. 시세 프레임(호가·체결가)은 심볼·종류마다, 매초 오는 마켓·심볼 목록 응답은 거래소마다 **분당 마지막 1건**만 남기고, 그 밖의 응답(입출금 REST 본문, 핸드셰이크 거부 본문, 구독 응답 같은 비시세 프레임)은 전부 남긴다. 한 건이 한 줄이고, 줄에는 원문 외에 "어느 거래소에서, 어느 경로로, 언제 받았는가" 세 가지만 덧붙는다.
 분 단위로 솎는 이유는 용량이다 — 프레임 전량은 하루 10~20GB(gzip 후)지만 분당 마지막 1건이면 0.3~0.5GB 다. 초 단위 김프 역사는 InfluxDB(009)가 이미 맡고 있으므로, 이 아카이브는 "그 분의 마지막 원문" 으로 재생을 보장한다.
 이 아카이브가 있으면 나중에 쓰는 필드·계산식·저장 모양이 바뀌어도 **처음부터 다시 수집할 필요 없이** 원문을 다시 읽어 재생할 수 있다. 가공된 값(김프·행 표)은 여기 남기지 않는다 — 가공값은 InfluxDB(005·009)의 몫이고, 이 저장소의 존재 이유는 가공 전 원문 보존이다.
 
@@ -69,7 +69,7 @@
 ### 3.7 재생 가능성 (이 스펙이 보장하는 성질)
 - 줄 하나에서 `exchange`·`source`·`raw` 만으로 001·012 의 해석 규칙(행 조립·USDT 시세 추출)을 **다시 적용할 수 있어야** 한다. 해석에 필요한 정보가 줄 밖(다른 줄·서버 상태)에 있으면 안 된다.
 - `receivedAt` 은 서버 시각이다. 거래소 시각은 `raw` 안에 있으므로 두 시계를 모두 보존한다.
-- 재생 해상도는 **분 단위 마지막 상태**다 — 한 분 안의 중간 변동은 남지 않는다. 초 단위 값이 필요하면 InfluxDB `premium`(009)을 본다. 비시세 응답(마켓 목록·입출금·거부 본문)은 전량이라 해상도 손실이 없다.
+- 재생 해상도는 **분 단위 마지막 상태**다 — 한 분 안의 중간 변동은 남지 않는다. 초 단위 값이 필요하면 InfluxDB `premium`(009)을 본다. 마켓 목록도 분당 마지막 1건이다(상장·상폐의 초 단위 시각은 남지 않는다 — 1초 안에 반영된 구독 변화는 Influx `premium` 점의 유무로 본다). 입출금·거부 본문은 전량이라 해상도 손실이 없다.
 - 재생 도구(아카이브 → Redis/Influx 재적재)는 후속 스펙이다.
 
 ## 4. 검증
@@ -100,10 +100,10 @@
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 183 files left unchanged / 462 passed, 1 warning in 4.80s  (2026-09-06, 3회 연속 통과)
-# 이 스펙 몫: tests/test_raw_archive.py 30개(§4 항목당 1개 이상 — 분 창·표본화·순서·워커·기동·재생),
-# 001 몫 원문 항목: tests/test_stream_upbit.py·test_stream_bithumb.py(모든 프레임 key 와 함께·행 갱신 전·REST/거부 본문 key=None),
-# 012 몫 원문 항목: tests/test_stream_binance.py(depth20·miniTicker key, ack·serverShutdown·exchangeInfo key=None)
+# All checks passed! / 183 files left unchanged / 465 passed, 1 warning in 4.9s  (2026-09-06, 목록 응답 key 전환 뒤 3회 연속 통과)
+# 이 스펙 몫: tests/test_raw_archive.py 30개(§4 항목당 1개 이상 — 분 창·표본화·순서·워커·기동·재생; key 없는 줄 전량은 입출금 본문으로),
+# 001 몫 원문 항목: tests/test_stream_upbit.py·test_stream_bithumb.py(모든 프레임 key 와 함께·행 갱신 전·마켓 목록 본문 `markets:all`·거부 본문 key=None),
+# 012 몫 원문 항목: tests/test_stream_binance.py(depth20·miniTicker key, exchangeInfo 본문 `symbols:all`, ack·serverShutdown key=None)
 
 # /health 스모크 — 빈 포트(8043)에 띄워 6초 뒤 확인 후 SIGINT, AWS 자격증명 탐색은 env 로 차단 (2026-09-06)
 S3_BUCKET= .venv/bin/uvicorn app.main:app --port 8043
@@ -120,7 +120,7 @@ curl -s -m 4 -o /dev/null -w '%{http_code}' https://api.upbit.com/v1/market/all 
 - **EC2 에서 확인 필요**(거래소 차단으로 로컬에서 원문이 0건): `aws s3 ls s3://<bucket>/raw/ --recursive | tail -3` 에 거래소 3곳 객체(거래소·분마다 정확히 1개, 이름 `…HHMM00Z`), `aws s3 cp <key> - | gunzip | head -2` 두 줄이 §3.4 모양이고 줄 수가 대략 심볼 수 × 2, 1분 객체 크기 실측(§3.5 추정치 대체), 없는 버킷으로 기동 시 객체마다(1초 간격) 실패 로그가 찍히되 `/spreads` 는 계속 갱신, 배포 후 객체가 쌓이는지.
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — 행을 `| raw-archive | 거래소 원문 S3 적재 — 시세 프레임은 심볼·종류별 분당 마지막 1건, 그 외 전량(거래소·분마다 객체 1개) | - | 읽기 API·재생 도구 없음, lifecycle 은 사람 몫. `S3_BUCKET` 없으면 비활성 |` 로. **항상 포함.** 알려진 빚에 "하루 0.6~0.9GB 추정 — 실측 후 lifecycle 결정".
+- `docs/context/status.md` — 행을 `| raw-archive | 거래소 원문 S3 적재 — 시세 프레임은 심볼·종류별, 매초 마켓 목록 응답은 거래소별 분당 마지막 1건, 그 외 전량(거래소·분마다 객체 1개) | - | 읽기 API·재생 도구 없음, lifecycle 은 사람 몫. `S3_BUCKET` 없으면 비활성 |` 로. **항상 포함.** 알려진 빚에 "하루 0.6~0.9GB 추정 — 실측 후 lifecycle 결정".
 - `CLAUDE.md` — 스펙 인덱스 010 행 상태 → DONE. **항상 포함.**
 - `docs/context/db.md` — "두 번째 저장소 S3" 문장을 원문 아카이브(접두사 `raw/`, 줄 모양, 거래소별 객체)로. "쓰는 쪽" 의 S3 줄을 닫기 회차·업로드 워커(닫는 조건·실패·상한)로.
 - `docs/context/architecture.md` — 데이터 흐름(BE) 그림의 S3 가지를 "수신 경로 → 원문 싱크 → S3 raw/" 로. "현재 구조" 절에 raw-archive 항목(모듈·역할·수신 경로와 분리한 이유 1~2줄).
@@ -134,7 +134,7 @@ curl -s -m 4 -o /dev/null -w '%{http_code}' https://api.upbit.com/v1/market/all 
   - §3.5 — 버퍼 단위를 "거래소당 하나" 가 아니라 `(거래소, 창 번호)` 로 확정. 선택지는 ① 거래소당 버퍼 하나, 다음 분의 줄이 오면 그 자리에서 앞 창을 닫는다(닫기가 수신 경로 안에서 일어나 기록 함수가 gzip 을 기다리게 된다) ② 거래소당 버퍼 하나, 다음 분의 줄도 앞 창에 붙인다(창 번호가 `receivedAt` 기준이라는 §3.5 와 어긋난다) ③ `(거래소, 창)` 마다 버퍼, 닫기 회차가 지난 창을 전부 닫는다(추천 — 기록 함수는 메모리 붙이기뿐이고 줄은 항상 자기 창으로 간다). 닫힌 창의 줄이 뒤늦게 오는 경우(시계 역행뿐)는 같은 키로 다시 올라가 덮어쓴다고 §3.5 에 적었다 — 수신 경로가 시각 읽기와 기록 사이에 양보하지 않아 정상 운영에서는 생기지 않는다.
   - §3.5 — 한 회차에 여러 버퍼가 닫힐 때의 대기열 순서를 거래소 이름·창 번호 순으로 확정(같은 거래소 안에서는 창 순서가 곧 시간 순서라 §3.6 의 "거래소마다의 순서 유지" 가 성립한다).
   - §3.5 — 줄 순서 "같으면 기록 순" 을 기록마다 오르는 순번으로 구현했다. 표본화로 교체된 줄은 뒤 줄의 `receivedAt`·순번을 가진다.
-  - 001 §3.7·012 §3.1 — 커넥터의 `key` 규칙: 업비트·빗썸은 `type` 이 `orderbook`·`ticker` 이고 `code` 가 문자열이면 `"<type>:<code>"`, 바이낸스는 `stream` 이 `<symbol>@depth20`·`<symbol>@miniTicker` 면 `"<종류>:<대문자 심볼>"`. 우주 밖·맵에 없는 심볼의 시세 프레임도 시세 프레임이므로 key 가 붙는다(행은 만들지 않는다). JSON 이 아니거나 객체가 아닌 프레임은 `key=None`.
+  - 001 §3.7·012 §3.1 — 커넥터의 `key` 규칙: 업비트·빗썸은 `type` 이 `orderbook`·`ticker` 이고 `code` 가 문자열이면 `"<type>:<code>"`, 바이낸스는 `stream` 이 `<symbol>@depth20`·`<symbol>@miniTicker` 면 `"<종류>:<대문자 심볼>"`. 우주 밖·맵에 없는 심볼의 시세 프레임도 시세 프레임이므로 key 가 붙는다(행은 만들지 않는다). JSON 이 아니거나 객체가 아닌 프레임은 `key=None`. 매초 오는 마켓 목록 응답은 `markets:all`(업비트·빗썸)·`symbols:all`(바이낸스) — 이 아카이브 쪽 코드는 바꾸지 않았다(key 있는 줄의 표본화 규칙 그대로), 커넥터가 key 를 붙이는 것만 바뀌었다.
   - `RawRecorder` 는 Protocol 이다 — `Callable` 은 기본값 있는 `key` 인자를 표현하지 못한다. 006 의 조회기 3종은 `key` 없이 4인자로 부른다(기본값 None).
   - 코드 내부(동작 불변): 기록 함수가 `json.loads` 로 유효성을 판단하므로 프레임마다 파싱이 2회(커넥터 1회 + 여기 1회). SDK 재시도 "2회" 는 botocore `max_attempts=3`(standard). 테스트용 관찰자 `buffered(exchange)`(열린 창 전부의 표본화 후 줄 수)·`pending`·`consecutive_failures` 와 `run_once(force_close=)`, 주입값 `retry_interval_sec`·`drain_deadline_sec`. "자격증명 없이 기동" 테스트는 실제 boto3 를 쓰되 env(`AWS_EC2_METADATA_DISABLED` 등)로 탐색을 막아 네트워크 없이 즉시 실패시킨다. 실패 로그는 warning(업로드·종료 버림)·error(상한 버림·HeadBucket·클라이언트 생성) 레벨이다.
 - 남은 빚:

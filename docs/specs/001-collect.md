@@ -1,6 +1,6 @@
 # 001 — collect
 
-상태: IN_PROGRESS | 의존: 없음 (이 스펙이 계약을 **제공**한다: 009 틱 인계, 010 원문 싱크, 011 판정, 012 바이낸스 스트림)
+상태: DONE | 의존: 없음 (이 스펙이 계약을 **제공**한다: 009 틱 인계, 010 원문 싱크, 011 판정, 012 바이낸스 스트림)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -31,7 +31,8 @@ REST 폴링은 마켓 목록 갱신에만 남는다 — 시세를 REST 로 묻�
 - 우주 = `(업비트 KRW base ∪ 빗썸 KRW base) ∩ 바이낸스 USDT base`. `USDT` 자신은 우주에 없다(바이낸스에 USDT/USDT 가 없다) — 시세 원천으로만 쓴다.
 - 구독 대상: 국내 거래소는 **자기 KRW 전 마켓**(`KRW-USDT` 포함). 바이낸스는 우주의 심볼(012). **목록이 바뀐 그 초에** 차이만 추가 구독·해지한다 — 새 상장은 1초 안에 구독되고, 상폐는 1초 안에 해지된다. 목록이 같으면 아무것도 하지 않는다(재구독 없음).
 - 저장 규칙: 우주 밖 base 의 행은 메모리에 넣지 않는다 — 국내 전용·해외 전용 코인은 메모리에 없다. 목록에서 빠진 base 는 그 초에 메모리에서 지운다(상폐 소멸). 그래서 이후의 모든 계산(틱·표·분석)은 항상 "지금 거래소가 말한 코인 목록" 위에서 돈다.
-- 실패: 한 거래소의 목록 호출이 실패하면(타임아웃·비-200·형식 오류·예상 밖 예외) 그 거래소의 직전 목록을 유지하고 다음 초에 다시 부른다. 로그는 초당 폭주하지 않게 **같은 거래소·같은 원인은 60초에 1줄**. 판정(§3.8)에는 영향 없다 — 목록 실패는 수집 실패가 아니다. 기동 직후 아직 한 번도 못 받은 거래소는 구독이 없다(목록이 빈 스트림은 연결하지 않는다).
+- 주기: 한 회차 = 세 목록을 **동시에**(병렬) 받아 우주를 확정하는 것이고, 회차가 끝난 뒤 1초를 쉬고 다음 회차를 시작한다 — 호출이 오래 걸리면(타임아웃 3초) 그만큼 주기가 늘어날 뿐 초당 1회를 넘지 않는다. `/refresh` 트리거의 회차는 이 주기와 독립이다(같은 초에 2회가 나갈 수 있다 — 한도 안).
+- 실패: 한 거래소의 목록 호출이 실패하면(타임아웃·비-200·형식 오류·예상 밖 예외) 그 거래소의 직전 목록을 유지하고 다음 초에 다시 부른다 — 다른 거래소의 목록·구독은 그 회차에 정상 반영된다. 로그는 초당 폭주하지 않게 **같은 거래소·같은 원인은 60초에 1줄**이고, 그 줄에 억눌린 동안의 누적 횟수를 적는다. 원인 = 실패 종류(`kind` 8종 — 거래소 예외가 아닌 예상 밖 예외는 예외 클래스 이름이 원인이고, 트리거 요약(§3.9)에는 `exchange_api_error`·`bad_response` 로 실린다). 판정(§3.8)에는 영향 없다 — 목록 실패는 수집 실패가 아니다. 기동 직후 아직 한 번도 못 받은 거래소는 구독이 없다(목록이 빈 스트림은 연결하지 않는다).
 - 응답 본문은 매초 원문 싱크에 기록하되 `key`(업비트·빗썸 `markets:all`, 바이낸스 `symbols:all`)를 붙인다 — 010 이 시세 프레임처럼 분당 마지막 1건만 남긴다(§3.7).
 
 ### 3.3 메모리 저장소 계약 (후속 스펙이 복사해 쓴다)
@@ -117,7 +118,7 @@ core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payl
 - 업비트 체결가 메시지 → `price`·`price_timestamp` 갱신, 호가는 그대로. 호가 전에 온 체결가는 보류됐다가 호가와 함께 실린다.
 - 빗썸 잔량 0 단계는 빠지고 최우선 호가도 잔량>0 인 단계. 빗썸 호가 `timestamp`(µs) 가 ms 로 바뀐다. `trade_timestamp` 가 1시간 이상 미래면 9시간을 뺀다.
 - 우주 밖 base 의 메시지는 저장되지 않는다. 목록 응답에서 base 가 빠지면 **다음 갱신(1초)에** 그 행이 사라지고 구독이 해지된다. 새 base 가 나타나면 다음 갱신에 구독이 추가된다. 목록이 같으면 재구독이 없다. `USDT` 행은 없다.
-- 목록 호출이 매초 나가고(가짜 REST 호출 수), 실패한 초에는 직전 목록이 유지되며 다음 초에 다시 부른다. 같은 원인의 실패 로그는 60초에 1줄이다.
+- 목록 호출이 매초 나가고(가짜 REST 호출 수 — 회차마다 세 거래소 각 1회, 세 호출은 동시에 진행), 실패한 초에는 직전 목록이 유지되며 다음 초에 다시 부른다. 같은 거래소·같은 원인의 실패 로그는 60초에 1줄이고 그 줄에 억눌린 횟수가 있다 — 원인이 바뀌면 바로 1줄.
 - 목록 응답 본문이 원문 싱크에 `key`(`markets:all`)와 함께 기록된다.
 - `KRW-USDT` 호가 메시지마다 시세 `ask=asks[0].price`·`bid=bids[0].price` 갱신, 한쪽이 비면 직전 시세 유지.
 - 국내 호가는 누적 `price×size` 상한에 도달한 단계까지만 저장된다(`inf` 면 전부).
@@ -126,7 +127,7 @@ core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payl
 - `received_at` 이 매 틱 갱신된다. 틱 생성 중 `await` 가 없다(가짜 스토어로 재진입이 없음을 확인 — 틱이 저장소를 읽고 쓰는 사이에 다른 태스크가 한 번도 돌지 않는다).
 - 006 조회 태스크가 끝나지 않은 채 다음 초가 오면 그 초는 새 태스크를 만들지 않는다(직전 태스크 1개만).
 - 판정: 연결 + 30초 이내 메시지 → 성공. 연결 실패(`network`)·핸드셰이크 429(`rate_limit`)·403/400(`bad_request`)·30초 무수신(`stale_stream`, url = WS URL)이 각각 실패로 기록되고, 정체됐던 실제 스트림에 시세 프레임이 다시 오면 성공으로 돌아온다. 60초 끊겼다가 재연결한 직후 첫 프레임 전의 판정은 성공이다(직전 연결의 수신 시각이 아니라 이번 구독 시각부터 센다). `{"status":"UP"}`·구독 응답은 수신으로 세지 않는다.
-- 기동 시 한 거래소의 목록을 못 받으면 그 거래소만 다음 초에 다시 부르고(다른 거래소의 목록·구독은 그대로), 받는 순간 그 거래소 구독이 시작된다.
+- 기동 시 한 거래소의 목록을 못 받으면 그 거래소는 구독 없이 다음 초에 다시 불리고(다른 거래소의 목록·구독은 첫 회차에 이미 반영), 받는 순간 그 거래소 구독이 시작된다.
 - 마켓 목록 갱신이 거래소 예외가 아닌 예외로 끝나도 갱신 루프는 다음 회차(매초)를 계속 돈다.
 - 재연결 백오프가 1·2·4…30 으로 자라고 **구독 뒤 첫 시세 프레임**을 받은 뒤에만 1로 돌아온다 — 연결 실패 2회 뒤 구독이 거부되면 세 번째 대기는 1 이 아니라 4 다(두 커넥터 모두). 구독 에러 응답은 `bad_request`.
 - 종료: 소켓 `close()` 가 돌아오지 않아도 `aclose` 는 2초 상한 안에 끝난다.
@@ -139,23 +140,23 @@ core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payl
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 183 files left unchanged / 462 passed, 1 warning in 4.93s  (2026-09-06, 3회 연속 통과)
-# 001 몫: tests/test_store.py test_quotes.py test_stream_upbit.py(39) test_stream_bithumb.py(17) test_ticks.py test_universe.py test_collect_trigger.py test_health.py test_rows.py (§4 항목당 1개 이상)
-# 원문 항목(§4): 모든 프레임이 `key`(`orderbook:KRW-BTC`·`ticker:KRW-BTC`)와 함께 행 갱신 전에 기록되고, UP·구독 응답·REST 본문·핸드셰이크 거부 본문·디코드 실패 프레임은 `key=None` — test_stream_upbit.py `test_every_frame_is_recorded_verbatim_before_interpretation`·`test_quote_frame_is_recorded_before_the_row_changes`·`test_fetch_markets_filters_krw_and_records_body`·`test_handshake_rejection_body_is_recorded_verbatim`, test_stream_bithumb.py `test_frames_recorded_before_interpretation_and_up_not_counted`·`test_fetch_markets_krw_filter_and_raw_record`·`test_handshake_rejection_body_is_recorded_verbatim`
+# All checks passed! / 183 files left unchanged / 465 passed, 1 warning in 4.9s  (2026-09-06, 매초 우주 전환 뒤 3회 연속 통과)
+# 001 몫: tests/test_store.py test_quotes.py test_stream_upbit.py test_stream_bithumb.py test_ticks.py test_universe.py(11) test_collect_trigger.py test_health.py test_rows.py (§4 항목당 1개 이상)
+# 우주 항목(§4): test_universe.py — 매초 회차·세 목록 동시 진행·실패한 초는 직전 목록 유지·다음 초 재호출·같은 원인 60초 1줄(억제 횟수)·원인/거래소가 다르면 즉시·예상 밖 예외도 그 거래소 실패로 루프 계속
+# 원문 항목(§4): 시세 프레임은 `key`(`orderbook:KRW-BTC`·`ticker:KRW-BTC`)와 함께 행 갱신 전에, 목록 응답 본문은 `markets:all` 로, UP·구독 응답·핸드셰이크 거부 본문·디코드 실패 프레임은 `key=None` — test_stream_upbit.py `test_fetch_markets_filters_krw_and_records_body`, test_stream_bithumb.py `test_fetch_markets_krw_filter_and_raw_record`
 
-cd server && .venv/bin/python -m uvicorn app.main:app --port 8041   # 로컬 스모크 (8000 은 다른 프로세스가 점유할 수 있어 빈 포트)
-curl -s localhost:8041/health          # {"status":"ok","version":"0.1.0"}
-curl -s localhost:8041/no-such         # {"error":{"code":"not_found","message":"Not Found","detail":null}}
-curl -s localhost:8041/spreads         # 망이 막힌 상태(2026-09-06 재확인): 404 market_data_not_found(detail {"exchange":"upbit"}) — 시세가 없다. 망이 열리면 기동 15초 뒤 행 461(012 §5)
-curl -s localhost:8041/health/collect  # 거래소 3곳. 망이 막힌 상태(2026-09-06 재확인): 셋 다 state "down"·outages [] — Influx·Redis 없음 경고 후 앱은 뜨고 종료 로그 깨끗함. 망이 열리면 기동 15초 뒤 셋 다 "ok"(012 §5)
-curl -s -X POST localhost:8041/refresh # usdkrw upbit·bithumb 각 ask 1367·bid 1366, calls upbit 2·bithumb 2·binance 1, failures []
+cd server && S3_BUCKET= .venv/bin/python -m uvicorn app.main:app --port 8044   # 로컬 스모크 (빈 포트, 끝나고 kill)
+curl -s localhost:8044/health          # {"status":"ok","version":"0.1.0"}
+curl -s localhost:8044/spreads         # 망이 막힌 상태(2026-09-06): 404 market_data_not_found(detail {"exchange":"upbit"}) — 시세가 없다. 망이 열리면 기동 15초 뒤 행 461(012 §5)
+curl -s localhost:8044/health/collect  # 거래소 3곳 state "down"·outages [] (망 차단). 망이 열리면 셋 다 "ok"(012 §5)
+curl -s -X POST localhost:8044/refresh # calls upbit 1·bithumb 1·binance 1, failures 셋 다 exchange_timeout(ConnectTimeout), 11.5초(목록 3초 + 입출금 3종 타임아웃)
+# 로그: 기동 직후 거래소별 "마켓 목록 갱신 실패 — 직전 목록 유지" 1줄씩, 60초 뒤 "(직전 60초 동안 같은 원인 25회 억제)" 1줄씩 — 회차가 연결 타임아웃 1.5초 + 1초 휴식이라 60초에 25회. SIGTERM 뒤 "Application shutdown complete", 트레이스백 0, 포트 해제
 ```
-- 선택 항목(실 네트워크 — 망이 열려 있으면 로컬에서도 가능, 막히면 EC2. 2026-09-05 로컬 실측, 우주 = 국내 KRW 전체(관찰용), 60초):
+- 선택 항목(실 네트워크 — 이 Mac 망이 거래소를 막아 이번 세션은 못 쟀다, 직전 실측 2026-09-05 로컬):
   - 마켓 목록 REST 0.26초(업비트 287·빗썸 479 마켓). t+10s 행 upbit 286·bithumb 478, USDT 시세 둘 다(1367/1366), 판정 둘 다 ok, decode 실패 0.
-  - 재연결: 70초 앱 기동 0회. 다른 12초 기동에서는 t+5s 에 업비트가 close 프레임 없이 끊어(`ConnectionClosedError`) 1초 뒤 재연결 1회 — 간헐적이며 백오프·판정은 규칙대로 동작.
-  - 메시지·원문(비압축): 업비트 ws 175 msg/s·442 KB/s(orderbook 9,038·ticker 1,470 /60s), 빗썸 ws 765 msg/s·1,018 KB/s(orderbook 45,000·ticker 924 /60s) → 국내 둘 ≈1.4 MB/s ≈ **130 GB/일**(010 용량 추정의 비압축 기준값).
-  - 실프레임: 업비트 첫 orderbook `orderbook_units` 30단계·`timestamp` 13자리(ms)·`SNAPSHOT`; 빗썸 첫 orderbook 15단계·`timestamp` 16자리(µs) — §3.10 과 일치. 행 `asks` 단계 분포 업비트 30단계 274/286, 빗썸 15단계 455/478(나머지는 누적 상한·잔량 필터).
-  - "행 100 이상" 의 앱 기준(우주 = 교집합) 실측은 012 §5 — 기동 15초 뒤 upbit 198·bithumb 292·binance 273.
+  - 메시지·원문(비압축): 업비트 ws 175 msg/s·442 KB/s, 빗썸 ws 765 msg/s·1,018 KB/s → 국내 둘 ≈1.4 MB/s ≈ **130 GB/일**(010 용량 추정의 비압축 기준값). 실프레임 형식은 §3.10 과 일치.
+  - 앱 기준(우주 = 교집합) 행 수는 012 §5 — 기동 15초 뒤 upbit 198·bithumb 292·binance 273.
+  - 매초 목록 호출을 실거래소에 60초 이상 돌린 실측(한도·응답 시간·재구독 0회)은 EC2 확인 필요.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — collect 행을 `| collect | 업비트·빗썸 WS 실시간 갱신·마켓 목록 REST 매초(우주)·1초 틱·/health | - | 바이낸스는 012 |` 로. **항상 포함.**
@@ -168,25 +169,21 @@ curl -s -X POST localhost:8041/refresh # usdkrw upbit·bithumb 각 ask 1367·bid
   - `server/app/core/models.py` — `Row`(호가는 `asks`/`bids` 뿐)·`Rate`·`StreamError`·`StreamState`·`Tick`·`TickRow`. `core/live_store.py` — 행 단위 쓰기(`put_row`·`put_rows`·`remove_row`·`retain_bases`)·입출금 3필드 물려받기·스트림 상태(`stream`/`stream_state`/`streams`)·틱 슬롯(`push_tick`/`tick`)·spark 맵. `core/rows.py` — `clean_levels`(잔량 필터 + 누적 상한).
   - `core/quotes.py` — `QuoteSink`: 메시지 → 행 규칙(§3.4·§3.5) 전부. 우주 필터·체결가 보류·USDT 시세·빈 호가 삭제.
   - `core/contracts.py` — 원문 싱크 `RawRecorder`/`noop_record`, 틱 인계 `TickHandoff`/`noop_handoff`, `OutageSink`, `StreamJudge`/`Verdict`, `WalletStatusProvider`, `ForeignSymbolSource`/`NoForeignSymbols`.
-  - `core/streams/upbit.py`·`core/streams/bithumb.py` — 스트림 커넥터 2개(연결·구독·펌프·분류·백오프·재구독·`fetch_markets`·`judge`). 코드 공유 없음. `core/universe.py` — `UniverseRefresher`(10분·못 받은 거래소만 5초 재시도(바이낸스 심볼 포함)·교집합·구독 목록 배포). `core/ticks.py` — `judge_state`·`build_tick`·`TickLoop`. `core/collect.py` — `CollectService.refresh_now`·`RefreshSummary`. `core/config.py` — `EXCHANGES`·`DOMESTIC_EXCHANGES`·`WS_OPEN_TIMEOUT`.
-  - `app/main.py` — lifespan 재배선(이력 복원 → 우주 → 스트림 → 틱 루프, 종료 시 마지막 틱 인계). `app.state.collector` = `CollectService`.
-  - 소비자: `core/orderbook.py` `walk_levels` 가 행의 `asks`/`bids` 만 본다. `features/spreads/`(router `refresh_now`, service `age` 스트림 기준·`RefreshSummary`, 테스트 시드 `put_rows`), `features/analysis/tests/`(시드·20단계 테스트 추가), `features/health/tests/`, `features/wallet_status/service.py`(`force`), `tests/test_outages.py`(틱 판정 배선), `tests/test_wallet_integration.py`(틱 루프 기반).
-  - 테스트: `tests/conftest.py`(`make_row`·`FakeStream`·`RawLog`), `tests/stream_fakes.py`, `tests/test_store.py` `test_quotes.py` `test_stream_upbit.py` `test_stream_bithumb.py` `test_ticks.py` `test_universe.py` `test_collect_trigger.py`.
+  - `core/streams/upbit.py`·`core/streams/bithumb.py` — 스트림 커넥터 2개(연결·구독·펌프·분류·백오프·재구독·`fetch_markets`(본문을 `markets:all` 로 기록)·`judge`). 코드 공유 없음. `core/universe.py` — `UniverseRefresher`(매초 회차·세 목록 `gather` 병렬·실패한 거래소는 직전 목록 유지·`(거래소, 원인)` 당 60초 로그 억제·교집합·구독 목록 배포). `core/ticks.py` — `judge_state`·`build_tick`·`TickLoop`. `core/collect.py` — `CollectService.refresh_now`·`RefreshSummary`. `core/config.py` — `EXCHANGES`·`DOMESTIC_EXCHANGES`·`WS_OPEN_TIMEOUT`.
+  - `app/main.py` — lifespan 배선(이력 복원 → 우주 → 스트림 → 틱 루프, 종료 시 마지막 틱 인계). `app.state.collector` = `CollectService`.
+  - 소비자: `core/orderbook.py` `walk_levels` 가 행의 `asks`/`bids` 만 본다. `features/spreads/`(router `refresh_now`, service `age` 스트림 기준·`RefreshSummary`), `features/analysis/tests/`, `features/health/tests/`, `features/wallet_status/service.py`(`force`), `tests/test_outages.py`, `tests/test_wallet_integration.py`.
+  - 테스트: `tests/conftest.py`(`make_row`·`FakeStream`·`RawLog`), `tests/stream_fakes.py`, `tests/test_store.py` `test_quotes.py` `test_stream_upbit.py` `test_stream_bithumb.py` `test_ticks.py` `test_universe.py`(매초·병렬·억제 로그 — 주입 시계 `monotonic`) `test_collect_trigger.py`.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-  - §3.2 바이낸스 심볼 집합의 core 계약(`refresh`/`bases`)과 테스트용 기본 구현 `NoForeignSymbols`(빈 집합 → 우주 비어 행 없음). 기동 재시도는 못 받은 거래소만 — 바이낸스 심볼 집합도 같은 규칙(한 번도 성공 못 했으면 재시도 대상, 국내만 재시도할 땐 호출 없음).
-  - §3.3 체결가 없을 때 `price_timestamp` = **호가 메시지의 거래소 시각(ms)** — 빗썸 µs→ms 규칙이 관측 가능한 유일한 자리다. `StreamState` 에 판정용 `url`·`connected_since`, `last_error` 에 `retry_after_sec`. 저장소 쓰기 면(`put_row` 등) 명시.
-  - §3.4 USDT 시세도 잔량 필터를 거친 최우선 호가. §3.5-2 마지막 체결가는 행 교체 후에도 이어진다.
-  - §3.6 입출금 캐시를 매 틱 행에 반영(60초 apply 만으로는 새 행이 1분간 null). 스트림 없는 거래소는 판정하지 않는다.
-  - §3.8 첫 연결 결과 전 판정 보류, 무수신 기준 = 이번 연결의 구독 시각과 마지막 수신 시각 중 최신(재연결 직후 첫 프레임 전은 구독 시각), 오류 없이 닫힌 스트림 = `network`, 연결 끊김(`ConnectionClosed`) = `network`. 핸드셰이크 HTTP 거부의 분류 주인은 011 §3.2 — 업비트·빗썸 4xx 는 429·418 외 전부 `bad_request`(403 포함), 커넥터의 REST 분류 함수를 핸드셰이크에도 쓴다(같은 파일 안 — 커넥터 간 공유 아님).
-  - §3.9 006 즉시 조회 = `refresh_if_due(force=True)`(§2 ⑥). 스트림 실패의 `error_code` = `kind`.
-  - §3.11 백오프 리셋 시점 = 구독 뒤 첫 시세 프레임. PING 은 라이브러리 keepalive(`ping_interval=30`)로 — 자체 핑 태스크 없음, 테스트에서 검증 불가. 목록이 비면 연결하지 않음. 같은 목록 재구독 안 함. 종료 2초 상한은 태스크 취소 대기와 소켓 close 를 합친 예산이다 — 남은 예산이 없으면 close 를 기다리지 않는다.
-  - 003 §3.2-4 `age` 는 003 문구 그대로 스트림 `last_message_at` 만 쓴다 — 행은 스트림 메시지로만 생기므로 행이 있는 거래소의 수신 시각은 항상 있다. 저장소를 직접 시드하는 테스트는 헬퍼가 그 거래소 스트림의 `last_message_at` 도 함께 시드한다(스펙 문장 없이 해결).
-  - 구조: `QuoteSink`(공통 규칙)와 커넥터(거래소 형식) 분리. 판정 규칙(`judge_state`)은 스펙 공통 규칙이라 core `ticks.py` 에 두고 두 커넥터가 호출한다(커넥터 간 코드 공유 아님). `TickLoop.tick` 은 동기 메서드이고 `run` 이 초 경계까지 잔다.
-  - 디코드 불가 바이너리 프레임(UTF-8 아님)은 문자열이 없어 원문 싱크에 기록하지 못하고 버린다(무효 프레임 카운트만).
-  - §3.2 마켓 우주 갱신 루프는 거래소 예외가 아닌 예외도 로그 후 다음 회차 — 틱 루프·스트림 `run` 과 같은 보호 규칙(태스크가 조용히 죽어 10분 갱신이 영구 정지하는 것을 막는다).
-  - §3.6-2 틱 원값 수식·자격을 003 §3.2-4 에서 이 스펙으로 복사했다(자기완결). 003 의 raw 블록과 문구가 어긋나면 003 담당이 맞춘다.
-  - §4 선택 항목(실 네트워크)은 이 Mac 망이 열린 시간에 로컬에서 쟀다 — 차단은 간헐적이다(dev-setup.md 로컬 메모의 확인 명령). 유입량 측정은 앱 커넥터 2개를 우주=국내 KRW 전체로 60초 돌린 관찰용 스크립트(레포 밖)로 했고, 그 밖의 항목은 8041 앱 스모크로 봤다.
-  - `server/build/`(setuptools 산출물 76파일)가 git 에 추적돼 있다 — 범위 밖이라 두었다. `ruff check .` 가 이 사본도 검사한다(status.md 알려진 빚). venv 에는 패키지를 **editable 로만** 설치한다(dev-setup.md) — 비-editable 사본이 있으면 다른 cwd 에서 옛 모듈을 import 한다.
+  - §3.2 주기의 뜻: "매초" 를 초 경계 정렬이 아니라 **회차 끝 + 1초 휴식** 으로 확정. 선택지는 ① 초 경계에 맞춰 시작(호출이 1초를 넘기면 같은 초에 두 회차가 겹쳐 한도 계산이 흔들린다) ② 회차 끝난 뒤 1초 휴식(추천 — 초당 1회를 절대 넘지 않고, 타임아웃 중엔 주기가 늘어날 뿐이다). 스모크에서 연결 타임아웃 1.5초 + 1초 = 60초에 25회.
+  - §3.2 로그 억제의 "원인" = 실패 종류 `kind`(거래소 예외) 또는 예외 클래스 이름(예상 밖 예외). 선택지는 메시지 전문(타임아웃 메시지에 예외 세부가 섞여 매초 다른 줄이 될 수 있다)·`(kind, status_code)`·`kind` — `kind` 를 택했다. 60초 뒤의 줄에 억눌린 횟수를 적는다.
+  - §3.2 예상 밖 예외(거래소 예외가 아닌 것)는 그 거래소의 목록 실패로 다룬다 — 직전 목록 유지, 트리거 요약에는 `exchange_api_error`/`bad_response` 로 실린다. 이전의 "못 받은 거래소만 5초 재시도" 분기와 `missing()` 은 매초 전체 회차로 대체돼 지웠다.
+  - §3.2 세 호출은 `asyncio.gather` 로 동시에 — 한 거래소가 3초 타임아웃이어도 나머지 목록은 그 회차에 반영된다. `/refresh` 트리거는 같은 `refresh()` 를 따로 한 번 더 부른다(루프와 겹쳐도 초당 2회 — 한도 안).
+  - §3.7 목록 응답 `key` = `markets:all`(업비트·빗썸)·`symbols:all`(바이낸스) — 매초 1~2MB 가 전량 남지 않게 010 이 분당 마지막 1건으로 솎는다. 입출금 본문(006)은 60초 1회라 그대로 `None`.
+  - 012 §3.3 `set_universe` 는 매초 불리므로 샤드 배정이 하나도 안 바뀌면 행 삭제·재조정 깨우기 없이 돌아온다(001 은 확정된 우주를 매초 그대로 넘긴다 — 무동작 판단은 커넥터 몫).
+  - §4 "기동 시 한 거래소의 목록을 못 받으면" 문구를 매초 전체 회차에 맞게 고쳤다(그 거래소는 구독 없이 다음 초에 다시, 다른 거래소는 첫 회차에 반영).
+  - §3.3 체결가 없을 때 `price_timestamp` = 호가 메시지의 거래소 시각(ms). §3.4 USDT 시세도 잔량 필터를 거친 최우선 호가. §3.6 입출금 캐시를 매 틱 행에 반영, 스트림 없는 거래소는 판정하지 않는다. §3.8 첫 연결 결과 전 판정 보류, 무수신 기준 = 이번 연결의 구독 시각과 마지막 수신 시각 중 최신, 오류 없이 닫힌 스트림 = `network`. §3.9 006 즉시 조회 = `refresh_if_due(force=True)`, 스트림 실패의 `error_code` = `kind`. §3.11 백오프 리셋 시점 = 구독 뒤 첫 시세 프레임, PING 은 라이브러리 keepalive, 종료 2초 상한은 취소 대기와 close 를 합친 예산.
+  - 003 §3.1 의 복사 계약에 "상장·상폐는 10분마다 갱신되는 마켓 우주" 문구가 남아 있다 — 003 담당 세션 몫이라 고치지 않았다: `docs/specs/003-spreads.md:§3.1 — 10분마다 → 실제는 매초`.
 - 남은 빚:
-  - §4 선택 항목 중 "1분 동안 재연결 0회·초당 메시지 수" 는 §5 의 관찰용 실측(우주 = 국내 KRW 전체)뿐이다 — 앱 기준(우주 = 교집합) 재측정은 EC2 에서 확인 필요. 실측 유입량(≈1.4 MB/s 비압축, 국내 둘)은 010 의 용량 추정 기준값이다.
+  - §4 선택 항목(실 네트워크)은 망 차단으로 이번 세션에 못 쟀다 — EC2 에서 매초 목록 호출을 60초 이상 돌려 한도·응답 시간·재구독 0회를 확인해야 한다.
+  - 우주 확정(`_apply`) 자체가 예외로 끝나면 루프의 보호 로그가 초당 1줄이다(거래소·원인 억제 밖) — 버그 경로라 두었다.
   - `server/build/`·`server/marketlens_server.egg-info/` 추적 정리는 별도 chore(editable 설치가 egg-info 를 다시 쓴다).

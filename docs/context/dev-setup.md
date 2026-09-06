@@ -94,4 +94,4 @@ curl -s "localhost:8000/orderbook/binance?symbol=BTC/USDT&depth=20" | head -c 40
 - `:8000` 은 이 머신에서 소마 캘린더가 점유할 수 있다. `lsof -i :8000` 으로 확인 후 정리하거나, `--port 8020` 으로 띄우고 curl 포트도 8020 으로 맞춘다.
 - 이 머신엔 `python3`=3.9 뿐이다. `python3 -m venv` 금지. 가상환경(uv, Python 3.12)으로 만들고 의존성 설치도 uv pip 로(`--python` 에 그 venv 의 파이썬 지정).
 - `actionlint` 미설치. 워크플로 lint 는 건너뛰고 실행 보고에 기록한다.
-- 이 망(통신사 필터)은 거래소·금융 도메인을 **간헐적으로** 차단한다(REST·WebSocket 모두 — 같은 날 `api.upbit.com`·`api.bithumb.com` 이 ConnectTimeout 이었다가 몇 시간 뒤 정상 응답). 시작 전에 `curl -s -m 4 -o /dev/null -w '%{http_code}\n' https://api.upbit.com/v1/market/all` 로 확인한다 — `200` 이면 실거래소 검증(001 §4 선택 항목 포함)을 로컬에서 돌릴 수 있고, 막혀 있으면 EC2 에서 돌린다. 마켓 목록을 못 받으면 서버는 5초마다 재시도하며 뜨고 `/spreads` 는 404 다.
+- 이 망(통신사 필터)은 거래소·금융 도메인을 **간헐적으로** 차단한다(REST·WebSocket 모두 — 같은 날 `api.upbit.com`·`api.bithumb.com` 이 ConnectTimeout 이었다가 몇 시간 뒤 정상 응답). 시작 전에 `curl -s -m 4 -o /dev/null -w '%{http_code}\n' https://api.upbit.com/v1/market/all` 로 확인한다 — `200` 이면 실거래소 검증(001 §4 선택 항목 포함)을 로컬에서 돌릴 수 있고, 막혀 있으면 EC2 에서 돌린다. 마켓 목록을 못 받으면 서버는 매초 다시 부르며(거래소·원인당 60초에 로그 1줄) 뜨고 `/spreads` 는 404 다.

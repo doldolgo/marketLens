@@ -1,6 +1,6 @@
 # 012 — binance-stream
 
-상태: IN_PROGRESS | 의존: 001(collect — 행 계약·마켓 우주·틱 판정·원문 싱크·커넥터 공통 규칙), 011(health — 실패 분류·구간 추적), 007(deploy — lifespan)
+상태: DONE | 의존: 001(collect — 행 계약·마켓 우주·틱 판정·원문 싱크·커넥터 공통 규칙), 011(health — 실패 분류·구간 추적), 007(deploy — lifespan)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 
@@ -61,7 +61,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 - miniTicker 메시지 → `price`·`price_timestamp`. depth 전에 오면 보류, depth 뒤에 실린다. 체결가 없으면 mid.
 - `exchangeInfo` 에서 `TRADING`·`USDT` 만 심볼 집합에 든다. 우주 밖 심볼 메시지는 버려진다.
 - 심볼 300개 → 3 샤드에 분산, 같은 심볼은 항상 같은 샤드(서브프로세스 2개로 해시 안정성 확인), 두 스트림이 같은 샤드. 추가·삭제가 나머지 배정을 안 바꾼다.
-- SUBSCRIBE 한 메시지 ≤ 100 스트림, 초당 ≤ 4 메시지. 재조정: 새 심볼 구독·빠진 심볼 해지·행 삭제. 재조정을 보내는 도중 `!serverShutdown` 으로 재연결되면 새 소켓에 배정 전체를 구독하고 `subscribed` 는 새 소켓 기준이다.
+- SUBSCRIBE 한 메시지 ≤ 100 스트림, 초당 ≤ 4 메시지. 재조정: 새 심볼 구독·빠진 심볼 해지·행 삭제. 같은 우주를 다시 받으면(매초) 보내는 것도 지우는 것도 없다. 재조정을 보내는 도중 `!serverShutdown` 으로 재연결되면 새 소켓에 배정 전체를 구독하고 `subscribed` 는 새 소켓 기준이다.
 - `connected_since` 는 첫 SUBSCRIBE 묶음을 다 보낸 시각이고 정체 30초는 거기서부터 센다(보내는 동안은 소켓이 열린 시각).
 - 정체: 샤드 2만 30초 무수신(0·1 은 수신) → 그 틱이 `stale_stream` 실패이고 message 에 "샤드 2". 30초 미만은 성공. 구독 0 샤드는 무시. 메시지가 오면 다음 틱 성공.
 - 미연결 샤드 → 그 샤드 `last_error.kind` 로 실패. 셋 중 둘이 나쁘면 더 오래 조용한 쪽.
@@ -74,9 +74,10 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 183 files left unchanged / 462 passed, 1 warning in 4.93s  (2026-09-06)
-# (이 스펙의 tests/test_stream_binance.py 49개 포함 — 3회 반복 실행 모두 49 passed)
-# 원문 항목(§4): depth20·miniTicker 프레임은 `key`(`depth20:BTCUSDT`·`miniTicker:BTCUSDT`, 맵에 없는 심볼도)와 함께 행 갱신 전에 기록되고, 구독 응답·`!serverShutdown`·exchangeInfo 본문·핸드셰이크 거부 본문은 `key=None` — `test_every_frame_and_exchange_info_body_are_recorded_verbatim`·`test_shutdown_and_unknown_symbol_frames_get_expected_keys`·`test_handshake_rejection_body_is_recorded_verbatim`
+# All checks passed! / 183 files left unchanged / 465 passed, 1 warning in 4.9s  (2026-09-06, 매초 exchangeInfo 전환 뒤 3회 연속 통과)
+# (이 스펙의 tests/test_stream_binance.py 49개 포함)
+# 원문 항목(§4): depth20·miniTicker 프레임은 `key`(`depth20:BTCUSDT`·`miniTicker:BTCUSDT`, 맵에 없는 심볼도)와 함께 행 갱신 전에 기록되고, exchangeInfo 본문은 `symbols:all`, 구독 응답·`!serverShutdown`·핸드셰이크 거부 본문은 `key=None` — `test_every_frame_and_exchange_info_body_are_recorded_verbatim`·`test_exchange_info_keeps_only_trading_usdt_symbols`·`test_shutdown_and_unknown_symbol_frames_get_expected_keys`·`test_handshake_rejection_body_is_recorded_verbatim`
+# 우주 항목(§4): `test_rebalance_subscribes_new_unsubscribes_dropped_and_removes_rows` — 같은 우주를 다시 받으면 전송 0 (001 이 매초 넘긴다)
 
 # 실서버 스모크 — 2026-09-05 로컬(이 시각 api.upbit.com·api.bithumb.com·api.binance.com 이 200 으로 열려 있어 로컬에서 돌렸다), 빈 포트 8041, 끝나고 kill
 .venv/bin/uvicorn app.main:app --port 8041
@@ -97,11 +98,11 @@ EC2 에서 확인 필요(로컬에서 재현 불가): 네트워크를 끊고 30�
 - `docs/context/dev-setup.md` — 스모크에 `/orderbook/binance … depth=20` 확인 1줄.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록): `server/app/core/streams/binance.py`(커넥터 — `BinanceStream`·`shard_of`), `server/tests/test_stream_binance.py`(49 테스트 — 연결·샤딩·재조정·판정·원문 `key`, 001 의 `tests/stream_fakes.py` 재사용 + 제어 메시지 간격을 표로 막는 `TicketSleeps`). 바꾼 것: `server/app/core/contracts.py`(`ForeignSymbolSource.set_universe` + `NoForeignSymbols`), `server/app/core/universe.py`(우주 확정 시 `set_universe` 호출), `server/tests/test_universe.py`(FakeForeign 에 `set_universe`), `server/app/main.py`(커넥터를 우주 `foreign`·스트림·틱 루프·`/refresh` 에 배선), `docs/context/status.md`·`architecture.md`·`dev-setup.md`, `CLAUDE.md` 인덱스, 이 스펙.
+- 만든 것 (파일 목록): `server/app/core/streams/binance.py`(커넥터 — `BinanceStream`·`shard_of`, exchangeInfo 본문은 `symbols:all` 로 기록, `set_universe` 는 샤드 배정이 같으면 무동작), `server/tests/test_stream_binance.py`(49 테스트 — 연결·샤딩·재조정·판정·원문 `key`, 001 의 `tests/stream_fakes.py` 재사용 + 제어 메시지 간격을 표로 막는 `TicketSleeps`). 바꾼 것: `server/app/core/contracts.py`(`ForeignSymbolSource.set_universe` + `NoForeignSymbols`), `server/app/core/universe.py`(우주 확정 시 `set_universe` 호출), `server/tests/test_universe.py`(FakeForeign 에 `set_universe`), `server/app/main.py`(커넥터를 우주 `foreign`·스트림·틱 루프·`/refresh` 에 배선), `docs/context/status.md`·`architecture.md`·`dev-setup.md`, `CLAUDE.md` 인덱스, 이 스펙.
 - 추측한 지점 (묻지 않고 정한 것 — 전부 §3 에 확정 문구로 적었다):
   1. 모듈 경로는 architecture.md·001 과 같은 `core/streams/binance.py`(§2).
   2. 우주 → 커넥터 전달. 선택지: (a) 커넥터가 `QuoteSink.universe` 를 60초마다 읽는다 — `/refresh` 즉시 반영이 안 된다, (b) `UniverseRefresher` 에 콜백 인자 — 심볼 집합과 구독 대상이 두 계약으로 갈린다, (c) `ForeignSymbolSource` 에 `set_universe(bases)` 추가하고 우주가 확정될 때마다 부른다 — 채택(§2·§3.3). 커넥터 하나가 `refresh`·`bases`·`set_universe` 를 전부 구현한다.
-  3. 재조정 = `set_universe` 가 깨우거나 60초마다, 연결된 샤드의 차이만 전송. 빠진 심볼의 행 삭제는 `set_universe` 에서 동기로(§3.3). 배정 0 인 샤드는 폴링 대신 이벤트 대기(§3.3).
+  3. 재조정 = `set_universe` 가 깨우거나 60초마다, 연결된 샤드의 차이만 전송. 빠진 심볼의 행 삭제는 `set_universe` 에서 동기로(§3.3). 배정 0 인 샤드는 폴링 대신 이벤트 대기(§3.3). 001 이 매초 우주를 넘기므로 `set_universe` 는 샤드 배정이 하나도 안 바뀌면 재조정을 깨우지 않는다 — 60초 주기 재조정이 매초로 바뀌지 않게(§3.3).
   4. 제어 메시지마다 0.25초 대기(초당 4개), `id` 는 샤드별 1부터, ack 는 시세 아님, `error` 키 응답은 `bad_request`(§3.3).
   5. 백오프 리셋의 증거 = 구독 뒤 첫 시세 프레임(001 과 동일). `!serverShutdown` 은 백오프 없이 즉시 재연결하되 백오프 값은 유지(§3.3).
   6. 클라이언트 keepalive ping 20초(라이브러리) — 조용히 죽은 TCP 감지용(§3.3).
@@ -113,5 +114,5 @@ EC2 에서 확인 필요(로컬에서 재현 불가): 네트워크를 끊고 30�
   12. `connected_since` 는 첫 SUBSCRIBE 묶음을 다 보낸 시각(§3.5, 001 §3.3 의 "구독 시각" 그대로). 보내는 동안(≤0.75초) 소켓이 열린 시각을 임시로 두는 이유는 판정 규칙이 001 과 같아야 해서다 — 그 값이 없으면 직전 연결의 수신 시각으로 정체가 되거나(재연결) 무한 조용함이 된다(첫 연결).
 - 실행 중 함께 고친 스펙 절: §2(경로·바꾸는 기존 것), §3.3(계약·재조정·소켓에 묶인 구독 집합·간격·백오프·keepalive·분류), §3.4(시각·맵 밖), §3.5(샤드 판정·구독 시각의 정의·집계), §3.6(재조정 태스크 포함 종료), §4(재조정 도중 재연결·구독 시각·lifespan 기동).
 - 남은 빚:
-  - EC2 확인 항목(§5): 네트워크 차단 → `stale_stream` → 복구, 24시간 강제 종료 재연결, 실제 대역폭.
+  - EC2 확인 항목(§5): 네트워크 차단 → `stale_stream` → 복구, 24시간 강제 종료 재연결, 실제 대역폭, 매초 exchangeInfo(1~2MB) 파싱이 이벤트 루프에 주는 지연(§3.3 의 10~40ms 는 추정).
   - 로컬 스모크에서 업비트 입출금 API 가 401 — 키·허용 IP 문제(006 소관), 이 스펙과 무관.
