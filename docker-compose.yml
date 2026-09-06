@@ -13,6 +13,13 @@ services:
     build: ./server
     container_name: marketlens-server
     restart: unless-stopped
+    # 컨테이너 로그 상한 — 회전이 없으면 json 로그가 디스크를 채우고, 디스크가 차면
+    # Influx 가 쓰기를 거부한다(그 상태는 공간을 되찾아도 재시작 전까지 풀리지 않는다).
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     # 시크릿은 이미지가 아니라 여기서만 주입된다 — 이미지 레이어에 .env 없음 (스펙 007 §3)
     env_file:
       - ./server/.env
@@ -29,6 +36,13 @@ services:
     build: ./web
     container_name: marketlens-web
     restart: unless-stopped
+    # 컨테이너 로그 상한 — 회전이 없으면 json 로그가 디스크를 채우고, 디스크가 차면
+    # Influx 가 쓰기를 거부한다(그 상태는 공간을 되찾아도 재시작 전까지 풀리지 않는다).
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     ports:
       # 현 EC2 는 기존 fe(:80)·be(:8000) 가 점유 — 루트 .env 의 WEB_PORT=8080 으로 공존한다
       - "${WEB_PORT:-80}:80"
@@ -39,6 +53,13 @@ services:
     image: influxdb:2.7
     container_name: marketlens-influxdb
     restart: unless-stopped
+    # 컨테이너 로그 상한 — 회전이 없으면 json 로그가 디스크를 채우고, 디스크가 차면
+    # Influx 가 쓰기를 거부한다(그 상태는 공간을 되찾아도 재시작 전까지 풀리지 않는다).
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     # dev compose 와 같은 첫 기동 설정 — org·bucket marketlens, admin 토큰 = INFLUX_TOKEN
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
@@ -57,6 +78,13 @@ services:
     image: redis:7-alpine
     container_name: marketlens-redis
     restart: unless-stopped
+    # 컨테이너 로그 상한 — 회전이 없으면 json 로그가 디스크를 채우고, 디스크가 차면
+    # Influx 가 쓰기를 거부한다(그 상태는 공간을 되찾아도 재시작 전까지 풀리지 않는다).
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     # AOF — 재기동해도 Influx 로 아직 안 옮긴 틱이 남는다 (009 §3.4). 호스트 비노출.
     command: ["redis-server", "--appendonly", "yes"]
     volumes:

@@ -45,6 +45,15 @@ def test_compose_declares_four_containers_with_fixed_names() -> None:
     assert names.isdisjoint({"market-lens-fe", "market-lens-be"})
 
 
+def test_compose_caps_container_logs_on_every_service() -> None:
+    # 회전 없는 json 로그가 디스크를 채우면 Influx 가 쓰기를 거부한다 (007 §3)
+    for name, svc in _yaml("docker-compose.yml")["services"].items():
+        logging = svc.get("logging")
+        assert logging is not None, f"{name} 에 로그 상한이 없다"
+        assert logging["driver"] == "json-file"
+        assert logging["options"] == {"max-size": "50m", "max-file": "3"}
+
+
 def test_compose_exposes_only_web_on_host_via_web_port() -> None:
     services = _yaml("docker-compose.yml")["services"]
     assert services["web"]["ports"] == ["${WEB_PORT:-80}:80"]

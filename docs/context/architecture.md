@@ -82,6 +82,7 @@ web/src/features/<name>/
 ## 배포 토폴로지
 EC2 1대. 루트 `docker compose up -d --build` 로 server·web·influxdb·redis 컨테이너를 실행한다. 컨테이너는 compose 기본 네트워크를 사용하며 InfluxDB·Redis 포트는 호스트에 공개하지 않는다. PR CI 는 server lint·format·pytest 와 web lint·build 를 실행한다. main push 는 EC2 에 SSH 로 접속해 배포한다. 상세는 스펙 007(deploy).
 같은 EC2 에 기존 marketlens-be(:8000)·fe(:80) 가 운영 중이라 이 레포의 web 은 `WEB_PORT=8080` 으로 공존한다. 80 이관·서버 분리(DB/파싱 분리)는 추후 별도 스펙으로 검토한다.
+네 컨테이너 모두 compose 가 로그를 `json-file` 50MB × 3 으로 묶는다 — 회전 없는 로그가 디스크를 채우면 Influx 가 쓰기를 거부하고, 그 거부는 공간을 되찾아도 재시작 전까지 풀리지 않는다.
 배포 workflow 의 성공은 EC2 명령 실행 성공만 뜻한다. 외부 URL 확인과 실패 시 자동 롤백은 아직 없다.
 
 ## 현재 구조 (개발 후 갱신 — 실행 세션이 §7 보고와 함께 채운다)
