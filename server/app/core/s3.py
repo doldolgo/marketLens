@@ -9,7 +9,7 @@ boto3 를 import 하는 곳은 이 모듈뿐이다. 아카이브(core.raw_archiv
 import boto3
 from botocore.config import Config
 
-# 객체가 수십 MB 라 읽기는 길게, 재시도는 SDK 2회(총 3회 시도) — §3.3
+# 객체는 수백 KB 지만 느린 망을 견디게 읽기는 길게, 재시도는 SDK 2회(총 3회 시도) — §3.3
 CONNECT_TIMEOUT_SEC = 3
 READ_TIMEOUT_SEC = 30
 MAX_ATTEMPTS = 3
