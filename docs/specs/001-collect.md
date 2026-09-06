@@ -131,7 +131,7 @@ core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payl
 - 마켓 목록 갱신이 거래소 예외가 아닌 예외로 끝나도 갱신 루프는 다음 회차(매초)를 계속 돈다.
 - 재연결 백오프가 1·2·4…30 으로 자라고 **구독 뒤 첫 시세 프레임**을 받은 뒤에만 1로 돌아온다 — 연결 실패 2회 뒤 구독이 거부되면 세 번째 대기는 1 이 아니라 4 다(두 커넥터 모두). 구독 에러 응답은 `bad_request`.
 - 종료: 소켓 `close()` 가 돌아오지 않아도 `aclose` 는 2초 상한 안에 끝난다.
-- 모든 프레임(시세·UP·에러)과 마켓 목록 응답 본문이 원문 싱크(fake)에 `exchange`·`source`·수신 시각과 함께 받은 텍스트 그대로 기록된다 — 행 갱신보다 먼저. 시세 프레임은 `key`(`orderbook:KRW-BTC`·`ticker:KRW-BTC`)와 함께, UP·구독 응답·에러·REST 본문·디코드 실패 프레임은 `key=None` 으로. 핸드셰이크가 HTTP 본문과 함께 거부되면 그 본문 전문이 `ws-handshake:<경로>` 로 기록된다(본문 없는 거부는 기록 없음).
+- 모든 프레임(시세·UP·에러)과 마켓 목록 응답 본문이 원문 싱크(fake)에 `exchange`·`source`·수신 시각과 함께 받은 텍스트 그대로 기록된다 — 행 갱신보다 먼저. 시세 프레임은 `key`(`orderbook:KRW-BTC`·`ticker:KRW-BTC`)와 함께, 마켓 목록 응답 본문은 `markets:all` 로, UP·구독 응답·에러·입출금 REST 본문(006)·디코드 실패 프레임은 `key=None` 으로. 핸드셰이크가 HTTP 본문과 함께 거부되면 그 본문 전문이 `ws-handshake:<경로>` 로 기록된다(본문 없는 거부는 기록 없음).
 - 트리거(§3.9): 우주 갱신 REST 가 호출되고 `calls` 에 반영, `saved` 가 현재 행 수, 실패 중인 스트림이 `failures` 에 담긴다. 동시 호출은 직렬화된다.
 - 거래소 타임아웃은 504 `exchange_timeout`, 비-200 은 502 `exchange_api_error`(HTTP `detail` 에 `statusCode`·`body`).
 - 테스트 전부 통과, ruff lint·format 위반 0.
@@ -140,7 +140,7 @@ core 공개 함수 `record(exchange: str, source: str, received_at_ms: int, payl
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 183 files left unchanged / 465 passed, 1 warning in 4.9s  (2026-09-06, 매초 우주 전환 뒤 3회 연속 통과)
+# All checks passed! / 183 files left unchanged / 468 passed, 1 warning in 4.9s  (2026-09-06, drift 검수 반영 뒤 3회 연속 통과)
 # 001 몫: tests/test_store.py test_quotes.py test_stream_upbit.py test_stream_bithumb.py test_ticks.py test_universe.py(11) test_collect_trigger.py test_health.py test_rows.py (§4 항목당 1개 이상)
 # 우주 항목(§4): test_universe.py — 매초 회차·세 목록 동시 진행·실패한 초는 직전 목록 유지·다음 초 재호출·같은 원인 60초 1줄(억제 횟수)·원인/거래소가 다르면 즉시·예상 밖 예외도 그 거래소 실패로 루프 계속
 # 원문 항목(§4): 시세 프레임은 `key`(`orderbook:KRW-BTC`·`ticker:KRW-BTC`)와 함께 행 갱신 전에, 목록 응답 본문은 `markets:all` 로, UP·구독 응답·핸드셰이크 거부 본문·디코드 실패 프레임은 `key=None` — test_stream_upbit.py `test_fetch_markets_filters_krw_and_records_body`, test_stream_bithumb.py `test_fetch_markets_krw_filter_and_raw_record`
