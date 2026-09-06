@@ -5,7 +5,7 @@
 ## 엔진 셋
 - **InfluxDB 2.7 OSS** — 영구 역사. org `marketlens`, bucket `marketlens` 하나. 쿼리는 Flux, Python 클라이언트는 `influxdb-client`. 이유: 김프 이력은 (거래소쌍·코인) 태그 × 시각 × 수치 2개라는 전형적 시계열이고, 시간 버킷 집계가 엔진 기본 기능이라 앱 코드가 줄어든다. 3 Core 는 기본 쿼리 범위 ~72시간이라 92일 백필·월간 조회에 부적합해 2.7 을 쓴다.
 - **Redis 7** — Influx 로 아직 옮기지 못한 틱의 **버퍼**(스펙 009). 원문이 아니라 Influx 가 저장할 모양 그대로를 들고, 60초마다 전량이 옮겨진 뒤 비워진다. AOF(`appendonly yes`)라 재기동해도 안 옮긴 틱이 남는다.
-- **S3** 버킷 `marketlens-spreads-snapshot`(ap-northeast-2), 접두사 `raw/` — 거래소 **원문 아카이브**(스펙 010). 거래소가 준 모든 WebSocket 프레임·REST 응답 본문을 받은 그대로 남긴다. 가공값은 없다.
+- **S3** 버킷 `marketlens-spreads-snapshot`(ap-northeast-2), 접두사 `raw/` — 거래소 **원문 아카이브**(스펙 010). 거래소가 준 WebSocket 프레임·REST 응답 본문을 받은 그대로 남긴다 — 시세 프레임은 심볼·종류별 분당 마지막 1건, 비시세 응답(마켓 목록·입출금·핸드셰이크 거부 본문·구독 응답)은 전량. 가공값은 없다.
 
 ## InfluxDB measurement
 같은 tag set + 같은 time 은 Influx 가 덮어쓴다. 이것이 유일키 역할이라 별도 중복 방지 코드가 없고, flusher 의 재시도가 여기 기댄다.

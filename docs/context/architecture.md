@@ -56,7 +56,7 @@
 - 비즈니스 에러는 `{"error": {"code": str, "message": str, "detail": any}}` 형식이다. 인증 실패와 FastAPI 요청 검증 실패(422)는 `{"detail": ...}` 형식을 사용한다.
 
 ## core 가 제공하는 계약 (기능·스펙이 공유하는 Protocol)
-- 원문 싱크 `record(exchange, source, received_at_ms, payload)` — 동기·무예외(010 구현, 수신 경로가 호출).
+- 원문 싱크 `record(exchange, source, received_at_ms, payload, key=None)` — 동기·무예외(010 구현, 수신 경로가 호출). `key` 는 시세 프레임이면 `"<종류>:<원본 심볼>"`(`orderbook:KRW-BTC`·`depth20:BTCUSDT`), 그 밖(REST 본문·핸드셰이크 거부·비시세 프레임·디코드 실패)은 None — 010 이 시세 프레임을 분당 마지막 1건으로 솎는 데 쓴다.
 - 틱 인계 `handoff(tick)` — 동기·무예외(009 구현, 틱 루프가 호출).
 - 판정 결과 전달 — 틱 루프가 이력 추적기에 거래소별 성공/실패를 넘긴다(011 구현).
 - 입출금 조회기 `refresh_if_due(client, force=False)` / `apply` / `failed` / `warnings` / `availability`(006 구현, 틱 루프가 호출 — `force` 는 `/refresh` 트리거가 쓴다).
