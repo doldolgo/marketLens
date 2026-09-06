@@ -140,7 +140,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 1-2. spark 복원(009 §3.6) — 최근 30분 1분 버킷, 10초 상한. 틱 루프 시작 전에 끝난다.
     await restore_spark(influx, spark, store, app.state.started_at // 1000)
 
-    # 2~3. 마켓 우주 → 스트림 기동. 목록을 못 받으면 5초 간격 재시도, 그동안 구독은 없다.
+    # 2~3. 마켓 우주(매초) → 스트림 기동. 목록을 못 받은 거래소는 다음 초에 다시 — 그동안 구독은 없다.
     # 바이낸스 커넥터(012)가 심볼 집합 계약도 맡는다 — 우주가 확정되면 그 심볼만 구독한다.
     upbit = UpbitStream(store=store, sink=sink, record=record)
     bithumb = BithumbStream(store=store, sink=sink, record=record)
