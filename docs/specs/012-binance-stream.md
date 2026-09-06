@@ -30,7 +30,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 - 대역폭 감: depth20 ~1.3KB + miniTicker ~0.2KB, 300 종목 × 1/s ≈ 450KB/s.
 
 ### 3.3 심볼 목록과 샤딩
-- 심볼 목록: `GET https://api.binance.com/api/v3/exchangeInfo`(weight 20) 의 `symbols[]` 중 `status == "TRADING"` 이고 `quoteAsset == "USDT"` 인 것. base = `baseAsset`. **매초** 갱신(001 §3.2 — weight 20/초 = 분당 1,200, 한도 6,000 의 20%; 응답이 1~2MB 라 파싱은 스레드가 아니라 이벤트 루프에서 10~40ms 다 — 틱 루프를 막지 않게 파싱 결과가 같으면(심볼 집합 불변) 아무 일도 하지 않는다), 응답 본문은 원문 싱크(`rest:/api/v3/exchangeInfo`). 실패 시 직전 목록 유지 + 경고.
+- 심볼 목록: `GET https://api.binance.com/api/v3/exchangeInfo?showPermissionSets=false&symbolStatus=TRADING`(weight 20) 의 `symbols[]` 중 `status == "TRADING"` 이고 `quoteAsset == "USDT"` 인 것. base = `baseAsset`. **질의 두 개는 성능 때문에 반드시 붙인다** — 커넥터가 어차피 거르는 조건이라 심볼 집합은 같은데(TRADING·USDT 487개 동일) 본문이 17.5MB → 2.5MB 로 줄고, 매초 드는 파싱 + 원문 기록 비용이 EC2 코어에서 **505ms → 88ms** 가 된다(실측). **매초** 갱신(001 §3.2 — weight 20/초 = 분당 1,200, 한도 6,000 의 20%; 파싱은 스레드가 아니라 이벤트 루프에서 하므로 본문 크기가 곧 틱 루프의 여유다 — 파싱 결과가 같으면(심볼 집합 불변) 그 뒤로는 아무 일도 하지 않는다), 응답 본문은 질의를 뺀 경로를 source 로 원문 싱크(`rest:/api/v3/exchangeInfo`). 실패 시 직전 목록 유지 + 경고.
 - 심볼 집합 계약은 커넥터 자신이 구현한다 — `refresh(client) -> int`(exchangeInfo 1회, 실패는 거래소 예외), `bases() -> set[str]`, `set_universe(bases)`. base↔symbol 은 exchangeInfo 의 `baseAsset`→`symbol` 맵 하나이고, 한 base 에 USDT 심볼이 둘 이상이면 처음 것을 쓴다. 우주 base 중 맵에 없는 것은 구독 대상이 아니다.
 - 구독 대상 = 001 의 마켓 우주 심볼. 001 의 우주 갱신(기동·매초·`/refresh`)이 우주를 확정할 때마다 `set_universe(bases)` 를 부르고, 커넥터는 그 자리에서 빠진 심볼의 행을 메모리에서 지운 뒤 재조정을 깨운다. 재조정은 연결된 샤드마다 원하는 구독과 실제 구독의 차이만 보낸다 — 새 심볼은 SUBSCRIBE, 빠진 심볼은 UNSUBSCRIBE. 실제 구독 집합은 **소켓에 묶인다** — 소켓이 바뀌면 빈 집합에서 시작해 연결 직후 배정 전체를 구독하고, 보내는 도중 소켓이 바뀐 재조정은 결과를 남기지 않는다(죽은 소켓에 보낸 구독을 새 소켓 것으로 세면 새 소켓은 차이가 없다고 보고 아무것도 구독하지 않는다). `set_universe` 가 깨우지 않아도 **60초마다** 한 번 돈다(재연결 뒤 등 어긋남을 맞춘다). 기동 직후 우주가 비어 있으면 구독이 없다 — 배정 심볼이 0 인 샤드는 연결하지 않고 배정이 생길 때까지 기다린다.
 - **3 샤드**(소켓 3개). 배정은 **심볼 문자열의 안정 해시(crc32) % 3** — 상장·상폐가 나머지 심볼의 배정을 흔들지 않고 재기동해도 같다. 한 소켓이 죽어도 1/3 만 잃고, 24시간 강제 종료가 샤드마다 다른 시각에 걸린다. 심볼의 두 스트림은 같은 샤드에 둔다. 샤드당 ≈ 200 스트림(한도 1,024).
@@ -60,6 +60,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 - depth20 메시지 → 행의 `asks`/`bids` 가 float 20단계, `asks` 오름차순·`bids` 내림차순, `updated_at` 갱신. 누적 1,000,000 USDT 에서 잘리고 첫 단계가 넘어도 1단계는 남는다.
 - miniTicker 메시지 → `price`·`price_timestamp`. depth 전에 오면 보류, depth 뒤에 실린다. 체결가 없으면 mid.
 - `exchangeInfo` 에서 `TRADING`·`USDT` 만 심볼 집합에 든다. 우주 밖 심볼 메시지는 버려진다.
+- `exchangeInfo` 요청 URL 에 `showPermissionSets=false`·`symbolStatus=TRADING` 이 붙고, 원문 싱크 source 는 질의 없는 `rest:/api/v3/exchangeInfo` 그대로다 — `test_exchange_info_request_asks_for_the_slim_body`
 - 심볼 300개 → 3 샤드에 분산, 같은 심볼은 항상 같은 샤드(서브프로세스 2개로 해시 안정성 확인), 두 스트림이 같은 샤드. 추가·삭제가 나머지 배정을 안 바꾼다.
 - SUBSCRIBE 한 메시지 ≤ 100 스트림, 초당 ≤ 4 메시지. 재조정: 새 심볼 구독·빠진 심볼 해지·행 삭제. 같은 우주를 다시 받으면(매초) 보내는 것도 지우는 것도 없다. 재조정을 보내는 도중 `!serverShutdown` 으로 재연결되면 새 소켓에 배정 전체를 구독하고 `subscribed` 는 새 소켓 기준이다.
 - `connected_since` 는 첫 SUBSCRIBE 묶음을 다 보낸 시각이고 정체 30초는 거기서부터 센다(보내는 동안은 소켓이 열린 시각).

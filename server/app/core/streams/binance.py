@@ -40,6 +40,10 @@ HANDSHAKE_SOURCE = (
 )
 REST_URL = "https://api.binance.com"
 EXCHANGE_INFO_PATH = "/api/v3/exchangeInfo"
+# 응답을 줄이는 질의 — 커넥터가 어차피 거르는 조건이라 심볼 집합은 같다(TRADING·USDT 487개 동일).
+# 본문 17.5MB → 2.5MB, 매초 파싱+원문 기록이 EC2 코어에서 505ms → 88ms 다 (§3.3).
+EXCHANGE_INFO_QUERY = "?showPermissionSets=false&symbolStatus=TRADING"
+EXCHANGE_INFO_URL = REST_URL + EXCHANGE_INFO_PATH + EXCHANGE_INFO_QUERY
 SYMBOLS_KEY = "symbols:all"  # 매초 오는 exchangeInfo 본문의 원문 싱크 key — 분당 마지막 1건 (001 §3.7)
 _BODY_LIMIT = 500  # 핸드셰이크 거부 응답 본문 상한 — 001 §3.1 과 같은 500자
 
@@ -137,7 +141,7 @@ class BinanceStream:
 
     async def refresh(self, client: httpx.AsyncClient) -> int:
         """exchangeInfo 1회 → TRADING·USDT 심볼 맵. 응답 본문은 해석 전에 원문 싱크로(`symbols:all`)."""
-        url = REST_URL + EXCHANGE_INFO_PATH
+        url = EXCHANGE_INFO_URL
         try:
             resp = await client.get(url)
         except httpx.TimeoutException as exc:

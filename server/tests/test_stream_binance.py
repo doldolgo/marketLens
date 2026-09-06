@@ -20,6 +20,8 @@ from app.core.live_store import LiveStore
 from app.core.streams.binance import (
     CONTROL_INTERVAL,
     EXCHANGE_INFO_PATH,
+    EXCHANGE_INFO_QUERY,
+    EXCHANGE_INFO_URL,
     PARAMS_PER_MESSAGE,
     REST_URL,
     SHARDS,
@@ -274,6 +276,33 @@ async def test_exchange_info_keeps_only_trading_usdt_symbols() -> None:
     assert json.loads(entry[3]) == body
 
 
+async def test_exchange_info_request_asks_for_the_slim_body() -> None:
+    # 전체 응답은 17.5MB 라 매초 파싱+원문 기록이 EC2 코어의 절반을 먹는다 — 거르는 조건을
+    # 질의로 넘겨 2.5MB 로 줄인다(심볼 집합은 같다). 원문 싱크 source 는 질의 없는 경로 그대로 (§3.3)
+    seen: list[httpx.URL] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url)
+        return httpx.Response(200, json=exchange_info(["BTCUSDT"]))
+
+    store, sink = store_with_universe({"BTC"})
+    raw = RawLog()
+    stream = BinanceStream(store=store, sink=sink, record=raw, clock=Clock(T0))
+    await stream.refresh(_client(handler))
+
+    [url] = seen
+    assert (
+        str(url)
+        == EXCHANGE_INFO_URL
+        == REST_URL + EXCHANGE_INFO_PATH + EXCHANGE_INFO_QUERY
+    )
+    assert dict(url.params) == {
+        "showPermissionSets": "false",
+        "symbolStatus": "TRADING",
+    }
+    assert raw.entries[0][1] == f"rest:{EXCHANGE_INFO_PATH}" == REST_SOURCE
+
+
 @pytest.mark.parametrize(
     ("status", "kind"),
     [
@@ -304,7 +333,7 @@ async def test_exchange_info_non_200_is_classified_by_binance_rule(
         7,
     )
     assert exc.body is not None and len(exc.body) == 500
-    assert exc.url == REST_URL + EXCHANGE_INFO_PATH
+    assert exc.url == EXCHANGE_INFO_URL
     assert stream.bases() == set()  # 실패 시 직전 목록 유지
 
 
@@ -322,7 +351,7 @@ async def test_exchange_info_connect_error_is_network() -> None:
         "network",
         None,
         None,
-        REST_URL + EXCHANGE_INFO_PATH,
+        EXCHANGE_INFO_URL,
     )
     assert stream.bases() == set()
 
@@ -348,7 +377,7 @@ async def test_exchange_info_timeout_and_bad_json() -> None:
     assert (info.value.kind, info.value.http_status, info.value.url) == (
         "timeout",
         504,
-        REST_URL + EXCHANGE_INFO_PATH,
+        EXCHANGE_INFO_URL,
     )
     with pytest.raises(ExchangeApiError) as bad:
         await stream.refresh(_client(lambda r: httpx.Response(200, text="<html>")))

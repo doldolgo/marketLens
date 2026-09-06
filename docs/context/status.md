@@ -18,7 +18,7 @@
 | tick-store | 틱 인계 큐(600, 종료 시 비우기 5초 상한) → Redis Stream `ticks` → 60초 flusher(1,000건 페이지 단위로 쓰고 지움) → Influx `premium`·`dw_fail`(멱등), spark 30분 링버퍼·기동 복원 | - | Redis·Influx 불달이어도 앱은 뜬다. 실서버(EC2) 수동 확인은 대기 |
 | raw-archive | 거래소 원문 S3 적재 — 시세 프레임은 심볼·종류별, 매초 마켓 목록 응답은 거래소별 분당 마지막 1건, 그 외 전량(거래소·분마다 객체 1개 `…HHMM00Z.jsonl.gz`), 매초 닫기 회차 + 업로드 워커(실패 재시도·256MB 상한) | - | 읽기 API·재생 도구 없음, lifecycle 은 사람 몫. `S3_BUCKET` 없으면 비활성. EC2 에서 객체 적재·1분 객체 크기 실측 대기 |
 | health | /health/collect·틱 판정(연결·30초 무수신·샤드) → 실패 구간 추적·collect_fail 쓰기/복원 | 실데이터 탭·5초 폴링·KPI 수집 상태 | 백오프는 013. EC2 에서 차단·재기동 복원 수동 확인 대기 |
-| binance-stream | WS 3샤드 depth20+miniTicker·exchangeInfo 매초·샤드 단위 정체 판정 | - | 해외 최대 20단계 |
+| binance-stream | WS 3샤드 depth20+miniTicker·exchangeInfo 매초(슬림 질의)·샤드 단위 정체 판정 | - | 해외 최대 20단계 |
 
 ## 알려진 빚
 - (001) `server/build/`(setuptools 산출물 76파일)와 `server/marketlens_server.egg-info/` 가 git 에 추적돼 있다 — `ruff check .` 가 이 사본(76파일)도 검사한다. 별도 chore 로 지울 것. venv 의 패키지는 editable 설치만 허용한다(dev-setup.md) — 비-editable 사본이 남아 있으면 `server/` 밖 cwd 에서 옛 모듈을 import 한다.
