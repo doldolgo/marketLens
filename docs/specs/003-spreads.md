@@ -1,6 +1,6 @@
 # 003 — spreads
 
-상태: IN_PROGRESS | 의존: 001(collect — 저장소·행·스트림 상태·즉시 갱신 트리거), 002(web-shell — 셸·공유 타입), 012(binance-stream — 해외 20단계 호가)
+상태: DONE | 의존: 001(collect — 저장소·행·스트림 상태·즉시 갱신 트리거), 002(web-shell — 셸·공유 타입), 012(binance-stream — 해외 20단계 호가)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -43,7 +43,7 @@
 - `received_at`(마지막 틱 시각, epoch 초)과 009 가 게시하는 spark 맵 `(dom, fx, base) → number[]`.
 
 001 이 하는 일:
-- 거래소 WebSocket 메시지마다 그 `(exchange, base)` 행만 교체한다 — 거래소 단위 통째 교체는 없다. 상장·상폐는 10분마다 갱신되는 마켓 우주가 반영한다(우주 밖 행은 없다).
+- 거래소 WebSocket 메시지마다 그 `(exchange, base)` 행만 교체한다 — 거래소 단위 통째 교체는 없다. 상장·상폐는 **매초** 갱신되는 마켓 우주가 반영한다(우주 밖 행은 없다 — 목록에서 빠진 코인의 행은 1초 안에 사라진다).
 - 스트림이 끊기면 행은 그대로 남고 `last_message_at` 이 멈춘다 — 이 값으로 age 가 자란다.
 - USDT 시세는 `KRW-USDT` 호가 메시지마다 거래소별로 덮어쓴다. 메시지가 없으면 직전 값이 남는다.
 - 매초 틱을 만들고 `received_at` 을 갱신한다.
@@ -179,49 +179,53 @@ FE 수동 확인:
 - 비교 해외 거래소에서 Binance 를 풀면 표가 비고 "조건에 맞는 코인이 없습니다" 가 보인다. `모두` 로 되돌리면 복구된다.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
-재구축 검증 세션(2026-09-06). 다섯 명령 모두 통과해야 커밋한다.
+행 자체 300초 미갱신 규칙(§3.2-4) 세션(2026-09-06). 다섯 명령 모두 통과한 뒤 커밋했다.
 ```bash
 cd server && .venv/bin/ruff check .            # All checks passed!
-cd server && .venv/bin/ruff format .           # 181 files left unchanged
-cd server && .venv/bin/python -m pytest -q     # 417 passed, 1 warning in 4.73s
-cd web && npm run lint                         # oxlint src — 출력 없음(error 0)
-cd web && npm run build                        # tsc -b && vite build — ✓ built in 293ms
+cd server && .venv/bin/ruff format .           # 1 file reformatted, 182 files left unchanged (테스트 파일 줄바꿈)
+cd server && .venv/bin/python -m pytest -q     # 467 passed, 1 warning in 4.78s (이 세션 전 465)
+cd web && npm run lint                         # oxlint src — 오류 0 (웹은 이번 세션에 손대지 않았다)
+cd web && npm run build                        # tsc -b && vite build — ✓ built in 297ms
 ```
-§4 의 BE 항목마다 `server/app/features/spreads/tests/` 에 최소 1개가 있다(§7 파일 목록).
+§4 의 BE 항목마다 `server/app/features/spreads/tests/` 에 최소 1개가 있다(§7 파일 목록). 이 세션이 추가·수정한 것: `test_stale_ok_and_age_follow_older_stream_not_row`(행 299초 전 + 스트림 6초/0.5초 → stale/ok, age 는 스트림 기준)·`test_row_unchanged_for_300s_is_stale_even_with_live_stream[upbit|binance]`(스트림 0.5초 전 + 그 코인 행만 301초 전 → `age ≥ 300`·stale, 같은 스트림의 다른 코인 행은 ok).
 
-기동 스모크(실거래소 없이 — 이 망은 거래소 도메인을 막는다): `.venv/bin/python -m uvicorn app.main:app --port 8041` 로 띄워 `GET /health` → `{"status":"ok","version":"0.1.0"}`, `GET /spreads` → 404 `market_data_not_found`(detail `{"exchange":"upbit"}`, §3.2-1 문구 그대로), `GET /spreads?notional=0`·`?notional=abc` → 422 `{"detail":[…]}`. 확인 후 프로세스를 죽였다.
+기동 스모크(실거래소 없이 — 이 망은 거래소 도메인을 막는다): `.venv/bin/python -m uvicorn app.main:app --port 8044` 로 띄워 `GET /health` → `{"status":"ok","version":"0.1.0"}`, `GET /spreads` → 404 `market_data_not_found`(detail `{"exchange":"upbit"}`, §3.2-1 문구 그대로), `GET /spreads?notional=0`·`?notional=abc` → 422 `{"detail":[…]}`. 확인 후 프로세스를 죽였다(포트 비어 있음 확인).
 
-FE 육안 확인은 `/spreads` 계약을 그대로 흉내낸 로컬 스텁(17키 행 6개 — ok 4·stale 1·fail 1, `notional` 에 비례해 `slipFwd` 가 커지는 값)을 `:8041` 에 띄우고 `VITE_API_BASE=http://localhost:8041 npm run dev` 로 봤다. 확인한 것: KPI 환율 `₩1,392.4`; 입출금 5필드를 전부 null 로 준 스텁이라 입출금 태그 전부 `?` 점선, 네트워크 `–`(빗썸 실값 셀의 실선·망 코드 표시는 아래 EC2 항목); 임계 1.5 이상(BTC·ETH)만 배경 강조·심볼 점; `슬 −0.08%p` 배지; 규모를 `$500k` 로 바꾸면 **다음 폴링부터** `?notional=500000` 이 나가고(스텁 요청 로그로 확인) 배지가 `−4.00%p` 로 커지며 김프가 `+2.23% → −1.69%` 로 작아지고 국내가 `₩100,000,000` 는 그대로; 역프 기준 토글 시 화살표가 `업비트 → Binance` 로 뒤집히고 값이 바뀜; Binance 체크 해제 → `조건에 맞는 코인이 없습니다…`(0 / 0), `모두` 로 복구; 행 클릭 → 기록 탭에 BTC 선택; 스텁을 죽이면 표는 남고 5초 뒤 전 행이 흐려지며 다시 띄우면 선명해진다.
+FE 는 이번 세션에 바꾸지 않았다 — 행 자체 300초 규칙은 `age` 값으로만 드러나고 FE 의 stale 규칙(`age ≥ 5`, §3.5)이 그대로 잡는다. FE 육안 확인(KPI 환율·입출금 태그·강조·`슬` 배지·규모 세그먼트·역프 토글·행 클릭 → 기록 탭·스텁을 죽이면 5초 뒤 흐려짐)은 직전 세션의 `/spreads` 스텁(`:8041`, 17키 행 6개) 결과가 유효하다.
 
-§4 "실서버 확인"(행 수 > 100·`rate > 1000`·`POST /refresh` 의 `totalSaved > 100`·`REFRESH_TOKEN` 401·`?notional=500000` 비교·첫 행 `netDom`)과 FE 의 빗썸 셀 실값 표시는 실거래소 수집이 필요해 **EC2 에서 확인 필요** — 이 망에서는 못 돌린다(§7 남은 빚).
+§4 "실서버 확인"(행 수 > 100·`rate > 1000`·`POST /refresh` 의 `totalSaved > 100`·`REFRESH_TOKEN` 401·`?notional=500000` 비교·첫 행 `netDom`)과 FE 의 빗썸 셀 실값 표시, 그리고 거래 정지 코인의 행이 실제로 300초 뒤 흐려지는지는 실거래소 수집이 필요해 **EC2 에서 확인 필요** — 이 망에서는 못 돌린다(§7 남은 빚).
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — spreads 행의 server 칸에 `notional` 규모로 호가를 걷어 슬리피지를 차감한다는 것, web 칸에 규모 세그먼트, 비고에 행 17키. 알려진 빚에 저장 계층(원값)과 응답(순값)의 차이. **항상 포함.**
-- `CLAUDE.md` — 스펙 인덱스 003 행 범위에 서버 슬리피지. **항상 포함.**
-- `docs/specs/002-web-shell.md` — §3.4 `SpreadRow` 계약에서 `liqDom`·`liqFx` 를 빼고 `slipFwd`·`slipRev`·`krw` 를 넣는다. §3.5-3·§4-11·§6 은 "spread 탭은 003 이 채운다, history 탭은 005 의 mock 탭(실데이터 연결은 후속 스펙)" 로 — 셸에 placeholder 탭은 없다.
-- `docs/specs/004-analysis.md` — walk 가 `core/orderbook.py` 로 이관된 것을 반영(§2·§3.1).
-- `docs/specs/009-tick-store.md` — 복사해 둔 원값 수식·조합 자격.
-- `docs/context/dev-setup.md` — 검증용 스모크를 §4 실서버 기준으로 교체: 최상위 `rate > 1000`·행 수 > 100·행 키 정확히 17개(키 순서는 §3.2 응답 예시와 동일)·`?notional=` 로 규모를 바꾸면 `slipFwd` 가 커지는지.
-- `docs/context/architecture.md` — "현재 구조" 절에 spreads 항목: `core/premium.py`(`premium_percent`), `features/spreads/`(service 순수 계산·router 2 엔드포인트·models), `/refresh` 응답 모양(`snapshots[]` 거래소당 1항목 등), web `features/spreads/`(1초 폴링·확장 타입). FE 데이터 흐름 문구는 002 §6 에서 이미 반영됨 — 확인만.
+- `docs/context/status.md` — spreads 행의 server 칸: `notional` 규모로 호가를 걷어 슬리피지를 차감하고, `age`·`status` 는 거래소 스트림 수신 시각 기준이되 행 자체 300초 미갱신이면 그 행의 경과 초라는 것. web 칸에 규모 세그먼트, 비고에 행 17키. 알려진 빚에 저장 계층(원값)과 응답(순값)의 차이. **항상 포함.**
+- `CLAUDE.md` — 스펙 인덱스 003 행 상태 DONE, 범위에 서버 슬리피지. "지금 IN_PROGRESS 인 것" 문장에서 003 을 뺀다. **항상 포함.**
+- `docs/context/architecture.md` — 데이터 흐름(BE) 의 `age`·`status` 문구(스트림 기준 + 행 자체 300초 예외)와 "현재 구조" 절의 spreads 항목(`age` 규칙에 행 자체 300초 예외).
+- `docs/specs/002-web-shell.md` — §3.4 `SpreadRow` 계약(`slipFwd`·`slipRev`·`krw`), "spread 탭은 003 이 채운다, history 탭은 005 의 mock 탭" — 이미 반영됨, 확인만.
+- `docs/specs/004-analysis.md` — walk 가 `core/orderbook.py` 로 이관된 것(§2·§3.1) — 이미 반영됨, 확인만.
+- `docs/specs/009-tick-store.md` — 복사해 둔 원값 수식·조합 자격 — 이미 반영됨, 확인만.
+- `docs/context/dev-setup.md` — 검증용 스모크(`rate > 1000`·행 수 > 100·행 키 17개·`?notional=` 비교) — 이미 반영됨, 확인만.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-001(WebSocket 수집·틱)·012(바이낸스 스트림) 위에서 돌아가는 현재 구현의 보고다.
+001(WebSocket 수집·매초 마켓 우주·틱)·012(바이낸스 스트림) 위에서 돌아가는 현재 구현의 보고다. 이번 세션은 §3.2-4 의 **행 자체 미갱신 300초** 예외를 구현해 스펙을 DONE 으로 되돌렸다.
 - 만든 것 (파일 목록):
   - `server/app/core/premium.py`(`premium_percent`)·`server/app/core/orderbook.py`(호가 걷기 — 004 와 공용, 전부 동기).
-  - `server/app/features/spreads/service.py` — 표 계산(걷기 2회를 수량으로 연결·순값·차감폭·`notional` 범위 상수), 입출금 5필드(006 §3.7), 스트림 기준 `age`, `/refresh` 응답 조립.
+  - `server/app/features/spreads/service.py` — 표 계산(걷기 2회를 수량으로 연결·순값·차감폭·`notional` 범위 상수), 입출금 5필드(006 §3.7), `age`(스트림 `last_message_at` 기준 + 행 `updated_at` 300초 이상이면 그 행의 경과 초 — 상수 `ROW_STALE_SEC = 300.0`), `/refresh` 응답 조립.
   - `server/app/features/spreads/models.py` — 행 17키·최상위 6키(`notional` 포함)·`/refresh` 응답. 행은 어디에도 저장되지 않는다.
   - `server/app/features/spreads/router.py` — `GET /spreads`(`notional` 은 FastAPI `Query(ge, le)` → 422)·`POST /refresh`(토큰 타이밍 안전 비교).
-  - `server/app/features/spreads/tests/` — `helpers.py`(저장소 시드·lifespan 없는 앱), `test_spreads_api.py`(404·페어·정렬·17키·age), `test_slippage.py`(§4 "슬리피지" 전 항목 + 저장 원값과의 관계 — core 의 `build_tick` 으로 같은 저장소의 틱을 만들어 `fwd + slipFwd` 와 비교), `test_refresh_api.py`, `test_spreads_service.py`, `test_usdt_staleness.py`(008), `test_wallet_fields.py`(006 §3.7 의 5케이스).
-  - `web/src/shared/types.ts`(002 §3.4 계약)·`web/src/features/spreads/{types.ts,api.ts,Tab.tsx}`·`web/src/App.tsx`(첫 탭·규모 상태·행 클릭 → 기록 탭).
+  - `server/app/features/spreads/tests/` — `helpers.py`(저장소 시드·lifespan 없는 앱), `test_spreads_api.py`(404·페어·정렬·17키·age — 스트림 기준 299초 경계와 행 자체 301초 양쪽), `test_slippage.py`(§4 "슬리피지" 전 항목 + 저장 원값과의 관계 — core 의 `build_tick` 으로 같은 저장소의 틱을 만들어 `fwd + slipFwd` 와 비교), `test_refresh_api.py`, `test_spreads_service.py`, `test_usdt_staleness.py`(008), `test_wallet_fields.py`(006 §3.7 의 5케이스).
+  - `web/src/shared/types.ts`(002 §3.4 계약)·`web/src/features/spreads/{types.ts,api.ts,Tab.tsx}`·`web/src/App.tsx`(첫 탭·규모 상태·행 클릭 → 기록 탭). 이번 세션 변경 없음.
 - 추측한 지점 (묻지 않고 정한 것 — 전부 본문에 반영):
+  - **행 자체 규칙과 스트림 규칙의 결합**은 `max` 다 — 행 `updated_at` 이 300초 이상이면 `age = max(스트림 경과, 행 경과)`, 아니면 스트림 경과. 스펙이 "그 행의 실제 경과 초(≥300)" 라고만 해서, 스트림이 그보다 더 오래 끊긴 경우(둘 다 300 이상)에 작은 쪽을 내지 않도록 오래된 쪽을 택했다 — `age` 는 어느 규칙에서든 "가장 낡은 근거" 라는 §3.2-4 의 뜻을 따른다. 행 두 개(국내·해외) 사이의 `max` 는 원래 규칙 그대로다.
+  - **행의 `updated_at` 은 항상 있다고 단언**한다(스트림 수신 시각과 같은 방식의 `assert`) — 행은 저장소의 `put_row` 로만 생기고 그 함수가 갱신 시각을 반드시 채운다. None 분기를 두면 스펙에 없는 동작이 생긴다.
   - **최우선 호가의 잔량 0 도 `fail`**(§3.2-4·§4). 가격만 검사하면 잔량 0 → 평균가 0 → 순값의 0 나눗셈으로 500 이 난다.
   - **최상위 키 순서**는 §3.2 예시대로 `rate notional rows warnings dataReceivedAt fetchedAt`.
   - **체결 규모 선택값은 셸 상태**(§3.4) — 탭의 분절 버튼과 폴링 URL 이 같은 값을 봐야 한다.
   - **원값 비교 테스트의 자리** — 009 의 `tests/test_tick_store.py` 가 같은 관계를 보지만 §4 항목마다 이 기능 폴더에 최소 1개를 두는 규칙(conventions.md)대로 `test_slippage.py` 에도 둔다. 저장 계층 코드 대신 core 의 `build_tick` 을 쓰는 이유는 Influx·Redis 없이 "같은 저장소로 만든 점"을 얻는 유일한 공개 경로이기 때문이다.
   - **20단계 걷기 검증**은 20단계 시드의 `fwd` 를 시드에서 손으로 계산한 값과 같은지 보고, 19단계로 자른 시드와 값이 다른지 본다 — "slipFwd > 0" 만으로는 앞 10단계만 걷는 회귀를 못 잡는다.
   - **FE 육안 확인은 스텁으로** — 이 망은 거래소 도메인을 막는다(dev-setup.md 로컬 메모). 스텁은 레포 밖(스크래치)에 두고 커밋하지 않는다.
+- 실행 중 함께 고친 절:
+  - §3.1 "001 이 하는 일" — 마켓 우주 갱신 주기를 001 §3.2 와 같은 **매초**로(001 계약 복사본의 어긋남).
 - 남은 빚:
-  - §4 "실서버 확인" 전부와 FE 의 빗썸 셀 실값 표시 — **EC2 에서 확인 필요**(행 수 > 100·`rate > 1000`·`totalSaved > 100`·`REFRESH_TOKEN` 401·`?notional=500000` 비교·첫 행 `netDom`).
+  - §4 "실서버 확인" 전부와 FE 의 빗썸 셀 실값 표시, 거래 정지 코인 행이 300초 뒤 실제로 흐려지는지 — **EC2 에서 확인 필요**(행 수 > 100·`rate > 1000`·`totalSaved > 100`·`REFRESH_TOKEN` 401·`?notional=500000` 비교·첫 행 `netDom`).
   - `core/orderbook.py` 단독 단위 테스트 없음(004 §7 이 남긴 빚 그대로). 검증은 `/spreads`·`/slippage` HTTP 응답을 통해서만.
   - `server/build/lib/`(76파일)·`marketlens_server.egg-info/` 가 git 에 추적돼 있고 `ruff check .` 가 그 사본까지 검사한다(status.md 알려진 빚 001). 이 스펙 범위 밖이라 손대지 않는다.
   - 스파크라인 렌더는 후속(status.md 비고).
