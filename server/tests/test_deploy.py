@@ -4,6 +4,7 @@ Docker 가 없는 CI 에서 도는 유일한 회귀 장치다. 컨테이너를 �
 Docker 가 있는 로컬·EC2 에서 사람이 돈다. 여기서는 설정 파일이 §4 의 조건을 말하는지만 본다.
 """
 
+import logging
 from pathlib import Path
 
 import yaml
@@ -135,6 +136,20 @@ def test_nginx_cache_rules_for_index_and_hashed_assets() -> None:
     assert '"public, max-age=31536000, immutable"' in assets_block
     # `always` 가 붙으면 404 에도 1년 immutable 이 실려 되돌릴 수 없게 캐시된다
     assert "always" not in assets_block
+
+
+def test_app_logging_puts_marketlens_info_on_a_timestamped_handler() -> None:
+    """설정이 없으면 lastResort 가 WARNING 이상만, 시각 없이 낸다 — 복구 신호가 안 보인다 (007 §3)."""
+    create_app()
+    create_app()  # 두 번 만들어도 handler 는 하나여야 한다(로그 중복 금지)
+    root = logging.getLogger()
+    mine = [h for h in root.handlers if getattr(h, "_marketlens", False)]
+    assert len(mine) == 1
+    assert "%(asctime)s" in (mine[0].formatter._fmt or "")
+    assert logging.getLogger("marketlens").getEffectiveLevel() == logging.INFO
+    # 라이브러리 INFO 는 루트의 WARNING 에 막힌다
+    assert root.level >= logging.WARNING
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
 
 
 def test_web_shell_title_is_the_smoke_string() -> None:

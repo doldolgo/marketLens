@@ -220,7 +220,27 @@ async def _http_exception_handler(
     )
 
 
+def _setup_logging() -> None:
+    """앱 로그를 타임스탬프와 함께 stderr 로 — 설정이 없으면 `logging.lastResort` 가 받아
+    WARNING 이상만, 그것도 시각 없이 나간다. 그러면 "S3 원문 업로드 재개"·"밀린 틱 n건 적재"
+    같은 복구 신호(009 §3.5·010 §3.6)가 아예 보이지 않는다.
+
+    handler 는 루트에 달되 레벨은 `marketlens` 에만 내린다 — 라이브러리 INFO(httpx 의 요청
+    한 줄 등)는 루트의 WARNING 에 막힌다. uvicorn 로거는 propagate=False 라 겹치지 않는다.
+    """
+    root = logging.getLogger()
+    if not any(getattr(h, "_marketlens", False) for h in root.handlers):
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        )
+        handler._marketlens = True  # type: ignore[attr-defined]
+        root.addHandler(handler)
+    logging.getLogger("marketlens").setLevel(logging.INFO)
+
+
 def create_app() -> FastAPI:
+    _setup_logging()
     app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=_lifespan)
     app.state.settings = get_settings()
 
