@@ -18,7 +18,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 ### 3.1 읽는 계약 (복사)
 - 001 §3.3: 행 = `(exchange, base)` 당 `quote`·`native_symbol`·`price`·`price_timestamp`·`asks`·`bids`(누적 1,000,000 USDT 도달 단계까지, 최소 1단계)·입출금 3필드(물려받음)·`updated_at`. 거래소별 스트림 상태 `{connected, last_message_at, last_error, subscribed}`.
 - 001 §3.2: 마켓 우주 = 국내 KRW base ∩ 바이낸스 USDT base. 이 스펙은 **바이낸스 USDT 현물 심볼 집합**을 제공하고, 우주의 심볼만 구독한다. 매초 갱신·`/refresh` 즉시 갱신.
-- 001 §3.7: 받은 모든 프레임과 REST 응답 본문은 원문 싱크 `record(exchange, source, received_at_ms, payload, key)` 로 넘긴다 — 행·상태 갱신 전에, `payload` 는 받은 텍스트 그대로. 시세 프레임은 `key` = `depth20:<심볼>`·`miniTicker:<심볼>`(대문자 원본 심볼), 구독 응답·`serverShutdown`·깨진 프레임·exchangeInfo 본문은 `key=None`. 010 이 `key` 로 심볼·종류별 분당 마지막 1건만 남긴다.
+- 001 §3.7: 받은 모든 프레임과 REST 응답 본문은 원문 싱크 `record(exchange, source, received_at_ms, payload, key)` 로 넘긴다 — 행·상태 갱신 전에, `payload` 는 받은 텍스트 그대로. 시세 프레임은 `key` = `depth20:<심볼>`·`miniTicker:<심볼>`(대문자 원본 심볼), 매초 반복되는 exchangeInfo 본문은 `symbols:all`, 구독 응답·`serverShutdown`·깨진 프레임·핸드셰이크 거부 본문은 `key=None`. 010 이 `key` 있는 줄을 심볼·종류별 분당 마지막 1건으로 솎는다.
 - 001 §3.8·011: 매 틱 성공/실패를 판정해 추적기에 넘긴다. 실패 종류 8종.
 
 ### 3.2 스트림
@@ -74,7 +74,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
-# All checks passed! / 183 files left unchanged / 465 passed, 1 warning in 4.9s  (2026-09-06, 매초 exchangeInfo 전환 뒤 3회 연속 통과)
+# All checks passed! / 183 files left unchanged / 468 passed, 1 warning in 4.9s  (2026-09-06, drift 검수 반영 뒤 3회 연속 통과)
 # (이 스펙의 tests/test_stream_binance.py 49개 포함)
 # 원문 항목(§4): depth20·miniTicker 프레임은 `key`(`depth20:BTCUSDT`·`miniTicker:BTCUSDT`, 맵에 없는 심볼도)와 함께 행 갱신 전에 기록되고, exchangeInfo 본문은 `symbols:all`, 구독 응답·`!serverShutdown`·핸드셰이크 거부 본문은 `key=None` — `test_every_frame_and_exchange_info_body_are_recorded_verbatim`·`test_exchange_info_keeps_only_trading_usdt_symbols`·`test_shutdown_and_unknown_symbol_frames_get_expected_keys`·`test_handshake_rejection_body_is_recorded_verbatim`
 # 우주 항목(§4): `test_rebalance_subscribes_new_unsubscribes_dropped_and_removes_rows` — 같은 우주를 다시 받으면 전송 0 (001 이 매초 넘긴다)
