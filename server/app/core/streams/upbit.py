@@ -30,6 +30,7 @@ logger = logging.getLogger("marketlens.stream.upbit")
 WS_URL = "wss://api.upbit.com/websocket/v1"
 WS_SOURCE = "ws:/websocket/v1"
 HANDSHAKE_SOURCE = "ws-handshake:/websocket/v1"  # 핸드셰이크 거부 응답 본문의 원문 싱크 source (010 §3.1)
+QUOTE_KINDS = ("orderbook", "ticker")  # 원문 싱크 key 를 붙이는 시세 프레임 종류 (§3.7)
 REST_URL = "https://api.upbit.com"
 MARKETS_PATH = "/v1/market/all"
 _BODY_LIMIT = 500  # 핸드셰이크 거부 응답 본문 상한 — 001 §3.1 과 같은 500자
@@ -270,13 +271,10 @@ class UpbitStream:
                     continue
             else:
                 text = str(raw)
-            self._record(self.id, WS_SOURCE, at, text)  # 해석보다 먼저 (§3.7)
-            try:
-                msg = json.loads(text)
-            except ValueError:
-                self.decode_failures += 1
-                continue
-            if not isinstance(msg, dict):
+            msg = _decode(text)
+            # 디코드 뒤, 행·시세·상태 갱신 전 — 받은 텍스트 그대로 + 시세 프레임이면 종류:심볼 (§3.7)
+            self._record(self.id, WS_SOURCE, at, text, _quote_key(msg))
+            if msg is None:
                 self.decode_failures += 1
                 continue
             error = msg.get("error")
@@ -322,6 +320,25 @@ class UpbitStream:
             price=float(msg["trade_price"]),
             price_timestamp=int(msg["trade_timestamp"]),
         )
+
+
+def _decode(text: str) -> dict[str, Any] | None:
+    """프레임 텍스트 → JSON 객체. 객체가 아니거나 JSON 이 아니면 None(무효 프레임)."""
+    try:
+        msg = json.loads(text)
+    except ValueError:
+        return None
+    return msg if isinstance(msg, dict) else None
+
+
+def _quote_key(msg: dict[str, Any] | None) -> str | None:
+    """원문 싱크의 `key` — 시세 프레임(`orderbook`·`ticker`)이면 `"<종류>:<code>"`, 그 밖은 None (§3.7)."""
+    if msg is None:
+        return None
+    kind, code = msg.get("type"), msg.get("code")
+    if kind in QUOTE_KINDS and isinstance(code, str):
+        return f"{kind}:{code}"
+    return None
 
 
 def _classify(exc: BaseException) -> StreamError:

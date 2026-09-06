@@ -134,7 +134,8 @@ async def test_future_trade_timestamp_value_is_corrected() -> None:
 
 
 async def test_frames_recorded_before_interpretation_and_up_not_counted() -> None:
-    frames = ['{"status":"UP"}', orderbook().encode(), "garbage"]
+    """모든 프레임이 받은 텍스트 그대로 — 시세는 `종류:심볼` key 와, 나머지는 key=None 으로 (§3.7)."""
+    frames = ['{"status":"UP"}', orderbook().encode(), ticker(), "garbage"]
     sock = FakeSocket(frames)
     stream, connector, _, raw, clock, store = build([sock])
     clock.now = T0 + 3
@@ -142,7 +143,14 @@ async def test_frames_recorded_before_interpretation_and_up_not_counted() -> Non
     assert raw.payloads("ws:/websocket/v1") == [
         '{"status":"UP"}',
         orderbook(),
+        ticker(),
         "garbage",
+    ]
+    assert raw.keys("ws:/websocket/v1") == [
+        None,
+        "orderbook:KRW-BTC",
+        "ticker:KRW-BTC",
+        None,
     ]
     assert all(e[0] == "bithumb" and e[2] == T0 + 3 for e in raw.entries)
     state = store.stream_state("bithumb")
@@ -257,6 +265,7 @@ async def test_fetch_markets_krw_filter_and_raw_record() -> None:
         _client(lambda r: httpx.Response(200, json=body))
     ) == ["KRW-BTC"]
     assert raw.entries[0][:2] == ("bithumb", "rest:/v1/market/all")
+    assert raw.entries[0][4] is None  # REST 본문은 key 없이 전량
 
 
 async def test_fetch_markets_200_with_error_body_is_failure() -> None:
@@ -299,6 +308,7 @@ async def test_handshake_rejection_body_is_recorded_verbatim() -> None:
     stream, connector, _, raw, _, _ = build([HandshakeRejected(429, body=body)])
     await run_until_exhausted(stream, connector)
     assert raw.payloads("ws-handshake:/websocket/v1") == [body.decode()]
+    assert raw.keys("ws-handshake:/websocket/v1") == [None]
     assert [e[0] for e in raw.entries if e[1].startswith("ws-handshake")] == ["bithumb"]
 
 

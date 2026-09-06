@@ -31,6 +31,10 @@ logger = logging.getLogger("marketlens.stream.binance")
 
 WS_URL = "wss://data-stream.binance.vision/stream"
 WS_SOURCE = "ws:/stream"
+QUOTE_KINDS = (
+    "depth20",
+    "miniTicker",
+)  # 원문 싱크 key 를 붙이는 시세 프레임 종류 (§3.1)
 HANDSHAKE_SOURCE = (
     "ws-handshake:/stream"  # 핸드셰이크 거부 응답 본문의 원문 싱크 source (010 §3.1)
 )
@@ -457,13 +461,10 @@ class BinanceStream:
                     continue
             else:
                 text = str(raw)
-            self._record(self.id, WS_SOURCE, at, text)  # 해석보다 먼저 (001 §3.7)
-            try:
-                msg = json.loads(text)
-            except ValueError:
-                self.decode_failures += 1
-                continue
-            if not isinstance(msg, dict):
+            msg = _decode(text)
+            # 디코드 뒤, 행·상태 갱신 전 — 받은 텍스트 그대로 + 시세 프레임이면 종류:심볼 (001 §3.7)
+            self._record(self.id, WS_SOURCE, at, text, _quote_key(msg))
+            if msg is None:
                 self.decode_failures += 1
                 continue
             if isinstance(msg.get("error"), dict):
@@ -514,6 +515,25 @@ class BinanceStream:
             price=float(data["c"]),
             price_timestamp=int(data["E"]),
         )
+
+
+def _decode(text: str) -> dict[str, Any] | None:
+    """프레임 텍스트 → JSON 객체. 객체가 아니거나 JSON 이 아니면 None(무효 프레임)."""
+    try:
+        msg = json.loads(text)
+    except ValueError:
+        return None
+    return msg if isinstance(msg, dict) else None
+
+
+def _quote_key(msg: dict[str, Any] | None) -> str | None:
+    """원문 싱크의 `key` — `<symbol>@depth20`·`<symbol>@miniTicker` 프레임이면 `"<종류>:<대문자 심볼>"` (§3.1)."""
+    if msg is None or not isinstance(msg.get("stream"), str):
+        return None
+    name, _, kind = msg["stream"].partition("@")
+    if kind in QUOTE_KINDS and name:
+        return f"{kind}:{name.upper()}"
+    return None
 
 
 def _classify(exc: BaseException, shard: int) -> StreamError:

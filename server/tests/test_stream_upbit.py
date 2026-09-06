@@ -137,13 +137,38 @@ async def test_binary_frames_are_decoded_and_usdt_feeds_rate() -> None:
 
 
 async def test_every_frame_is_recorded_verbatim_before_interpretation() -> None:
-    frames = [UP, orderbook(), '{"error":{"name":"NO_TICKET","message":"x"}}']
+    """모든 프레임이 받은 텍스트 그대로 — 시세는 `종류:심볼` key 와, 나머지는 key=None 으로 (§3.7)."""
+    frames = [
+        UP,
+        orderbook(),
+        ticker(),
+        "not json",
+        '{"type":"orderbook","code":"KRW-ETH","orderbook_units":[]}',  # 우주 밖도 key 는 붙는다
+        '{"error":{"name":"NO_TICKET","message":"x"}}',
+    ]
     sock = FakeSocket(frames)
     stream, connector, _, raw, clock, _ = build([sock])
     clock.now = T0 + 1
     await run_until_exhausted(stream, connector)
     assert raw.payloads("ws:/websocket/v1") == frames
+    assert raw.keys("ws:/websocket/v1") == [
+        None,
+        "orderbook:KRW-BTC",
+        "ticker:KRW-BTC",
+        None,
+        "orderbook:KRW-ETH",
+        None,
+    ]
     assert all(e[0] == "upbit" and e[2] == T0 + 1 for e in raw.entries)
+
+
+async def test_quote_frame_is_recorded_before_the_row_changes() -> None:
+    """기록 시점은 행 갱신 전 — 기록 함수가 본 순간 그 행은 아직 없다 (§3.7·§3.11)."""
+    stream, connector, _, _, _, store = build([FakeSocket([orderbook()])])
+    seen: list[object] = []
+    stream._record = lambda *a, **kw: seen.append(store.get("upbit", "BTC"))  # noqa: SLF001
+    await run_until_exhausted(stream, connector)
+    assert seen == [None] and store.get("upbit", "BTC") is not None
 
 
 async def test_status_up_and_invalid_frames_do_not_count_as_quotes() -> None:
@@ -381,7 +406,7 @@ async def test_fetch_markets_filters_krw_and_records_body() -> None:
     client = _client(lambda r: httpx.Response(200, json=body))
     assert await stream.fetch_markets(client) == ["KRW-BTC", "KRW-USDT"]
     [entry] = raw.entries
-    assert entry[:2] == ("upbit", "rest:/v1/market/all")
+    assert entry[:2] == ("upbit", "rest:/v1/market/all") and entry[4] is None
     assert json.loads(entry[3]) == body
 
 
@@ -455,6 +480,7 @@ async def test_handshake_rejection_body_is_recorded_verbatim() -> None:
     stream, connector, _, raw, _, _ = build([HandshakeRejected(429, body=body)])
     await run_until_exhausted(stream, connector)
     assert raw.payloads("ws-handshake:/websocket/v1") == [body.decode()]
+    assert raw.keys("ws-handshake:/websocket/v1") == [None]
     assert [e[0] for e in raw.entries if e[1].startswith("ws-handshake")] == ["upbit"]
 
 

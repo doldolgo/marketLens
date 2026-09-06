@@ -66,18 +66,27 @@ class FakeStream:
 
 
 class RawLog:
-    """원문 싱크 fake — record(exchange, source, received_at_ms, payload) 를 그대로 쌓는다."""
+    """원문 싱크 fake — record(exchange, source, received_at_ms, payload, key) 를 그대로 쌓는다."""
 
     def __init__(self) -> None:
-        self.entries: list[tuple[str, str, int, str]] = []
+        self.entries: list[tuple[str, str, int, str, str | None]] = []
 
     def __call__(
-        self, exchange: str, source: str, received_at_ms: int, payload: str
+        self,
+        exchange: str,
+        source: str,
+        received_at_ms: int,
+        payload: str,
+        key: str | None = None,
     ) -> None:
-        self.entries.append((exchange, source, received_at_ms, payload))
+        self.entries.append((exchange, source, received_at_ms, payload, key))
 
     def payloads(self, source: str | None = None) -> list[str]:
         return [e[3] for e in self.entries if source is None or e[1] == source]
+
+    def keys(self, source: str | None = None) -> list[str | None]:
+        """기록 순서대로의 `key` — 시세 프레임은 `"<종류>:<심볼>"`, 그 밖은 None (001 §3.7)."""
+        return [e[4] for e in self.entries if source is None or e[1] == source]
 
 
 class FakeInflux:

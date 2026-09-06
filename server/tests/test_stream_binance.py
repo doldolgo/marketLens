@@ -666,13 +666,34 @@ async def test_every_frame_and_exchange_info_body_are_recorded_verbatim() -> Non
     clock.now = T0 + 1
     await run_until_exhausted(stream, connector)
     assert raw.payloads(WS_SOURCE) == frames
+    assert raw.keys(WS_SOURCE) == [
+        None,
+        "depth20:BTCUSDT",
+        None,
+        "miniTicker:BTCUSDT",
+        None,
+    ]
     assert all(
         e[0] == "binance" and e[2] == T0 + 1 for e in raw.entries if e[1] == WS_SOURCE
     )
     assert json.loads(raw.payloads(REST_SOURCE)[0])["symbols"][0]["symbol"] == "BTCUSDT"
+    assert raw.keys(REST_SOURCE) == [None]
     verdict = stream.judge(T0)  # 마지막 프레임의 에러 응답 = 구독 거부
     assert verdict is not None and verdict.error is not None
     assert verdict.error.kind == "bad_request" and "샤드" in verdict.error.message
+
+
+async def test_shutdown_and_unknown_symbol_frames_get_expected_keys() -> None:
+    """`!serverShutdown` 은 key=None, 맵에 없는 심볼의 시세 프레임도 종류:심볼 key 로 기록된다 (§3.1)."""
+    second = FakeSocket([], hold=True)
+    stream, _, _, raw, _, store = await build(
+        [FakeSocket([depth("ETHUSDT"), SHUTDOWN], hold=True), second]
+    )
+    stream.start()
+    await until(second.subscribed)  # serverShutdown 뒤 재연결까지
+    await stream.aclose()
+    assert raw.keys(WS_SOURCE) == ["depth20:ETHUSDT", None]
+    assert store.get("binance", "ETH") is None
 
 
 async def test_acks_and_invalid_frames_do_not_count_as_quotes() -> None:
@@ -883,6 +904,7 @@ async def test_handshake_rejection_body_is_recorded_verbatim() -> None:
     )
     await run_until_exhausted(stream, connector)
     assert raw.payloads("ws-handshake:/stream") == [body.decode()]
+    assert raw.keys("ws-handshake:/stream") == [None]
     assert [e[0] for e in raw.entries if e[1].startswith("ws-handshake")] == ["binance"]
 
 
