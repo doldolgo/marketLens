@@ -80,7 +80,7 @@
    - **호가 소진**: 매수측이 저장 단계를 다 먹고도 규모가 남으면 **실제 체결된 만큼**의 평균가로 순값을 낸다(요청 규모를 채운 척하지 않는다). **매도측이 소진돼 못 판 수량이 있으면 판 수량만큼 매수측을 되맞춘다**(004 §3.2·§3.3 과 같은 규칙) — 못 판 코인을 0원으로 치면 −50% 대 쓰레기 값이 나오기 때문이다. `status` 는 바뀌지 않는다. 소진 여부를 행에 싣지 않는 이유는 키가 늘고 FE 가 쓰지 않기 때문이다 — 대신 §4 가 "같은 호가에서 규모를 키우면 slip 이 줄지 않는다"를 보장한다.
    - `krw` = `dom_bid.price` — 이 행 국내 거래소의 최우선 매수호가(KRW). 국내 시세 자체라 환율·슬리피지와 무관하다 — FE 가 환산하지 않고 그대로 표시한다.
    - `usd` = 해외 스냅샷의 마지막 체결가. `spark` = fwd 추이(009 가 채운다).
-   - `age` = 현재 시각 − 양측 **거래소 스트림의 마지막 시세 수신 시각**(`last_message_at`) 중 오래된 쪽. 초 단위, 0 미만이면 0. 행 자체의 갱신 시각이 아니다 — 조용한 코인은 호가가 안 바뀌어 메시지가 안 오지만 그 호가는 여전히 현재값이고, 낡음은 스트림이 끊긴 것뿐이다. **예외 — 행 자체 미갱신 300초**: 두 행 중 어느 쪽이든 `updated_at` 이 현재보다 **300초** 이상 오래됐으면 `age` 는 그 행의 실제 경과 초(≥300)다. 상장은 돼 있는데 거래소가 그 코인 프레임을 보내지 않는 상태(거래 정지·심볼 장애)를 FE 의 stale 규칙(`age ≥ 5`)이 그대로 잡게 하기 위해서다. 300초는 코드 상수다.
+   - `age` = 현재 시각 − 양측 **거래소 스트림의 마지막 시세 수신 시각**(`last_message_at`) 중 오래된 쪽. 초 단위, 0 미만이면 0. 행 자체의 갱신 시각이 아니다 — 조용한 코인은 호가가 안 바뀌어 메시지가 안 오지만 그 호가는 여전히 현재값이고, 낡음은 스트림이 끊긴 것뿐이다. **예외 — 행 자체 미갱신 300초**: 두 행 중 어느 쪽이든 `updated_at` 이 현재보다 **300초** 이상 오래됐으면 `age` 는 그 행의 실제 경과 초(≥300)다(스트림 경과가 그보다 크면 스트림 경과 — 둘 중 오래된 쪽). 상장은 돼 있는데 거래소가 그 코인 프레임을 보내지 않는 상태(거래 정지·심볼 장애)를 FE 의 stale 규칙(`age ≥ 5`)이 그대로 잡게 하기 위해서다. 300초는 코드 상수다.
    - `status`: `age ≥ 5.0` → `stale`, 아니면 `ok`. 단 최우선 호가 4개 중 하나라도 비었거나, 그 **가격 또는 잔량**이 0 이하면 `fail` 이고 `fwd` `rev` `slipFwd` `slipRev` `krw` `usd` 는 전부 0. 가격 0 을 통과시키면 rev 의 분모가 0 이 되고, 잔량 0 을 통과시키면 걷어도 체결 수량이 0 이라 평균가가 0 이 되어 순값의 분모가 0 이 된다. **fail 이어도 입출금 값과 age 는 싣는다.** `fail` 이 아니면 최우선 4호가의 가격·잔량이 모두 양수이므로 걷기의 체결 수량이 0 이 되는 경우는 없다.
    - 입출금 5필드(`netDom depDom wdDom depFx wdFx`): **006 §3.7 의 망 판정**으로 채운다. 국내 망 정보가 없으면(키 없음 등) 코인 단위 값·`netDom` null 로 강등된다 — 그래서 키 없이 기동해도 5키는 항상 존재한다.
 5. 행 정렬: `(sym, dom, fx)` 오름차순 고정.
@@ -145,6 +145,7 @@ BE (네트워크 없음 — 저장소에 직접 시드):
 - 호가가 빈 스냅샷은 `status=fail` 이고 숫자 필드가 0, 입출금 값은 유지된다. 최우선 호가의 **잔량이 0** 인 스냅샷도 같다.
 - 거래소 스트림의 마지막 수신이 6초 전이면 `stale`, 0.5초 전이면 `ok`, age 는 두 거래소 중 오래된 쪽 기준이다. 행 자체의 갱신 시각이 299초 전이어도 스트림이 살아 있으면 `ok` 다.
 - 스트림은 살아 있는데 행의 `updated_at` 이 301초 전이면 `age ≥ 300` 이고 `stale` 이다(국내 행·해외 행 어느 쪽이든). 다른 코인 행은 `ok` 그대로.
+- 스트림 마지막 수신이 400초 전이고 행의 `updated_at` 이 301초 전이면 `age ≈ 400`(둘 중 오래된 쪽)이다.
 - `krw` 가 그 행 국내 거래소의 최우선 매수호가와 같다.
 
 **슬리피지 (이 스펙의 핵심)**
@@ -179,15 +180,15 @@ FE 수동 확인:
 - 비교 해외 거래소에서 Binance 를 풀면 표가 비고 "조건에 맞는 코인이 없습니다" 가 보인다. `모두` 로 되돌리면 복구된다.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
-행 자체 300초 미갱신 규칙(§3.2-4) 세션(2026-09-06). 다섯 명령 모두 통과한 뒤 커밋했다.
+행 자체 300초 미갱신 규칙(§3.2-4) 검수 반영 세션(2026-09-06). 다섯 명령 모두 통과한 뒤 커밋했다.
 ```bash
 cd server && .venv/bin/ruff check .            # All checks passed!
-cd server && .venv/bin/ruff format .           # 1 file reformatted, 182 files left unchanged (테스트 파일 줄바꿈)
-cd server && .venv/bin/python -m pytest -q     # 467 passed, 1 warning in 4.78s (이 세션 전 465)
+cd server && .venv/bin/ruff format .           # 183 files left unchanged
+cd server && .venv/bin/python -m pytest -q     # 468 passed, 1 warning in 4.87s
 cd web && npm run lint                         # oxlint src — 오류 0 (웹은 이번 세션에 손대지 않았다)
-cd web && npm run build                        # tsc -b && vite build — ✓ built in 297ms
+cd web && npm run build                        # tsc -b && vite build — ✓ built in 289ms
 ```
-§4 의 BE 항목마다 `server/app/features/spreads/tests/` 에 최소 1개가 있다(§7 파일 목록). 이 세션이 추가·수정한 것: `test_stale_ok_and_age_follow_older_stream_not_row`(행 299초 전 + 스트림 6초/0.5초 → stale/ok, age 는 스트림 기준)·`test_row_unchanged_for_300s_is_stale_even_with_live_stream[upbit|binance]`(스트림 0.5초 전 + 그 코인 행만 301초 전 → `age ≥ 300`·stale, 같은 스트림의 다른 코인 행은 ok).
+§4 의 BE 항목마다 `server/app/features/spreads/tests/` 에 최소 1개가 있다(§7 파일 목록). `age` 규칙의 테스트: `test_stale_ok_and_age_follow_older_stream_not_row`(행 299초 전 + 스트림 6초/0.5초 → stale/ok, age 는 스트림 기준)·`test_row_unchanged_for_300s_is_stale_even_with_live_stream[upbit|binance]`(스트림 0.5초 전 + 그 코인 행만 301초 전 → `age ≥ 300`·stale, 같은 스트림의 다른 코인 행은 ok)·`test_row_and_stream_both_stale_report_the_older`(행 301초 전 + 국내 스트림 400초 전 → `age ≈ 400`).
 
 기동 스모크(실거래소 없이 — 이 망은 거래소 도메인을 막는다): `.venv/bin/python -m uvicorn app.main:app --port 8044` 로 띄워 `GET /health` → `{"status":"ok","version":"0.1.0"}`, `GET /spreads` → 404 `market_data_not_found`(detail `{"exchange":"upbit"}`, §3.2-1 문구 그대로), `GET /spreads?notional=0`·`?notional=abc` → 422 `{"detail":[…]}`. 확인 후 프로세스를 죽였다(포트 비어 있음 확인).
 
@@ -214,7 +215,7 @@ FE 는 이번 세션에 바꾸지 않았다 — 행 자체 300초 규칙은 `age
   - `server/app/features/spreads/tests/` — `helpers.py`(저장소 시드·lifespan 없는 앱), `test_spreads_api.py`(404·페어·정렬·17키·age — 스트림 기준 299초 경계와 행 자체 301초 양쪽), `test_slippage.py`(§4 "슬리피지" 전 항목 + 저장 원값과의 관계 — core 의 `build_tick` 으로 같은 저장소의 틱을 만들어 `fwd + slipFwd` 와 비교), `test_refresh_api.py`, `test_spreads_service.py`, `test_usdt_staleness.py`(008), `test_wallet_fields.py`(006 §3.7 의 5케이스).
   - `web/src/shared/types.ts`(002 §3.4 계약)·`web/src/features/spreads/{types.ts,api.ts,Tab.tsx}`·`web/src/App.tsx`(첫 탭·규모 상태·행 클릭 → 기록 탭). 이번 세션 변경 없음.
 - 추측한 지점 (묻지 않고 정한 것 — 전부 본문에 반영):
-  - **행 자체 규칙과 스트림 규칙의 결합**은 `max` 다 — 행 `updated_at` 이 300초 이상이면 `age = max(스트림 경과, 행 경과)`, 아니면 스트림 경과. 스펙이 "그 행의 실제 경과 초(≥300)" 라고만 해서, 스트림이 그보다 더 오래 끊긴 경우(둘 다 300 이상)에 작은 쪽을 내지 않도록 오래된 쪽을 택했다 — `age` 는 어느 규칙에서든 "가장 낡은 근거" 라는 §3.2-4 의 뜻을 따른다. 행 두 개(국내·해외) 사이의 `max` 는 원래 규칙 그대로다.
+  - **행 자체 규칙과 스트림 규칙의 결합**은 `max` 다(§3.2-4) — 행 `updated_at` 이 300초 이상이면 `age = max(스트림 경과, 행 경과)`, 아니면 스트림 경과. 스트림이 행보다 더 오래 끊긴 경우(둘 다 300 이상)에 작은 쪽을 내지 않기 위해서다 — `age` 는 어느 규칙에서든 "가장 낡은 근거" 다. 행 두 개(국내·해외) 사이의 `max` 도 같은 뜻이다. §4 항목은 `test_row_and_stream_both_stale_report_the_older`.
   - **행의 `updated_at` 은 항상 있다고 단언**한다(스트림 수신 시각과 같은 방식의 `assert`) — 행은 저장소의 `put_row` 로만 생기고 그 함수가 갱신 시각을 반드시 채운다. None 분기를 두면 스펙에 없는 동작이 생긴다.
   - **최우선 호가의 잔량 0 도 `fail`**(§3.2-4·§4). 가격만 검사하면 잔량 0 → 평균가 0 → 순값의 0 나눗셈으로 500 이 난다.
   - **최상위 키 순서**는 §3.2 예시대로 `rate notional rows warnings dataReceivedAt fetchedAt`.

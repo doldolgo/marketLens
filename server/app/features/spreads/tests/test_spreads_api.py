@@ -317,6 +317,20 @@ def test_row_unchanged_for_300s_is_stale_even_with_live_stream(
     assert 0.4 <= rows["ETH"]["age"] <= 2.0
 
 
+def test_row_and_stream_both_stale_report_the_older() -> None:
+    """행 자체 301초 + 스트림 400초 → age 는 둘 중 오래된 쪽(≈400) (§3.2-4, §4)."""
+    store = LiveStore()
+    now = datetime.now(UTC)
+    seed_basic(store, now=now - timedelta(seconds=301))
+    store.set_rate("upbit", 1400.0, 1390.0, now)
+    ms = lambda dt: int(dt.timestamp() * 1000)  # noqa: E731
+    store.stream("upbit").last_message_at = ms(now - timedelta(seconds=400))
+    store.stream("binance").last_message_at = ms(now - timedelta(seconds=0.5))
+    [row] = make_client(store).get("/spreads").json()["rows"]
+    assert row["status"] == "stale"
+    assert 399.0 <= row["age"] <= 403.0
+
+
 def test_krw_is_domestic_best_bid_price() -> None:
     # krw 는 그 행 국내 거래소의 최우선 매수호가 — 환율·슬리피지와 무관하다 (§3.2-4)
     store = LiveStore()
