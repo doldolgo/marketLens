@@ -33,6 +33,9 @@ HANDSHAKE_SOURCE = "ws-handshake:/websocket/v1"  # 핸드셰이크 거부 응답
 QUOTE_KINDS = ("orderbook", "ticker")  # 원문 싱크 key 를 붙이는 시세 프레임 종류 (§3.7)
 REST_URL = "https://api.upbit.com"
 MARKETS_PATH = "/v1/market/all"
+MARKETS_KEY = (
+    "markets:all"  # 매초 오는 목록 응답의 원문 싱크 key — 분당 마지막 1건 (§3.7)
+)
 _BODY_LIMIT = 500  # 핸드셰이크 거부 응답 본문 상한 — 001 §3.1 과 같은 500자
 
 PING_INTERVAL = 30.0  # 서버는 120초 idle 에 끊는다 — 30초마다 PING 프레임 (§3.10)
@@ -89,7 +92,7 @@ class UpbitStream:
     # --- 마켓 목록 (§3.2) ---
 
     async def fetch_markets(self, client: httpx.AsyncClient) -> list[str]:
-        """`GET /v1/market/all` 의 KRW- 마켓 코드. 응답 본문은 해석 전에 원문 싱크로."""
+        """`GET /v1/market/all` 의 KRW- 마켓 코드. 응답 본문은 해석 전에 원문 싱크로(`markets:all`)."""
         url = REST_URL + MARKETS_PATH
         try:
             resp = await client.get(url)
@@ -104,7 +107,9 @@ class UpbitStream:
                 f"업비트 연결 실패: {type(exc).__name__}: {exc}",
                 kind="network",
             ) from exc
-        self._record(self.id, f"rest:{MARKETS_PATH}", self._clock(), resp.text)
+        self._record(
+            self.id, f"rest:{MARKETS_PATH}", self._clock(), resp.text, MARKETS_KEY
+        )
         if resp.status_code != 200:
             raise ExchangeApiError(
                 self.id,

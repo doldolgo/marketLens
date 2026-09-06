@@ -40,6 +40,7 @@ HANDSHAKE_SOURCE = (
 )
 REST_URL = "https://api.binance.com"
 EXCHANGE_INFO_PATH = "/api/v3/exchangeInfo"
+SYMBOLS_KEY = "symbols:all"  # 매초 오는 exchangeInfo 본문의 원문 싱크 key — 분당 마지막 1건 (001 §3.7)
 _BODY_LIMIT = 500  # 핸드셰이크 거부 응답 본문 상한 — 001 §3.1 과 같은 500자
 
 SHARDS = 3
@@ -135,7 +136,7 @@ class BinanceStream:
     # --- 심볼 집합 (ForeignSymbolSource, §3.3) ---
 
     async def refresh(self, client: httpx.AsyncClient) -> int:
-        """exchangeInfo 1회 → TRADING·USDT 심볼 맵. 응답 본문은 해석 전에 원문 싱크로."""
+        """exchangeInfo 1회 → TRADING·USDT 심볼 맵. 응답 본문은 해석 전에 원문 싱크로(`symbols:all`)."""
         url = REST_URL + EXCHANGE_INFO_PATH
         try:
             resp = await client.get(url)
@@ -150,7 +151,9 @@ class BinanceStream:
                 f"바이낸스 연결 실패: {type(exc).__name__}: {exc}",
                 kind="network",
             ) from exc
-        self._record(self.id, f"rest:{EXCHANGE_INFO_PATH}", self._clock(), resp.text)
+        self._record(
+            self.id, f"rest:{EXCHANGE_INFO_PATH}", self._clock(), resp.text, SYMBOLS_KEY
+        )
         if resp.status_code != 200:
             raise ExchangeApiError(
                 self.id,
@@ -193,14 +196,21 @@ class BinanceStream:
         return set(self._symbol_of)
 
     def set_universe(self, bases: set[str]) -> None:
-        """우주 확정 → 샤드별 배정 교체. 빠진 심볼의 행은 그 자리에서 지우고 재조정을 깨운다."""
+        """우주 확정 → 샤드별 배정 교체. 빠진 심볼의 행은 그 자리에서 지우고 재조정을 깨운다.
+
+        매초 불리므로 배정이 하나도 안 바뀌면 아무것도 하지 않는다 — 재조정을 깨우지 않는다 (§3.3).
+        """
         desired = {
             self._symbol_of[b]
             for b in (x.upper() for x in bases)
             if b in self._symbol_of
         }
+        changed = False
         for shard in self._shards:
             mine = {s for s in desired if shard_of(s) == shard.index}
+            if mine == shard.assigned:
+                continue
+            changed = True
             for symbol in shard.assigned - mine:
                 self._store.remove_row(self.id, self._base_of.get(symbol, symbol))
             shard.assigned = mine
@@ -208,7 +218,8 @@ class BinanceStream:
                 shard.has_work.set()
             else:
                 shard.has_work.clear()
-        self._wake.set()
+        if changed:
+            self._wake.set()
 
     # --- 판정 (§3.5) ---
 

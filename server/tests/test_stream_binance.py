@@ -270,7 +270,7 @@ async def test_exchange_info_keeps_only_trading_usdt_symbols() -> None:
     assert await stream.refresh(_client(lambda r: httpx.Response(200, json=body))) == 1
     assert stream.bases() == {"BTC", "XRP"}
     [entry] = raw.entries
-    assert entry[:3] == ("binance", REST_SOURCE, T0)
+    assert entry[:3] == ("binance", REST_SOURCE, T0) and entry[4] == "symbols:all"
     assert json.loads(entry[3]) == body
 
 
@@ -677,7 +677,9 @@ async def test_every_frame_and_exchange_info_body_are_recorded_verbatim() -> Non
         e[0] == "binance" and e[2] == T0 + 1 for e in raw.entries if e[1] == WS_SOURCE
     )
     assert json.loads(raw.payloads(REST_SOURCE)[0])["symbols"][0]["symbol"] == "BTCUSDT"
-    assert raw.keys(REST_SOURCE) == [None]
+    assert raw.keys(REST_SOURCE) == [
+        "symbols:all"
+    ]  # 매초 오는 목록은 분당 마지막 1건 (001 §3.7)
     verdict = stream.judge(T0)  # 마지막 프레임의 에러 응답 = 구독 거부
     assert verdict is not None and verdict.error is not None
     assert verdict.error.kind == "bad_request" and "샤드" in verdict.error.message

@@ -265,7 +265,9 @@ async def test_fetch_markets_krw_filter_and_raw_record() -> None:
         _client(lambda r: httpx.Response(200, json=body))
     ) == ["KRW-BTC"]
     assert raw.entries[0][:2] == ("bithumb", "rest:/v1/market/all")
-    assert raw.entries[0][4] is None  # REST 본문은 key 없이 전량
+    assert (
+        raw.entries[0][4] == "markets:all"
+    )  # 매초 오는 목록은 분당 마지막 1건 (001 §3.7)
 
 
 async def test_fetch_markets_200_with_error_body_is_failure() -> None:

@@ -17,8 +17,9 @@ from app.core.models import Row, StreamError, Tick
 class RawRecorder(Protocol):
     """record(exchange, source, received_at_ms, payload, key=None) — 동기·예외 없음·즉시 반환.
 
-    `key` 는 시세 프레임이면 `"<종류>:<원본 심볼>"`(`orderbook:KRW-BTC`·`depth20:BTCUSDT`), 그 밖
-    (REST 본문·핸드셰이크 거부·비시세 프레임·디코드 실패)은 None — 010 이 분당 마지막 1건으로 솎는 데 쓴다.
+    `key` 는 시세 프레임이면 `"<종류>:<원본 심볼>"`(`orderbook:KRW-BTC`·`depth20:BTCUSDT`), 매초 오는
+    마켓 목록 응답은 `markets:all`·`symbols:all`, 그 밖(입출금 REST 본문·핸드셰이크 거부·비시세 프레임·
+    디코드 실패)은 None — 010 이 `key` 있는 줄을 분당 마지막 1건으로 솎는 데 쓴다.
     """
 
     def __call__(
@@ -125,7 +126,7 @@ class ForeignSymbolSource(Protocol):
         ...
 
     def set_universe(self, bases: set[str]) -> None:
-        """우주가 확정될 때마다(기동·10분·/refresh) 받는다 — 구독 대상 재조정 (012 §3.3). 동기."""
+        """우주가 확정될 때마다(기동·매초·/refresh) 받는다 — 배정이 같으면 무동작, 다르면 재조정 (012 §3.3). 동기."""
         ...
 
 

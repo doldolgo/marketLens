@@ -406,7 +406,8 @@ async def test_fetch_markets_filters_krw_and_records_body() -> None:
     client = _client(lambda r: httpx.Response(200, json=body))
     assert await stream.fetch_markets(client) == ["KRW-BTC", "KRW-USDT"]
     [entry] = raw.entries
-    assert entry[:2] == ("upbit", "rest:/v1/market/all") and entry[4] is None
+    # 매초 오는 목록 응답은 `markets:all` key 로 — 010 이 분당 마지막 1건만 남긴다 (§3.7)
+    assert entry[:2] == ("upbit", "rest:/v1/market/all") and entry[4] == "markets:all"
     assert json.loads(entry[3]) == body
 
 

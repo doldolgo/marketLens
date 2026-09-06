@@ -191,8 +191,10 @@ async def test_lines_without_key_are_all_kept_even_when_identical() -> None:
     archive, s3, clock = build()
     for i in range(3):
         archive.record("upbit", WS, T0 + i, '{"status":"UP"}')
-    archive.record("upbit", "rest:/v1/market/all", T0 + 3, "[]")
-    archive.record("upbit", "rest:/v1/market/all", T0 + 4, "[]")
+    archive.record(
+        "upbit", "rest:/v1/status/wallet", T0 + 3, "[]"
+    )  # 입출금 본문은 key 없음
+    archive.record("upbit", "rest:/v1/status/wallet", T0 + 4, "[]")
     assert archive.buffered("upbit") == 5
     clock.now = NEXT
     await archive.run_once()
