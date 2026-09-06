@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.influx import CollectFailRow
 from app.core.live_store import LiveStore
 from app.core.models import Row
 from app.core.outages import OutageTracker
@@ -76,8 +77,8 @@ def test_response_shape_fixed_exchange_order_and_open_outage_in_both(
 ) -> None:
     store = LiveStore()
     now = datetime.now(UTC)
-    store.replace_exchange("upbit", [row("upbit", "BTC"), row("upbit", "ETH")], now)
-    store.replace_exchange("binance", [row("binance", "BTC")], now)
+    store.put_rows([row("upbit", "BTC"), row("upbit", "ETH")], now)
+    store.put_rows([row("binance", "BTC")], now)
     t = OutageTracker()
     now_ms = T0 + 100 * SEC
     for ex in ("upbit", "bithumb"):
@@ -157,6 +158,42 @@ def test_success_rate_counts_only_overlap_with_1h_window() -> None:
     assert bt.success_rate_1h == 99.0
     assert bn.success_rate_1h == 100.0
     assert out.success_rate_1h == round((up.success_rate_1h + 99.0 + 100.0) / 3, 1)
+
+
+async def test_restored_open_outage_spans_downtime_until_now() -> None:
+    # 기동 30분 전에 열린 진행 중 점을 복원 → 꺼져 있던 시간을 포함해 started_at~now 가 실패 구간이다 (§3.4·§3.5)
+    started = T0 - 30 * 60 * SEC
+
+    class Reader:
+        def query_collect_fail(self, *, start: int) -> list[CollectFailRow]:
+            return [
+                CollectFailRow(
+                    exchange="upbit",
+                    kind="network",
+                    started_ts=started // SEC,
+                    count=1,
+                    last_failed_ts=started // SEC,
+                    status_code=None,
+                    message="m",
+                    url="https://x/y",
+                    retry_after_sec=None,
+                    ended_ts=None,
+                )
+            ]
+
+    t = OutageTracker()
+    await t.restore(Reader(), T0)
+    now_ms = T0 + 10 * 60 * SEC
+    out = build_collect_health(LiveStore(), t, T0, now_ms)
+    up = out.exchanges[0]
+    assert up.open_outage is not None and up.open_outage.started_at == started
+    assert up.success_rate_1h == round((1 - 2400 / 3600) * 100, 1)  # 33.3
+    assert out.outages[0].ended_at is None
+    # 기동 후 연속 성공 3회면 기동 후의 첫 성공 틱에 닫힌다 — 구간은 꺼진 시간을 그대로 품는다
+    close(t, "upbit", now_ms)
+    out = build_collect_health(LiveStore(), t, T0, now_ms + 3 * SEC)
+    assert out.exchanges[0].open_outage is None
+    assert (out.outages[0].started_at, out.outages[0].ended_at) == (started, now_ms)
 
 
 def test_outages_sorted_by_started_at_desc_and_last_error_is_latest() -> None:

@@ -6,18 +6,21 @@
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 APP_NAME = "MarketLens Backend"
 APP_VERSION = "0.1.0"
 USER_AGENT = f"marketlens-server/{APP_VERSION}"
 
-# 거래소 호출 타임아웃(초) — 스펙 001 §3.1
+# 거래소 3곳 고정 순서 — 스펙 001 §3.3. 국내 둘은 KRW, 바이낸스는 USDT 마켓
+EXCHANGES = ("upbit", "bithumb", "binance")
+DOMESTIC_EXCHANGES = ("upbit", "bithumb")
+
+# 거래소 REST(마켓 목록) 타임아웃(초)·WebSocket 핸드셰이크 타임아웃(초) — 스펙 001 §3.1
 EXCHANGE_TIMEOUT_TOTAL = 3.0
 EXCHANGE_TIMEOUT_CONNECT = 1.5
-
-# 수집 주기(초) — 한 사이클이 끝난 뒤 이만큼 쉰다. 사이클이 길어져도 겹치지 않는다.
-COLLECT_INTERVAL = 1.0
+WS_OPEN_TIMEOUT = 5.0
 
 
 class Settings(BaseSettings):
@@ -29,7 +32,9 @@ class Settings(BaseSettings):
 
     influx_url: str = "http://localhost:8086"
     influx_token: str | None = None
-    # S3 snapshot(010) — 버킷이 없으면 snapshot 루프 비활성, 앱은 뜬다.
+    # 틱 버퍼 Redis(009) — compose 안에서는 redis://redis:6379/0 으로 덮는다. 불달이어도 앱은 뜬다.
+    redis_url: str = "redis://localhost:6379/0"
+    # S3 원문 아카이브(010) — 버킷이 없으면 원문 싱크가 무동작이고 앱은 뜬다.
     # AWS 키는 env 에 두지 않는다: SDK 기본 탐색(~/.aws, EC2 IAM 역할)을 쓴다.
     s3_bucket: str | None = None
     s3_region: str = "ap-northeast-2"
@@ -38,6 +43,14 @@ class Settings(BaseSettings):
     upbit_secret_key: str | None = None
     binance_api_key: str | None = None
     binance_secret_key: str | None = None
+
+    @field_validator("s3_region", mode="before")
+    @classmethod
+    def _blank_region_is_default(cls, value: object) -> object:
+        """`S3_REGION=` 처럼 비워 두면 기본 리전이다 — 빈 문자열은 boto3 가 즉시 거부한다 (010 §3.2)."""
+        if isinstance(value, str) and not value.strip():
+            return "ap-northeast-2"
+        return value
 
 
 @lru_cache

@@ -6,6 +6,7 @@ import httpx
 
 from app.core.models import Row
 from app.features.wallet_status.service import WalletStatusService
+from app.features.wallet_status.tests.helpers import FakeRecorder
 
 
 def make_row(
@@ -130,3 +131,23 @@ async def test_failure_cycle_overwrites_previous_success_with_unknown() -> None:
     assert row.networks == []
     assert "bithumb" in service.failed()
     assert any("빗썸 지갑 상태 API 가 500" in w for w in service.warnings())
+
+
+async def test_injected_recorder_receives_each_cycle_body() -> None:
+    # 배선 시 주입한 원문 싱크가 회차마다 실호출 응답을 받는다 — 키 없는 거래소는 호출이 없어 원문도 없다 (§3.5)
+    _, client = routing_client(lambda: httpx.Response(200, json=_GOOD_BITHUMB))
+    recorder = FakeRecorder()
+    service = WalletStatusService(
+        upbit_api_key=None,
+        upbit_secret_key=None,
+        binance_api_key=None,
+        binance_secret_key=None,
+        interval=0.0,
+        record=recorder,
+    )
+    await service.refresh_if_due(client)
+    await service.refresh_if_due(client)
+    assert [(ex, src) for ex, src, _, _ in recorder.lines] == [
+        ("bithumb", "rest:/public/assetsstatus/multichain/ALL"),
+        ("bithumb", "rest:/public/assetsstatus/multichain/ALL"),
+    ]

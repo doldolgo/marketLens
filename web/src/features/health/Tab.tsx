@@ -1,7 +1,7 @@
 // 수집 상태 탭 — /health/collect 실데이터 (스펙 011 §3.8). 카드 4개: 요약·거래소 3장·24시간 타임라인·로그.
 import { exName, fmtAgo, fmtHm, fmtHms } from '../../shared/format'
 import type { Feed, HealthData, HealthExchange, HealthOutage, HealthState, OutageKind } from '../../shared/types'
-import { Chip, DIM_TEXT } from '../../shared/ui'
+import { Chip } from '../../shared/ui'
 import { KIND_LABELS, STATE_LINES } from './types'
 
 const DAY_MS = 24 * 3_600_000
@@ -46,17 +46,17 @@ function ExCard({ ex, now }: { ex: HealthExchange; now: number }) {
         </span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 10px', marginTop: 8, fontSize: 12 }}>
-        <span style={{ color: DIM_TEXT }}>마지막 수신</span>
+        <span style={{ color: 'var(--color-neutral-600)' }}>마지막 수신</span>
         <span style={{ textAlign: 'right', color: ex.state !== 'ok' ? 'var(--color-warn)' : undefined }}>
           {ex.lastSuccessAt === null ? '–' : fmtAgo(Math.max(0, now - ex.lastSuccessAt) / 1000)}
         </span>
-        <span style={{ color: DIM_TEXT }}>수집 마켓</span>
+        <span style={{ color: 'var(--color-neutral-600)' }}>수집 마켓</span>
         <span style={{ textAlign: 'right' }}>{ex.markets}</span>
-        <span style={{ color: DIM_TEXT }}>성공률 1h</span>
+        <span style={{ color: 'var(--color-neutral-600)' }}>성공률 1h</span>
         <span style={{ textAlign: 'right', color: ex.successRate1h <= 99 ? 'var(--color-warn)' : undefined }}>
           {ex.successRate1h.toFixed(1)}%
         </span>
-        <span style={{ color: DIM_TEXT }}>최근 에러</span>
+        <span style={{ color: 'var(--color-neutral-600)' }}>최근 에러</span>
         <span style={{ textAlign: 'right' }}>
           {err ? `${fmtHms(err.at)} · ${KIND_LABELS[err.kind]}${httpText(err.statusCode)}` : '–'}
         </span>
@@ -77,7 +77,7 @@ function Timeline({ data, now }: { data: HealthData; now: number }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {data.exchanges.map((ex) => (
           <div key={ex.exchange} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ width: 84, fontSize: 11, color: DIM_TEXT, flex: 'none' }}>{exName(ex.exchange)}</span>
+            <span style={{ width: 84, fontSize: 11, color: 'var(--color-neutral-400)', flex: 'none' }}>{exName(ex.exchange)}</span>
             <div
               style={{
                 position: 'relative',
@@ -117,7 +117,7 @@ function Timeline({ data, now }: { data: HealthData; now: number }) {
                     top: -2,
                     bottom: -2,
                     left: pct(data.serverStartedAt),
-                    borderLeft: `1px dashed ${DIM_TEXT}`,
+                    borderLeft: '1px dashed var(--color-neutral-600)',
                   }}
                 />
               )}
@@ -125,8 +125,8 @@ function Timeline({ data, now }: { data: HealthData; now: number }) {
           </div>
         ))}
       </div>
-      {/* 축 5눈금: HH:00 ×4 + 지금 (002 §3.9 와 같다) */}
-      <div style={{ position: 'relative', height: 16, marginTop: 6, marginLeft: 94, fontSize: 10, color: DIM_TEXT }}>
+      {/* 축 눈금 5개 — 24시간 창을 5등분한 1/5·2/5·3/5·4/5 지점의 HH:00 + 우측 끝 지금 (§3.8 3번) */}
+      <div style={{ position: 'relative', height: 16, marginTop: 6, marginLeft: 94, fontSize: 10, color: 'var(--color-neutral-600)' }}>
         {[1, 2, 3, 4].map((i) => {
           const t = new Date(now - (1 - i / 5) * DAY_MS)
           return (
@@ -165,25 +165,25 @@ function Log({ data }: { data: HealthData }) {
     <div style={cardStyle}>
       <div style={{ ...kicker, marginBottom: 10 }}>최근 실패 구간</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {rows.length === 0 && <div style={{ fontSize: 12, color: DIM_TEXT, padding: '3px 6px' }}>최근 24시간 실패 없음</div>}
+        {rows.length === 0 && <div style={{ fontSize: 12, color: 'var(--color-neutral-500)', padding: '3px 6px' }}>최근 24시간 실패 없음</div>}
         {rows.map((o) => (
           <div key={`${o.exchange}|${o.startedAt}`} className="hv-row4" style={logRowStyle}>
-            <span style={{ color: DIM_TEXT }}>{fmtHms(o.startedAt)}</span>
+            <span style={{ color: 'var(--color-neutral-500)' }}>{fmtHms(o.startedAt)}</span>
             <span>{exName(o.exchange)}</span>
             <Chip style={{ background: 'transparent', color: kindColor(o.kind), border: `1px solid ${kindColor(o.kind)}` }}>
               {KIND_LABELS[o.kind]}
             </Chip>
-            <span style={{ color: 'color-mix(in srgb, var(--color-text) 80%, transparent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ color: 'var(--color-neutral-300)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {logContent(o)}
             </span>
           </div>
         ))}
         {/* 맨 끝(가장 오래된 쪽) 서버 시작 행 */}
         <div className="hv-row4" style={logRowStyle}>
-          <span style={{ color: DIM_TEXT }}>{fmtHms(data.serverStartedAt)}</span>
-          <span style={{ color: DIM_TEXT }}>서버</span>
+          <span style={{ color: 'var(--color-neutral-500)' }}>{fmtHms(data.serverStartedAt)}</span>
+          <span style={{ color: 'var(--color-neutral-500)' }}>서버</span>
           <Chip tone="neutral">서버 시작</Chip>
-          <span style={{ color: DIM_TEXT }}>이력 복원 후 수집 시작</span>
+          <span style={{ color: 'var(--color-neutral-500)' }}>이력 복원 후 수집 시작</span>
         </div>
       </div>
     </div>
@@ -194,7 +194,7 @@ export default function HealthTab({ feed, now }: { feed: Feed; now: number }) {
   const data = feed.health
   if (data === null) {
     return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: DIM_TEXT }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--color-neutral-500)' }}>
         수집 상태 조회 전
       </div>
     )
@@ -228,7 +228,7 @@ export default function HealthTab({ feed, now }: { feed: Feed; now: number }) {
               {data.successRate1h.toFixed(1)}%
             </div>
           </div>
-          <span style={{ marginLeft: 'auto', fontSize: 11, color: DIM_TEXT }}>
+          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-neutral-600)' }}>
             {fmtHms(data.fetchedAt)} 기준
             <span style={{ marginLeft: 12, opacity: 0.7 }}>{fmtHm(data.serverStartedAt)} 서버 시작</span>
           </span>

@@ -1,6 +1,6 @@
 """분석 계산 — 스펙 004 §3. 순수 계산: 저장소를 인자로 받고 전역을 import 하지 않는다.
 
-모든 응답은 메모리 스냅샷(1초 수집)만 읽는다 — 거래소 REST 호출 0회 (§2).
+모든 응답은 메모리 스냅샷(001 — WebSocket 으로 실시간 교체)만 읽는다 — 거래소 REST 호출 0회 (§2).
 """
 
 import re
@@ -14,6 +14,7 @@ from app.core.orderbook import (
     average_price,
     slippage_percent,
     walk_amount,
+    walk_levels,
     walk_quantity,
 )
 from app.core.premium import premium_percent
@@ -57,7 +58,7 @@ LOW_LIQUIDITY_KRW = 1_000_000.0  # scan 1위 유동성 경고 문턱 (§3.2)
 FEE_WARNING = "모든 수치는 수수료·출금 수수료·전송 시간 미반영 이론값입니다."
 CAP_WARNING = "요청 금액이 호가 저장 한도(10억원)를 넘어 슬리피지가 실제보다 작게 계산됐을 수 있습니다."
 _NOT_COLLECTED_HINT = (
-    "수집 루프가 한 사이클 돌았는지 확인하세요 (아직 수집 안 됨 또는 미상장)."
+    "스트림이 첫 스냅샷을 받았는지 확인하세요 (아직 수집 안 됨 또는 미상장)."
 )
 _SUSPICION_REASON = "이름만 같은 다른 코인이거나 한쪽 입출금 중단 가능성이 있습니다. 거래 전 확인하세요."
 
@@ -135,9 +136,8 @@ def _get_row(store: LiveStore, exchange: str, base: str, quote: str) -> Row:
     if row is None:
         raise _not_found(f"{exchange} 에 {base} 스냅샷이 없습니다.")
     if row.quote != quote:
-        raise AnalysisApiError(
-            404,
-            "market_data_not_found",
+        # §3.0 — market_data_not_found 는 quote 불일치여도 첫 스냅샷 안내를 함께 싣는다
+        raise _not_found(
             f"{exchange} 의 {base} 마켓은 {row.quote} 표시입니다. `{base}/{row.quote}` 로 다시 요청하세요.",
             {"stored_quote": row.quote},
         )
@@ -157,7 +157,10 @@ def build_orderbook(
     _require_exchange(exchange)
     base, quote = _parse_symbol(symbol)
     row = _get_row(store, exchange, base, quote)
-    if not row.asks and not row.bids:
+    # 슬리피지가 실제로 소비하는 호가를 그대로 보여주는 것이 이 엔드포인트의 쓸모다 (§3.2)
+    asks = walk_levels(row, "asks")
+    bids = walk_levels(row, "bids")
+    if not asks and not bids:
         raise _not_found(f"{exchange} 의 {base}/{quote} 호가가 비어 있습니다.")
     # 저장 순서 그대로 depth 단계까지 자르기만 한다 — 계산 없음
     return OrderbookResponse(
@@ -165,8 +168,8 @@ def build_orderbook(
         symbol=f"{base}/{quote}",
         base=base,
         quote=quote,
-        bids=[OrderbookLevel(price=lv[0], size=lv[1]) for lv in row.bids[:depth]],
-        asks=[OrderbookLevel(price=lv[0], size=lv[1]) for lv in row.asks[:depth]],
+        bids=[OrderbookLevel(price=lv[0], size=lv[1]) for lv in bids[:depth]],
+        asks=[OrderbookLevel(price=lv[0], size=lv[1]) for lv in asks[:depth]],
         timestamp=row.price_timestamp,
         data_updated_at=_ms(row.updated_at),
         data_received_at=_received_ms(store),
@@ -204,7 +207,8 @@ def build_slippage(
         )
 
     row = _get_row(store, exchange, base, quote)
-    stored = row.asks if side == "buy" else row.bids  # 살 때 asks, 팔 때 bids
+    # 살 때 asks, 팔 때 bids — 목록은 walk_levels 가 고른다 (§3.1)
+    stored = walk_levels(row, "asks" if side == "buy" else "bids")
     if not stored:
         raise _not_found(
             f"{exchange} 의 {base}/{quote} {side} 쪽 호가가 비어 있습니다."
@@ -284,7 +288,10 @@ def build_arbitrage(
     for row in sorted(rows, key=lambda r: r.exchange):
         if row.quote not in (DOMESTIC_QUOTE, FOREIGN_QUOTE):
             continue  # KRW/USDT 가 아니면 후보 풀에서 제외 (§3.2-2)
-        if not row.asks or not row.bids:
+        # 걷는 목록 기준으로 판정·환산한다 — 이 다리가 실제로 먹는 호가다 (§3.1)
+        row_asks = walk_levels(row, "asks")
+        row_bids = walk_levels(row, "bids")
+        if not row_asks or not row_bids:
             failures.append(
                 ArbitrageFailure(exchange=row.exchange, reason="호가가 비어 있습니다.")
             )
@@ -310,8 +317,8 @@ def build_arbitrage(
         candidates.append(
             _Candidate(
                 row=row,
-                asks_krw=[[lv[0] * ask_mult, lv[1]] for lv in row.asks[:depth]],
-                bids_krw=[[lv[0] * bid_mult, lv[1]] for lv in row.bids[:depth]],
+                asks_krw=[[lv[0] * ask_mult, lv[1]] for lv in row_asks[:depth]],
+                bids_krw=[[lv[0] * bid_mult, lv[1]] for lv in row_bids[:depth]],
             )
         )
 
@@ -676,15 +683,19 @@ def _matrix_direction(
 ) -> MatrixDirection | None:
     """최대 조합을 amount_krw 로 walk 한다. 체결 0 이면 조합 없음 (§3.2-4)."""
     if direction == "fwd":
-        # 해외 asks 에 사서(rate ask 환산) 국내 bids 에 판다
-        buy_levels = [[lv[0] * pick.rate.ask, lv[1]] for lv in pick.fx_row.asks]
-        sell_levels = pick.dom_row.bids
+        # 해외 asks 에 사서(rate ask 환산) 국내 bids 에 판다. 목록은 walk_levels (§3.1)
+        buy_levels = [
+            [lv[0] * pick.rate.ask, lv[1]] for lv in walk_levels(pick.fx_row, "asks")
+        ]
+        sell_levels = walk_levels(pick.dom_row, "bids")
         buy_ex, sell_ex = pick.fx_ex, pick.dom_ex
         buy_row, sell_row = pick.fx_row, pick.dom_row
     else:
         # 국내 asks 에 사서 해외 bids 에 판다(rate bid 환산)
-        buy_levels = pick.dom_row.asks
-        sell_levels = [[lv[0] * pick.rate.bid, lv[1]] for lv in pick.fx_row.bids]
+        buy_levels = walk_levels(pick.dom_row, "asks")
+        sell_levels = [
+            [lv[0] * pick.rate.bid, lv[1]] for lv in walk_levels(pick.fx_row, "bids")
+        ]
         buy_ex, sell_ex = pick.dom_ex, pick.fx_ex
         buy_row, sell_row = pick.dom_row, pick.fx_row
 

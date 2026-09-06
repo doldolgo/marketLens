@@ -36,7 +36,7 @@
 셸·표·KPI·카드·배지의 **구조와 인라인 스타일**(크기·간격·어느 토큰을 쓰는지)은 `docs/design/reference/`(App.tsx·ui.tsx·tabs/ 6개)가 진실이다. 컴파일 대상이 아닌 참조 원본이며 import 대응표는 그 폴더의 README 에 있다. 참조와 이 스펙 문구가 어긋나면 참조 파일이 우선이다. 참조에 없는 동작(003 입출금 배지·망 열, 005 실데이터 등)은 이 레포의 스펙대로 유지하고 겉모습만 참조를 따른다.
 - 표는 `<table>` 이 아니라 CSS grid. 탭마다 컬럼 폭 문자열 1개. 행 높이 40px. 헤더는 sticky·10.5px·uppercase·`letter-spacing 0.07em`, 정렬 활성 열은 `accent-300`.
 - hot 행 = accent 8% 배경 + 심볼 `accent-300`. stale 행 = `opacity 0.45`. 실패값 `–`.
-- 흐린 글자는 `--color-neutral-500`(보조)·`-600`(캡션·kicker) 램프를 쓴다. `color-mix` 로 재해석하지 않는다.
+- 흐린 글자는 `--color-neutral-500`(보조)·`-600`(캡션·kicker) 램프를 쓴다. `color-mix` 로 재해석하지 않는다. 이 규칙은 **글자색**에만 적용된다 — 배경·구분선 강조(hot 행 배경, 토글·칩 배경, 표 행 밑선, 타임라인 트랙)는 참조 원본과 `theme.css` 그대로 `color-mix` 를 쓴다.
 - 카드 = surface + `radius-md` + `shadow-sm`. KPI 스트립은 카드가 아닌 flex 스트립이고 블록 사이는 세로 그라디언트 선.
 - kicker·card·세로선·grid 표·거래소/상태 배지는 shared 에 한 번만 두고 탭에서 다시 정의하지 않는다. 참조 원본은 탭마다 중복돼 있으니 추출해서 쓴다.
 
@@ -90,9 +90,9 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
    - 블록 사이 세로 구분선은 1번 뒤와 3번 뒤.
 3. **탭 본문**. 탭은 **언마운트하지 않고 숨긴다**. 각 탭의 검색어·필터·드릴다운 상태가 전환 후에도 유지되어야 하기 때문이다.
    - 숨김 탭은 레이아웃에 참여하지 않는다. 보이는 탭은 컨트롤 바(고정) + 본문(가변, 자체 스크롤).
-   - `spread`·`history` 는 placeholder: 가운데 정렬 한 줄 `spreads — 스펙 003 에서 구현` / `history — 스펙 005 에서 구현`.
+   - `spread` 탭은 003 이 채운다. `history` 탭은 005 의 mock 탭이다(실데이터 연결은 후속 스펙) — 셸이 넘긴 선택 심볼을 선택 티커로 보인다.
 4. **푸터**. `flow` 탭에서는 탭 자체 푸터로 대체.
-   - 문구: `암묵환율 = 국내 거래소 USDT/KRW 체결가 기준`, `순방향 = 해외 매수 → 국내 매도 · 역방향 = 국내 매수 → 해외 매도`. 우측 `수집 실패 값은 보간 없이 –로 표시`.
+   - 문구: `암묵환율 = 국내 거래소 USDT/KRW 최우선 매도호가(ask) 기준`, `순방향 = 해외 매수 → 국내 매도 · 역방향 = 국내 매수 → 해외 매도`. 우측 `수집 실패 값은 보간 없이 –로 표시`.
 
 ### 3.6 mock 공통
 - 코인 24개(순서·기준가 USD): BTC 118420, ETH 4123, XRP 2.91, SOL 182.4, DOGE 0.2134, ADA 0.887, TRX 0.302, LINK 24.6, AVAX 41.2, DOT 8.42, SUI 4.05, APT 10.8, ARB 1.12, OP 2.31, SEI 0.512, ATOM 9.14, NEAR 6.72, HBAR 0.246, ETC 31.5, STX 2.04, ONDO 1.42, PEPE 0.0000162, WLD 3.86, TIA 6.18.
@@ -150,7 +150,7 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
 ## 4. 검증
 테스트 러너 없음. 완료 = build 에러 0 + lint error 0(warn 허용) + dev 서버의 index 에 문서 제목 `트레이딩룸 · MarketLens` 가 있음 + 아래 육안 체크(`localhost:5173`):
 1. 헤더: `트레이딩룸` + 깜빡이는 초록 점 `실시간 수집 중`, 탭 6개가 §3.5 순서·라벨, 우측 `HH:MM:SS KST` 가 1.5초마다 바뀐다.
-2. KPI: `USDT/KRW 암묵환율 –`, `BTC 김프 · 순방향 0.00%`(중립색), `역방향 0.00%`, `수집 상태 8곳 중 N곳 정상` + 보조문, 우측 `0개 코인 · 0 페어`.
+2. KPI: `USDT/KRW 암묵환율 –`, `BTC 김프 · 순방향 0.00%`(중립색), `역방향 0.00%`, `수집 상태 3곳 중 N곳 정상`(011 §3.7) + 보조문, 우측 `0개 코인 · 0 페어`.
 3. 활성 탭 밑줄이 accent 색, 비활성은 흐린 글자.
 4. 갭 탭에 검색어 입력 → 다른 탭 갔다 와도 검색어·정렬이 유지된다.
 5. 갭 탭: 24행, 헤더 `진입 갭 · 현물 → 선물 ▾`, 임계 0.5 이상 행 accent 배경, stale 행 반투명, 펀딩 `+0.0xx%` + `펀딩 N분 후`. `정리 기준` 전환 시 헤더 문구·`▴` 로 바뀐다.
@@ -159,22 +159,39 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
 8. 수집 상태: 011 §4.
 9. 레이더: 코인 칩 9개 → 클릭 시 브레드크럼 `전체 → BTC`, 코인 카드 + 표에서 코인 열 사라짐. 주소 클릭 → 주소 카드. `← 뒤로` 동작. 푸터가 ⚠️ 안내로 바뀐다.
 10. 레이더 검색에 `eth` Enter → ETH 코인 뷰, `winter` Enter → Wintermute 주소 뷰, `zzz` → `일치하는 코인·주소 없음`.
-11. 실시간 스프레드·기록/통계 탭은 placeholder 문구 한 줄.
+11. 실시간 스프레드 탭은 003 §4 가 본다. 기록/통계 탭은 005 의 mock 탭이고(실데이터 연결은 후속 스펙) 스프레드 행 클릭으로 넘어온 심볼이 선택돼 있다.
 12. 1.5초마다 갭 탭 일부 값이 흔들리고, 탭을 오래 두면 stale 행이 늘지 않는다(ok 항목은 age 가 리셋되므로).
 13. 6탭 전부 표가 grid(행 40px·sticky 헤더)이고 헤더·KPI·카드 생김새가 `docs/design/reference/` 와 같다. `<table>` 요소가 남아 있지 않다.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+cd web && npm run lint && npm run build   # oxlint src: error 0 / tsc -b && vite build: 44 modules, dist/index.html·assets/index-*.{css,js} 생성 (2026-09-06, Node v26.4.0)
+cd web && npx vite --port 5173 --strictPort   # 육안 확인용 dev 서버 — 확인 후 종료
+curl -s localhost:5173 | grep -o "<title>[^<]*</title>"   # <title>트레이딩룸 · MarketLens</title>
 ```
+육안 확인(`localhost:5173`, 서버 없이 — `/api/*` 는 실패해 spreads 표는 대기 문구, 수집 상태 KPI 는 `–`/`수집 상태 조회 전`):
+- §4-1 헤더 `트레이딩룸` + `실시간 수집 중`, 탭 6개가 §3.5 순서·라벨, 우측 `HH:MM:SS KST` 가 갱신된다. `lang="ko"`.
+- §4-2 KPI `USDT/KRW 암묵환율 –`, `BTC 김프 · 순방향 0.00%`, `역방향 0.00%`, `추적 페어 0개 코인 · 0 페어`. §4-3 활성 탭 밑줄 accent.
+- §4-5 갭 탭 `24 / 24 코인 표시`, 헤더 `진입 갭 · 현물 → 선물 ▾`, 행마다 `{ex} 현물 → {ex} 선물` 칩, 갭 내림차순(+0.85% … +0.06%), 임계 0.5 이상 행 accent 배경, 펀딩 `+0.0xx%` + `펀딩 3분 후`/`펀딩 3시간 3분 후`.
+- §4-7 선선갭 `가격갭 ▾` 내림차순(+1.38% …), `A ↔ B` 칩 + `A 롱 / B 숏`, 펀딩갭 `%/h` + `해당 조합 펀딩갭`.
+- §4-9 레이더 코인 칩 9개(ETH 8건 … DOGE 3건), `44 / 44건 표시`, 거래소 칩 국내 우선(업비트 6건·빗썸 2건 → MEXC 13건 …), 요약 4블록, 브레드크럼 `전체`, 표에 코인·주소 열 모두 있음.
+- §4-13 `document.querySelectorAll('table').length === 0`.
+- 이번 기록에서 조작하지 않은 항목(코드 경로만 확인): §4-4 검색어 유지(탭은 `display:none` 으로 숨김 — 언마운트 없음), §4-6 퍼센트 색(`pctColor`), §4-10 레이더 검색(`toUpperCase` 코인 판정·`일치하는 코인·주소 없음`), §4-12 1.5초 흔들림. §4-8·11 은 011·003·005 가 본다.
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — web-shell 행을 `| web-shell | - | 셸·KPI·mock 탭 4종 동작 | spreads/history 탭은 placeholder |` 로. **항상 포함.**
+- `docs/context/status.md` — web-shell 행을 `| web-shell | - | 셸·KPI·mock 탭 3종(gap·pp·flow) 동작 | spreads 탭은 003 실데이터, history 탭은 005 의 mock(실데이터 연결은 후속 스펙) |` 로. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 002 행 상태 → DONE. **항상 포함.**
-- `docs/context/architecture.md` — 데이터 흐름(FE) 절에 한 줄 추가: "셸의 공유 피드가 탭 공통 데이터를 들고, 1.5초 tick 은 셸이 돌린다. `/spreads` 1초 폴링은 spreads 기능(003)이 제공한다." + "현재 구조" 절에 web-shell 항목(shared 조각들·App.tsx·mock 탭 4종 폴더).
+- `docs/context/architecture.md` — 데이터 흐름(FE) 절에 한 줄 추가: "셸의 공유 피드가 탭 공통 데이터를 들고, 1.5초 tick 은 셸이 돌린다. `/spreads` 1초 폴링은 spreads 기능(003)이 제공한다." + "현재 구조" 절에 web-shell 항목(shared 조각들·App.tsx·mock 탭 3종 폴더).
 - `docs/context/dev-setup.md` — web 절 명령(dev/build/lint)은 실제와 일치. 사전 준비의 Node 항목에 "22(CI·배포 고정 — 로컬은 v26 도 동작 확인)" 주석.
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
+  - `web/` 프로젝트(Vite + React 19 + TypeScript strict, oxlint, `index.html` 제목·`lang="ko"`·보라 번개 favicon, `vite.config.ts` 의 `/api` 프록시·접두사 제거).
+  - `web/src/shared/` — `theme.css`·`index.css`(`docs/design/` 원본 복사), `config.ts`(§3.1 상수·`API_BASE`), `types.ts`(`FeedStatus`·`IoState`·`SpreadRow`·mock 타입), `feed.ts`(공유 피드 생성·통째 교체·1.5초 tick·`useFeed`), `format.ts`(§3.3 포맷 8종·`pctColor`·`exName`), `rand.ts`(문자열 시드 결정론 난수), `mock.ts`(§3.6 마켓·§3.10 레이더·`events`), `ui.tsx`(kicker·card·세로선·grid 표·배지·분절·숫자 입력·토글).
+  - `web/src/App.tsx`(헤더·탭 6개·KPI 스트립·탭 숨김·푸터), `main.tsx`, `features/gap/Tab.tsx`·`features/pp/Tab.tsx`·`features/flow/Tab.tsx`(mock 탭 3종). `features/spreads`·`features/history`·`features/health` 는 003·005·011 이 채웠다.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - `events(per, now)` 의 기간 문자열은 `<N>h|<N>d|<N>w`(대소문자 무시)로 해석하고 해석 불가면 24h — §3.4 에 적었다.
+  - mock tick 에서 `stale` 항목은 값을 고정하고 age 만 +1.5(§3.6). 레이더의 usd 가 null 인 행도 수량은 감춰진 금액으로 계산한다(§3.10).
+  - 숨김 탭은 `display:none`, 보이는 탭은 `display:contents` 로 셸의 세로 flex 에 직접 참여한다(§3.5-3 "숨김 탭은 레이아웃에 참여하지 않는다" 의 구현).
 - 남은 빚:
+  - §5 에서 조작하지 않은 항목(§4-4·6·10·12)의 실제 조작 확인.

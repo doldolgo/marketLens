@@ -3,6 +3,7 @@
 
 levels 는 체결되는 쪽 호가([price, size] 목록, 최우선부터).
 금액(quote 통화) 기준으로 사거나 팔고, 수량 기준도 대칭이다.
+그 목록을 고르는 규칙도 여기 있다 — `walk_levels` (004 §3.1).
 
 **이 모듈의 함수는 전부 동기다 — async 로 바꾸지 않는다.** `GET /spreads` 가 수집 락 없이도
 안전한 근거가 "표 조립 전체에 await 가 없다"는 것뿐이기 때문이다. 여기에 await 지점이 생기면
@@ -12,8 +13,20 @@ levels 는 체결되는 쪽 호가([price, size] 목록, 최우선부터).
 
 from dataclasses import dataclass
 
+from app.core.models import Row
+
 # 부동소수 잔액 찌꺼기를 "소진"으로 오판하지 않기 위한 허용 오차
 _EPSILON = 1e-9
+
+
+def walk_levels(row: Row, side: str) -> list[list[float]]:
+    """걷을 호가 — 행의 `asks`/`bids` 그 자체다 (001 §3.3, 004 §3.1).
+
+    세 거래소 모두 WebSocket 호가라 업비트 최대 30·빗썸 최대 15·바이낸스 최대 20단계가
+    들어 있고 별도의 깊이 필드는 없다. 003·004 의 **모든 걷기가 이 함수를 거친다** — 표면값
+    (최우선 1단계)과 걷기가 같은 목록을 보므로 한 응답 안에서 출처가 갈리지 않는다.
+    """
+    return row.asks if side == "asks" else row.bids
 
 
 @dataclass

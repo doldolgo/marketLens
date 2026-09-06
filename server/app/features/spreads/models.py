@@ -11,7 +11,7 @@ from pydantic import BaseModel
 class SpreadRow(BaseModel):
     """(국내 거래소 × 해외 거래소 × 코인) 페어 1행. 키 순서는 스펙 §3.2 예시와 같다.
 
-    선언 순서가 곧 아카이브 스키마다 — 010 의 S3 줄이 이 순서를 그대로 쓴다.
+    행은 어디에도 저장되지 않는다 — S3 는 원문(010), Influx 는 원값(009). HTTP 응답에만 있다.
     """
 
     sym: str
@@ -35,7 +35,7 @@ class SpreadRow(BaseModel):
 
 class SpreadsResponse(BaseModel):
     rate: float
-    notional: float  # 이 응답의 슬리피지가 계산된 체결 규모(USD) — 010 이 줄마다 싣는다
+    notional: float  # 이 응답의 슬리피지가 계산된 체결 규모(USD) — 응답에만 있고 어디에도 저장되지 않는다
     rows: list[SpreadRow]
     warnings: list[str]  # USDT 시세 미갱신 경고 — 없으면 빈 배열 (스펙 008)
     data_received_at: int | None  # 저장소 마지막 수신 시각 epoch ms, 스냅샷 없으면 null
@@ -46,8 +46,8 @@ class RefreshSnapshot(BaseModel):
     """거래소당 1항목."""
 
     exchange: str
-    saved: int  # 이번 실행에서 저장된 행 수 (실패 거래소는 0)
-    calls: int  # 이번 실행에서 나간 HTTP 호출 수 (실패 거래소는 0)
+    saved: int  # 지금 메모리에 있는 그 거래소 행 수 (§3.3)
+    calls: int  # 이 트리거로 나간 REST 호출 수 (실패 거래소는 0)
     # 입출금 조회 성공 여부 — 바이낸스 항목에도 붙는다 (006 §2)
     wallet_status_available: bool
 

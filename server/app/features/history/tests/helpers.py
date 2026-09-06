@@ -41,10 +41,16 @@ class FakeInfluxReader:
         return out
 
 
-def make_client(reader: FakeInfluxReader | None) -> TestClient:
-    """lifespan 없이 앱 상태를 직접 채운다 — 수집 루프·persist 루프·네트워크가 돌지 않는다."""
+def make_client(
+    reader: FakeInfluxReader | None, store: LiveStore | None = None
+) -> TestClient:
+    """lifespan 없이 앱 상태를 직접 채운다 — 스트림·틱 루프·네트워크가 돌지 않는다.
+
+    `reader` 는 Influx 자리(None = INFLUX_TOKEN 없음), `store` 는 메모리 시세 자리다 —
+    저장소 장애 검증은 둘을 따로 채워 메모리 조회가 살아 있는지 본다 (§3.1).
+    """
     app: FastAPI = create_app()
-    app.state.live_store = LiveStore()
+    app.state.live_store = store if store is not None else LiveStore()
     app.state.settings = SimpleNamespace(refresh_token=None)
     app.state.influx = reader
     return TestClient(app)

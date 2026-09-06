@@ -194,13 +194,6 @@ export function Empty({ children, size = 13 }: { children: ReactNode; size?: num
   )
 }
 
-// ── 레거시 — 아직 이식 전인 탭이 쓴다. 마지막 탭(flow) 이식 커밋에서 제거한다. ──
-export const DIM_TEXT = 'color-mix(in srgb, var(--color-text) 55%, transparent)'
-
-export function Toggle(props: { label: string; on: boolean; onChange: (on: boolean) => void }) {
-  return <ToggleBtn on={props.on} label={props.label} onClick={() => props.onChange(!props.on)} />
-}
-
 export function Chip(props: {
   children: ReactNode
   tone?: 'accent' | 'neutral' | 'outline' | 'warn'

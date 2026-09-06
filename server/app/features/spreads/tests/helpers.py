@@ -1,11 +1,12 @@
 """spreads 테스트 공용 도구 — 네트워크 없음, 저장소에 직접 시드 (스펙 003 §4)."""
 
+from datetime import datetime
 from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.core.collector import CycleResult
+from app.core.collect import RefreshSummary
 from app.core.live_store import LiveStore
 from app.core.models import Row
 from app.core.networks import Network
@@ -42,14 +43,25 @@ def make_row(
     )
 
 
-class FakeCollector:
-    """미리 정한 CycleResult 를 돌려주는 가짜 — /refresh 가 거래소를 부르지 않게."""
+def seed_rows(store: LiveStore, rows: list[Row], now: datetime) -> None:
+    """행을 시드하면서 그 거래소 스트림의 수신 시각도 `now` 로 둔다.
 
-    def __init__(self, result: CycleResult) -> None:
+    런타임에서 행은 스트림 메시지로만 생기므로 행이 있는 거래소의 `last_message_at` 은 항상
+    있다 — 저장소를 직접 시드하는 테스트만 이 헬퍼로 같은 전제를 만든다(`age` 는 스트림 기준).
+    """
+    store.put_rows(rows, now)
+    for exchange in {row.exchange for row in rows}:
+        store.stream(exchange).last_message_at = int(now.timestamp() * 1000)
+
+
+class FakeCollector:
+    """미리 정한 RefreshSummary 를 돌려주는 가짜 — /refresh 가 거래소를 부르지 않게."""
+
+    def __init__(self, result: RefreshSummary) -> None:
         self._result = result
         self.cycles = 0
 
-    async def run_cycle(self) -> CycleResult:
+    async def refresh_now(self) -> RefreshSummary:
         self.cycles += 1
         return self._result
 
@@ -62,8 +74,8 @@ def make_cycle_result(
     warnings: list[str] | None = None,
     calls: dict[str, int] | None = None,
     wallet_status_available: dict[str, bool] | None = None,
-) -> CycleResult:
-    return CycleResult(
+) -> RefreshSummary:
+    return RefreshSummary(
         saved=saved if saved is not None else {"upbit": 0, "bithumb": 0, "binance": 0},
         rates_observed=rates_observed or [],
         failures=failures or [],

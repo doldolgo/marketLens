@@ -73,8 +73,7 @@ def test_per_exchange_rates_and_matching_sides():
     """매수측 환율은 거래소별(국내 자기 환율, 해외 기준 환율), ask≠bid 면 다리별로 맞는 쪽 (§4)."""
     store = LiveStore()
     # bithumb 이 USDT 마켓을 가진 상황 — 자기 환율(1,350/1,340)로 환산해야 한다
-    store.replace_exchange(
-        "bithumb",
+    store.put_rows(
         [
             make_row(
                 "bithumb",
@@ -87,8 +86,7 @@ def test_per_exchange_rates_and_matching_sides():
         ],
         FIXED_DT,
     )
-    store.replace_exchange(
-        "binance",
+    store.put_rows(
         [
             make_row(
                 "binance", "AB", price=100.0, asks=[[100.0, 10.0]], bids=[[99.0, 10.0]]
@@ -115,8 +113,7 @@ def test_per_exchange_rates_and_matching_sides():
 def test_sell_side_exhaustion_rematches_buy():
     """매도측 소진 시 매수를 되맞춰 실효 수익률이 −50% 대로 떨어지지 않는다 (§4)."""
     store = LiveStore()
-    store.replace_exchange(
-        "upbit",
+    store.put_rows(
         [
             make_row(
                 "upbit",
@@ -128,8 +125,7 @@ def test_sell_side_exhaustion_rematches_buy():
         ],
         FIXED_DT,
     )
-    store.replace_exchange(
-        "binance",
+    store.put_rows(
         [
             make_row(
                 "binance", "TT", price=100.0, asks=[[100.0, 5.0]], bids=[[99.0, 5.0]]
@@ -164,6 +160,20 @@ def test_buy_side_exhaustion_warns_partial_fill():
     assert any("원만 체결" in w for w in body["warnings"])
 
 
+def test_cap_warning_precedes_fee_sentence():
+    """한도 10억원 초과 경고(f)는 마지막 수수료 문구(g) 바로 앞 (§3.2-9)."""
+    client = make_client(standard_store())
+    body = client.get(
+        "/arbitrage", params={"sym": "BTC", "amount": 2_000_000_000}
+    ).json()
+    warnings = body["warnings"]
+    assert "저장 한도" in warnings[-2]
+    assert "미반영 이론값" in warnings[-1]
+
+    below = client.get("/arbitrage", params={"sym": "BTC", "amount": 1_000_000}).json()
+    assert not any("저장 한도" in w for w in below["warnings"])
+
+
 def test_missing_snapshot_and_missing_base_rate_are_404():
     client = make_client(standard_store())
     res = client.get("/arbitrage", params={"sym": "NOPE", "amount": 1_000_000})
@@ -172,13 +182,11 @@ def test_missing_snapshot_and_missing_base_rate_are_404():
 
     # 기준 환율(upbit) 없음 — bithumb 환율만 있어도 404 다
     store = LiveStore()
-    store.replace_exchange(
-        "upbit",
+    store.put_rows(
         [make_row("upbit", "BTC", price=100_000_000)],
         FIXED_DT,
     )
-    store.replace_exchange(
-        "binance",
+    store.put_rows(
         [make_row("binance", "BTC", price=71_000)],
         FIXED_DT,
     )

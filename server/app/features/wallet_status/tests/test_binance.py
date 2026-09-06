@@ -3,13 +3,19 @@
 import hashlib
 import hmac
 import re
+import time
 
 import httpx
 import pytest
 
 from app.features.wallet_status.binance import fetch_binance
 from app.features.wallet_status.models import WalletStatusError
-from app.features.wallet_status.tests.helpers import Capture, json_client
+from app.features.wallet_status.tests.helpers import (
+    Capture,
+    FakeRecorder,
+    assert_recorded_only,
+    json_client,
+)
 
 
 async def test_hmac_signature_matches_directly_computed_value() -> None:
@@ -110,3 +116,44 @@ async def test_http_500_message_has_status_and_no_secret() -> None:
     assert len(err.detail["body"]) <= 500
     assert "top-secret-value" not in err.message
     assert "top-secret-value" not in str(err.detail)
+
+
+async def test_response_body_recorded_without_signature_or_api_key() -> None:
+    # source 는 경로만 — 쿼리의 서명·timestamp 와 X-MBX-APIKEY 는 남지 않는다 (§3.5·§4)
+    body = '[{"coin":"BTC","networkList":[{"network":"BTC","depositEnable":true,"withdrawEnable":true}]}]'
+    cap = Capture([httpx.Response(200, content=body.encode())])
+    recorder = FakeRecorder()
+    before = int(time.time() * 1000)
+    await fetch_binance(
+        cap.client(), api_key="fake-api-key-xyz", secret_key="sk", record=recorder
+    )
+    assert_recorded_only(
+        recorder,
+        exchange="binance",
+        source="rest:/sapi/v1/capital/config/getall",
+        body=body,
+        before_ms=before,
+    )
+    signature = re.search(r"signature=([0-9a-f]{64})", str(cap.requests[0].url))
+    assert signature is not None
+    _, source, _, payload = recorder.lines[0]
+    for leak in (signature.group(1), "timestamp=", "fake-api-key-xyz"):
+        assert leak not in source
+        assert leak not in payload
+
+
+async def test_http_500_body_is_recorded_too() -> None:
+    cap = Capture([httpx.Response(500, text="binance-down")])
+    recorder = FakeRecorder()
+    before = int(time.time() * 1000)
+    with pytest.raises(WalletStatusError):
+        await fetch_binance(
+            cap.client(), api_key="ak", secret_key="sk", record=recorder
+        )
+    assert_recorded_only(
+        recorder,
+        exchange="binance",
+        source="rest:/sapi/v1/capital/config/getall",
+        body="binance-down",
+        before_ms=before,
+    )

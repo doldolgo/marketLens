@@ -8,7 +8,7 @@
 
 ```bash
 # 0) env — server/.env.example 을 복사해 server/.env 를 만들고 값을 채운다 (전부 선택값)
-# 1) InfluxDB (선택 — 없어도 앱은 뜬다, /history/* 만 503)
+# 1) InfluxDB + Redis (선택 — 없어도 앱은 뜬다, /history/* 만 503·인계된 틱만 버려진다)
 docker compose --env-file server/.env -f docker-compose.dev.yml up -d
 # 2) server (Python 3.12, uv 가상환경 — docs/context/dev-setup.md)
 cd server && uvicorn app.main:app --reload   # :8000
@@ -22,7 +22,7 @@ cd web && npm ci && npm run dev              # :5173, /api → :8000 프록시
 docker compose --env-file .env --env-file server/.env up -d --build
 ```
 
-server·web·influxdb 세 컨테이너가 뜨고, 호스트에는 web 하나만 열린다(`WEB_PORT`, 기본 80).
+server·web·influxdb·redis 네 컨테이너가 뜨고, 호스트에는 web 하나만 열린다(`WEB_PORT`, 기본 80 — 기존 스택과 공존하는 EC2 는 루트 `.env` 의 `WEB_PORT=8080`).
 
 ## 배포
 

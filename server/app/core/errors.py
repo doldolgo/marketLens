@@ -7,7 +7,7 @@ main.py 의 예외 핸들러가 한다. 여기는 예외 자체와 detail 조립
 _BODY_LIMIT = 500  # 비-200 본문은 앞 500자만 담는다 — 스펙 001 §3.1
 
 # 실패 종류 8종 — 스펙 011 §3.2. 분류는 각 커넥터가 자기 거래소 규칙으로 정한다.
-# stale_stream 만 HTTP 응답이 아니라 상시 연결의 정체다(012 §3.6) — url·status_code 가 없다.
+# stale_stream 만 HTTP 응답이 아니라 상시 연결의 정체다(012 §3.6) — status_code 만 없다(url 은 WS URL).
 FAIL_KINDS = (
     "timeout",
     "network",
@@ -34,7 +34,7 @@ class ExchangeError(Exception):
     def __init__(
         self,
         exchange: str,
-        url: str | None,  # stale_stream 은 HTTP 호출이 아니라 url 이 없다 (011 §3.2)
+        url: str | None,  # REST URL 또는 WS URL — stale_stream 도 WS URL (011 §3.2)
         message: str,
         status_code: int | None = None,
         body: str | None = None,

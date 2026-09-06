@@ -9,9 +9,14 @@ import pytest
 
 from app.core.live_store import LiveStore
 from app.core.models import Row
-from app.features.spreads.tests.helpers import make_client, make_row
+from app.core.ticks import build_tick
+from app.features.spreads.tests.helpers import make_client, make_row, seed_rows
 
-NOW = datetime.now(UTC)
+
+def _now() -> datetime:
+    """호출 시점의 시계 — import 시각을 상수로 잡으면 느린 CI 에서 수집 뒤 실행까지 STALE_SEC 를 넘겨 행이 낡은 것으로 판정된다."""
+    return datetime.now(UTC)
+
 
 # 환율 ask=bid=1000 — 슬리피지만 남기려고 테더 프리미엄을 없앤 시드
 RATE = 1000.0
@@ -31,11 +36,10 @@ def seed(
     fx_bids: list[list[float]] | None = None,
     dom_bids: list[list[float]] | None = None,
     dom_asks: list[list[float]] | None = None,
-    depth: tuple[list[list[float]], list[list[float]]] | None = None,
 ) -> LiveStore:
-    """upbit × binance 한 페어. depth 를 주면 해외 행에 012 스트림 깊이를 얹는다."""
-    store.replace_exchange(
-        "upbit",
+    """upbit × binance 한 페어."""
+    seed_rows(
+        store,
         [
             make_row(
                 "upbit",
@@ -44,7 +48,7 @@ def seed(
                 bids=dom_bids if dom_bids is not None else DOM_BIDS,
             )
         ],
-        NOW,
+        _now(),
     )
     fx_row: Row = make_row(
         "binance",
@@ -53,11 +57,8 @@ def seed(
         asks=fx_asks if fx_asks is not None else FX_ASKS,
         bids=fx_bids if fx_bids is not None else FX_BIDS,
     )
-    if depth is not None:
-        fx_row.depth_asks, fx_row.depth_bids = depth
-        fx_row.depth_at = 1_757_000_000_000
-    store.replace_exchange("binance", [fx_row], NOW)
-    store.set_rate("upbit", RATE, RATE, NOW)
+    seed_rows(store, [fx_row], _now())
+    store.set_rate("upbit", RATE, RATE, _now())
     store.mark_received(1_787_000_000)
     return store
 
@@ -145,22 +146,39 @@ def test_exhausted_book_uses_actually_filled_average_and_keeps_status() -> None:
     assert row["fwd"] > -50.0
 
 
-def test_depth_levels_are_used_when_present() -> None:
-    # 해외에 depth_* 가 있으면 그것을, 없으면 1단계 asks/bids 를 쓴다 (012 스트림 유무, §4)
-    shallow = seed(LiveStore(), fx_asks=[FX_ASKS[0]], fx_bids=[FX_BIDS[0]])
-    streamed = seed(
-        LiveStore(),
-        fx_asks=[FX_ASKS[0]],
-        fx_bids=[FX_BIDS[0]],
-        depth=(FX_ASKS, FX_BIDS),
-    )
-    # 1단계만 있으면 $5,000 어치(50개)밖에 못 사고 그 평균은 최우선가 그대로다
-    assert only_row(shallow)["slipFwd"] == 0.0
-    # 깊이가 실리면 2단계까지 먹어 평균이 나빠진다 — 2단계 시드와 같은 값
-    assert only_row(streamed)["fwd"] == pytest.approx(25.0)
-    assert only_row(streamed)["slipFwd"] == pytest.approx(75.0)
-    # 깊이는 응답에 노출되지 않는다 (001 §3.3 — 저장도 안 한다)
-    assert all("depth" not in key for key in only_row(streamed))
+def _expected_fwd(fx_asks: list[list[float]], notional: float) -> float:
+    """시드로 손계산한 fwd — 해외 asks 를 규모로 걸어 산 수량을 국내 DOM_BIDS 에 판 값 (§3.2-4)."""
+    bought_qty = bought_amt = 0.0
+    for price, size in fx_asks:
+        take = min(size, (notional - bought_amt) / price)
+        bought_qty += take
+        bought_amt += take * price
+        if bought_amt >= notional:
+            break
+    sold_qty = sold_amt = 0.0
+    for price, size in DOM_BIDS:
+        take = min(size, bought_qty - sold_qty)
+        sold_qty += take
+        sold_amt += take * price
+    return ((sold_amt / sold_qty) / ((bought_amt / bought_qty) * RATE) - 1) * 100
+
+
+def test_all_stored_levels_are_walked_even_at_twenty() -> None:
+    # 바이낸스 행의 asks 가 20단계면 그 전부를 걷는다 (§4) — 20단계를 모두 소진하는 규모에서
+    # fwd 가 손계산과 같고, 같은 시드를 19단계로 자르면 값이 달라진다(앞 N단계만 걷는 회귀를 잡는다).
+    deep_asks = [[100.0 + i, 5.0] for i in range(20)]  # 단계당 ≈$500, 전체 $10,950
+    notional = 11_000  # 20단계 전부(100개, $10,950)를 먹고도 남는다 → 실제 체결분 평균
+    deep = only_row(seed(LiveStore(), fx_asks=deep_asks), notional=notional)
+    assert deep["fwd"] == pytest.approx(_expected_fwd(deep_asks, notional))
+    # 손계산 그대로: 평균 $109.5 에 100개 → 국내 50@₩200,000 + 50@₩100,000 → 평균 ₩150,000
+    assert deep["fwd"] == pytest.approx((150_000.0 / (109.5 * RATE) - 1) * 100)
+    assert deep["slipFwd"] > 0.0
+
+    truncated = only_row(seed(LiveStore(), fx_asks=deep_asks[:19]), notional=notional)
+    assert truncated["fwd"] == pytest.approx(_expected_fwd(deep_asks[:19], notional))
+    assert truncated["fwd"] != pytest.approx(deep["fwd"])
+    # 깊이 전용 필드는 응답에 없다 (001 §3.3 — 행의 asks/bids 가 전부다)
+    assert all("depth" not in key for key in deep)
 
 
 def test_default_notional_is_10000_and_echoed_at_top_level() -> None:
@@ -193,3 +211,17 @@ def test_boundary_notional_values_are_accepted() -> None:
         resp = make_client(store).get(f"/spreads?notional={value}")
         assert resp.status_code == 200
         assert resp.json()["notional"] == float(value)
+
+
+def test_net_values_differ_from_stored_raw_by_the_deducted_width() -> None:
+    # 응답 fwd·rev 는 저장 계층(009 틱 → 005 premium)이 쓰는 원값과 다르다 —
+    # 같은 저장소로 만든 틱의 fwd 는 응답의 fwd + slipFwd 와 같다 (§4)
+    store = seed(LiveStore())
+    row = only_row(store)
+    [point] = build_tick(store, ts=1_787_000_000, dw_failed=()).rows
+    assert (point.dom, point.fx, point.base) == ("upbit", "binance", "BTC")
+    # 차감이 0 이 아닌 시드라 두 값이 실제로 다르다
+    assert row["slipFwd"] > 0 and row["slipRev"] > 0
+    assert point.fwd != pytest.approx(row["fwd"])
+    assert point.fwd == pytest.approx(row["fwd"] + row["slipFwd"])
+    assert point.rev == pytest.approx(row["rev"] + row["slipRev"])

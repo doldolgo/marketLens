@@ -1,7 +1,10 @@
-"""앱 진입점 — 골격·에러 형식·/health·수집 루프 기동 (스펙 001).
+"""앱 진입점 — 골격·에러 형식·/health·수집 배선 (스펙 001).
 
-/health 와 수집 루프는 기능 폴더가 아니라 여기(시스템) 소관이다.
+/health 와 틱 루프는 기능 폴더가 아니라 여기(시스템) 소관이다.
 메모리가 진실이므로 uvicorn 워커는 1개여야 한다 — 워커가 둘이면 서로 다른 메모리를 본다.
+시작 순서: Influx·Redis 연결 확인 → 010 원문 아카이브(S3_BUCKET 있을 때) → 011 이력 복원 → 009 spark 복원
+→ 마켓 우주 → 스트림 기동(국내 2 + 바이낸스 3샤드) → 틱 루프 → 009 인계 보내기 태스크·flusher.
+어느 것이 실패해도 앱은 뜬다.
 """
 
 import asyncio
@@ -18,7 +21,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.core.collector import Collector
+from app.core.collect import CollectService
 from app.core.config import (
     APP_NAME,
     APP_VERSION,
@@ -27,18 +30,23 @@ from app.core.config import (
     USER_AGENT,
     get_settings,
 )
-from app.core.connectors.binance import BinanceConnector
-from app.core.connectors.binance_depth import BinanceDepthStream, DepthCache
-from app.core.connectors.bithumb import BithumbConnector
-from app.core.connectors.upbit import UpbitConnector
+from app.core.contracts import noop_record
 from app.core.errors import ExchangeError
 from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
 from app.core.outages import OutageTracker
-from app.core.persist import PersistLoop
+from app.core.quotes import QuoteSink
+from app.core.raw_archive import RawArchive
+from app.core.redis_stream import RedisTickStream
 from app.core.s3 import S3Uploader
 from app.core.serialization import camelize_json
-from app.core.snapshot import SnapshotLoop
+from app.core.spark import SparkBuffer, restore_spark
+from app.core.streams.binance import BinanceStream
+from app.core.streams.bithumb import BithumbStream
+from app.core.streams.upbit import UpbitStream
+from app.core.tick_store import Flusher, TickRelay
+from app.core.ticks import TickLoop
+from app.core.universe import UniverseRefresher
 from app.features.analysis.router import router as analysis_router
 from app.features.health.router import router as health_router
 from app.features.history.router import router as history_router
@@ -54,105 +62,137 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         timeout=httpx.Timeout(EXCHANGE_TIMEOUT_TOTAL, connect=EXCHANGE_TIMEOUT_CONNECT),
         headers={"User-Agent": USER_AGENT},
     )
-    store = LiveStore()
     settings = app.state.settings
-    # 입출금 상태 60초 캐시(006) — 키 없는 거래소는 unknown, 빗썸은 키 불필요
+    store = LiveStore()
+    sink = QuoteSink(store)
+
+    # 원문 아카이브(010) — S3_BUCKET 이 없으면 비활성(기록 함수는 무동작), 앱은 뜬다.
+    # 클라이언트 생성 실패도 비활성 + 에러 1줄. HeadBucket 실패는 에러 1줄뿐이다 — 자격증명이
+    # 없어도 뜨고, 이후 실패는 업로드 워커 로그로만.
+    archive: RawArchive | None = None
+    record = noop_record
+    uploader: S3Uploader | None = None
+    if not settings.s3_bucket:
+        logger.warning(
+            "S3_BUCKET 이 없어 원문 아카이브를 쓰지 않는다 — 원문은 남지 않는다"
+        )
+    else:
+        try:
+            uploader = S3Uploader(bucket=settings.s3_bucket, region=settings.s3_region)
+        except Exception as exc:
+            logger.error(
+                "S3 클라이언트 생성 실패 (region=%s) — 원문 아카이브를 쓰지 않는다: %r",
+                settings.s3_region,
+                exc,
+            )
+    if uploader is not None:
+        try:
+            await asyncio.to_thread(uploader.head_bucket)
+        except Exception as exc:
+            logger.error(
+                "S3 버킷 %s 접근 실패 — 원문 업로드는 워커가 객체마다 다시 시도한다: %r",
+                settings.s3_bucket,
+                exc,
+            )
+        archive = RawArchive(uploader=uploader)
+        record = archive.record
+        archive.start()
+
+    # 입출금 상태 60초 캐시(006) — 키 없는 거래소는 unknown, 빗썸은 키 불필요.
+    # 응답 본문은 시세 원문과 같은 싱크(010)에 남는다.
     wallet = WalletStatusService(
         upbit_api_key=settings.upbit_api_key,
         upbit_secret_key=settings.upbit_secret_key,
         binance_api_key=settings.binance_api_key,
         binance_secret_key=settings.binance_secret_key,
+        record=record,
     )
-    # Influx — 토큰 없으면 저장 루프 비활성·/history/* 503, 앱은 뜬다 (스펙 005 §3.1)
+
+    # Influx — 토큰 없으면 /history/* 503·이력 복원 없음, 앱은 뜬다 (스펙 005·011)
     influx: InfluxClient | None = None
-    persist_task: asyncio.Task[None] | None = None
     if settings.influx_token:
         influx = InfluxClient(url=settings.influx_url, token=settings.influx_token)
         if not await asyncio.to_thread(influx.ping):
-            # 기동 시 연결 실패는 에러 로그 1줄 — 저장 루프가 다음 회차에 재시도한다
             logger.error(
-                "InfluxDB 연결 실패: %s — 저장 루프가 회차마다 재시도한다",
-                settings.influx_url,
+                "InfluxDB 연결 실패: %s — 회차마다 재시도한다", settings.influx_url
             )
     else:
-        logger.warning(
-            "INFLUX_TOKEN 이 없어 저장 루프를 켜지 않는다 — /history/* 는 503"
-        )
+        logger.warning("INFLUX_TOKEN 이 없어 Influx 를 쓰지 않는다 — /history/* 는 503")
     app.state.influx = influx
 
-    # 수집 실패 이력(011) — 복원은 수집 루프 시작 전에 끝난다. 쓰기는 별도 태스크가 순서대로.
+    # Redis — 틱 버퍼(009). 불달이면 경고 1줄, 인계된 틱은 버려지고 앱은 뜬다
+    tick_stream = RedisTickStream.from_url(settings.redis_url)
+    if not await tick_stream.ping():
+        logger.warning(
+            "Redis 연결 실패: %s — 인계된 틱은 버려진다 (명령마다 재시도)",
+            settings.redis_url,
+        )
+    spark = SparkBuffer()
+    handoff = TickRelay(stream=tick_stream, store=store, spark=spark)
+
+    # 1. 수집 실패 이력(011) 복원 — 틱 루프 시작 전에 끝난다. 쓰기는 별도 태스크가 순서대로.
     outages = OutageTracker(writer=influx)
     app.state.started_at = int(time.time() * 1000)
     await outages.restore(influx, app.state.started_at)
     outage_writer_task = asyncio.create_task(outages.run_writer_loop())
     app.state.outages = outages
 
-    # 바이낸스 깊이 스트림(012) — 구독 대상은 메모리의 바이낸스 스냅샷 심볼이라
-    # 이미 국내 교집합이 적용돼 있고 상장·상폐를 자동으로 따라간다. 붙지 못해도 앱은 뜬다.
-    depth_cache = DepthCache()
-    depth_stream = BinanceDepthStream(
-        cache=depth_cache,
-        symbols=lambda: {r.native_symbol for r in store.get_all(exchange="binance")},
-    )
-    depth_stream.start()
+    # 1-2. spark 복원(009 §3.6) — 최근 30분 1분 버킷, 10초 상한. 틱 루프 시작 전에 끝난다.
+    await restore_spark(influx, spark, store, app.state.started_at // 1000)
 
-    collector = Collector(
+    # 2~3. 마켓 우주(매초) → 스트림 기동. 목록을 못 받은 거래소는 다음 초에 다시 — 그동안 구독은 없다.
+    # 바이낸스 커넥터(012)가 심볼 집합 계약도 맡는다 — 우주가 확정되면 그 심볼만 구독한다.
+    upbit = UpbitStream(store=store, sink=sink, record=record)
+    bithumb = BithumbStream(store=store, sink=sink, record=record)
+    binance = BinanceStream(store=store, sink=sink, record=record)
+    streams = [upbit, bithumb, binance]
+    universe = UniverseRefresher(
+        sink=sink, streams=[upbit, bithumb], foreign=binance, client=client
+    )
+    universe.start()
+    for stream in streams:
+        stream.start()
+
+    # 4. 틱 루프(1초) — 틱 생성·인계·판정
+    ticks = TickLoop(
         store=store,
-        domestic=[UpbitConnector(), BithumbConnector()],
-        foreign=BinanceConnector(depth=depth_cache),
+        streams=streams,
         client=client,
-        wallet=wallet,
+        handoff=handoff,
         outages=outages,
+        wallet=wallet,
     )
-    app.state.live_store = store
-    app.state.collector = collector
+    ticks.start()
 
+    # 5. 009 — 인계 큐 보내기 태스크와 flusher(60초, Influx 토큰 없으면 비활성)
+    handoff.start()
+    flusher: Flusher | None = None
     if influx is not None:
-        persist = PersistLoop(store=store, collector=collector, influx=influx)
-        persist_task = asyncio.create_task(persist.run_loop())
+        flusher = Flusher(stream=tick_stream, writer=influx)
+        flusher.start()
 
-    # S3 snapshot — 버킷 없으면 루프 비활성, 앱은 뜬다. persist 루프와 독립 (스펙 010 §3.2)
-    s3: S3Uploader | None = None
-    snapshot_task: asyncio.Task[None] | None = None
-    if settings.s3_bucket:
-        s3 = S3Uploader(bucket=settings.s3_bucket, region=settings.s3_region)
-        if not await asyncio.to_thread(s3.head_bucket):
-            # 기동 시 접근 확인 실패는 에러 로그 1줄 — 루프가 회차마다 다시 시도한다 (§3.3)
-            logger.error(
-                "S3 버킷 접근 확인 실패: %s — snapshot 루프가 회차마다 재시도한다",
-                settings.s3_bucket,
-            )
-        snapshot = SnapshotLoop(store=store, collector=collector, s3=s3)
-        snapshot_task = asyncio.create_task(snapshot.run_loop())
-    else:
-        logger.warning("S3_BUCKET 이 없어 snapshot 루프를 켜지 않는다")
-
-    task = asyncio.create_task(collector.run_loop())
+    app.state.live_store = store
+    app.state.collector = CollectService(
+        store=store, universe=universe, streams=streams, client=client, wallet=wallet
+    )
     try:
         yield
     finally:
-        task.cancel()
+        await ticks.aclose()  # 슬롯의 마지막 틱을 인계한다
+        await handoff.aclose()  # 큐에 남은 틱을 Redis 로 한 번씩 보내 본다(총 5초 상한)
+        if flusher is not None:
+            await flusher.aclose()
+        await universe.aclose()
+        await asyncio.gather(*(s.aclose() for s in streams))
+        if archive is not None:
+            # 스트림이 닫힌 뒤 — 마지막 프레임까지 담아 5초 안에서 올린다 (010 §3.6)
+            await archive.aclose()
         outage_writer_task.cancel()
-        if persist_task is not None:
-            persist_task.cancel()
-        if snapshot_task is not None:
-            snapshot_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
         with contextlib.suppress(asyncio.CancelledError):
             await outage_writer_task
-        if persist_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await persist_task
-        if snapshot_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await snapshot_task
-        # 샤드는 취소하고 기다린 다음 소켓을 닫는다 (012 §3.4)
-        await depth_stream.aclose()
         if influx is not None:
             influx.close()
-        if s3 is not None:
-            s3.close()
+        await tick_stream.aclose()
         await client.aclose()
 
 
@@ -194,7 +234,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        # 수집 루프 상태와 무관하게 항상 ok
+        # 스트림 상태와 무관하게 항상 ok — 프로세스 liveness 만 나타낸다
         return {"status": "ok", "version": APP_VERSION}
 
     app.include_router(spreads_router)

@@ -7,11 +7,11 @@ import time
 from collections.abc import Collection
 from datetime import UTC, datetime
 
-from app.core.collector import CycleResult
+from app.core.collect import RefreshSummary
 from app.core.live_store import LiveStore
 from app.core.models import Row
 from app.core.networks import pick_domestic
-from app.core.orderbook import average_price, walk_amount, walk_quantity
+from app.core.orderbook import average_price, walk_amount, walk_levels, walk_quantity
 from app.core.premium import premium_percent
 from app.features.spreads.models import (
     RefreshFailure,
@@ -27,6 +27,8 @@ BASE_EXCHANGE = "upbit"
 DOMESTIC_QUOTE = "KRW"
 FOREIGN_QUOTE = "USDT"
 STALE_AFTER_SEC = 5.0
+# 행 자체가 이만큼 안 바뀌면 스트림이 살아 있어도 그 행의 실제 경과 초를 age 로 낸다 (§3.2-4)
+ROW_STALE_SEC = 300.0
 # USDT 는 매 사이클(1초) 관측이 정상 — 60초 무관측은 구조적 문제다 (스펙 008 §3.2)
 USDT_STALE_WARN_SEC = 60.0
 EXCLUDED_COINS: frozenset[str] = frozenset()
@@ -82,16 +84,6 @@ def _wallet_fields(
     return (dom_net.name, dom_net.dep, dom_net.wd, dep_fx, wd_fx)
 
 
-def _walk_levels(row: Row, side: str) -> list[list[float]]:
-    """걷을 호가 — `depth_*` 가 비어 있지 않으면 그것을, 비면 `asks`/`bids` (001 §3.3).
-
-    국내 행은 `depth_*` 가 항상 비어 있고, 해외는 012 스트림이 살아 있으면 최대 20단계다.
-    """
-    if side == "asks":
-        return row.depth_asks or row.asks
-    return row.depth_bids or row.bids
-
-
 def _cross_walk(
     buy_levels: list[list[float]],
     sell_levels: list[list[float]],
@@ -110,10 +102,24 @@ def _cross_walk(
     return average_price(buy), average_price(sell)
 
 
-def _age_seconds(row: Row, now: datetime) -> float:
-    """스냅샷 경과 초. updated_at 은 저장소 적재 시각이라 항상 채워져 있다."""
+def _age_seconds(row: Row, store: LiveStore, now: datetime) -> float:
+    """그 거래소 스트림의 마지막 시세 수신 이후 경과 초 (§3.2-4).
+
+    행 자체의 갱신 시각이 아니다 — 조용한 코인은 메시지가 안 와도 호가는 현재값이다.
+    행은 스트림 메시지로만 생기므로 행이 있는 거래소의 수신 시각과 행의 갱신 시각은 항상 있다.
+
+    예외: 행 자체가 300초 이상 안 바뀌었으면(거래 정지·심볼 장애 — 스트림은 살아 있는데
+    그 코인 프레임만 안 온다) 그 행의 실제 경과 초를 낸다. FE 의 stale 규칙(age ≥ 5)이
+    그대로 잡게 하기 위해서다.
+    """
+    state = store.stream_state(row.exchange)
+    assert state is not None and state.last_message_at is not None
     assert row.updated_at is not None
-    return (now - row.updated_at).total_seconds()
+    stream_age = (now.timestamp() * 1000 - state.last_message_at) / 1000
+    row_age = (now - row.updated_at).total_seconds()
+    if row_age >= ROW_STALE_SEC:
+        return max(stream_age, row_age)
+    return stream_age
 
 
 def _build_row(
@@ -122,6 +128,7 @@ def _build_row(
     fx_row: Row,
     rate_ask: float,
     rate_bid: float,
+    store: LiveStore,
     now: datetime,
     notional: float,
 ) -> SpreadRow:
@@ -131,8 +138,8 @@ def _build_row(
     fx_bid = fx_row.bids[0] if fx_row.bids else None
     fx_ask = fx_row.asks[0] if fx_row.asks else None
 
-    # age 는 양측 중 오래된 쪽 기준, 0 미만이면 0
-    age = max(0.0, _age_seconds(dom_row, now), _age_seconds(fx_row, now))
+    # age 는 양측 스트림 중 오래된 쪽 기준(행 자체 300초 미갱신이면 그 행의 경과 초), 0 미만이면 0
+    age = max(0.0, _age_seconds(dom_row, store, now), _age_seconds(fx_row, store, now))
 
     best = (dom_bid, dom_ask, fx_bid, fx_ask)
     failed = any(level is None for level in best) or any(
@@ -156,11 +163,11 @@ def _build_row(
 
         # 걷기 — 김프는 해외 asks 를 notional(USDT)로, 역프는 국내 asks 를 그 원화 환산액으로
         fx_ask_avg, dom_bid_avg = _cross_walk(
-            _walk_levels(fx_row, "asks"), _walk_levels(dom_row, "bids"), notional
+            walk_levels(fx_row, "asks"), walk_levels(dom_row, "bids"), notional
         )
         dom_ask_avg, fx_bid_avg = _cross_walk(
-            _walk_levels(dom_row, "asks"),
-            _walk_levels(fx_row, "bids"),
+            walk_levels(dom_row, "asks"),
+            walk_levels(fx_row, "bids"),
             notional * rate_ask,
         )
 
@@ -185,7 +192,8 @@ def _build_row(
         fwd=fwd,
         rev=rev,
         usd=usd,
-        spark=[],  # 항상 빈 배열 — 009(tick-store) 몫
+        # 009 가 게시한 fwd 원값 추이(1분 버킷 ≤30개) — fail 행도 싣는다, 없으면 빈 배열
+        spark=store.spark(dom_row.exchange, fx_row.exchange, base),
         status=status,
         age=age,
         slip_fwd=slip_fwd,
@@ -257,6 +265,7 @@ def build_spreads(
                         fx_table[base],
                         rate.ask,
                         rate.bid,
+                        store,
                         now,
                         notional,
                     )
@@ -289,10 +298,10 @@ def build_spreads(
     )
 
 
-def build_refresh(result: CycleResult, store: LiveStore) -> RefreshResponse:
-    """001 수집 사이클 결과 → POST /refresh 응답 — 스펙 003 §3.3.
+def build_refresh(result: RefreshSummary, store: LiveStore) -> RefreshResponse:
+    """001 즉시 갱신 트리거 요약 → POST /refresh 응답 — 스펙 003 §3.3.
 
-    `snapshots[]` 는 거래소당 1항목이고 001 요약의 호출 수도 여기 싣는다(006 이 원소를 확장).
+    `snapshots[]` 는 거래소당 1항목이고 001 요약의 REST 호출 수도 여기 싣는다(006 이 원소를 확장).
     """
     snapshots = [
         RefreshSnapshot(

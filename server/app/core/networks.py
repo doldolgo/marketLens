@@ -73,22 +73,25 @@ def match_network(
                 return "matched", f
 
     dom_tokens = normalize_name(dom.name)
+    # 국내 이름이 전부 불용어(예 Mainnet)면 정보가 없다 — 빈 집합끼리의 "완전 일치"는
+    # 아무 망이나 맞다는 뜻이 되고, absent 라고 말할 근거도 없으니 unknown (§3.6-2)
+    if not dom_tokens:
+        return "unknown", None
     foreign_tokens = [(f, normalize_name(f.name)) for f in foreign]
 
-    if dom_tokens:  # 빈 토큰 집합끼리의 "완전 일치"는 아무 망이나 맞다는 뜻이 된다
-        # 2. 토큰 집합 완전 일치
-        for f, ft in foreign_tokens:
-            if ft == dom_tokens:
-                return "matched", f
-        # 3. 토큰 정렬-결합 문자열 일치 (`AssetHub Polkadot` ↔ `Asset Hub Polkadot`) + 동일 체인 쌍 표
-        dom_joined = "".join(sorted(dom_tokens))
-        for f, ft in foreign_tokens:
-            if not ft:
-                continue
-            if "".join(sorted(ft)) == dom_joined:
-                return "matched", f
-            if frozenset({dom_tokens, ft}) in _EQUIV_PAIRS:
-                return "matched", f
+    # 2. 토큰 집합 완전 일치
+    for f, ft in foreign_tokens:
+        if ft == dom_tokens:
+            return "matched", f
+    # 3. 토큰 정렬-결합 문자열 일치 (`AssetHub Polkadot` ↔ `Asset Hub Polkadot`) + 동일 체인 쌍 표
+    dom_joined = "".join(sorted(dom_tokens))
+    for f, ft in foreign_tokens:
+        if not ft:
+            continue
+        if "".join(sorted(ft)) == dom_joined:
+            return "matched", f
+        if frozenset({dom_tokens, ft}) in _EQUIV_PAIRS:
+            return "matched", f
 
     # 4. 못 찾음 — 토큰이 하나라도 겹치거나 길이 3+ 토큰의 접두사 관계(kat↔katana)면 unknown
     for _, ft in foreign_tokens:

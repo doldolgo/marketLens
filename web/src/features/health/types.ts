@@ -10,6 +10,7 @@ export const KIND_LABELS: Record<OutageKind, string> = {
   unavailable: '거래소 오류',
   bad_request: '요청 오류',
   bad_response: '응답 오류',
+  stale_stream: '스트림 정체',
 }
 
 /** 거래소 카드 상태 문구 (§3.8). */

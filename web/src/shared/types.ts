@@ -78,6 +78,7 @@ export type OutageKind =
   | 'unavailable'
   | 'bad_request'
   | 'bad_response'
+  | 'stale_stream'
 
 /** 실패 구간 1건 — openOutage 와 outages 항목이 같은 모양. endedAt null = 진행 중. */
 export interface HealthOutage {

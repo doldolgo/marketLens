@@ -1,11 +1,18 @@
 """업비트 입출금 조회 — JWT 서명·wallet_state 해석·망 목록 (스펙 006 §3.2·§4)."""
 
+import time
+
 import httpx
 import jwt
 import pytest
 
 from app.features.wallet_status.models import WalletStatusError
-from app.features.wallet_status.tests.helpers import Capture, json_client
+from app.features.wallet_status.tests.helpers import (
+    Capture,
+    FakeRecorder,
+    assert_recorded_only,
+    json_client,
+)
 from app.features.wallet_status.upbit import fetch_upbit
 
 # HS256 최소 권장 키 길이(32바이트)를 채운 가짜 키 — 짧으면 PyJWT 가 경고를 낸다
@@ -117,3 +124,56 @@ async def test_http_500_message_has_status_and_no_secret() -> None:
     assert len(err.detail["body"]) <= 500  # detail body 앞 500자
     assert _LEAKABLE_SECRET not in err.message
     assert _LEAKABLE_SECRET not in str(err.detail)
+
+
+async def test_response_body_recorded_to_raw_sink_without_auth_header() -> None:
+    # 성공 응답 본문이 exchange·rest:<경로>·수신 시각과 함께 그대로 남고, 헤더·토큰은 없다 (§4)
+    body = '[{"currency":"BTC","wallet_state":"working","net_type":"BTC"}]'
+    cap = Capture([httpx.Response(200, content=body.encode())])
+    recorder = FakeRecorder()
+    before = int(time.time() * 1000)
+    await fetch_upbit(
+        cap.client(), api_key="ak", secret_key=_LEAKABLE_SECRET, record=recorder
+    )
+    assert_recorded_only(
+        recorder,
+        exchange="upbit",
+        source="rest:/v1/status/wallet",
+        body=body,
+        before_ms=before,
+    )
+    token = cap.requests[0].headers["Authorization"].removeprefix("Bearer ")
+    assert token not in recorder.lines[0][3]
+    assert _LEAKABLE_SECRET not in recorder.lines[0][3]
+
+
+async def test_http_500_body_is_recorded_too() -> None:
+    # 실패 응답도 받은 그대로 원문 싱크에 — 성공·실패 모두 (§3.5)
+    cap = Capture([httpx.Response(500, text="upbit-down")])
+    recorder = FakeRecorder()
+    before = int(time.time() * 1000)
+    with pytest.raises(WalletStatusError):
+        await fetch_upbit(
+            cap.client(), api_key="ak", secret_key=_FAKE_SECRET, record=recorder
+        )
+    assert_recorded_only(
+        recorder,
+        exchange="upbit",
+        source="rest:/v1/status/wallet",
+        body="upbit-down",
+        before_ms=before,
+    )
+
+
+async def test_transport_failure_records_nothing() -> None:
+    # 응답 자체가 없으면 남길 본문도 없다 (§3.5)
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("timeout", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(boom))
+    recorder = FakeRecorder()
+    with pytest.raises(WalletStatusError):
+        await fetch_upbit(
+            client, api_key="ak", secret_key=_FAKE_SECRET, record=recorder
+        )
+    assert recorder.lines == []

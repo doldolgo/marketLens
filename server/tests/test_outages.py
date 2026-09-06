@@ -3,16 +3,26 @@
 import asyncio
 import time
 
-from app.core.collector import Collector
-from app.core.errors import ExchangeApiError, ExchangeTimeoutError
-from app.core.influx import CollectFailRow, InfluxPoint, InfluxUnavailableError
+import httpx
+
+from app.core.errors import ExchangeApiError
+from app.core.influx import (
+    CollectFailRow,
+    InfluxPoint,
+    InfluxUnavailableError,
+    collect_fail_point,
+    to_line,
+)
 from app.core.live_store import LiveStore
 from app.core.outages import RETENTION_MS, OutageTracker
-from tests.conftest import FakeConnector, make_row
+from app.core.ticks import TickLoop
+from tests.conftest import FakeStream
+from tests.test_universe import build as build_universe
 
 T0 = 1_700_000_000_000  # epoch ms
 SEC = 1_000
-URL = "https://api.upbit.com/v1/orderbook"
+URL = "wss://api.upbit.com/websocket/v1"
+BINANCE_URL = "wss://data-stream.binance.vision/stream"
 
 
 class FakeInflux:
@@ -209,6 +219,30 @@ async def test_restore_fills_memory_and_open_points_continue() -> None:
     assert t2.open_outage("binance") is None and t2.outages()[0].ended_at == T0
 
 
+async def test_restore_closes_older_duplicate_open_point_and_writes_it() -> None:
+    influx = FakeInflux()
+    s0 = T0 // 1000
+    old = _row("upbit", s0 - 600, ended=None, kind="network", count=7)
+    influx.rows = [old, _row("upbit", s0 - 60, ended=None, kind="timeout")]
+    t = OutageTracker(writer=influx)
+    await t.restore(influx, T0)
+    open_ = t.open_outage("upbit")
+    assert open_ is not None and open_.started_at == (s0 - 60) * 1000
+    older = next(o for o in t.outages() if o.started_at == (s0 - 600) * 1000)
+    assert older.ended_at == old.last_failed_ts * 1000
+    await t.flush()
+    assert (
+        influx.write_calls == 1
+    )  # 옛 점의 닫힘 쓰기 1회 — 다음 재기동에 다시 진행 중이 되지 않는다
+    key = (
+        "collect_fail",
+        frozenset({("exchange", "upbit"), ("kind", "network")}),
+        s0 - 600,
+    )
+    assert influx.data[key]["ended_ts"] == old.last_failed_ts
+    assert influx.data[key]["count"] == 7
+
+
 async def test_restore_without_influx_or_on_error_or_timeout_starts_empty(
     monkeypatch,
 ) -> None:
@@ -232,37 +266,27 @@ async def test_restore_without_influx_or_on_error_or_timeout_starts_empty(
     assert t.outages() == []
 
 
-# ── 수집 사이클 → 추적기 연결 (011 §2 바꾸는 것 2) ─────────────────────────────
+# ── 틱 판정 → 추적기 연결 (011 §2 바꾸는 것 2, 001 §3.8) ─────────────────────────
 
 
-async def test_cycle_feeds_tracker_with_connector_kind_and_body(unused_client) -> None:
-    store = LiveStore()
-    upbit = FakeConnector("upbit", [[make_row("upbit", "BTC")]])
-    bithumb = FakeConnector(
-        "bithumb",
-        [
-            ExchangeApiError(
-                "bithumb",
-                URL,
-                "비-200",
-                status_code=429,
-                body='{"error":429}',
-                kind="rate_limit",
-                retry_after_sec=2,
-            )
-        ],
+def test_tick_feeds_tracker_with_stream_kind_and_message() -> None:
+    upbit = FakeStream("upbit")
+    upbit.succeed()
+    bithumb = FakeStream("bithumb")
+    bithumb.fail(
+        "rate_limit", '{"error":429}', status_code=429, url=URL, retry_after_sec=2
     )
-    binance = FakeConnector("binance", [ExchangeTimeoutError("binance", URL, "느림")])
+    binance = FakeStream("binance")
+    binance.fail("timeout", "느림", url=URL)
     t = OutageTracker()
-    collector = Collector(
-        store=store,
-        domestic=[upbit, bithumb],
-        foreign=binance,
-        client=unused_client,
+    loop = TickLoop(
+        store=LiveStore(),
+        streams=[upbit, bithumb, binance],
+        client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: None)),
         outages=t,
     )
-    result = await collector.run_cycle()
-    assert t.last_success_at("upbit") == result.fetched_at
+    loop.tick(T0 // 1000)
+    assert t.last_success_at("upbit") == T0
     b = t.open_outage("bithumb")
     assert b is not None and (b.kind, b.status_code, b.message, b.retry_after_sec) == (
         "rate_limit",
@@ -271,15 +295,124 @@ async def test_cycle_feeds_tracker_with_connector_kind_and_body(unused_client) -
         2,
     )
     n = t.open_outage("binance")
-    assert n is not None and (n.kind, n.message, n.status_code) == (
+    assert n is not None and (n.kind, n.message, n.status_code, n.url) == (
         "timeout",
         "느림",
         None,
+        URL,
     )
-    # /refresh 가 쓰는 failures 모양은 불변
-    assert [sorted(f) for f in result.failures] == [
-        ["error_code", "exchange", "message"]
-    ] * 2
+
+
+def test_outage_message_prefers_handshake_body_over_connector_message() -> None:
+    t = OutageTracker()
+    body = '{"error":{"name":429,"message":"' + "x" * 400 + '"}}'
+    t.record_failure(
+        "upbit",
+        T0,
+        kind="rate_limit",
+        message="업비트 WebSocket 실패: InvalidStatus: HTTP 429",
+        status_code=429,
+        url=URL,
+        retry_after_sec=None,
+        body=body,
+    )
+    o = t.open_outage("upbit")
+    assert o is not None and o.message == body[:300]  # body 우선, 300자 상한
+    # 본문 없는 다음 실패는 커넥터 message 로 덮인다 — 최신 실패가 이긴다
+    t.record_failure(
+        "upbit",
+        T0 + SEC,
+        kind="rate_limit",
+        message="업비트 WebSocket 실패: InvalidStatus: HTTP 429",
+        status_code=429,
+        url=URL,
+        retry_after_sec=None,
+        body=None,
+    )
+    assert o.message == "업비트 WebSocket 실패: InvalidStatus: HTTP 429"
+
+
+async def test_multiline_rejection_body_is_one_line_and_writes_open_and_close() -> None:
+    influx = FakeInflux()
+    t = OutageTracker(writer=influx)
+    html = "<html>\r\n<head><title>403 Forbidden</title></head>\n<body>\nblocked\n</body></html>"
+    t.record_failure(
+        "binance",
+        T0,
+        kind="banned",
+        message="바이낸스 WebSocket 실패: InvalidStatus: HTTP 403",
+        status_code=403,
+        url=BINANCE_URL,
+        retry_after_sec=None,
+        body=html,
+    )
+    o = t.open_outage("binance")
+    assert o is not None
+    assert o.message == (
+        "<html> <head><title>403 Forbidden</title></head> <body> blocked </body></html>"
+    )
+    for i in range(1, 4):
+        t.record_success("binance", T0 + i * SEC)
+    await t.flush()
+    assert influx.write_calls == 2  # 열림·닫힘 둘 다 성공
+    assert influx.only()["ended_ts"] == T0 // 1000 + 1
+    # line protocol 한 줄 — 개행이 있으면 Influx 가 배치를 400 으로 거부한다
+    lines = [to_line(collect_fail_point(x.to_row())) for x in t.outages()]
+    assert all("\n" not in line and "\r" not in line for line in lines)
+
+
+def test_tick_passes_handshake_body_into_outage_message() -> None:
+    binance = FakeStream("binance")
+    binance.fail(
+        "rate_limit",
+        "바이낸스 WebSocket 실패(샤드 0): InvalidStatus: HTTP 429",
+        status_code=429,
+        url=BINANCE_URL,
+        retry_after_sec=10,
+        body='{"code":-1003,"msg":"Too much request weight used"}',
+    )
+    t = OutageTracker()
+    loop = TickLoop(
+        store=LiveStore(),
+        streams=[binance],
+        client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: None)),
+        outages=t,
+    )
+    loop.tick(T0 // 1000)
+    o = t.open_outage("binance")
+    assert o is not None and (o.message, o.status_code, o.url, o.retry_after_sec) == (
+        '{"code":-1003,"msg":"Too much request weight used"}',
+        429,
+        BINANCE_URL,
+        10,
+    )
+
+
+async def test_market_list_rest_failure_does_not_open_outage() -> None:
+    """이력의 입력은 스트림 판정뿐 — 마켓 목록 REST 실패는 /refresh failures 로만 드러난다 (§3.3)."""
+    err = ExchangeApiError(
+        "bithumb",
+        "https://api.bithumb.com/v1/market/all",
+        "429",
+        429,
+        kind="rate_limit",
+    )
+    refresher, _, _, store, _ = build_universe([["KRW-BTC"]], [err], {"BTC"})
+    outcome = await refresher.refresh()
+    assert outcome.failures == [err]
+    upbit, bithumb = FakeStream("upbit"), FakeStream("bithumb")
+    upbit.succeed()
+    bithumb.succeed()
+    t = OutageTracker()
+    loop = TickLoop(
+        store=store,
+        streams=[upbit, bithumb],
+        client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: None)),
+        outages=t,
+    )
+    loop.tick(T0 // 1000)
+    assert t.outages() == [] and t.open_outage("bithumb") is None
+    assert t.last_success_at("bithumb") == T0
 
 
 async def test_writer_loop_drains_queue_in_order() -> None:

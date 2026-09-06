@@ -22,14 +22,14 @@ marketlens/
     specs/                    기능별 스펙 (항상 최신으로 유지한다 — 과거 버전은 git 에 남는다)
       TEMPLATE.md
       NNN-<name>.md
-    design/                   디자인 파일 원본 (theme.css·index.css) — 스펙은 값을 옮겨 적지 않고 이 파일을 복사하게 한다
+    design/                   디자인 원본 — theme.css·index.css(토큰) + reference/(App.tsx·ui.tsx·tabs/ — 화면 구조). 스펙은 값을 옮겨 적지 않고 이 파일을 복사하게 한다
     runbooks/
       execute-spec.md         실행 세션에 줄 프롬프트
       drift-check.md          문서↔코드 어긋남 점검 절차
       ec2-setup.md            EC2 최초 1회 설정 (사람용 체크리스트)
   server/                     FastAPI 앱 (Python 3.12)
     app/
-      core/                   공유 인프라 — 커넥터·메모리 저장소·수집 루프·김프 계산·망 매칭·Influx 클라이언트 (모듈 이름은 개발 후 architecture.md "현재 구조"에)
+      core/                   공유 인프라 — 스트림 커넥터·메모리 저장소(LiveStore)·틱 루프·김프 계산·망 매칭·Influx·Redis·S3 클라이언트 (모듈 이름은 개발 후 architecture.md "현재 구조"에)
       features/<name>/        기능 1개 = 폴더 1개: router.py service.py models.py tests/
       main.py
     tests/                    기능 폴더 밖의 통합 테스트만
@@ -40,7 +40,7 @@ marketlens/
       App.tsx main.tsx
 ```
 - 화면이 있는 기능만 `web/src/features/<name>` 폴더를 가진다. 이름은 `server/app/features/<name>` 과 같게 한다.
-- `collect` 는 기능 폴더가 아니라 `core/collector` 에 산다. `wallet-status`(Python 패키지는 `wallet_status`) 는 BE 전용이다(화면은 spreads 표에 얹힌다).
+- `collect` 는 기능 폴더가 아니라 `core/` 에 산다. `wallet-status`(Python 패키지는 `wallet_status`) 는 BE 전용이다(화면은 spreads 표에 얹힌다).
 - 기능 간 import 금지. 공유는 `core/`·`shared/`를 통해서만.
 
 ## 3. 개발 방식 (문서 기반)
@@ -73,20 +73,20 @@ marketlens/
 ## 4. 스펙 인덱스
 | 번호 | 이름 | 상태 | 범위 |
 |---|---|---|---|
-| 001 | collect | DONE | 업비트·빗썸·바이낸스 1초 수집 → 메모리, USDT 시세 추출, `/health` |
+| 001 | collect | DONE | 업비트·빗썸 WebSocket 실시간 수집 → 메모리, 마켓 우주, USDT 시세, 1초 틱, 원문 싱크·인계·판정 계약, `/health` |
 | 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·mock 탭(갭/선선갭/입출금레이더) |
-| 003 | spreads | DONE | 김프 표 — `/spreads`(체결 규모별 서버 슬리피지) `/refresh` + 스프레드 탭 |
+| 003 | spreads | DONE | 김프 표 — `/spreads`(체결 규모별 서버 슬리피지) `/refresh`(즉시 갱신 트리거) + 스프레드 탭 |
 | 004 | analysis | DONE | 단일 종목 분석 — premium·matrix·orderbook·slippage·arbitrage (BE 전용) |
-| 005 | history | DONE | Influx 영속·김프 아카이브·`/history/*`·백필 + history 탭 |
+| 005 | history | DONE | Influx `premium` 점 규칙·`/history/*`·백필 + history 탭 (쓰기는 009) |
 | 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
-| 007 | deploy | DONE | Docker·compose·CI·EC2 배포 |
+| 007 | deploy | DONE | Docker·compose(server·web·influxdb·redis)·CI·EC2 배포 |
 | 008 | usdt-staleness | DONE | `/spreads` USDT 시세 미갱신 경고 (BE 전용) |
-| 009 | tick-store | TODO | 3계층 저장 — Redis 초단위 틱 스트림(1h)·flusher·`spark` 채움 |
-| 010 | s3-snapshot | DONE | `/spreads` 행 전체를 60초마다 S3 에 `.jsonl.gz` 로 저장 (BE 전용) |
+| 009 | tick-store | DONE | 3계층 저장 — LiveStore 틱 슬롯 → Redis → 60초마다 Influx 전량 적재·비움, `spark` |
+| 010 | raw-archive | DONE | 거래소 원문(WS 프레임·REST 응답)을 S3 `raw/` 에 — 시세 프레임·매초 마켓 목록은 분당 마지막 1건, 그 외 전량, 거래소·분마다 객체 1개 (BE 전용) |
 | 011 | health | DONE | 거래소별 수집 실패 구간 이력·분류 → `/health/collect` + 수집 상태 탭 실데이터, Influx `collect_fail` 복원 |
-| 012 | binance-depth | DONE | 바이낸스 WS 깊이 스트림 → 해외 호가 최대 20단계 (BE 전용, HTTP 계약 무변경) |
+| 012 | binance-stream | DONE | 바이낸스 WS 3샤드 depth20+miniTicker → 해외 호가 최대 20단계, exchangeInfo 심볼 (BE 전용) |
 
-실행 순서 = 번호 순.
+실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
 **스펙은 항상 지금 동작과 같아야 한다. DONE 이 된 뒤라도 동작을 바꾸고 싶으면 그 기능의 스펙을 그냥 고치면 된다.** 단, 스펙만 고치면 문서와 코드가 어긋나므로 — 같은 PR 에서 코드와 테스트도 스펙에 맞게 고치고, 그 기능의 §4 검증을 다시 통과시켜야 한다(§6). 변경이 여러 기능에 걸치면 관련 스펙을 전부 고친다. "예전에는 ~였다" 같은 설명은 남기지 않는다 — 과거 버전은 git 에서 보면 된다.
 
@@ -100,7 +100,7 @@ marketlens/
 
 허용:
 - 수정 가능: `server/` `web/` `docs/context/*` `docs/runbooks/*` 담당 스펙(DONE 이어도 — 단 §4 규칙대로 코드·테스트와 함께) `CLAUDE.md` 스펙 인덱스 상태. `docs/design/*` 원본 변경은 사람 합의 후.
-- 거래소 실호출은 수집 루프·백필 스크립트 코드가 한다. 세션이 직접 부르는 것은 스펙 §4 가 명시한 실서버 확인 항목뿐이고, 개발 망에서 거래소 도메인이 차단되면 EC2 에서 돌린다(dev-setup.md 로컬 메모).
+- 거래소 실호출은 스트림 커넥터·틱 루프·백필 스크립트 코드가 한다. 세션이 직접 부르는 것은 스펙 §4 가 명시한 실서버 확인 항목뿐이고, 개발 망에서 거래소 도메인이 차단되면 EC2 에서 돌린다(dev-setup.md 로컬 메모).
 
 ## 6. 문서 변경 검증 루프 (md 를 바꾸면 반드시 돈다)
 문서와 코드는 같은 진실을 가리켜야 한다. `docs/**/*.md`·`CLAUDE.md` 가 바뀌면:

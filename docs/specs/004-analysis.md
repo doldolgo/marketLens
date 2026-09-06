@@ -1,6 +1,6 @@
 # 004 — analysis
 
-상태: TODO | 의존: 001(collect — 메모리 스냅샷·환율), 003(spreads — `core/premium.py` 의 `premium_percent`)
+상태: DONE | 의존: 001(collect — 메모리 스냅샷·USDT 시세·호가 단계), 003(spreads — `core/premium.py` 의 `premium_percent`)
 
 > 이 문서는 **사람이 끝까지 읽는** 문서다. 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -10,26 +10,28 @@
 
 ## 2. 범위
 - 만드는 것: 기능 폴더 `analysis` (server 만). 엔드포인트 6개 — `GET /orderbook/{exchange}` `GET /slippage/{exchange}` `GET /arbitrage` `GET /premium` `GET /premium/scan` `GET /matrix`.
-- 호가창 소진(walk) 계산은 `core/orderbook.py` 에 산다 — 003(spreads)과 이 스펙이 함께 쓰는 공유 모듈이다(기능 간 import 금지, CLAUDE.md §2). **함수는 전부 동기다**(003 §2 의 근거). `core/premium.py` 도 003 이 만든 것을 **import 해서 쓴다**(복사·재정의 금지).
+- 호가창 소진(walk) 계산은 `core/orderbook.py` 에 산다 — 003(spreads)과 이 스펙이 함께 쓰는 공유 모듈이다(기능 간 import 금지, CLAUDE.md §2). **함수는 전부 동기다**(003 §2 의 근거). 이 스펙의 걷기는 전부 스냅샷의 `asks`/`bids` 를 그대로 입력으로 쓴다(§3.1). `core/premium.py` 도 003 이 만든 것을 **import 해서 쓴다**(복사·재정의 금지).
 - 하지 않는 것: FE 없음. Influx 읽기(005). 입출금 상태 수집(006) — 여기서는 스냅샷에 들어 있는 값을 **읽기만** 한다. 거래소 REST 호출 0회.
 - 바꾸는 기존 것: 라우터 등록뿐.
 
 ## 3. 동작
 
 ### 3.0 공통 규칙
-- 모든 응답은 메모리 스냅샷(1초 수집)만 읽는다. 스냅샷 1개 = `(exchange, base)` 당 `quote`(KRW 또는 USDT)·`price`(최근 체결가)·`asks`(오름차순)·`bids`(내림차순)·`deposit_enabled`·`withdrawal_enabled`(각 `true/false/null`)·`updated_at`.
+- 모든 응답은 메모리 스냅샷(001 — WebSocket 으로 실시간 교체)만 읽는다. 스냅샷 1개 = `(exchange, base)` 당 `quote`(KRW 또는 USDT)·`price`(최근 체결가)·`asks`(오름차순)·`bids`(내림차순 — 단계 수는 업비트 최대 30·빗썸 최대 15·바이낸스 최대 20)·`deposit_enabled`·`withdrawal_enabled`(각 `true/false/null`)·`updated_at`.
 - 환율 = 국내 거래소별 KRW-USDT `ask`(USDT 살 때)·`bid`(USDT 팔 때). 기준 국내 거래소 = `upbit`. 해외 거래소는 `binance` 1곳.
 - **HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase**다. Python 내부 필드는 snake_case를 유지한다.
-- 공통 꼬리 필드: `dataReceivedAt`(수집 루프가 마지막으로 교체한 시각 ms, 비었으면 `null`). `fetchedAt`(응답 생성 시각 ms).
+- 공통 꼬리 필드: `dataReceivedAt`(마지막 틱 시각 ms — 001 의 `received_at`, 비었으면 `null`). `fetchedAt`(응답 생성 시각 ms).
 - 에러는 `{"error": {"code", "message", "detail"}}`. 쿼리 타입/범위 위반은 FastAPI 기본 422. 코드: `invalid_symbol`(400). `invalid_request`(400). `unsupported_exchange`(404, 레지스트리에 없는 거래소 id). `no_arbitrage_opportunity`(409).
-- `market_data_not_found`(404) = 스냅샷/환율/호가가 메모리에 없음. 의미는 "아직 수집 안 됨 또는 미상장". message 에 "수집 루프가 한 사이클 돌았는지 확인" 안내.
+- `market_data_not_found`(404) = 스냅샷/환율/호가가 메모리에 없음. 의미는 "아직 수집 안 됨 또는 미상장". message 에 "스트림이 첫 스냅샷을 받았는지 확인" 안내.
 - `sym`/`symbol` 은 대소문자 무관(대문자로 정규화). `symbol` 형식은 `BASE/QUOTE`(`-`·`_` 구분자도 허용, 조각 2개가 아니면 `invalid_symbol`). 요청한 quote 가 저장된 quote 와 다르면 `market_data_not_found` 에 "`BASE/<저장 quote>` 로 다시 요청하세요".
 - 모든 계산은 **수수료·출금 수수료·전송 시간 미반영 이론값**이다. slippage·arbitrage·scan 은 `warnings` 마지막에 항상 그 문장을 넣는다 — matrix 만 §3.2 순서대로 그 문장 **뒤에** 입출금 경고가 온다. warnings 는 `list[str]`, 순서 고정(각 절 참고).
 - `depth` 파라미터(orderbook·slippage·arbitrage)는 ≥1 이고 상한은 **저장된 단계 수** — 넘기면 저장분 전부를 쓴다.
 - 스캔·매트릭스 제외 코인: 현재 `AI`·`PROS`·`MANTRA` — 서로 다른 코인이 같은 티커를 써서 국내·해외 매칭이 틀린다(MANTRA 는 2026-08-30 실측에서 스캔 1위 +40.8% 로 확인).
 
 ### 3.1 계산 규칙
-호가창 소진(walk). levels 는 체결되는 쪽 호가(살 때 asks, 팔 때 bids), 최우선부터. 어느 목록을 쓰는지는 001 §3.3 규칙을 따른다 — `depth_*` 가 비어 있지 않으면 그것을, 비면 `asks`/`bids` 를 쓴다(해외는 012 스트림이 살아 있으면 최대 20단계). 금액(quote 통화) 기준으로 사거나, 수량 기준으로 판다. 결과 = 체결 수량·체결 금액·먹은 단계 수·소진 여부.
+호가창 소진(walk). levels 는 체결되는 쪽 호가(살 때 asks, 팔 때 bids), 최우선부터. 금액(quote 통화) 기준으로 사거나, 수량 기준으로 판다. 결과 = 체결 수량·체결 금액·먹은 단계 수·소진 여부.
+
+**어느 목록을 걷는가.** 걷기의 입력은 스냅샷의 `asks`/`bids` 그 자체다 — 001 §3.3 대로 세 거래소 모두 WebSocket 호가를 받아 업비트 최대 30·빗썸 최대 15·바이낸스 최대 20단계가 들어 있다. 표면값(최우선 1단계 = `asks[0]`·`bids[0]`)과 걷기가 같은 목록을 보므로 한 응답 안에서 출처가 갈리지 않는다.
 1. 단계를 최우선부터 순서대로 먹는다.
 2. 금액 기준 — 한 단계의 `price×size` 가 남은 금액 이상이면 그 단계에서 `남은 금액/price` 만큼 **부분 체결**하고 끝(`exhausted=false`). 모든 단계를 먹어도 남으면 `exhausted=true` 이고 `amount` 는 요청액이 아니라 **실제 체결액**.
 3. 수량 기준도 대칭(부족하면 `quantity` = 실제 체결량).
@@ -45,11 +47,11 @@
 #### `GET /orderbook/{exchange}`
 - 파라미터: `symbol`(필수, `BASE/QUOTE`). `depth` 기본 10.
 - 오류: 미등록 거래소 404. 형식 400 `invalid_symbol`. 스냅샷 없음·quote 불일치 404.
-1. 저장된 호가를 `depth` 단계까지 잘라 돌려준다(자르기만, 계산 없음). 응답 키: `exchange·symbol·base·quote`, `bids/asks[{price,size}]`, `timestamp`(스냅샷의 내부 `price_timestamp` = 거래소 시세 시각 ms — 001 계약에 호가 전용 시각은 없다), `dataUpdatedAt`.
+1. 저장된 호가(`asks`/`bids`, §3.1)를 `depth` 단계까지 잘라 돌려준다(자르기만, 계산 없음) — 슬리피지가 실제로 소비하는 호가를 그대로 보여주는 것이 이 엔드포인트의 쓸모다. 응답 키: `exchange·symbol·base·quote`, `bids/asks[{price,size}]`, `timestamp`(스냅샷의 내부 `price_timestamp` = 거래소 시세 시각 ms — 001 계약에 호가 전용 시각은 없다), `dataUpdatedAt`.
 #### `GET /slippage/{exchange}`
 - 파라미터: `symbol`(필수). `side` 는 `buy`|`sell`, 기본 buy. `amount` **또는** `quantity`(정확히 하나, >0). `depth` 기본 100.
 - 오류: amount·quantity 둘 다/둘 다 없음/≤0 → 400 `invalid_request`(스냅샷 조회보다 먼저). 호가 비어 있음 404. 최소 단위도 체결 안 됨 400.
-1. 한 거래소·한 방향을 `depth` 단계 호가로 walk 한다(살 때 asks, 팔 때 bids). 응답 키: `exchange·name·symbol·quoteCurrency·side`, `requestedAmount`/`requestedQuantity`(안 준 쪽은 `null`), `bestPrice`(최우선), `averagePrice`, `quantity`/`amount`(실제 체결량/액), `slippagePercent`, `levelsConsumed`, `depthExhausted`, `depthAvailable`(저장된 단계 수), `dataUpdatedAt`, 공통 꼬리 필드, `warnings`.
+1. 한 거래소·한 방향을 `depth` 단계 호가로 walk 한다(살 때 asks, 팔 때 bids). `depthAvailable` 은 저장된 단계 수이고 `bestPrice` 는 최우선이다. 응답 키: `exchange·name·symbol·quoteCurrency·side`, `requestedAmount`/`requestedQuantity`(안 준 쪽은 `null`), `bestPrice`(최우선), `averagePrice`, `quantity`/`amount`(실제 체결량/액), `slippagePercent`, `levelsConsumed`, `depthExhausted`, `depthAvailable`(저장된 단계 수), `dataUpdatedAt`, 공통 꼬리 필드, `warnings`.
 2. 예: asks `[(100,1),(120,10)]`, `amount=220` → 수량 2.0, 평균 110, 슬리피지 10%, 2단계.
 3. warnings 순서: (a) 1단계 안에서 끝나면 "슬리피지 0, 규모를 키우면 생김" (b) 항상 "메모리 스냅샷 기준, 타이밍 슬리피지 미반영".
 #### `GET /arbitrage`
@@ -92,12 +94,17 @@
 8. warnings 순서: 한도 10억원 초과 → 항상 수수료 미반영 → 어느 방향이든 출금·입금이 둘 다 `true` 가 아닌 조합이 있으면 "입출금 막힘 표시 조합 있음 — 실제 중단일 수도, 확인 못 한 것일 수도(`null`)".
 
 ### 3.3 엣지 모음
-- 수집 루프가 아직 안 돌았거나(메모리 빔) 미상장 코인 → 전부 `market_data_not_found` 404. 스냅샷은 있는데 호가가 빈 경우: 단일 대상(orderbook·slippage·premium)은 404. 다수 후보(arbitrage)는 `failures[]` 로 내리고 계속. scan·matrix 는 그 짝/조합만 조용히 건너뛴다.
+- 스트림이 아직 안 붙었거나(메모리 빔) 미상장 코인 → 전부 `market_data_not_found` 404. 스냅샷은 있는데 호가가 빈 경우: 단일 대상(orderbook·slippage·premium)은 404. 다수 후보(arbitrage)는 `failures[]` 로 내리고 계속. scan·matrix 는 그 짝/조합만 조용히 건너뛴다.
 - `amount` 가 저장 깊이를 넘으면 오류가 아니라 `depthExhausted=true` + 실제 체결분 계산 + 경고. 호가 저장 한도(10억원)를 넘는 금액은 경고만.
 - 입출금 상태 `null` = 모름. 응답에서 `null` 그대로 내보내고 경고한다. 절대 `true` 로 가정하지 않는다.
 - 환율 ask=bid 인 거래소는 단일 환율 계산과 동일한 결과가 나온다.
 
 ## 4. 검증
+
+**깊이 반영 (012 스트림)**
+- 바이낸스 행의 `asks` 가 20단계면 `/orderbook/binance` 의 `asks` 도(`depth` 로 자르기 전) 20개이고, `/slippage/binance` 의 `depthAvailable` 이 그 길이와 같다
+- 다단계 바이낸스 행에서 규모를 키우면 `slippagePercent` 가 0 에서 양수가 된다 — 1단계뿐이면 평균가가 곧 최우선가라 어떤 규모에도 0 이다(이 항목이 회귀를 잡는다)
+- `/arbitrage`·`/matrix` 의 해외 다리가 바이낸스 20단계를 걷는다 — 1단계 시드와 20단계 시드의 실효 수익률이 다르다
 
 테스트 입력을 스펙이 고정하는 의도적 예외 — 수식 검증 가능한 기대값을 주기 위해.
 
@@ -129,7 +136,7 @@
 - `/matrix` 매도측 소진 시 매수측을 되맞춰 실효 수익률이 −50% 대로 떨어지지 않는다; 환율 없는 국내 거래소 조합은 빠진다
 - 모든 분석 응답 키는 camelCase이고 에러 본문은 `{"error":{code,message,detail}}`
 
-실서버 확인 (기동 후 수집 루프 한 사이클 뒤 실제 호출):
+실서버 확인 (기동 후 스트림 스냅샷이 온 뒤 — 수 초 — 실제 호출):
 - `/orderbook/upbit` BTC/KRW `depth=3` → `quote=="KRW"`, asks 3단계
 - `/slippage/upbit` BTC/KRW `amount=1,000,000` → `slippagePercent ≥ 0`, `levelsConsumed ≥ 1`
 - `/slippage/upbit` BTC/KRW amount·quantity 없이 → 에러 코드 `invalid_request`
@@ -141,17 +148,27 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 
-`walk.py` → `core/orderbook.py` 이관(§2) 세션에서 이관 **전**(main)·**후** 같은 명령을 돌려 테스트 수가 같은지 확인했다. 순수 이관이라 새 테스트를 만들지 않았다.
+```bash
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/python -m pytest -q
+```
+- `All checks passed!`
+- `181 files left unchanged`
+- `420 passed, 1 warning in 4.75s`. analysis 폴더만은 `57 passed`(§4 검증 항목 + "깊이 반영" 3항목 + §3.2 warnings (f) 한도 경고 위치).
+
+회귀를 실제로 잡는지 확인했다 — `core/orderbook.py` 의 걷기 목록을 최우선 1단계로 잠깐 자르자 `test_twenty_levels.py` 4개가 전부 깨졌고, 원상 복구 후 다시 통과.
 
 ```bash
-cd server && .venv/bin/ruff check . && .venv/bin/python -m pytest -q
+cd server && .venv/bin/python -m uvicorn app.main:app --port 8041   # 거래소 도메인이 막힌 로컬 망 — 스냅샷 없는 상태의 오류 경로만
+curl -s localhost:8041/health                                       # {"status":"ok","version":"0.1.0"}
+curl -s 'localhost:8041/premium?sym=BTC&dom=binance'                # 400 invalid_request (선택 가능: upbit, bithumb)
+curl -s 'localhost:8041/orderbook/coinbase?symbol=BTC/KRW'          # 404 unsupported_exchange
+curl -s -o /dev/null -w '%{http_code}' 'localhost:8041/matrix?amountKrw=-1'   # 422
+curl -s 'localhost:8041/slippage/upbit?symbol=BTC/KRW'              # 400 invalid_request (amount 또는 quantity 중 정확히 하나)
+curl -s 'localhost:8041/orderbook/upbit?symbol=BTC/KRW&depth=3'     # 404 market_data_not_found — message 에 "스트림이 첫 스냅샷을 받았는지 확인하세요"
 ```
-- 이관 전(main): `All checks passed!` / `265 passed, 2 warnings in 1.12s`
-- 이관 후: `All checks passed!` / `265 passed, 2 warnings in 1.12s`
-- `.venv/bin/ruff format --check .` → `92 files already formatted`
+프로세스는 확인 뒤 종료했다. web 은 건드리지 않았다(lint·build 생략).
 
-venv 는 `uv`(0.11.28) 로 만든 Python 3.12.13 (`server/.venv`, dev-setup.md §server-3).
-실서버 확인(§4 아래 curl 목록)은 이 세션에서 돌리지 않았다 — 이관은 HTTP 계약을 건드리지 않고, 로컬 망에서 거래소 호출이 막힌다(dev-setup.md 로컬 메모).
+**EC2 에서 확인 필요** — §4 "실서버 확인" 중 스냅샷이 있어야 하는 항목(`/orderbook/upbit` depth=3 asks 3단계, `/slippage/upbit` amount=1,000,000 의 `slippagePercent ≥ 0`·`levelsConsumed ≥ 1`, `/arbitrage` BTC 의 `profitKrw`·`buy.exchange ≠ sell.exchange`, `/premium` BTC 의 fwd·rev, `/premium/scan?limit=5`, `/matrix?amountKrw=1000000` 의 `scannedCoins == len(coins)`)은 이 망에서 거래소 WebSocket 이 막혀 돌리지 못했다(dev-setup.md 로컬 메모). 응답 키·타입은 이 세션에서 바뀌지 않았다.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — analysis 행을 `| analysis | 6개 엔드포인트 동작 | - | HTTP 계약 camelCase |` 로. **항상 포함.**
@@ -161,20 +178,22 @@ venv 는 `uv`(0.11.28) 로 만든 Python 3.12.13 (`server/.venv`, dev-setup.md �
 
 ## 7. 실행 보고 (실행 세션이 채움)
 
-### walk → `core/orderbook.py` 이관 세션 (§2)
+6개 엔드포인트·모델·라우터는 스트림 스냅샷(`asks`/`bids` 그대로)을 걷는다. 이 세션이 손댄 것은 §3.0 안내 문구, §4 "깊이 반영" 테스트, 검수 지적 3건이다.
+
 - 만든 것 (파일 목록):
-  - `server/app/core/orderbook.py` — `server/app/features/analysis/walk.py` 를 `git mv` 로 옮겼다. `WalkResult`·`_EPSILON`·함수 4개(`walk_amount`·`walk_quantity`·`average_price`·`slippage_percent`)의 본문은 한 글자도 안 바꿨다. 모듈 docstring 만 고쳐 (a) 003·004 공용 core 모듈이라는 것과 (b) **함수를 async 로 바꾸지 말라**는 근거를 적었다 — `GET /spreads` 가 수집 락 없이 안전한 이유가 "표 조립 전체에 await 가 없다" 하나뿐이라, await 지점이 생기면 응답 하나가 스냅샷 교체 전·후 호가를 섞는다.
-  - `server/app/features/analysis/service.py` — import 를 `app.core.orderbook` 으로. 서버 트리에서 이 모듈을 쓰는 유일한 곳이었다.
-  - `server/app/features/analysis/tests/test_slippage_api.py` — 모듈 위치를 말하던 docstring 1줄만 갱신.
-  - `docs/context/architecture.md` "현재 구조" analysis 항목, 이 문서 §5·§6.
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-  - **테스트 파일은 옮기지 않았다.** walk 를 직접 부르는 테스트가 없었다 — 소진 계산의 검증 항목(§4 의 금액·수량 walk, 부분 체결, 매도 슬리피지, 2단계 예시)은 전부 `/slippage` **HTTP 응답**으로 확인하는 004 §4 항목이라 `features/analysis/tests/` 가 맞는 자리다(conventions.md "기능 테스트는 기능 폴더"). core 모듈이라고 다 `server/tests/` 에 단위 테스트가 있는 것도 아니다 — `core/premium.py` 는 기능 테스트(`features/spreads/tests/`)와 `tests/test_backfill.py` 를 통해서만 검증한다. `core/rows.py`·`core/networks.py` 처럼 `server/tests/test_orderbook.py` 를 새로 만들면 테스트 수가 늘어 "이관 전후 같은 수(265)" 확인이 깨지므로 이번 변경에는 넣지 않았다(남은 빚).
-  - `server/.venv` 가 이미 있어서(Python 3.12.13, 의존성 설치 완료 — 동시 진행 중인 012 세션이 만든 것으로 보인다) `--clear` 로 다시 만들지 않고 그대로 썼다. 남이 쓰는 venv 를 지우면 그 세션이 깨진다.
-  - 작업 트리에 012 세션의 커밋 안 된 `server/pyproject.toml` 수정(websockets 의존)이 있었다. 읽기만 하고 손대지 않았으며 커밋에도 넣지 않았다(파일을 지정해 add).
-  - 003 §2 는 이 이관을 003 이 할 일로 적어 두었다. 004 담당이라 003 문장은 건드리지 않았다 — 003 세션이 정리하면 된다.
-  - 이 문서 머리의 `상태: TODO` 가 CLAUDE.md 인덱스의 `DONE` 과 어긋난다. 이관 범위 밖이라 그대로 뒀다.
-  - **커밋이 둘로 갈렸다.** 이 클론의 pre-commit 훅이 `docs/`·`CLAUDE.md` 밖의 경로를 막는다("이 폴더는 docs 만 커밋합니다. 코드 변경은 marketlens-space 에서"). 훅을 우회하지 않았다 — `refactor/walk-to-core-impl` 브랜치에는 문서만 커밋했고, 검증을 끝낸 코드 3파일은 작업 트리에 staged 로 남겼다. 코드 커밋은 marketlens-space 에서 한다.
+  - `server/app/features/analysis/service.py` — `market_data_not_found` 404 는 전부 `_not_found` 를 거쳐 "스트림이 첫 스냅샷을 받았는지 확인하세요" 를 싣는다(quote 불일치 포함 — 그 경우 "`BASE/<저장 quote>` 로 다시 요청하세요" 뒤에 안내가 붙는다). 모듈 docstring 은 "WebSocket 으로 실시간 교체".
+  - `server/app/features/analysis/models.py` — `data_received_at` 주석 "마지막 틱 시각(001 의 `received_at`)".
+  - `server/app/features/analysis/tests/test_orderbook_api.py` — 404 message 의 안내 문구와 quote 불일치의 저장 quote 안내를 함께 단언.
+  - `server/app/features/analysis/tests/test_arbitrage_api.py` — §3.2 warnings (f) 한도 10억원 초과 경고가 수수료 문구 바로 앞에 오는지(`amount=2,000,000,000`), 한도 이하에서는 없는지 단언.
+  - `server/app/features/analysis/tests/test_twenty_levels.py` — §4 "깊이 반영" 세 항목 전부. 셋째 항목(`/arbitrage`·`/matrix` 해외 다리)은 같은 코인을 바이낸스 1단계 시드와 20단계 시드로 두 번 심고, 국내(upbit) 쪽은 1단계에 10 BTC 를 둬 해외 다리만 여러 단계를 먹게 한다 — 1단계 시드는 `depthExhausted=true`·슬리피지 0, 20단계 시드는 `depthExhausted=false`·슬리피지 양수·실효 수익률이 더 낮다. matrix 는 fwd(asks)·rev(bids) 양쪽을 단언하고 표면 김프는 두 시드에서 같음을 함께 확인한다.
+  - `docs/context/status.md`(analysis 행)·`CLAUDE.md`(004 DONE, 재구축 순서 005 → 006 → 007)·`docs/context/architecture.md`("현재 구조" analysis 항목), 이 문서 머리·§5·§7.
+- 추측한 지점 (묻지 않고 정한 것) / 실행 중 함께 고친 스펙 절:
+  - **`core/orderbook.py` 는 `walk_levels(row, side)` 를 둔다.** `row.asks` 또는 `row.bids` 를 그대로 돌려주는 통과 함수이고, 003 의 spreads service 가 import 한다. §2 의 "걷기는 스냅샷의 `asks`/`bids` 그대로" 와 동작이 같으므로 스펙 본문에는 이름을 적지 않는다.
+  - **실서버 확인은 두 갈래다.** 스냅샷이 필요 없는 오류 경로 4개(+빈 저장소의 404)는 빈 포트 8041 에 띄워 로컬에서 돌리고, 스냅샷이 필요한 항목은 §5 "EC2 에서 확인 필요" 에 둔다.
+  - **§4 "깊이 반영" 세 항목은 `test_twenty_levels.py` 한 파일이 담는다.**
+  - **quote 불일치 404 도 첫 스냅샷 안내를 싣는다.** §3.0 은 `market_data_not_found` 전체에 안내를 요구하므로 저장 quote 안내와 나란히 둔다 — 코드가 아니라 스펙을 따랐다.
+- 보고만 하는 어긋남 (담당 아닌 스펙 — CLAUDE.md §5): 없음.
 - 남은 빚:
-  - `core/orderbook.py` 에 `server/tests/` 직접 단위 테스트가 없다. 003 이 이 모듈을 실제로 import 할 때(spreads 슬리피지) 같이 만드는 것이 자연스럽다.
-  - `docs/context/status.md` 는 이번 변경으로 고칠 것이 없었다 — 이관은 엔드포인트·응답 모양을 안 바꿔서 analysis 행 문구가 그대로 맞다.
-  - §7 의 나머지(6개 엔드포인트 구현 당시의 판단)는 원래 구현 세션이 비워 둔 채라 git 기록에만 있다. 여기 적은 것은 이관 세션 몫뿐이다.
+  - `core/orderbook.py` 는 `server/tests/` 직접 단위 테스트가 없다 — 걷기 4함수와 `walk_levels` 는 `/orderbook`·`/slippage`·`/arbitrage`·`/matrix`·`/spreads` HTTP 응답으로만 검증한다.
+  - §4 실서버 확인의 스냅샷 필요 항목은 EC2 대기(§5).
+  - `/matrix` 의 `totalSlippagePercent` 는 표면 김프(1단계) − 실효 수익률이라, 매수측이 1단계 안에서 소진되면 실효 = 표면이 되어 0 이다 — 소진은 `depthExhausted` 로만 드러난다(`test_twenty_levels.py` 의 1단계 시드가 이 경우다). 스펙이 의도한 정의이고 경고는 두지 않았다.

@@ -20,9 +20,7 @@ from app.features.analysis.tests.helpers import (
 
 def _custom_store(asks: list[list[float]], bids: list[list[float]]) -> LiveStore:
     store = LiveStore()
-    store.replace_exchange(
-        "upbit", [make_row("upbit", "TT", asks=asks, bids=bids)], FIXED_DT
-    )
+    store.put_rows([make_row("upbit", "TT", asks=asks, bids=bids)], FIXED_DT)
     store.mark_received(FIXED_SEC)
     return store
 
@@ -155,7 +153,7 @@ def test_empty_side_is_404():
     """스냅샷은 있는데 걷는 쪽 호가가 비면 404 (§3.3)."""
     store = LiveStore()
     row = make_row("upbit", "TT", asks=[[100.0, 1.0]], bids=[])
-    store.replace_exchange("upbit", [row], FIXED_DT)
+    store.put_rows([row], FIXED_DT)
     client = make_client(store)
     res = client.get(
         "/slippage/upbit", params={"symbol": "TT/KRW", "side": "sell", "quantity": 1}

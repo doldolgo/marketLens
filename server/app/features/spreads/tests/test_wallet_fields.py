@@ -5,9 +5,12 @@ from datetime import UTC, datetime
 from app.core.live_store import LiveStore
 from app.core.networks import Network
 from app.features.spreads.service import build_spreads
-from app.features.spreads.tests.helpers import make_row
+from app.features.spreads.tests.helpers import make_row, seed_rows
 
-NOW = datetime.now(UTC)
+
+def _now() -> datetime:
+    """호출 시점의 시계 — import 시각을 상수로 잡으면 느린 CI 에서 수집 뒤 실행까지 STALE_SEC 를 넘겨 행이 낡은 것으로 판정된다."""
+    return datetime.now(UTC)
 
 
 def seed(
@@ -21,22 +24,22 @@ def seed(
     fx_wd: bool | None = None,
     base: str = "GRT",
 ) -> None:
-    store.replace_exchange(
-        "upbit",
+    seed_rows(
+        store,
         [make_row("upbit", base, dep=dom_dep, wd=dom_wd, networks=dom_networks)],
-        NOW,
+        _now(),
     )
-    store.replace_exchange(
-        "binance",
+    seed_rows(
+        store,
         [make_row("binance", base, dep=fx_dep, wd=fx_wd, networks=fx_networks)],
-        NOW,
+        _now(),
     )
-    store.set_rate("upbit", 1400.0, 1390.0, NOW)
+    store.set_rate("upbit", 1400.0, 1390.0, _now())
     store.mark_received(1_787_000_000)
 
 
 def only_row(store: LiveStore) -> dict[str, object]:
-    rows = build_spreads(store, now=NOW).model_dump()["rows"]
+    rows = build_spreads(store, now=_now()).model_dump()["rows"]
     assert len(rows) == 1
     return rows[0]
 
@@ -131,8 +134,8 @@ def test_case5_unknown_with_empty_foreign_networks_uses_fx_coin_values() -> None
 def test_fail_row_still_applies_network_verdict() -> None:
     # status=fail 행도 같은 규칙 (§3.7)
     store = LiveStore()
-    store.replace_exchange(
-        "upbit",
+    seed_rows(
+        store,
         [
             make_row(
                 "upbit",
@@ -140,10 +143,10 @@ def test_fail_row_still_applies_network_verdict() -> None:
                 networks=[Network("ETH", "Ethereum", dep=True, wd=True)],
             )
         ],
-        NOW,
+        _now(),
     )
-    store.replace_exchange(
-        "binance",
+    seed_rows(
+        store,
         [
             make_row(
                 "binance",
@@ -152,9 +155,9 @@ def test_fail_row_still_applies_network_verdict() -> None:
                 networks=[Network("ETH", "Ethereum (ERC20)", dep=True, wd=False)],
             )
         ],
-        NOW,
+        _now(),
     )
-    store.set_rate("upbit", 1400.0, 1390.0, NOW)
+    store.set_rate("upbit", 1400.0, 1390.0, _now())
     store.mark_received(1_787_000_000)
     row = only_row(store)
     assert row["status"] == "fail"

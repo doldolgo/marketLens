@@ -67,6 +67,20 @@ def test_equivalence_table_metal_l2_both_directions() -> None:
     assert verdict == "matched"
 
 
+def test_all_stopword_domestic_name_is_unknown() -> None:
+    # 국내 이름이 전부 불용어면 정보가 없다 — 코드가 안 맞으면 absent 로 못 박지 않고 unknown
+    for foreign_name in ("Ethereum", "Network"):
+        verdict, matched = match_network(
+            net("MAIN", "Mainnet"), [net("ETH", foreign_name)]
+        )
+        assert verdict == "unknown"
+        assert matched is None
+    # 코드가 맞으면 이름과 무관하게 matched (규칙 1 이 먼저)
+    verdict, matched = match_network(net("ETH", "Mainnet"), [net("ETH", "Ethereum")])
+    assert verdict == "matched"
+    assert matched is not None
+
+
 def test_prefix_of_long_token_is_unknown() -> None:
     # kat ↔ katana — 길이 3+ 토큰의 접두사 관계는 absent 로 못 박지 않는다
     verdict, _ = match_network(net("KAT", "Kat"), [net("KATANA", "Katana")])
