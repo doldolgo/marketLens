@@ -3,7 +3,7 @@
 > 이 문서는 **목표 상태**를 쓴다. 실제 구현 여부는 `status.md` 가 말한다.
 
 ## 엔진 셋
-- **InfluxDB 2.7 OSS** — 영구 역사. org `marketlens`, bucket `marketlens` 하나. 쿼리는 Flux, Python 클라이언트는 `influxdb-client`. 이유: 김프 이력은 (거래소쌍·코인) 태그 × 시각 × 수치 2개라는 전형적 시계열이고, 시간 버킷 집계가 엔진 기본 기능이라 앱 코드가 줄어든다. 3 Core 는 기본 쿼리 범위 ~72시간이라 92일 백필·월간 조회에 부적합해 2.7 을 쓴다.
+- **InfluxDB 2.7 OSS** — 영구 역사. org `marketlens`. 버킷 `marketlens`(초 단위 원값·사건·실패 구간, 무제한) + `candles_1m…1d`(봉 계층 — retention 이 곧 유통기한 7일/30일/90일/365일/무제한, 기동 시 없으면 만들고 있으면 안 건드린다, 스펙 014). 쿼리는 Flux, Python 클라이언트는 `influxdb-client`. 이유: 김프 이력은 (거래소쌍·코인) 태그 × 시각 × 수치 2개라는 전형적 시계열이고, 시간 버킷 집계가 엔진 기본 기능이라 앱 코드가 줄어든다. 3 Core 는 기본 쿼리 범위 ~72시간이라 92일 백필·월간 조회에 부적합해 2.7 을 쓴다.
 - **Redis 7** — Influx 로 아직 옮기지 못한 틱의 **버퍼**(스펙 009). 원문이 아니라 Influx 가 저장할 모양 그대로를 들고, 60초마다 전량이 옮겨진 뒤 비워진다. AOF(`appendonly yes`)라 재기동해도 안 옮긴 틱이 남는다.
 - **S3** 버킷 `marketlens-spreads-snapshot`(ap-northeast-2), 접두사 `raw/` — 거래소 **원문 아카이브**(스펙 010). 거래소가 준 WebSocket 프레임·REST 응답 본문을 받은 그대로 남긴다 — 시세 프레임은 심볼·종류별, 매초 오는 마켓·심볼 목록 응답은 거래소별 분당 마지막 1건, 나머지(입출금·핸드셰이크 거부 본문·구독 응답)는 전량. 가공값은 없다.
 
@@ -13,6 +13,8 @@
 - **dw_fail** — 입출금 조회 실패 관측. tag `exchange`, field `v`=1, time = 틱 시각. 한 점 = (exchange, time). 읽는 HTTP 엔드포인트 없음 — 사람이 Influx UI 에서 본다.
 - **collect_fail** — 수집 실패 구간 1건(스펙 011 §3.4). tag `exchange`·`kind`, time = `started_at`(초), field `count`(int)·`last_failed_ts`(int 초)·`status_code`(int, 없으면 0)·`message`(string)·`url`(string)·`retry_after_sec`(int, 없으면 0)·`ended_ts`(int 초, 닫힐 때만). 한 점 = (exchange, kind, started_at). 열 때 쓰고 닫을 때 같은 키로 덮어써 필드를 합친다.
 - **premium_event** — 김프/역프 사건 1건(스펙 013 §3.3). tag `dom`·`fx`·`base`·`dir`(kimp|reverse), time = `start_ts`(초), field `end_ts`(int 초, **진행 중이면 0**)·`duration_seconds`(int, 진행 중 0)·`max_percent`(float)·`max_ts`(int 초)·`last_ts`(int 초)·`samples`(int)·`enter_percent`(float 1.0)·`exit_percent`(float 0.5). 한 점 = (dom, fx, base, dir, start_ts). 기준값을 점에 같이 남기는 것은 나중에 기준이 바뀌어도 과거 사건의 의미가 남게 하기 위해서다. 매초 쓰지 않는다 — 열린 지 60초를 넘긴 순간, 열린 채 60초마다, 닫힐 때 같은 키로 덮어쓴다.
+
+- **candle** — 봉 1개(스펙 014 §3.4). 다섯 계층 버킷 `candles_1m`·`candles_5m`·`candles_1h`·`candles_4h`·`candles_1d` 모두 같은 모양. tag `dom`·`fx`·`base`, time = 창 시작(초, **KST 벽시계 정렬** `(ts + 32400) // W * W − 32400` — 4h·1d 가 UTC 정렬과 다르다). field `fwd_o fwd_h fwd_l fwd_c rev_o rev_h rev_l rev_c`(float %, 원값)·`krw`(float, 국내 종가 원)·`usdt`(float, 해외 종가)·`rate`(float, USDT 중간값 원)·`dom_dep dom_wd fx_dep fx_wd`(int: 1 가능·0 불가·−1 모름)·`blocked_fwd_sec blocked_rev_sec`(int, 창 길이 이하)·`samples`(int, 창에 든 틱 수). 유일키 = (버킷, dom, fx, base, 창 시작). 1m 하루 ≈ 70만 점.
 
 ## Redis
 - 키 하나: Stream **`ticks`**. 엔트리 = 틱 1개 — 필드 `ts`(epoch 초), `data`(틱 레코드 `{ts, rows:[{dom,fx,base,fwd,rev}], dwFailed:[…]}` 를 gzip 한 JSON, ≈3KB).
@@ -36,7 +38,7 @@
 - Influx time 은 ns 지만 기록 정밀도는 **초**. 틱 `ts` 는 epoch 초. API 응답의 `*Ts` 는 epoch 초, `fetchedAt`·`updatedAt` 은 epoch ms. 원문 아카이브 `receivedAt` 은 epoch ms(서버 시각 — 거래소 시각은 `raw` 안에 있다).
 
 ## 보존
-- Influx bucket retention 은 **무제한**. `dw_fail` 의 "최근 24시간" 은 쿼리 range(-24h) 로 처리한다 — retention 을 걸면 `premium` 까지 지워진다. 초단위 적재의 보존·롤업은 과부하 실측 후 별도 스펙.
+- Influx bucket retention 은 **무제한**. `dw_fail` 의 "최근 24시간" 은 쿼리 range(-24h) 로 처리한다 — retention 을 걸면 `premium` 까지 지워진다. 봉 계층은 버킷 retention 이 유통기한이다(1m 7일·5m 30일·1h 90일·4h 365일·1d 무제한). 초 단위 `premium` 은 아직 무제한.
 - Redis 는 옮기면 비운다(위). S3 는 lifecycle 미설정.
 
 ## 쓰는 쪽
@@ -45,12 +47,13 @@
 - 백필 스크립트(005): 업비트 초봉 × 바이낸스 1초봉 → 과거 92일 `premium`. 기존 기록의 앞·뒤 빈 구간만 채운다.
 - 이력 추적기(011): 구간 열림·닫힘 시 `collect_fail` 1점, 매초 없음. 실패는 로그 후 무시.
 - 사건 감지기(013): 열린 지 60초·60초마다·닫힐 때 `premium_event` 1점(같은 키 덮어쓰기). 실패는 미전송 맵(상한 1,000)에 두고 다음 60초 회차에 재시도.
+- 1분 집계기·롤업(014): 분이 닫힐 때 조합 전부(≈490)를 미전송 맵(상한 10,000, 넘치면 오래된 분부터)에 두고 쓰기 태스크가 `candles_1m` 에 한 번에 → 같은 회차에 5m→1h→4h→1d 순으로 아래 계층을 읽어 위 버킷에(계층당 최대 12창, 접는 창의 끝 ≤ 아래 계층 완료 지점). 실패 뒤 60초 안엔 재시도 없음. 종료 시 미전송분은 쓰지 않는다.
 - 원문 싱크(010, 수신 경로가 동기 호출): 줄을 `(거래소, UTC 분 창)` 버퍼에 붙인다 — 시세 프레임·매초 마켓 목록 응답(`key` 있음)은 창 안에서 `(source, key)` 당 마지막 1건만, 그 외는 전량. 닫기 회차(매초) + 업로드 워커(스레드 1개): 창이 지나면 객체 1개로 닫아 gzip·업로드. 실패는 대기열 머리에 두고 1초 뒤 재시도, 압축 후 256MB 를 넘으면 오래된 객체부터 버리고 로그.
 - Influx·Redis·S3 어느 것이 닿지 않아도 앱은 뜬다. `INFLUX_TOKEN` 없으면 flusher 비활성, `S3_BUCKET` 없으면 아카이브 비활성.
 
 ## 읽는 쪽
-- `features/history` 의 `/history/premium`·`/history/streaks`·`/history/streaks/bulk`·`/history/events`(`premium_event` 닫힌 사건 + 메모리의 진행 중) 만. 다른 조회 API 는 DB 를 0회 접근한다(메모리가 진실). 저장소 불가 시 503 `storage_unavailable`.
-- 기동 시 1회: `collect_fail` 24시간 복원(011, 3초 상한), `premium_event` 7일 안 `end_ts 0` 복원(013, 3초 상한 — 600초 넘게 못 본 사건은 `last_ts` 로 닫아 쓴다), spark 용 `premium` 최근 30분 1분 버킷 집계(009, 10초 상한).
+- `features/history` 의 `/history/premium`·`/history/streaks`·`/history/streaks/bulk`·`/history/events`(`premium_event` 닫힌 사건 + 메모리의 진행 중)·`/history/candles`(`res` 의 계층 버킷 하나, 요청당 1,440창 상한, 진행 중 창 없음) 만. 다른 조회 API 는 DB 를 0회 접근한다(메모리가 진실). 저장소 불가 시 503 `storage_unavailable`.
+- 기동 시 1회: `collect_fail` 24시간 복원(011, 3초 상한), `premium_event` 7일 안 `end_ts 0` 복원(013, 3초 상한 — 600초 넘게 못 본 사건은 `last_ts` 로 닫아 쓴다), spark 용 `premium` 최근 30분 1분 버킷 집계(009, 10초 상한), 롤업 따라잡기 기준점 — 계층마다 위 버킷 가장 늦은 점·아래 계층들 가장 오래된 점(014, 계층당 3초 상한). 롤업 회차는 아래 계층 버킷을 창 단위로 읽는다.
 - Redis 는 flusher 만 읽는다. S3 를 읽는 코드는 없다.
 
 ## 로컬 접속

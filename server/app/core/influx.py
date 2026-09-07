@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from influxdb_client import InfluxDBClient
+from influxdb_client import BucketRetentionRules, InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
 from influxdb_client.domain.write_precision import WritePrecision
 
@@ -136,6 +136,75 @@ def premium_event_point(row: PremiumEventRow) -> InfluxPoint:
     )
 
 
+@dataclass(frozen=True)
+class CandleRow:
+    """`candle` 점 1개 — (국내, 해외, 코인) 조합의 창 1개(스펙 014 §3.4). 다섯 계층 버킷이 같은 모양이다.
+
+    입출금 4개는 int 3상태(1 가능·0 불가·−1 모름) — Influx 에 null 이 없어서다.
+    """
+
+    dom: str
+    fx: str
+    base: str
+    ts: int  # 창 시작 epoch 초(KST 정렬) = 점의 time
+    fwd_o: float
+    fwd_h: float
+    fwd_l: float
+    fwd_c: float
+    rev_o: float
+    rev_h: float
+    rev_l: float
+    rev_c: float
+    krw: float  # 국내 종가(원)
+    usdt: float  # 해외 종가
+    rate: float  # USDT 중간값(원)
+    dom_dep: int
+    dom_wd: int
+    fx_dep: int
+    fx_wd: int
+    blocked_fwd_sec: int
+    blocked_rev_sec: int
+    samples: int
+
+
+_CANDLE_FLOAT_FIELDS = (
+    "fwd_o",
+    "fwd_h",
+    "fwd_l",
+    "fwd_c",
+    "rev_o",
+    "rev_h",
+    "rev_l",
+    "rev_c",
+    "krw",
+    "usdt",
+    "rate",
+)
+_CANDLE_INT_FIELDS = (
+    "dom_dep",
+    "dom_wd",
+    "fx_dep",
+    "fx_wd",
+    "blocked_fwd_sec",
+    "blocked_rev_sec",
+    "samples",
+)
+
+
+def candle_point(row: CandleRow) -> InfluxPoint:
+    """봉 1점 — 유일키 (버킷, dom, fx, base, 창 시작). 같은 창을 다시 접으면 덮어쓴다(재시도 안전)."""
+    fields: dict[str, float | int | str] = {
+        k: float(getattr(row, k)) for k in _CANDLE_FLOAT_FIELDS
+    }
+    fields.update({k: int(getattr(row, k)) for k in _CANDLE_INT_FIELDS})
+    return InfluxPoint(
+        measurement="candle",
+        tags={"dom": row.dom, "fx": row.fx, "base": row.base},
+        fields=fields,
+        ts=row.ts,
+    )
+
+
 def collect_fail_point(row: CollectFailRow) -> InfluxPoint:
     """실패 구간 1점 — 열릴 때와 닫힐 때 같은 (tag, time) 으로 써서 필드를 합친다.
 
@@ -229,18 +298,43 @@ class InfluxClient:
 
     # --- 쓰기 ---
 
-    def write(self, points: list[InfluxPoint]) -> None:
-        """점 목록을 쓰기 1번으로 보낸다 — 전부 성공 또는 예외(전부 없음)."""
+    def write(self, points: list[InfluxPoint], bucket: str | None = None) -> None:
+        """점 목록을 쓰기 1번으로 보낸다 — 전부 성공 또는 예외(전부 없음). `bucket` 없으면 `marketlens`(014 계층 버킷만 지정)."""
         lines = [to_line(p) for p in points]
         try:
             with self._inner().write_api(write_options=SYNCHRONOUS) as write_api:
                 write_api.write(
-                    bucket=self.bucket,
+                    bucket=bucket or self.bucket,
                     record=lines,
                     write_precision=WritePrecision.S,
                 )
         except Exception as exc:
             raise InfluxUnavailableError(f"Influx 쓰기 실패: {exc}") from exc
+
+    # --- 버킷 (014 §3.4 — 계층 버킷 5개를 기동 시 만든다. `marketlens` 는 건드리지 않는다) ---
+
+    def list_buckets(self) -> set[str]:
+        """org 의 버킷 이름 집합."""
+        try:
+            found = self._inner().buckets_api().find_buckets(org=self.org, limit=100)
+            return {b.name for b in (found.buckets or [])}
+        except Exception as exc:
+            raise InfluxUnavailableError(f"Influx 버킷 조회 실패: {exc}") from exc
+
+    def create_bucket(self, name: str, retention_sec: int) -> None:
+        """버킷 생성 — retention 0 은 무제한(Influx 규약). 이미 있는 버킷의 retention 은 여기서 바꾸지 않는다."""
+        try:
+            self._inner().buckets_api().create_bucket(
+                bucket_name=name,
+                retention_rules=BucketRetentionRules(
+                    type="expire", every_seconds=retention_sec
+                ),
+                org=self.org,
+            )
+        except Exception as exc:
+            raise InfluxUnavailableError(
+                f"Influx 버킷 생성 실패 {name}: {exc}"
+            ) from exc
 
     # --- 읽기 (premium 전용 — 읽는 HTTP 엔드포인트는 /history/* 뿐, db.md) ---
 
@@ -435,6 +529,75 @@ from(bucket: "{self.bucket}")
                 )
             )
         return rows
+
+    # --- 읽기 (candle — /history/candles·롤업·기동 따라잡기. 스펙 014 §3.5~3.6) ---
+
+    def query_candles(
+        self,
+        bucket: str,
+        *,
+        start: int,
+        stop: int,
+        dom: str | None = None,
+        fx: str | None = None,
+        base: str | None = None,
+    ) -> list[CandleRow]:
+        """계층 버킷 하나에서 `start ≤ 창 시작 < stop` 인 봉 — ts 오름차순(같은 ts 는 dom·fx·base 순). 필터 없으면 전 조합."""
+        conds = ['r._measurement == "candle"']
+        if dom is not None:
+            conds.append(f'r.dom == "{_esc_flux(dom)}"')
+        if fx is not None:
+            conds.append(f'r.fx == "{_esc_flux(fx)}"')
+        if base is not None:
+            conds.append(f'r.base == "{_esc_flux(base.upper())}"')
+        flux = f"""
+from(bucket: "{_esc_flux(bucket)}")
+  |> range(start: {_rfc3339(start)}, stop: {_rfc3339(stop)})
+  |> filter(fn: (r) => {" and ".join(conds)})
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> group()
+  |> sort(columns: ["_time", "dom", "fx", "base"])
+"""
+        rows: list[CandleRow] = []
+        for record in self._records(flux):
+            v = record.values
+            if any(v.get(k) is None for k in _CANDLE_FLOAT_FIELDS + _CANDLE_INT_FIELDS):
+                continue  # 반쪽 점은 싣지 않는다 — 봉은 18 필드가 한 번에 쓰인다
+            rows.append(
+                CandleRow(
+                    dom=str(v.get("dom", "")),
+                    fx=str(v.get("fx", "")),
+                    base=str(v.get("base", "")),
+                    ts=int(v["_time"].timestamp()),
+                    **{k: float(v[k]) for k in _CANDLE_FLOAT_FIELDS},
+                    **{k: int(v[k]) for k in _CANDLE_INT_FIELDS},
+                )
+            )
+        return rows
+
+    def latest_candle_ts(self, bucket: str, *, start: int) -> int | None:
+        """`start` 이후 그 버킷의 가장 늦은 봉의 창 시작 — 없으면 None. 시리즈별 last() 는 푸시다운이라 전 구간 정렬이 없다."""
+        return self._edge_candle_ts(bucket, start=start, fn="last", desc=True)
+
+    def earliest_candle_ts(self, bucket: str, *, start: int) -> int | None:
+        """`start` 이후 그 버킷의 가장 오래된 봉의 창 시작 — 없으면 None."""
+        return self._edge_candle_ts(bucket, start=start, fn="first", desc=False)
+
+    def _edge_candle_ts(
+        self, bucket: str, *, start: int, fn: str, desc: bool
+    ) -> int | None:
+        flux = f"""
+from(bucket: "{_esc_flux(bucket)}")
+  |> range(start: {_rfc3339(start)})
+  |> filter(fn: (r) => r._measurement == "candle" and r._field == "samples")
+  |> {fn}()
+  |> group()
+  |> sort(columns: ["_time"], desc: {"true" if desc else "false"})
+  |> limit(n: 1)
+"""
+        for record in self._records(flux):
+            return int(record.get_time().timestamp())
+        return None
 
     def _records(self, flux: str):  # noqa: ANN202 — influxdb-client 내부 타입 비노출
         try:

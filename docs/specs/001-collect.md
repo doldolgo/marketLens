@@ -60,7 +60,7 @@ USDT 시세 = 국내 거래소 id 당 `{exchange, ask, bid, updated_at}`. 바이
 ### 3.6 틱 루프 (1초)
 앱 시작과 함께 돌고 종료 시 취소된다. 매초 경계에 순서대로:
 1. 006 조회기가 있으면 `refresh_if_due` (60초에 한 번 실호출, 시세 갱신을 막지 않게 별도 태스크 — 직전 태스크가 끝나지 않았으면 이번 초는 건너뛴다). 조회기의 캐시는 **매 틱** 세 거래소의 행에 반영한다 — 메시지로 새로 생긴 행도 1초 안에 3필드를 갖는다.
-2. **틱 생성**(동기, `await` 없음 — 한 틱 안에서 교체 전후 호가가 섞이지 않는 근거): `ts` = 이 초(epoch 초), `rows` = 전 조합 중 자격 통과분의 `{dom, fx, base, fwd, rev}`, `dwFailed` = 조회기의 실패 상태 거래소 목록. `fwd`·`rev` 는 **최우선 1단계 기준의 원값**(슬리피지 차감 전 — 003 §3.2-4 의 raw 규칙과 같은 수식, 009 가 Influx `premium` 에 쓰는 값)이다:
+2. **틱 생성**(동기, `await` 없음 — 한 틱 안에서 교체 전후 호가가 섞이지 않는 근거): `ts` = 이 초(epoch 초), `rows` = 전 조합 중 자격 통과분의 `{dom, fx, base, fwd, rev}` + 014 §3.2 의 7개 값(`dom_price`·`fx_price`·`rate`=(ask+bid)/2·`dom_dep`·`dom_wd`·`fx_dep`·`fx_wd`, 그 순간의 행에서 — Redis 레코드·`premium` 점에는 넣지 않는다(014)), `dwFailed` = 조회기의 실패 상태 거래소 목록. `fwd`·`rev` 는 **최우선 1단계 기준의 원값**(슬리피지 차감 전 — 003 §3.2-4 의 raw 규칙과 같은 수식, 009 가 Influx `premium` 에 쓰는 값)이다:
    - 조합 = (국내 거래소 `dom`, 해외 거래소 `fx`, 양쪽에 행이 있는 `base`). 자격: `dom ≠ fx`, 양쪽 행에 `asks[0]`·`bids[0]` 존재, **그 국내 거래소 자신의** USDT 시세(`rate_ask`·`rate_bid`) 존재, 여섯 값(`dom_bid`·`dom_ask`·`fx_bid`·`fx_ask`·`rate_ask`·`rate_bid`) 전부 > 0. 하나라도 빠지면 그 조합은 이 틱에 없다(남의 시세를 빌리지 않는다).
      ```
      premium_percent(buy_krw, sell_krw) = (sell_krw / buy_krw − 1) × 100      # core/premium.py, 003 이 제공

@@ -122,6 +122,14 @@ def build_tick(store: LiveStore, ts: int, dw_failed: Sequence[str]) -> Tick:
                         rev=premium_percent(
                             buy_krw=dom_ask, sell_krw=fx_bid * rate.bid
                         ),
+                        # 014 §3.2 — 1분 집계용. 추가 조회 없이 같은 행에서 읽는다
+                        dom_price=dom_row.price,
+                        fx_price=fx_row.price,
+                        rate=(rate.ask + rate.bid) / 2,
+                        dom_dep=dom_row.deposit_enabled,
+                        dom_wd=dom_row.withdrawal_enabled,
+                        fx_dep=fx_row.deposit_enabled,
+                        fx_wd=fx_row.withdrawal_enabled,
                     )
                 )
     return Tick(ts=ts, rows=tuple(rows), dw_failed=tuple(dw_failed))
@@ -137,6 +145,7 @@ class TickLoop:
         handoff: TickHandoff = noop_handoff,
         outages: OutageSink | None = None,
         events: EventSink | None = None,
+        candles: EventSink | None = None,
         wallet: WalletStatusProvider | None = None,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
@@ -147,6 +156,7 @@ class TickLoop:
         self._handoff = handoff
         self._outages = outages
         self._events = events
+        self._candles = candles
         self._wallet = wallet
         self._clock = clock
         self._sleep = sleep
@@ -195,6 +205,9 @@ class TickLoop:
         if self._events is not None:
             # 013 — 사건 감지는 현재 틱으로(인계되는 직전 틱이 아니라) — ts 가 곧 판정 시각이다
             self._events.observe(tick)
+        if self._candles is not None:
+            # 014 — 1분 집계도 현재 틱으로, 013 감지기 다음 자리
+            self._candles.observe(tick)
         return tick
 
     def _judge_all(self, now_ms: int) -> None:

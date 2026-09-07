@@ -138,3 +138,33 @@ class EventsResponse(BaseModel):
     count: int
     fetched_at: int
     events: list[EventOut]
+
+
+class CandleOut(BaseModel):
+    """봉 1개 — 스펙 014 §3.6. OHLC 는 `dir` 방향의 원값, 입출금은 방향 경로의 두 끝(None = 모름)."""
+
+    ts: int  # 창 시작 epoch 초(KST 정렬)
+    open: float
+    high: float
+    low: float
+    close: float
+    krw: float
+    usdt: float
+    fx_rate: float
+    deposit_ok: bool | None
+    withdraw_ok: bool | None
+    blocked_sec: int
+    samples: int
+
+
+class CandlesResponse(BaseModel):
+    base: str
+    res: Literal["1m", "5m", "1h", "4h", "1d"]
+    dom: str
+    fx: str
+    dir: Literal["kimp", "reverse"]
+    start_ts: int
+    end_ts: int
+    count: int
+    fetched_at: int
+    candles: list[CandleOut]

@@ -1,7 +1,7 @@
 // 선택 심볼 봉 차트 — lightweight-charts(TradingView 오픈소스, 캔버스). 판 구성:
 //   판 0: 김프 % — 거래소 쌍이 하나면 캔들, 여럿이면 쌍별 종가 선. 진입 1.0·이탈 0.5·0 기준선 + 사건 구간 음영
 //   판 1: 가격(USDT 기준) — 선택한 거래소마다 선 1개. 국내는 원화 ÷ 환율로 환산
-//   판 2~: 입출금 띠 — 선택한 국내 거래소마다 1판(막힘 = 붉은 막대)
+//   판 2~: 입출금 띠 — 선택한 국내 거래소마다 1판, 방향 경로(김프 = 해외 출금 → 국내 입금)의 두 끝 기준. 막힘 = 붉은 막대, 모름 = 회색
 // 휠 줌·드래그 이동은 라이브러리 기본. 왼쪽 끝에 가까워지면 onNeedOlder 로 과거를 더 달라고 한다.
 // 차트 객체는 ref 에 두고 데이터가 바뀔 때만 setData 한다 — 셸의 매초 리렌더가 캔버스를 다시 그리지 않게.
 import {
@@ -11,15 +11,13 @@ import {
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { exName, fmtKrw, fmtPct, fmtTime, fmtUsdt, pctColor } from '../../shared/format'
 import { Pill, Seg, card, hint, kicker, type SegOpt } from '../../shared/ui'
-import { FX_CHOICES } from './mock'
-import { INTERVALS, INTERVAL_LABEL, type Interval } from './rollup'
+import { FX_CHOICES, INITIAL_BARS, bandTone } from './candles'
+import { INTERVALS, INTERVAL_LABEL, INTERVAL_SEC, type Interval } from './rollup'
 import type { Candle1m, Dir, Dom, PremiumEvent } from './types'
 
 /** 사건 룰 (013 §3.1) — 기준선 표시용. */
 const ENTER_PCT = 1.0
 const EXIT_PCT = 0.5
-/** 처음 보이는 봉 개수(봉 종류 무관). 이후는 사용자가 줌·이동. */
-export const INITIAL_BARS = 360
 /** 왼쪽 끝에서 이만큼(봉 개수) 안으로 들어오면 과거 요청. */
 const LOAD_MORE_MARGIN = 30
 const CHART_H = 420
@@ -90,6 +88,10 @@ export interface ChartProps {
   events: PremiumEvent[]
   /** 사용자가 왼쪽 끝 근처까지 끌었을 때 — 과거를 더 붙여 series 를 갱신하라는 신호. */
   onNeedOlder: () => void
+  /** 청크를 받는 중 — 헤더에 표시, 직전 봉은 유지 (014 §3.7). */
+  loading: boolean
+  /** 마지막 조회 실패의 HTTP 상태(네트워크 실패 0). 없으면 null. */
+  errorStatus: number | null
 }
 
 interface Refs {
@@ -185,6 +187,9 @@ export default function PremiumChart(p: ChartProps) {
     const dirHex = cssVar(p.dir === 'kimp' ? '--color-up' : '--color-down', '#e0697d')
     const blocked = cssVar('--color-up', '#e0697d')
     const ok = alpha(cssVar('--color-neutral-800', '#2e3040'), 0.45)
+    const unknown = alpha(cssVar('--color-neutral-600', '#6a6a78'), 0.55)
+    const windowSec = INTERVAL_SEC[p.interval]
+    const bandColor: Record<ReturnType<typeof bandTone>, string> = { open: ok, blocked: alpha(blocked, 0.9), partial: alpha(blocked, 0.5), unknown }
 
     const single = S.length === 1
     const base = S[0].candles
@@ -217,10 +222,12 @@ export default function PremiumChart(p: ChartProps) {
           priceFormat: { type: 'custom', minMove: 0.0001, formatter: fmtUsdt },
         }, 1))
       })
-      // 판 2~: 국내 거래소별 입출금 띠
+      // 판 2~: 국내 거래소별 입출금 띠 — 라벨은 방향 경로(김프 `{해외} 출금 → {국내} 입금`, 역프 반대)
+      const fxName = fxs.map(fxLabel).join('/')
       doms.forEach((d, i) => {
+        const title = p.dir === 'kimp' ? `${fxName} 출금 → ${exName(d)} 입금` : `${exName(d)} 출금 → ${fxName} 입금`
         const h = r.chart.addSeries(HistogramSeries, {
-          priceLineVisible: false, lastValueVisible: false, base: 0, title: exName(d),
+          priceLineVisible: false, lastValueVisible: false, base: 0, title,
           priceFormat: { type: 'custom', minMove: 1, formatter: () => '' },
         }, 2 + i)
         h.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0 } })
@@ -247,10 +254,7 @@ export default function PremiumChart(p: ChartProps) {
     for (const ps of priceSpecs) r.priceLines.get(ps.key)?.setData(ps.from.candles.map((c) => ({ time: toChartTime(c.ts), value: ps.pick(c) })))
     for (const d of doms) {
       const from = S.find((s) => s.dom === d)!
-      r.dwHists.get(d)?.setData(from.candles.map((c) => {
-        const bad = !c.depositOk || !c.withdrawOk
-        return { time: toChartTime(c.ts), value: 1, color: bad ? alpha(blocked, c.blockedSec >= 60 ? 0.9 : 0.5) : ok }
-      }))
+      r.dwHists.get(d)?.setData(from.candles.map((c) => ({ time: toChartTime(c.ts), value: 1, color: bandColor[bandTone(c, windowSec)] })))
     }
 
     // 보이는 범위: 구성·봉 종류가 바뀌면 오른쪽 끝 최근 INITIAL_BARS 개, 과거가 앞에 붙었으면 그대로
@@ -328,7 +332,8 @@ export default function PremiumChart(p: ChartProps) {
         <span style={{ fontFamily: 'var(--font-heading)', fontSize: 18, fontWeight: 500 }}>{p.sym}</span>
         <span style={{ fontSize: 12, color }}>{DIR_LABEL[p.dir]} {INTERVAL_LABEL[p.interval]}봉</span>
         <Seg opts={intervalOpts} pad="5px 9px" />
-        <Pill tone="warn">MOCK — 서버 1분봉 미구현</Pill>
+        {p.loading && <Pill tone="accent">불러오는 중…</Pill>}
+        {p.errorStatus != null && <Pill tone="warn">차트를 불러오지 못했습니다 (HTTP {p.errorStatus})</Pill>}
         <span style={{ ...hint, marginLeft: 'auto' }}>휠 = 줌 · 드래그 = 이동 · 왼쪽 끝으로 끌면 과거 로드</span>
       </div>
       {/* 거래소 선택 — 국내·해외 각각 체크박스, 여러 개 가능. 쌍이 하나면 캔들, 여럿이면 선 */}
@@ -367,17 +372,30 @@ export default function PremiumChart(p: ChartProps) {
             {doms.map((d) => {
               const c = at(S.find((s) => s.dom === d)!)
               if (!c) return null
-              const st = (okv: boolean) => <b style={{ ...num, color: okv ? 'var(--color-neutral-300)' : 'var(--color-up)' }}>{okv ? '가능' : '막힘'}</b>
-              return <span key={d}>{exName(d)} 입금 {st(c.depositOk)} 출금 {st(c.withdrawOk)}{c.blockedSec > 0 && <span style={{ color: 'var(--color-neutral-500)' }}> · 막힘 {c.blockedSec}초</span>}</span>
+              const st = (okv: boolean | null) => (
+                <b style={{ ...num, color: okv == null ? 'var(--color-neutral-500)' : okv ? 'var(--color-neutral-300)' : 'var(--color-up)' }}>{okv == null ? '모름' : okv ? '가능' : '막힘'}</b>
+              )
+              const fxName = fxs.map(fxLabel).join('/')
+              const path = p.dir === 'kimp'
+                ? <>{fxName} 출금 {st(c.withdrawOk)} → {exName(d)} 입금 {st(c.depositOk)}</>
+                : <>{exName(d)} 출금 {st(c.withdrawOk)} → {fxName} 입금 {st(c.depositOk)}</>
+              return <span key={d}>{path}{c.blockedSec > 0 && <span style={{ color: 'var(--color-neutral-500)' }}> · 막힘 {c.blockedSec}초</span>}</span>
             })}
           </>
         )}
       </div>
 
-      <div ref={boxRef} style={{ width: '100%', height: CHART_H }} />
+      <div style={{ position: 'relative' }}>
+        <div ref={boxRef} style={{ width: '100%', height: CHART_H }} />
+        {S.every((s) => s.candles.length === 0) && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', color: 'var(--color-neutral-500)', fontSize: 12 }}>
+            {p.loading ? '불러오는 중…' : '기간 내 기록 없음'}
+          </div>
+        )}
+      </div>
 
       <div style={{ ...kicker, marginTop: 'var(--space-2)' }}>
-        위 = {DIR_LABEL[p.dir]} 원값 {INTERVAL_LABEL[p.interval]} {single ? '시/고/저/종' : '종가(쌍별)'}, 음영 = 사건 구간 · 가운데 = USDT 기준 거래소별 가격(국내는 환율 환산) · 아래 띠 붉음 = 입금 또는 출금 막힘 (연함 = 봉 일부만)
+        위 = {DIR_LABEL[p.dir]} 원값 {INTERVAL_LABEL[p.interval]} {single ? '시/고/저/종' : '종가(쌍별)'}, 음영 = 사건 구간 · 가운데 = USDT 기준 거래소별 가격(국내는 환율 환산) · 아래 띠 = {DIR_LABEL[p.dir]} 경로 입출금 — 붉음 = 막힘(연함 = 봉 일부만), 회색 = 모름
       </div>
     </div>
   )
