@@ -4,12 +4,12 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { exName, fmtAgo, fmtPct, fmtTime, pctColor } from '../../shared/format'
 import { Empty, Pill, Seg, card, hint, kicker, searchInput, type SegOpt } from '../../shared/ui'
-import { useEvents } from './api'
-import PremiumChart, { INITIAL_BARS, type PairSeries } from './Chart'
-import { FX_CHOICES, makeMockCandles } from './mock'
+import { useCandles, useEvents } from './api'
+import { RES_OF_INTERVAL, RES_SEC } from './candles'
+import PremiumChart, { type PairSeries } from './Chart'
 import { INTERVAL_SEC, rollup, type Interval } from './rollup'
 import { aggregate, durationOf, sortStats, summarize, type SortKey } from './stats'
-import type { Candle1m, Dir, Dom, PremiumEvent } from './types'
+import type { Dir, Dom, PremiumEvent } from './types'
 
 type Per = '7d' | '30d' | '90d'
 const PER_LABEL: Record<Per, string> = { '7d': '1주', '30d': '1달', '90d': '3달' }
@@ -65,19 +65,16 @@ export default function HistoryTab({ now, selSym, onSelect }: {
   const [chartDoms, setChartDoms] = useState<Dom[]>(['upbit'])
   const [chartFxs, setChartFxs] = useState<string[]>(['binance'])
   useEffect(() => { if (dom) setChartDoms([dom]) }, [dom])
-  // 봉 종류 — 1분봉을 클라이언트에서 접는다 (rollup.ts)
+  // 봉 종류 — 계층(1m·5m·1h·4h·1d) 하나를 골라 그 안에서 접는다 (candles.ts·rollup.ts)
   const [interval, setInterval_] = useState<Interval>('1m')
-  // 차트에 실린 과거 일수 = 기본(첫 화면에 봉 INITIAL_BARS 개가 차는 일수) + 사용자가 왼쪽 끝으로 끌어 늘린 일수 (상한 30일).
-  // effect 로 맞추면 옛 일수로 한 번 그리고 다시 그리는 2단계가 되어 차트 범위가 어긋나므로, 같은 렌더에서 바로 계산한다.
-  const MAX_DAYS = 30
-  const chartKey = `${selSym}:${chartDoms.join('+')}:${chartFxs.join('+')}:${dir}:${interval}`
-  const [extra, setExtra] = useState({ key: chartKey, days: 0 })
-  const extraDays = extra.key === chartKey ? extra.days : 0
-  const baseDays = Math.max(1, Math.ceil((INITIAL_BARS * INTERVAL_SEC[interval]) / 86_400))
-  const chartDays = Math.min(MAX_DAYS, baseDays + extraDays)
+  const res = RES_OF_INTERVAL[interval]
+  // 왼쪽으로 끌어 더 붙인 청크 수 — (심볼, 쌍, 방향, 계층) 이 바뀌면 0 부터. effect 로 맞추면 옛 값으로 한 번 그리고 다시 그리는
+  // 2단계가 되어 차트 범위가 어긋나므로, 같은 렌더에서 바로 계산한다.
+  const chartKey = `${selSym}:${chartDoms.join('+')}:${chartFxs.join('+')}:${dir}:${res}`
+  const [olderState, setOlderState] = useState({ key: chartKey, n: 0 })
+  const older = olderState.key === chartKey ? olderState.n : 0
 
   const nowSec = Math.floor(now / 1000)
-  const nowMin = Math.floor(nowSec / 60) * 60
   const periodSec = PER_SEC[per]
   const { result, loading } = useEvents({ dir, dom, periodSec })
   // 실패·미도착 때 `[]` 를 매 렌더 새로 만들면 아래 memo 들이 초마다 깨져 차트가 초마다 다시 그려진다 → 고정 빈 배열
@@ -97,23 +94,17 @@ export default function HistoryTab({ now, selSym, onSelect }: {
   const t0Sec = nowSec - periodSec
   const color = dirColor(dir)
 
-  // 차트 데이터 — 서버 1분봉이 없어 mock. 선택한 (국내 × 해외) 쌍마다 UTC 하루 단위 청크로 만들어(시드 = 청크 시작)
-  // 분이 지나도 과거 모양이 안 바뀐다. 접기(rollup)까지 여기서 끝내 차트는 그리기만 한다.
-  const domsKey = chartDoms.join('+'), fxsKey = chartFxs.join('+')
-  const series = useMemo<PairSeries[]>(() => {
-    const day0 = Math.floor(nowMin / 86_400) * 86_400
-    const out: PairSeries[] = []
-    for (const d of DOMS_ORDER.filter((x) => chartDoms.includes(x))) {
-      for (const f of FX_CHOICES.map((x) => x.id).filter((x) => chartFxs.includes(x))) {
-        const c1m: Candle1m[] = []
-        for (let k = chartDays - 1; k >= 0; k--) c1m.push(...makeMockCandles(d, f, selSym, dir, day0 - k * 86_400))
-        out.push({ dom: d, fx: f, candles: rollup(c1m.filter((c) => c.ts < nowMin), INTERVAL_SEC[interval]) })
-      }
-    }
-    return out
-  }, [domsKey, fxsKey, selSym, dir, chartDays, nowMin, interval])
+  // 차트 데이터 — /history/candles 청크(쌍별)를 받아 봉 종류로 접는다. 접기까지 여기서 끝내 차트는 그리기만 한다
+  const domsKey = chartDoms.join('+')
+  const { pairs, loading: candlesLoading, errorStatus: candlesError, oldestReached } = useCandles({
+    base: selSym, dir, doms: DOMS_ORDER.filter((x) => chartDoms.includes(x)), fxs: chartFxs, interval, older,
+  })
+  const series = useMemo<PairSeries[]>(
+    () => pairs.map((p) => ({ dom: p.dom, fx: p.fx, candles: rollup(p.candles, INTERVAL_SEC[interval], RES_SEC[res]) })),
+    [pairs, interval, res],
+  )
   const chartEvents = useMemo(() => mine.filter((e) => chartDoms.includes(e.dom)), [mine, domsKey])
-  const needOlder = () => setExtra({ key: chartKey, days: extraDays + 1 })
+  const needOlder = () => { if (!oldestReached) setOlderState({ key: chartKey, n: older + 1 }) }
 
   const dirOpts: SegOpt[] = (['kimp', 'reverse'] as Dir[]).map((d) => ({
     label: DIR_LABEL[d], onClick: () => setDir(d),
@@ -148,11 +139,12 @@ export default function HistoryTab({ now, selSym, onSelect }: {
           </span>
         </div>
 
-        {/* 선택 심볼 1분봉 차트 — 김프 캔들 + 가격 + 입출금 (스펙 014 예정, 지금은 mock) */}
+        {/* 선택 심볼 봉 차트 — 김프 캔들 + 가격 + 입출금 (스펙 014 §3.7) */}
         <PremiumChart sym={selSym} dir={dir}
           doms={chartDoms} fxs={chartFxs} onDoms={setChartDoms} onFxs={setChartFxs}
           interval={interval} onInterval={setInterval_}
-          series={series} events={chartEvents} onNeedOlder={needOlder} />
+          series={series} events={chartEvents} onNeedOlder={needOlder}
+          loading={candlesLoading} errorStatus={candlesError} />
 
         <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 'var(--space-4)', alignItems: 'start' }}>
 
