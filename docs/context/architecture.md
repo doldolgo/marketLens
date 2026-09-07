@@ -13,7 +13,7 @@
 - **현재 서버는 uvicorn worker 1개만 사용한다.** `live_store` 가 프로세스 내부 메모리이기 때문에 다중 worker 를 쓰려면 프로세스들이 공유하는 외부 저장소로 먼저 이전해야 한다.
 
 ## 런타임 구성
-- **server/**: Python 3.12, FastAPI, httpx, websockets, redis(asyncio), influxdb-client, boto3, pyjwt, pydantic v2, pydantic-settings. 로컬 포트 8000. 상시 태스크: 업비트·빗썸 스트림 각 1, 바이낸스 샤드 3 + 재조정 루프(60초), 마켓 우주 갱신 루프(매초 — 목록 3개 병렬, 실패는 직전 목록 유지·거래소·원인당 60초 1줄 로그), 틱 루프(1초), Redis 인계 큐, flusher(60초), 원문 닫기 회차(1초, 업로드는 데몬 워커 스레드 1개), 입출금 조회(60초), `collect_fail` 쓰기 큐 태스크, `premium_event` 쓰기 태스크(점이 생기면 즉시·없어도 60초 회차).
+- **server/**: Python 3.12, FastAPI, httpx, websockets, redis(asyncio), influxdb-client, boto3, pyjwt, pydantic v2, pydantic-settings. 로컬 포트 8000. 상시 태스크: 업비트·빗썸 스트림 각 1, 바이낸스 샤드 3 + 재조정 루프(60초), 마켓 우주 갱신 루프(매초 — 목록 3개 병렬, 실패는 직전 목록 유지·거래소·원인당 60초 1줄 로그), 틱 루프(1초), Redis 인계 큐, flusher(60초), 원문 닫기 회차(1초, 업로드는 데몬 워커 스레드 1개), 입출금 조회(60초), `collect_fail` 쓰기 큐 태스크, `premium_event` 쓰기 태스크(점이 생기면 즉시·없어도 60초 회차), `candle` 쓰기·롤업 태스크(분이 닫히면 즉시·없어도 60초 회차 — 1m 쓰기 뒤 같은 회차에 5m→1h→4h→1d).
 - **web/**: React 19, TypeScript, Vite. 런타임 의존성은 react·react-dom·lightweight-charts(기록 탭 캔버스 차트) 셋이다. 로컬 포트는 5173 이고, 배포 컨테이너의 nginx 는 80번 포트를 사용한다. 호스트 포트는 `WEB_PORT` 로 정한다.
 - **저장소**: InfluxDB 2.7 OSS(org·bucket `marketlens`, Flux) — 김프 이력. Redis 7 — 틱 버퍼(AOF, Influx 로 옮기기 전까지만). S3(`marketlens-spreads-snapshot`, ap-northeast-2, 접두사 `raw/`) — 거래소 원문 아카이브. 모델은 `db.md`. 테스트에서는 셋 다 띄우지 않는다(fake·fakeredis). S3 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 IAM 역할).
 
@@ -59,7 +59,20 @@ flowchart TB
     INF -. 기동 시 복원 7일 .-> EVT
     HIST -- "/history/events = 닫힌 사건(Influx) + 진행 중(메모리)" --> EVT
 
+    %% ── 014 1분 봉 → 계층 롤업 ──
+    AGG[1분 집계기<br/>메모리 · 열린 분 1개]
+    LS -- "매 틱 조합별 OHLC·가격·입출금 누적" --> AGG
+    C1[(candles_1m<br/>7일)]
+    AGG -- "분 닫힐 때 조합 전부 한 번에" --> C1
+    CUP[(candles_5m · 1h · 4h · 1d<br/>30일 · 90일 · 365일 · 무제한)]
+    C1 -- "같은 회차 사슬 롤업<br/>계층당 12창 · 아래 완료 지점까지" --> CUP
+    HIST -- "/history/candles = 계층 버킷 하나" --> CUP
+    HIST -- "res=1m" --> C1
+
     %% ── 스펙 번호 (테두리 색) ──
+    AGG:::spec014
+    C1:::spec014
+    CUP:::spec014
     S3:::spec010
     RS:::spec009
     INF:::spec005
@@ -70,8 +83,9 @@ flowchart TB
     classDef spec005 stroke:#27ae60,stroke-width:2px
     classDef spec011 stroke:#c0392b,stroke-width:2px
     classDef spec013 stroke:#8e44ad,stroke-width:2px
+    classDef spec014 stroke:#16a085,stroke-width:2px
 ```
-- 테두리 색 = 스펙 번호: 주황 010(원문 싱크) · 파랑 009(틱 저장) · 초록 005(history) · 빨강 011(health) · 보라 013(premium-events). 점선은 부수 흐름.
+- 테두리 색 = 스펙 번호: 주황 010(원문 싱크) · 파랑 009(틱 저장) · 초록 005(history) · 빨강 011(health) · 보라 013(premium-events) · 청록 014(premium-1m). 점선은 부수 흐름.
 - 행은 거래소 단위 통째 교체가 아니라 **메시지 단위**로 바뀐다. 상장·상폐는 매초 갱신되는 **마켓 우주**(국내 KRW ∩ 바이낸스 USDT)가 반영한다 — 우주 밖 행은 없다.
 - 스트림이 끊기면 행은 남고 그 거래소의 `last_message_at` 이 멈춘다. `/spreads` 의 `age`·`status` 는 행이 아니라 **거래소 스트림의 마지막 수신 시각** 기준이다(조용한 코인의 호가는 안 바뀌어도 현재값이다). 단 행 자체(`updated_at`)가 **300초** 이상 안 바뀌면 `age` 는 그 행의 실제 경과 초라 stale 로 보인다(거래 정지·심볼 장애 — 스트림은 살아 있는데 그 코인 프레임만 안 오는 상태).
 - 입출금 상태 API 는 틱 루프가 60초 주기로만 조회해 캐시하고, 행이 새 메시지로 교체돼도 그 3필드는 물려받는다. 키가 없으면 `null`(모름). 망 판정은 `/spreads` 에서 하고, 빗썸은 키가 필요 없다.
@@ -84,7 +98,7 @@ flowchart TB
 - `fetch` 폴링만 사용. 상태관리·라우터·스타일 라이브러리 없음.
 - API base: `VITE_API_BASE` (미설정 시 `/api`). dev 는 vite proxy `/api → http://localhost:8000` (prefix strip), 배포는 nginx `/api/ → server:8000/`.
 - 폴링 실패 시 직전 데이터 유지.
-- 셸의 공유 피드가 탭 공통 데이터를 들고, 1.5초 tick 은 셸이 돌린다. `/spreads` 1초 폴링은 spreads 기능(003)이, `/health/collect` 5초 폴링은 health 기능(011)이 제공한다.
+- 셸의 공유 피드가 탭 공통 데이터를 들고, 1.5초 tick 은 셸이 돌린다. `/spreads` 1초 폴링은 spreads 기능(003)이, `/health/collect` 5초 폴링은 health 기능(011)이 제공한다. 기록 탭은 `/history/events` 60초 재조회(013)와 `/history/candles` 청크 캐시(014 — 봉 종류 → 계층, 쌍마다 1,440창 청크, 최신 청크만 60초 재조회, 계층 안 접기)를 쓴다.
 
 ## 계약 규칙 (BE ↔ FE)
 - BE 내부는 snake_case 를 사용한다. HTTP JSON 키와 복합어 쿼리 파라미터는 모든 엔드포인트에서 camelCase 를 사용한다. 정확한 스키마는 각 기능의 모델과 타입이 정의한다.
@@ -137,4 +151,5 @@ EC2 1대. 루트 `docker compose up -d --build` 로 server·web·influxdb·redis
 - **raw-archive (010)**: `core/s3.py`(`S3Uploader` — boto3 를 import 하는 유일한 곳, `put`·`head_bucket`, 로그 없음), `core/raw_archive.py`(`format_line`·`object_key`·`pack` 순수 함수, `RawArchive` — 001 의 `record(…, key)` 계약 구현: `(거래소, UTC 분 창)` 버퍼에 줄을 붙이고 `key` 있는 줄은 `(source, key)` 당 마지막 1건만, 매초 닫기 회차가 지난 창을 닫아 스레드에서 gzip → 거래소 합산 단일 FIFO 대기열 → 데몬 워커 스레드 1개가 순서대로 `PutObject`(실패는 머리에 두고 1초 뒤 재시도, 압축 후 256MB 초과 시 오래된 객체부터 버림), 종료 5초 상한). 수신 경로와 분리한 이유 — 기록 함수는 메모리 붙이기뿐이라 어떤 S3 장애도 스트림·틱 루프를 한 줄도 막지 않는다. `main.py` 가 `S3_BUCKET` 이 있을 때만 만들어 스트림 3개와 006 조회기에 `record` 를 주입하고, 없으면 `noop_record`. 테스트는 `server/tests/test_raw_archive.py`(fake S3·주입 시계).
 - **health (011)**: `core/outages.py`(실패 구간 추적기 — 틱 루프가 쓰므로 core. 열림/닫힘 시 `collect_fail` 1점을 순서 보장 큐로 쓰고, 기동 시 24시간 복원), `features/health/`(읽기 API `/health/collect`), web `features/health/`(5초 폴링·탭). 응답 타입 `HealthData` 와 거래소 표시명 `exName` 은 `shared/` 에 있다.
 - **premium-events (013)**: `core/premium_events.py`(`PremiumEventDetector` — 틱 루프가 쓰므로 core. 조합·방향별 열린 사건만 메모리, 열린 지 60초·60초마다·닫힐 때 `premium_event` 1점을 미전송 맵(같은 키 덮어쓰기, 상한 1,000)에 모아 쓰기 태스크가 한 번에 쓰고 실패 뒤 60초는 재시도 안 함, 기동 시 7일 복원 3초 상한), `core/influx.py` 의 `PremiumEventRow`·`premium_event_point`·`query_premium_events`, `core/contracts.py` 의 `EventSink`. 읽기 API 는 `features/history/`(`build_events` — Influx 닫힌 사건 + 메모리 진행 중, 고아 점은 last_ts 로 닫힌 것처럼) `GET /history/events`. web `features/history/`(`api.ts` 60초 재조회·`stats.ts` 순수 집계·`Tab.tsx` 김프/역프 서브탭). 테스트는 `server/tests/test_premium_events*.py`(`premium_event_fakes.py`)·`features/history/tests/test_events_api.py`.
+- **premium-1m (014)**: `core/candles.py`(틱 루프·쓰기 태스크가 쓰므로 core — `TIERS`·`window_start`(KST 정렬)·`limit_sec`, `CandleAggregator` — 013 감지기 다음 자리의 `observe`: 열린 분 1개의 조합별 누적 → 분 닫힐 때 `candle_point` 를 미전송 맵(상한 10,000)에 → `run_writer_loop` 회차가 `candles_1m` 에 한 번에 쓰고 이어 `Rollup.run_round`(5m→1h→4h→1d, 계층당 12창, 접는 창의 끝 ≤ min(지금, 아래 계층 완료 지점 — 1m 은 열린 분의 시작)), 실패 뒤 60초 재시도 없음; `Rollup.restore` 기동 기준점(위 버킷 마지막 점 → 아래 계층들 가장 오래된 점 → 지금 창, 계층당 3초 상한); `ensure_candle_buckets` 3초 상한), `core/influx.py` 의 `CandleRow`·`candle_point`·`write(points, bucket)`·`list_buckets`·`create_bucket`·`query_candles`·`latest_candle_ts`·`earliest_candle_ts`(시리즈별 first/last 푸시다운, 보관 기간 안에서만), `core/models.py` `TickRow` 의 7개 추가 필드(기본값 — Redis 되읽기·`premium` 은 그대로). 읽기 API 는 `features/history/`(`build_candles` — 계층 버킷 하나·1,440창 상한·방향별 필드·경로 두 끝·3상태 → null) `GET /history/candles`. web `features/history/`(`candles.ts` 순수 — 봉→계층·청크 계산·보관 상한·띠 색 규칙, `api.ts` `useCandles` 청크 캐시·디바운스·취소·최신 청크 60초, `rollup.ts` KST 고정 정렬·`samples` 합, `Chart.tsx` 상태·경로 라벨·모름 회색). 테스트는 `server/tests/test_candles.py`(`candle_fakes.py`)·`features/history/tests/test_candles_api.py`.
 - **binance-stream (012)**: `core/streams/binance.py`(`BinanceStream` 하나 — 샤드 3개 각각 소켓·시계·백오프·구독 집합, `shard_of` = crc32 % 3, 재조정 루프 1개(배정이 바뀐 `set_universe` 가 깨우거나 60초 — 매초 같은 우주는 무동작), exchangeInfo 심볼 맵으로 `ForeignSymbolSource` 구현, `judge` 는 샤드별 판정 후 가장 조용한 샤드를 고른다). 001 의 `QuoteSink.orderbook/trade` 와 `store.stream("binance")`(샤드 집계) 를 쓰고 `StreamJudge` 로 틱 루프·`/refresh` 트리거에 꽂힌다. 테스트는 `server/tests/test_stream_binance.py`(001 의 `stream_fakes.py` 재사용).

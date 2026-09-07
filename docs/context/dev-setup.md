@@ -74,6 +74,10 @@ curl -s "localhost:8000/history/premium?base=BTC&unit=week" | head -c 300
 ```
 (dev compose 기동 + 60초 뒤) `count ≥ 1` 이면 정상, Influx 없으면 503 `storage_unavailable` (005).
 ```bash
+curl -s "localhost:8000/history/candles?base=BTC" | head -c 400
+```
+(dev compose 기동 + 61초 뒤) `count ≥ 1`·봉의 `samples ≤ 60`, 60초 뒤 `count` 가 1 늘면 정상, `res=5m` 은 5분 뒤 1개 (014). 기동 로그에 `봉 버킷 생성: candles_1m, …`(첫 기동만). Influx UI(`http://localhost:8086`) Data Explorer 에서 버킷 `candles_1m` 의 `candle` 점 수가 분당 ≈ 490 이면 정상.
+```bash
 aws s3 ls s3://<bucket>/raw/ --recursive | tail -3
 ```
 (`S3_BUCKET` 설정 + 기동 2분 뒤) 거래소·분마다 객체 1개(`raw/exchange=…/dt=…/hh=…/…HHMM00Z.jsonl.gz`)면 정상 (010). `aws s3 cp <key> - | gunzip | head -1` 의 줄이 `exchange`·`source`·`receivedAt`·`raw` 4키면 정상.

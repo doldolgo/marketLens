@@ -1,6 +1,6 @@
 # 014 — premium-1m
 
-상태: IN_PROGRESS | 의존: 001(collect — 틱), 005(history — `/history/*` 오류 계약), 006(wallet-status — 행의 입출금 3상태), 009(tick-store — Redis 틱 레코드 모양 불변), 013(premium-events — Influx 1점 쓰기·재시도 패턴, 기록 탭 차트 카드 시안)
+상태: DONE | 의존: 001(collect — 틱), 005(history — `/history/*` 오류 계약), 006(wallet-status — 행의 입출금 3상태), 009(tick-store — Redis 틱 레코드 모양 불변), 013(premium-events — Influx 1점 쓰기·재시도 패턴, 기록 탭 차트 카드 시안)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -117,7 +117,23 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 2026-09-07 로컬(Mac mini). 이 망은 이날 거래소 도메인이 열려 있었다(api.upbit.com 200).
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q
+#   All checks passed! / 114 files already formatted / 536 passed
+cd web && npm run lint && npm run build
+#   oxlint 경고 0 / tsc -b + vite build 성공 (index-*.js 444 kB)
+docker compose --env-file server/.env -f docker-compose.dev.yml up -d
+cd server && .venv/bin/uvicorn app.main:app --port 8020          # :8000 은 다른 프로세스가 점유
+#   21:49:15 로그 "봉 버킷 생성: candles_1m, candles_5m, candles_1h, candles_4h, candles_1d"
+curl -s "localhost:8020/history/candles?base=BTC"
+#   61초 뒤 count 1 — 21:49 봉 samples 42(기동 분은 관측한 만큼), depositOk/withdrawOk null(키 없음), 이후 분마다 +1
+#   Influx(query_candles): candles_1m 분당 489점(upbit+bithumb, /spreads 행 489 와 같다), candles_5m 21:45 창 489점
+curl -s "localhost:8020/history/candles?base=BTC&res=5m"          # 5분 뒤 count 2 (21:45 → 21:50)
+# 기록 탭 — 헤드리스 브라우저(playwright)로 :8010(VITE_API_BASE=http://localhost:8020) 열어 탭 클릭·스크린샷:
+#   BTC 1분 캔들·업비트/Binance 가격 선·입출금 띠(회색=모름) 실값, MOCK 배지 없음, 해외 선택지 Binance 만,
+#   요청 res=1m 청크 2개(오늘·어제 KST 하루), "5분" 클릭 → res=5m&start=…&end=start+432000 요청
+# 재기동 21:53:51 → 21:53 봉 samples 6(<60), 21:54 봉 60, 5m 21:50 창(재기동 전 미접힘)이 기동 뒤 회차에 samples 246 으로 채워짐
+#   두 번째 기동 로그에 버킷 생성 없음(있으면 안 건드린다), candle 경고 0
 ```
 
 ## 6. 갱신할 문서
@@ -132,5 +148,18 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
+  - server: `app/core/models.py`(TickRow 7필드) · `app/core/ticks.py`(build_tick 채움·`candles` 싱크 배선) · `app/core/influx.py`(`CandleRow`·`candle_point`·`write(bucket)`·`list_buckets`·`create_bucket`·`query_candles`·`latest_candle_ts`·`earliest_candle_ts`) · **`app/core/candles.py`**(`TIERS`·`window_start`·`limit_sec`·`ensure_candle_buckets`·`fold_candles`·`fold_window`·`Rollup`·`CandleAggregator`) · `app/main.py`(버킷 → 기준점 복원 → 쓰기 태스크 → 틱 루프 배선) · `app/features/history/{models,service,router}.py`(`CandleOut`·`CandlesResponse`·`CandleReader`·`build_candles`·`GET /history/candles`) · 테스트 `tests/candle_fakes.py`·`tests/test_candles.py`(21)·`tests/test_ticks.py`(+1)·`features/history/tests/helpers.py`(`seed_candle`·`query_candles`)·`features/history/tests/test_candles_api.py`(10)
+  - web: `shared/config.ts`(`HISTORY_CANDLES_POLL_MS`) · `features/history/types.ts`(`Res`·`CandlesResponse`·`Candle1m` 3상태) · **`features/history/candles.ts`**(봉→계층·청크·보관 상한·띠 색 규칙·`FX_CHOICES`·`INITIAL_BARS`) · `api.ts`(`fetchCandles`·`useCandles`) · `rollup.ts`(KST 고정·`samples` 합·계층 base) · `Tab.tsx`·`Chart.tsx`(실데이터·상태·경로 라벨·모름 회색) · `mock.ts` 삭제
+  - docs: `docs/context/{status,architecture,product,db,dev-setup}.md` · `docs/specs/001-collect.md` §3.6-2 · `docs/specs/013-premium-events.md` §3.5·§7 · `CLAUDE.md` 인덱스
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - **§3.5 함께 고침(사람 합의)**: 위 계층은 아래 계층 완료 지점까지만 접는다(접는 창의 끝 ≤ min(지금, 아래 완료 시각); 1m 완료 시각 = 집계기가 열어 둔 분의 시작). 원래 문구대로면 재기동·불통 뒤 밀린 구간에서 위 계층이 아래를 앞질러 빈 창을 확정해 영구 구멍이 생겼다. 따라잡기 기준점도 "아래 버킷" → "아래 계층들 중 가장 오래된 점"(첫 배포에는 1m 만 있어 1h·1d 가 5m·4h 만 보면 지금 창에 앵커를 잡는다). §4 에 검증 항목 추가.
+  - 첫 틱 전 회차(1m 완료 시각 미상)에는 롤업을 돌리지 않는다. 롤업 실패도 1m 쓰기와 같은 60초 게이트를 공유한다(Influx 불통 한 가지 원인이라). 롤업은 창 1개당 `write` 1번(12창 = 12번).
+  - 기준점 복원 3초 상한은 **계층당**. `latest/earliest_candle_ts` 는 시리즈별 `last()/first()` 푸시다운 뒤 group·sort — 전 구간 정렬을 피했고(EC2 4GB Influx OOM 전력), 조회 범위는 아래 계층 보관 기간 안으로 한정.
+  - `TickRow` 7필드는 기본값을 둔다 — Redis 에서 되읽은 틱(`decode_tick`)과 옛 테스트가 다섯 값만으로 행을 만들기 때문. `InfluxClient.write` 에 선택 인자 `bucket` 추가(기본은 `marketlens`).
+  - web: `rollup.ts` 의 접기 정렬을 브라우저 로컬 오프셋에서 **KST 고정 상수**로 바꿈(서버 창 정렬과 같아야 1d 경계가 맞는다 — 013 시안은 로컬). 접기에 `samples` 합 추가. 최신 청크 재조회는 60초 회차에서만(봉 종류·쌍 변경 시에는 없는 청크만 — "1m→3m 재요청 없음" 규칙). 청크 캐시는 컴포넌트 ref(탭이 마운트된 동안 유지, 셸은 탭을 내리지 않는다). `INITIAL_BARS` 를 `Chart.tsx` → `candles.ts` 로. 읽기 줄의 입출금 `null` 은 "모름"(회색). 청크 하나라도 실패하면 오류 배지 + 받은 청크만 그린다.
+  - 커밋 1개(`feat(history): add 1m candle aggregator …`)가 320줄로 300줄 규약을 조금 넘는다 — 모듈 하나를 더 쪼개면 컴파일 단위가 깨져 그대로 두었다. `actionlint` 미설치·워크플로 변경 없음.
+  - 로컬 검증 중 이전 세션의 vite(:8010, 프록시 :8000)를 내리고 `VITE_API_BASE=http://localhost:8020` 로 다시 띄웠다 — 서버는 :8020(:8000 점유). 둘 다 켜 둔 상태로 끝냈다.
 - 남은 빚:
+  - `candles_*` 은 배포 시점부터(과거분 없음). 위 계층 구멍을 사후에 메우는 도구 없음(1m 7일·5m 30일 안이면 재료는 있다 — 후속 스펙 후보). web 청크 캐시 상한 없음(status.md 알려진 빚).
+  - EC2 확인 대기: 실 키로 입출금 값(`depositOk`/`withdrawOk` true/false·막힌 초), 4h·1d 계층 첫 점(KST 04시·자정 경계), 7일 이상 운용 뒤 1m retention 삭제, 긴 공백 따라잡기 속도 실측(밀린 1시간당 1회차), 1m 분당 ≈490점 × 하루 적재량.
+  - 사건 클릭 → 구간 차트(후속). web 테스트 러너 없음 — `candles.ts` 순수 함수는 수동·빌드로만 확인.
