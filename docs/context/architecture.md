@@ -18,23 +18,60 @@
 - **저장소**: InfluxDB 2.7 OSS(org·bucket `marketlens`, Flux) — 김프 이력. Redis 7 — 틱 버퍼(AOF, Influx 로 옮기기 전까지만). S3(`marketlens-spreads-snapshot`, ap-northeast-2, 접두사 `raw/`) — 거래소 원문 아카이브. 모델은 `db.md`. 테스트에서는 셋 다 띄우지 않는다(fake·fakeredis). S3 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 IAM 역할).
 
 ## 데이터 흐름 (BE)
+```mermaid
+flowchart TB
+    %% ── 소스 ──
+    subgraph SRC[수집 소스]
+        UP[업비트 WS]
+        BT[빗썸 WS]
+        BN[바이낸스 WS<br/>3샤드]
+        REST[REST<br/>마켓 목록 매초 · 입출금 60초]
+    end
+
+    %% ── 010 원문 싱크 ──
+    S3[(S3 raw/<br/>거래소별 분당 객체 1개<br/>시세는 분당 마지막 1건)]
+    SRC -. 모든 프레임·응답 본문 .-> S3
+
+    %% ── LiveStore ──
+    LS[LiveStore<br/>최신 시세 · 스트림 상태 · 틱 슬롯 · spark]
+    UP --> LS
+    BT -- "메시지마다 (exchange, base) 행 교체<br/>KRW-USDT → USDT 시세" --> LS
+    BN --> LS
+    API[실시간 조회 API] -- 읽기 --> LS
+
+    %% ── 009 틱 → Redis → Influx ──
+    RS[[Redis Stream `ticks`<br/>아직 안 옮긴 틱만]]
+    LS -- "매초: 틱 T 생성 → 슬롯에 넣고 T−1 인계" --> RS
+    INF[(InfluxDB<br/>premium · dw_fail)]
+    RS -- "60초마다 전량 → 성공 시 비움" --> INF
+    HIST["/history/*"] -- 읽기 --> INF
+
+    %% ── 011 수집 실패 판정 ──
+    FAIL[실패 이력<br/>메모리 · 구간 단위]
+    LS -- "매 틱 거래소별 판정<br/>연결 · 30초 무수신" --> FAIL
+    FAIL -- "열림/닫힘 시 collect_fail" --> INF
+    INF -. 기동 시 복원 .-> FAIL
+
+    %% ── 013 김프/역프 사건 감지 ──
+    EVT[사건 감지기<br/>메모리 · 열린 사건만]
+    LS -- "매 틱 조합·방향별 판정<br/>1.0% 진입 · 0.5% 이탈 · 1분 초과" --> EVT
+    EVT -- "열린 지 60초 · 60초마다 · 닫힐 때 premium_event" --> INF
+    INF -. 기동 시 복원 7일 .-> EVT
+    HIST -- "/history/events = 닫힌 사건(Influx) + 진행 중(메모리)" --> EVT
+
+    %% ── 스펙 번호 (테두리 색) ──
+    S3:::spec010
+    RS:::spec009
+    INF:::spec005
+    FAIL:::spec011
+    EVT:::spec013
+    classDef spec010 stroke:#e67e22,stroke-width:2px
+    classDef spec009 stroke:#2980b9,stroke-width:2px
+    classDef spec005 stroke:#27ae60,stroke-width:2px
+    classDef spec011 stroke:#c0392b,stroke-width:2px
+    classDef spec013 stroke:#8e44ad,stroke-width:2px
 ```
-[업비트 WS] [빗썸 WS] [바이낸스 WS 3샤드]   [REST: 마켓 목록 매초 · 입출금 60초]
-      │           │            │                          │
-      └───── 모든 프레임·응답 본문 → 원문 싱크 ──▶ S3 raw/ (거래소별 분당 객체 1개 · 시세는 분당 마지막 1건)  ─ 010
-      │           │            │
-      ▼           ▼            ▼   메시지마다 (exchange, base) 행 교체 · KRW-USDT → USDT 시세
-                LiveStore (최신 시세 · 스트림 상태 · 틱 슬롯 · spark)
-                    │                         ▲
-   실시간 조회 API ◀─┘ 읽기                    │ 매초: 틱 T 생성 → 슬롯에 넣고 T−1 을 인계
-                                              ▼
-                                   Redis Stream `ticks` (아직 안 옮긴 틱만)          ─ 009
-                                              │ 60초마다 전량 → Influx → 성공 시 비움
-                                              ▼
-                                   InfluxDB `premium`·`dw_fail`  ◀── /history/* 읽기  ─ 005
-매 틱 거래소별 판정(연결·30초 무수신) → 실패 이력(메모리, 구간 단위) → Influx collect_fail(열림/닫힘 시)·기동 시 복원  ─ 011
-매 틱 조합·방향별 판정(1.0% 진입·0.5% 이탈·1분 초과) → 사건 감지기(메모리, 열린 사건만) → Influx premium_event(열린 지 60초·60초마다·닫힐 때)·기동 시 7일 복원 → /history/events(닫힌 사건 + 진행 중)  ─ 013
-```
+- 테두리 색 = 스펙 번호: 주황 010(원문 싱크) · 파랑 009(틱 저장) · 초록 005(history) · 빨강 011(health) · 보라 013(premium-events). 점선은 부수 흐름.
 - 행은 거래소 단위 통째 교체가 아니라 **메시지 단위**로 바뀐다. 상장·상폐는 매초 갱신되는 **마켓 우주**(국내 KRW ∩ 바이낸스 USDT)가 반영한다 — 우주 밖 행은 없다.
 - 스트림이 끊기면 행은 남고 그 거래소의 `last_message_at` 이 멈춘다. `/spreads` 의 `age`·`status` 는 행이 아니라 **거래소 스트림의 마지막 수신 시각** 기준이다(조용한 코인의 호가는 안 바뀌어도 현재값이다). 단 행 자체(`updated_at`)가 **300초** 이상 안 바뀌면 `age` 는 그 행의 실제 경과 초라 stale 로 보인다(거래 정지·심볼 장애 — 스트림은 살아 있는데 그 코인 프레임만 안 오는 상태).
 - 입출금 상태 API 는 틱 루프가 60초 주기로만 조회해 캐시하고, 행이 새 메시지로 교체돼도 그 3필드는 물려받는다. 키가 없으면 `null`(모름). 망 판정은 `/spreads` 에서 하고, 빗썸은 키가 필요 없다.
