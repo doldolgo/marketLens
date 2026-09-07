@@ -28,7 +28,7 @@
 - **앱은 자기 로거(`marketlens.*`)를 INFO 로, 타임스탬프와 함께 stderr 로 낸다.** 설정이 없으면 `logging.lastResort` 가 받아 WARNING 이상만, 시각도 없이 나간다 — 그러면 "S3 원문 업로드 재개"(010 §3.6)·"DB 저장 재개"(009 §3.5) 같은 복구 신호가 아예 보이지 않아 장애가 풀렸는지 알 수 없다. handler 는 루트에 달고 레벨은 `marketlens` 에만 내린다 — 라이브러리 INFO(httpx 의 요청 한 줄 등)는 루트의 WARNING 에 막혀야 로그가 초당 수십 줄로 불어나지 않는다.
 - **컨테이너 로그는 네 서비스 모두 `json-file` 50MB × 3 으로 묶는다.** docker 기본값은 무한이고, 회전 없는 로그가 디스크를 채우면 Influx 가 쓰기를 거부한다 — 그 거부는 **공간을 되찾아도 컨테이너를 재시작하기 전까지 풀리지 않는다**(열지 못한 shard 를 캐시한다). 데몬 설정(`/etc/docker/daemon.json`)이 아니라 compose 에 두는 이유는 이 스택이 자기 한도를 들고 다니게 하기 위해서다.
 - **호스트에 여는 포트는 web 하나.** server 는 compose 안에서만, Influx 는 비공개. 공격면을 하나로.
-- **호스트 포트는 compose 변수 `WEB_PORT`(기본 80).** 현 EC2 는 기존 fe 가 80, be 가 8000 을 점유하므로 **`WEB_PORT=8080` 으로 공존**한다. 기존 컨테이너·crontab 은 이 레포 소관이 아니다 — 절대 내리거나 수정하지 않는다. 기존 스택을 이관·폐기하는 날 80 으로 바꾸는 것은 별도 스펙.
+- **호스트 포트는 compose 변수 `WEB_PORT`(기본 80).** EC2 는 루트 `.env` 의 `WEB_PORT=80`. 기존 marketlens-be·fe 컨테이너는 2026-09-04 정지(`docker compose stop`, 폴더·코드 유지) — 이 레포 소관이 아니므로 그 폴더는 건드리지 않는다. 로컬 통합 기동은 `:8000` 충돌을 피해 `WEB_PORT=8080` 을 쓴다(dev-setup.md).
 - **`/api/*` 는 web 이 server 로 넘기며 `/api` 접두를 뗀다.** `/api/health` → server `/health`. dev 의 vite proxy 와 같은 규칙이라 FE 코드는 환경을 모른다.
 - **server 는 uvicorn 워커 1개.** 틱 루프·스트림과 메모리 저장소가 프로세스 안에 있어 워커가 둘이면 진실도 둘이 된다.
 - **`.env` 는 이미지에 넣지 않는다.** `server/.env` 는 compose 의 `env_file` 로만 주입(시크릿이 이미지 레이어에 남지 않게). `WEB_PORT` 는 compose 변수라 루트 `.env` 에 둔다 — 시크릿과 포트 설정을 섞지 않는다. 단 `INFLUX_URL`·`REDIS_URL` 은 compose 가 `environment` 로 `http://influxdb:8086`·`redis://redis:6379/0` 을 **덮어쓴다** — `server/.env` 의 값은 로컬(호스트) 기준이라 컨테이너 안에서 닿지 않기 때문.
@@ -60,8 +60,8 @@
 - 호스트에 8000·8086 이 **이 스택 때문에 새로 열리지 않는다**(server·Influx 비노출).
 - `docker inspect --format '{{.HostConfig.LogConfig}}' marketlens-server` 가 `json-file` 과 `max-size:50m`·`max-file:3` 을 말한다(네 컨테이너 모두).
 - Influx 컨테이너를 내려도 `/health` 는 200, `/history/*` 만 503. Redis 컨테이너를 내려도 `/health` 200·`/spreads` 정상(009 격리).
-- EC2 에서: 배포 후에도 기존 컨테이너 `market-lens-fe`·`market-lens-be`(기존 스택의 실제 컨테이너 이름 — 폴더명 `~/marketlens-be` 와 다르다)가 그대로 Up 이고 `curl localhost:80` 이 기존 fe 를 준다(공존).
-- PR 을 올리면 `server`·`web` check 가 green. main 머지 → Actions deploy 성공 → EC2 안에서 `curl localhost:8080/api/health` 가 ok.
+- EC2 에서: 기존 컨테이너 `market-lens-fe`·`market-lens-be`(기존 스택의 실제 컨테이너 이름 — 폴더명 `~/marketlens-be` 와 다르다)는 2026-09-04 정지 상태 그대로이고 `curl localhost:80` 이 이 레포의 web 을 준다.
+- PR 을 올리면 `server`·`web` check 가 green. main 머지 → Actions deploy 성공 → EC2 안에서 `curl localhost:80/api/health` 가 ok.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
