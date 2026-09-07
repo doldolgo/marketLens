@@ -1,6 +1,6 @@
 """InfluxDB 2.7 클라이언트 — 연결·읽기/쓰기 공유 인프라 (스펙 005 §3.1~3.2).
 
-influxdb-client 를 import 하는 곳은 이 모듈뿐이다. 009 flusher·011 이력 추적기·history 서비스·백필은
+influxdb-client 를 import 하는 곳은 이 모듈뿐이다. 009 flusher·011 이력 추적기·013 사건 감지기·history 서비스·백필은
 `InfluxPoint` 와 아래 메서드 시그니처에만 의존한다 — 테스트는 같은 시그니처의 fake 를 쓴다.
 모든 실패는 `InfluxUnavailableError` 하나로 모은다: 호출자는 원인 구분 없이
 "저장소 불가"(재시도 또는 503) 로만 다룬다.
@@ -93,6 +93,47 @@ class CollectFailRow:
     url: str | None
     retry_after_sec: int | None
     ended_ts: int | None  # None = 진행 중(닫힘 쓰기가 아직 없다)
+
+
+@dataclass(frozen=True)
+class PremiumEventRow:
+    """`premium_event` 점 1개 — 김프/역프 사건(스펙 013 §3.3). `end_ts == 0` 은 진행 중."""
+
+    dom: str
+    fx: str
+    base: str
+    dir: str  # kimp | reverse
+    start_ts: int  # epoch 초 = 점의 time
+    end_ts: int  # 0 = 진행 중
+    duration_seconds: int  # 진행 중이면 0
+    max_percent: float
+    max_ts: int
+    last_ts: int
+    samples: int
+    enter_percent: float
+    exit_percent: float
+
+
+def premium_event_point(row: PremiumEventRow) -> InfluxPoint:
+    """사건 1점 — 열림(60초 경과)·60초 갱신·닫힘이 전부 같은 (tag, time) 으로 덮어쓴다 (013 §3.3).
+
+    기준값(enter/exit)을 점에 같이 남기는 것은 나중에 기준이 바뀌어도 과거 사건의 의미가 남게 하기 위해서다.
+    """
+    return InfluxPoint(
+        measurement="premium_event",
+        tags={"dom": row.dom, "fx": row.fx, "base": row.base, "dir": row.dir},
+        fields={
+            "end_ts": row.end_ts,
+            "duration_seconds": row.duration_seconds,
+            "max_percent": float(row.max_percent),
+            "max_ts": row.max_ts,
+            "last_ts": row.last_ts,
+            "samples": row.samples,
+            "enter_percent": float(row.enter_percent),
+            "exit_percent": float(row.exit_percent),
+        },
+        ts=row.start_ts,
+    )
 
 
 def collect_fail_point(row: CollectFailRow) -> InfluxPoint:
@@ -340,6 +381,57 @@ from(bucket: "{self.bucket}")
                     if v.get("retry_after_sec") is not None
                     else None,
                     ended_ts=int(ended) if ended is not None else None,
+                )
+            )
+        return rows
+
+    # --- 읽기 (premium_event — /history/events 와 기동 시 복원. 스펙 013 §3.3~3.4) ---
+
+    def query_premium_events(
+        self,
+        *,
+        start: int,
+        stop: int,
+        dom: str | None = None,
+        dir: str | None = None,
+        base: str | None = None,
+    ) -> list[PremiumEventRow]:
+        """`start ≤ start_ts < stop` 인 사건 전부(진행 중 `end_ts 0` 포함) — start_ts 내림차순."""
+        conds = ['r._measurement == "premium_event"']
+        if dom is not None:
+            conds.append(f'r.dom == "{_esc_flux(dom)}"')
+        if dir is not None:
+            conds.append(f'r.dir == "{_esc_flux(dir)}"')
+        if base is not None:
+            conds.append(f'r.base == "{_esc_flux(base.upper())}"')
+        flux = f"""
+from(bucket: "{self.bucket}")
+  |> range(start: {_rfc3339(start)}, stop: {_rfc3339(stop)})
+  |> filter(fn: (r) => {" and ".join(conds)})
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> group()
+  |> sort(columns: ["_time"], desc: true)
+"""
+        rows: list[PremiumEventRow] = []
+        for record in self._records(flux):
+            v = record.values
+            if v.get("last_ts") is None or v.get("max_percent") is None:
+                continue  # 반쪽 점은 싣지 않는다
+            rows.append(
+                PremiumEventRow(
+                    dom=str(v.get("dom", "")),
+                    fx=str(v.get("fx", "")),
+                    base=str(v.get("base", "")),
+                    dir=str(v.get("dir", "")),
+                    start_ts=int(v["_time"].timestamp()),
+                    end_ts=int(v.get("end_ts") or 0),
+                    duration_seconds=int(v.get("duration_seconds") or 0),
+                    max_percent=float(v["max_percent"]),
+                    max_ts=int(v.get("max_ts") or 0),
+                    last_ts=int(v["last_ts"]),
+                    samples=int(v.get("samples") or 0),
+                    enter_percent=float(v.get("enter_percent") or 0.0),
+                    exit_percent=float(v.get("exit_percent") or 0.0),
                 )
             )
         return rows

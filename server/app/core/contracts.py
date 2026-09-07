@@ -70,6 +70,15 @@ class OutageSink(Protocol):
     ) -> None: ...
 
 
+# --- 사건 감지 (스펙 013 §3.2, 구현은 core/premium_events.py) ---
+
+
+class EventSink(Protocol):
+    """틱 루프가 매초 현재 틱을 넘긴다 — 동기·예외 없음. 011 의 판정 전달과 같은 자리."""
+
+    def observe(self, tick: Tick) -> None: ...
+
+
 class Verdict(Protocol):
     """스트림 판정 1건 — ok 면 성공, 아니면 error 에 실패 내용 (§3.8)."""
 
