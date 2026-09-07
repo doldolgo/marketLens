@@ -154,3 +154,4 @@ docker compose -f docker-compose.dev.yml exec -T influxdb sh -c 'influx query --
   - §4 수동 항목은 전부 로컬 dev compose + 실거래소 수집으로 확인했다(§5). EC2 에서는 배포 뒤 Influx UI 에서 `premium_event` 가 쌓이는지만 한 번 본다.
   - web 집계 규칙 검증 스크립트는 레포 밖 일회성(러너 미도입 — conventions.md). 러너 스펙이 오면 `stats.ts` 단언 13개를 옮긴다.
   - 사건 클릭 → 구간 차트(014). 과거 `premium` 사건 일괄 생성(별도 스펙, status.md 알려진 빚).
+  - 사건 점에 입출금 이력 없음(2026-09-07 논의, 후속으로 미룸): 방향 경로(김프 `wdFx→depDom`·역프 `wdDom→depFx`) 상태가 바뀐 틱의 `시각:상태(1/0/−1)` 를 문자열 필드로 누적 + 막힌 초 합계, 값은 메모리의 006 캐시(±60초), 화면은 로그 열 1개·차트(014)에 겹쳐 그리기. 같은 키 덮어쓰기라 스냅샷만 쓰면 마지막 상태만 남는다 — 그래서 누적 문자열이어야 한다.
