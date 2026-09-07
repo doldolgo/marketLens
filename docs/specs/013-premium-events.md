@@ -105,13 +105,23 @@ cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/
 cd web && npm run lint && npm run build
 # oxlint 0 · tsc -b && vite build ✓
 node <레포 밖 일회성 스크립트>.ts   # stats.ts 순수 집계 — §4 web 집계 규칙 13개 단언 통과 (러너 없음, dev-setup.md)
-# 로컬 스모크 — server/.env 없음(Influx·Redis 없이 기동), 거래소 도메인 200
+# 로컬 스모크 1 — server/.env 없음(Influx·Redis 없이 기동), 거래소 도메인 200
 cd server && .venv/bin/uvicorn app.main:app --port 8020
 curl -s localhost:8020/health                          # {"status":"ok"}
 curl -s "localhost:8020/history/events?dir=kimp"       # 503 storage_unavailable
 curl -s "localhost:8020/history/events?dir=up"         # 422
 curl -s localhost:8020/spreads                          # rows 478 — 틱 루프가 감지기를 물고 돈다(예외 로그 없음)
 # 기동 로그: "Influx 가 없어 사건을 복원하지 않는다 — 빈 상태로 시작"
+# 로컬 스모크 2 — server/.env(INFLUX_TOKEN) + dev compose(Influx 2.7·Redis 7) 위, 실거래소 수집
+docker compose --env-file server/.env -f docker-compose.dev.yml up -d
+cd server && .venv/bin/uvicorn app.main:app --port 8020        # 로그 "사건 복원: 진행 중 0건, 닫음 0건"
+curl -s "localhost:8020/history/events?dir=kimp"                # 기동 61초 뒤 count 4 → ongoing true·endTs null·durationSeconds 61·samples 62
+docker compose -f docker-compose.dev.yml exec -T influxdb sh -c 'influx query --org marketlens --token "$DOCKER_INFLUXDB_INIT_ADMIN_TOKEN" "from(bucket:\"marketlens\") |> range(start:-1h) |> filter(fn:(r)=>r._measurement==\"premium_event\")"'
+# 61초 시점 점 1개/사건(samples 62, end_ts 0) → 60초 뒤 같은 키 갱신(samples 98, last_ts 전진, 점 수 그대로)
+# 서버 재기동 → 로그 "사건 복원: 진행 중 37건, 닫음 0건", /history/events 의 사건이 같은 startTs·ongoing true 로 남음
+# 닫힘: ESP 빗썸 역프가 0.5% 이하로 내려와 endTs·durationSeconds 117·samples 117 로 응답(Influx 같은 키에 end_ts 채워짐)
+# web: VITE_API_BASE=http://localhost:8020 npx vite --port 8030 → Playwright 로 기록 탭 — 김프 서브탭 표 7행·상태 `진행 중 · N분`,
+#   행 클릭 → 요약·로그(빗썸·업비트 2행 진행 중), 역프 서브탭 → dir=reverse 재조회·선택 심볼 유지, 요청 URL 에 start·end·dir
 ```
 
 ## 6. 갱신할 문서
@@ -141,6 +151,6 @@ curl -s localhost:8020/spreads                          # rows 478 — 틱 루�
   - 방향 서브탭·수치 색은 `pctColor(±1)` 로 김프 = `--color-up`, 역프 = `--color-down`(참조 디자인의 POS/NEG 에 해당).
 - 실행 중 함께 고친 스펙 절: §3.3 — 쓰기 실패 뒤 60초 재시도 금지(이유), 복원 시 닫는 점은 쓰기 큐 맨 앞(이유), 재기동에 600초를 쓰는 이유. §3.4 — 같은 키는 메모리 우선, 고아 점은 `last_ts` 로 닫힌 것처럼(이유). §3.5 — 숨김 탭에서도 60초 재조회 계속(이유). 005 §2·§3.6·§4·§7 을 013 으로 돌렸다.
 - 남은 빚:
-  - §4 수동(EC2) 전부 — 첫 `premium_event` 점·닫힘 `end_ts`·기록 탭 실데이터·재기동 복원. 로컬엔 `server/.env` 가 없어 Influx 경로는 fake 로만 검증했다.
+  - §4 수동 항목은 전부 로컬 dev compose + 실거래소 수집으로 확인했다(§5). EC2 에서는 배포 뒤 Influx UI 에서 `premium_event` 가 쌓이는지만 한 번 본다.
   - web 집계 규칙 검증 스크립트는 레포 밖 일회성(러너 미도입 — conventions.md). 러너 스펙이 오면 `stats.ts` 단언 13개를 옮긴다.
   - 사건 클릭 → 구간 차트(014). 과거 `premium` 사건 일괄 생성(별도 스펙, status.md 알려진 빚).
