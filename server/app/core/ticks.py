@@ -145,6 +145,7 @@ class TickLoop:
         handoff: TickHandoff = noop_handoff,
         outages: OutageSink | None = None,
         events: EventSink | None = None,
+        candles: EventSink | None = None,
         wallet: WalletStatusProvider | None = None,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
@@ -155,6 +156,7 @@ class TickLoop:
         self._handoff = handoff
         self._outages = outages
         self._events = events
+        self._candles = candles
         self._wallet = wallet
         self._clock = clock
         self._sleep = sleep
@@ -203,6 +205,9 @@ class TickLoop:
         if self._events is not None:
             # 013 — 사건 감지는 현재 틱으로(인계되는 직전 틱이 아니라) — ts 가 곧 판정 시각이다
             self._events.observe(tick)
+        if self._candles is not None:
+            # 014 — 1분 집계도 현재 틱으로, 013 감지기 다음 자리
+            self._candles.observe(tick)
         return tick
 
     def _judge_all(self, now_ms: int) -> None:

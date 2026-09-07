@@ -2,8 +2,8 @@
 
 /health 와 틱 루프는 기능 폴더가 아니라 여기(시스템) 소관이다.
 메모리가 진실이므로 uvicorn 워커는 1개여야 한다 — 워커가 둘이면 서로 다른 메모리를 본다.
-시작 순서: Influx·Redis 연결 확인 → 010 원문 아카이브(S3_BUCKET 있을 때) → 011 이력 복원 → 013 사건 복원 → 009 spark 복원
-→ 마켓 우주 → 스트림 기동(국내 2 + 바이낸스 3샤드) → 틱 루프 → 009 인계 보내기 태스크·flusher.
+시작 순서: Influx·Redis 연결 확인 → 010 원문 아카이브(S3_BUCKET 있을 때) → 011 이력 복원 → 013 사건 복원 → 014 봉 버킷·롤업 기준점
+→ 009 spark 복원 → 마켓 우주 → 스트림 기동(국내 2 + 바이낸스 3샤드) → 틱 루프 → 009 인계 보내기 태스크·flusher.
 어느 것이 실패해도 앱은 뜬다.
 """
 
@@ -21,6 +21,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core.candles import CandleAggregator, ensure_candle_buckets
 from app.core.collect import CollectService
 from app.core.config import (
     APP_NAME,
@@ -144,6 +145,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     event_writer_task = asyncio.create_task(events.run_writer_loop())
     app.state.premium_events = events
 
+    # 1-1-1. 1분 봉(014) — 계층 버킷 5개(없으면 생성, 3초 상한) → 롤업 기준점(계층당 3초 상한).
+    # Influx 가 없으면 집계만 돌고 쓰기·롤업은 실패로 남는다. 쓰기 태스크는 분이 닫히면 즉시·없어도 60초 회차.
+    candles = CandleAggregator(store=influx)
+    await ensure_candle_buckets(influx)
+    await candles.restore(app.state.started_at // 1000)
+    candle_writer_task = asyncio.create_task(candles.run_writer_loop())
+
     # 1-2. spark 복원(009 §3.6) — 최근 30분 1분 버킷, 10초 상한. 틱 루프 시작 전에 끝난다.
     await restore_spark(influx, spark, store, app.state.started_at // 1000)
 
@@ -168,6 +176,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         handoff=handoff,
         outages=outages,
         events=events,
+        candles=candles,
         wallet=wallet,
     )
     ticks.start()
@@ -195,7 +204,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if archive is not None:
             # 스트림이 닫힌 뒤 — 마지막 프레임까지 담아 5초 안에서 올린다 (010 §3.6)
             await archive.aclose()
-        for task in (outage_writer_task, event_writer_task):
+        for task in (outage_writer_task, event_writer_task, candle_writer_task):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
