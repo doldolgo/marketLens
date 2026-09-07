@@ -77,7 +77,7 @@ marketlens/
 | 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·mock 탭(갭/선선갭/입출금레이더) |
 | 003 | spreads | DONE | 김프 표 — `/spreads`(체결 규모별 서버 슬리피지) `/refresh`(즉시 갱신 트리거) + 스프레드 탭 |
 | 004 | analysis | DONE | 단일 종목 분석 — premium·scan·matrix·orderbook·slippage·arbitrage (BE 전용) |
-| 005 | history | DONE | Influx `premium` 점 규칙·`/history/*`·백필 + history 탭 (쓰기는 009) |
+| 005 | history | DONE | Influx `premium` 점 규칙·`/history/*`(start 기본 7일 창)·백필 + 기록 탭 사건 로그 실데이터 (쓰기는 009) |
 | 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
 | 007 | deploy | DONE | Docker·compose(server·web·influxdb·redis)·CI·EC2 배포 |
 | 008 | usdt-staleness | DONE | `/spreads` USDT 시세 미갱신 경고 (BE 전용) |

@@ -104,7 +104,7 @@ async def get_streaks(
 async def get_streaks_bulk(
     request: Request,
     threshold: float = Query(0, ge=0),
-    start: int = Query(0, ge=0, le=4_102_444_800),
+    start: int | None = Query(None, ge=0, le=4_102_444_800),
     end: int | None = Query(None, ge=0, le=4_102_444_800),
     max_gap: int = Query(600, ge=1, alias="maxGap"),
     dom: Literal["upbit", "bithumb"] = Query("upbit"),

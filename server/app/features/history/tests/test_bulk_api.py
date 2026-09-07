@@ -1,5 +1,7 @@
 """GET /history/streaks/bulk — 전 코인 통계·빈 coins·오류 (스펙 005 §3.4, §4)."""
 
+import time
+
 from app.features.history.tests.helpers import FakeInfluxReader, make_client
 
 T0 = 1_700_000_000
@@ -24,7 +26,7 @@ def test_empty_records_returns_empty_coins() -> None:
 
 def test_coin_count_and_shapes() -> None:
     res = make_client(seeded_reader()).get(
-        "/history/streaks/bulk", params={"threshold": 0, "maxGap": 123}
+        "/history/streaks/bulk", params={"threshold": 0, "maxGap": 123, "start": T0}
     )
     assert res.status_code == 200
     body = res.json()
@@ -44,8 +46,7 @@ def test_coin_count_and_shapes() -> None:
     assert eth["lastTs"] == T0 + 60
     assert eth["kimp"]["count"] == 1
     assert eth["kimp"]["segments"][0]["samples"] == 2
-    # start 기본 0 (§3.4)
-    assert body["startTs"] == 0
+    assert body["startTs"] == T0
     assert body["maxGapSeconds"] == 123
     assert set(body.keys()) == {
         "dom",
@@ -62,7 +63,7 @@ def test_coin_count_and_shapes() -> None:
 
 def test_dom_filter() -> None:
     res = make_client(seeded_reader()).get(
-        "/history/streaks/bulk", params={"dom": "bithumb"}
+        "/history/streaks/bulk", params={"dom": "bithumb", "start": T0}
     )
     body = res.json()
     assert [c["base"] for c in body["coins"]] == ["XRP"]
@@ -87,3 +88,13 @@ def test_storage_unavailable_503() -> None:
     res = make_client(None).get("/history/streaks/bulk")
     assert res.status_code == 503
     assert res.json()["error"]["code"] == "storage_unavailable"
+
+
+def test_default_window_is_last_7_days() -> None:
+    # start 없으면 end − 7일 — 2023년 시드는 전부 창 밖이라 빈 coins, 최근 기록만 잡힌다 (§3.4)
+    now = int(time.time())
+    reader = seeded_reader()
+    reader.seed("upbit", "binance", "SOL", [(now - 86_400, 2.0, -1.0)])
+    body = make_client(reader).get("/history/streaks/bulk").json()
+    assert [c["base"] for c in body["coins"]] == ["SOL"]
+    assert body["startTs"] == body["endTs"] - 604_800

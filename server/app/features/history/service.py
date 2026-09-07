@@ -249,6 +249,17 @@ def _streak_parts(
     )
 
 
+# start 미지정 시 조회 창 (§3.4) — 전 구간 조회가 Influx 를 죽이므로 최근 7일만
+DEFAULT_WINDOW_SEC = 7 * 86_400
+
+
+def default_start(start: int | None, end_eff: int) -> int:
+    """start 가 없으면 end − 7일 (음수는 0 으로 — Flux range 가 epoch 이전을 못 받는다)."""
+    if start is not None:
+        return start
+    return max(0, end_eff - DEFAULT_WINDOW_SEC)
+
+
 def build_streaks(
     reader: PremiumReader,
     *,
@@ -271,11 +282,12 @@ def build_streaks(
             "invalid_request",
             f"end({end_eff})가 start({start}) 이하입니다.",
         )
+    start_eff = default_start(start, end_eff)
     rows = reader.query_premium(
         dom=dom,
         fx=fx,
         base=base.upper(),
-        start=start if start is not None else 0,
+        start=start_eff,
         stop=end_eff,
     )
     if not rows:
@@ -293,8 +305,7 @@ def build_streaks(
         fx=fx,
         threshold_percent=threshold,
         max_gap_seconds=max_gap,
-        # start 미지정이면 그 코인 기록의 첫 ts (§3.4)
-        start_ts=start if start is not None else rows[0].ts,
+        start_ts=start_eff,
         end_ts=end_eff,
         kimp=kimp,
         reverse=reverse,
@@ -312,19 +323,22 @@ def build_bulk(
     dom: str,
     fx: str,
     threshold: float,
-    start: int,
+    start: int | None,
     end: int | None,
     max_gap: int,
 ) -> BulkResponse:
     now_sec = int(time.time())
     end_eff = end if end is not None else now_sec + 1
-    if end_eff <= start:
+    if start is not None and end_eff <= start:
         raise HistoryApiError(
             400,
             "invalid_request",
             f"end({end_eff})가 start({start}) 이하입니다.",
         )
-    rows = reader.query_premium(dom=dom, fx=fx, base=None, start=start, stop=end_eff)
+    start_eff = default_start(start, end_eff)
+    rows = reader.query_premium(
+        dom=dom, fx=fx, base=None, start=start_eff, stop=end_eff
+    )
     by_base: dict[str, list[PremiumRow]] = {}
     for row in rows:
         by_base.setdefault(row.base, []).append(row)
@@ -349,7 +363,7 @@ def build_bulk(
         fx=fx,
         threshold_percent=threshold,
         max_gap_seconds=max_gap,
-        start_ts=start,
+        start_ts=start_eff,
         end_ts=end_eff,
         coin_count=len(coins),
         coins=coins,
