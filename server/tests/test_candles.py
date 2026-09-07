@@ -1,4 +1,4 @@
-"""1분 봉 집계기·쓰기·버킷·창 정렬 (스펙 014 §3.3~3.4, §4)."""
+"""1분 봉 집계기·쓰기·버킷·창 정렬·롤업·따라잡기 (스펙 014 §3.3~3.5, §4)."""
 
 import logging
 
@@ -6,11 +6,12 @@ import pytest
 
 from app.core.candles import (
     PENDING_LIMIT,
+    TIERS,
     CandleAggregator,
     ensure_candle_buckets,
     window_start,
 )
-from tests.candle_fakes import T0, FakeCandleStore, row, tick
+from tests.candle_fakes import T0, FakeCandleStore, candle, row, tick
 
 M = 60
 H = 3_600
@@ -190,3 +191,218 @@ def test_windows_align_to_kst_wall_clock() -> None:
     # UTC 정렬과 다르다 — UTC 자정(T0 + 9h)은 1d 경계가 아니다
     assert window_start(T0 + 9 * H, D) == T0
     assert window_start(T0 + 7 * M + 3, 5 * M) == T0 + 5 * M
+
+
+# ── 롤업 (§3.5) ────────────────────────────────────────────────────────────────
+
+
+def seed_1m(store: FakeCandleStore, start: int, n: int, **kw) -> None:
+    for i in range(n):
+        store.seed("candles_1m", candle(start + i * M, **kw))
+
+
+async def test_five_1m_fold_into_one_5m_with_fold_rules() -> None:
+    store = FakeCandleStore()
+    vals = [
+        (0.5, 0.6, 0.4, 0.55),
+        (0.55, 0.9, 0.5, 0.8),
+        (0.8, 0.85, 0.3, 0.4),
+        (0.4, 0.5, 0.35, 0.45),
+        (0.45, 0.7, 0.44, 0.66),
+    ]
+    for i, (o, h, lo, c) in enumerate(vals):
+        store.seed(
+            "candles_1m",
+            candle(
+                T0 + i * M,
+                o=o,
+                h=h,
+                lo=lo,
+                c=c,
+                krw=100.0 + i,
+                blocked_fwd=i,
+                samples=50 + i,
+                dom_dep=0 if i == 4 else 1,
+            ),
+        )
+    agg, _ = make(store, now=T0 + 5 * M)
+    await agg.restore(T0 + 5 * M)
+    agg.observe(tick(T0 + 5 * M))  # 1m 완료 시각 = 열린 분의 시작
+    await agg.flush()
+    f = fields(store, "candles_5m", T0)
+    assert (f["fwd_o"], f["fwd_h"], f["fwd_l"], f["fwd_c"]) == (0.5, 0.9, 0.3, 0.66)
+    assert (f["rev_o"], f["rev_h"], f["rev_l"], f["rev_c"]) == (-0.5, -0.3, -0.9, -0.66)
+    assert (f["krw"], f["dom_dep"], f["blocked_fwd_sec"], f["samples"]) == (
+        104.0,
+        0,
+        10,
+        260,
+    )
+
+
+async def test_partial_lower_folds_and_empty_lower_gives_no_point() -> None:
+    store = FakeCandleStore()
+    seed_1m(store, T0, 3)  # 첫 5m 창에 3개뿐 — 그것으로 접는다. 둘째 창은 비어 있다
+    agg, _ = make(store, now=T0 + 10 * M)
+    await agg.restore(T0 + 10 * M)
+    agg.observe(tick(T0 + 10 * M))
+    await agg.flush()
+    assert [r.ts for r in store.candles("candles_5m")] == [T0]
+    assert fields(store, "candles_5m", T0)["samples"] == 180
+
+
+async def test_chain_order_and_1h_reads_5m_written_in_same_round() -> None:
+    store = FakeCandleStore()
+    seed_1m(store, T0, 60)  # 정확히 1시간
+    agg, _ = make(store, now=T0 + H)
+    await agg.restore(T0 + H)
+    agg.observe(tick(T0 + H, row()))  # 열린 분 — 1m 쓸 것은 아직 없다
+    await agg.flush()
+    buckets = [b for b, _ in store.writes]
+    assert buckets == ["candles_5m"] * 12 + ["candles_1h"]
+    assert fields(store, "candles_1h", T0)["samples"] == 3_600
+    assert store.candles("candles_4h") == [] and store.candles("candles_1d") == []
+
+
+async def test_at_most_12_windows_per_tier_per_round_and_future_windows_wait() -> None:
+    store = FakeCandleStore()
+    seed_1m(store, T0, 70)  # 14개의 5m 창, 마지막 창(T0+65m)은 끝이 now(T0+69m+1) 이후
+    now = T0 + 69 * M + 1
+    agg, _ = make(store, now=now)
+    await agg.restore(now)
+    agg.observe(tick(now))
+    await agg.flush()
+    assert [r.ts for r in store.candles("candles_5m")] == [
+        T0 + i * 5 * M for i in range(12)
+    ]
+    await agg.flush()  # 13번째는 다음 회차, 14번째(끝 T0+70m > now)는 접지 않는다
+    assert [r.ts for r in store.candles("candles_5m")] == [
+        T0 + i * 5 * M for i in range(13)
+    ]
+
+
+async def test_rollup_failure_stops_round_and_resumes_after_gate() -> None:
+    store = FakeCandleStore()
+    seed_1m(store, T0, 10)
+    agg, clock = make(store, now=T0 + 10 * M)
+    await agg.restore(T0 + 10 * M)
+    agg.observe(tick(T0 + 10 * M))
+    store.query_fail = True
+    await agg.write_round()
+    assert store.candles("candles_5m") == []
+    store.query_fail = False
+    await agg.write_round()
+    assert store.candles("candles_5m") == []  # 실패 뒤 60초 안엔 안 한다
+    clock[0] = T0 + 11 * M
+    await agg.write_round()
+    assert [r.ts for r in store.candles("candles_5m")] == [T0, T0 + 5 * M]
+
+
+async def test_upper_tier_never_passes_lower_tier_completion() -> None:
+    """밀린 3시간: 첫 회차 1h 는 5m 이 접힌 첫 시간만, 나머지는 다음 회차들에서 — 빈 창을 확정하지 않는다."""
+    store = FakeCandleStore()
+    seed_1m(store, T0, 3 * 60)
+    now = T0 + 3 * H
+    agg, _ = make(store, now=now)
+    await agg.restore(now)
+    agg.observe(tick(now))
+    await agg.flush()  # 5m: T0~T0+1h (12창), 1h: T0 창만 (T0+1h·T0+2h 창은 끝이 now 이전이지만 5m 이 아직 없다)
+    assert [r.ts for r in store.candles("candles_1h")] == [T0]
+    await agg.flush()
+    assert [r.ts for r in store.candles("candles_1h")] == [T0, T0 + H]
+    await agg.flush()
+    assert [r.ts for r in store.candles("candles_1h")] == [T0, T0 + H, T0 + 2 * H]
+    assert (
+        fields(store, "candles_1h", T0 + 2 * H)["samples"] == 3_600
+    )  # 구멍 없이 채워졌다
+    assert store.candles("candles_4h") == []  # 4h 창(끝 T0+4h)은 아직 지금 이후
+
+
+async def test_5m_stops_at_the_minute_the_aggregator_has_open() -> None:
+    store = FakeCandleStore()
+    seed_1m(
+        store, T0, 10
+    )  # Influx 엔 T0+9m 까지 있지만 집계기는 T0+7m 분을 열어 둔 상태
+    agg, _ = make(store, now=T0 + 10 * M)
+    await agg.restore(T0 + 10 * M)
+    agg.observe(tick(T0 + 7 * M))
+    await agg.flush()
+    assert [r.ts for r in store.candles("candles_5m")] == [
+        T0
+    ]  # T0+5m 창(끝 T0+10m)은 1m 완료 시각(T0+7m)을 넘는다
+    agg.observe(tick(T0 + 10 * M))
+    await agg.flush()
+    assert [r.ts for r in store.candles("candles_5m")] == [T0, T0 + 5 * M]
+
+
+async def test_no_tick_yet_means_no_rollup_this_round() -> None:
+    store = FakeCandleStore()
+    seed_1m(store, T0, 10)
+    agg, _ = make(store, now=T0 + 10 * M)
+    await agg.restore(T0 + 10 * M)
+    await agg.flush()  # 1m 완료 시각을 모른다 — 접지 않는다
+    assert store.candles("candles_5m") == []
+
+
+# ── 따라잡기 (§3.5) ────────────────────────────────────────────────────────────
+
+
+async def test_restore_resumes_after_latest_upper_point() -> None:
+    store = FakeCandleStore()
+    seed_1m(store, T0, 15)
+    store.seed("candles_5m", candle(T0))  # 첫 창은 이미 접혀 있다
+    agg, _ = make(store, now=T0 + 15 * M)
+    await agg.restore(T0 + 15 * M)
+    assert agg.rollup.last_done("5m") == T0
+    agg.observe(tick(T0 + 15 * M))
+    await agg.flush()
+    assert [r.ts for r in store.candles("candles_5m")] == [T0, T0 + 5 * M, T0 + 10 * M]
+    assert (
+        fields(store, "candles_5m", T0)["samples"] == 60
+    )  # 있던 점은 다시 접지 않았다
+
+
+async def test_restore_starts_from_oldest_lower_point_when_upper_is_empty() -> None:
+    store = FakeCandleStore()
+    seed_1m(store, T0 + 7 * M, 8)  # 1m 은 T0+7m 부터 — 첫 5m 창은 T0+5m
+    now = T0 + 15 * M
+    agg, _ = make(store, now=now)
+    await agg.restore(now)
+    assert agg.rollup.last_done("5m") == T0
+    assert agg.rollup.last_done("1d") == window_start(T0 + 7 * M, D) - D
+    agg.observe(tick(now))
+    await agg.flush()
+    assert [r.ts for r in store.candles("candles_5m")] == [T0 + 5 * M, T0 + 10 * M]
+
+
+async def test_restore_failure_starts_from_now_window_with_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = FakeCandleStore()
+    seed_1m(store, T0, 30)
+    store.query_fail = True
+    now = T0 + 30 * M
+    agg, _ = make(store, now=now)
+    with caplog.at_level(logging.WARNING, logger="marketlens.candles"):
+        await agg.restore(now)
+    assert "기준점 조회 실패" in caplog.text
+    assert (
+        agg.rollup.last_done("5m") == now - 5 * M
+    )  # 지금 창(끝 now+5m)부터 — 과거 창은 접지 않는다
+    store.query_fail = False
+    await agg.flush()
+    assert store.candles("candles_5m") == []
+
+
+async def test_restore_empty_buckets_then_first_minutes_fold_when_window_ends() -> None:
+    store = FakeCandleStore()
+    agg, clock = make(store, now=T0)
+    await agg.restore(T0)
+    for i in range(5 * M + 1):  # T0 ~ T0+5m 틱 — 5개 분이 닫힌다
+        agg.observe(tick(T0 + i, row()))
+    clock[0] = T0 + 5 * M
+    await agg.flush()
+    assert [r.ts for r in store.candles("candles_1m")] == [T0 + i * M for i in range(5)]
+    assert [r.ts for r in store.candles("candles_5m")] == [T0]
+    assert fields(store, "candles_5m", T0)["samples"] == 300
+    assert TIERS[0].bucket == "candles_1m"
