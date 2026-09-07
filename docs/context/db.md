@@ -12,6 +12,7 @@
 - **premium** — 김프/역프 한 점. tag `dom`·`fx`·`base`, field `fwd`·`rev`(float, %), time = 틱 시각(초). 한 점 = (dom, fx, base, time). `/history/*` 전부의 유일한 원천. 값은 최우선 1단계 기준의 **슬리피지 차감 전 원값**이다 — 저장 시점에는 체결 규모가 정의되지 않기 때문이고, `/spreads` 의 순값과는 `fwd + slipFwd` 관계다(003 §2). 매초 전 조합(≈490)이 한 점씩 — 하루 약 4,200만 점.
 - **dw_fail** — 입출금 조회 실패 관측. tag `exchange`, field `v`=1, time = 틱 시각. 한 점 = (exchange, time). 읽는 HTTP 엔드포인트 없음 — 사람이 Influx UI 에서 본다.
 - **collect_fail** — 수집 실패 구간 1건(스펙 011 §3.4). tag `exchange`·`kind`, time = `started_at`(초), field `count`(int)·`last_failed_ts`(int 초)·`status_code`(int, 없으면 0)·`message`(string)·`url`(string)·`retry_after_sec`(int, 없으면 0)·`ended_ts`(int 초, 닫힐 때만). 한 점 = (exchange, kind, started_at). 열 때 쓰고 닫을 때 같은 키로 덮어써 필드를 합친다.
+- **premium_event** — 김프/역프 사건 1건(스펙 013 §3.3). tag `dom`·`fx`·`base`·`dir`(kimp|reverse), time = `start_ts`(초), field `end_ts`(int 초, **진행 중이면 0**)·`duration_seconds`(int, 진행 중 0)·`max_percent`(float)·`max_ts`(int 초)·`last_ts`(int 초)·`samples`(int)·`enter_percent`(float 1.0)·`exit_percent`(float 0.5). 한 점 = (dom, fx, base, dir, start_ts). 기준값을 점에 같이 남기는 것은 나중에 기준이 바뀌어도 과거 사건의 의미가 남게 하기 위해서다. 매초 쓰지 않는다 — 열린 지 60초를 넘긴 순간, 열린 채 60초마다, 닫힐 때 같은 키로 덮어쓴다.
 
 ## Redis
 - 키 하나: Stream **`ticks`**. 엔트리 = 틱 1개 — 필드 `ts`(epoch 초), `data`(틱 레코드 `{ts, rows:[{dom,fx,base,fwd,rev}], dwFailed:[…]}` 를 gzip 한 JSON, ≈3KB).
@@ -43,12 +44,13 @@
 - flusher(009, 60초): Redis 전량 → `premium`(조합별)·`dw_fail`(dwFailed) → 성공 시 Redis 에서 삭제.
 - 백필 스크립트(005): 업비트 초봉 × 바이낸스 1초봉 → 과거 92일 `premium`. 기존 기록의 앞·뒤 빈 구간만 채운다.
 - 이력 추적기(011): 구간 열림·닫힘 시 `collect_fail` 1점, 매초 없음. 실패는 로그 후 무시.
+- 사건 감지기(013): 열린 지 60초·60초마다·닫힐 때 `premium_event` 1점(같은 키 덮어쓰기). 실패는 미전송 맵(상한 1,000)에 두고 다음 60초 회차에 재시도.
 - 원문 싱크(010, 수신 경로가 동기 호출): 줄을 `(거래소, UTC 분 창)` 버퍼에 붙인다 — 시세 프레임·매초 마켓 목록 응답(`key` 있음)은 창 안에서 `(source, key)` 당 마지막 1건만, 그 외는 전량. 닫기 회차(매초) + 업로드 워커(스레드 1개): 창이 지나면 객체 1개로 닫아 gzip·업로드. 실패는 대기열 머리에 두고 1초 뒤 재시도, 압축 후 256MB 를 넘으면 오래된 객체부터 버리고 로그.
 - Influx·Redis·S3 어느 것이 닿지 않아도 앱은 뜬다. `INFLUX_TOKEN` 없으면 flusher 비활성, `S3_BUCKET` 없으면 아카이브 비활성.
 
 ## 읽는 쪽
-- `features/history` 의 `/history/premium`·`/history/streaks`·`/history/streaks/bulk` 만. 다른 조회 API 는 DB 를 0회 접근한다(메모리가 진실). 저장소 불가 시 503 `storage_unavailable`.
-- 기동 시 1회: `collect_fail` 24시간 복원(011, 3초 상한), spark 용 `premium` 최근 30분 1분 버킷 집계(009, 10초 상한).
+- `features/history` 의 `/history/premium`·`/history/streaks`·`/history/streaks/bulk`·`/history/events`(`premium_event` 닫힌 사건 + 메모리의 진행 중) 만. 다른 조회 API 는 DB 를 0회 접근한다(메모리가 진실). 저장소 불가 시 503 `storage_unavailable`.
+- 기동 시 1회: `collect_fail` 24시간 복원(011, 3초 상한), `premium_event` 7일 안 `end_ts 0` 복원(013, 3초 상한 — 600초 넘게 못 본 사건은 `last_ts` 로 닫아 쓴다), spark 용 `premium` 최근 30분 1분 버킷 집계(009, 10초 상한).
 - Redis 는 flusher 만 읽는다. S3 를 읽는 코드는 없다.
 
 ## 로컬 접속

@@ -11,8 +11,8 @@
 끝나면 dev compose(Influx·Redis)를 올리고 서버를 :8000 에 띄우면 1분 뒤 `premium` 에 점이 남고, `/history/premium` 이 그 주의 기록을 돌려준다.
 
 ## 2. 범위
-- 만드는 것: 공유 인프라의 Influx 클라이언트(연결·읽기/쓰기), 기능 폴더 `features/history`(`/history/premium` `/history/streaks` `/history/streaks/bulk`), 백필 스크립트(코인 목록·일수 인자), dev compose(Influx 2.7 + Redis 7 — 루트 `docker-compose.dev.yml`. 배포용 `docker-compose.yml` 은 007 몫), `web/src/features/history/`(기록 탭 — 사건 로그를 `/history/streaks` 실데이터로).
-- 하지 않는 것: Influx 쓰기 루프 — `premium`·`dw_fail` 은 009 의 flusher 가 60초마다 Redis 전량을 옮겨 쓴다. `/spreads` 의 `spark` 도 009 가 채운다. 기록 탭의 티커별 통계 표·요약 카드·타임라인·구간 차트(후속 스펙 — 1초 기록 위에선 못 돌아오므로 1분 롤업과 함께). 빗썸 페어 백필(빗썸엔 초봉 API 없음 — 빗썸×바이낸스는 실시간 기록으로만 쌓인다). 보존기간 정리(retention 무제한). 배포 compose(스펙 007). 재기동 직후 조회 API 의 DB 폴백 — 메모리가 비면 기존 404 그대로다.
+- 만드는 것: 공유 인프라의 Influx 클라이언트(연결·읽기/쓰기), 기능 폴더 `features/history`(`/history/premium` `/history/streaks` `/history/streaks/bulk`), 백필 스크립트(코인 목록·일수 인자), dev compose(Influx 2.7 + Redis 7 — 루트 `docker-compose.dev.yml`. 배포용 `docker-compose.yml` 은 007 몫).
+- 하지 않는 것: Influx 쓰기 루프 — `premium`·`dw_fail` 은 009 의 flusher 가 60초마다 Redis 전량을 옮겨 쓴다. `/spreads` 의 `spark` 도 009 가 채운다. 기록 탭 화면(013 — 저장 시점에 감지한 `premium_event` 로 그린다. 이 스펙의 web 몫은 없다). 빗썸 페어 백필(빗썸엔 초봉 API 없음 — 빗썸×바이낸스는 실시간 기록으로만 쌓인다). 보존기간 정리(retention 무제한). 배포 compose(스펙 007). 재기동 직후 조회 API 의 DB 폴백 — 메모리가 비면 기존 404 그대로다.
 - 앱 셸(002/003)과의 접점: 셸의 기록 탭 자리는 이 기능의 `web/src/features/history/Tab.tsx` 이고, 스프레드 행 클릭이 넘기는 선택된 심볼의 초기값은 `'BTC'` 다.
 
 ## 3. 동작
@@ -77,14 +77,8 @@ HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*
   **UTC 하루 단위로 처리·날마다 쓴다**. 기존 기록 이전 구간은 최신 날부터 거꾸로(중단돼도 미완 구간이 첫 time 밖에 남아 다음 실행이 다시 잡는다). 같은 시각 점은 덮어쓴다.
   Ctrl-C 로 중단하면 exit 130. 다시 실행하면 남은 구간부터 이어진다.
 
-### 3.6 web — 기록 탭 (사건 로그 실데이터)
-데이터는 `GET /history/streaks` 하나다. 선택 심볼·필터가 바뀔 때마다 한 번 조회한다 — 폴링 없음, 연속 변경은 400ms 안의 마지막 것만 보내고 진행 중 요청은 취소한다(한 조회가 서버에서 수 초 걸리기 때문). 항상 `start`·`end` 를 붙인다: `end` = 지금(초), `start` = 지금 − 기간.
-- 피벗: 스프레드 탭 행 클릭 → 선택된 심볼 설정 + 기록 탭 전환(003 배선 그대로, 초기값 `'BTC'`). 기록 탭 안에서는 필터바의 심볼 입력(영숫자, 대문자로 정규화)으로 바꾼다.
-- 필터바: 심볼 입력, 기간 `1주/1달`(기본 1주 — 3달은 1초 기록 위에서 60초 안에 못 돌아오므로 1분 롤업 후속에서 복원), 유형 `전체/김프만/역프만`, 거래소 `업비트/빗썸`(기본 업비트 → `dom`, 한 번에 하나), `사건 기준 스프레드 ≥`(기본 1.0, step 0.1 → `threshold`). 우측 설명 `사건 = 원값 스프레드가 기준 이상인 연속 구간(10분 넘게 끊기면 새 구간) · 기간 내 N건`. 기준은 `premium` 원값(슬리피지 차감 전)이라 스프레드 탭의 순값보다 크게 잡힌다(status.md 알려진 빚).
-- 응답 → 화면: `kimp.segments` = 김프 사건, `reverse.segments` = 역프 사건. 유형 필터는 클라이언트에서 거른다. 두 목록을 합쳐 `startTs` 내림차순, N = 합친 수.
-- 사건 로그 카드 "사건 로그 · {심볼} · {거래소} · 최근 20건": 열 `유형|시작|종료|지속|최대 스프레드`. 시작·종료는 `startTs`·`endTs` 를 로컬 `M/D HH:mm` 으로. **진행 중** = 그 방향의 마지막 구간이고 `endTs ≥ lastUpdatedTs − maxGapSeconds`(마지막 기록까지 이어졌다) — 방향마다 많아야 1건. 종료 칸 `진행 중`, 지속 = 지금 − 시작. 그 외 지속 = `durationSeconds`. 최대 스프레드 = `maxPercent`(김프 POS 색, 역프 NEG 색). 비면 `기간 내 사건 없음`.
-- 상태: 조회 중이면 카드 머리에 `조회 중…`(직전 결과 유지), 404 = 빈 상태와 같다, 그 외 오류(503 등)는 `기록을 불러오지 못했습니다 (HTTP n)`.
-- 색·간격은 `docs/design/theme.css` 토큰, 표 구조는 002 §3.2. 참조 디자인(`docs/design/reference/tabs/HistoryTab.tsx`)의 티커별 표·요약 카드·타임라인은 후속 스펙에서 실데이터로 돌아온다 — mock 으로 남기지 않는다.
+### 3.6 web — 기록 탭
+기록 탭은 013 §3.5(`/history/events` 사건 표). 이 스펙의 web 몫은 없다 — `/history/streaks` 는 API 로만 남고 화면은 안 쓴다.
 
 ## 4. 검증
 - 점의 수·시각·값은 009 §4 가 검증한다(틱 → flusher). 이 스펙은 점 규칙만 본다: USDT 시세 없는 국내 거래소는 틱의 `rows` 에 dom 으로 등장하지 않는다
@@ -100,7 +94,7 @@ HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*
 - 백필 대상 구간 계산: 기록 없음 → 전체 구간, 기록 있음 → 앞·뒤 빈 구간만(가운데는 건드리지 않음); 주/월 구간 경계가 ISO 주·달력 월과 일치, 잘못된 unit 거부
 - 캔들 병합: 세 값이 갖춰지기 전 ts 는 건너뜀, fwd 불변이면 기록 없음, 종가 대칭식 결과
 - `/history/streaks/bulk?threshold=0`: `coinCount == len(coins)` 이고 100 을 넘는다(전 코인)
-- 수동: dev compose + 서버 기동 후 **기동 약 60초 뒤**(009 flusher 첫 회차) `premium` 에 첫 점이 쌓이고, 75초 시점에 `/history/premium?base=BTC&unit=week` 가 `count ≥ 1`·`events[0].dt == 0` 을 돌려준다. Influx 컨테이너를 내리면 flusher 실패 로그가 회차마다 찍히되 `/spreads` 는 계속 갱신, `/history/premium` 은 503. 다시 올리면 밀린 구간이 한 회차에 들어가 `count` 에 구멍이 없다. 백필 스크립트 1일 실행 → "구간 완료, 김프 기록 N건" 에서 N > 1000, 재실행 시 "이미 전부 채워져". 스프레드 행 클릭 → 기록 탭에 그 심볼 선택. 기록 탭이 보내는 요청에 `start`·`end`·`threshold`·`dom` 이 항상 있다(브라우저 네트워크 탭), 마지막 기록까지 이어진 구간은 `진행 중`, 기록 없는 심볼은 `기간 내 사건 없음`. 마지막으로 서버 테스트·lint, web build·lint 통과.
+- 수동: dev compose + 서버 기동 후 **기동 약 60초 뒤**(009 flusher 첫 회차) `premium` 에 첫 점이 쌓이고, 75초 시점에 `/history/premium?base=BTC&unit=week` 가 `count ≥ 1`·`events[0].dt == 0` 을 돌려준다. Influx 컨테이너를 내리면 flusher 실패 로그가 회차마다 찍히되 `/spreads` 는 계속 갱신, `/history/premium` 은 503. 다시 올리면 밀린 구간이 한 회차에 들어가 `count` 에 구멍이 없다. 백필 스크립트 1일 실행 → "구간 완료, 김프 기록 N건" 에서 N > 1000, 재실행 시 "이미 전부 채워져". 기록 탭 확인은 013 §4. 마지막으로 서버 테스트·lint, web build·lint 통과.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 기록 탭 실데이터·7일 기본 창 세션(2026-09-07). 다섯 명령 모두 통과해야 커밋한다.
@@ -139,7 +133,7 @@ cd web && npm run build                        # tsc -b && vite build — ✓ bu
   - `server/app/features/history/tests/` — `helpers.py`(fake 리더 + lifespan 없는 앱, 선택적 LiveStore), `test_premium_api.py`·`test_streaks_api.py`·`test_bulk_api.py`(§3.4 계약·오류 4종·경계값), `test_point_rules.py`(§3.3 점 규칙·원값·`dw_fail`·저장소 장애 격리·bulk 100코인 초과).
   - `server/scripts/backfill.py` — §3.5 그대로. 순수 계산(`plan_day_slices`·`is_full_day`·`dedup_changes`·`merge_premiums`·`rates_for_slice`)과 거래소 호출(거래소별 재시도 정책·페이지 간격)을 나눈다. 테스트 `server/tests/test_backfill.py` 는 순수 계산만.
   - 루트 `docker-compose.dev.yml` — Influx 2.7 + Redis 7(009), 토큰은 `${INFLUX_TOKEN}` 치환.
-  - `web/src/features/history/Tab.tsx`·`api.ts`·`types.ts` — §3.6 사건 로그(streaks 1회 조회, 디바운스·취소). `web/src/App.tsx` 가 선택 심볼(초기 `'BTC'`)과 탭 전환을 든다. 002 의 mock 사건 목록(`feed.events`)은 이 탭이 유일한 사용처라 함께 지웠다.
+  - `web/src/App.tsx` 가 선택 심볼(초기 `'BTC'`)과 탭 전환을 든다. 002 의 mock 사건 목록(`feed.events`)은 함께 지웠다. 기록 탭 파일들은 013 이 `/history/events` 용으로 다시 썼다.
   - `server/app/main.py` — 토큰이 있을 때만 `InfluxClient` 를 만들어 `app.state.influx` 에 두고 ping 실패는 에러 1줄. flusher(009)·이력 복원(011)·spark 복원(009)이 같은 클라이언트를 쓴다.
 - 추측한 지점 (묻지 않고 정한 것 — 전부 본문에 반영):
   - `fx` 는 `Literal["binance"]` 쿼리로 노출한다 — 다른 값은 FastAPI 422(§3.4 오류 표의 "파라미터 검증 실패").
@@ -152,4 +146,3 @@ cd web && npm run build                        # tsc -b && vite build — ✓ bu
 - 남은 빚:
   - §4 수동 항목 전부(첫 점·`count` 구멍·백필 1일·재실행 문구)와 `bulk` 실데이터 100코인 초과 — **EC2 에서 확인 필요**.
   - 캔들 수집기(`fetch_*`)·백필 실호출의 자동 테스트 없음(순수 계산만).
-  - 기록 탭의 티커별 통계·요약 카드·타임라인·구간 차트(후속 스펙, 1분 롤업 위에서). `start` 를 준 조회도 1달은 수십 초 — 롤업 전까지 기간 옵션을 1달로 묶어 둔다.
