@@ -5,7 +5,6 @@ import type {
   FeedStatus,
   FlowAddr,
   FlowRow,
-  MockEvent,
   MockMarket,
   PerpItem,
   SpotItem,
@@ -152,28 +151,3 @@ export function buildFlow(): { addrs: FlowAddr[]; rows: FlowRow[] } {
 // ── 005 mock 사건 목록 (§3.4 events) ───────────────────────────────────────
 
 /** 기간 선택값을 시간으로 — "24h"/"7d"/"2w" 형태를 해석, 그 외는 24h 로 본다 (추측). */
-function perHours(per: string): number {
-  const m = /^(\d+)\s*([hdw])$/i.exec(per.trim())
-  if (!m) return 24
-  const n = Number(m[1])
-  const u = m[2].toLowerCase()
-  return u === 'h' ? n : u === 'd' ? n * 24 : n * 168
-}
-
-export function makeEvents(per: string, now: number): MockEvent[] {
-  const r = rng(`events|${per}`)
-  const hours = perHours(per)
-  const n = 18 + Math.floor(r() * 12)
-  const out: MockEvent[] = []
-  for (let k = 0; k < n; k++) {
-    const [sym] = pick(r, COINS)
-    const type: 'kimp' | 'rev' = r() < 0.6 ? 'kimp' : 'rev'
-    const dom = pick(r, DOM_EXS)
-    const start = now - Math.floor(r() * hours * 3_600_000)
-    const durMin = Math.round(uniform(r, 3, 180))
-    const peak = type === 'kimp' ? round3(uniform(r, 1.5, 6)) : -round3(uniform(r, 1.5, 4))
-    out.push({ sym, type, dom, start, durMin, peak })
-  }
-  out.sort((a, b) => b.start - a.start)
-  return out
-}
