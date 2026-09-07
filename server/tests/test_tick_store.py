@@ -28,7 +28,6 @@ from app.features.spreads.tests.helpers import make_client, seed_rows
 from app.main import create_app
 from tests.conftest import FakeInflux, make_row
 
-NOW = datetime.now(UTC)
 T0 = 1_787_000_000
 
 
@@ -47,6 +46,8 @@ def make_stream(connected: bool = True) -> tuple[RedisTickStream, fakeredis.Fake
 
 def seeded() -> LiveStore:
     """호가를 여러 단계로 시드해 슬리피지가 0 이 아니게 — 원값 ≠ 순값."""
+    # 수신 시각은 import 시각이 아니라 호출 시각 — 5초가 지나면 stale 이라, 모듈 상수면 앞 테스트가 길어질 때(CI) 깨진다
+    now = datetime.now(UTC)
     store = LiveStore()
     seed_rows(
         store,
@@ -66,9 +67,9 @@ def seeded() -> LiveStore:
             make_row("upbit", "ETH", bids=[[3_000.0, 10.0]], asks=[[3_010.0, 10.0]]),
             make_row("binance", "ETH", bids=[[2.0, 1000.0]], asks=[[2.1, 1000.0]]),
         ],
-        NOW,
+        now,
     )
-    store.set_rate("upbit", 1400.0, 1390.0, NOW)
+    store.set_rate("upbit", 1400.0, 1390.0, now)
     return store
 
 

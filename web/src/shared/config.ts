@@ -10,6 +10,8 @@ export const MOCK_TICK_MS = 1500
 export const SPREAD_POLL_MS = 1000
 /** 수집 상태 폴링(ms) — 011 이 사용, 셸은 값만 들고 있다. */
 export const HEALTH_POLL_MS = 5000
+/** 기록 탭 사건 표 재조회(ms) — 013 이 사용. 진행 중 사건의 지속·최대값만 따라가면 되므로 느리다. */
+export const HISTORY_EVENTS_POLL_MS = 60000
 /** 색 규약 — 한국식: 빨강=상승, 파랑=하락 (§3.3). */
 export const COLOR_CONVENTION = '한국식'
 

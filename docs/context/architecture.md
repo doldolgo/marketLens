@@ -13,27 +13,65 @@
 - **현재 서버는 uvicorn worker 1개만 사용한다.** `live_store` 가 프로세스 내부 메모리이기 때문에 다중 worker 를 쓰려면 프로세스들이 공유하는 외부 저장소로 먼저 이전해야 한다.
 
 ## 런타임 구성
-- **server/**: Python 3.12, FastAPI, httpx, websockets, redis(asyncio), influxdb-client, boto3, pyjwt, pydantic v2, pydantic-settings. 로컬 포트 8000. 상시 태스크: 업비트·빗썸 스트림 각 1, 바이낸스 샤드 3 + 재조정 루프(60초), 마켓 우주 갱신 루프(매초 — 목록 3개 병렬, 실패는 직전 목록 유지·거래소·원인당 60초 1줄 로그), 틱 루프(1초), Redis 인계 큐, flusher(60초), 원문 닫기 회차(1초, 업로드는 데몬 워커 스레드 1개), 입출금 조회(60초), `collect_fail` 쓰기 큐 태스크.
+- **server/**: Python 3.12, FastAPI, httpx, websockets, redis(asyncio), influxdb-client, boto3, pyjwt, pydantic v2, pydantic-settings. 로컬 포트 8000. 상시 태스크: 업비트·빗썸 스트림 각 1, 바이낸스 샤드 3 + 재조정 루프(60초), 마켓 우주 갱신 루프(매초 — 목록 3개 병렬, 실패는 직전 목록 유지·거래소·원인당 60초 1줄 로그), 틱 루프(1초), Redis 인계 큐, flusher(60초), 원문 닫기 회차(1초, 업로드는 데몬 워커 스레드 1개), 입출금 조회(60초), `collect_fail` 쓰기 큐 태스크, `premium_event` 쓰기 태스크(점이 생기면 즉시·없어도 60초 회차).
 - **web/**: React 19, TypeScript, Vite. 런타임 의존성은 react·react-dom 뿐이다. 로컬 포트는 5173 이고, 배포 컨테이너의 nginx 는 80번 포트를 사용한다. 호스트 포트는 `WEB_PORT` 로 정한다.
 - **저장소**: InfluxDB 2.7 OSS(org·bucket `marketlens`, Flux) — 김프 이력. Redis 7 — 틱 버퍼(AOF, Influx 로 옮기기 전까지만). S3(`marketlens-spreads-snapshot`, ap-northeast-2, 접두사 `raw/`) — 거래소 원문 아카이브. 모델은 `db.md`. 테스트에서는 셋 다 띄우지 않는다(fake·fakeredis). S3 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 IAM 역할).
 
 ## 데이터 흐름 (BE)
+```mermaid
+flowchart TB
+    %% ── 소스 ──
+    subgraph SRC[수집 소스]
+        UP[업비트 WS]
+        BT[빗썸 WS]
+        BN[바이낸스 WS<br/>3샤드]
+        REST[REST<br/>마켓 목록 매초 · 입출금 60초]
+    end
+
+    %% ── 010 원문 싱크 ──
+    S3[(S3 raw/<br/>거래소별 분당 객체 1개<br/>시세는 분당 마지막 1건)]
+    SRC -. 모든 프레임·응답 본문 .-> S3
+
+    %% ── LiveStore ──
+    LS[LiveStore<br/>최신 시세 · 스트림 상태 · 틱 슬롯 · spark]
+    UP --> LS
+    BT -- "메시지마다 (exchange, base) 행 교체<br/>KRW-USDT → USDT 시세" --> LS
+    BN --> LS
+    API[실시간 조회 API] -- 읽기 --> LS
+
+    %% ── 009 틱 → Redis → Influx ──
+    RS[[Redis Stream `ticks`<br/>아직 안 옮긴 틱만]]
+    LS -- "매초: 틱 T 생성 → 슬롯에 넣고 T−1 인계" --> RS
+    INF[(InfluxDB<br/>premium · dw_fail)]
+    RS -- "60초마다 전량 → 성공 시 비움" --> INF
+    HIST["/history/*"] -- 읽기 --> INF
+
+    %% ── 011 수집 실패 판정 ──
+    FAIL[실패 이력<br/>메모리 · 구간 단위]
+    LS -- "매 틱 거래소별 판정<br/>연결 · 30초 무수신" --> FAIL
+    FAIL -- "열림/닫힘 시 collect_fail" --> INF
+    INF -. 기동 시 복원 .-> FAIL
+
+    %% ── 013 김프/역프 사건 감지 ──
+    EVT[사건 감지기<br/>메모리 · 열린 사건만]
+    LS -- "매 틱 조합·방향별 판정<br/>1.0% 진입 · 0.5% 이탈 · 1분 초과" --> EVT
+    EVT -- "열린 지 60초 · 60초마다 · 닫힐 때 premium_event" --> INF
+    INF -. 기동 시 복원 7일 .-> EVT
+    HIST -- "/history/events = 닫힌 사건(Influx) + 진행 중(메모리)" --> EVT
+
+    %% ── 스펙 번호 (테두리 색) ──
+    S3:::spec010
+    RS:::spec009
+    INF:::spec005
+    FAIL:::spec011
+    EVT:::spec013
+    classDef spec010 stroke:#e67e22,stroke-width:2px
+    classDef spec009 stroke:#2980b9,stroke-width:2px
+    classDef spec005 stroke:#27ae60,stroke-width:2px
+    classDef spec011 stroke:#c0392b,stroke-width:2px
+    classDef spec013 stroke:#8e44ad,stroke-width:2px
 ```
-[업비트 WS] [빗썸 WS] [바이낸스 WS 3샤드]   [REST: 마켓 목록 매초 · 입출금 60초]
-      │           │            │                          │
-      └───── 모든 프레임·응답 본문 → 원문 싱크 ──▶ S3 raw/ (거래소별 분당 객체 1개 · 시세는 분당 마지막 1건)  ─ 010
-      │           │            │
-      ▼           ▼            ▼   메시지마다 (exchange, base) 행 교체 · KRW-USDT → USDT 시세
-                LiveStore (최신 시세 · 스트림 상태 · 틱 슬롯 · spark)
-                    │                         ▲
-   실시간 조회 API ◀─┘ 읽기                    │ 매초: 틱 T 생성 → 슬롯에 넣고 T−1 을 인계
-                                              ▼
-                                   Redis Stream `ticks` (아직 안 옮긴 틱만)          ─ 009
-                                              │ 60초마다 전량 → Influx → 성공 시 비움
-                                              ▼
-                                   InfluxDB `premium`·`dw_fail`  ◀── /history/* 읽기  ─ 005
-매 틱 거래소별 판정(연결·30초 무수신) → 실패 이력(메모리, 구간 단위) → Influx collect_fail(열림/닫힘 시)·기동 시 복원  ─ 011
-```
+- 테두리 색 = 스펙 번호: 주황 010(원문 싱크) · 파랑 009(틱 저장) · 초록 005(history) · 빨강 011(health) · 보라 013(premium-events). 점선은 부수 흐름.
 - 행은 거래소 단위 통째 교체가 아니라 **메시지 단위**로 바뀐다. 상장·상폐는 매초 갱신되는 **마켓 우주**(국내 KRW ∩ 바이낸스 USDT)가 반영한다 — 우주 밖 행은 없다.
 - 스트림이 끊기면 행은 남고 그 거래소의 `last_message_at` 이 멈춘다. `/spreads` 의 `age`·`status` 는 행이 아니라 **거래소 스트림의 마지막 수신 시각** 기준이다(조용한 코인의 호가는 안 바뀌어도 현재값이다). 단 행 자체(`updated_at`)가 **300초** 이상 안 바뀌면 `age` 는 그 행의 실제 경과 초라 stale 로 보인다(거래 정지·심볼 장애 — 스트림은 살아 있는데 그 코인 프레임만 안 오는 상태).
 - 입출금 상태 API 는 틱 루프가 60초 주기로만 조회해 캐시하고, 행이 새 메시지로 교체돼도 그 3필드는 물려받는다. 키가 없으면 `null`(모름). 망 판정은 `/spreads` 에서 하고, 빗썸은 키가 필요 없다.
@@ -59,6 +97,7 @@
 - 원문 싱크 `record(exchange, source, received_at_ms, payload, key=None)` — 동기·무예외(010 구현, 수신 경로가 호출). `key` 는 시세 프레임이면 `"<종류>:<원본 심볼>"`(`orderbook:KRW-BTC`·`depth20:BTCUSDT`), 매초 오는 마켓 목록 응답은 `markets:all`(업비트·빗썸)·`symbols:all`(바이낸스), 그 밖(입출금 REST 본문·핸드셰이크 거부·비시세 프레임·디코드 실패)은 None — 010 이 `key` 있는 줄을 분당 마지막 1건으로 솎는 데 쓴다.
 - 틱 인계 `handoff(tick)` — 동기·무예외(009 구현, 틱 루프가 호출).
 - 판정 결과 전달 — 틱 루프가 이력 추적기에 거래소별 성공/실패를 넘긴다(011 구현).
+- 사건 감지 `observe(tick)` — 틱 루프가 매초 현재 틱을 넘긴다(013 구현, 동기·예외 없음).
 - 입출금 조회기 `refresh_if_due(client, force=False)` / `apply` / `failed` / `warnings` / `availability`(006 구현, 틱 루프가 호출 — `force` 는 `/refresh` 트리거가 쓴다).
 - 바이낸스 USDT 현물 심볼 집합 `refresh(client) -> int` / `bases() -> set[str]` / `set_universe(bases)`(012 의 커넥터가 구현, 마켓 우주가 호출 — 우주가 확정될 때마다 `set_universe` 로 구독 대상을 넘긴다). 커넥터를 꽂지 않는 테스트에는 빈 집합을 주는 기본 구현.
 - 스트림 판정 `judge(now_ms) -> Verdict | None`(거래소 스트림마다 — 국내는 core 공통 규칙, 바이낸스는 012 샤드 규칙. None = 아직 판정 대상 아님).
@@ -97,4 +136,5 @@ EC2 1대. 루트 `docker compose up -d --build` 로 server·web·influxdb·redis
 - **tick-store (009)**: `core/redis_stream.py`(`RedisTickStream` — redis 를 import 하는 유일한 곳. `ticks` XADD/XRANGE 페이지/XDEL, 재시도 없음, 연결 2초·명령 5초), `core/tick_store.py`(`encode_tick`/`decode_tick` gzip JSON, `TickRelay` — `handoff` 구현: spark 갱신·게시 → 600 큐 → 보내기 태스크가 순서대로 XADD, 실패 틱은 버림, 종료 시 큐 비우기 총 5초 상한; `Flusher` — 60초마다 1,000건 페이지 단위로 읽기 → 스레드에서 5,000점 배치 쓰기 → 그 페이지만 XDEL → 다음 페이지, 연속 실패 수·잘림 감지(지우지 못한 첫 ID 기준, XDEL 실패는 제외)), `core/spark.py`(`SparkBuffer` 1분 버킷 last 30개 링버퍼, `restore_spark` 기동 복원 10초 상한), `core/influx.py` 의 `query_spark`(aggregateWindow 1m last). `INFLUX_TOKEN` 없으면 flusher 를 띄우지 않는다. 테스트는 `server/tests/test_tick_store.py`·`test_spark.py`·`test_tick_store_history.py`(fakeredis + `tests/conftest.py` 의 `FakeInflux`).
 - **raw-archive (010)**: `core/s3.py`(`S3Uploader` — boto3 를 import 하는 유일한 곳, `put`·`head_bucket`, 로그 없음), `core/raw_archive.py`(`format_line`·`object_key`·`pack` 순수 함수, `RawArchive` — 001 의 `record(…, key)` 계약 구현: `(거래소, UTC 분 창)` 버퍼에 줄을 붙이고 `key` 있는 줄은 `(source, key)` 당 마지막 1건만, 매초 닫기 회차가 지난 창을 닫아 스레드에서 gzip → 거래소 합산 단일 FIFO 대기열 → 데몬 워커 스레드 1개가 순서대로 `PutObject`(실패는 머리에 두고 1초 뒤 재시도, 압축 후 256MB 초과 시 오래된 객체부터 버림), 종료 5초 상한). 수신 경로와 분리한 이유 — 기록 함수는 메모리 붙이기뿐이라 어떤 S3 장애도 스트림·틱 루프를 한 줄도 막지 않는다. `main.py` 가 `S3_BUCKET` 이 있을 때만 만들어 스트림 3개와 006 조회기에 `record` 를 주입하고, 없으면 `noop_record`. 테스트는 `server/tests/test_raw_archive.py`(fake S3·주입 시계).
 - **health (011)**: `core/outages.py`(실패 구간 추적기 — 틱 루프가 쓰므로 core. 열림/닫힘 시 `collect_fail` 1점을 순서 보장 큐로 쓰고, 기동 시 24시간 복원), `features/health/`(읽기 API `/health/collect`), web `features/health/`(5초 폴링·탭). 응답 타입 `HealthData` 와 거래소 표시명 `exName` 은 `shared/` 에 있다.
+- **premium-events (013)**: `core/premium_events.py`(`PremiumEventDetector` — 틱 루프가 쓰므로 core. 조합·방향별 열린 사건만 메모리, 열린 지 60초·60초마다·닫힐 때 `premium_event` 1점을 미전송 맵(같은 키 덮어쓰기, 상한 1,000)에 모아 쓰기 태스크가 한 번에 쓰고 실패 뒤 60초는 재시도 안 함, 기동 시 7일 복원 3초 상한), `core/influx.py` 의 `PremiumEventRow`·`premium_event_point`·`query_premium_events`, `core/contracts.py` 의 `EventSink`. 읽기 API 는 `features/history/`(`build_events` — Influx 닫힌 사건 + 메모리 진행 중, 고아 점은 last_ts 로 닫힌 것처럼) `GET /history/events`. web `features/history/`(`api.ts` 60초 재조회·`stats.ts` 순수 집계·`Tab.tsx` 김프/역프 서브탭). 테스트는 `server/tests/test_premium_events*.py`(`premium_event_fakes.py`)·`features/history/tests/test_events_api.py`.
 - **binance-stream (012)**: `core/streams/binance.py`(`BinanceStream` 하나 — 샤드 3개 각각 소켓·시계·백오프·구독 집합, `shard_of` = crc32 % 3, 재조정 루프 1개(배정이 바뀐 `set_universe` 가 깨우거나 60초 — 매초 같은 우주는 무동작), exchangeInfo 심볼 맵으로 `ForeignSymbolSource` 구현, `judge` 는 샤드별 판정 후 가장 조용한 샤드를 고른다). 001 의 `QuoteSink.orderbook/trade` 와 `store.stream("binance")`(샤드 집계) 를 쓰고 `StreamJudge` 로 틱 루프·`/refresh` 트리거에 꽂힌다. 테스트는 `server/tests/test_stream_binance.py`(001 의 `stream_fakes.py` 재사용).

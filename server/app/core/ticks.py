@@ -17,6 +17,7 @@ import httpx
 
 from app.core.config import EXCHANGES
 from app.core.contracts import (
+    EventSink,
     OutageSink,
     StreamJudge,
     TickHandoff,
@@ -135,6 +136,7 @@ class TickLoop:
         client: httpx.AsyncClient,
         handoff: TickHandoff = noop_handoff,
         outages: OutageSink | None = None,
+        events: EventSink | None = None,
         wallet: WalletStatusProvider | None = None,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
@@ -144,6 +146,7 @@ class TickLoop:
         self._client = client
         self._handoff = handoff
         self._outages = outages
+        self._events = events
         self._wallet = wallet
         self._clock = clock
         self._sleep = sleep
@@ -189,6 +192,9 @@ class TickLoop:
             self._handoff(prev)
         self._store.mark_received(ts)
         self._judge_all(ts * 1000)
+        if self._events is not None:
+            # 013 — 사건 감지는 현재 틱으로(인계되는 직전 틱이 아니라) — ts 가 곧 판정 시각이다
+            self._events.observe(tick)
         return tick
 
     def _judge_all(self, now_ms: int) -> None:

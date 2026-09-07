@@ -1,4 +1,4 @@
-"""GET /history/premium·/history/streaks·/history/streaks/bulk — 스펙 005 §3.4.
+"""GET /history/premium·/history/streaks·/history/streaks/bulk — 스펙 005 §3.4. /history/events — 013 §3.4.
 
 유일하게 DB 를 읽는 조회 경로다(db.md). 저장소 불가(연결 실패·토큰 없음)는 503
 `storage_unavailable` — 메모리 조회 경로(/spreads 등)는 영향받지 않는다.
@@ -14,11 +14,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.core.influx import InfluxUnavailableError
+from app.core.premium_events import PremiumEventDetector
 from app.core.serialization import camelize_json
 from app.features.history.service import (
+    EventReader,
     HistoryApiError,
     PremiumReader,
     build_bulk,
+    build_events,
     build_premium_history,
     build_streaks,
 )
@@ -39,9 +42,11 @@ def _error(status: int, code: str, message: str, detail: object = None) -> JSONR
 
 
 async def _respond(
-    request: Request, build: Callable[[PremiumReader], BaseModel]
+    request: Request, build: Callable[[PremiumReader | EventReader], BaseModel]
 ) -> JSONResponse:
-    reader: PremiumReader | None = getattr(request.app.state, "influx", None)
+    reader: PremiumReader | EventReader | None = getattr(
+        request.app.state, "influx", None
+    )
     if reader is None:
         return _error(
             503,
@@ -104,7 +109,7 @@ async def get_streaks(
 async def get_streaks_bulk(
     request: Request,
     threshold: float = Query(0, ge=0),
-    start: int = Query(0, ge=0, le=4_102_444_800),
+    start: int | None = Query(None, ge=0, le=4_102_444_800),
     end: int | None = Query(None, ge=0, le=4_102_444_800),
     max_gap: int = Query(600, ge=1, alias="maxGap"),
     dom: Literal["upbit", "bithumb"] = Query("upbit"),
@@ -121,5 +126,34 @@ async def get_streaks_bulk(
             start=start,
             end=end,
             max_gap=max_gap,
+        ),
+    )
+
+
+@router.get("/events")
+async def get_events(
+    request: Request,
+    start: int | None = Query(None, ge=0, le=4_102_444_800),
+    end: int | None = Query(None, ge=0, le=4_102_444_800),
+    dom: Literal["upbit", "bithumb"] | None = Query(None),
+    dir: Literal["kimp", "reverse"] | None = Query(None),
+    base: str | None = Query(None, pattern=_BASE_PATTERN),
+) -> JSONResponse:
+    # 진행 중 사건은 메모리(013 감지기)에서 — 감지기가 없으면(테스트) 진행 중 없음.
+    # Influx 가 없으면 진행 중만으로 200 을 만들지 않고 503 — 반쪽 답을 주지 않기 위해 (013 §3.4)
+    detector: PremiumEventDetector | None = getattr(
+        request.app.state, "premium_events", None
+    )
+    open_events = detector.open_events() if detector is not None else []
+    return await _respond(
+        request,
+        lambda reader: build_events(
+            reader,  # type: ignore[arg-type]
+            open_events,
+            start=start,
+            end=end,
+            dom=dom,
+            dir=dir,
+            base=base,
         ),
     )

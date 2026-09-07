@@ -1,7 +1,7 @@
 // 공유 피드 — 셸이 만들어 모든 탭에 내려주는 객체 하나 (스펙 002 §3.4).
 import { useEffect, useRef, useState } from 'react'
 import { MOCK_TICK_MS } from './config'
-import { buildFlow, buildMarkets, makeEvents, tickMarkets } from './mock'
+import { buildFlow, buildMarkets, tickMarkets } from './mock'
 import type { Feed, IoEntry, SpreadRow } from './types'
 
 /** 교체 시 io 재구성 — 행마다 국내·해외 각각 한 항목, net 은 netDom ?? '–'. */
@@ -33,7 +33,6 @@ export function createFeed(): Feed {
     setHealth(data) {
       feed.health = data
     },
-    events: makeEvents,
   }
   return feed
 }

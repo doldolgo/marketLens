@@ -11,8 +11,8 @@
 끝나면 dev compose(Influx·Redis)를 올리고 서버를 :8000 에 띄우면 1분 뒤 `premium` 에 점이 남고, `/history/premium` 이 그 주의 기록을 돌려준다.
 
 ## 2. 범위
-- 만드는 것: 공유 인프라의 Influx 클라이언트(연결·읽기/쓰기), 기능 폴더 `features/history`(`/history/premium` `/history/streaks` `/history/streaks/bulk`), 백필 스크립트(코인 목록·일수 인자), dev compose(Influx 2.7 + Redis 7 — 루트 `docker-compose.dev.yml`. 배포용 `docker-compose.yml` 은 007 몫), `web/src/features/history/`(기록 탭 화면).
-- 하지 않는 것: Influx 쓰기 루프 — `premium`·`dw_fail` 은 009 의 flusher 가 60초마다 Redis 전량을 옮겨 쓴다. `/spreads` 의 `spark` 도 009 가 채운다. 기록 탭을 `/history/*` 실데이터에 연결하는 것(후속 스펙 몫). 빗썸 페어 백필(빗썸엔 초봉 API 없음 — 빗썸×바이낸스는 실시간 기록으로만 쌓인다). 보존기간 정리(retention 무제한). 배포 compose(스펙 007). 재기동 직후 조회 API 의 DB 폴백 — 메모리가 비면 기존 404 그대로다.
+- 만드는 것: 공유 인프라의 Influx 클라이언트(연결·읽기/쓰기), 기능 폴더 `features/history`(`/history/premium` `/history/streaks` `/history/streaks/bulk`), 백필 스크립트(코인 목록·일수 인자), dev compose(Influx 2.7 + Redis 7 — 루트 `docker-compose.dev.yml`. 배포용 `docker-compose.yml` 은 007 몫).
+- 하지 않는 것: Influx 쓰기 루프 — `premium`·`dw_fail` 은 009 의 flusher 가 60초마다 Redis 전량을 옮겨 쓴다. `/spreads` 의 `spark` 도 009 가 채운다. 기록 탭 화면(013 — 저장 시점에 감지한 `premium_event` 로 그린다. 이 스펙의 web 몫은 없다). 빗썸 페어 백필(빗썸엔 초봉 API 없음 — 빗썸×바이낸스는 실시간 기록으로만 쌓인다). 보존기간 정리(retention 무제한). 배포 compose(스펙 007). 재기동 직후 조회 API 의 DB 폴백 — 메모리가 비면 기존 404 그대로다.
 - 앱 셸(002/003)과의 접점: 셸의 기록 탭 자리는 이 기능의 `web/src/features/history/Tab.tsx` 이고, 스프레드 행 클릭이 넘기는 선택된 심볼의 초기값은 `'BTC'` 다.
 
 ## 3. 동작
@@ -45,7 +45,7 @@ HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*
 - `summary` = `{firstFwd,lastFwd,minFwd,maxFwd}` — 구간 전체 통계.
 - `events` = `[{dt,fwd,rev}…]` 컴팩트 — 절대시각 대신 `dt`=직전 기록으로부터 경과 초(구간 첫 기록은 0).
 
-**`/history/streaks?base&threshold&start&end&maxGap`** — `threshold ≥ 0`(기본 0). `start`/`end` 없으면 그 코인 기록의 첫 ts / 지금+1초. 조회 구간 안에 기록이 0건이면 404(구간 밖 기록 유무는 보지 않는다), `end ≤ start` 면 400. 구간(streak) 규칙:
+**`/history/streaks?base&threshold&start&end&maxGap`** — `threshold ≥ 0`(기본 0). `end` 없으면 지금+1초, **`start` 없으면 `end − 7일`(604,800초)** — 전 구간 조회를 막기 위해서다(2,700만 점 위에서 `start` 없는 조회는 Influx 를 죽인다, status.md 알려진 빚). 응답 `startTs` 는 실제로 쓴 값. 조회 구간 안에 기록이 0건이면 404(구간 밖 기록 유무는 보지 않는다), `end ≤ start` 면 400. 구간(streak) 규칙:
 1. ts 오름차순으로 값이 `threshold` **이상**인 연속 기록을 한 구간으로 묶는다(같은 값 포함).
 2. 값이 미만이거나 직전 기록과 `maxGap` 초보다 벌어지면 구간을 닫는다(끊긴 수집을 이어 붙여 "3시간 연속" 을 만들지 않는다).
 3. fwd(kimp) 와 rev(reverse) 를 절댓값 없이 **각각** 계산한다.
@@ -55,7 +55,7 @@ HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*
 7. 최상위 응답 = `{base,dom,fx,thresholdPercent,maxGapSeconds,startTs,endTs,kimp,reverse,overall,scanned,lastUpdatedTs,lastUpdated,fetchedAt}`. 방향 요약 키 이름은 bulk 와 같은 `kimp`(fwd)·`reverse`(rev). `scanned` 는 전체 행 수, `lastUpdated` 는 KST.
 예: 값 `0 1 3 6 29 4 31`(60초 간격), threshold 4 → 구간 1개(samples 4, max 31); threshold 5 → 2개.
 
-**`/history/streaks/bulk?threshold&start&end&maxGap`** — 전 코인 한 번에. `start` 기본 0.
+**`/history/streaks/bulk?threshold&start&end&maxGap`** — 전 코인 한 번에. `start`·`end` 기본값은 streaks 와 같다(`end − 7일` / 지금+1초).
 응답 `{dom,fx,thresholdPercent,maxGapSeconds,startTs,endTs,coinCount,coins:[{base,scanned,lastTs,kimp,reverse,overall}…],fetchedAt}`. **기록 없으면 404 가 아니라 빈 `coins`.**
 수 MB 응답이라 압축(gzip)해 보낸다.
 
@@ -77,14 +77,8 @@ HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*
   **UTC 하루 단위로 처리·날마다 쓴다**. 기존 기록 이전 구간은 최신 날부터 거꾸로(중단돼도 미완 구간이 첫 time 밖에 남아 다음 실행이 다시 잡는다). 같은 시각 점은 덮어쓴다.
   Ctrl-C 로 중단하면 exit 130. 다시 실행하면 남은 구간부터 이어진다.
 
-### 3.6 web — 기록 탭 (**mock 유지**)
-데이터는 002 가 제공하는 mock 사건 목록(`{sym, type:'kimp'|'rev', dom, start, durMin, peak}`, 1.5초 tick 마다 `now` 갱신)을 쓴다. `/history/*` 는 호출하지 않는다 — 실데이터 연결은 후속 스펙.
-- 피벗: 스프레드 탭 행 클릭 → 선택된 심볼 설정 + 기록 탭 전환(003 배선 그대로, 초기값 `'BTC'`). 기록 탭은 선택된 심볼을 받아 우측 요약·로그를 그 심볼로 보여주고, 좌측 표 행 클릭으로 바꾼다.
-- 필터바: 기간 `1주/1달/3달`(기본 1달), 유형 `전체/김프만/역프만`, 거래소 `전체/업비트/빗썸`, `사건 기준 스프레드 ≥`(기본 1.0, step 0.1). 우측 설명 `사건 = 스프레드가 기준값 이상으로 출현한 시점부터 소멸까지 · 기간 내 N건`. 필터 = `peak ≥ 기준 && 유형 && 거래소`.
-- 좌 카드 "티커별 사건 통계 · {기간} — 열 클릭으로 정렬": 열 `티커|횟수|최대 지속|평균 지속|최대 김프|평균 김프|최대 역프|평균 역프|최신`, 심볼별 집계, 상위 30행. 헤더 클릭 정렬(같은 열 재클릭 시 방향 반전, 기본 횟수 내림차순, null 은 뒤·`–` 표시).
-  선택 심볼 행은 accent 배경으로 강조, 김프는 POS·역프는 NEG 색. 비면 `기준을 만족하는 사건이 없습니다 — 임계값을 낮춰보세요`.
-- 우 column: 요약 카드(선택된 심볼 제목, 총 사건·김프/역프 수, 평균·최장 지속, 기간 점유율 = Σ지속/기간 %). 타임라인 2줄(김프 accent / 역프 neutral, 위치·폭은 기간 대비 비율, 짧은 사건도 보이게 최소폭 보장, 축 라벨은 기간 시작~지금을 5등분한 날짜 `M/D`).
-  "사건 로그 · {선택된 심볼} 최근 20건"(유형|시작|종료(끝나지 않았으면 `진행 중`)|지속|최대 스프레드, 비면 `기간 내 사건 없음`). 색·간격은 `docs/design/theme.css` 토큰, 표 구조는 002 §3.2.
+### 3.6 web — 기록 탭
+기록 탭은 013 §3.5(`/history/events` 사건 표). 이 스펙의 web 몫은 없다 — `/history/streaks` 는 API 로만 남고 화면은 안 쓴다.
 
 ## 4. 검증
 - 점의 수·시각·값은 009 §4 가 검증한다(틱 → flusher). 이 스펙은 점 규칙만 본다: USDT 시세 없는 국내 거래소는 틱의 `rows` 에 dom 으로 등장하지 않는다
@@ -95,21 +89,23 @@ HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*
 - `/history/premium`: 구간 밖 기록은 안 잡힘, `events[0].dt==0`, `count==len(events)`, `summary` 가 구간 전체 기준, 기록 없으면 404, `date=abc` 400
 - 구간 판정 예시: `0 1 3 6 29 4 31` threshold 4 → 1구간(samples 4, max 31), threshold 5 → 2구간; `maxGap` 초과 간격에서 구간이 끊긴다; 방향 avg 는 샘플 가중
 - `/history/streaks`: `end<=start` 400, 기록 없는 코인 404, `threshold=-1` 422, `lastUpdated` 가 `+09:00` 으로 끝난다
+- `/history/streaks`·`bulk`: `start` 없으면 `startTs == endTs − 604800` 이고 그보다 오래된 기록은 `scanned` 에 안 잡힌다; `end` 만 주면 `start = end − 7일`
 - `/history/streaks/bulk`: 기록 없으면 200 + 빈 `coins`
 - 백필 대상 구간 계산: 기록 없음 → 전체 구간, 기록 있음 → 앞·뒤 빈 구간만(가운데는 건드리지 않음); 주/월 구간 경계가 ISO 주·달력 월과 일치, 잘못된 unit 거부
 - 캔들 병합: 세 값이 갖춰지기 전 ts 는 건너뜀, fwd 불변이면 기록 없음, 종가 대칭식 결과
 - `/history/streaks/bulk?threshold=0`: `coinCount == len(coins)` 이고 100 을 넘는다(전 코인)
-- 수동: dev compose + 서버 기동 후 **기동 약 60초 뒤**(009 flusher 첫 회차) `premium` 에 첫 점이 쌓이고, 75초 시점에 `/history/premium?base=BTC&unit=week` 가 `count ≥ 1`·`events[0].dt == 0` 을 돌려준다. Influx 컨테이너를 내리면 flusher 실패 로그가 회차마다 찍히되 `/spreads` 는 계속 갱신, `/history/premium` 은 503. 다시 올리면 밀린 구간이 한 회차에 들어가 `count` 에 구멍이 없다. 백필 스크립트 1일 실행 → "구간 완료, 김프 기록 N건" 에서 N > 1000, 재실행 시 "이미 전부 채워져". 스프레드 행 클릭 → 기록 탭에 그 심볼 선택. 마지막으로 서버 테스트·lint, web build·lint 통과.
+- 수동: dev compose + 서버 기동 후 **기동 약 60초 뒤**(009 flusher 첫 회차) `premium` 에 첫 점이 쌓이고, 75초 시점에 `/history/premium?base=BTC&unit=week` 가 `count ≥ 1`·`events[0].dt == 0` 을 돌려준다. Influx 컨테이너를 내리면 flusher 실패 로그가 회차마다 찍히되 `/spreads` 는 계속 갱신, `/history/premium` 은 503. 다시 올리면 밀린 구간이 한 회차에 들어가 `count` 에 구멍이 없다. 백필 스크립트 1일 실행 → "구간 완료, 김프 기록 N건" 에서 N > 1000, 재실행 시 "이미 전부 채워져". 기록 탭 확인은 013 §4. 마지막으로 서버 테스트·lint, web build·lint 통과.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
-재구축 검증 세션(2026-09-06). 다섯 명령 모두 통과해야 커밋한다.
+기록 탭 실데이터·7일 기본 창 세션(2026-09-07). 다섯 명령 모두 통과해야 커밋한다.
 ```bash
 cd server && .venv/bin/ruff check .            # All checks passed!
-cd server && .venv/bin/ruff format .           # 182 files left unchanged
-cd server && .venv/bin/python -m pytest -q     # 426 passed, 1 warning in 4.79s (history 34·backfill 14·tick_store_history 2)
+cd server && .venv/bin/ruff format .           # 183 files left unchanged
+cd server && .venv/bin/python -m pytest -q     # 475 passed, 1 warning in 5.14s (history 37)
 cd web && npm run lint                         # oxlint src — 출력 없음(error 0)
-cd web && npm run build                        # tsc -b && vite build — ✓ built in 292ms
+cd web && npm run build                        # tsc -b && vite build — ✓ built in 397ms
 ```
+기록 탭은 로컬 vite(:8010) 를 SSH 포워딩으로 EC2 서버 컨테이너에 붙여 실데이터로 확인했다 — 요청에 `start`·`end`·`threshold`·`dom` 이 항상 붙고, BTC 7일 조회 ≈ 2초, 기준 0.1 에서 김프 35·역프 28 건, 방향별 마지막 구간만 `진행 중`, 빗썸 전환 시 재조회. 서버의 7일 기본 창은 EC2 에 아직 배포 전(§4 의 `start` 없는 호출 실측은 배포 후).
 §4 의 BE 항목마다 `server/app/features/history/tests/` 에 최소 1개가 있다(§7 파일 목록). 틱 → Redis → flusher → `/history/*` 전 경로는 `server/tests/test_tick_store_history.py`(009) 가 fake Influx 로 본다.
 
 기동 스모크(Influx·Redis·거래소 없이 — 이 망은 거래소 도메인을 막는다): `.venv/bin/python -m uvicorn app.main:app --port 8041` 을 env 만 바꿔 두 번 띄웠다.
@@ -121,7 +117,7 @@ cd web && npm run build                        # tsc -b && vite build — ✓ bu
 
 ## 6. 갱신할 문서
 - `docs/context/db.md` — measurement·tag/field·시각 단위·쓰는 쪽/읽는 쪽·로컬 접속을 이 스펙 §3.1~3.2 와 일치시킨다.
-- `docs/context/status.md` — history 행(server: Influx·flusher(009)·3 라우트·bulk / web: mock, `/history/*` 미연결).
+- `docs/context/status.md` — history 행(server: Influx·flusher(009)·3 라우트·bulk·7일 기본 창 / web: 사건 로그 실데이터, 통계·차트는 후속) 과 알려진 빚 (005) 의 전 구간 조회 문구.
 - `docs/context/dev-setup.md` — DB 절(compose 기동·Influx UI :8086·Influx 없어도 앱은 뜸). env 표를 `INFLUX_URL`·`INFLUX_TOKEN` 으로, 스모크에 `/history/premium`, 백필 스크립트 실행법.
 - `docs/context/architecture.md` — 런타임 절의 저장소 문구(InfluxDB 2.7), BE 흐름의 `premium`·`dw_fail`, "현재 구조" 의 history 항목. 계약 규칙은 전 엔드포인트 camelCase 라 `/history/*` 예외 목록은 없다.
 - `docs/context/product.md` — 용어 절에 streak(구간) 1줄.
@@ -137,17 +133,16 @@ cd web && npm run build                        # tsc -b && vite build — ✓ bu
   - `server/app/features/history/tests/` — `helpers.py`(fake 리더 + lifespan 없는 앱, 선택적 LiveStore), `test_premium_api.py`·`test_streaks_api.py`·`test_bulk_api.py`(§3.4 계약·오류 4종·경계값), `test_point_rules.py`(§3.3 점 규칙·원값·`dw_fail`·저장소 장애 격리·bulk 100코인 초과).
   - `server/scripts/backfill.py` — §3.5 그대로. 순수 계산(`plan_day_slices`·`is_full_day`·`dedup_changes`·`merge_premiums`·`rates_for_slice`)과 거래소 호출(거래소별 재시도 정책·페이지 간격)을 나눈다. 테스트 `server/tests/test_backfill.py` 는 순수 계산만.
   - 루트 `docker-compose.dev.yml` — Influx 2.7 + Redis 7(009), 토큰은 `${INFLUX_TOKEN}` 치환.
-  - `web/src/features/history/Tab.tsx` — §3.6 mock 탭. `web/src/App.tsx` 가 선택 심볼(초기 `'BTC'`)과 탭 전환을 든다. mock 사건 목록은 `web/src/shared/mock.ts`(002).
+  - `web/src/App.tsx` 가 선택 심볼(초기 `'BTC'`)과 탭 전환을 든다. 002 의 mock 사건 목록(`feed.events`)은 함께 지웠다. 기록 탭 파일들은 013 이 `/history/events` 용으로 다시 썼다.
   - `server/app/main.py` — 토큰이 있을 때만 `InfluxClient` 를 만들어 `app.state.influx` 에 두고 ping 실패는 에러 1줄. flusher(009)·이력 복원(011)·spark 복원(009)이 같은 클라이언트를 쓴다.
 - 추측한 지점 (묻지 않고 정한 것 — 전부 본문에 반영):
   - `fx` 는 `Literal["binance"]` 쿼리로 노출한다 — 다른 값은 FastAPI 422(§3.4 오류 표의 "파라미터 검증 실패").
   - `base` 는 `^[A-Za-z0-9]{1,20}$` 패턴으로 검증한다(422) — Flux 문자열에 들어가므로 이스케이프와 함께 이중 방어.
   - 빈 방향 요약은 `count 0`·수치 0.0·빈 `segments`, bulk 의 `coins` 는 base 오름차순.
   - 백필의 "이미 채워진 날" 판정은 그 조각의 `count > 0`. dev compose 의 UI 비밀번호도 `${INFLUX_TOKEN}` 재사용.
-  - 기록 탭의 기간 내부값은 `7d/30d/90d`, 필터의 "peak ≥ 기준" 은 역프(음수 peak)를 크기로 비교한다.
+  - 기록 탭의 기간 내부값은 `7d/30d`. 심볼 입력은 영숫자만 받아 대문자로 보낸다(서버 `base` 패턴과 같다).
   - 저장소 장애 검증은 lifespan 없이 앱 상태에 fake 리더(실패)·빈 리더를 꽂아 본다 — 실제 기동 경로는 §5 의 :8041 스모크 두 번이 대신한다.
 - 실행 중 함께 고친 절: §2 — `/spreads` 의 `spark` 는 009 가 채운다(이 스펙의 후속 몫이 아니다), 앱 셸 접점을 지금 모양(기록 탭 = 이 기능의 Tab, 선택 심볼 초기값 `'BTC'`)으로. §6 — architecture.md 항목을 지금 문서 구조(계약 규칙에 casing 예외 목록 없음)로.
 - 남은 빚:
   - §4 수동 항목 전부(첫 점·`count` 구멍·백필 1일·재실행 문구)와 `bulk` 실데이터 100코인 초과 — **EC2 에서 확인 필요**.
   - 캔들 수집기(`fetch_*`)·백필 실호출의 자동 테스트 없음(순수 계산만).
-  - 기록 탭 실데이터 연결(후속 스펙), 전 구간 `/history/streaks` 의 Influx 과부하(status.md 알려진 빚).

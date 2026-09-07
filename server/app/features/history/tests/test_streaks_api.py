@@ -22,7 +22,12 @@ def example_reader() -> FakeInfluxReader:
 
 
 def get(client, **params):
-    return client.get("/history/streaks", params={"base": "BTC", **params})
+    # 예시 데이터는 2023년 시각이라 start 를 안 주면 7일 기본 창(§3.4) 밖 — 기본은 T0 부터.
+    # start=None 을 넘기면 파라미터를 뺀다(기본 창 테스트용).
+    merged = {"base": "BTC", "start": T0, **params}
+    return client.get(
+        "/history/streaks", params={k: v for k, v in merged.items() if v is not None}
+    )
 
 
 def test_threshold_4_single_segment() -> None:
@@ -97,7 +102,7 @@ def test_top_level_14_keys_and_kst() -> None:
     assert body["lastUpdated"].endswith("+09:00")
     assert body["lastUpdatedTs"] == T0 + 6 * 60
     assert body["scanned"] == len(EXAMPLE)
-    # start/end 미지정 — 첫 ts / 지금+1초 (§3.4)
+    # startTs 는 실제로 쓴 값, end 미지정 — 지금+1초 (§3.4)
     assert body["startTs"] == T0
     assert body["endTs"] > int(time.time())
     # 구간 start/end 도 KST 표기 (§3.4-4)
@@ -167,3 +172,37 @@ def test_nonpositive_end_is_400():
     res = client.get("/history/streaks?base=BTC&end=0")
     assert res.status_code == 400
     assert res.json()["error"]["code"] == "invalid_request"
+
+
+def test_default_window_is_last_7_days() -> None:
+    # start 없으면 end − 7일 — 8일 전 기록은 창 밖, 1일 전 기록만 잡힌다 (§3.4)
+    now = int(time.time())
+    reader = FakeInfluxReader()
+    reader.seed(
+        "upbit",
+        "binance",
+        "BTC",
+        [(now - 8 * 86_400, 5.0, -1.0), (now - 86_400, 5.0, -1.0)],
+    )
+    body = get(make_client(reader), start=None).json()
+    assert body["scanned"] == 1
+    assert body["startTs"] == body["endTs"] - 604_800
+    assert body["lastUpdatedTs"] == now - 86_400
+
+
+def test_end_only_window_is_7_days_before_end() -> None:
+    # end 만 주면 start = end − 7일 (§3.4)
+    now = int(time.time())
+    reader = FakeInfluxReader()
+    reader.seed(
+        "upbit",
+        "binance",
+        "BTC",
+        [(now - 8 * 86_400, 5.0, -1.0), (now - 86_400, 5.0, -1.0)],
+    )
+    end = now - 2 * 86_400
+    body = get(make_client(reader), start=None, end=end).json()
+    assert body["startTs"] == end - 604_800
+    assert body["endTs"] == end
+    assert body["scanned"] == 1
+    assert body["lastUpdatedTs"] == now - 8 * 86_400

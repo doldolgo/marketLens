@@ -144,16 +144,6 @@ export interface FlowRow {
   age: number
 }
 
-/** 005(기록/통계) mock 사건. start 는 epoch ms, peak 는 최고 %. */
-export interface MockEvent {
-  sym: string
-  type: 'kimp' | 'rev'
-  dom: string
-  start: number
-  durMin: number
-  peak: number
-}
-
 /** 셸이 모든 탭에 내려주는 공유 피드 하나. */
 export interface Feed {
   /** 이 스펙에서는 항상 빈 배열 — 003 이 채운다. */
@@ -171,6 +161,4 @@ export interface Feed {
   replace(rows: SpreadRow[], rate: number): void
   /** 수집 상태 적용 — 011 이 5초 폴링으로 호출. */
   setHealth(data: HealthData): void
-  /** 005 가 실 DB 전에 화면을 채우는 mock 사건 목록. per: 기간 선택값, now: epoch ms. */
-  events(per: string, now: number): MockEvent[]
 }
