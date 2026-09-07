@@ -9,11 +9,15 @@ import time
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Literal, Protocol
 
-from app.core.influx import PremiumRow
+from app.core.influx import PremiumEventRow, PremiumRow
+from app.core.premium_events import MIN_DURATION_SEC
+from app.core.premium_events import PremiumEvent as OpenEvent
 from app.features.history.models import (
     BulkCoin,
     BulkResponse,
     DirectionSummary,
+    EventOut,
+    EventsResponse,
     Overall,
     PremiumEvent,
     PremiumHistoryResponse,
@@ -31,6 +35,20 @@ class PremiumReader(Protocol):
     def query_premium(
         self, *, dom: str, fx: str, base: str | None, start: int, stop: int
     ) -> list[PremiumRow]: ...
+
+
+class EventReader(Protocol):
+    """`/history/events` 가 쓰는 저장소 읽기 — 013 사건 점."""
+
+    def query_premium_events(
+        self,
+        *,
+        start: int,
+        stop: int,
+        dom: str | None = None,
+        dir: str | None = None,
+        base: str | None = None,
+    ) -> list[PremiumEventRow]: ...
 
 
 class HistoryApiError(Exception):
@@ -368,4 +386,84 @@ def build_bulk(
         coin_count=len(coins),
         coins=coins,
         fetched_at=_now_ms(),
+    )
+
+
+# ── /history/events (스펙 013 §3.4) ─────────────────────────────────────────
+
+
+def build_events(
+    reader: EventReader,
+    open_events: list[OpenEvent],
+    *,
+    start: int | None,
+    end: int | None,
+    dom: str | None,
+    dir: str | None,
+    base: str | None,
+    now_sec: int | None = None,
+) -> EventsResponse:
+    """Influx 의 닫힌 사건 + 메모리의 진행 중 사건. 구간 판정은 start_ts 기준(`start ≤ start_ts < end`)."""
+    now = now_sec if now_sec is not None else int(time.time())
+    end_eff = end if end is not None else now + 1
+    if start is not None and end_eff <= start:
+        raise HistoryApiError(
+            400,
+            "invalid_request",
+            f"end({end_eff})가 start({start}) 이하입니다.",
+        )
+    start_eff = default_start(start, end_eff)
+    base_u = base.upper() if base is not None else None
+    rows = reader.query_premium_events(
+        start=start_eff, stop=end_eff, dom=dom, dir=dir, base=base_u
+    )
+    by_key: dict[tuple[str, str, str, str, int], EventOut] = {}
+    for r in rows:
+        # 고아 점(end_ts 0 인데 메모리에 없음)은 복원 규칙과 같이 last_ts 에서 끝난 것으로 —
+        # 아래에서 메모리의 진행 중 사건이 같은 키를 덮는다
+        end_ts = r.end_ts or r.last_ts
+        by_key[(r.dom, r.fx, r.base, r.dir, r.start_ts)] = EventOut(
+            base=r.base,
+            dom=r.dom,
+            fx=r.fx,
+            dir=r.dir,  # type: ignore[arg-type]
+            start_ts=r.start_ts,
+            end_ts=end_ts,
+            duration_seconds=end_ts - r.start_ts,
+            ongoing=False,
+            max_percent=r.max_percent,
+            max_ts=r.max_ts,
+            samples=r.samples,
+        )
+    for ev in open_events:
+        if dom is not None and ev.dom != dom:
+            continue
+        if dir is not None and ev.dir != dir:
+            continue
+        if base_u is not None and ev.base != base_u:
+            continue
+        if not (start_eff <= ev.start_ts < end_eff):
+            continue
+        if now - ev.start_ts <= MIN_DURATION_SEC:
+            continue  # 열린 지 60초를 넘긴 것만 — 1분 못 넘길 스파이크는 아직 사건이 아니다
+        by_key[(ev.dom, ev.fx, ev.base, ev.dir, ev.start_ts)] = EventOut(
+            base=ev.base,
+            dom=ev.dom,
+            fx=ev.fx,
+            dir=ev.dir,  # type: ignore[arg-type]
+            start_ts=ev.start_ts,
+            end_ts=None,
+            duration_seconds=now - ev.start_ts,
+            ongoing=True,
+            max_percent=ev.max_percent,
+            max_ts=ev.max_ts,
+            samples=ev.samples,
+        )
+    events = sorted(by_key.values(), key=lambda e: (-e.start_ts, e.base))
+    return EventsResponse(
+        start_ts=start_eff,
+        end_ts=end_eff,
+        count=len(events),
+        fetched_at=_now_ms(),
+        events=events,
     )

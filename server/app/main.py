@@ -2,7 +2,7 @@
 
 /health 와 틱 루프는 기능 폴더가 아니라 여기(시스템) 소관이다.
 메모리가 진실이므로 uvicorn 워커는 1개여야 한다 — 워커가 둘이면 서로 다른 메모리를 본다.
-시작 순서: Influx·Redis 연결 확인 → 010 원문 아카이브(S3_BUCKET 있을 때) → 011 이력 복원 → 009 spark 복원
+시작 순서: Influx·Redis 연결 확인 → 010 원문 아카이브(S3_BUCKET 있을 때) → 011 이력 복원 → 013 사건 복원 → 009 spark 복원
 → 마켓 우주 → 스트림 기동(국내 2 + 바이낸스 3샤드) → 틱 루프 → 009 인계 보내기 태스크·flusher.
 어느 것이 실패해도 앱은 뜬다.
 """
@@ -35,6 +35,7 @@ from app.core.errors import ExchangeError
 from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
 from app.core.outages import OutageTracker
+from app.core.premium_events import PremiumEventDetector
 from app.core.quotes import QuoteSink
 from app.core.raw_archive import RawArchive
 from app.core.redis_stream import RedisTickStream
@@ -137,6 +138,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     outage_writer_task = asyncio.create_task(outages.run_writer_loop())
     app.state.outages = outages
 
+    # 1-1. 김프/역프 사건(013) 복원 — 7일 안의 진행 중 사건, 3초 상한. 쓰기는 별도 태스크가 회차마다.
+    events = PremiumEventDetector(writer=influx)
+    await events.restore(influx, app.state.started_at // 1000)
+    event_writer_task = asyncio.create_task(events.run_writer_loop())
+    app.state.premium_events = events
+
     # 1-2. spark 복원(009 §3.6) — 최근 30분 1분 버킷, 10초 상한. 틱 루프 시작 전에 끝난다.
     await restore_spark(influx, spark, store, app.state.started_at // 1000)
 
@@ -160,6 +167,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         client=client,
         handoff=handoff,
         outages=outages,
+        events=events,
         wallet=wallet,
     )
     ticks.start()
@@ -187,9 +195,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if archive is not None:
             # 스트림이 닫힌 뒤 — 마지막 프레임까지 담아 5초 안에서 올린다 (010 §3.6)
             await archive.aclose()
-        outage_writer_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await outage_writer_task
+        for task in (outage_writer_task, event_writer_task):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         if influx is not None:
             influx.close()
         await tick_stream.aclose()

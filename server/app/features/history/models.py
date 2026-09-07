@@ -114,3 +114,27 @@ class BulkResponse(BaseModel):
     coin_count: int
     coins: list[BulkCoin]
     fetched_at: int
+
+
+class EventOut(BaseModel):
+    """김프/역프 사건 1건 — 스펙 013 §3.4. 진행 중이면 end_ts None·ongoing True·duration 은 지금까지."""
+
+    base: str
+    dom: str
+    fx: str
+    dir: Literal["kimp", "reverse"]
+    start_ts: int
+    end_ts: int | None
+    duration_seconds: int
+    ongoing: bool
+    max_percent: float
+    max_ts: int
+    samples: int
+
+
+class EventsResponse(BaseModel):
+    start_ts: int
+    end_ts: int
+    count: int
+    fetched_at: int
+    events: list[EventOut]
