@@ -5,7 +5,12 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.core.influx import InfluxUnavailableError, PremiumEventRow, PremiumRow
+from app.core.influx import (
+    CandleRow,
+    InfluxUnavailableError,
+    PremiumEventRow,
+    PremiumRow,
+)
 from app.core.live_store import LiveStore
 from app.core.premium_events import PremiumEventDetector
 from app.main import create_app
@@ -18,6 +23,7 @@ class FakeInfluxReader:
         # (dom, fx, base) → [(ts, fwd, rev)] — seed 순서 무관, 조회는 ts 오름차순
         self._rows: dict[tuple[str, str, str], list[tuple[int, float, float]]] = {}
         self._events: list[PremiumEventRow] = []
+        self._candles: dict[str, list[CandleRow]] = {}  # 014 계층 버킷 이름 → 봉
         self.fail = False
 
     def seed(
@@ -92,6 +98,70 @@ class FakeInfluxReader:
             and (dir is None or r.dir == dir)
             and (base is None or r.base == base.upper())
         ]
+
+    def seed_candle(
+        self,
+        bucket: str,
+        ts: int,
+        *,
+        base: str = "BTC",
+        dom: str = "upbit",
+        fwd: tuple[float, float, float, float] = (0.5, 0.9, 0.4, 0.7),
+        rev: tuple[float, float, float, float] = (-0.5, -0.4, -0.9, -0.7),
+        dw: tuple[int, int, int, int] = (1, 1, 1, 1),
+        blocked: tuple[int, int] = (0, 0),
+        samples: int = 60,
+    ) -> None:
+        """봉 점 1개 — dw = (dom_dep, dom_wd, fx_dep, fx_wd) 저장값, blocked = (fwd, rev) 막힌 초."""
+        self._candles.setdefault(bucket, []).append(
+            CandleRow(
+                dom=dom,
+                fx="binance",
+                base=base.upper(),
+                ts=ts,
+                fwd_o=fwd[0],
+                fwd_h=fwd[1],
+                fwd_l=fwd[2],
+                fwd_c=fwd[3],
+                rev_o=rev[0],
+                rev_h=rev[1],
+                rev_l=rev[2],
+                rev_c=rev[3],
+                krw=168_450_000.0,
+                usdt=112_010.5,
+                rate=1502.5,
+                dom_dep=dw[0],
+                dom_wd=dw[1],
+                fx_dep=dw[2],
+                fx_wd=dw[3],
+                blocked_fwd_sec=blocked[0],
+                blocked_rev_sec=blocked[1],
+                samples=samples,
+            )
+        )
+
+    def query_candles(
+        self,
+        bucket: str,
+        *,
+        start: int,
+        stop: int,
+        dom: str | None = None,
+        fx: str | None = None,
+        base: str | None = None,
+    ) -> list[CandleRow]:
+        if self.fail:
+            raise InfluxUnavailableError("연결 실패 (테스트)")
+        out = [
+            r
+            for r in self._candles.get(bucket, [])
+            if start <= r.ts < stop
+            and (dom is None or r.dom == dom)
+            and (fx is None or r.fx == fx)
+            and (base is None or r.base == base.upper())
+        ]
+        out.sort(key=lambda r: r.ts)
+        return out
 
 
 def make_client(
