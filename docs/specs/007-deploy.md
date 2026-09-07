@@ -60,7 +60,7 @@
 - 호스트에 8000·8086 이 **이 스택 때문에 새로 열리지 않는다**(server·Influx 비노출).
 - `docker inspect --format '{{.HostConfig.LogConfig}}' marketlens-server` 가 `json-file` 과 `max-size:50m`·`max-file:3` 을 말한다(네 컨테이너 모두).
 - Influx 컨테이너를 내려도 `/health` 는 200, `/history/*` 만 503. Redis 컨테이너를 내려도 `/health` 200·`/spreads` 정상(009 격리).
-- EC2 에서: 배포 후에도 기존 컨테이너 `market-lens-fe`·`market-lens-be`(기존 스택의 실제 컨테이너 이름 — 폴더명 `~/marketlens-be` 와 다르다)가 그대로 Up 이고 `curl localhost:80` 이 기존 fe 를 준다(공존).
+- EC2 에서: 기존 컨테이너 `market-lens-fe`·`market-lens-be`(기존 스택의 실제 컨테이너 이름 — 폴더명 `~/marketlens-be` 와 다르다)는 2026-09-04 정지 상태 그대로이고 `curl localhost:80` 이 이 레포의 web 을 준다.
 - PR 을 올리면 `server`·`web` check 가 green. main 머지 → Actions deploy 성공 → EC2 안에서 `curl localhost:80/api/health` 가 ok.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)

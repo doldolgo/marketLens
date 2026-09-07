@@ -76,7 +76,7 @@ marketlens/
 | 001 | collect | DONE | 업비트·빗썸 WebSocket 실시간 수집 → 메모리, 마켓 우주, USDT 시세, 1초 틱, 원문 싱크·인계·판정 계약, `/health` |
 | 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·mock 탭(갭/선선갭/입출금레이더) |
 | 003 | spreads | DONE | 김프 표 — `/spreads`(체결 규모별 서버 슬리피지) `/refresh`(즉시 갱신 트리거) + 스프레드 탭 |
-| 004 | analysis | DONE | 단일 종목 분석 — premium·matrix·orderbook·slippage·arbitrage (BE 전용) |
+| 004 | analysis | DONE | 단일 종목 분석 — premium·scan·matrix·orderbook·slippage·arbitrage (BE 전용) |
 | 005 | history | DONE | Influx `premium` 점 규칙·`/history/*`·백필 + history 탭 (쓰기는 009) |
 | 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
 | 007 | deploy | DONE | Docker·compose(server·web·influxdb·redis)·CI·EC2 배포 |
