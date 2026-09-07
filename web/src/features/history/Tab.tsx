@@ -1,17 +1,22 @@
 // 기록/통계 탭 — 전 코인 김프/역프 사건 표 + 선택 심볼 요약·타임라인·사건 로그 (스펙 013 §3.5).
 // 데이터는 /history/events 하나. 방향 서브탭·기간·거래소가 쿼리이고, 심볼은 클라이언트에서 거른다.
 // 참조 디자인(docs/design/reference/tabs/HistoryTab.tsx)의 김프/역프 열 분리 대신 서브탭 — 한 화면은 한 방향만.
-import { useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { exName, fmtAgo, fmtPct, fmtTime, pctColor } from '../../shared/format'
-import { Empty, Pill, Seg, card, hint, kicker, type SegOpt } from '../../shared/ui'
+import { Empty, Pill, Seg, card, hint, kicker, searchInput, type SegOpt } from '../../shared/ui'
 import { useEvents } from './api'
+import PremiumChart, { INITIAL_BARS, type PairSeries } from './Chart'
+import { FX_CHOICES, makeMockCandles } from './mock'
+import { INTERVAL_SEC, rollup, type Interval } from './rollup'
 import { aggregate, durationOf, sortStats, summarize, type SortKey } from './stats'
-import type { Dir, Dom, PremiumEvent } from './types'
+import type { Candle1m, Dir, Dom, PremiumEvent } from './types'
 
 type Per = '7d' | '30d' | '90d'
 const PER_LABEL: Record<Per, string> = { '7d': '1주', '30d': '1달', '90d': '3달' }
 const PER_SEC: Record<Per, number> = { '7d': 7 * 86_400, '30d': 30 * 86_400, '90d': 90 * 86_400 }
 const DIR_LABEL: Record<Dir, string> = { kimp: '김프', reverse: '역프' }
+const DOMS_ORDER: Dom[] = ['upbit', 'bithumb']
+const NO_EVENTS: PremiumEvent[] = []
 // 서브탭·수치 색은 스프레드 탭 관례 — 김프 = 상승(POS) 색, 역프 = 하락(NEG) 색
 const dirColor = (dir: Dir) => pctColor(dir === 'kimp' ? 1 : -1)
 
@@ -54,11 +59,29 @@ export default function HistoryTab({ now, selSym, onSelect }: {
   const [dom, setDom] = useState<Dom | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('cnt')
   const [sortDir, setSortDir] = useState(-1)
+  // 심볼 검색 — Enter 로 선택 (표 클릭과 같은 onSelect)
+  const [q, setQ] = useState('')
+  // 차트 거래소 선택(국내·해외 각각 여러 개). 위 필터가 한 국내 거래소로 좁혀지면 차트도 그걸 따른다
+  const [chartDoms, setChartDoms] = useState<Dom[]>(['upbit'])
+  const [chartFxs, setChartFxs] = useState<string[]>(['binance'])
+  useEffect(() => { if (dom) setChartDoms([dom]) }, [dom])
+  // 봉 종류 — 1분봉을 클라이언트에서 접는다 (rollup.ts)
+  const [interval, setInterval_] = useState<Interval>('1m')
+  // 차트에 실린 과거 일수 = 기본(첫 화면에 봉 INITIAL_BARS 개가 차는 일수) + 사용자가 왼쪽 끝으로 끌어 늘린 일수 (상한 30일).
+  // effect 로 맞추면 옛 일수로 한 번 그리고 다시 그리는 2단계가 되어 차트 범위가 어긋나므로, 같은 렌더에서 바로 계산한다.
+  const MAX_DAYS = 30
+  const chartKey = `${selSym}:${chartDoms.join('+')}:${chartFxs.join('+')}:${dir}:${interval}`
+  const [extra, setExtra] = useState({ key: chartKey, days: 0 })
+  const extraDays = extra.key === chartKey ? extra.days : 0
+  const baseDays = Math.max(1, Math.ceil((INITIAL_BARS * INTERVAL_SEC[interval]) / 86_400))
+  const chartDays = Math.min(MAX_DAYS, baseDays + extraDays)
 
   const nowSec = Math.floor(now / 1000)
+  const nowMin = Math.floor(nowSec / 60) * 60
   const periodSec = PER_SEC[per]
   const { result, loading } = useEvents({ dir, dom, periodSec })
-  const events: PremiumEvent[] = result?.kind === 'ok' ? result.data.events : []
+  // 실패·미도착 때 `[]` 를 매 렌더 새로 만들면 아래 memo 들이 초마다 깨져 차트가 초마다 다시 그려진다 → 고정 빈 배열
+  const events: PremiumEvent[] = result?.kind === 'ok' ? result.data.events : NO_EVENTS
 
   // 좌 표: 심볼별 집계 → 정렬 → 상위 30
   const rank = sortStats(aggregate(events, nowSec), sortKey, sortDir).slice(0, 30)
@@ -68,10 +91,29 @@ export default function HistoryTab({ now, selSym, onSelect }: {
   }
 
   // 우 column: 선택 심볼의 사건(최신순)·요약·타임라인
-  const mine = events.filter((e) => e.base === selSym).sort((a, b) => b.startTs - a.startTs)
+  // events 는 60초 재조회 때만 새 배열 — 매초 리렌더에서 같은 참조를 유지해 차트 setData 가 초마다 돌지 않게 memo
+  const mine = useMemo(() => events.filter((e) => e.base === selSym).sort((a, b) => b.startTs - a.startTs), [events, selSym])
   const sum = summarize(mine, nowSec, periodSec)
   const t0Sec = nowSec - periodSec
   const color = dirColor(dir)
+
+  // 차트 데이터 — 서버 1분봉이 없어 mock. 선택한 (국내 × 해외) 쌍마다 UTC 하루 단위 청크로 만들어(시드 = 청크 시작)
+  // 분이 지나도 과거 모양이 안 바뀐다. 접기(rollup)까지 여기서 끝내 차트는 그리기만 한다.
+  const domsKey = chartDoms.join('+'), fxsKey = chartFxs.join('+')
+  const series = useMemo<PairSeries[]>(() => {
+    const day0 = Math.floor(nowMin / 86_400) * 86_400
+    const out: PairSeries[] = []
+    for (const d of DOMS_ORDER.filter((x) => chartDoms.includes(x))) {
+      for (const f of FX_CHOICES.map((x) => x.id).filter((x) => chartFxs.includes(x))) {
+        const c1m: Candle1m[] = []
+        for (let k = chartDays - 1; k >= 0; k--) c1m.push(...makeMockCandles(d, f, selSym, dir, day0 - k * 86_400))
+        out.push({ dom: d, fx: f, candles: rollup(c1m.filter((c) => c.ts < nowMin), INTERVAL_SEC[interval]) })
+      }
+    }
+    return out
+  }, [domsKey, fxsKey, selSym, dir, chartDays, nowMin, interval])
+  const chartEvents = useMemo(() => mine.filter((e) => chartDoms.includes(e.dom)), [mine, domsKey])
+  const needOlder = () => setExtra({ key: chartKey, days: extraDays + 1 })
 
   const dirOpts: SegOpt[] = (['kimp', 'reverse'] as Dir[]).map((d) => ({
     label: DIR_LABEL[d], onClick: () => setDir(d),
@@ -97,11 +139,20 @@ export default function HistoryTab({ now, selSym, onSelect }: {
             seg('업비트', dom === 'upbit', () => setDom('upbit')),
             seg('빗썸', dom === 'bithumb', () => setDom('bithumb')),
           ]} />
+          <input className="input" placeholder="심볼 검색 → Enter" value={q} style={searchInput}
+            onChange={(e) => setQ(e.target.value.toUpperCase())}
+            onKeyDown={(e) => { if (e.key === 'Enter' && q.trim()) { onSelect(q.trim()); setQ('') } }} />
           <span style={{ ...hint, marginLeft: 'auto' }}>
             사건 = 원값 {DIR_LABEL[dir]} 1.0% 진입 → 0.5% 이탈, 1분 이하 제외 · 기간 내 {events.length}건
             {loading && <span style={{ color: 'var(--color-accent-300)', marginLeft: 8 }}>조회 중…</span>}
           </span>
         </div>
+
+        {/* 선택 심볼 1분봉 차트 — 김프 캔들 + 가격 + 입출금 (스펙 014 예정, 지금은 mock) */}
+        <PremiumChart sym={selSym} dir={dir}
+          doms={chartDoms} fxs={chartFxs} onDoms={setChartDoms} onFxs={setChartFxs}
+          interval={interval} onInterval={setInterval_}
+          series={series} events={chartEvents} onNeedOlder={needOlder} />
 
         <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 'var(--space-4)', alignItems: 'start' }}>
 

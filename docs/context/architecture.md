@@ -14,7 +14,7 @@
 
 ## 런타임 구성
 - **server/**: Python 3.12, FastAPI, httpx, websockets, redis(asyncio), influxdb-client, boto3, pyjwt, pydantic v2, pydantic-settings. 로컬 포트 8000. 상시 태스크: 업비트·빗썸 스트림 각 1, 바이낸스 샤드 3 + 재조정 루프(60초), 마켓 우주 갱신 루프(매초 — 목록 3개 병렬, 실패는 직전 목록 유지·거래소·원인당 60초 1줄 로그), 틱 루프(1초), Redis 인계 큐, flusher(60초), 원문 닫기 회차(1초, 업로드는 데몬 워커 스레드 1개), 입출금 조회(60초), `collect_fail` 쓰기 큐 태스크, `premium_event` 쓰기 태스크(점이 생기면 즉시·없어도 60초 회차).
-- **web/**: React 19, TypeScript, Vite. 런타임 의존성은 react·react-dom 뿐이다. 로컬 포트는 5173 이고, 배포 컨테이너의 nginx 는 80번 포트를 사용한다. 호스트 포트는 `WEB_PORT` 로 정한다.
+- **web/**: React 19, TypeScript, Vite. 런타임 의존성은 react·react-dom·lightweight-charts(기록 탭 캔버스 차트) 셋이다. 로컬 포트는 5173 이고, 배포 컨테이너의 nginx 는 80번 포트를 사용한다. 호스트 포트는 `WEB_PORT` 로 정한다.
 - **저장소**: InfluxDB 2.7 OSS(org·bucket `marketlens`, Flux) — 김프 이력. Redis 7 — 틱 버퍼(AOF, Influx 로 옮기기 전까지만). S3(`marketlens-spreads-snapshot`, ap-northeast-2, 접두사 `raw/`) — 거래소 원문 아카이브. 모델은 `db.md`. 테스트에서는 셋 다 띄우지 않는다(fake·fakeredis). S3 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 IAM 역할).
 
 ## 데이터 흐름 (BE)

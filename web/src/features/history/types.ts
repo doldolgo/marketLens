@@ -27,3 +27,26 @@ export interface EventsResponse {
   fetchedAt: number
   events: PremiumEvent[]
 }
+
+// ── 1분봉 (스펙 014 예정 — 아직 서버 계약 없음, 화면 시안용 mock 이 이 모양을 만든다) ──
+/** (dom, base) 1분 1행. 김프 % 는 선택 방향의 원값 OHLC, 가격은 분 종가, 입출금은 분 끝 시점 상태. */
+export interface Candle1m {
+  /** 분 시작 epoch 초. */
+  ts: number
+  open: number
+  high: number
+  low: number
+  close: number
+  /** 국내 거래소 원화 종가. */
+  krw: number
+  /** 해외 거래소 USDT 종가. */
+  usdt: number
+  /** USDT/KRW 환율 종가. */
+  fxRate: number
+  /** 분 끝 시점 국내 입금 가능 여부. */
+  depositOk: boolean
+  /** 분 끝 시점 국내 출금 가능 여부. */
+  withdrawOk: boolean
+  /** 그 분 안에 입금 또는 출금이 막혀 있던 초 (0~60). */
+  blockedSec: number
+}
