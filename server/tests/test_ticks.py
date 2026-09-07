@@ -68,6 +68,26 @@ def test_build_tick_eligibility_and_raw_formulas() -> None:
     ]
 
 
+def test_build_tick_row_carries_prices_and_wallet_states_for_candles() -> None:
+    """014 §3.2 — 가격 3개·입출금 4상태가 그 순간의 행에서 실리고, rate 는 (ask+bid)/2."""
+    store = seeded()
+    dom = make_row(
+        "upbit",
+        "BTC",
+        price=100_050.0,
+        bids=[[100_000.0, 1.0]],
+        asks=[[100_100.0, 1.0]],
+    )
+    fx = make_row("binance", "BTC", price=70.5, bids=[[70.0, 1.0]], asks=[[71.0, 1.0]])
+    store.put_rows([dom, fx], NOW)
+    # 입출금 3필드는 교체 시 직전 행에서 물려받으므로(001 §3.5) 006 조회기처럼 저장된 행에 직접 얹는다
+    dom.deposit_enabled, dom.withdrawal_enabled = True, False
+    fx.deposit_enabled, fx.withdrawal_enabled = None, True
+    [row] = build_tick(store, T0, []).rows
+    assert (row.dom_price, row.fx_price, row.rate) == (100_050.0, 70.5, 1395.0)
+    assert (row.dom_dep, row.dom_wd, row.fx_dep, row.fx_wd) == (True, False, None, True)
+
+
 def test_build_tick_skips_non_positive_values_and_empty_books() -> None:
     store = seeded()
     store.put_rows([make_row("binance", "BTC", bids=[[0.0, 1.0]])], NOW)

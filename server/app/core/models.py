@@ -84,6 +84,16 @@ class TickRow:
     base: str
     fwd: float
     rev: float
+    # 014 §3.2 — 1분 집계기가 읽는 값. 틱을 만드는 순간의 메모리 행에서 온다.
+    # Redis 레코드·`premium` 점에는 넣지 않는다(009 모양 불변) — 기본값은 Redis 에서 되읽은 틱과
+    # 옛 테스트가 다섯 값만으로 행을 만들 수 있게 둔 것이고, 집계기는 build_tick 이 채운 행만 본다.
+    dom_price: float = 0.0  # 국내 `price`
+    fx_price: float = 0.0  # 해외 `price`
+    rate: float = 0.0  # 그 국내 거래소 USDT 중간값 (ask+bid)/2, 원
+    dom_dep: bool | None = None  # 국내 입금 — 3상태 그대로(None = 모름)
+    dom_wd: bool | None = None  # 국내 출금
+    fx_dep: bool | None = None  # 해외 입금
+    fx_wd: bool | None = None  # 해외 출금
 
 
 @dataclass(frozen=True)

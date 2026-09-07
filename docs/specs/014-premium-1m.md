@@ -1,6 +1,6 @@
 # 014 — premium-1m
 
-상태: TODO | 의존: 001(collect — 틱), 005(history — `/history/*` 오류 계약), 006(wallet-status — 행의 입출금 3상태), 009(tick-store — Redis 틱 레코드 모양 불변), 013(premium-events — Influx 1점 쓰기·재시도 패턴, 기록 탭 차트 카드 시안)
+상태: IN_PROGRESS | 의존: 001(collect — 틱), 005(history — `/history/*` 오류 계약), 006(wallet-status — 행의 입출금 3상태), 009(tick-store — Redis 틱 레코드 모양 불변), 013(premium-events — Influx 1점 쓰기·재시도 패턴, 기록 탭 차트 카드 시안)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.

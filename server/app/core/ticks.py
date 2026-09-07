@@ -122,6 +122,14 @@ def build_tick(store: LiveStore, ts: int, dw_failed: Sequence[str]) -> Tick:
                         rev=premium_percent(
                             buy_krw=dom_ask, sell_krw=fx_bid * rate.bid
                         ),
+                        # 014 §3.2 — 1분 집계용. 추가 조회 없이 같은 행에서 읽는다
+                        dom_price=dom_row.price,
+                        fx_price=fx_row.price,
+                        rate=(rate.ask + rate.bid) / 2,
+                        dom_dep=dom_row.deposit_enabled,
+                        dom_wd=dom_row.withdrawal_enabled,
+                        fx_dep=fx_row.deposit_enabled,
+                        fx_wd=fx_row.withdrawal_enabled,
                     )
                 )
     return Tick(ts=ts, rows=tuple(rows), dw_failed=tuple(dw_failed))
