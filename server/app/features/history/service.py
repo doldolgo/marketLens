@@ -9,12 +9,15 @@ import time
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Literal, Protocol
 
-from app.core.influx import PremiumEventRow, PremiumRow
+from app.core.candles import TIER_BY_RES, limit_sec
+from app.core.influx import CandleRow, PremiumEventRow, PremiumRow
 from app.core.premium_events import MIN_DURATION_SEC
 from app.core.premium_events import PremiumEvent as OpenEvent
 from app.features.history.models import (
     BulkCoin,
     BulkResponse,
+    CandleOut,
+    CandlesResponse,
     DirectionSummary,
     EventOut,
     EventsResponse,
@@ -49,6 +52,21 @@ class EventReader(Protocol):
         dir: str | None = None,
         base: str | None = None,
     ) -> list[PremiumEventRow]: ...
+
+
+class CandleReader(Protocol):
+    """`/history/candles` 가 쓰는 저장소 읽기 — 014 계층 버킷 하나."""
+
+    def query_candles(
+        self,
+        bucket: str,
+        *,
+        start: int,
+        stop: int,
+        dom: str | None = None,
+        fx: str | None = None,
+        base: str | None = None,
+    ) -> list[CandleRow]: ...
 
 
 class HistoryApiError(Exception):
@@ -466,4 +484,84 @@ def build_events(
         count=len(events),
         fetched_at=_now_ms(),
         events=events,
+    )
+
+
+# ── /history/candles ───────────────────────────────────────────────────────
+
+
+def _tri_to_bool(v: int) -> bool | None:
+    """저장값 1/0/−1 → true/false/null (014 §3.6)."""
+    return None if v < 0 else bool(v)
+
+
+def build_candles(
+    reader: CandleReader,
+    *,
+    base: str,
+    res: str,
+    dom: str,
+    fx: str,
+    dir: str,
+    start: int | None,
+    end: int | None,
+    now_sec: int | None = None,
+) -> CandlesResponse:
+    """계층 버킷 하나에서 `start ≤ 창 시작 < end` 인 봉 — 진행 중인 창은 없다(닫힌 창만 저장되므로).
+
+    상한 = 1,440 × 창 길이. `end − start` 가 상한을 넘으면 400 — 실수로 수십만 점을 읽는 호출이 Influx 를 못 건드리게.
+    """
+    tier = TIER_BY_RES[res]
+    limit = limit_sec(tier)
+    end_eff = (
+        end
+        if end is not None
+        else (now_sec if now_sec is not None else int(time.time()))
+    )
+    start_eff = start if start is not None else max(0, end_eff - limit)
+    if end_eff <= start_eff:
+        raise HistoryApiError(
+            400, "invalid_request", f"end({end_eff})가 start({start_eff}) 이하입니다."
+        )
+    if end_eff - start_eff > limit:
+        raise HistoryApiError(
+            400,
+            "invalid_request",
+            f"window exceeds limit: {res} 은 한 번에 {limit}초(1,440창)까지입니다.",
+            {"limitSec": limit},
+        )
+    base_u = base.upper()
+    rows = reader.query_candles(
+        tier.bucket, start=start_eff, stop=end_eff, dom=dom, fx=fx, base=base_u
+    )
+    kimp = dir == "kimp"
+    candles = [
+        CandleOut(
+            ts=r.ts,
+            open=r.fwd_o if kimp else r.rev_o,
+            high=r.fwd_h if kimp else r.rev_h,
+            low=r.fwd_l if kimp else r.rev_l,
+            close=r.fwd_c if kimp else r.rev_c,
+            krw=r.krw,
+            usdt=r.usdt,
+            fx_rate=r.rate,
+            # 방향 경로의 두 끝 — 김프는 해외 출금 → 국내 입금, 역프는 국내 출금 → 해외 입금
+            deposit_ok=_tri_to_bool(r.dom_dep if kimp else r.fx_dep),
+            withdraw_ok=_tri_to_bool(r.fx_wd if kimp else r.dom_wd),
+            blocked_sec=r.blocked_fwd_sec if kimp else r.blocked_rev_sec,
+            samples=r.samples,
+        )
+        for r in sorted(rows, key=lambda r: r.ts)
+    ]
+    return CandlesResponse(
+        base=base_u,
+        res=res,  # type: ignore[arg-type]
+        dom=dom,
+        fx=fx,
+        dir=dir,  # type: ignore[arg-type]
+        start_ts=start_eff,
+        end_ts=end_eff,
+        count=len(candles),
+        fetched_at=_now_ms(),
+        candles=candles,
     )

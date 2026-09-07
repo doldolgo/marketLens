@@ -1,4 +1,4 @@
-"""GET /history/premium·/history/streaks·/history/streaks/bulk — 스펙 005 §3.4. /history/events — 013 §3.4.
+"""GET /history/premium·/history/streaks·/history/streaks/bulk — 스펙 005 §3.4. /history/events — 013 §3.4. /history/candles — 014 §3.6.
 
 유일하게 DB 를 읽는 조회 경로다(db.md). 저장소 불가(연결 실패·토큰 없음)는 503
 `storage_unavailable` — 메모리 조회 경로(/spreads 등)는 영향받지 않는다.
@@ -17,10 +17,12 @@ from app.core.influx import InfluxUnavailableError
 from app.core.premium_events import PremiumEventDetector
 from app.core.serialization import camelize_json
 from app.features.history.service import (
+    CandleReader,
     EventReader,
     HistoryApiError,
     PremiumReader,
     build_bulk,
+    build_candles,
     build_events,
     build_premium_history,
     build_streaks,
@@ -42,9 +44,10 @@ def _error(status: int, code: str, message: str, detail: object = None) -> JSONR
 
 
 async def _respond(
-    request: Request, build: Callable[[PremiumReader | EventReader], BaseModel]
+    request: Request,
+    build: Callable[[PremiumReader | EventReader | CandleReader], BaseModel],
 ) -> JSONResponse:
-    reader: PremiumReader | EventReader | None = getattr(
+    reader: PremiumReader | EventReader | CandleReader | None = getattr(
         request.app.state, "influx", None
     )
     if reader is None:
@@ -155,5 +158,32 @@ async def get_events(
             dom=dom,
             dir=dir,
             base=base,
+        ),
+    )
+
+
+@router.get("/candles")
+async def get_candles(
+    request: Request,
+    base: str = Query(..., pattern=_BASE_PATTERN),
+    res: Literal["1m", "5m", "1h", "4h", "1d"] = Query("1m"),
+    dom: Literal["upbit", "bithumb"] = Query("upbit"),
+    fx: Literal["binance"] = Query("binance"),
+    dir: Literal["kimp", "reverse"] = Query("kimp"),
+    start: int | None = Query(None, ge=0, le=4_102_444_800),
+    end: int | None = Query(None, ge=0, le=4_102_444_800),
+) -> JSONResponse:
+    # 계층 버킷 하나만 읽는다 — 진행 중인 창(메모리)은 싣지 않는다 (014 §3.6)
+    return await _respond(
+        request,
+        lambda reader: build_candles(
+            reader,  # type: ignore[arg-type]
+            base=base,
+            res=res,
+            dom=dom,
+            fx=fx,
+            dir=dir,
+            start=start,
+            end=end,
         ),
     )
