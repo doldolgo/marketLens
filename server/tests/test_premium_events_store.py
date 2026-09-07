@@ -3,7 +3,9 @@
 import asyncio
 
 import httpx
+import pytest
 
+from app.core import premium_events
 from app.core.influx import premium_event_point, to_line
 from app.core.live_store import LiveStore
 from app.core.models import Tick
@@ -127,7 +129,9 @@ async def test_restore_keeps_only_latest_open_per_combination() -> None:
     assert influx.only()["end_ts"] == now - 100  # 옛것은 last_ts 로 닫아 썼다
 
 
-async def test_restore_failure_or_timeout_starts_empty() -> None:
+async def test_restore_failure_or_timeout_starts_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     influx = FakeInflux()
     influx.rows = [restored_row(T0, T0 + 100)]
     influx.query_fail = True
@@ -135,10 +139,12 @@ async def test_restore_failure_or_timeout_starts_empty() -> None:
     await det.restore(influx, T0 + 200)
     assert det.open_events() == []
 
+    # 상한을 줄여서 본다 — 실제 3초를 자면 스레드가 남아 시각 기반 테스트(tick_store)를 흔든다
+    monkeypatch.setattr(premium_events, "RESTORE_TIMEOUT_SEC", 0.05)
     influx.query_fail = False
-    influx.query_delay = 3.5
+    influx.query_delay = 0.2
     det2 = PremiumEventDetector(writer=influx)
-    await asyncio.wait_for(det2.restore(influx, T0 + 200), timeout=5)
+    await asyncio.wait_for(det2.restore(influx, T0 + 200), timeout=2)
     assert det2.open_events() == []
 
 
