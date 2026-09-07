@@ -161,6 +161,91 @@ def fold_window(rows: list[CandleRow], ts: int) -> list[InfluxPoint]:
     return [candle_point(fold_candles(rs, ts)) for _, rs in sorted(by_combo.items())]
 
 
+# --- 롤업 (§3.5) ---
+
+
+class Rollup:
+    """계층마다 "마지막으로 접은 창"을 들고, 회차마다 그 다음 창부터 차례로 접어 쓴다."""
+
+    def __init__(self, store: CandleStore | None) -> None:
+        self._store = store
+        # 위 계층 res → 마지막으로 접은 창 시작. None = 기준점이 없어(복원 전·Influx 없음) 접지 않는다
+        self._last_done: dict[str, int | None] = {t.res: None for t in TIERS[1:]}
+
+    async def restore(self, now_sec: int) -> None:
+        """기동 시 계층마다 기준점 — 위 버킷의 가장 늦은 점, 비면 아래 버킷 가장 오래된 점의 창 직전, 실패면 지금 창 직전."""
+        if self._store is None:
+            return
+        for i, upper in enumerate(TIERS[1:], start=1):
+            try:
+                last = await asyncio.wait_for(
+                    asyncio.to_thread(self._edge, i, now_sec),
+                    timeout=RESTORE_TIMEOUT_SEC,
+                )
+            except Exception as exc:
+                last = window_start(now_sec, upper.window_sec) - upper.window_sec
+                logger.warning(
+                    "%s 롤업 기준점 조회 실패 — 지금 창부터 시작: %r", upper.res, exc
+                )
+            self._last_done[upper.res] = last
+
+    def _edge(self, i: int, now_sec: int) -> int:
+        """계층 i 의 기준점 — 위 버킷의 가장 늦은 점, 없으면(첫 배포·긴 공백) 아래 계층들 중 가장 오래된 점의 창 직전.
+
+        아래를 한 계층만 보지 않는 이유: 첫 배포에는 1m 만 있고 5m·1h 는 아직 비어 있다 — 1h 가 5m 만 보면
+        지금 창에 앵커를 잡아 1m 에 있던 첫 시간을 영영 접지 않는다. 각 버킷은 자기 보관 기간 안에서만 찾는다 —
+        그 밖의 빈틈은 메울 수 없고 전 구간 스캔도 피한다.
+        """
+        assert self._store is not None
+        upper, lower = TIERS[i], TIERS[i - 1]
+        latest = self._store.latest_candle_ts(
+            upper.bucket, start=now_sec - lower.retention_sec
+        )
+        if latest is not None:
+            return latest
+        anchor = now_sec
+        for tier in TIERS[:i]:
+            earliest = self._store.earliest_candle_ts(
+                tier.bucket, start=now_sec - tier.retention_sec
+            )
+            if earliest is not None:
+                anchor = min(anchor, earliest)
+        return window_start(anchor, upper.window_sec) - upper.window_sec
+
+    def last_done(self, res: str) -> int | None:
+        return self._last_done[res]
+
+    def run_round(self, now_sec: int, minute_frontier: int | None) -> None:
+        """5m → 1h → 4h → 1d 순으로 계층당 최대 12창을 접어 쓴다. 동기 — 스레드에서 돈다.
+
+        접는 창의 끝 ≤ min(지금, 아래 계층 완료 시각). `minute_frontier` 는 1m 이 Influx 에 다 들어간 시각(집계기가
+        열어 둔 분의 시작), 그 위 계층의 완료 시각은 아래 계층이 마지막으로 접은 창의 끝 — 위 계층이 아래를 앞질러
+        "아래 점이 없다" 로 빈 창을 확정하면 다시 보지 않아 영구 구멍이 되기 때문이다 (§3.5).
+        Influx 실패는 예외로 전파돼 그 자리에서 회차가 멈춘다 — 접은 창까지만 기준점이 전진했으므로
+        다음 회차가 같은 창부터 다시 한다(같은 키 덮어쓰기라 안전).
+        """
+        if self._store is None:
+            return
+        lower_done = minute_frontier
+        for lower, upper in zip(TIERS, TIERS[1:], strict=False):
+            last = self._last_done[upper.res]
+            if last is None or lower_done is None:
+                return  # 기준점이 없거나(복원 전) 아래가 아직 아무것도 못 쓴 회차 — 그 위도 접을 수 없다
+            w = upper.window_sec
+            bound = min(now_sec, lower_done)
+            ws = last + w
+            done = 0
+            while ws + w <= bound and done < MAX_WINDOWS_PER_ROUND:
+                rows = self._store.query_candles(lower.bucket, start=ws, stop=ws + w)
+                points = fold_window(rows, ws)
+                if points:
+                    self._store.write(points, upper.bucket)
+                self._last_done[upper.res] = ws
+                ws += w
+                done += 1
+            lower_done = self._last_done[upper.res] + w  # type: ignore[operator]
+
+
 # --- 1분 집계기 (§3.3~3.4) ---
 
 
@@ -188,6 +273,7 @@ class CandleAggregator:
     ) -> None:
         self._store = store
         self._clock = clock
+        self._rollup = Rollup(store)
         self._open_minute: int | None = (
             None  # 지금 모으는 분의 시작 — 이 시각 전의 분은 전부 닫혔다
         )
@@ -200,8 +286,16 @@ class CandleAggregator:
         )
 
     @property
+    def rollup(self) -> Rollup:
+        return self._rollup
+
+    @property
     def pending_count(self) -> int:
         return len(self._pending)
+
+    async def restore(self, now_sec: int) -> None:
+        """기동 시 1회 — 롤업 기준점. 진행 중이던 분은 복원하지 않는다(재기동 후 첫 분은 samples < 60)."""
+        await self._rollup.restore(now_sec)
 
     # --- 틱 루프가 매초 부른다 (EventSink 모양) ---
 
@@ -288,11 +382,11 @@ class CandleAggregator:
             await self.write_round()
 
     async def flush(self) -> None:
-        """미전송 점을 지금 전부 쓴다(실패 대기 무시) — 테스트용."""
+        """미전송 점을 지금 쓰고 롤업까지 돈다(실패 대기 무시) — 테스트용."""
         await self.write_round(force=True)
 
     async def write_round(self, force: bool = False) -> None:
-        """회차 1번 — 미전송 1m 전부를 쓰기 1번으로. 실패는 남겨 두고 60초 뒤."""
+        """회차 1번 — 미전송 1m 전부를 쓰기 1번으로 → 성공하면 같은 회차에서 롤업. 실패는 남겨 두고 60초 뒤."""
         if self._store is None:
             return
         now = self._clock()
@@ -318,3 +412,9 @@ class CandleAggregator:
             for key, point in batch:
                 if self._pending.get(key) is point:
                     del self._pending[key]
+        try:
+            # 이 시각 전의 1m 은 전부 Influx 에 있다(썼거나 상한에서 버렸다) — 롤업이 앞지르지 못하는 선
+            await asyncio.to_thread(self._rollup.run_round, int(now), self._open_minute)
+        except Exception as exc:
+            self._failed_at = now
+            logger.warning("candle 롤업 실패 — 접은 창 다음부터 다음 회차에: %r", exc)
