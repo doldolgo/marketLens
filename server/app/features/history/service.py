@@ -548,6 +548,11 @@ def build_candles(
             # 방향 경로의 두 끝 — 김프는 해외 출금 → 국내 입금, 역프는 국내 출금 → 해외 입금
             deposit_ok=_tri_to_bool(r.dom_dep if kimp else r.fx_dep),
             withdraw_ok=_tri_to_bool(r.fx_wd if kimp else r.dom_wd),
+            # 거래소별 4상태 — 차트가 거래소마다 입금·출금 줄을 따로 그린다(015). 경로 밖 칸도 값이 있어야 "모름" 이 안 뜬다
+            dom_deposit_ok=_tri_to_bool(r.dom_dep),
+            dom_withdraw_ok=_tri_to_bool(r.dom_wd),
+            fx_deposit_ok=_tri_to_bool(r.fx_dep),
+            fx_withdraw_ok=_tri_to_bool(r.fx_wd),
             blocked_sec=r.blocked_fwd_sec if kimp else r.blocked_rev_sec,
             samples=r.samples,
         )
