@@ -47,6 +47,10 @@ def test_candle_shape_matches_spec_example_and_camel_case() -> None:
         "fxRate": 1502.5,
         "depositOk": True,  # 김프 = dom_dep
         "withdrawOk": True,  # 김프 = fx_wd
+        "domDepositOk": True,  # 거래소별 4상태 — dw=(dom_dep, dom_wd, fx_dep, fx_wd)
+        "domWithdrawOk": False,
+        "fxDepositOk": None,  # −1 → null
+        "fxWithdrawOk": True,
         "blockedSec": 0,
         "samples": 60,
     }
@@ -117,6 +121,13 @@ def test_reverse_uses_rev_fields_and_swaps_wallet_path() -> None:
     assert (c["open"], c["high"], c["low"], c["close"]) == (-0.2, 0.1, -0.5, 0.05)
     assert c["withdrawOk"] is False  # 역프 = dom_wd (0)
     assert c["depositOk"] is None  # 역프 = fx_dep (−1 → null)
+    # 거래소별 4상태는 방향과 무관하게 그대로
+    assert (
+        c["domDepositOk"],
+        c["domWithdrawOk"],
+        c["fxDepositOk"],
+        c["fxWithdrawOk"],
+    ) == (True, False, None, True)
     assert c["blockedSec"] == 9
 
 

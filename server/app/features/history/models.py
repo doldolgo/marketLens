@@ -141,7 +141,7 @@ class EventsResponse(BaseModel):
 
 
 class CandleOut(BaseModel):
-    """봉 1개 — 스펙 014 §3.6. OHLC 는 `dir` 방향의 원값, 입출금은 방향 경로의 두 끝(None = 모름)."""
+    """봉 1개 — 스펙 014 §3.6. OHLC 는 `dir` 방향의 원값. 입출금은 거래소별 4상태 전부 + 방향 경로의 두 끝(None = 모름)."""
 
     ts: int  # 창 시작 epoch 초(KST 정렬)
     open: float
@@ -153,6 +153,10 @@ class CandleOut(BaseModel):
     fx_rate: float
     deposit_ok: bool | None
     withdraw_ok: bool | None
+    dom_deposit_ok: bool | None
+    dom_withdraw_ok: bool | None
+    fx_deposit_ok: bool | None
+    fx_withdraw_ok: bool | None
     blocked_sec: int
     samples: int
 

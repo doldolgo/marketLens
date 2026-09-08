@@ -82,12 +82,15 @@
   "candles": [
     {"ts": 1788739200, "open": 0.62, "high": 0.71, "low": 0.58, "close": 0.66,
      "krw": 168450000, "usdt": 112010.5, "fxRate": 1502.5,
-     "depositOk": true, "withdrawOk": null, "blockedSec": 0, "samples": 60}
+     "depositOk": true, "withdrawOk": null,
+     "domDepositOk": true, "domWithdrawOk": true, "fxDepositOk": false, "fxWithdrawOk": null,
+     "blockedSec": 0, "samples": 60}
   ]
 }
 ```
 - `open high low close` = `dir` 가 `kimp` 면 `fwd_*`, `reverse` 면 `rev_*`. `fxRate` = `rate`.
 - `depositOk`·`withdrawOk` 는 **방향 경로**의 두 끝: `kimp` → `withdrawOk = fx_wd`·`depositOk = dom_dep`, `reverse` → `withdrawOk = dom_wd`·`depositOk = fx_dep`. 저장값 1 → `true`, 0 → `false`, −1 → `null`. `blockedSec` = 방향의 `blocked_*_sec`.
+- `domDepositOk`·`domWithdrawOk`·`fxDepositOk`·`fxWithdrawOk` 는 저장된 4상태를 방향과 무관하게 그대로(같은 1/0/−1 변환). 차트가 거래소마다 입금·출금 줄을 따로 그리므로 경로 밖 칸도 필요하다.
 - 정렬 `ts` 오름차순. 기록 없으면 404 가 아니라 빈 `candles`(배포 전 날짜·상장 전 코인·보관 기간 밖은 "없음" 이 정상).
 - 오류: 503 `storage_unavailable`, 400·422 는 §3.1. 응답 크기 감: 최대 1,440건 × ≈150B, 앱 전역 gzip.
 
@@ -111,7 +114,7 @@
 - 롤업: 1m 5개(시가 a·종가 e·고 max·저 min·samples 합·blocked 합) → 5m 1점, 마지막 점 값이 가격·입출금; 1m 이 3개뿐이면 그것으로 접는다, 0개면 5m 점 없음; 순서 = 1m 쓰기 → 5m → 1h → 4h → 1d(1h 는 같은 회차에 쓴 5m 을 읽는다); 한 회차 계층당 12창까지, 13번째는 다음 회차; 끝이 지금 이후인 창은 접지 않는다; 밀린 3시간에서 첫 회차 1h 는 5m 이 접힌 첫 시간 창만 접고 나머지는 다음 회차들에서(구멍 없음); 5m 은 집계기가 열어 둔 분 전까지만 접는다
 - 따라잡기: 기동 시 위 버킷 마지막 점 다음 창부터; 위 버킷이 비면 아래 계층들 중 가장 오래된 점의 창부터(1m 만 있어도 1h·1d 가 그 시각에 앵커); 조회 실패 시 지금 창부터 + 경고
 - Influx 없이 기동 → 집계는 돌고 `/history/candles` 503
-- `/history/candles`: `start` 없으면 `startTs == endTs − 상한`; `res=5m` 에서 `end − start == 432000` 200, `432001` 400; `end ≤ start` 400; `res` 별로 다른 버킷을 읽는다; `dir=reverse` 면 `rev_*`·`blocked_rev_sec`·`withdrawOk = dom_wd`·`depositOk = fx_dep`; `−1 → null`; `base=btc → BTC`; `fx=bybit`·`res=3m` 422; 빈 `candles` 200; `ts` 오름차순
+- `/history/candles`: `start` 없으면 `startTs == endTs − 상한`; `res=5m` 에서 `end − start == 432000` 200, `432001` 400; `end ≤ start` 400; `res` 별로 다른 버킷을 읽는다; `dir=reverse` 면 `rev_*`·`blocked_rev_sec`·`withdrawOk = dom_wd`·`depositOk = fx_dep`; 거래소별 4키는 방향과 무관; `−1 → null`; `base=btc → BTC`; `fx=bybit`·`res=3m` 422; 빈 `candles` 200; `ts` 오름차순
 - web(수동 또는 순수 함수): 봉 → 계층 매핑; 청크 캐시 — 봉 종류를 1m → 3m 으로 바꿔도 이미 받은 청크는 재요청 없음, 5m 으로 바꾸면 `res=5m` 청크를 새로 부른다; 최신 청크만 60초 재조회; 과거 로드가 계층 보관 기간에서 멈춘다; 띠 색 규칙(`null` 회색·`false` 막힘)
 - 수동(로컬 dev compose + 실거래소): 기동 로그에 버킷 5개 생성, 61초 뒤 Influx UI `candles_1m` 에 점 ≈ 490 개(분 1개), 5분 뒤 `candles_5m` 에 ≈ 490 개. `curl "…/history/candles?base=BTC"` 에 봉이 붙고 60초 뒤 1개 늘어남, `res=5m` 도 5분 뒤 1개. 기록 탭 차트에 BTC 1m 캔들·업비트/빗썸 가격 선·입출금 띠가 실값으로 그려지고 `MOCK` 배지 없음, 해외 선택지는 Binance 만, 봉을 5m 으로 바꾸면 요청 URL 에 `res=5m`. 서버 재기동 → 그 분의 `samples < 60`, 그 다음 분은 60, 재기동 중 못 접은 5m 창이 기동 뒤 회차에 채워진다. 서버 테스트·lint, web build·lint 통과.
 
