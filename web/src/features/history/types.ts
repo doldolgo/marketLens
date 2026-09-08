@@ -53,6 +53,11 @@ export interface Candle1m {
   blockedSec: number
   /** 창에 든 틱 수. */
   samples: number
+  /** 거래소별 입출금 4상태(015 거래소별 띠). 서버는 아직 안 내려준다 — 없으면 화면이 경로 2상태에서 채운다(`exchangeStates`). */
+  domDepositOk?: boolean | null
+  domWithdrawOk?: boolean | null
+  fxDepositOk?: boolean | null
+  fxWithdrawOk?: boolean | null
 }
 
 export interface CandlesResponse {

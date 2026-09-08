@@ -5,8 +5,9 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { exName, fmtAgo, fmtPct, fmtTime, pctColor } from '../../shared/format'
 import { Empty, Pill, Seg, card, hint, kicker, searchInput, type SegOpt } from '../../shared/ui'
 import { useCandles, useEvents } from './api'
-import { RES_OF_INTERVAL, RES_SEC } from './candles'
-import PremiumChart, { type PairSeries } from './Chart'
+import { FX_CHOICES, REAL_FXS, RES_OF_INTERVAL, RES_SEC, isMockFx } from './candles'
+import FxChartCard, { ChartSync, ChartToolbar, type PairSeries } from './Chart'
+import { mockCandles, mockEvents } from './mock'
 import { INTERVAL_SEC, rollup, type Interval } from './rollup'
 import { aggregate, durationOf, sortStats, summarize, type SortKey } from './stats'
 import type { Dir, Dom, PremiumEvent } from './types'
@@ -65,12 +66,14 @@ export default function HistoryTab({ now, selSym, onSelect }: {
   const [chartDoms, setChartDoms] = useState<Dom[]>(['upbit'])
   const [chartFxs, setChartFxs] = useState<string[]>(['binance'])
   useEffect(() => { if (dom) setChartDoms([dom]) }, [dom])
+  // 카드 간 시간축·십자선 연동 — 탭이 사는 동안 하나
+  const [sync] = useState(() => new ChartSync())
   // 봉 종류 — 계층(1m·5m·1h·4h·1d) 하나를 골라 그 안에서 접는다 (candles.ts·rollup.ts)
   const [interval, setInterval_] = useState<Interval>('1m')
   const res = RES_OF_INTERVAL[interval]
   // 왼쪽으로 끌어 더 붙인 청크 수 — (심볼, 쌍, 방향, 계층) 이 바뀌면 0 부터. effect 로 맞추면 옛 값으로 한 번 그리고 다시 그리는
   // 2단계가 되어 차트 범위가 어긋나므로, 같은 렌더에서 바로 계산한다.
-  const chartKey = `${selSym}:${chartDoms.join('+')}:${chartFxs.join('+')}:${dir}:${res}`
+  const chartKey = `${selSym}:${chartDoms.join('+')}:${dir}:${res}`
   const [olderState, setOlderState] = useState({ key: chartKey, n: 0 })
   const older = olderState.key === chartKey ? olderState.n : 0
 
@@ -94,16 +97,30 @@ export default function HistoryTab({ now, selSym, onSelect }: {
   const t0Sec = nowSec - periodSec
   const color = dirColor(dir)
 
-  // 차트 데이터 — /history/candles 청크(쌍별)를 받아 봉 종류로 접는다. 접기까지 여기서 끝내 차트는 그리기만 한다
+  // 차트 데이터 — /history/candles 청크(쌍별)를 받아 봉 종류로 접는다. 접기까지 여기서 끝내 차트는 그리기만 한다.
+  // 서버가 주는 해외 거래소는 binance 뿐이라 항상 그것만 부르고, mock 해외 거래소 카드는 그 봉을 변형해 만든다(015 시안, mock.ts)
   const domsKey = chartDoms.join('+')
+  const fxsKey = chartFxs.join('+')
   const { pairs, loading: candlesLoading, errorStatus: candlesError, oldestReached } = useCandles({
-    base: selSym, dir, doms: DOMS_ORDER.filter((x) => chartDoms.includes(x)), fxs: chartFxs, interval, older,
+    base: selSym, dir, doms: DOMS_ORDER.filter((x) => chartDoms.includes(x)), fxs: REAL_FXS, interval, older,
   })
-  const series = useMemo<PairSeries[]>(
-    () => pairs.map((p) => ({ dom: p.dom, fx: p.fx, candles: rollup(p.candles, INTERVAL_SEC[interval], RES_SEC[res]) })),
-    [pairs, interval, res],
-  )
+  // 카드 순서는 선택 순서가 아니라 FX_CHOICES 순서. 카드 = 해외 1개 × 선택한 국내 전부
+  const cards = useMemo<{ fx: string; series: PairSeries[] }[]>(() => {
+    const fxs = FX_CHOICES.map((f) => f.id).filter((id) => chartFxs.includes(id))
+    return fxs.map((fx) => ({
+      fx,
+      series: pairs.filter((p) => p.fx === REAL_FXS[0]).map((p) => {
+        const raw = isMockFx(fx) ? mockCandles(fx, p.candles, dir, RES_SEC[res]) : p.candles
+        return { dom: p.dom, fx, candles: rollup(raw, INTERVAL_SEC[interval], RES_SEC[res]) }
+      }),
+    }))
+  }, [pairs, fxsKey, dir, interval, res])
   const chartEvents = useMemo(() => mine.filter((e) => chartDoms.includes(e.dom)), [mine, domsKey])
+  // 카드별 사건 — 렌더마다 새 배열을 만들면 카드의 음영 effect 가 초마다 돌므로 memo (014 교훈)
+  const cardEvents = useMemo<Record<string, PremiumEvent[]>>(
+    () => Object.fromEntries(FX_CHOICES.map((f) => [f.id, isMockFx(f.id) ? mockEvents(f.id, chartEvents) : chartEvents.filter((e) => e.fx === f.id)])),
+    [chartEvents],
+  )
   const needOlder = () => { if (!oldestReached) setOlderState({ key: chartKey, n: older + 1 }) }
 
   const dirOpts: SegOpt[] = (['kimp', 'reverse'] as Dir[]).map((d) => ({
@@ -119,7 +136,8 @@ export default function HistoryTab({ now, selSym, onSelect }: {
 
   return (
     <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-      <div style={{ padding: 'var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+      {/* 폭 92% 가운데 정렬 — 양옆에 여백을 조금 둬 차트 카드가 화면 끝까지 꽉 차지 않게. 필터바·표도 같이 좁혀 줄을 맞춘다 */}
+      <div style={{ width: '92%', margin: '0 auto', padding: 'var(--space-6) 0', display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
 
         {/* 방향 서브탭 + 필터바 (§3.5) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
@@ -139,12 +157,17 @@ export default function HistoryTab({ now, selSym, onSelect }: {
           </span>
         </div>
 
-        {/* 선택 심볼 봉 차트 — 김프 캔들 + 가격 + 입출금 (스펙 014 §3.7) */}
-        <PremiumChart sym={selSym} dir={dir}
-          doms={chartDoms} fxs={chartFxs} onDoms={setChartDoms} onFxs={setChartFxs}
-          interval={interval} onInterval={setInterval_}
-          series={series} events={chartEvents} onNeedOlder={needOlder}
+        {/* 선택 심볼 봉 차트 — 해외 거래소 1개 = 카드 1개, 김프 + 가격 + 거래소별 입출금 (스펙 014 §3.7 · 015) */}
+        <ChartToolbar sym={selSym} dir={dir} interval={interval} onInterval={setInterval_}
+          doms={chartDoms} onDoms={setChartDoms} fxs={chartFxs} onFxs={setChartFxs}
           loading={candlesLoading} errorStatus={candlesError} />
+        {/* 카드 사이는 다른 블록보다 넓게 — 카드가 붙어 있으면 한 덩어리로 보여 답답하다 */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
+          {cards.filter((c) => c.series.length > 0).map((c) => (
+            <FxChartCard key={c.fx} fx={c.fx} dir={dir} interval={interval}
+              series={c.series} events={cardEvents[c.fx] ?? NO_EVENTS} onNeedOlder={needOlder} loading={candlesLoading} sync={sync} />
+          ))}
+        </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 'var(--space-4)', alignItems: 'start' }}>
 

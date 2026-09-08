@@ -7,8 +7,16 @@ import type { Candle1m, Dir, Dom, Res } from './types'
 /** 처음 보이는 봉 개수(봉 종류 무관). 이후는 사용자가 줌·이동. */
 export const INITIAL_BARS = 360
 
-/** 차트에서 고를 수 있는 해외 거래소 — 서버가 수집하는 해외 거래소는 binance 뿐(§2). */
-export const FX_CHOICES: { id: string; label: string }[] = [{ id: 'binance', label: 'Binance' }]
+/** 차트에서 고를 수 있는 해외 거래소 — 서버가 수집하는 해외 거래소는 binance 뿐(§2). `mock` 은 015 UI 시안용:
+ *  binance 실봉을 변형해 그린다(mock.ts). 수집 스펙이 생기면 mock 을 지우고 실데이터로 바꾼다. */
+export const FX_CHOICES: { id: string; label: string; mock?: boolean }[] = [
+  { id: 'binance', label: 'Binance' },
+  { id: 'bybit', label: 'Bybit', mock: true },
+  { id: 'mexc', label: 'MEXC', mock: true },
+]
+export const isMockFx = (id: string) => FX_CHOICES.some((f) => f.id === id && f.mock)
+/** 서버에서 실제로 받는 해외 거래소 — mock 은 이걸 변형해 만든다. */
+export const REAL_FXS = FX_CHOICES.filter((f) => !f.mock).map((f) => f.id)
 
 /** 봉 종류 → 서버 계층. 계층 안에서만 접는다(3m 은 1m 셋, 15m·30m 은 5m 셋·여섯). */
 export const RES_OF_INTERVAL: Record<Interval, Res> = {
@@ -53,10 +61,17 @@ export function neededChunks(nowSec: number, res: Res, intervalSec: number, olde
   return { starts, oldestReached }
 }
 
-/** 입출금 띠 색 규칙(§3.7): 어느 하나 false → 막힘(창 내내 막혔으면 진하게), false 없이 null 섞임 → 모름, 둘 다 true → 열림. */
-export type BandTone = 'open' | 'blocked' | 'partial' | 'unknown'
-export function bandTone(c: Candle1m, windowSec: number): BandTone {
-  if (c.depositOk === false || c.withdrawOk === false) return c.blockedSec >= windowSec ? 'blocked' : 'partial'
-  if (c.depositOk == null || c.withdrawOk == null) return 'unknown'
-  return 'open'
+/** 거래소별 줄 1개의 색(015 §띠): 창 끝 상태만 본다 — 막힌 초는 경로 단위(`blockedSec`)라 줄마다 나눌 수 없어 연한 붉음은 여기 없다. */
+export type BandTone = 'open' | 'blocked' | 'unknown'
+export const lineTone = (ok: boolean | null | undefined): BandTone => (ok == null ? 'unknown' : ok ? 'open' : 'blocked')
+
+/** 거래소별 입출금 4상태. 서버가 4상태를 안 주면 경로 2상태(김프 = 해외 출금·국내 입금, 역프 = 국내 출금·해외 입금)로 채우고 나머지는 모름. */
+export interface ExchangeStates { domDeposit: boolean | null; domWithdraw: boolean | null; fxDeposit: boolean | null; fxWithdraw: boolean | null }
+export function exchangeStates(c: Candle1m, dir: Dir): ExchangeStates {
+  if (c.domDepositOk !== undefined) {
+    return { domDeposit: c.domDepositOk, domWithdraw: c.domWithdrawOk ?? null, fxDeposit: c.fxDepositOk ?? null, fxWithdraw: c.fxWithdrawOk ?? null }
+  }
+  return dir === 'kimp'
+    ? { domDeposit: c.depositOk, domWithdraw: null, fxDeposit: null, fxWithdraw: c.withdrawOk }
+    : { domDeposit: null, domWithdraw: c.withdrawOk, fxDeposit: c.depositOk, fxWithdraw: null }
 }
