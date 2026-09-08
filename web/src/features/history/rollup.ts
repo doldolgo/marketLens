@@ -33,6 +33,7 @@ export function rollup(candles: Candle1m[], step: number, base = 60): Candle1m[]
       cur.close = c.close
       cur.krw = c.krw; cur.usdt = c.usdt; cur.fxRate = c.fxRate
       cur.depositOk = c.depositOk; cur.withdrawOk = c.withdrawOk
+      cur.domDepositOk = c.domDepositOk; cur.domWithdrawOk = c.domWithdrawOk; cur.fxDepositOk = c.fxDepositOk; cur.fxWithdrawOk = c.fxWithdrawOk
       cur.blockedSec = Math.min(step, cur.blockedSec + c.blockedSec)
       cur.samples += c.samples
     } else {
