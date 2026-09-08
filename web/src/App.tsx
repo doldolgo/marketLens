@@ -1,6 +1,6 @@
 // 셸 레이아웃 — 헤더 + KPI 스트립 + 탭 6개 + 푸터 (스펙 002 §3.5, 구조는 docs/design/reference/App.tsx).
 // 탭은 언마운트하지 않고 숨긴다: 검색어·필터·드릴다운 상태가 전환 후에도 유지되어야 하기 때문.
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import FlowTab from './features/flow/Tab'
 import GapTab from './features/gap/Tab'
 import { useHealthPolling } from './features/health/api'
@@ -12,6 +12,7 @@ import SpreadsTab from './features/spreads/Tab'
 import { useFeed } from './shared/feed'
 import { exName, fmtPct, pctColor } from './shared/format'
 import { kicker, vDivider } from './shared/ui'
+import { UrlActive, oneOf, str, useUrlState, type Codec } from './shared/urlState'
 
 type TabId = 'spread' | 'history' | 'gap' | 'pp' | 'health' | 'flow'
 
@@ -21,16 +22,24 @@ const TABS: [TabId, string][] = [
   ['pp', '선선갭'], ['health', '수집 상태'], ['flow', '입출금 레이더'],
 ]
 
+/** 체결 규모 — NOTIONALS 중 하나만 허용, 그 외 URL 값은 기본값으로. */
+const NOTIONAL_CODEC: Codec<number> = {
+  parse: (s) => { const n = Number(s); return (NOTIONALS as readonly number[]).includes(n) ? n : undefined },
+  format: (v) => String(v),
+}
+
 export default function App() {
   const { feed, now } = useFeed()
   // 체결 규모는 스프레드 탭이 고르고 폴링이 쿼리로 보낸다 — 둘이 같은 값을 봐야 해서 셸이 든다 (003 §3.4)
-  const [notional, setNotional] = useState<number>(NOTIONALS[0])
+  // 탭·선택 심볼·체결 규모는 URL 쿼리(?tab=&sym=&n=)에 실려 새로고침해도 같은 화면 (002 §3.5).
+  // URL 은 보이는 화면만 담는다 — sym 은 기록 탭, n 은 스프레드 탭이 활성일 때만 쓴다
+  const [tab, setTab] = useUrlState<TabId>('tab', 'spread', oneOf(TABS.map(([id]) => id)))
+  const [notional, setNotional] = useUrlState<number>('n', NOTIONALS[0], NOTIONAL_CODEC, tab === 'spread')
   // 셸이 공유 피드를 만든 직후 /spreads 1초 폴링 시작 (스펙 003 §3.4), 그 옆에서 /health/collect 5초 폴링 (011 §3.6)
   useSpreadPolling(feed, notional)
   useHealthPolling(feed)
-  const [tab, setTab] = useState<TabId>('spread')
   // 스프레드 행 클릭 → 기록 탭으로 피벗할 선택된 심볼 — 초기값 'BTC' (스펙 005 §2)
-  const [selSym, setSelSym] = useState<string>('BTC')
+  const [selSym, setSelSym] = useUrlState<string>('sym', 'BTC', str, tab === 'history')
 
   // 수집 상태 KPI — /health/collect 마지막 응답 기준, 첫 응답 전엔 – (011 §3.7)
   const exs = feed.health?.exchanges ?? []
@@ -56,8 +65,11 @@ export default function App() {
   const clock = new Date(now).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
   // 숨김 탭은 레이아웃에 참여하지 않는다 — display:none, 보이는 탭은 contents 로 셸의 세로 flex 에 직접 참여.
+  // UrlActive: 보이는 탭의 상태 키만 URL 에 남긴다 (shared/urlState)
   const wrap = (id: TabId, node: ReactNode) => (
-    <div key={id} style={{ display: tab === id ? 'contents' : 'none' }}>{node}</div>
+    <div key={id} style={{ display: tab === id ? 'contents' : 'none' }}>
+      <UrlActive.Provider value={tab === id}>{node}</UrlActive.Provider>
+    </div>
   )
 
   return (

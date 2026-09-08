@@ -1,5 +1,4 @@
 // 선선갭(선물–선물 갭) 탭 (mock) — 스펙 002 §3.8, 구조는 docs/design/reference/tabs/PPTab.tsx.
-import { useState } from 'react'
 import { STALE_SEC } from '../../shared/config'
 import { fmtFundingHr, fmtPct, pctColor } from '../../shared/format'
 import type { Feed } from '../../shared/types'
@@ -7,6 +6,7 @@ import {
   GridHeader, gridRow, NumField, SymCell, TableFrame, ToggleBtn,
   bar, count, exTag, hint, searchInput, type Header,
 } from '../../shared/ui'
+import { bool, num, sortOf, str, useUrlState } from '../../shared/urlState'
 
 /** 심볼 | 가격갭(가변) | 펀딩갭. 행 높이는 참조대로 48px(2줄 셀). */
 const GRID = '100px 2.2fr 150px'
@@ -36,11 +36,12 @@ type SortCol = 'sym' | 'gap' | 'fund'
 /** 거래소 칩 — 선선갭은 양쪽 다 accent, 참조대로 한 치수 작게. */
 
 export default function PpTab({ feed }: { feed: Feed }) {
-  const [q, setQ] = useState('')
-  const [thrP, setThrP] = useState(0.3)
-  const [thrF, setThrF] = useState(20)
-  const [only, setOnly] = useState(false)
-  const [sort, setSort] = useState<{ col: SortCol; asc: boolean }>({ col: 'gap', asc: false })
+  // 검색어·필터·정렬은 URL 쿼리(p.*)에 실려 새로고침해도 같은 화면 (002 §3.5)
+  const [q, setQ] = useUrlState('p.q', '', str)
+  const [thrP, setThrP] = useUrlState('p.thrp', 0.3, num)
+  const [thrF, setThrF] = useUrlState('p.thrf', 20, num)
+  const [only, setOnly] = useUrlState('p.only', false, bool)
+  const [sort, setSort] = useUrlState<{ col: SortCol; asc: boolean }>('p.sort', { col: 'gap', asc: false }, sortOf(['sym', 'gap', 'fund']))
 
   // fail 아닌 선물 거래소 모든 쌍 — 최대 가격갭 쌍과 최대 펀딩갭(시간당) 값을 각각 채택.
   const all: Row[] = feed.markets.map((m) => {

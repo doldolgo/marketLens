@@ -1,14 +1,15 @@
 // 기록/통계 탭 — 전 코인 김프/역프 사건 표 + 선택 심볼 요약·타임라인·사건 로그 (스펙 013 §3.5).
 // 데이터는 /history/events 하나. 방향 서브탭·기간·거래소가 쿼리이고, 심볼은 클라이언트에서 거른다.
 // 참조 디자인(docs/design/reference/tabs/HistoryTab.tsx)의 김프/역프 열 분리 대신 서브탭 — 한 화면은 한 방향만.
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { exName, fmtAgo, fmtPct, fmtTime, pctColor } from '../../shared/format'
 import { Empty, Pill, Seg, card, hint, kicker, searchInput, type SegOpt } from '../../shared/ui'
+import { alias, list, oneOf, useUrlState, type Codec } from '../../shared/urlState'
 import { useCandles, useEvents } from './api'
 import { FX_CHOICES, REAL_FXS, RES_OF_INTERVAL, RES_SEC, isMockFx } from './candles'
 import FxChartCard, { ChartSync, ChartToolbar, type PairSeries } from './Chart'
 import { mockCandles, mockEvents } from './mock'
-import { INTERVAL_SEC, rollup, type Interval } from './rollup'
+import { INTERVALS, INTERVAL_SEC, rollup, type Interval } from './rollup'
 import { aggregate, durationOf, sortStats, summarize, type SortKey } from './stats'
 import type { Dir, Dom, PremiumEvent } from './types'
 
@@ -29,6 +30,15 @@ const HEADERS: [SortKey, string][] = [
   ['ongoingSince', '상태'], ['cnt', '횟수'], ['maxDur', '최대 지속'], ['avgDur', '평균 지속'],
   ['maxPct', '최대 스프레드'], ['avgPct', '평균 스프레드'], ['last', '최신'],
 ]
+/** 표 정렬 URL 표기 `열:asc|desc` — 열은 HEADERS 의 키만. */
+const SORT_CODEC: Codec<{ key: SortKey; dir: number }> = {
+  parse: (s) => {
+    const [k, d] = s.split(':')
+    if (!HEADERS.some(([key]) => key === k) || (d !== 'asc' && d !== 'desc')) return undefined
+    return { key: k as SortKey, dir: d === 'asc' ? 1 : -1 }
+  },
+  format: (v) => `${v.key}:${v.dir === 1 ? 'asc' : 'desc'}`,
+}
 
 /** 지속 초 → 사람이 읽는 표기. */
 function fmtDur(sec: number): string {
@@ -55,22 +65,24 @@ function StatusPill({ since, nowSec }: { since: number | null; nowSec: number })
 export default function HistoryTab({ now, selSym, onSelect }: {
   now: number; selSym: string; onSelect: (sym: string) => void
 }) {
-  const [dir, setDir] = useState<Dir>('kimp')
-  const [per, setPer] = useState<Per>('7d')
-  const [dom, setDom] = useState<Dom | null>(null)
-  const [sortKey, setSortKey] = useState<SortKey>('cnt')
-  const [sortDir, setSortDir] = useState(-1)
+  // 방향·기간·거래소·정렬·차트 선택은 URL 쿼리(h.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색 입력은 Enter 전까지 임시라 제외
+  const [dir, setDir] = useUrlState<Dir>('h.dir', 'kimp', oneOf(['kimp', 'reverse']))
+  const [per, setPer] = useUrlState<Per>('h.per', '7d', oneOf(['7d', '30d', '90d']))
+  const [dom, setDom_] = useUrlState<Dom | null>('h.dom', null, alias([['all', null], ['upbit', 'upbit'], ['bithumb', 'bithumb']]))
+  const [sort, setSort] = useUrlState<{ key: SortKey; dir: number }>('h.sort', { key: 'cnt', dir: -1 }, SORT_CODEC)
+  const { key: sortKey, dir: sortDir } = sort
   // 심볼 검색 — Enter 로 선택 (표 클릭과 같은 onSelect)
   const [q, setQ] = useState('')
   // 차트 거래소 선택(국내·해외 각각 여러 개). 국내는 위 필터를 그대로 따른다 — 전체면 둘 다, 하나면 그 하나.
   // 빗썸에만 있는 코인(HEMI 등)이 기본 선택 업비트 때문에 빈 화면이 되지 않게. 툴바 체크박스는 그 뒤 더 좁힐 때만
-  const [chartDoms, setChartDoms] = useState<Dom[]>(DOMS_ORDER)
-  const [chartFxs, setChartFxs] = useState<string[]>(['binance'])
-  useEffect(() => { setChartDoms(dom ? [dom] : DOMS_ORDER) }, [dom])
+  const [chartDoms, setChartDoms] = useUrlState<Dom[]>('h.doms', DOMS_ORDER, list(oneOf(DOMS_ORDER)))
+  const [chartFxs, setChartFxs] = useUrlState<string[]>('h.fx', ['binance'], list(oneOf(FX_CHOICES.map((f) => f.id))))
+  // 필터 변경 때만 차트 국내 선택을 따라가게 — effect 로 하면 마운트 때 URL 에서 복원한 chartDoms 를 덮어쓴다
+  const setDom = (d: Dom | null) => { setDom_(d); setChartDoms(d ? [d] : DOMS_ORDER) }
   // 카드 간 시간축·십자선 연동 — 탭이 사는 동안 하나
   const [sync] = useState(() => new ChartSync())
   // 봉 종류 — 계층(1m·5m·1h·4h·1d) 하나를 골라 그 안에서 접는다 (candles.ts·rollup.ts)
-  const [interval, setInterval_] = useState<Interval>('1m')
+  const [interval, setInterval_] = useUrlState<Interval>('h.iv', '1m', oneOf(INTERVALS))
   const res = RES_OF_INTERVAL[interval]
   // 왼쪽으로 끌어 더 붙인 청크 수 — (심볼, 쌍, 방향, 계층) 이 바뀌면 0 부터. effect 로 맞추면 옛 값으로 한 번 그리고 다시 그리는
   // 2단계가 되어 차트 범위가 어긋나므로, 같은 렌더에서 바로 계산한다.
@@ -87,8 +99,8 @@ export default function HistoryTab({ now, selSym, onSelect }: {
   // 좌 표: 심볼별 집계 → 정렬 → 상위 30
   const rank = sortStats(aggregate(events, nowSec), sortKey, sortDir).slice(0, 30)
   const onSort = (k: SortKey) => {
-    if (k === sortKey) setSortDir(-sortDir)
-    else { setSortKey(k); setSortDir(-1) }
+    if (k === sortKey) setSort({ key: k, dir: -sortDir })
+    else setSort({ key: k, dir: -1 })
   }
 
   // 우 column: 선택 심볼의 사건(최신순)·요약·타임라인
