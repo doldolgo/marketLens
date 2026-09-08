@@ -62,10 +62,11 @@ export default function HistoryTab({ now, selSym, onSelect }: {
   const [sortDir, setSortDir] = useState(-1)
   // 심볼 검색 — Enter 로 선택 (표 클릭과 같은 onSelect)
   const [q, setQ] = useState('')
-  // 차트 거래소 선택(국내·해외 각각 여러 개). 위 필터가 한 국내 거래소로 좁혀지면 차트도 그걸 따른다
-  const [chartDoms, setChartDoms] = useState<Dom[]>(['upbit'])
+  // 차트 거래소 선택(국내·해외 각각 여러 개). 국내는 위 필터를 그대로 따른다 — 전체면 둘 다, 하나면 그 하나.
+  // 빗썸에만 있는 코인(HEMI 등)이 기본 선택 업비트 때문에 빈 화면이 되지 않게. 툴바 체크박스는 그 뒤 더 좁힐 때만
+  const [chartDoms, setChartDoms] = useState<Dom[]>(DOMS_ORDER)
   const [chartFxs, setChartFxs] = useState<string[]>(['binance'])
-  useEffect(() => { if (dom) setChartDoms([dom]) }, [dom])
+  useEffect(() => { setChartDoms(dom ? [dom] : DOMS_ORDER) }, [dom])
   // 카드 간 시간축·십자선 연동 — 탭이 사는 동안 하나
   const [sync] = useState(() => new ChartSync())
   // 봉 종류 — 계층(1m·5m·1h·4h·1d) 하나를 골라 그 안에서 접는다 (candles.ts·rollup.ts)
