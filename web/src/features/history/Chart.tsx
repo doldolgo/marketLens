@@ -84,6 +84,8 @@ export interface PairSeries {
   candles: Candle1m[]
 }
 export const pairKey = (s: { dom: string; fx: string }) => `${s.dom}|${s.fx}`
+/** 시간축·음영·읽기 줄의 기준 쌍 — 봉이 있는 첫 쌍. 업비트에 원화 마켓이 없는 코인은 첫 쌍(업비트)이 비어 있어 이걸 축으로 잡으면 아무것도 안 보인다. */
+const axisOf = (S: PairSeries[]): PairSeries => S.find((s) => s.candles.length > 0) ?? S[0]
 
 // ── 카드 간 연동 ──
 // 시간축: 한 카드의 논리 범위(봉 index 기준)를 나머지에 그대로 적용한다. 카드들의 봉 시각 배열은 같은 binance 청크에서 나와 index 가 맞다.
@@ -283,9 +285,9 @@ export default function FxChartCard(p: CardProps) {
       host: () => {
         const S = seriesRef.current
         if (S.length === 0) return null
-        return S.length === 1 ? r.candle : r.premLines.get(S[0].dom) ?? null
+        return S.length === 1 ? r.candle : r.premLines.get(axisOf(S).dom) ?? null
       },
-      at: (ts) => (seriesRef.current[0] ? findAt(seriesRef.current[0].candles, ts) : null),
+      at: (ts) => (seriesRef.current.length ? findAt(axisOf(seriesRef.current).candles, ts) : null),
       onHover: setHoverTs,
     })
     return () => {
@@ -322,22 +324,24 @@ export default function FxChartCard(p: CardProps) {
     }
 
     const single = S.length === 1
-    const base = S[0].candles
+    const axis = axisOf(S)
+    const base = axis.candles
     const doms = S.map((s) => s.dom)
     const priceSpecs: { key: string; label: string; color: string; pick: (c: Candle1m) => number; from: PairSeries }[] = [
-      { key: 'fx', label: fxLabel(p.fx), color: FX_COLOR, pick: (c) => c.usdt, from: S[0] },
+      { key: 'fx', label: fxLabel(p.fx), color: FX_COLOR, pick: (c) => c.usdt, from: axis },
       ...S.map((s) => ({ key: `dom:${s.dom}`, label: exName(s.dom), color: DOM_COLOR[s.dom], pick: (c: Candle1m) => c.krw / c.fxRate, from: s })),
     ]
     // 입출금 행: 이 해외 거래소 → 국내 순. 김프 경로 = 해외 출금·국내 입금, 역프 = 국내 출금·해외 입금 — 나머지 줄은 흐리게
     const rows: BandRow[] = [
-      { id: 'fx', label: fxLabel(p.fx), from: S[0], pick: (c) => { const e = exchangeStates(c, p.dir); return { deposit: e.fxDeposit, withdraw: e.fxWithdraw } } },
+      { id: 'fx', label: fxLabel(p.fx), from: axis, pick: (c) => { const e = exchangeStates(c, p.dir); return { deposit: e.fxDeposit, withdraw: e.fxWithdraw } } },
       ...S.map((s) => ({ id: s.dom, label: exName(s.dom), from: s, pick: (c: Candle1m) => { const e = exchangeStates(c, p.dir); return { deposit: e.domDeposit, withdraw: e.domWithdraw } } })),
     ]
     const dimmed = (row: BandRow, kind: 'deposit' | 'withdraw') => {
       const relevant = row.id === 'fx' ? (p.dir === 'kimp' ? 'withdraw' : 'deposit') : (p.dir === 'kimp' ? 'deposit' : 'withdraw')
       return kind !== relevant
     }
-    const configKey = `${doms.join(',')}|${p.dir}`
+    // 축 쌍이 바뀌면(로딩 중엔 다 비어 첫 쌍, 뒤에 빗썸만 도착) 기준선을 붙일 호스트도 바뀌어야 하므로 구성 키에 넣는다
+    const configKey = `${doms.join(',')}|${p.dir}|${axis.dom}`
 
     if (r.configKey !== configKey) {
       // 구성이 바뀜 → 동적 시리즈 재생성
@@ -375,7 +379,7 @@ export default function FxChartCard(p: CardProps) {
       })
       // 기준선(진입·이탈·0) — 데이터가 빈 시리즈의 기준선은 그려지지 않으므로 캔들 또는 첫 국내 선에 붙인다
       r.candle.priceLines().forEach((l) => r.candle.removePriceLine(l))
-      const host: ISeriesApi<'Candlestick' | 'Line'> = single ? r.candle : r.premLines.get(S[0].dom)!
+      const host: ISeriesApi<'Candlestick' | 'Line'> = single ? r.candle : r.premLines.get(axis.dom)!
       host.createPriceLine({ price: ENTER_PCT, color: dirHex, lineStyle: LineStyle.Dashed, lineWidth: 1, title: `진입 ${ENTER_PCT.toFixed(1)}%` })
       host.createPriceLine({ price: EXIT_PCT, color: cssVar('--color-neutral-500', '#8a8a96'), lineStyle: LineStyle.SparseDotted, lineWidth: 1, title: `이탈 ${EXIT_PCT.toFixed(1)}%` })
       host.createPriceLine({ price: 0, color: cssVar('--color-neutral-600', '#6a6a78'), lineStyle: LineStyle.Solid, lineWidth: 1, title: '' })
@@ -428,16 +432,17 @@ export default function FxChartCard(p: CardProps) {
     if (!r || p.series.length === 0) return
     const shadeColor = alpha(cssVar(p.dir === 'kimp' ? '--color-up' : '--color-down', '#e0697d'), 0.13)
     const inEvent = (ts: number) => p.events.some((e) => ts >= e.startTs && (e.endTs == null || ts < e.endTs))
-    r.shade.setData(p.series[0].candles.map((c) => inEvent(c.ts) ? { time: toChartTime(c.ts), value: 1, color: shadeColor } : { time: toChartTime(c.ts) }))
+    r.shade.setData(axisOf(p.series).candles.map((c) => inEvent(c.ts) ? { time: toChartTime(c.ts), value: 1, color: shadeColor } : { time: toChartTime(c.ts) }))
   }, [p.series, p.events, p.dir])
 
   // ── 읽기 줄: 십자선 시각(없으면 마지막 봉)의 국내별 김프·거래소별 가격·거래소별 입출금
   const S = p.series
-  const base = S[0]?.candles ?? []
+  const axis = S.length ? axisOf(S) : null
+  const base = axis?.candles ?? []
   const ts = hoverTs ?? base[base.length - 1]?.ts ?? null
   const at = (s: PairSeries) => (ts == null ? null : findAt(s.candles, ts))
   const single = S.length === 1
-  const c0 = at(S[0])
+  const c0 = axis ? at(axis) : null
   const num: CSSProperties = { fontWeight: 500 }
   const sep = <span style={{ color: 'var(--color-neutral-700)' }}>|</span>
   const st = (okv: boolean | null, dim: boolean) => (
