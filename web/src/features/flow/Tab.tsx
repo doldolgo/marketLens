@@ -4,6 +4,7 @@ import { fmtQty, fmtTime, fmtUsd } from '../../shared/format'
 import { DOM_EXS, FLOW_PRICES } from '../../shared/mock'
 import type { Feed, FlowRow } from '../../shared/types'
 import { Empty, Pill, Seg, segOpt, bar, card, count, gridHead, gridRow, headCell, kicker, searchInput } from '../../shared/ui'
+import { bool, list, oneOf, str, useUrlState } from '../../shared/urlState'
 
 type Pivot = { kind: 'coin'; sym: string } | { kind: 'addr'; id: string }
 type Dir = 'all' | 'in' | 'out'
@@ -26,11 +27,12 @@ const chipBtn = {
 } as const
 
 export default function FlowTab({ feed, now }: { feed: Feed; now: number }) {
+  // 필터는 URL 쿼리(f.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색 입력(Enter 전 임시)·드릴다운 스택은 제외
   const [q, setQ] = useState('')
-  const [miss, setMiss] = useState(false)
-  const [dir, setDir] = useState<Dir>('all')
-  const [region, setRegion] = useState<Region>('all')
-  const [exSel, setExSel] = useState<string[]>([])
+  const [miss, setMiss] = useUrlState('f.miss', false, bool)
+  const [dir, setDir] = useUrlState<Dir>('f.dir', 'all', oneOf(['all', 'in', 'out']))
+  const [region, setRegion] = useUrlState<Region>('f.region', 'all', oneOf(['all', 'fx', 'dom']))
+  const [exSel, setExSel] = useUrlState<string[]>('f.ex', [], list(str))
   const [stack, setStack] = useState<Pivot[]>([])
 
   const rowsAll = feed.flowRows

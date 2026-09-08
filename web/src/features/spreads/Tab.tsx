@@ -1,5 +1,4 @@
 // 실시간 스프레드 탭 — 코인 1개 = 행 1개 집계 표 (스펙 003 §3.5, 구조는 docs/design/reference/tabs/SpreadTab.tsx).
-import { useState } from 'react'
 import { HIGHLIGHT_PCT, STALE_SEC } from '../../shared/config'
 import { fmtKrw, fmtPct, pctColor } from '../../shared/format'
 import { FX_EXS } from '../../shared/mock'
@@ -8,11 +7,18 @@ import {
   Empty, GridHeader, gridRow, NumField, Seg, segOpt, SymCell, TableFrame, ToggleBtn,
   bar, count, exTag, hint, label, searchInput, vDivider, type Header,
 } from '../../shared/ui'
+import { alias, bool, num, oneOf, sortOf, str, useUrlState, type Codec } from '../../shared/urlState'
 import { NOTIONALS } from './api'
 
 type View = 'kimp' | 'rev'
 type DomFilter = 'all' | '업비트' | '빗썸'
 type SortCol = 'sym' | 'price' | 'val' | 'io' | 'net'
+
+/** 꺼진 해외 거래소 Record ↔ 쉼표 목록. FX_EXS 밖 이름은 버린다. */
+const FX_OFF_CODEC: Codec<Record<string, boolean>> = {
+  parse: (s) => Object.fromEntries(s.split(',').filter((fx) => (FX_EXS as readonly string[]).includes(fx)).map((fx) => [fx, true])),
+  format: (v) => FX_EXS.filter((fx) => v[fx]).join(','),
+}
 
 /** 심볼 | 국내가 KRW | 김프 | 입출금 | 네트워크 — 국내가 열만 가변 폭.
  *  김프 열은 `슬 −N.NN%p` 배지 자리를 항상 비워 둔다 — 규모를 바꿀 때마다 표가 흔들리지 않게. */
@@ -113,15 +119,16 @@ interface Props {
 }
 
 export default function SpreadsTab({ feed, notional, onNotional, onPick }: Props) {
-  const [q, setQ] = useState('')
-  const [domFilter, setDomFilter] = useState<DomFilter>('all')
-  const [view, setView] = useState<View>('kimp')
-  const [thr, setThr] = useState(HIGHLIGHT_PCT)
-  const [onlyThr, setOnlyThr] = useState(false)
-  const [onlyIo, setOnlyIo] = useState(false)
-  const [sort, setSort] = useState<{ col: SortCol; asc: boolean }>({ col: 'val', asc: false })
-  /** 체크 해제된 해외 거래소 — 키가 있으면 제외. 비어 있으면 전부 켜짐. */
-  const [fxOff, setFxOff] = useState<Record<string, boolean>>({})
+  // 검색어·필터·정렬은 URL 쿼리(s.*)에 실려 새로고침해도 같은 화면 (002 §3.5)
+  const [q, setQ] = useUrlState('s.q', '', str)
+  const [domFilter, setDomFilter] = useUrlState<DomFilter>('s.dom', 'all', alias([['all', 'all'], ['upbit', '업비트'], ['bithumb', '빗썸']]))
+  const [view, setView] = useUrlState<View>('s.view', 'kimp', oneOf(['kimp', 'rev']))
+  const [thr, setThr] = useUrlState('s.thr', HIGHLIGHT_PCT, num)
+  const [onlyThr, setOnlyThr] = useUrlState('s.only', false, bool)
+  const [onlyIo, setOnlyIo] = useUrlState('s.io', false, bool)
+  const [sort, setSort] = useUrlState<{ col: SortCol; asc: boolean }>('s.sort', { col: 'val', asc: false }, sortOf(['sym', 'price', 'val', 'io', 'net']))
+  /** 체크 해제된 해외 거래소 — 키가 있으면 제외. 비어 있으면 전부 켜짐. URL 엔 꺼진 이름 목록으로. */
+  const [fxOff, setFxOff] = useUrlState<Record<string, boolean>>('s.fxoff', {}, FX_OFF_CODEC)
   const fxAllOn = FX_EXS.every((fx) => !fxOff[fx])
 
   const all = aggregate(feed, domFilter, fxOff, view)

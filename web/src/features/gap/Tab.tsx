@@ -1,5 +1,4 @@
 // 선물–현물 갭 탭 (mock) — 스펙 002 §3.7, 구조는 docs/design/reference/tabs/GapTab.tsx.
-import { useState } from 'react'
 import { STALE_SEC } from '../../shared/config'
 import { fmtFunding3, fmtPct, fmtUsdt, pctColor } from '../../shared/format'
 import type { Feed } from '../../shared/types'
@@ -7,6 +6,7 @@ import {
   GridHeader, gridRow, NumField, Seg, segOpt, SymCell, TableFrame, ToggleBtn,
   bar, count, exTag, hint, label, searchInput, type Header,
 } from '../../shared/ui'
+import { bool, num, oneOf, sortOf, str, useUrlState } from '../../shared/urlState'
 
 /** 심볼 | 현물가 USDT | 갭(가변) | 펀딩비 */
 const GRID = '100px 1fr 320px 150px'
@@ -38,11 +38,12 @@ function fundingEta(ex: string, now: number): string {
 }
 
 export default function GapTab({ feed, now }: { feed: Feed; now: number }) {
-  const [q, setQ] = useState('')
-  const [mode, setMode] = useState<Mode>('entry')
-  const [thr, setThr] = useState(0.5)
-  const [only, setOnly] = useState(false)
-  const [sort, setSort] = useState<{ col: SortCol; asc: boolean }>({ col: 'gap', asc: false })
+  // 검색어·필터·정렬은 URL 쿼리(g.*)에 실려 새로고침해도 같은 화면 (002 §3.5)
+  const [q, setQ] = useUrlState('g.q', '', str)
+  const [mode, setMode] = useUrlState<Mode>('g.mode', 'entry', oneOf(['entry', 'exit']))
+  const [thr, setThr] = useUrlState('g.thr', 0.5, num)
+  const [only, setOnly] = useUrlState('g.only', false, bool)
+  const [sort, setSort] = useUrlState<{ col: SortCol; asc: boolean }>('g.sort', { col: 'gap', asc: false }, sortOf(['sym', 'price', 'gap', 'funding']))
 
   // fail 아닌 현물×선물 모든 조합 중 최대(진입)·최소(정리) 갭을 채택.
   const all: Row[] = feed.markets.map((m) => {
