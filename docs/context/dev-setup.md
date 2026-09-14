@@ -32,6 +32,7 @@ npm run lint       # oxlint
 ## env (server/.env)
 | 키 | 기본 |
 |---|---|
+| ROLE | `collector` |
 | INFLUX_URL | `http://localhost:8086` |
 | INFLUX_TOKEN | 없음 |
 | REDIS_URL | `redis://localhost:6379/0` |
@@ -43,6 +44,7 @@ npm run lint       # oxlint
 | S3_BUCKET | 없음 |
 | S3_REGION | `ap-northeast-2` |
 
+- `ROLE`: 프로세스 역할(016) — `collector`(전체 동작) | `api`(Influx 조회 전용, 백그라운드 태스크 없음). 로컬은 비워 둔다. `api` 는 compose 의 `api` 서비스가 `environment` 로만 준다. 둘 밖의 값이면 설정을 읽는 순간 실패한다.
 - `INFLUX_URL`·`INFLUX_TOKEN`: InfluxDB 2.7 접속(org·bucket 은 `marketlens` 고정). 토큰이 없으면 flusher 비활성·`/history/*` 503 — 앱은 뜬다. 사람용 UI 는 `http://localhost:8086`(같은 토큰).
 - `REDIS_URL`: Redis 7 접속(009 틱 버퍼). compose 안에서는 `redis://redis:6379/0` 으로 덮어쓴다. 없으면 인계된 틱이 버려진다(앱은 뜬다).
 - `REFRESH_TOKEN`: 설정 시 `POST /refresh` 에 `X-Refresh-Token` 헤더가 필요하다.
@@ -56,7 +58,7 @@ npm run lint       # oxlint
 ```bash
 WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 ```
-server·web·influxdb·redis 네 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 뜨고 호스트에는 web 하나만 열린다. `localhost:8080` 에 화면, `/api/*` 는 nginx 가 server 로 프록시(접두 제거). 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
+server·api·web·influxdb·redis 다섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 뜨고 호스트에는 web 하나만 열린다. `localhost:8080` 에 화면, `/api/*` 는 nginx 가 server 로 프록시(접두 제거)하되 `/api/history/{premium,streaks,candles}` 는 api 로 간다(016). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/spreads` 는 정상·`/api/history/candles?base=BTC` 는 502, `start api` 로 복구. 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
 
 ## 검증용 스모크
 ```bash

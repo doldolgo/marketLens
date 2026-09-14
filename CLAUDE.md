@@ -79,7 +79,7 @@ marketlens/
 | 004 | analysis | DONE | 단일 종목 분석 — premium·scan·matrix·orderbook·slippage·arbitrage (BE 전용) |
 | 005 | history | DONE | Influx `premium` 점 규칙·`/history/*`(start 기본 7일 창)·백필 + 기록 탭 사건 로그 실데이터 (쓰기는 009) |
 | 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
-| 007 | deploy | DONE | Docker·compose(server·web·influxdb·redis)·CI·EC2 배포 |
+| 007 | deploy | DONE | Docker·compose(server·api·web·influxdb·redis)·CI·EC2 배포 |
 | 008 | usdt-staleness | DONE | `/spreads` USDT 시세 미갱신 경고 (BE 전용) |
 | 009 | tick-store | DONE | 3계층 저장 — LiveStore 틱 슬롯 → Redis → 60초마다 Influx 전량 적재·비움, `spark` |
 | 010 | raw-archive | DONE | 거래소 원문(WS 프레임·REST 응답)을 S3 `raw/` 에 — 시세 프레임·매초 마켓 목록은 분당 마지막 1건, 그 외 전량, 거래소·분마다 객체 1개 (BE 전용) |
@@ -87,6 +87,7 @@ marketlens/
 | 012 | binance-stream | DONE | 바이낸스 WS 3샤드 depth20+miniTicker → 해외 호가 최대 20단계, exchangeInfo 심볼 (BE 전용) |
 | 013 | premium-events | DONE | 틱에서 김프/역프 사건 감지(1.0% 진입·0.5% 이탈·1분 초과) → Influx `premium_event` 1건 1점 + `/history/events` + 기록 탭 전 코인 사건 표 |
 | 014 | premium-1m | DONE | 틱에서 (국내·해외·코인) 1분 OHLC·가격·입출금 집계 → 버킷 `candles_1m…1d`(사슬 롤업, 보관 7일/30일/90일/1년/무제한) + `/history/candles`(`res`, 1,440점 상한) + 기록 탭 차트 실데이터 |
+| 016 | process-split | DONE | 서버 `ROLE`(collector | api) — Influx 조회(`/history/premium`·`streaks`·`streaks/bulk`·`candles`)를 별도 컨테이너 `api` 에서, nginx 경로 분기, compose 5컨테이너 (BE·인프라) |
 
 실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
