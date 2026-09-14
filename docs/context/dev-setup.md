@@ -46,7 +46,7 @@ npm run lint       # oxlint
 | S3_BUCKET | 없음 |
 | S3_REGION | `ap-northeast-2` |
 
-- `ROLE`: 프로세스 역할(016) — `collector`(전체 동작) | `api`(Influx 조회 + `/ws/spreads`, 백그라운드 태스크는 017 구독 하나). 로컬은 비워 둔다. `api` 는 compose 의 `api` 서비스가 `environment` 로만 준다. 둘 밖의 값이면 설정을 읽는 순간 실패한다.
+- `ROLE`: 프로세스 역할(016) — `collector`(전체 동작) | `api`(Influx 조회 + `/ws/spreads` + `GET /spreads` Redis 읽기, 백그라운드 태스크는 017 구독 하나). 로컬은 비워 둔다. `api` 는 compose 의 `api` 서비스가 `environment` 로만 준다. 둘 밖의 값이면 설정을 읽는 순간 실패한다.
 - `INFLUX_URL`·`INFLUX_TOKEN`: InfluxDB 2.7 접속(org·bucket 은 `marketlens` 고정). 토큰이 없으면 flusher 비활성·`/history/*` 503 — 앱은 뜬다. 사람용 UI 는 `http://localhost:8086`(같은 토큰).
 - `REDIS_URL`: Redis 7 접속(009 틱 버퍼). compose 안에서는 `redis://redis:6379/0` 으로 덮어쓴다. 없으면 인계된 틱이 버려진다(앱은 뜬다).
 - `REFRESH_TOKEN`: 설정 시 `POST /refresh` 에 `X-Refresh-Token` 헤더가 필요하다.
@@ -60,15 +60,15 @@ npm run lint       # oxlint
 ```bash
 WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 ```
-server·api·web·influxdb·redis 다섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 뜨고 호스트에는 web 하나만 열린다. `localhost:8080` 에 화면, `/api/*` 는 nginx 가 server 로 프록시(접두 제거)하되 `/api/history/{premium,streaks,candles}` 와 `/api/ws/` 는 api 로 간다(016·017). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/spreads` 는 정상·`/api/history/candles?base=BTC` 는 502, `start api` 로 복구. 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
+server·api·web·influxdb·redis 다섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 뜨고 호스트에는 web 하나만 열린다. `localhost:8080` 에 화면, `/api/*` 는 nginx 가 server 로 프록시(접두 제거)하되 `/api/history/{premium,streaks,candles}`·`/api/ws/`·`/api/spreads` 는 api 로 간다(016·017·018). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/spreads`·`/api/history/candles?base=BTC` 둘 다 502, `/api/health` 는 200, `start api` 로 복구. `stop redis` 면 `/api/spreads` 503·WebSocket 은 `waiting`(화면은 직전 표 유지), `start redis` 뒤 10초 안에 복구. 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
 
 ## 검증용 스모크
 ```bash
 curl -s localhost:8000/spreads | head -c 600
 ```
-(기동 10초 뒤 — 마켓 목록·exchangeInfo REST 첫 회차(이후 매초) + 스트림 스냅샷 한 바퀴) 최상위 `rate > 1000`·`notional == 1000`, 행 수 > 100, `warnings` 는 평상시 빈 배열(008), 각 행의 키가 정확히 다음 17개면 정상 (003 §4 기준):
+(기동 10초 뒤 — 마켓 목록·exchangeInfo REST 첫 회차(이후 매초) + 스트림 스냅샷 한 바퀴. dev compose 의 Redis 가 떠 있어야 하고, 접속자(또는 이 curl 자체)가 `spreads:want` 를 쓴 뒤 5초 안에 200 — 첫 curl 은 404 일 수 있다, 018) 최상위 `rate > 1000`·`notional == 1000`, 행 수 > 100, `warnings` 는 평상시 빈 배열(008), 각 행의 키가 정확히 다음 17개면 정상 (003 §4 기준):
 `sym, dom, fx, fwd, rev, usd, spark, status, age, slipFwd, slipRev, krw, netDom, depDom, wdDom, depFx, wdFx`
-체결 규모를 바꿔 슬리피지가 커지는지 본다 — `curl -s "localhost:8000/spreads?notional=500000"` 의 같은 행 `slipFwd` 가 기본값보다 크거나 같아야 한다.
+표는 $1,000 한 장뿐이다(`?notional=` 은 400) — 종목 하나의 규모별 슬리피지는 004 의 `/analysis/slippage`(아래 `/slippage/<거래소>`)로 본다.
 ```bash
 .venv/bin/python - <<'EOF'
 import asyncio, websockets

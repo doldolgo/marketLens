@@ -24,8 +24,8 @@ Influx 를 읽는 무거운 조회(`/history/premium`·`/history/streaks`·`/his
 | `api` | Influx 조회 전용 |
 
 - `collector`: 오늘의 `server` 컨테이너와 **완전히 같다.** 스트림·우주·틱 루프·인계·flusher·writer 태스크·원문 아카이브·입출금 조회 전부 돌고, 모든 엔드포인트를 서빙한다. 로컬 개발(`uvicorn app.main:app`)은 `ROLE` 을 안 주므로 이 역할이다.
-- `api`: 기동 시 **Influx 클라이언트 생성·ping 만** 한다. 거래소 REST·WebSocket 에 연결하지 않고, Redis 는 017 의 구독 목적으로만 연결하며(스트림 `ticks` 는 안 읽는다), S3 를 만지지 않고, 백그라운드 태스크는 017 의 구독 태스크 하나뿐이다. 기동 시 복원(수집 실패 이력·사건·봉 버킷·spark)도 하지 않는다 — 이 중 하나라도 하면 두 프로세스가 같은 measurement 를 중복으로 쓰거나(`collect_fail`·`premium_event`·롤업) 거래소를 이중 구독한다.
-- `api` 가 서빙하는 경로는 `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles` 다섯과 017 의 `/ws/spreads`. 응답·파라미터·에러는 005·014 계약 그대로(Influx 불달·토큰 없음이면 503). **그 외 경로는 404.** `/history/events` 도 404 다 — 진행 중 사건을 메모리에서 읽는 엔드포인트라 `collector` 만 답할 수 있다.
+- `api`: 기동 시 **Influx 클라이언트 생성·ping 만** 한다. 거래소 REST·WebSocket 에 연결하지 않고, Redis 는 017 의 구독과 018 의 `spreads:latest` 읽기·`spreads:want` 쓰기(`GET /spreads` 요청 단위)에만 연결하며(스트림 `ticks` 는 안 읽는다), S3 를 만지지 않고, 백그라운드 태스크는 017 의 구독 태스크 하나뿐이다. 기동 시 복원(수집 실패 이력·사건·봉 버킷·spark)도 하지 않는다 — 이 중 하나라도 하면 두 프로세스가 같은 measurement 를 중복으로 쓰거나(`collect_fail`·`premium_event`·롤업) 거래소를 이중 구독한다.
+- `api` 가 서빙하는 경로는 `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles` 다섯과 017 의 `/ws/spreads`, 018 의 `/spreads`(Redis 읽기). 응답·파라미터·에러는 005·014 계약 그대로(Influx 불달·토큰 없음이면 503). **그 외 경로는 404.** `/history/events` 도 404 다 — 진행 중 사건을 메모리에서 읽는 엔드포인트라 `collector` 만 답할 수 있다.
 - `ROLE` 이 둘 중 하나가 아니면 **설정을 읽는 시점에** 실패한다(앱 객체를 만들기 전, lifespan 이 아니다 — 설정 오류 메시지에 허용값 둘을 적는다). 잘못 뜬 채로 조용히 수집이 두 벌 돌지 않게. 설정은 지금처럼 env 에서 읽되 모르는 키는 무시하는 규칙이라, `ROLE` 은 명시적 설정 항목이어야 검사가 된다.
 
 ### 3.2 compose
@@ -78,7 +78,7 @@ deploy 워크플로(007)는 안 바뀐다. `up -d --build` 가 `api` 도 같이 
 - nginx 계약: 네 경로가 `api:8000` 으로 가고 접두가 떼지며, `/api/history/events` 는 `server:8000` 으로, `location /api/` 의 기존 `proxy_pass` 와 `location = /api` 404 유지
 - `/history/events` 라우터 분리 뒤 005 의 기존 테스트가 전부 그대로 통과(경로·응답 무변경)
 - 007 §4 검증 항목 전부 재통과(4컨테이너 → 5컨테이너로 문구만)
-- 수동: 로컬 `WEB_PORT=8080 docker compose --env-file server/.env up -d --build` 후 `curl localhost:8080/api/history/premium?...` 이 `api` 컨테이너 로그에, `curl localhost:8080/api/spreads` 가 `server` 로그에 찍힌다. `docker compose stop api` 뒤 `/api/spreads` 정상·`/api/history/candles` 502/504(수 초~60초 뒤). `docker compose start api` 후 복구
+- 수동: 로컬 `WEB_PORT=8080 docker compose --env-file server/.env up -d --build` 후 `curl localhost:8080/api/history/premium?...` 이 `api` 컨테이너 로그에, `curl localhost:8080/api/spreads` 가 `server` 로그에 찍힌다. `docker compose stop api` 뒤 `/api/spreads`·`/api/history/candles` 둘 다 502/504(수 초~60초 뒤, 018 부터 `/api/spreads` 도 api 로 간다). `docker compose start api` 후 복구
 - 수동(EC2): 배포 후 `docker stats` 에서 `marketlens-api` 가 뜨고 `marketlens-server` CPU 가 배포 전과 같다(수집 부하는 그대로여야 한다)
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
