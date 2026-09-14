@@ -59,6 +59,7 @@ from app.features.history.router import events_router as history_events_router
 from app.features.history.router import router as history_router
 from app.features.spreads.hub import SpreadsHub
 from app.features.spreads.push import SpreadsPublisher
+from app.features.spreads.router import refresh_router as spreads_refresh_router
 from app.features.spreads.router import router as spreads_router
 from app.features.spreads.ws import ws_router as spreads_ws_router
 from app.features.wallet_status.service import WalletStatusService
@@ -93,6 +94,7 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
     hub = SpreadsHub(bus=bus)
     hub.start()
     app.state.spreads_hub = hub
+    app.state.spreads_bus = bus  # 018 — GET /spreads 가 요청마다 latest 읽기·want 쓰기
     try:
         yield
     finally:
@@ -230,6 +232,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     publisher.start()
     hub.start()
     app.state.spreads_hub = hub
+    app.state.spreads_bus = (
+        bus  # 018 — collector 역할도 GET /spreads 는 메모리가 아니라 Redis 를 읽는다
+    )
     flusher: Flusher | None = None
     if influx is not None:
         flusher = Flusher(stream=tick_stream, writer=influx)
@@ -332,11 +337,13 @@ def create_app() -> FastAPI:
         # 스트림 상태와 무관하게 항상 ok — 프로세스 liveness 만 나타낸다
         return {"status": "ok", "version": APP_VERSION}
 
-    # api 역할은 Influx 만 읽는 네 경로 + 017 의 /ws/spreads — /history/events 는 진행 중 사건을 메모리에서 읽으므로 제외 (016 §3.1)
+    # api 역할은 Influx 만 읽는 네 경로 + 017 의 /ws/spreads + 018 의 GET /spreads(Redis 읽기)
+    # — /history/events 는 진행 중 사건을 메모리에서 읽으므로 제외 (016 §3.1, 018 §3.4)
     app.include_router(history_router)
     app.include_router(spreads_ws_router)
+    app.include_router(spreads_router)
     if not api_only:
-        app.include_router(spreads_router)
+        app.include_router(spreads_refresh_router)
         app.include_router(analysis_router)
         app.include_router(history_events_router)
         app.include_router(health_router)
