@@ -1,7 +1,7 @@
 """core 가 제공하는 계약 — 후속 스펙이 구현하고 main.py lifespan 이 배선한다 (architecture.md).
 
 core 는 features 를 import 하지 않는다. 구현이 아직 없는 계약에는 아무것도 하지 않는
-기본 구현이 꽂힌다(원문 싱크 010, 틱 인계 009, 바이낸스 심볼 012).
+기본 구현이 꽂힌다(원문 싱크 010, 틱 인계 009, 해외 심볼 012·019).
 """
 
 from collections.abc import Callable
@@ -122,10 +122,15 @@ class WalletStatusProvider(Protocol):
     def failed(self) -> list[str]: ...
 
 
-# --- 바이낸스 USDT 현물 심볼 집합 (스펙 001 §3.2, 구현은 012) ---
+# --- 해외 USDT 현물 심볼 집합 (스펙 001 §3.2, 구현은 012 바이낸스·019 바이빗 — 우주는 목록으로 받는다) ---
 
 
 class ForeignSymbolSource(Protocol):
+    @property
+    def id(self) -> str:
+        """거래소 id — 우주가 목록 실패를 거래소별로 보고하는 데 쓴다."""
+        ...
+
     async def refresh(self, client: httpx.AsyncClient) -> int:
         """심볼 목록을 REST 로 갱신하고 나간 호출 수를 돌려준다. 실패는 ExchangeError."""
         ...
@@ -135,12 +140,14 @@ class ForeignSymbolSource(Protocol):
         ...
 
     def set_universe(self, bases: set[str]) -> None:
-        """우주가 확정될 때마다(기동·매초·/refresh) 받는다 — 배정이 같으면 무동작, 다르면 재조정 (012 §3.3). 동기."""
+        """우주가 확정될 때마다(기동·매초·/refresh) 우주 전체를 받는다 — 자기 맵에 없는 base 는 무시, 배정이 같으면 무동작, 다르면 재조정 (012 §3.3·019 §3.3). 동기."""
         ...
 
 
 class NoForeignSymbols:
-    """바이낸스 커넥터를 꽂지 않을 때(테스트)의 구현 — 심볼이 없어 우주가 비고 행이 저장되지 않는다."""
+    """해외 커넥터를 꽂지 않을 때(테스트)의 구현 — 심볼이 없어 우주가 비고 행이 저장되지 않는다."""
+
+    id = "binance"
 
     async def refresh(self, client: httpx.AsyncClient) -> int:
         return 0

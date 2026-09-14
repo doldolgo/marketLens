@@ -50,9 +50,16 @@ class FakeDomestic:
 
 
 class FakeForeign:
-    """바이낸스 심볼 집합 fake — 앞의 `failures` 번은 예외, 그 뒤 성공."""
+    """해외 심볼 집합 fake — 앞의 `failures` 번은 예외, 그 뒤 성공."""
 
-    def __init__(self, bases: set[str], calls: int = 1, failures: int = 0) -> None:
+    def __init__(
+        self,
+        bases: set[str],
+        calls: int = 1,
+        failures: int = 0,
+        id: str = "binance",
+    ) -> None:
+        self.id = id
         self._bases = bases
         self._calls = calls
         self._failures = failures
@@ -62,7 +69,7 @@ class FakeForeign:
     async def refresh(self, client: httpx.AsyncClient) -> int:
         self.refreshes += 1
         if self.refreshes <= self._failures:
-            raise ExchangeApiError("binance", "u", "down", kind="network")
+            raise ExchangeApiError(self.id, "u", "down", kind="network")
         return self._calls
 
     def bases(self) -> set[str]:
@@ -101,7 +108,7 @@ def build(
     refresher = UniverseRefresher(
         sink=sink,
         streams=[up, bt],
-        foreign=foreign,
+        foreigns=[foreign],
         client=_client(),
         monotonic=clock or Clock(),
     )
@@ -266,3 +273,29 @@ async def test_full_refresh_calls_every_exchange_including_foreign() -> None:
     await refresher.refresh()
     await refresher.refresh()  # 매초 회차·/refresh 트리거 — 셋을 전부 부른다
     assert (up.calls, bt.calls, foreign.refreshes) == (2, 2, 2)
+
+
+async def test_two_foreign_sources_form_a_union_and_each_gets_the_full_universe() -> (
+    None
+):
+    """해외가 둘이면 우주 = 국내 합집합 ∩ (바이낸스 ∪ 바이빗) — 한쪽 해외에만 있는 코인도 든다 (019 §2-1)."""
+    binance = FakeForeign({"BTC", "XRP"}, id="binance")
+    bybit = FakeForeign({"BTC", "SOL"}, id="bybit", failures=1)
+    store = LiveStore()
+    sink = QuoteSink(store)
+    refresher = UniverseRefresher(
+        sink=sink,
+        streams=[FakeDomestic("upbit", [["KRW-BTC", "KRW-XRP", "KRW-SOL", "KRW-ETH"]])],
+        foreigns=[binance, bybit],
+        client=_client(),
+    )
+    outcome = await refresher.refresh()  # 바이빗 첫 회차 실패 → 바이빗 목록은 빈 채로
+    assert refresher.universe == {"BTC", "XRP"}
+    assert [(e.exchange, e.kind) for e in outcome.failures] == [("bybit", "network")]
+    assert outcome.calls == {"upbit": 1, "binance": 1}
+    outcome = await refresher.refresh()
+    assert refresher.universe == {"BTC", "XRP", "SOL"}  # 바이빗에만 있는 SOL 도 든다
+    assert outcome.calls == {"upbit": 1, "binance": 1, "bybit": 1}
+    # 둘 다 우주 전체를 받는다 — 자기 맵에 없는 base 는 커넥터가 무시한다
+    assert binance.universes[-1] == {"BTC", "XRP", "SOL"}
+    assert bybit.universes[-1] == {"BTC", "XRP", "SOL"}

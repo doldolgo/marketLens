@@ -1,8 +1,12 @@
 """GET /orderbook/{exchange} — 스펙 004 §3.2·§4."""
 
+from datetime import UTC, datetime
+
+from app.core.live_store import LiveStore
 from app.features.analysis.tests.helpers import (
     FIXED_MS,
     make_client,
+    make_row,
     seed_levels,
     standard_store,
 )
@@ -84,3 +88,18 @@ def test_depth_below_one_is_422():
     client = make_client(standard_store())
     res = client.get("/orderbook/upbit", params={"symbol": "BTC/KRW", "depth": 0})
     assert res.status_code == 422
+
+
+def test_bybit_is_in_the_registry() -> None:
+    # 019 — 바이빗 행도 /orderbook/{exchange} 로 본다 (표시명 Bybit)
+    store = LiveStore()
+    store.put_row(
+        make_row(
+            "bybit", "BTC", quote="USDT", asks=[[67_000.0, 1.0]], bids=[[66_900.0, 1.0]]
+        ),
+        datetime.now(tz=UTC),
+    )
+    res = make_client(store).get("/orderbook/bybit", params={"symbol": "BTC/USDT"})
+    assert res.status_code == 200
+    body = res.json()
+    assert (body["exchange"], body["asks"][0]["price"]) == ("bybit", 67_000.0)

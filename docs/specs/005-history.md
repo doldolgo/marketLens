@@ -37,7 +37,7 @@ dev compose 는 Influx 2.7 과 Redis(009) 를 띄운다. 첫 기동 시 org·buc
 
 ### 3.4 `GET /history/*`
 HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*Ts` 는 epoch 초, `fetchedAt` 은 ms.
-공통 파라미터: `dom` ∈ {upbit, bithumb}(기본 upbit), `fx` = binance 고정. `maxGap`(기본 600, ≥1) 은 streaks·bulk 만 받는다 — premium 은 구간 전체를 그대로 돌려주므로 gap 개념이 없다. streaks·bulk 의 `start`·`end` 는 0 ≤ 값 ≤ 4,102,444,800(2100-01-01) — 밖이면 422(연도 오버플로 500 방지). `end ≤ 0` 은 400(end ≤ start 의 특수형).
+공통 파라미터: `dom` ∈ {upbit, bithumb}(기본 upbit), `fx` ∈ {binance, bybit}(기본 binance — 019). `maxGap`(기본 600, ≥1) 은 streaks·bulk 만 받는다 — premium 은 구간 전체를 그대로 돌려주므로 gap 개념이 없다. streaks·bulk 의 `start`·`end` 는 0 ≤ 값 ≤ 4,102,444,800(2100-01-01) — 밖이면 422(연도 오버플로 500 방지). `end ≤ 0` 은 400(end ≤ start 의 특수형).
 
 **`/history/premium?base&unit&date`** — `base`·`unit ∈ {week, month}` 필수. `date=YYYY-MM-DD`(정확히 이 형식·연도 1970~2100, 밖이면 400. 없으면 오늘 UTC).
 구간 = `date` 가 속한 ISO 주(월 00:00 UTC ~ 다음 월) 또는 달(1일 ~ 다음 달 1일), end exclusive. 구간에 기록 없으면 404. 구간 전체를 한 번에 반환한다. 응답 키:
@@ -136,7 +136,7 @@ cd web && npm run build                        # tsc -b && vite build — ✓ bu
   - `web/src/App.tsx` 가 선택 심볼(초기 `'BTC'`)과 탭 전환을 든다. 002 의 mock 사건 목록(`feed.events`)은 함께 지웠다. 기록 탭 파일들은 013 이 `/history/events` 용으로 다시 썼다.
   - `server/app/main.py` — 토큰이 있을 때만 `InfluxClient` 를 만들어 `app.state.influx` 에 두고 ping 실패는 에러 1줄. flusher(009)·이력 복원(011)·spark 복원(009)이 같은 클라이언트를 쓴다.
 - 추측한 지점 (묻지 않고 정한 것 — 전부 본문에 반영):
-  - `fx` 는 `Literal["binance"]` 쿼리로 노출한다 — 다른 값은 FastAPI 422(§3.4 오류 표의 "파라미터 검증 실패").
+  - `fx` 는 `Literal["binance", "bybit"]` 쿼리로 노출한다 — 다른 값은 FastAPI 422(§3.4 오류 표의 "파라미터 검증 실패").
   - `base` 는 `^[A-Za-z0-9]{1,20}$` 패턴으로 검증한다(422) — Flux 문자열에 들어가므로 이스케이프와 함께 이중 방어.
   - 빈 방향 요약은 `count 0`·수치 0.0·빈 `segments`, bulk 의 `coins` 는 base 오름차순.
   - 백필의 "이미 채워진 날" 판정은 그 조각의 `count > 0`. dev compose 의 UI 비밀번호도 `${INFLUX_TOKEN}` 재사용.

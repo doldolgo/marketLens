@@ -159,7 +159,9 @@ def test_window_judged_by_window_start_and_sorted_ascending() -> None:
 
 def test_bad_params_422() -> None:
     client = make_client(FakeInfluxReader())
-    assert get(client, base="BTC", fx="bybit").status_code == 422
+    assert (
+        get(client, base="BTC", fx="mexc").status_code == 422
+    )  # fx 는 binance·bybit 뿐 (019)
     assert get(client, base="BTC", res="3m").status_code == 422
     assert get(client, base="BTC", dir="up").status_code == 422
     assert get(client, base="BTC", dom="binance").status_code == 422
@@ -175,3 +177,8 @@ def test_storage_unavailable_503() -> None:
     reader = FakeInfluxReader()
     reader.fail = True
     assert get(make_client(reader), base="BTC").status_code == 503
+
+
+def test_fx_accepts_bybit() -> None:
+    res = get(make_client(FakeInfluxReader()), base="BTC", fx="bybit")
+    assert res.status_code == 200 and res.json()["fx"] == "bybit"  # 019

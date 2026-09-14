@@ -76,16 +76,22 @@ async def test_first_cycle_fetches_then_cache_until_interval() -> None:
     assert len(requests) == 1
 
 
-async def test_keyless_upbit_binance_fail_with_zero_calls_and_warnings() -> None:
+async def test_keyless_upbit_binance_bybit_fail_with_zero_calls_and_warnings() -> None:
     _, client = routing_client(lambda: httpx.Response(200, json=_GOOD_BITHUMB))
     service = keyless_service()
     await service.refresh_if_due(client)
-    assert service.availability() == {"upbit": False, "bithumb": True, "binance": False}
-    assert service.failed() == ["upbit", "binance"]
+    assert service.availability() == {
+        "upbit": False,
+        "bithumb": True,
+        "binance": False,
+        "bybit": False,
+    }
+    assert service.failed() == ["upbit", "binance", "bybit"]
     warnings = service.warnings()
     assert warnings == [
         "upbit 입출금 상태 조회 실패 — UPBIT_API_KEY / UPBIT_SECRET_KEY 가 비어 있습니다. (해당 거래소의 deposit_enabled / withdrawal_enabled 는 null)",
         "binance 입출금 상태 조회 실패 — BINANCE_API_KEY / BINANCE_SECRET_KEY 가 비어 있습니다. (해당 거래소의 deposit_enabled / withdrawal_enabled 는 null)",
+        "bybit 입출금 상태 조회 실패 — BYBIT_API_KEY / BYBIT_SECRET_KEY 가 비어 있습니다. (해당 거래소의 deposit_enabled / withdrawal_enabled 는 null)",
     ]
 
 

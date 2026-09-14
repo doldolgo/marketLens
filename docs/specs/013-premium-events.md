@@ -18,7 +18,7 @@
 ## 3. 동작
 
 ### 3.1 읽는 계약 (복사)
-- 001·009: 틱은 1초 주기. 틱 `rows` 의 행 = `(dom, fx, base, fwd, rev)`, `dom ∈ {upbit, bithumb}`, `fx = binance`, `fwd`·`rev` 는 **슬리피지 차감 전 원값 %**(005 §3.3). 국내 거래소의 USDT 시세가 없거나 호가가 없으면 그 조합은 그 틱에 **없다**. 틱 시각 `ts` 는 epoch 초.
+- 001·009: 틱은 1초 주기. 틱 `rows` 의 행 = `(dom, fx, base, fwd, rev)`, `dom ∈ {upbit, bithumb}`, `fx ∈ {binance, bybit}`(019), `fwd`·`rev` 는 **슬리피지 차감 전 원값 %**(005 §3.3). 국내 거래소의 USDT 시세가 없거나 호가가 없으면 그 조합은 그 틱에 **없다**. 틱 시각 `ts` 는 epoch 초.
 - 005: `fwd`(kimp) 는 해외 매수→국내 매도 방향, `rev`(reverse) 는 국내 매수→해외 매도 방향. 둘 다 양수일 때 그 방향의 프리미엄이 있다. `/history/*` 오류 계약 — 503 `storage_unavailable`(Influx 불달·`INFLUX_TOKEN` 없음), 400 `invalid_request`(`end ≤ start`), 422(파라미터 검증). `start`·`end` 는 0 ≤ 값 ≤ 4,102,444,800, `start` 없으면 `end − 7일`, `end` 없으면 지금+1초. HTTP JSON 키는 camelCase.
 - 011: 구간을 메모리에서 열고 닫으며 Influx 에 **열림·닫힘 시 1점**(같은 tag·time 으로 덮어써 field 를 합친다 — Influx 2.x 는 같은 key 재쓰기 시 field 합집합·새 값 우선). 기동 시 복원은 틱 루프 시작 **전**, 3초 상한, 실패하면 빈 상태로 시작하고 경고 1줄. 쓰기 실패는 로그 후 무시하되 순서를 보장한다.
 - 002/003: 셸의 1.5초 `now`, 탭은 숨김만, 스프레드 행 클릭 → 선택 심볼 + 기록 탭 전환(초기 `'BTC'`). 거래소 표시명 `upbit→업비트` `bithumb→빗썸`.
