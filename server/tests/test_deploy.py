@@ -73,16 +73,16 @@ def test_compose_injects_env_file_and_overrides_service_urls() -> None:
     assert "ROLE" not in server.get("environment", {})
 
 
-def test_compose_api_is_same_image_with_role_api_and_no_redis() -> None:
-    """api 는 server 와 같은 빌드 컨텍스트, ROLE=api 만 다르다 — Redis 는 쓰지 않으므로 덮지 않는다 (016 §3.2)."""
+def test_compose_api_is_same_image_with_role_api_and_redis_for_subscribe() -> None:
+    """api 는 server 와 같은 빌드 컨텍스트, ROLE=api 만 다르다. Redis 는 017 구독용으로 서비스명을 덮는다 (016 §3.2·017 §3.5)."""
     services = _yaml("docker-compose.yml")["services"]
     server, api, web = services["server"], services["api"], services["web"]
     assert api["build"] == server["build"] == "./server"
     assert api["env_file"] == ["./server/.env"]
     assert api["environment"]["ROLE"] == "api"
     assert api["environment"]["INFLUX_URL"] == server["environment"]["INFLUX_URL"]
-    assert "REDIS_URL" not in api["environment"]
-    assert api["depends_on"] == ["influxdb"]
+    assert api["environment"]["REDIS_URL"] == server["environment"]["REDIS_URL"]
+    assert set(api["depends_on"]) == {"influxdb", "redis"}
     # nginx 가 기동 시 두 upstream 이름을 푼다 — web 은 둘 다 기다린다
     assert set(web["depends_on"]) == {"server", "api"}
 
@@ -176,6 +176,27 @@ def test_nginx_routes_influx_history_paths_to_api_and_the_rest_to_server() -> No
         "proxy_set_header X-Forwarded-Proto $scheme;",
     ):
         assert header in block, header
+
+
+def test_nginx_upgrades_api_ws_to_api_without_touching_read_timeout() -> None:
+    """`/api/ws/` 접두 위치 → `api:8000/ws/`, Upgrade 헤더·HTTP/1.1, read timeout 은 기본 그대로 (017 §3.5)."""
+    conf = _text("web/nginx.conf")
+    block = conf.split("location /api/ws/ {", 1)[1].split("\n    }", 1)[0]
+    assert "proxy_pass http://api:8000/ws/;" in block
+    assert "proxy_http_version 1.1;" in block
+    assert "proxy_set_header Upgrade $http_upgrade;" in block
+    assert 'proxy_set_header Connection "upgrade";' in block
+    for header in (
+        "proxy_set_header Host $http_host;",
+        "proxy_set_header X-Real-IP $remote_addr;",
+        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+        "proxy_set_header X-Forwarded-Proto $scheme;",
+    ):
+        assert header in block, header
+    assert "proxy_read_timeout" not in conf
+    # 정규식 location(016)은 /api/ws/ 에 걸리지 않아야 접두 위치가 이긴다
+    pattern, _ = _nginx_api_block()
+    assert not re.search(pattern, "/api/ws/spreads")
 
 
 def test_nginx_cache_rules_for_index_and_hashed_assets() -> None:

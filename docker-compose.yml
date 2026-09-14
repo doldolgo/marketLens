@@ -48,9 +48,11 @@ services:
     environment:
       ROLE: api
       INFLUX_URL: http://influxdb:8086
-      # REDIS_URL 은 덮지 않는다 — api 는 Redis 를 쓰지 않는다(env_file 의 로컬 값은 무시된다)
+      # 017 — 스프레드 표 구독(pub/sub)용. 안 덮으면 env_file 의 로컬 값(localhost)을 컨테이너 안에서 쓴다
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       - influxdb
+      - redis
 
   web:
     build: ./web

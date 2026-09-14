@@ -1,4 +1,5 @@
-"""프로세스 역할 계약 — ROLE=api 앱은 Influx 조회 경로만 서빙하고 백그라운드 태스크가 없다 (스펙 016 §3.1·§4).
+"""프로세스 역할 계약 — ROLE=api 앱은 Influx 조회 경로 + /ws/spreads 만 서빙하고 백그라운드 태스크는
+017 의 구독 태스크 하나다 (스펙 016 §3.1·§4, 017 §4).
 
 collector(기본) 의 전체 동작은 기존 테스트가 그대로 지킨다 — 여기서는 라우트 집합만 본다.
 """
@@ -10,6 +11,7 @@ from collections.abc import Callable, Iterator
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from starlette.routing import WebSocketRoute
 
 from app.core.config import get_settings
 from app.main import create_app
@@ -71,9 +73,29 @@ def test_api_role_serves_only_influx_routes_and_404s_the_rest(set_role) -> None:
         client.get("/orderbook/upbit", params={"symbol": "BTC/KRW"}).status_code == 404
     )
     assert _paths(client.app) == API_ROUTES
+    # WebSocket 경로는 OpenAPI 에 안 실린다 — 라우트 표에서 본다 (017 §3.3)
+    assert _ws_paths(client.app) == {"/ws/spreads"}
 
 
-async def test_api_role_starts_with_no_tasks_and_no_redis_s3_exchange_logs(
+def _ws_paths(app) -> set[str]:  # noqa: ANN001 — FastAPI 앱
+    """WebSocket 경로 집합 — include_router 가 라우터를 중첩으로 두므로 재귀로 훑는다."""
+
+    def walk(routes) -> set[str]:  # noqa: ANN001
+        found: set[str] = set()
+        for r in routes:
+            if isinstance(r, WebSocketRoute):
+                found.add(r.path)
+            # 포함된 라우터는 원본 라우터를 감싼 객체로 남는다 — 그 안을 다시 훑는다
+            inner = getattr(r, "original_router", None)
+            found |= walk(
+                inner.routes if inner is not None else getattr(r, "routes", [])
+            )
+        return found
+
+    return walk(app.routes)
+
+
+async def test_api_role_starts_with_only_the_spreads_hub_task_and_no_s3_exchange_logs(
     set_role,  # noqa: ANN001
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -83,11 +105,11 @@ async def test_api_role_starts_with_no_tasks_and_no_redis_s3_exchange_logs(
     # lifespan 을 이 루프에서 직접 돌린다 — 안에서 만든 태스크가 있으면 여기서 보인다
     async with app.router.lifespan_context(app):
         others = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        assert others == [], "api 역할은 백그라운드 태스크를 만들지 않는다"
+        # 017 — Redis 구독 태스크 하나뿐 (스트림·flusher·쓰기 태스크 없음)
+        assert [t.get_name() for t in others] == ["spreads_hub"]
         assert app.state.influx is None  # 토큰 없음
-    # Redis·S3·거래소 줄이 찍히면 역할 분기가 샌 것이다 (016 §3.5)
+    # S3·거래소 줄이 찍히면 역할 분기가 샌 것이다 (016 §3.5). Redis 줄은 017 구독이 남길 수 있다
     for banned in (
-        "Redis",
         "S3",
         "거래소",
         "업비트",
@@ -108,6 +130,7 @@ def test_collector_is_default_and_keeps_full_route_set(set_role) -> None:  # noq
     assert API_ROUTES <= paths
     assert {"/spreads", "/refresh", "/health/collect", "/history/events"} <= paths
     assert any(p.startswith("/orderbook") for p in paths)
+    assert _ws_paths(app) == {"/ws/spreads"}  # 두 역할 모두 (017 §3.2)
 
 
 def test_unknown_role_fails_when_settings_are_read_before_app_object(set_role) -> None:  # noqa: ANN001
