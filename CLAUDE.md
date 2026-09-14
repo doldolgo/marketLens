@@ -88,6 +88,7 @@ marketlens/
 | 013 | premium-events | DONE | 틱에서 김프/역프 사건 감지(1.0% 진입·0.5% 이탈·1분 초과) → Influx `premium_event` 1건 1점 + `/history/events` + 기록 탭 전 코인 사건 표 |
 | 014 | premium-1m | DONE | 틱에서 (국내·해외·코인) 1분 OHLC·가격·입출금 집계 → 버킷 `candles_1m…1d`(사슬 롤업, 보관 7일/30일/90일/1년/무제한) + `/history/candles`(`res`, 1,440점 상한) + 기록 탭 차트 실데이터 |
 | 016 | process-split | DONE | 서버 `ROLE`(collector | api) — Influx 조회(`/history/premium`·`streaks`·`streaks/bulk`·`candles`)를 별도 컨테이너 `api` 에서, nginx 경로 분기, compose 5컨테이너 (BE·인프라) |
+| 017 | spreads-push | DONE | 스프레드 표 WebSocket 푸시 — 수집이 누가 볼 때만 $1,000 표를 매초 Redis 채널로, `api` 가 구독해 바뀐 행만 `/ws/spreads` 로 접속자 전원에 같은 바이트, FE 폴링 대체(5초 fallback), 체결 규모 $1,000 고정 |
 
 실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
