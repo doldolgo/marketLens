@@ -76,7 +76,7 @@ async def get_premium_history(
     unit: Literal["week", "month"] = Query(...),
     date: str | None = Query(None),
     dom: Literal["upbit", "bithumb"] = Query("upbit"),
-    fx: Literal["binance"] = Query("binance"),
+    fx: Literal["binance", "bybit"] = Query("binance"),
 ) -> JSONResponse:
     return await _respond(
         request,
@@ -95,7 +95,7 @@ async def get_streaks(
     end: int | None = Query(None, ge=0, le=4_102_444_800),
     max_gap: int = Query(600, ge=1, alias="maxGap"),
     dom: Literal["upbit", "bithumb"] = Query("upbit"),
-    fx: Literal["binance"] = Query("binance"),
+    fx: Literal["binance", "bybit"] = Query("binance"),
 ) -> JSONResponse:
     return await _respond(
         request,
@@ -120,7 +120,7 @@ async def get_streaks_bulk(
     end: int | None = Query(None, ge=0, le=4_102_444_800),
     max_gap: int = Query(600, ge=1, alias="maxGap"),
     dom: Literal["upbit", "bithumb"] = Query("upbit"),
-    fx: Literal["binance"] = Query("binance"),
+    fx: Literal["binance", "bybit"] = Query("binance"),
 ) -> JSONResponse:
     # 수 MB 응답의 gzip 은 001 이 켠 앱 전역 GZip 미들웨어가 처리한다 (architecture.md)
     return await _respond(
@@ -172,7 +172,7 @@ async def get_candles(
     base: str = Query(..., pattern=_BASE_PATTERN),
     res: Literal["1m", "5m", "1h", "4h", "1d"] = Query("1m"),
     dom: Literal["upbit", "bithumb"] = Query("upbit"),
-    fx: Literal["binance"] = Query("binance"),
+    fx: Literal["binance", "bybit"] = Query("binance"),
     dir: Literal["kimp", "reverse"] = Query("kimp"),
     start: int | None = Query(None, ge=0, le=4_102_444_800),
     end: int | None = Query(None, ge=0, le=4_102_444_800),

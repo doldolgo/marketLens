@@ -88,10 +88,16 @@ def test_response_shape_fixed_exchange_order_and_open_outage_in_both(
 
     body = make_client(store, t, now_ms, monkeypatch).get("/health/collect").json()
     assert body["serverStartedAt"] == T0 and body["fetchedAt"] == now_ms
-    assert [e["exchange"] for e in body["exchanges"]] == ["upbit", "bithumb", "binance"]
-    up, bt, bn = body["exchanges"]
+    assert [e["exchange"] for e in body["exchanges"]] == [
+        "upbit",
+        "bithumb",
+        "binance",
+        "bybit",
+    ]
+    up, bt, bn, by = body["exchanges"]
     assert up["successRate1h"] == 100.0 and bn["successRate1h"] == 99.7
-    assert body["successRate1h"] == 99.9  # (100 + 100 + 99.7) / 3
+    assert by["successRate1h"] == 100.0 and by["state"] == "down"  # 성공 0회 (019)
+    assert body["successRate1h"] == 99.9  # (100 + 100 + 99.7 + 100) / 4
     assert (up["state"], up["markets"], up["openOutage"], up["lastError"]) == (
         "ok",
         2,
@@ -137,7 +143,7 @@ def test_state_boundaries(elapsed_ms: int, state: str) -> None:
 
 def test_zero_success_is_down() -> None:
     out = build_collect_health(LiveStore(), OutageTracker(), T0, T0 + SEC)
-    assert [e.state for e in out.exchanges] == ["down", "down", "down"]
+    assert [e.state for e in out.exchanges] == ["down", "down", "down", "down"]
     assert out.success_rate_1h == 100.0 and out.outages == []
 
 
@@ -153,11 +159,13 @@ def test_success_rate_counts_only_overlap_with_1h_window() -> None:
     # 진행 중: 36초 전 시작 → now 까지 36초
     fail(t, "bithumb", now_ms - 36 * SEC)
     out = build_collect_health(LiveStore(), t, T0, now_ms)
-    up, bt, bn = out.exchanges
+    up, bt, bn, by = out.exchanges
     assert up.success_rate_1h == round((1 - 600 / 3600) * 100, 1)  # 83.3
     assert bt.success_rate_1h == 99.0
-    assert bn.success_rate_1h == 100.0
-    assert out.success_rate_1h == round((up.success_rate_1h + 99.0 + 100.0) / 3, 1)
+    assert bn.success_rate_1h == 100.0 and by.success_rate_1h == 100.0
+    assert out.success_rate_1h == round(
+        (up.success_rate_1h + 99.0 + 100.0 + 100.0) / 4, 1
+    )
 
 
 async def test_restored_open_outage_spans_downtime_until_now() -> None:
