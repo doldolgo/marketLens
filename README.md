@@ -22,7 +22,7 @@ cd web && npm ci && npm run dev              # :5173, /api → :8000 프록시
 docker compose --env-file .env --env-file server/.env up -d --build
 ```
 
-server·web·influxdb·redis 네 컨테이너가 뜨고, 호스트에는 web 하나만 열린다(`WEB_PORT`, 기본 80 — 기존 스택과 공존하는 EC2 는 루트 `.env` 의 `WEB_PORT=8080`).
+server·api·web·influxdb·redis 다섯 컨테이너가 뜨고(api 는 `/history/*` 조회 전용 — 수집과 프로세스가 다르다), 호스트에는 web 하나만 열린다(`WEB_PORT`, 기본 80 — 기존 스택과 공존하는 EC2 는 루트 `.env` 의 `WEB_PORT=8080`).
 
 ## 배포
 

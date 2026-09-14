@@ -5,6 +5,7 @@ Docker 가 있는 로컬·EC2 에서 사람이 돈다. 여기서는 설정 파�
 """
 
 import logging
+import re
 from pathlib import Path
 
 import yaml
@@ -28,13 +29,13 @@ def _on(workflow: dict) -> dict:
     return workflow.get("on") or workflow[True]
 
 
-# --- compose: 컨테이너 4개, 호스트 노출은 web 하나 ---------------------------
+# --- compose: 컨테이너 5개(016), 호스트 노출은 web 하나 -------------------------
 
 
-def test_compose_declares_four_containers_with_fixed_names() -> None:
+def test_compose_declares_five_containers_with_fixed_names() -> None:
     compose = _yaml("docker-compose.yml")
     services = compose["services"]
-    assert set(services) == {"server", "web", "influxdb", "redis"}
+    assert set(services) == {"server", "api", "web", "influxdb", "redis"}
     # 프로젝트명 고정 — dev compose(marketlens-dev)와 컨테이너·볼륨을 나눈다
     assert compose["name"] == "marketlens"
     assert _yaml("docker-compose.dev.yml")["name"] != compose["name"]
@@ -58,7 +59,7 @@ def test_compose_caps_container_logs_on_every_service() -> None:
 def test_compose_exposes_only_web_on_host_via_web_port() -> None:
     services = _yaml("docker-compose.yml")["services"]
     assert services["web"]["ports"] == ["${WEB_PORT:-80}:80"]
-    for name in ("server", "influxdb", "redis"):
+    for name in ("server", "api", "influxdb", "redis"):
         assert "ports" not in services[name], f"{name} 는 호스트에 열리면 안 된다"
 
 
@@ -68,6 +69,22 @@ def test_compose_injects_env_file_and_overrides_service_urls() -> None:
     assert server["environment"]["INFLUX_URL"] == "http://influxdb:8086"
     assert server["environment"]["REDIS_URL"] == "redis://redis:6379/0"
     assert set(server["depends_on"]) == {"influxdb", "redis"}
+    # server 에는 ROLE 을 주지 않는다 — 기본값 collector (016 §3.2)
+    assert "ROLE" not in server.get("environment", {})
+
+
+def test_compose_api_is_same_image_with_role_api_and_no_redis() -> None:
+    """api 는 server 와 같은 빌드 컨텍스트, ROLE=api 만 다르다 — Redis 는 쓰지 않으므로 덮지 않는다 (016 §3.2)."""
+    services = _yaml("docker-compose.yml")["services"]
+    server, api, web = services["server"], services["api"], services["web"]
+    assert api["build"] == server["build"] == "./server"
+    assert api["env_file"] == ["./server/.env"]
+    assert api["environment"]["ROLE"] == "api"
+    assert api["environment"]["INFLUX_URL"] == server["environment"]["INFLUX_URL"]
+    assert "REDIS_URL" not in api["environment"]
+    assert api["depends_on"] == ["influxdb"]
+    # nginx 가 기동 시 두 upstream 이름을 푼다 — web 은 둘 다 기다린다
+    assert set(web["depends_on"]) == {"server", "api"}
 
 
 def test_compose_storage_containers_persist_and_match_dev_setup() -> None:
@@ -124,7 +141,41 @@ def test_nginx_strips_api_prefix_and_falls_back_to_index() -> None:
     assert "location /api/ {" in conf
     # proxy_pass 끝의 / 가 접두 제거를 만든다: /api/health → /health
     assert "proxy_pass http://server:8000/;" in conf
+    assert "location = /api { return 404; }" in conf
     assert "try_files $uri $uri/ /index.html;" in conf
+
+
+def _nginx_api_block() -> tuple[str, str]:
+    """api 로 보내는 정규식 location — (패턴, 블록 본문)."""
+    conf = _text("web/nginx.conf")
+    match = re.search(r"location ~ (\S+) \{(.*?)\n    \}", conf, re.S)
+    assert match is not None, "api 로 분기하는 정규식 location 이 없다"
+    return match.group(1), match.group(2)
+
+
+def test_nginx_routes_influx_history_paths_to_api_and_the_rest_to_server() -> None:
+    """네 경로만 api:8000 으로, 접두를 떼고 (016 §3.3). /api/history/events 는 server 로."""
+    pattern, block = _nginx_api_block()
+    to_api = (
+        "/api/history/premium",
+        "/api/history/streaks",
+        "/api/history/streaks/bulk",
+        "/api/history/candles",
+    )
+    for path in to_api:
+        assert re.search(pattern, path), path
+    for path in ("/api/history/events", "/api/spreads", "/api/health", "/api/refresh"):
+        assert not re.search(pattern, path), path
+    assert "proxy_pass http://api:8000;" in block
+    # proxy_pass 에 URI 가 없으므로 접두 제거는 rewrite 가 한다 — break 라 쿼리스트링은 그대로
+    assert "rewrite ^/api/(.*)$ /$1 break;" in block
+    for header in (
+        "proxy_set_header Host $http_host;",
+        "proxy_set_header X-Real-IP $remote_addr;",
+        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+        "proxy_set_header X-Forwarded-Proto $scheme;",
+    ):
+        assert header in block, header
 
 
 def test_nginx_cache_rules_for_index_and_hashed_assets() -> None:
@@ -264,4 +315,4 @@ def test_readme_is_short_and_points_to_claude_md() -> None:
     assert (
         "docker compose --env-file .env --env-file server/.env up -d --build" in readme
     )
-    assert "네 컨테이너" in readme or "4컨테이너" in readme
+    assert "다섯 컨테이너" in readme or "5컨테이너" in readme
