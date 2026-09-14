@@ -39,16 +39,33 @@ _GOOD_BITHUMB = {
 }
 
 
+_GOOD_BITGET = {
+    "code": "00000",
+    "msg": "success",
+    "requestTime": 1,
+    "data": [
+        {
+            "coin": "BTC",
+            "chains": [
+                {"chain": "BTC", "rechargeable": "true", "withdrawable": "true"}
+            ],
+        }
+    ],
+}
+
+
 def routing_client(
     bithumb: Callable[[], httpx.Response],
 ) -> tuple[list[httpx.Request], httpx.AsyncClient]:
-    """호스트별 라우팅 — 빗썸만 응답을 정하고 나머지는 도달하면 실패해야 한다."""
+    """호스트별 라우팅 — 키 없는 빗썸·비트겟만 응답을 정하고 나머지는 도달하면 실패해야 한다."""
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.url.host == "api.bithumb.com":
             return bithumb()
+        if request.url.host == "api.bitget.com":
+            return httpx.Response(200, json=_GOOD_BITGET)  # public — 키 없이 성공 (020)
         raise AssertionError(f"예상 밖 네트워크 호출: {request.url}")
 
     return requests, httpx.AsyncClient(transport=httpx.MockTransport(handler))
@@ -67,13 +84,13 @@ def keyless_service(interval: float = 60.0) -> WalletStatusService:
 async def test_first_cycle_fetches_then_cache_until_interval() -> None:
     requests, client = routing_client(lambda: httpx.Response(200, json=_GOOD_BITHUMB))
     service = keyless_service(interval=60.0)
-    # 기동 첫 사이클은 캐시가 비어 즉시 호출 — 키 있는 빗썸만 1회 (§3.5)
+    # 기동 첫 사이클은 캐시가 비어 즉시 호출 — 키 없는 빗썸·비트겟만 1회씩 (§3.5·020)
     calls = await service.refresh_if_due(client)
-    assert calls == {"bithumb": 1}
-    assert len(requests) == 1
+    assert calls == {"bithumb": 1, "bitget": 1}
+    assert len(requests) == 2
     # 사이 사이클은 캐시 — 호출 없음
     assert await service.refresh_if_due(client) is None
-    assert len(requests) == 1
+    assert len(requests) == 2
 
 
 async def test_keyless_upbit_binance_bybit_fail_with_zero_calls_and_warnings() -> None:
@@ -85,6 +102,7 @@ async def test_keyless_upbit_binance_bybit_fail_with_zero_calls_and_warnings() -
         "bithumb": True,
         "binance": False,
         "bybit": False,
+        "bitget": True,  # public — 키가 없어도 경고가 나지 않는다 (020)
     }
     assert service.failed() == ["upbit", "binance", "bybit"]
     warnings = service.warnings()
@@ -153,7 +171,12 @@ async def test_injected_recorder_receives_each_cycle_body() -> None:
     )
     await service.refresh_if_due(client)
     await service.refresh_if_due(client)
-    assert [(ex, src) for ex, src, _, _ in recorder.lines] == [
-        ("bithumb", "rest:/public/assetsstatus/multichain/ALL"),
-        ("bithumb", "rest:/public/assetsstatus/multichain/ALL"),
-    ]
+    assert (
+        sorted((ex, src) for ex, src, _, _ in recorder.lines)
+        == [
+            ("bitget", "rest:/api/v2/spot/public/coins"),
+            ("bitget", "rest:/api/v2/spot/public/coins"),
+            ("bithumb", "rest:/public/assetsstatus/multichain/ALL"),
+            ("bithumb", "rest:/public/assetsstatus/multichain/ALL"),
+        ]
+    )  # 병렬 조회라 도착 순서는 정하지 않는다 — 키 없는 두 public 조회기만 원문이 있다 (020)

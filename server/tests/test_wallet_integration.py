@@ -33,15 +33,30 @@ _BITHUMB_WALLET = {
         }
     ],
 }
+_BITGET_WALLET = {
+    "code": "00000",
+    "msg": "success",
+    "requestTime": 1,
+    "data": [
+        {
+            "coin": "BTC",
+            "chains": [
+                {"chain": "BTC", "rechargeable": "true", "withdrawable": "true"}
+            ],
+        }
+    ],
+}
 NOW = datetime.now(UTC)
 
 
 def wallet_client(responses: list[httpx.Response]) -> httpx.AsyncClient:
-    """빗썸 입출금 URL 만 응답한다 — 키 없는 업비트·바이낸스는 호출 자체가 없어야 한다."""
+    """빗썸·비트겟(public) 입출금 URL 만 응답한다 — 키 없는 업비트·바이낸스·바이빗은 호출 자체가 없어야 한다."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.bithumb.com" and "assetsstatus" in request.url.path:
             return responses.pop(0) if len(responses) > 1 else responses[0]
+        if request.url.host == "api.bitget.com" and "public/coins" in request.url.path:
+            return httpx.Response(200, json=_BITGET_WALLET)  # 키 없이 성공 (020)
         raise AssertionError(f"예상 밖 네트워크 호출: {request.url}")
 
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
@@ -117,6 +132,7 @@ async def test_keyless_startup_spreads_and_refresh_contract() -> None:
         "bithumb": True,
         "binance": False,
         "bybit": False,
+        "bitget": True,  # public (020)
     }
     dw_warnings = [w for w in body["warnings"] if "입출금 상태 조회 실패" in w]
     assert len(dw_warnings) == 3
@@ -125,7 +141,7 @@ async def test_keyless_startup_spreads_and_refresh_contract() -> None:
     assert dw_warnings[2].startswith("bybit ")
     # 트리거는 입출금을 즉시 다시 조회한다 — 빗썸 항목의 calls 에 그 1회 (§3.5)
     calls = {s["exchange"]: s["calls"] for s in body["snapshots"]}
-    assert calls["bithumb"] == 1
+    assert calls["bithumb"] == 1 and calls["bitget"] == 1
     assert calls["upbit"] == 0  # 키 없음 → 호출 0회로 실패
 
 

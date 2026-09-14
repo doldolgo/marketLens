@@ -1,4 +1,4 @@
-// 015 UI 시안용 mock — 서버가 수집하지 않는 해외 거래소(MEXC) 카드는 binance 실봉을 변형해 그린다(Bybit 는 019 부터 실데이터).
+// 015 UI 시안용 mock — 서버가 수집하지 않는 해외 거래소(MEXC) 카드는 binance 실봉을 변형해 그린다(Bybit 는 019, Bitget 는 020 부터 실데이터).
 // 실 API 경로(청크·과거 로드·60초 갱신)는 그대로 타고, 이 파일은 받은 봉을 바꾸기만 한다. 수집 스펙이 생기면 이 파일과
 // `FX_CHOICES` 의 mock 항목을 지운다. 변형은 시드 난수라 같은 (거래소, 시각) 은 언제 봐도 같은 값이다.
 import type { Candle1m, Dir, PremiumEvent } from './types'

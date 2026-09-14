@@ -38,12 +38,13 @@ from app.features.analysis.models import (
 
 # 거래소 레지스트리 — 004 는 BE 전용이라 표시명도 여기서 만든다 (003 FE 의 표시명 규칙과 동일)
 DOMESTIC_EXCHANGES: tuple[str, ...] = ("upbit", "bithumb")
-FOREIGN_EXCHANGES: tuple[str, ...] = ("binance", "bybit")
+FOREIGN_EXCHANGES: tuple[str, ...] = ("binance", "bybit", "bitget")
 EXCHANGE_NAMES: dict[str, str] = {
     "upbit": "업비트",
     "bithumb": "빗썸",
     "binance": "Binance",
     "bybit": "Bybit",  # 019 — /orderbook·/slippage 의 {exchange} 로 열린다
+    "bitget": "Bitget",  # 020
 }
 BASE_EXCHANGE = "upbit"  # 기준 국내 거래소 (§3.0)
 FX_EXCHANGE = "binance"  # premium·scan·matrix 의 해외는 바이낸스 고정 (§3.0, 019 빚)

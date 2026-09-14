@@ -4,7 +4,7 @@
 
 ## 핵심 설계 결정
 - **실시간 시세의 기준은 `live_store`(LiveStore)다.** 실시간 조회 API 는 메모리만 읽고(스프레드 표 푸시는 api 가 Redis 구독으로 — 017), `/history/*` 만 InfluxDB 를 조회한다. HTTP 조회 경로에 S3 호출은 없다. Redis 를 HTTP 가 만지는 곳은 `GET /spreads`(키 `spreads:latest` 읽기·`spreads:want` 쓰기, 018) 하나고 그 밖은 WebSocket 푸시의 구독뿐이다.
-- **거래소 시세는 WebSocket 상시 연결로만 받는다.** 업비트·빗썸은 호가·현재가 스트림(001), 바이낸스는 depth20·miniTicker 스트림(012), 바이빗은 orderbook.200 스냅샷+델타·publicTrade 스트림(019). REST 는 "지금 어떤 코인이 있는가"(마켓·심볼 목록, **매초**)와 입출금 상태(60초)에만 쓴다 — 목록이 바뀐 초에 구독을 더하고 지운다. 네 거래소 모두 SSE 는 제공하지 않는다 — 선택지는 WebSocket 뿐이다.
+- **거래소 시세는 WebSocket 상시 연결로만 받는다.** 업비트·빗썸은 호가·현재가 스트림(001), 바이낸스는 depth20·miniTicker 스트림(012), 바이빗은 orderbook.200 스냅샷+델타·publicTrade 스트림(019), 비트겟은 books 스냅샷+update·trade 스트림(020). REST 는 "지금 어떤 코인이 있는가"(마켓·심볼 목록, **매초**)와 입출금 상태(60초)에만 쓴다 — 목록이 바뀐 초에 구독을 더하고 지운다. 다섯 거래소 모두 SSE 는 제공하지 않는다 — 선택지는 WebSocket 뿐이다.
 - **저장은 세 계층을 순서대로 흐른다(009).** LiveStore 는 최신 시세와 **최신 틱 1장**을 들고, 새 틱이 만들어지는 순간 직전 틱이 Redis 로 인계된다. Redis 는 Influx 로 아직 옮기지 못한 틱만 들고(원문이 아니라 Influx 가 저장할 모양 그대로), 60초마다 전량이 Influx 로 옮겨진 뒤 비워진다.
 - **원문은 S3 에 남긴다(010).** 거래소가 준 WebSocket 프레임·REST 응답 본문을 가공하지 않은 텍스트 그대로 원문 싱크에 넘기고, 거래소별로 **분마다 객체 1개**를 S3 `raw/` 에 쌓는다. 시세 프레임은 심볼·종류마다, 매초 오는 마켓·심볼 목록 응답은 거래소마다 그 분의 마지막 1건만 남기고(용량 — 하루 0.3~0.5GB), 입출금·핸드셰이크 거부 본문 같은 나머지 응답은 전량 남긴다. 쓰는 필드가 바뀌어도 재수집 없이 분 단위로 재생하기 위한 저장소다.
 - **시세 커넥터는 공통 인터페이스를 구현하고 코드를 공유하지 않는다.** 거래소별 메시지 형식·quirk 는 각 커넥터 안에서만 흡수한다. 새 거래소 추가는 커넥터 하나 추가다.
@@ -13,7 +13,7 @@
 - **프로세스 역할은 `ROLE`(collector | api)다(016).** collector 는 uvicorn worker 1개 — `live_store` 가 프로세스 메모리라서, 다중 worker 를 쓰려면 프로세스들이 공유하는 외부 저장소로 먼저 이전해야 한다. api 는 메모리 저장소를 갖지 않고 Influx 만 읽으며(`/history/premium`·`streaks`·`streaks/bulk`·`candles`), Redis 채널 `spreads` 를 구독해 `/ws/spreads` 접속자에게 표를 민다(017). `GET /spreads` 는 두 역할 모두 Redis `spreads:latest` 를 돌려준다(018) — 스프레드 탭이 보는 컨테이너는 api 하나다.
 
 ## 런타임 구성
-- **server/**: Python 3.12, FastAPI, httpx, websockets, redis(asyncio), influxdb-client, boto3, pyjwt, pydantic v2, pydantic-settings. 로컬 포트 8000. 상시 태스크(collector 역할 — api 는 017 구독 태스크 1개 + 접속마다 보내기 태스크 1개): 업비트·빗썸 스트림 각 1, 바이낸스 샤드 3 + 재조정 루프(60초), 마켓 우주 갱신 루프(매초 — 목록 3개 병렬, 실패는 직전 목록 유지·거래소·원인당 60초 1줄 로그), 틱 루프(1초), Redis 인계 큐, flusher(60초), 원문 닫기 회차(1초, 업로드는 데몬 워커 스레드 1개), 입출금 조회(60초), `collect_fail` 쓰기 큐 태스크, `premium_event` 쓰기 태스크(점이 생기면 즉시·없어도 60초 회차), `candle` 쓰기·롤업 태스크(분이 닫히면 즉시·없어도 60초 회차 — 1m 쓰기 뒤 같은 회차에 5m→1h→4h→1d), 017 표 게시 보내기 태스크·`spreads:want` 읽기(5초)·구독 허브(로컬 단일 프로세스는 자기 게시를 자기 구독).
+- **server/**: Python 3.12, FastAPI, httpx, websockets, redis(asyncio), influxdb-client, boto3, pyjwt, pydantic v2, pydantic-settings. 로컬 포트 8000. 상시 태스크(collector 역할 — api 는 017 구독 태스크 1개 + 접속마다 보내기 태스크 1개): 업비트·빗썸 스트림 각 1, 바이낸스·바이빗·비트겟 샤드 각 3 + 재조정 루프(60초), 마켓 우주 갱신 루프(매초 — 목록 5개 병렬, 실패는 직전 목록 유지·거래소·원인당 60초 1줄 로그), 틱 루프(1초), Redis 인계 큐, flusher(60초), 원문 닫기 회차(1초, 업로드는 데몬 워커 스레드 1개), 입출금 조회(60초), `collect_fail` 쓰기 큐 태스크, `premium_event` 쓰기 태스크(점이 생기면 즉시·없어도 60초 회차), `candle` 쓰기·롤업 태스크(분이 닫히면 즉시·없어도 60초 회차 — 1m 쓰기 뒤 같은 회차에 5m→1h→4h→1d), 017 표 게시 보내기 태스크·`spreads:want` 읽기(5초)·구독 허브(로컬 단일 프로세스는 자기 게시를 자기 구독).
 - **web/**: React 19, TypeScript, Vite. 런타임 의존성은 react·react-dom·lightweight-charts(기록 탭 캔버스 차트) 셋이다. 로컬 포트는 5173 이고, 배포 컨테이너의 nginx 는 80번 포트를 사용한다. 호스트 포트는 `WEB_PORT` 로 정한다.
 - **저장소**: InfluxDB 2.7 OSS(org·bucket `marketlens`, Flux) — 김프 이력. Redis 7 — 틱 버퍼(AOF, Influx 로 옮기기 전까지만). S3(`marketlens-spreads-snapshot`, ap-northeast-2, 접두사 `raw/`) — 거래소 원문 아카이브. 모델은 `db.md`. 테스트에서는 셋 다 띄우지 않는다(fake·fakeredis). S3 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 IAM 역할).
 
@@ -26,6 +26,7 @@ flowchart TB
         BT[빗썸 WS]
         BN[바이낸스 WS<br/>3샤드]
         BY[바이빗 WS<br/>3샤드]
+        BG[비트겟 WS<br/>3샤드]
         REST[REST<br/>마켓 목록 매초 · 입출금 60초]
     end
 
@@ -38,6 +39,8 @@ flowchart TB
     UP --> LS
     BT -- "메시지마다 (exchange, base) 행 교체<br/>KRW-USDT → USDT 시세" --> LS
     BN --> LS
+    BY --> LS
+    BG --> LS
     API[실시간 조회 API] -- 읽기 --> LS
 
     %% ── 009 틱 → Redis → Influx ──
@@ -97,7 +100,7 @@ flowchart TB
     classDef spec017 stroke:#d35400,stroke-width:2px
 ```
 - 테두리 색 = 스펙 번호: 주황 010(원문 싱크) · 파랑 009(틱 저장) · 초록 005(history) · 빨강 011(health) · 보라 013(premium-events) · 청록 014(premium-1m) · 갈색 017(spreads-push). 점선은 부수 흐름.
-- 행은 거래소 단위 통째 교체가 아니라 **메시지 단위**로 바뀐다. 상장·상폐는 매초 갱신되는 **마켓 우주**(국내 KRW ∩ (바이낸스 ∪ 바이빗) USDT)가 반영한다 — 우주 밖 행은 없다.
+- 행은 거래소 단위 통째 교체가 아니라 **메시지 단위**로 바뀐다. 상장·상폐는 매초 갱신되는 **마켓 우주**(국내 KRW ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟) USDT)가 반영한다 — 우주 밖 행은 없다.
 - 스트림이 끊기면 행은 남고 그 거래소의 `last_message_at` 이 멈춘다. `/spreads` 의 `age`·`status` 는 행이 아니라 **거래소 스트림의 마지막 수신 시각** 기준이다(조용한 코인의 호가는 안 바뀌어도 현재값이다). 단 행 자체(`updated_at`)가 **300초** 이상 안 바뀌면 `age` 는 그 행의 실제 경과 초라 stale 로 보인다(거래 정지·심볼 장애 — 스트림은 살아 있는데 그 코인 프레임만 안 오는 상태).
 - 입출금 상태 API 는 틱 루프가 60초 주기로만 조회해 캐시하고, 행이 새 메시지로 교체돼도 그 3필드는 물려받는다. 키가 없으면 `null`(모름). 망 판정은 `/spreads` 에서 하고, 빗썸은 키가 필요 없다.
 - `GET /health` 와 틱 루프는 기능 폴더가 아니라 앱 진입점 소관이다. `/health` 는 프로세스 liveness 만 나타낸다. 상세는 `/health/collect`(011).
@@ -124,8 +127,8 @@ flowchart TB
 - 판정 결과 전달 — 틱 루프가 이력 추적기에 거래소별 성공/실패를 넘긴다(011 구현).
 - 사건 감지 `observe(tick)` — 틱 루프가 매초 현재 틱을 넘긴다(013 구현, 동기·예외 없음).
 - 입출금 조회기 `refresh_if_due(client, force=False)` / `apply` / `failed` / `warnings` / `availability`(006 구현, 틱 루프가 호출 — `force` 는 `/refresh` 트리거가 쓴다).
-- 해외 USDT 현물 심볼 집합 `id` / `refresh(client) -> int` / `bases() -> set[str]` / `set_universe(bases)`(012 바이낸스·019 바이빗 커넥터가 각각 구현, 마켓 우주가 **목록**으로 받아 합집합을 만들고 확정될 때마다 각 커넥터에 `set_universe` 로 우주 전체를 넘긴다 — 자기 맵에 없는 base 는 커넥터가 무시한다). 커넥터를 꽂지 않는 테스트에는 빈 집합을 주는 기본 구현.
-- 스트림 판정 `judge(now_ms) -> Verdict | None`(거래소 스트림마다 — 국내는 core 공통 규칙, 바이낸스·바이빗은 샤드 규칙(012·019). None = 아직 판정 대상 아님).
+- 해외 USDT 현물 심볼 집합 `id` / `refresh(client) -> int` / `bases() -> set[str]` / `set_universe(bases)`(012·019·020 커넥터가 각각 구현, 마켓 우주가 **목록**으로 받아 합집합을 만들고 확정될 때마다 각 커넥터에 `set_universe` 로 우주 전체를 넘긴다 — 자기 맵에 없는 base 는 커넥터가 무시한다). 커넥터를 꽂지 않는 테스트에는 빈 집합을 주는 기본 구현.
+- 스트림 판정 `judge(now_ms) -> Verdict | None`(거래소 스트림마다 — 국내는 core 공통 규칙, 바이낸스·바이빗·비트겟은 샤드 규칙(012·019·020). None = 아직 판정 대상 아님).
 core 는 features 를 import 하지 않는다 — 구조적 타입(Protocol)으로만 알고 배선은 `main.py` lifespan 이 한다.
 
 ## 기능 폴더 기본 구조
@@ -168,3 +171,4 @@ EC2 1대, 컨테이너 5개(server=collector·api·web·influxdb·redis). 루트
 - **spreads-serve (018)**: `features/spreads/router.py` 의 `router`(`GET /spreads` — 두 역할 모두 `main.py` 가 포함, `app.state.spreads_bus` 의 `RedisBus.latest_and_want()` 로 `GET spreads:latest` + `SET spreads:want EX 15` 를 파이프라인 한 왕복, 키 값을 `Response` 바이트 그대로·없으면 404·`RedisUnavailableError` 면 503·`notional` 쿼리는 400)와 `refresh_router`(`POST /refresh` — collector 만). `core/redis_bus.py` 의 `RedisUnavailableError`(redis 예외를 HTTP 경계로 넘기는 유일한 이름). `web/nginx.conf` 의 `location = /api/spreads`(정확 일치 → `api:8000`, rewrite 로 접두 제거). 테스트는 `features/spreads/tests/test_spreads_api.py`(HTTP 계약은 fakeredis, 표 계산 규칙은 헬퍼 `spreads_json` — 게시기와 같은 함수·직렬화)·`test_push.py`(게시 안 하는 조건)·`tests/test_role.py`·`test_deploy.py`.
 - **binance-stream (012)**: `core/streams/binance.py`(`BinanceStream` 하나 — 샤드 3개 각각 소켓·시계·백오프·구독 집합, `shard_of` = crc32 % 3, 재조정 루프 1개(배정이 바뀐 `set_universe` 가 깨우거나 60초 — 매초 같은 우주는 무동작), exchangeInfo 심볼 맵으로 `ForeignSymbolSource` 구현, `judge` 는 샤드별 판정 후 가장 조용한 샤드를 고른다). 001 의 `QuoteSink.orderbook/trade` 와 `store.stream("binance")`(샤드 집계) 를 쓰고 `StreamJudge` 로 틱 루프·`/refresh` 트리거에 꽂힌다. 테스트는 `server/tests/test_stream_binance.py`(001 의 `stream_fakes.py` 재사용).
 - **bybit (019)**: `core/streams/bybit.py`(`BybitStream` 하나 — 012 와 같은 샤드 3개·`shard_of`·재조정 루프 구조를 코드 공유 없이 다시 쓴다. 다른 점: 심볼마다 로컬 북 `_Book`(스냅샷 교체·델타 삽입/교체/삭제, 소켓이 바뀌면 비움)에서 매 메시지 행을 다시 만들고, 샤드마다 JSON ping 태스크(20초 ping·20초 안에 pong 없으면 소켓을 닫아 `timeout` 으로 재연결), 구독 요청은 args 10개·0.1초 간격, instruments-info(`retCode`≠0 은 실패) 로 `ForeignSymbolSource` 구현). `features/wallet_status/bybit.py`(`fetch_bybit` — 헤더 HMAC, `chains[]` → 망). 배선: `main.py` 가 `UniverseRefresher(foreigns=[binance, bybit])` 와 `streams` 4개, `WalletStatusService` 바이빗 키. `/history/*` 의 `fx` 는 `Literal["binance", "bybit"]`. 테스트는 `server/tests/test_stream_bybit.py`(`BybitSleeps` — 핑 주기를 표로 막는다)·`features/wallet_status/tests/test_bybit.py`.
+- **bitget (020)**: `core/streams/bitget.py`(`BitgetStream` 하나 — 012·019 와 같은 샤드 3개·`shard_of`·재조정 루프 구조를 코드 공유 없이 다시 쓴다. 다른 점: 심볼마다 로컬 북 `_Book` 이 마지막 `seq` 를 들고 역행 update 를 버리며, 샤드마다 문자열 ping 태스크(30초 `ping`·30초 안에 `pong` 없으면 소켓을 닫아 `timeout` 으로 재연결), 구독 요청은 `{instType, channel, instId}` 객체 args 50개·0.2초 간격, 소켓마다 1시간 창의 요청 시각 deque 로 예산을 세어 192회부터 경고 1줄(소진 중 한 번)·재조정 연기, symbols(`code != "00000"` 은 실패) 로 `ForeignSymbolSource` 구현, base 별 마지막 체결 ts 로 과거 체결 무시). `features/wallet_status/bitget.py`(`fetch_bitget` — 인증 없음, `chains[]` 의 문자열 `"true"` → 망). 배선: `main.py` 가 `UniverseRefresher(foreigns=[binance, bybit, bitget])` 와 `streams` 5개, `WalletStatusService` 가 조회기 5종. `/history/*` 의 `fx` 는 `Literal["binance", "bybit", "bitget"]`. 테스트는 `server/tests/test_stream_bitget.py`(`BitgetSleeps` — 핑·백오프 상한이 둘 다 30초라 표로 막는 값을 테스트가 고른다)·`features/wallet_status/tests/test_bitget.py`.

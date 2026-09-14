@@ -47,6 +47,7 @@ from app.core.s3 import S3Uploader
 from app.core.serialization import camelize_json
 from app.core.spark import SparkBuffer, restore_spark
 from app.core.streams.binance import BinanceStream
+from app.core.streams.bitget import BitgetStream
 from app.core.streams.bithumb import BithumbStream
 from app.core.streams.bybit import BybitStream
 from app.core.streams.upbit import UpbitStream
@@ -200,14 +201,18 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     await restore_spark(influx, spark, store, app.state.started_at // 1000)
 
     # 2~3. 마켓 우주(매초) → 스트림 기동. 목록을 못 받은 거래소는 다음 초에 다시 — 그동안 구독은 없다.
-    # 해외 커넥터(012 바이낸스·019 바이빗)가 심볼 집합 계약도 맡는다 — 우주가 확정되면 각자 자기 심볼만 구독한다.
+    # 해외 커넥터(012 바이낸스·019 바이빗·020 비트겟)가 심볼 집합 계약도 맡는다 — 우주가 확정되면 각자 자기 심볼만 구독한다.
     upbit = UpbitStream(store=store, sink=sink, record=record)
     bithumb = BithumbStream(store=store, sink=sink, record=record)
     binance = BinanceStream(store=store, sink=sink, record=record)
     bybit = BybitStream(store=store, sink=sink, record=record)
-    streams = [upbit, bithumb, binance, bybit]
+    bitget = BitgetStream(store=store, sink=sink, record=record)
+    streams = [upbit, bithumb, binance, bybit, bitget]
     universe = UniverseRefresher(
-        sink=sink, streams=[upbit, bithumb], foreigns=[binance, bybit], client=client
+        sink=sink,
+        streams=[upbit, bithumb],
+        foreigns=[binance, bybit, bitget],
+        client=client,
     )
     universe.start()
     for stream in streams:

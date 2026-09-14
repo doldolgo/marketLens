@@ -4,7 +4,7 @@
 > 새 컨텍스트에서 작업을 시작할 때는 이 문서 → `docs/context/*` → 지정된 스펙 1개 순서로 읽는다.
 
 ## 1. 한 줄 정의
-한국 거래소(업비트·빗썸)와 해외 거래소(바이낸스·바이빗) 간 **김치 프리미엄(김프)·역프를 1초 단위로 계산해 보여주는 차익거래 모니터링 대시보드**.
+한국 거래소(업비트·빗썸)와 해외 거래소(바이낸스·바이빗·비트겟) 간 **김치 프리미엄(김프)·역프를 1초 단위로 계산해 보여주는 차익거래 모니터링 대시보드**.
 트레이더가 "지금 어느 코인이, 어느 방향으로, 얼마나 벌어져 있고, 실제로 옮길 수 있는가(입출금 상태)"를 한 화면에서 판단하게 한다.
 
 ## 2. 레포 구조 (기능 단위)
@@ -91,7 +91,7 @@ marketlens/
 | 017 | spreads-push | DONE | 스프레드 표 WebSocket 푸시 — 수집이 누가 볼 때만 $1,000 표를 매초 Redis 채널로, `api` 가 구독해 바뀐 행만 `/ws/spreads` 로 접속자 전원에 같은 바이트, FE 폴링 대체(fallback 폴링 없음), 체결 규모 $1,000 고정 |
 | 018 | spreads-serve | DONE | `GET /spreads` 를 `api` 가 Redis `spreads:latest` 로 답하고 nginx `/api/spreads` 를 `api` 로 — 스프레드 탭이 보는 컨테이너는 api 하나, `notional` 쿼리 삭제, 요청마다 `spreads:want` 갱신 (BE·인프라) |
 | 019 | bybit | DONE | 바이빗 USDT 현물 추가 — WS 3샤드 orderbook.200(스냅샷+델타)+publicTrade, instruments-info 매초, 입출금(HMAC), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗), `/history/*` `fx=bybit`, web 표시명·기록 탭 Bybit 실데이터 |
-| 020 | bitget | TODO | 비트겟 USDT 현물 추가 — WS 3샤드 books(스냅샷+update)+trade, symbols 매초, 입출금(public·키 없음), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟), `/history/*` `fx=bitget`, web 표시명·기록 탭 Bitget 실데이터 |
+| 020 | bitget | DONE | 비트겟 USDT 현물 추가 — WS 3샤드 books(스냅샷+update)+trade, symbols 매초, 입출금(public·키 없음), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟), `/history/*` `fx=bitget`, web 표시명·기록 탭 Bitget 실데이터 |
 
 실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
