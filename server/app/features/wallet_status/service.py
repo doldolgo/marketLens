@@ -17,6 +17,7 @@ from app.core.contracts import RawRecorder, noop_record
 from app.core.models import Row
 from app.features.wallet_status.binance import fetch_binance
 from app.features.wallet_status.bithumb import fetch_bithumb
+from app.features.wallet_status.bybit import fetch_bybit
 from app.features.wallet_status.models import CoinStatus, WalletStatusError
 from app.features.wallet_status.upbit import fetch_upbit
 
@@ -26,7 +27,7 @@ logger = logging.getLogger("marketlens.wallet_status")
 WALLET_REFRESH_INTERVAL = 60.0
 
 # 경고·실패 목록의 순서 고정 — 사이클마다 순서가 바뀌면 비교가 성가시다
-_EXCHANGES = ("upbit", "bithumb", "binance")
+_EXCHANGES = ("upbit", "bithumb", "binance", "bybit")
 
 
 @dataclass
@@ -46,6 +47,8 @@ class WalletStatusService:
         upbit_secret_key: str | None,
         binance_api_key: str | None,
         binance_secret_key: str | None,
+        bybit_api_key: str | None = None,
+        bybit_secret_key: str | None = None,
         interval: float = WALLET_REFRESH_INTERVAL,
         record: RawRecorder = noop_record,  # 010 원문 싱크 — 주입하지 않으면 무동작 (§3.5)
     ) -> None:
@@ -53,6 +56,8 @@ class WalletStatusService:
         self._upbit_secret_key = upbit_secret_key
         self._binance_api_key = binance_api_key
         self._binance_secret_key = binance_secret_key
+        self._bybit_api_key = bybit_api_key
+        self._bybit_secret_key = bybit_secret_key
         self._interval = interval
         self._record = record
         self._last_at: float | None = None
@@ -63,7 +68,7 @@ class WalletStatusService:
     async def refresh_if_due(
         self, client: httpx.AsyncClient, *, force: bool = False
     ) -> dict[str, int] | None:
-        """60초가 지났으면 세 거래소를 병렬 조회하고 거래소별 호출 수를 돌려준다.
+        """60초가 지났으면 네 거래소를 병렬 조회하고 거래소별 호출 수를 돌려준다.
 
         캐시가 유효한 틱은 None. 기동 첫 틱은 캐시가 비어 즉시 호출한다. `force` 는
         001 의 즉시 갱신 트리거(`/refresh`)가 주기와 무관하게 조회시키는 길이다.
@@ -94,6 +99,15 @@ class WalletStatusService:
                     client,
                     api_key=self._binance_api_key,
                     secret_key=self._binance_secret_key,
+                    record=self._record,
+                ),
+            ),
+            self._fetch_one(
+                "bybit",
+                fetch_bybit(
+                    client,
+                    api_key=self._bybit_api_key,
+                    secret_key=self._bybit_secret_key,
                     record=self._record,
                 ),
             ),
