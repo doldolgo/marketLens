@@ -13,7 +13,12 @@ from app.core.live_store import LiveStore
 from app.core.quotes import QuoteSink
 from app.core.ticks import TickLoop
 from app.core.universe import UniverseRefresher
-from app.features.spreads.tests.helpers import FakeCollector, make_client, seed_rows
+from app.features.spreads.tests.helpers import (
+    FakeCollector,
+    make_client,
+    seed_rows,
+    spreads_json,
+)
 from app.features.wallet_status.service import WalletStatusService
 from tests.conftest import make_row
 
@@ -89,7 +94,7 @@ async def test_keyless_startup_spreads_and_refresh_contract() -> None:
     assert tick.dw_failed == ("upbit", "binance", "bybit")
 
     # /spreads — 모든 행에 5키, 값은 true/false/null 뿐, netDom 은 문자열 또는 null (§4)
-    rows = make_client(store).get("/spreads").json()["rows"]
+    rows = spreads_json(store)["rows"]
     assert rows
     for row in rows:
         assert {"netDom", "depDom", "wdDom", "depFx", "wdFx"} <= set(row)
@@ -134,13 +139,13 @@ async def test_failure_refresh_overwrites_rows_to_unknown_in_spreads() -> None:
 
     await wallet.refresh_if_due(client)
     ticks.tick(1_787_000_000)
-    rows = make_client(store).get("/spreads").json()["rows"]
+    rows = spreads_json(store)["rows"]
     assert any(r["depDom"] is True for r in rows if r["dom"] == "bithumb")
 
     await wallet.refresh_if_due(client)  # 이번엔 빗썸 500
     tick = ticks.tick(1_787_000_001)
     assert "bithumb" in tick.dw_failed
-    rows = make_client(store).get("/spreads").json()["rows"]
+    rows = spreads_json(store)["rows"]
     for row in (r for r in rows if r["dom"] == "bithumb"):
         assert row["depDom"] is None
         assert row["wdDom"] is None

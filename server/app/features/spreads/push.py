@@ -90,7 +90,8 @@ class SpreadsPublisher:
             try:
                 payload = build_spreads(self._store, notional=DEFAULT_NOTIONAL)
             except MarketDataNotFoundError:
-                return  # 재료가 없는 초 — GET /spreads 가 404 인 상황과 같다, 게시할 표가 없다
+                # 환율 없음·국내/해외 스냅샷 없음 — 이 회차는 표를 만들지 않는다, 경고 없음(기동 직후 정상) (018 §3.2)
+                return
             self._queue.append(encode_table(payload))
             elapsed = time.perf_counter() - started
             if elapsed > SLOW_BUILD_WARN_SEC:

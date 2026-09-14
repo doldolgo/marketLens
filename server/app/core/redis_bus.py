@@ -1,4 +1,4 @@
-"""Redis pub/sub·키 클라이언트 — 스프레드 표 게시·구독 (스펙 017 §3.1·§3.2).
+"""Redis pub/sub·키 클라이언트 — 스프레드 표 게시·구독 (스펙 017 §3.1·§3.2) + `GET /spreads` 읽기 (018 §3.1).
 
 redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 둘뿐이다. 스트림 `ticks`(009)와
 채널·키(017)는 쓰는 프로세스가 다르고(수집 vs api) 연결 수명도 다르다(명령마다 lazy vs 오래 사는 구독)
@@ -7,7 +7,7 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
 채널·키 (db.md Redis 절):
 - 채널 `spreads`        — 표 JSON, 실시간(수집 → api)
 - 키 `spreads:latest`   — 같은 JSON, TTL 10초. 늦게 붙은 구독자의 첫 표. 수집이 멈추면 사라진다
-- 키 `spreads:want`     — 값 "1", TTL 15초. api 가 5초마다 갱신, 수집이 5초마다 읽어 "원함"으로
+- 키 `spreads:want`     — 값 "1", TTL 15초. api 가 5초마다 갱신(+ `GET /spreads` 요청마다, 018), 수집이 5초마다 읽어 "원함"으로
 """
 
 import time
@@ -15,6 +15,7 @@ import time
 import redis.asyncio as aioredis
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
+from redis.exceptions import RedisError
 
 from app.core.redis_stream import CONNECT_TIMEOUT_SEC, SOCKET_TIMEOUT_SEC
 
@@ -23,6 +24,10 @@ LATEST_KEY = "spreads:latest"
 WANT_KEY = "spreads:want"
 LATEST_TTL_SEC = 10
 WANT_TTL_SEC = 15
+
+
+class RedisUnavailableError(Exception):
+    """연결 실패·타임아웃 — 005 의 InfluxUnavailableError 와 같은 역할. HTTP 경계가 503 으로 바꾼다 (018 §3.1)."""
 
 
 class Subscription:
@@ -88,6 +93,22 @@ class RedisBus:
     async def latest(self) -> str | None:
         """`GET spreads:latest` — 없으면 None(키 만료 = 수집이 표를 안 만들거나 멈춤). 실패는 예외."""
         value = await self._client.get(LATEST_KEY)
+        return None if value is None else _text(value)
+
+    async def latest_and_want(self) -> str | None:
+        """`GET spreads:latest` + `SET spreads:want 1 EX 15` 를 한 왕복으로 — `GET /spreads` 요청마다 (018 §3.1).
+
+        폴링만 하는 접속자(WebSocket 이 막힌 망)가 있는 동안에도 수집이 표를 만들어야 해서 읽기와 want 를
+        같이 한다. 키가 없어도(404) want 는 쓴다 — 그래야 수집이 다음 5초 안에 표를 만들기 시작한다.
+        Redis 에 못 닿으면 둘 다 안 되고 RedisUnavailableError 다 — 백오프 없음, 5초 폴링이 곧 재시도다.
+        """
+        try:
+            async with self._client.pipeline(transaction=False) as pipe:
+                pipe.get(LATEST_KEY)
+                pipe.set(WANT_KEY, "1", ex=WANT_TTL_SEC)
+                value, _ = await pipe.execute()
+        except RedisError as exc:
+            raise RedisUnavailableError(str(exc)) from exc
         return None if value is None else _text(value)
 
     async def subscribe(self) -> Subscription:

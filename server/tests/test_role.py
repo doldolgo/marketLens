@@ -1,5 +1,5 @@
-"""프로세스 역할 계약 — ROLE=api 앱은 Influx 조회 경로 + /ws/spreads 만 서빙하고 백그라운드 태스크는
-017 의 구독 태스크 하나다 (스펙 016 §3.1·§4, 017 §4).
+"""프로세스 역할 계약 — ROLE=api 앱은 Influx 조회 경로 + /ws/spreads + GET /spreads(Redis 읽기) 만
+서빙하고 백그라운드 태스크는 017 의 구독 태스크 하나다 (스펙 016 §3.1·§4, 017 §4, 018 §3.4·§4).
 
 collector(기본) 의 전체 동작은 기존 테스트가 그대로 지킨다 — 여기서는 라우트 집합만 본다.
 """
@@ -8,21 +8,24 @@ import asyncio
 import logging
 from collections.abc import Callable, Iterator
 
+import fakeredis
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from starlette.routing import WebSocketRoute
 
 from app.core.config import get_settings
+from app.core.redis_bus import RedisBus
 from app.main import create_app
 
-# api 역할이 답하는 다섯 경로 (016 §3.1) — 그 외는 전부 404
+# api 역할이 답하는 여섯 경로 (016 §3.1 + 018 §3.4) — 그 외는 전부 404
 API_ROUTES = {
     "/health",
     "/history/premium",
     "/history/streaks",
     "/history/streaks/bulk",
     "/history/candles",
+    "/spreads",
 }
 
 
@@ -65,7 +68,7 @@ def test_api_role_serves_only_influx_routes_and_404s_the_rest(set_role) -> None:
         assert resp.status_code == 503, path
         assert resp.json()["error"]["code"] == "storage_unavailable", path
     # 메모리 저장소를 읽는 경로는 없다 — /history/events 도 진행 중 사건을 메모리에서 읽으므로 404
-    assert client.get("/spreads").status_code == 404
+    # (GET /spreads 는 있지만 Redis 만 읽는다 — 아래 테스트)
     assert client.post("/refresh").status_code == 404
     assert client.get("/health/collect").status_code == 404
     assert client.get("/history/events").status_code == 404
@@ -93,6 +96,22 @@ def _ws_paths(app) -> set[str]:  # noqa: ANN001 — FastAPI 앱
         return found
 
     return walk(app.routes)
+
+
+def test_api_role_serves_spreads_from_redis_key_without_memory(set_role) -> None:  # noqa: ANN001
+    # 018 §3.1·§4 — api 역할에 메모리 저장소는 없고, GET /spreads 는 키가 없으면 404·있으면 그 바이트
+    set_role("api")
+    server = fakeredis.FakeServer()
+    app = create_app()  # lifespan 없음 — Redis 자리만 fakeredis 로 채운다
+    app.state.spreads_bus = RedisBus(fakeredis.aioredis.FakeRedis(server=server))
+    client = TestClient(app)
+    assert not hasattr(app.state, "live_store")
+    resp = client.get("/spreads")
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "market_data_not_found"
+    fakeredis.FakeRedis(server=server).set("spreads:latest", '{"rows":[]}', ex=10)
+    assert client.get("/spreads").content == b'{"rows":[]}'
+    assert fakeredis.FakeRedis(server=server).ttl("spreads:want") == 15
 
 
 async def test_api_role_starts_with_only_the_spreads_hub_task_and_no_s3_exchange_logs(

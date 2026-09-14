@@ -20,7 +20,7 @@
 - 컨테이너 5개:
   - `server` — FastAPI + uvicorn 워커 1개(python 3.12 slim). 컨테이너 포트 8000, **호스트에 노출하지 않는다**(compose 내부 네트워크만).
   - `api` — `server` 와 같은 이미지에 `ROLE=api`. Influx 조회 경로(`/history/premium`·`streaks`·`streaks/bulk`·`candles`)만 서빙, 호스트 비노출(016).
-  - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 `/api/` 를 `server:8000/` 로 프록시하고(`/api/ws/` 는 `api:8000/ws/` 로 WebSocket 업그레이드, 017), 없는 경로는 index.html 을 준다(SPA).
+  - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 `/api/` 를 `server:8000/` 로 프록시하고(`/api/history/{premium,streaks,candles}` 는 016, `/api/ws/` 는 `api:8000/ws/` 로 WebSocket 업그레이드 017, `/api/spreads` 정확 일치는 018 — 셋 다 `api` 로), 없는 경로는 index.html 을 준다(SPA).
     캐시 규칙: `index.html` 은 `no-store, must-revalidate` **+ `always`** — 배포가 FE·BE 를 함께 바꾸므로 캐시된 셸이 남으면 열려 있던 탭이 구 번들로 새 API 계약을 계속 친다. `/assets/` 의 해시 박힌 파일은 `max-age=31536000, immutable` 이되 **`always` 는 붙이지 않는다** — 붙이면 404 에도 1년 immutable 이 실려, 배포 직전 셸을 든 브라우저가 사라진 번들의 404 를 1년간 캐시한다(재배포로도 되돌릴 수 없다). `always` 없이도 200·304 는 헤더를 받는다.
   - `influxdb` — 2.7, dev compose 와 같은 첫 기동 설정(org·bucket `marketlens`, admin 토큰 = `INFLUX_TOKEN`). named volume, 호스트 비노출.
   - `redis` — `redis:7-alpine`, `--appendonly yes`, named volume, 호스트 비노출(009 의 틱 버퍼 — Influx 로 옮기기 전 틱만 든다).

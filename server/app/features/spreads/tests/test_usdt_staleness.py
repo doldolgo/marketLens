@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 from app.core.live_store import LiveStore
-from app.features.spreads.tests.helpers import make_client, make_row, seed_rows
+from app.features.spreads.tests.helpers import make_row, seed_rows, spreads_json
 
 
 def seed_pair(store: LiveStore, now: datetime) -> None:
@@ -37,7 +37,7 @@ def test_stale_rate_emits_warning_with_seconds() -> None:
     store = LiveStore()
     seed_pair(store, now)
     store.set_rate("upbit", 1400.0, 1390.0, now - timedelta(seconds=61))
-    body = make_client(store).get("/spreads").json()
+    body = spreads_json(store)
     assert len(body["warnings"]) == 1
     w = body["warnings"][0]
     assert w.startswith("upbit USDT 시세가")
@@ -52,7 +52,7 @@ def test_fresh_rate_has_no_warning() -> None:
     store = LiveStore()
     seed_pair(store, now)
     store.set_rate("upbit", 1400.0, 1390.0, now - timedelta(seconds=59))
-    body = make_client(store).get("/spreads").json()
+    body = spreads_json(store)
     assert body["warnings"] == []
 
 
@@ -62,7 +62,7 @@ def test_two_stale_exchanges_sorted_by_id() -> None:
     seed_pair(store, now)
     store.set_rate("upbit", 1400.0, 1390.0, now - timedelta(seconds=61))
     store.set_rate("bithumb", 1401.0, 1391.0, now - timedelta(seconds=90))
-    body = make_client(store).get("/spreads").json()
+    body = spreads_json(store)
     assert len(body["warnings"]) == 2
     assert body["warnings"][0].startswith("bithumb ")
     assert body["warnings"][1].startswith("upbit ")
@@ -73,7 +73,7 @@ def test_warnings_key_always_present_and_top_keys_stable() -> None:
     store = LiveStore()
     seed_pair(store, now)
     store.set_rate("upbit", 1400.0, 1390.0, now)
-    body = make_client(store).get("/spreads").json()
+    body = spreads_json(store)
     assert body["warnings"] == []
     # 스펙 008 §4 — 최상위는 정확히 6키, 행은 정확히 17키(003 §3.2 계약 그대로)
     assert set(body) == {

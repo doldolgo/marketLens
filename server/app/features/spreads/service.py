@@ -38,8 +38,6 @@ EXCLUDED_COINS: frozenset[str] = frozenset()
 # 체결 규모(USD) — 표의 모든 행이 이 규모로 호가를 걷는다 (스펙 003 §3.2-0)
 # 화면·푸시(017)는 이 기본값 하나로 고정이고, 쿼리 `notional` 은 진단용으로만 남는다
 DEFAULT_NOTIONAL = 1_000.0
-MIN_NOTIONAL = 1.0
-MAX_NOTIONAL = 10_000_000.0
 
 
 class MarketDataNotFoundError(Exception):

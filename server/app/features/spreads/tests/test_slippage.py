@@ -10,7 +10,7 @@ import pytest
 from app.core.live_store import LiveStore
 from app.core.models import Row
 from app.core.ticks import build_tick
-from app.features.spreads.tests.helpers import make_client, make_row, seed_rows
+from app.features.spreads.tests.helpers import make_row, seed_rows, spreads_json
 
 
 def _now() -> datetime:
@@ -64,10 +64,13 @@ def seed(
 
 
 def only_row(store: LiveStore, notional: float | None = None) -> dict:
-    query = "/spreads" if notional is None else f"/spreads?notional={notional}"
-    resp = make_client(store).get(query)
-    assert resp.status_code == 200, resp.text
-    [row] = resp.json()["rows"]
+    # 규모를 바꿔 보는 건 계산 함수로만 — HTTP 는 $1,000 표 한 장뿐이다 (018)
+    body = (
+        spreads_json(store)
+        if notional is None
+        else spreads_json(store, notional=notional)
+    )
+    [row] = body["rows"]
     return row
 
 
@@ -182,35 +185,12 @@ def test_all_stored_levels_are_walked_even_at_twenty() -> None:
 
 
 def test_default_notional_is_1000_and_echoed_at_top_level() -> None:
-    # notional 미지정이면 1000 이 쓰이고 응답 최상위에 그 값이 실린다 (§4, 017 로 고정값)
+    # 규모 미지정이면 서버 상수 1000 이 쓰이고 표 최상위에 그 값이 실린다 (§4, 017 고정값·018 쿼리 없음)
     store = seed(LiveStore())
-    body = make_client(store).get("/spreads").json()
+    body = spreads_json(store)
     assert body["notional"] == 1_000.0
-    explicit = make_client(store).get("/spreads?notional=1000").json()
-    assert explicit["notional"] == 1_000.0
+    explicit = spreads_json(store, notional=1000)
     assert explicit["rows"][0]["fwd"] == body["rows"][0]["fwd"]
-    # 실수도 허용된다
-    assert make_client(store).get("/spreads?notional=12345.5").json()["notional"] == (
-        12_345.5
-    )
-
-
-@pytest.mark.parametrize("value", ["0", "-1", "10000001", "abc", ""])
-def test_out_of_range_or_non_numeric_notional_is_422(value: str) -> None:
-    # 0·음수·상한 초과·문자열은 FastAPI 기본 422 다 — error 포장이 아니다 (§3.2-0)
-    resp = make_client(seed(LiveStore())).get(f"/spreads?notional={value}")
-    assert resp.status_code == 422
-    assert "detail" in resp.json()
-    assert "error" not in resp.json()
-
-
-def test_boundary_notional_values_are_accepted() -> None:
-    # 허용 범위는 1 ≤ notional ≤ 10,000,000 이고 양 끝은 통과한다 (§3.2-0)
-    store = seed(LiveStore())
-    for value in (1, 10_000_000):
-        resp = make_client(store).get(f"/spreads?notional={value}")
-        assert resp.status_code == 200
-        assert resp.json()["notional"] == float(value)
 
 
 def test_net_values_differ_from_stored_raw_by_the_deducted_width() -> None:

@@ -75,7 +75,7 @@ marketlens/
 |---|---|---|---|
 | 001 | collect | DONE | 업비트·빗썸 WebSocket 실시간 수집 → 메모리, 마켓 우주, USDT 시세, 1초 틱, 원문 싱크·인계·판정 계약, `/health` |
 | 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·mock 탭(갭/선선갭/입출금레이더) |
-| 003 | spreads | DONE | 김프 표 — `/spreads`(체결 규모별 서버 슬리피지) `/refresh`(즉시 갱신 트리거) + 스프레드 탭 |
+| 003 | spreads | DONE | 김프 표 — `/spreads`(Redis 표 반환, 018) `/refresh`(즉시 갱신 트리거) + 스프레드 탭 |
 | 004 | analysis | DONE | 단일 종목 분석 — premium·scan·matrix·orderbook·slippage·arbitrage (BE 전용) |
 | 005 | history | DONE | Influx `premium` 점 규칙·`/history/*`(start 기본 7일 창)·백필 + 기록 탭 사건 로그 실데이터 (쓰기는 009) |
 | 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
@@ -87,8 +87,9 @@ marketlens/
 | 012 | binance-stream | DONE | 바이낸스 WS 3샤드 depth20+miniTicker → 해외 호가 최대 20단계, exchangeInfo 심볼 (BE 전용) |
 | 013 | premium-events | DONE | 틱에서 김프/역프 사건 감지(1.0% 진입·0.5% 이탈·1분 초과) → Influx `premium_event` 1건 1점 + `/history/events` + 기록 탭 전 코인 사건 표 |
 | 014 | premium-1m | DONE | 틱에서 (국내·해외·코인) 1분 OHLC·가격·입출금 집계 → 버킷 `candles_1m…1d`(사슬 롤업, 보관 7일/30일/90일/1년/무제한) + `/history/candles`(`res`, 1,440점 상한) + 기록 탭 차트 실데이터 |
-| 016 | process-split | DONE | 서버 `ROLE`(collector | api) — Influx 조회(`/history/premium`·`streaks`·`streaks/bulk`·`candles`)를 별도 컨테이너 `api` 에서, nginx 경로 분기, compose 5컨테이너 (BE·인프라) |
-| 017 | spreads-push | DONE | 스프레드 표 WebSocket 푸시 — 수집이 누가 볼 때만 $1,000 표를 매초 Redis 채널로, `api` 가 구독해 바뀐 행만 `/ws/spreads` 로 접속자 전원에 같은 바이트, FE 폴링 대체(5초 fallback), 체결 규모 $1,000 고정 |
+| 016 | process-split | DONE | 서버 `ROLE`(collector | api) — Influx 조회(`/history/premium`·`streaks`·`streaks/bulk`·`candles`, 018 부터 `/spreads` 도)를 별도 컨테이너 `api` 에서, nginx 경로 분기, compose 5컨테이너 (BE·인프라) |
+| 017 | spreads-push | DONE | 스프레드 표 WebSocket 푸시 — 수집이 누가 볼 때만 $1,000 표를 매초 Redis 채널로, `api` 가 구독해 바뀐 행만 `/ws/spreads` 로 접속자 전원에 같은 바이트, FE 폴링 대체(fallback 폴링 없음), 체결 규모 $1,000 고정 |
+| 018 | spreads-serve | DONE | `GET /spreads` 를 `api` 가 Redis `spreads:latest` 로 답하고 nginx `/api/spreads` 를 `api` 로 — 스프레드 탭이 보는 컨테이너는 api 하나, `notional` 쿼리 삭제, 요청마다 `spreads:want` 갱신 (BE·인프라) |
 | 019 | bybit | DONE | 바이빗 USDT 현물 추가 — WS 3샤드 orderbook.200(스냅샷+델타)+publicTrade, instruments-info 매초, 입출금(HMAC), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗), `/history/*` `fx=bybit`, web 표시명·기록 탭 Bybit 실데이터 |
 
 실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
