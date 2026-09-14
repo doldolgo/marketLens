@@ -178,6 +178,28 @@ def test_nginx_routes_influx_history_paths_to_api_and_the_rest_to_server() -> No
         assert header in block, header
 
 
+def test_nginx_routes_spreads_exactly_to_api_and_subpaths_to_server() -> None:
+    """`= /api/spreads` 만 api:8000 으로 — 접두 제거·쿼리 유지·헤더 4개, 하위 경로는 server 로 (018 §3.3)."""
+    conf = _text("web/nginx.conf")
+    block = conf.split("location = /api/spreads {", 1)[1].split("\n    }", 1)[0]
+    assert "proxy_pass http://api:8000;" in block
+    # 016 과 같은 방식 — rewrite 가 접두를 떼고 break 라 쿼리스트링은 그대로 따라간다
+    assert "rewrite ^/api/(.*)$ /$1 break;" in block
+    for header in (
+        "proxy_set_header Host $http_host;",
+        "proxy_set_header X-Real-IP $remote_addr;",
+        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+        "proxy_set_header X-Forwarded-Proto $scheme;",
+    ):
+        assert header in block, header
+    # 정확 일치뿐이라 /api/spreads/… 는 어느 api 분기에도 안 걸리고 접두 location /api/ 가 server 로 보낸다
+    assert "location /api/spreads" not in conf
+    pattern, _ = _nginx_api_block()
+    assert not re.search(pattern, "/api/spreads") and not re.search(
+        pattern, "/api/spreads/x"
+    )
+
+
 def test_nginx_upgrades_api_ws_to_api_without_touching_read_timeout() -> None:
     """`/api/ws/` 접두 위치 → `api:8000/ws/`, Upgrade 헤더·HTTP/1.1, read timeout 은 기본 그대로 (017 §3.5)."""
     conf = _text("web/nginx.conf")
