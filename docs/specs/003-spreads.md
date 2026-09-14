@@ -111,7 +111,7 @@
 
 ### 3.4 FE — 표 수신과 002 와의 계약
 - 002 가 만든 공유 피드에 "스프레드 적용" 동작이 있다. **행 배열과 환율을 통째로 교체**하고, 코인×거래소표시명 단위의 입출금 조회표를 재구성한다(`net` 은 `netDom`, 없으면 `'–'`). 002 의 1.5초 mock tick 은 각 행의 `age` 를 1.5 씩 올린다.
-- 표는 **017 의 `/ws/spreads` 구독**으로 받는다(snapshot·delta·fallback 폴링·재연결 규칙은 017 §3.4). fallback 폴링의 `GET /spreads` 는 api 가 Redis 에서 답한다(018). 행의 `dom`/`fx` 는 표시명(`upbit→업비트`, `bithumb→빗썸`, `binance→Binance`, `bybit→Bybit`, 모르는 id 는 그대로)으로 바꾼 뒤 공유 피드에 적용하고 화면을 갱신한다. **수신 실패는 직전 데이터를 유지**한다.
+- 표는 **017 의 `/ws/spreads` 구독**으로 받는다(snapshot·delta·재연결 규칙은 017 §3.4 — 폴링 fallback 없음). `GET /spreads` 는 브라우저가 부르지 않는 curl·진단용이고 api 가 Redis 에서 답한다(018). 행의 `dom`/`fx` 는 표시명(`upbit→업비트`, `bithumb→빗썸`, `binance→Binance`, `bybit→Bybit`, 모르는 id 는 그대로)으로 바꾼 뒤 공유 피드에 적용하고 화면을 갱신한다. **수신 실패는 직전 데이터를 유지**한다.
 - 구독은 spreads 기능 폴더 안에 살고, 셸이 공유 피드를 만든 직후 시작된다. 002 의 `shared/` 는 수정하지 않는다(shared → feature import 금지).
 - 헤더(002 KPI 스트립)의 "USDT/KRW 암묵환율" 은 `/spreads` 최상위 `rate` 로 채워진다. `rate>0` 이면 `₩1,392.0`(소수 1자리 ko-KR), 0 이면 `–`.
 - 셸: 스프레드 탭이 첫 탭이다. 행 클릭 → 선택된 심볼을 저장하고 기록 탭으로 전환한다. 기록 탭(005 의 mock 탭 — 실데이터 연결은 후속 스펙)은 넘겨받은 심볼을 선택 티커로 보인다.

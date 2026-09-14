@@ -50,7 +50,7 @@
 - `snapshot` → 행의 `dom`/`fx` 를 표시명으로 바꿔 공유 피드에 통째 교체(003 과 같다). `delta` → 키로 행을 갱신·추가, `removed` 를 삭제, `rate` 갱신. **안 실린 행의 `age` 는 서버가 마지막에 준 값으로 되돌린다** — delta 가 안 실었다는 것은 서버 판정(`status`·`age` 기준 stale 여부)이 안 바뀌었다는 뜻이므로(조용한 코인의 호가는 안 바뀌어도 현재값, 003). 셸의 1.5초 tick 은 그대로 `age` 를 키우므로 **delta 가 끊기면**(수집 정지·연결 반쯤 죽음) 5초 뒤 전 행이 stale 로 간다. 스트림이 조용해져 서버 `age` 가 5 를 넘으면 `status` 가 바뀌어 그 행이 delta 에 실린다. `heartbeat`·`waiting` 은 표를 건드리지 않는다.
 - **무응답 감지**: 어떤 종류든 서버 메시지가 **10초** 동안 없으면 연결을 닫고 재연결한다. 반쯤 죽은 연결(절전·망 전환)은 이것으로만 잡힌다.
 - 끊기면 1→2→4→…→30초 백오프로 재연결한다(서버 메시지를 하나라도 받으면 백오프는 1초로 돌아간다). 재연결 대기 중에도 직전 표를 지우지 않는다.
-- **폴링 fallback**: 연결 시도 후 **5초** 안에 서버 메시지가 하나도 없으면 `GET /spreads` 를 **5초마다** 폴링하고, snapshot 이 오는 순간 폴링을 끝낸다. `waiting` 을 받았으면 폴링하지 않는다 — 표가 없는 건 서버도 같아서 `GET` 도 404 다. WebSocket 을 막는 망에서도 표는 뜨되 1초 갱신은 포기한다.
+- **폴링 fallback 없음**(2026-09-15 결정): WebSocket 이 막힌 망에서는 위 백오프 재연결만 반복하고 표는 뜨지 않는다. 브라우저는 `GET /spreads` 를 부르지 않는다 — 그 엔드포인트는 curl·진단용이다(018).
 - 탭을 옮겨도 연결은 유지한다(헤더 KPI 의 환율이 이 연결에서 온다). 페이지를 닫으면 브라우저가 연결을 닫는다 — 499 는 생기지 않는다.
 - 스프레드 탭의 "체결 규모" 세그먼트는 없다 — 안내 문구가 `$1,000` 기준임을 말한다. URL 쿼리 `n` 도 없다(002 §3.5).
 - `/health/collect` 5초 폴링(011)은 그대로.
@@ -77,7 +77,7 @@
 - 느린 클라이언트 대기열 5개 → 1008, 다른 접속자는 지연 없음
 - nginx·compose 계약: `/api/ws/` 위치의 Upgrade 헤더·`proxy_http_version 1.1`·목적지 `api:8000/ws/`·`proxy_read_timeout` 없음, `api` 의 `REDIS_URL`·`depends_on` (`tests/test_deploy.py`)
 - 역할: `api` 역할의 백그라운드 태스크는 구독 태스크 1개, `/ws/spreads` 는 두 역할 모두 (`tests/test_role.py`)
-- FE: snapshot 교체·delta 병합·removed 삭제·age 자체 증가·10초 무응답 재연결·백오프·5초 fallback 폴링 시작·waiting 시 폴링 안 함·snapshot 수신 시 폴링 중단 (러너 없음 — 수동)
+- FE: snapshot 교체·delta 병합·removed 삭제·age 자체 증가·10초 무응답 재연결·백오프·WebSocket 차단 시 `GET /spreads` 호출 0건·재연결만 반복 (러너 없음 — 수동)
 - 수동: 브라우저 DevTools 에서 20초 관찰 시 `/spreads` 요청 0건, WS 프레임 초당 1개(delta 또는 heartbeat). 탭 이동 후에도 프레임 계속. `docker compose stop server` 후 heartbeat 만 오고 표가 stale 로 가고, 재기동 후 복구
 - 수동(EC2): 접속자 5명을 열어 두고 `docker stats` 의 `marketlens-server` CPU 가 접속자 1명일 때와 같다 / 접속자 0명이면 오늘과 같다
 
