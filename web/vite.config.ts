@@ -1,7 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-// dev 프록시: /api/* → localhost:8000, /api 접두사는 떼고 전달 (스펙 002 §3.1)
+// dev 프록시: /api/* → localhost:8000, /api 접두사는 떼고 전달 (스펙 002 §3.1). ws: true 는 /api/ws/spreads 업그레이드용 (017 §3.5)
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -10,6 +10,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        ws: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },

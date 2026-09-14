@@ -41,6 +41,7 @@ from app.core.outages import OutageTracker
 from app.core.premium_events import PremiumEventDetector
 from app.core.quotes import QuoteSink
 from app.core.raw_archive import RawArchive
+from app.core.redis_bus import RedisBus
 from app.core.redis_stream import RedisTickStream
 from app.core.s3 import S3Uploader
 from app.core.serialization import camelize_json
@@ -55,7 +56,10 @@ from app.features.analysis.router import router as analysis_router
 from app.features.health.router import router as health_router
 from app.features.history.router import events_router as history_events_router
 from app.features.history.router import router as history_router
+from app.features.spreads.hub import SpreadsHub
+from app.features.spreads.push import SpreadsPublisher
 from app.features.spreads.router import router as spreads_router
+from app.features.spreads.ws import ws_router as spreads_ws_router
 from app.features.wallet_status.service import WalletStatusService
 
 logger = logging.getLogger("marketlens.main")
@@ -76,16 +80,23 @@ async def _open_influx(settings: Settings) -> InfluxClient | None:
 
 @asynccontextmanager
 async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """api 역할(016 §3.1) — Influx 클라이언트 생성·ping 만 한다.
+    """api 역할(016 §3.1) — Influx 클라이언트 생성·ping + 017 의 스프레드 표 구독 허브뿐이다.
 
-    거래소·Redis·S3 에 연결하지 않고 백그라운드 태스크·기동 복원도 없다 — 하나라도 하면
-    collector 와 같은 measurement 를 중복으로 쓰거나(collect_fail·premium_event·롤업) 거래소를 이중 구독한다.
+    거래소·S3 에 연결하지 않고 기동 복원도 없다 — 하나라도 하면 collector 와 같은 measurement 를
+    중복으로 쓰거나(collect_fail·premium_event·롤업) 거래소를 이중 구독한다. Redis 는 구독 목적으로만
+    쓰고(스트림 `ticks` 는 안 읽는다) 백그라운드 태스크는 그 구독 태스크 하나다.
     """
     influx = await _open_influx(app.state.settings)
     app.state.influx = influx
+    bus = RedisBus.from_url(app.state.settings.redis_url)
+    hub = SpreadsHub(bus=bus)
+    hub.start()
+    app.state.spreads_hub = hub
     try:
         yield
     finally:
+        await hub.aclose()
+        await bus.aclose()
         if influx is not None:
             influx.close()
 
@@ -155,6 +166,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     spark = SparkBuffer()
     handoff = TickRelay(stream=tick_stream, store=store, spark=spark)
+    # 017 — 표 게시(누가 볼 때만, 틱 직후)와 자기 게시를 자기 구독하는 허브(로컬 단일 프로세스용)
+    bus = RedisBus.from_url(settings.redis_url)
+    publisher = SpreadsPublisher(store=store, bus=bus)
+    hub = SpreadsHub(bus=bus)
 
     # 1. 수집 실패 이력(011) 복원 — 틱 루프 시작 전에 끝난다. 쓰기는 별도 태스크가 순서대로.
     outages = OutageTracker(writer=influx)
@@ -201,12 +216,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         outages=outages,
         events=events,
         candles=candles,
+        spreads=publisher,
         wallet=wallet,
     )
     ticks.start()
 
-    # 5. 009 — 인계 큐 보내기 태스크와 flusher(60초, Influx 토큰 없으면 비활성)
+    # 5. 009 — 인계 큐 보내기 태스크와 flusher(60초, Influx 토큰 없으면 비활성). 017 — 게시·구독 태스크
     handoff.start()
+    publisher.start()
+    hub.start()
+    app.state.spreads_hub = hub
     flusher: Flusher | None = None
     if influx is not None:
         flusher = Flusher(stream=tick_stream, writer=influx)
@@ -220,6 +239,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await ticks.aclose()  # 슬롯의 마지막 틱을 인계한다
+        await publisher.aclose()  # 남은 표는 버린다 — 017
+        await hub.aclose()  # 접속자 전원 1001
         await handoff.aclose()  # 큐에 남은 틱을 Redis 로 한 번씩 보내 본다(총 5초 상한)
         if flusher is not None:
             await flusher.aclose()
@@ -235,6 +256,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if influx is not None:
             influx.close()
         await tick_stream.aclose()
+        await bus.aclose()
         await client.aclose()
 
 
@@ -306,8 +328,9 @@ def create_app() -> FastAPI:
         # 스트림 상태와 무관하게 항상 ok — 프로세스 liveness 만 나타낸다
         return {"status": "ok", "version": APP_VERSION}
 
-    # api 역할은 Influx 만 읽는 네 경로뿐 — /history/events 는 진행 중 사건을 메모리에서 읽으므로 제외 (016 §3.1)
+    # api 역할은 Influx 만 읽는 네 경로 + 017 의 /ws/spreads — /history/events 는 진행 중 사건을 메모리에서 읽으므로 제외 (016 §3.1)
     app.include_router(history_router)
+    app.include_router(spreads_ws_router)
     if not api_only:
         app.include_router(spreads_router)
         app.include_router(analysis_router)

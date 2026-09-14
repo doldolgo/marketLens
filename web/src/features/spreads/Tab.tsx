@@ -8,7 +8,6 @@ import {
   bar, count, exTag, hint, label, searchInput, vDivider, type Header,
 } from '../../shared/ui'
 import { alias, bool, num, oneOf, sortOf, str, useUrlState, type Codec } from '../../shared/urlState'
-import { NOTIONALS } from './api'
 
 type View = 'kimp' | 'rev'
 type DomFilter = 'all' | '업비트' | '빗썸'
@@ -110,15 +109,12 @@ const ioLabel = (kind: string, state: IoState) => (state === null ? `${kind} ?` 
 const fxCheck = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' } as const
 const checkbox = { accentColor: 'var(--color-accent)', width: 13, height: 13, cursor: 'pointer' } as const
 
-/** 체결 규모는 셸이 들고 있다 — 같은 값이 폴링 URL 의 `notional` 로도 나가야 하기 때문 (§3.4). */
 interface Props {
   feed: Feed
-  notional: number
-  onNotional: (v: number) => void
   onPick: (sym: string) => void
 }
 
-export default function SpreadsTab({ feed, notional, onNotional, onPick }: Props) {
+export default function SpreadsTab({ feed, onPick }: Props) {
   // 검색어·필터·정렬은 URL 쿼리(s.*)에 실려 새로고침해도 같은 화면 (002 §3.5)
   const [q, setQ] = useUrlState('s.q', '', str)
   const [domFilter, setDomFilter] = useUrlState<DomFilter>('s.dom', 'all', alias([['all', 'all'], ['upbit', '업비트'], ['bithumb', '빗썸']]))
@@ -190,10 +186,9 @@ export default function SpreadsTab({ feed, notional, onNotional, onPick }: Props
           <span style={label}>기준 보기</span>
           <Seg pad="4px 10px" opts={[['kimp', '김프 기준'], ['rev', '역프 기준']].map(([id, l]) => segOpt(l, view === id, () => switchView(id as View)))} />
           {vDivider}
-          {/* 차감은 항상 적용된다 — 가격 기준(현재가/슬리피지 반영) 세그먼트는 없다 (§3.5) */}
+          {/* 차감은 항상 적용된다 — 가격 기준 세그먼트도, 체결 규모 선택지도 없다 (§3.5, 017 로 $1,000 고정) */}
           <span style={label}>체결 규모</span>
-          <Seg pad="4px 9px" opts={NOTIONALS.map((v) => segOpt('$' + v / 1000 + 'k', notional === v, () => onNotional(v)))} />
-          <span style={hint}>호가창 시장가 체결 기준 · 매수·매도 양측 슬리피지 차감</span>
+          <span style={hint}>$1,000 호가창 시장가 체결 기준 · 매수·매도 양측 슬리피지 차감</span>
           {vDivider}
           <span style={label}>비교 해외 거래소</span>
           <label style={{ ...fxCheck, color: fxAllOn ? 'var(--color-accent-300)' : 'var(--color-neutral-400)' }}>

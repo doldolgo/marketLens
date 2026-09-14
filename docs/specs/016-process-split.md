@@ -24,8 +24,8 @@ Influx 를 읽는 무거운 조회(`/history/premium`·`/history/streaks`·`/his
 | `api` | Influx 조회 전용 |
 
 - `collector`: 오늘의 `server` 컨테이너와 **완전히 같다.** 스트림·우주·틱 루프·인계·flusher·writer 태스크·원문 아카이브·입출금 조회 전부 돌고, 모든 엔드포인트를 서빙한다. 로컬 개발(`uvicorn app.main:app`)은 `ROLE` 을 안 주므로 이 역할이다.
-- `api`: 기동 시 **Influx 클라이언트 생성·ping 만** 한다. 거래소 REST·WebSocket 에 연결하지 않고, Redis 에 연결하지 않고, S3 를 만지지 않고, 어떤 백그라운드 태스크도 만들지 않는다. 기동 시 복원(수집 실패 이력·사건·봉 버킷·spark)도 하지 않는다 — 이 중 하나라도 하면 두 프로세스가 같은 measurement 를 중복으로 쓰거나(`collect_fail`·`premium_event`·롤업) 거래소를 이중 구독한다.
-- `api` 가 서빙하는 경로는 `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles` 다섯뿐. 응답·파라미터·에러는 005·014 계약 그대로(Influx 불달·토큰 없음이면 503). **그 외 경로는 404.** `/history/events` 도 404 다 — 진행 중 사건을 메모리에서 읽는 엔드포인트라 `collector` 만 답할 수 있다.
+- `api`: 기동 시 **Influx 클라이언트 생성·ping 만** 한다. 거래소 REST·WebSocket 에 연결하지 않고, Redis 는 017 의 구독 목적으로만 연결하며(스트림 `ticks` 는 안 읽는다), S3 를 만지지 않고, 백그라운드 태스크는 017 의 구독 태스크 하나뿐이다. 기동 시 복원(수집 실패 이력·사건·봉 버킷·spark)도 하지 않는다 — 이 중 하나라도 하면 두 프로세스가 같은 measurement 를 중복으로 쓰거나(`collect_fail`·`premium_event`·롤업) 거래소를 이중 구독한다.
+- `api` 가 서빙하는 경로는 `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles` 다섯과 017 의 `/ws/spreads`. 응답·파라미터·에러는 005·014 계약 그대로(Influx 불달·토큰 없음이면 503). **그 외 경로는 404.** `/history/events` 도 404 다 — 진행 중 사건을 메모리에서 읽는 엔드포인트라 `collector` 만 답할 수 있다.
 - `ROLE` 이 둘 중 하나가 아니면 **설정을 읽는 시점에** 실패한다(앱 객체를 만들기 전, lifespan 이 아니다 — 설정 오류 메시지에 허용값 둘을 적는다). 잘못 뜬 채로 조용히 수집이 두 벌 돌지 않게. 설정은 지금처럼 env 에서 읽되 모르는 키는 무시하는 규칙이라, `ROLE` 은 명시적 설정 항목이어야 검사가 된다.
 
 ### 3.2 compose
@@ -36,7 +36,7 @@ Influx 를 읽는 무거운 조회(`/history/premium`·`/history/streaks`·`/his
 | `server` | `collector` |
 | `api` | `api` |
 
-- `api` 는 `server` 와 **같은 빌드 컨텍스트·같은 이미지**다. `ROLE=api` 만 `environment` 로 준다. `server/.env` 를 같은 `env_file` 로 주입하고 `INFLUX_URL` 을 같은 값으로 덮는다. `REDIS_URL` 은 덮지 않는다 — api 는 Redis 를 쓰지 않는다(env_file 에 남아 있는 로컬 값은 §3.5 대로 무시된다). 컨테이너명 `marketlens-api`, 로그 상한 `json-file` 50MB × 3, `restart: unless-stopped`, 호스트 포트 없음, `depends_on: influxdb`.
+- `api` 는 `server` 와 **같은 빌드 컨텍스트·같은 이미지**다. `ROLE=api` 만 `environment` 로 준다. `server/.env` 를 같은 `env_file` 로 주입하고 `INFLUX_URL` 을 같은 값으로 덮는다. `REDIS_URL` 도 같은 값으로 덮는다 — 017 의 구독용(안 덮으면 env_file 의 로컬 값을 컨테이너 안에서 쓴다). 컨테이너명 `marketlens-api`, 로그 상한 `json-file` 50MB × 3, `restart: unless-stopped`, 호스트 포트 없음, `depends_on: influxdb·redis`.
 - `server` 에는 `ROLE` 을 주지 않는다(기본값). 주면 `collector` 여야 한다.
 - `web` 은 `server`·`api` 둘 다에 `depends_on`.
 - 호스트에 여는 포트는 여전히 web 하나.
@@ -51,6 +51,7 @@ Influx 를 읽는 무거운 조회(`/history/premium`·`/history/streaks`·`/his
 | `/api/history/streaks` | `api:8000` |
 | `/api/history/streaks/bulk` | `api:8000` |
 | `/api/history/candles` | `api:8000` |
+| `/api/ws/` | `api:8000/ws/` (017) |
 | 그 외 `/api/*` | `server:8000` |
 
 - 위 네 경로는 **앞부분 일치**다(쿼리스트링·하위 경로 포함). `/api/history/events` 는 "그 외"라 `server` 로 간다.
@@ -64,13 +65,13 @@ deploy 워크플로(007)는 안 바뀐다. `up -d --build` 가 `api` 도 같이 
 
 ### 3.5 엣지
 - `api` 에서 Influx 토큰이 없으면 `/history/*` 503, `/health` 는 200 — 005 와 같다.
-- `api` 프로세스에 `REDIS_URL`·`S3_BUCKET`·거래소 키가 있어도 무시한다(연결 시도 자체를 안 한다). 로그에 "Redis 연결 실패"·"S3 버킷 접근 실패" 류가 **찍히지 않아야** 한다 — 찍히면 역할 분기가 샌 것이다.
+- `api` 프로세스에 `S3_BUCKET`·거래소 키가 있어도 무시한다(연결 시도 자체를 안 한다). 로그에 "S3 버킷 접근 실패"·거래소 줄이 **찍히지 않아야** 한다 — 찍히면 역할 분기가 샌 것이다. Redis 줄은 017 구독이 남길 수 있다.
 - `collector` 가 재시작해도 `api` 는 영향 없고, `api` 가 재시작해도 수집은 한 틱도 안 빠진다.
 - 두 컨테이너의 `/health` 는 구분되지 않는다(둘 다 `{"status":"ok","version":…}` — 001 의 본문 그대로). nginx 의 `/api/health` 는 `server` 로 간다. `api` 의 헬스는 compose 안에서 `docker compose exec api` 로만 본다 — 외부 헬스체크는 후속(인프라 스펙).
 
 ## 4. 검증
 - `ROLE=api` 로 만든 앱은 `/health` 200, `/history/premium` 이 Influx 계약대로 답하고(토큰 없으면 503), `/spreads`·`/refresh`·`/health/collect`·`/history/events`·`/orderbook/upbit` 이 404
-- `ROLE=api` 앱의 기동 로그에 Redis·S3·거래소 관련 줄이 없고, 백그라운드 태스크가 0개
+- `ROLE=api` 앱의 기동 로그에 S3·거래소 관련 줄이 없고, 백그라운드 태스크는 017 의 구독 태스크 1개(`/ws/spreads` 는 두 역할 모두)
 - `ROLE` 없음 = `collector` = 오늘과 같은 라우트 집합(기존 테스트 전부 그대로 통과)
 - `ROLE=foo` 는 설정을 읽는 순간 실패(앱 객체 생성 전)
 - compose 계약(`tests/test_deploy.py` 갱신): 컨테이너 5개·고정 이름, `api` 는 `ROLE=api` + `env_file` + `INFLUX_URL` 덮어쓰기 + `REDIS_URL` 없음 + 로그 상한 + 호스트 포트 없음, `server` 에 `ROLE` 없음, `web` 이 둘 다 `depends_on`, 호스트 노출은 web 하나. README 의 컨테이너 수 문구 검사는 5개 기준으로
@@ -97,7 +98,7 @@ curl -s -o /dev/null -w '%{http_code}' 'localhost:8090/api/history/streaks/bulk?
 curl -s -o /dev/null -w '%{http_code}' 'localhost:8090/api/history/candles?base=BTC'           # api 로그
 curl -s -o /dev/null -w '%{http_code}' localhost:8090/api/history/events                       # 200, server 로그
 curl -s -o /dev/null -w '%{http_code}' localhost:8090/api/spreads                              # 200, server 로그
-docker logs marketlens-api 2>&1 | grep -Ec 'Redis|S3|업비트|빗썸|바이낸스|거래소|우주|스트림'      # 0
+docker logs marketlens-api 2>&1 | grep -Ec 'S3|업비트|빗썸|바이낸스|거래소|우주|스트림'      # 0 (Redis 줄은 017 구독)
 docker compose --env-file server/.env stop api
 curl … /api/spreads → 200, /api/health → 200, /api/history/candles?base=BTC → 504(첫 시도) / 502(14초 뒤, 재시도)
 docker compose --env-file server/.env start api  # 3초 뒤 /api/history/candles 가 다시 api 의 답(503 storage_unavailable — 아래 §7)

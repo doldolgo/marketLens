@@ -18,7 +18,7 @@
                  ③ InfluxDB `premium`·`dw_fail`  ←── 양식 그대로 적재, 성공하면 읽은 만큼 Redis 를 비운다
 ```
 
-- **① LiveStore** — "지금"을 답한다. 최신 시세와 **최신 틱 1장**을 든다. `/spreads` 와 FE 가 읽는 유일한 곳이며 폴링 경로에 Redis·Influx 호출이 없다.
+- **① LiveStore** — "지금"을 답한다. 최신 시세와 **최신 틱 1장**을 든다. `/spreads` 와 FE 가 읽는 유일한 곳이며 HTTP 폴링 경로에 Redis·Influx 호출이 없다(WebSocket 푸시는 017 — api 가 Redis 채널을 구독한다).
 - **② Redis** — "Influx 로 아직 옮기지 못한 틱"만 든다. 원문이 아니라 **Influx 가 저장할 모양 그대로**(조합별 fwd/rev)를 담는다. 옮기고 나면 비운다.
 - **③ InfluxDB** — 영구 역사. `/history/*` 가 읽는다.
 

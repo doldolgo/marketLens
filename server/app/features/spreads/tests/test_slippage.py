@@ -86,8 +86,8 @@ def test_single_level_fill_has_zero_slippage() -> None:
 
 
 def test_two_levels_deduct_and_raw_is_restored_both_directions() -> None:
-    # 2단계 이상을 먹으면 slip > 0 이고 fwd + slipFwd 가 원값이다 (양방향, §4)
-    row = only_row(seed(LiveStore()))
+    # 2단계 이상을 먹으면 slip > 0 이고 fwd + slipFwd 가 원값이다 (양방향, §4). 시드는 $10,000 기준
+    row = only_row(seed(LiveStore()), notional=10_000)
     # fwd: 해외에서 $10,000 → 50 + 25 = 75개, 평균 $133.33…
     #      국내에서 75개를 팔면 50@₩200,000 + 25@₩100,000 → 평균 ₩166,666.67
     assert row["fwd"] == pytest.approx(25.0)
@@ -105,7 +105,7 @@ def test_legs_are_linked_by_quantity_not_walked_separately() -> None:
     # 한 다리에서 산 수량을 다른 다리에서 판다 — 다리를 따로 걸은 값과 다르다 (§4).
     # 국내 매도 1단계를 얇게 해 "산 수량 75개"가 2단계로 넘어가게 만든 시드.
     thin = [[200_000.0, 10.0], [100_000.0, 100.0]]
-    row = only_row(seed(LiveStore(), dom_bids=thin))
+    row = only_row(seed(LiveStore(), dom_bids=thin), notional=10_000)
     # 연결: 75개를 판다 → 10@₩200,000 + 65@₩100,000 = ₩8,500,000, 평균 ₩113,333.33
     #       fwd = (113,333.33 / 133,333.33 − 1) × 100 = −15.0
     assert row["fwd"] == pytest.approx(-15.0)
@@ -181,13 +181,13 @@ def test_all_stored_levels_are_walked_even_at_twenty() -> None:
     assert all("depth" not in key for key in deep)
 
 
-def test_default_notional_is_10000_and_echoed_at_top_level() -> None:
-    # notional 미지정이면 10000 이 쓰이고 응답 최상위에 그 값이 실린다 (§4)
+def test_default_notional_is_1000_and_echoed_at_top_level() -> None:
+    # notional 미지정이면 1000 이 쓰이고 응답 최상위에 그 값이 실린다 (§4, 017 로 고정값)
     store = seed(LiveStore())
     body = make_client(store).get("/spreads").json()
-    assert body["notional"] == 10_000.0
-    explicit = make_client(store).get("/spreads?notional=10000").json()
-    assert explicit["notional"] == 10_000.0
+    assert body["notional"] == 1_000.0
+    explicit = make_client(store).get("/spreads?notional=1000").json()
+    assert explicit["notional"] == 1_000.0
     assert explicit["rows"][0]["fwd"] == body["rows"][0]["fwd"]
     # 실수도 허용된다
     assert make_client(store).get("/spreads?notional=12345.5").json()["notional"] == (
@@ -217,7 +217,7 @@ def test_net_values_differ_from_stored_raw_by_the_deducted_width() -> None:
     # 응답 fwd·rev 는 저장 계층(009 틱 → 005 premium)이 쓰는 원값과 다르다 —
     # 같은 저장소로 만든 틱의 fwd 는 응답의 fwd + slipFwd 와 같다 (§4)
     store = seed(LiveStore())
-    row = only_row(store)
+    row = only_row(store, notional=10_000)
     [point] = build_tick(store, ts=1_787_000_000, dw_failed=()).rows
     assert (point.dom, point.fx, point.base) == ("upbit", "binance", "BTC")
     # 차감이 0 이 아닌 시드라 두 값이 실제로 다르다

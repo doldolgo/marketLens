@@ -4,7 +4,7 @@
 
 ## 엔진 셋
 - **InfluxDB 2.7 OSS** — 영구 역사. org `marketlens`. 버킷 `marketlens`(초 단위 원값·사건·실패 구간, 무제한) + `candles_1m…1d`(봉 계층 — retention 이 곧 유통기한 7일/30일/90일/365일/무제한, 기동 시 없으면 만들고 있으면 안 건드린다, 스펙 014). 쿼리는 Flux, Python 클라이언트는 `influxdb-client`. 이유: 김프 이력은 (거래소쌍·코인) 태그 × 시각 × 수치 2개라는 전형적 시계열이고, 시간 버킷 집계가 엔진 기본 기능이라 앱 코드가 줄어든다. 3 Core 는 기본 쿼리 범위 ~72시간이라 92일 백필·월간 조회에 부적합해 2.7 을 쓴다.
-- **Redis 7** — Influx 로 아직 옮기지 못한 틱의 **버퍼**(스펙 009). 원문이 아니라 Influx 가 저장할 모양 그대로를 들고, 60초마다 전량이 옮겨진 뒤 비워진다. AOF(`appendonly yes`)라 재기동해도 안 옮긴 틱이 남는다.
+- **Redis 7** — Influx 로 아직 옮기지 못한 틱의 **버퍼**(스펙 009) + 스프레드 표의 **채널·키**(스펙 017 — 게시 즉시 소비, TTL 10/15초). 원문이 아니라 Influx 가 저장할 모양 그대로를 들고, 60초마다 전량이 옮겨진 뒤 비워진다. AOF(`appendonly yes`)라 재기동해도 안 옮긴 틱이 남는다.
 - **S3** 버킷 `marketlens-spreads-snapshot`(ap-northeast-2), 접두사 `raw/` — 거래소 **원문 아카이브**(스펙 010). 거래소가 준 WebSocket 프레임·REST 응답 본문을 받은 그대로 남긴다 — 시세 프레임은 심볼·종류별, 매초 오는 마켓·심볼 목록 응답은 거래소별 분당 마지막 1건, 나머지(입출금·핸드셰이크 거부 본문·구독 응답)는 전량. 가공값은 없다.
 
 ## InfluxDB measurement
@@ -17,11 +17,14 @@
 - **candle** — 봉 1개(스펙 014 §3.4). 다섯 계층 버킷 `candles_1m`·`candles_5m`·`candles_1h`·`candles_4h`·`candles_1d` 모두 같은 모양. tag `dom`·`fx`·`base`, time = 창 시작(초, **KST 벽시계 정렬** `(ts + 32400) // W * W − 32400` — 4h·1d 가 UTC 정렬과 다르다). field `fwd_o fwd_h fwd_l fwd_c rev_o rev_h rev_l rev_c`(float %, 원값)·`krw`(float, 국내 종가 원)·`usdt`(float, 해외 종가)·`rate`(float, USDT 중간값 원)·`dom_dep dom_wd fx_dep fx_wd`(int: 1 가능·0 불가·−1 모름)·`blocked_fwd_sec blocked_rev_sec`(int, 창 길이 이하)·`samples`(int, 창에 든 틱 수). 유일키 = (버킷, dom, fx, base, 창 시작). 1m 하루 ≈ 70만 점.
 
 ## Redis
-- 키 하나: Stream **`ticks`**. 엔트리 = 틱 1개 — 필드 `ts`(epoch 초), `data`(틱 레코드 `{ts, rows:[{dom,fx,base,fwd,rev}], dwFailed:[…]}` 를 gzip 한 JSON, ≈3KB).
+- Stream **`ticks`**(009). 엔트리 = 틱 1개 — 필드 `ts`(epoch 초), `data`(틱 레코드 `{ts, rows:[{dom,fx,base,fwd,rev}], dwFailed:[…]}` 를 gzip 한 JSON, ≈3KB).
 - 쓰는 쪽: 009 의 인계기 — LiveStore 틱 슬롯에서 물러난 직전 틱을 `XADD ticks MAXLEN ~ 86400`. 평상시 길이 60 안팎.
 - 읽고 지우는 쪽: 009 의 flusher — 60초마다 전량을 `XRANGE` 1,000건 페이지로 잘라 한 페이지씩 Influx 에 쓰고, **그 페이지의 모든 배치가 성공한 뒤에만** 그 페이지의 ID 를 `XDEL` 한다(메모리는 페이지 크기에 비례). 페이지가 실패하면 그 페이지부터는 지우지 않고 다음 회차가 같은 구간을 다시 보낸다(Influx 덮어쓰기라 무해).
 - `MAXLEN ~ 86400`(24시간)은 Influx 가 하루 넘게 막혔을 때만 작동하는 안전 상한이다. 잘리면 유실이고 flusher 가 다음 회차 로그로 알린다.
-- env `REDIS_URL`(기본 `redis://localhost:6379/0`, compose 안에서는 `redis://redis:6379/0`). Redis 가 없어도 앱은 뜬다 — 인계된 틱은 버려지고(경고 로그) 원문은 S3 에 있어 재생 가능하다.
+- 채널 **`spreads`**(017) — `GET /spreads` 와 같은 표 JSON(camelCase, ≈240KB) 1장. 쓰는 쪽 수집(누가 볼 때만 틱 직후 매초), 읽는 쪽 api 의 구독 허브.
+- 키 **`spreads:latest`**(017) — 같은 JSON, TTL 10초. 쓰는 쪽 수집(게시와 한 왕복), 읽는 쪽 api(첫 접속자의 시작 표). 만료 = 수집이 표를 안 만들거나 멈춤.
+- 키 **`spreads:want`**(017) — 값 `1`, TTL 15초. 쓰는 쪽 api(접속자가 있는 동안 5초마다·첫 접속 즉시), 읽는 쪽 수집(5초마다 → 메모리 "원함").
+- env `REDIS_URL`(기본 `redis://localhost:6379/0`, compose 안에서는 `redis://redis:6379/0` — server·api 둘 다). Redis 가 없어도 앱은 뜬다 — 인계된 틱은 버려지고(경고 로그) 원문은 S3 에 있어 재생 가능하다.
 
 ## S3 원문 아카이브
 - 객체 키 `raw/exchange=<id>/dt=YYYY-MM-DD/hh=HH/YYYYMMDDTHHMM00Z.jsonl.gz`(UTC, 시각 = 분 창의 시작). 거래소·분마다 객체 1개. 시세 프레임·마켓 목록 응답은 그 분의 `(source, key)` 별 마지막 1건만(목록의 key 는 `markets:all`·`symbols:all`), 나머지(입출금·핸드셰이크 거부 본문·구독 응답)는 전량.
@@ -54,7 +57,7 @@
 ## 읽는 쪽
 - `features/history` 의 `/history/premium`·`/history/streaks`·`/history/streaks/bulk`·`/history/events`(`premium_event` 닫힌 사건 + 메모리의 진행 중)·`/history/candles`(`res` 의 계층 버킷 하나, 요청당 1,440창 상한, 진행 중 창 없음) 만. 다른 조회 API 는 DB 를 0회 접근한다(메모리가 진실). 저장소 불가 시 503 `storage_unavailable`.
 - 기동 시 1회: `collect_fail` 24시간 복원(011, 3초 상한), `premium_event` 7일 안 `end_ts 0` 복원(013, 3초 상한 — 600초 넘게 못 본 사건은 `last_ts` 로 닫아 쓴다), spark 용 `premium` 최근 30분 1분 버킷 집계(009, 10초 상한), 롤업 따라잡기 기준점 — 계층마다 위 버킷 가장 늦은 점·아래 계층들 가장 오래된 점(014, 계층당 3초 상한). 롤업 회차는 아래 계층 버킷을 창 단위로 읽는다.
-- Redis 는 flusher 만 읽는다. S3 를 읽는 코드는 없다.
+- Redis 스트림 `ticks` 는 flusher 만 읽는다. 채널 `spreads`·키 `spreads:latest` 는 api 의 구독 허브가, 키 `spreads:want` 는 수집의 게시기가 읽는다(017). S3 를 읽는 코드는 없다.
 
 ## 로컬 접속
 - dev compose 로 Influx 2.7 과 Redis 7 을 띄운다. env 는 `INFLUX_URL`(기본 `http://localhost:8086`)·`INFLUX_TOKEN`·`REDIS_URL`.

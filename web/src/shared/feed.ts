@@ -18,7 +18,7 @@ function buildIo(rows: SpreadRow[]): Record<string, IoEntry> {
 export function createFeed(): Feed {
   const flow = buildFlow()
   const feed: Feed = {
-    spreads: [], // 이 스펙에서는 항상 빈 배열 — 003 이 replace 로 채운다
+    spreads: [], // 이 스펙에서는 항상 빈 배열 — 003(017 구독)이 replace 로 채운다
     rate: 0,
     io: {},
     markets: buildMarkets(),
@@ -37,7 +37,7 @@ export function createFeed(): Feed {
   return feed
 }
 
-/** 1.5초 tick — 폴링이 멈추면 stale 로 드러나도록 모든 행의 age 를 키운다. */
+/** 1.5초 tick — 푸시가 멈추면 stale 로 드러나도록 모든 행의 age 를 키운다 (017 은 안 바뀐 행을 안 보낸다). */
 export function tickFeed(feed: Feed): void {
   for (const row of feed.spreads) row.age += 1.5
   for (const row of feed.flowRows) row.age += 1.5

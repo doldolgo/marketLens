@@ -20,7 +20,7 @@
 - 컨테이너 5개:
   - `server` — FastAPI + uvicorn 워커 1개(python 3.12 slim). 컨테이너 포트 8000, **호스트에 노출하지 않는다**(compose 내부 네트워크만).
   - `api` — `server` 와 같은 이미지에 `ROLE=api`. Influx 조회 경로(`/history/premium`·`streaks`·`streaks/bulk`·`candles`)만 서빙, 호스트 비노출(016).
-  - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 `/api/` 를 `server:8000/` 로 프록시하고, 없는 경로는 index.html 을 준다(SPA).
+  - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 `/api/` 를 `server:8000/` 로 프록시하고(`/api/ws/` 는 `api:8000/ws/` 로 WebSocket 업그레이드, 017), 없는 경로는 index.html 을 준다(SPA).
     캐시 규칙: `index.html` 은 `no-store, must-revalidate` **+ `always`** — 배포가 FE·BE 를 함께 바꾸므로 캐시된 셸이 남으면 열려 있던 탭이 구 번들로 새 API 계약을 계속 친다. `/assets/` 의 해시 박힌 파일은 `max-age=31536000, immutable` 이되 **`always` 는 붙이지 않는다** — 붙이면 404 에도 1년 immutable 이 실려, 배포 직전 셸을 든 브라우저가 사라진 번들의 404 를 1년간 캐시한다(재배포로도 되돌릴 수 없다). `always` 없이도 200·304 는 헤더를 받는다.
   - `influxdb` — 2.7, dev compose 와 같은 첫 기동 설정(org·bucket `marketlens`, admin 토큰 = `INFLUX_TOKEN`). named volume, 호스트 비노출.
   - `redis` — `redis:7-alpine`, `--appendonly yes`, named volume, 호스트 비노출(009 의 틱 버퍼 — Influx 로 옮기기 전 틱만 든다).
@@ -32,7 +32,7 @@
 - **호스트 포트는 compose 변수 `WEB_PORT`(기본 80).** EC2 는 루트 `.env` 의 `WEB_PORT=80`. 기존 marketlens-be·fe 컨테이너는 2026-09-04 정지(`docker compose stop`, 폴더·코드 유지) — 이 레포 소관이 아니므로 그 폴더는 건드리지 않는다. 로컬 통합 기동은 `:8000` 충돌을 피해 `WEB_PORT=8080` 을 쓴다(dev-setup.md).
 - **`/api/*` 는 web 이 server 로 넘기며 `/api` 접두를 뗀다.** `/api/health` → server `/health`. dev 의 vite proxy 와 같은 규칙이라 FE 코드는 환경을 모른다.
 - **server 는 uvicorn 워커 1개(collector 역할 기준, 016).** 틱 루프·스트림과 메모리 저장소가 프로세스 안에 있어 워커가 둘이면 진실도 둘이 된다.
-- **`.env` 는 이미지에 넣지 않는다.** `server/.env` 는 compose 의 `env_file` 로만 주입(시크릿이 이미지 레이어에 남지 않게). `WEB_PORT` 는 compose 변수라 루트 `.env` 에 둔다 — 시크릿과 포트 설정을 섞지 않는다. 단 `INFLUX_URL`·`REDIS_URL` 은 compose 가 `environment` 로 `http://influxdb:8086`·`redis://redis:6379/0` 을 **덮어쓴다** — `server/.env` 의 값은 로컬(호스트) 기준이라 컨테이너 안에서 닿지 않기 때문.
+- **`.env` 는 이미지에 넣지 않는다.** `server/.env` 는 compose 의 `env_file` 로만 주입(시크릿이 이미지 레이어에 남지 않게). `WEB_PORT` 는 compose 변수라 루트 `.env` 에 둔다 — 시크릿과 포트 설정을 섞지 않는다. 단 `INFLUX_URL`·`REDIS_URL` 은 compose 가 `environment` 로 `http://influxdb:8086`·`redis://redis:6379/0` 을 **덮어쓴다** — `server/.env` 의 값은 로컬(호스트) 기준이라 컨테이너 안에서 닿지 않기 때문. `api` 도 같은 두 값을 덮는다(016·017).
 - **CI 는 server·web 두 job 을 항상 둘 다 돌린다.** 경로 필터로 건너뛰면 required check 가 비어 branch protection 이 꼬인다.
   - `server` job: Python 3.12 → 의존성 설치 → `ruff check .` → `ruff format --check .` → `pytest -q` (작업 디렉토리 `server/`)
   - `web` job: Node 22 → `npm ci` → `npm run lint` → `npm run build` (작업 디렉토리 `web/`)
