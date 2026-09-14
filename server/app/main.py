@@ -2,7 +2,8 @@
 
 /health 와 틱 루프는 기능 폴더가 아니라 여기(시스템) 소관이다.
 메모리가 진실이므로 uvicorn 워커는 1개여야 한다 — 워커가 둘이면 서로 다른 메모리를 본다.
-시작 순서: Influx·Redis 연결 확인 → 010 원문 아카이브(S3_BUCKET 있을 때) → 011 이력 복원 → 013 사건 복원 → 014 봉 버킷·롤업 기준점
+프로세스 역할은 ROLE(016) — collector(기본) 는 아래 전체, api 는 Influx 조회 전용(`_api_lifespan`).
+시작 순서(collector): Influx·Redis 연결 확인 → 010 원문 아카이브(S3_BUCKET 있을 때) → 011 이력 복원 → 013 사건 복원 → 014 봉 버킷·롤업 기준점
 → 009 spark 복원 → 마켓 우주 → 스트림 기동(국내 2 + 바이낸스 3샤드) → 틱 루프 → 009 인계 보내기 태스크·flusher.
 어느 것이 실패해도 앱은 뜬다.
 """
@@ -29,6 +30,7 @@ from app.core.config import (
     EXCHANGE_TIMEOUT_CONNECT,
     EXCHANGE_TIMEOUT_TOTAL,
     USER_AGENT,
+    Settings,
     get_settings,
 )
 from app.core.contracts import noop_record
@@ -51,11 +53,41 @@ from app.core.ticks import TickLoop
 from app.core.universe import UniverseRefresher
 from app.features.analysis.router import router as analysis_router
 from app.features.health.router import router as health_router
+from app.features.history.router import events_router as history_events_router
 from app.features.history.router import router as history_router
 from app.features.spreads.router import router as spreads_router
 from app.features.wallet_status.service import WalletStatusService
 
 logger = logging.getLogger("marketlens.main")
+
+
+async def _open_influx(settings: Settings) -> InfluxClient | None:
+    """Influx 클라이언트 생성·ping — 두 역할이 공통으로 하는 유일한 기동 작업 (016 §3.1)."""
+    if not settings.influx_token:
+        logger.warning("INFLUX_TOKEN 이 없어 Influx 를 쓰지 않는다 — /history/* 는 503")
+        return None
+    influx = InfluxClient(url=settings.influx_url, token=settings.influx_token)
+    if not await asyncio.to_thread(influx.ping):
+        logger.error(
+            "InfluxDB 연결 실패: %s — 회차마다 재시도한다", settings.influx_url
+        )
+    return influx
+
+
+@asynccontextmanager
+async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """api 역할(016 §3.1) — Influx 클라이언트 생성·ping 만 한다.
+
+    거래소·Redis·S3 에 연결하지 않고 백그라운드 태스크·기동 복원도 없다 — 하나라도 하면
+    collector 와 같은 measurement 를 중복으로 쓰거나(collect_fail·premium_event·롤업) 거래소를 이중 구독한다.
+    """
+    influx = await _open_influx(app.state.settings)
+    app.state.influx = influx
+    try:
+        yield
+    finally:
+        if influx is not None:
+            influx.close()
 
 
 @asynccontextmanager
@@ -111,15 +143,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     # Influx — 토큰 없으면 /history/* 503·이력 복원 없음, 앱은 뜬다 (스펙 005·011)
-    influx: InfluxClient | None = None
-    if settings.influx_token:
-        influx = InfluxClient(url=settings.influx_url, token=settings.influx_token)
-        if not await asyncio.to_thread(influx.ping):
-            logger.error(
-                "InfluxDB 연결 실패: %s — 회차마다 재시도한다", settings.influx_url
-            )
-    else:
-        logger.warning("INFLUX_TOKEN 이 없어 Influx 를 쓰지 않는다 — /history/* 는 503")
+    influx = await _open_influx(settings)
     app.state.influx = influx
 
     # Redis — 틱 버퍼(009). 불달이면 경고 1줄, 인계된 틱은 버려지고 앱은 뜬다
@@ -259,8 +283,15 @@ def _setup_logging() -> None:
 
 def create_app() -> FastAPI:
     _setup_logging()
-    app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=_lifespan)
-    app.state.settings = get_settings()
+    # 설정을 앱 객체보다 먼저 읽는다 — ROLE 이 허용값 밖이면 여기서 실패한다 (016 §3.1)
+    settings = get_settings()
+    api_only = settings.role == "api"
+    app = FastAPI(
+        title=APP_NAME,
+        version=APP_VERSION,
+        lifespan=_api_lifespan if api_only else _lifespan,
+    )
+    app.state.settings = settings
 
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
@@ -275,10 +306,13 @@ def create_app() -> FastAPI:
         # 스트림 상태와 무관하게 항상 ok — 프로세스 liveness 만 나타낸다
         return {"status": "ok", "version": APP_VERSION}
 
-    app.include_router(spreads_router)
-    app.include_router(analysis_router)
+    # api 역할은 Influx 만 읽는 네 경로뿐 — /history/events 는 진행 중 사건을 메모리에서 읽으므로 제외 (016 §3.1)
     app.include_router(history_router)
-    app.include_router(health_router)
+    if not api_only:
+        app.include_router(spreads_router)
+        app.include_router(analysis_router)
+        app.include_router(history_events_router)
+        app.include_router(health_router)
 
     return app
 

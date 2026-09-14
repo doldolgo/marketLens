@@ -3,6 +3,9 @@
 유일하게 DB 를 읽는 조회 경로다(db.md). 저장소 불가(연결 실패·토큰 없음)는 503
 `storage_unavailable` — 메모리 조회 경로(/spreads 등)는 영향받지 않는다.
 Influx 클라이언트는 동기라 스레드로 돌려 이벤트 루프를 막지 않는다.
+
+라우터는 둘이다(016 §2): `router` 는 Influx 만 읽는 네 경로, `events_router` 는 진행 중 사건을
+메모리(013 감지기)에서도 읽는 `/history/events` — api 역할은 앞의 것만 include 한다. 경로·응답은 같다.
 """
 
 import asyncio
@@ -29,6 +32,7 @@ from app.features.history.service import (
 )
 
 router = APIRouter(prefix="/history")
+events_router = APIRouter(prefix="/history")
 
 # base 는 Flux 문자열에 들어간다 — 심볼 문자만 허용(그 외 422)
 _BASE_PATTERN = r"^[A-Za-z0-9]{1,20}$"
@@ -133,7 +137,7 @@ async def get_streaks_bulk(
     )
 
 
-@router.get("/events")
+@events_router.get("/events")
 async def get_events(
     request: Request,
     start: int | None = Query(None, ge=0, le=4_102_444_800),

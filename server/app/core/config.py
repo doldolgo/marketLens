@@ -5,6 +5,7 @@
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,6 +31,9 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
+    # 프로세스 역할(016 §3.1) — collector 는 오늘의 전체 동작, api 는 Influx 조회 전용(compose 가 준다).
+    # 허용값 밖이면 설정을 읽는 순간(앱 객체 생성 전) 실패한다 — 잘못 뜬 채로 수집이 두 벌 돌지 않게.
+    role: Literal["collector", "api"] = "collector"
     influx_url: str = "http://localhost:8086"
     influx_token: str | None = None
     # 틱 버퍼 Redis(009) — compose 안에서는 redis://redis:6379/0 으로 덮는다. 불달이어도 앱은 뜬다.
