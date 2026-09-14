@@ -24,7 +24,7 @@ from app.core.tick_store import (
     encode_tick,
 )
 from app.core.ticks import TickLoop
-from app.features.spreads.tests.helpers import make_client, seed_rows
+from app.features.spreads.tests.helpers import seed_rows, spreads_json
 from app.main import create_app
 from tests.conftest import FakeInflux, make_row
 
@@ -122,7 +122,7 @@ async def test_handed_off_tick_matches_raw_premium_of_spreads_row() -> None:
     assert set(by_base) == {"BTC", "ETH"}
     assert set(by_base["BTC"]) == {"dom", "fx", "base", "fwd", "rev"}
     # 같은 호가의 /spreads 행: 순값 + 차감폭 = 원값
-    rows = make_client(store).get("/spreads").json()["rows"]
+    rows = spreads_json(store)["rows"]
     for row in rows:
         raw = by_base[row["sym"]]
         assert raw["fwd"] == pytest.approx(row["fwd"] + row["slipFwd"])
@@ -159,7 +159,7 @@ async def test_redis_down_drops_ticks_with_one_warning_each_and_spreads_keeps_wo
     assert len(warnings) == 2 and relay.pending == 0
     # 틱 루프·/spreads·spark 는 정상
     assert store.tick is not None and store.tick.ts == T0 + 2
-    [btc, _] = make_client(store).get("/spreads").json()["rows"]
+    [btc, _] = spreads_json(store)["rows"]
     assert btc["status"] == "ok" and len(btc["spark"]) == 1
     # 복구되면 그 뒤 틱부터 흐른다
     server.connected = True

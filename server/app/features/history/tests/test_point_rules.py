@@ -16,6 +16,7 @@ from app.core.redis_stream import RedisTickStream
 from app.core.tick_store import Flusher, TickRelay
 from app.core.ticks import TickLoop, build_tick
 from app.features.history.tests.helpers import FakeInfluxReader, make_client
+from app.features.spreads.tests.helpers import spreads_json
 from tests.conftest import FakeInflux, make_row
 
 
@@ -88,9 +89,7 @@ def test_stored_point_is_the_raw_value_before_slippage() -> None:
     # premium 의 fwd/rev 는 차감 전 원값 — 같은 호가의 /spreads 행은 fwd + slipFwd·rev + slipRev (§4)
     store = seed(two_level_books(), rates={"upbit": (1400.0, 1390.0)})
     [point] = build_tick(store, T0, ()).rows
-    resp = make_client(FakeInfluxReader(), store).get("/spreads")
-    assert resp.status_code == 200, resp.text
-    [row] = resp.json()["rows"]
+    [row] = spreads_json(store)["rows"]
     assert row["slipFwd"] > 0 and row["slipRev"] > 0  # 차감이 0 이 아닌 상태에서 고정
     assert point.fwd == pytest.approx(row["fwd"] + row["slipFwd"])
     assert point.rev == pytest.approx(row["rev"] + row["slipRev"])
@@ -161,14 +160,13 @@ HISTORY_ROUTES = [
 
 
 def test_influx_outage_keeps_memory_routes_alive_and_history_503() -> None:
-    # Influx 가 닿지 않아도 /health 200·/spreads 는 메모리로 동작, /history/* 만 503 (§4)
+    # Influx 가 닿지 않아도 /health 200·표 계산은 메모리로 동작, /history/* 만 503 (§4)
     reader = FakeInfluxReader()
     reader.fail = True
     store = seed(two_level_books(), rates={"upbit": (1400.0, 1390.0)})
     client = make_client(reader, store)
     assert client.get("/health").json()["status"] == "ok"
-    spreads = client.get("/spreads")
-    assert spreads.status_code == 200 and len(spreads.json()["rows"]) == 1
+    assert len(spreads_json(store)["rows"]) == 1
     for path, params in HISTORY_ROUTES:
         res = client.get(path, params=params)
         assert res.status_code == 503, path
@@ -176,10 +174,10 @@ def test_influx_outage_keeps_memory_routes_alive_and_history_503() -> None:
 
 
 def test_missing_token_makes_every_history_route_503() -> None:
-    # INFLUX_TOKEN 없이 기동 → /history/* 503, 메모리 조회는 그대로 (§4)
+    # INFLUX_TOKEN 없이 기동 → /history/* 503, 메모리 표 계산은 그대로 (§4)
     store = seed(two_level_books(), rates={"upbit": (1400.0, 1390.0)})
     client = make_client(None, store)
-    assert client.get("/spreads").status_code == 200
+    assert len(spreads_json(store)["rows"]) == 1
     for path, params in HISTORY_ROUTES:
         res = client.get(path, params=params)
         assert res.status_code == 503, path
