@@ -1000,7 +1000,7 @@ def test_boot_with_every_connection_failing_keeps_health_200(
         raise httpx.ConnectError("down", request=request)
 
     real_client = httpx.AsyncClient
-    for module in ("upbit", "bithumb", "binance", "bybit"):
+    for module in ("upbit", "bithumb", "binance", "bybit", "bitget"):
         monkeypatch.setattr(f"app.core.streams.{module}.open_socket", refuse)
     monkeypatch.setattr(
         httpx,
@@ -1029,6 +1029,7 @@ def test_boot_with_every_connection_failing_keeps_health_200(
             "bithumb",
             "binance",
             "bybit",
+            "bitget",
         ]
         state = app.state.live_store.stream_state("bybit")
         assert state is not None and not state.connected

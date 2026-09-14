@@ -122,7 +122,7 @@ class WalletStatusProvider(Protocol):
     def failed(self) -> list[str]: ...
 
 
-# --- 해외 USDT 현물 심볼 집합 (스펙 001 §3.2, 구현은 012 바이낸스·019 바이빗 — 우주는 목록으로 받는다) ---
+# --- 해외 USDT 현물 심볼 집합 (스펙 001 §3.2, 구현은 012 바이낸스·019 바이빗·020 비트겟 — 우주는 목록으로 받는다) ---
 
 
 class ForeignSymbolSource(Protocol):

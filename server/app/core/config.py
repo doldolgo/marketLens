@@ -14,8 +14,8 @@ APP_NAME = "MarketLens Backend"
 APP_VERSION = "0.1.0"
 USER_AGENT = f"marketlens-server/{APP_VERSION}"
 
-# 거래소 4곳 고정 순서 — 스펙 001 §3.3·019 §2. 국내 둘은 KRW, 바이낸스·바이빗은 USDT 마켓
-EXCHANGES = ("upbit", "bithumb", "binance", "bybit")
+# 거래소 5곳 고정 순서 — 스펙 001 §3.3·020 §2. 국내 둘은 KRW, 바이낸스·바이빗·비트겟은 USDT 마켓
+EXCHANGES = ("upbit", "bithumb", "binance", "bybit", "bitget")
 DOMESTIC_EXCHANGES = ("upbit", "bithumb")
 
 # 거래소 REST(마켓 목록) 타임아웃(초)·WebSocket 핸드셰이크 타임아웃(초) — 스펙 001 §3.1

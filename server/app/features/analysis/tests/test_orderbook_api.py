@@ -103,3 +103,22 @@ def test_bybit_is_in_the_registry() -> None:
     assert res.status_code == 200
     body = res.json()
     assert (body["exchange"], body["asks"][0]["price"]) == ("bybit", 67_000.0)
+
+
+def test_bitget_is_in_the_registry() -> None:
+    # 020 — 비트겟 행도 /orderbook/{exchange} 로 본다 (표시명 Bitget)
+    store = LiveStore()
+    store.put_row(
+        make_row(
+            "bitget",
+            "BTC",
+            quote="USDT",
+            asks=[[67_000.0, 1.0]],
+            bids=[[66_900.0, 1.0]],
+        ),
+        datetime.now(tz=UTC),
+    )
+    res = make_client(store).get("/orderbook/bitget", params={"symbol": "BTC/USDT"})
+    assert res.status_code == 200
+    body = res.json()
+    assert (body["exchange"], body["asks"][0]["price"]) == ("bitget", 67_000.0)
