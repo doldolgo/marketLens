@@ -19,7 +19,7 @@
 ## 3. 동작
 
 ### 3.1 읽는 계약 (복사)
-- 001·009: 틱은 1초 주기, `ts` 는 epoch 초. 틱 `rows` 의 행 = 자격(국내×해외 다른 거래소, 양쪽 최우선 호가, 그 국내 거래소 자신의 USDT 시세, 여섯 값 > 0)을 통과한 조합만. `dom ∈ {upbit, bithumb}`, `fx ∈ {binance, bybit}`(019). 자격 미달 조합은 그 틱에 **없다**. 국내 행의 `price` = 마지막 체결가(없으면 최우선 호가 중간값), 해외 행도 같다. 국내 거래소의 USDT 시세 = `rate.ask`(KRW-USDT 최우선 매도호가)·`rate.bid`(최우선 매수호가).
+- 001·009: 틱은 1초 주기, `ts` 는 epoch 초. 틱 `rows` 의 행 = 자격(국내×해외 다른 거래소, 양쪽 최우선 호가, 그 국내 거래소 자신의 USDT 시세, 여섯 값 > 0)을 통과한 조합만. `dom ∈ {upbit, bithumb}`, `fx ∈ {binance, bybit, bitget}`(020). 자격 미달 조합은 그 틱에 **없다**. 국내 행의 `price` = 마지막 체결가(없으면 최우선 호가 중간값), 해외 행도 같다. 국내 거래소의 USDT 시세 = `rate.ask`(KRW-USDT 최우선 매도호가)·`rate.bid`(최우선 매수호가).
 - 006: 행의 `deposit_enabled`·`withdrawal_enabled` 는 3상태(`true`/`false`/`None`=모름 — 조회 실패 시). 60초마다 갱신, 국내·해외 세 거래소 모두.
 - 005·013: `/history/*` 오류 계약 — 503 `storage_unavailable`(Influx 불달·`INFLUX_TOKEN` 없음), 400 `invalid_request`, 422(파라미터 검증). `start`·`end` 는 0 ≤ 값 ≤ 4,102,444,800. HTTP JSON 키는 camelCase. Influx 는 같은 (measurement, tag, time) 을 덮어쓴다 — 재시도 안전성의 근거. 쓰기 1회는 동기·타임아웃 60초. Influx org `marketlens`, `INFLUX_TOKEN` 은 compose 의 초기 관리 토큰(버킷 생성 권한이 있다).
 - 013: 쓰기 실패는 미전송 맵에 두고 다음 60초 회차에 재시도, **실패 뒤 60초 안에는 다시 쓰지 않는다**(불통 중 쓰기 스레드가 연달아 막히는 것을 피하기 위해).
@@ -74,7 +74,7 @@
 
 ### 3.6 `GET /history/candles`
 계층 버킷 하나만 읽는다. 진행 중인 창(메모리)은 싣지 않는다 — 화면은 어차피 현재 창을 그리지 않는다. 거래소 호출 0회.
-`?base&res&dom&fx&dir&start&end` — `base` 필수(`^[A-Za-z0-9]{1,20}$`, 대문자 정규화), `res` 기본 `1m`(`1m|5m|1h|4h|1d`), `dom` 기본 `upbit`(`upbit|bithumb`), `fx` 기본 `binance`(`binance|bybit` — 019), `dir` 기본 `kimp`(`kimp|reverse`), `end` 없으면 지금, `start` 없으면 `end − 상한`. **상한 = 1,440 × 창 길이**(1m 하루·5m 5일·1h 60일·4h 240일·1d 1,440일). `end − start > 상한` 이면 400 `invalid_request`("window exceeds limit") — 상한이 있어야 실수로 한 번에 수십만 점을 읽는 호출이 Influx 를 못 건드린다. `end ≤ start` 400. 구간 판정 `start ≤ 창 시작 < end`.
+`?base&res&dom&fx&dir&start&end` — `base` 필수(`^[A-Za-z0-9]{1,20}$`, 대문자 정규화), `res` 기본 `1m`(`1m|5m|1h|4h|1d`), `dom` 기본 `upbit`(`upbit|bithumb`), `fx` 기본 `binance`(`binance|bybit|bitget` — 020), `dir` 기본 `kimp`(`kimp|reverse`), `end` 없으면 지금, `start` 없으면 `end − 상한`. **상한 = 1,440 × 창 길이**(1m 하루·5m 5일·1h 60일·4h 240일·1d 1,440일). `end − start > 상한` 이면 400 `invalid_request`("window exceeds limit") — 상한이 있어야 실수로 한 번에 수십만 점을 읽는 호출이 Influx 를 못 건드린다. `end ≤ start` 400. 구간 판정 `start ≤ 창 시작 < end`.
 ```json
 {
   "base": "BTC", "res": "1m", "dom": "upbit", "fx": "binance", "dir": "kimp",

@@ -6,13 +6,13 @@
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
 
 ## 1. 목적
-세 거래소의 **입출금 가능 여부를 망(network) 단위로** 거래소 API 에서 받아 60초마다 캐시한다.
+다섯 거래소의 **입출금 가능 여부를 망(network) 단위로** 거래소 API 에서 받아 60초마다 캐시한다.
 `/spreads` 의 각 행은 **국내 거래소 망을 기준으로 바이낸스의 같은 망을 찾아** `netDom / depDom / wdDom / depFx / wdFx` 를 채운다.
 끝나면 트레이더는 "GRT 가 김프 3% 인데 바이낸스 ETH 망 출금이 막혀 못 옮긴다" 를 표에서 바로 본다.
 API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동작한다.
 
 ## 2. 범위
-- 만드는 것: `server/app/features/wallet_status/` — 업비트·빗썸·바이낸스 입출금 조회 3종과 틱 루프 등록(바이빗 조회기는 019 §3.6 이 같은 계약으로 더한다 — 조회기 4종). 망 맞추기 규칙은 spreads 도 쓰므로 `server/app/core/` 에 둔다.
+- 만드는 것: `server/app/features/wallet_status/` — 업비트·빗썸·바이낸스 입출금 조회 3종과 틱 루프 등록(바이빗은 019 §3.6, 비트겟은 020 §3.6 — 조회기 5종). 망 맞추기 규칙은 spreads 도 쓰므로 `server/app/core/` 에 둔다.
 - 이 기능은 **BE 전용**이다. 새 엔드포인트·화면이 없으므로 `web/` 쪽 폴더는 만들지 않는다.
 - 하지 않는 것: 입출금 수수료·최소 출금량, 지갑 상태의 영속(저장하지 않는다), FE 변경(spreads 탭이 이미 `netDom ?? '–'` 와 `depDom/wdDom/depFx/wdFx` 를 그린다), 입출금 레이더 탭(온체인 mock, 무관).
 
@@ -62,7 +62,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 - HTTP 200 이 아니면 실패: `<거래소 표시명> 지갑 상태 API 가 <status> 를 반환했습니다.` + detail `{exchange, body 앞 500자}`.
 - 조회 3종은 예외를 삼키지 않는다. 삼키는 건 틱 루프(001)다. 실패한 거래소만 경고 1줄 `"<거래소id> 입출금 상태 조회 실패 — <메시지> (해당 거래소의 deposit_enabled / withdrawal_enabled 는 null)"` 을 `/refresh` 의 `warnings` 에 넣고, 그 거래소 전 코인을 `unknown`·망 목록 빈 리스트로 둔다.
 - `/refresh` 의 거래소별 `walletStatusAvailable` 은 조회 성공이면 true.
-- 주기: 60초마다 세 거래소 **병렬** 조회, 사이 틱은 캐시. 기동 첫 틱은 캐시가 비어 1초 안에 호출한다(키 없는 거래소는 즉시 실패 → 경고).
+- 주기: 60초마다 다섯 거래소 **병렬** 조회, 사이 틱은 캐시. 기동 첫 틱은 캐시가 비어 1초 안에 호출한다(키 없는 거래소는 즉시 실패 → 경고).
 - 한 거래소 실패는 그 거래소만 영향. 시세 수집은 무관. 재시도는 다음 60초 회차(별도 백오프 없음).
 - 실패한 거래소는 `/refresh` 응답에 표시된다(`walletStatusAvailable=false`). 틱 루프가 실패 상태인 거래소 목록을 틱의 `dwFailed` 에 싣고, 009 가 그것으로 `dw_fail` 점을 쓴다.
 - **실패한 회차는 직전 성공값을 유지하지 않고 `unknown` 으로 덮는다.** 오래된 "열림" 을 보여주는 쪽이 더 위험하다.
@@ -144,7 +144,7 @@ cd server && .venv/bin/ruff check . && .venv/bin/ruff format . && .venv/bin/pyth
 # 키 없이 기동(:8041, 거래소 도메인 차단 망): /health → {"status":"ok","version":"0.1.0"}, 트레이스백 0.
 #   /spreads 는 404(마켓 목록을 못 받아 우주가 빔 — dev-setup.md 로컬 메모의 정상 동작). 키 없는 /spreads 5키·빗썸 depDom 비-null·/refresh 경고 2줄은 tests/test_wallet_integration.py 가 같은 배선으로 단언한다.
 ```
-EC2 에서 확인 필요(이 망은 거래소 REST 를 막는다): 실키 기동 후 `/refresh` 경고 없음·세 거래소 `walletStatusAvailable` true(업비트는 EC2 IP 가 허용 목록에 있어야 한다), `/spreads` 에 `netDom` 채워진 행 다수, S3 `raw/exchange=<id>/` 객체에 `rest:/v1/status/wallet`·`rest:/public/assetsstatus/multichain/ALL`·`rest:/sapi/v1/capital/config/getall` 줄이 60초마다 1개씩.
+EC2 에서 확인 필요(이 망은 거래소 REST 를 막는다): 실키 기동 후 `/refresh` 경고 없음·키 있는 세 거래소 `walletStatusAvailable` true(빗썸·비트겟은 키 없이 true, 업비트는 EC2 IP 가 허용 목록에 있어야 한다), `/spreads` 에 `netDom` 채워진 행 다수, S3 `raw/exchange=<id>/` 객체에 `rest:/v1/status/wallet`·`rest:/public/assetsstatus/multichain/ALL`·`rest:/sapi/v1/capital/config/getall` 줄이 60초마다 1개씩.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — wallet-status 행. server: 3거래소 조회·`/spreads` 망 판정. web: 없음(spreads 탭이 표시).

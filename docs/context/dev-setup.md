@@ -102,7 +102,7 @@ docker compose -f docker-compose.dev.yml exec redis redis-cli XLEN ticks
 ```bash
 curl -s localhost:8000/health/collect | head -c 400
 ```
-`exchanges` 에 거래소 4곳(`upbit`·`bithumb`·`binance`·`bybit` 순), 기동 몇 초 뒤 각 `state: "ok"` 면 정상 (011·019).
+`exchanges` 에 거래소 5곳(`upbit`·`bithumb`·`binance`·`bybit`·`bitget` 순), 기동 몇 초 뒤 각 `state: "ok"` 면 정상 (011·020).
 ```bash
 curl -s "localhost:8000/orderbook/binance?symbol=BTC/USDT&depth=20" | head -c 400
 ```
@@ -111,6 +111,10 @@ curl -s "localhost:8000/orderbook/binance?symbol=BTC/USDT&depth=20" | head -c 40
 curl -s "localhost:8000/orderbook/bybit?symbol=BTC/USDT&depth=20"
 ```
 바이빗도 같다(019) — 기동 10초 뒤 `asks` 20단계, 로그에 `바이빗 샤드 N` 연결 실패 경고 없음, `/spreads` 에 `fx:"bybit"` 행.
+```bash
+curl -s "localhost:8000/orderbook/bitget?symbol=BTC/USDT&depth=20"
+```
+비트겟도 같다(020) — 기동 10초 뒤 `asks` 20단계, 로그에 `비트겟 샤드 N` 연결 실패 경고 없음, `/spreads` 에 `fx:"bitget"` 행이고 그 행의 `depFx/wdFx` 는 키 없이도 null 이 아니다(입출금이 공개 API).
 
 ## 로컬 메모 (개인)
 - `:8000` 은 이 머신에서 소마 캘린더가 점유할 수 있다. `lsof -i :8000` 으로 확인 후 정리하거나, `--port 8020` 으로 띄우고 curl 포트도 8020 으로 맞춘다.

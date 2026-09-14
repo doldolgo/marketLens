@@ -1,6 +1,6 @@
 # 020 — bitget
 
-상태: TODO | 의존: 001(collect — 행 계약·마켓 우주·틱 판정·원문 싱크·커넥터 공통 규칙), 006(wallet-status — 입출금 조회기 계약·망 판정), 011(health — 실패 분류·구간 추적), 012·019(binance-stream·bybit — 샤드·판정·로컬 북 규칙의 원형), 005·014(`/history/*` 의 `fx` 파라미터)
+상태: DONE | 의존: 001(collect — 행 계약·마켓 우주·틱 판정·원문 싱크·커넥터 공통 규칙), 006(wallet-status — 입출금 조회기 계약·망 판정), 011(health — 실패 분류·구간 추적), 012·019(binance-stream·bybit — 샤드·판정·로컬 북 규칙의 원형), 005·014(`/history/*` 의 `fx` 파라미터)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -88,7 +88,20 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# server (2026-09-15, 로컬 Mac)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check .   # All checks passed / 208 files already formatted
+.venv/bin/pytest -q                                                       # 674 passed (신규 tests/test_stream_bitget.py 50 + features/wallet_status/tests/test_bitget.py 7)
+# web
+cd web && npm run lint && npm run build                                   # oxlint 0 / vite built (index-*.js 451KB)
+# 실서버(로컬 :8020, 이 망은 이날 거래소 도메인 열림 — curl api.bitget.com 200)
+curl -s localhost:8020/health/collect            # exchanges = upbit ok 255 · bithumb ok 400 · binance ok 292 · bybit ok 269 · bitget ok 310 (기동 60초 뒤), 로그에 "비트겟 샤드" 경고 0줄
+curl -s "localhost:8020/orderbook/bitget?symbol=BTC/USDT&depth=20"   # asks 20 · bids 20
+curl -s localhost:8020/spreads                   # rows 1463, fx ∈ {binance, bybit, bitget}, bitget 행 520 — depFx/wdFx 가 null 아닌 행 473(키 없음)
+curl -s "localhost:8020/history/candles?base=BTC&fx=bitget"  # 200 · fx=mexc → 422
+curl -s -X POST localhost:8020/refresh           # snapshots 5항목, bitget walletStatusAvailable true·saved 310
+# web 수동(Playwright, vite :8010 → :8020): 스프레드 탭 경로 라벨 "Bitget" 99개 → Bitget 체크 해제 뒤 보이는 표에 0개(URL ?s.fxoff=Bitget), KPI "5곳 중 5곳 정상".
+#   기록 탭 ?h.fx=bitget,mexc → /history/candles?fx=bitget 4회 호출, MOCK 배지 1개(MEXC 카드만).
+# 실측(로컬): symbols 본문 828,074B(전 마켓 1,761 중 online·USDT 1,690), fetch 186ms, 파싱 2.9ms. 나머지(샤드당 초당 프레임·CPU·원문 객체 크기·채널 200개 끊김·0.2초 간격 거부)는 EC2 실측 대기.
 ```
 
 ## 6. 갱신할 문서
@@ -100,6 +113,18 @@
 - 스펙(같은 PR 에서 문구를 고친다 — CLAUDE.md §4): `001-collect.md` §3.2 "거래소 4곳" → 5곳(§1 첫 문단 포함)·매초 목록 항목에 비트겟 `GET /api/v2/spot/public/symbols`(`status == "online"`·`quoteCoin == "USDT"`, 초당 20회 중 1회)·계약 구현 "012(바이낸스)·019(바이빗)" → "012·019·020"·우주 정의 "(바이낸스 USDT base ∪ 바이빗 USDT base)" → "(바이낸스 ∪ 바이빗 ∪ 비트겟 USDT base)"·§3.6 "매 틱 세 거래소의 행에 반영" → 다섯 거래소, `006-wallet-status.md` §1 "세 거래소의 입출금" → 다섯 거래소·§2 "(바이빗 조회기는 019 §3.6 … — 조회기 4종)" → "(바이빗은 019 §3.6, 비트겟은 020 §3.6 — 조회기 5종)"·§3.5 "60초마다 세 거래소 병렬 조회" → 다섯 거래소·§5 EC2 문장 "세 거래소 `walletStatusAvailable`" → 키 있는 세 거래소(빗썸·비트겟은 키 없이 true), `011-health.md` §3.1 "거래소 4곳(…)" → 5곳·§3.2 거래소별 규칙에 비트겟 행(§3.8)·`exchanges` 고정 순서 5곳·"4곳 평균" → 5곳·탭 "4트랙"·"카드 4장"·"4곳 중 4곳" → 5, `005-history.md` §3.4 `fx ∈ {binance, bybit}` → `{binance, bybit, bitget}`·§7 `Literal` 3값, `014-premium-1m.md` §3.1 틱 행 `fx ∈ {binance, bybit}` 와 `/history/candles` 의 `fx`(`binance|bybit|bitget`), `003-spreads.md` §3.5 표시명 목록에 `bitget→Bitget`, `013-premium-events.md` §3.1 틱 행 정의 `fx ∈ {binance, bybit, bitget}`.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
+- 만든 것 (파일 목록): `server/app/core/streams/bitget.py`(`BitgetStream` — 샤드 3개·`_Book`(seq 포함)·문자열 ping 태스크·구독 예산·symbols 조회·판정), `server/app/features/wallet_status/bitget.py`(`fetch_bitget`), `server/tests/test_stream_bitget.py`(50 테스트, `BitgetSleeps`), `server/app/features/wallet_status/tests/test_bitget.py`(7). 바꾼 것: `core/config.py`(`EXCHANGES` 5곳)·`core/contracts.py`(주석)·`main.py`(스트림 5개·`foreigns` 3개)·`features/health/service.py`(5곳)·`features/analysis/service.py`(레지스트리 `bitget`)·`features/history/router.py`(`fx` Literal 3값)·`features/wallet_status/service.py`(조회기 5종) + 기존 테스트 7파일(5곳 순서·비트겟 public 응답 라우팅). web: `shared/format.ts`(표시명)·`features/history/candles.ts`(`FX_CHOICES` Bitget 실데이터)·`Tab.tsx`·`mock.ts`(주석). 문서: §6 목록 전부 + `005-history.md` §3.4 공통 파라미터 줄의 `fx` 집합(§6 에 없던 같은 계약).
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - 구독 예산은 소켓마다 **최근 1시간 창의 요청 시각 deque** 로 센다(subscribe·unsubscribe 둘 다 1회). 요청 하나를 보낼 때마다 그 묶음의 심볼을 실제 구독 집합에 반영해, 예산에 막혀 중간에 멈춰도 보낸 만큼만 소켓에 묶인 것으로 센다. 경고는 **소진 한 번에 1줄**(60초 회차마다 반복하지 않고, 예산이 돌아왔다가 다시 소진되면 다시 1줄) — "경고 1줄" 을 이렇게 읽었다.
+  - 프레임 판별에서 JSON 객체인데 `event` 도 `action`·`arg` 도 아닌 것(예 `{"foo":1}`)은 디코드 실패로 센다. 구독한 적 없는 채널(`ticker` 등)의 시세 모양 프레임은 버리되 세지 않는다. UTF-8 로 못 푸는 바이트 프레임은 텍스트가 없어 원문 싱크에도 남지 않는다(019 와 같다).
+  - 체결 무시 규칙의 "오래된" 은 **엄격히 작다**(같은 ts 는 최신으로 실어 값이 갱신된다). 마지막 체결 ts 는 소켓이 아니라 base 단위로 들고, 우주에서 빠질 때 지운다.
+  - `update` 의 `seq` 가 직전 이하이면 버리되 그 프레임도 원문에 남고 수신 시각에는 센다(스냅샷 전 update 와 같은 취급). 새 `snapshot` 은 seq 를 새로 시작한다.
+  - 시간당 예산 판정의 시계는 커넥터에 주입된 `clock`(수신 시각과 같은 ms 시계)이다 — 테스트가 1시간을 돌릴 수 있게.
+  - 핑 주기·pong 대기(30초)와 백오프 상한(30초)이 같은 값이라 가짜 sleep 이 구분 못 한다 — 백오프 테스트만 핑 상수를 20초로 패치한다(코드는 그대로).
+  - 함께 고친 스펙 절: 없음(§6 목록 밖의 `005-history.md` §3.4 `fx` 집합 한 줄만 같은 계약이라 함께 고쳤다).
 - 남은 빚:
+  - **symbols 본문이 매초 828KB** 다(파라미터로 줄일 수 없다 — `symbol` 하나만 받는다). 하루 약 70GB 수신, 파싱은 3ms 라 CPU 보다 대역폭·거래소 예의 문제. 매초 규칙(001 §3.2)을 비트겟만 늦추거나(예 60초) `ETag`/`If-None-Match` 지원 여부를 확인하는 별도 결정이 필요하다 — 이 세션은 스펙대로 매초로 두었다.
+  - EC2 실측 대기(§5): 샤드당 초당 프레임 수와 collector CPU(해외 2곳일 때와 비교 — 019 뒤 이미 85~100%), 1분 원문 객체 크기, 연결당 채널 200개 안팎(우주 ~310 심볼 × 2채널 / 3샤드)에서 끊김 여부, 구독 요청 0.2초 간격 거부 여부, 예산 경고가 실제로 뜨는지.
+  - 원문 아카이브의 비트겟 호가는 update 표본이라 재생 불가(status.md 에 적음). `books` update 누락 감지 불가(status.md).
+  - 004 analysis 나머지 5개 API 의 해외는 여전히 바이낸스 고정.
+  - 커밋 300줄 규칙: 커넥터(`bitget.py` ≈ 600줄)와 그 테스트(≈ 1,000줄)는 한 파일이라 쪼개지 못했다 — PR 본문에 명시.
