@@ -4,7 +4,7 @@
 > 새 컨텍스트에서 작업을 시작할 때는 이 문서 → `docs/context/*` → 지정된 스펙 1개 순서로 읽는다.
 
 ## 1. 한 줄 정의
-한국 거래소(업비트·빗썸)와 해외 거래소(바이낸스) 간 **김치 프리미엄(김프)·역프를 1초 단위로 계산해 보여주는 차익거래 모니터링 대시보드**.
+한국 거래소(업비트·빗썸)와 해외 거래소(바이낸스·바이빗) 간 **김치 프리미엄(김프)·역프를 1초 단위로 계산해 보여주는 차익거래 모니터링 대시보드**.
 트레이더가 "지금 어느 코인이, 어느 방향으로, 얼마나 벌어져 있고, 실제로 옮길 수 있는가(입출금 상태)"를 한 화면에서 판단하게 한다.
 
 ## 2. 레포 구조 (기능 단위)
@@ -89,6 +89,7 @@ marketlens/
 | 014 | premium-1m | DONE | 틱에서 (국내·해외·코인) 1분 OHLC·가격·입출금 집계 → 버킷 `candles_1m…1d`(사슬 롤업, 보관 7일/30일/90일/1년/무제한) + `/history/candles`(`res`, 1,440점 상한) + 기록 탭 차트 실데이터 |
 | 016 | process-split | DONE | 서버 `ROLE`(collector | api) — Influx 조회(`/history/premium`·`streaks`·`streaks/bulk`·`candles`)를 별도 컨테이너 `api` 에서, nginx 경로 분기, compose 5컨테이너 (BE·인프라) |
 | 017 | spreads-push | DONE | 스프레드 표 WebSocket 푸시 — 수집이 누가 볼 때만 $1,000 표를 매초 Redis 채널로, `api` 가 구독해 바뀐 행만 `/ws/spreads` 로 접속자 전원에 같은 바이트, FE 폴링 대체(5초 fallback), 체결 규모 $1,000 고정 |
+| 019 | bybit | DONE | 바이빗 USDT 현물 추가 — WS 3샤드 orderbook.200(스냅샷+델타)+publicTrade, instruments-info 매초, 입출금(HMAC), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗), `/history/*` `fx=bybit`, web 표시명·기록 탭 Bybit 실데이터 |
 
 실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).

@@ -12,7 +12,7 @@
 API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동작한다.
 
 ## 2. 범위
-- 만드는 것: `server/app/features/wallet_status/` — 업비트·빗썸·바이낸스 입출금 조회 3종과 틱 루프 등록. 망 맞추기 규칙은 spreads 도 쓰므로 `server/app/core/` 에 둔다.
+- 만드는 것: `server/app/features/wallet_status/` — 업비트·빗썸·바이낸스 입출금 조회 3종과 틱 루프 등록(바이빗 조회기는 019 §3.6 이 같은 계약으로 더한다 — 조회기 4종). 망 맞추기 규칙은 spreads 도 쓰므로 `server/app/core/` 에 둔다.
 - 이 기능은 **BE 전용**이다. 새 엔드포인트·화면이 없으므로 `web/` 쪽 폴더는 만들지 않는다.
 - 하지 않는 것: 입출금 수수료·최소 출금량, 지갑 상태의 영속(저장하지 않는다), FE 변경(spreads 탭이 이미 `netDom ?? '–'` 와 `depDom/wdDom/depFx/wdFx` 를 그린다), 입출금 레이더 탭(온체인 mock, 무관).
 
