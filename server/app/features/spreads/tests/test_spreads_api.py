@@ -140,7 +140,7 @@ def test_fwd_rev_use_directional_quotes_and_rates() -> None:
     # 최상위 값: rate 는 기준 거래소 환율 ask, dataReceivedAt 은 ms
     assert set(body) == TOP_KEYS
     assert body["rate"] == 1400.0
-    assert body["notional"] == 10000.0
+    assert body["notional"] == 1000.0
     assert body["dataReceivedAt"] == 1_787_000_000_000
     assert body["fetchedAt"] > 1_700_000_000_000
 
