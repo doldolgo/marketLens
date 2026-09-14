@@ -7,11 +7,11 @@ import type { Candle1m, Dir, Dom, Res } from './types'
 /** 처음 보이는 봉 개수(봉 종류 무관). 이후는 사용자가 줌·이동. */
 export const INITIAL_BARS = 360
 
-/** 차트에서 고를 수 있는 해외 거래소 — 서버가 수집하는 해외 거래소는 binance 뿐(§2). `mock` 은 015 UI 시안용:
- *  binance 실봉을 변형해 그린다(mock.ts). 수집 스펙이 생기면 mock 을 지우고 실데이터로 바꾼다. */
+/** 차트에서 고를 수 있는 해외 거래소 — 서버가 수집하는 해외 거래소는 binance·bybit(019). `mock` 은 015 UI 시안용:
+ *  binance 실봉을 변형해 그린다(mock.ts). 수집 스펙이 생기면 그 항목의 mock 을 지운다. */
 export const FX_CHOICES: { id: string; label: string; mock?: boolean }[] = [
   { id: 'binance', label: 'Binance' },
-  { id: 'bybit', label: 'Bybit', mock: true },
+  { id: 'bybit', label: 'Bybit' },
   { id: 'mexc', label: 'MEXC', mock: true },
 ]
 export const isMockFx = (id: string) => FX_CHOICES.some((f) => f.id === id && f.mock)

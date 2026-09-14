@@ -1,12 +1,12 @@
-// 015 UI 시안용 mock — 서버가 수집하는 해외 거래소는 binance 뿐이라, Bybit·MEXC 카드는 binance 실봉을 변형해 그린다.
+// 015 UI 시안용 mock — 서버가 수집하지 않는 해외 거래소(MEXC) 카드는 binance 실봉을 변형해 그린다(Bybit 는 019 부터 실데이터).
 // 실 API 경로(청크·과거 로드·60초 갱신)는 그대로 타고, 이 파일은 받은 봉을 바꾸기만 한다. 수집 스펙이 생기면 이 파일과
 // `FX_CHOICES` 의 mock 항목을 지운다. 변형은 시드 난수라 같은 (거래소, 시각) 은 언제 봐도 같은 값이다.
 import type { Candle1m, Dir, PremiumEvent } from './types'
 
-/** 거래소별 김프 기본 오프셋(%p) — Bybit 는 조금 높게, MEXC 는 조금 낮게 보이게. */
-const BASE_OFFSET: Record<string, number> = { bybit: 0.12, mexc: -0.18 }
+/** 거래소별 김프 기본 오프셋(%p) — MEXC 는 조금 낮게 보이게. */
+const BASE_OFFSET: Record<string, number> = { mexc: -0.18 }
 /** 사건 시각을 미는 초 — binance 사건을 복사해 살짝 어긋나게. */
-const EVENT_SHIFT: Record<string, number> = { bybit: 300, mexc: -600 }
+const EVENT_SHIFT: Record<string, number> = { mexc: -600 }
 
 /** [0, 1) 시드 난수 — 문자열 해시(FNV-1a). */
 function rand(key: string): number {
