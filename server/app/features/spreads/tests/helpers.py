@@ -1,8 +1,10 @@
 """spreads 테스트 공용 도구 — 네트워크 없음, 저장소에 직접 시드 (스펙 003 §4)."""
 
+import json
 from datetime import datetime
 from types import SimpleNamespace
 
+import fakeredis
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -10,7 +12,25 @@ from app.core.collect import RefreshSummary
 from app.core.live_store import LiveStore
 from app.core.models import Row
 from app.core.networks import Network
+from app.core.redis_bus import RedisBus
+from app.features.spreads.push import encode_table
+from app.features.spreads.service import build_spreads
 from app.main import create_app
+
+
+def make_bus() -> tuple[RedisBus, fakeredis.FakeServer]:
+    """fakeredis 위의 버스 — 같은 server 로 두 번째 클라이언트를 만들면 구독·게시 양쪽을 흉내낼 수 있다."""
+    server = fakeredis.FakeServer()
+    return RedisBus(fakeredis.aioredis.FakeRedis(server=server)), server
+
+
+def spreads_json(store: LiveStore, **build_kw: object) -> dict:
+    """저장소로 만든 표를 `GET /spreads` 가 돌려주는 바이트 그대로(017 게시기 인코딩) 파싱한 것.
+
+    018 부터 HTTP 는 Redis 키를 그대로 답하므로 표 **계산** 규칙(003·006·008)은 이 헬퍼로 본다 —
+    게시기가 키에 넣는 것과 같은 함수·같은 직렬화라 HTTP 로 받을 값과 같다.
+    """
+    return json.loads(encode_table(build_spreads(store, **build_kw)))  # type: ignore[arg-type]
 
 
 def make_row(
@@ -92,14 +112,19 @@ def make_app(
     *,
     refresh_token: str | None = None,
     collector: FakeCollector | None = None,
+    bus: RedisBus | None = None,
 ) -> FastAPI:
-    """lifespan 없이 앱을 만들고 상태를 직접 채운다 — 수집 루프·네트워크가 돌지 않는다."""
+    """lifespan 없이 앱을 만들고 상태를 직접 채운다 — 수집 루프·네트워크가 돌지 않는다.
+
+    `bus` 는 GET /spreads 가 읽는 Redis 자리(018) — 안 주면 빈 fakeredis 라 키가 없어 404 다.
+    """
     app = create_app()
     app.state.live_store = store if store is not None else LiveStore()
     # 실제 .env·OS env 에 의존하지 않도록 설정을 스텁으로 바꾼다
     app.state.settings = SimpleNamespace(refresh_token=refresh_token)
     if collector is not None:
         app.state.collector = collector
+    app.state.spreads_bus = bus if bus is not None else make_bus()[0]
     return app
 
 
@@ -108,5 +133,8 @@ def make_client(
     *,
     refresh_token: str | None = None,
     collector: FakeCollector | None = None,
+    bus: RedisBus | None = None,
 ) -> TestClient:
-    return TestClient(make_app(store, refresh_token=refresh_token, collector=collector))
+    return TestClient(
+        make_app(store, refresh_token=refresh_token, collector=collector, bus=bus)
+    )

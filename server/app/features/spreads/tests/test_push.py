@@ -14,12 +14,13 @@ from app.core.redis_bus import LATEST_KEY, RedisBus
 from app.core.ticks import TickLoop
 from app.features.spreads.hub import make_delta
 from app.features.spreads.push import SpreadsPublisher
-from app.features.spreads.tests.helpers import make_client, make_row, seed_rows
-
-
-def make_bus() -> tuple[RedisBus, fakeredis.FakeServer]:
-    server = fakeredis.FakeServer()
-    return RedisBus(fakeredis.aioredis.FakeRedis(server=server)), server
+from app.features.spreads.tests.helpers import (
+    make_bus,
+    make_client,
+    make_row,
+    seed_rows,
+    spreads_json,
+)
 
 
 def seed(store: LiveStore, *, now: datetime | None = None) -> None:
@@ -65,7 +66,7 @@ def make_loop(store: LiveStore, publisher: SpreadsPublisher, handoff) -> TickLoo
 async def test_publisher_builds_nothing_without_want_and_same_json_as_get_with_want() -> (
     None
 ):
-    bus, _ = make_bus()
+    bus, server = make_bus()
     store = LiveStore()
     seed(store)
     publisher = SpreadsPublisher(store=store, bus=bus)
@@ -80,17 +81,58 @@ async def test_publisher_builds_nothing_without_want_and_same_json_as_get_with_w
     assert publisher.wanted
     loop.tick(1_787_000_001)
     assert publisher.pending == 1
-    # 같은 틱 안의 GET /spreads 와 비교 — 시각 필드만 빼고 같다 (§4)
-    http = make_client(store).get("/spreads").json()
+    # 같은 틱 안의 표 계산과 비교 — 시각 필드만 빼고 같다 (§4)
+    computed = spreads_json(store)
+    # HTTP 클라이언트는 같은 fakeredis 서버를 보는 별도 연결 — TestClient 의 루프가 다르다
+    client = make_client(
+        store, bus=RedisBus(fakeredis.aioredis.FakeRedis(server=server))
+    )
+    assert (
+        client.get("/spreads").status_code == 404
+    )  # 게시 전 — 메모리에 재료가 있어도 (018 §4)
     assert await publisher.drain() == 1
-    published = json.loads(await bus.latest())
-    assert published["notional"] == 1000.0 == http["notional"]
-    for body in (published, http):
+    latest = await bus.latest()
+    published = json.loads(latest)
+    assert published["notional"] == 1000.0 == computed["notional"]
+    for body in (published, computed):
         body.pop("fetchedAt")
         for row in body["rows"]:
             row.pop("age")
-    assert published == http
+    assert published == computed
     assert (await bus._client.ttl(LATEST_KEY)) == 10
+    # 게시 뒤 GET /spreads 는 키의 바이트 그대로 (018 §4)
+    resp = client.get("/spreads")
+    assert resp.status_code == 200 and resp.content == latest.encode()
+
+
+async def test_publisher_skips_round_without_rate_or_one_side_then_publishes(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # 018 §3.2 — 표를 만들지 않는 조건: 경고 없이 그 회차만 건너뛰고, 조건이 풀리면 다음 회차에 게시
+    bus, _ = make_bus()
+    store = LiveStore()
+    publisher = SpreadsPublisher(store=store, bus=bus)
+    publisher.set_wanted(True)
+    caplog.set_level(logging.WARNING, logger="marketlens.spreads_push")
+    now = datetime.now(UTC)
+    tick = Tick(ts=1, rows=(), dw_failed=())
+
+    seed_rows(store, [make_row("upbit", "BTC")], now)
+    seed_rows(store, [make_row("binance", "BTC")], now)
+    publisher.observe(tick)  # 기준 거래소 환율 없음
+    assert publisher.pending == 0
+
+    store.set_rate("upbit", 1400.0, 1390.0, now)
+    store.remove_row("binance", "BTC")
+    publisher.observe(tick)  # 해외(USDT) 스냅샷 없음
+    assert publisher.pending == 0
+    assert not caplog.records
+
+    seed_rows(store, [make_row("binance", "BTC")], now)
+    publisher.observe(tick)
+    assert publisher.pending == 1
+    assert await publisher.drain() == 1
+    assert (await bus.latest()) is not None
 
 
 async def test_publisher_publishes_on_channel_and_only_when_wanted() -> None:
