@@ -14,8 +14,8 @@ APP_NAME = "MarketLens Backend"
 APP_VERSION = "0.1.0"
 USER_AGENT = f"marketlens-server/{APP_VERSION}"
 
-# 거래소 3곳 고정 순서 — 스펙 001 §3.3. 국내 둘은 KRW, 바이낸스는 USDT 마켓
-EXCHANGES = ("upbit", "bithumb", "binance")
+# 거래소 4곳 고정 순서 — 스펙 001 §3.3·019 §2. 국내 둘은 KRW, 바이낸스·바이빗은 USDT 마켓
+EXCHANGES = ("upbit", "bithumb", "binance", "bybit")
 DOMESTIC_EXCHANGES = ("upbit", "bithumb")
 
 # 거래소 REST(마켓 목록) 타임아웃(초)·WebSocket 핸드셰이크 타임아웃(초) — 스펙 001 §3.1
@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     upbit_secret_key: str | None = None
     binance_api_key: str | None = None
     binance_secret_key: str | None = None
+    bybit_api_key: str | None = None
+    bybit_secret_key: str | None = None
 
     @field_validator("s3_region", mode="before")
     @classmethod

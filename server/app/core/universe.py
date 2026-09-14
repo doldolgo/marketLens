@@ -1,9 +1,10 @@
 """마켓 우주 — 스펙 001 §3.2.
 
-우주 = (업비트 KRW base ∪ 빗썸 KRW base) ∩ 바이낸스 USDT base. 매초 세 목록을 동시에 받아
-확정하고 `/refresh` 트리거가 즉시 갱신한다. 국내 스트림은 자기 KRW 전 마켓을 구독하고
-(KRW-USDT 포함), 우주 밖 base 의 행은 저장되지 않는다. 바이낸스 심볼 집합은 012 가 제공한다
-(ForeignSymbolSource). 목록 실패는 직전 목록 유지 — 같은 거래소·같은 원인은 60초에 1줄만 로그.
+우주 = (업비트 KRW base ∪ 빗썸 KRW base) ∩ (바이낸스 USDT base ∪ 바이빗 USDT base). 매초 네 목록을
+동시에 받아 확정하고 `/refresh` 트리거가 즉시 갱신한다. 국내 스트림은 자기 KRW 전 마켓을 구독하고
+(KRW-USDT 포함), 우주 밖 base 의 행은 저장되지 않는다. 해외 심볼 집합은 커넥터가 제공한다
+(ForeignSymbolSource — 012 바이낸스·019 바이빗, 우주는 목록으로 받는다). 목록 실패는 직전 목록 유지 —
+같은 거래소·같은 원인은 60초에 1줄만 로그.
 """
 
 import asyncio
@@ -24,7 +25,6 @@ logger = logging.getLogger("marketlens.universe")
 
 UNIVERSE_INTERVAL = 1.0  # 회차가 끝난 뒤 쉬는 시간 — 초당 1회를 넘지 않는다 (§3.2)
 LOG_SUPPRESS_SEC = 60.0  # 같은 거래소·같은 원인의 실패 로그 간격 (§3.2)
-FOREIGN = "binance"
 
 
 class DomesticStream(Protocol):
@@ -52,14 +52,14 @@ class UniverseRefresher:
         *,
         sink: QuoteSink,
         streams: Sequence[DomesticStream],
-        foreign: ForeignSymbolSource,
+        foreigns: Sequence[ForeignSymbolSource],
         client: httpx.AsyncClient,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._sink = sink
         self._streams = list(streams)
-        self._foreign = foreign
+        self._foreigns = list(foreigns)
         self._client = client
         self._sleep = sleep
         self._monotonic = monotonic
@@ -70,11 +70,11 @@ class UniverseRefresher:
         self.universe: set[str] = set()
 
     async def refresh(self) -> RefreshOutcome:
-        """세 목록을 동시에 받아 우주·구독을 갱신한다. 실패한 거래소는 직전 목록 유지."""
+        """네 목록을 동시에 받아 우주·구독을 갱신한다. 실패한 거래소는 직전 목록 유지."""
         outcome = RefreshOutcome()
         results = await asyncio.gather(
             *(self._fetch_domestic(s) for s in self._streams),
-            self._fetch_foreign(),
+            *(self._fetch_foreign(f) for f in self._foreigns),
         )
         for exchange, calls, error in results:
             if error is None:
@@ -93,12 +93,14 @@ class UniverseRefresher:
             return stream.id, 0, self._failed(stream.id, exc)
         return stream.id, 1, None
 
-    async def _fetch_foreign(self) -> tuple[str, int, ExchangeError | None]:
+    async def _fetch_foreign(
+        self, foreign: ForeignSymbolSource
+    ) -> tuple[str, int, ExchangeError | None]:
         try:
-            calls = await self._foreign.refresh(self._client)
+            calls = await foreign.refresh(self._client)
         except Exception as exc:
-            return FOREIGN, 0, self._failed(FOREIGN, exc)
-        return FOREIGN, calls, None
+            return foreign.id, 0, self._failed(foreign.id, exc)
+        return foreign.id, calls, None
 
     def _failed(self, exchange: str, exc: Exception) -> ExchangeError:
         """실패 1건 → 60초 억제 로그 + 트리거 요약용 거래소 예외 (§3.2·§3.9).
@@ -143,20 +145,25 @@ class UniverseRefresher:
         domestic: set[str] = set()
         for codes in self._markets.values():
             domestic |= {c.split("-", 1)[1].upper() for c in codes if "-" in c}
-        self.universe = domestic & self._foreign.bases()
+        # 해외는 합집합 — 한쪽 해외에만 있는 코인도 우주에 들고, 그쪽 행만 생긴다 (019 §2-1)
+        foreign: set[str] = set()
+        for source in self._foreigns:
+            foreign |= source.bases()
+        self.universe = domestic & foreign
         removed = self._sink.set_universe(self.universe)
         if removed:
             logger.info("우주 갱신으로 행 %d개 소멸 (상폐·교집합 이탈)", removed)
         for stream in self._streams:
             stream.set_markets(self._markets.get(stream.id, []))
-        # 바이낸스는 우주의 심볼만 구독한다 — 확정된 우주를 넘기면 커넥터가 차이만 재조정한다 (012 §3.3)
-        self._foreign.set_universe(self.universe)
+        # 해외는 우주의 심볼만 구독한다 — 확정된 우주를 각 커넥터에 넘기면 자기 맵에 없는 base 는 무시하고 차이만 재조정한다 (012 §3.3·019 §3.3)
+        for source in self._foreigns:
+            source.set_universe(self.universe)
 
     def start(self) -> None:
         self._task = asyncio.create_task(self.run())
 
     async def run(self) -> None:
-        """매초 회차 — 세 목록을 동시에 받고, 회차가 끝난 뒤 1초를 쉰다 (§3.2).
+        """매초 회차 — 네 목록을 동시에 받고, 회차가 끝난 뒤 1초를 쉰다 (§3.2).
 
         예상 밖 예외는 로그 후 다음 회차 — 갱신 루프는 멈추지 않는다.
         """

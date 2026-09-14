@@ -80,7 +80,7 @@ def build(
     universe = UniverseRefresher(
         sink=QuoteSink(store),
         streams=[upbit, bithumb],
-        foreign=FakeForeign({"BTC"}, calls=0),
+        foreigns=[FakeForeign({"BTC"}, calls=0)],
         client=_client(),
     )
     service = CollectService(
@@ -107,7 +107,7 @@ async def test_trigger_reports_calls_saved_failures_and_warnings() -> None:
 
     result = await service.refresh_now()
     assert upbit.calls == 1 and result.calls == {"upbit": 1, "binance": 0, "bithumb": 1}
-    assert result.saved == {"upbit": 1, "bithumb": 0, "binance": 1}
+    assert result.saved == {"upbit": 1, "bithumb": 0, "binance": 1, "bybit": 0}
     assert result.rates_observed == ["upbit"]
     assert result.failures == [
         {"exchange": "bithumb", "error_code": "exchange_timeout", "message": "느림"},
