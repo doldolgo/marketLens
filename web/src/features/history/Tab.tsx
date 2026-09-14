@@ -111,7 +111,7 @@ export default function HistoryTab({ now, selSym, onSelect }: {
   const color = dirColor(dir)
 
   // 차트 데이터 — /history/candles 청크(쌍별)를 받아 봉 종류로 접는다. 접기까지 여기서 끝내 차트는 그리기만 한다.
-  // 실데이터 해외 거래소(binance·bybit)는 선택된 것만 부른다. mock 카드(MEXC)는 binance 봉을 변형해 만드므로 그때는 binance 도 부른다(015 시안, mock.ts)
+  // 실데이터 해외 거래소(binance·bybit·bitget)는 선택된 것만 부른다. mock 카드(MEXC)는 binance 봉을 변형해 만드므로 그때는 binance 도 부른다(015 시안, mock.ts)
   const domsKey = chartDoms.join('+')
   const fxsKey = chartFxs.join('+')
   const mockBase = REAL_FXS[0] // mock 카드의 재료 봉 — binance
