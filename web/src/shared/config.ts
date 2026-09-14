@@ -6,8 +6,15 @@ export const HIGHLIGHT_PCT = 1.5
 export const STALE_SEC = 5
 /** mock tick(ms) — 셸 전체의 심장 박동. 시계·age·mock 흔들림이 전부 이 주기를 따른다. */
 export const MOCK_TICK_MS = 1500
-/** 스프레드 폴링(ms) — 003 이 사용, 셸은 값만 들고 있다. */
-export const SPREAD_POLL_MS = 1000
+/** 스프레드 fallback 폴링(ms) — WebSocket 이 막힌 망에서만 (017 §3.4). */
+export const SPREAD_POLL_MS = 5000
+/** 연결 시도 후 이 시간 안에 서버 메시지가 없으면 fallback 폴링 시작(ms) (017 §3.4). */
+export const SPREAD_WS_FALLBACK_MS = 5000
+/** 서버 메시지가 이 시간 동안 없으면 반쯤 죽은 연결로 보고 재연결(ms) (017 §3.4). */
+export const SPREAD_WS_SILENCE_MS = 10000
+/** 재연결 백오프(ms) — 1초에서 두 배씩 이 값까지 (017 §3.4). */
+export const SPREAD_WS_BACKOFF_MIN_MS = 1000
+export const SPREAD_WS_BACKOFF_MAX_MS = 30000
 /** 수집 상태 폴링(ms) — 011 이 사용, 셸은 값만 들고 있다. */
 export const HEALTH_POLL_MS = 5000
 /** 기록 탭 사건 표 재조회(ms) — 013 이 사용. 진행 중 사건의 지속·최대값만 따라가면 되므로 느리다. */

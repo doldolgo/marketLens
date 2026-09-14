@@ -157,7 +157,7 @@ export interface Feed {
   health: HealthData | null
   flowAddrs: FlowAddr[]
   flowRows: FlowRow[]
-  /** spreads 행 + rate 통째 교체 — 003 이 1초 폴링으로 호출. io 는 새 행들로부터 재구성. */
+  /** spreads 행 + rate 통째 교체 — 017 구독이 snapshot·delta 마다 호출. io 는 새 행들로부터 재구성. */
   replace(rows: SpreadRow[], rate: number): void
   /** 수집 상태 적용 — 011 이 5초 폴링으로 호출. */
   setHealth(data: HealthData): void
