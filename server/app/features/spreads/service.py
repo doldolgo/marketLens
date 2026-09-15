@@ -11,14 +11,19 @@ from app.core.collect import RefreshSummary
 from app.core.live_store import LiveStore
 from app.core.models import Row
 from app.core.networks import pick_domestic
-from app.core.orderbook import average_price, walk_amount, walk_levels, walk_quantity
+from app.core.orderbook import (
+    WalkResult,
+    average_price,
+    walk_amount,
+    walk_levels,
+    walk_quantity,
+)
 from app.core.premium import premium_percent
 from app.features.spreads.models import (
     RefreshFailure,
     RefreshRate,
     RefreshResponse,
     RefreshSnapshot,
-    SpreadRow,
     SpreadsResponse,
 )
 
@@ -29,8 +34,6 @@ FOREIGN_QUOTE = "USDT"
 STALE_AFTER_SEC = 5.0
 # 행 자체가 이만큼 안 바뀌면 스트림이 살아 있어도 그 행의 실제 경과 초를 age 로 낸다 (§3.2-4)
 ROW_STALE_SEC = 300.0
-# `spark` 응답 소수 자리 — 화면 스파크라인의 눈금보다 촘촘하다 (§3.2)
-SPARK_DIGITS = 3
 # USDT 는 매 사이클(1초) 관측이 정상 — 60초 무관측은 구조적 문제다 (스펙 008 §3.2)
 USDT_STALE_WARN_SEC = 60.0
 EXCLUDED_COINS: frozenset[str] = frozenset()
@@ -85,18 +88,33 @@ def _wallet_fields(
     return (dom_net.name, dom_net.dep, dom_net.wd, dep_fx, wd_fx)
 
 
+# 한 표 안에서 "사는 쪽" 걷기 결과를 나누는 메모 — (거래소, 코인) → 그 마켓 asks 를 고정 금액으로 걷은 것
+BuyMemo = dict[tuple[str, str], WalkResult]
+
+
 def _cross_walk(
     buy_levels: list[list[float]],
     sell_levels: list[list[float]],
     buy_amount: float,
+    *,
+    memo: BuyMemo | None = None,
+    memo_key: tuple[str, str] | None = None,
 ) -> tuple[float, float]:
     """양쪽 다리를 **수량으로 연결해** 건넌 (평균 매수가, 평균 매도가) — 스펙 003 §3.2-4.
 
     각 다리를 따로 걸으면 사지도 않은 수량을 파는 값이 나온다. 매도측이 소진돼 못 판
     수량이 있으면 판 수량만큼 매수측을 되맞춘다 — 못 판 코인을 0원으로 치면 −50% 대
     쓰레기 값이 나오기 때문이다(004 §3.2·§3.3 과 같은 규칙).
+
+    사는 쪽 걷기는 상대 거래소와 무관하다(같은 마켓·같은 금액) — 한 마켓이 여러 행에 나오므로
+    (해외 마켓은 국내 2곳, 국내 마켓은 해외 3곳) `memo` 가 있으면 한 표 안에서 한 번만 걷는다.
+    파는 쪽은 산 수량에 달려 있어 행마다 걷는다.
     """
-    buy = walk_amount(buy_levels, buy_amount)
+    buy = memo.get(memo_key) if memo is not None else None
+    if buy is None:
+        buy = walk_amount(buy_levels, buy_amount)
+        if memo is not None and memo_key is not None:
+            memo[memo_key] = buy
     sell = walk_quantity(sell_levels, buy.quantity)
     if sell.exhausted and sell.quantity < buy.quantity:
         buy = walk_quantity(buy_levels, sell.quantity)
@@ -132,8 +150,15 @@ def _build_row(
     store: LiveStore,
     now: datetime,
     notional: float,
-) -> SpreadRow:
-    """행 하나의 규칙 — 스펙 003 §3.2-4."""
+    buy_memo: BuyMemo,
+) -> dict[str, object]:
+    """행 하나의 규칙 — 스펙 003 §3.2-4.
+
+    응답 키(camelCase)·순서 그대로의 dict 를 만든다 — `SpreadRow` 모델을 거치지 않는다.
+    표는 매초 1,400행 넘게 만들어지므로(017) 모델 생성 → model_dump → 키 변환 → json 의
+    네 단계가 표 1장 비용의 절반이었다. 키 이름·순서의 진실은 `SpreadRow` 이고, 이 dict 가
+    그것과 같은 바이트가 되는지는 테스트가 옛 경로와 비교해 지킨다.
+    """
     dom_bid = dom_row.bids[0] if dom_row.bids else None
     dom_ask = dom_row.asks[0] if dom_row.asks else None
     fx_bid = fx_row.bids[0] if fx_row.bids else None
@@ -163,13 +188,21 @@ def _build_row(
         rev_raw = premium_percent(buy_krw=dom_ask[0], sell_krw=fx_bid[0] * rate_bid)
 
         # 걷기 — 김프는 해외 asks 를 notional(USDT)로, 역프는 국내 asks 를 그 원화 환산액으로
+        # 사는 쪽 메모 키 = 마켓 — 해외 asks 는 늘 notional(USDT), 국내 asks 는 그 거래소 환율로
+        # 환산한 원화라 같은 마켓이면 금액도 같다
         fx_ask_avg, dom_bid_avg = _cross_walk(
-            walk_levels(fx_row, "asks"), walk_levels(dom_row, "bids"), notional
+            walk_levels(fx_row, "asks"),
+            walk_levels(dom_row, "bids"),
+            notional,
+            memo=buy_memo,
+            memo_key=(fx_row.exchange, base),
         )
         dom_ask_avg, fx_bid_avg = _cross_walk(
             walk_levels(dom_row, "asks"),
             walk_levels(fx_row, "bids"),
             notional * rate_ask,
+            memo=buy_memo,
+            memo_key=(dom_row.exchange, base),
         )
 
         # 순값과 차감폭 — 반올림하지 않는다(상한도 없다)
@@ -186,41 +219,43 @@ def _build_row(
     # 입출금 5필드는 망 판정으로 채운다 — fail 행도 같은 규칙 (006 §3.7)
     net_dom, dep_dom, wd_dom, dep_fx, wd_fx = _wallet_fields(dom_row, fx_row)
 
-    return SpreadRow(
-        sym=base,
-        dom=dom_row.exchange,
-        fx=fx_row.exchange,
-        fwd=fwd,
-        rev=rev,
-        usd=usd,
-        # 009 가 게시한 fwd 원값 추이(1분 버킷 ≤30개) — fail 행도 싣는다, 없으면 빈 배열.
-        # 소수 3자리로 줄여 싣는다(0.001%p = 김프 눈금보다 촘촘하다): 490행 × 30개를 1초마다
-        # 보내므로 배정밀도 그대로면 응답이 gzip 106KB 다. 버퍼에는 원값이 남는다.
-        spark=[
-            round(v, SPARK_DIGITS)
-            for v in store.spark(dom_row.exchange, fx_row.exchange, base)
-        ],
-        status=status,
-        age=age,
-        slip_fwd=slip_fwd,
-        slip_rev=slip_rev,
-        krw=krw,
-        net_dom=net_dom,
-        dep_dom=dep_dom,
-        wd_dom=wd_dom,
-        dep_fx=dep_fx,
-        wd_fx=wd_fx,
-    )
+    # float() 는 모델이 하던 int→float 강제와 같다 — 거래소가 정수로 준 가격이 "100" 이 아니라
+    # "100.0" 으로 나가야 옛 바이트와 같다
+    return {
+        "sym": base,
+        "dom": dom_row.exchange,
+        "fx": fx_row.exchange,
+        "fwd": float(fwd),
+        "rev": float(rev),
+        "usd": float(usd),
+        # 009 가 게시한 fwd 추이(1분 버킷 ≤30개) — fail 행도 싣는다, 없으면 빈 배열.
+        # 값은 009 가 버퍼에 넣을 때 이미 소수 3자리다(0.001%p = 김프 눈금보다 촘촘하다): 490행 ×
+        # 30개를 1초마다 보내므로 배정밀도 그대로면 응답이 gzip 106KB 다. 원값은 Influx 에 남는다.
+        "spark": store.spark(dom_row.exchange, fx_row.exchange, base),
+        "status": status,
+        "age": float(age),
+        "slipFwd": float(slip_fwd),
+        "slipRev": float(slip_rev),
+        "krw": float(krw),
+        "netDom": net_dom,
+        "depDom": dep_dom,
+        "wdDom": wd_dom,
+        "depFx": dep_fx,
+        "wdFx": wd_fx,
+    }
 
 
-def build_spreads(
+def build_table(
     store: LiveStore,
     *,
     now: datetime | None = None,
     excluded: Collection[str] | None = None,
     notional: float = DEFAULT_NOTIONAL,
-) -> SpreadsResponse:
+) -> dict[str, object]:
     """전 (국내 × 해외 × 코인) 페어의 김프/역프 표 — 스펙 003 §3.2.
+
+    응답 모양(camelCase 키·순서) 그대로의 dict 를 돌려준다 — 017 게시기가 이걸 바로 json 으로
+    만든다. 모델이 필요하면 `build_spreads` (테스트·문서용, 같은 계산).
 
     표 조립 전체가 `await` 없이 끝난다 — 그것이 이 함수가 수집 락 없이도 한 응답 안에서
     스냅샷 교체 전·후 호가를 섞지 않는 유일한 근거다(§2). 걷기를 async 로 만들지 않는다.
@@ -253,7 +288,8 @@ def build_spreads(
         )
 
     # 3~4. 페어 생성 — 국내 거래소마다 자기 환율, 환율 없는 국내 거래소는 행 전체가 빠진다
-    rows_out: list[SpreadRow] = []
+    rows_out: list[dict[str, object]] = []
+    buy_memo: BuyMemo = {}  # 이 표 한 장의 수명 — 다음 회차는 새 호가로 새로 걷는다
     for dom_ex, dom_table in domestic.items():
         rate = store.get_rate(dom_ex)
         if rate is None or rate.ask <= 0 or rate.bid <= 0:
@@ -274,11 +310,12 @@ def build_spreads(
                         store,
                         now,
                         notional,
+                        buy_memo,
                     )
                 )
 
     # 5. 정렬 고정
-    rows_out.sort(key=lambda r: (r.sym, r.dom, r.fx))
+    rows_out.sort(key=lambda r: (r["sym"], r["dom"], r["fx"]))
 
     # 6. 최상위 값 + USDT 시세 미갱신 경고 — 시세가 "있긴 한데 낡은" 거래소만 (스펙 008 §3.2)
     warnings: list[str] = []
@@ -294,13 +331,26 @@ def build_spreads(
             )
 
     received = store.received_at
-    return SpreadsResponse(
-        rate=base_rate.ask,
-        notional=notional,
-        rows=rows_out,
-        warnings=warnings,
-        data_received_at=received * 1000 if received is not None else None,
-        fetched_at=int(time.time() * 1000),
+    return {
+        "rate": float(base_rate.ask),
+        "notional": float(notional),
+        "rows": rows_out,
+        "warnings": warnings,
+        "dataReceivedAt": received * 1000 if received is not None else None,
+        "fetchedAt": int(time.time() * 1000),
+    }
+
+
+def build_spreads(
+    store: LiveStore,
+    *,
+    now: datetime | None = None,
+    excluded: Collection[str] | None = None,
+    notional: float = DEFAULT_NOTIONAL,
+) -> SpreadsResponse:
+    """`build_table` 과 같은 표를 `SpreadsResponse` 모델로 — 테스트·문서용. 뜨거운 경로는 dict 다."""
+    return SpreadsResponse.model_validate(
+        build_table(store, now=now, excluded=excluded, notional=notional)
     )
 
 

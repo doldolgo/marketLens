@@ -5,14 +5,22 @@ BE 내부 필드명은 snake_case 로 두고 HTTP 직렬화 경계에서 camelCa
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_camel
+
+# 응답 키(camelCase)로 읽고 쓸 수 있게 — `build_table` 이 만든 dict 를 그대로 검증한다
+_CAMEL = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
 class SpreadRow(BaseModel):
     """(국내 거래소 × 해외 거래소 × 코인) 페어 1행. 키 순서는 스펙 §3.2 예시와 같다.
 
     행은 어디에도 저장되지 않는다 — S3 는 원문(010), Influx 는 원값(009). HTTP 응답에만 있다.
+    키 이름·순서의 진실은 이 모델이다 — 뜨거운 경로(`service.build_table`)는 이 모델을 거치지
+    않고 같은 키의 dict 를 만들며, 두 결과가 같은 바이트인지 테스트가 지킨다.
     """
+
+    model_config = _CAMEL
 
     sym: str
     dom: str
@@ -34,6 +42,8 @@ class SpreadRow(BaseModel):
 
 
 class SpreadsResponse(BaseModel):
+    model_config = _CAMEL
+
     rate: float
     notional: float  # 이 응답의 슬리피지가 계산된 체결 규모(USD) — 응답에만 있고 어디에도 저장되지 않는다
     rows: list[SpreadRow]

@@ -20,6 +20,9 @@ logger = logging.getLogger("marketlens.spark")
 SPARK_LEN = 30  # 버킷 수 = 최근 30분
 BUCKET_SEC = 60
 RESTORE_TIMEOUT_SEC = 10.0
+# `/spreads` 응답의 `spark` 소수 자리(003 §3.2) — 버퍼에 넣는 순간 이 자리로 줄인다. 응답을 만들 때
+# 1,400행 × 30개를 매초 다시 반올림하지 않기 위해서다(틱마다 바뀌는 값은 조합당 1개뿐). 원값은 Influx 에 있다.
+SPARK_DIGITS = 3
 
 
 class SparkReader(Protocol):
@@ -44,6 +47,7 @@ class SparkBuffer:
             self._put((r.dom, r.fx, r.base.upper()), r.bucket_ts // BUCKET_SEC, r.fwd)
 
     def _put(self, key: SparkKey, bucket: int, value: float) -> None:
+        value = round(value, SPARK_DIGITS)
         buf = self._buf.get(key)
         if buf is None:
             buf = deque(maxlen=SPARK_LEN)
@@ -55,7 +59,7 @@ class SparkBuffer:
         # 이미 지난 버킷의 값은 무시한다 — 틱은 시각 순으로 오므로 정상 경로엔 없다
 
     def snapshot(self) -> dict[SparkKey, list[float]]:
-        """LiveStore 에 게시할 맵 — 매번 새로 만든다(≈490 × ≤30 값)."""
+        """LiveStore 에 게시할 맵 — 매번 새로 만든다(≈2,400 × ≤30 값). 값은 이미 응답 자리(3자리)다."""
         return {key: [v for _, v in buf] for key, buf in self._buf.items()}
 
 

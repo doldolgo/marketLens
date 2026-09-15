@@ -9,6 +9,9 @@ from datetime import datetime
 from app.core.models import Rate, Row, StreamState, Tick
 
 SparkKey = tuple[str, str, str]  # (dom, fx, base)
+_NO_SPARK: list[
+    float
+] = []  # 조합에 추이가 없을 때 돌려주는 빈 목록 — 공유되므로 고치지 않는다
 
 
 class LiveStore:
@@ -120,7 +123,9 @@ class LiveStore:
         return self._received_at
 
     def spark(self, dom: str, fx: str, base: str) -> list[float]:
-        return list(self._spark.get((dom, fx, base.upper()), []))
+        """게시된 목록 그 자체 — 호출자는 고치지 않는다. 맵은 틱마다 통째로 교체되고 목록은 그때 새로
+        만들어지므로(009) 복사할 이유가 없고, 표 1,400행이 매초 읽는 자리라 복사 비용을 안 낸다."""
+        return self._spark.get((dom, fx, base.upper()), _NO_SPARK)
 
     def is_empty(self) -> bool:
         return not any(self._snapshots.values())
