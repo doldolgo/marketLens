@@ -11,7 +11,13 @@ from app.core.collect import RefreshSummary
 from app.core.live_store import LiveStore
 from app.core.models import Row
 from app.core.networks import pick_domestic
-from app.core.orderbook import average_price, walk_amount, walk_levels, walk_quantity
+from app.core.orderbook import (
+    WalkResult,
+    average_price,
+    walk_amount,
+    walk_levels,
+    walk_quantity,
+)
 from app.core.premium import premium_percent
 from app.features.spreads.models import (
     RefreshFailure,
@@ -82,18 +88,33 @@ def _wallet_fields(
     return (dom_net.name, dom_net.dep, dom_net.wd, dep_fx, wd_fx)
 
 
+# 한 표 안에서 "사는 쪽" 걷기 결과를 나누는 메모 — (거래소, 코인) → 그 마켓 asks 를 고정 금액으로 걷은 것
+BuyMemo = dict[tuple[str, str], WalkResult]
+
+
 def _cross_walk(
     buy_levels: list[list[float]],
     sell_levels: list[list[float]],
     buy_amount: float,
+    *,
+    memo: BuyMemo | None = None,
+    memo_key: tuple[str, str] | None = None,
 ) -> tuple[float, float]:
     """양쪽 다리를 **수량으로 연결해** 건넌 (평균 매수가, 평균 매도가) — 스펙 003 §3.2-4.
 
     각 다리를 따로 걸으면 사지도 않은 수량을 파는 값이 나온다. 매도측이 소진돼 못 판
     수량이 있으면 판 수량만큼 매수측을 되맞춘다 — 못 판 코인을 0원으로 치면 −50% 대
     쓰레기 값이 나오기 때문이다(004 §3.2·§3.3 과 같은 규칙).
+
+    사는 쪽 걷기는 상대 거래소와 무관하다(같은 마켓·같은 금액) — 한 마켓이 여러 행에 나오므로
+    (해외 마켓은 국내 2곳, 국내 마켓은 해외 3곳) `memo` 가 있으면 한 표 안에서 한 번만 걷는다.
+    파는 쪽은 산 수량에 달려 있어 행마다 걷는다.
     """
-    buy = walk_amount(buy_levels, buy_amount)
+    buy = memo.get(memo_key) if memo is not None else None
+    if buy is None:
+        buy = walk_amount(buy_levels, buy_amount)
+        if memo is not None and memo_key is not None:
+            memo[memo_key] = buy
     sell = walk_quantity(sell_levels, buy.quantity)
     if sell.exhausted and sell.quantity < buy.quantity:
         buy = walk_quantity(buy_levels, sell.quantity)
@@ -129,6 +150,7 @@ def _build_row(
     store: LiveStore,
     now: datetime,
     notional: float,
+    buy_memo: BuyMemo,
 ) -> dict[str, object]:
     """행 하나의 규칙 — 스펙 003 §3.2-4.
 
@@ -166,13 +188,21 @@ def _build_row(
         rev_raw = premium_percent(buy_krw=dom_ask[0], sell_krw=fx_bid[0] * rate_bid)
 
         # 걷기 — 김프는 해외 asks 를 notional(USDT)로, 역프는 국내 asks 를 그 원화 환산액으로
+        # 사는 쪽 메모 키 = 마켓 — 해외 asks 는 늘 notional(USDT), 국내 asks 는 그 거래소 환율로
+        # 환산한 원화라 같은 마켓이면 금액도 같다
         fx_ask_avg, dom_bid_avg = _cross_walk(
-            walk_levels(fx_row, "asks"), walk_levels(dom_row, "bids"), notional
+            walk_levels(fx_row, "asks"),
+            walk_levels(dom_row, "bids"),
+            notional,
+            memo=buy_memo,
+            memo_key=(fx_row.exchange, base),
         )
         dom_ask_avg, fx_bid_avg = _cross_walk(
             walk_levels(dom_row, "asks"),
             walk_levels(fx_row, "bids"),
             notional * rate_ask,
+            memo=buy_memo,
+            memo_key=(dom_row.exchange, base),
         )
 
         # 순값과 차감폭 — 반올림하지 않는다(상한도 없다)
@@ -259,6 +289,7 @@ def build_table(
 
     # 3~4. 페어 생성 — 국내 거래소마다 자기 환율, 환율 없는 국내 거래소는 행 전체가 빠진다
     rows_out: list[dict[str, object]] = []
+    buy_memo: BuyMemo = {}  # 이 표 한 장의 수명 — 다음 회차는 새 호가로 새로 걷는다
     for dom_ex, dom_table in domestic.items():
         rate = store.get_rate(dom_ex)
         if rate is None or rate.ask <= 0 or rate.bid <= 0:
@@ -279,6 +310,7 @@ def build_table(
                         store,
                         now,
                         notional,
+                        buy_memo,
                     )
                 )
 
