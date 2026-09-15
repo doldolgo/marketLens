@@ -16,12 +16,10 @@ from collections import deque
 from app.core.live_store import LiveStore
 from app.core.models import Tick
 from app.core.redis_bus import RedisBus
-from app.core.serialization import camelize_json
 from app.features.spreads.service import (
     DEFAULT_NOTIONAL,
     MarketDataNotFoundError,
-    SpreadsResponse,
-    build_spreads,
+    build_table,
 )
 
 logger = logging.getLogger("marketlens.spreads_push")
@@ -35,10 +33,10 @@ LOG_SUPPRESS_SEC = 60.0
 QUEUE_LIMIT = 2
 
 
-def encode_table(payload: SpreadsResponse) -> str:
-    """`GET /spreads` 응답(JSONResponse)과 같은 바이트 — camelCase·공백 없음·NaN 금지."""
+def encode_table(payload: dict[str, object]) -> str:
+    """`build_table` 의 dict 를 표 바이트로 — camelCase·공백 없음·NaN 금지 (018 `GET /spreads` 가 그대로 답한다)."""
     return json.dumps(
-        camelize_json(payload.model_dump()),
+        payload,
         ensure_ascii=False,
         allow_nan=False,
         separators=(",", ":"),
@@ -88,7 +86,7 @@ class SpreadsPublisher:
         try:
             started = time.perf_counter()
             try:
-                payload = build_spreads(self._store, notional=DEFAULT_NOTIONAL)
+                payload = build_table(self._store, notional=DEFAULT_NOTIONAL)
             except MarketDataNotFoundError:
                 # 환율 없음·국내/해외 스냅샷 없음 — 이 회차는 표를 만들지 않는다, 경고 없음(기동 직후 정상) (018 §3.2)
                 return

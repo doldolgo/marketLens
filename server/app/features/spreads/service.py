@@ -18,7 +18,6 @@ from app.features.spreads.models import (
     RefreshRate,
     RefreshResponse,
     RefreshSnapshot,
-    SpreadRow,
     SpreadsResponse,
 )
 
@@ -132,8 +131,14 @@ def _build_row(
     store: LiveStore,
     now: datetime,
     notional: float,
-) -> SpreadRow:
-    """행 하나의 규칙 — 스펙 003 §3.2-4."""
+) -> dict[str, object]:
+    """행 하나의 규칙 — 스펙 003 §3.2-4.
+
+    응답 키(camelCase)·순서 그대로의 dict 를 만든다 — `SpreadRow` 모델을 거치지 않는다.
+    표는 매초 1,400행 넘게 만들어지므로(017) 모델 생성 → model_dump → 키 변환 → json 의
+    네 단계가 표 1장 비용의 절반이었다. 키 이름·순서의 진실은 `SpreadRow` 이고, 이 dict 가
+    그것과 같은 바이트가 되는지는 테스트가 옛 경로와 비교해 지킨다.
+    """
     dom_bid = dom_row.bids[0] if dom_row.bids else None
     dom_ask = dom_row.asks[0] if dom_row.asks else None
     fx_bid = fx_row.bids[0] if fx_row.bids else None
@@ -186,41 +191,46 @@ def _build_row(
     # 입출금 5필드는 망 판정으로 채운다 — fail 행도 같은 규칙 (006 §3.7)
     net_dom, dep_dom, wd_dom, dep_fx, wd_fx = _wallet_fields(dom_row, fx_row)
 
-    return SpreadRow(
-        sym=base,
-        dom=dom_row.exchange,
-        fx=fx_row.exchange,
-        fwd=fwd,
-        rev=rev,
-        usd=usd,
+    # float() 는 모델이 하던 int→float 강제와 같다 — 거래소가 정수로 준 가격이 "100" 이 아니라
+    # "100.0" 으로 나가야 옛 바이트와 같다
+    return {
+        "sym": base,
+        "dom": dom_row.exchange,
+        "fx": fx_row.exchange,
+        "fwd": float(fwd),
+        "rev": float(rev),
+        "usd": float(usd),
         # 009 가 게시한 fwd 원값 추이(1분 버킷 ≤30개) — fail 행도 싣는다, 없으면 빈 배열.
         # 소수 3자리로 줄여 싣는다(0.001%p = 김프 눈금보다 촘촘하다): 490행 × 30개를 1초마다
         # 보내므로 배정밀도 그대로면 응답이 gzip 106KB 다. 버퍼에는 원값이 남는다.
-        spark=[
+        "spark": [
             round(v, SPARK_DIGITS)
             for v in store.spark(dom_row.exchange, fx_row.exchange, base)
         ],
-        status=status,
-        age=age,
-        slip_fwd=slip_fwd,
-        slip_rev=slip_rev,
-        krw=krw,
-        net_dom=net_dom,
-        dep_dom=dep_dom,
-        wd_dom=wd_dom,
-        dep_fx=dep_fx,
-        wd_fx=wd_fx,
-    )
+        "status": status,
+        "age": float(age),
+        "slipFwd": float(slip_fwd),
+        "slipRev": float(slip_rev),
+        "krw": float(krw),
+        "netDom": net_dom,
+        "depDom": dep_dom,
+        "wdDom": wd_dom,
+        "depFx": dep_fx,
+        "wdFx": wd_fx,
+    }
 
 
-def build_spreads(
+def build_table(
     store: LiveStore,
     *,
     now: datetime | None = None,
     excluded: Collection[str] | None = None,
     notional: float = DEFAULT_NOTIONAL,
-) -> SpreadsResponse:
+) -> dict[str, object]:
     """전 (국내 × 해외 × 코인) 페어의 김프/역프 표 — 스펙 003 §3.2.
+
+    응답 모양(camelCase 키·순서) 그대로의 dict 를 돌려준다 — 017 게시기가 이걸 바로 json 으로
+    만든다. 모델이 필요하면 `build_spreads` (테스트·문서용, 같은 계산).
 
     표 조립 전체가 `await` 없이 끝난다 — 그것이 이 함수가 수집 락 없이도 한 응답 안에서
     스냅샷 교체 전·후 호가를 섞지 않는 유일한 근거다(§2). 걷기를 async 로 만들지 않는다.
@@ -253,7 +263,7 @@ def build_spreads(
         )
 
     # 3~4. 페어 생성 — 국내 거래소마다 자기 환율, 환율 없는 국내 거래소는 행 전체가 빠진다
-    rows_out: list[SpreadRow] = []
+    rows_out: list[dict[str, object]] = []
     for dom_ex, dom_table in domestic.items():
         rate = store.get_rate(dom_ex)
         if rate is None or rate.ask <= 0 or rate.bid <= 0:
@@ -278,7 +288,7 @@ def build_spreads(
                 )
 
     # 5. 정렬 고정
-    rows_out.sort(key=lambda r: (r.sym, r.dom, r.fx))
+    rows_out.sort(key=lambda r: (r["sym"], r["dom"], r["fx"]))
 
     # 6. 최상위 값 + USDT 시세 미갱신 경고 — 시세가 "있긴 한데 낡은" 거래소만 (스펙 008 §3.2)
     warnings: list[str] = []
@@ -294,13 +304,26 @@ def build_spreads(
             )
 
     received = store.received_at
-    return SpreadsResponse(
-        rate=base_rate.ask,
-        notional=notional,
-        rows=rows_out,
-        warnings=warnings,
-        data_received_at=received * 1000 if received is not None else None,
-        fetched_at=int(time.time() * 1000),
+    return {
+        "rate": float(base_rate.ask),
+        "notional": float(notional),
+        "rows": rows_out,
+        "warnings": warnings,
+        "dataReceivedAt": received * 1000 if received is not None else None,
+        "fetchedAt": int(time.time() * 1000),
+    }
+
+
+def build_spreads(
+    store: LiveStore,
+    *,
+    now: datetime | None = None,
+    excluded: Collection[str] | None = None,
+    notional: float = DEFAULT_NOTIONAL,
+) -> SpreadsResponse:
+    """`build_table` 과 같은 표를 `SpreadsResponse` 모델로 — 테스트·문서용. 뜨거운 경로는 dict 다."""
+    return SpreadsResponse.model_validate(
+        build_table(store, now=now, excluded=excluded, notional=notional)
     )
 
 

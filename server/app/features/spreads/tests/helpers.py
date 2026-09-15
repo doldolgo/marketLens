@@ -14,7 +14,7 @@ from app.core.models import Row
 from app.core.networks import Network
 from app.core.redis_bus import RedisBus
 from app.features.spreads.push import encode_table
-from app.features.spreads.service import build_spreads
+from app.features.spreads.service import build_table
 from app.main import create_app
 
 
@@ -30,7 +30,7 @@ def spreads_json(store: LiveStore, **build_kw: object) -> dict:
     018 부터 HTTP 는 Redis 키를 그대로 답하므로 표 **계산** 규칙(003·006·008)은 이 헬퍼로 본다 —
     게시기가 키에 넣는 것과 같은 함수·같은 직렬화라 HTTP 로 받을 값과 같다.
     """
-    return json.loads(encode_table(build_spreads(store, **build_kw)))  # type: ignore[arg-type]
+    return json.loads(encode_table(build_table(store, **build_kw)))  # type: ignore[arg-type]
 
 
 def make_row(
