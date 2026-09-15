@@ -53,6 +53,9 @@ CONTROL_INTERVAL = 0.1  # 구독 요청 사이 대기 — 빈도 한도가 문�
 REBALANCE_INTERVAL = 60.0  # set_universe 가 깨우지 않아도 이 주기로 구독 차이를 맞춘다
 PING_INTERVAL = 20.0  # JSON ping 주기 — 공식 문서 요구 (§3.2)
 PONG_TIMEOUT = 20.0  # 이 안에 pong 이 없으면 끊고 재연결 — 조용히 죽은 TCP 감지 (§3.2)
+# 심볼당 행 발행(정렬 + QuoteSink.orderbook) 최소 간격 — 델타는 100ms 마다 오지만 표는 1초에 1번만 읽으므로
+# 메시지마다 200단계를 정렬·행 재생성하던 비용(py-spy: 수집기 CPU 22%)을 1/5 로 줄인다 (§3.2)
+PUBLISH_INTERVAL_MS = 500
 BACKOFF_START = 1.0
 BACKOFF_MAX = 30.0
 CLOSE_TIMEOUT = 2.0  # 종료 시 취소 + 소켓 3개 동시 close 합계 상한
@@ -93,6 +96,10 @@ class _Book:
     def __init__(self) -> None:
         self.asks: dict[float, float] = {}
         self.bids: dict[float, float] = {}
+        self.ts = 0  # 마지막으로 반영한 프레임의 `ts` — 발행 시 행의 호가 시각
+        self.received_at = 0  # 그 프레임의 수신 시각 — 발행 시 행의 `updated_at`
+        self.published_at = 0  # 마지막으로 행을 내보낸 시각 (§3.2 발행 제한)
+        self.dirty = False  # 델타를 반영했지만 아직 행으로 내보내지 않았다
 
     def replace(self, data: dict[str, Any]) -> None:
         self.asks = {float(p): float(q) for p, q in data["a"]}
@@ -136,6 +143,8 @@ class _Shard:
         self.ws: Any | None = None
         self.task: asyncio.Task[None] | None = None
         self.ping_task: asyncio.Task[None] | None = None
+        # dirty 북을 주기적으로 발행 (§3.2) — 소켓과 수명이 같다
+        self.flush_task: asyncio.Task[None] | None = None
         self.backoff = BACKOFF_START
         self.next_id = 0
         self.pong_pending = False  # ping 을 보냈고 아직 pong 이 안 왔다
@@ -428,6 +437,7 @@ class BybitStream:
                 )  # 구독 시각 = 첫 묶음을 다 보낸 시각
                 self._publish()
                 shard.ping_task = asyncio.create_task(self._run_ping(shard, ws))
+                shard.flush_task = asyncio.create_task(self._run_flush(shard))
                 await self._pump(shard, ws)
             except asyncio.CancelledError:
                 raise
@@ -451,6 +461,7 @@ class BybitStream:
                     self._record_rejection(exc)
             finally:
                 await self._stop_ping(shard)
+                await self._stop_flush(shard)
                 shard.state.connected = False
                 shard.state.connected_since = None
                 shard.state.subscribed = 0
@@ -511,6 +522,37 @@ class BybitStream:
     async def _stop_ping(self, shard: _Shard) -> None:
         task, shard.ping_task = shard.ping_task, None
         if task is None or task is asyncio.current_task():
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
+    async def _run_flush(self, shard: _Shard) -> None:
+        """PUBLISH_INTERVAL 마다 델타로 바뀌었지만 아직 안 내보낸 북을 전부 행으로 만든다 (§3.2).
+
+        델타가 끊긴 심볼도 마지막 델타 뒤 한 주기 안에는 반드시 발행된다 — 누락 없음.
+        발행 실패가 이 태스크를 죽이면 dirty 북이 영원히 안 나가므로 로그만 남기고 계속 돈다.
+        """
+        while True:
+            await self._sleep(PUBLISH_INTERVAL_MS / 1000)
+            try:
+                self._flush(shard)
+            except Exception:
+                logger.exception("바이빗 샤드 %d 호가 행 발행 실패", shard.index)
+
+    def _flush(self, shard: _Shard) -> None:
+        now = self._clock()
+        for symbol, book in shard.books.items():
+            if not book.dirty:
+                continue
+            base = self._base_of.get(symbol)
+            if base is None:
+                continue  # 맵에서 빠진 심볼 — 펌프와 같은 규칙으로 버린다 (§3.4)
+            self._publish_book(symbol, base, book, now)
+
+    async def _stop_flush(self, shard: _Shard) -> None:
+        task, shard.flush_task = shard.flush_task, None
+        if task is None:
             return
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -608,18 +650,30 @@ class BybitStream:
     ) -> None:
         data = msg["data"]
         kind = msg.get("type")
+        ts = int(msg["ts"])
         book = shard.books.get(symbol)
         if kind == "snapshot" or data.get("u") == 1:
-            # 새 스냅샷·서비스 재시작(u=1) → 북 통째 교체 (§3.4)
+            # 새 스냅샷·서비스 재시작(u=1) → 북 통째 교체 (§3.4). 교체 직후 상태는 간격과 무관하게 바로 내보낸다
             book = _Book()
             book.replace(data)
             shard.books[symbol] = book
+            book.ts, book.received_at = ts, at
+            self._publish_book(symbol, base, book, at)
         elif kind == "delta":
             if book is None:
                 return  # 스냅샷 전에 온 델타 — 북이 없으니 버린다 (§3.4)
-            book.apply(data)
+            book.apply(data)  # 델타는 바뀐 단계만 오므로 하나도 빠짐없이 북에 반영한다
+            book.ts, book.received_at = ts, at
+            if at - book.published_at >= PUBLISH_INTERVAL_MS:
+                self._publish_book(symbol, base, book, at)  # 조용하던 심볼은 바로
+            else:
+                # 최근에 내보냈다 — 다음 주기(_run_flush)에 묶어서 (§3.2)
+                book.dirty = True
         else:
             raise ValueError(f"알 수 없는 orderbook type: {kind!r}")
+
+    def _publish_book(self, symbol: str, base: str, book: _Book, now: int) -> None:
+        """북 → 정렬 → 행 1회. 호가 시각·수신 시각은 그 북에 마지막으로 반영된 프레임의 것 (§3.2)."""
         asks, bids = book.sorted_levels()
         self._sink.orderbook(
             exchange=self.id,
@@ -628,9 +682,11 @@ class BybitStream:
             native_symbol=symbol,
             asks=asks,
             bids=bids,
-            timestamp_ms=int(msg["ts"]),
-            received_at_ms=at,
+            timestamp_ms=book.ts,
+            received_at_ms=book.received_at,
         )
+        book.dirty = False
+        book.published_at = now
 
     def _on_trade(self, base: str, data: Any) -> None:
         """한 프레임의 체결 중 `T` 가 가장 큰 것 — 배열 순서를 믿지 않는다 (§3.4)."""
