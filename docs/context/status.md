@@ -20,7 +20,7 @@
 | health | /health/collect·틱 판정(연결·30초 무수신·샤드) → 실패 구간 추적·collect_fail 쓰기/복원 | 실데이터 탭·5초 폴링·KPI 수집 상태 | 백오프는 후속 스펙. EC2 에서 차단·재기동 복원 수동 확인 대기 |
 | binance-stream | WS 3샤드 depth20+miniTicker·exchangeInfo 매초(슬림 질의)·샤드 단위 정체 판정 | - | 해외 최대 20단계 |
 | bybit | WS 3샤드 orderbook.200(스냅샷+델타 로컬 북)+publicTrade·instruments-info 매초·JSON ping/pong 감시·샤드 단위 정체 판정·입출금(HMAC 헤더)·`/history/*` `fx=bybit`·`/orderbook/bybit` | 표시명 `Bybit`·기록 탭 Bybit 실데이터(선택된 해외만 조회) | 해외 최대 20단계, MEXC 는 mock |
-| bitget | WS 3샤드 books(스냅샷+update 로컬 북, seq 역행 버림)+trade·symbols 매초·문자열 ping/pong 감시·샤드 단위 정체 판정·입출금(public, 키 없음)·`/history/*` `fx=bitget`·`/orderbook/bitget` | 표시명 `Bitget`·기록 탭 Bitget 실데이터 | 해외 최대 20단계, MEXC 는 mock |
+| bitget | WS 3샤드 books15(200ms 스냅샷, 15단계)+trade·symbols 매초·문자열 ping/pong 감시·샤드 단위 정체 판정·입출금(public, 키 없음)·`/history/*` `fx=bitget`·`/orderbook/bitget` | 표시명 `Bitget`·기록 탭 Bitget 실데이터 | 해외 최대 20단계, MEXC 는 mock |
 
 ## 알려진 빚
 - (019) 원문 아카이브의 바이빗 호가는 델타 프레임을 분당 마지막 1건으로 표본화한 것이라 북을 재생할 수 없다 — 재생이 필요해지면 스냅샷을 따로 남기는 별도 스펙. 비트겟 `books` update 도 같다(020).

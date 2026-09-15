@@ -51,7 +51,7 @@ STALE_LIMIT = 30_000
 SERVER_DIR = Path(__file__).resolve().parents[1]
 BTC_SHARD = shard_of("BTCUSDT")
 
-ACK = '{"event":"subscribe","arg":{"instType":"SPOT","channel":"books","instId":"BTCUSDT"}}'
+ACK = '{"event":"subscribe","arg":{"instType":"SPOT","channel":"books15","instId":"BTCUSDT"}}'
 PONG = "pong"
 REJECT = '{"event":"error","code":"30005","msg":"instId not found"}'
 REST_SOURCE = "rest:/api/v2/spot/public/symbols"
@@ -80,7 +80,7 @@ def arg(channel: str, symbol: str) -> dict[str, str]:
 
 
 def args_of(symbol: str) -> list[dict[str, str]]:
-    return [arg("books", symbol), arg("trade", symbol)]
+    return [arg("books15", symbol), arg("trade", symbol)]
 
 
 def symbols_body(symbols: list[str], extra: list[dict[str, str]] | None = None) -> dict:  # type: ignore[type-arg]
@@ -116,7 +116,7 @@ def snapshot(
     return json.dumps(
         {
             "action": action,
-            "arg": arg("books", symbol),
+            "arg": arg("books15", symbol),
             "data": [
                 {
                     "asks": asks[::-1],
@@ -141,7 +141,7 @@ def update(
     return json.dumps(
         {
             "action": "update",
-            "arg": arg("books", symbol),
+            "arg": arg("books15", symbol),
             "data": [
                 {
                     "asks": asks or [],
@@ -649,7 +649,7 @@ async def test_subscribe_messages_carry_at_most_fifty_args_spaced_and_under_4096
     assert all(len(s.encode()) <= 4096 for s in sock.sent)  # 요청 직렬화 길이
     sent = [a for m in subs for a in m["args"]]
     for s in symbols:
-        assert arg("books", s) in sent and arg("trade", s) in sent
+        assert arg("books15", s) in sent and arg("trade", s) in sent
     assert all(a["instType"] == "SPOT" for a in sent)
     assert sleeps.values.count(CONTROL_INTERVAL) == 2  # 요청마다 0.2초
     assert store.stream_state("bitget").subscribed == 30  # type: ignore[union-attr]
@@ -949,7 +949,7 @@ async def test_unknown_symbol_frames_keep_their_key_but_do_not_count() -> None:
         {"action": "snapshot", "arg": arg("ticker", "BTCUSDT"), "data": []}
     )
     bad_action = json.dumps(
-        {"action": "weird", "arg": arg("books", "BTCUSDT"), "data": []}
+        {"action": "weird", "arg": arg("books15", "BTCUSDT"), "data": []}
     )
     sock = FakeSocket(
         [snapshot("ETHUSDT"), ACK, "[1]", b"\xff\xfe", other_channel, bad_action]
