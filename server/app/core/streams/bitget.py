@@ -1,4 +1,4 @@
-"""비트겟 스트림 커넥터 — WebSocket books(스냅샷+update)·trade 3샤드 + symbols REST (스펙 020).
+"""비트겟 스트림 커넥터 — WebSocket books15(스냅샷)·trade 3샤드 + symbols REST (스펙 020).
 
 바이낸스(012)·바이빗(019)과 규칙은 같지만 코드를 공유하지 않는다 — quirk 가 섞이면 디버깅 불가.
 바이빗과 다른 점: 구독 인자가 토픽 문자열이 아니라 `{instType, channel, instId}` 객체이고, 핑은
@@ -43,9 +43,7 @@ SYMBOLS_KEY = "symbols:all"  # 매초 오는 심볼 목록 본문의 원문 싱�
 _BODY_LIMIT = 500  # 핸드셰이크 거부 응답 본문 상한 — 001 §3.1 과 같은 500자
 
 INST_TYPE = "SPOT"
-BOOKS_CHANNEL = (
-    "books"  # 전체 깊이 — 스냅샷형 채널(books1·5·15)은 최대 15단계라 얕다 (§3.2)
-)
+BOOKS_CHANNEL = "books15"  # 15단계 스냅샷 — 전체 깊이 `books` 는 update 마다 북 전체를 다시 정렬해 CPU 47% 를 먹었다 (§3.2 개정 2026-09-15)
 TRADE_CHANNEL = "trade"
 SHARDS = 3
 ARGS_PER_MESSAGE = (
