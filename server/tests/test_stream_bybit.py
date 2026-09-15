@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.core.errors import ExchangeApiError, ExchangeTimeoutError
 from app.core.live_store import LiveStore
+from app.core.streams import bybit as bybit_module
 from app.core.streams.bybit import (
     ARGS_PER_MESSAGE,
     CONTROL_INTERVAL,
@@ -167,12 +168,14 @@ def _client(handler) -> httpx.AsyncClient:  # type: ignore[no-untyped-def]
 class BybitSleeps(Sleeps):
     """핑 주기·pong 대기는 표를 줄 때만 진행한다 — 가짜 sleep 이 즉시 돌아오면 핑 루프가 폭주한다.
 
+    호가 발행 주기(0.5초)도 같은 이유로 `release_flush()` 를 부를 때만 한 주기 지난 것으로 친다.
     구독 요청 간격(0.1초)도 `control_tickets` 를 주면 표 단위로 막을 수 있다.
     """
 
     def __init__(self, control_tickets: int | None = None) -> None:
         super().__init__()
         self._ping = asyncio.Semaphore(0)
+        self._flush = asyncio.Semaphore(0)
         self._control = (
             asyncio.Semaphore(control_tickets) if control_tickets is not None else None
         )
@@ -180,6 +183,10 @@ class BybitSleeps(Sleeps):
     def release_ping(self, n: int = 1) -> None:
         for _ in range(n):
             self._ping.release()
+
+    def release_flush(self, n: int = 1) -> None:
+        for _ in range(n):
+            self._flush.release()
 
     def release_control(self, n: int = 1) -> None:
         assert self._control is not None
@@ -190,6 +197,9 @@ class BybitSleeps(Sleeps):
         self.values.append(seconds)
         if seconds in (PING_INTERVAL, PONG_TIMEOUT):
             await self._ping.acquire()
+        elif seconds == bybit_module.PUBLISH_INTERVAL_MS / 1000:
+            # 모듈 속성으로 비교 — 테스트가 간격을 0 으로 patch 해도 루프가 폭주하지 않게
+            await self._flush.acquire()
         elif seconds == CONTROL_INTERVAL and self._control is not None:
             await self._control.acquire()
         else:
@@ -254,11 +264,17 @@ async def run_until_exhausted(stream: BybitStream, connector: FakeConnector) -> 
 
 
 def backoffs(sleeps: Sleeps) -> list[float]:
-    """제어 메시지·핑 간격을 뺀 나머지 = 재연결 대기."""
+    """제어 메시지·핑·발행 주기를 뺀 나머지 = 재연결 대기."""
     return [
         v
         for v in sleeps.values
-        if v not in (CONTROL_INTERVAL, PING_INTERVAL, PONG_TIMEOUT)
+        if v
+        not in (
+            CONTROL_INTERVAL,
+            PING_INTERVAL,
+            PONG_TIMEOUT,
+            bybit_module.PUBLISH_INTERVAL_MS / 1000,
+        )
     ]
 
 
@@ -305,7 +321,12 @@ async def test_snapshot_is_cut_at_one_million_usdt_but_keeps_first_level() -> No
     )  # 첫 단계 2,000,000
 
 
-async def test_delta_deletes_inserts_and_replaces_then_rebuilds_row() -> None:
+async def test_delta_deletes_inserts_and_replaces_then_rebuilds_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 스냅샷 직후의 델타는 발행 제한(§3.2)에 걸려 다음 주기까지 행에 안 나온다 — 여기서는 북 반영 규칙만
+    # 보므로 간격을 0 으로 두고 즉시 발행시킨다. 발행 제한 자체는 test_delta_within_interval_* 가 본다.
+    monkeypatch.setattr("app.core.streams.bybit.PUBLISH_INTERVAL_MS", 0)
     frames = [
         snapshot(levels=3),  # asks 71000·71010·71020, bids 70990·70980·70970
         delta(
@@ -327,6 +348,101 @@ async def test_delta_deletes_inserts_and_replaces_then_rebuilds_row() -> None:
     assert row.bids == [[70_980.0, 0.1], [70_970.0, 0.1]]
     assert row.updated_at == datetime.fromtimestamp((T0 + 60) / 1000, tz=UTC)
     assert row.price_timestamp == T0 + 50  # 체결가 없으면 mid, 시각은 프레임 ts
+
+
+async def test_delta_within_interval_is_applied_to_the_book_but_not_published() -> None:
+    """같은 심볼의 행은 500ms 에 1번 — 두 번째 델타는 북에만 쌓이고 다음 주기에 묶여 나온다 (§3.2)."""
+    sock = GatedSocket()
+    stream, _, sleeps, _, clock, store = await build([sock])
+    sink = stream._sink
+    calls: list[int] = []
+    original = sink.orderbook
+
+    def counting(**kwargs: Any) -> None:
+        calls.append(kwargs["received_at_ms"])
+        original(**kwargs)
+
+    sink.orderbook = counting  # type: ignore[method-assign]
+    stream.start()
+    await until(sock.subscribed)
+    sock.push(snapshot(levels=3))  # asks 71000·71010·71020
+    await until(sock.delivered)
+    assert calls == [T0]
+    clock.now = T0 + 600  # 마지막 발행(T0) 뒤 500ms 지남 → 첫 델타는 바로
+    sock.push(delta(asks=[["71005.00", "0.5"]], ts=T0 + 590))
+    await until(sock.delivered)
+    assert calls == [T0, T0 + 600]
+    clock.now = T0 + 700  # 100ms 뒤 두 번째 델타 → 북에만, sink 호출 없음
+    sock.push(delta(asks=[["71000.00", "0"]], ts=T0 + 690))
+    await until(sock.delivered)
+    assert calls == [T0, T0 + 600]
+    row = store.get("bybit", "BTC")
+    assert row is not None and row.asks[0] == [71_000.0, 0.1]  # 행은 아직 첫 델타 상태
+    assert sleeps.values.count(0.5) == 1  # 주기 대기 중
+    clock.now = T0 + 1_100
+    sleeps.release_flush()  # 한 주기 지남 → 묶인 델타가 행으로
+    await asyncio.sleep(0.01)
+    assert calls == [T0, T0 + 600, T0 + 700]  # 수신 시각은 마지막 델타의 것
+    row = store.get("bybit", "BTC")
+    assert row is not None
+    assert row.asks == [[71_005.0, 0.5], [71_010.0, 0.1], [71_020.0, 0.1]]
+    assert row.updated_at == datetime.fromtimestamp((T0 + 700) / 1000, tz=UTC)
+    assert row.price_timestamp == T0 + 690  # 호가 시각 = 마지막 델타의 ts
+    await stream.aclose()
+
+
+async def test_dirty_symbol_is_published_within_one_interval_after_its_last_delta() -> (
+    None
+):
+    """델타가 끊긴 심볼도 마지막 델타 뒤 한 주기(500ms) 안에는 반드시 나온다 — 발행 누락 없음 (§3.2)."""
+    sock = GatedSocket()
+    stream, _, sleeps, _, clock, store = await build([sock])
+    stream.start()
+    await until(sock.subscribed)
+    sock.push(snapshot(levels=3))
+    await until(sock.delivered)
+    # 스냅샷 발행 100ms 뒤 델타 하나 → dirty 로만 남고 이후 조용하다
+    clock.now = T0 + 100
+    sock.push(delta(asks=[["71005.00", "0.5"]], ts=T0 + 90))
+    await until(sock.delivered)
+    row = store.get("bybit", "BTC")
+    assert row is not None and len(row.asks) == 3  # 아직 스냅샷 상태
+    # 주기 태스크는 실제 시간 0.5초를 자므로 그 한 주기가 지나면 밀려 나온다 — 상한 = 주기 = 500ms
+    assert sleeps.values.count(0.5) == 1
+    clock.now = T0 + 500
+    sleeps.release_flush()
+    await asyncio.sleep(0.01)
+    row = store.get("bybit", "BTC")
+    assert row is not None and len(row.asks) == 4 and row.asks[1] == [71_005.0, 0.5]
+    assert row.updated_at == datetime.fromtimestamp((T0 + 100) / 1000, tz=UTC)
+    assert row.price_timestamp == T0 + 90
+    sleeps.release_flush()  # 다음 주기 — dirty 가 없으니 다시 내보내지 않는다
+    await asyncio.sleep(0.01)
+    assert store.get("bybit", "BTC").updated_at == datetime.fromtimestamp(  # type: ignore[union-attr]
+        (T0 + 100) / 1000, tz=UTC
+    )
+    await stream.aclose()
+
+
+async def test_snapshot_is_published_immediately_regardless_of_interval() -> None:
+    """스냅샷은 북 교체 직후 상태를 간격과 무관하게 바로 내보낸다 (§3.2)."""
+    sock = GatedSocket()
+    stream, _, _, _, clock, store = await build([sock])
+    stream.start()
+    await until(sock.subscribed)
+    sock.push(snapshot(levels=3))
+    await until(sock.delivered)
+    clock.now = T0 + 100
+    sock.push(delta(asks=[["71005.00", "0.5"]], ts=T0 + 90))  # dirty 로 남는다
+    await until(sock.delivered)
+    clock.now = T0 + 200  # 마지막 발행 뒤 200ms — 델타라면 묶였을 시점
+    sock.push(snapshot(levels=2, price=80_000.0, ts=T0 + 190))
+    await until(sock.delivered)
+    row = store.get("bybit", "BTC")
+    assert row is not None and row.asks == [[80_000.0, 0.1], [80_010.0, 0.1]]
+    assert row.updated_at == datetime.fromtimestamp((T0 + 200) / 1000, tz=UTC)
+    assert row.price_timestamp == T0 + 190
+    await stream.aclose()
 
 
 async def test_delta_before_snapshot_is_dropped() -> None:
@@ -1050,7 +1166,7 @@ async def test_aclose_cancels_tasks_and_closes_all_sockets() -> None:
     stream.start()
     await asyncio.sleep(0.01)
     before = {t for t in asyncio.all_tasks() if t is not asyncio.current_task()}
-    assert len(before) == SHARDS * 2 + 1  # 샤드 3 + 핑 3 + 재조정 1
+    assert len(before) == SHARDS * 3 + 1  # 샤드 3 + 핑 3 + 발행 주기 3 + 재조정 1
     await stream.aclose()
     assert all(s.closed for s in socks)
     await asyncio.sleep(0.01)  # 취소된 태스크가 남긴 예외가 없다

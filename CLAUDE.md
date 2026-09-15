@@ -90,7 +90,7 @@ marketlens/
 | 016 | process-split | DONE | 서버 `ROLE`(collector | api) — Influx 조회(`/history/premium`·`streaks`·`streaks/bulk`·`candles`, 018 부터 `/spreads` 도)를 별도 컨테이너 `api` 에서, nginx 경로 분기, compose 5컨테이너 (BE·인프라) |
 | 017 | spreads-push | DONE | 스프레드 표 WebSocket 푸시 — 수집이 누가 볼 때만 $1,000 표를 매초 Redis 채널로, `api` 가 구독해 바뀐 행만 `/ws/spreads` 로 접속자 전원에 같은 바이트, FE 폴링 대체(fallback 폴링 없음), 체결 규모 $1,000 고정 |
 | 018 | spreads-serve | DONE | `GET /spreads` 를 `api` 가 Redis `spreads:latest` 로 답하고 nginx `/api/spreads` 를 `api` 로 — 스프레드 탭이 보는 컨테이너는 api 하나, `notional` 쿼리 삭제, 요청마다 `spreads:want` 갱신 (BE·인프라) |
-| 019 | bybit | DONE | 바이빗 USDT 현물 추가 — WS 3샤드 orderbook.200(스냅샷+델타)+publicTrade, instruments-info 매초, 입출금(HMAC), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗), `/history/*` `fx=bybit`, web 표시명·기록 탭 Bybit 실데이터 |
+| 019 | bybit | DONE | 바이빗 USDT 현물 추가 — WS 3샤드 orderbook.200(스냅샷+델타, 행 발행 500ms 제한)+publicTrade, instruments-info 매초, 입출금(HMAC), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗), `/history/*` `fx=bybit`, web 표시명·기록 탭 Bybit 실데이터 |
 | 020 | bitget | DONE | 비트겟 USDT 현물 추가 — WS 3샤드 books15(스냅샷)+trade, symbols 매초, 입출금(public·키 없음), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟), `/history/*` `fx=bitget`, web 표시명·기록 탭 Bitget 실데이터 |
 
 실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
