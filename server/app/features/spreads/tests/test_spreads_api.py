@@ -9,8 +9,10 @@ from datetime import UTC, datetime, timedelta
 import fakeredis
 import pytest
 
+from app.core.influx import SparkBucketRow
 from app.core.live_store import LiveStore
 from app.core.redis_bus import RedisBus
+from app.core.spark import SparkBuffer
 from app.features.spreads.tests.helpers import (
     make_bus,
     make_client,
@@ -478,10 +480,28 @@ def test_spark_is_taken_from_the_published_map_including_fail_rows() -> None:
 
 
 def test_spark_values_are_rounded_to_three_decimals() -> None:
-    """490행 × 30개를 매초 보내므로 배정밀도 그대로면 응답이 몇 배가 된다 (§3.2)."""
+    """490행 × 30개를 매초 보내므로 배정밀도 그대로면 응답이 몇 배가 된다 (§3.2).
+
+    반올림은 009 링버퍼가 값을 넣는 순간 한다 — 표를 만들 때마다 전 행을 다시 반올림하지 않는다.
+    """
     store = LiveStore()
     seed_basic(store)
-    store.set_spark({("upbit", "binance", "BTC"): [-1.4799569337290985, 2.0]})
+    buffer = SparkBuffer()
+    buffer.seed(
+        [
+            SparkBucketRow(
+                dom="upbit",
+                fx="binance",
+                base="BTC",
+                bucket_ts=0,
+                fwd=-1.4799569337290985,
+            ),
+            SparkBucketRow(
+                dom="upbit", fx="binance", base="BTC", bucket_ts=60, fwd=2.0
+            ),
+        ]
+    )
+    store.set_spark(buffer.snapshot())
     [row] = spreads_json(store)["rows"]
     assert row["spark"] == [-1.48, 2.0]
 

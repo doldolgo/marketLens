@@ -28,8 +28,6 @@ FOREIGN_QUOTE = "USDT"
 STALE_AFTER_SEC = 5.0
 # 행 자체가 이만큼 안 바뀌면 스트림이 살아 있어도 그 행의 실제 경과 초를 age 로 낸다 (§3.2-4)
 ROW_STALE_SEC = 300.0
-# `spark` 응답 소수 자리 — 화면 스파크라인의 눈금보다 촘촘하다 (§3.2)
-SPARK_DIGITS = 3
 # USDT 는 매 사이클(1초) 관측이 정상 — 60초 무관측은 구조적 문제다 (스펙 008 §3.2)
 USDT_STALE_WARN_SEC = 60.0
 EXCLUDED_COINS: frozenset[str] = frozenset()
@@ -200,13 +198,10 @@ def _build_row(
         "fwd": float(fwd),
         "rev": float(rev),
         "usd": float(usd),
-        # 009 가 게시한 fwd 원값 추이(1분 버킷 ≤30개) — fail 행도 싣는다, 없으면 빈 배열.
-        # 소수 3자리로 줄여 싣는다(0.001%p = 김프 눈금보다 촘촘하다): 490행 × 30개를 1초마다
-        # 보내므로 배정밀도 그대로면 응답이 gzip 106KB 다. 버퍼에는 원값이 남는다.
-        "spark": [
-            round(v, SPARK_DIGITS)
-            for v in store.spark(dom_row.exchange, fx_row.exchange, base)
-        ],
+        # 009 가 게시한 fwd 추이(1분 버킷 ≤30개) — fail 행도 싣는다, 없으면 빈 배열.
+        # 값은 009 가 버퍼에 넣을 때 이미 소수 3자리다(0.001%p = 김프 눈금보다 촘촘하다): 490행 ×
+        # 30개를 1초마다 보내므로 배정밀도 그대로면 응답이 gzip 106KB 다. 원값은 Influx 에 남는다.
+        "spark": store.spark(dom_row.exchange, fx_row.exchange, base),
         "status": status,
         "age": float(age),
         "slipFwd": float(slip_fwd),
