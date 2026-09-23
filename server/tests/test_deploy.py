@@ -142,7 +142,19 @@ def test_nginx_strips_api_prefix_and_falls_back_to_index() -> None:
     # proxy_pass 끝의 / 가 접두 제거를 만든다: /api/health → /health
     assert "proxy_pass http://server:8000/;" in conf
     assert "location = /api { return 404; }" in conf
-    assert "try_files $uri $uri/ /index.html;" in conf
+    # 022 — SPA fallback 은 /app/ 아래에서만, / 는 정적 랜딩
+    assert "try_files $uri $uri/ /app/index.html;" in conf
+    assert "try_files /landing.html =404;" in conf
+    assert "return 301 /app/$is_args$args;" in conf
+    assert "try_files $uri $uri/ /index.html;" not in conf
+
+
+def test_web_bundle_lives_under_app_prefix() -> None:
+    """022 — vite base 가 /app/ 라야 /app/assets/… 로 번들을 찾고, nginx alias 가 그걸 dist/assets 로 잇는다."""
+    vite = _text("web/vite.config.ts")
+    assert "base: '/app/'" in vite
+    conf = _text("web/nginx.conf")
+    assert "alias /usr/share/nginx/html/assets/;" in conf
 
 
 def _nginx_api_block() -> tuple[str, str]:
