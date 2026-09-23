@@ -23,7 +23,7 @@ ruff check . && ruff format .
 ```bash
 cd web
 npm ci
-npm run dev        # http://localhost:5173 , /api → localhost:8000 프록시 (ws: true — /api/ws/spreads 업그레이드 포함)
+npm run dev        # http://localhost:5173/app/ (base 가 /app/, 022) , /api → localhost:8000 프록시 (ws: true — /api/ws/spreads 업그레이드 포함)
 npm run build      # tsc -b && vite build
 npm run lint       # oxlint
 ```

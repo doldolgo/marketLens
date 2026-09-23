@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MarketLens — 김치 프리미엄 실시간 모니터링</title>
+  <meta name="description" content="업비트·빗썸과 바이낸스·바이빗·비트겟 사이의 김프·역프를 1초 단위로 계산합니다. 슬리피지를 뺀 순값과 입출금 가능 여부까지 한 화면에서." />
+  <link rel="canonical" href="/" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="MarketLens — 김치 프리미엄, 1초마다." />
+  <meta property="og:description" content="국내·해외 거래소 400개 코인의 김프·역프를 1초 단위로. 슬리피지를 뺀 순값, 입출금 가능 여부까지 한 화면에." />
+  <meta property="og:image" content="http://3.34.104.16/landing/spreads.png" />
+  <meta property="og:locale" content="ko_KR" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" />
+  <style>
+    /* 토큰 값은 src/shared/theme.css 와 같다 — 이 파일은 번들 밖(public)이라 CSS 변수를 import 하지 못해 값을 복사했다. 테마가 바뀌면 여기도 맞춘다. */
+    :root {
+      --bg:#161826; --surface:#232532; --text:#e9e9ed; --accent:#9184d9; --up:#e0697d; --down:#6f9bee;
+      --n200:#e4e7f5; --n300:#cfd3e5; --n400:#b2b6ca; --n500:#9397ab; --n600:#75798c; --n800:#3f424d;
+      --divider:rgba(233,233,237,0.16); --r-md:8px; --r-lg:14px;
+      --sh-sm:0 0 0 1px #3f424d; --sh-md:0 0 0 1px #595d6c, 0 6px 18px rgba(0,0,0,0.55);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: inherit; text-decoration: none; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+    nav { display: flex; align-items: center; justify-content: space-between; height: 60px; border-bottom: 1px solid var(--divider); }
+    .mark { font-weight: 600; font-size: 17px; letter-spacing: -0.01em; }
+    .mark b { color: var(--accent); font-weight: 600; }
+    .btn { display: inline-flex; align-items: center; padding: 9px 16px; border-radius: var(--r-md); font-size: 13px; font-weight: 500; background: var(--accent); color: #fff; box-shadow: var(--sh-sm); white-space: nowrap; }
+    .btn:hover { filter: brightness(1.08); }
+    .btn.lg { padding: 13px 22px; font-size: 15px; }
+    .btn.ghost { background: transparent; color: var(--n300); }
+    header { padding: 84px 0 40px; }
+    h1 { font-weight: 600; font-size: 52px; line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 18px; }
+    h1 span { color: var(--accent); }
+    .lead { font-size: 17px; line-height: 1.65; color: var(--n400); max-width: 620px; margin: 0 0 28px; }
+    .lead b { color: var(--n200); font-weight: 500; }
+    .kicker { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--n600); margin: 0 0 12px; }
+    .teaser { padding: 28px 0 48px; }
+    .teaser[hidden] { display: none; }
+    .cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+    .card { background: var(--surface); border-radius: var(--r-md); box-shadow: var(--sh-sm); padding: 14px 16px; min-width: 0; }
+    .card .sym { font-weight: 600; font-size: 16px; }
+    .card .route { font-size: 11.5px; color: var(--n500); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card .pct { font-size: 24px; font-weight: 600; margin-top: 10px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+    .card .dir { font-size: 11px; color: var(--n600); margin-top: 2px; }
+    .meta { font-size: 12px; color: var(--n600); margin-top: 12px; font-variant-numeric: tabular-nums; }
+    .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 8px 0 56px; }
+    figure { margin: 0; background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--sh-md); overflow: hidden; }
+    figure img { display: block; width: 100%; height: auto; }
+    figcaption { padding: 10px 14px; font-size: 12px; color: var(--n500); border-top: 1px solid var(--divider); }
+    .feats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 0 0 56px; }
+    .feat { background: var(--surface); border-radius: var(--r-md); box-shadow: var(--sh-sm); padding: 20px; }
+    .feat h3, .step h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+    .feat p, .step p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--n400); }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 0 0 72px; }
+    .step { padding: 4px 0; border-top: 1px solid var(--divider); }
+    .step .n { font-size: 11px; color: var(--accent); letter-spacing: 0.08em; margin: 12px 0 6px; }
+    footer { display: flex; align-items: center; justify-content: space-between; padding: 20px 0 36px; border-top: 1px solid var(--divider); font-size: 12px; color: var(--n600); }
+    @media (max-width: 720px) {
+      header { padding: 48px 0 28px; }
+      h1 { font-size: 34px; }
+      .lead { font-size: 15px; }
+      .cards { display: flex; overflow-x: auto; gap: 10px; padding-bottom: 6px; scroll-snap-type: x mandatory; }
+      .card { flex: 0 0 160px; scroll-snap-align: start; }
+      .shots, .feats, .steps { grid-template-columns: 1fr; }
+      nav .btn { padding: 7px 12px; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <a class="mark" href="/">Market<b>Lens</b></a>
+      <a class="btn" href="/app/">대시보드 열기 →</a>
+    </nav>
+
+    <header>
+      <h1>김치 프리미엄,<br /><span>1초마다.</span></h1>
+      <p class="lead">
+        업비트·빗썸과 바이낸스·바이빗·비트겟 사이의 <b>김프·역프를 1초 단위로</b> 계산합니다.
+        호가를 걷어 슬리피지를 뺀 <b>순값</b>과, 지금 <b>실제로 옮길 수 있는지</b>(입출금 상태)까지 한 화면에서 판단합니다.
+      </p>
+      <a class="btn lg" href="/app/">대시보드 열기 →</a>
+    </header>
+
+    <!-- 실시간 티저 — 스크립트가 /api/spreads 를 한 번 읽어 채운다. 실패하면 구역째 숨긴다(지어낸 숫자 금지, 스펙 022 §3.3) -->
+    <section class="teaser" id="teaser">
+      <p class="kicker">지금 열려 있는 김프 · 입출금이 실제로 가능한 경로만</p>
+      <div class="cards" id="cards" hidden></div>
+      <div class="meta" id="meta">불러오는 중…</div>
+    </section>
+
+    <section class="shots">
+      <figure>
+        <img src="/landing/spreads.png" alt="실시간 스프레드 표 — 400개 코인의 김프·역프, 입출금 상태" loading="lazy" width="2040" height="1230" />
+        <figcaption>실시간 스프레드 — 400개 코인 × 국내 2 × 해외 3 페어, 매초 갱신</figcaption>
+      </figure>
+      <figure>
+        <img src="/landing/history.png" alt="기록 탭 — 김프 사건 로그와 봉 차트" loading="lazy" width="2040" height="1230" />
+        <figcaption>기록 — 김프 사건 로그와 1분~1일 봉 차트, 입출금 띠</figcaption>
+      </figure>
+    </section>
+
+    <section class="feats">
+      <div class="feat">
+        <h3>실시간 스프레드 표</h3>
+        <p>국내 거래소별 최우선 호가와 해외 호가창을 매초 맞대어 김프·역프를 셉니다. 임계값 하이라이트, 입출금 가능한 것만 보기, 코인 검색이 있습니다.</p>
+      </div>
+      <div class="feat">
+        <h3>기록과 봉 차트</h3>
+        <p>1% 넘게 벌어진 김프 사건을 자동으로 기록하고, 코인·거래소 조합마다 1분부터 1일까지 봉으로 남깁니다. 지난주에 어디가 얼마나 벌어졌는지 바로 봅니다.</p>
+      </div>
+      <div class="feat">
+        <h3>입출금 상태</h3>
+        <p>숫자가 커도 지갑이 막혀 있으면 의미가 없습니다. 거래소별 입금·출금 가능 여부와 망을 표와 차트에 같이 얹어 "옮길 수 있는 김프" 만 고르게 합니다.</p>
+      </div>
+    </section>
+
+    <section class="steps">
+      <div class="step">
+        <div class="n">01 · 수집</div>
+        <h3>5거래소 WebSocket</h3>
+        <p>업비트·빗썸·바이낸스·바이빗·비트겟의 호가창과 체결을 실시간으로 받아 1초마다 한 장의 스냅샷으로 정리합니다.</p>
+      </div>
+      <div class="step">
+        <div class="n">02 · 계산</div>
+        <h3>슬리피지를 뺀 순값</h3>
+        <p>$1,000 를 실제로 체결한다고 보고 호가창을 걷어 평균 체결가를 구합니다. 표의 숫자는 최우선 호가가 아니라 그 순값입니다.</p>
+      </div>
+      <div class="step">
+        <div class="n">03 · 기록</div>
+        <h3>사건과 봉</h3>
+        <p>1% 진입 · 0.5% 이탈 규칙으로 김프 사건을 잡고, 1분 봉을 1일 봉까지 말아 올려 시계열 DB 에 남깁니다.</p>
+      </div>
+    </section>
+
+    <footer>
+      <span>소프트웨어 마에스트로 17기 · MarketLens</span>
+      <a class="btn ghost" href="/app/">대시보드 열기 →</a>
+    </footer>
+  </div>
+
+  <script>
+    // 티저 규칙(스펙 022 §3.3): fail 제외, 경로가 실제로 열린 방향만 후보, 코인당 1개, 값 내림차순 상위 5.
+    // 김프 = 해외 매수 → 국내 매도(해외 출금·국내 입금 열림), 역프 = 국내 매수 → 해외 매도(국내 출금·해외 입금 열림). 모름(null)은 열림이 아니다.
+    (function () {
+      var NAMES = { upbit: '업비트', bithumb: '빗썸', binance: 'Binance', bybit: 'Bybit', bitget: 'Bitget' }
+      var teaser = document.getElementById('teaser'), cards = document.getElementById('cards'), meta = document.getElementById('meta')
+      function name(id) { if (NAMES[id]) return NAMES[id]; return id }
+      function pctText(v) { var s = v.toFixed(2) + '%'; if (v > 0) s = '+' + s; return s }
+      function pctColor(v) { if (v > 0) return 'var(--up)'; if (v < 0) return 'var(--down)'; return 'var(--n400)' }
+      function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] }) }
+      function pick(rows) {
+        var best = {}
+        function offer(it) { var cur = best[it.sym]; if (!cur || it.pct > cur.pct) best[it.sym] = it }
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i]
+          if (r.status === 'fail') continue
+          if (r.wdFx === true && r.depDom === true) offer({ sym: r.sym, dom: r.dom, fx: r.fx, dir: 'kimp', pct: r.fwd })
+          if (r.wdDom === true && r.depFx === true) offer({ sym: r.sym, dom: r.dom, fx: r.fx, dir: 'reverse', pct: r.rev })
+        }
+        var items = Object.keys(best).map(function (k) { return best[k] })
+        items.sort(function (a, b) { return b.pct - a.pct })
+        return items.slice(0, 5)
+      }
+      function render(body) {
+        var rows = body.rows, items = pick(rows), html = ''
+        for (var i = 0; i < items.length; i++) {
+          var it = items[i], from = name(it.dom), to = name(it.fx), dir = '역프 · 국내 매수 → 해외 매도'
+          if (it.dir === 'kimp') { from = name(it.fx); to = name(it.dom); dir = '김프 · 해외 매수 → 국내 매도' }
+          html += '<div class="card"><div class="sym">' + esc(it.sym) + '</div><div class="route">' + esc(from) + ' → ' + esc(to) + '</div>'
+            + '<div class="pct" style="color:' + pctColor(it.pct) + '">' + pctText(it.pct) + '</div><div class="dir">' + dir + '</div></div>'
+        }
+        var coins = {}
+        for (var j = 0; j < rows.length; j++) coins[rows[j].sym] = true
+        var line = '코인 ' + Object.keys(coins).length.toLocaleString('ko-KR') + '개 · 페어 ' + rows.length.toLocaleString('ko-KR') + '개'
+        if (typeof body.rate === 'number' && body.rate > 0) line += ' · USDT ₩' + Math.round(body.rate).toLocaleString('ko-KR')
+        line += ' · 슬리피지를 뺀 순값, $1,000 체결 기준'
+        if (items.length === 0) { meta.textContent = '지금 열린 경로가 없습니다 · ' + line; return }
+        cards.innerHTML = html
+        cards.hidden = false
+        meta.textContent = line
+      }
+      fetch('/api/spreads')
+        .then(function (res) { if (!res.ok) throw new Error(String(res.status)); return res.json() })
+        .then(function (body) { if (!body || !Array.isArray(body.rows)) throw new Error('rows 없음'); render(body) })
+        .catch(function () { teaser.hidden = true })
+    })()
+  </script>
+</body>
+</html>
