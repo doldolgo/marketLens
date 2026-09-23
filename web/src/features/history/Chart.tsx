@@ -90,6 +90,13 @@ function tsToIndex(times: number[], step: number, ts: number): number {
   return lo + (ts - times[lo]) / (times[hi] - times[lo])
 }
 
+/** 빈 판의 문구 — 로딩 중이 먼저, 그다음 코인 위치 안내, 마지막이 기본 문구. */
+function emptyText(loading: boolean, hint: string | null): string {
+  if (loading) return '불러오는 중…'
+  if (hint) return hint
+  return '기간 내 기록 없음'
+}
+
 /** 오름차순 봉 배열에서 ts 와 같은 봉 (이진 탐색). */
 function findAt(arr: Candle1m[], ts: number): Candle1m | null {
   let lo = 0, hi = arr.length - 1
@@ -238,6 +245,8 @@ export interface CardProps {
   onNeedOlder: () => void
   loading: boolean
   sync: ChartSync
+  /** 봉이 없을 때 "기간 내 기록 없음" 대신 보여 줄 안내(예: 이 코인이 있는 거래소). null 이면 기본 문구. */
+  emptyHint: string | null
 }
 
 interface Refs {
@@ -552,7 +561,7 @@ export default function FxChartCard(p: CardProps) {
         <div ref={boxRef} style={{ width: '100%', height: CHART_H }} />
         {S.every((s) => s.candles.length === 0) && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', color: 'var(--color-neutral-500)', fontSize: 12 }}>
-            {p.loading ? '불러오는 중…' : '기간 내 기록 없음'}
+            {emptyText(p.loading, p.emptyHint)}
           </div>
         )}
       </div>

@@ -127,7 +127,7 @@ export default function App() {
       </div>
 
       {wrap('spread', <SpreadsTab feed={feed} onPick={(sym) => { setSelSym(sym); setTab('history') }} />)}
-      {wrap('history', <HistoryTab now={now} selSym={selSym} onSelect={setSelSym} />)}
+      {wrap('history', <HistoryTab now={now} selSym={selSym} onSelect={setSelSym} spreads={feed.spreads} />)}
       {wrap('gap', <GapTab feed={feed} now={now} />)}
       {wrap('pp', <PpTab feed={feed} />)}
       {wrap('health', <HealthTab feed={feed} now={now} />)}
