@@ -16,7 +16,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { exName, fmtKrw, fmtPct, fmtTime, fmtUsdt, pctColor } from '../../shared/format'
 import { Pill, Seg, card, hint, kicker, type SegOpt } from '../../shared/ui'
 import { FX_CHOICES, INITIAL_BARS, exchangeStates, lineTone, type BandTone } from './candles'
-import { INTERVALS, INTERVAL_LABEL, type Interval } from './rollup'
+import { INTERVALS, INTERVAL_LABEL, INTERVAL_SEC, type Interval } from './rollup'
 import type { Candle1m, Dir, Dom, PremiumEvent } from './types'
 
 /** 사건 룰 (013 §3.1) — 기준선 표시용. */
@@ -65,6 +65,31 @@ const TZ_OFF = -new Date().getTimezoneOffset() * 60
 const toChartTime = (ts: number) => (ts + TZ_OFF) as UTCTimestamp
 const fromChartTime = (t: number) => t - TZ_OFF
 
+/** 카드의 시간축 = 카드에 붙은 모든 쌍의 봉 시각 합집합(오름차순). 라이브러리는 차트 안 모든 시리즈의 시각을 합쳐 봉 index 를 매기므로,
+ *  쌍 하나의 봉 수로 범위를 잡으면 두 국내 거래소의 봉 수가 다른 코인에서 최신 구간이 화면 밖으로 밀린다. */
+function axisTimes(S: PairSeries[]): number[] {
+  const set = new Set<number>()
+  for (const s of S) for (const c of s.candles) set.add(c.ts)
+  return [...set].sort((a, b) => a - b)
+}
+/** 봉 index(소수 허용) → 시각. 데이터 밖은 봉 간격으로 늘려 잡는다 — 오른쪽 끝 여백까지 카드끼리 같은 시각을 보게. */
+function indexToTs(times: number[], step: number, i: number): number {
+  const last = times.length - 1
+  if (i <= 0) return times[0] + i * step
+  if (i >= last) return times[last] + (i - last) * step
+  const j = Math.floor(i)
+  return times[j] + (i - j) * (times[j + 1] - times[j])
+}
+/** 시각 → 봉 index(소수). 봉 사이는 비례, 데이터 밖은 봉 간격 — 카드마다 봉 개수·시작 시각이 달라도 같은 시각 구간을 보게. */
+function tsToIndex(times: number[], step: number, ts: number): number {
+  const last = times.length - 1
+  if (ts <= times[0]) return (ts - times[0]) / step
+  if (ts >= times[last]) return last + (ts - times[last]) / step
+  let lo = 0, hi = last
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (times[mid] <= ts) lo = mid; else hi = mid }
+  return lo + (ts - times[lo]) / (times[hi] - times[lo])
+}
+
 /** 오름차순 봉 배열에서 ts 와 같은 봉 (이진 탐색). */
 function findAt(arr: Candle1m[], ts: number): Candle1m | null {
   let lo = 0, hi = arr.length - 1
@@ -88,7 +113,8 @@ export const pairKey = (s: { dom: string; fx: string }) => `${s.dom}|${s.fx}`
 const axisOf = (S: PairSeries[]): PairSeries => S.find((s) => s.candles.length > 0) ?? S[0]
 
 // ── 카드 간 연동 ──
-// 시간축: 한 카드의 논리 범위(봉 index 기준)를 나머지에 그대로 적용한다. 카드들의 봉 시각 배열은 같은 binance 청크에서 나와 index 가 맞다.
+// 시간축: 한 카드의 논리 범위(봉 index)를 그 카드의 시간축으로 시각 구간으로 바꾸고, 나머지 카드는 각자의 시간축으로 다시 index 로 바꿔 적용한다.
+//        해외 거래소마다 수집 시작 시점이 달라 카드마다 봉 개수·첫 봉이 다르므로 index 를 그대로 옮기면 봉이 적은 카드는 데이터 밖(빈 화면)을 보게 된다.
 // 십자선: 마우스가 가리키는 시각을 전 카드에 알리고(읽기 줄), 다른 카드엔 그 시각의 김프 값 자리에 십자선을 그려 준다.
 // 적용받은 카드도 같은 이벤트를 다시 쏘므로 "같은 값이면 무시" 로 되울림을 끊는다.
 interface SyncMember {
@@ -96,6 +122,8 @@ interface SyncMember {
   host: () => ISeriesApi<'Candlestick' | 'Line'> | null
   at: (ts: number) => Candle1m | null
   onHover: (ts: number | null) => void
+  /** 이 카드의 시간축(봉 시각 합집합)과 봉 간격(초) — 봉이 없으면 null(범위 연동에서 제외). */
+  axis: () => { times: number[]; step: number } | null
 }
 export class ChartSync {
   private members = new Map<IChartApi, SyncMember>()
@@ -107,12 +135,19 @@ export class ChartSync {
 
   range(from: IChartApi, r: LogicalRange) {
     if (this.applying) return
+    const src = this.members.get(from)?.axis()
+    if (!src) return
+    const fromTs = indexToTs(src.times, src.step, r.from)
+    const toTs = indexToTs(src.times, src.step, r.to)
     this.applying = true
-    for (const [chart] of this.members) {
+    for (const [chart, m] of this.members) {
       if (chart === from) continue
+      const dst = m.axis()
+      if (!dst) continue
+      const lr = { from: tsToIndex(dst.times, dst.step, fromTs), to: tsToIndex(dst.times, dst.step, toTs) }
       const cur = chart.timeScale().getVisibleLogicalRange()
-      if (cur && Math.abs(cur.from - r.from) < 1e-6 && Math.abs(cur.to - r.to) < 1e-6) continue
-      chart.timeScale().setVisibleLogicalRange(r)
+      if (cur && Math.abs(cur.from - lr.from) < 1e-6 && Math.abs(cur.to - lr.to) < 1e-6) continue
+      chart.timeScale().setVisibleLogicalRange(lr)
     }
     this.applying = false
   }
@@ -226,6 +261,9 @@ export default function FxChartCard(p: CardProps) {
   const boxRef = useRef<HTMLDivElement>(null)
   const refs = useRef<Refs | null>(null)
   const seriesRef = useRef<PairSeries[]>([])
+  const timesRef = useRef<number[]>([]) // 카드의 시간축(모든 쌍의 봉 시각 합집합) — 범위 연동·초기 범위의 기준
+  const intervalRef = useRef(p.interval)
+  intervalRef.current = p.interval
   const viewKeyRef = useRef<string | null>(null) // 국내 구성·봉 종류 — 바뀌면 보이는 범위를 오른쪽 끝으로 리셋
   const firstTsRef = useRef<number | null>(null) // 직전 데이터의 첫 봉 — 과거가 앞에 붙었는지 판정
   const askedRef = useRef(false) // onNeedOlder 중복 호출 방지, 데이터가 바뀌면 풀림
@@ -289,6 +327,7 @@ export default function FxChartCard(p: CardProps) {
       },
       at: (ts) => (seriesRef.current.length ? findAt(axisOf(seriesRef.current).candles, ts) : null),
       onHover: setHoverTs,
+      axis: () => (timesRef.current.length ? { times: timesRef.current, step: INTERVAL_SEC[intervalRef.current] } : null),
     })
     return () => {
       p.sync.remove(chart)
@@ -311,6 +350,8 @@ export default function FxChartCard(p: CardProps) {
     if (!r || p.series.length === 0) return
     const S = p.series
     seriesRef.current = S
+    const times = axisTimes(S)
+    timesRef.current = times
     askedRef.current = false
     busyRef.current = true
     const keepRange = r.chart.timeScale().getVisibleRange() // setData 전에 시각 기준으로 잡아둔다
@@ -408,7 +449,7 @@ export default function FxChartCard(p: CardProps) {
     const ts0 = base[0]?.ts ?? null
     const prev = firstTsRef.current
     if (viewKeyRef.current !== viewKey || prev == null || ts0 == null || ts0 > prev) {
-      const n = base.length
+      const n = times.length // 축 쌍 하나가 아니라 합집합 — 라이브러리의 index 공간과 같은 개수
       const apply = () => {
         const cur = refs.current
         if (!cur || seriesRef.current !== S) return // 그새 데이터가 또 바뀌었으면 그쪽 effect 가 처리

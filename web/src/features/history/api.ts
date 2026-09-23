@@ -133,21 +133,23 @@ export function useCandles(q: CandlesQuery): CandlesState {
     const refreshLatest = round !== seenRound.current
     seenRound.current = round
     const ctl = new AbortController()
-    const timer = setTimeout(() => {
-      const now = Math.floor(Date.now() / 1000)
-      const { starts } = neededChunks(now, res, INTERVAL_SEC[interval], older)
-      const latest = starts[starts.length - 1]
-      const refs: ChunkRef[] = []
-      for (const dom of domsKey.split('+') as Dom[]) {
-        for (const fx of fxsKey.split('+')) {
-          for (const start of starts) {
-            const ref: ChunkRef = { dom, fx, base, dir, res, start }
-            if ((refreshLatest && start === latest) || !cache.current.has(chunkKey(ref))) refs.push(ref)
-          }
+    // 부를 청크는 지금 정하고 요청만 디바운스한다 — 로딩 표시를 타이머 뒤로 미루면 코인·봉 종류를 바꾼 직후
+    // 캐시가 비어 있는 동안 "기록 없음" 이 먼저 보인다
+    const now = Math.floor(Date.now() / 1000)
+    const { starts } = neededChunks(now, res, INTERVAL_SEC[interval], older)
+    const latest = starts[starts.length - 1]
+    const refs: ChunkRef[] = []
+    for (const dom of domsKey.split('+') as Dom[]) {
+      for (const fx of fxsKey.split('+')) {
+        for (const start of starts) {
+          const ref: ChunkRef = { dom, fx, base, dir, res, start }
+          if ((refreshLatest && start === latest) || !cache.current.has(chunkKey(ref))) refs.push(ref)
         }
       }
-      setLoading(refs.length > 0) // 직전 회차가 취소돼 켜진 채 남은 표시도 여기서 끈다
-      if (refs.length === 0) return
+    }
+    setLoading(refs.length > 0) // 직전 회차가 취소돼 켜진 채 남은 표시도 여기서 끈다
+    if (refs.length === 0) return
+    const timer = setTimeout(() => {
       Promise.all(refs.map((ref) => fetchCandles(ref, ctl.signal).then((body) => { cache.current.set(chunkKey(ref), body.candles) })))
         .then(() => setErrorStatus(null))
         .catch((err: unknown) => {
