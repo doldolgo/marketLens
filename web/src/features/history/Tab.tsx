@@ -1,7 +1,7 @@
 // 기록/통계 탭 — 전 코인 김프/역프 사건 표 + 선택 심볼 요약·타임라인·사건 로그 (스펙 013 §3.5).
 // 데이터는 /history/events 하나. 방향 서브탭·기간·거래소가 쿼리이고, 심볼은 클라이언트에서 거른다.
 // 참조 디자인(docs/design/reference/tabs/HistoryTab.tsx)의 김프/역프 열 분리 대신 서브탭 — 한 화면은 한 방향만.
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { exName, fmtAgo, fmtPct, fmtTime, pctColor } from '../../shared/format'
 import { Empty, Pill, Seg, card, hint, kicker, searchInput, type SegOpt } from '../../shared/ui'
 import { alias, list, oneOf, useUrlState, type Codec } from '../../shared/urlState'
@@ -11,7 +11,16 @@ import FxChartCard, { ChartSync, ChartToolbar, type PairSeries } from './Chart'
 import { mockCandles, mockEvents } from './mock'
 import { INTERVALS, INTERVAL_SEC, rollup, type Interval } from './rollup'
 import { aggregate, durationOf, sortStats, summarize, type SortKey } from './stats'
+import type { SpreadRow } from '../../shared/types'
 import type { Dir, Dom, PremiumEvent } from './types'
+
+/** 빈 카드에 띄울 안내 — 이 코인이 다른 해외 거래소에만 있으면 그 이름을 알려 준다. 모르면(피드 없음) null → 기본 문구 */
+function emptyHintFor(sym: string, fx: string, availableFxs: string[]): string | null {
+  if (availableFxs.length === 0) return null
+  if (availableFxs.includes(fx)) return null
+  const names = availableFxs.map((id) => FX_CHOICES.find((f) => f.id === id)?.label ?? id).join('·')
+  return `${sym} 은 ${names} 에만 있습니다`
+}
 
 type Per = '7d' | '30d' | '90d'
 const PER_LABEL: Record<Per, string> = { '7d': '1주', '30d': '1달', '90d': '3달' }
@@ -62,8 +71,10 @@ function StatusPill({ since, nowSec }: { since: number | null; nowSec: number })
   return <Pill tone="accent">진행 중 · {fmtDur(nowSec - since)}</Pill>
 }
 
-export default function HistoryTab({ now, selSym, onSelect }: {
+export default function HistoryTab({ now, selSym, onSelect, spreads }: {
   now: number; selSym: string; onSelect: (sym: string) => void
+  /** 스프레드 피드의 현재 행 — 선택 코인이 어느 해외 거래소에 있는지 알아내는 데만 쓴다 (014 §3.7). */
+  spreads: SpreadRow[]
 }) {
   // 방향·기간·거래소·정렬·차트 선택은 URL 쿼리(h.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색 입력은 Enter 전까지 임시라 제외
   const [dir, setDir] = useUrlState<Dir>('h.dir', 'kimp', oneOf(['kimp', 'reverse']))
@@ -77,6 +88,21 @@ export default function HistoryTab({ now, selSym, onSelect }: {
   // 빗썸에만 있는 코인(HEMI 등)이 기본 선택 업비트 때문에 빈 화면이 되지 않게. 툴바 체크박스는 그 뒤 더 좁힐 때만
   const [chartDoms, setChartDoms] = useUrlState<Dom[]>('h.doms', DOMS_ORDER, list(oneOf(DOMS_ORDER)))
   const [chartFxs, setChartFxs] = useUrlState<string[]>('h.fx', ['binance'], list(oneOf(FX_CHOICES.map((f) => f.id))))
+  // 선택 코인이 있는 해외 거래소(피드 기준, FX_CHOICES 순서). 피드가 아직 없으면 빈 배열 = 모름.
+  // 피드 행의 fx 는 표시명(exName, 'Bitget')이라 id 도 표시명으로 바꿔 비교한다
+  const availableFxs = useMemo(() => {
+    const has = new Set(spreads.filter((r) => r.sym === selSym).map((r) => r.fx))
+    return REAL_FXS.filter((id) => has.has(exName(id)))
+  }, [spreads, selSym])
+  const availableKey = availableFxs.join('+')
+  // 켜진 해외 카드에 이 코인이 하나도 없으면(CUDIS 는 Bitget 에만) 코인이 있는 거래소로 카드를 바꾼다 — 기본 카드가 Binance 라
+  // 다른 곳에만 상장된 코인은 빈 차트만 보였다. 사용자가 직접 고른 조합은 코인이 바뀌기 전까지 그대로 둔다(deps 에 chartFxs 없음)
+  useEffect(() => {
+    if (availableFxs.length === 0) return
+    if (chartFxs.some((id) => availableFxs.includes(id))) return
+    setChartFxs(availableFxs)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selSym, availableKey])
   // 필터 변경 때만 차트 국내 선택을 따라가게 — effect 로 하면 마운트 때 URL 에서 복원한 chartDoms 를 덮어쓴다
   const setDom = (d: Dom | null) => { setDom_(d); setChartDoms(d ? [d] : DOMS_ORDER) }
   // 카드 간 시간축·십자선 연동 — 탭이 사는 동안 하나
@@ -180,7 +206,8 @@ export default function HistoryTab({ now, selSym, onSelect }: {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
           {cards.filter((c) => c.series.length > 0).map((c) => (
             <FxChartCard key={c.fx} fx={c.fx} dir={dir} interval={interval}
-              series={c.series} events={cardEvents[c.fx] ?? NO_EVENTS} onNeedOlder={needOlder} loading={candlesLoading} sync={sync} />
+              series={c.series} events={cardEvents[c.fx] ?? NO_EVENTS} onNeedOlder={needOlder} loading={candlesLoading} sync={sync}
+              emptyHint={emptyHintFor(selSym, c.fx, availableFxs)} />
           ))}
         </div>
 
