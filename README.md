@@ -19,11 +19,14 @@ cd web && npm ci && npm run dev              # :5173, /api → :8000 프록시
 ## 통합 기동 (Docker)
 
 ```bash
-docker compose --env-file .env --env-file server/.env up -d --build
+# 로컬 — 다섯 컨테이너를 한 망에 (COMPOSE_PROFILES 가 없으면 아무것도 안 뜬다)
+COMPOSE_PROFILES=collect,data,serve WEB_PORT=8080 docker compose --env-file server/.env up -d --build
+# EC2 — 박스마다 자기 profile 하나만 (collect=server / data=redis·influxdb / serve=api·web)
+docker compose --profile <collect|data|serve> --env-file .env --env-file server/.env up -d --build
 ```
 
-server·api·web·influxdb·redis 다섯 컨테이너가 뜨고(api 는 `/history/*` 조회 전용 — 수집과 프로세스가 다르다), 호스트에는 web 하나만 열린다(`WEB_PORT`, 기본 80 — 기존 스택과 공존하는 EC2 는 루트 `.env` 의 `WEB_PORT=8080`).
+server·api·web·influxdb·redis 다섯 컨테이너(api 는 `/history/*` 조회 전용 — 수집과 프로세스가 다르다)가 EC2 3대에 나뉘어 뜬다. 박스 간 주소는 루트 `.env` 의 `DATA_HOST`·`COLLECT_HOST`(사설 IP) — 안 주면 서비스 이름이라 로컬은 한 망에서 그대로 돈다. 호스트 포트: web `WEB_PORT`(기본 80), 그리고 다른 박스가 붙는 server 8000·redis 6379·influxdb 8086(보안그룹이 막는다).
 
 ## 배포
 
-`main` 머지 = 배포. PR 마다 CI(server·web)가 돌고, 머지되면 GitHub Actions 가 EC2 에 SSH 로 `docker compose up -d --build` 를 실행한다(`.github/workflows/`).
+`main` 머지 = 배포. PR 마다 CI(server·web)가 돌고, 머지되면 GitHub Actions 가 EC2 3대에 data → collect → serve 순서로 SSH 해 각 박스의 profile 로 `docker compose up -d --build` 를 실행한다(`.github/workflows/`, 스펙 021).

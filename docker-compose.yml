@@ -1,8 +1,15 @@
-# 배포용 compose — server·api·web·influxdb·redis 5컨테이너 (스펙 007·009·016). dev 는 docker-compose.dev.yml(Influx+Redis).
-# 기동(EC2): docker compose --env-file .env --env-file server/.env up -d --build
-#   WEB_PORT 는 루트 .env 에서, INFLUX_TOKEN 은 server/.env 에서 치환된다.
+# 배포용 compose — server·api·web·influxdb·redis 5컨테이너 (스펙 007·009·016·021). dev 는 docker-compose.dev.yml(Influx+Redis).
+# 021 — 박스(EC2) 3대에 나눠 뜬다. 서비스마다 profile 이 하나씩이라 profile 없이 up 하면 아무것도 안 뜬다
+#   (실수로 5개가 한 박스에 뜨는 사고 방지). 박스별 기동:
+#   docker compose --profile <collect|data|serve> --env-file .env --env-file server/.env up -d --build
+#   로컬 통합 기동(예전처럼 5개가 한 망에): COMPOSE_PROFILES=collect,data,serve 로 위 명령(--profile 생략).
+#   WEB_PORT·DATA_HOST·COLLECT_HOST 는 루트 .env 에서, INFLUX_TOKEN 은 server/.env 에서 치환된다.
 #   --env-file 을 명시하면 기본 ./.env 자동 로드가 꺼지므로 둘 다 적는다.
-# 호스트에 여는 포트는 web 하나(${WEB_PORT:-80}) — server·api·influx·redis 는 compose 내부 네트워크만.
+# 박스 간 주소는 루트 .env 의 DATA_HOST(=data 박스 사설 IP)·COLLECT_HOST(=collect 박스 사설 IP).
+#   기본값이 서비스 이름이라 두 키를 안 주면 007 의 한 박스 동작 그대로다.
+# depends_on 은 없다 — 의존 대상이 다른 박스에 있다. 저장소가 늦게 떠도 server 는 재시도한다(3.5 엣지).
+# 호스트에 여는 포트: web ${WEB_PORT:-80} / server 8000 / redis 6379 / influxdb 8086 — 뒤 셋은 다른 박스에서
+#   붙기 위해 열고 보안그룹이 막는다(8000 은 serve 에서만, 6379·8086 은 collect·serve 에서만). api 는 비공개.
 
 # 프로젝트 이름 고정 — 같은 폴더의 dev compose(프로젝트=폴더명)와 influxdb 서비스명이 겹쳐
 # 서로의 컨테이너를 재생성하는 사고를 막고, EC2 폴더명(~/marketlens)과도 일치시킨다.
@@ -13,6 +20,8 @@ services:
     build: ./server
     container_name: marketlens-server
     restart: unless-stopped
+    # 021 — collect 박스(c7g.medium) 전용. 수집기가 코어 1개를 온전히 쓴다.
+    profiles: [collect]
     # 컨테이너 로그 상한 — 회전이 없으면 json 로그가 디스크를 채우고, 디스크가 차면
     # Influx 가 쓰기를 거부한다(그 상태는 공간을 되찾아도 재시작 전까지 풀리지 않는다).
     logging:
@@ -24,13 +33,13 @@ services:
     env_file:
       - ./server/.env
     environment:
-      # 컨테이너 안에서 Influx 는 서비스명으로 접근 — server/.env 의 localhost 값을 덮는다
-      INFLUX_URL: http://influxdb:8086
-      # 틱 버퍼 Redis(009)도 서비스명으로 — server/.env 의 localhost 값을 덮는다
-      REDIS_URL: redis://redis:6379/0
-    depends_on:
-      - influxdb
-      - redis
+      # 컨테이너 안에서 Influx 는 data 박스 사설 IP(DATA_HOST) 로 — 없으면 서비스명(한 박스). server/.env 의 localhost 값을 덮는다
+      INFLUX_URL: http://${DATA_HOST:-influxdb}:8086
+      # 틱 버퍼 Redis(009)도 같은 규칙 — server/.env 의 localhost 값을 덮는다
+      REDIS_URL: redis://${DATA_HOST:-redis}:6379/0
+    ports:
+      # serve 박스의 nginx 가 사설 IP 로 붙는다 — 보안그룹이 serve 그룹 외 인바운드를 막는다 (021 §3.1)
+      - "8000:8000"
 
   # Influx 조회 전용 프로세스(스펙 016) — server 와 같은 이미지, ROLE 만 다르다. 무거운 /history 조회의
   # CPU·메모리가 수집 프로세스의 이벤트 루프·RSS 를 차지하지 않게 갈랐다. 거래소·Redis·S3 에 붙지 않는다.
@@ -38,6 +47,8 @@ services:
     build: ./server
     container_name: marketlens-api
     restart: unless-stopped
+    # 021 — serve 박스(t4g.micro). web 과 같은 박스라 nginx 가 서비스명으로 푼다.
+    profiles: [serve]
     logging:
       driver: json-file
       options:
@@ -47,17 +58,16 @@ services:
       - ./server/.env
     environment:
       ROLE: api
-      INFLUX_URL: http://influxdb:8086
+      INFLUX_URL: http://${DATA_HOST:-influxdb}:8086
       # 017 — 스프레드 표 구독(pub/sub)용. 안 덮으면 env_file 의 로컬 값(localhost)을 컨테이너 안에서 쓴다
-      REDIS_URL: redis://redis:6379/0
-    depends_on:
-      - influxdb
-      - redis
+      REDIS_URL: redis://${DATA_HOST:-redis}:6379/0
 
   web:
     build: ./web
     container_name: marketlens-web
     restart: unless-stopped
+    # 021 — serve 박스. api 와 같은 박스.
+    profiles: [serve]
     # 컨테이너 로그 상한 — 회전이 없으면 json 로그가 디스크를 채우고, 디스크가 차면
     # Influx 가 쓰기를 거부한다(그 상태는 공간을 되찾아도 재시작 전까지 풀리지 않는다).
     logging:
@@ -68,15 +78,19 @@ services:
     ports:
       # 호스트 포트는 루트 .env 의 WEB_PORT (EC2 는 80)
       - "${WEB_PORT:-80}:80"
-    # nginx 가 두 upstream(server·api)을 기동 시 이름으로 푼다 — 둘 다 먼저 떠 있어야 한다
-    depends_on:
-      - server
-      - api
+    environment:
+      # 021 — nginx 의 `location /api/` 업스트림. collect 박스 사설 IP, 없으면 서비스명(한 박스).
+      # nginx 이미지의 entrypoint 가 /etc/nginx/templates/*.template 을 envsubst 해 conf.d 에 쓴다(web/Dockerfile).
+      COLLECT_HOST: ${COLLECT_HOST:-server}
+      # envsubst 대상을 이 한 변수로 제한 — nginx 자체 변수($http_host·$http_upgrade…)가 치환되지 않게
+      NGINX_ENVSUBST_FILTER: ^COLLECT_HOST$$
 
   influxdb:
     image: influxdb:2.7
     container_name: marketlens-influxdb
     restart: unless-stopped
+    # 021 — data 박스(t4g.small, 2GB + 스왑 1GB). redis 와 같은 박스.
+    profiles: [data]
     # 컨테이너 로그 상한 — 회전이 없으면 json 로그가 디스크를 채우고, 디스크가 차면
     # Influx 가 쓰기를 거부한다(그 상태는 공간을 되찾아도 재시작 전까지 풀리지 않는다).
     logging:
@@ -95,6 +109,15 @@ services:
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN}
       # retention 무제한 — dw_fail 의 "최근 24시간" 은 쿼리 range 로 처리한다 (db.md)
       DOCKER_INFLUXDB_INIT_RETENTION: "0"
+      # 021 — 쿼리 메모리 상한. 2026-09-07 기간 없는 streaks/bulk 가 Influx 를 2.4GB 까지 키워 OOM 4회.
+      # 쿼리 1개 256MB × 동시 3개 = 전체 768MB. 전체 + Influx 상주 0.5GB + Redis 30MB ≈ 1.3GB < 1.5GB(§3.1).
+      # 넘는 쿼리는 Influx 가 거부하고(api 는 503 으로 전파) 프로세스는 산다. max 는 concurrency × memory 와 같아야 한다.
+      INFLUXD_QUERY_MEMORY_BYTES: "268435456"
+      INFLUXD_QUERY_MAX_MEMORY_BYTES: "805306368"
+      INFLUXD_QUERY_CONCURRENCY: "3"
+    ports:
+      # collect(server)·serve(api) 박스가 사설 IP 로 붙는다 — 보안그룹이 두 그룹 외 인바운드를 막는다 (021 §3.1)
+      - "8086:8086"
     volumes:
       - influxdb-data:/var/lib/influxdb2
 
@@ -102,6 +125,8 @@ services:
     image: redis:7-alpine
     container_name: marketlens-redis
     restart: unless-stopped
+    # 021 — data 박스. influxdb 와 같은 박스.
+    profiles: [data]
     # 컨테이너 로그 상한 — 회전이 없으면 json 로그가 디스크를 채우고, 디스크가 차면
     # Influx 가 쓰기를 거부한다(그 상태는 공간을 되찾아도 재시작 전까지 풀리지 않는다).
     logging:
@@ -109,8 +134,11 @@ services:
       options:
         max-size: "50m"
         max-file: "3"
-    # AOF — 재기동해도 Influx 로 아직 안 옮긴 틱이 남는다 (009 §3.4). 호스트 비노출.
+    # AOF — 재기동해도 Influx 로 아직 안 옮긴 틱이 남는다 (009 §3.4).
     command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      # collect(server)·serve(api) 박스가 사설 IP 로 붙는다 — 인증 없음, 보안그룹만 (021 §3.1·알려진 빚)
+      - "6379:6379"
     volumes:
       - redis-data:/data
 

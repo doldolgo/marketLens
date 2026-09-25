@@ -36,7 +36,7 @@ Influx 를 읽는 무거운 조회(`/history/premium`·`/history/streaks`·`/his
 | `server` | `collector` |
 | `api` | `api` |
 
-- `api` 는 `server` 와 **같은 빌드 컨텍스트·같은 이미지**다. `ROLE=api` 만 `environment` 로 준다. `server/.env` 를 같은 `env_file` 로 주입하고 `INFLUX_URL` 을 같은 값으로 덮는다. `REDIS_URL` 도 같은 값으로 덮는다 — 017 의 구독용(안 덮으면 env_file 의 로컬 값을 컨테이너 안에서 쓴다). 컨테이너명 `marketlens-api`, 로그 상한 `json-file` 50MB × 3, `restart: unless-stopped`, 호스트 포트 없음, `depends_on: influxdb·redis`.
+- `api` 는 `server` 와 **같은 빌드 컨텍스트·같은 이미지**다. `ROLE=api` 만 `environment` 로 준다. `server/.env` 를 같은 `env_file` 로 주입하고 `INFLUX_URL`·`REDIS_URL` 을 server 와 같은 `DATA_HOST` 치환식으로 덮는다(021 — 둘 다 data 박스를 본다, 기본값은 서비스 이름). `REDIS_URL` 은 017 의 구독용(안 덮으면 env_file 의 로컬 값을 컨테이너 안에서 쓴다). 컨테이너명 `marketlens-api`, 로그 상한 `json-file` 50MB × 3, `restart: unless-stopped`, 호스트 포트 없음, `depends_on` 없음(021 — 저장소는 다른 박스).
 - `server` 에는 `ROLE` 을 주지 않는다(기본값). 주면 `collector` 여야 한다.
 - `web` 은 `server`·`api` 둘 다에 `depends_on`.
 - 호스트에 여는 포트는 여전히 web 하나.
@@ -67,7 +67,7 @@ deploy 워크플로(007)는 안 바뀐다. `up -d --build` 가 `api` 도 같이 
 - `api` 에서 Influx 토큰이 없으면 `/history/*` 503, `/health` 는 200 — 005 와 같다.
 - `api` 프로세스에 `S3_BUCKET`·거래소 키가 있어도 무시한다(연결 시도 자체를 안 한다). 로그에 "S3 버킷 접근 실패"·거래소 줄이 **찍히지 않아야** 한다 — 찍히면 역할 분기가 샌 것이다. Redis 줄은 017 구독이 남길 수 있다.
 - `collector` 가 재시작해도 `api` 는 영향 없고, `api` 가 재시작해도 수집은 한 틱도 안 빠진다.
-- 두 컨테이너의 `/health` 는 구분되지 않는다(둘 다 `{"status":"ok","version":…}` — 001 의 본문 그대로). nginx 의 `/api/health` 는 `server` 로 간다. `api` 의 헬스는 compose 안에서 `docker compose exec api` 로만 본다 — 외부 헬스체크는 후속(인프라 스펙).
+- 두 컨테이너의 `/health` 는 구분되지 않는다(둘 다 `{"status":"ok","version":…}` — 001 의 본문 그대로). nginx 의 `/api/health` 는 `server` 로 간다. `api` 의 헬스는 serve 박스 안에서 `docker compose --profile serve exec api` 로만 본다 — 외부 헬스체크는 후속(인프라 스펙).
 
 ## 4. 검증
 - `ROLE=api` 로 만든 앱은 `/health` 200, `/history/premium` 이 Influx 계약대로 답하고(토큰 없으면 503), `/spreads`·`/refresh`·`/health/collect`·`/history/events`·`/orderbook/upbit` 이 404

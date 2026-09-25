@@ -1,5 +1,9 @@
-# deploy — main 푸시(=PR 머지)마다 EC2 에 SSH 로 배포한다 (스펙 007 §3).
-# Secrets: EC2_HOST·EC2_USER·EC2_SSH_KEY (기존 be·fe 레포와 같은 값).
+# deploy — main 푸시(=PR 머지)마다 EC2 3대에 SSH 로 배포한다 (스펙 007 §3 · 021 §3.3).
+# 박스 순서 data → collect → serve: 저장소가 먼저 떠야 수집이 붙고, 수집이 떠야 nginx 가 업스트림을 푼다.
+# job 3개를 needs 로 이었다 — 한 박스가 실패하면 뒤 박스는 돌지 않고, Actions 화면에서 어느 박스가 죽었는지 바로 보인다.
+# Secrets: EC2_HOST_DATA·EC2_HOST_COLLECT·EC2_HOST_SERVE(박스별 공인 IP) + 공용 EC2_USER·EC2_SSH_KEY. 옛 EC2_HOST 는 안 쓴다.
+# 각 박스 스크립트는 같은 뼈대(가드 → 미러 동기화 → 자기 profile 만 up --build → prune)이고 가드 키만 다르다.
+# 가드는 값을 출력하지 않는다: 존재·비어있지 않음만 `grep -q '^KEY=.'` 로 본다.
 name: Deploy
 
 on:
@@ -7,19 +11,45 @@ on:
     branches: [main]
 
 jobs:
-  deploy:
+  data:
     runs-on: ubuntu-latest
     steps:
       - uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.EC2_HOST }}
+          host: ${{ secrets.EC2_HOST_DATA }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
             cd ~/marketlens
-            # 가드 — 토큰 없이 뜨면 저장 루프가 꺼진 채 조용히 데이터를 잃는다.
-            # 값은 출력하지 않는다: 존재·비어있지 않음만 확인.
+            # 가드 — Influx 첫 기동 admin 토큰이 server/.env 의 INFLUX_TOKEN 이다. 비면 setup 이 깨진다.
+            if [ ! -f server/.env ]; then
+              echo "server/.env 가 없다 — 배포 중단"; exit 1
+            fi
+            if ! grep -q '^INFLUX_TOKEN=.' server/.env; then
+              echo "INFLUX_TOKEN 이 비어 있다 — 배포 중단"; exit 1
+            fi
+            # pull 대신 미러 동기화 — 서버 쪽에 어떤 로컬 커밋·갈래가 있어도 main 을 그대로 따른다
+            git fetch origin main
+            git reset --hard origin/main
+            # data 박스는 redis·influxdb 만. 이미지는 공식 이미지라 --build 는 아무것도 안 하지만 뼈대를 같게 둔다.
+            docker compose --profile data --env-file .env --env-file server/.env up -d --build
+            docker image prune -f
+
+  collect:
+    needs: data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST_COLLECT }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/marketlens
+            # 가드 — 토큰 없이 뜨면 저장 루프가, 버킷 없이 뜨면 원문 아카이브(010)가 꺼진 채 조용히 데이터를 잃는다.
+            # DATA_HOST 가 비면 server 가 자기 박스의 (없는) influxdb·redis 서비스명으로 붙어 조용히 인계·저장을 못 한다.
             if [ ! -f server/.env ]; then
               echo "server/.env 가 없다 — 배포 중단"; exit 1
             fi
@@ -29,11 +59,42 @@ jobs:
             if ! grep -q '^S3_BUCKET=.' server/.env; then
               echo "S3_BUCKET 이 비어 있다 — 배포 중단"; exit 1
             fi
-            # pull 대신 미러 동기화 — 서버 쪽에 어떤 로컬 커밋·갈래가 있어도 main 을 그대로 따른다
+            if ! grep -q '^DATA_HOST=.' .env; then
+              echo "DATA_HOST 가 비어 있다 — 배포 중단"; exit 1
+            fi
             git fetch origin main
             git reset --hard origin/main
-            # WEB_PORT 는 루트 .env, INFLUX_TOKEN 치환은 server/.env 에서.
-            # --env-file 명시 시 기본 ./.env 자동 로드가 꺼지므로 둘 다 적는다.
-            docker compose --env-file .env --env-file server/.env up -d --build
+            # collect 는 1 vCPU 라 --build 동안 수집이 느려진다(표 1~2분 지연) — 감수 (021 §3.3)
+            docker compose --profile collect --env-file .env --env-file server/.env up -d --build
             # 오래된 레이어가 EC2 디스크를 채우지 않게
+            docker image prune -f
+
+  serve:
+    needs: collect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST_SERVE }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/marketlens
+            # 가드 — api 는 INFLUX_TOKEN 으로 data 의 Influx 를 읽고, nginx 는 COLLECT_HOST 로 수집 박스를 푼다.
+            if [ ! -f server/.env ]; then
+              echo "server/.env 가 없다 — 배포 중단"; exit 1
+            fi
+            if ! grep -q '^INFLUX_TOKEN=.' server/.env; then
+              echo "INFLUX_TOKEN 이 비어 있다 — 배포 중단"; exit 1
+            fi
+            if ! grep -q '^DATA_HOST=.' .env; then
+              echo "DATA_HOST 가 비어 있다 — 배포 중단"; exit 1
+            fi
+            if ! grep -q '^COLLECT_HOST=.' .env; then
+              echo "COLLECT_HOST 가 비어 있다 — 배포 중단"; exit 1
+            fi
+            git fetch origin main
+            git reset --hard origin/main
+            docker compose --profile serve --env-file .env --env-file server/.env up -d --build
             docker image prune -f

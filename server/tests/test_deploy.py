@@ -1,4 +1,4 @@
-"""배포 설정 계약 — compose·워크플로·Dockerfile·nginx 를 파일로 읽어 단언한다 (스펙 007 §3·§4).
+"""배포 설정 계약 — compose·워크플로·Dockerfile·nginx 를 파일로 읽어 단언한다 (스펙 007 §3·§4, 021 §4).
 
 Docker 가 없는 CI 에서 도는 유일한 회귀 장치다. 컨테이너를 실제로 띄우는 검증은 §5 의 명령으로
 Docker 가 있는 로컬·EC2 에서 사람이 돈다. 여기서는 설정 파일이 §4 의 조건을 말하는지만 본다.
@@ -29,7 +29,16 @@ def _on(workflow: dict) -> dict:
     return workflow.get("on") or workflow[True]
 
 
-# --- compose: 컨테이너 5개(016), 호스트 노출은 web 하나 -------------------------
+# --- compose: 컨테이너 5개(016), 박스별 profile 3개(021) -------------------------
+
+# 021 §3.2 — 서비스 → profile. 박스마다 자기 profile 만 띄운다.
+PROFILE_OF = {
+    "server": "collect",
+    "redis": "data",
+    "influxdb": "data",
+    "api": "serve",
+    "web": "serve",
+}
 
 
 def test_compose_declares_five_containers_with_fixed_names() -> None:
@@ -56,35 +65,70 @@ def test_compose_caps_container_logs_on_every_service() -> None:
         assert logging["options"] == {"max-size": "50m", "max-file": "3"}
 
 
-def test_compose_exposes_only_web_on_host_via_web_port() -> None:
+def test_compose_gives_every_service_exactly_one_box_profile() -> None:
+    """021 §3.2 — server=collect / redis·influxdb=data / api·web=serve. profile 없이 up 하면 아무것도 안 뜬다."""
+    services = _yaml("docker-compose.yml")["services"]
+    for name, svc in services.items():
+        assert svc.get("profiles") == [PROFILE_OF[name]], name
+
+
+def test_compose_has_no_depends_on_anywhere() -> None:
+    # 의존 대상이 다른 박스에 있다 — 같은 compose 안에서 기다릴 수 없다 (021 §3.2)
+    for name, svc in _yaml("docker-compose.yml")["services"].items():
+        assert "depends_on" not in svc, f"{name} 에 depends_on 이 있다"
+
+
+def test_compose_host_ports_are_web_port_and_cross_box_ports_only() -> None:
+    """호스트 공개: web ${WEB_PORT:-80}, server 8000, redis 6379, influxdb 8086. api 는 없다 (021 §3.2)."""
     services = _yaml("docker-compose.yml")["services"]
     assert services["web"]["ports"] == ["${WEB_PORT:-80}:80"]
-    for name in ("server", "api", "influxdb", "redis"):
-        assert "ports" not in services[name], f"{name} 는 호스트에 열리면 안 된다"
+    assert services["server"]["ports"] == ["8000:8000"]
+    assert services["redis"]["ports"] == ["6379:6379"]
+    assert services["influxdb"]["ports"] == ["8086:8086"]
+    assert "ports" not in services["api"], "api 는 같은 박스의 nginx 만 부른다"
 
 
-def test_compose_injects_env_file_and_overrides_service_urls() -> None:
+def test_compose_injects_env_file_and_overrides_service_urls_via_data_host() -> None:
+    """server 의 저장소 주소는 DATA_HOST 치환식, 기본값은 서비스 이름(한 박스 기동 그대로) (021 §3.2)."""
     server = _yaml("docker-compose.yml")["services"]["server"]
     assert server["env_file"] == ["./server/.env"]
-    assert server["environment"]["INFLUX_URL"] == "http://influxdb:8086"
-    assert server["environment"]["REDIS_URL"] == "redis://redis:6379/0"
-    assert set(server["depends_on"]) == {"influxdb", "redis"}
+    assert server["environment"]["INFLUX_URL"] == "http://${DATA_HOST:-influxdb}:8086"
+    assert server["environment"]["REDIS_URL"] == "redis://${DATA_HOST:-redis}:6379/0"
     # server 에는 ROLE 을 주지 않는다 — 기본값 collector (016 §3.2)
     assert "ROLE" not in server.get("environment", {})
 
 
-def test_compose_api_is_same_image_with_role_api_and_redis_for_subscribe() -> None:
-    """api 는 server 와 같은 빌드 컨텍스트, ROLE=api 만 다르다. Redis 는 017 구독용으로 서비스명을 덮는다 (016 §3.2·017 §3.5)."""
+def test_compose_api_is_same_image_with_role_api_and_same_data_host_urls() -> None:
+    """api 는 server 와 같은 빌드 컨텍스트, ROLE=api 만 다르다. 저장소 주소도 같은 DATA_HOST 치환식 (016 §3.2·017 §3.5·021 §3.2)."""
     services = _yaml("docker-compose.yml")["services"]
-    server, api, web = services["server"], services["api"], services["web"]
+    server, api = services["server"], services["api"]
     assert api["build"] == server["build"] == "./server"
     assert api["env_file"] == ["./server/.env"]
     assert api["environment"]["ROLE"] == "api"
     assert api["environment"]["INFLUX_URL"] == server["environment"]["INFLUX_URL"]
     assert api["environment"]["REDIS_URL"] == server["environment"]["REDIS_URL"]
-    assert set(api["depends_on"]) == {"influxdb", "redis"}
-    # nginx 가 기동 시 두 upstream 이름을 푼다 — web 은 둘 다 기다린다
-    assert set(web["depends_on"]) == {"server", "api"}
+
+
+def test_compose_web_receives_collect_host_and_limits_envsubst_to_it() -> None:
+    """nginx 의 수집 업스트림은 COLLECT_HOST(기본 server). envsubst 는 그 한 변수만 — $http_* 가 안 깨지게 (021 §3.2)."""
+    web = _yaml("docker-compose.yml")["services"]["web"]
+    assert web["environment"]["COLLECT_HOST"] == "${COLLECT_HOST:-server}"
+    # compose 는 $$ 를 $ 하나로 넘긴다 — 컨테이너 안 값은 ^COLLECT_HOST$
+    assert web["environment"]["NGINX_ENVSUBST_FILTER"] == "^COLLECT_HOST$$"
+
+
+def test_compose_influx_caps_query_memory_within_data_box() -> None:
+    """data 박스(2GB+스왑 1GB)에서 조회 폭주가 Influx 를 죽이지 않게 — 1개 256MB × 동시 3 = 전체 768MB (021 §3.1)."""
+    env = _yaml("docker-compose.yml")["services"]["influxdb"]["environment"]
+    per_query = int(env["INFLUXD_QUERY_MEMORY_BYTES"])
+    total = int(env["INFLUXD_QUERY_MAX_MEMORY_BYTES"])
+    concurrency = int(env["INFLUXD_QUERY_CONCURRENCY"])
+    assert per_query == 256 * 1024 * 1024
+    assert concurrency == 3
+    # Influx 는 max = concurrency × memory 를 요구한다
+    assert total == per_query * concurrency
+    # 전체 상한 + Redis 상주 30MB + Influx 상주 0.5GB 가 1.5GB 를 넘지 않는다
+    assert total + 30 * 1024 * 1024 + 512 * 1024 * 1024 <= 1.5 * 1024 * 1024 * 1024
 
 
 def test_compose_storage_containers_persist_and_match_dev_setup() -> None:
@@ -128,7 +172,10 @@ def test_web_image_is_multistage_node22_to_nginx() -> None:
     assert "FROM node:22-alpine AS build" in dockerfile
     assert "RUN npm ci" in dockerfile and "RUN npm run build" in dockerfile
     assert "FROM nginx:" in dockerfile
-    assert "COPY nginx.conf /etc/nginx/conf.d/default.conf" in dockerfile
+    # 021 — templates 에 둬야 이미지 entrypoint 가 COLLECT_HOST 를 채워 conf.d 에 써 준다
+    copies = [ln for ln in dockerfile.splitlines() if ln.startswith("COPY")]
+    assert "COPY nginx.conf /etc/nginx/templates/default.conf.template" in copies
+    assert not any("/etc/nginx/conf.d/" in ln for ln in copies)
     assert "COPY --from=build /app/dist /usr/share/nginx/html" in dockerfile
     assert ".env*" in _text("web/.dockerignore").splitlines()
 
@@ -140,7 +187,9 @@ def test_nginx_strips_api_prefix_and_falls_back_to_index() -> None:
     conf = _text("web/nginx.conf")
     assert "location /api/ {" in conf
     # proxy_pass 끝의 / 가 접두 제거를 만든다: /api/health → /health
-    assert "proxy_pass http://server:8000/;" in conf
+    # 021 — 업스트림 호스트는 COLLECT_HOST 치환(수집은 다른 박스). 고정 서비스명은 남지 않는다.
+    assert "proxy_pass http://${COLLECT_HOST}:8000/;" in conf
+    assert "http://server:8000" not in conf
     assert "location = /api { return 404; }" in conf
     # 022 — SPA fallback 은 /app/ 아래에서만, / 는 정적 랜딩
     assert "try_files $uri $uri/ /app/index.html;" in conf
@@ -233,6 +282,23 @@ def test_nginx_upgrades_api_ws_to_api_without_touching_read_timeout() -> None:
     assert not re.search(pattern, "/api/ws/spreads")
 
 
+def test_nginx_template_substitutes_only_collect_host() -> None:
+    """021 §3.2 — ${…} 꼴 치환 변수는 COLLECT_HOST 하나뿐이고 api 로 가는 세 분기는 서비스명 그대로다.
+    nginx 자체 변수는 $name 꼴이라 필터(^COLLECT_HOST$)에 걸리지 않는다."""
+    conf = _text("web/nginx.conf")
+    assert set(re.findall(r"\$\{(\w+)\}", conf)) == {"COLLECT_HOST"}
+    assert conf.count("proxy_pass http://api:8000;") == 2
+    assert "proxy_pass http://api:8000/ws/;" in conf
+    for var in (
+        "$http_host",
+        "$remote_addr",
+        "$proxy_add_x_forwarded_for",
+        "$scheme",
+        "$http_upgrade",
+    ):
+        assert var in conf, var
+
+
 def test_nginx_cache_rules_for_index_and_hashed_assets() -> None:
     conf = _text("web/nginx.conf")
     index_block = conf.split("location = /index.html", 1)[1].split("}", 1)[0]
@@ -312,47 +378,94 @@ def test_ci_web_job_installs_lints_and_builds() -> None:
     assert runs == ["npm ci", "npm run lint", "npm run build"]
 
 
-# --- deploy: main 푸시 → SSH → 가드 → 미러 동기화 → up --build → prune -----------
+# --- deploy: main 푸시 → 박스 3대(data→collect→serve) 각각 SSH → 가드 → 미러 동기화 → 자기 profile up --build → prune
 
 
-def _deploy_script() -> list[str]:
+BOXES = ("data", "collect", "serve")
+
+# 021 §3.3 — 박스별 가드 키. server/.env 의 INFLUX_TOKEN 은 세 박스 공통.
+GUARDS = {
+    "data": ["grep -q '^INFLUX_TOKEN=.' server/.env"],
+    "collect": [
+        "grep -q '^INFLUX_TOKEN=.' server/.env",
+        "grep -q '^S3_BUCKET=.' server/.env",
+        "grep -q '^DATA_HOST=.' .env",
+    ],
+    "serve": [
+        "grep -q '^INFLUX_TOKEN=.' server/.env",
+        "grep -q '^DATA_HOST=.' .env",
+        "grep -q '^COLLECT_HOST=.' .env",
+    ],
+}
+
+
+def _deploy_script(box: str) -> list[str]:
     deploy = _yaml(".github/workflows/deploy.yml")
     assert _on(deploy) == {"push": {"branches": ["main"]}}
-    step = deploy["jobs"]["deploy"]["steps"][0]
+    job = deploy["jobs"][box]
+    step = job["steps"][0]
     assert step["uses"] == "appleboy/ssh-action@v1"
-    assert step["with"]["host"] == "${{ secrets.EC2_HOST }}"
+    assert step["with"]["host"] == "${{ secrets.EC2_HOST_" + box.upper() + " }}"
     assert step["with"]["username"] == "${{ secrets.EC2_USER }}"
     assert step["with"]["key"] == "${{ secrets.EC2_SSH_KEY }}"
     lines = [ln.strip() for ln in step["with"]["script"].splitlines()]
     return [ln for ln in lines if ln and not ln.startswith("#")]
 
 
-def test_deploy_script_guards_env_then_mirrors_main_then_builds() -> None:
-    script = _deploy_script()
-    assert script[0] == "set -e"
-    assert script[1] == "cd ~/marketlens"
+def test_deploy_runs_three_boxes_in_order_data_collect_serve() -> None:
+    """job 3개, needs 로 직렬 — 한 박스가 실패하면 뒤 박스는 돌지 않는다 (021 §3.3)."""
+    jobs = _yaml(".github/workflows/deploy.yml")["jobs"]
+    assert list(jobs) == list(BOXES)
+    assert "needs" not in jobs["data"]
+    assert jobs["collect"]["needs"] == "data"
+    assert jobs["serve"]["needs"] == "collect"
+    # 옛 단일 시크릿은 어디에도 남지 않는다
+    assert "secrets.EC2_HOST }}" not in _text(".github/workflows/deploy.yml")
 
-    def index_of(fragment: str) -> int:
-        return next(i for i, ln in enumerate(script) if fragment in ln)
 
-    i_file = index_of("[ ! -f server/.env ]")
-    i_token = index_of("grep -q '^INFLUX_TOKEN=.' server/.env")
-    i_bucket = index_of("grep -q '^S3_BUCKET=.' server/.env")
-    i_fetch = index_of("git fetch origin main")
-    i_reset = index_of("git reset --hard origin/main")
-    i_up = index_of(
-        "docker compose --env-file .env --env-file server/.env up -d --build"
-    )
-    i_prune = index_of("docker image prune -f")
-    assert i_file < i_token < i_bucket < i_fetch < i_reset < i_up < i_prune
-    assert i_prune == len(script) - 1
+def _index_of(script: list[str], fragment: str) -> int:
+    return next(i for i, ln in enumerate(script) if fragment in ln)
+
+
+def test_deploy_script_per_box_guards_env_then_mirrors_main_then_builds_own_profile() -> (
+    None
+):
+    for box in BOXES:
+        script = _deploy_script(box)
+        assert script[0] == "set -e", box
+        assert script[1] == "cd ~/marketlens", box
+        i_file = _index_of(script, "[ ! -f server/.env ]")
+        i_guards = [_index_of(script, g) for g in GUARDS[box]]
+        i_fetch = _index_of(script, "git fetch origin main")
+        i_reset = _index_of(script, "git reset --hard origin/main")
+        i_up = _index_of(
+            script,
+            f"docker compose --profile {box} --env-file .env --env-file server/.env up -d --build",
+        )
+        i_prune = _index_of(script, "docker image prune -f")
+        assert (
+            i_file < min(i_guards)
+            and max(i_guards) < i_fetch < i_reset < i_up < i_prune
+        ), box
+        assert i_prune == len(script) - 1, box
+        # 자기 가드 키만 — 다른 박스의 키를 요구하면 그 박스에서 배포가 헛되이 막힌다
+        for other_box, guards in GUARDS.items():
+            for g in guards:
+                if g not in GUARDS[box]:
+                    assert g not in script, (box, other_box, g)
+        # profile 은 자기 것 하나만
+        assert sum("--profile" in ln for ln in script) == 1, box
 
 
 def test_deploy_script_never_prints_env_values() -> None:
-    script = "\n".join(_deploy_script())
-    assert "cat server/.env" not in script
-    assert "$INFLUX_TOKEN" not in script and "$S3_BUCKET" not in script
-    assert "git pull" not in script, "pull 은 갈래가 있으면 실패한다 — 미러 동기화만"
+    for box in BOXES:
+        script = "\n".join(_deploy_script(box))
+        assert "cat server/.env" not in script and "cat .env" not in script
+        assert "$INFLUX_TOKEN" not in script and "$S3_BUCKET" not in script
+        assert "$DATA_HOST" not in script and "$COLLECT_HOST" not in script
+        assert "git pull" not in script, (
+            "pull 은 갈래가 있으면 실패한다 — 미러 동기화만"
+        )
 
 
 # --- PR 템플릿·README ---------------------------------------------------------
@@ -367,7 +480,9 @@ def test_readme_is_short_and_points_to_claude_md() -> None:
     readme = _text("README.md")
     assert len(readme.strip().splitlines()) <= 40
     assert "CLAUDE.md" in readme
+    # 021 — 박스별 profile 기동이 README 의 배포 명령이다
     assert (
-        "docker compose --env-file .env --env-file server/.env up -d --build" in readme
+        "docker compose --profile <collect|data|serve> --env-file .env --env-file server/.env up -d --build"
+        in readme
     )
     assert "다섯 컨테이너" in readme or "5컨테이너" in readme
