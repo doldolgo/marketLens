@@ -55,7 +55,7 @@
 
 ## 4. 검증
 - env 파일(없으면 env 예시 파일에서 만든다)을 둔 채 `WEB_PORT=8080 docker compose --env-file server/.env up -d --build` 하면 여섯 컨테이너가 살아 있다(compose 변수 치환은 셸 env 와 `--env-file` 만 읽으므로 `INFLUX_TOKEN` 을 위해 `server/.env` 를 명시한다).
-- `curl localhost:8080/` 에 `트레이딩룸 · MarketLens` 가 있고, `curl localhost:8080/foo` 도 index.html 을 준다.
+- `curl localhost:8080/` 에 `KimpTrack` 이 있고, `curl localhost:8080/foo` 도 index.html 을 준다.
 - `curl localhost:8080/api/health` 가 server 의 `/health` 응답을 그대로 준다(`status == "ok"`).
 - server 컨테이너 env 에 `.env` 값이 있고, 이미지 안에는 `.env` 파일이 없다.
 - 호스트 포트는 profile 별로만 열린다(021): serve 는 caddy 의 80(`WEB_PORT`)·443 뿐, collect 는 8000, data 는 6379·8086. api·web 은 어느 박스에서도 호스트에 열리지 않는다(023).
@@ -69,7 +69,7 @@
 # 로컬(Mac, OrbStack Docker 29 / compose v5) — 2026-09-06. 거래소 도메인은 이 망에서 차단(REST·WS 모두 ConnectTimeout).
 WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 #   → marketlens-influxdb·redis·server·web 4컨테이너 Up, 호스트 노출은 web 의 :8080 하나(ps Ports 열)
-curl localhost:8080/            # <title>트레이딩룸 · MarketLens</title>  /foo → 200, 같은 index.html
+curl localhost:8080/            # <title>KimpTrack</title>  /foo → 200, 같은 index.html
 curl -sI localhost:8080/index.html          # Cache-Control: no-store, must-revalidate
 curl -sI localhost:8080/assets/index-*.js   # Cache-Control: public, max-age=31536000, immutable
 curl -sI localhost:8080/assets/none.js       # 404 이고 Cache-Control 이 없다

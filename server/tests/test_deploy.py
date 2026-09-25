@@ -349,7 +349,7 @@ def test_app_logging_puts_marketlens_info_on_a_timestamped_handler() -> None:
 
 
 def test_web_shell_title_is_the_smoke_string() -> None:
-    assert "<title>트레이딩룸 · MarketLens</title>" in _text("web/index.html")
+    assert "<title>KimpTrack</title>" in _text("web/index.html")
 
 
 # --- 앱: 저장소 없이도 /health 200, /history 만 503 ----------------------------
