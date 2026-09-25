@@ -1,6 +1,6 @@
 # 023 — domain-tls
 
-상태: TODO | 의존: 007 deploy(compose·배포 워크플로), 021 infra-split(serve 박스·보안그룹), 022 landing(nginx 경로)
+상태: DONE | 의존: 007 deploy(compose·배포 워크플로), 021 infra-split(serve 박스·보안그룹), 022 landing(nginx 경로)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 
@@ -42,6 +42,10 @@
 - 배포 뒤(EC2): `curl -sI https://kimptrack.com/` 200, `curl -sI http://kimptrack.com/` 308, `curl -sI http://3.34.104.16/` 200, 대시보드 `/app/` 스프레드 표가 wss 로 갱신된다(개발자 도구 Network → WS 에 `wss://kimptrack.com/api/ws/spreads`).
 
 ## 5. 완료 기준
+- `cd server && .venv/bin/python -m pytest -q` → 687 passed
+- `docker run --rm -v ./Caddyfile:/etc/caddy/Caddyfile:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile` → Valid configuration
+- 로컬 caddy + `nginx:alpine`(이름 `web`) : `localhost:8090/` 200, `Host: kimptrack.com` 308 → `https://kimptrack.com/`, `www` 도 동일
+- PR #51 머지(2026-09-25 11:15 UTC) → Deploy data·collect·serve 모두 success
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` deploy 행 — caddy 앞단 (반영함)
@@ -52,3 +56,7 @@
 - `CLAUDE.md` 스펙 인덱스 023 행 (반영함)
 
 ## 7. 실행 보고
+- 배포 뒤 EC2 실측(2026-09-25 11:2x UTC): `https://kimptrack.com/` HTTP/2 200, `https://www.kimptrack.com/` 200, `http://kimptrack.com/` 308 → https, `http://3.34.104.16/` 200, `https://kimptrack.com/api/health/collect` 정상, `wss://kimptrack.com/api/ws/spreads` 에서 표 메시지 수신. 인증서 발급자 Let's Encrypt, 유효 2026-09-25 ~ 2026-12-24(자동 갱신).
+- caddy 로그: 기동 7초 뒤 두 도메인 "certificate obtained successfully". 컨테이너 caddy(80·443)·web(호스트 미공개)·api.
+- 사전에 한 것: Cloudflare A 레코드 apex·www(프록시 끔), serve 보안그룹 443(CLI).
+- 남긴 것: nginx 가 `X-Forwarded-Proto`·`X-Real-IP` 를 덮어쓴다(3.3). Cloudflare 프록시는 안 켰다.

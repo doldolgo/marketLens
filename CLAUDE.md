@@ -95,7 +95,7 @@ marketlens/
 | 020 | bitget | DONE | 비트겟 USDT 현물 추가 — WS 3샤드 books15(스냅샷)+trade, symbols 매초, 입출금(public·키 없음), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟), `/history/*` `fx=bitget`, web 표시명·기록 탭 Bitget 실데이터 |
 | 021 | infra-split | DONE | EC2 3대 분리 — compose profile 3개(collect=server c7g.medium / data=redis·influxdb t4g.small / serve=api·web t4g.micro), 박스 간 사설 IP(루트 .env DATA_HOST·COLLECT_HOST), nginx 업스트림 주입, 배포 3타깃(data→collect→serve), 런북 ec2-split.md (인프라) |
 | 022 | landing | DONE | 정적 HTML 랜딩 `/`(검색·미리보기 메타, `/api/spreads` 1회 티저, 스크린샷, 모바일) · 대시보드는 `/app/`(Vite base·nginx alias), 옛 쿼리 링크는 301 (web·nginx 전용) |
-| 023 | domain-tls | TODO | `kimptrack.com`·`www` HTTPS — serve 박스에 caddy 컨테이너(호스트 80·443, Let's Encrypt 자동 발급·갱신, 볼륨 보존), web 은 호스트 비공개, 탄력 IP 직접 접속은 평문 유지, DNS 는 Cloudflare(프록시 끔) (인프라·serve 전용) |
+| 023 | domain-tls | DONE | `kimptrack.com`·`www` HTTPS — serve 박스에 caddy 컨테이너(호스트 80·443, Let's Encrypt 자동 발급·갱신, 볼륨 보존), web 은 호스트 비공개, 탄력 IP 직접 접속은 평문 유지, DNS 는 Cloudflare(프록시 끔) (인프라·serve 전용) |
 
 실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
