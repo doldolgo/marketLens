@@ -29,7 +29,7 @@ def _on(workflow: dict) -> dict:
     return workflow.get("on") or workflow[True]
 
 
-# --- compose: 컨테이너 5개(016), 박스별 profile 3개(021) -------------------------
+# --- compose: 컨테이너 6개(016·023), 박스별 profile 3개(021) -------------------------
 
 # 021 §3.2 — 서비스 → profile. 박스마다 자기 profile 만 띄운다.
 PROFILE_OF = {
@@ -38,13 +38,14 @@ PROFILE_OF = {
     "influxdb": "data",
     "api": "serve",
     "web": "serve",
+    "caddy": "serve",
 }
 
 
-def test_compose_declares_five_containers_with_fixed_names() -> None:
+def test_compose_declares_six_containers_with_fixed_names() -> None:
     compose = _yaml("docker-compose.yml")
     services = compose["services"]
-    assert set(services) == {"server", "api", "web", "influxdb", "redis"}
+    assert set(services) == {"server", "api", "web", "caddy", "influxdb", "redis"}
     # 프로젝트명 고정 — dev compose(marketlens-dev)와 컨테이너·볼륨을 나눈다
     assert compose["name"] == "marketlens"
     assert _yaml("docker-compose.dev.yml")["name"] != compose["name"]
@@ -78,10 +79,11 @@ def test_compose_has_no_depends_on_anywhere() -> None:
         assert "depends_on" not in svc, f"{name} 에 depends_on 이 있다"
 
 
-def test_compose_host_ports_are_web_port_and_cross_box_ports_only() -> None:
-    """호스트 공개: web ${WEB_PORT:-80}, server 8000, redis 6379, influxdb 8086. api 는 없다 (021 §3.2)."""
+def test_compose_host_ports_are_caddy_and_cross_box_ports_only() -> None:
+    """호스트 공개: caddy ${WEB_PORT:-80}·443(023), server 8000, redis 6379, influxdb 8086. web·api 는 없다 (021 §3.2)."""
     services = _yaml("docker-compose.yml")["services"]
-    assert services["web"]["ports"] == ["${WEB_PORT:-80}:80"]
+    assert services["caddy"]["ports"] == ["${WEB_PORT:-80}:80", "443:443"]
+    assert "ports" not in services["web"], "web 은 같은 박스의 caddy 만 부른다 (023)"
     assert services["server"]["ports"] == ["8000:8000"]
     assert services["redis"]["ports"] == ["6379:6379"]
     assert services["influxdb"]["ports"] == ["8086:8086"]
@@ -117,6 +119,23 @@ def test_compose_web_receives_collect_host_and_limits_envsubst_to_it() -> None:
     assert web["environment"]["NGINX_ENVSUBST_FILTER"] == "^COLLECT_HOST$$"
 
 
+def test_compose_caddy_fronts_web_with_domain_tls_and_plain_fallback() -> None:
+    """023 §3 — caddy 는 serve profile, Caddyfile 을 읽기 전용으로 마운트, 인증서는 이름 있는 볼륨에 남긴다."""
+    caddy = _yaml("docker-compose.yml")["services"]["caddy"]
+    assert caddy["image"].startswith("caddy:2")
+    assert "./Caddyfile:/etc/caddy/Caddyfile:ro" in caddy["volumes"]
+    assert "caddy-data:/data" in caddy["volumes"], (
+        "볼륨이 없으면 재배포마다 재발급 → Let's Encrypt 한도"
+    )
+    conf = _text("Caddyfile")
+    # 도메인 두 개는 자동 HTTPS, 그 밖의 호스트(IP 직접)는 평문 catch-all — 둘 다 nginx(web:80) 로
+    assert "kimptrack.com, www.kimptrack.com {" in conf
+    assert "http:// {" in conf
+    assert conf.count("reverse_proxy web:80") == 2
+    # HTTP/3 은 UDP 443 을 안 열므로 광고하지 않는다
+    assert "protocols h1 h2" in conf
+
+
 def test_compose_influx_caps_query_memory_within_data_box() -> None:
     """data 박스(2GB+스왑 1GB)에서 조회 폭주가 Influx 를 죽이지 않게 — 1개 256MB × 동시 3 = 전체 768MB (021 §3.1)."""
     env = _yaml("docker-compose.yml")["services"]["influxdb"]["environment"]
@@ -145,7 +164,12 @@ def test_compose_storage_containers_persist_and_match_dev_setup() -> None:
     assert redis["command"] == ["redis-server", "--appendonly", "yes"]
     assert influx["volumes"] == ["influxdb-data:/var/lib/influxdb2"]
     assert redis["volumes"] == ["redis-data:/data"]
-    assert set(compose["volumes"]) == {"influxdb-data", "redis-data"}
+    assert set(compose["volumes"]) == {
+        "influxdb-data",
+        "redis-data",
+        "caddy-data",
+        "caddy-config",
+    }
 
 
 # --- 이미지: .env 는 들어가지 않고, 워커는 1개 -------------------------------
@@ -485,4 +509,4 @@ def test_readme_is_short_and_points_to_claude_md() -> None:
         "docker compose --profile <collect|data|serve> --env-file .env --env-file server/.env up -d --build"
         in readme
     )
-    assert "다섯 컨테이너" in readme or "5컨테이너" in readme
+    assert "여섯 컨테이너" in readme or "6컨테이너" in readme

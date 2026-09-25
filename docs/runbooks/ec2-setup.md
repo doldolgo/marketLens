@@ -6,7 +6,7 @@
 **이 EC2 의 기존 marketlens-be·fe 컨테이너는 2026-09-04 에 정지했다(`docker compose stop`, 폴더·코드는 남아 있다). 이 레포의 web 이 :80 을 쓴다.**
 
 1. Docker Engine + compose plugin 은 이미 있다(기존 스택이 쓴다). 배포 계정이 `docker` 그룹인지 확인.
-2. 인바운드는 박스별(`ec2-split.md` 1번 표): serve 80·22, collect 8000(serve 그룹에서만)·22, data 6379·8086(collect·serve 그룹에서만)·22. 22 는 내 IP.
+2. 인바운드는 박스별(`ec2-split.md` 1번 표): serve 80·443·22, collect 8000(serve 그룹에서만)·22, data 6379·8086(collect·serve 그룹에서만)·22. 22 는 내 IP.
 3. `git clone <repo> ~/marketlens` — 기존 `~/marketlens-be`·`~/marketlens-fe` 와 별개 폴더.
 4. `~/marketlens/server/.env` 작성 (git 에 없음):
    - `INFLUX_URL`·`REDIS_URL` — `server/.env.example` 의 기본값(localhost) 그대로 둔다. compose 가 `environment` 로 `http://influxdb:8086`·`redis://redis:6379/0` 을 덮어쓰므로 컨테이너 안에서는 이 값이 쓰이지 않는다(007 §3).

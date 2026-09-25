@@ -150,7 +150,7 @@ web/src/features/<name>/
 EC2 3대(021), 같은 VPC·서브넷, 박스끼리는 사설 IP 로만 통신한다. compose 파일은 하나이고 서비스 5개(server=collector·api·web·influxdb·redis)에 profile 이 하나씩 있어 박스마다 자기 profile 만 띄운다: `docker compose --profile <collect|data|serve> --env-file .env --env-file server/.env up -d --build`. `depends_on` 은 없다(의존 대상이 다른 박스).
 - **collect**(c7g.medium) — `server`. 거래소 WebSocket·틱 루프·Redis 인계·flusher·S3 원문·입출금 조회. 호스트 8000(serve 보안그룹만), 탄력 IP(업비트 허용 IP), IAM 프로파일은 이 박스에만.
 - **data**(t4g.small, 스왑 1GB) — `redis`·`influxdb`. 호스트 6379·8086(collect·serve 보안그룹만). Influx 쿼리 메모리 상한 1개 256MB × 동시 3 = 768MB.
-- **serve**(t4g.micro) — `api`·`web`. 호스트 80(`WEB_PORT`)만, 탄력 IP `3.34.104.16`. nginx 가 `/api/` 를 `COLLECT_HOST:8000` 으로 프록시하고 `/api/history/{premium,streaks,candles}`·`/api/ws/`(WebSocket 업그레이드)·`/api/spreads`(정확 일치) 는 같은 박스의 api 로 보낸다.
+- **serve**(t4g.micro) — `api`·`web`·`caddy`. 호스트 80(`WEB_PORT`)·443 은 caddy 가 쥔다(023) — `kimptrack.com`·`www` 는 Let's Encrypt 로 TLS 종단, 그 밖의 호스트(탄력 IP `3.34.104.16` 직접)는 평문 — 둘 다 web(nginx :80) 으로 넘긴다. nginx 가 `/api/` 를 `COLLECT_HOST:8000` 으로 프록시하고 `/api/history/{premium,streaks,candles}`·`/api/ws/`(WebSocket 업그레이드)·`/api/spreads`(정확 일치) 는 같은 박스의 api 로 보낸다.
 박스 간 주소는 루트 `.env` 의 `DATA_HOST`·`COLLECT_HOST` 두 키다. 기본값이 서비스 이름이라 로컬은 `COMPOSE_PROFILES=collect,data,serve` 로 예전처럼 5개가 한 망에 뜬다. PR CI 는 server lint·format·pytest 와 web lint·build 를 실행한다. main push 는 워크플로가 data → collect → serve 순서로 SSH 배포한다(한 박스가 실패하면 뒤는 돌지 않는다). 상세는 스펙 007(deploy)·021(infra-split), 전환 절차는 `docs/runbooks/ec2-split.md`.
 다섯 컨테이너 모두 compose 가 로그를 `json-file` 50MB × 3 으로 묶는다 — 회전 없는 로그가 디스크를 채우면 Influx 가 쓰기를 거부하고, 그 거부는 공간을 되찾아도 재시작 전까지 풀리지 않는다.
 배포 workflow 의 성공은 EC2 명령 실행 성공만 뜻한다. 외부 URL 확인과 실패 시 자동 롤백은 아직 없다.

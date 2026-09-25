@@ -16,7 +16,7 @@
 |---|---|
 | collect | TCP 8000 ← `marketlens-serve` 그룹 / TCP 22 ← 0.0.0.0/0 |
 | data | TCP 6379 ← `marketlens-collect`·`marketlens-serve` 그룹 / TCP 8086 ← 같은 두 그룹 / TCP 22 ← 0.0.0.0/0 |
-| serve | TCP 80 ← 0.0.0.0/0 / TCP 22 ← 0.0.0.0/0 |
+| serve | TCP 80 ← 0.0.0.0/0 / TCP 443 ← 0.0.0.0/0 (023) / TCP 22 ← 0.0.0.0/0 |
 
 소스에 CIDR 대신 **보안그룹 ID** 를 넣는다 — 사설 IP 가 바뀌어도 규칙이 산다. 22 는 내 IP 로 좁히지 못한다 — 배포 워크플로(GitHub Actions 러너, 동적 IP)가 세 박스에 SSH 로 붙기 때문이다. 키 인증만 허용된다.
 - 확인: `aws ec2 describe-security-groups --filters Name=group-name,Values='marketlens-*' --query 'SecurityGroups[].[GroupName,GroupId]' --output text` 에 3줄.
