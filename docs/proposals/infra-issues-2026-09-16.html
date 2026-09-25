@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<title>MarketLens 인프라 문제점 정리</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F4F6F8; --surface:#FFFFFF; --surface-2:#EAEEF2; --line:#D5DBE2;
+  --ink:#18222E; --ink-2:#4A5764; --ink-3:#7B8794;
+  --accent:#245E8C; --accent-soft:#DCE9F4;
+  --ok:#2C7A57; --ok-soft:#DDF0E6; --warn:#A8690F; --warn-soft:#F7EBD3; --bad:#B03A3A; --bad-soft:#F6DEDE;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#10161C; --surface:#171E26; --surface-2:#1F2830; --line:#2E3942;
+    --ink:#E6EBF0; --ink-2:#AEB9C4; --ink-3:#7F8B97;
+    --accent:#7FB3E0; --accent-soft:#1E3247;
+    --ok:#6FCB9A; --ok-soft:#1B3328; --warn:#E2B15A; --warn-soft:#3A2E16; --bad:#E48A8A; --bad-soft:#3E2020;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10161C; --surface:#171E26; --surface-2:#1F2830; --line:#2E3942;
+  --ink:#E6EBF0; --ink-2:#AEB9C4; --ink-3:#7F8B97;
+  --accent:#7FB3E0; --accent-soft:#1E3247;
+  --ok:#6FCB9A; --ok-soft:#1B3328; --warn:#E2B15A; --warn-soft:#3A2E16; --bad:#E48A8A; --bad-soft:#3E2020;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.65;padding-inline:20px;padding-block:0 80px;-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+.wrap{max-width:880px;margin:0 auto}
+header.top{padding-block:44px 28px;border-bottom:1px solid var(--line)}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+h1{font-size:34px;line-height:1.2;font-weight:700;margin:10px 0 12px;letter-spacing:-.01em;text-wrap:balance}
+.lede{font-size:17px;color:var(--ink-2);max-width:64ch;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:18px;font-size:13px;color:var(--ink-3);font-family:var(--mono)}
+nav.toc{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);margin-inline:-20px;padding-inline:20px}
+nav.toc ol{list-style:none;margin:0 auto;padding:0;max-width:880px;display:flex;gap:2px;overflow-x:auto;font-size:13px}
+nav.toc a{display:block;padding:10px 12px;color:var(--ink-2);text-decoration:none;white-space:nowrap;border-bottom:2px solid transparent}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent);border-bottom-color:var(--accent);outline:none}
+nav.toc a b{font-family:var(--mono);font-weight:500;margin-right:6px;color:var(--ink-3)}
+section{padding-block:40px 8px;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:0}
+h2{font-size:24px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+h2 .n{font-family:var(--mono);font-weight:500;color:var(--ink-3);font-size:16px;margin-right:10px}
+.sub{color:var(--ink-2);margin:0 0 22px;max-width:64ch}
+h3{font-size:16px;font-weight:600;margin:28px 0 10px}
+p{max-width:68ch;margin:0 0 12px}
+ul{max-width:68ch;padding-left:20px;margin:0 0 14px}
+li{margin-bottom:4px}
+code{font-family:var(--mono);font-size:.9em;background:var(--surface-2);padding:1px 5px;border-radius:3px}
+.tbl{overflow-x:auto;margin:0 0 18px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:8px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{font-weight:600;color:var(--ink-2);font-size:12.5px;letter-spacing:.03em;background:var(--surface-2)}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.mono{font-family:var(--mono);font-size:13px;white-space:nowrap}
+.pill{display:inline-block;font-family:var(--mono);font-size:11.5px;padding:1px 8px;border-radius:999px;line-height:1.6;white-space:nowrap}
+.pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)} .pill.info{background:var(--accent-soft);color:var(--accent)} .pill.mute{background:var(--surface-2);color:var(--ink-2)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin:0 0 18px}
+.stat{background:var(--surface);padding:12px 14px}
+.stat .k{font-size:12px;color:var(--ink-3)}
+.stat .v{font-family:var(--mono);font-size:20px;font-weight:500;font-variant-numeric:tabular-nums;margin-top:2px}
+.stat .d{font-size:12px;color:var(--ink-2);margin-top:2px}
+.note{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;margin:0 0 16px;max-width:72ch}
+.note.warn{border-left-color:var(--warn)} .note.bad{border-left-color:var(--bad)}
+.note b{font-weight:600}
+figure{margin:0 0 20px;background:var(--surface);border:1px solid var(--line);padding:14px}
+figure svg{display:block;width:100%;height:auto;max-width:100%}
+figcaption{font-size:12.5px;color:var(--ink-3);margin-top:8px;font-family:var(--mono)}
+.svg-box{fill:var(--surface-2);stroke:var(--line)}
+.svg-box.hi{fill:var(--accent-soft);stroke:var(--accent)}
+.svg-t{fill:var(--ink);font-family:var(--sans);font-size:12.5px;font-weight:500}
+.svg-s{fill:var(--ink-3);font-family:var(--mono);font-size:10.5px}
+.svg-l{stroke:var(--ink-3);stroke-width:1.3;fill:none}
+.svg-l.hi{stroke:var(--accent)}
+.svg-lab{fill:var(--ink-2);font-family:var(--mono);font-size:10px}
+.svg-host{fill:none;stroke:var(--ink-3);stroke-dasharray:4 3}
+.agenda{list-style:none;padding:0;margin:0;max-width:none;counter-reset:ag}
+.agenda li{background:var(--surface);border:1px solid var(--line);padding:14px 16px 14px 52px;margin-bottom:10px;position:relative}
+.agenda li::before{counter-increment:ag;content:counter(ag);position:absolute;left:16px;top:13px;font-family:var(--mono);font-size:14px;color:var(--accent);font-weight:500}
+.agenda .q{font-weight:600;margin-bottom:4px}
+.agenda .r{color:var(--ink-2);font-size:14px}
+.agenda .r b{color:var(--ink);font-weight:600}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:640px){.two{grid-template-columns:1fr} h1{font-size:28px}}
+.small{font-size:13px;color:var(--ink-3)}
+.stats{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important}}
+html{scroll-behavior:smooth;scroll-padding-top:48px}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">MarketLens · 인프라 문제점 정리</div>
+  <h1>멘토 지적 30개를 실제 인프라와 하나씩 대조했다</h1>
+  <p class="lede">9월 13일 오은석 멘토님 멘토링 녹취(1시간 50분)에서 인프라 관련 지적을 전부 뽑고, main 브랜치 커밋·compose·nginx·배포 워크플로·런북·스펙 021·기존 제안서와 대조했습니다. 해결된 것, 반만 된 것, 손도 못 댄 것, 그리고 멘토님 지적과 실제가 다른 것을 나눠 적었습니다. 마지막에 멘토님이 짚지 않았지만 조사 중 드러난 문제와 문서 간 불일치를 모았습니다.</p>
+  <div class="meta"><span>2026-09-16</span><span>작성 이진중</span><span>근거 09-13 멘토링 녹취 전문 · main 커밋 cd488af 까지 · docker-compose.yml · web/nginx.conf · .github/workflows · docs/specs 007·016~021 · docs/runbooks · docs/proposals 3건</span></div>
+</header>
+
+<nav class="toc"><ol>
+  <li><a href="#s1"><b>1</b>요약</a></li>
+  <li><a href="#s2"><b>2</b>해결됨</a></li>
+  <li><a href="#s3"><b>3</b>부분 해결</a></li>
+  <li><a href="#s4"><b>4</b>미해결</a></li>
+  <li><a href="#s5"><b>5</b>사실 정정</a></li>
+  <li><a href="#s6"><b>6</b>추가 발견</a></li>
+  <li><a href="#s7"><b>7</b>문서 불일치</a></li>
+  <li><a href="#s8"><b>8</b>우선순위</a></li>
+</ol></nav>
+
+<section id="s1">
+  <h2><span class="n">1</span>요약</h2>
+  <p class="sub">녹취에서 인프라·운영·보안·비용 관련 지적 30개를 뽑았습니다. 제품·일정·토큰 사용량 같은 인프라 외 지적은 제외했습니다.</p>
+  <div class="stats">
+    <div class="stat"><div class="k">해결됨</div><div class="v">7</div><div class="d">머지 커밋에 근거가 있음</div></div>
+    <div class="stat"><div class="k">부분 해결</div><div class="v">4</div><div class="d">설계·실험은 있고 코드는 없음</div></div>
+    <div class="stat"><div class="k">미해결</div><div class="v">10</div><div class="d">코드·설정 어디에도 없음</div></div>
+    <div class="stat"><div class="k">사실 정정</div><div class="v">4</div><div class="d">멘토링 때 잘못 답했거나 오해</div></div>
+    <div class="stat"><div class="k">확인만 필요</div><div class="v">5</div><div class="d">멘토님이 물었고 답은 됐음</div></div>
+    <div class="stat"><div class="k">추가 발견</div><div class="v">7</div><div class="d">멘토님이 짚지 않은 것</div></div>
+  </div>
+  <div class="note warn"><b>핵심.</b> 멘토님이 가장 강하게 말한 두 가지(수집과 조회 경합, 1초 폴링 트래픽)는 다음 날 머지된 016·017로 풀렸습니다. 반대로 "죽어도 아무도 모른다"에 해당하는 알람, 봇 대응(404·요청 제한), 메타데이터 보호는 하나도 손대지 않았습니다. 스펙 021(EC2 3대 분리)은 문서만 있고 compose·nginx·워크플로 코드는 main과 같습니다.</div>
+  <p class="small">확인만 필요 5건: S3에 무엇을 저장하는지(멘토님 수용), 수집 상태 탭 5,200건이 가벼운 응답인지, 상위 IP 16,000건이 팀 IP인지, AWS 잔여 예산, CDN은 한국 타겟이면 불필요. 이 다섯은 별도 대응이 없어 아래 표에서 뺐습니다.</p>
+</section>
+
+<section id="s2">
+  <h2><span class="n">2</span>해결된 지적 7개</h2>
+  <p class="sub">근거가 main 브랜치 커밋 본문이나 스펙 완료 기록에 있는 것만 넣었습니다.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>멘토님 지적</th><th>녹취 원문</th><th>해결 근거</th></tr></thead>
+    <tbody>
+      <tr><td>수집 태스크와 조회 API가 같은 루프에서 경합한다. 수집 인스턴스를 따로 빼야 한다.</td><td class="small">1:21:47 "문제는 이제 얘랑 그 조회 API 랑 같은 루프 안에서 지금 동작하는 걸로 분석이 됐어."</td><td>09-14 PR #37, 스펙 016. 같은 이미지에 ROLE=collector / ROLE=api 두 컨테이너. api는 거래소·S3·틱 루프 없이 Influx 조회 4경로와 스프레드 푸시만 맡음. 실측으로 api 로그에 거래소·S3 줄 0건. <span class="pill warn">같은 EC2라 CPU는 아직 공유</span></td></tr>
+      <tr><td>스프레드 API가 1초마다 56KB. 100명이면 시간당 3GB, 다 트래픽 비용.</td><td class="small">1:06:05 "1초에 56KB씩 계속 받고 있고 응답 속도도 좀 오래 걸려요. 300ms, 400ms 튀거든."</td><td>09-14 PR #38, 스펙 017. 1초 폴링을 /ws/spreads WebSocket 푸시로. 수집기가 누가 볼 때만 표를 만들어 Redis 채널에 게시하고 api가 바뀐 행만 접속자 전원에 같은 바이트로 보냄. 접속자 1명당 244KB/초가 54~131KB/초(압축 전)로. 09-15 PR #40, 스펙 018에서 폴링 fallback까지 삭제.</td></tr>
+      <tr><td>다른 페이지에 있어도 스프레드·입출금 폴링이 백그라운드에서 계속 돈다.</td><td class="small">1:09:29 "저거는 상시 계속 동기화되고 있는 게 의도된 동작이 맞아요?"</td><td>017에서 스프레드 탭을 벗어나면 WebSocket 구독을 해제. 폴링 자체가 없어져 백그라운드 호출이 사라짐.</td></tr>
+      <tr><td>누가 CPU를 이렇게 많이 쓰는지 알아야 기능을 분리할 수 있다.</td><td class="small">1:21:08 "누가 CPU 를 이렇게 많이 거는지는 여러분들이 알아야 돼요."</td><td>09-15 EC2에서 py-spy 프로파일. 비트겟 전체 호가 재정렬 47% → PR #43 books15 스냅샷 구독. 바이빗 델타 정렬 22% → PR #44 심볼당 500ms 발행 제한 + 튜플 정렬. 표 생성의 pydantic 변환이 틱당 비용 절반 → PR #45 dict 직접 생성. 셋 다 커밋 본문에 비율 기록.</td></tr>
+      <tr><td>499 응답. 폴링 중 페이지 이동으로 클라이언트가 먼저 끊는 케이스, 예외 처리하라.</td><td class="small">1:48:30 "그 폴링 요청을 1초마다 하는데 그럼 페이지 이동할 때마다 그 요청이 오기 전에 다른 페이지로 가서 요청이 중단된"</td><td>017·018로 폴링이 사라져 원인이 소멸. WebSocket 종료는 정상 close로 처리됨.</td></tr>
+      <tr><td>로그 때문에 디스크가 터진다. 로그 로테이트를 반드시 걸어라.</td><td class="small">1:26:00 "로그 로테이트 설정을 반드시 해줘야 돼."</td><td>09-07 커밋 1ad44f3. 컨테이너 5개 전부 json-file 50MB × 3. 커밋 본문: 전날 죽은 컨테이너의 17GB 로그가 디스크를 채워 Influx가 쓰기를 거부했고, 공간을 되찾아도 컨테이너 재시작 전까지 거부가 풀리지 않았음. <span class="pill warn">호스트 로그 정책은 없음 → 3장</span></td></tr>
+      <tr><td>S3로 옮기는 작업 같은 인프라 변경은 공유해 달라.</td><td class="small">0:58 "S3로 옮기는 작업이라던가 이런 것들도 이제 그런 뭔가 진행한 내용들이 있으면은 공유를 해주면"</td><td>스펙 010 raw-archive로 문서화. 버킷 marketlens-spreads-snapshot, 접두사 raw/, IAM 역할 marketlens-s3-snapshot(PutObject·ListBucket만), 분당 마지막 1건 표본화로 하루 0.3~0.5GB 추정. 09-16 보고 자료에 포함.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s3">
+  <h2><span class="n">3</span>부분 해결 4개</h2>
+  <p class="sub">설계나 실험은 있는데 배포된 코드가 없거나, 절반만 된 것.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>멘토님 지적</th><th>지금 상태</th><th>남은 것</th></tr></thead>
+    <tbody>
+      <tr><td>서버 안에 DB가 있으면 안 된다. RDS든 별도 서비스든 밖으로 빼야 한다. <span class="small">(1:01:45)</span></td><td>스펙 021이 Redis·InfluxDB를 data 박스(t4g.small)로 빼는 설계. 브랜치 spec/021-infra-split은 문서 커밋 1개(스펙 + 런북 ec2-split.md)뿐이고 docker-compose.yml·nginx.conf·deploy.yml은 main과 동일.</td><td>compose profile 3개, depends_on 제거, DATA_HOST·COLLECT_HOST 주입, nginx 템플릿 치환, 워크플로 3타깃, test_deploy.py 갱신. 그 뒤 런북 11단계 이전. 관리형(ElastiCache·Timestream for InfluxDB) 서울 리전 가격은 미확인.</td></tr>
+      <tr><td>수평 확장이 안 되는 구조. 앞단에 로드밸런서, API 서버를 2·3·4번으로 늘릴 수 있게. <span class="small">(1:00:07, 1:27:20)</span></td><td>016으로 api가 상태 없는 프로세스가 됨(Redis 구독·Influx 읽기만). 021이 api·web을 serve 박스(t4g.micro)로 떼는 게 1단계. 로드밸런서·ASG·다중 AZ는 docs/proposals/infra-ha.md 초안(약 $480/월)에만 있음.</td><td>수집기에 남은 HTTP 3개(/health/collect·/history/events·/refresh)를 api로 옮겨야 api를 2대로 늘릴 수 있음. 이 작업은 스펙 번호가 없음. ALB 도입 시점은 성능 테스트 뒤 결정.</td></tr>
+      <tr><td>T 계열은 버스터블이라 상시 고CPU에 안 맞다. unlimited 켜져 있어 비용 2배. M 계열이 낫다. <span class="small">(1:19:40)</span></td><td>09-15 실험으로 확인. t4g.small은 크레딧 소진 후 steal 43~53%로 수집이 무너짐. c7g.medium(1vCPU 2GB)은 컨테이너 5개를 다 올려 12분 만에 메모리 초과. 지금은 t4g.medium unlimited 유지.</td><td>021에서 수집기만 c7g.medium(고정 성능)으로. 초과 크레딧 청구액이 팀 계산 약 $18과 멘토님 추정 월 10~12만원 중 어느 쪽인지 청구서로 미확정.</td></tr>
+      <tr><td>1주·1달·1년 지난 로그를 자동으로 지우고 압축하는 보관 정책. <span class="small">(1:25:50)</span></td><td>컨테이너 로그만 50MB × 3 상한. 호스트 쪽 로그(journald·docker 데몬·apt)와 S3 raw/ 보관 기간 정책은 없음. S3 lifecycle 미설정.</td><td>보관 기간 결정 + S3 lifecycle + 호스트 logrotate 확인.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s4">
+  <h2><span class="n">4</span>미해결 10개</h2>
+  <p class="sub">코드·설정·런북 어디에도 대응이 없는 것. 근거는 레포 파일을 직접 확인한 결과입니다.</p>
+
+  <h3>4-1. 없는 경로에 200을 주고 있다</h3>
+  <p>멘토님 1:43:08 "없는 경로 붙여서 했을 때, 예를 들어서 점 EV 이런 거 입력해서 했을 때 사공사가 뜨는 게 나아요." 봇이 200을 받으면 "여기 서버 뭐 된 거 같아, 좀 더 보자"라고 오게 된다는 지적.</p>
+  <p>web/nginx.conf 마지막 location이 <code>try_files $uri $uri/ /index.html</code>이라 /.env, /config.php, /admin.php 전부 200 + 대시보드 HTML을 돌려줍니다. 정확 일치 404는 <code>location = /api</code> 하나만 있습니다. 확장자 있는 경로나 .env·.git류를 404로 보내는 규칙이 없습니다.</p>
+  <div class="note bad"><b>문서 오류.</b> 09-14 회의 자료 3장 장애 표에 "없는 경로 404 는 됨"이라 적혀 있는데 실제 nginx 설정과 다릅니다. 09-16 멘토 보고 자료의 "미착수"가 맞습니다.</div>
+
+  <h3>4-2. 요청 제한과 IP 차단이 없다</h3>
+  <p>멘토님 1:41:15 "13초 동안 760회의 요청이 들어온 거거든. 그러니까 이런 것들은 사실 막아야 돼." 그 중 624건이 200으로 응답.</p>
+  <p>nginx.conf에 <code>limit_req</code>·<code>limit_conn</code> 없음. 보안그룹은 80을 전체 공개. WAF·Cloudflare 없음. 같은 IP가 초당 수십 회를 때려도 전부 api·server 컨테이너까지 도달합니다.</p>
+
+  <h3>4-3. 알람이 하나도 없다</h3>
+  <p>멘토님 1:23:20 "AWS 가 스토리지를 모니터링해서 못 봐요. 그 인프라 관리하는 사람들이 놓치는 게 이 용량이야." 1:16:24 전날 CPU 100%로 컨테이너가 죽었다 살았다 반복하는 걸 멘토님이 먼저 봤음.</p>
+  <p>CloudWatch 알람·SNS·하트비트·외부 헬스체크 전부 없음. 레포에서 CloudWatch를 언급하는 파일은 docs/proposals 3개뿐이고 런북·스펙·워크플로에는 없습니다. 원규가 만든 CloudWatch 대시보드는 있으나 알람이 아니고 팀이 보지 않음(1:16:39 "저도이제검토안해갖고"). 09-12 디스크 풀, 09-12 CPU 100%, 09-15 수집기 93% 전부 사람이 우연히 발견했습니다.</p>
+
+  <h3>4-4. APM 없음</h3>
+  <p>멘토님 1:29:22 "APM 이라고 있어요. 어플리케이션 퍼포먼스 모니터링이라고 해가지고 뭐 센틀이나 데이터 도구나." 무료 플랜 검토 후 토요일 성능 테스트 전에 세팅하라는 숙제. Sentry·Datadog·Elastic 어느 것도 붙지 않았고 조사도 안 했습니다. 09-07 커밋 b458769 전까지는 앱 로거에 핸들러조차 없어 info 로그가 전부 버려지고 있었습니다.</p>
+
+  <h3>4-5. 성능 테스트 시나리오 없음</h3>
+  <p>멘토님 1:31:21 "메뉴별로 또는 기능별로 사용자가 쓸 때 어떤 API 들을 호출하는지, 그리고 그 API 를 호출하는 순서라던가 그 병렬 병렬인지를 체크해서 그 호출 시나리오를 미리 좀 이렇게 정리해 놓으면." 팀 몫은 시나리오 정리, 멘토님 몫은 스크립트. 시나리오 문서 없음. API 서버 1대가 몇 명을 버티는지 수치가 없어 021의 serve 박스를 t4g.micro로 잡은 것도 실측 근거가 아니라 api 컨테이너 75MB·CPU 0.2~5%(접속자 1명) 기준 추정입니다.</p>
+
+  <h3>4-6. 451KB JS 번들 정체 미확인</h3>
+  <p>멘토님 1:03:38 "얘가 451KB거든. 그러니까 자바스크립트 파일 치고는 조금 큰 편이어가지고." 당시 답은 "아마 스프레드 관련이지 않을까요?"(추측). 번들 분석(vite-bundle-visualizer 등) 미실행. 차트 라이브러리가 유력하나 확인 안 됨.</p>
+
+  <h3>4-7. 레포 프라이빗 전환 + 멘토 초대</h3>
+  <p>멘토님 4:06 "프라이빗을 조금 바꿔 놓는 게 좋긴 할 것 같고." 코드 밖 작업. 레포 상태와 멘토 계정 초대 여부는 이 조사에서 확인하지 못했습니다. <span class="pill warn">미확인</span></p>
+
+  <h3>4-8. EC2 메타데이터 보호가 확인되지 않았다</h3>
+  <p>멘토님 1:40:26 "AWS 에 특정 설정이 열려있으면은 그 메타데이터를 가지고 갈 수 있어. 이 시투에. 그 메타데이터 가지고 다양한 공격이 가능해." 액세스 로그에 9일·11일 AWS 크레덴셜·EC2 메타데이터 경로 탐색이 실제로 있었음.</p>
+  <p>런북 ec2-setup.md와 ec2-split.md의 IMDS 명령은 <code>--http-put-response-hop-limit 2 --http-endpoint enabled</code>만 있고 <code>--http-tokens required</code>(IMDSv2 강제)가 없습니다. hop limit을 2로 올린 것은 컨테이너에서 메타데이터에 닿게 하려는 것이라, IMDSv1이 살아 있으면 컨테이너 안에서 토큰 없이 IAM 임시 자격증명을 읽을 수 있습니다. 지금 인스턴스의 http-tokens 값은 서버에서 확인해야 합니다. <span class="pill warn">미확인</span> 프록시가 없어 외부에서 직접 닿을 길은 없다는 멘토님 말은 맞지만, SSRF나 컨테이너 탈출 시 방어선이 없습니다.</p>
+
+  <h3>4-9. 수집기 이중화</h3>
+  <p>멘토님 1:22:50 "이 수립 인스턴스가 만약에 죽어버리게 되면 전체적인 서비스 장애가 발생하기 때문에 얘가 이중화는 돼 있어야 될 거예요. 추후에." 멘토님도 "지금 당장은" 아니라고 했음. infra-ha.md에 Redis 리더 락(SET NX PX 5000) 기반 핫 스탠바이 초안만 있고 스펙 번호 없음.</p>
+
+  <h3>4-10. 해외 트래픽·클라우드 대역 ACL</h3>
+  <p>멘토님 1:35:50 "대부분의 공격이 해외 트래픽으로 많이 들어와. 그리고 특히 그 클라우드 배급자, IP 대역 뭐 오라클이라던가." 토요일에 적용법 설명 예정이라 팀 숙제는 아니었으나 대응 없음. 보안그룹 80 전체 공개, nginx geo 차단 없음.</p>
+</section>
+
+<section id="s5">
+  <h2><span class="n">5</span>멘토님 지적과 실제가 다른 것 4개</h2>
+  <p class="sub">멘토링 때 잘못 답했거나 멘토님이 오해한 부분. 다음 멘토링에서 정정해야 할 사실입니다.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>멘토링 때</th><th>실제</th></tr></thead>
+    <tbody>
+      <tr><td>57:04 "도커 컨테이너가 4개" (원규 "네")</td><td>5개. server·api·web·influxdb·redis. api는 09-14 016 머지로 생겼으나 멘토링(09-13) 시점에 이미 PR 진행 중이었고, redis는 09-05부터 있었음. 09-16 보고 자료에서 정정함.</td></tr>
+      <tr><td>1:14:16 "엔진엑스가 없네." /var/log/nginx 폴더가 없어 액세스 로그 미설정으로 판단</td><td>nginx는 web 컨테이너 안에 있고 호스트에 노출된 유일한 포트(80)를 받음. nginx 공식 이미지는 access.log를 stdout으로 보내므로 <code>docker logs marketlens-web</code>에 남습니다. 호스트 /var/log/nginx가 없는 건 정상. 다만 50MB × 3 상한이라 약 150MB 넘는 과거 로그는 사라집니다. 멘토님이 분석한 건 uvicorn 로그(9/8~)였음.</td></tr>
+      <tr><td>1:21:47 수집과 조회 API가 "같은 루프 안에서 동작하는 걸로 분석" (멘토님 "코드를 보면서 봐야" 유보)</td><td>멘토링 당일 기준으로는 사실. 다음 날 016 머지로 Influx 조회는 api 컨테이너로 갔고, 스프레드 표 서빙도 018로 api로 갔음. 수집기에 남은 HTTP는 /health·/health/collect·/history/events·/refresh·분석 API(/orderbook 등)뿐.</td></tr>
+      <tr><td>1:20:40 unlimited 초과 과금 "한 2배 정도 나올 거야", 월 10~12만원 추정</td><td>팀 계산은 (50% − 20%) × 2vCPU × 730h × $0.04 ≈ $18/월. 두 코어 다 쓰면 최대 $58. 청구서의 CPUSurplusCreditsCharged로 확정 안 됨. <span class="pill warn">미확정</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s6">
+  <h2><span class="n">6</span>멘토님이 짚지 않았지만 조사 중 드러난 문제 7개</h2>
+
+  <h3>6-1. compose에 메모리·CPU 제한이 하나도 없다</h3>
+  <p>docker-compose.yml 5개 서비스 어디에도 <code>mem_limit</code>·<code>cpus</code>·<code>healthcheck</code> 없음. 09-15 c7g.medium 실험이 12분 만에 죽은 원인이 Influx 메모리(상주 524MB, 전 구간 조회 시 2.4GB까지)였는데, 스펙 021도 Influx 쿼리 상한 env만 걸고 컨테이너 단위 메모리 상한은 없습니다. data 박스(t4g.small 2GB)에서 Influx가 다시 폭주하면 Redis까지 같이 죽고 스프레드 표 전체가 멈춥니다(018에서 폴링 fallback 삭제).</p>
+
+  <h3>6-2. Redis 인증 없음 + 021에서 6379·8086을 호스트에 공개</h3>
+  <p>지금은 compose 내부 네트워크만이라 문제 없지만, 021은 박스 간 통신을 위해 Redis 6379·Influx 8086을 호스트 포트로 열고 보안그룹으로만 막습니다. 3대 모두 같은 퍼블릭 서브넷. 보안그룹 규칙 실수 한 번이면 인증 없는 Redis가 인터넷에 노출됩니다. 021 스펙도 "Redis 인증 없음"을 빚으로 적어 두었습니다. 멘토님이 물을 VPC 질문(프라이빗 서브넷·NAT)과 직결.</p>
+
+  <h3>6-3. 비트겟 마켓 목록을 매초 828KB 받는다</h3>
+  <p>비트겟 symbols REST 응답이 828KB인데 마켓 우주 갱신 루프가 매초 호출. 하루 약 70GB 수신. AWS 인바운드는 무료지만 매초 828KB JSON 파싱이 수집기 1코어를 갉아먹습니다. 09-07 바이낸스 exchangeInfo 17.5MB를 2.5MB로 줄인 것(커밋 3b27fc4, 매초 505ms → 88ms)과 같은 종류의 문제. ETag 조건부 요청 또는 주기 연장 필요.</p>
+
+  <h3>6-4. 수집기가 최적화 3건 뒤에도 1코어 93%</h3>
+  <p>uvicorn 워커 1개 + asyncio 루프 하나라 vCPU를 늘려도 소용없음. 거래소가 5곳(샤드 11개)이라 앞으로 거래소를 더 붙이면 다시 100%. 국내/해외 프로세스 분리가 근본 해결이지만 틱 루프가 두 메모리를 봐야 해서 큰 변경. 021의 c7g.medium 이동은 코어 속도(Graviton2 → 3) 효과인데 차이는 미측정.</p>
+
+  <h3>6-5. 배포 후 확인과 자동 롤백이 없다</h3>
+  <p>deploy.yml 성공 = SSH 명령이 exit 0으로 끝났다는 뜻. 컨테이너가 떴는지, /api/health가 200인지 안 봅니다. 021로 3타깃이 되면 한 박스 실패 시 뒤 박스는 돌지 않고 사람이 들어가 git reset 해야 합니다. 멘토님이 말한 "런칭 전 코드 프리징·테스트"(13:51)와 맞물려, 런칭 뒤에는 배포마다 사람이 브라우저를 열어 확인해야 하는 구조.</p>
+
+  <h3>6-6. 021 배포 중 수집이 3~5분 느려진다</h3>
+  <p>collect 박스가 1vCPU라 <code>docker compose up --build</code> 동안 이미지 빌드가 수집기와 코어를 나눠 씁니다. 표 1~2분 지연·틱 판정 stale 가능. 스펙이 "감수한다"고 적었지만 매 배포마다 데이터 품질이 흔들리는 것. CI에서 이미지를 빌드해 받아오거나(레지스트리) 빌드 전용 박스가 필요.</p>
+
+  <h3>6-7. 프로파일 측정 원본이 레포에 없다</h3>
+  <p>py-spy 비율(47%·22%)과 "틱 1초 초과 경고 291회 → 0회"는 커밋 본문·보고 자료에 결과 숫자만 있고, 측정 명령·프로파일 출력·측정 시각·접속자 수 조건이 남아 있지 않습니다. 다음에 CPU가 다시 오르면 같은 조건으로 비교할 기준이 없습니다. 멘토님이 강조한 "누가 CPU를 쓰는지 알아야 한다"를 재현 가능하게 하려면 측정 절차를 런북으로.</p>
+</section>
+
+<section id="s7">
+  <h2><span class="n">7</span>문서 간 불일치</h2>
+  <p class="sub">스펙·런북·제안서를 대조하면서 나온 것. 멘토님께 공유하는 자료에 틀린 사실이 들어가면 신뢰를 잃으니 먼저 고칠 것.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>어디</th><th>무엇</th><th>맞는 것</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">proposals/infra-meeting-2026-09-14.html</td><td>장애 표 "없는 경로 404 는 됨"</td><td>nginx try_files 때문에 모든 경로 200. 미착수가 맞음</td></tr>
+      <tr><td class="mono">proposals/infra-meeting-2026-09-14.html</td><td>코드 순서 표의 020(나머지 HTTP 이동)·021(리더 락)</td><td>실제 020=bitget, 021=infra-split. "나머지 HTTP 이동"과 "리더 락"은 스펙 번호가 없음</td></tr>
+      <tr><td class="mono">proposals/infra-mentor-2026-09-16.html</td><td>"docker logs marketlens-web-1"</td><td>compose container_name은 marketlens-web</td></tr>
+      <tr><td class="mono">specs/021-infra-split.md</td><td>비용 절 "서울 리전 원문 미확인, 10% 안팎 높다"</td><td>09-14 회의 자료가 서울 Price List CSV로 확인한 값(c7g.medium $29.8·t4g.small $15.2·t4g.micro $7.6)과 021의 $30·$15·$7이 일치. 미확인 문구 삭제 가능</td></tr>
+      <tr><td class="mono">specs/007-deploy.md</td><td>목적 절 "기존 marketlens-be·fe 가 운영 중이므로 공존한다"</td><td>같은 문서 규칙 절과 ec2-setup.md는 "2026-09-04 정지". 09-07 커밋이 공존 문구를 지웠다고 했으나 이 줄은 남음</td></tr>
+      <tr><td class="mono">specs/007-deploy.md</td><td>로그 규칙 "네 서비스 모두"</td><td>서비스 5개. 같은 문서 검증 절은 "다섯 컨테이너 모두"</td></tr>
+      <tr><td class="mono">context/status.md</td><td>머리 문단 "4거래소 스트림", "입출금 상태(3거래소 조회)"</td><td>5거래소</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s8">
+  <h2><span class="n">8</span>우선순위 제안</h2>
+  <p class="sub">"실제로 겪었거나 로그에 찍힌 것"을 먼저, "언젠가 필요한 것"을 뒤로. 판단은 팀이.</p>
+  <ol class="agenda">
+    <li><div class="q">nginx 404 + limit_req</div><div class="r">nginx.conf 두 블록 추가로 끝나는 작은 변경. 봇 스캔은 로그에 이미 찍혀 있고(13초 760회, .env 탐색), 멘토님이 두 번 반복한 지적. 021보다 먼저 해도 충돌 없음.</div></li>
+    <li><div class="q">IMDSv2 강제 확인</div><div class="r">서버에서 <code>aws ec2 describe-instances</code>로 HttpTokens 값 확인. optional이면 required로. 명령 한 줄이고 컨테이너 S3 업로드가 IMDSv2로 동작하는지만 확인하면 됨. 런북 두 곳의 명령도 같이 고침.</div></li>
+    <li><div class="q">CloudWatch 알람 3개 + SNS</div><div class="r">디스크 80%·CPU 90% 5분·인스턴스 상태 체크 실패. 디스크는 CloudWatch Agent가 있어야 보임. 09-12 장애 두 건이 다 "죽은 걸 나중에 알았다"였음.</div></li>
+    <li><div class="q">스펙 021 구현 + 이전</div><div class="r">DB 분리·수집 박스 고정 성능·조회 분리를 한 번에. 이때 compose mem_limit(6-1)과 Redis requirepass(6-2)를 같은 PR에 넣을지 결정. 문서 불일치(7장)는 이 PR의 문서 갱신에 끼워 정리.</div></li>
+    <li><div class="q">비트겟 symbols ETag 또는 주기 연장</div><div class="r">수집기 93%를 낮추는 가장 싼 방법. 프로파일로 비율 먼저 측정하고, 측정 절차를 런북으로 남김(6-7).</div></li>
+    <li><div class="q">부하 테스트 시나리오 + APM</div><div class="r">토요일 멘토님 스크립트와 맞추기. 시나리오는 대시보드 진입 → 스프레드 WebSocket 구독 → 기록 탭 7일 조회 → 이탈. Sentry 무료 플랜은 FastAPI 통합 한 줄.</div></li>
+  </ol>
+</section>
+
+</div>
+</body>
+</html>

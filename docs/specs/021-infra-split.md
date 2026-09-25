@@ -36,7 +36,7 @@ EC2 1대에 몰린 컨테이너 5개를 **역할별 EC2 3대**(수집 · 데이�
 | data | 6379·8086·22 |
 | serve | 80·22 |
 
-8000 은 serve 보안그룹에서만, 6379·8086 은 collect·serve 보안그룹에서만, 22 는 사람 IP 에서만, 80 은 전체. 아웃바운드는 전부 열어 둔다(거래소·S3·apt·Docker Hub).
+8000 은 serve 보안그룹에서만, 6379·8086 은 collect·serve 보안그룹에서만, 22 와 80 은 전체 — 22 는 배포 워크플로(GitHub Actions 러너, 동적 IP)가 붙어야 해서 좁힐 수 없고 키 인증만 받는다. 아웃바운드는 전부 열어 둔다(거래소·S3·apt·Docker Hub).
 
 ### 3.2 compose
 파일은 루트 `docker-compose.yml` 하나 그대로이고 서비스 5개·컨테이너 이름·이미지·로그 상한(`json-file` 50MB×3)·`restart: unless-stopped`·볼륨 이름(`influxdb-data`·`redis-data`, 프로젝트명 `marketlens`)도 그대로다. 바뀌는 것:

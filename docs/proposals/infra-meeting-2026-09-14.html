@@ -1,0 +1,447 @@
+<title>MarketLens 인프라 재구성</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F4F6F8; --surface:#FFFFFF; --surface-2:#EAEEF2; --line:#D5DBE2;
+  --ink:#18222E; --ink-2:#4A5764; --ink-3:#7B8794;
+  --accent:#245E8C; --accent-soft:#DCE9F4;
+  --ok:#2C7A57; --ok-soft:#DDF0E6; --warn:#A8690F; --warn-soft:#F7EBD3; --bad:#B03A3A; --bad-soft:#F6DEDE;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#10161C; --surface:#171E26; --surface-2:#1F2830; --line:#2E3942;
+    --ink:#E6EBF0; --ink-2:#AEB9C4; --ink-3:#7F8B97;
+    --accent:#7FB3E0; --accent-soft:#1E3247;
+    --ok:#6FCB9A; --ok-soft:#1B3328; --warn:#E2B15A; --warn-soft:#3A2E16; --bad:#E48A8A; --bad-soft:#3E2020;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10161C; --surface:#171E26; --surface-2:#1F2830; --line:#2E3942;
+  --ink:#E6EBF0; --ink-2:#AEB9C4; --ink-3:#7F8B97;
+  --accent:#7FB3E0; --accent-soft:#1E3247;
+  --ok:#6FCB9A; --ok-soft:#1B3328; --warn:#E2B15A; --warn-soft:#3A2E16; --bad:#E48A8A; --bad-soft:#3E2020;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.65;padding-inline:20px;padding-block:0 80px;-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+.wrap{max-width:880px;margin:0 auto}
+header.top{padding-block:44px 28px;border-bottom:1px solid var(--line)}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+h1{font-size:34px;line-height:1.2;font-weight:700;margin:10px 0 12px;letter-spacing:-.01em;text-wrap:balance}
+.lede{font-size:17px;color:var(--ink-2);max-width:64ch;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:18px;font-size:13px;color:var(--ink-3);font-family:var(--mono)}
+nav.toc{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);margin-inline:-20px;padding-inline:20px}
+nav.toc ol{list-style:none;margin:0 auto;padding:0;max-width:880px;display:flex;gap:2px;overflow-x:auto;font-size:13px}
+nav.toc a{display:block;padding:10px 12px;color:var(--ink-2);text-decoration:none;white-space:nowrap;border-bottom:2px solid transparent}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent);border-bottom-color:var(--accent);outline:none}
+nav.toc a b{font-family:var(--mono);font-weight:500;margin-right:6px;color:var(--ink-3)}
+section{padding-block:40px 8px;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:0}
+h2{font-size:24px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+h2 .n{font-family:var(--mono);font-weight:500;color:var(--ink-3);font-size:16px;margin-right:10px}
+.sub{color:var(--ink-2);margin:0 0 22px;max-width:64ch}
+h3{font-size:16px;font-weight:600;margin:28px 0 10px}
+p{max-width:68ch;margin:0 0 12px}
+ul{max-width:68ch;padding-left:20px;margin:0 0 14px}
+li{margin-bottom:4px}
+code{font-family:var(--mono);font-size:.9em;background:var(--surface-2);padding:1px 5px;border-radius:3px}
+.tbl{overflow-x:auto;margin:0 0 18px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:8px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{font-weight:600;color:var(--ink-2);font-size:12.5px;letter-spacing:.03em;background:var(--surface-2)}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.mono{font-family:var(--mono);font-size:13px;white-space:nowrap}
+.pill{display:inline-block;font-family:var(--mono);font-size:11.5px;padding:1px 8px;border-radius:999px;line-height:1.6;white-space:nowrap}
+.pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)} .pill.info{background:var(--accent-soft);color:var(--accent)} .pill.mute{background:var(--surface-2);color:var(--ink-2)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin:0 0 18px}
+.stat{background:var(--surface);padding:12px 14px}
+.stat .k{font-size:12px;color:var(--ink-3)}
+.stat .v{font-family:var(--mono);font-size:20px;font-weight:500;font-variant-numeric:tabular-nums;margin-top:2px}
+.stat .d{font-size:12px;color:var(--ink-2);margin-top:2px}
+.note{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;margin:0 0 16px;max-width:72ch}
+.note.warn{border-left-color:var(--warn)} .note.bad{border-left-color:var(--bad)}
+.note b{font-weight:600}
+figure{margin:0 0 20px;background:var(--surface);border:1px solid var(--line);padding:14px}
+figure svg{display:block;width:100%;height:auto;max-width:100%}
+figcaption{font-size:12.5px;color:var(--ink-3);margin-top:8px;font-family:var(--mono)}
+.svg-box{fill:var(--surface-2);stroke:var(--line)}
+.svg-box.hi{fill:var(--accent-soft);stroke:var(--accent)}
+.svg-t{fill:var(--ink);font-family:var(--sans);font-size:12.5px;font-weight:500}
+.svg-s{fill:var(--ink-3);font-family:var(--mono);font-size:10.5px}
+.svg-l{stroke:var(--ink-3);stroke-width:1.3;fill:none}
+.svg-l.hi{stroke:var(--accent)}
+.svg-lab{fill:var(--ink-2);font-family:var(--mono);font-size:10px}
+.svg-host{fill:none;stroke:var(--ink-3);stroke-dasharray:4 3}
+.agenda{list-style:none;padding:0;margin:0;max-width:none;counter-reset:ag}
+.agenda li{background:var(--surface);border:1px solid var(--line);padding:14px 16px 14px 52px;margin-bottom:10px;position:relative}
+.agenda li::before{counter-increment:ag;content:counter(ag);position:absolute;left:16px;top:13px;font-family:var(--mono);font-size:14px;color:var(--accent);font-weight:500}
+.agenda .q{font-weight:600;margin-bottom:4px}
+.agenda .r{color:var(--ink-2);font-size:14px}
+.agenda .r b{color:var(--ink);font-weight:600}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:640px){.two{grid-template-columns:1fr} h1{font-size:28px}}
+.small{font-size:13px;color:var(--ink-3)}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important}}
+html{scroll-behavior:smooth;scroll-padding-top:48px}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">MarketLens · 인프라 회의 자료</div>
+  <h1>서버 하나가 죽어도 수집은 이어지고, 조회는 응답한다</h1>
+  <p class="lede">지금 EC2 한 대에 다 얹혀 있는 구조를 어디까지 나눌지 결정하는 회의입니다. 이번 주에 조회 분리·WebSocket 푸시·스프레드 탭 분리·바이빗 추가가 들어갔고, 그 결과 수집기 CPU 가 1코어 100% 에 닿았습니다. 현재 상태, 바꾼 것, 겪은 장애, 제안 구조와 비용, 오늘 결정할 안건 순서입니다.</p>
+  <div class="meta"><span>2026-09-15</span><span>작성 진중</span><span>근거 docs/proposals/infra-ha.md · docs/context/architecture.md · 스펙 016~019 · 09-15 EC2 실측</span></div>
+</header>
+
+<nav class="toc"><ol>
+  <li><a href="#s1"><b>1</b>현재 구조</a></li>
+  <li><a href="#s2"><b>2</b>이번 주 변경</a></li>
+  <li><a href="#s3"><b>3</b>겪은 장애</a></li>
+  <li><a href="#s4"><b>4</b>제안 구조</a></li>
+  <li><a href="#s5"><b>5</b>비용</a></li>
+  <li><a href="#s6"><b>6</b>결정 안건</a></li>
+</ol></nav>
+
+<!-- ───────────── 1 ───────────── -->
+<section id="s1">
+  <h2><span class="n">1</span>현재 구조</h2>
+  <p class="sub">EC2 한 대(t4g.medium, 2vCPU 4GB, ARM) 위에 컨테이너 다섯 개. 인터넷에 열린 포트는 web 컨테이너의 80번 하나. 스프레드 탭은 api 컨테이너만 보고(018), 수집기는 거래소 4곳에 붙어 있습니다(019).</p>
+
+  <figure>
+    <svg viewBox="0 0 860 340" role="img" aria-label="현재 구조: EC2 한 대 안의 컨테이너 5개와 S3">
+      <rect x="340" y="20" width="350" height="300" class="svg-host" rx="4"/>
+      <text x="352" y="38" class="svg-s">EC2 t4g.medium · 컨테이너 5개</text>
+      <!-- internet -->
+      <rect x="10" y="140" width="110" height="46" class="svg-box" rx="3"/>
+      <text x="65" y="160" text-anchor="middle" class="svg-t">인터넷</text>
+      <text x="65" y="176" text-anchor="middle" class="svg-s">브라우저</text>
+      <!-- web -->
+      <rect x="150" y="140" width="120" height="46" class="svg-box hi" rx="3"/>
+      <text x="210" y="160" text-anchor="middle" class="svg-t">web (nginx)</text>
+      <text x="210" y="176" text-anchor="middle" class="svg-s">:80 · 정적 + 프록시</text>
+      <line x1="120" y1="163" x2="150" y2="163" class="svg-l hi"/>
+      <!-- server (top) -->
+      <rect x="360" y="50" width="160" height="46" class="svg-box hi" rx="3"/>
+      <text x="440" y="70" text-anchor="middle" class="svg-t">server (collector)</text>
+      <text x="440" y="86" text-anchor="middle" class="svg-s">4거래소 WS · 틱 · 김프 계산</text>
+      <!-- redis (middle) -->
+      <rect x="380" y="150" width="120" height="46" class="svg-box" rx="3"/>
+      <text x="440" y="170" text-anchor="middle" class="svg-t">redis</text>
+      <text x="440" y="186" text-anchor="middle" class="svg-s">틱 버퍼 · spreads 채널</text>
+      <!-- api (bottom) -->
+      <rect x="360" y="250" width="160" height="46" class="svg-box hi" rx="3"/>
+      <text x="440" y="270" text-anchor="middle" class="svg-t">api (ROLE=api)</text>
+      <text x="440" y="286" text-anchor="middle" class="svg-s">/history/* · /ws/spreads · /spreads</text>
+      <!-- web -> server -->
+      <path d="M270 152 L320 152 L320 73 L360 73" class="svg-l"/>
+      <text x="314" y="108" text-anchor="end" class="svg-lab">수집 상태 탭 · 사건 표</text>
+      <text x="314" y="120" text-anchor="end" class="svg-lab">/health/collect · /history/events</text>
+      <!-- web -> api -->
+      <path d="M270 174 L320 174 L320 273 L360 273" class="svg-l hi"/>
+      <text x="314" y="206" text-anchor="end" class="svg-lab">차트 · 스프레드 표</text>
+      <text x="314" y="218" text-anchor="end" class="svg-lab">/history/candles · /ws/spreads · /spreads</text>
+      <!-- server <-> redis -->
+      <line x1="425" y1="96" x2="425" y2="150" class="svg-l"/>
+      <text x="418" y="126" text-anchor="end" class="svg-lab">틱 스트림 (009)</text>
+      <line x1="470" y1="96" x2="470" y2="150" class="svg-l hi"/>
+      <text x="478" y="126" class="svg-lab">PUBLISH spreads · latest · want 읽기 (017)</text>
+      <!-- api <-> redis -->
+      <line x1="470" y1="196" x2="470" y2="250" class="svg-l hi"/>
+      <text x="478" y="228" class="svg-lab">SUBSCRIBE · latest 읽기 · want 쓰기 (017·018)</text>
+      <!-- influx -->
+      <rect x="560" y="150" width="120" height="46" class="svg-box" rx="3"/>
+      <text x="620" y="170" text-anchor="middle" class="svg-t">influxdb 2.7</text>
+      <text x="620" y="186" text-anchor="middle" class="svg-s">봉 · 사건 · 실패구간</text>
+      <path d="M520 88 L540 88 L540 165 L560 165" class="svg-l"/>
+      <path d="M520 258 L540 258 L540 181 L560 181" class="svg-l hi"/>
+      <text x="620" y="212" text-anchor="middle" class="svg-lab">server 쓰기 · api 읽기만 (016)</text>
+      <!-- s3 outside host -->
+      <rect x="730" y="50" width="110" height="46" class="svg-box" rx="3"/>
+      <text x="785" y="70" text-anchor="middle" class="svg-t">S3</text>
+      <text x="785" y="86" text-anchor="middle" class="svg-s">raw/ 원문 (010)</text>
+      <line x1="520" y1="62" x2="730" y2="62" class="svg-l"/>
+    </svg>
+    <figcaption>강조된 선 = 016~018 에서 생긴 경로. 수집기와 api 는 직접 연결이 없고 사이의 Redis(spreads 채널·latest·want 키)로만 통신한다. web→server 선은 아직 수집기가 답하는 두 요청(수집 상태 탭·사건 표). 수집기 밖으로는 업비트·빗썸·바이낸스 3샤드·바이빗 3샤드 WebSocket 이 나간다. InfluxDB·Redis 포트는 호스트에 열지 않음.</figcaption>
+  </figure>
+
+  <div class="tbl"><table>
+    <tr><th>컨테이너</th><th>하는 일</th><th>상태를 가지나</th></tr>
+    <tr><td class="mono">web</td><td>Vite 빌드 정적 파일 + nginx 프록시. 경로로 server / api 분기</td><td>없음</td></tr>
+    <tr><td class="mono">server</td><td>업비트·빗썸·바이낸스·바이빗 WebSocket 수집, 1초 틱, 김프·슬리피지 계산, 표를 Redis 에 게시, Influx·S3 쓰기. 남은 HTTP 는 <code>/health</code> <code>/health/collect</code> <code>/history/events</code> <code>/refresh</code></td><td><b>메모리(LiveStore)</b> — 워커 1개 강제</td></tr>
+    <tr><td class="mono">api</td><td>같은 이미지, <code>ROLE=api</code>. Influx 조회 4경로 + <code>/ws/spreads</code> 브로드캐스트 + <code>GET /spreads</code>(Redis 키 그대로 반환, 018)</td><td>없음 (Redis 구독·키 읽기만)</td></tr>
+    <tr><td class="mono">influxdb</td><td>1분봉 사슬 롤업, 김프 사건, 수집 실패 구간</td><td>디스크 (EBS)</td></tr>
+    <tr><td class="mono">redis</td><td>틱 24h 버퍼(60초마다 Influx 로 flush), <code>spreads</code> 채널·<code>spreads:latest</code>(TTL 10초)·<code>spreads:want</code>(TTL 15초)</td><td>메모리</td></tr>
+  </table></div>
+
+  <h3>배포 파이프라인</h3>
+  <ul>
+    <li><b>PR CI</b> (<code>ci.yml</code>): server <code>ruff</code>·<code>pytest</code>, web <code>lint</code>·<code>build</code>. 문서만 바뀐 PR 도 전부 돕니다.</li>
+    <li><b>main push</b> (<code>deploy.yml</code>): EC2 에 SSH → <code>docker compose up -d --build</code>. 배포 가드가 EC2 <code>.env</code> 의 <code>INFLUX_TOKEN</code>·<code>S3_BUCKET</code> 존재만 확인.</li>
+    <li>워크플로 성공 = "EC2 에서 명령이 끝났다"는 뜻. <b>외부 URL 확인·자동 롤백은 없습니다.</b></li>
+  </ul>
+
+  <h3>오늘 실측 (09-15 01:31 KST, docker stats 4회 · 접속자 0~1명 · 바이빗 포함)</h3>
+  <div class="stats">
+    <div class="stat"><div class="k">server CPU</div><div class="v">85~100%</div><div class="d">1코어 기준. 바이빗 전(09-14) 50~76%</div></div>
+    <div class="stat"><div class="k">server 메모리</div><div class="v">229~262 MB</div><div class="d">호스트 가용 1,895MB</div></div>
+    <div class="stat"><div class="k">api CPU / 메모리</div><div class="v">0.2~5.1% · 75 MB</div><div class="d">curl·WS 접속 시 순간 5%</div></div>
+    <div class="stat"><div class="k">influxdb 메모리</div><div class="v">524 MB</div><div class="d">CPU 0.15%</div></div>
+    <div class="stat"><div class="k">스프레드 표</div><div class="v">943 행</div><div class="d">바이낸스+바이빗. 3거래소 때 488</div></div>
+  </div>
+  <div class="note bad"><b>수집기가 1코어를 다 씁니다.</b> 수집 프로세스는 asyncio 단일 워커라 코어를 하나만 쓰는데, 바이빗 추가 뒤 그 코어가 85~100% 입니다. 이 상태면 거래소 메시지 처리가 밀리고 틱이 늦어질 수 있습니다(아직 경고 로그는 0건). t4g.medium 은 버스터블(기준 20%)이라 크레딧이 마르고 Unlimited 초과 과금으로 버티는 중입니다. 6장 안건 4.</div>
+  <div class="note warn"><b>EC2 <code>.env</code> 에 바이빗 키가 없습니다.</b> 1분마다 "BYBIT_API_KEY / BYBIT_SECRET_KEY 가 비어 있습니다" 경고가 찍히고, 바이빗 코인의 입출금 상태는 전부 unknown 입니다. 사람이 키를 넣어야 합니다.</div>
+</section>
+
+<!-- ───────────── 2 ───────────── -->
+<section id="s2">
+  <h2><span class="n">2</span>이번 주 변경 — 016 · 017 · 018 · 019</h2>
+  <p class="sub">016·017 은 09-13 멘토 지적(폴링 매초 56KB, 백그라운드 탭 폴링, 수집과 조회가 한 프로세스)에 대한 답. 018 은 스프레드 탭 완전 분리, 019 는 해외 거래소 추가. 넷 다 09-14 머지·EC2 배포 완료.</p>
+
+  <div class="two">
+    <div>
+      <h3>016 process-split <span class="pill ok">DONE · PR #37</span></h3>
+      <ul>
+        <li>같은 이미지에 <code>ROLE=collector|api</code>. api 는 Influx 만 붙고 거래소·S3·틱 루프 없음.</li>
+        <li>nginx 가 <code>/api/history/{premium,streaks,candles}</code> 만 api 로. 나머지는 server.</li>
+        <li>무거운 Influx 조회가 수집 프로세스를 막지 못하게 됨. (streaks 7일 조회가 지금 14.8초 — 3장 참고)</li>
+        <li>실측: api 로그에 거래소·S3 오염 0줄. server CPU 는 분리 전과 같음 = 수집 부하는 그대로.</li>
+        <li>수집기에 남은 HTTP 는 <code>/health/collect</code>·<code>/history/events</code>·<code>/refresh</code>. 메모리에만 있는 상태라서. 020 이 뗀다.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>017 spreads-push <span class="pill ok">DONE · PR #38</span></h3>
+      <ul>
+        <li>FE 1초 폴링 → <code>/ws/spreads</code> 구독. 체결 규모 <b>$1,000 고정</b>(세그먼트·URL <code>n</code> 삭제).</li>
+        <li>server 는 <b>누가 볼 때만</b>(Redis <code>spreads:want</code>) 표를 만들어 채널에 게시. api 가 구독해 바뀐 행만 접속자 전원에 같은 바이트로.</li>
+        <li>하트비트 1초, 재연결 백오프 1→30초. 폴링 fallback 은 018 에서 삭제.</li>
+        <li>실측: 접속 0명이면 표 생성 중단 확인. 20초 구독 = snapshot 1 · delta 17 · heartbeat 9.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="two">
+    <div>
+      <h3>018 spreads-serve <span class="pill ok">DONE · PR #40</span></h3>
+      <ul>
+        <li><code>GET /spreads</code> 를 두 역할 모두 Redis <code>spreads:latest</code> 그대로 반환. 메모리를 읽지 않음. <code>notional</code> 쿼리는 400.</li>
+        <li>nginx <code>/api/spreads</code> → api. <b>스프레드 탭이 보는 컨테이너는 api 하나.</b></li>
+        <li>FE 폴링 fallback 삭제(09-15 결정). WebSocket 막히면 재연결만 반복. Redis 죽으면 표 갱신 멈춤 — 우회 경로 없음, 답은 Redis 가용성(4장).</li>
+        <li>실측: server 로그 <code>GET /spreads</code> 0건, api 에만 기록. Redis 채널 구독자 2(api + server 자기 허브).</li>
+      </ul>
+    </div>
+    <div>
+      <h3>019 bybit <span class="pill ok">DONE · PR #39</span></h3>
+      <ul>
+        <li>바이빗 USDT 현물. WebSocket 3샤드(orderbook.200 스냅샷+델타, publicTrade), 심볼 목록 REST 매초, 입출금 60초.</li>
+        <li>우주 = 국내 ∩ (바이낸스 ∪ 바이빗). 표 488행 → <b>943행</b>. compose·nginx 변경 없음, Influx 태그 <code>fx=bybit</code> 로 카디널리티 약 2배.</li>
+        <li><b>인프라 영향:</b> 수집기 아웃바운드 WSS +3, 매초 REST +1. server CPU 50~76% → <b>85~100%</b>. EC2 실측은 스펙에 미기록(1장 수치가 첫 측정).</li>
+        <li>바이빗 orderbook.200 은 메시지마다 200단계 정렬 — CPU 증가의 유력 원인, 미확인.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="tbl"><table>
+    <tr><th>접속자 1명당 서버 송출 (488행 기준 실측)</th><th class="num">폴링 (이전)</th><th class="num">푸시 (지금)</th><th>비고</th></tr>
+    <tr><td>첫 화면</td><td class="num">244 KB / 초</td><td class="num">243 KB × 1회</td><td>snapshot 488행</td></tr>
+    <tr><td>이후 매초 (원문 크기)</td><td class="num">244 KB</td><td class="num">54~131 KB</td><td>바뀐 행 108~264개. 호가 기반 슬리피지라 절반 가까이 매초 바뀜</td></tr>
+    <tr><td>서버 CPU</td><td>접속자 수 × (파싱+직렬화+gzip)</td><td>직렬화 1회, 전원 같은 바이트</td><td>접속자 비례 → 상수</td></tr>
+    <tr><td>백그라운드 탭</td><td>계속 폴링</td><td>탭 벗어나면 구독 해제</td><td></td></tr>
+    <tr><td>943행(바이빗 후)</td><td class="num">—</td><td class="num">미실측</td><td>행 수 약 2배라 snapshot·delta 도 약 2배로 추정</td></tr>
+  </table></div>
+  <div class="note"><b>제안서 수치 정정.</b> 제안서는 변경분 전송을 "수 KB/s" 로 적었는데 실측 원문은 54~131KB/s(488행)입니다. permessage-deflate 협상은 확인됐지만 압축 후 크기는 아직 안 쟀고, 943행 기준 재실측도 필요합니다. 트래픽 절감 폭은 기대보다 작고, CPU 상수화 효과는 그대로입니다.</div>
+</section>
+
+<!-- ───────────── 3 ───────────── -->
+<section id="s3">
+  <h2><span class="n">3</span>실제로 겪은 장애</h2>
+  <p class="sub">전부 한 대에 있어서 생긴 문제입니다. 인프라로 푸는 것과 코드로 푸는 것을 구분했습니다.</p>
+  <div class="tbl"><table>
+    <tr><th>언제</th><th>무슨 일</th><th>원인</th><th>대응</th><th>상태</th></tr>
+    <tr><td class="mono">09-12</td><td>디스크 풀 → Influx 쓰기 거부</td><td>회전 없는 컨테이너 로그</td><td>compose 로그 50MB×3 회전 적용. CloudWatch 디스크 80% 알람은 아직</td><td><span class="pill warn">부분</span></td></tr>
+    <tr><td class="mono">09-12</td><td>CPU 100%</td><td>파싱+조회+DB 가 한 박스, T계열 크레딧</td><td>016 으로 조회 분리. 박스 분리·M/C 계열은 4장</td><td><span class="pill warn">부분</span></td></tr>
+    <tr><td class="mono">09-15</td><td>수집기 1코어 85~100% (바이빗 추가 직후)</td><td>거래소 4곳 + orderbook.200 정렬 추정, 단일 워커</td><td>원인 프로파일 → 바이빗 호가 깊이 축소 또는 수집기 박스 분리. 안건 4</td><td><span class="pill bad">미해결</span></td></tr>
+    <tr><td class="mono">—</td><td>InfluxDB OOM 재시작</td><td>상한 없는 전 구간 조회</td><td><code>/history</code> 조회 창 상한 (코드, 022 예정)</td><td><span class="pill bad">미해결</span></td></tr>
+    <tr><td class="mono">09-14</td><td><code>/history/streaks</code> 7일 창 14.8초 (09-07 약 2초)</td><td>데이터 누적 또는 api 컨테이너 자원 — 미확인</td><td>위와 같은 조회 상한 스펙에서 같이</td><td><span class="pill bad">미해결</span></td></tr>
+    <tr><td class="mono">상시</td><td>봇 경로 스캔 (로그)</td><td>80 공개</td><td>없는 경로 404 는 됨. nginx rate limit·SSM 전환은 아직</td><td><span class="pill warn">부분</span></td></tr>
+    <tr><td class="mono">상시</td><td>죽어도 아무도 모름</td><td>알람 없음</td><td>CloudWatch → SNS, 하트비트, Sentry (023 예정)</td><td><span class="pill bad">미해결</span></td></tr>
+  </table></div>
+  <div class="note"><b>Redis 단일 경로 (09-15 결정됨).</b> 018 에서 폴링 fallback 을 없앴으므로 Redis 가 죽으면 스프레드 표 갱신이 멈추고 화면은 직전 표를 흐리게 유지합니다. 수집기 메모리에 표가 있어도 꺼내는 길을 두지 않기로 했습니다. 이 결정의 짝은 4장의 Redis Multi-AZ 입니다 — 안건 1 이 "Redis 를 뺀다" 로 가면 이 결정도 되돌려야 합니다.</div>
+</section>
+
+<!-- ───────────── 4 ───────────── -->
+<section id="s4">
+  <h2><span class="n">4</span>제안 구조 (확장 시)</h2>
+  <p class="sub">멘토 요구 기준의 최종 모습. 목표는 두 가지 — 어느 한 대가 죽어도 수집이 끊기지 않고 조회가 응답할 것, 사용자가 몰리면 API 만 늘려서 받을 것. <b>사용자 10명 이내인 지금 당장 쓸 구성은 5장</b>이고, 이 장은 그 다음 단계입니다.</p>
+
+  <figure>
+    <svg viewBox="0 0 860 320" role="img" aria-label="제안 구조: LB, API 2대, 파싱 2대, DB, Redis, S3">
+      <rect x="10" y="130" width="90" height="46" class="svg-box" rx="3"/>
+      <text x="55" y="150" text-anchor="middle" class="svg-t">인터넷</text>
+      <text x="55" y="166" text-anchor="middle" class="svg-s">브라우저</text>
+      <rect x="140" y="130" width="90" height="46" class="svg-box" rx="3"/>
+      <text x="185" y="150" text-anchor="middle" class="svg-t">ALB</text>
+      <text x="185" y="166" text-anchor="middle" class="svg-s">헬스체크 · WS</text>
+      <line x1="100" y1="153" x2="140" y2="153" class="svg-l"/>
+      <!-- API x2 -->
+      <rect x="280" y="70" width="140" height="46" class="svg-box hi" rx="3"/>
+      <text x="350" y="90" text-anchor="middle" class="svg-t">API #1 · AZ-a</text>
+      <text x="350" y="106" text-anchor="middle" class="svg-s">c7g.large · 상태 없음</text>
+      <rect x="280" y="190" width="140" height="46" class="svg-box hi" rx="3"/>
+      <text x="350" y="210" text-anchor="middle" class="svg-t">API #2 · AZ-c</text>
+      <text x="350" y="226" text-anchor="middle" class="svg-s">ASG min 2</text>
+      <path d="M230 146 L255 146 L255 93 L280 93" class="svg-l"/>
+      <path d="M230 160 L255 160 L255 213 L280 213" class="svg-l"/>
+      <!-- Redis -->
+      <rect x="480" y="130" width="130" height="46" class="svg-box hi" rx="3"/>
+      <text x="545" y="150" text-anchor="middle" class="svg-t">Redis (Multi-AZ)</text>
+      <text x="545" y="166" text-anchor="middle" class="svg-s">최신 상태 · 틱 버퍼 · 리더 락</text>
+      <path d="M420 93 L450 93 L450 146 L480 146" class="svg-l hi"/>
+      <path d="M420 213 L450 213 L450 160 L480 160" class="svg-l hi"/>
+      <text x="428" y="128" class="svg-lab">읽기</text>
+      <!-- Parser x2 -->
+      <rect x="680" y="40" width="150" height="46" class="svg-box hi" rx="3"/>
+      <text x="755" y="60" text-anchor="middle" class="svg-t">파싱 #1 · 리더</text>
+      <text x="755" y="76" text-anchor="middle" class="svg-s">c7g.large · EIP</text>
+      <rect x="680" y="110" width="150" height="46" class="svg-box" rx="3"/>
+      <text x="755" y="130" text-anchor="middle" class="svg-t">파싱 #2 · 스탠바이</text>
+      <text x="755" y="146" text-anchor="middle" class="svg-s">WS 는 물고, 쓰기만 안 함</text>
+      <path d="M680 63 L645 63 L645 146 L610 146" class="svg-l hi"/>
+      <path d="M680 133 L660 133 L660 153 L610 153" class="svg-l"/>
+      <text x="690" y="102" class="svg-lab">리더 락 SET NX PX 5000</text>
+      <!-- Influx -->
+      <rect x="480" y="240" width="130" height="46" class="svg-box" rx="3"/>
+      <text x="545" y="260" text-anchor="middle" class="svg-t">InfluxDB · 1대</text>
+      <text x="545" y="276" text-anchor="middle" class="svg-s">r7g.large · EBS · 일 스냅샷</text>
+      <line x1="545" y1="176" x2="545" y2="240" class="svg-l"/>
+      <text x="552" y="212" class="svg-lab">60초 flush</text>
+      <path d="M420 106 L440 106 L440 263 L480 263" class="svg-l"/>
+      <path d="M420 226 L440 226" class="svg-l"/>
+      <text x="404" y="290" class="svg-lab">/history 읽기</text>
+      <!-- S3 -->
+      <rect x="680" y="240" width="150" height="46" class="svg-box" rx="3"/>
+      <text x="755" y="260" text-anchor="middle" class="svg-t">S3 raw/</text>
+      <text x="755" y="276" text-anchor="middle" class="svg-s">lifecycle 설정 필요</text>
+      <path d="M755 86 L755 100 L840 100 L840 263 L830 263" class="svg-l"/>
+      <text x="720" y="200" class="svg-lab">거래소 → 파싱 둘 다 WS 연결</text>
+    </svg>
+    <figcaption>강조된 선 = 리더만 쓴다. 파싱 #2 는 리더 락이 풀리면 5초 안에 쓰기를 이어받는다.</figcaption>
+  </figure>
+
+  <div class="tbl"><table>
+    <tr><th>서버</th><th>대수</th><th>결정</th><th>왜</th></tr>
+    <tr><td>API</td><td class="num">2+</td><td>ALB + ASG(min 2), 두 AZ. c7g.large — <b>10명 이내면 t4g.small 1대(5장)</b></td><td>상태 없는 프로세스라 늘리기 쉬움. 스프레드 탭은 이미 api 만 봄(018). 수집 상태 탭·사건 표까지 옮기면(020) 수집기에서 HTTP 가 사라짐</td></tr>
+    <tr><td>파싱</td><td class="num">2</td><td>핫 스탠바이 + Redis 리더 락. c7g.large ×2, 각자 EIP</td><td>둘 다 쓰면 <code>premium_event</code>·<code>collect_fail</code> 이 시작 시각 키라 ±1초 중복. dedupe 보다 락 한 줄이 쌈. 파싱 앞 LB 불필요(멘토). <b>단 바이빗 후 1코어 100% 라 c7g.large 도 코어 하나가 한계</b> — 단일 워커라 vCPU 수보다 코어 속도가 관건(t4g=Graviton2, c7g=Graviton3, 차이는 미측정)</td></tr>
+    <tr><td>DB</td><td class="num">1</td><td>InfluxDB OSS 1대 + EBS + 일 스냅샷. r7g.large(16GB)</td><td>OSS 는 복제 불가. 죽으면 조회만 멈추고 수집은 Redis 24h 버퍼로 무손실. OOM 본질은 조회 상한</td></tr>
+    <tr><td>Redis</td><td class="num">1</td><td>ElastiCache Multi-AZ, cache.t4g.medium — <b>10명 이내면 수집 박스 컨테이너(5장)</b></td><td>용도 3개: 틱 버퍼(현행) · API 가 읽는 최신 상태 · 리더 락. 6장 안건</td></tr>
+    <tr><td>S3</td><td class="num">1</td><td>현행 유지</td><td>lifecycle 미설정만 정리</td></tr>
+  </table></div>
+
+  <h3>문제 → 해결 → 남는 공백</h3>
+  <div class="tbl"><table>
+    <tr><th>문제</th><th>해결</th><th class="num">남는 공백</th></tr>
+    <tr><td>파싱 1대 죽음</td><td>파싱 2대 + 리더 락</td><td class="num">≤ 5초</td></tr>
+    <tr><td>API 1대 죽음</td><td>ALB 헬스체크 제외, ASG 교체</td><td class="num">0</td></tr>
+    <tr><td>사용자 몰림</td><td>푸시로 접속자 비례 CPU 제거(017 완료), 부족하면 ASG</td><td class="num">스케일아웃 2~3분</td></tr>
+    <tr><td>DB 죽음</td><td>Redis 24h 버퍼 + 스냅샷 복원</td><td class="num">조회만 10~30분</td></tr>
+    <tr><td>Redis 죽음</td><td>Multi-AZ 자동 페일오버, 파싱기는 로컬 버퍼</td><td class="num">~1분</td></tr>
+    <tr><td>DB OOM · 디스크 풀 · 무알람</td><td>조회 상한(코드 022) · 로그 회전(완료) + 디스크 알람 · CloudWatch/SNS/Sentry(023)</td><td class="num">—</td></tr>
+  </table></div>
+
+  <h3>인프라만으로 안 되는 것 — 코드 변경 순서</h3>
+  <div class="tbl"><table>
+    <tr><th>순서</th><th>내용</th><th>풀리는 것</th><th>상태</th></tr>
+    <tr><td class="mono">016</td><td><code>ROLE</code> 분기</td><td>API·파싱 분리</td><td><span class="pill ok">DONE</span></td></tr>
+    <tr><td class="mono">017</td><td>폴링 → WebSocket 푸시</td><td>접속자 비례 CPU</td><td><span class="pill ok">DONE</span></td></tr>
+    <tr><td class="mono">018</td><td>spreads-serve — <code>GET /spreads</code> 를 api 가 Redis 에서 답하고 nginx <code>/api/spreads</code> 를 api 로, FE fallback 삭제</td><td>스프레드 탭이 보는 컨테이너 = api 하나</td><td><span class="pill ok">DONE</span></td></tr>
+    <tr><td class="mono">019</td><td>bybit — 해외 거래소 추가(인프라 스펙 아님, 번호만 차지)</td><td>—</td><td><span class="pill ok">DONE</span></td></tr>
+    <tr><td class="mono">020</td><td>스트림 상태·실패 구간·사건을 Redis 에 쓰고 나머지 HTTP(<code>/health/collect</code>·<code>/history/events</code>)도 api 로</td><td>수집기에서 HTTP 제거 → API 2대</td><td><span class="pill mute">TODO</span></td></tr>
+    <tr><td class="mono">021</td><td>파싱 리더 락 + 쓰기 게이트 + Redis 단절 시 로컬 버퍼</td><td>파싱 2대</td><td><span class="pill mute">TODO</span></td></tr>
+    <tr><td class="mono">022</td><td><code>/history</code> 조회 창 상한</td><td>DB OOM · streaks 14.8초</td><td><span class="pill mute">TODO</span></td></tr>
+    <tr><td class="mono">023</td><td>하트비트 + Sentry + <code>/health</code> 외부 체크</td><td>알람</td><td><span class="pill mute">TODO</span></td></tr>
+  </table></div>
+  <p class="small">제안서 초안의 가번호(017=Redis 읽기, 022=푸시)는 실제 머지 순서와 어긋나 위 표로 다시 매겼습니다. 020 이후는 스펙 미작성. 순서 자체는 6장 안건입니다.</p>
+</section>
+
+<!-- ───────────── 5 ───────────── -->
+<section id="s5">
+  <h2><span class="n">5</span>비용 — 사용자 10명 이내 기준</h2>
+  <p class="sub">전제: 동시 접속 10명 이내, 수집 서버는 t4g.medium 고정. 요금은 AWS 가격표 CSV(ap-northeast-2, Linux 온디맨드, 09-15 조회)와 AWS 문서의 T4g 크레딧 표 기준, 월 730시간.</p>
+
+  <h3>지금 쓸 구성 — 박스 2대</h3>
+  <div class="tbl"><table>
+    <tr><th>박스</th><th>타입</th><th>올리는 것</th><th class="num">시간당</th><th class="num">월</th><th>근거</th></tr>
+    <tr><td>수집</td><td class="mono">t4g.medium (2vCPU 4GB)</td><td>server(수집기) · redis</td><td class="num">$0.0416</td><td class="num">$30</td><td>고정 전제. 수집기 1코어 85~100% = 인스턴스 평균 약 45~50% &gt; 기준 20% → Unlimited 초과분 별도(아래)</td></tr>
+    <tr><td>수집 초과 크레딧</td><td class="mono">$0.04 / vCPU·h</td><td></td><td class="num"></td><td class="num">≈ $18</td><td>(50% − 20%) × 2vCPU = 0.6 vCPU·h/h × 730h. CPU 가 더 내려가면 줄고, 두 코어 다 쓰면 최대 $58</td></tr>
+    <tr><td>조회</td><td class="mono">t4g.small (2vCPU 2GB)</td><td>api · web(nginx) · influxdb</td><td class="num">$0.0208</td><td class="num">$15</td><td>api 실측 75MB·CPU 0.2~5%(1명). Influx 524MB. 10명이어도 기준 20% 안. OOM 나면 t4g.medium($30)</td></tr>
+    <tr><td>디스크</td><td class="mono">EBS gp3 30GB × 2</td><td></td><td class="num"></td><td class="num">≈ $6 <span class="pill warn">미검증</span></td><td>서울 gp3 단가 미확인(미국 동부 $0.08/GB·월 기준 추정)</td></tr>
+    <tr><td>공인 IP</td><td class="mono">IPv4 × 2</td><td></td><td class="num">$0.005</td><td class="num">≈ $7 <span class="pill warn">미검증</span></td><td>2024-02 부터 공인 IPv4 과금. 조회 박스만 공인 IP 를 두고 수집 박스는 NAT 없이 아웃바운드만이면 1개로 줄일 수 있는지 확인 필요</td></tr>
+    <tr><td>Redis</td><td class="mono">컨테이너</td><td>수집 박스 안</td><td class="num"></td><td class="num">$0</td><td>실측 메모리 10MB. ElastiCache 최소(cache.t4g.micro 0.5GB)가 월 $17.5 — 조회 박스 한 대보다 비쌈</td></tr>
+    <tr><th colspan="4">합계</th><th class="num">≈ $76 / 월</th><th>환율 1,500원 기준 약 11만원. 지금(1대, 약 $48)보다 +$28</th></tr>
+  </table></div>
+
+  <div class="note"><b>왜 이렇게 나누나.</b> 실제로 겪은 장애 둘(DB OOM, 조회 CPU 100%)은 전부 "조회가 수집을 죽인" 사고입니다. 그래서 경계를 <b>수집 박스 vs 조회 박스</b>로 긋습니다. 조회 박스가 죽으면 화면만 멈추고 수집은 이어지며 Redis 가 틱을 24시간 버퍼합니다. 수집 박스가 죽으면 어차피 표가 없습니다 — 둘을 더 나눠도 이 규모에선 얻는 게 없습니다. Influx 를 조회 박스에 두는 이유도 같습니다: 무거운 조회가 수집 박스 크레딧을 태우지 않게.</div>
+
+  <div class="stats">
+    <div class="stat"><div class="k">지금 (1대)</div><div class="v">≈ $48</div><div class="d">t4g.medium $30 + 초과 크레딧 추정 $18</div></div>
+    <div class="stat"><div class="k">10명 플랜 (2대)</div><div class="v">≈ $76</div><div class="d">+$28. 조회 박스가 수집을 못 건드림</div></div>
+    <div class="stat"><div class="k">확장 시 (HA 제안)</div><div class="v">≈ $480</div><div class="d">API 2대+LB · 파싱 2대 · r7g DB · ElastiCache</div></div>
+  </div>
+
+  <h3>싸게 가는 변형과 그 대가</h3>
+  <div class="tbl"><table>
+    <tr><th>변형</th><th class="num">월</th><th>대가</th></tr>
+    <tr><td>조회 박스를 t4g.micro(1GB)로, Influx 는 수집 박스에 남김</td><td class="num">≈ $62</td><td>조회 CPU·OOM 이 다시 수집 박스로 — 09-12 사고 재현 가능. 안 권함</td></tr>
+    <tr><td>지금처럼 1대 유지 + 바이빗 호가 깊이 축소로 CPU 만 낮춤</td><td class="num">≈ $35~48</td><td>초과 크레딧만 줄어듦. 조회와 수집이 한 박스인 구조는 그대로</td></tr>
+    <tr><td>수집 박스를 c7g.large 로</td><td class="num">≈ $88</td><td>수집 $60(초과 없음, Graviton3 코어) — t4g.medium 실효 $48 과 $12 차이. 코어당 성능 차이는 미측정</td></tr>
+  </table></div>
+
+  <h3>단가표 (서울, 온디맨드, 09-15 확인)</h3>
+  <div class="tbl"><table>
+    <tr><th>타입</th><th class="num">vCPU</th><th class="num">메모리</th><th class="num">기준 CPU</th><th class="num">시간당</th><th class="num">월</th></tr>
+    <tr><td class="mono">t4g.nano</td><td class="num">2</td><td class="num">0.5 GB</td><td class="num">5%</td><td class="num">$0.0052</td><td class="num">$3.8</td></tr>
+    <tr><td class="mono">t4g.micro</td><td class="num">2</td><td class="num">1 GB</td><td class="num">10%</td><td class="num">$0.0104</td><td class="num">$7.6</td></tr>
+    <tr><td class="mono">t4g.small</td><td class="num">2</td><td class="num">2 GB</td><td class="num">20%</td><td class="num">$0.0208</td><td class="num">$15.2</td></tr>
+    <tr><td class="mono">t4g.medium</td><td class="num">2</td><td class="num">4 GB</td><td class="num">20%</td><td class="num">$0.0416</td><td class="num">$30.4</td></tr>
+    <tr><td class="mono">c7g.medium</td><td class="num">1</td><td class="num">2 GB</td><td class="num">—</td><td class="num">$0.0408</td><td class="num">$29.8</td></tr>
+    <tr><td class="mono">c7g.large</td><td class="num">2</td><td class="num">4 GB</td><td class="num">—</td><td class="num">$0.0816</td><td class="num">$59.6</td></tr>
+    <tr><td class="mono">cache.t4g.micro (ElastiCache)</td><td class="num">2</td><td class="num">0.5 GB</td><td class="num">—</td><td class="num">$0.024</td><td class="num">$17.5</td></tr>
+    <tr><td class="mono">cache.t4g.small (ElastiCache)</td><td class="num">2</td><td class="num">1.37 GB</td><td class="num">—</td><td class="num">$0.047</td><td class="num">$34.3</td></tr>
+    <tr><td>T4g Unlimited 초과 크레딧</td><td></td><td></td><td></td><td class="num">$0.04 / vCPU·h</td><td></td></tr>
+  </table></div>
+  <p class="small">출처: AWS Price List CSV ap-northeast-2(EC2 온디맨드 Linux 공유 테넌시), AWS EC2 요금 페이지("For T4g instances in Unlimited mode, CPU Credits are charged at $0.04 per vCPU-Hour for Linux"), AWS 문서 burstable-credits-baseline-concepts(T4g 크레딧 표: nano 5% · micro 10% · small 20% · medium 20%), ElastiCache 단가는 instances.vantage.sh 서울 표시값. 실제 초과 크레딧 청구는 CloudWatch <code>CPUSurplusCreditsCharged</code> 로 확인할 것 — 멘토 추정 "월 10~12만원" 은 이 계산($18)과 다르므로 청구서로 확정.</p>
+</section>
+
+<!-- ───────────── 6 ───────────── -->
+<section id="s6">
+  <h2><span class="n">6</span>오늘 결정할 것</h2>
+  <p class="sub">"제안" 은 진중 의견입니다. 합의된 결과는 <code>architecture.md</code> 배포 토폴로지에 반영하고, 코드 변경은 스펙 018 부터 씁니다.</p>
+  <ol class="agenda">
+    <li>
+      <div class="q">Redis 를 유지할 것인가, 뺄 것인가</div>
+      <div class="r">빼면 대신 풀어야 하는 것 3개: API 가 읽을 최신 틱(→ 매초 Influx 조회, Influx 가 이미 약한 고리) · DB 다운 시 24h 버퍼(→ 파싱기 로컬 디스크 버퍼 신규) · 파싱 리더 락(→ dedupe 코드 또는 수동 스탠바이). 줄어드는 건 월 ~$50~100.<br><b>제안: 유지.</b> Redis 는 추가가 아니라 현행이고, 017 이 이미 채널로 쓰고 있음.</div>
+    </li>
+    <li>
+      <div class="q">인스턴스 — 10명 이내 기준 박스 2대(수집 t4g.medium · 조회 t4g.small)로 갈 것인가</div>
+      <div class="r">5장 계산: 월 약 $76, 지금보다 +$28. 조회 박스에 api·web·Influx, 수집 박스에 수집기·Redis. HA 제안($480)은 사용자가 늘 때로 미룸.<br><b>제안: 2대.</b> 코드 변경 없이 compose 를 둘로 나누고 Redis 포트를 사설망 보안그룹으로만 여는 인프라 작업. 020 이 끝나면 조회 박스는 그대로 API 2대의 첫 번째가 됨.</div>
+    </li>
+    <li>
+      <div class="q">코드 변경 순서 — 020 나머지 HTTP 이동 → 021 리더 락 → 022 조회 상한 → 023 알람</div>
+      <div class="r">장애 빈도로 보면 022(OOM·14.8초)와 023(무알람)이 급하고, HA 로 보면 020·021 이 선행.<br><b>제안: 022 → 023 → 020 → 021.</b> 지금 한 대인 동안 실제로 아픈 것부터. 단 안건 4 의 CPU 대응이 이 순서보다 앞입니다.</div>
+    </li>
+    <li>
+      <div class="q">수집기 1코어 100% — 무엇부터 할 것인가</div>
+      <div class="r">바이빗 추가 뒤 85~100%. 단일 워커라 인스턴스를 키워도 코어 하나만 씁니다. 선택지: (a) 먼저 프로파일 — 바이빗 orderbook.200 정렬이 원인이면 구독 깊이를 50 으로 낮춤(호가 걷기는 최대 20단계만 씀) (b) 수집기를 국내/해외 두 프로세스로 나눔 — 틱 루프가 두 메모리를 봐야 해서 큰 변경 (c) c7g 로 코어 속도만 올림 — 효과 미측정.<br><b>제안: (a) 를 이번 주 안에.</b> 측정 없이 (b)·(c) 로 가지 않는다. 그동안 EC2 <code>.env</code> 에 바이빗 키를 넣어 경고를 없앤다.</div>
+    </li>
+    <li>
+      <div class="q">문서 잔재 정리 PR 을 누가 언제</div>
+      <div class="r">018 문서 커밋 뒤에도 남아 있음(09-15 재확인): 002 의 "스프레드 폴링 1000ms·1초 폴링" 문구, 003 의 "폴링을 시작한다·규모 세그먼트", 016 검증 절의 "api 는 REDIS_URL 없음", 007·009 의 "4컨테이너", architecture 의 nginx 설명 2곳(api 분기 누락), 017 §5 테스트 수. 여기에 019 EC2 실측(CPU·표 943행) 기록 추가. docs 전용 PR 하나로 묶고 CI 는 전체 통과 필요.</div>
+    </li>
+    <li>
+      <div class="q">미검증 항목 확인 담당</div>
+      <div class="r">ElastiCache 서울 요금 · ALB 유휴 타임아웃(기본 60초 → WS 하트비트 1초라 문제 없음, 확인만) · Amazon Timestream for InfluxDB 서울 리전 가능 여부와 가격 · 943행 기준 snapshot·delta 크기와 압축 후 크기 · 접속자 5명 동시 CPU · Graviton2→3 코어당 성능 차이.</div>
+    </li>
+  </ol>
+</section>
+</div>
