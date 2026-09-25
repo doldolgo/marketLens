@@ -15,7 +15,7 @@
 ## 런타임 구성
 - **server/**: Python 3.12, FastAPI, httpx, websockets, redis(asyncio), influxdb-client, boto3, pyjwt, pydantic v2, pydantic-settings. 로컬 포트 8000. 상시 태스크(collector 역할 — api 는 017 구독 태스크 1개 + 접속마다 보내기 태스크 1개): 업비트·빗썸 스트림 각 1, 바이낸스·바이빗·비트겟 샤드 각 3 + 재조정 루프(60초), 마켓 우주 갱신 루프(매초 — 목록 5개 병렬, 실패는 직전 목록 유지·거래소·원인당 60초 1줄 로그), 틱 루프(1초), Redis 인계 큐, flusher(60초), 원문 닫기 회차(1초, 업로드는 데몬 워커 스레드 1개), 입출금 조회(60초), `collect_fail` 쓰기 큐 태스크, `premium_event` 쓰기 태스크(점이 생기면 즉시·없어도 60초 회차), `candle` 쓰기·롤업 태스크(분이 닫히면 즉시·없어도 60초 회차 — 1m 쓰기 뒤 같은 회차에 5m→1h→4h→1d), 017 표 게시 보내기 태스크·`spreads:want` 읽기(5초)·구독 허브(로컬 단일 프로세스는 자기 게시를 자기 구독).
 - **web/**: React 19, TypeScript, Vite. 런타임 의존성은 react·react-dom·lightweight-charts(기록 탭 캔버스 차트) 셋이다. 대시보드는 `/app/` 아래에 산다(Vite `base: '/app/'`) — `/` 는 React 밖의 정적 `public/landing.html` 이 nginx 로 서빙된다(022, 티저 스크립트가 `/api/spreads` 1회 조회). 로컬 포트는 5173 이고, 배포 컨테이너의 nginx 는 80번 포트를 사용한다. 호스트 포트는 `WEB_PORT` 로 정한다.
-- **저장소**: InfluxDB 2.7 OSS(org·bucket `marketlens`, Flux) — 김프 이력. Redis 7 — 틱 버퍼(AOF, Influx 로 옮기기 전까지만). S3(`marketlens-spreads-snapshot`, ap-northeast-2, 접두사 `raw/`) — 거래소 원문 아카이브. 모델은 `db.md`. 테스트에서는 셋 다 띄우지 않는다(fake·fakeredis). S3 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 IAM 역할).
+- **저장소**: InfluxDB 2.7 OSS(org·bucket `marketlens`, Flux) — 김프 이력. Redis 7 — 틱 버퍼(AOF, Influx 로 옮기기 전까지만). S3(`marketlens-spreads-snapshot`, ap-northeast-2, 접두사 `raw/`) — 거래소 원문 아카이브. 모델은 `db.md`. 테스트에서는 셋 다 띄우지 않는다(fake·fakeredis). S3 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 IAM 역할). 배포에서 Redis·Influx 는 data 박스에 있고 server·api 가 사설 IP(루트 `.env` 의 `DATA_HOST`)로 붙는다(021).
 
 ## 데이터 흐름 (BE)
 ```mermaid
@@ -147,8 +147,11 @@ web/src/features/<name>/
 ```
 
 ## 배포 토폴로지
-EC2 1대, 컨테이너 5개(server=collector·api·web·influxdb·redis). 루트 `docker compose up -d --build` 로 실행한다. 컨테이너는 compose 기본 네트워크를 사용하며 InfluxDB·Redis 포트는 호스트에 공개하지 않는다. PR CI 는 server lint·format·pytest 와 web lint·build 를 실행한다. main push 는 EC2 에 SSH 로 접속해 배포한다. 상세는 스펙 007(deploy).
-이 레포의 web 이 `WEB_PORT=80` 으로 서빙한다(기존 marketlens-be·fe 컨테이너는 2026-09-04 정지). server·api 는 호스트에 포트를 열지 않고 nginx 가 `/api/` 로 프록시한다 — `/api/history/{premium,streaks,candles}`·`/api/ws/`(WebSocket 업그레이드)·`/api/spreads`(정확 일치) 는 api 로, 그 외는 server 로. 수집과 Influx 조회는 컨테이너가 다르다(016). 메모리 저장소 공유·EC2 분리는 후속.
+EC2 3대(021), 같은 VPC·서브넷, 박스끼리는 사설 IP 로만 통신한다. compose 파일은 하나이고 서비스 5개(server=collector·api·web·influxdb·redis)에 profile 이 하나씩 있어 박스마다 자기 profile 만 띄운다: `docker compose --profile <collect|data|serve> --env-file .env --env-file server/.env up -d --build`. `depends_on` 은 없다(의존 대상이 다른 박스).
+- **collect**(c7g.medium) — `server`. 거래소 WebSocket·틱 루프·Redis 인계·flusher·S3 원문·입출금 조회. 호스트 8000(serve 보안그룹만), 탄력 IP(업비트 허용 IP), IAM 프로파일은 이 박스에만.
+- **data**(t4g.small, 스왑 1GB) — `redis`·`influxdb`. 호스트 6379·8086(collect·serve 보안그룹만). Influx 쿼리 메모리 상한 1개 256MB × 동시 3 = 768MB.
+- **serve**(t4g.micro) — `api`·`web`. 호스트 80(`WEB_PORT`)만, 탄력 IP `3.34.104.16`. nginx 가 `/api/` 를 `COLLECT_HOST:8000` 으로 프록시하고 `/api/history/{premium,streaks,candles}`·`/api/ws/`(WebSocket 업그레이드)·`/api/spreads`(정확 일치) 는 같은 박스의 api 로 보낸다.
+박스 간 주소는 루트 `.env` 의 `DATA_HOST`·`COLLECT_HOST` 두 키다. 기본값이 서비스 이름이라 로컬은 `COMPOSE_PROFILES=collect,data,serve` 로 예전처럼 5개가 한 망에 뜬다. PR CI 는 server lint·format·pytest 와 web lint·build 를 실행한다. main push 는 워크플로가 data → collect → serve 순서로 SSH 배포한다(한 박스가 실패하면 뒤는 돌지 않는다). 상세는 스펙 007(deploy)·021(infra-split), 전환 절차는 `docs/runbooks/ec2-split.md`.
 다섯 컨테이너 모두 compose 가 로그를 `json-file` 50MB × 3 으로 묶는다 — 회전 없는 로그가 디스크를 채우면 Influx 가 쓰기를 거부하고, 그 거부는 공간을 되찾아도 재시작 전까지 풀리지 않는다.
 배포 workflow 의 성공은 EC2 명령 실행 성공만 뜻한다. 외부 URL 확인과 실패 시 자동 롤백은 아직 없다.
 

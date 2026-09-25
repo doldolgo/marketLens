@@ -56,11 +56,13 @@ npm run lint       # oxlint
 
 **API 키는 .env 에만. 코드·문서·커밋에 절대 넣지 않는다.**
 
+루트 `.env`(compose 변수, 비밀 아님): `WEB_PORT` 와 021 의 박스 간 주소 `DATA_HOST`(data 박스 사설 IP)·`COLLECT_HOST`(collect 박스 사설 IP). **로컬은 두 키를 비운다**(파일이 없어도 된다) — 기본값이 서비스 이름이라 한 망에서 그대로 붙는다.
+
 ## docker 통합 기동 (배포와 같은 구성)
 ```bash
-WEB_PORT=8080 docker compose --env-file server/.env up -d --build
+COMPOSE_PROFILES=collect,data,serve WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 ```
-server·api·web·influxdb·redis 다섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 뜨고 호스트에는 web 하나만 열린다. `localhost:8080` 에 화면, `/api/*` 는 nginx 가 server 로 프록시(접두 제거)하되 `/api/history/{premium,streaks,candles}`·`/api/ws/`·`/api/spreads` 는 api 로 간다(016·017·018). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/spreads`·`/api/history/candles?base=BTC` 둘 다 502, `/api/health` 는 200, `start api` 로 복구. `stop redis` 면 `/api/spreads` 503·WebSocket 은 `waiting`(화면은 직전 표 유지), `start redis` 뒤 10초 안에 복구. 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
+server·api·web·influxdb·redis 다섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 한 망에 뜬다. `COMPOSE_PROFILES` 가 없으면 아무것도 안 뜬다 — 배포는 박스마다 profile 하나씩이라(021) 로컬만 셋을 다 켠다. 호스트에는 web(8080) 외에 박스 간 포트 server 8000·redis 6379·influxdb 8086 도 열리므로 **dev compose(Influx :8086·Redis :6379)와 겹친다 — 통합 기동 전에 `docker compose -f docker-compose.dev.yml down` 으로 내린다**(볼륨 유지). 이후 `stop`·`start`·`down` 도 같은 `COMPOSE_PROFILES=…` 를 앞에 붙인다(안 붙이면 그 서비스가 모델에 없다). `localhost:8080` 에 화면, `/api/*` 는 nginx 가 server 로 프록시(접두 제거)하되 `/api/history/{premium,streaks,candles}`·`/api/ws/`·`/api/spreads` 는 api 로 간다(016·017·018). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/spreads`·`/api/history/candles?base=BTC` 둘 다 502, `/api/health` 는 200, `start api` 로 복구. `stop redis` 면 `/api/spreads` 503·WebSocket 은 `waiting`(화면은 직전 표 유지), `start redis` 뒤 10초 안에 복구. 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
 
 ## 검증용 스모크
 ```bash

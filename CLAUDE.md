@@ -26,7 +26,8 @@ marketlens/
     runbooks/
       execute-spec.md         실행 세션에 줄 프롬프트
       drift-check.md          문서↔코드 어긋남 점검 절차
-      ec2-setup.md            EC2 최초 1회 설정 (사람용 체크리스트)
+      ec2-setup.md            EC2 박스 공통 준비 (사람용 체크리스트)
+      ec2-split.md            EC2 3대 분리 전환 절차 (사람용, 021)
   server/                     FastAPI 앱 (Python 3.12)
     app/
       core/                   공유 인프라 — 스트림 커넥터·메모리 저장소(LiveStore)·틱 루프·김프 계산·망 매칭·Influx·Redis·S3 클라이언트 (모듈 이름은 개발 후 architecture.md "현재 구조"에)
@@ -92,7 +93,7 @@ marketlens/
 | 018 | spreads-serve | DONE | `GET /spreads` 를 `api` 가 Redis `spreads:latest` 로 답하고 nginx `/api/spreads` 를 `api` 로 — 스프레드 탭이 보는 컨테이너는 api 하나, `notional` 쿼리 삭제, 요청마다 `spreads:want` 갱신 (BE·인프라) |
 | 019 | bybit | DONE | 바이빗 USDT 현물 추가 — WS 3샤드 orderbook.200(스냅샷+델타, 행 발행 500ms 제한)+publicTrade, instruments-info 매초, 입출금(HMAC), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗), `/history/*` `fx=bybit`, web 표시명·기록 탭 Bybit 실데이터 |
 | 020 | bitget | DONE | 비트겟 USDT 현물 추가 — WS 3샤드 books15(스냅샷)+trade, symbols 매초, 입출금(public·키 없음), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟), `/history/*` `fx=bitget`, web 표시명·기록 탭 Bitget 실데이터 |
-| 021 | infra-split | TODO | EC2 3대 분리 — compose profile 3개(collect=server c7g.medium / data=redis·influxdb t4g.small / serve=api·web t4g.micro), 박스 간 사설 IP(루트 .env DATA_HOST·COLLECT_HOST), nginx 업스트림 주입, 배포 3타깃(data→collect→serve), 런북 ec2-split.md (인프라) |
+| 021 | infra-split | DONE | EC2 3대 분리 — compose profile 3개(collect=server c7g.medium / data=redis·influxdb t4g.small / serve=api·web t4g.micro), 박스 간 사설 IP(루트 .env DATA_HOST·COLLECT_HOST), nginx 업스트림 주입, 배포 3타깃(data→collect→serve), 런북 ec2-split.md (인프라) |
 | 022 | landing | DONE | 정적 HTML 랜딩 `/`(검색·미리보기 메타, `/api/spreads` 1회 티저, 스크린샷, 모바일) · 대시보드는 `/app/`(Vite base·nginx alias), 옛 쿼리 링크는 301 (web·nginx 전용) |
 
 실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.

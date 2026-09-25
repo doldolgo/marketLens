@@ -1,6 +1,6 @@
 # 021 — infra-split
 
-상태: TODO | 의존: 007(deploy — compose·워크플로·설정 계약 테스트), 016(process-split — `ROLE`·nginx 분기), 017(spreads-push — Redis 키·채널), 018(spreads-serve — `GET /spreads` 가 Redis 키)
+상태: DONE | 의존: 007(deploy — compose·워크플로·설정 계약 테스트), 016(process-split — `ROLE`·nginx 분기), 017(spreads-push — Redis 키·채널), 018(spreads-serve — `GET /spreads` 가 Redis 키)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -25,7 +25,7 @@ EC2 1대에 몰린 컨테이너 5개를 **역할별 EC2 3대**(수집 · 데이�
 | serve | t4g.micro |
 
 - **collect** — 컨테이너 `server`(016 의 `collector` 역할) 하나. 거래소 WebSocket·마켓 우주·틱 루프·Redis 인계·flusher·원문 S3 아카이브·입출금 조회를 전부 맡는다. IAM 인스턴스 프로파일 `marketlens-s3-snapshot`(010 의 원문 업로드 주체)은 **이 박스에만** 붙이고 IMDS hop limit 2(ec2-setup.md 5-2). 컨테이너 포트 8000 을 호스트에 공개한다 — serve 의 nginx 가 사설 IP 로 붙기 위해서다. 탄력 IP 를 하나 붙인다 — 업비트 API 키가 IP 허용 목록이라 공인 IP 가 고정돼야 한다(t4g.small 실측에서 새 IP 는 401).
-- **data** — `redis` + `influxdb`. 6379·8086 을 호스트에 공개한다. 스왑 1GB. Influx 는 쿼리 메모리 상한을 env 로 건다: 쿼리 1개 상한·전체 상한·동시 쿼리 수 — 값은 실행 세션이 Influx 2.7 문서에서 정하되 **전체 상한 + Redis 상주(30MB) + Influx 상주(0.5GB) 가 1.5GB 를 넘지 않게**. 근거: 2026-09-07 기간 지정 없는 `/history/streaks/bulk` 가 Influx 를 2.4GB 까지 키워 OOM 4회. 상한을 넘는 쿼리는 Influx 가 거부하고(503 으로 전파) 프로세스는 살아야 한다.
+- **data** — `redis` + `influxdb`. 6379·8086 을 호스트에 공개한다. 스왑 1GB. Influx 는 쿼리 메모리 상한을 env 로 건다: 쿼리 1개 256MB(`INFLUXD_QUERY_MEMORY_BYTES`)·동시 3개(`INFLUXD_QUERY_CONCURRENCY`)·전체 768MB(`INFLUXD_QUERY_MAX_MEMORY_BYTES` — Influx 는 전체 = 동시 × 1개 를 요구한다). **전체 상한 + Redis 상주(30MB) + Influx 상주(0.5GB) ≈ 1.3GB 로 1.5GB 를 넘지 않는다**. 근거: 2026-09-07 기간 지정 없는 `/history/streaks/bulk` 가 Influx 를 2.4GB 까지 키워 OOM 4회. 상한을 넘는 쿼리는 Influx 가 거부하고(503 으로 전파) 프로세스는 살아야 한다.
 - **serve** — `api`(016 의 `api` 역할) + `web`(nginx). 기존 탄력 IP `3.34.104.16` 을 이 박스로 옮긴다. 호스트에 여는 포트는 `WEB_PORT`(80) 하나.
 
 보안그룹은 3개, 규칙은 최소다. 셀 한 토큰, 의미는 아래 문장으로.
@@ -43,7 +43,7 @@ EC2 1대에 몰린 컨테이너 5개를 **역할별 EC2 3대**(수집 · 데이�
 - 서비스마다 profile 하나: `server` → `collect`, `redis`·`influxdb` → `data`, `api`·`web` → `serve`. **`depends_on` 은 전부 없앤다** — 의존 대상이 다른 박스에 있다. 각 박스는 `docker compose --profile <역할> --env-file .env --env-file server/.env up -d --build` 로 자기 profile 만 띄운다. profile 을 안 주면 아무것도 안 뜬다(실수로 5개가 한 박스에 뜨지 않게).
 - 박스 간 주소는 **루트 `.env`(비밀 아님)** 의 두 키로 준다. `DATA_HOST` = data 박스 사설 IP, `COLLECT_HOST` = collect 박스 사설 IP. compose 는 `server`·`api` 의 `INFLUX_URL` 을 `http://${DATA_HOST:-influxdb}:8086`, `REDIS_URL` 을 `redis://${DATA_HOST:-redis}:6379/0` 으로 덮고, `web` 에 `COLLECT_HOST`(기본 `server`)를 준다. 기본값이 서비스 이름이라 **키를 안 주면 007 의 한 박스 동작 그대로** 다 — 로컬 통합 기동은 `COMPOSE_PROFILES=collect,data,serve` 로 예전처럼 5개가 한 망에 뜬다. `server/.env` 는 007 대로 비밀만 든다(`INFLUX_URL`·`REDIS_URL` 의 localhost 값은 컨테이너 안에서 계속 덮인다).
 - 호스트 포트: `server` 8000, `redis` 6379, `influxdb` 8086 을 공개한다(위 보안그룹이 막는다). `web` 은 `${WEB_PORT:-80}:80` 그대로, `api` 는 비공개.
-- `web` 은 nginx 설정을 템플릿으로 두고 기동 시 **`COLLECT_HOST` 하나만** 치환한다 — `location /api/` 의 업스트림이 `http://<COLLECT_HOST>:8000/` 이 된다. nginx 자체 변수(`$http_host`·`$http_upgrade` 등)는 치환 대상이 아니어야 한다. 016·018 의 분기(`/api/history/{premium,streaks,candles}`·`= /api/spreads`·`/api/ws/` → `api:8000`)는 같은 박스라 그대로다.
+- `web` 은 nginx 설정을 템플릿으로 두고 기동 시 **`COLLECT_HOST` 하나만** 치환한다 — `location /api/` 의 업스트림이 `http://<COLLECT_HOST>:8000/` 이 된다. nginx 자체 변수(`$http_host`·`$http_upgrade` 등)는 치환 대상이 아니어야 한다. 방식은 nginx 공식 이미지의 templates 기능: `web/nginx.conf` 를 `/etc/nginx/templates/default.conf.template` 로 넣고, compose 가 `NGINX_ENVSUBST_FILTER=^COLLECT_HOST$` 를 줘 치환 변수를 그 하나로 제한한다. 016·018 의 분기(`/api/history/{premium,streaks,candles}`·`= /api/spreads`·`/api/ws/` → `api:8000`)는 같은 박스라 그대로다.
 - Influx 첫 기동 설정(`DOCKER_INFLUXDB_INIT_*`)은 그대로 둔다 — 이전한 볼륨이 있으면 setup 이 건너뛰고, 빈 볼륨이면 새로 만든다.
 
 ### 3.3 배포
@@ -97,8 +97,29 @@ main push → 워크플로가 **data → collect → serve** 순서로 SSH 3번,
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 2026-09-25 로컬(M4, Docker 29). 계약 테스트·전체 회귀
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q   # 686 passed
+cd web && npm run lint && npm run build                                                                  # 통과
+# profile 없이는 아무것도 안 뜬다
+docker compose --env-file server/.env config --services | wc -l                                          # 0
+# 박스 간 주소 치환
+COMPOSE_PROFILES=collect DATA_HOST=10.0.0.5 docker compose --env-file server/.env config | grep -E "INFLUX_URL|REDIS_URL"
+#   INFLUX_URL: http://10.0.0.5:8086 / REDIS_URL: redis://10.0.0.5:6379/0
+# nginx 템플릿 — 이름 풀리는 망에서 web 이미지만 띄워 렌더 결과 확인(COLLECT_HOST=server, =10.0.1.7 두 번)
+#   proxy_pass http://server:8000/ → http://10.0.1.7:8000/ 만 바뀌고 api:8000 세 분기·$http_host 등 nginx 변수 그대로, nginx -t 성공
+# Influx 상한 — 빈 볼륨으로 influxdb:2.7 단독 기동, 로그 "Starting query controller" concurrency_quota=3
+#   memory_bytes_quota_per_query=268435456 max_memory_bytes=805306368, /health pass
+# 로컬 통합 기동(5컨테이너 한 망) — 이 머신은 8000·6379·8086 이 점유라 호스트 포트만 바꾼 override 를 스크래치패드에서 덧대어 실행(레포 밖)
+COMPOSE_PROFILES=collect,data,serve WEB_PORT=8090 docker compose -f docker-compose.yml -f <override> --env-file server/.env up -d --build
+docker ps        # marketlens-server·api·web·influxdb·redis 5개 Up, web RestartCount 0
+curl localhost:8090/api/health                 # 200 (nginx → server, 렌더된 업스트림 http://server:8000/)
+curl "localhost:8090/api/history/candles?base=BTC"   # 200 (nginx → api → Influx)
+curl localhost:8090/api/health/collect         # 200
+curl localhost:8090/api/spreads                # 첫 발행 뒤 200, 445KB, rows 1,444 (nginx → api → Redis)
+docker inspect marketlens-influxdb --format '{{.Config.Env}}' | tr ' ' '\n' | grep INFLUXD_QUERY   # 3개
+COMPOSE_PROFILES=collect,data,serve WEB_PORT=8090 docker compose -f docker-compose.yml -f <override> --env-file server/.env down   # 볼륨 유지
 ```
+§4 수동(EC2) 1~7 은 런북 `ec2-split.md` 전환 뒤 사람이 확인한다 — 이 커밋 시점 미실행.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — deploy 행 server 열을 "compose profile 3개(collect=server / data=redis·influxdb / serve=api·web), EC2 3대, 배포 워크플로 3타깃(data→collect→serve), 박스 간 주소는 루트 .env 의 DATA_HOST·COLLECT_HOST" 로. 알려진 빚에 "Redis 인증 없음(보안그룹만) / 이미지 박스별 빌드(collect 1 vCPU 라 배포 중 수집 지연) / Influx 쿼리 기간 상한 미적용(022 후보)" 추가.
@@ -110,6 +131,6 @@ main push → 워크플로가 **data → collect → serve** 순서로 SSH 3번,
 - `docs/runbooks/ec2-setup.md` — 머리에 "3대 구성은 `ec2-split.md`, 이 문서는 박스 공통 준비(도커·env·IAM·Secrets)" 한 줄, 2번(인바운드) 을 박스별 표 참조로, 6번 Secrets 를 5개로.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-- 남은 빚:
+- 만든 것 (파일 목록): `docker-compose.yml`(profile 3개·`depends_on` 제거·`DATA_HOST`/`COLLECT_HOST` 치환·호스트 포트·Influx 쿼리 상한 3개·web 에 `NGINX_ENVSUBST_FILTER`), `web/nginx.conf`(`location /api/` 업스트림 `${COLLECT_HOST}`), `web/Dockerfile`(templates 경로로 복사), `.github/workflows/deploy.yml`(job 3개 data→collect→serve, 박스별 시크릿·가드·profile), `server/tests/test_deploy.py`(§4 계약 — profile·depends_on 없음·포트·치환식·템플릿 변수 1개·워크플로 3타깃·박스별 가드·README), `README.md`, 문서 6종(`status.md`·`architecture.md`·`dev-setup.md`·`007`·`016`·`ec2-setup.md`) + `CLAUDE.md` 021 DONE·런북 목록.
+- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절: ① nginx 치환은 공식 이미지 templates 기능 + `NGINX_ENVSUBST_FILTER=^COLLECT_HOST$`(§3.2 에 적음). 컨테이너 안에서 `sh -c` 로 띄우면 entrypoint 가 안 돌아 치환이 안 된다 — 디버그 때 주의. ② 워크플로는 step 이 아니라 **job 3개 + needs** — 실패 박스가 Actions 에서 바로 보이고 뒤 job 이 자동으로 멈춘다. ③ Influx 상한 값 256MB×3=768MB(§3.1 에 적음). ④ data 박스 가드는 `INFLUX_TOKEN` 만(루트 `.env` 는 빈 파일이라 검사 없음). ⑤ 로컬 통합 기동은 dev compose 와 6379·8086 이 겹쳐 먼저 내려야 한다(dev-setup.md 에 적음). ⑥ `depends_on` 이 없어 serve 박스에서 web 이 api 보다 먼저 뜨면 nginx 가 "host not found in upstream api" 로 한 번 죽고 restart 로 다시 뜬다(로컬 실측에선 RestartCount 0 — status.md 알려진 빚에 적음).
+- 남은 빚: EC2 전환 자체(런북 11단계, 사람) 와 §4 수동 1~7. 007 §5 의 옛 기록("호스트 8000·8086 LISTEN 0건")은 그 시점 기록이라 손대지 않음. Redis 인증 없음·박스별 이미지 빌드·Influx 쿼리 기간 상한 미적용은 status.md 알려진 빚.

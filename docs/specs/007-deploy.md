@@ -16,7 +16,7 @@
 ## 3. 정해진 것
 
 ### 툴
-- CI/CD 는 **GitHub Actions**. 배포 단위는 **docker compose**. 서버는 **EC2 1대**(기존 스택과 같은 서버), 이미지는 EC2 에서 직접 빌드한다.
+- CI/CD 는 **GitHub Actions**. 배포 단위는 **docker compose**. 서버는 **EC2 3대**(collect·data·serve — compose profile 하나씩, 021), 이미지는 각 EC2 에서 직접 빌드한다.
 - 컨테이너 5개:
   - `server` — FastAPI + uvicorn 워커 1개(python 3.12 slim). 컨테이너 포트 8000, **호스트에 노출하지 않는다**(compose 내부 네트워크만).
   - `api` — `server` 와 같은 이미지에 `ROLE=api`. Influx 조회 경로(`/history/premium`·`streaks`·`streaks/bulk`·`candles`)만 서빙, 호스트 비노출(016).
@@ -28,7 +28,7 @@
 ### 규칙 (왜 가 있는 것)
 - **앱은 자기 로거(`marketlens.*`)를 INFO 로, 타임스탬프와 함께 stderr 로 낸다.** 설정이 없으면 `logging.lastResort` 가 받아 WARNING 이상만, 시각도 없이 나간다 — 그러면 "S3 원문 업로드 재개"(010 §3.6)·"DB 저장 재개"(009 §3.5) 같은 복구 신호가 아예 보이지 않아 장애가 풀렸는지 알 수 없다. handler 는 루트에 달고 레벨은 `marketlens` 에만 내린다 — 라이브러리 INFO(httpx 의 요청 한 줄 등)는 루트의 WARNING 에 막혀야 로그가 초당 수십 줄로 불어나지 않는다.
 - **컨테이너 로그는 네 서비스 모두 `json-file` 50MB × 3 으로 묶는다.** docker 기본값은 무한이고, 회전 없는 로그가 디스크를 채우면 Influx 가 쓰기를 거부한다 — 그 거부는 **공간을 되찾아도 컨테이너를 재시작하기 전까지 풀리지 않는다**(열지 못한 shard 를 캐시한다). 데몬 설정(`/etc/docker/daemon.json`)이 아니라 compose 에 두는 이유는 이 스택이 자기 한도를 들고 다니게 하기 위해서다.
-- **호스트에 여는 포트는 web 하나.** server 는 compose 안에서만, Influx 는 비공개. 공격면을 하나로.
+- **호스트에 여는 포트는 박스마다 최소.** serve 는 web 하나, collect 는 8000·data 는 6379/8086 을 다른 박스가 붙도록 열되 보안그룹으로 막는다(021). 공인으로 열린 것은 80 하나.
 - **호스트 포트는 compose 변수 `WEB_PORT`(기본 80).** EC2 는 루트 `.env` 의 `WEB_PORT=80`. 기존 marketlens-be·fe 컨테이너는 2026-09-04 정지(`docker compose stop`, 폴더·코드 유지) — 이 레포 소관이 아니므로 그 폴더는 건드리지 않는다. 로컬 통합 기동은 `:8000` 충돌을 피해 `WEB_PORT=8080` 을 쓴다(dev-setup.md).
 - **`/api/*` 는 web 이 server 로 넘기며 `/api` 접두를 뗀다.** `/api/health` → server `/health`. dev 의 vite proxy 와 같은 규칙이라 FE 코드는 환경을 모른다.
 - **server 는 uvicorn 워커 1개(collector 역할 기준, 016).** 틱 루프·스트림과 메모리 저장소가 프로세스 안에 있어 워커가 둘이면 진실도 둘이 된다.
@@ -38,13 +38,13 @@
   - `web` job: Node 22 → `npm ci` → `npm run lint` → `npm run build` (작업 디렉토리 `web/`)
   - 트리거는 `pull_request`(대상 main). 액션 세대는 기존 be·fe 레포와 같게(checkout@v5·setup-python@v5·setup-node@v5, 의존성 캐시 켬).
 - **main 은 PR 로만 머지한다.** main 푸시 = 배포이므로 CI 를 우회할 길을 막는다. branch protection(§사람이 하는 것)으로 강제한다.
-- **deploy 워크플로**: `push`(main) 트리거, `appleboy/ssh-action@v1` 로 EC2 에 SSH. 스크립트 순서:
+- **deploy 워크플로**: `push`(main) 트리거, `appleboy/ssh-action@v1` 로 EC2 3대에 data → collect → serve 순서로 SSH(job 3개, 한 박스 실패 시 뒤는 안 돈다 — 021 §3.3). 각 박스 스크립트 순서:
   1. `cd ~/marketlens` (기존 be·fe 폴더와 다른 폴더)
-  2. `server/.env` 가 없거나 `INFLUX_TOKEN`·`S3_BUCKET` 중 하나라도 비어 있으면 **배포 실패**(값은 출력하지 않는다 — 존재·비어있지 않음만 `grep -q '^KEY=.'` 로 본다). 토큰 없이 뜨면 저장 루프가, 버킷 없이 뜨면 원문 아카이브(010)가 꺼진 채 조용히 데이터를 잃는다. S3 자격증명은 env 가 아니라 EC2 인스턴스의 IAM 역할(`docs/runbooks/ec2-setup.md` 5-2)이므로 가드 대상이 아니다. 루트 `.env` 는 가드하지 않는다 — 없으면 4단계 `--env-file .env` 가 어차피 시끄럽게 실패한다.
+  2. `server/.env` 가 없거나 가드 키(박스별 — 021 §3.3: 셋 다 `INFLUX_TOKEN`, collect 는 `S3_BUCKET`·루트 `.env` 의 `DATA_HOST`, serve 는 `DATA_HOST`·`COLLECT_HOST`) 중 하나라도 비어 있으면 **배포 실패**(값은 출력하지 않는다 — 존재·비어있지 않음만 `grep -q '^KEY=.'` 로 본다). 토큰 없이 뜨면 저장 루프가, 버킷 없이 뜨면 원문 아카이브(010)가 꺼진 채 조용히 데이터를 잃는다. S3 자격증명은 env 가 아니라 EC2 인스턴스의 IAM 역할(`docs/runbooks/ec2-setup.md` 5-2)이므로 가드 대상이 아니다. 루트 `.env` 는 가드하지 않는다 — 없으면 4단계 `--env-file .env` 가 어차피 시끄럽게 실패한다.
   3. `git fetch origin main && git reset --hard origin/main` — pull 이 아니라 **미러 동기화**. 배포 트리는 main 의 사본일 뿐이므로, 서버 쪽 로컬 커밋·갈래가 있어도 항상 main 을 그대로 따른다(첫 배포에서 pull 이 갈래 때문에 실패한 실사례).
-  4. `docker compose --env-file .env --env-file server/.env up -d --build` — `WEB_PORT` 는 루트 `.env`, Influx 첫 기동 admin 토큰(`DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN}`)은 `server/.env` 에서 치환한다. `--env-file` 을 명시하면 기본 `./.env` 자동 로드가 꺼지므로 둘 다 적는다.
+  4. `docker compose --profile <박스> --env-file .env --env-file server/.env up -d --build` — 자기 profile 만. `WEB_PORT`·`DATA_HOST`·`COLLECT_HOST` 는 루트 `.env`, Influx 첫 기동 admin 토큰(`DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN}`)은 `server/.env` 에서 치환한다. `--env-file` 을 명시하면 기본 `./.env` 자동 로드가 꺼지므로 둘 다 적는다.
   5. `docker image prune -f` — 오래된 레이어가 EC2 디스크를 채우지 않게.
-- Secrets 는 `EC2_HOST`·`EC2_USER`·`EC2_SSH_KEY` 셋(기존 be·fe 레포와 같은 값). 값은 어디에도 적지 않는다.
+- Secrets 는 `EC2_HOST_DATA`·`EC2_HOST_COLLECT`·`EC2_HOST_SERVE`(박스별 공인 IP, 021)·`EC2_USER`·`EC2_SSH_KEY` 다섯. 값은 어디에도 적지 않는다.
 - PR 템플릿은 conventions.md 규칙 그대로 3줄 골격: 무엇을 / 왜 / 테스트.
 - **배포 설정의 계약은 테스트가 지킨다.** `server/tests/test_deploy.py` 가 루트 `docker-compose.yml`·워크플로 2개·Dockerfile·`.dockerignore`·`nginx.conf`·PR 템플릿·README 를 **파일로 읽어** §4 의 조건(컨테이너 5개, 호스트 노출은 web 하나, `.env` 는 `env_file` 로만·이미지 제외, `INFLUX_URL`·`REDIS_URL` 덮어쓰기, CI job 2개 무필터, deploy 스크립트의 가드·미러 동기화·`up -d --build`·prune 순서, nginx 접두 제거·캐시 규칙, 워커 1개)을 단언한다. Docker 가 없는 CI 에서 도는 유일한 회귀 장치라 pytest 안에 둔다. YAML 파싱은 dev 의존성 `pyyaml`(설치가 이미 전이 의존으로 들어오지만 명시해야 두 설치 경로가 같다). 워크플로의 `docker compose config`·컨테이너 기동 검증은 Docker 가 있는 로컬·EC2 에서 사람이 §5 명령으로 돈다.
 
@@ -58,7 +58,7 @@
 - `curl localhost:8080/` 에 `트레이딩룸 · MarketLens` 가 있고, `curl localhost:8080/foo` 도 index.html 을 준다.
 - `curl localhost:8080/api/health` 가 server 의 `/health` 응답을 그대로 준다(`status == "ok"`).
 - server 컨테이너 env 에 `.env` 값이 있고, 이미지 안에는 `.env` 파일이 없다.
-- 호스트에 8000·8086 이 **이 스택 때문에 새로 열리지 않는다**(server·Influx 비노출).
+- 호스트 포트는 profile 별로만 열린다(021): serve 는 80(`WEB_PORT`)뿐, collect 는 8000, data 는 6379·8086. api 는 어느 박스에서도 호스트에 열리지 않는다.
 - `docker inspect --format '{{.HostConfig.LogConfig}}' marketlens-server` 가 `json-file` 과 `max-size:50m`·`max-file:3` 을 말한다(다섯 컨테이너 모두).
 - Influx 컨테이너를 내려도 `/health` 는 200, `/history/*` 만 503. Redis 컨테이너를 내려도 `/health` 200·`/spreads` 정상(009 격리).
 - EC2 에서: 기존 컨테이너 `market-lens-fe`·`market-lens-be`(기존 스택의 실제 컨테이너 이름 — 폴더명 `~/marketlens-be` 와 다르다)는 2026-09-04 정지 상태 그대로이고 `curl localhost:80` 이 이 레포의 web 을 준다.
