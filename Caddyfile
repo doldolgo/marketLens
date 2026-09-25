@@ -1,0 +1,18 @@
+# 023 — TLS 앞단. serve 박스에서 caddy 가 호스트 80·443 을 쥐고 nginx(web 컨테이너) 로 넘긴다.
+# 인증서는 Let's Encrypt 자동 발급·갱신, 저장은 compose 볼륨 caddy-data(재기동·재배포에도 재발급하지 않는다).
+{
+	# HTTP/3(UDP 443)는 compose 에서 안 열므로 광고하지 않는다 — 브라우저가 QUIC 을 헛시도하지 않게
+	servers {
+		protocols h1 h2
+	}
+}
+
+# 도메인 — 자동 HTTPS. http://kimptrack.com 은 caddy 가 https 로 308 리다이렉트한다(설정 없이 기본 동작).
+kimptrack.com, www.kimptrack.com {
+	reverse_proxy web:80
+}
+
+# 그 밖의 호스트(탄력 IP 직접 접속·로컬 :WEB_PORT)는 평문 HTTP 그대로 — 인증서 없음, 리다이렉트 없음.
+http:// {
+	reverse_proxy web:80
+}
