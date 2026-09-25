@@ -32,7 +32,7 @@
 - (020) EC2 실측 대기: symbols 본문 크기·파싱 ms, 샤드당 초당 프레임 수와 collector CPU(해외 2곳일 때와 비교), 1분 원문 객체 크기, 연결당 채널 200개 안팎에서 끊김 여부(권장 50개 미만 대비), 구독 요청 0.2초 간격이 거부되지 않는지.
 - (001) `server/build/`(setuptools 산출물 76파일)와 `server/marketlens_server.egg-info/` 가 git 에 추적돼 있다 — `ruff check .` 가 이 사본(76파일)도 검사한다. 별도 chore 로 지울 것. venv 의 패키지는 editable 설치만 허용한다(dev-setup.md) — 비-editable 사본이 남아 있으면 `server/` 밖 cwd 에서 옛 모듈을 import 한다.
 - (010) 원문은 분당 마지막 1건 표본화로 하루 0.3~0.5GB(gzip 후) **추정** — EC2 에서 1분 객체 크기를 실측한 뒤 버킷 lifecycle 을 정한다.
-- (006) 망 동일 체인 쌍 표는 `{metal,l2}` ↔ `{metal,dao,l2}` 1쌍뿐이다 — 실서버에서 `unknown` 으로 남는 국내 망을 보며 표를 늘린다(규칙을 느슨하게 풀지 않는다).
+- (006) 망 동일 체인 표·별칭은 2026-09-25 S3 원문(업비트·빗썸·바이낸스·비트겟)으로 늘렸다(비트겟 `ERC20`/`BEP20`/`TRC20`, 빗썸 `BASE_ETH`/`ARB_ETH`/`OP_ETH` 등). 남는 unknown 은 빗썸의 코드=이름 망(`APT`·`ADA`…)과 `AVAX`(C-Chain 미확인) — 실서버를 보며 표를 늘린다(규칙을 느슨하게 풀지 않는다). 바이빗은 수집 박스 `.env` 의 `BYBIT_API_KEY`/`BYBIT_SECRET_KEY` 가 비어 있어 입출금 조회가 매분 실패하고 `/spreads` 바이빗 행의 5필드가 전부 null 이다 — 키는 사람이 넣는다.
 - (003·005) `/spreads` 의 `fwd`·`rev` 는 슬리피지 차감 후 순값이고 Influx `premium` 은 차감 전 원값이다. 저장 시점에 체결 규모가 정의되지 않기 때문이며, 그 대가로 `/history/streaks?threshold=` 는 화면 값보다 큰 값을 기준으로 구간을 센다. 백필(캔들 기반)도 원값만 만들 수 있어 아카이브 동질성 쪽을 택했다.
 - (013) 과거 `premium` 의 사건 일괄 생성 미완 — `premium_event` 는 배포 시점부터만 쌓인다. 과거분은 `premium` 원본을 코인별로 나눠 도는 별도 스펙.
 - (013) 사건 점에 입출금 상태 이력이 없다 — 사건 중 이동 가능 여부·막힌 시각은 후속(013 §7 남은 빚에 설계 메모).

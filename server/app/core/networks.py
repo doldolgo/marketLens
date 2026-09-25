@@ -36,14 +36,34 @@ _ALIASES = {
     "trx": "tron",
     "arb": "arbitrum",
     "op": "optimism",
+    # 비트겟은 망 코드를 규격명·붙여 쓴 이름으로 준다 (S3 원문 2026-09-25) — 국내 토큰과 같게
+    "erc20": "ethereum",
+    "bep20": "bsc",
+    "trc20": "tron",
+    "cap20": "chiliz",
+    "arbitrumone": "arbitrum",
+    # avalanche 로 풀지 않는다 — 이름이 AVAX 뿐인 국내 망은 C-Chain 인지 몰라 접두사 규칙으로 unknown 에 둔다
+    "avaxc": "avalanchec",
 }
 
-# 확인된 동일 체인 쌍 표 (양방향) — 규칙을 느슨하게 푸는 대신 이 표를 늘린다 (§3.6-3)
-_EQUIV_PAIRS: frozenset[frozenset[frozenset[str]]] = frozenset(
-    {
-        frozenset({frozenset({"metal", "l2"}), frozenset({"metal", "dao", "l2"})}),
-    }
+# 확인된 동일 체인 표 — 한 묶음 = 같은 체인을 뜻하는 토큰 집합들. 규칙을 느슨하게 푸는 대신 이 표를 늘린다 (§3.6-3)
+_EQUIV_CLASSES: tuple[tuple[frozenset[str], ...], ...] = (
+    (frozenset({"metal", "l2"}), frozenset({"metal", "dao", "l2"})),
+    # 빗썸은 L2 를 `<체인>_ETH` 코드로 주고 표시명이 없다 → {체인, ethereum}
+    (frozenset({"base"}), frozenset({"base", "ethereum"})),
+    (frozenset({"arbitrum"}), frozenset({"arbitrum", "one"}), frozenset({"arbitrum", "ethereum"})),
+    (frozenset({"optimism"}), frozenset({"optimism", "ethereum"})),
+    # 빗썸 BSC · 비트겟 BEP20(별칭) ↔ 업비트·바이낸스 "BNB Smart Chain"
+    (frozenset({"bsc"}), frozenset({"bnb", "smart"})),
+    # 업비트·바이낸스 "Avalanche C-Chain" ↔ 비트겟 "AVAXC-Chain"(별칭)
+    (frozenset({"avalanche", "c"}), frozenset({"avalanchec"})),
+    # 업비트·바이낸스 "NEO N3" ↔ 비트겟 "NEO3"
+    (frozenset({"neo", "n3"}), frozenset({"neo3"})),
 )
+# 토큰 집합 → 묶음 번호 (조회용)
+_EQUIV_INDEX: dict[frozenset[str], int] = {
+    tokens: i for i, cls in enumerate(_EQUIV_CLASSES) for tokens in cls
+}
 
 _PAREN_RE = re.compile(r"\([^)]*\)")
 _SPLIT_RE = re.compile(r"[^0-9a-z]+")
@@ -83,14 +103,15 @@ def match_network(
     for f, ft in foreign_tokens:
         if ft == dom_tokens:
             return "matched", f
-    # 3. 토큰 정렬-결합 문자열 일치 (`AssetHub Polkadot` ↔ `Asset Hub Polkadot`) + 동일 체인 쌍 표
+    # 3. 토큰 정렬-결합 문자열 일치 (`AssetHub Polkadot` ↔ `Asset Hub Polkadot`) + 동일 체인 표
     dom_joined = "".join(sorted(dom_tokens))
+    dom_class = _EQUIV_INDEX.get(dom_tokens)
     for f, ft in foreign_tokens:
         if not ft:
             continue
         if "".join(sorted(ft)) == dom_joined:
             return "matched", f
-        if frozenset({dom_tokens, ft}) in _EQUIV_PAIRS:
+        if dom_class is not None and _EQUIV_INDEX.get(ft) == dom_class:
             return "matched", f
 
     # 4. 못 찾음 — 토큰이 하나라도 겹치거나 길이 3+ 토큰의 접두사 관계(kat↔katana)면 unknown
