@@ -41,8 +41,8 @@
 전부 한국어. 색·글꼴·둥글기·그림자 값은 `docs/design/theme.css` 의 토큰과 **같은 값**을 `landing.html` 안에 복사해 쓴다(번들 밖 파일이라 CSS 변수를 import 하지 못한다). 테마 값이 바뀌면 이 파일도 맞춘다.
 
 ### 3.3 검색·미리보기 메타
-- `<title>` "MarketLens — 김치 프리미엄 실시간 모니터링", `<meta name="description">` 두 문장, `<link rel="canonical" href="/">`, `lang="ko"`.
-- Open Graph: `og:title`·`og:description`·`og:image`(스프레드 스크린샷 절대 주소)·`og:locale ko_KR`, `twitter:card summary_large_image`. **`og:image` 는 절대 주소여야 해서 지금은 EC2 IP 가 박혀 있다 — 도메인이 생기면 그 주소로 바꾼다.**
+- `<title>` "MarketLens — 김치 프리미엄 실시간 모니터링", `<meta name="description">` 두 문장, `<link rel="canonical" href="https://kimptrack.com/">`(절대 주소 — IP 로 들어와도 검색엔진이 도메인을 원본으로 본다), `lang="ko"`.
+- Open Graph: `og:title`·`og:description`·`og:url`(`https://kimptrack.com/`)·`og:image`(`https://kimptrack.com/landing/spreads.png` — 절대 주소여야 한다)·`og:locale ko_KR`, `twitter:card summary_large_image`. 도메인은 023 부터(그 전엔 EC2 IP 가 박혀 있었다).
 - `robots.txt`: 전부 허용, `/api/` 만 불허.
 - 본문(제목·설명·기능·작동 방식·스크린샷 alt)은 전부 HTML 에 있다. 자바스크립트가 꺼져도 티저 구역만 "불러오는 중…" 으로 남고 나머지는 그대로 읽힌다.
 

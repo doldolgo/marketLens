@@ -29,4 +29,4 @@ server·api·web·caddy·influxdb·redis 여섯 컨테이너(api 는 `/history/*
 
 ## 배포
 
-`main` 머지 = 배포. PR 마다 CI(server·web)가 돌고, 머지되면 GitHub Actions 가 EC2 3대에 data → collect → serve 순서로 SSH 해 각 박스의 profile 로 `docker compose up -d --build` 를 실행한다(`.github/workflows/`, 스펙 021).
+공개 주소는 `https://kimptrack.com`(스펙 023 — caddy 가 TLS, 탄력 IP 직접 접속은 평문). `main` 머지 = 배포. PR 마다 CI(server·web)가 돌고, 머지되면 GitHub Actions 가 EC2 3대에 data → collect → serve 순서로 SSH 해 각 박스의 profile 로 `docker compose up -d --build` 를 실행한다(`.github/workflows/`, 스펙 021).
