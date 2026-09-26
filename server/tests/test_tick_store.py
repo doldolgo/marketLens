@@ -535,7 +535,7 @@ def test_boot_with_redis_refused_logs_one_warning_and_health_is_200(
         caplog.at_level(logging.WARNING, logger="marketlens.main"),
         TestClient(app) as client,
     ):
-        assert client.get("/health").status_code == 200
+        assert client.get("/health").json()["status"] in ("ok", "starting")
     warnings = [r for r in caplog.records if "Redis 연결 실패" in r.getMessage()]
     assert len(warnings) == 1
 

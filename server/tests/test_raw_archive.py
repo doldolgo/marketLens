@@ -648,7 +648,7 @@ def test_boot_without_bucket_disables_archive_and_keeps_health_200(
         caplog.at_level(logging.WARNING, logger="marketlens.main"),
         TestClient(app) as client,
     ):
-        assert client.get("/health").status_code == 200
+        assert client.get("/health").json()["status"] in ("ok", "starting")
     assert any("S3_BUCKET 이 없어" in r.getMessage() for r in caplog.records)
     assert wired["record"] is noop_record  # 스트림에는 무동작 기록 함수가 꽂힌다
 
@@ -671,9 +671,9 @@ def test_boot_with_bucket_but_no_credentials_still_starts_with_one_error_line(
     monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "none"))
     app, wired = _boot(monkeypatch, s3_bucket="marketlens-test-bucket")
     with caplog.at_level(logging.ERROR), TestClient(app) as client:
-        assert client.get("/health").status_code == 200
+        assert client.get("/health").json()["status"] in ("ok", "starting")
         time.sleep(0.05)
-        assert client.get("/health").status_code == 200
+        assert client.get("/health").json()["status"] in ("ok", "starting")
     errors = [
         r.getMessage()
         for r in caplog.records
@@ -705,7 +705,7 @@ def test_blank_region_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr("app.main.S3Uploader", Recording)
     app, wired = _boot(monkeypatch, s3_bucket="b", s3_region="")
     with TestClient(app) as client:
-        assert client.get("/health").status_code == 200
+        assert client.get("/health").json()["status"] in ("ok", "starting")
     assert built == {"bucket": "b", "region": "ap-northeast-2"}
     assert wired["record"] is not noop_record
 
@@ -720,7 +720,7 @@ def test_boot_survives_s3_client_construction_failure(
     monkeypatch.setattr("app.main.S3Uploader", Broken)
     app, wired = _boot(monkeypatch, s3_bucket="b")
     with caplog.at_level(logging.ERROR, logger="marketlens.main"), TestClient(app) as c:
-        assert c.get("/health").status_code == 200
+        assert c.get("/health").json()["status"] in ("ok", "starting")
     errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
     assert len(errors) == 1 and "S3 클라이언트 생성 실패" in errors[0]
     assert wired["record"] is noop_record

@@ -428,3 +428,72 @@ async def test_writer_loop_drains_queue_in_order() -> None:
         await asyncio.sleep(0.01)
     task.cancel()
     assert influx.write_calls == 2 and influx.only()["ended_ts"] == T0 // 1000 + 1
+
+
+# --- 025 — Slack 발생/복구 알림 ------------------------------------------------
+
+
+def alerting() -> tuple[OutageTracker, list[tuple[str, str]]]:
+    sent: list[tuple[str, str]] = []
+    return OutageTracker(alerts=lambda k, t: sent.append((k, t))), sent
+
+
+def test_outage_shorter_than_60s_never_alerts() -> None:
+    t, sent = alerting()
+    for i in range(59):
+        fail(t, "upbit", T0 + i * SEC)
+    for i in range(59, 62):
+        t.record_success("upbit", T0 + i * SEC)  # 3연속 성공 → 닫힘
+    assert t.open_outage("upbit") is None
+    assert sent == []  # 발생 없음 → 복구도 없음
+
+
+def test_outage_alerts_once_at_60s_and_recovery_once_on_close() -> None:
+    t, sent = alerting()
+    for i in range(0, 90):
+        fail(
+            t,
+            "upbit",
+            T0 + i * SEC,
+            kind="stale_stream",
+            message="30초 무수신",
+            status=None,
+        )
+    assert len(sent) == 1
+    key, text = sent[0]
+    assert key == "outage:upbit"
+    assert text == "🔴 upbit 수집 실패 stale_stream 60초째 · 30초 무수신"
+    for i in range(90, 93):
+        t.record_success("upbit", T0 + i * SEC)
+    assert len(sent) == 2
+    assert sent[1][0] == "outage:upbit:closed"
+    # 종료 시각 = 연속 성공의 첫 사이클(90초) → 1분 30초, 실패 90회
+    assert sent[1][1] == "🟢 upbit 복구 · 1분 30초 · 실패 90회"
+
+
+def test_alert_text_includes_status_code_and_caps_message() -> None:
+    t, sent = alerting()
+    for i in range(0, 61):
+        fail(t, "binance", T0 + i * SEC, kind="banned", message="x" * 200, status=418)
+    assert sent[0][1] == "🔴 binance 수집 실패 banned 60초째 · 418 · " + "x" * 120
+
+
+def test_kind_change_recovers_old_and_restarts_60s_for_new() -> None:
+    t, sent = alerting()
+    for i in range(0, 70):
+        fail(t, "upbit", T0 + i * SEC, kind="timeout")
+    assert [k for k, _ in sent] == ["outage:upbit"]
+    fail(t, "upbit", T0 + 70 * SEC, kind="network")  # kind 바뀜 → 이전 구간 닫힘
+    assert [k for k, _ in sent] == ["outage:upbit", "outage:upbit:closed"]
+    for i in range(71, 129):
+        fail(t, "upbit", T0 + i * SEC, kind="network")
+    assert len(sent) == 2  # 새 구간은 아직 59초
+    fail(t, "upbit", T0 + 130 * SEC, kind="network")
+    assert len(sent) == 3 and "network 60초째" in sent[2][1]
+
+
+def test_no_alerts_without_callback() -> None:
+    t = OutageTracker()
+    for i in range(0, 100):
+        fail(t, "upbit", T0 + i * SEC)
+    assert t.open_outage("upbit") is not None  # 콜백 없이도 예외 없이 돈다

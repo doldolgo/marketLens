@@ -12,7 +12,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 import httpx
@@ -35,8 +35,10 @@ from app.core.config import (
 )
 from app.core.contracts import noop_record
 from app.core.errors import ExchangeError
+from app.core.heartbeat import HeartbeatSink
 from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
+from app.core.notify import Notifier, SlackLogHandler
 from app.core.outages import OutageTracker
 from app.core.premium_events import PremiumEventDetector
 from app.core.quotes import QuoteSink
@@ -67,6 +69,8 @@ from app.features.wallet_status.service import WalletStatusService
 
 logger = logging.getLogger("marketlens.main")
 
+HEALTH_STALE_MS = 30_000  # 마지막 틱이 이보다 오래면 /health 는 stale·503 (025 §3.5)
+
 
 async def _open_influx(settings: Settings) -> InfluxClient | None:
     """Influx 클라이언트 생성·ping — 두 역할이 공통으로 하는 유일한 기동 작업 (016 §3.1)."""
@@ -89,6 +93,7 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
     중복으로 쓰거나(collect_fail·premium_event·롤업) 거래소를 이중 구독한다. Redis 는 구독 목적으로만
     쓰고(스트림 `ticks` 는 안 읽는다) 백그라운드 태스크는 그 구독 태스크 하나다.
     """
+    _start_notifier(app)
     influx = await _open_influx(app.state.settings)
     app.state.influx = influx
     bus = RedisBus.from_url(app.state.settings.redis_url)
@@ -103,10 +108,12 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
         await bus.aclose()
         if influx is not None:
             influx.close()
+        await _close_notifier(app)
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    _start_notifier(app)
     client = httpx.AsyncClient(
         timeout=httpx.Timeout(EXCHANGE_TIMEOUT_TOTAL, connect=EXCHANGE_TIMEOUT_CONNECT),
         headers={"User-Agent": USER_AGENT},
@@ -178,7 +185,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     hub = SpreadsHub(bus=bus)
 
     # 1. 수집 실패 이력(011) 복원 — 틱 루프 시작 전에 끝난다. 쓰기는 별도 태스크가 순서대로.
-    outages = OutageTracker(writer=influx)
+    outages = OutageTracker(writer=influx, alerts=_alerts(app))
     app.state.started_at = int(time.time() * 1000)
     await outages.restore(influx, app.state.started_at)
     outage_writer_task = asyncio.create_task(outages.run_writer_loop())
@@ -218,7 +225,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     for stream in streams:
         stream.start()
 
-    # 4. 틱 루프(1초) — 틱 생성·인계·판정
+    # 4. 틱 루프(1초) — 틱 생성·인계·판정. 025 — 틱 끝마다 Redis 심장박동(api 의 /health 가 읽는다)
+    heartbeat = HeartbeatSink(bus=bus)
     ticks = TickLoop(
         store=store,
         streams=streams,
@@ -228,6 +236,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         events=events,
         candles=candles,
         spreads=publisher,
+        heartbeat=heartbeat,
         wallet=wallet,
     )
     ticks.start()
@@ -253,6 +262,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await ticks.aclose()  # 슬롯의 마지막 틱을 인계한다
+        await heartbeat.aclose()
         await publisher.aclose()  # 남은 표는 버린다 — 017
         await hub.aclose()  # 접속자 전원 1001
         await handoff.aclose()  # 큐에 남은 틱을 Redis 로 한 번씩 보내 본다(총 5초 상한)
@@ -272,6 +282,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await tick_stream.aclose()
         await bus.aclose()
         await client.aclose()
+        await _close_notifier(app)
 
 
 def _error_body(code: str, message: str, detail: object) -> dict[str, object]:
@@ -296,6 +307,80 @@ async def _http_exception_handler(
         status_code=exc.status_code,
         content=_error_body(code, str(exc.detail), None),
     )
+
+
+async def _unhandled_exception_handler(
+    request: Request, exc: Exception
+) -> JSONResponse:
+    """처리 안 된 예외 → 500 을 앱 에러 형식으로 (025 §3.3). 내용은 응답에 싣지 않고 ERROR 로그 1줄 —
+    그 줄이 Slack 로그 핸들러를 타고 알림이 된다."""
+    logger.exception("unhandled: %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content=_error_body("internal_error", "internal error", None),
+    )
+
+
+def _install_notifier(app: FastAPI, settings: Settings) -> None:
+    """025 §3.2 — 웹훅 URL 이 없으면 알림기·로그 핸들러 모두 만들지 않는다(로컬·테스트 기본)."""
+    app.state.notifier = None
+    if not settings.slack_webhook_url:
+        return
+    notifier = Notifier(webhook_url=settings.slack_webhook_url, role=settings.role)
+    app.state.notifier = notifier
+    root = logging.getLogger()
+    # create_app 이 여러 번 불려도(테스트) 루트에 핸들러가 겹치지 않게
+    for h in [h for h in root.handlers if isinstance(h, SlackLogHandler)]:
+        root.removeHandler(h)
+    root.addHandler(SlackLogHandler(notifier.notify))
+
+
+def _alerts(app: FastAPI) -> Callable[[str, str], None] | None:
+    notifier: Notifier | None = app.state.notifier
+    if notifier is None:
+        return None
+    return notifier.notify
+
+
+def _start_notifier(app: FastAPI) -> None:
+    notifier: Notifier | None = app.state.notifier
+    if notifier is None:
+        return
+    notifier.start()
+    # 기동 알림 — 억제(10분) 덕에 재시작 루프가 10분에 1줄로 보인다 (025 §3.3)
+    notifier.notify("startup", f"🟢 {app.state.settings.role} 기동 (v{APP_VERSION})")
+
+
+async def _close_notifier(app: FastAPI) -> None:
+    notifier: Notifier | None = app.state.notifier
+    if notifier is not None:
+        await notifier.aclose()
+
+
+async def _health_status(
+    app: FastAPI, now_ms: int, *, api_only: bool
+) -> tuple[str, int | None]:
+    """025 §3.5 — (status, lastTickAt ms). collector 는 메모리의 마지막 틱, api 는 Redis 심장박동."""
+    if api_only:
+        bus: RedisBus | None = getattr(app.state, "spreads_bus", None)
+        if bus is None:
+            return "starting", None  # lifespan 전 — Redis 자리가 아직 없다
+        try:
+            last_ms = await bus.heartbeat()
+        except Exception:
+            return "redis_down", None
+        if last_ms is None:
+            return "stale", None
+        if now_ms - last_ms < HEALTH_STALE_MS:
+            return "ok", last_ms
+        return "stale", last_ms
+    store: LiveStore | None = getattr(app.state, "live_store", None)
+    if store is None or store.received_at is None:
+        return "starting", None  # 기동 후 첫 틱 전
+    last_ms = store.received_at * 1000
+    if now_ms - last_ms < HEALTH_STALE_MS:
+        return "ok", last_ms
+    return "stale", last_ms
 
 
 def _setup_logging() -> None:
@@ -328,6 +413,7 @@ def create_app() -> FastAPI:
         lifespan=_api_lifespan if api_only else _lifespan,
     )
     app.state.settings = settings
+    _install_notifier(app, settings)
 
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
@@ -336,11 +422,23 @@ def create_app() -> FastAPI:
 
     app.add_exception_handler(ExchangeError, _exchange_error_handler)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
+    app.add_exception_handler(Exception, _unhandled_exception_handler)
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        # 스트림 상태와 무관하게 항상 ok — 프로세스 liveness 만 나타낸다
-        return {"status": "ok", "version": APP_VERSION}
+    async def health(request: Request) -> JSONResponse:
+        # 025 §3.5 — 프로세스 생존이 아니라 데이터 흐름을 답한다. ok 만 200, 나머지는 503 —
+        # 외부 uptime 서비스가 상태코드만 보고 판정하게. 상태 응답이라 {"error":…} 형식이 아니다.
+        status, last_ms = await _health_status(
+            request.app, int(time.time() * 1000), api_only=api_only
+        )
+        if status == "ok":
+            code = 200
+        else:
+            code = 503
+        return JSONResponse(
+            status_code=code,
+            content={"status": status, "version": APP_VERSION, "lastTickAt": last_ms},
+        )
 
     # api 역할은 Influx 만 읽는 네 경로 + 017 의 /ws/spreads + 018 의 GET /spreads(Redis 읽기)
     # — /history/events 는 진행 중 사건을 메모리에서 읽으므로 제외 (016 §3.1, 018 §3.4)

@@ -98,6 +98,7 @@ marketlens/
 | 022 | landing | DONE | 정적 HTML 랜딩 `/`(검색·미리보기 메타, `/api/spreads` 1회 티저, 스크린샷, 모바일) · 대시보드는 `/app/`(Vite base·nginx alias), 옛 쿼리 링크는 301 (web·nginx 전용) |
 | 023 | domain-tls | DONE | `kimptrack.com`·`www` HTTPS — serve 박스에 caddy 컨테이너(호스트 80·443, Let's Encrypt 자동 발급·갱신, 볼륨 보존), web 은 호스트 비공개, 탄력 IP 직접 접속은 평문 유지, DNS 는 Cloudflare(프록시 끔) (인프라·serve 전용) |
 | 024 | wallet-history | DONE | 틱 입출금 4상태 = 006 망 판정값 + 망 이름 2개 → 1분봉·사건 점 `net_dom`·`net_fx`, `/history/candles`·`events` 에 `netDom`·`netFx`, 기록 탭 읽기 줄·사건 표·로그에 망 표시 |
+| 025 | slack-alerts | DONE | Slack 웹훅 알림 — 기동·수집 실패 구간 60초 발생/복구·ERROR 로그·처리 안 된 500(키별 10분 억제, 새 라이브러리 없음), 수집기 심장박동 `collect:heartbeat`, `/health` 신선도 판정(비정상 503), 외부 uptime 감시 런북 |
 
 실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).

@@ -234,4 +234,9 @@ def test_health_contract_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = make_client(LiveStore(), OutageTracker(), T0, monkeypatch)
-    assert client.get("/health").json() == {"status": "ok", "version": "0.1.0"}
+    # 025 — 틱 없는 앱은 starting·503, 키는 status·version·lastTickAt
+    assert client.get("/health").json() == {
+        "status": "starting",
+        "version": "0.1.0",
+        "lastTickAt": None,
+    }

@@ -56,7 +56,8 @@ def test_api_role_serves_only_influx_routes_and_404s_the_rest(set_role) -> None:
     client = TestClient(create_app())  # lifespan 없음 = Influx 없음 → /history/* 503
 
     health = client.get("/health")
-    assert health.status_code == 200 and health.json()["status"] == "ok"
+    # 025 — lifespan 없이는 Redis 자리가 없어 starting·503
+    assert health.status_code == 503 and health.json()["status"] == "starting"
     # 응답·에러는 005·014 계약 그대로 — 토큰 없으면 503 storage_unavailable
     for path, params in (
         ("/history/premium", {"base": "BTC", "unit": "week"}),

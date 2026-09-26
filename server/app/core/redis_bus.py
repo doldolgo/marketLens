@@ -8,6 +8,7 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
 - 채널 `spreads`        — 표 JSON, 실시간(수집 → api)
 - 키 `spreads:latest`   — 같은 JSON, TTL 10초. 늦게 붙은 구독자의 첫 표. 수집이 멈추면 사라진다
 - 키 `spreads:want`     — 값 "1", TTL 15초. api 가 5초마다 갱신(+ `GET /spreads` 요청마다, 018), 수집이 5초마다 읽어 "원함"으로
+- 키 `collect:heartbeat` — 틱 시각(ms) 문자열, TTL 30초. 수집이 매 틱 쓰고 api 의 `/health` 가 읽는다 (025)
 """
 
 import time
@@ -24,6 +25,8 @@ LATEST_KEY = "spreads:latest"
 WANT_KEY = "spreads:want"
 LATEST_TTL_SEC = 10
 WANT_TTL_SEC = 15
+HEARTBEAT_KEY = "collect:heartbeat"
+HEARTBEAT_TTL_SEC = 30
 
 
 class RedisUnavailableError(Exception):
@@ -110,6 +113,17 @@ class RedisBus:
         except RedisError as exc:
             raise RedisUnavailableError(str(exc)) from exc
         return None if value is None else _text(value)
+
+    async def set_heartbeat(self, ts_ms: int) -> None:
+        """`SET collect:heartbeat <ts_ms> EX 30` — 수집 틱 루프가 매초 (025 §3.4). 실패는 예외."""
+        await self._client.set(HEARTBEAT_KEY, str(ts_ms), ex=HEARTBEAT_TTL_SEC)
+
+    async def heartbeat(self) -> int | None:
+        """`GET collect:heartbeat` — 없으면 None(수집이 30초 넘게 틱을 못 만듦). 실패는 예외."""
+        value = await self._client.get(HEARTBEAT_KEY)
+        if value is None:
+            return None
+        return int(_text(value))
 
     async def subscribe(self) -> Subscription:
         """채널 구독 연결을 새로 연다 — 여기서 실제 연결이 일어나므로 실패는 예외."""
