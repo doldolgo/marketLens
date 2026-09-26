@@ -7,7 +7,7 @@ wallet_status(조회)와 spreads(행 판정)가 같이 쓰므로 core 에 둔다
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, NamedTuple, Protocol
 
 Verdict = Literal["matched", "unknown", "absent"]
 
@@ -148,3 +148,62 @@ def pick_domestic(
             return dn, verdict, fn
     # 3. 첫 국내 망의 판정
     return judged[0]
+
+
+# --- 행 1개의 입출금 판정 (스펙 006 §3.7 + 024 §3.2) ---
+
+
+class WalletRow(Protocol):
+    """판정이 읽는 행의 일부 — core.models.Row 가 만족한다. models 가 이 모듈을 import 하므로 역참조는 Protocol 로."""
+
+    deposit_enabled: bool | None
+    withdrawal_enabled: bool | None
+    networks: list[Network]
+
+
+class WalletFields(NamedTuple):
+    """행 1개의 판정 6값 — 006 §3.7 의 다섯 + 해외 망 이름(024 §3.2). 앞 다섯이 `/spreads` 5필드 순서 그대로다."""
+
+    net_dom: str | None
+    net_fx: str | None
+    dep_dom: bool | None
+    wd_dom: bool | None
+    dep_fx: bool | None
+    wd_fx: bool | None
+
+
+def wallet_fields(dom_row: WalletRow, fx_row: WalletRow) -> WalletFields:
+    """국내 망 기준 입출금 판정 — 스펙 006 §3.7. spreads 행과 틱(024)이 같은 함수를 부른다.
+
+    국내 망이 기준이다. status=fail 행도 같은 규칙.
+    """
+    if not dom_row.networks:
+        # 1. 국내 망 목록이 비면(키 없음·망 정보 없는 과도기) 코인 단위 값 그대로
+        return WalletFields(
+            None,
+            None,
+            dom_row.deposit_enabled,
+            dom_row.withdrawal_enabled,
+            fx_row.deposit_enabled,
+            fx_row.withdrawal_enabled,
+        )
+    # 2. 국내 망·판정·해외 망을 고른다 (§3.6 tie-break)
+    dom_net, verdict, fx_net = pick_domestic(dom_row.networks, fx_row.networks)
+    net_fx: str | None = None
+    dep_fx: bool | None
+    wd_fx: bool | None
+    if verdict == "matched" and fx_net is not None:
+        # 3. 맞춘 해외 망의 값 — 해외 망 이름은 이 경우에만 안다
+        net_fx = fx_net.name
+        dep_fx, wd_fx = fx_net.dep, fx_net.wd
+    elif verdict == "absent":
+        # 4. 해외가 그 망을 안 다룸 = 옮길 길 없음
+        dep_fx = wd_fx = False
+    elif fx_row.networks:
+        # 5. 해외 망이 있는데 못 맞춤 = 모른다고 말한다 — 코인 단위로 접으면 낙관 편향
+        dep_fx = wd_fx = None
+    else:
+        # 5. 해외 망 정보가 아예 없으면 해외 코인 단위 값
+        dep_fx = fx_row.deposit_enabled
+        wd_fx = fx_row.withdrawal_enabled
+    return WalletFields(dom_net.name, net_fx, dom_net.dep, dom_net.wd, dep_fx, wd_fx)

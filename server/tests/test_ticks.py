@@ -9,6 +9,7 @@ import pytest
 
 from app.core.live_store import LiveStore
 from app.core.models import Rate, Row, StreamError, StreamState, Tick
+from app.core.networks import Network
 from app.core.premium import premium_percent
 from app.core.ticks import STALE_AFTER_MS, TickLoop, build_tick, judge_state
 from tests.conftest import FakeStream, make_row
@@ -85,7 +86,39 @@ def test_build_tick_row_carries_prices_and_wallet_states_for_candles() -> None:
     fx.deposit_enabled, fx.withdrawal_enabled = None, True
     [row] = build_tick(store, T0, []).rows
     assert (row.dom_price, row.fx_price, row.rate) == (100_050.0, 70.5, 1395.0)
+    # 망 목록이 없으면 코인 단위 값 그대로, 망 이름 둘 다 None (024 §3.3)
     assert (row.dom_dep, row.dom_wd, row.fx_dep, row.fx_wd) == (True, False, None, True)
+    assert (row.net_dom, row.net_fx) == (None, None)
+
+
+def test_build_tick_wallet_states_are_network_verdicts_with_names() -> None:
+    """024 §3.3 — 입출금 4상태는 006 §3.7 판정값이고 망 이름 2개는 판정에 쓴 표시명."""
+    store = seeded()
+    dom = make_row("upbit", "BTC")
+    fx = make_row("binance", "BTC")
+    store.put_rows([dom, fx], NOW)
+    dom.deposit_enabled = dom.withdrawal_enabled = True
+    fx.deposit_enabled = fx.withdrawal_enabled = True
+    # absent — 해외가 그 망을 안 다룸: 해외 두 값 False, 해외 망 이름 없음
+    dom.networks = [Network("SOL", "Solana", True, True)]
+    fx.networks = [Network("BSC", "BNB Smart Chain", True, True)]
+    [row] = build_tick(store, T0, []).rows
+    assert (row.dom_dep, row.dom_wd, row.fx_dep, row.fx_wd) == (
+        True,
+        True,
+        False,
+        False,
+    )
+    assert (row.net_dom, row.net_fx) == ("Solana", None)
+    # matched — 맞춘 해외 망의 값과 이름
+    fx.networks = [Network("SOL", "Solana", True, False)]
+    [row] = build_tick(store, T0, []).rows
+    assert (row.fx_dep, row.fx_wd, row.net_dom, row.net_fx) == (
+        True,
+        False,
+        "Solana",
+        "Solana",
+    )
 
 
 def test_build_tick_skips_non_positive_values_and_empty_books() -> None:

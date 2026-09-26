@@ -1,6 +1,14 @@
 """망 정규화·판정·tie-break — 스펙 006 §3.6·§4. core 순수 함수라 네트워크 없음."""
 
-from app.core.networks import Network, match_network, normalize_name, pick_domestic
+from dataclasses import dataclass
+
+from app.core.networks import (
+    Network,
+    match_network,
+    normalize_name,
+    pick_domestic,
+    wallet_fields,
+)
 
 
 def net(code: str, name: str, dep: bool = True, wd: bool = True) -> Network:
@@ -222,3 +230,66 @@ def test_upbit_chiliz_chain_vs_bitget_cap20_is_matched() -> None:
 
 def test_sol_vs_bitget_bep20_only_is_still_absent() -> None:
     assert match_network(net("SOL", "SOL"), [net("BEP20", "BEP20")])[0] == "absent"
+
+
+# --- 행 판정 6값 — 006 §3.7 다섯 경우 + 해외 망 이름 (024 §3.2·§4) ---
+
+
+@dataclass
+class _Row:
+    """판정 입력 — core.models.Row 중 wallet_fields 가 읽는 세 값."""
+
+    deposit_enabled: bool | None
+    withdrawal_enabled: bool | None
+    networks: list[Network]
+
+
+def test_wallet_fields_case1_no_domestic_networks_uses_coin_values() -> None:
+    fx = _Row(False, True, [net("ETH", "Ethereum")])
+    assert wallet_fields(_Row(True, None, []), fx) == (
+        None,
+        None,
+        True,
+        None,
+        False,
+        True,
+    )
+
+
+def test_wallet_fields_matched_takes_matched_network_values_and_both_names() -> None:
+    # GRT 실사례 — 코인 단위로는 출금 가능이지만 맞춘 ETH 망은 출금 중단
+    dom = _Row(None, None, [net("ETH", "Ethereum")])
+    fx = _Row(
+        True,
+        True,
+        [net("ARBITRUM", "Arbitrum One"), net("ETH", "Ethereum (ERC20)", wd=False)],
+    )
+    assert wallet_fields(dom, fx) == (
+        "Ethereum",
+        "Ethereum (ERC20)",
+        True,
+        True,
+        True,
+        False,
+    )
+
+
+def test_wallet_fields_absent_blocks_foreign_and_has_no_foreign_name() -> None:
+    dom = _Row(True, True, [net("SOL", "Solana")])
+    fx = _Row(True, True, [net("BSC", "BNB Smart Chain")])
+    assert wallet_fields(dom, fx) == ("Solana", None, True, True, False, False)
+
+
+def test_wallet_fields_unknown_with_foreign_networks_is_null_null() -> None:
+    dom = _Row(True, True, [net("AVAX", "AVAX")])
+    fx = _Row(True, True, [net("AVAXC", "AVAX C-Chain")])
+    assert wallet_fields(dom, fx) == ("AVAX", None, True, True, None, None)
+
+
+def test_wallet_fields_unknown_without_foreign_networks_uses_foreign_coin_values() -> (
+    None
+):
+    # 국내 두 값은 코인 값이 아니라 고른 망의 값, 해외 두 값만 코인 단위
+    dom = _Row(None, None, [net("ETH", "Ethereum", wd=False)])
+    fx = _Row(False, True, [])
+    assert wallet_fields(dom, fx) == ("Ethereum", None, True, False, False, True)
