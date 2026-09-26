@@ -79,10 +79,10 @@ curl -s localhost:8000/spreads | head -c 600
 표는 $1,000 한 장뿐이다(`?notional=` 은 400) — 종목 하나의 규모별 슬리피지는 004 의 `/analysis/slippage`(아래 `/slippage/<거래소>`)로 본다.
 ```bash
 .venv/bin/python - <<'EOF'
-import asyncio, websockets
+import asyncio, gzip, websockets
 async def main():
     async with websockets.connect("ws://localhost:8000/ws/spreads") as ws:
-        for _ in range(8): print((await ws.recv())[:60])
+        for _ in range(8): print(gzip.decompress(await ws.recv())[:60])  # 프레임은 gzip 바이너리 (017)
 asyncio.run(main())
 EOF
 ```

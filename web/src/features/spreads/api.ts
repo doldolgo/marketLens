@@ -16,6 +16,15 @@ function socketUrl(): string {
   return url.toString()
 }
 
+/**
+ * gzip 바이너리 프레임 → JSON 문자열 (§3.3). 서버가 표 1장당 1회만 압축하려고 permessage-deflate(접속마다 따로 압축,
+ * api CPU 가 접속자 수에 비례) 대신 미리 gzip 한 같은 바이트를 전원에게 보낸다. 브라우저 내장 DecompressionStream 으로 푼다.
+ */
+async function inflate(data: ArrayBuffer): Promise<string> {
+  const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('gzip'))
+  return new Response(stream).text()
+}
+
 /** 서버 행(거래소 id) → 피드 행(표시명). 키는 서버 id 기준 `sym|dom|fx` 라 변환 전에 만든다. */
 const rowKey = (r: SpreadRow) => `${r.sym}|${r.dom}|${r.fx}`
 const display = (r: SpreadRow): SpreadRow => ({ ...r, dom: exName(r.dom), fx: exName(r.fx) })
@@ -94,17 +103,24 @@ export function useSpreadSocket(feed: Feed): void {
     function connect(): void {
       if (!alive) return
       const socket = new WebSocket(socketUrl())
+      socket.binaryType = 'arraybuffer' // 프레임은 gzip 바이너리 — 기본 Blob 이면 풀기 전에 한 번 더 읽어야 한다
       ws = socket
       armSilence()
+      // 해제가 비동기라 도착 순서대로 처리하도록 직렬화한다 — delta 순서가 바뀌면 병합·삭제가 틀어진다
+      let chain: Promise<void> = Promise.resolve()
       socket.onmessage = (ev) => {
         if (!alive || ws !== socket) return
         backoff = SPREAD_WS_BACKOFF_MIN_MS // 서버 메시지를 받았으면 살아 있는 연결
         armSilence()
-        try {
-          handle(JSON.parse(ev.data as string) as SpreadsMessage)
-        } catch {
-          // 알 수 없는 프레임은 무시
-        }
+        chain = chain
+          .then(() => inflate(ev.data as ArrayBuffer))
+          .then((text) => {
+            if (!alive || ws !== socket) return // 푸는 사이 닫혔거나 새 연결로 바뀐 경우
+            handle(JSON.parse(text) as SpreadsMessage)
+          })
+          .catch(() => {
+            // 알 수 없는 프레임은 무시
+          })
       }
       socket.onclose = () => {
         if (ws === socket) ws = null

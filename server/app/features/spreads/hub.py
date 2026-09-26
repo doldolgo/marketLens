@@ -1,13 +1,17 @@
 """서빙 프로세스의 구독·diff·브로드캐스트 (스펙 017 §3.2).
 
-Redis 채널 `spreads` 를 구독하는 태스크 하나가 새 표마다 diff 를 1회 만들고, 접속자 전원에게 같은
-문자열을 넣는다. 접속자마다 보내기 대기열·보내기 태스크가 따로 있어 느린 한 명이 나머지를 막지 않는다.
+Redis 채널 `spreads` 를 구독하는 태스크 하나가 새 표마다 diff 를 1회 만들고 gzip 도 1회 해서, 접속자
+전원에게 같은 바이트를 넣는다. 압축을 여기서 한 번만 하는 이유 — uvicorn 의 permessage-deflate 는 접속마다
+따로 압축해서 api CPU 가 접속자 수에 비례했다(실측 2026-09-26: 50명에 1코어 포화). 그래서 Dockerfile 이
+그 압축을 끄고, 브라우저는 gzip 바이너리 프레임을 DecompressionStream 으로 푼다.
+접속자마다 보내기 대기열·보내기 태스크가 따로 있어 느린 한 명이 나머지를 막지 않는다.
 접속자가 없으면 상태(직전 표)를 들지 않고 채널 메시지를 파싱하지 않는다 — 배포의 `server` 컨테이너가
 같은 코드를 띄워도 비용이 없다.
 """
 
 import asyncio
 import contextlib
+import gzip
 import json
 import logging
 import time
@@ -26,9 +30,16 @@ BACKOFF_MIN_SEC = 1.0
 BACKOFF_MAX_SEC = 30.0
 CODE_SLOW = 1008
 CODE_GOING_AWAY = 1001
+GZIP_LEVEL = 6  # 표 1장당 1회라 CPU 보다 크기를 택한다 (9 는 시간이 2배인데 크기 차이가 거의 없다)
 
-HEARTBEAT = '{"type":"heartbeat"}'
-WAITING = '{"type":"waiting"}'
+
+def pack(text: str) -> bytes:
+    """브라우저로 나가는 프레임 1개 — 모든 메시지가 같은 방식이라 클라이언트가 분기하지 않는다."""
+    return gzip.compress(text.encode(), compresslevel=GZIP_LEVEL)
+
+
+HEARTBEAT = pack('{"type":"heartbeat"}')
+WAITING = pack('{"type":"waiting"}')
 META_KEYS = ("notional", "rate", "warnings", "dataReceivedAt", "fetchedAt")
 
 
@@ -71,14 +82,14 @@ def _dumps(value: dict) -> str:
 class Connection:
     def __init__(self, ws: WebSocket) -> None:
         self._ws = ws
-        self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=SEND_QUEUE_LIMIT)
+        self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=SEND_QUEUE_LIMIT)
         self._sender: asyncio.Task[None] | None = None
         self._closing = False
 
     def start(self) -> None:
         self._sender = asyncio.create_task(self._run_sender())
 
-    def offer(self, message: str) -> None:
+    def offer(self, message: bytes) -> None:
         """대기열에 넣는다 — 가득 차 있으면 느린 접속자로 보고 닫는다. 기다리지 않는다."""
         if self._closing:
             return
@@ -112,7 +123,7 @@ class Connection:
             except TimeoutError:
                 message = HEARTBEAT
             try:
-                await self._ws.send_text(message)
+                await self._ws.send_bytes(message)
             except Exception:
                 return  # 끊긴 소켓 — 수신 쪽(라우터)이 detach 한다
 
@@ -141,7 +152,10 @@ class SpreadsHub:
         if first:
             await self._load_latest()
             await self._refresh_want()  # 수집이 표를 만들기 시작하도록 지금 1회 (§3.1)
-        conn.offer(make_snapshot(self._table) if self._table is not None else WAITING)
+        if self._table is not None:
+            conn.offer(pack(make_snapshot(self._table)))
+        else:
+            conn.offer(WAITING)
         return conn
 
     def detach(self, conn: Connection) -> None:
@@ -150,7 +164,7 @@ class SpreadsHub:
             self._table = self._index = None  # 0명 — 상태를 버린다 (§3.2)
 
     def on_table(self, text: str) -> None:
-        """새 표 1장 — 접속자가 없으면 파싱조차 안 한다. 있으면 diff 1회, 전원에게 같은 문자열."""
+        """새 표 1장 — 접속자가 없으면 파싱조차 안 한다. 있으면 diff 1회·gzip 1회, 전원에게 같은 바이트."""
         if not self._conns:
             return
         table = json.loads(text)
@@ -160,8 +174,9 @@ class SpreadsHub:
         else:
             message, self._index = make_delta(self._index, table)
         self._table = table
+        frame = pack(message)
         for conn in list(self._conns):
-            conn.offer(message)
+            conn.offer(frame)
 
     async def _load_latest(self) -> None:
         try:
