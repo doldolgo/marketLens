@@ -22,9 +22,16 @@ function emptyHintFor(sym: string, fx: string, availableFxs: string[]): string |
   return `${sym} 은 ${names} 에만 있습니다`
 }
 
-type Per = '7d' | '30d' | '90d'
-const PER_LABEL: Record<Per, string> = { '7d': '1주', '30d': '1달', '90d': '3달' }
-const PER_SEC: Record<Per, number> = { '7d': 7 * 86_400, '30d': 30 * 86_400, '90d': 90 * 86_400 }
+type Per = '1h' | '4h' | '8h' | '12h' | '24h' | '3d' | '7d' | '30d' | '90d'
+const PERS: Per[] = ['1h', '4h', '8h', '12h', '24h', '3d', '7d', '30d', '90d']
+const PER_LABEL: Record<Per, string> = {
+  '1h': '1시간', '4h': '4시간', '8h': '8시간', '12h': '12시간', '24h': '24시간',
+  '3d': '3일', '7d': '1주', '30d': '1달', '90d': '3달',
+}
+const PER_SEC: Record<Per, number> = {
+  '1h': 3_600, '4h': 4 * 3_600, '8h': 8 * 3_600, '12h': 12 * 3_600, '24h': 24 * 3_600,
+  '3d': 3 * 86_400, '7d': 7 * 86_400, '30d': 30 * 86_400, '90d': 90 * 86_400,
+}
 const DIR_LABEL: Record<Dir, string> = { kimp: '김프', reverse: '역프' }
 const DOMS_ORDER: Dom[] = ['upbit', 'bithumb']
 const NO_EVENTS: PremiumEvent[] = []
@@ -57,10 +64,14 @@ function fmtDur(sec: number): string {
   return `${(min / 60 / 24).toFixed(1)}일`
 }
 
-/** 축 라벨 M/D (로컬). */
-function fmtMd(ms: number): string {
+/** 타임라인 축 라벨 (로컬). 기간이 하루 이하면 M/D 는 5칸이 전부 같은 날이라 시각으로, 1주 미만이면 날짜+시각, 그 이상은 M/D. */
+function fmtAxis(ms: number, periodSec: number): string {
   const d = new Date(ms)
-  return `${d.getMonth() + 1}/${d.getDate()}`
+  const md = `${d.getMonth() + 1}/${d.getDate()}`
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  if (periodSec <= 86_400) return hm
+  if (periodSec < 7 * 86_400) return `${md} ${hm}`
+  return md
 }
 
 const rankCell: CSSProperties = { fontSize: 11.5, fontVariantNumeric: 'tabular-nums', textAlign: 'right', padding: '0 4px' }
@@ -78,7 +89,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
 }) {
   // 방향·기간·거래소·정렬·차트 선택은 URL 쿼리(h.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색 입력은 Enter 전까지 임시라 제외
   const [dir, setDir] = useUrlState<Dir>('h.dir', 'kimp', oneOf(['kimp', 'reverse']))
-  const [per, setPer] = useUrlState<Per>('h.per', '7d', oneOf(['7d', '30d', '90d']))
+  const [per, setPer] = useUrlState<Per>('h.per', '7d', oneOf(PERS))
   const [dom, setDom_] = useUrlState<Dom | null>('h.dom', null, alias([['all', null], ['upbit', 'upbit'], ['bithumb', 'bithumb']]))
   const [sort, setSort] = useUrlState<{ key: SortKey; dir: number }>('h.sort', { key: 'cnt', dir: -1 }, SORT_CODEC)
   const { key: sortKey, dir: sortDir } = sort
@@ -183,7 +194,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
         {/* 방향 서브탭 + 필터바 (§3.5) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
           <Seg opts={dirOpts} pad="6px 16px" />
-          <Seg opts={(['7d', '30d', '90d'] as Per[]).map((p) => seg(PER_LABEL[p], per === p, () => setPer(p)))} />
+          <Seg opts={PERS.map((p) => seg(PER_LABEL[p], per === p, () => setPer(p)))} />
           <Seg opts={[
             seg('전체', dom === null, () => setDom(null)),
             seg('업비트', dom === 'upbit', () => setDom('upbit')),
@@ -301,7 +312,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
                 <div style={{ position: 'relative', height: 14 }}>
                   {[0, 0.25, 0.5, 0.75, 1].map((f) => (
                     <span key={f} style={{ position: 'absolute', left: `${(f * 100).toFixed(0)}%`, transform: 'translateX(-50%)', fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-600)' }}>
-                      {fmtMd((t0Sec + f * periodSec) * 1000)}
+                      {fmtAxis((t0Sec + f * periodSec) * 1000, periodSec)}
                     </span>
                   ))}
                 </div>
