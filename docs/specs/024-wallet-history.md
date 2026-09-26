@@ -1,6 +1,6 @@
 # 024 — wallet-history
 
-상태: TODO | 의존: 006(wallet-status — 망 기준 판정·5필드 규칙), 013(premium-events — 사건 점·`/history/events`·기록 탭 사건 표), 014(premium-1m — 틱 행 확장·1분봉·`/history/candles`·차트 카드)
+상태: DONE | 의존: 006(wallet-status — 망 기준 판정·5필드 규칙), 013(premium-events — 사건 점·`/history/events`·기록 탭 사건 표), 014(premium-1m — 틱 행 확장·1분봉·`/history/candles`·차트 카드)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -98,8 +98,21 @@ web(수동 또는 순수 함수):
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 2026-09-26, 브랜치 feat/024-wallet-history
+$ cd server && ruff check . && ruff format --check . && pytest -q
+All checks passed!
+210 files already formatted
+718 passed, 1 warning in 8.38s
+$ cd web && npm run lint && npm run build
+(lint 경고 0)
+dist/assets/index-jl2TMY9h.js   453.60 kB │ gzip: 143.86 kB
+✓ built in 538ms
+# web 순수 함수 확인 — netPath 4가지 표기, 사건 표 망 열(최근 사건 기준·오름차순·null 뒤). 스크래치 스크립트로 1회
+$ node --experimental-strip-types net_check.mts
+web pure checks ok
 ```
+- 수동(EC2, 배포 후) 항목 4개는 **미실행** — 배포 뒤 사람이 확인한다: `candles_1m` 최신 점의 `net_dom`·`net_fx`, `/history/candles?base=ETH&fx=bitget` 의 `netDom "Ethereum"`·`netFx "ERC20"`, 표에서 `wdFx false` 인 코인의 띠 막힘 색·`경로 막힘 60초`, 사건 표 `망` 열·로그 `ERC20 → Ethereum`, `/spreads` 17키·값 불변.
+- 브라우저 수동 확인(차트 읽기 줄·사건 표·로그 표시)은 로컬에 봉·사건 데이터가 없어 미실행 — lint·build·순수 함수 확인으로 대신했다.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — `| wallet-history | server: 틱 4상태 = 006 판정값 + net_dom·net_fx, 봉·사건 점 문자열 2필드, /history/candles·events netDom·netFx | web: 읽기 줄·사건 표·로그 망 표시 | 배포 전 점은 망 null·4상태 코인 단위 |` 행 추가. 알려진 빚: "(014) 배포 전 봉의 입출금 4상태·막힌 초는 코인 단위 값이라 표와 다를 수 있다 — 1m 7일 보관이 지나면 사라진다(5m 이상은 남는다)" 한 줄.
@@ -112,6 +125,15 @@ web(수동 또는 순수 함수):
 - `docs/specs/006-wallet-status.md` — §3.7 첫 줄에 "이 5필드 계산은 core 공개 함수이며 틱(024)도 같은 함수로 판정한다" 와 `net_fx` 한 줄.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
+- 만든 것 (파일 목록): server — `core/networks.py`(`WalletRow` Protocol·`WalletFields` NamedTuple·`wallet_fields`), `core/models.py`(`TickRow.net_dom/net_fx`), `core/ticks.py`(build_tick 이 판정값을 싣는다), `features/spreads/service.py`(로컬 `_wallet_fields` 삭제 → core 공용), `core/influx.py`(`CandleRow`·`PremiumEventRow` 문자열 2필드, 점 20 필드, 읽기 선택 `_opt_str`), `core/candles.py`(분 닫힘·접기 마지막 값), `core/premium_events.py`(열림·매 틱·닫힘 갱신, 복원), `features/history/models.py`·`service.py`(`netDom`·`netFx`). 테스트 — `tests/test_networks.py`(판정 6값 5경우)·`test_ticks.py`·`test_tick_store.py`(Redis 5키)·`test_candles.py`(마지막 값·빈 문자열·absent 60초·롤업)·`test_influx_read.py`(신규 — 옛 18 필드 점·빈 문자열 → null, influxdb-client 자리에 가짜)·`test_premium_events.py`(열림/갱신/닫힘/복원)·`features/history/tests/test_candles_api.py`·`test_events_api.py`, fake 3개(`candle_fakes`·`premium_event_fakes`·`history/tests/helpers`). web — `features/history/network.ts`(신규 — `netPath`·`NET_NONE`), `types.ts`, `rollup.ts`, `stats.ts`(`SymStat.net`), `Tab.tsx`(사건 표 `망` 열·정렬·로그 `망` 열), `Chart.tsx`(읽기 줄 국내 거래소 칸마다 `망`). 문서 — `docs/context/status.md`·`architecture.md`·`product.md`·`db.md`, 스펙 006·013·014, `CLAUDE.md` 인덱스.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - 공유 함수는 `core/networks.py` 에 두고 입력을 `Row` 대신 구조적 Protocol(`deposit_enabled`·`withdrawal_enabled`·`networks`)로 받았다 — `models.py` 가 `networks.py` 를 import 하므로 역참조는 순환이다. 반환은 스펙 순서 그대로의 NamedTuple(튜플 비교가 그대로 된다).
+  - 사건 감지기는 관측하는 매 틱마다 `net_dom`·`net_fx` 를 최신값으로 든다(60초 갱신·닫힘이 "그 시점 틱 행의 값" 이 되게). 결측·복원으로 닫히는 사건(§3.3 `_close_at`)은 그 시점의 틱 행이 없어 **마지막으로 본 값**을 쓴다 — 스펙이 말하지 않은 엣지, "마지막 값만 남긴다" 와 같은 취지.
+  - 사건 로그 `망` 의 한쪽만 있는 경우는 스펙에 없어 읽기 줄과 같은 표기(`– → Ethereum`)로 했다. 사건 표 `망` 열 첫 클릭은 오름차순(문자열), 수치 열은 기존대로 내림차순.
+  - 읽기 줄의 망 칸은 국내 거래소 칸마다 넣었다(`netDom` 이 국내 거래소별로 다르다 — 카드 하나에 업비트·빗썸이 같이 그려진다).
+  - Influx 읽기 규칙 테스트는 influxdb-client 를 module 속성에서 가짜로 바꿔 넣었다(`tests/test_influx_read.py`) — 실물 파서를 공개 함수로 통과시키는 유일한 길이었다.
+  - 함께 고친 절: 없음(스펙 본문 그대로 구현). §5·§7 만 채웠다.
 - 남은 빚:
+  - EC2 수동 확인 4개 미실행(§5).
+  - `TickRow` 에 필드가 9개 붙어 매초 ≈490 행에 문자열 2개가 더 실린다 — 부담은 없지만 `premium` 점·Redis 레코드와의 경계가 "기본값이 있는 필드" 라는 관례에만 기대고 있다.
+  - 배포 전 봉의 4상태·막힌 초는 코인 단위 값이라 표와 다를 수 있다(status.md 알려진 빚).
