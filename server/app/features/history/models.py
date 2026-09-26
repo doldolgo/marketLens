@@ -130,6 +130,9 @@ class EventOut(BaseModel):
     max_percent: float
     max_ts: int
     samples: int
+    # 024 §3.7 — 사건이 옮기는 망(국내·해외 표시명). 배포 전 점·모름은 None
+    net_dom: str | None
+    net_fx: str | None
 
 
 class EventsResponse(BaseModel):
@@ -159,6 +162,9 @@ class CandleOut(BaseModel):
     fx_withdraw_ok: bool | None
     blocked_sec: int
     samples: int
+    # 024 §3.6 — 창 마지막 행의 망(국내·해외 표시명). 방향과 무관하게 같은 값, 배포 전 봉·모름은 None
+    net_dom: str | None
+    net_fx: str | None
 
 
 class CandlesResponse(BaseModel):

@@ -53,7 +53,23 @@ def test_candle_shape_matches_spec_example_and_camel_case() -> None:
         "fxWithdrawOk": True,
         "blockedSec": 0,
         "samples": 60,
+        "netDom": None,  # 024 — 망 필드 없는 봉(배포 전) 은 null
+        "netFx": None,
     }
+
+
+def test_candle_network_names_are_direction_independent_and_null_when_missing() -> None:
+    reader = FakeInfluxReader()
+    reader.seed_candle("candles_1m", T0, net_dom="Ethereum", net_fx="ERC20")
+    reader.seed_candle("candles_1m", T0 + 60)
+    for d in ("kimp", "reverse"):
+        body = get(
+            make_client(reader), base="BTC", dir=d, start=T0, end=T0 + DAY
+        ).json()
+        assert [(c["netDom"], c["netFx"]) for c in body["candles"]] == [
+            ("Ethereum", "ERC20"),
+            (None, None),
+        ]
 
 
 def test_window_limit_per_res_is_1440_windows() -> None:

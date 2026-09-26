@@ -59,8 +59,10 @@ class FakeInfluxReader:
         max_percent: float = 1.5,
         last_ts: int | None = None,
         samples: int = 10,
+        net_dom: str | None = None,
+        net_fx: str | None = None,
     ) -> None:
-        """사건 점 1개 — end_ts 0 은 진행 중(고아 점 검증용)."""
+        """사건 점 1개 — end_ts 0 은 진행 중(고아 점 검증용). 망 이름 None = 배포 전 점."""
         self._events.append(
             PremiumEventRow(
                 dom=dom,
@@ -76,6 +78,8 @@ class FakeInfluxReader:
                 samples=samples,
                 enter_percent=1.0,
                 exit_percent=0.5,
+                net_dom=net_dom,
+                net_fx=net_fx,
             )
         )
 
@@ -111,8 +115,10 @@ class FakeInfluxReader:
         dw: tuple[int, int, int, int] = (1, 1, 1, 1),
         blocked: tuple[int, int] = (0, 0),
         samples: int = 60,
+        net_dom: str | None = None,
+        net_fx: str | None = None,
     ) -> None:
-        """봉 점 1개 — dw = (dom_dep, dom_wd, fx_dep, fx_wd) 저장값, blocked = (fwd, rev) 막힌 초."""
+        """봉 점 1개 — dw = (dom_dep, dom_wd, fx_dep, fx_wd) 저장값, blocked = (fwd, rev) 막힌 초. 망 이름 None = 배포 전 점."""
         self._candles.setdefault(bucket, []).append(
             CandleRow(
                 dom=dom,
@@ -137,6 +143,8 @@ class FakeInfluxReader:
                 blocked_fwd_sec=blocked[0],
                 blocked_rev_sec=blocked[1],
                 samples=samples,
+                net_dom=net_dom,
+                net_fx=net_fx,
             )
         )
 
