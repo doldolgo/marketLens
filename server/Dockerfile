@@ -14,4 +14,5 @@ COPY scripts ./scripts
 
 EXPOSE 8000
 # 워커 1개 고정 — 메모리가 진실이라 프로세스가 둘이면 진실도 둘 (architecture.md)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# permessage-deflate 끔 — /ws/spreads 는 hub 가 gzip 을 표 1장당 1회 하고, 켜 두면 접속자마다 또 압축한다 (스펙 017)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--ws-per-message-deflate", "false"]
