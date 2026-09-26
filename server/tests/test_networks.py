@@ -137,7 +137,9 @@ def test_tiebreak_falls_back_to_first_domestic_verdict() -> None:
 
 
 def test_bithumb_eth_vs_bitget_erc20_is_matched() -> None:
-    verdict, matched = match_network(net("ETH", "ETH"), [net("ERC20", "ERC20"), net("BEP20", "BEP20")])
+    verdict, matched = match_network(
+        net("ETH", "ETH"), [net("ERC20", "ERC20"), net("BEP20", "BEP20")]
+    )
     assert verdict == "matched"
     assert matched is not None and matched.code == "ERC20"
 
@@ -161,8 +163,14 @@ def test_trx_vs_bitget_trc20_is_matched() -> None:
 
 
 def test_bithumb_base_eth_vs_base_is_matched() -> None:
-    assert match_network(net("BASE_ETH", "BASE_ETH"), [net("BASE", "Base")])[0] == "matched"  # 바이낸스
-    assert match_network(net("BASE_ETH", "BASE_ETH"), [net("BASE", "BASE")])[0] == "matched"  # 비트겟
+    assert (
+        match_network(net("BASE_ETH", "BASE_ETH"), [net("BASE", "Base")])[0]
+        == "matched"
+    )  # 바이낸스
+    assert (
+        match_network(net("BASE_ETH", "BASE_ETH"), [net("BASE", "BASE")])[0]
+        == "matched"
+    )  # 비트겟
 
 
 def test_bithumb_arb_eth_vs_arbitrum_one_is_matched() -> None:
@@ -178,7 +186,10 @@ def test_bithumb_arb_eth_vs_arbitrum_one_is_matched() -> None:
 
 
 def test_bithumb_op_eth_vs_optimism_is_matched() -> None:
-    assert match_network(net("OP_ETH", "OP_ETH"), [net("OPTIMISM", "Optimism")])[0] == "matched"
+    assert (
+        match_network(net("OP_ETH", "OP_ETH"), [net("OPTIMISM", "Optimism")])[0]
+        == "matched"
+    )
 
 
 def test_upbit_avalanche_c_chain_vs_bitget_avaxc_chain_is_matched() -> None:

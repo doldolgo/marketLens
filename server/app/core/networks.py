@@ -51,7 +51,11 @@ _EQUIV_CLASSES: tuple[tuple[frozenset[str], ...], ...] = (
     (frozenset({"metal", "l2"}), frozenset({"metal", "dao", "l2"})),
     # 빗썸은 L2 를 `<체인>_ETH` 코드로 주고 표시명이 없다 → {체인, ethereum}
     (frozenset({"base"}), frozenset({"base", "ethereum"})),
-    (frozenset({"arbitrum"}), frozenset({"arbitrum", "one"}), frozenset({"arbitrum", "ethereum"})),
+    (
+        frozenset({"arbitrum"}),
+        frozenset({"arbitrum", "one"}),
+        frozenset({"arbitrum", "ethereum"}),
+    ),
     (frozenset({"optimism"}), frozenset({"optimism", "ethereum"})),
     # 빗썸 BSC · 비트겟 BEP20(별칭) ↔ 업비트·바이낸스 "BNB Smart Chain"
     (frozenset({"bsc"}), frozenset({"bnb", "smart"})),
