@@ -30,7 +30,9 @@ class Stats:
         self.bytes = 0
         self.closes = Counter()  # close code → 건수
         self.errors = Counter()  # 예외 클래스 이름 → 건수
-        self.gaps: list[float] = []  # 같은 접속에서 연속 메시지 사이 간격(초). 서버가 밀리면 커진다
+        self.gaps: list[
+            float
+        ] = []  # 같은 접속에서 연속 메시지 사이 간격(초). 서버가 밀리면 커진다
         self.first_snapshot: list[float] = []  # 접속 시작 → 스냅샷 도착까지(초)
 
 
@@ -97,9 +99,13 @@ class Runner:
         ]
         if s.gaps:
             q = statistics.quantiles(s.gaps, n=20)
-            line.append(f"간격 p50 {statistics.median(s.gaps):.2f}s p95 {q[18]:.2f}s max {max(s.gaps):.2f}s")
+            line.append(
+                f"간격 p50 {statistics.median(s.gaps):.2f}s p95 {q[18]:.2f}s max {max(s.gaps):.2f}s"
+            )
         if s.first_snapshot:
-            line.append(f"스냅샷 도착 p50 {statistics.median(s.first_snapshot):.2f}s max {max(s.first_snapshot):.2f}s")
+            line.append(
+                f"스냅샷 도착 p50 {statistics.median(s.first_snapshot):.2f}s max {max(s.first_snapshot):.2f}s"
+            )
         line.append(f"종류 {dict(s.msgs)}")
         if s.closes:
             line.append(f"끊김 {dict(s.closes)}")
@@ -111,8 +117,12 @@ class Runner:
 async def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("url")
-    p.add_argument("--stages", default="10,50,100,200", help="단계별 접속자 수, 쉼표 구분")
-    p.add_argument("--hold", type=float, default=30.0, help="단계마다 유지·측정하는 시간(초)")
+    p.add_argument(
+        "--stages", default="10,50,100,200", help="단계별 접속자 수, 쉼표 구분"
+    )
+    p.add_argument(
+        "--hold", type=float, default=30.0, help="단계마다 유지·측정하는 시간(초)"
+    )
     a = p.parse_args()
 
     r = Runner(a.url)
