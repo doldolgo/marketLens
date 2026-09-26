@@ -550,7 +550,7 @@ export default function FxChartCard(p: CardProps) {
                   {dwCell(exName(s.dom), e.domDeposit, e.domWithdraw, fxRelevant === 'withdraw' ? 'deposit' : 'withdraw')}
                   {c.blockedSec > 0 && <span style={{ color: 'var(--color-neutral-500)' }}> · 경로 막힘 {c.blockedSec}초</span>}
                   {/* 옮기는 망 — 경로 방향대로 `보내는 망 → 받는 망`, 배포 전 봉은 `–` (024 §3.8) */}
-                  <span style={{ color: 'var(--color-neutral-500)' }}> · 망 </span><b style={num}>{netPath(p.dir, c.netDom, c.netFx)}</b>
+                  <span style={{ color: 'var(--color-neutral-500)' }}> · 네트워크 </span><b style={num}>{netPath(p.dir, c.netDom, c.netFx)}</b>
                 </span>
               )
             })}

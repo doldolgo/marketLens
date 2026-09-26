@@ -42,10 +42,10 @@ const dirColor = (dir: Dir) => pctColor(dir === 'kimp' ? 1 : -1)
 /** 티커 | 상태 | 횟수 | 최대 지속 | 평균 지속 | 최대 스프레드 | 평균 스프레드 | 망 | 최신 */
 const RANK_GRID = '64px 120px repeat(7, 1fr)'
 /** 거래소 | 시작 | 종료 | 지속 | 최대 스프레드 | 망 */
-const LOG_GRID = '70px 1fr 1fr 90px 110px 1.3fr'
+const LOG_GRID = '108px 1fr 1fr 78px 100px 1.2fr'
 const HEADERS: [SortKey, string][] = [
   ['ongoingSince', '상태'], ['cnt', '횟수'], ['maxDur', '최대 지속'], ['avgDur', '평균 지속'],
-  ['maxPct', '최대 스프레드'], ['avgPct', '평균 스프레드'], ['net', '망'], ['last', '최신'],
+  ['maxPct', '최대 스프레드'], ['avgPct', '평균 스프레드'], ['net', '네트워크'], ['last', '최신'],
 ]
 /** 표 정렬 URL 표기 `열:asc|desc` — 열은 HEADERS 의 키만. */
 const SORT_CODEC: Codec<{ key: SortKey; dir: number }> = {
@@ -302,7 +302,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
                   {mine.map((e) => {
                     const dur = durationOf(e, nowSec)
                     return (
-                      <span key={`${e.dom}-${e.startTs}`}
+                      <span key={`${e.dom}-${e.fx}-${e.startTs}`}
                         title={`${exName(e.dom)} · ${fmtTime(e.startTs * 1000)} 시작 · ${fmtDur(dur)} 지속 · 최대 ${fmtPct(e.maxPercent)}`}
                         style={{
                           position: 'absolute', top: 3, bottom: 3, minWidth: 2, borderRadius: 2, background: color,
@@ -332,21 +332,21 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
                 <span style={{ padding: '6px 8px', textAlign: 'right' }}>종료</span>
                 <span style={{ padding: '6px 8px', textAlign: 'right' }}>지속시간</span>
                 <span style={{ padding: '6px 8px', textAlign: 'right' }}>최대 스프레드</span>
-                <span style={{ padding: '6px 0 6px 8px', textAlign: 'right' }}>망</span>
+                <span style={{ padding: '6px 0 6px 8px', textAlign: 'right' }}>네트워크</span>
               </div>
               {mine.slice(0, 20).map((e) => (
-                <div key={`${e.dom}-${e.startTs}`} style={{
+                <div key={`${e.dom}-${e.fx}-${e.startTs}`} style={{
                   display: 'grid', gridTemplateColumns: LOG_GRID, alignItems: 'center', height: 32, padding: '0 var(--space-6)',
                   borderBottom: '1px solid color-mix(in srgb, #e9e9ed 6%, transparent)',
                   // 진행 중 행은 옅은 accent 배경 — 끝난 행과 한눈에 구분되게 (§3.5)
                   background: e.ongoing ? 'color-mix(in srgb, var(--color-accent) 6%, transparent)' : 'transparent',
                 }}>
-                  <Pill tone="neutral">{exName(e.dom)}</Pill>
+                  <Pill tone="neutral">{exName(e.dom)} · {exName(e.fx)}</Pill>
                   <span style={{ ...numCell, color: 'var(--color-neutral-300)' }}>{fmtTime(e.startTs * 1000)}</span>
                   <span style={{ ...numCell, color: e.ongoing ? 'var(--color-accent-300)' : 'var(--color-neutral-400)' }}>{e.ongoing ? '진행 중' : fmtTime((e.endTs ?? e.startTs) * 1000)}</span>
                   <span style={numCell}>{fmtDur(durationOf(e, nowSec))}</span>
                   <span style={{ ...numCell, fontWeight: 500, color }}>{fmtPct(e.maxPercent)}</span>
-                  {/* 경로 방향대로 `보내는 망 → 받는 망` — 배포 전 사건은 `–` (024 §3.8) */}
+                  {/* 경로 방향대로 `보내는 네트워크 → 받는 네트워크` — 배포 전 사건은 `–` (024 §3.8) */}
                   <span style={{ ...numCell, paddingRight: 0, color: 'var(--color-neutral-300)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={netPath(e.dir, e.netDom, e.netFx)}>{netPath(e.dir, e.netDom, e.netFx)}</span>
                 </div>
               ))}
