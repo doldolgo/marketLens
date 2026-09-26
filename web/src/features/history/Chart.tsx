@@ -16,6 +16,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { exName, fmtKrw, fmtPct, fmtTime, fmtUsdt, pctColor } from '../../shared/format'
 import { Pill, Seg, card, hint, kicker, type SegOpt } from '../../shared/ui'
 import { FX_CHOICES, INITIAL_BARS, exchangeStates, lineTone, type BandTone } from './candles'
+import { netPath } from './network'
 import { INTERVALS, INTERVAL_LABEL, INTERVAL_SEC, type Interval } from './rollup'
 import type { Candle1m, Dir, Dom, PremiumEvent } from './types'
 
@@ -548,6 +549,8 @@ export default function FxChartCard(p: CardProps) {
                 <span key={s.dom}>
                   {dwCell(exName(s.dom), e.domDeposit, e.domWithdraw, fxRelevant === 'withdraw' ? 'deposit' : 'withdraw')}
                   {c.blockedSec > 0 && <span style={{ color: 'var(--color-neutral-500)' }}> · 경로 막힘 {c.blockedSec}초</span>}
+                  {/* 옮기는 망 — 경로 방향대로 `보내는 망 → 받는 망`, 배포 전 봉은 `–` (024 §3.8) */}
+                  <span style={{ color: 'var(--color-neutral-500)' }}> · 망 </span><b style={num}>{netPath(p.dir, c.netDom, c.netFx)}</b>
                 </span>
               )
             })}

@@ -34,6 +34,7 @@ export function rollup(candles: Candle1m[], step: number, base = 60): Candle1m[]
       cur.krw = c.krw; cur.usdt = c.usdt; cur.fxRate = c.fxRate
       cur.depositOk = c.depositOk; cur.withdrawOk = c.withdrawOk
       cur.domDepositOk = c.domDepositOk; cur.domWithdrawOk = c.domWithdrawOk; cur.fxDepositOk = c.fxDepositOk; cur.fxWithdrawOk = c.fxWithdrawOk
+      cur.netDom = c.netDom; cur.netFx = c.netFx // 망 이름도 마지막 값 (024)
       cur.blockedSec = Math.min(step, cur.blockedSec + c.blockedSec)
       cur.samples += c.samples
     } else {
