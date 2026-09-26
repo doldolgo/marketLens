@@ -22,6 +22,7 @@
 | binance-stream | WS 3샤드 depth20+miniTicker·exchangeInfo 매초(슬림 질의)·샤드 단위 정체 판정 | - | 해외 최대 20단계 |
 | bybit | WS 3샤드 orderbook.200(스냅샷+델타 로컬 북, 행 발행 심볼당 500ms 제한)+publicTrade·instruments-info 매초·JSON ping/pong 감시·샤드 단위 정체 판정·입출금(HMAC 헤더)·`/history/*` `fx=bybit`·`/orderbook/bybit` | 표시명 `Bybit`·기록 탭 Bybit 실데이터(선택된 해외만 조회) | 해외 최대 20단계, MEXC 는 mock |
 | bitget | WS 3샤드 books15(200ms 스냅샷, 15단계)+trade·symbols 매초·문자열 ping/pong 감시·샤드 단위 정체 판정·입출금(public, 키 없음)·`/history/*` `fx=bitget`·`/orderbook/bitget` | 표시명 `Bitget`·기록 탭 Bitget 실데이터 | 해외 최대 20단계, MEXC 는 mock |
+| wallet-history | server: 틱 4상태 = 006 판정값 + net_dom·net_fx, 봉·사건 점 문자열 2필드, /history/candles·events netDom·netFx | web: 읽기 줄·사건 표·로그 망 표시 | 배포 전 점은 망 null·4상태 코인 단위 |
 
 ## 알려진 빚
 - (021) Redis 인증 없음 — 보안그룹(collect·serve 그룹만 6379)이 유일한 벽. 이미지는 박스별 빌드라 collect(1 vCPU)는 배포 중 수집이 1~2분 느려진다. Influx 쿼리 **기간** 상한은 미적용(메모리 상한만, 기간 상한은 후속 스펙 후보). serve 박스에서 `web` 이 `api` 보다 먼저 뜨면 nginx 가 업스트림 이름을 못 풀어 한 번 죽고 `restart` 로 다시 뜬다(`depends_on` 을 없앤 대가 — 수 초).
@@ -36,5 +37,6 @@
 - (003·005) `/spreads` 의 `fwd`·`rev` 는 슬리피지 차감 후 순값이고 Influx `premium` 은 차감 전 원값이다. 저장 시점에 체결 규모가 정의되지 않기 때문이며, 그 대가로 `/history/streaks?threshold=` 는 화면 값보다 큰 값을 기준으로 구간을 센다. 백필(캔들 기반)도 원값만 만들 수 있어 아카이브 동질성 쪽을 택했다.
 - (013) 과거 `premium` 의 사건 일괄 생성 미완 — `premium_event` 는 배포 시점부터만 쌓인다. 과거분은 `premium` 원본을 코인별로 나눠 도는 별도 스펙.
 - (013) 사건 점에 입출금 상태 이력이 없다 — 사건 중 이동 가능 여부·막힌 시각은 후속(013 §7 남은 빚에 설계 메모).
+- (014) 배포 전 봉의 입출금 4상태·막힌 초는 코인 단위 값이라 표와 다를 수 있다 — 1m 7일 보관이 지나면 사라진다(5m 이상은 남는다).
 - (014) `candles_*` 은 배포 시점부터 — 과거분 없음(초 단위 `premium` 엔 가격이 없다). 초 단위 `premium` 의 보존은 여전히 무제한(별도 결정). 위 계층 구멍을 사후에 메우는 도구는 없다(1m 7일·5m 30일 안이면 재료는 있다 — 후속 스펙 후보). web 의 청크 캐시(`useCandles`)는 상한이 없다 — 심볼을 많이 훑으면 탭이 열린 동안 메모리가 늘어난다(청크 1개 ≤ 1,440봉).
 - (005) Influx `premium` 에는 초 단위 백필(BTC)에 더해 구 스택 PostgreSQL 에서 옮겨 온 2026-05-15~08-29 기록 2,759만 점이 함께 있다(옛 하나은행 환율 기준 값은 업비트 `KRW-USDT` 분봉 기준으로 다시 계산해 넣었다). 이 크기 위에서 **전 구간** `/history/streaks` 는 EC2(4GB)의 Influx 를 재시작시킨다(60초+ 후 504, 2026-08-30·09-07 실측). 그래서 `start` 없는 streaks·bulk 는 최근 7일 창이 기본이고(2026-09-07) FE 도 항상 `start`·`end` 를 붙인다(7일 BTC ≈ 2초). `start` 를 옛날로 주면 여전히 전 구간이 돌 수 있다 — 상한은 두지 않았다. 전 구간 조회가 Influx 를 재시작시켜도 수집은 영향 없음(016 — 조회는 api 컨테이너에서 돈다). 후속 스펙 후보: 오래된 데이터 1m 롤업(3달 기간 옵션 복원 조건). nginx read timeout(60초)도 함께 볼 것.

@@ -44,6 +44,9 @@ class PremiumEvent:
     max_ts: int
     last_ts: int
     samples: int
+    # 024 §3.5 — 마지막으로 본 틱 행의 망 표시명. 진행 중이면 "지금 옮길 망", 닫히면 "닫힐 때 망". 이력은 남기지 않는다
+    net_dom: str | None = None
+    net_fx: str | None = None
     written: bool = False  # 열린 지 60초를 넘겨 Influx 에 점이 있(어야 하)는가
 
     @property
@@ -65,6 +68,8 @@ class PremiumEvent:
             samples=self.samples,
             enter_percent=ENTER_PERCENT,
             exit_percent=EXIT_PERCENT,
+            net_dom=self.net_dom,
+            net_fx=self.net_fx,
         )
 
     @classmethod
@@ -80,6 +85,8 @@ class PremiumEvent:
             max_ts=row.max_ts,
             last_ts=row.last_ts,
             samples=row.samples,
+            net_dom=row.net_dom,
+            net_fx=row.net_fx,
             written=True,
         )
 
@@ -181,6 +188,8 @@ class PremiumEventDetector:
                             max_ts=ts,
                             last_ts=ts,
                             samples=1,
+                            net_dom=row.net_dom,
+                            net_fx=row.net_fx,
                         )
                 elif value > EXIT_PERCENT:
                     ev.samples += 1
@@ -188,7 +197,10 @@ class PremiumEventDetector:
                     if value > ev.max_percent:
                         ev.max_percent = value
                         ev.max_ts = ts
+                    # 024 §3.5 — 60초 갱신·닫힘이 "그 시점 틱 행의 망" 을 쓰도록 매 틱 최신값을 든다(마지막 값만 남는다)
+                    ev.net_dom, ev.net_fx = row.net_dom, row.net_fx
                 else:
+                    ev.net_dom, ev.net_fx = row.net_dom, row.net_fx
                     self._close_observed(ev, ts)
         for key, ev in list(self._open.items()):
             if key not in seen and ts - ev.last_ts > MAX_GAP_SEC:

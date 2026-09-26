@@ -90,10 +90,14 @@ class TickRow:
     dom_price: float = 0.0  # 국내 `price`
     fx_price: float = 0.0  # 해외 `price`
     rate: float = 0.0  # 그 국내 거래소 USDT 중간값 (ask+bid)/2, 원
-    dom_dep: bool | None = None  # 국내 입금 — 3상태 그대로(None = 모름)
+    # 입출금 4개는 006 §3.7 로 판정한 값(024 §3.3 — spreads 행과 같은 함수), 3상태 그대로(None = 모름)
+    dom_dep: bool | None = None  # 국내 입금
     dom_wd: bool | None = None  # 국내 출금
     fx_dep: bool | None = None  # 해외 입금
     fx_wd: bool | None = None  # 해외 출금
+    # 024 §3.3 — 판정에 쓴 망 표시명(국내·해외). 모르면 None. Redis 레코드·`premium` 점에는 넣지 않는다
+    net_dom: str | None = None
+    net_fx: str | None = None
 
 
 @dataclass(frozen=True)

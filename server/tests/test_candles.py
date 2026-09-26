@@ -406,3 +406,54 @@ async def test_restore_empty_buckets_then_first_minutes_fold_when_window_ends() 
     assert [r.ts for r in store.candles("candles_5m")] == [T0]
     assert fields(store, "candles_5m", T0)["samples"] == 300
     assert TIERS[0].bucket == "candles_1m"
+
+
+# ── 망 이름 2필드 (024 §3.4) ─────────────────────────────────────────────────
+
+
+async def test_minute_carries_last_network_names_and_empty_string_for_none() -> None:
+    store = FakeCandleStore()
+    agg, _ = make(store)
+    agg.observe(tick(T0, row(net_dom="Ethereum", net_fx="ERC20")))
+    agg.observe(tick(T0 + 1, row(net_dom="Ethereum", net_fx=None)))
+    agg.observe(tick(T0 + M))
+    await agg.flush()
+    f = fields(store, "candles_1m", T0)
+    assert (f["net_dom"], f["net_fx"]) == (
+        "Ethereum",
+        "",
+    )  # 마지막 행 값, None → 빈 문자열
+    assert len(f) == 20
+
+
+async def test_absent_foreign_network_blocks_both_paths_every_second() -> None:
+    store = FakeCandleStore()
+    agg, _ = make(store)
+    for i in range(60):
+        # absent 판정 = 해외 입금·출금 둘 다 False → 김프·역프 둘 다 매초 막힘
+        agg.observe(
+            tick(T0 + i, row(fx_dep=False, fx_wd=False, net_dom="Solana", net_fx=None))
+        )
+    agg.observe(tick(T0 + M))
+    await agg.flush()
+    f = fields(store, "candles_1m", T0)
+    assert (f["blocked_fwd_sec"], f["blocked_rev_sec"]) == (60, 60)
+    assert (f["net_dom"], f["net_fx"]) == ("Solana", "")
+
+
+async def test_rollup_takes_last_network_names() -> None:
+    store = FakeCandleStore()
+    for i in range(5):
+        store.seed(
+            "candles_1m",
+            candle(T0 + i * M, net_dom="Ethereum", net_fx="ERC20" if i < 4 else None),
+        )
+    agg, _ = make(store, now=T0 + 5 * M)
+    await agg.restore(T0 + 5 * M)
+    agg.observe(tick(T0 + 5 * M))
+    await agg.flush()
+    f = fields(store, "candles_5m", T0)
+    assert (f["net_dom"], f["net_fx"]) == (
+        "Ethereum",
+        "",
+    )  # 마지막 봉 값(입출금 4상태와 같은 규칙)

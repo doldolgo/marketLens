@@ -6,6 +6,7 @@ from tests.premium_event_fakes import (
     FakeInflux,
     feed,
     open_one,
+    restored_row,
     row,
     tick,
 )
@@ -139,3 +140,38 @@ def test_combinations_and_directions_are_independent() -> None:
     ]
     det.observe(tick(T0 + 100, row(fwd=0.1, dom="upbit"), row(fwd=1.5, dom="bithumb")))
     assert sorted(e.dom for e in det.open_events()) == ["bithumb", "upbit"]
+
+
+# ── 망 이름 2필드 (024 §3.5) ─────────────────────────────────────────────────
+
+
+async def test_network_names_follow_open_refresh_and_close_ticks() -> None:
+    influx = FakeInflux()
+    det = PremiumEventDetector(writer=influx)
+    det.observe(tick(T0, row(fwd=1.5, net_dom="Ethereum", net_fx="ERC20")))
+    ev = open_one(det)
+    assert (ev.net_dom, ev.net_fx) == ("Ethereum", "ERC20")  # 열리는 틱 행의 망
+    # 60초를 넘긴 첫 점 — 그 시점 틱 행의 값으로(국내 망 tie-break 가 바뀐 경우), 없음은 빈 문자열
+    det.observe(tick(T0 + 61, row(fwd=1.5, net_dom="Arbitrum One", net_fx=None)))
+    await det.flush()
+    p = influx.only()
+    assert (p["net_dom"], p["net_fx"]) == ("Arbitrum One", "")
+    # 닫힐 때 — 닫히는 틱 행의 값으로 덮어쓴다
+    det.observe(tick(T0 + 200, row(fwd=0.3, net_dom="Ethereum", net_fx="ERC20")))
+    await det.flush()
+    p = influx.only()
+    assert (p["end_ts"], p["net_dom"], p["net_fx"]) == (T0 + 200, "Ethereum", "ERC20")
+
+
+async def test_restore_reads_network_names_and_old_points_have_none() -> None:
+    influx = FakeInflux()
+    now = T0 + 10_000
+    influx.rows = [
+        restored_row(T0, now - 100, net_dom="Ethereum", net_fx="ERC20"),
+        restored_row(T0, now - 100, base="BONK"),  # 배포 전 점 — 망 없음
+    ]
+    det = PremiumEventDetector(writer=influx)
+    await det.restore(influx, now)
+    by_base = {e.base: e for e in det.open_events()}
+    assert (by_base["SOPH"].net_dom, by_base["SOPH"].net_fx) == ("Ethereum", "ERC20")
+    assert (by_base["BONK"].net_dom, by_base["BONK"].net_fx) == (None, None)

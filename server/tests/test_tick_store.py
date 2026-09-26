@@ -538,3 +538,21 @@ def test_boot_with_redis_refused_logs_one_warning_and_health_is_200(
         assert client.get("/health").status_code == 200
     warnings = [r for r in caplog.records if "Redis 연결 실패" in r.getMessage()]
     assert len(warnings) == 1
+
+
+def test_encoded_tick_row_keeps_five_keys_without_wallet_fields() -> None:
+    """024 §3.3 — 판정값·망 이름은 Redis 레코드에 실리지 않는다(009 모양 불변)."""
+    row = TickRow(
+        dom="upbit",
+        fx="binance",
+        base="BTC",
+        fwd=1.0,
+        rev=-1.0,
+        dom_dep=True,
+        net_dom="Ethereum",
+        net_fx="ERC20",
+    )
+    [r] = json.loads(
+        gzip.decompress(encode_tick(Tick(ts=T0, rows=(row,), dw_failed=())))
+    )["rows"]
+    assert set(r) == {"dom", "fx", "base", "fwd", "rev"}

@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from app.core.collect import RefreshSummary
 from app.core.live_store import LiveStore
 from app.core.models import Row
-from app.core.networks import pick_domestic
+from app.core.networks import wallet_fields
 from app.core.orderbook import (
     WalkResult,
     average_price,
@@ -50,42 +50,6 @@ class MarketDataNotFoundError(Exception):
         super().__init__(message)
         self.message = message
         self.detail = detail
-
-
-def _wallet_fields(
-    dom_row: Row, fx_row: Row
-) -> tuple[str | None, bool | None, bool | None, bool | None, bool | None]:
-    """행의 입출금 5필드 (netDom, depDom, wdDom, depFx, wdFx) — 스펙 006 §3.7.
-
-    국내 망이 기준이다. status=fail 행도 같은 규칙.
-    """
-    if not dom_row.networks:
-        # 1. 국내 망 목록이 비면(키 없음·망 정보 없는 과도기) 코인 단위 값 그대로
-        return (
-            None,
-            dom_row.deposit_enabled,
-            dom_row.withdrawal_enabled,
-            fx_row.deposit_enabled,
-            fx_row.withdrawal_enabled,
-        )
-    # 2. 국내 망·판정·해외 망을 고른다 (§3.6 tie-break)
-    dom_net, verdict, fx_net = pick_domestic(dom_row.networks, fx_row.networks)
-    dep_fx: bool | None
-    wd_fx: bool | None
-    if verdict == "matched" and fx_net is not None:
-        # 3. 맞춘 해외 망의 값
-        dep_fx, wd_fx = fx_net.dep, fx_net.wd
-    elif verdict == "absent":
-        # 4. 해외가 그 망을 안 다룸 = 옮길 길 없음
-        dep_fx = wd_fx = False
-    elif fx_row.networks:
-        # 5. 해외 망이 있는데 못 맞춤 = 모른다고 말한다 — 코인 단위로 접으면 낙관 편향
-        dep_fx = wd_fx = None
-    else:
-        # 5. 해외 망 정보가 아예 없으면 해외 코인 단위 값
-        dep_fx = fx_row.deposit_enabled
-        wd_fx = fx_row.withdrawal_enabled
-    return (dom_net.name, dom_net.dep, dom_net.wd, dep_fx, wd_fx)
 
 
 # 한 표 안에서 "사는 쪽" 걷기 결과를 나누는 메모 — (거래소, 코인) → 그 마켓 asks 를 고정 금액으로 걷은 것
@@ -217,7 +181,8 @@ def _build_row(
         status = "stale" if age >= STALE_AFTER_SEC else "ok"
 
     # 입출금 5필드는 망 판정으로 채운다 — fail 행도 같은 규칙 (006 §3.7)
-    net_dom, dep_dom, wd_dom, dep_fx, wd_fx = _wallet_fields(dom_row, fx_row)
+    # 024 부터 core 공용 함수 — 틱도 같은 판정을 쓴다. 표는 앞 다섯 값만 싣고 `net_fx` 는 싣지 않는다(응답 불변)
+    wf = wallet_fields(dom_row, fx_row)
 
     # float() 는 모델이 하던 int→float 강제와 같다 — 거래소가 정수로 준 가격이 "100" 이 아니라
     # "100.0" 으로 나가야 옛 바이트와 같다
@@ -237,11 +202,11 @@ def _build_row(
         "slipFwd": float(slip_fwd),
         "slipRev": float(slip_rev),
         "krw": float(krw),
-        "netDom": net_dom,
-        "depDom": dep_dom,
-        "wdDom": wd_dom,
-        "depFx": dep_fx,
-        "wdFx": wd_fx,
+        "netDom": wf.net_dom,
+        "depDom": wf.dep_dom,
+        "wdDom": wf.wd_dom,
+        "depFx": wf.dep_fx,
+        "wdFx": wf.wd_fx,
     }
 
 

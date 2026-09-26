@@ -57,7 +57,34 @@ def test_closed_event_shape_and_camel_case() -> None:
         "maxPercent": 1.42,
         "maxTs": T0,
         "samples": 10,
+        "netDom": None,  # 024 — 망 필드 없는 점(배포 전) 은 null
+        "netFx": None,
     }
+
+
+def test_event_network_names_closed_from_store_and_ongoing_from_memory() -> None:
+    now = int(time.time())
+    reader = FakeInfluxReader()
+    reader.seed_event("BONK", T0, T0 + 900, net_dom="Solana", net_fx="Solana")
+    det = PremiumEventDetector()
+    row = TickRow(
+        dom="upbit",
+        fx="binance",
+        base="SOPH",
+        fwd=1.5,
+        rev=-1.0,
+        net_dom="Ethereum",
+        net_fx="ERC20",
+    )
+    det.observe(Tick(ts=now - 4800, rows=(row,), dw_failed=()))
+    det.observe(Tick(ts=now, rows=(row,), dw_failed=()))
+    body = get(make_client(reader, events=det), start=T0, end=now + 1).json()
+    by_base = {e["base"]: e for e in body["events"]}
+    assert (by_base["BONK"]["netDom"], by_base["BONK"]["netFx"]) == ("Solana", "Solana")
+    assert (by_base["SOPH"]["netDom"], by_base["SOPH"]["netFx"]) == (
+        "Ethereum",
+        "ERC20",
+    )
 
 
 def test_filters_dom_dir_base_and_uppercases_base() -> None:

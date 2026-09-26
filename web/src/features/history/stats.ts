@@ -20,6 +20,8 @@ export interface SymStat {
   avgPct: number
   /** 가장 최근 사건의 시작 시각. */
   last: number
+  /** 가장 최근 사건의 국내 망 표시명(거래소 전체면 두 거래소를 합친 뒤 최근 것) — 없으면 null (024). */
+  net: string | null
 }
 
 export function aggregate(events: PremiumEvent[], nowSec: number): SymStat[] {
@@ -34,6 +36,8 @@ export function aggregate(events: PremiumEvent[], nowSec: number): SymStat[] {
     const ongoing = es.filter((e) => e.ongoing)
     const closed = es.filter((e) => !e.ongoing)
     const durs = es.map((e) => durationOf(e, nowSec))
+    let latest = es[0]
+    for (const e of es) if (e.startTs > latest.startTs) latest = e
     out.push({
       sym,
       ongoingSince: ongoing.length ? Math.min(...ongoing.map((e) => e.startTs)) : null,
@@ -43,6 +47,7 @@ export function aggregate(events: PremiumEvent[], nowSec: number): SymStat[] {
       maxPct: Math.max(...es.map((e) => e.maxPercent)),
       avgPct: es.reduce((a, e) => a + e.maxPercent, 0) / es.length,
       last: Math.max(...es.map((e) => e.startTs)),
+      net: latest.netDom,
     })
   }
   return out

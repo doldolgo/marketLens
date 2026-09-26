@@ -18,6 +18,9 @@ export interface PremiumEvent {
   maxPercent: number
   maxTs: number
   samples: number
+  /** 사건이 옮기는 망의 표시명(국내·해외). 진행 중이면 지금 옮길 망, 닫혔으면 닫힐 때 망. 배포 전 점·모름은 null (024). */
+  netDom: string | null
+  netFx: string | null
 }
 
 export interface EventsResponse {
@@ -58,6 +61,9 @@ export interface Candle1m {
   domWithdrawOk?: boolean | null
   fxDepositOk?: boolean | null
   fxWithdrawOk?: boolean | null
+  /** 창 마지막 행의 망 표시명(국내·해외) — 방향과 무관하게 같은 값. 배포 전 봉·모름은 null (024). */
+  netDom: string | null
+  netFx: string | null
 }
 
 export interface CandlesResponse {

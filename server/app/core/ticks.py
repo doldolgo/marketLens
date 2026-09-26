@@ -26,6 +26,7 @@ from app.core.contracts import (
 )
 from app.core.live_store import LiveStore
 from app.core.models import Row, StreamError, StreamState, Tick, TickRow
+from app.core.networks import wallet_fields
 from app.core.premium import premium_percent
 
 logger = logging.getLogger("marketlens.ticks")
@@ -111,6 +112,9 @@ def build_tick(store: LiveStore, ts: int, dw_failed: Sequence[str]) -> Tick:
                 six = (dom_bid, dom_ask, fx_bid, fx_ask, rate.ask, rate.bid)
                 if any(v <= 0 for v in six):
                     continue
+                # 024 §3.3 — 입출금은 006 §3.7 판정값(spreads 행과 같은 함수). 코인 단위 값을 그대로 실으면
+                # 표에서 "출금 불가" 인 코인이 봉·사건에서는 열림으로 남는다
+                wf = wallet_fields(dom_row, fx_row)
                 rows.append(
                     TickRow(
                         dom=dom_ex,
@@ -126,10 +130,12 @@ def build_tick(store: LiveStore, ts: int, dw_failed: Sequence[str]) -> Tick:
                         dom_price=dom_row.price,
                         fx_price=fx_row.price,
                         rate=(rate.ask + rate.bid) / 2,
-                        dom_dep=dom_row.deposit_enabled,
-                        dom_wd=dom_row.withdrawal_enabled,
-                        fx_dep=fx_row.deposit_enabled,
-                        fx_wd=fx_row.withdrawal_enabled,
+                        dom_dep=wf.dep_dom,
+                        dom_wd=wf.wd_dom,
+                        fx_dep=wf.dep_fx,
+                        fx_wd=wf.wd_fx,
+                        net_dom=wf.net_dom,
+                        net_fx=wf.net_fx,
                     )
                 )
     return Tick(ts=ts, rows=tuple(rows), dw_failed=tuple(dw_failed))

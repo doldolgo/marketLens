@@ -51,9 +51,22 @@ class FakeInflux:
 
 
 def row(
-    base: str = "SOPH", fwd: float = 0.0, rev: float = 0.0, dom: str = "upbit"
+    base: str = "SOPH",
+    fwd: float = 0.0,
+    rev: float = 0.0,
+    dom: str = "upbit",
+    net_dom: str | None = None,
+    net_fx: str | None = None,
 ) -> TickRow:
-    return TickRow(dom=dom, fx="binance", base=base, fwd=fwd, rev=rev)
+    return TickRow(
+        dom=dom,
+        fx="binance",
+        base=base,
+        fwd=fwd,
+        rev=rev,
+        net_dom=net_dom,
+        net_fx=net_fx,
+    )
 
 
 def tick(ts: int, *rows: TickRow) -> Tick:
@@ -78,7 +91,12 @@ def open_one(det: PremiumEventDetector) -> PremiumEvent:
 
 
 def restored_row(
-    start_ts: int, last_ts: int, end_ts: int = 0, base: str = "SOPH"
+    start_ts: int,
+    last_ts: int,
+    end_ts: int = 0,
+    base: str = "SOPH",
+    net_dom: str | None = None,
+    net_fx: str | None = None,
 ) -> PremiumEventRow:
     return PremiumEventRow(
         dom="upbit",
@@ -94,4 +112,6 @@ def restored_row(
         samples=10,
         enter_percent=1.0,
         exit_percent=0.5,
+        net_dom=net_dom,
+        net_fx=net_fx,
     )

@@ -9,6 +9,7 @@ import { useCandles, useEvents } from './api'
 import { FX_CHOICES, REAL_FXS, RES_OF_INTERVAL, RES_SEC, isMockFx } from './candles'
 import FxChartCard, { ChartSync, ChartToolbar, type PairSeries } from './Chart'
 import { mockCandles, mockEvents } from './mock'
+import { NET_NONE, netPath } from './network'
 import { INTERVALS, INTERVAL_SEC, rollup, type Interval } from './rollup'
 import { aggregate, durationOf, sortStats, summarize, type SortKey } from './stats'
 import type { SpreadRow } from '../../shared/types'
@@ -38,13 +39,13 @@ const NO_EVENTS: PremiumEvent[] = []
 // 서브탭·수치 색은 스프레드 탭 관례 — 김프 = 상승(POS) 색, 역프 = 하락(NEG) 색
 const dirColor = (dir: Dir) => pctColor(dir === 'kimp' ? 1 : -1)
 
-/** 티커 | 상태 | 횟수 | 최대 지속 | 평균 지속 | 최대 스프레드 | 평균 스프레드 | 최신 */
-const RANK_GRID = '64px 120px repeat(6, 1fr)'
-/** 거래소 | 시작 | 종료 | 지속 | 최대 스프레드 */
-const LOG_GRID = '70px 1fr 1fr 110px 120px'
+/** 티커 | 상태 | 횟수 | 최대 지속 | 평균 지속 | 최대 스프레드 | 평균 스프레드 | 망 | 최신 */
+const RANK_GRID = '64px 120px repeat(7, 1fr)'
+/** 거래소 | 시작 | 종료 | 지속 | 최대 스프레드 | 망 */
+const LOG_GRID = '70px 1fr 1fr 90px 110px 1.3fr'
 const HEADERS: [SortKey, string][] = [
   ['ongoingSince', '상태'], ['cnt', '횟수'], ['maxDur', '최대 지속'], ['avgDur', '평균 지속'],
-  ['maxPct', '최대 스프레드'], ['avgPct', '평균 스프레드'], ['last', '최신'],
+  ['maxPct', '최대 스프레드'], ['avgPct', '평균 스프레드'], ['net', '망'], ['last', '최신'],
 ]
 /** 표 정렬 URL 표기 `열:asc|desc` — 열은 HEADERS 의 키만. */
 const SORT_CODEC: Codec<{ key: SortKey; dir: number }> = {
@@ -136,8 +137,10 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
   // 좌 표: 심볼별 집계 → 정렬 → 상위 30
   const rank = sortStats(aggregate(events, nowSec), sortKey, sortDir).slice(0, 30)
   const onSort = (k: SortKey) => {
-    if (k === sortKey) setSort({ key: k, dir: -sortDir })
-    else setSort({ key: k, dir: -1 })
+    if (k === sortKey) { setSort({ key: k, dir: -sortDir }); return }
+    // 망 열은 문자열이라 첫 클릭이 오름차순, 수치 열은 내림차순 (024 §3.8)
+    if (k === 'net') { setSort({ key: k, dir: 1 }); return }
+    setSort({ key: k, dir: -1 })
   }
 
   // 우 column: 선택 심볼의 사건(최신순)·요약·타임라인
@@ -228,7 +231,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
           <div style={{ ...card, padding: 'var(--space-4) 0' }}>
             <div style={{ ...kicker, padding: '0 var(--space-6) var(--space-2)' }}>티커별 {DIR_LABEL[dir]} 사건 · {PER_LABEL[per]} — 열 클릭으로 정렬</div>
             <div style={{ overflowX: 'auto' }}>
-              <div style={{ minWidth: 720 }}>
+              <div style={{ minWidth: 800 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: RANK_GRID, padding: '0 var(--space-6)', borderBottom: '1px solid var(--color-neutral-800)' }}>
                   <button onClick={() => onSort('sym')} className="hv-txt"
                     style={{ appearance: 'none', background: 'none', border: 'none', font: 'inherit', fontSize: 10.5, letterSpacing: '0.07em', textTransform: 'uppercase', padding: '7px 0', cursor: 'pointer', textAlign: 'left', color: sortKey === 'sym' ? 'var(--color-accent-300)' : 'var(--color-neutral-600)' }}>
@@ -262,6 +265,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
                     <span style={{ ...rankCell, color: 'var(--color-neutral-300)' }}>{x.avgDur != null ? fmtDur(x.avgDur) : '–'}</span>
                     <span style={{ ...rankCell, color }}>{fmtPct(x.maxPct)}</span>
                     <span style={{ ...rankCell, color }}>{fmtPct(x.avgPct)}</span>
+                    <span style={{ ...rankCell, color: 'var(--color-neutral-300)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={x.net ?? undefined}>{x.net ?? NET_NONE}</span>
                     <span style={{ ...rankCell, fontSize: 11, color: 'var(--color-neutral-500)' }}>{fmtAgo(nowSec - x.last)}</span>
                   </button>
                 ))}
@@ -328,6 +332,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
                 <span style={{ padding: '6px 8px', textAlign: 'right' }}>종료</span>
                 <span style={{ padding: '6px 8px', textAlign: 'right' }}>지속시간</span>
                 <span style={{ padding: '6px 8px', textAlign: 'right' }}>최대 스프레드</span>
+                <span style={{ padding: '6px 0 6px 8px', textAlign: 'right' }}>망</span>
               </div>
               {mine.slice(0, 20).map((e) => (
                 <div key={`${e.dom}-${e.startTs}`} style={{
@@ -341,6 +346,8 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
                   <span style={{ ...numCell, color: e.ongoing ? 'var(--color-accent-300)' : 'var(--color-neutral-400)' }}>{e.ongoing ? '진행 중' : fmtTime((e.endTs ?? e.startTs) * 1000)}</span>
                   <span style={numCell}>{fmtDur(durationOf(e, nowSec))}</span>
                   <span style={{ ...numCell, fontWeight: 500, color }}>{fmtPct(e.maxPercent)}</span>
+                  {/* 경로 방향대로 `보내는 망 → 받는 망` — 배포 전 사건은 `–` (024 §3.8) */}
+                  <span style={{ ...numCell, paddingRight: 0, color: 'var(--color-neutral-300)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={netPath(e.dir, e.netDom, e.netFx)}>{netPath(e.dir, e.netDom, e.netFx)}</span>
                 </div>
               ))}
               {mine.length === 0 && <Empty size={12}>기간 내 사건 없음</Empty>}

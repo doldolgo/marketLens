@@ -452,6 +452,8 @@ def build_events(
             max_percent=r.max_percent,
             max_ts=r.max_ts,
             samples=r.samples,
+            net_dom=r.net_dom,
+            net_fx=r.net_fx,
         )
     for ev in open_events:
         if dom is not None and ev.dom != dom:
@@ -476,6 +478,8 @@ def build_events(
             max_percent=ev.max_percent,
             max_ts=ev.max_ts,
             samples=ev.samples,
+            net_dom=ev.net_dom,
+            net_fx=ev.net_fx,
         )
     events = sorted(by_key.values(), key=lambda e: (-e.start_ts, e.base))
     return EventsResponse(
@@ -555,6 +559,8 @@ def build_candles(
             fx_withdraw_ok=_tri_to_bool(r.fx_wd),
             blocked_sec=r.blocked_fwd_sec if kimp else r.blocked_rev_sec,
             samples=r.samples,
+            net_dom=r.net_dom,
+            net_fx=r.net_fx,
         )
         for r in sorted(rows, key=lambda r: r.ts)
     ]

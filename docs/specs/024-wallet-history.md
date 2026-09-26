@@ -1,0 +1,139 @@
+# 024 — wallet-history
+
+상태: DONE | 의존: 006(wallet-status — 망 기준 판정·5필드 규칙), 013(premium-events — 사건 점·`/history/events`·기록 탭 사건 표), 014(premium-1m — 틱 행 확장·1분봉·`/history/candles`·차트 카드)
+
+> 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
+> 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
+
+## 1. 목적
+기록 탭이 스프레드 표와 **같은 입출금 판정**을 보여주고, 사건마다 **어느 망으로 옮기는 길이었는지**를 남긴다. 지금 스프레드 표는 국내 망 기준으로 판정한 5필드(006 §3.7)를 쓰는데, 틱은 판정 전의 코인 단위 값(한 망이라도 열리면 열림)을 담아서 1분봉·사건·차트가 표와 다른 값을 보여준다 — 표에서 "출금 불가" 인 코인이 기록 탭에서는 열림으로 그려지고, 막힌 초도 0 이다. 망 이름은 어디에도 남지 않아 기록 탭에서 "어느 망으로 옮기라는 것인지" 를 알 수 없다. 끝나면 틱·1분봉·사건이 표와 같은 판정값을 담고, 차트 읽기 줄·사건 표·사건 로그에 망 이름이 보인다.
+
+## 2. 범위
+- 만드는 것: 틱 행의 입출금 4상태를 망 판정값으로 채우고 망 이름 2개를 더한다. 1분봉·상위 봉에 망 이름 필드 2개. 사건 점에 망 이름 필드 2개. `/history/candles`·`/history/events` 응답에 `netDom`·`netFx`. 기록 탭 차트 읽기 줄·사건 표·사건 로그에 망 표시.
+- 하지 않는 것: 과거 점 보정(배포 전 봉·사건은 망 필드가 없고 4상태는 코인 단위 값 그대로 남는다 — 관측한 대로 둔다). `/spreads` 응답 변경(17개 키 그대로, 값도 같다). Redis 틱 레코드(009 §3.3 `{dom,fx,base,fwd,rev}`)·초 단위 `premium` 점 변경. 006 의 판정 규칙 자체 변경. 사건 진행 중 망이 바뀐 이력 저장(마지막 값만 남긴다). 해외 망 코드(예 `ERC20`) 표시 — 표시명만 남긴다.
+- 바꾸는 기존 것:
+  1. 006 §3.7 의 5필드 계산을 **공유 규칙**으로 둔다 — spreads 행과 틱이 같은 함수를 부른다. spreads 는 지금과 같은 값을 내야 한다.
+  2. 014 §3.2 틱 행 — `dom_dep dom_wd fx_dep fx_wd` 의 뜻이 "코인 단위 값" 에서 "**006 §3.7 로 판정한 값**" 으로 바뀌고 `net_dom`·`net_fx` 가 붙는다. 014 §3.3 막힌 초는 규칙 그대로인데 입력이 판정값이 되므로 표와 같은 초를 센다.
+  3. 014 §3.4 봉 점·§3.6 응답, 013 §3.3 사건 점·§3.4 응답·§3.5 화면.
+
+## 3. 동작
+
+### 3.1 읽는 계약 (복사)
+- 006 §3.1: 거래소 응답의 코인마다 코인 단위 `deposit_enabled`·`withdrawal_enabled`(3상태) 와 **망 목록**(응답 순서, 망마다 code·name·dep·wd). 조회 실패 회차는 그 거래소 전 행이 `None`·빈 망 목록. 60초마다 갱신되고 사이 틱은 캐시.
+- 006 §3.6·§3.7: 국내 망 목록 D, 해외 망 목록 F 로 5필드 `(netDom, depDom, wdDom, depFx, wdFx)` 를 정한다 — D 비면 코인 단위 값 그대로·`netDom null`; D 있으면 국내 망 하나를 고르고(tie-break) 그 망의 dep/wd 가 `depDom/wdDom`, 판정이 matched 면 맞춘 해외 망의 dep/wd, absent 면 `false/false`, unknown 이면 F 비면 해외 코인 단위 값·F 있으면 `null/null`.
+- 014 §3.2: 틱 행 = `{dom, fx, base, fwd, rev, dom_price, fx_price, rate, dom_dep, dom_wd, fx_dep, fx_wd}`. 틱을 만드는 순간 메모리 행에서 읽는다(추가 조회 없음). 틱 루프는 입출금 반영 → 틱 생성 순서라 틱 생성 시점에 행에 망 목록이 있다.
+- 014 §3.3·§3.4: 1분봉 = 그 분 마지막 행의 입출금 4상태(1/0/−1), `blocked_fwd_sec` = `fx_wd == False` 또는 `dom_dep == False` 인 행 수, `blocked_rev_sec` 는 대칭. 상위 봉은 입출금 마지막 값·막힌 초 합. measurement `candle`, tag `dom fx base`, 18 필드가 한 번에 쓰인다.
+- 013 §3.3: measurement `premium_event`, tag `dom fx base dir`, time = `start_ts`, 열린 지 60초에 1점·60초마다 같은 키 덮어쓰기·닫힐 때 1점. 같은 키 재쓰기는 field 합집합·새 값 우선.
+- 013 §3.4·014 §3.6: `/history/events`·`/history/candles` 응답 모양. HTTP JSON 키는 camelCase. Influx 는 필드가 없는 옛 점을 그대로 갖고 있다.
+
+### 3.2 공유 판정 — 5필드 + 해외 망 이름
+006 §3.7 의 5필드 계산을 core 의 공개 함수 하나로 둔다: 입력은 국내 행·해외 행(코인 단위 3상태 + 망 목록), 출력은 `(net_dom, net_fx, dep_dom, wd_dom, dep_fx, wd_fx)`. 앞 다섯은 006 §3.7 그대로이고 `net_fx` 만 새로 더한다:
+- matched → `net_fx` = 맞춘 해외 망의 name.
+- 그 밖(D 비면·absent·unknown) → `net_fx = null`.
+
+`/spreads` 는 이 함수의 앞 다섯 값을 쓰고 `net_fx` 는 싣지 않는다(응답 불변). 틱은 여섯 값 전부를 쓴다.
+
+### 3.3 틱 행 — 판정값으로
+014 §3.2 의 입출금 4상태를 **§3.2 의 판정값**으로 채운다. 행에 망 목록이 없으면(D 비면) 지금과 같은 코인 단위 값이므로 배포 뒤에도 키 없는 거래소의 값은 달라지지 않는다.
+
+| 이름 | 값 |
+|---|---|
+| dom_dep | 판정 depDom |
+| dom_wd | 판정 wdDom |
+| fx_dep | 판정 depFx |
+| fx_wd | 판정 wdFx |
+| net_dom | 판정 netDom |
+| net_fx | 판정 netFx |
+
+`net_dom`·`net_fx` 는 문자열 또는 없음. Redis 레코드·`premium` 점에는 넣지 않는다(014 §3.2 와 같다). 틱 한 번에 조합 ≈ 490 × 판정 1회 — 판정은 망 목록 길이(코인당 1~5)만큼의 문자열 비교라 매초 부담이 없다.
+
+### 3.4 1분봉·상위 봉 — 망 이름 2필드
+- 1분봉: 그 분 **마지막 행**의 `net_dom`·`net_fx`. 없음은 **빈 문자열**로 쓴다(Influx 문자열 필드는 null 이 없다 — 빈 문자열 = 망 없음/모름).
+- `blocked_fwd_sec`·`blocked_rev_sec` 규칙은 014 §3.3 그대로. 입력이 판정값이라 표에서 `wdFx false` 인 코인은 이제 매초 막힘으로 센다. `null`(unknown) 은 여전히 세지 않는다.
+- 상위 봉: 마지막 값(입출금 4상태와 같은 규칙).
+- 점: measurement `candle` 에 field `net_dom`·`net_fx`(string) 를 더한다 — 20 필드. **읽을 때** 두 문자열 필드는 선택이다: 없거나 빈 문자열이면 `null` 로 읽는다. 배포 전 18 필드 점을 버리지 않기 위해서다(다른 18 필드가 하나라도 없으면 지금처럼 반쪽 점으로 버린다).
+
+### 3.5 사건 점 — 망 이름 2필드
+- `premium_event` 에 field `net_dom`·`net_fx`(string, 빈 문자열 = 없음) 를 더한다. 값은 **사건이 열리는 틱 행**의 `net_dom`·`net_fx` 이고, 60초 갱신·닫힘 때마다 **그 시점 틱 행의 값으로 덮어쓴다**(진행 중이면 "지금 옮길 망", 닫히면 "닫힐 때 망"). 열린 지 60초 전에 닫혀 버려지는 사건은 013 대로 점이 없다.
+- 복원(013 §3.3)은 두 필드도 그대로 읽어 메모리에 올린다. 복원 뒤 첫 틱부터 다시 덮어쓴다.
+- 옛 점(필드 없음)은 읽을 때 `null`.
+
+### 3.6 `GET /history/candles` — `netDom`·`netFx`
+014 §3.6 응답의 봉마다 `"netDom": "Ethereum", "netFx": "ERC20"` 을 더한다. 값은 저장 문자열, 빈 문자열·없음은 `null`. 방향과 무관하게 같은 값(국내 망 하나를 기준으로 판정하므로 김프·역프가 같은 망을 본다). 그 밖은 014 §3.6 그대로(파라미터·상한·정렬·오류·빈 `candles`).
+
+### 3.7 `GET /history/events` — `netDom`·`netFx`
+013 §3.4 응답의 사건마다 `"netDom": "Ethereum", "netFx": "ERC20"` 을 더한다. 진행 중 사건은 메모리 값, 닫힌 사건은 저장값, 옛 점은 `null`. 고아 점 규칙·정렬·오류는 013 그대로.
+
+### 3.8 web — 기록 탭
+- **차트 읽기 줄**(014 §3.7 의 거래소별 입금·출금 칸 옆): 망을 한 칸 더 보여준다. 김프 `{netFx} → {netDom}`, 역프 `{netDom} → {netFx}`(경로 방향대로). 한쪽만 있으면 있는 쪽만(`– → Ethereum`), 둘 다 없으면 `망 –`. 옛 봉(`null`)도 같은 표기.
+- **사건 표**(013 §3.5 좌 카드): 열 `티커|상태|횟수|최대 지속|평균 지속|최대 스프레드|평균 스프레드|망|최신`. `망` = 그 심볼의 **가장 최근 사건**의 `netDom`(거래소 전체면 두 거래소 사건을 합친 뒤 최근 것), 없으면 `–`. 정렬은 문자열 오름차순(재클릭 반전).
+- **사건 로그**(우 column): 열 `거래소|시작|종료|지속|최대 스프레드|망`. `망` = 그 사건의 김프면 `{netFx} → {netDom}`, 역프면 반대. 없으면 `–`.
+- 요약 카드·타임라인은 그대로.
+- 접기(rollup)에서 두 문자열은 마지막 값(입출금 4상태와 같은 규칙).
+
+### 3.9 엣지
+- 국내 거래소 조회 실패 회차(D 비고 코인 값 `None`): 틱 4상태 `None`·망 없음 → 봉 −1·빈 문자열, 막힌 초 안 셈, 화면 `모름`·`망 –`. 표와 같다.
+- 해외 거래소 키 없음(F 항상 비고 코인 값 `None`): 판정 unknown 에서 F 비면 해외 코인 단위 값(`None`) → 같은 결과. `netDom` 은 국내 망이 있으면 채워진다(어디로 받을지는 안다).
+- absent(해외가 그 망을 안 다룸): `fx_dep = fx_wd = False` → 김프·역프 둘 다 매초 막힘으로 센다. `netDom` 은 국내 망, `netFx` 는 `null`.
+- 사건 진행 중 국내 망 tie-break 결과가 바뀌면(국내 망이 여럿인 코인) 60초 갱신 때 새 값으로 덮어쓴다 — 마지막 값만 남는다.
+- 봉 하나에 망이 바뀐 경우 마지막 행의 값. 상위 봉도 마지막 값.
+
+## 4. 검증
+서버(순수 함수·API):
+- 공유 판정 함수: 006 §3.7 다섯 경우(D 비면·matched·absent·unknown+F 있음·unknown+F 비면)마다 여섯 값. `/spreads` 5필드가 지금과 같은 값(기존 `test_wallet_fields` 그대로 통과).
+- 틱: 국내 행에 망 목록이 있고 해외 망이 absent 면 틱의 `fx_wd == False`·`net_dom` 국내 망 name·`net_fx None`. matched 면 `net_fx` = 맞춘 해외 망 name. 망 목록 없으면 코인 단위 값·둘 다 None.
+- Redis 틱 레코드 키는 5개 그대로.
+- 1분봉: 마지막 행의 `net_dom`·`net_fx`, 없음 → 빈 문자열. absent 행 60초 → `blocked_fwd_sec 60`·`blocked_rev_sec 60`. 상위 봉은 마지막 값.
+- 봉 점 20 필드. 읽기: 18 필드 옛 점은 `net_*` 없이 읽힌다(버리지 않는다), 빈 문자열은 `null`.
+- 사건: 열릴 때 틱의 망, 60초 갱신·닫힘 때 그 시점 값으로 덮어씀, 복원 시 읽힘, 옛 점 `null`.
+- `/history/candles`·`/history/events` 응답에 `netDom`·`netFx`(값·`null`).
+web(수동 또는 순수 함수):
+- 사건 표 `망` 열 = 최근 사건 기준·정렬, 사건 로그 `망` 열 방향 표기, 읽기 줄 표기 4가지(둘 다·한쪽·없음·옛 봉).
+- `npm run lint && npm run build`.
+수동(EC2, 배포 후):
+- 1분 뒤 Influx `candles_1m` 최신 점에 `net_dom`·`net_fx` 가 있고, `/history/candles?base=ETH&fx=bitget` 최신 봉의 `netDom "Ethereum"`(업비트)·`netFx "ERC20"`. 배포 전 봉은 `null`.
+- 스프레드 표에서 `wdFx false` 인 코인의 차트 입출금 띠가 막힘 색이고 읽기 줄 `경로 막힘 60초`.
+- 사건 표에 `망` 열, 새로 열린 사건 행 클릭 → 로그에 `ERC20 → Ethereum` 형태. 배포 전 사건은 `–`.
+- `/spreads` 응답 키 17개·값 변화 없음(배포 전후 같은 코인 비교).
+
+## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
+```bash
+# 2026-09-26, 브랜치 feat/024-wallet-history
+$ cd server && ruff check . && ruff format --check . && pytest -q
+All checks passed!
+210 files already formatted
+718 passed, 1 warning in 8.38s
+$ cd web && npm run lint && npm run build
+(lint 경고 0)
+dist/assets/index-jl2TMY9h.js   453.60 kB │ gzip: 143.86 kB
+✓ built in 538ms
+# web 순수 함수 확인 — netPath 4가지 표기, 사건 표 망 열(최근 사건 기준·오름차순·null 뒤). 스크래치 스크립트로 1회
+$ node --experimental-strip-types net_check.mts
+web pure checks ok
+```
+- 수동(EC2, 배포 후) 항목 4개는 **미실행** — 배포 뒤 사람이 확인한다: `candles_1m` 최신 점의 `net_dom`·`net_fx`, `/history/candles?base=ETH&fx=bitget` 의 `netDom "Ethereum"`·`netFx "ERC20"`, 표에서 `wdFx false` 인 코인의 띠 막힘 색·`경로 막힘 60초`, 사건 표 `망` 열·로그 `ERC20 → Ethereum`, `/spreads` 17키·값 불변.
+- 브라우저 수동 확인(차트 읽기 줄·사건 표·로그 표시)은 로컬에 봉·사건 데이터가 없어 미실행 — lint·build·순수 함수 확인으로 대신했다.
+
+## 6. 갱신할 문서
+- `docs/context/status.md` — `| wallet-history | server: 틱 4상태 = 006 판정값 + net_dom·net_fx, 봉·사건 점 문자열 2필드, /history/candles·events netDom·netFx | web: 읽기 줄·사건 표·로그 망 표시 | 배포 전 점은 망 null·4상태 코인 단위 |` 행 추가. 알려진 빚: "(014) 배포 전 봉의 입출금 4상태·막힌 초는 코인 단위 값이라 표와 다를 수 있다 — 1m 7일 보관이 지나면 사라진다(5m 이상은 남는다)" 한 줄.
+- `CLAUDE.md` — 스펙 인덱스 024 행 상태 → DONE.
+- `docs/context/architecture.md` — wallet-status 항목의 `core/networks.py` 설명에 "5필드+해외 망 판정(spreads 행·틱 공용)" 을 더하고, 데이터 흐름 절의 틱 설명에 "입출금 4상태는 006 판정값, 망 이름 2개" 를 더한다.
+- `docs/context/product.md` — 용어 "봉" 정의에 "망 이름 2개(국내·해외 표시명)" 를, "입출금 상태" 정의 끝에 "기록(봉·사건)도 같은 판정값" 을 더한다.
+- `docs/context/db.md` — `premium_event` 행 field 목록 끝에 `net_dom`·`net_fx`(string, 빈 문자열 = 없음, 배포 전 점엔 없음) 추가. `candle` 행 field 목록 끝에 같은 두 필드 추가하고 "`dom_dep dom_wd fx_dep fx_wd` 는 006 §3.7 판정값" 을 명시.
+- `docs/specs/014-premium-1m.md` — §3.2 표에 `net_dom`·`net_fx` 두 행과 "4상태는 006 §3.7 판정값(024)" 문구, §3.3 에 망 이름 마지막 값 규칙, §3.4 점 필드 20개·읽기 선택 규칙, §3.6 응답 예시에 `netDom`·`netFx`, §3.7 읽기 줄 망 칸.
+- `docs/specs/013-premium-events.md` — §3.3 field 목록에 `net_dom`·`net_fx` 와 덮어쓰기 시점, §3.4 응답 예시에 `netDom`·`netFx`, §3.5 사건 표·로그 열에 `망`.
+- `docs/specs/006-wallet-status.md` — §3.7 첫 줄에 "이 5필드 계산은 core 공개 함수이며 틱(024)도 같은 함수로 판정한다" 와 `net_fx` 한 줄.
+
+## 7. 실행 보고 (실행 세션이 채움)
+- 만든 것 (파일 목록): server — `core/networks.py`(`WalletRow` Protocol·`WalletFields` NamedTuple·`wallet_fields`), `core/models.py`(`TickRow.net_dom/net_fx`), `core/ticks.py`(build_tick 이 판정값을 싣는다), `features/spreads/service.py`(로컬 `_wallet_fields` 삭제 → core 공용), `core/influx.py`(`CandleRow`·`PremiumEventRow` 문자열 2필드, 점 20 필드, 읽기 선택 `_opt_str`), `core/candles.py`(분 닫힘·접기 마지막 값), `core/premium_events.py`(열림·매 틱·닫힘 갱신, 복원), `features/history/models.py`·`service.py`(`netDom`·`netFx`). 테스트 — `tests/test_networks.py`(판정 6값 5경우)·`test_ticks.py`·`test_tick_store.py`(Redis 5키)·`test_candles.py`(마지막 값·빈 문자열·absent 60초·롤업)·`test_influx_read.py`(신규 — 옛 18 필드 점·빈 문자열 → null, influxdb-client 자리에 가짜)·`test_premium_events.py`(열림/갱신/닫힘/복원)·`features/history/tests/test_candles_api.py`·`test_events_api.py`, fake 3개(`candle_fakes`·`premium_event_fakes`·`history/tests/helpers`). web — `features/history/network.ts`(신규 — `netPath`·`NET_NONE`), `types.ts`, `rollup.ts`, `stats.ts`(`SymStat.net`), `Tab.tsx`(사건 표 `망` 열·정렬·로그 `망` 열), `Chart.tsx`(읽기 줄 국내 거래소 칸마다 `망`). 문서 — `docs/context/status.md`·`architecture.md`·`product.md`·`db.md`, 스펙 006·013·014, `CLAUDE.md` 인덱스.
+- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - 공유 함수는 `core/networks.py` 에 두고 입력을 `Row` 대신 구조적 Protocol(`deposit_enabled`·`withdrawal_enabled`·`networks`)로 받았다 — `models.py` 가 `networks.py` 를 import 하므로 역참조는 순환이다. 반환은 스펙 순서 그대로의 NamedTuple(튜플 비교가 그대로 된다).
+  - 사건 감지기는 관측하는 매 틱마다 `net_dom`·`net_fx` 를 최신값으로 든다(60초 갱신·닫힘이 "그 시점 틱 행의 값" 이 되게). 결측·복원으로 닫히는 사건(§3.3 `_close_at`)은 그 시점의 틱 행이 없어 **마지막으로 본 값**을 쓴다 — 스펙이 말하지 않은 엣지, "마지막 값만 남긴다" 와 같은 취지.
+  - 사건 로그 `망` 의 한쪽만 있는 경우는 스펙에 없어 읽기 줄과 같은 표기(`– → Ethereum`)로 했다. 사건 표 `망` 열 첫 클릭은 오름차순(문자열), 수치 열은 기존대로 내림차순.
+  - 읽기 줄의 망 칸은 국내 거래소 칸마다 넣었다(`netDom` 이 국내 거래소별로 다르다 — 카드 하나에 업비트·빗썸이 같이 그려진다).
+  - Influx 읽기 규칙 테스트는 influxdb-client 를 module 속성에서 가짜로 바꿔 넣었다(`tests/test_influx_read.py`) — 실물 파서를 공개 함수로 통과시키는 유일한 길이었다.
+  - 함께 고친 절: 없음(스펙 본문 그대로 구현). §5·§7 만 채웠다.
+- 남은 빚:
+  - EC2 수동 확인 4개 미실행(§5).
+  - `TickRow` 에 필드가 9개 붙어 매초 ≈490 행에 문자열 2개가 더 실린다 — 부담은 없지만 `premium` 점·Redis 레코드와의 경계가 "기본값이 있는 필드" 라는 관례에만 기대고 있다.
+  - 배포 전 봉의 4상태·막힌 초는 코인 단위 값이라 표와 다를 수 있다(status.md 알려진 빚).
