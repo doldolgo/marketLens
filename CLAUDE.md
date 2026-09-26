@@ -29,6 +29,7 @@ marketlens/
       drift-check.md          문서↔코드 어긋남 점검 절차
       ec2-setup.md            EC2 박스 공통 준비 (사람용 체크리스트)
       ec2-split.md            EC2 3대 분리 전환 절차 (사람용, 021)
+      ws-loadtest.md          스프레드 웹소켓 부하 측정 절차 + 2026-09-26 전후 기록 (사람용)
   server/                     FastAPI 앱 (Python 3.12)
     app/
       core/                   공유 인프라 — 스트림 커넥터·메모리 저장소(LiveStore)·틱 루프·김프 계산·망 매칭·Influx·Redis·S3 클라이언트 (모듈 이름은 개발 후 architecture.md "현재 구조"에)

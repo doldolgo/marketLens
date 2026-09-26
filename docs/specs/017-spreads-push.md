@@ -111,6 +111,30 @@ cd web && npm run lint && npm run build                                    # oxl
 # EC2: §4 실측(위 표) 완료. 접속자 5명 vs 1명 vs 0명 CPU 비교는 배포 뒤 사람이 본다(§7 남은 빚)
 ```
 
+**부하 실측 (2026-09-26, 실서버 kimptrack.com, 같은 리전 EC2 에서 Python websockets 접속자 계단식 10→50→100→200→400, 단계당 30초 — 절차·전체 표·결정 근거는 `docs/runbooks/ws-loadtest.md`)**
+| 항목 | 값 |
+|---|---|
+| 개선 전 api CPU 1코어 포화 시작 | 50명 |
+| 개선 전 상한(핸드셰이크 10초 실패) | 약 118명 |
+| 개선 전 100명 스냅샷 도착 p50 | 4.0초 |
+| 개선 후 400명 접속 유지 | 400/400 |
+| 개선 후 400명 간격 p95 | 1.18초 |
+| 개선 후 400명 api CPU(유지) | 13~20% |
+| 개선 후 상한 | 미확인(부하기 포화) |
+| 스냅샷 gzip 후 크기 | 728KB→157KB |
+| delta gzip 후 크기 | 246KB→58KB |
+
+개선 전 병목은 uvicorn permessage-deflate 가 접속마다 따로 압축하는 것이었고, 허브에서 표 1장당 1회 gzip 한 같은 바이트를 보내도록 바꿨다(§2·§3.2·§3.3·§3.4, PR #63). 같은 날 배포 뒤 같은 스크립트로 재측정한 값이 위 표다.
+
+```bash
+# server (2026-09-26, gzip 1회)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check .   # All checks passed
+.venv/bin/pytest -q app/features/spreads                                   # 71 passed — test_hub·test_ws 바이너리 프레임 기준으로 갱신 + 프레임 계약 테스트 1개
+cd web && npm run lint && npm run build                                    # 통과
+# 로컬(uvicorn :8020 --ws-per-message-deflate false + vite :8010) 헤드리스 크롬: 398개 코인·1453 페어 렌더, 프레임 전부 바이너리, 콘솔 에러 0
+# 실서버 배포 뒤: 협상 확장 없음, 프레임 bytes(gzip), 헤드리스 크롬 렌더 정상, api 컨테이너 Cmd 에 플래그 확인
+```
+
 ## 6. 갱신할 문서
 - `docs/context/status.md` — spreads 행 web 열 "1초 폴링·규모 세그먼트" → "`/ws/spreads` 구독(snapshot+delta, 5초 fallback 폴링)", server 열에 "누가 볼 때만 $1,000 표 매초 Redis 게시·api diff 브로드캐스트". **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스 017 행 DONE. **항상 포함.**
@@ -133,7 +157,10 @@ cd web && npm run lint && npm run build                                    # oxl
   - `test_slippage.py` 의 3개 테스트는 $10,000 시드 기준 수식이라 `notional=10_000` 을 명시했다.
   - FE 테스트 러너가 없어 §4 FE 항목은 Playwright 스크립트(레포 밖 스크래치)로 확인했다. 개발 모드 StrictMode 는 연결을 2번 열고 첫 것을 바로 닫는다(정상).
 - 실행 중 함께 고친 스펙 절(사람 합의): §1·§2·§3 전체 — 체결 규모 `$1,000` 고정(규모 세그먼트·URL `n`·`subscribe` 메시지·30초 타이머 삭제). §2 — api → 브라우저는 uvicorn 기본 permessage-deflate(압축 없이는 폴링보다 대역폭이 커지는 실측). §3.1 — 300ms 유지 근거·첫 접속 시 want 즉시 1회. §3.2 — 구독 태스크 하나가 want 갱신도. §3.4 — **안 실린 행의 age 는 서버 값으로 되돌린다**(실측: 매초 바뀌는 행 35% 라 조용한 코인이 5초마다 흐려졌다 밝아지는 깜빡임), 백오프 리셋은 서버 메시지 수신. §3.5 — compose `api` 의 `REDIS_URL`. 다른 스펙: 003 §1·§3.2-0·§3.4·§3.5·§4·§7, 002 §3.5, 009 §2, 016 §3.1·§3.2·§3.3·§3.5·§4·§5, 007 §3.
+- 2026-09-26 (gzip 1회, PR #63): 부하 실측으로 접속자당 압축이 병목임을 확인하고 §2·§3.2·§3.3·§3.4 를 바꿨다. 허브 `pack()` 이 gzip 1회, `Connection` 대기열은 bytes, `send_bytes`. Dockerfile 의 uvicorn 플래그. 브라우저 `inflate()` + promise 체인 직렬화. 부하 스크립트는 `server/tools/ws_loadtest.py`.
 - 남은 빚:
+  - 새 접속자에게 주는 snapshot 은 접속할 때마다 따로 gzip 한다(728KB ≈ 40~50ms) — 초당 20접속 구간에서 api CPU 95~100% 로 튀었다(유지 구간 10~20%). 배포 직후 전원 재접속이 이 상황. 표 1장당 압축한 스냅샷 캐시로 없앨 수 있다(2026-09-26 실측).
+  - 송신 네트워크: 400명이면 압축 후 약 190Mbps. t4g.micro 는 버스트형이라 지속 부하에서 CPU 보다 먼저 한계일 수 있다 — 미실측.
   - 표 생성은 틱 루프 안 동기 — 해외 3거래소(1,463행) 뒤 EC2 실측 450ms 로 상한 300ms 를 매초 넘겨, 게시기는 모델·`camelize_json` 을 거치지 않는 dict 경로(`build_table`)·spark 삽입 시 반올림·마켓별 사는 쪽 걷기 메모로 줄였다(로컬 M4 66→19ms). 그래도 경고가 남으면 표 생성을 별도 프로세스로 옮기는 것을 검토한다("await 없음" 원칙은 유지). 다른 라우터의 `camelize_json`(004·005) 은 그대로다.
   - 배포의 `server` 컨테이너도 허브를 띄워 채널을 구독한다(접속자 0 → 파싱 없음, 비용은 구독 연결 1개). 역할별 끄기 스위치는 두지 않았다.
   - api 프로세스가 멈추면 브라우저는 10초 무응답으로 먼저 재연결하고 nginx 는 60초 뒤 끊는다 — 둘 다 스펙대로지만 외부 헬스체크는 여전히 없다(016 남은 빚 그대로).
