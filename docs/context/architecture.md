@@ -52,7 +52,7 @@ flowchart TB
 
     %% ── 017 표 푸시 ──
     PUB[[Redis 채널 `spreads`<br/>키 latest 10초 · want 15초]]
-    LS -- "매초(want 있을 때만): $1,000 표 = GET /spreads JSON" --> PUB
+    LS -- "매초: $1,000 표 = GET /spreads JSON" --> PUB
     HUB[api 구독 허브<br/>직전 표 1장 · diff 1회]
     PUB --> HUB
     HUB -- "/ws/spreads snapshot·delta·heartbeat<br/>접속자 전원 같은 바이트" --> WS[브라우저]

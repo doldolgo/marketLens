@@ -11,6 +11,8 @@ export const SPREAD_WS_SILENCE_MS = 10000
 /** 재연결 백오프(ms) — 1초에서 두 배씩 이 값까지 (017 §3.4). */
 export const SPREAD_WS_BACKOFF_MIN_MS = 1000
 export const SPREAD_WS_BACKOFF_MAX_MS = 30000
+/** 표를 아직 한 번도 못 받은 동안의 재연결 상한(ms) — 배포 직후 새로고침에서 첫 표까지 30초 기다리지 않게 (017 §3.4). */
+export const SPREAD_WS_BACKOFF_EMPTY_MAX_MS = 3000
 /** 수집 상태 폴링(ms) — 011 이 사용, 셸은 값만 들고 있다. */
 export const HEALTH_POLL_MS = 5000
 /** 기록 탭 사건 표 재조회(ms) — 013 이 사용. 진행 중 사건의 지속·최대값만 따라가면 되므로 느리다. */

@@ -83,10 +83,6 @@ class RedisBus:
             pipe.set(LATEST_KEY, data, ex=LATEST_TTL_SEC)
             await pipe.execute()
 
-    async def wanted(self) -> bool:
-        """`spreads:want` 가 살아 있는가. 실패는 예외."""
-        return await self._client.exists(WANT_KEY) == 1
-
     # --- 서빙 프로세스 쪽 (§3.2) ---
 
     async def want(self) -> None:

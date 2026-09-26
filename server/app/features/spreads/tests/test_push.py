@@ -60,26 +60,18 @@ def make_loop(store: LiveStore, publisher: SpreadsPublisher, handoff) -> TickLoo
     )
 
 
-# --- 수집: want 없으면 안 만들고, 있으면 GET /spreads 와 같은 JSON 을 채널·키에 ---
+# --- 수집: 접속자와 무관하게 매 틱 GET /spreads 와 같은 JSON 을 채널·키에 ---
 
 
-async def test_publisher_builds_nothing_without_want_and_same_json_as_get_with_want() -> (
-    None
-):
+async def test_publisher_builds_every_tick_without_want_and_same_json_as_get() -> None:
     bus, server = make_bus()
     store = LiveStore()
     seed(store)
     publisher = SpreadsPublisher(store=store, bus=bus)
 
-    await publisher.refresh_wanted()  # 키 없음 → 원함 아님
+    # `spreads:want` 키가 없어도 만든다 (2026-09-26 결정)
     loop = make_loop(store, publisher, lambda tick: None)
     loop.tick(1_787_000_000)
-    assert publisher.pending == 0 and not publisher.wanted
-
-    await bus.want()
-    await publisher.refresh_wanted()
-    assert publisher.wanted
-    loop.tick(1_787_000_001)
     assert publisher.pending == 1
     # 같은 틱 안의 표 계산과 비교 — 시각 필드만 빼고 같다 (§4)
     computed = spreads_json(store)
@@ -112,7 +104,6 @@ async def test_publisher_skips_round_without_rate_or_one_side_then_publishes(
     bus, _ = make_bus()
     store = LiveStore()
     publisher = SpreadsPublisher(store=store, bus=bus)
-    publisher.set_wanted(True)
     caplog.set_level(logging.WARNING, logger="marketlens.spreads_push")
     now = datetime.now(UTC)
     tick = Tick(ts=1, rows=(), dw_failed=())
@@ -135,14 +126,13 @@ async def test_publisher_skips_round_without_rate_or_one_side_then_publishes(
     assert (await bus.latest()) is not None
 
 
-async def test_publisher_publishes_on_channel_and_only_when_wanted() -> None:
+async def test_publisher_publishes_on_channel() -> None:
     bus, server = make_bus()
     listener = RedisBus(fakeredis.aioredis.FakeRedis(server=server))
     sub = await listener.subscribe()
     store = LiveStore()
     seed(store)
     publisher = SpreadsPublisher(store=store, bus=bus)
-    publisher.set_wanted(True)
     publisher.observe(Tick(ts=1, rows=(), dw_failed=()))
     await publisher.drain()
     text = await sub.get(timeout=1.0)
@@ -158,7 +148,6 @@ async def test_redis_down_skips_publish_but_tick_handoff_continues(
     store = LiveStore()
     seed(store)
     publisher = SpreadsPublisher(store=store, bus=bus)
-    publisher.set_wanted(True)
     handed: list[int] = []
     loop = make_loop(store, publisher, lambda tick: handed.append(tick.ts))
     caplog.set_level(logging.WARNING, logger="marketlens.spreads_push")
@@ -169,9 +158,6 @@ async def test_redis_down_skips_publish_but_tick_handoff_continues(
     # 같은 원인은 60초에 1줄
     warnings = [r for r in caplog.records if "표 게시 실패" in r.getMessage()]
     assert len(warnings) == 1
-    # want 를 못 읽으면 직전 값 유지
-    await publisher.refresh_wanted()
-    assert publisher.wanted
 
 
 # --- diff 규칙 ---

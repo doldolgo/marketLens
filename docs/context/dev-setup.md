@@ -74,7 +74,7 @@ curl -i -s localhost:8000/health
 ```bash
 curl -s localhost:8000/spreads | head -c 600
 ```
-(기동 10초 뒤 — 마켓 목록·exchangeInfo REST 첫 회차(이후 매초) + 스트림 스냅샷 한 바퀴. dev compose 의 Redis 가 떠 있어야 하고, 접속자(또는 이 curl 자체)가 `spreads:want` 를 쓴 뒤 5초 안에 200 — 첫 curl 은 404 일 수 있다, 018) 최상위 `rate > 1000`·`notional == 1000`, 행 수 > 100, `warnings` 는 평상시 빈 배열(008), 각 행의 키가 정확히 다음 17개면 정상 (003 §4 기준):
+(기동 10초 뒤 — 마켓 목록·exchangeInfo REST 첫 회차(이후 매초) + 스트림 스냅샷 한 바퀴. dev compose 의 Redis 가 떠 있어야 하고, 수집이 매 틱 표를 만들므로 기동 뒤 첫 틱부터 200 — 재료가 모이기 전이면 404, 018) 최상위 `rate > 1000`·`notional == 1000`, 행 수 > 100, `warnings` 는 평상시 빈 배열(008), 각 행의 키가 정확히 다음 17개면 정상 (003 §4 기준):
 `sym, dom, fx, fwd, rev, usd, spark, status, age, slipFwd, slipRev, krw, netDom, depDom, wdDom, depFx, wdFx`
 표는 $1,000 한 장뿐이다(`?notional=` 은 400) — 종목 하나의 규모별 슬리피지는 004 의 `/analysis/slippage`(아래 `/slippage/<거래소>`)로 본다.
 ```bash
@@ -86,7 +86,7 @@ async def main():
 asyncio.run(main())
 EOF
 ```
-접속 직후 `waiting`(`spreads:latest` 가 살아 있으면 바로 `snapshot`), 최대 5초 뒤 `snapshot`(행 수 = `/spreads` 와 같음), 이후 매초 `delta`(바뀐 행만, 평상시 30~50%)·빈 초는 `heartbeat` 면 정상 (017). 접속을 끊고 15초 뒤 `redis-cli TTL spreads:want` 가 `-2` 면 수집이 표 생성을 멈춘 것.
+접속 직후 바로 `snapshot`(행 수 = `/spreads` 와 같음 — 수집이 매 틱 표를 만들어 `spreads:latest` 가 늘 살아 있다, `waiting` 은 수집 기동 직후뿐), 이후 매초 `delta`(바뀐 행만, 평상시 30~50%)·빈 초는 `heartbeat` 면 정상 (017).
 ```bash
 curl -s "localhost:8000/slippage/upbit?symbol=BTC/KRW&amount=1000000" | head -c 300
 ```
