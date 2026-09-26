@@ -77,7 +77,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 2. 괄호 주석 제거 (`(ERC20)`).
 3. 영숫자 외 문자로 토큰 분리.
 4. 불용어 제거: `network networks chain mainnet protocol pos token coin`.
-5. 별칭 치환: `avax→avalanche, eth→ethereum, btc→bitcoin, matic→polygon, pol→polygon, sol→solana, trx→tron, arb→arbitrum, op→optimism`.
+5. 별칭 치환: `avax→avalanche, eth→ethereum, btc→bitcoin, matic→polygon, pol→polygon, sol→solana, trx→tron, arb→arbitrum, op→optimism, erc20→ethereum, bep20→bsc, trc20→tron, cap20→chiliz, arbitrumone→arbitrum, avaxc→avalanchec`. 뒤 6개는 비트겟이 망 코드를 표준 규격명(`ERC20`·`BEP20`·`TRC20`·`CAP20`)이나 붙여 쓴 이름(`ArbitrumOne`·`AVAXC-Chain`)으로 주기 때문이다(2026-09-25 S3 원문 확인). `avaxc` 는 `avalanche` 로 풀지 않는다 — 이름이 `AVAX` 뿐인 국내 망(빗썸)이 C-Chain 인지 확인되지 않았으므로 접두사 규칙(4)으로 unknown 에 머물게 한다.
 6. 토큰 순서는 무시한다.
 
 예: `Ethereum (ERC20)`→{ethereum}, `Polygon POS`→{polygon}, `Avalanche C-Chain` = `AVAX C-Chain`→{avalanche, c}.
@@ -86,10 +86,17 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 0. 해외 망 목록이 비면 `unknown`. 정보 없음 ≠ 그 망 없음.
 1. 코드 대문자 일치 → matched. 국내 코드가 비면 이 규칙은 건너뛴다.
 2. 토큰 집합 완전 일치 → matched. 국내 망의 토큰 집합이 비면(이름이 전부 불용어 — 예 `Mainnet`) 규칙 2~4 를 보지 않고 **`unknown`** 으로 끝낸다 — 빈 집합끼리의 완전 일치는 아무 망이나 맞다는 뜻이 되고, 이름에 정보가 없으니 `absent`(해외가 그 망을 안 다룸) 라고도 말할 수 없다.
-3. 토큰을 정렬해 붙인 문자열 일치 (`AssetHub Polkadot` ↔ `Asset Hub Polkadot`) → matched. 확인된 동일 체인 쌍 표(초기값 `{metal,l2}` ↔ `{metal,dao,l2}`, 양방향)도 matched. 규칙을 느슨하게 푸는 대신 이 표를 늘린다.
+3. 토큰을 정렬해 붙인 문자열 일치 (`AssetHub Polkadot` ↔ `Asset Hub Polkadot`) → matched. 확인된 **동일 체인 표**(같은 체인을 뜻하는 토큰 집합들의 묶음, 한 묶음 안의 어느 둘이든 matched)도 matched. 규칙을 느슨하게 푸는 대신 이 표를 늘린다. 현재 묶음:
+   - `{metal,l2}` · `{metal,dao,l2}`
+   - `{base}` · `{base,ethereum}` — 빗썸 `BASE_ETH`
+   - `{arbitrum}` · `{arbitrum,one}` · `{arbitrum,ethereum}` — 업비트·바이낸스 `Arbitrum One`, 빗썸 `ARB_ETH`, 비트겟 `ArbitrumOne`(별칭)
+   - `{optimism}` · `{optimism,ethereum}` — 빗썸 `OP_ETH`
+   - `{bsc}` · `{bnb,smart}` — 빗썸 `BSC`·비트겟 `BEP20`(별칭), 업비트·바이낸스 `BNB Smart Chain`
+   - `{avalanche,c}` · `{avalanchec}` — 업비트·바이낸스 `Avalanche C-Chain`, 비트겟 `AVAXC-Chain`(별칭)
+   - `{neo,n3}` · `{neo3}` — 업비트·바이낸스 `NEO N3`, 비트겟 `NEO3`
 4. 못 찾음: 어느 해외 망과든 토큰이 하나라도 겹치거나, 길이 3 이상 토큰끼리 한쪽이 다른 쪽 접두사(`kat` ↔ `katana`)면 `unknown`. 아니면 `absent`.
 
-예: 업비트 `SEI "Sei"` vs 바이낸스 `SEIEVM "Sei EVM"` → {sei} ⊂ {sei, evm} 겹침 → **unknown**. 가장 중요한 케이스다. `QKC "Quarkchain"` vs `ETH "Ethereum (ERC20)"` → absent.
+예: 업비트 `SEI "Sei"` vs 바이낸스 `SEIEVM "Sei EVM"` → {sei} ⊂ {sei, evm} 겹침 → **unknown**. 가장 중요한 케이스다. `QKC "Quarkchain"` vs `ETH "Ethereum (ERC20)"` → absent. 빗썸 `ETH "ETH"` vs 비트겟 `ERC20 "ERC20"` → 별칭으로 둘 다 {ethereum} → matched. 빗썸 `AVAX "AVAX"` vs 비트겟 `AVAXC-CHAIN "AVAXC-Chain"` → {avalanche} vs {avalanchec} 접두사 → unknown.
 
 **국내 망이 여럿일 때 tie-break**: 국내 망을 응답 순서대로 판정한다.
 1. matched 이고 **국내 입금 ok 이면서 해외 출금 ok**(해외→국내로 실제 옮길 수 있는 길)인 첫 망을 즉시 채택.
@@ -153,7 +160,7 @@ EC2 에서 확인 필요(이 망은 거래소 REST 를 막는다): 실키 기동
 - `CLAUDE.md` 스펙 인덱스 상태.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 소요 파일: `server/app/core/networks.py`(`Network`·`normalize_name`·`match_network`·`pick_domestic`·동일 체인 쌍 표), `server/app/core/contracts.py`(`WalletStatusProvider` Protocol), `server/app/features/wallet_status/`(`upbit.py`·`binance.py`·`bithumb.py` 조회기 — 코드 공유 없음, `service.py` `WalletStatusService`, `models.py`, `tests/` 4파일 + `helpers.py` 의 `Capture`·`FakeRecorder`), `server/app/core/ticks.py`(틱마다 `apply`·`failed`, 조회는 별도 태스크), `server/app/core/collect.py`(`force=True` 조회·`wallet_status_available`), `server/app/features/spreads/service.py`(`_wallet_fields` §3.7)·`models.py`(`walletStatusAvailable`), `server/app/main.py`(키 4개·`record` 주입), `server/tests/test_networks.py`·`test_wallet_integration.py`, `server/pyproject.toml`(PyJWT).
+- 소요 파일: `server/app/core/networks.py`(`Network`·`normalize_name`·`match_network`·`pick_domestic`·동일 체인 표), `server/app/core/contracts.py`(`WalletStatusProvider` Protocol), `server/app/features/wallet_status/`(`upbit.py`·`binance.py`·`bithumb.py` 조회기 — 코드 공유 없음, `service.py` `WalletStatusService`, `models.py`, `tests/` 4파일 + `helpers.py` 의 `Capture`·`FakeRecorder`), `server/app/core/ticks.py`(틱마다 `apply`·`failed`, 조회는 별도 태스크), `server/app/core/collect.py`(`force=True` 조회·`wallet_status_available`), `server/app/features/spreads/service.py`(`_wallet_fields` §3.7)·`models.py`(`walletStatusAvailable`), `server/app/main.py`(키 4개·`record` 주입), `server/tests/test_networks.py`·`test_wallet_integration.py`, `server/pyproject.toml`(PyJWT).
 - 추측한 지점(스펙에 확정 문구로 적음): (1) 원문 기록 시점·범위 — §3.5: 응답을 받는 즉시 상태 코드 해석 전에 본문을 남기고, 응답이 없는 실패(타임아웃·연결 오류)는 남기지 않으며, 기록 함수는 배선 시 조회기 묶음에 주입(미주입이면 무동작). 바이낸스 `source` 는 경로만 — 쿼리의 timestamp·서명은 요청 쪽이라 제외. (2) 입출금 조회는 틱 루프와 별도 태스크(10초 타임아웃이 시세를 막지 않게, 겹치지 않게 하나만). (3) core↔feature 결합은 Protocol 로, 배선은 `main.py`. (4) 전부 불용어라 토큰 집합이 빈 국내 망 이름은 코드가 안 맞으면 `unknown` — §3.6-2 에 확정 문구. (5) `/refresh` 의 `calls` 는 실호출이 나간 조회만 더한다(키 없음은 0).
 - 실행 중 함께 고친 절: §3.5 원문 기록 규칙 문장(위 1번).
-- 남은 빚: 실키 3-true·`netDom` 채움·S3 `rest:` 줄 확인은 EC2(§5) / 동일 체인 쌍 표는 1쌍뿐 — 실서버 `unknown` 을 보며 늘린다(status.md 빚).
+- 남은 빚: 실키 3-true·`netDom` 채움·S3 `rest:` 줄 확인은 EC2(§5) / 동일 체인 표는 실서버 `unknown`·`absent` 을 보며 늘린다(status.md 빚). 빗썸은 망 표시명이 없어 `name = code` 이고 코인명과 같은 코드(`APT`·`ADA`·`AR`…)는 해외 이름(`Aptos`·`Cardano`·`Arweave`)과 못 맞춰 unknown/absent 로 남는다 — 코인별 별칭은 두지 않는다.
