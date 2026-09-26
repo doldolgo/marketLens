@@ -150,6 +150,8 @@ def fold_candles(rows: list[CandleRow], ts: int) -> CandleRow:
         blocked_fwd_sec=sum(r.blocked_fwd_sec for r in rows),
         blocked_rev_sec=sum(r.blocked_rev_sec for r in rows),
         samples=sum(r.samples for r in rows),
+        net_dom=last.net_dom,
+        net_fx=last.net_fx,
     )
 
 
@@ -352,6 +354,9 @@ class CandleAggregator:
                     blocked_fwd_sec=acc.blocked_fwd,
                     blocked_rev_sec=acc.blocked_rev,
                     samples=acc.samples,
+                    # 024 §3.4 — 그 분 마지막 행의 망 이름(입출금 4상태와 같은 규칙)
+                    net_dom=last.net_dom,
+                    net_fx=last.net_fx,
                 )
                 self._pending[(dom, fx, base, minute)] = candle_point(row)
             dropped = 0

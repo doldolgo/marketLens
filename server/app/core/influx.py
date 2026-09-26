@@ -112,6 +112,16 @@ class PremiumEventRow:
     samples: int
     enter_percent: float
     exit_percent: float
+    # 024 §3.5 — 사건이 옮기는 망의 표시명(국내·해외). None = 모름/없음. 배포 전 점에는 필드가 없다
+    net_dom: str | None = None
+    net_fx: str | None = None
+
+
+def _opt_str(v: object) -> str | None:
+    """문자열 필드의 없음·빈 문자열 → None — Influx 문자열에 null 이 없어 빈 문자열이 "없음" 이다(024 §3.4)."""
+    if v is None or v == "":
+        return None
+    return str(v)
 
 
 def premium_event_point(row: PremiumEventRow) -> InfluxPoint:
@@ -131,6 +141,9 @@ def premium_event_point(row: PremiumEventRow) -> InfluxPoint:
             "samples": row.samples,
             "enter_percent": float(row.enter_percent),
             "exit_percent": float(row.exit_percent),
+            # 없음은 빈 문자열 — Influx 문자열 필드에 null 이 없다 (024 §3.5)
+            "net_dom": row.net_dom or "",
+            "net_fx": row.net_fx or "",
         },
         ts=row.start_ts,
     )
@@ -140,7 +153,8 @@ def premium_event_point(row: PremiumEventRow) -> InfluxPoint:
 class CandleRow:
     """`candle` 점 1개 — (국내, 해외, 코인) 조합의 창 1개(스펙 014 §3.4). 다섯 계층 버킷이 같은 모양이다.
 
-    입출금 4개는 int 3상태(1 가능·0 불가·−1 모름) — Influx 에 null 이 없어서다.
+    입출금 4개는 int 3상태(1 가능·0 불가·−1 모름) — Influx 에 null 이 없어서다. 값은 006 §3.7 판정값(024).
+    망 이름 2개는 문자열이고 없음은 빈 문자열로 쓴다. 배포 전 점에는 두 필드가 없다 — 읽을 때 선택이다.
     """
 
     dom: str
@@ -165,6 +179,8 @@ class CandleRow:
     blocked_fwd_sec: int
     blocked_rev_sec: int
     samples: int
+    net_dom: str | None = None
+    net_fx: str | None = None
 
 
 _CANDLE_FLOAT_FIELDS = (
@@ -189,14 +205,17 @@ _CANDLE_INT_FIELDS = (
     "blocked_rev_sec",
     "samples",
 )
+# 024 §3.4 — 망 이름 2개. 읽을 때 선택(없거나 빈 문자열 = None)이라 18 필드 옛 점을 버리지 않는다
+_CANDLE_STR_FIELDS = ("net_dom", "net_fx")
 
 
 def candle_point(row: CandleRow) -> InfluxPoint:
-    """봉 1점 — 유일키 (버킷, dom, fx, base, 창 시작). 같은 창을 다시 접으면 덮어쓴다(재시도 안전)."""
+    """봉 1점(20 필드) — 유일키 (버킷, dom, fx, base, 창 시작). 같은 창을 다시 접으면 덮어쓴다(재시도 안전)."""
     fields: dict[str, float | int | str] = {
         k: float(getattr(row, k)) for k in _CANDLE_FLOAT_FIELDS
     }
     fields.update({k: int(getattr(row, k)) for k in _CANDLE_INT_FIELDS})
+    fields.update({k: getattr(row, k) or "" for k in _CANDLE_STR_FIELDS})
     return InfluxPoint(
         measurement="candle",
         tags={"dom": row.dom, "fx": row.fx, "base": row.base},
@@ -526,6 +545,8 @@ from(bucket: "{self.bucket}")
                     samples=int(v.get("samples") or 0),
                     enter_percent=float(v.get("enter_percent") or 0.0),
                     exit_percent=float(v.get("exit_percent") or 0.0),
+                    net_dom=_opt_str(v.get("net_dom")),
+                    net_fx=_opt_str(v.get("net_fx")),
                 )
             )
         return rows
@@ -562,7 +583,7 @@ from(bucket: "{_esc_flux(bucket)}")
         for record in self._records(flux):
             v = record.values
             if any(v.get(k) is None for k in _CANDLE_FLOAT_FIELDS + _CANDLE_INT_FIELDS):
-                continue  # 반쪽 점은 싣지 않는다 — 봉은 18 필드가 한 번에 쓰인다
+                continue  # 반쪽 점은 싣지 않는다 — 봉은 수치 18 필드가 한 번에 쓰인다(망 2필드는 선택, 024)
             rows.append(
                 CandleRow(
                     dom=str(v.get("dom", "")),
@@ -571,6 +592,7 @@ from(bucket: "{_esc_flux(bucket)}")
                     ts=int(v["_time"].timestamp()),
                     **{k: float(v[k]) for k in _CANDLE_FLOAT_FIELDS},
                     **{k: int(v[k]) for k in _CANDLE_INT_FIELDS},
+                    **{k: _opt_str(v.get(k)) for k in _CANDLE_STR_FIELDS},
                 )
             )
         return rows

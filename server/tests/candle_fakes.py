@@ -87,10 +87,13 @@ class FakeCandleStore:
 
     def candles(self, bucket: str) -> list[CandleRow]:
         """그 버킷의 봉 전부 — ts 오름차순, 같은 ts 는 dom·fx·base 순."""
-        rows = [
-            CandleRow(dom=d, fx=f, base=b, ts=ts, **fields)  # type: ignore[arg-type]
-            for (d, f, b, ts), fields in self.data.get(bucket, {}).items()
-        ]
+        rows = []
+        for (d, f, b, ts), fields in self.data.get(bucket, {}).items():
+            kw = dict(fields)
+            # 실물 읽기와 같은 규칙(024 §3.4) — 망 문자열 2개는 선택이고 없음·빈 문자열은 None
+            for k in ("net_dom", "net_fx"):
+                kw[k] = kw.get(k) or None
+            rows.append(CandleRow(dom=d, fx=f, base=b, ts=ts, **kw))  # type: ignore[arg-type]
         rows.sort(key=lambda r: (r.ts, r.dom, r.fx, r.base))
         return rows
 
@@ -116,6 +119,8 @@ def candle(
     blocked_fwd: int = 0,
     samples: int = 60,
     dom_dep: int = 1,
+    net_dom: str | None = None,
+    net_fx: str | None = None,
 ) -> CandleRow:
     """아래 계층 봉 1개 — rev 는 fwd 의 음수, 나머지는 기본값."""
     return CandleRow(
@@ -141,6 +146,8 @@ def candle(
         blocked_fwd_sec=blocked_fwd,
         blocked_rev_sec=0,
         samples=samples,
+        net_dom=net_dom,
+        net_fx=net_fx,
     )
 
 
@@ -157,6 +164,8 @@ def row(
     dom_wd: bool | None = True,
     fx_dep: bool | None = True,
     fx_wd: bool | None = True,
+    net_dom: str | None = None,
+    net_fx: str | None = None,
 ) -> TickRow:
     return TickRow(
         dom=dom,
@@ -171,6 +180,8 @@ def row(
         dom_wd=dom_wd,
         fx_dep=fx_dep,
         fx_wd=fx_wd,
+        net_dom=net_dom,
+        net_fx=net_fx,
     )
 
 
