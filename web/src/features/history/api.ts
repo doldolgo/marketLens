@@ -4,7 +4,7 @@
 // 늦게 온 옛 응답이 새 결과를 덮지 않게 (005 §3.6 방식). 심볼은 클라이언트에서 거르므로 쿼리에 없다.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { API_BASE, HISTORY_CANDLES_POLL_MS, HISTORY_EVENTS_POLL_MS } from '../../shared/config'
-import { RES_OF_INTERVAL, chunkKey, neededChunks, resLimitSec, type ChunkRef } from './candles'
+import { RES_OF_INTERVAL, chunkKey, chunkSec, neededChunks, type ChunkRef } from './candles'
 import { INTERVAL_SEC, type Interval } from './rollup'
 import type { Candle1m, CandlesResponse, Dir, Dom, EventsResponse } from './types'
 
@@ -73,7 +73,7 @@ export function useEvents(q: EventsQuery): EventsState {
 }
 
 // ── /history/candles (스펙 014 §3.7) ──
-// 선택된 (국내 × 해외) 쌍마다 계층의 청크(= 요청당 상한 길이, KST 자정 정렬)를 부른다. 청크는 (쌍, 심볼, 방향, 계층, 청크 시작)
+// 선택된 (국내 × 해외) 쌍마다 계층의 청크(360창, KST 기준 청크 길이 배수 정렬)를 부른다. 청크는 (쌍, 심볼, 방향, 계층, 청크 시작)
 // 키로 메모리에 들고 있어 심볼·방향·쌍·봉을 바꿔도 없는 청크만 새로 부르고, 최신 청크만 60초마다 다시 부른다(창이 닫힐 때마다 새 봉).
 // 청크가 상한 길이라 400 은 나올 수 없다. 요청은 위와 같은 400ms 디바운스·직전 요청 취소.
 
@@ -84,7 +84,7 @@ class HttpError extends Error {
 export async function fetchCandles(ref: ChunkRef, signal: AbortSignal): Promise<CandlesResponse> {
   const params = new URLSearchParams({
     base: ref.base, res: ref.res, dom: ref.dom, fx: ref.fx, dir: ref.dir,
-    start: String(ref.start), end: String(ref.start + resLimitSec(ref.res)),
+    start: String(ref.start), end: String(ref.start + chunkSec(ref.res)),
   })
   const res = await fetch(`${API_BASE}/history/candles?${params}`, { signal })
   if (!res.ok) throw new HttpError(res.status)
