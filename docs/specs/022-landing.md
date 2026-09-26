@@ -8,7 +8,7 @@
 처음 온 사람이 주소를 열면 대시보드 대신 **이게 무엇인지 3초 안에 알 수 있는 한 페이지**를 먼저 본다. 검색 엔진과 메신저 미리보기가 자바스크립트 없이도 제목·설명·본문을 읽을 수 있어야 하므로 **정적 HTML** 이다. 지금 실제로 벌어진 김프 몇 개를 실데이터로 보여 주고, 버튼 하나로 대시보드에 들어간다.
 
 ## 2. 범위
-- 만드는 것: 정적 파일 `web/public/landing.html`(HTML·CSS·티저 스크립트 한 파일), `web/public/robots.txt`, 스크린샷 `web/public/landing/*.png`. 서버 코드 없음. React 안 씀.
+- 만드는 것: 정적 파일 `web/public/landing.html`(HTML·CSS·티저 스크립트 한 파일), `web/public/robots.txt`, `web/public/sitemap.xml`, 스크린샷 `web/public/landing/*.png`. 서버 코드 없음. React 안 씀.
 - 하지 않는 것: 가입·로그인·대기자 명단·방문 집계·다국어·사이트맵. 대시보드 자체는 그대로 누구나 연다.
 - 바꾸는 기존 것: 대시보드가 `/` 에서 `/app/` 로 옮겨 간다(Vite `base`, nginx 경로). 배포 워크플로·compose 는 그대로 — nginx 설정은 web 이미지에 들어 있어 main 머지 = 배포다.
 
@@ -21,7 +21,7 @@
 | `/?tab=…` | `301 /app/?tab=…` |
 | `/app` | `301 /app/` |
 | `/app/…` | 대시보드 |
-| `/landing/*.png` `/robots.txt` `/favicon.svg` | 정적 파일 |
+| `/landing/*.png` `/robots.txt` `/sitemap.xml` `/favicon.svg` | 정적 파일 |
 | 그 밖의 루트 경로 | 404 |
 
 - `/` 에 쿼리가 붙어 오면(옛 링크 `/?tab=history&sym=BTC`) 쿼리를 그대로 들고 `/app/` 로 301 한다. 랜딩은 쿼리를 쓰지 않는다.
@@ -43,7 +43,8 @@
 ### 3.3 검색·미리보기 메타
 - `<title>` "MarketLens — 김치 프리미엄 실시간 모니터링", `<meta name="description">` 두 문장, `<link rel="canonical" href="https://kimptrack.com/">`(절대 주소 — IP 로 들어와도 검색엔진이 도메인을 원본으로 본다), `lang="ko"`.
 - Open Graph: `og:title`·`og:description`·`og:url`(`https://kimptrack.com/`)·`og:image`(`https://kimptrack.com/landing/spreads.png` — 절대 주소여야 한다)·`og:locale ko_KR`, `twitter:card summary_large_image`. 도메인은 023 부터(그 전엔 EC2 IP 가 박혀 있었다).
-- `robots.txt`: 전부 허용, `/api/` 만 불허.
+- `robots.txt`: 전부 허용, `/api/` 만 불허, `Sitemap:` 줄로 `https://kimptrack.com/sitemap.xml` 을 가리킨다.
+- `sitemap.xml`: `https://kimptrack.com/` 과 `https://kimptrack.com/app/` 두 URL. `lastmod` 는 두지 않는다 — 배포마다 갱신할 사람이 없으면 오래된 날짜가 남아 오히려 신뢰를 깎는다.
 - 본문(제목·설명·기능·작동 방식·스크린샷 alt)은 전부 HTML 에 있다. 자바스크립트가 꺼져도 티저 구역만 "불러오는 중…" 으로 남고 나머지는 그대로 읽힌다.
 
 ### 3.4 실시간 티저 규칙
@@ -64,7 +65,7 @@
 
 ## 4. 검증
 - `server/tests/test_deploy.py`: nginx 에 `/app/` fallback·`/` 랜딩·쿼리 301 이 있고 루트 `index.html` fallback 이 없다, Vite `base` 가 `/app/` 이고 nginx 가 `assets/` 를 alias 로 잇는다.
-- 수동(web 이미지를 로컬에서 띄워 curl): `/` 200 HTML(제목 포함) · `/?tab=history` 301 `/app/?tab=history` · `/app` 301 `/app/` · `/app/` 200 index · `/app/assets/<번들>.js` 200 immutable · `/app/아무거나` 200 index · `/landing/spreads.png`·`/robots.txt` 200 · `/없는경로` 404.
+- 수동(web 이미지를 로컬에서 띄워 curl): `/` 200 HTML(제목 포함) · `/?tab=history` 301 `/app/?tab=history` · `/app` 301 `/app/` · `/app/` 200 index · `/app/assets/<번들>.js` 200 immutable · `/app/아무거나` 200 index · `/landing/spreads.png`·`/robots.txt`·`/sitemap.xml` 200 · `/없는경로` 404.
 - 수동(브라우저): 티저에 뜬 코인·경로·퍼센트가 같은 시각 대시보드 표의 행과 같고 입출금이 막힌 행은 없다 · `/api/spreads` 503 이면 티저 구역이 사라진다 · 랜딩이 `/api/ws/`·`/api/health/` 를 부르지 않는다 · 390px 폭에서 가로 스크롤 없음 · 자바스크립트 끄고도 본문이 보인다.
 - `cd web && npm run lint && npm run build`, `cd server && ruff check . && pytest -q` 통과.
 
@@ -85,6 +86,6 @@ curl -sI http://localhost:8091/ ; curl -sI 'http://localhost:8091/?tab=history' 
 - `docs/context/dev-setup.md` — `npm run dev` 주소를 `http://localhost:5173/app/` 로.
 
 ## 7. 실행 보고
-- 만든 것: `web/public/landing.html`·`robots.txt`·`landing/spreads.png`·`history.png`, `web/vite.config.ts` base, `web/nginx.conf` 루트·`/app/` 블록, `server/tests/test_deploy.py` 단언 2개.
+- 만든 것: `web/public/landing.html`·`robots.txt`·`sitemap.xml`·`landing/spreads.png`·`history.png`, `web/vite.config.ts` base, `web/nginx.conf` 루트·`/app/` 블록, `server/tests/test_deploy.py` 단언 2개.
 - 추측한 지점: 루트의 없는 경로를 404 로 한 것(검색 엔진 중복 색인 방지). 티저의 "열린 경로" 판정은 스프레드 표의 입출금 칸 값을 그대로 썼다. Vite `base` 때문에 dev 주소가 `/app/` 로 바뀐 것은 설정 한 줄의 결과라 그대로 받아들였다.
 - 남은 빚: `og:image` 절대 주소에 EC2 IP 가 박혀 있다(도메인 생기면 교체). 스크린샷은 정적 파일이라 화면이 바뀌면 낡는다. 랜딩의 색 값이 theme.css 와 복사본 관계다.
