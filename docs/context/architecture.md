@@ -112,7 +112,7 @@ flowchart TB
 - 스프레드 표는 WebSocket `/ws/spreads` 연결 1개(017), 나머지는 `fetch` 폴링. 상태관리·라우터·스타일 라이브러리 없음.
 - API base: `VITE_API_BASE` (미설정 시 `/api`). dev 는 vite proxy `/api → http://localhost:8000` (prefix strip), 배포는 nginx `/api/ → server:8000/`.
 - 폴링 실패 시 직전 데이터 유지.
-- 셸의 공유 피드가 탭 공통 데이터를 들고, 1.5초 tick 은 셸이 돌린다. `/ws/spreads` 구독(snapshot 통째 교체·delta 키 병합, 10초 무응답 재연결·백오프, 폴링 fallback 없음)은 spreads 기능(017)이, `/health/collect` 5초 폴링은 health 기능(011)이 제공한다. 기록 탭은 `/history/events` 60초 재조회(013)와 `/history/candles` 청크 캐시(014 — 봉 종류 → 계층, 쌍마다 1,440창 청크, 최신 청크만 60초 재조회, 계층 안 접기)를 쓴다.
+- 셸의 공유 피드가 탭 공통 데이터를 들고, 1.5초 tick 은 셸이 돌린다. `/ws/spreads` 구독(snapshot 통째 교체·delta 키 병합, 10초 무응답 재연결·백오프, 폴링 fallback 없음)은 spreads 기능(017)이, `/health/collect` 5초 폴링은 health 기능(011)이 제공한다. 기록 탭은 `/history/events` 60초 재조회(013)와 `/history/candles` 청크 캐시(014 — 봉 종류 → 계층, 쌍마다 360창 청크, 최신 청크만 60초 재조회, 계층 안 접기)를 쓴다.
 
 ## 계약 규칙 (BE ↔ FE)
 - BE 내부는 snake_case 를 사용한다. HTTP JSON 키와 복합어 쿼리 파라미터는 모든 엔드포인트에서 camelCase 를 사용한다. 정확한 스키마는 각 기능의 모델과 타입이 정의한다.
