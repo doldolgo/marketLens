@@ -885,12 +885,13 @@ def test_boot_with_every_connection_failing_keeps_health_200(
         TestClient(app) as client,
     ):
         resp = client.get("/health")
-        assert resp.status_code == 200 and resp.json()["status"] == "ok"
+        # 025 — 첫 틱 전엔 starting(503). 앱이 JSON 으로 답하면 떠 있는 것이다
+        assert resp.json()["status"] in ("ok", "starting")
         for _ in range(100):  # 우주 확정 → BTC 샤드 연결 시도 1회 → 경고 1줄
             if any(r.name == "marketlens.stream.binance" for r in caplog.records):
                 break
             time.sleep(0.02)
-        assert client.get("/health").status_code == 200
+        assert client.get("/health").json()["status"] in ("ok", "starting")
         state = app.state.live_store.stream_state("binance")
         assert (
             state is not None and not state.connected

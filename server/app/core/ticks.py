@@ -153,6 +153,7 @@ class TickLoop:
         events: EventSink | None = None,
         candles: EventSink | None = None,
         spreads: EventSink | None = None,
+        heartbeat: EventSink | None = None,
         wallet: WalletStatusProvider | None = None,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
@@ -165,6 +166,7 @@ class TickLoop:
         self._events = events
         self._candles = candles
         self._spreads = spreads
+        self._heartbeat = heartbeat
         self._wallet = wallet
         self._clock = clock
         self._sleep = sleep
@@ -219,6 +221,9 @@ class TickLoop:
         if self._spreads is not None:
             # 017 — 표 게시는 맨 마지막 자리 — received_at 이 찍힌 뒤라 GET /spreads 와 같은 표가 나온다
             self._spreads.observe(tick)
+        if self._heartbeat is not None:
+            # 025 — 맨 끝: 여기까지 왔다 = 이 초의 틱이 온전히 끝났다. 위에서 예외가 나면 이 초는 안 쓴다
+            self._heartbeat.observe(tick)
         return tick
 
     def _judge_all(self, now_ms: int) -> None:

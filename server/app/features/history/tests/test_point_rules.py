@@ -165,7 +165,8 @@ def test_influx_outage_keeps_memory_routes_alive_and_history_503() -> None:
     reader.fail = True
     store = seed(two_level_books(), rates={"upbit": (1400.0, 1390.0)})
     client = make_client(reader, store)
-    assert client.get("/health").json()["status"] == "ok"
+    # 025 — /health 는 틱 신선도만 본다(씨앗 틱이 있어 ok 또는 stale). Influx 장애와 무관하게 답한다
+    assert client.get("/health").json()["status"] in ("ok", "stale")
     assert len(spreads_json(store)["rows"]) == 1
     for path, params in HISTORY_ROUTES:
         res = client.get(path, params=params)

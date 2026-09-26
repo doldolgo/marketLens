@@ -8,7 +8,7 @@
 
 | 기능 | server | web | 비고 |
 |---|---|---|---|
-| collect | 업비트·빗썸 WS 실시간 갱신·마켓 목록 REST 매초(우주 = 국내 ∪ ∩ 해외 ∪)·1초 틱·/health | - | 바이낸스 스트림은 012, 바이빗은 019, 비트겟은 020 |
+| collect | 업비트·빗썸 WS 실시간 갱신·마켓 목록 REST 매초(우주 = 국내 ∪ ∩ 해외 ∪)·1초 틱·/health(신선도, 025) | - | 바이낸스 스트림은 012, 바이빗은 019, 비트겟은 020 |
 | web-shell | - | 셸·KPI·mock 탭 3종(gap·pp·flow) 동작, 탭·심볼·탭별 필터가 URL 쿼리로 복원 | spreads 탭은 003, history 탭은 005 실데이터 |
 | landing | 없음 | 정적 `landing.html` 을 nginx 가 `/` 에서 서빙(히어로·`/api/spreads` 1회 티저·스크린샷 2장·기능 3장·작동 방식·OG 메타·robots) · 대시보드는 `/app/`(Vite base) · `/?tab=…` 은 `/app/` 로 301 · 루트의 없는 경로는 404 | 스크린샷·`og:image` 주소(EC2 IP)는 사람이 갱신 |
 | spreads | `/spreads` 는 Redis `spreads:latest` 를 그대로 반환(두 역할 동일, 요청마다 `spreads:want` 갱신, `notional` 쿼리는 400, Redis 불달 503, 018), 표 계산은 017 게시기가 $1,000 으로 — 전 페어 표, `age`·`status` 는 거래소 스트림 수신 시각 기준(행 자체가 300초 이상 안 바뀌면 그 행의 경과 초 → stale), USDT 시세 미갱신 경고, `spark` 는 009 가 게시한 30분 추이. `/refresh` 는 001 즉시 갱신 트리거 노출. 017 — `spreads:want` 가 살아 있을 때만 틱 직후 $1,000 표를 Redis 채널 `spreads`·키 `spreads:latest` 로 매초 게시(`features/spreads/push.py`), 구독 허브(`hub.py`, api·로컬 단일 프로세스 모두)가 diff 를 접속자 전원에게 같은 바이트로 `/ws/spreads` 브로드캐스트 | 실데이터 탭·`/ws/spreads` 구독(snapshot+delta, 10초 무응답 재연결·백오프, 폴링 fallback 없음 — 막힌 망에선 표 안 뜸)·체결 규모 $1,000 고정·행 클릭 → 기록 탭 | 행 17키. 스프레드 탭이 보는 컨테이너는 api 하나(018). 스파크라인 렌더는 후속. 실거래소 확인(행 수 > 100 등)은 EC2 대기 |
@@ -24,7 +24,10 @@
 | bitget | WS 3샤드 books15(200ms 스냅샷, 15단계)+trade·symbols 매초·문자열 ping/pong 감시·샤드 단위 정체 판정·입출금(public, 키 없음)·`/history/*` `fx=bitget`·`/orderbook/bitget` | 표시명 `Bitget`·기록 탭 Bitget 실데이터 | 해외 최대 20단계, MEXC 는 mock |
 | wallet-history | server: 틱 4상태 = 006 판정값 + net_dom·net_fx, 봉·사건 점 문자열 2필드, /history/candles·events netDom·netFx | web: 읽기 줄·사건 표·로그 망 표시 | 배포 전 점은 망 null·4상태 코인 단위 |
 
+| slack-alerts | server: Slack 웹훅 알림(기동·수집 60초 구간 발생/복구·ERROR 로그·처리 안 된 500, 키별 10분 억제)·심장박동 `collect:heartbeat`·`/health` 신선도(두 역할, 비정상 503) | - | 외부 uptime 은 런북 uptime-monitor.md, 웹훅·모니터 등록은 사람 몫 |
+
 ## 알려진 빚
+- (025) 디스크·메모리 알람 없음(CloudWatch Agent 는 후속). 같은 거래소가 발생 알림 뒤 10분 안에 다시 60초 넘게 끊기면 두 번째 발생·복구 알림은 억제된다(단순함 — 억제 예외 없음). 외부 uptime 모니터는 사람이 등록해야 동작한다.
 - (021) Redis 인증 없음 — 보안그룹(collect·serve 그룹만 6379)이 유일한 벽. 이미지는 박스별 빌드라 collect(1 vCPU)는 배포 중 수집이 1~2분 느려진다. Influx 쿼리 **기간** 상한은 미적용(메모리 상한만, 기간 상한은 후속 스펙 후보). serve 박스에서 `web` 이 `api` 보다 먼저 뜨면 nginx 가 업스트림 이름을 못 풀어 한 번 죽고 `restart` 로 다시 뜬다(`depends_on` 을 없앤 대가 — 수 초).
 - (019) 원문 아카이브의 바이빗 호가는 델타 프레임을 분당 마지막 1건으로 표본화한 것이라 북을 재생할 수 없다 — 재생이 필요해지면 스냅샷을 따로 남기는 별도 스펙. 비트겟 `books` update 도 같다(020).
 - (019) 004 analysis 는 `/orderbook/bybit`·`/orderbook/bitget` 만 열려 있고 나머지 5개 API 의 해외는 바이낸스 고정 — `fx` 선택은 후속.

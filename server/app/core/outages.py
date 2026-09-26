@@ -7,7 +7,8 @@ core 에 사는 이유: 쓰는 쪽이 수집기(core)라 기능 폴더가 될 �
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from app.core.influx import CollectFailRow, InfluxPoint, collect_fail_point
@@ -18,6 +19,8 @@ RETENTION_MS = 24 * 3600 * 1000  # 닫힌 구간은 24시간 뒤 메모리에서
 CLOSE_AFTER_SUCCESSES = 3  # 연속 성공 3사이클이면 구간을 닫는다 — 플래핑은 한 구간
 RESTORE_TIMEOUT_SEC = 3.0  # 기동 복원 조회 상한 — 넘기면 빈 목록으로 기동
 MESSAGE_LIMIT = 300  # 구간 message(거부 응답 body 또는 커넥터 message) 상한
+ALERT_AFTER_MS = 60_000  # 구간이 이만큼 열려 있으면 Slack 발생 알림 (025 §3.3) — 재연결 몇 초는 안 알린다
+ALERT_MESSAGE_LIMIT = 120
 
 
 @dataclass
@@ -34,6 +37,8 @@ class Outage:
     message: str
     url: str | None
     retry_after_sec: int | None
+    # 발생 알림을 보냈는가 — 보낸 구간만 닫힐 때 복구 알림이 나간다 (025 §3.3). 저장·복원하지 않는다.
+    notified: bool = field(default=False, compare=False)
 
     def to_row(self) -> CollectFailRow:
         return CollectFailRow(
@@ -78,8 +83,13 @@ class OutageReader(Protocol):
 
 
 class OutageTracker:
-    def __init__(self, writer: OutageWriter | None = None) -> None:
+    def __init__(
+        self,
+        writer: OutageWriter | None = None,
+        alerts: Callable[[str, str], None] | None = None,
+    ) -> None:
         self._writer = writer
+        self._alerts = alerts  # 025 — Slack `notify(key, text)`. 없으면 알림 없음
         self._outages: list[Outage] = []  # 24시간 안의 구간 전부(진행 중 포함)
         self._open: dict[str, Outage] = {}  # 거래소 → 진행 중 구간
         self._last_success: dict[str, int] = {}
@@ -172,6 +182,10 @@ class OutageTracker:
             cur.message = message
             cur.url = url
             cur.retry_after_sec = retry_after_sec
+        if not cur.notified and at_ms - cur.started_at >= ALERT_AFTER_MS:
+            # 60초 도달 틱에 1회 — 이후 틱은 notified 로 막힌다
+            cur.notified = True
+            self._alert(cur, at_ms)
         self._prune(at_ms)
 
     def record_success(self, exchange: str, at_ms: int) -> None:
@@ -230,6 +244,28 @@ class OutageTracker:
         outage.ended_at = ended_at
         self._open.pop(outage.exchange, None)
         self._enqueue(outage)
+        if outage.notified:
+            self._alert_closed(outage)
+
+    def _alert(self, outage: Outage, now_ms: int) -> None:
+        if self._alerts is None:
+            return
+        parts = [
+            f"🔴 {outage.exchange} 수집 실패 {outage.kind} {(now_ms - outage.started_at) // 1000}초째"
+        ]
+        if outage.status_code is not None:
+            parts.append(str(outage.status_code))
+        if outage.message:
+            parts.append(outage.message[:ALERT_MESSAGE_LIMIT])
+        self._alerts(f"outage:{outage.exchange}", " · ".join(parts))
+
+    def _alert_closed(self, outage: Outage) -> None:
+        if self._alerts is None or outage.ended_at is None:
+            return
+        dur = (outage.ended_at - outage.started_at) // 1000
+        text = f"🟢 {outage.exchange} 복구 · {dur // 60}분 {dur % 60}초 · 실패 {outage.count}회"
+        # 발생 키와 다른 키 — 억제에 걸리지 않는다
+        self._alerts(f"outage:{outage.exchange}:closed", text)
 
     def _enqueue(self, outage: Outage) -> None:
         if self._writer is not None:

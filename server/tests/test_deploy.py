@@ -359,8 +359,9 @@ def test_health_stays_up_without_storage_and_history_is_503() -> None:
     # lifespan 없이 띄우면 Influx·Redis 가 없는 상태 — Influx 컨테이너를 내린 것과 같다
     client = TestClient(create_app())
     health = client.get("/health")
-    assert health.status_code == 200
-    assert health.json()["status"] == "ok"
+    # 025 — lifespan 없이는 틱이 없어 starting·503. 앱이 답하는 것 자체가 "떠 있다" 다
+    assert health.status_code == 503
+    assert health.json()["status"] == "starting"
     resp = client.get("/history/premium", params={"base": "BTC", "unit": "week"})
     assert resp.status_code == 503
     assert resp.json()["error"]["code"] == "storage_unavailable"

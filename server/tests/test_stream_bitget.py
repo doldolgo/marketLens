@@ -1113,12 +1113,13 @@ def test_boot_with_every_connection_failing_keeps_health_200(
         TestClient(app) as client,
     ):
         resp = client.get("/health")
-        assert resp.status_code == 200 and resp.json()["status"] == "ok"
+        # 025 — 첫 틱 전엔 starting(503). 앱이 JSON 으로 답하면 떠 있는 것이다
+        assert resp.json()["status"] in ("ok", "starting")
         for _ in range(100):  # 우주 확정 → 배정 있는 샤드 연결 시도 → 경고
             if any(r.name == "marketlens.stream.bitget" for r in caplog.records):
                 break
             time.sleep(0.02)
-        assert client.get("/health").status_code == 200
+        assert client.get("/health").json()["status"] in ("ok", "starting")
         health = client.get("/health/collect").json()
         assert [e["exchange"] for e in health["exchanges"]] == [
             "upbit",

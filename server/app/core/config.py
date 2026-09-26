@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     binance_secret_key: str | None = None
     bybit_api_key: str | None = None
     bybit_secret_key: str | None = None
+    # Slack Incoming Webhook(025). 없으면 알림 기능 전체가 꺼진다 — 로컬·테스트 기본
+    slack_webhook_url: str | None = None
 
     @field_validator("s3_region", mode="before")
     @classmethod
