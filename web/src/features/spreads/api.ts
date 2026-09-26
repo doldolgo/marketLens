@@ -3,7 +3,7 @@
 // 셸이 공유 피드를 만든 직후 시작한다.
 import { useEffect, useReducer } from 'react'
 import {
-  API_BASE, SPREAD_WS_BACKOFF_MAX_MS, SPREAD_WS_BACKOFF_MIN_MS, SPREAD_WS_SILENCE_MS,
+  API_BASE, SPREAD_WS_BACKOFF_EMPTY_MAX_MS, SPREAD_WS_BACKOFF_MAX_MS, SPREAD_WS_BACKOFF_MIN_MS, SPREAD_WS_SILENCE_MS,
 } from '../../shared/config'
 import { exName } from '../../shared/format'
 import type { Feed, SpreadRow } from '../../shared/types'
@@ -31,6 +31,7 @@ export function useSpreadSocket(feed: Feed): void {
     let alive = true
     let ws: WebSocket | null = null
     let backoff = SPREAD_WS_BACKOFF_MIN_MS
+    let hasTable = false // snapshot 을 한 번이라도 받았는가 — 못 받은 동안은 재연결 상한을 짧게 (§3.4)
     const rows = new Map<string, SpreadRow>() // 서버 키 → 피드 행 객체
     const serverAge = new Map<string, number>() // 서버 키 → 서버가 마지막에 준 age
     let silenceTimer: ReturnType<typeof setTimeout> | null = null
@@ -47,6 +48,7 @@ export function useSpreadSocket(feed: Feed): void {
     }
 
     function applyTable(res: SpreadsResponse): void {
+      hasTable = true
       rows.clear()
       serverAge.clear()
       for (const r of res.rows) put(r)
@@ -86,7 +88,7 @@ export function useSpreadSocket(feed: Feed): void {
         reconnectTimer = null
         connect()
       }, backoff)
-      backoff = Math.min(backoff * 2, SPREAD_WS_BACKOFF_MAX_MS)
+      backoff = Math.min(backoff * 2, hasTable ? SPREAD_WS_BACKOFF_MAX_MS : SPREAD_WS_BACKOFF_EMPTY_MAX_MS)
     }
 
     function connect(): void {
