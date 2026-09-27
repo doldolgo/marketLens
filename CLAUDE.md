@@ -96,13 +96,13 @@ marketlens/
 | 019 | bybit | DONE | 바이빗 USDT 현물 추가 — WS 3샤드 orderbook.200(스냅샷+델타, 행 발행 500ms 제한)+publicTrade, instruments-info 매초, 입출금(HMAC), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗), `/history/*` `fx=bybit`, web 표시명·기록 탭 Bybit 실데이터 |
 | 020 | bitget | DONE | 비트겟 USDT 현물 추가 — WS 3샤드 books15(스냅샷)+trade, symbols 매초, 입출금(public·키 없음), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟), `/history/*` `fx=bitget`, web 표시명·기록 탭 Bitget 실데이터 |
 | 021 | infra-split | DONE | EC2 3대 분리 — compose profile 3개(collect=server c7g.medium / data=redis·influxdb t4g.small / serve=api·web t4g.micro), 박스 간 사설 IP(루트 .env DATA_HOST·COLLECT_HOST), nginx 업스트림 주입, 배포 3타깃(data→collect→serve), 런북 ec2-split.md (인프라) |
-| 022 | landing | IN_PROGRESS | 정적 HTML 랜딩 `/` — 실시간 경로 카드·7일 사건·만든 방식, 요약 API `GET /landing`(api), 대시보드는 `/app/` |
+| 022 | landing | DONE | 정적 HTML 랜딩 `/` — 실시간 경로 카드·7일 사건·만든 방식, 요약 API `GET /landing`(api), 대시보드는 `/app/` |
 | 023 | domain-tls | DONE | `kimptrack.com`·`www` HTTPS — serve 박스에 caddy 컨테이너(호스트 80·443, Let's Encrypt 자동 발급·갱신, 볼륨 보존), web 은 호스트 비공개, 탄력 IP 직접 접속은 평문 유지, DNS 는 Cloudflare(프록시 끔) (인프라·serve 전용) |
 | 024 | wallet-history | DONE | 틱 입출금 4상태 = 006 망 판정값 + 망 이름 2개 → 1분봉·사건 점 `net_dom`·`net_fx`, `/history/candles`·`events` 에 `netDom`·`netFx`, 기록 탭 읽기 줄·사건 표·로그에 망 표시 |
 | 025 | slack-alerts | DONE | Slack 웹훅 알림 — 기동·수집 실패 구간 60초 발생/복구·ERROR 로그·처리 안 된 500(키별 10분 억제, 새 라이브러리 없음), 수집기 심장박동 `collect:heartbeat`, `/health` 신선도 판정(비정상 503), 외부 uptime 감시 런북 |
 | 026 | day-change | DONE | 국내 거래소·코인별 KST 00시 첫 체결가 장부(Redis `dayopen:<날짜>`, 재기동 유지) → `/spreads` 행 `dayChg`(19키) + 스프레드 탭 열 개편(심볼·변동율·국내가격·해외가격·해외거래소·국내거래소·김프·입출금·네트워크) |
 
-실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 022(히어로 문구).
+실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
 **스펙은 항상 지금 동작과 같아야 한다. DONE 이 된 뒤라도 동작을 바꾸고 싶으면 그 기능의 스펙을 그냥 고치면 된다.** 단, 스펙만 고치면 문서와 코드가 어긋나므로 — 같은 PR 에서 코드와 테스트도 스펙에 맞게 고치고, 그 기능의 §4 검증을 다시 통과시켜야 한다(§6). 변경이 여러 기능에 걸치면 관련 스펙을 전부 고친다. "예전에는 ~였다" 같은 설명은 남기지 않는다 — 과거 버전은 git 에서 보면 된다.
 
