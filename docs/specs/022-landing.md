@@ -1,6 +1,6 @@
 # 022 — landing
 
-상태: IN_PROGRESS | 의존: 003 spreads(행 계약), 006 wallet-status(5필드), 013 premium-events(`premium_event`), 014 premium-1m(`candles_1m`), 016 process-split(`api` 역할), 017·018(`spreads:latest`), 007 deploy(nginx·web 이미지), 023 domain-tls(절대 주소)
+상태: DONE | 의존: 003 spreads(행 계약), 006 wallet-status(5필드), 013 premium-events(`premium_event`), 014 premium-1m(`candles_1m`), 016 process-split(`api` 역할), 017·018(`spreads:latest`), 007 deploy(nginx·web 이미지), 023 domain-tls(절대 주소)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -144,32 +144,37 @@ server — `features/landing/tests/`(Redis·Influx 는 fake):
 
 ## 5. 완료 기준 (실행 세션이 채움)
 ```bash
-# 자동 (2026-09-27)
+# 자동 (2026-09-27, 사건 표 기준·Influx 3초·h1 수정 반영)
 cd server && ruff check . && ruff format --check . && pytest -q
-#   All checks passed! / 225 files already formatted / 827 passed (시작 전 796 + landing 30 + deploy 1)
-cd web && npm ci && npm run lint && npm run build
+#   All checks passed! / 226 files already formatted / 833 passed (landing 36 — 계산 13·서빙 18·Influx 3초 5)
+cd web && npm run lint && npm run build
 #   oxlint 출력 없음·종료 0 / tsc -b && vite build ✓ — dist 에 landing.html·landing/{og,spreads,history}.png
 node --check <landing.html 의 <script> 를 뽑은 파일>   # oxlint 는 src 만 본다 → 문법 통과
 
 # 수동 — 5컨테이너 대신 대역 구성(이 Mac 은 거래소 도메인이 막혀 수집이 안 된다: api.upbit.com curl 000)
 redis-server --port 6399                                   # 로컬 Redis, spreads:latest 에 운영 /api/spreads 본문(TTL 없음, 4초마다 다시 넣음)
-docker run influxdb:2.7 (:8087, 테스트 토큰)                # 운영 /api/history/events 7일 58,601건 → premium_event, /api/history/candles 상위 5경로 2시간 → candles_1m
+docker run influxdb:2.7 (:8087, 테스트 토큰)                # 운영 /api/history/events 7일(58,595건) → premium_event, /api/history/candles 상위 5경로 2시간 → candles_1m
 ROLE=api REDIS_URL=redis://localhost:6399/0 INFLUX_URL=http://localhost:8087 INFLUX_TOKEN=<테스트> SLACK_WEBHOOK_URL= uvicorn app.main:app --port 8000
-curl -s -D - localhost:8000/landing
-#   200 · cache-control: no-store · live·trail(59점)·events 모두 참
-python3 pick_top.py <같은 spreads:latest 값>               # §3.2 규칙을 서버 코드와 따로 적은 대조
-#   top[0] 같음(2Z 빗썸→Binance 역프 1.2726…), top 5·over1·over1Movable·coins·pairs·rate 모두 같음
 docker run nginx:1.27-alpine (web/nginx.conf 템플릿 + dist, api·server → 호스트 :8000, :8090)
-#   / 200 landing(no-store) · /?tab=history&sym=BTC 301 /app/?… · /app 301 /app/ · /api/landing 200(api 로그 GET /landing) · /landing/og.png 200 · /nope 404
+curl -s -D - localhost:8090/api/landing
+#   200 · cache-control: no-store · live·trail(59점)·events 모두 참
+#   nginx: / 200 landing(no-store) · /?tab=history&sym=BTC 301 /app/?… · /app 301 /app/ · /api/landing 200(api 로그 GET /landing) · /landing/og.png 200 · /nope 404
+python3 pick_top.py <같은 spreads:latest 값> / 사건 대조 스크립트   # §3.2 규칙을 서버 코드와 따로 적은 대조
+#   live.top[0]·top 5·over1·over1Movable·coins·pairs·rate 같음
+#   events.top(닫힌 사건만·코인마다 가장 늦게 끝난 것·endTs 내림차순 5) 같음 — MINA·TRUST·INIT·ARX·ENJ, 최고 1.00~1.25%. open 234 = 적재한 진행 중 234
+docker pause exec022-influx   # 캐시 만료 뒤 Influx 가 매달린 상태
+#   만료 뒤 첫 요청 3.02초 — live 새 값, events 직전 값 그대로(같은 창), trail null(1위가 새 경로로 바뀌어 그 경로의 직전 값이 없다)
+#   조회가 도는 동안 온 요청 3.01초 / docker unpause 뒤 0.02초 — 뒤에서 끝난 조회가 trail·events(새 창)를 채웠다
 # 헤드리스 Chrome(DevTools 프로토콜), localhost:8090/
-#   1440·390 전체 화면: 카드·다음 경로·3번 두 문장·사건 표가 실데이터로 참. 390 scrollWidth 390 = innerWidth, 넘친 요소 0
+#   h1: 1440·960·390·360px 모두 두 줄 — 글자 47.1·37.1·37.4·34.2px, 첫 줄 427/440·336.5/346.7·339.7/350·310.6/320px(칸 폭), 가로 스크롤 없음
+#   1440·390 전체 화면: 카드·다음 경로·3번 두 문장·사건 수와 "최근에 끝난 사건" 표(마지막 칸 끝난 시각)가 실데이터로 참
 #   폴링: 로드 1회 → 보이는 채 21초 3회 → 숨김 25초 동안 3회 그대로 → 다시 보이고 1초 4회 → 10.5초 뒤 5회
 #   네트워크: /api/ 요청은 /api/landing 뿐, /api/spreads 0건, WebSocket 0건
-#   api 중지: 연 채로면 응답 [200, 502, 502] 동안 값 유지·"25초 전 값" → 64초에 "최신 값을 받지 못하고 있습니다"+흐림 /
+#   api 중지: 연 채로면 응답 [200, 502, 502] 동안 값 유지·"27초 전 값" → 64초에 "최신 값을 받지 못하고 있습니다"+흐림 /
 #             멈춘 채 새로 열면 "실시간 값을 불러오지 못했습니다"+대시보드 버튼, 다음 경로·3번 문장·사건 구역 숨김
 #   자바스크립트 끔: 제목·설명·섹션 글·면책·그림이 읽히고 카드 자리는 noscript 한 줄
-#   경로 링크 /app/?tab=history&sym=2Z&h.dir=reverse&h.dom=bithumb&h.fx=binance → 운영 기록 탭이 2Z·역프·빗썸·Binance 로 열림
-#   포커스는 10초 재그림 뒤에도 같은 링크, 값 강조 0.6초 · prefers-reduced-motion 이면 animation none
+#   (첫 빌드에서 확인, 이번 수정과 무관한 경로) 경로 링크 /app/?tab=history&sym=2Z&h.dir=reverse&h.dom=bithumb&h.fx=binance → 운영 기록 탭이
+#   2Z·역프·빗썸·Binance 로 열림 / 포커스는 10초 재그림 뒤에도 같은 링크 / 값 강조 0.6초, prefers-reduced-motion 이면 animation none
 ```
 
 ## 6. 갱신할 문서
@@ -182,22 +187,22 @@ docker run nginx:1.27-alpine (web/nginx.conf 템플릿 + dist, api·server → �
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-  - server: `app/features/landing/`(`models.py` 응답 모델, `service.py` 순수 계산 `build_live`·`build_trail`·`build_events` + `LandingService`(부분마다 캐시 한 칸 — 결과·null 을 ttl 동안, 락 안에서 한 번만 갱신, trail 은 경로가 키), `router.py` `GET /landing`), `app/features/landing/tests/`(`helpers.py` FakeBus·FakeInflux·손 시계, `test_rules.py` 12개, `test_serving.py` 18개), `app/main.py`(앱마다 `app.state.landing`, 두 역할 모두 라우터), `tests/test_role.py`(api 경로 7개), `tests/test_deploy.py`(`= /api/landing` 테스트 1개 + api 로 가는 `proxy_pass` 수 2→3).
+  - server: `app/features/landing/`(`models.py` 응답 모델, `service.py` 순수 계산 `build_live`·`build_trail`·`build_events` + `LandingService`(부분마다 캐시 한 칸 `_Slot` — 결과·null 을 ttl 동안, 비었거나 만료되면 키마다 조회 태스크 하나, 그동안 온 요청은 같은 태스크를 기다리고 태스크는 끝나는 순간 캐시를 채워 그때부터 ttl, trail 은 경로가 키. Influx 부분은 대기 상한(3초) 뒤 같은 키의 직전 값), `router.py` `GET /landing`), `app/features/landing/tests/`(`helpers.py` FakeBus·FakeInflux(`gate` 로 느린 조회)·손 시계, `test_rules.py` 13개, `test_serving.py` 18개, `test_influx_wait.py` 5개), `app/main.py`(앱마다 `app.state.landing`, 두 역할 모두 라우터), `tests/test_role.py`(api 경로 7개), `tests/test_deploy.py`(`= /api/landing` 테스트 1개 + api 로 가는 `proxy_pass` 수 2→3).
   - web: `nginx.conf`(`location = /api/landing`), `public/landing.html` 전면 재작성, `public/landing/og.png` 신규, `spreads.png`·`history.png` 재캡처(운영 `/app/` 1360×820 @1.5x, 스크롤바 숨김).
   - 문서: status·architecture·product·dev-setup·db, 016 §3.1·018 §3.4, CLAUDE.md 인덱스.
 - 추측한 지점 / 실행 중 함께 고친 스펙 절:
-  - 동률: live 는 코인 안에서 값이 같으면 표에서 먼저 나온 행(김프 먼저). events 는 코인 안 최고값이 같으면 나중에 시작한 사건, 코인 사이 동률은 `sym` 오름차순.
-  - 화면: 첫 응답 전 카드 자리 "값을 받는 중입니다". 한 번 그린 뒤 `live` 가 null 인 응답은 실패처럼(직전 카드 유지·나이 증가). `events.top` 이 비면 표와 작은 글을 숨긴다. 추이의 세로 범위에 0 을 늘 넣는다(0% 기준선이 늘 보이고 작은 흔들림을 부풀리지 않게), 선·끝점 색은 마지막 값의 부호색. 지속은 기록 탭 `fmtDur`(분·시간·일), 시작은 보는 사람 시간대와 무관하게 KST. 카드 전체가 기록 탭 링크, 사건 행은 코인 칸 링크 + 행 클릭. 10초마다 다시 그려도 키보드 포커스를 같은 링크로 되돌린다.
+  - 동률: live 는 코인 안에서 값이 같으면 표에서 먼저 나온 행(김프 먼저). events 는 코인 안에서 끝난 시각이 같으면 나중에 시작한 사건.
+  - 3초 규칙: trail 의 "직전 값" 은 같은 경로의 것만 준다 — 1위가 바뀐 새 경로면 null(다른 코인의 추이를 이 경로 카드에 싣지 않는다, 경로가 바뀌면 새로 읽는다는 캐시 규칙과 같은 뜻으로 읽었다). live 도 같은 태스크 구조지만 상한 없이 끝까지 기다린다. 대기 상한은 `LandingService(influx_wait_sec=)` 로 주입한다(테스트는 0.2초).
+  - h1: 두 줄을 블록으로 고정하고 크기는 `min(48px, 100cqi / 9.35)` — 글 칸을 컨테이너로 두고, 9.35 는 첫 줄 폭(Pretendard 700·자간 −0.035em 에서 9.08em 실측, 시스템 대체 글꼴은 8.95em) + 3% 여유. cqi 를 모르는 브라우저는 34px(360px 폭에서도 들어간다).
+  - 화면: 첫 응답 전 카드 자리 "값을 받는 중입니다". 한 번 그린 뒤 `live` 가 null 인 응답은 실패처럼(직전 카드 유지·나이 증가). `events.top` 이 비면 소제목·표·작은 글을 숨긴다. 추이의 세로 범위에 0 을 늘 넣는다(0% 기준선이 늘 보이고 작은 흔들림을 부풀리지 않게), 선·끝점 색은 마지막 값의 부호색. 지속은 기록 탭 `fmtDur`(분·시간·일), 끝난 시각은 보는 사람 시간대와 무관하게 KST. 카드 전체가 기록 탭 링크, 사건 행은 코인 칸 링크 + 행 클릭. 10초마다 다시 그려도 키보드 포커스를 같은 링크로 되돌린다.
   - 0 의 색은 스펙대로 회색이다 — 대시보드 `pctColor` 는 0 을 글자색으로 칠해 조금 다르다.
   - 그림·favicon 은 상대 경로(`landing/…`) — 배포 `/` 와 dev `/app/landing.html` 에서 같은 파일을 찾는다. `og:image` 는 절대 주소 그대로.
-  - 한국어 줄바꿈: 한글 뒤 "·" 앞, ")"·"%" 뒤 조사 앞에서 줄이 바뀌지 않게 그 묶음을 nowrap 으로 감쌌다(문구는 그대로). h1 은 구 단위로만 바뀐다(모바일 "지금 옮길 수 있는 김프를 / 1초마다 찾습니다").
+  - 한국어 줄바꿈: 한글 뒤 "·" 앞, ")"·"%" 뒤 조사 앞에서 줄이 바뀌지 않게 그 묶음을 nowrap 으로 감쌌다(문구는 그대로).
   - server: 저장소 불가(Redis 예외·`InfluxUnavailableError`)는 로그 없이 그 부분 null, 그 밖의 계산 예외는 WARNING 1줄 + null(항상 200). `LandingService` 는 I/O 가 없어 lifespan 이 아니라 `create_app` 에서 만든다. events 와 live→trail 을 함께 기다린다. core 변경 없음 — `RedisBus.latest()`(GET 만)·`query_candles`·`query_premium_events`·`TIER_BY_RES["1m"]` 를 그대로 쓴다.
-  - 함께 고친 절: 016 §3.1·018 §3.4(api 경로·Redis 용도), §6 목록 밖으로 db.md 읽는 쪽("다른 조회 API 는 DB 0회" 가 틀리게 돼서)·status.md deploy 행과 dev-setup 통합 기동의 api 분기 목록.
-  - 스펙이 실제와 달랐던 곳: §3.2 예시의 사건 수 812 는 실제와 크게 다르다 — 2026-09-27 7일 58,601건(김프 4,058·역프 54,543·진행 중 248). 설계(7일 전부 읽어 앱에서 세기)는 그대로 두고 비용을 쟀다(아래). §4 의 "test_deploy 단언 1개" 는 새 테스트 1개에 더해 기존 단언 하나(api 로 가는 `proxy_pass` 수)가 바뀌었다.
+  - 함께 고친 절: 016 §3.1·018 §3.4(api 경로·Redis 용도), §6 목록 밖으로 db.md 읽는 쪽("다른 조회 API 는 DB 0회" 가 틀리게 돼서)·status.md deploy 행과 dev-setup 통합 기동의 api 분기 목록. §4 의 "test_deploy 단언 1개" 는 새 테스트 1개에 더해 기존 단언 하나(api 로 가는 `proxy_pass` 수)가 바뀌었다.
+  - `open` 은 `end_ts == 0` 을 센다 — 평소엔 진행 중 사건 수와 같다(운영 `/api/history/events` 에서 `endTs == 0` 248건 = `ongoing` 248건, 013 기동 복원이 600초 넘게 못 본 점을 닫는다). 수집이 멈춰 있는 동안만 그때 열려 있던 사건이 진행 중으로 남는다.
 - 남은 빚:
-  - events 비용 — 같은 58,601점을 넣은 로컬 Influx 에서 조회 0.95초·파이썬 CPU 0.36초·메모리 +50MB, 60초에 한 번. 늘어서 api(t4g.micro)에 부담이 되면 Flux 쪽 집계(core 새 조회)로 옮기는 후속 스펙(status.md 빚).
-  - `open` 은 `end_ts == 0` 인 점을 그대로 세므로 수집이 닫지 못한 고아 점도 진행 중으로 센다(013 의 `/history/events` 는 고아를 닫힌 것으로 본다).
-  - 부분별 타임아웃은 스펙에 없어 넣지 않았다 — Influx 가 매달리면 응답이 클라이언트 타임아웃(60초)만큼 늦고 nginx(60초)가 먼저 끊을 수 있다. 첫 요청이면 카드는 §3.5 의 실패 안내.
+  - events 비용 — 7일 `premium_event` 전부(2026-09-27 58,601점)를 60초에 한 번 읽는다. 같은 점을 넣은 로컬 Influx 에서 조회 0.95초·파이썬 CPU 0.36초·메모리 +50MB. 느려져도 응답은 3초 규칙으로 늦지 않지만 비용은 그대로다 — 늘어서 api(t4g.micro)에 부담이 되면 Flux 쪽 집계(core 새 조회)로 옮기는 후속 스펙(status.md 빚).
   - 막 1위가 된 경로는 봉이 없어도 null 을 60초 캐시하므로 최대 60초 추이가 안 보일 수 있다(스펙의 null 캐시 그대로).
   - `landing.html` 인라인 스크립트는 oxlint 대상 밖이다(`node --check` 로 문법만).
   - 확인은 로컬 대역 구성(운영 공개 API 본문을 로컬 Redis·Influx 에)으로 했다 — EC2 배포 뒤 `/api/landing` 응답 시간·api CPU 실측 대기.
