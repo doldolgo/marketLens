@@ -12,6 +12,7 @@ import json
 import logging
 import time
 from collections import deque
+from collections.abc import Mapping
 
 from app.core.live_store import LiveStore
 from app.core.models import Tick
@@ -57,9 +58,16 @@ class LogSuppressor:
 
 
 class SpreadsPublisher:
-    def __init__(self, *, store: LiveStore, bus: RedisBus) -> None:
+    def __init__(
+        self,
+        *,
+        store: LiveStore,
+        bus: RedisBus,
+        day_open: Mapping[tuple[str, str], float] | None = None,
+    ) -> None:
         self._store = store
         self._bus = bus
+        self._day_open = day_open  # 026 — 기준가 장부(같은 틱에서 방금 갱신된 것)
         self._queue: deque[str] = deque(maxlen=QUEUE_LIMIT)
         self._wake = asyncio.Event()
         self._tasks: list[asyncio.Task[None]] = []
@@ -74,7 +82,9 @@ class SpreadsPublisher:
         try:
             started = time.perf_counter()
             try:
-                payload = build_table(self._store, notional=DEFAULT_NOTIONAL)
+                payload = build_table(
+                    self._store, notional=DEFAULT_NOTIONAL, day_open=self._day_open
+                )
             except MarketDataNotFoundError:
                 # 환율 없음·국내/해외 스냅샷 없음 — 이 회차는 표를 만들지 않는다, 경고 없음(기동 직후 정상) (018 §3.2)
                 return

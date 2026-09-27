@@ -34,6 +34,7 @@ from app.core.config import (
     get_settings,
 )
 from app.core.contracts import noop_record
+from app.core.day_open import DayOpenBook
 from app.core.errors import ExchangeError
 from app.core.heartbeat import HeartbeatSink
 from app.core.influx import InfluxClient
@@ -181,7 +182,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     handoff = TickRelay(stream=tick_stream, store=store, spark=spark)
     # 017 — 표 게시(누가 볼 때만, 틱 직후)와 자기 게시를 자기 구독하는 허브(로컬 단일 프로세스용)
     bus = RedisBus.from_url(settings.redis_url)
-    publisher = SpreadsPublisher(store=store, bus=bus)
+    # 026 — 일중 기준가 장부(KST 00시 첫 체결가, Redis 보존). 게시기가 매초 읽어 dayChg 를 만든다
+    day_open = DayOpenBook(bus=bus)
+    publisher = SpreadsPublisher(store=store, bus=bus, day_open=day_open.prices)
     hub = SpreadsHub(bus=bus)
 
     # 1. 수집 실패 이력(011) 복원 — 틱 루프 시작 전에 끝난다. 쓰기는 별도 태스크가 순서대로.
@@ -238,6 +241,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         spreads=publisher,
         heartbeat=heartbeat,
         wallet=wallet,
+        day_open=day_open,
     )
     ticks.start()
 
@@ -263,6 +267,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         await ticks.aclose()  # 슬롯의 마지막 틱을 인계한다
         await heartbeat.aclose()
+        await day_open.aclose()
         await publisher.aclose()  # 남은 표는 버린다 — 017
         await hub.aclose()  # 접속자 전원 1001
         await handoff.aclose()  # 큐에 남은 틱을 Redis 로 한 번씩 보내 본다(총 5초 상한)

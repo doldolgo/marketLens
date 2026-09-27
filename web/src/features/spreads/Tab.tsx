@@ -1,6 +1,6 @@
 // 실시간 스프레드 탭 — 코인 1개 = 행 1개 집계 표 (스펙 003 §3.5, 구조는 docs/design/reference/tabs/SpreadTab.tsx).
 import { HIGHLIGHT_PCT, STALE_SEC } from '../../shared/config'
-import { fmtKrw, fmtPct, pctColor } from '../../shared/format'
+import { fmtKrw, fmtPct, fmtUsdt, pctColor } from '../../shared/format'
 import { FX_EXS } from '../../shared/mock'
 import type { Feed, IoState, SpreadRow } from '../../shared/types'
 import {
@@ -11,7 +11,7 @@ import { alias, bool, num, oneOf, sortOf, str, useUrlState, type Codec } from '.
 
 type View = 'kimp' | 'rev'
 type DomFilter = 'all' | '업비트' | '빗썸'
-type SortCol = 'sym' | 'price' | 'val' | 'io' | 'net'
+type SortCol = 'sym' | 'chg' | 'price' | 'usd' | 'fxEx' | 'domEx' | 'val' | 'io' | 'net'
 
 /** 꺼진 해외 거래소 Record ↔ 쉼표 목록. FX_EXS 밖 이름은 버린다. */
 const FX_OFF_CODEC: Codec<Record<string, boolean>> = {
@@ -19,9 +19,9 @@ const FX_OFF_CODEC: Codec<Record<string, boolean>> = {
   format: (v) => FX_EXS.filter((fx) => v[fx]).join(','),
 }
 
-/** 심볼 | 국내가 KRW | 김프 | 입출금 | 네트워크 — 국내가 열만 가변 폭.
- *  김프 열은 `슬 −N.NN%p` 배지 자리를 항상 비워 둔다 — 규모를 바꿀 때마다 표가 흔들리지 않게. */
-const GRID = '112px 1fr 344px 148px 88px'
+/** 심볼 | 변동율 | 국내가격 | 해외가격 | 해외거래소 | 국내거래소 | 김프 | 입출금 | 네트워크 — 국내가격 열만 가변 폭 (026 §3.3).
+ *  김프 열은 `슬 −N.NN%p` 배지 자리를 항상 비워 둔다 — 값이 바뀔 때마다 표가 흔들리지 않게. */
+const GRID = '112px 84px 1fr 112px 96px 84px 176px 148px 88px'
 
 /** 코인 1개의 집계 행. */
 interface CoinRow {
@@ -31,8 +31,13 @@ interface CoinRow {
   age: number
   /** 보기 기준(김프/역프) 최대 행의 값. 전부 fail 이면 null. */
   val: number | null
-  from: string | null
-  to: string | null
+  /** 최대 행의 해외·국내 거래소(표시명) — 열 2개로 보인다. */
+  fxEx: string | null
+  domEx: string | null
+  /** 최대 행의 KST 00시 대비 국내 변동 %. 기준가 없으면 null (`–`). */
+  chg: number | null
+  /** 최대 행의 해외 마지막 체결가(USDT). fail 이거나 0 이면 null. */
+  usd: number | null
   /** 출금(출발 거래소)·입금(도착 거래소) 상태. */
   wd: IoState
   dep: IoState
@@ -84,9 +89,11 @@ function aggregate(
       allStale: live.length > 0 && live.every((r) => r.age >= STALE_SEC),
       age,
       val: best ? (view === 'kimp' ? best.fwd : best.rev) : null,
+      fxEx: best ? best.fx : null,
+      domEx: best ? best.dom : null,
+      chg: best ? best.dayChg : null,
+      usd: best && best.usd !== null && best.usd > 0 ? best.usd : null,
       // 김프 = 해외 → 국내, 역프 = 국내 → 해외. 출금 거래소는 출발, 입금 거래소는 도착.
-      from: best ? (view === 'kimp' ? best.fx : best.dom) : null,
-      to: best ? (view === 'kimp' ? best.dom : best.fx) : null,
       wd: best ? (view === 'kimp' ? best.wdFx : best.wdDom) : null,
       dep: best ? (view === 'kimp' ? best.depDom : best.depFx) : null,
       net: best ? (best.netDom ?? '–') : '–',
@@ -130,7 +137,7 @@ export default function SpreadsTab({ feed, onPick }: Props) {
   const [onlyThr, setOnlyThr] = useUrlState('s.only', false, bool)
   const [onlyIo, setOnlyIo] = useUrlState('s.io', false, bool)
   const [onlyNet, setOnlyNet] = useUrlState('s.net', false, bool)
-  const [sort, setSort] = useUrlState<{ col: SortCol; asc: boolean }>('s.sort', { col: 'val', asc: false }, sortOf(['sym', 'price', 'val', 'io', 'net']))
+  const [sort, setSort] = useUrlState<{ col: SortCol; asc: boolean }>('s.sort', { col: 'val', asc: false }, sortOf(['sym', 'chg', 'price', 'usd', 'fxEx', 'domEx', 'val', 'io', 'net']))
   /** 체크 해제된 해외 거래소 — 키가 있으면 제외. 비어 있으면 전부 켜짐. URL 엔 꺼진 이름 목록으로. */
   const [fxOff, setFxOff] = useUrlState<Record<string, boolean>>('s.fxoff', {}, FX_OFF_CODEC)
   const fxAllOn = FX_EXS.every((fx) => !fxOff[fx])
@@ -151,7 +158,11 @@ export default function SpreadsTab({ feed, onPick }: Props) {
     if (a.allFail !== b.allFail) return a.allFail ? 1 : -1
     const key = (c: CoinRow): number | string | null =>
       sort.col === 'val' ? c.val
+      : sort.col === 'chg' ? c.chg
       : sort.col === 'price' ? c.price
+      : sort.col === 'usd' ? c.usd
+      : sort.col === 'fxEx' ? c.fxEx
+      : sort.col === 'domEx' ? c.domEx
       : sort.col === 'io' ? ioRank(c.wd, c.dep)
       : sort.col === 'net' ? (c.net === '–' ? null : c.net)
       : c.sym
@@ -167,8 +178,9 @@ export default function SpreadsTab({ feed, onPick }: Props) {
 
   function clickSort(col: string) {
     const c = col as SortCol
-    // 같은 키 재클릭 = 방향 반전. 새 키는 심볼·네트워크만 오름차순.
-    setSort((s) => (s.col === c ? { col: c, asc: !s.asc } : { col: c, asc: c === 'sym' || c === 'net' }))
+    // 같은 키 재클릭 = 방향 반전. 새 키는 이름 열(심볼·네트워크·거래소)만 오름차순.
+    const nameCol = c === 'sym' || c === 'net' || c === 'fxEx' || c === 'domEx'
+    setSort((s) => (s.col === c ? { col: c, asc: !s.asc } : { col: c, asc: nameCol }))
   }
 
   function switchView(v: View) {
@@ -177,7 +189,8 @@ export default function SpreadsTab({ feed, onPick }: Props) {
   }
 
   const headers: Header[] = [
-    ['sym', '심볼', 'left'], ['price', '국내가 KRW', 'right'],
+    ['sym', '심볼', 'left'], ['chg', '변동율', 'right'], ['price', '국내가격', 'right'], ['usd', '해외가격', 'right'],
+    ['fxEx', '해외거래소', 'left'], ['domEx', '국내거래소', 'left'],
     ['val', view === 'kimp' ? '김프' : '역프', 'right'], ['io', '입출금', 'right'], ['net', '네트워크', 'right'],
   ]
 
@@ -219,7 +232,7 @@ export default function SpreadsTab({ feed, onPick }: Props) {
         </div>
       </div>
 
-      <TableFrame minWidth={820}>
+      <TableFrame minWidth={1040}>
         <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} />
         {feed.spreads.length === 0 && <Empty>백엔드에서 스프레드를 받는 중입니다…</Empty>}
         {feed.spreads.length > 0 && coins.length === 0 && <Empty>조건에 맞는 코인이 없습니다. 필터를 넓혀 보세요.</Empty>}
@@ -229,13 +242,23 @@ export default function SpreadsTab({ feed, onPick }: Props) {
             <div key={c.sym} onClick={() => onPick(c.sym)} className="hv-row"
               style={{ ...gridRow(GRID, { hot, stale: c.allStale }), cursor: 'pointer' }}>
               <SymCell sym={c.sym} hot={hot} />
+              {/* 변동율 — 기준가 없음(null)은 0% 가 아니라 `–` (026 §3.2) */}
+              <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: c.chg !== null ? pctColor(c.chg) : 'var(--color-neutral-700)' }}>
+                {c.chg !== null ? fmtPct(c.chg) : '–'}
+              </div>
               <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                 {c.price !== null ? '₩' + fmtKrw(c.price) : '–'}
               </div>
+              <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-300)' }}>
+                {c.usd !== null ? '$' + fmtUsdt(c.usd) : '–'}
+              </div>
+              <div style={{ padding: '0 8px', display: 'flex', alignItems: 'center' }}>
+                <span style={exTag()}>{c.fxEx ?? '–'}</span>
+              </div>
+              <div style={{ padding: '0 8px', display: 'flex', alignItems: 'center' }}>
+                <span style={exTag()}>{c.domEx ?? '–'}</span>
+              </div>
               <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-                <span style={exTag()}>{c.from ?? '–'}</span>
-                <span style={{ fontSize: 10, color: 'var(--color-neutral-600)' }}>→</span>
-                <span style={exTag()}>{c.to ?? '–'}</span>
                 <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-600)', whiteSpace: 'nowrap' }}>
                   {c.slip > 0 ? '슬 −' + c.slip.toFixed(2) + '%p' : ''}
                 </span>

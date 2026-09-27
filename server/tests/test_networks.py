@@ -269,6 +269,52 @@ def test_equivalence_table_pairs_confirmed_2026_09_27(
     assert matched is not None and matched.code == fx[0]
 
 
+# 2026-09-27 배포 뒤 "네트워크 다름" 59행 대조 — absent 로 떨어지던 약칭 ↔ 체인 이름 (§3.6-3)
+@pytest.mark.parametrize(
+    ("dom", "fx"),
+    [
+        (("0G", "0G"), ("ZEROGRAVITY", "Zero Gravity")),
+        (("0G", "0G Chain"), ("ZEROGRAVITY", "Zero Gravity")),
+        (("ADA", "ADA"), ("CARDANO", "Cardano")),
+        (("AR", "AR"), ("ARWEAVE", "Arweave")),
+        (("CC", "CC"), ("CANTON", "Canton")),
+        (("DOT", "DOT"), ("STATEMINT", "Asset Hub Polkadot")),
+        (("DOT", "DOT"), ("POLKADOTASSETHUB", "PolkadotAssetHub")),
+        (("DOT", "DOT"), ("DOTAH", "Polkadot AssetHub ")),
+        (("KSM", "KSM"), ("KUSAMA", "Asset Hub Kusama")),
+        (("KSM", "KSM"), ("ASSETHUBKUSAMA", "AssetHubKusama")),
+        (("KSM", "KSM"), ("KSMAH", "Kusama Asset Hub")),
+        (("POLYX", "POLYX"), ("POLYMESH", "Polymesh")),
+        (("PROS", "PROS"), ("PHAROS", "Pharos")),
+        (("S", "S"), ("SONIC", "Sonic Network")),
+        (("SOMI", "SOMI"), ("SOMNIA", "Somnia")),
+        (("STX", "STX"), ("STACKS", "stacks")),
+        (("TIA", "TIA"), ("CELESTIA", "Celestia")),
+        (("VET", "VET"), ("VECHAIN", "VeChain")),
+        (("XLM", "XLM"), ("STELLARLUMENS", "StellarLumens")),
+        (("XPL", "XPL"), ("PLASMA", "Plasma")),
+        (("ZK_ETH", "ZK_ETH"), ("ZKSYNCERA", "zkSync Era")),
+        (("ZK_ETH", "ZK_ETH"), ("ZKV2", "ZKsync Era")),
+    ],
+)
+def test_equivalence_table_pairs_from_absent_audit_2026_09_27(
+    dom: tuple[str, str], fx: tuple[str, str]
+) -> None:
+    verdict, matched = match_network(net(*dom), [net(*fx)])
+    assert verdict == "matched"
+    assert matched is not None and matched.code == fx[0]
+
+
+def test_bithumb_dot_vs_binance_picks_asset_hub_not_bsc_or_eth() -> None:
+    foreign = [
+        net("BSC", "BNB Smart Chain (BEP20)"),
+        net("STATEMINT", "Asset Hub Polkadot"),
+        net("ETH", "Ethereum (ERC20)"),
+    ]
+    verdict, matched = match_network(net("DOT", "DOT"), foreign)
+    assert verdict == "matched" and matched is foreign[1]
+
+
 def test_bithumb_taiko_eth_vs_bybit_picks_taiko_chain_not_erc20() -> None:
     # 바이빗은 ETH(ERC20)·Taiko Chain 둘 다 준다 — 빗썸 TAIKO_ETH 는 L2 쪽에 맞아야 하고, 그 망의 출금 막힘이 그대로 보인다
     foreign = [net("ETH", "Ethereum"), net("TAIKO", "Taiko Chain", wd=False)]

@@ -4,7 +4,7 @@
 """
 
 import time
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from datetime import UTC, datetime
 
 from app.core.collect import RefreshSummary
@@ -115,6 +115,7 @@ def _build_row(
     now: datetime,
     notional: float,
     buy_memo: BuyMemo,
+    day_open: Mapping[tuple[str, str], float],
 ) -> dict[str, object]:
     """행 하나의 규칙 — 스펙 003 §3.2-4.
 
@@ -184,6 +185,12 @@ def _build_row(
     # 024 부터 core 공용 함수 — 틱도 같은 판정을 쓴다. `net_fx` 는 FE 의 "네트워크 같음/다름" 판단 재료다
     wf = wallet_fields(dom_row, fx_row)
 
+    # 026 §3.2 — KST 00시 기준가 대비 국내 체결가. fail 행도 계산(호가와 무관). 기준가 없으면 null 이지 0 이 아니다
+    ref = day_open.get((dom_row.exchange, base))
+    day_chg: float | None = None
+    if ref is not None and ref > 0 and dom_row.price > 0:
+        day_chg = (dom_row.price / ref - 1) * 100
+
     # float() 는 모델이 하던 int→float 강제와 같다 — 거래소가 정수로 준 가격이 "100" 이 아니라
     # "100.0" 으로 나가야 옛 바이트와 같다
     return {
@@ -208,6 +215,7 @@ def _build_row(
         "depFx": wf.dep_fx,
         "wdFx": wf.wd_fx,
         "netFx": wf.net_fx,
+        "dayChg": day_chg,
     }
 
 
@@ -217,8 +225,11 @@ def build_table(
     now: datetime | None = None,
     excluded: Collection[str] | None = None,
     notional: float = DEFAULT_NOTIONAL,
+    day_open: Mapping[tuple[str, str], float] | None = None,
 ) -> dict[str, object]:
     """전 (국내 × 해외 × 코인) 페어의 김프/역프 표 — 스펙 003 §3.2.
+
+    `day_open` 은 026 의 기준가 장부((국내 거래소, 코인) → KST 00시 가격) — 없으면 `dayChg` 는 전부 null.
 
     응답 모양(camelCase 키·순서) 그대로의 dict 를 돌려준다 — 017 게시기가 이걸 바로 json 으로
     만든다. 모델이 필요하면 `build_spreads` (테스트·문서용, 같은 계산).
@@ -277,6 +288,7 @@ def build_table(
                         now,
                         notional,
                         buy_memo,
+                        day_open if day_open is not None else {},
                     )
                 )
 
@@ -313,10 +325,13 @@ def build_spreads(
     now: datetime | None = None,
     excluded: Collection[str] | None = None,
     notional: float = DEFAULT_NOTIONAL,
+    day_open: Mapping[tuple[str, str], float] | None = None,
 ) -> SpreadsResponse:
     """`build_table` 과 같은 표를 `SpreadsResponse` 모델로 — 테스트·문서용. 뜨거운 경로는 dict 다."""
     return SpreadsResponse.model_validate(
-        build_table(store, now=now, excluded=excluded, notional=notional)
+        build_table(
+            store, now=now, excluded=excluded, notional=notional, day_open=day_open
+        )
     )
 
 

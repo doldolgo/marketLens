@@ -12,6 +12,7 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
 """
 
 import time
+from collections.abc import Mapping
 
 import redis.asyncio as aioredis
 from redis.asyncio.retry import Retry
@@ -27,6 +28,8 @@ LATEST_TTL_SEC = 10
 WANT_TTL_SEC = 15
 HEARTBEAT_KEY = "collect:heartbeat"
 HEARTBEAT_TTL_SEC = 30
+DAY_OPEN_PREFIX = "dayopen:"  # 026 — `dayopen:<YYYY-MM-DD>` 해시
+DAY_OPEN_TTL_SEC = 48 * 3600
 
 
 class RedisUnavailableError(Exception):
@@ -113,6 +116,19 @@ class RedisBus:
     async def set_heartbeat(self, ts_ms: int) -> None:
         """`SET collect:heartbeat <ts_ms> EX 30` — 수집 틱 루프가 매초 (025 §3.4). 실패는 예외."""
         await self._client.set(HEARTBEAT_KEY, str(ts_ms), ex=HEARTBEAT_TTL_SEC)
+
+    async def day_open_load(self, date: str) -> dict[str, float]:
+        """`HGETALL dayopen:<date>` — 기동·자정 직후 장부 복원 (026 §3.1). 없으면 빈 dict. 실패는 예외."""
+        raw = await self._client.hgetall(DAY_OPEN_PREFIX + date)
+        return {_text(k): float(_text(v)) for k, v in raw.items()}
+
+    async def day_open_save(self, date: str, prices: Mapping[str, float]) -> None:
+        """`HSET dayopen:<date>` + `EXPIRE 48h` 를 한 왕복으로 (026 §3.1). 실패는 예외."""
+        key = DAY_OPEN_PREFIX + date
+        async with self._client.pipeline(transaction=False) as pipe:
+            pipe.hset(key, mapping={k: repr(v) for k, v in prices.items()})
+            pipe.expire(key, DAY_OPEN_TTL_SEC)
+            await pipe.execute()
 
     async def heartbeat(self) -> int | None:
         """`GET collect:heartbeat` — 없으면 None(수집이 30초 넘게 틱을 못 만듦). 실패는 예외."""

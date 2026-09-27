@@ -31,6 +31,8 @@ export interface SpreadRow {
   wdFx: IoState
   /** 맞춘 해외 망 이름 — 못 맞추면(모름·다름·강등) null (003 §3.2). */
   netFx: string | null
+  /** KST 00시 기준가 대비 국내 체결가 변동 % (026). 기준가 없으면 null — 0% 가 아니다. */
+  dayChg: number | null
 }
 
 /** io 맵 항목 — 키는 "{sym}|{거래소 표시명}". */

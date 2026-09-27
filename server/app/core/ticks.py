@@ -155,6 +155,7 @@ class TickLoop:
         spreads: EventSink | None = None,
         heartbeat: EventSink | None = None,
         wallet: WalletStatusProvider | None = None,
+        day_open: EventSink | None = None,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -167,6 +168,7 @@ class TickLoop:
         self._candles = candles
         self._spreads = spreads
         self._heartbeat = heartbeat
+        self._day_open = day_open
         self._wallet = wallet
         self._clock = clock
         self._sleep = sleep
@@ -218,6 +220,9 @@ class TickLoop:
         if self._candles is not None:
             # 014 — 1분 집계도 현재 틱으로, 013 감지기 다음 자리
             self._candles.observe(tick)
+        if self._day_open is not None:
+            # 026 — 기준가 장부는 표 게시 바로 앞 — 같은 틱의 표가 그 틱에 잡힌 기준가를 본다
+            self._day_open.observe(tick)
         if self._spreads is not None:
             # 017 — 표 게시는 맨 마지막 자리 — received_at 이 찍힌 뒤라 GET /spreads 와 같은 표가 나온다
             self._spreads.observe(tick)
