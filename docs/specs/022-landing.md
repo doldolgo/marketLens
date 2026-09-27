@@ -113,7 +113,7 @@ KimpTrack                                     [서비스로 넘어가기]
 - 첫 요청이 실패(네트워크·200 아님·JSON 아님)하거나 `live` 가 null 이면 카드 자리에 "실시간 값을 불러오지 못했습니다" 한 줄과 "서비스로 넘어가기" 버튼만 둔다. 그 뒤의 실패는 직전 값을 그대로 두고 나이만 는다. 지어낸 숫자·자리표시 숫자는 넣지 않는다.
 - `top` 이 빈 배열이면 카드 안에 "지금 옮길 수 있는 경로가 없습니다" 만 두고 다음 경로를 숨긴다. 부분 null 은 §3.3 규칙대로 그 구역만 숨긴다.
 - 자릿수는 대시보드 `web/src/shared/format.ts` 의 `fmtKrw`·`fmtUsdt`·`fmtPct` 규칙을 옮겨 쓴다.
-- 자바스크립트가 꺼져도 제목·설명·섹션 글·면책·그림은 HTML 에 있다. 실데이터 자리는 `<noscript>` 한 줄 "실시간 값은 자바스크립트를 켜면 보입니다".
+- 자바스크립트가 꺼져도 제목·설명·섹션 글·그림은 HTML 에 있다. 실데이터 자리는 `<noscript>` 한 줄 "실시간 값은 자바스크립트를 켜면 보입니다".
 
 ### 3.6 검색·미리보기·그림
 - `<title>` "KimpTrack — 옮길 수 있는 김프를 1초마다", description = 히어로 설명 2문장, `lang="ko"`, canonical·`og:url` `https://kimptrack.com/`, `og:image` `https://kimptrack.com/landing/og.png`, `og:locale ko_KR`, `twitter:card summary_large_image`.
