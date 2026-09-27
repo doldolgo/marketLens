@@ -121,7 +121,7 @@ def test_row_keys_follow_spread_row_model() -> None:
     table = build_table(_store(), now=NOW)
     expected = [
         "sym", "dom", "fx", "fwd", "rev", "usd", "spark", "status", "age",
-        "slipFwd", "slipRev", "krw", "netDom", "depDom", "wdDom", "depFx", "wdFx",
+        "slipFwd", "slipRev", "krw", "netDom", "depDom", "wdDom", "depFx", "wdFx", "netFx",
     ]  # fmt: skip
     assert all(list(row.keys()) == expected for row in table["rows"])
     assert list(table.keys()) == [

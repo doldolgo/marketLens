@@ -29,6 +29,8 @@ export interface SpreadRow {
   wdDom: IoState
   depFx: IoState
   wdFx: IoState
+  /** 맞춘 해외 망 이름 — 못 맞추면(모름·다름·강등) null (003 §3.2). */
+  netFx: string | null
 }
 
 /** io 맵 항목 — 키는 "{sym}|{거래소 표시명}". */

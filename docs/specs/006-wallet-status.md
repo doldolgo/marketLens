@@ -92,9 +92,12 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
    - `{arbitrum}` · `{arbitrum,one}` · `{arbitrum,ethereum}` — 업비트·바이낸스 `Arbitrum One`, 빗썸 `ARB_ETH`, 비트겟 `ArbitrumOne`(별칭)
    - `{optimism}` · `{optimism,ethereum}` — 빗썸 `OP_ETH`
    - `{bsc}` · `{bnb,smart}` — 빗썸 `BSC`·비트겟 `BEP20`(별칭), 업비트·바이낸스 `BNB Smart Chain`
-   - `{avalanche,c}` · `{avalanchec}` — 업비트·바이낸스 `Avalanche C-Chain`, 비트겟 `AVAXC-Chain`(별칭)
+   - `{avalanche,c}` · `{avalanchec}` · `{cavax}` — 업비트·바이낸스 `Avalanche C-Chain`, 비트겟 `AVAXC-Chain`(별칭), 바이빗 `CAVAX`
    - `{neo,n3}` · `{neo3}` — 업비트·바이낸스 `NEO N3`, 비트겟 `NEO3`
-4. 못 찾음: 어느 해외 망과든 토큰이 하나라도 겹치거나, 길이 3 이상 토큰끼리 한쪽이 다른 쪽 접두사(`kat` ↔ `katana`)면 `unknown`. 아니면 `absent`.
+   - 약칭 ↔ 풀네임(2026-09-27 S3 원문 대조): `{allo}`·`{allora}` / `{apt}`·`{aptos}` / `{kat}`·`{katana}` / `{mon}`·`{monad}` / `{inj}`·`{injective}` / `{waxp}`·`{wax}` / `{baby}`·`{babylon}`·`{babylon,genesis}` / `{core}`·`{coredao}` / `{near}`·`{nearprotocol}` / `{ont}`·`{ontology}` / `{stellar}`·`{stellarlumens}` / `{zksync,era}`·`{zksyncera}` / `{assethub,polkadot}`·`{polkadotassethub}` — 국내(주로 빗썸)는 코드를 그대로 이름으로 주고 해외는 체인 이름을 준다.
+   - 빗썸 L2 코드 `<체인>_ETH`·`<체인>_BTC`·`<체인>_USDT` ↔ 해외 체인 이름: `{manta,ethereum}`·`{manta}`·`{manta,pacific}`·`{mantanetwork}` / `{mega,ethereum}`·`{mega}`·`{megaeth}` / `{scroll,ethereum}`·`{scroll}` / `{blast,ethereum}`·`{blast}` / `{taiko,ethereum}`·`{taiko}` / `{merl,bitcoin}`·`{merlin}` / `{stable,usdt}`·`{stable}` — 모체인 토큰이 붙어 규칙 4 의 겹침에 걸리므로 표로 못 박는다.
+   - 표에 **넣지 않은** 쌍(확인 전, unknown 유지): 빗썸 `NEO`(레거시인지 N3 인지)·`FRAX`(Fraxtal 인지 ERC20 인지)·`ENJ`(Enjin 메인넷인지 ERC20 인지)·`ASTR`(네이티브인지 EVM 인지)·`AVAX`(C-Chain 인지 X-Chain 인지), 업비트 `Sei`·`Stratis`·빗썸 `PEAQ`(해외는 EVM 주소만 줌).
+4. 못 찾음: 어느 해외 망과든 토큰이 하나라도 겹치거나, 길이 3 이상 토큰끼리 한쪽이 다른 쪽 접두사(`enj` ↔ `enjin`)면 `unknown`. 아니면 `absent`.
 
 예: 업비트 `SEI "Sei"` vs 바이낸스 `SEIEVM "Sei EVM"` → {sei} ⊂ {sei, evm} 겹침 → **unknown**. 가장 중요한 케이스다. `QKC "Quarkchain"` vs `ETH "Ethereum (ERC20)"` → absent. 빗썸 `ETH "ETH"` vs 비트겟 `ERC20 "ERC20"` → 별칭으로 둘 다 {ethereum} → matched. 빗썸 `AVAX "AVAX"` vs 비트겟 `AVAXC-CHAIN "AVAXC-Chain"` → {avalanche} vs {avalanchec} 접두사 → unknown.
 
@@ -105,7 +108,7 @@ API 키가 없어도 서버는 해당 값을 `unknown` 으로 두고 정상 동�
 4. 국내 망 목록이 비는 경우는 여기까지 오지 않는다 — §3.7-1 이 먼저 코인 단위 값으로 처리한다.
 
 ### 3.7 `/spreads` 행의 5필드 (스펙 003 문단 대체)
-이 5필드 계산은 core 공개 함수이며 틱(024)도 같은 함수로 판정한다. 함수는 여섯째 값 `net_fx`(matched 면 맞춘 해외 망의 name, 그 밖은 null)를 더 돌려주는데 `/spreads` 는 싣지 않는다(응답 불변).
+이 5필드 계산은 core 공개 함수이며 틱(024)도 같은 함수로 판정한다. 함수는 여섯째 값 `net_fx`(matched 면 맞춘 해외 망의 name, 그 밖은 null)를 더 돌려주고 `/spreads` 도 `netFx` 로 싣는다(003 §3.2).
 행의 국내 스냅샷 망 목록을 D, 해외(바이낸스) 망 목록을 F 라 할 때:
 1. D 비면(키 없음·망 정보 없는 과도기) → 5필드는 **코인 단위 값 그대로**. `depDom/wdDom` = 국내 코인 값, `depFx/wdFx` = 해외 코인 값, `netDom = null`.
 2. D 있으면 §3.6 으로 국내 망·판정·해외 망을 고른다. `netDom` = 고른 국내 망 name, `depDom/wdDom` = 그 망의 dep/wd.

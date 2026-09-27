@@ -180,8 +180,8 @@ def _build_row(
         usd = fx_row.price
         status = "stale" if age >= STALE_AFTER_SEC else "ok"
 
-    # 입출금 5필드는 망 판정으로 채운다 — fail 행도 같은 규칙 (006 §3.7)
-    # 024 부터 core 공용 함수 — 틱도 같은 판정을 쓴다. 표는 앞 다섯 값만 싣고 `net_fx` 는 싣지 않는다(응답 불변)
+    # 입출금 6필드는 망 판정으로 채운다 — fail 행도 같은 규칙 (006 §3.7)
+    # 024 부터 core 공용 함수 — 틱도 같은 판정을 쓴다. `net_fx` 는 FE 의 "네트워크 같음/다름" 판단 재료다
     wf = wallet_fields(dom_row, fx_row)
 
     # float() 는 모델이 하던 int→float 강제와 같다 — 거래소가 정수로 준 가격이 "100" 이 아니라
@@ -207,6 +207,7 @@ def _build_row(
         "wdDom": wf.wd_dom,
         "depFx": wf.dep_fx,
         "wdFx": wf.wd_fx,
+        "netFx": wf.net_fx,
     }
 
 

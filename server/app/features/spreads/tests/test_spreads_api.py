@@ -11,6 +11,7 @@ import pytest
 
 from app.core.influx import SparkBucketRow
 from app.core.live_store import LiveStore
+from app.core.networks import Network
 from app.core.redis_bus import RedisBus
 from app.core.spark import SparkBuffer
 from app.features.spreads.tests.helpers import (
@@ -27,10 +28,10 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-# 스펙 §4: 응답 행 키는 정확히 이 17개다
+# 스펙 §4: 응답 행 키는 정확히 이 18개다
 ROW_KEYS = {
     "sym", "dom", "fx", "fwd", "rev", "usd", "spark", "status", "age",
-    "slipFwd", "slipRev", "krw", "netDom", "depDom", "wdDom", "depFx", "wdFx",
+    "slipFwd", "slipRev", "krw", "netDom", "depDom", "wdDom", "depFx", "wdFx", "netFx",
 }  # fmt: skip
 
 # 최상위 6키 (§4)
@@ -462,10 +463,11 @@ def test_row_keys_are_exactly_the_17_camel_case_keys() -> None:
     # 입출금 4개 값은 수집기가 준 코인 단위 값 그대로 — 001 은 전부 null 을 준다
     assert row["depDom"] is None and row["wdDom"] is None
     assert row["depFx"] is None and row["wdFx"] is None
+    assert row["netFx"] is None
 
 
 def test_spark_is_taken_from_the_published_map_including_fail_rows() -> None:
-    """009 가 게시한 (dom, fx, base) 맵이 행의 `spark` 로 실린다 — 키 17개·타입은 불변."""
+    """009 가 게시한 (dom, fx, base) 맵이 행의 `spark` 로 실린다 — 키 18개·타입은 불변."""
     store = LiveStore()
     seed_basic(store)
     seed_rows(store, [make_row("upbit", "ETH", bids=[], asks=[[3_000.0, 1.0]])], _now())
@@ -546,3 +548,34 @@ def test_zero_domestic_ask_price_fails_row_not_500():
     rows = {r["sym"]: r for r in spreads_json(store)["rows"]}
     assert rows["BTC"]["status"] == "fail" and rows["BTC"]["rev"] == 0
     assert rows["ETH"]["status"] in ("ok", "stale")
+
+
+def test_net_fx_is_matched_foreign_network_name_or_null() -> None:
+    """`netFx` 는 맞춘 해외 망 이름, 못 맞추면 null — absent 행은 null 에 depFx·wdFx false (003 §3.2)."""
+    store = LiveStore()
+    seed_basic(
+        store
+    )  # 환율용 — 저장소는 같은 (거래소, 코인) 의 이전 망 목록을 이어받으므로 BTC 는 안 쓴다
+    eth = Network(code="ETH", name="Ethereum", dep=True, wd=True)
+    seed_rows(
+        store,
+        [
+            make_row("upbit", "ETH", networks=[eth]),
+            make_row(
+                "upbit", "QKC", networks=[Network("QKC", "Quarkchain", True, True)]
+            ),
+        ],
+        _now(),
+    )
+    seed_rows(
+        store,
+        [
+            make_row("binance", "ETH", networks=[eth]),
+            make_row("binance", "QKC", networks=[eth]),
+        ],
+        _now(),
+    )
+    rows = {r["sym"]: r for r in spreads_json(store)["rows"]}
+    assert rows["ETH"]["netDom"] == "Ethereum" and rows["ETH"]["netFx"] == "Ethereum"
+    assert rows["QKC"]["netDom"] == "Quarkchain" and rows["QKC"]["netFx"] is None
+    assert rows["QKC"]["depFx"] is False and rows["QKC"]["wdFx"] is False
