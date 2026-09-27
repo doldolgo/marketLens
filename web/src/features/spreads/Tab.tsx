@@ -37,6 +37,10 @@ interface CoinRow {
   wd: IoState
   dep: IoState
   net: string
+  /** 맞춘 해외 망 이름 — null 이면 모름 또는 다름. "네트워크 같음" 필터는 이 값이 있는 행만 통과. */
+  netFx: string | null
+  /** 네트워크 다름 — 국내 망은 있는데 못 맞췄고 해외 입출금이 둘 다 false(006 absent). 모름(null)과 구분한다. */
+  netDiff: boolean
   /** 국내가 KRW — 김프 최대 행의 `krw` 그대로. fail 이거나 0 이면 null. */
   price: number | null
   /** 그 방향에서 서버가 차감한 폭(%p, 양수). 0 이면 배지를 숨긴다. */
@@ -86,6 +90,9 @@ function aggregate(
       wd: best ? (view === 'kimp' ? best.wdFx : best.wdDom) : null,
       dep: best ? (view === 'kimp' ? best.depDom : best.depFx) : null,
       net: best ? (best.netDom ?? '–') : '–',
+      netFx: best ? best.netFx : null,
+      // null 은 다름이 아니다 — 해외 입출금이 둘 다 false 로 못 박힌 경우만 다름 (003 §3.2)
+      netDiff: best !== null && best.netDom !== null && best.netFx === null && best.depFx === false && best.wdFx === false,
       // 서버가 그 행 국내 거래소의 최우선 매수호가를 그대로 준다 — 환산도 보정도 하지 않는다
       price: fwdBest && fwdBest.krw > 0 ? fwdBest.krw : null,
       slip: best ? (view === 'kimp' ? best.slipFwd : best.slipRev) : 0,
@@ -122,6 +129,7 @@ export default function SpreadsTab({ feed, onPick }: Props) {
   const [thr, setThr] = useUrlState('s.thr', HIGHLIGHT_PCT, num)
   const [onlyThr, setOnlyThr] = useUrlState('s.only', false, bool)
   const [onlyIo, setOnlyIo] = useUrlState('s.io', false, bool)
+  const [onlyNet, setOnlyNet] = useUrlState('s.net', false, bool)
   const [sort, setSort] = useUrlState<{ col: SortCol; asc: boolean }>('s.sort', { col: 'val', asc: false }, sortOf(['sym', 'price', 'val', 'io', 'net']))
   /** 체크 해제된 해외 거래소 — 키가 있으면 제외. 비어 있으면 전부 켜짐. URL 엔 꺼진 이름 목록으로. */
   const [fxOff, setFxOff] = useUrlState<Record<string, boolean>>('s.fxoff', {}, FX_OFF_CODEC)
@@ -134,6 +142,8 @@ export default function SpreadsTab({ feed, onPick }: Props) {
   if (onlyThr) coins = coins.filter((c) => c.val !== null && c.val >= thr)
   // null 은 열림이 아니다 — 출금·입금 둘 다 true 일 때만 통과 (§3.5)
   if (onlyIo) coins = coins.filter((c) => c.wd === true && c.dep === true)
+  // 모름·다름 둘 다 빠진다 — 맞춘 망 이름이 있는 행만
+  if (onlyNet) coins = coins.filter((c) => c.netFx !== null)
 
   const dir = sort.asc ? 1 : -1
   coins = [...coins].sort((a, b) => {
@@ -180,7 +190,12 @@ export default function SpreadsTab({ feed, onPick }: Props) {
         <Seg opts={[['all', '모두'], ['업비트', '업비트'], ['빗썸', '빗썸']].map(([id, l]) => segOpt(l, domFilter === id, () => setDomFilter(id as DomFilter)))} />
         <NumField label="하이라이트 임계값" value={thr} step={0.1} onChange={setThr} />
         <ToggleBtn on={onlyThr} label="임계 초과만" onClick={() => setOnlyThr(!onlyThr)} />
-        <ToggleBtn on={onlyIo} label="입출금 가능만" onClick={() => setOnlyIo(!onlyIo)} />
+        <label style={{ ...fxCheck, color: onlyIo ? 'var(--color-accent-300)' : 'var(--color-neutral-300)' }}>
+          <input type="checkbox" checked={onlyIo} style={checkbox} onChange={() => setOnlyIo(!onlyIo)} />입출금 열림
+        </label>
+        <label style={{ ...fxCheck, color: onlyNet ? 'var(--color-accent-300)' : 'var(--color-neutral-300)' }}>
+          <input type="checkbox" checked={onlyNet} style={checkbox} onChange={() => setOnlyNet(!onlyNet)} />네트워크 같음
+        </label>
         <span style={count}>{coins.length} / {all.length} 코인 표시</span>
         <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
           <span style={label}>기준 보기</span>
@@ -229,8 +244,15 @@ export default function SpreadsTab({ feed, onPick }: Props) {
                 </span>
               </div>
               <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 5 }}>
-                <span style={tagStyle(c.wd)}>{ioLabel('출금', c.wd)}</span>
-                <span style={tagStyle(c.dep)}>{ioLabel('입금', c.dep)}</span>
+                {/* 다름이면 어느 방향이든 옮길 길이 없다 — "중단" 두 개로 보이면 안 되므로 태그 하나 */}
+                {c.netDiff ? (
+                  <span style={tagStyle(false)}>네트워크 다름</span>
+                ) : (
+                  <>
+                    <span style={tagStyle(c.wd)}>{ioLabel('출금', c.wd)}</span>
+                    <span style={tagStyle(c.dep)}>{ioLabel('입금', c.dep)}</span>
+                  </>
+                )}
               </div>
               <div style={{ padding: '0 8px', textAlign: 'right', fontSize: 11, color: 'var(--color-neutral-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {c.net}

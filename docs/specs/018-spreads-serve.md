@@ -21,7 +21,7 @@
 
 ### 3.1 `GET /spreads` — 두 역할 모두, Redis 에서 읽는다
 - 쿼리 파라미터 **없음.** `notional` 을 주면 값이 무엇이든 **400** `notional_fixed`, message "체결 규모는 $1,000 고정입니다. notional 쿼리는 받지 않습니다." — 옛 호출자(구 번들 탭·스크립트)가 다른 규모의 표를 받았다고 착각하지 않게 하기 위해서다. 에러 포장은 003 과 같은 `{"error":{"code","message","detail"}}`, detail 은 `{"notional": <받은 값>}`. 이 400 은 Redis 를 만지기 전에 나므로 want 도 쓰지 않는다.
-- 응답 200: Redis 키 `spreads:latest` 의 값을 **그대로** 돌려준다(017 §3.1 이 저장한 JSON — camelCase, `notional: 1000`, `rows` 17키, `warnings`, `rate`, `dataReceivedAt`, `fetchedAt`). 파싱·재직렬화하지 않는다 — 수집이 만든 바이트가 곧 응답이다. `Content-Type: application/json`, 기존 GZip 미들웨어 적용.
+- 응답 200: Redis 키 `spreads:latest` 의 값을 **그대로** 돌려준다(017 §3.1 이 저장한 JSON — camelCase, `notional: 1000`, `rows` 18키, `warnings`, `rate`, `dataReceivedAt`, `fetchedAt`). 파싱·재직렬화하지 않는다 — 수집이 만든 바이트가 곧 응답이다. `Content-Type: application/json`, 기존 GZip 미들웨어 적용.
 - 키가 없으면 **404** `market_data_not_found`, message "스프레드 표가 아직 없습니다. 수집이 표를 만드는 중이거나 멈춰 있습니다.", detail `{"key": "spreads:latest"}`. 017 의 `waiting` 과 같은 상황이다 — 수집 기동 직후, 첫 접속 뒤 최대 5초, 수집 정지.
 - Redis 불달(연결 실패·타임아웃)이면 **503** `redis_unavailable`, message "Redis 에 연결할 수 없습니다.", detail `{"reason": <드라이버 오류 문자열>}` — 016 의 Influx 불달 503 과 같은 톤. 이 요청은 want 도 못 쓴다. 요청마다 새로 시도한다(백오프 없음).
 - **`spreads:want` 갱신**: 200·404 어느 쪽이든 요청마다 `SET spreads:want 1 EX 15` 를 같이 한다(읽기와 한 왕복). curl·스크립트처럼 `GET` 만 부르는 호출자가 있는 동안에도 수집이 표를 만들어야 하기 때문이다(브라우저는 부르지 않는다 — 017 §3.4). 017 의 허브가 5초마다 하는 갱신과 같은 키·같은 TTL 이라 서로 방해하지 않는다. 첫 호출은 404 를 받고, 수집이 5초 안에 원함을 읽어 표를 만들면 그 뒤 호출부터 200 이다 — 017 의 "첫 접속자는 최대 5초" 와 같은 대기.
@@ -32,7 +32,7 @@
 017 §3.1 의 게시기가 매초 표를 만들 때, 다음이면 그 회차는 **표를 만들지 않고 게시하지 않는다**(경고 없음 — 수집 기동 직후 정상 상태다). 키 `spreads:latest` 는 직전 값이 TTL 10초로 남았다가 사라진다.
 - 기준 거래소(`upbit`)의 환율이 없거나 ask/bid 가 0 이하
 - 스냅샷을 호가통화로 나눴을 때 국내(`KRW`) 또는 해외(`USDT`) 가 비어 있음
-그 외 표 규칙(페어 생성·행 17키·슬리피지·`age`·`status`·`spark`·`warnings`)은 003 §3.2 그대로다.
+그 외 표 규칙(페어 생성·행 18키·슬리피지·`age`·`status`·`spark`·`warnings`)은 003 §3.2 그대로다.
 
 ### 3.3 프록시 — nginx
 - `/api/spreads`(정확히 이 경로 — 쿼리는 무관하게 따라간다) 를 `api:8000/spreads` 로 보낸다. nginx 의 **정확 일치 location(`= /api/spreads`)** 하나 — 접두 제거(rewrite)·쿼리 유지·프록시 헤더 4개는 016 의 정규식 위치와 같은 방식. `/api/spreads/…` 같은 하위 경로는 없다 — 정확 일치라 그런 요청은 `location /api/` 가 받아 `server` 로 가고 거기서 404 다.

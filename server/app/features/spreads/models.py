@@ -39,6 +39,7 @@ class SpreadRow(BaseModel):
     wd_dom: bool | None
     dep_fx: bool | None
     wd_fx: bool | None
+    net_fx: str | None  # 맞춘 해외 망 이름 — 못 맞추면(모름·다름·강등) None
 
 
 class SpreadsResponse(BaseModel):
