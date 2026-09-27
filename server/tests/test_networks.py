@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+import pytest
+
 from app.core.networks import (
     Network,
     match_network,
@@ -98,8 +100,8 @@ def test_all_stopword_domestic_name_is_unknown() -> None:
 
 
 def test_prefix_of_long_token_is_unknown() -> None:
-    # kat ↔ katana — 길이 3+ 토큰의 접두사 관계는 absent 로 못 박지 않는다
-    verdict, _ = match_network(net("KAT", "Kat"), [net("KATANA", "Katana")])
+    # enj ↔ enjin — 길이 3+ 토큰의 접두사 관계는 absent 로 못 박지 않는다
+    verdict, _ = match_network(net("ENJ", "ENJ"), [net("ENJIN", "Enjin")])
     assert verdict == "unknown"
 
 
@@ -224,6 +226,53 @@ def test_bithumb_neo_without_chain_name_stays_unknown() -> None:
 def test_upbit_chiliz_chain_vs_bitget_cap20_is_matched() -> None:
     foreign = [net("ERC20", "ERC20"), net("CAP20", "CAP20")]
     verdict, matched = match_network(net("CHZ", "Chiliz Chain"), foreign)
+    assert verdict == "matched"
+    assert matched is foreign[1]
+
+
+# 2026-09-27 실서버 `?` 56행 — S3 원문으로 대조해 동일 체인 표에 넣은 쌍 (§3.6-3)
+@pytest.mark.parametrize(
+    ("dom", "fx"),
+    [
+        (("ALLO", "ALLO"), ("ALLORA", "Allora")),
+        (("APT", "APT"), ("APTOS", "APTOS")),
+        (("KAT", "KAT"), ("KATANA", "Katana")),
+        (("MON", "MON"), ("MONAD", "Monad")),
+        (("INJ", "INJ"), ("INJECTIVE", "INJECTIVE")),
+        (("WAXP", "WAXP"), ("WAX", "WAX")),
+        (("BABY", "BABY"), ("BABYLON", "Babylon")),
+        (("BABY", "Babylon Genesis"), ("BABYLON", "Babylon")),
+        (("CORE", "CORE"), ("COREDAO", "CoreDAO")),
+        (("NEAR", "NEAR Protocol"), ("NEARPROTOCOL", "NEARProtocol")),
+        (("ONT", "ONT"), ("ONTOLOGY", "Ontology")),
+        (("XLM", "Stellar Network"), ("STELLARLUMENS", "StellarLumens")),
+        (("ZKSYNC", "ZKsync Era"), ("ZKSYNCERA", "zkSyncEra")),
+        (("DOT", "AssetHub Polkadot"), ("POLKADOTASSETHUB", "PolkadotAssetHub")),
+        (("AVAX", "Avalanche C-Chain"), ("CAVAX", "CAVAX")),
+        (("MANTA_ETH", "MANTA_ETH"), ("MANTA", "Manta Network")),
+        (("MANTA_ETH", "MANTA_ETH"), ("MANTA", "Manta Pacific Mainnet")),
+        (("MANTA_ETH", "MANTA_ETH"), ("MANTANETWORK", "MantaNetWork")),
+        (("MEGA_ETH", "MEGA_ETH"), ("MEGAETH", "MegaETH")),
+        (("MEGA_ETH", "MEGA_ETH"), ("MEGA", "MEGA")),
+        (("SCROLL_ETH", "SCROLL_ETH"), ("SCROLL", "Scroll")),
+        (("BLAST_ETH", "BLAST_ETH"), ("BLAST", "BLAST")),
+        (("TAIKO_ETH", "TAIKO_ETH"), ("TAIKO", "Taiko Chain")),
+        (("MERL_BTC", "MERL_BTC"), ("MERLIN", "Merlin Chain")),
+        (("STABLE_USDT", "STABLE_USDT"), ("STABLE", "STABLE")),
+    ],
+)
+def test_equivalence_table_pairs_confirmed_2026_09_27(
+    dom: tuple[str, str], fx: tuple[str, str]
+) -> None:
+    verdict, matched = match_network(net(*dom), [net(*fx)])
+    assert verdict == "matched"
+    assert matched is not None and matched.code == fx[0]
+
+
+def test_bithumb_taiko_eth_vs_bybit_picks_taiko_chain_not_erc20() -> None:
+    # 바이빗은 ETH(ERC20)·Taiko Chain 둘 다 준다 — 빗썸 TAIKO_ETH 는 L2 쪽에 맞아야 하고, 그 망의 출금 막힘이 그대로 보인다
+    foreign = [net("ETH", "Ethereum"), net("TAIKO", "Taiko Chain", wd=False)]
+    verdict, matched = match_network(net("TAIKO_ETH", "TAIKO_ETH"), foreign)
     assert verdict == "matched"
     assert matched is foreign[1]
 

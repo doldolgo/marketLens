@@ -60,9 +60,36 @@ _EQUIV_CLASSES: tuple[tuple[frozenset[str], ...], ...] = (
     # 빗썸 BSC · 비트겟 BEP20(별칭) ↔ 업비트·바이낸스 "BNB Smart Chain"
     (frozenset({"bsc"}), frozenset({"bnb", "smart"})),
     # 업비트·바이낸스 "Avalanche C-Chain" ↔ 비트겟 "AVAXC-Chain"(별칭)
-    (frozenset({"avalanche", "c"}), frozenset({"avalanchec"})),
+    (frozenset({"avalanche", "c"}), frozenset({"avalanchec"}), frozenset({"cavax"})),
     # 업비트·바이낸스 "NEO N3" ↔ 비트겟 "NEO3"
     (frozenset({"neo", "n3"}), frozenset({"neo3"})),
+    # 약칭 ↔ 풀네임 — 국내(주로 빗썸)는 코드를 그대로 이름으로 주고 해외는 체인 이름을 준다 (S3 원문 2026-09-27)
+    (frozenset({"allo"}), frozenset({"allora"})),
+    (frozenset({"apt"}), frozenset({"aptos"})),
+    (frozenset({"kat"}), frozenset({"katana"})),
+    (frozenset({"mon"}), frozenset({"monad"})),
+    (frozenset({"inj"}), frozenset({"injective"})),
+    (frozenset({"waxp"}), frozenset({"wax"})),
+    (frozenset({"baby"}), frozenset({"babylon"}), frozenset({"babylon", "genesis"})),
+    (frozenset({"core"}), frozenset({"coredao"})),
+    (frozenset({"near"}), frozenset({"nearprotocol"})),
+    (frozenset({"ont"}), frozenset({"ontology"})),
+    (frozenset({"stellar"}), frozenset({"stellarlumens"})),
+    (frozenset({"zksync", "era"}), frozenset({"zksyncera"})),
+    (frozenset({"assethub", "polkadot"}), frozenset({"polkadotassethub"})),
+    # 빗썸 L2 코드 `<체인>_ETH`·`<체인>_BTC`·`<체인>_USDT` ↔ 해외 체인 이름 — 모체인 토큰이 붙어 겹침 규칙(4)에 걸리므로 표로 못 박는다
+    (
+        frozenset({"manta", "ethereum"}),
+        frozenset({"manta"}),
+        frozenset({"manta", "pacific"}),
+        frozenset({"mantanetwork"}),
+    ),
+    (frozenset({"mega", "ethereum"}), frozenset({"mega"}), frozenset({"megaeth"})),
+    (frozenset({"scroll", "ethereum"}), frozenset({"scroll"})),
+    (frozenset({"blast", "ethereum"}), frozenset({"blast"})),
+    (frozenset({"taiko", "ethereum"}), frozenset({"taiko"})),
+    (frozenset({"merl", "bitcoin"}), frozenset({"merlin"})),
+    (frozenset({"stable", "usdt"}), frozenset({"stable"})),
 )
 # 토큰 집합 → 묶음 번호 (조회용)
 _EQUIV_INDEX: dict[frozenset[str], int] = {
@@ -118,7 +145,7 @@ def match_network(
         if dom_class is not None and _EQUIV_INDEX.get(ft) == dom_class:
             return "matched", f
 
-    # 4. 못 찾음 — 토큰이 하나라도 겹치거나 길이 3+ 토큰의 접두사 관계(kat↔katana)면 unknown
+    # 4. 못 찾음 — 토큰이 하나라도 겹치거나 길이 3+ 토큰의 접두사 관계(enj↔enjin)면 unknown
     for _, ft in foreign_tokens:
         if dom_tokens & ft:
             return "unknown", None
