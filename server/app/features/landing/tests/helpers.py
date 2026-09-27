@@ -2,12 +2,14 @@
 
 import asyncio
 import json
+import threading
 
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.core.influx import CandleRow, InfluxUnavailableError, PremiumEventRow
-from app.features.landing.service import LandingService
+from app.features.landing.service import INFLUX_WAIT_SEC, LandingService
 from app.main import create_app
 
 NOW = 1_790_509_107  # 고정 시계의 시작(epoch 초)
@@ -104,7 +106,11 @@ class FakeBus:
 
 
 class FakeInflux:
-    """core.influx.InfluxClient 의 봉·사건 조회 시그니처 — 부른 인자를 남긴다. 순서는 넣은 그대로 돌려준다."""
+    """core.influx.InfluxClient 의 봉·사건 조회 시그니처 — 부른 인자를 남긴다. 순서는 넣은 그대로 돌려준다.
+
+    `gate` 를 닫아 두면(threading.Event, set 전) 조회가 스레드 안에서 멈춘다 — 느린 Influx 흉내. 테스트는
+    끝나기 전에 반드시 연다(안 열어도 5초 뒤 스스로 풀린다). `finished` 는 끝까지 돈 조회 수.
+    """
 
     def __init__(self) -> None:
         self.candles: list[CandleRow] = []
@@ -112,6 +118,12 @@ class FakeInflux:
         self.fail = False
         self.candle_calls: list[dict] = []
         self.event_calls: list[dict] = []
+        self.gate: threading.Event | None = None
+        self.finished = 0
+
+    def _pass_gate(self) -> None:
+        if self.gate is not None:
+            self.gate.wait(timeout=5)
 
     def query_candles(
         self,
@@ -133,16 +145,20 @@ class FakeInflux:
                 "base": base,
             }
         )
-        if self.fail:
-            raise InfluxUnavailableError("조회 실패 (테스트)")
-        return [
-            c
-            for c in self.candles
-            if (dom is None or c.dom == dom)
-            and (fx is None or c.fx == fx)
-            and (base is None or c.base == base.upper())
-            and start <= c.ts < stop
-        ]
+        self._pass_gate()
+        try:
+            if self.fail:
+                raise InfluxUnavailableError("조회 실패 (테스트)")
+            return [
+                c
+                for c in self.candles
+                if (dom is None or c.dom == dom)
+                and (fx is None or c.fx == fx)
+                and (base is None or c.base == base.upper())
+                and start <= c.ts < stop
+            ]
+        finally:
+            self.finished += 1
 
     def query_premium_events(
         self,
@@ -154,9 +170,13 @@ class FakeInflux:
         base: str | None = None,
     ) -> list[PremiumEventRow]:
         self.event_calls.append({"start": start, "stop": stop})
-        if self.fail:
-            raise InfluxUnavailableError("조회 실패 (테스트)")
-        return [e for e in self.events if start <= e.start_ts < stop]
+        self._pass_gate()
+        try:
+            if self.fail:
+                raise InfluxUnavailableError("조회 실패 (테스트)")
+            return [e for e in self.events if start <= e.start_ts < stop]
+        finally:
+            self.finished += 1
 
 
 def candle(
@@ -228,14 +248,37 @@ def make_app(
     bus: object | None = None,
     influx: FakeInflux | None = None,
     clock: Clock | None = None,
+    influx_wait_sec: float = INFLUX_WAIT_SEC,
 ) -> FastAPI:
-    """lifespan 없이 앱 상태를 직접 채운다 — `bus`·`influx` 가 None 이면 그 저장소가 없는 것과 같다."""
+    """lifespan 없이 앱 상태를 직접 채운다 — `bus`·`influx` 가 None 이면 그 저장소가 없는 것과 같다.
+
+    `influx_wait_sec` — 3초 규칙을 실제 3초 기다리지 않고 보려고 줄일 수 있다.
+    """
     app = create_app()
     app.state.spreads_bus = bus
     app.state.influx = influx
     clock = clock if clock is not None else Clock()
-    app.state.landing = LandingService(wall=clock, mono=clock)
+    app.state.landing = LandingService(
+        wall=clock, mono=clock, influx_wait_sec=influx_wait_sec
+    )
     return app
+
+
+def async_client(app: FastAPI) -> httpx.AsyncClient:
+    """한 이벤트 루프에서 여러 요청 — 응답 뒤에도 도는 조회 태스크를 같은 루프에서 끝까지 보려고 쓴다."""
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://t"
+    )
+
+
+async def settle(influx: FakeInflux, finished: int) -> None:
+    """뒤에서 도는 조회가 `finished` 개 끝나고, 그 결과가 캐시에 들어갈 때까지(루프 몇 바퀴) 기다린다."""
+    for _ in range(500):
+        if influx.finished >= finished:
+            break
+        await asyncio.sleep(0.01)
+    assert influx.finished >= finished, "조회가 끝나지 않았다"
+    await asyncio.sleep(0.05)
 
 
 def make_client(

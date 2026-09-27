@@ -2,6 +2,7 @@
 
 계산(`build_live`·`build_trail`·`build_events`)은 순수 함수다. `LandingService` 는 부분마다 프로세스 메모리
 캐시(live 5초·trail·events 60초)를 들고, 비었거나 만료된 부분에 요청이 몰려도 저장소는 한 번만 읽는다.
+Influx 부분(trail·events)은 3초까지만 기다리고, 늦으면 직전 값을 싣고 조회는 뒤에서 마저 돈다.
 저장소는 core 의 Redis(`spreads:latest` 읽기만 — `spreads:want` 는 쓰지 않는다)와 Influx(봉·사건 조회)
 클라이언트를 인자로 받는다. 다른 기능은 import 하지 않는다.
 """
@@ -35,6 +36,8 @@ TOP_N = 5
 OVER_PCT = 1.0  # 013 사건 진입 기준과 같은 값
 TRAIL_MIN_POINTS = 2  # 선 하나를 그리려면 두 점이 있어야 한다
 TRAIL_BUCKET = TIER_BY_RES["1m"].bucket  # candles_1m (014)
+# Influx 부분은 이만큼만 기다리고 늦으면 직전 값 — 클라이언트 자체 타임아웃(60초)만큼 응답이 늦지 않게
+INFLUX_WAIT_SEC = 3.0
 
 # 방향 → (값 키, 차감폭 키, 출발 쪽 출금 키, 도착 쪽 입금 키).
 # 김프는 해외에서 사서 국내로(해외 출금·국내 입금), 역프는 국내에서 사서 해외로(국내 출금·해외 입금).
@@ -236,18 +239,23 @@ async def _load_events(influx: LandingReader, now: int) -> EventsOut | None:
 class _Slot[T]:
     """부분 하나의 캐시 — 결과(None 포함)를 ttl 초 들고, 만료되거나 키(경로)가 바뀌면 다시 읽는다.
 
-    null 도 캐시하는 것은 장애 중에 요청마다 Redis·Influx 를 두드리지 않기 위해서다. 갱신은 한 번에
-    하나 — 기다리던 요청은 락을 얻은 뒤 방금 채워진 값을 그대로 쓴다.
+    null 도 캐시하는 것은 장애 중에 요청마다 Redis·Influx 를 두드리지 않기 위해서다. 갱신은 키마다 한 번에
+    하나 — 조회는 태스크로 돌고, 그동안 온 요청은 새로 시작하지 않고 같은 태스크를 기다린다. 태스크는
+    기다리던 요청이 먼저 떠나도 끝까지 돌아, 끝나는 순간 캐시를 채우고 그때부터 ttl 을 센다.
+    `wait` 가 있으면(Influx 부분) 그만큼만 기다리고, 넘으면 같은 키의 직전 값(만료됐어도)을, 없으면 None 을 준다.
     """
 
-    def __init__(self, ttl: float, mono: Callable[[], float]) -> None:
+    def __init__(
+        self, ttl: float, mono: Callable[[], float], wait: float | None = None
+    ) -> None:
         self._ttl = ttl
         self._mono = mono
-        self._lock = asyncio.Lock()
+        self._wait = wait
         self._filled = False
         self._key: Hashable = None
         self._value: T | None = None
         self._expires = 0.0
+        self._pending: dict[Hashable, asyncio.Task[T | None]] = {}
 
     def _fresh(self, key: Hashable) -> bool:
         return self._filled and self._key == key and self._mono() < self._expires
@@ -257,28 +265,48 @@ class _Slot[T]:
     ) -> T | None:
         if self._fresh(key):
             return self._value
-        async with self._lock:
-            if not self._fresh(key):
-                self._value = await load()
-                self._key = key
-                self._filled = True
-                self._expires = self._mono() + self._ttl
-            return self._value
+        task = self._pending.get(key)
+        if task is None:
+            task = asyncio.create_task(self._fill(key, load))
+            self._pending[key] = task
+        # shield — 이 요청이 끊기거나 기다림이 끝나도 조회는 취소되지 않는다
+        if self._wait is None:
+            return await asyncio.shield(task)
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), self._wait)
+        except TimeoutError:
+            # 직전 값은 같은 키의 것만 — 다른 경로의 추이를 이 경로 카드에 싣지 않는다
+            return self._value if self._filled and self._key == key else None
+
+    async def _fill(
+        self, key: Hashable, load: Callable[[], Awaitable[T | None]]
+    ) -> T | None:
+        try:
+            value = await load()
+            self._key = key
+            self._value = value
+            self._filled = True
+            self._expires = self._mono() + self._ttl
+            return value
+        finally:
+            self._pending.pop(key, None)
 
 
 class LandingService:
-    """앱 하나에 하나 — 세 부분의 캐시를 든다. 시계(벽시계·단조)는 테스트가 바꿀 수 있게 주입한다."""
+    """앱 하나에 하나 — 세 부분의 캐시를 든다. 시계(벽시계·단조)와 Influx 대기 상한은 테스트가 바꿀 수 있게 주입한다."""
 
     def __init__(
         self,
         *,
         wall: Callable[[], float] = time.time,
         mono: Callable[[], float] = time.monotonic,
+        influx_wait_sec: float = INFLUX_WAIT_SEC,
     ) -> None:
         self._wall = wall
+        # live 는 Redis 한 번이라 끝까지 기다린다 — 3초 규칙은 Influx 부분(trail·events)에만
         self._live: _Slot[LiveOut] = _Slot(LIVE_TTL_SEC, mono)
-        self._trail: _Slot[TrailOut] = _Slot(TRAIL_TTL_SEC, mono)
-        self._events: _Slot[EventsOut] = _Slot(EVENTS_TTL_SEC, mono)
+        self._trail: _Slot[TrailOut] = _Slot(TRAIL_TTL_SEC, mono, influx_wait_sec)
+        self._events: _Slot[EventsOut] = _Slot(EVENTS_TTL_SEC, mono, influx_wait_sec)
 
     async def summary(
         self, *, bus: TableReader | None, influx: LandingReader | None
