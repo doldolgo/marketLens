@@ -82,6 +82,7 @@ _EQUIV_CLASSES: tuple[tuple[frozenset[str], ...], ...] = (
     ),
     (
         frozenset({"assethub", "polkadot"}),
+        frozenset({"asset", "hub", "polkadot"}),
         frozenset({"polkadotassethub"}),
         frozenset({"dot"}),
     ),
