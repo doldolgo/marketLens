@@ -212,42 +212,68 @@ def test_trail_is_null_when_top_is_empty_without_reading_influx() -> None:
 # ---- events ----
 
 
-def test_events_counts_by_direction_and_open_and_top_one_per_coin_desc() -> None:
+def test_events_counts_by_direction_and_open() -> None:
     influx = FakeInflux()
     influx.events += [
-        event("CUDIS", NOW - 100_000, dom="bithumb", fx="bitget", max_percent=231.4),
-        event("CUDIS", NOW - 200_000, max_percent=12.0, end_ts=NOW - 199_000),
-        event("AAA", NOW - 5_000, dir="reverse", max_percent=3.0, end_ts=NOW - 4_000),
-        event("BBB", NOW - 6_000, dir="reverse", max_percent=4.0, end_ts=NOW - 5_500),
-        event("CCC", NOW - 7_000, max_percent=1.2, end_ts=NOW - 6_800),
-        event("DDD", NOW - 8_000, max_percent=2.0, end_ts=NOW - 7_900),
-        event("EEE", NOW - 9_000, max_percent=1.1),  # 진행 중
+        event("AAA", NOW - 5_000, dir="reverse", end_ts=NOW - 4_000),
+        event("BBB", NOW - 6_000, end_ts=NOW - 5_500),
+        event("CCC", NOW - 9_000),  # 진행 중
+        event("DDD", NOW - 9_500, dir="reverse"),  # 진행 중
+        event("EEE", NOW - 8_000, end_ts=NOW - 7_900),
     ]
     events = make_client(FakeBus(None), influx).get("/landing").json()["events"]
     assert (events["start"], events["stop"]) == (NOW - 604_800, NOW)
     assert influx.event_calls == [{"start": NOW - 604_800, "stop": NOW}]
-    assert events["count"] == 7
-    assert (events["kimp"], events["reverse"], events["open"]) == (5, 2, 2)
-    assert [(e["sym"], e["maxPercent"]) for e in events["top"]] == [
-        ("CUDIS", 231.4),
-        ("BBB", 4.0),
-        ("AAA", 3.0),
-        ("DDD", 2.0),
-        ("CCC", 1.2),
+    assert events["count"] == 5
+    assert (events["kimp"], events["reverse"], events["open"]) == (3, 2, 2)
+
+
+def test_events_top_is_closed_only_latest_end_per_coin_by_end_desc() -> None:
+    influx = FakeInflux()
+    influx.events += [
+        # 최고값이 가장 커도 진행 중이면 빠진다 — 같은 코인은 닫힌 사건 중 가장 늦게 끝난 것
+        event("CUDIS", NOW - 100_000, dom="bithumb", fx="bitget", max_percent=231.4),
+        event(
+            "CUDIS",
+            NOW - 9_000,
+            dom="bithumb",
+            fx="bitget",
+            dir="reverse",
+            max_percent=1.46,
+            end_ts=NOW - 5_000,
+            last_ts=NOW - 5_001,
+        ),
+        # 같은 코인의 더 이른 사건은 빠진다(최고값이 더 커도)
+        event("AAA", NOW - 60_000, max_percent=9.0, end_ts=NOW - 50_000),
+        event("AAA", NOW - 5_000, dir="reverse", max_percent=1.3, end_ts=NOW - 4_000),
+        # AAA 와 같은 시각에 끝남 — sym 오름차순으로 뒤
+        event("FFF", NOW - 4_500, max_percent=1.2, end_ts=NOW - 4_000),
+        event("BBB", NOW - 6_000, max_percent=1.8, end_ts=NOW - 5_500),
+        event("CCC", NOW - 7_000, max_percent=652.0, end_ts=NOW - 6_800),
+        # 여섯째 — 상위 5개 밖
+        event("DDD", NOW - 8_000, max_percent=415.0, end_ts=NOW - 7_900),
+        event("EEE", NOW - 9_000, max_percent=1.1),  # 진행 중만 있는 코인
     ]
-    assert events["top"][0] == {
+    events = make_client(FakeBus(None), influx).get("/landing").json()["events"]
+    assert [(e["sym"], e["endTs"]) for e in events["top"]] == [
+        ("AAA", NOW - 4_000),
+        ("FFF", NOW - 4_000),
+        ("CUDIS", NOW - 5_000),
+        ("BBB", NOW - 5_500),
+        ("CCC", NOW - 6_800),
+    ]
+    assert events["top"][2] == {
         "sym": "CUDIS",
         "dom": "bithumb",
         "fx": "bitget",
-        "dir": "kimp",
-        "maxPercent": 231.4,
-        "startTs": NOW - 100_000,
-        "endTs": 0,
-        "durationSeconds": 0,
-        "lastTs": NOW - 100_000 + 90,
+        "dir": "reverse",
+        "maxPercent": 1.46,
+        "startTs": NOW - 9_000,
+        "endTs": NOW - 5_000,
+        "durationSeconds": 4_000,
+        "lastTs": NOW - 5_001,
     }
-    assert events["top"][2]["durationSeconds"] == 1_000
-    assert events["top"][2]["endTs"] == NOW - 4_000
+    assert events["top"][0]["maxPercent"] == 1.3  # AAA 의 늦게 끝난 사건(9.0 이 아니라)
 
 
 def test_events_with_no_rows_is_zero_counts_not_null() -> None:

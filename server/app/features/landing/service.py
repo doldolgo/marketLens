@@ -140,17 +140,23 @@ def build_trail(route: RouteOut, candles: list[CandleRow]) -> TrailOut | None:
 
 
 def build_events(rows: list[PremiumEventRow], *, start: int, stop: int) -> EventsOut:
-    """7일 사건 → 방향별·진행 중 수와 코인당 1개(`max_percent` 가 가장 큰 사건) 상위 5개."""
-    best: dict[str, PremiumEventRow] = {}
+    """7일 사건 → 방향별·진행 중 수와, 닫힌 사건 중 코인마다 가장 늦게 끝난 것을 끝난 순 5개.
+
+    최고값 순으로 고르지 않는다 — 7일 최고값 자리는 입출금이 막혔거나 이름만 같은 다른 코인의
+    수백 % 값이 차지해서, 계속 기록하고 있다는 것을 현실적인 값으로 보여 주지 못한다.
+    """
+    latest: dict[str, PremiumEventRow] = {}
     for row in rows:
-        current = best.get(row.base)
-        # 같은 코인에서 최고값이 같으면 나중에 시작한 사건을 둔다
-        if current is None or (row.max_percent, row.start_ts) > (
-            current.max_percent,
+        if row.end_ts <= 0:
+            continue  # 진행 중 — 끝난 시각이 아직 없다
+        current = latest.get(row.base)
+        # 같은 코인에서 끝난 시각이 같으면 나중에 시작한 사건을 둔다
+        if current is None or (row.end_ts, row.start_ts) > (
+            current.end_ts,
             current.start_ts,
         ):
-            best[row.base] = row
-    top = sorted(best.values(), key=lambda r: (-r.max_percent, r.base))[:TOP_N]
+            latest[row.base] = row
+    top = sorted(latest.values(), key=lambda r: (-r.end_ts, r.base))[:TOP_N]
     return EventsOut(
         start=start,
         stop=stop,

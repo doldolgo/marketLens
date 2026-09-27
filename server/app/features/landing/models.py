@@ -53,7 +53,7 @@ class EventOut(BaseModel):
     dir: Direction
     max_percent: float
     start_ts: int
-    end_ts: int  # 0 = 진행 중
+    end_ts: int  # 끝난 시각 — top 은 닫힌 사건만 고른다
     duration_seconds: int
     last_ts: int
 
