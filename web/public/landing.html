@@ -67,7 +67,7 @@
 
     .wrap { width: min(1120px, 100% - 64px); margin-inline: auto; }
     .prose { max-width: 34em; color: var(--n300); text-wrap: pretty; }
-    /* 한 줄에 두는 묶음 — 한글 뒤 "·" 앞이나 ")"·"%" 뒤 조사 앞에서 줄이 바뀌면 줄머리에 점·조사가 온다. h1 은 구 단위로만 바꾼다 */
+    /* 한 줄에 두는 묶음 — 한글 뒤 "·" 앞이나 ")"·"%" 뒤 조사 앞에서 줄이 바뀌면 줄머리에 점·조사가 온다 */
     .nw { white-space: nowrap; }
     .small { font-size: 13px; line-height: 1.6; color: var(--n500); }
     .up { color: var(--up); }
@@ -87,8 +87,11 @@
 
     /* 히어로 — 글 5 : 카드 7 */
     .hero { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; align-items: start; padding-block: 64px 112px; }
-    .hero-text { padding-top: 20px; }
-    h1 { font-size: 52px; line-height: 1.22; letter-spacing: -0.035em; }
+    .hero-text { padding-top: 20px; container-type: inline-size; }
+    /* h1 은 어느 폭에서나 "지금 옮길 수 있는 김프를" / "1초마다 찾습니다" 두 줄 — 첫 줄(Pretendard 700 에서 9.08em)이
+       글 칸(100cqi)에 들어가는 크기, 최대 48px. 9.35 는 3% 여유. cqi 를 모르는 브라우저는 34px(360px 폭에서도 들어간다) */
+    h1 { font-size: 34px; font-size: min(48px, 100cqi / 9.35); line-height: 1.22; letter-spacing: -0.035em; }
+    .h1-line { display: block; white-space: nowrap; }
     .lead { margin-top: 24px; }
     .hero-text .btn-lg { margin-top: 36px; }
 
@@ -150,16 +153,17 @@
     .shot img { border: 1px solid var(--n800); border-radius: var(--r-md); }
 
     /* 7일 사건 표 */
-    .ev { width: 100%; margin-top: 28px; border-collapse: collapse; font-size: 15px; line-height: 1.5; }
+    .ev { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 15px; line-height: 1.5; }
     .ev th { padding: 0 14px 10px 0; border-bottom: 1px solid var(--divider); text-align: left; font-size: 13px; font-weight: 500; color: var(--n500); white-space: nowrap; }
     .ev td { padding: 12px 14px 12px 0; border-bottom: 1px solid var(--divider); vertical-align: baseline; }
     .ev th:last-child, .ev td:last-child { padding-right: 0; }
     .ev .num { text-align: right; }
-    .ev .c-sym, .ev .c-max, .ev .c-start { white-space: nowrap; }
+    .ev .c-sym, .ev .c-max, .ev .c-end { white-space: nowrap; }
     .ev .c-sym a { font-weight: 650; }
-    .ev .c-route, .ev .c-dir, .ev .c-dur, .ev .c-start { color: var(--n300); }
+    .ev .c-route, .ev .c-dir, .ev .c-dur, .ev .c-end { color: var(--n300); }
     .ev tbody tr { cursor: pointer; }
     .ev tbody tr:hover { background: rgba(233, 233, 237, 0.03); }
+    .ev-title { margin-top: 28px; }
     .ev-note { margin-top: 14px; }
 
     /* 어떻게 만들었나 — 실제 순서라 번호와 잇는 선을 둔다 */
@@ -192,10 +196,9 @@
       .section { padding-block: 72px; }
     }
 
-    /* 720px 미만 — 모바일 글자 크기, 사건 표는 행마다 두 줄(코인·최고 / 경로·방향·지속·시작) */
+    /* 720px 미만 — 모바일 글자 크기, 사건 표는 행마다 두 줄(코인·최고 / 경로·방향·지속·끝난 시각) */
     @media (max-width: 719px) {
       .wrap { width: min(1120px, 100% - 40px); }
-      h1 { font-size: 34px; }
       h2 { font-size: 24px; }
       .value { font-size: 52px; }
       .sym { font-size: 26px; }
@@ -212,8 +215,8 @@
       .ev .c-route { order: 4; }
       .ev .c-dir { order: 5; }
       .ev .c-dur { order: 6; }
-      .ev .c-start { order: 7; }
-      .ev .c-route, .ev .c-dir, .ev .c-dur, .ev .c-start { font-size: 13px; color: var(--n400); }
+      .ev .c-end { order: 7; }
+      .ev .c-route, .ev .c-dir, .ev .c-dur, .ev .c-end { font-size: 13px; color: var(--n400); }
     }
   </style>
 </head>
@@ -229,7 +232,7 @@
   <main>
     <section class="wrap hero" aria-labelledby="hero-title">
       <div class="hero-text">
-        <h1 id="hero-title"><span class="nw">지금</span> <span class="nw">옮길 수 있는 김프를</span> <span class="nw">1초마다 찾습니다</span></h1>
+        <h1 id="hero-title"><span class="h1-line">지금 옮길 수 있는 김프를</span> <span class="h1-line">1초마다 찾습니다</span></h1>
         <p class="prose lead"><span class="nw">업비트·빗썸과</span> <span class="nw">바이낸스·바이빗·비트겟의</span> 호가를 매초 맞대어 김프와 역프를 계산합니다. $1,000를 실제로 사고팔 때의 값과, 지금 입출금이 열려 있는지까지 함께 봅니다.</p>
         <a class="btn btn-lg" href="/app/">대시보드 열기</a>
       </div>
@@ -270,9 +273,10 @@
         <div>
           <p class="prose">1% 넘게 벌어져 1분 넘게 이어진 순간을 사건으로 남깁니다.<span id="events-sum" hidden></span></p>
           <div id="events-table" hidden>
+            <h3 class="ev-title">최근에 끝난 사건</h3>
             <table class="ev">
               <thead>
-                <tr><th scope="col">코인</th><th scope="col">경로</th><th scope="col">방향</th><th scope="col" class="num">최고</th><th scope="col" class="num">지속</th><th scope="col" class="num">시작</th></tr>
+                <tr><th scope="col">코인</th><th scope="col">경로</th><th scope="col">방향</th><th scope="col" class="num">최고</th><th scope="col" class="num">지속</th><th scope="col" class="num">끝난 시각</th></tr>
               </thead>
               <tbody id="events-rows"></tbody>
             </table>
@@ -358,7 +362,7 @@
         return `${(min / 60 / 24).toFixed(1)}일`
       }
       const pad2 = (n) => String(n).padStart(2, '0')
-      // 사건 시작 — 보는 사람의 시간대와 무관하게 KST
+      // 사건이 끝난 시각 — 보는 사람의 시간대와 무관하게 KST
       const fmtKst = (ts) => {
         const d = new Date((ts + 9 * 3600) * 1000)
         return `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일 ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`
@@ -466,12 +470,11 @@
         if (!ev) return
         eventsSum.textContent = ` 지난 7일 ${fmtCount(ev.count)}건(김프 ${fmtCount(ev.kimp)}건, 역프 ${fmtCount(ev.reverse)}건), 지금 진행 중 ${fmtCount(ev.open)}건.`
         keepFocus(eventsRows, ev.top.map((e) => {
-          const dur = e.endTs === 0 ? `진행 중 ${fmtDur(e.lastTs - e.startTs)}` : fmtDur(e.durationSeconds)
           return `<tr><td class="c-sym"><a href="${esc(historyLink(e))}">${esc(e.sym)}</a></td>`
             + `<td class="c-route">${esc(exName(e.dom))} · ${esc(exName(e.fx))}</td>`
             + `<td class="c-dir">${dirName(e.dir)}</td>`
             + `<td class="num c-max ${sign(e.maxPercent)}">${fmtPct(e.maxPercent)}</td>`
-            + `<td class="num c-dur">${dur}</td><td class="num c-start">${fmtKst(e.startTs)}</td></tr>`
+            + `<td class="num c-dur">${fmtDur(e.durationSeconds)}</td><td class="num c-end">${fmtKst(e.endTs)}</td></tr>`
         }).join(''))
       }
 
