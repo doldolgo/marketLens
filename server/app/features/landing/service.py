@@ -6,18 +6,25 @@
 클라이언트를 인자로 받는다. 다른 기능은 import 하지 않는다.
 """
 
+import asyncio
 import json
+import logging
+import time
+from collections.abc import Awaitable, Callable, Hashable
 from typing import Any, Protocol
 
 from app.core.candles import TIER_BY_RES
-from app.core.influx import CandleRow, PremiumEventRow
+from app.core.influx import CandleRow, InfluxUnavailableError, PremiumEventRow
 from app.features.landing.models import (
     EventOut,
     EventsOut,
+    LandingResponse,
     LiveOut,
     RouteOut,
     TrailOut,
 )
+
+logger = logging.getLogger("marketlens.landing")
 
 LIVE_TTL_SEC = 5.0
 TRAIL_TTL_SEC = 60.0
@@ -166,3 +173,135 @@ def build_events(rows: list[PremiumEventRow], *, start: int, stop: int) -> Event
             for r in top
         ],
     )
+
+
+async def _load_live(bus: TableReader | None) -> LiveOut | None:
+    if bus is None:
+        return None
+    try:
+        text = await bus.latest()
+    except Exception:
+        # Redis 불달·타임아웃 — 이 부분만 null. redis 예외 타입은 core 밖에서 import 하지 않는다
+        return None
+    if text is None:
+        return None  # 키 없음 — 수집이 표를 안 만들거나 멈췄다
+    try:
+        return build_live(text)
+    except Exception as exc:
+        logger.warning("랜딩 live 계산 실패 — 표 모양이 계약과 다르다: %r", exc)
+        return None
+
+
+async def _load_trail(
+    influx: LandingReader, route: RouteOut, now: int
+) -> TrailOut | None:
+    try:
+        candles = await asyncio.to_thread(
+            influx.query_candles,
+            TRAIL_BUCKET,
+            start=now - TRAIL_WINDOW_SEC,
+            stop=now,
+            dom=route.dom,
+            fx=route.fx,
+            base=route.sym,
+        )
+        return build_trail(route, candles)
+    except InfluxUnavailableError:
+        return None
+    except Exception as exc:
+        logger.warning("랜딩 trail 계산 실패: %r", exc)
+        return None
+
+
+async def _load_events(influx: LandingReader, now: int) -> EventsOut | None:
+    start = now - EVENTS_WINDOW_SEC
+    try:
+        rows = await asyncio.to_thread(
+            influx.query_premium_events, start=start, stop=now
+        )
+        return build_events(rows, start=start, stop=now)
+    except InfluxUnavailableError:
+        return None
+    except Exception as exc:
+        logger.warning("랜딩 events 계산 실패: %r", exc)
+        return None
+
+
+class _Slot[T]:
+    """부분 하나의 캐시 — 결과(None 포함)를 ttl 초 들고, 만료되거나 키(경로)가 바뀌면 다시 읽는다.
+
+    null 도 캐시하는 것은 장애 중에 요청마다 Redis·Influx 를 두드리지 않기 위해서다. 갱신은 한 번에
+    하나 — 기다리던 요청은 락을 얻은 뒤 방금 채워진 값을 그대로 쓴다.
+    """
+
+    def __init__(self, ttl: float, mono: Callable[[], float]) -> None:
+        self._ttl = ttl
+        self._mono = mono
+        self._lock = asyncio.Lock()
+        self._filled = False
+        self._key: Hashable = None
+        self._value: T | None = None
+        self._expires = 0.0
+
+    def _fresh(self, key: Hashable) -> bool:
+        return self._filled and self._key == key and self._mono() < self._expires
+
+    async def get(
+        self, key: Hashable, load: Callable[[], Awaitable[T | None]]
+    ) -> T | None:
+        if self._fresh(key):
+            return self._value
+        async with self._lock:
+            if not self._fresh(key):
+                self._value = await load()
+                self._key = key
+                self._filled = True
+                self._expires = self._mono() + self._ttl
+            return self._value
+
+
+class LandingService:
+    """앱 하나에 하나 — 세 부분의 캐시를 든다. 시계(벽시계·단조)는 테스트가 바꿀 수 있게 주입한다."""
+
+    def __init__(
+        self,
+        *,
+        wall: Callable[[], float] = time.time,
+        mono: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._wall = wall
+        self._live: _Slot[LiveOut] = _Slot(LIVE_TTL_SEC, mono)
+        self._trail: _Slot[TrailOut] = _Slot(TRAIL_TTL_SEC, mono)
+        self._events: _Slot[EventsOut] = _Slot(EVENTS_TTL_SEC, mono)
+
+    async def summary(
+        self, *, bus: TableReader | None, influx: LandingReader | None
+    ) -> LandingResponse:
+        # events 는 live 와 무관하다 — 함께 기다려 응답 시간이 두 저장소 시간의 합이 되지 않게
+        (live, trail), events = await asyncio.gather(
+            self._live_and_trail(bus, influx), self._events_part(influx)
+        )
+        return LandingResponse(
+            served_at=int(self._wall() * 1000), live=live, trail=trail, events=events
+        )
+
+    async def _live_and_trail(
+        self, bus: TableReader | None, influx: LandingReader | None
+    ) -> tuple[LiveOut | None, TrailOut | None]:
+        live = await self._live.get(None, lambda: _load_live(bus))
+        if live is None or not live.top or influx is None:
+            return live, None
+        route = live.top[0]
+        # 경로가 바뀌면 만료 전이라도 새로 읽는다
+        key = (route.dom, route.fx, route.sym, route.dir)
+        trail = await self._trail.get(
+            key, lambda: _load_trail(influx, route, int(self._wall()))
+        )
+        return live, trail
+
+    async def _events_part(self, influx: LandingReader | None) -> EventsOut | None:
+        if influx is None:
+            return None  # 토큰 없음 — 읽을 저장소가 없다
+        return await self._events.get(
+            None, lambda: _load_events(influx, int(self._wall()))
+        )

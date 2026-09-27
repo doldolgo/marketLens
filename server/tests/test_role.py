@@ -1,5 +1,5 @@
-"""프로세스 역할 계약 — ROLE=api 앱은 Influx 조회 경로 + /ws/spreads + GET /spreads(Redis 읽기) 만
-서빙하고 백그라운드 태스크는 017 의 구독 태스크 하나다 (스펙 016 §3.1·§4, 017 §4, 018 §3.4·§4).
+"""프로세스 역할 계약 — ROLE=api 앱은 Influx 조회 경로 + /ws/spreads + GET /spreads(Redis 읽기)
++ GET /landing(022) 만 서빙하고 백그라운드 태스크는 017 의 구독 태스크 하나다 (스펙 016 §3.1·§4, 017 §4, 018 §3.4·§4).
 
 collector(기본) 의 전체 동작은 기존 테스트가 그대로 지킨다 — 여기서는 라우트 집합만 본다.
 """
@@ -18,7 +18,7 @@ from app.core.config import get_settings
 from app.core.redis_bus import RedisBus
 from app.main import create_app
 
-# api 역할이 답하는 여섯 경로 (016 §3.1 + 018 §3.4) — 그 외는 전부 404
+# api 역할이 답하는 일곱 경로 (016 §3.1 + 018 §3.4 + 022 §3.2) — 그 외는 전부 404
 API_ROUTES = {
     "/health",
     "/history/premium",
@@ -26,6 +26,7 @@ API_ROUTES = {
     "/history/streaks/bulk",
     "/history/candles",
     "/spreads",
+    "/landing",
 }
 
 
