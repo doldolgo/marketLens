@@ -69,7 +69,6 @@
     .prose { max-width: 34em; color: var(--n300); text-wrap: pretty; }
     /* 한 줄에 두는 묶음 — 한글 뒤 "·" 앞이나 ")"·"%" 뒤 조사 앞에서 줄이 바뀌면 줄머리에 점·조사가 온다 */
     .nw { white-space: nowrap; }
-    .small { font-size: 13px; line-height: 1.6; color: var(--n500); }
     .up { color: var(--up); }
     .down { color: var(--down); }
     .flat { color: var(--n400); }
@@ -164,7 +163,6 @@
     .ev tbody tr { cursor: pointer; }
     .ev tbody tr:hover { background: rgba(233, 233, 237, 0.03); }
     .ev-title { margin-top: 28px; }
-    .ev-note { margin-top: 14px; }
 
     /* 어떻게 만들었나 — 실제 순서라 번호와 잇는 선을 둔다 */
     .steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 40px; margin-top: 44px; padding: 0; list-style: none; }
@@ -173,11 +171,6 @@
     .steps li:last-child::before { content: none; }
     .step-n { position: absolute; top: 0; left: 0; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--n600); border-radius: 50%; font-size: 13px; font-weight: 600; line-height: 1; color: var(--n300); }
     .steps h3 + p { margin-top: 8px; color: var(--n300); text-wrap: pretty; }
-    .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 40px; margin-top: 56px; padding: 24px 0 0; border-top: 1px solid var(--divider); list-style: none; font-size: 15px; color: var(--n400); }
-
-    /* 알아둘 점 */
-    .notes { max-width: 34em; margin-top: 28px; padding: 0; list-style: none; color: var(--n300); text-wrap: pretty; }
-    .notes li + li { margin-top: 12px; }
 
     /* 바닥 */
     .foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; padding-block: 28px 48px; border-top: 1px solid var(--divider); font-size: 13px; color: var(--n500); }
@@ -192,7 +185,6 @@
       .steps { grid-template-columns: minmax(0, 1fr); gap: 32px; }
       .steps li { padding-top: 0; padding-left: 48px; }
       .steps li::before { top: 36px; bottom: -28px; left: 14px; right: auto; width: 1px; height: auto; }
-      .facts { grid-template-columns: minmax(0, 1fr); }
       .section { padding-block: 72px; }
     }
 
@@ -226,7 +218,7 @@
       <svg width="22" height="10" viewBox="0 0 22 10" aria-hidden="true" focusable="false"><circle cx="4" cy="5" r="3.5" fill="currentColor" /><rect x="5" y="4" width="12" height="2" fill="currentColor" /><circle cx="18" cy="5" r="3.5" fill="currentColor" /></svg>
       KimpTrack
     </a>
-    <a class="btn" href="/app/">대시보드 열기</a>
+    <a class="btn" href="/app/">서비스로 넘어가기</a>
   </header>
 
   <main>
@@ -234,7 +226,7 @@
       <div class="hero-text">
         <h1 id="hero-title"><span class="h1-line">지금 옮길 수 있는 김프를</span> <span class="h1-line">1초마다 찾습니다</span></h1>
         <p class="prose lead"><span class="nw">업비트·빗썸과</span> <span class="nw">바이낸스·바이빗·비트겟의</span> 호가를 매초 맞대어 김프와 역프를 계산합니다. $1,000를 실제로 사고팔 때의 값과, 지금 입출금이 열려 있는지까지 함께 봅니다.</p>
-        <a class="btn btn-lg" href="/app/">대시보드 열기</a>
+        <a class="btn btn-lg" href="/app/">서비스로 넘어가기</a>
       </div>
       <div>
         <!-- 경로 카드 — 스크립트가 /api/landing 으로 채운다. 지어낸 숫자·자리표시 숫자는 넣지 않는다 (스펙 022 §3.5) -->
@@ -249,16 +241,16 @@
     </section>
 
     <section class="wrap section" aria-labelledby="why-title">
-      <h2 id="why-title">숫자만 보고 옮기면 안 되는 이유</h2>
+      <h2 id="why-title"><span class="nw">표시된 김프와</span> <span class="nw">먹을 수 있는 김프는</span> <span class="nw">다릅니다</span></h2>
       <div class="split">
         <div>
           <div class="point">
-            <h3>호가창을 걷은 값</h3>
-            <p class="prose"><span id="why-slip" hidden></span>표의 모든 숫자는 호가창을 걷어 낸 평균 체결가로 계산하고, 원화와 USDT 사이도 은행 환율이 아니라 국내 거래소의 <span class="nw">USDT 호가<span id="why-rate" hidden></span>로</span> 바꿉니다.</p>
+            <h3>호가창 깊이</h3>
+            <p class="prose">흔히 보는 김프는 가격 하나로 계산한 값입니다. 실제로 주문을 넣으면 호가창을 파고들면서 평균 단가가 밀리고, 주문이 클수록 그 차이도 커집니다. <span id="why-depth" hidden></span>원화와 USDT 환산도 은행 환율 대신 국내 거래소의 실제 USDT 호가로 <span class="nw">합니다<span id="why-rate" hidden></span>.</span></p>
           </div>
           <div class="point">
-            <h3>입출금이 열린 길</h3>
-            <p class="prose"><span id="why-open" hidden></span>거래소마다 <span class="nw">입금·출금을</span> 망 단위로 확인하고, 한쪽이라도 막혔거나 망이 맞지 않으면 옮길 수 없는 경로로 봅니다.</p>
+            <h3>입출금 상태</h3>
+            <p class="prose">김프가 아무리 커도 출금이나 입금이 막혀 있으면 코인을 옮길 수 없습니다. <span id="why-open" hidden></span>거래소마다 입출금을 네트워크 단위로 확인해서, 한쪽이라도 막혔거나 네트워크가 맞지 않으면 옮길 수 없는 경로로 표시합니다.</p>
           </div>
         </div>
         <figure class="shot">
@@ -280,7 +272,6 @@
               </thead>
               <tbody id="events-rows"></tbody>
             </table>
-            <p class="small ev-note">사건 값은 최우선 호가 기준이며, 입출금이 막힌 경로도 들어갑니다.</p>
           </div>
         </div>
         <figure class="shot">
@@ -297,28 +288,12 @@
         <li><span class="step-n" aria-hidden="true">3</span><h3>기록</h3><p>1초 원값은 InfluxDB 에, <span class="nw">사건(1.0% 진입·0.5% 이탈)과</span> 1분 <span class="nw">봉(5분·1시간·4시간·1일로</span> <span class="nw">접음)은</span> 따로 남기고, 거래소 원문은 S3 에 보관합니다.</p></li>
         <li><span class="step-n" aria-hidden="true">4</span><h3>전달</h3><p>조회 서버가 표에서 바뀐 행만 모아 한 번만 압축하고, 접속자 모두에게 같은 바이트를 WebSocket 으로 보냅니다.</p></li>
       </ol>
-      <!-- 수치의 근거는 docs/context/status.md·docs/runbooks/ws-loadtest.md — 인프라·부하가 바뀌면 사람이 고친다 -->
-      <ul class="facts" role="list">
-        <li>서버 3대 — 수집 c7g.medium, 데이터 t4g.small, 조회 t4g.micro (2026-09-25부터)</li>
-        <li>WebSocket 동시 접속 400명에서 조회 서버 CPU 13~20% (2026-09-26 측정)</li>
-        <li>2026년 5월부터 쌓인 김프 기록</li>
-        <li>HTTPS 인증서 자동 <span class="nw">발급·갱신(Let's Encrypt)</span></li>
-      </ul>
-    </section>
-
-    <section class="wrap section" aria-labelledby="notes-title">
-      <h2 id="notes-title">알아둘 점</h2>
-      <ul class="notes" role="list">
-        <li>KimpTrack은 가격 차이를 관측하는 도구입니다. 주문을 내지 않고, 투자를 권하지 않습니다.</li>
-        <li>가격과 입출금 상태는 거래소 공개 API 기준이라 실제와 어긋날 수 있습니다. 옮기기 전에 거래소에서 직접 확인하세요.</li>
-        <li>출금 수수료, 전송 시간, 세금은 계산에 들어 있지 않습니다.</li>
-      </ul>
     </section>
   </main>
 
   <footer class="wrap foot">
     <p>소프트웨어 마에스트로 17기 프로젝트</p>
-    <a href="/app/">대시보드 열기</a>
+    <a href="/app/">서비스로 넘어가기</a>
   </footer>
 
   <script>
@@ -331,7 +306,7 @@
       const card = $('card')
       const next = $('next')
       const nextList = $('next-list')
-      const whySlip = $('why-slip')
+      const whyDepth = $('why-depth')
       const whyRate = $('why-rate')
       const whyOpen = $('why-open')
       const eventsSum = $('events-sum')
@@ -450,17 +425,20 @@
         next.hidden = rest.length === 0
       }
 
+      // 3번 섹션의 실데이터 문장 — 호가 깊이 예시(depthGap)·USDT 괄호·over1. 나머지 문장은 HTML 에 그대로 있다
       function renderWhy(live) {
-        const t = live.top[0]
-        whySlip.innerHTML = t
-          ? `<span class="nw">${esc(t.sym)}의</span> 최우선 호가 차이는 <span class="nw">${fmtPct(t.pct + t.slip)}지만,</span> $1,000를 실제로 사고팔면 <span class="nw">${fmtPct(t.pct)}입니다.</span> `
-          : ''
-        whySlip.hidden = !t
+        const g = live.depthGap
+        if (g) {
+          const [f, t] = ends(g)
+          whyDepth.innerHTML = `지금 <span class="nw">${esc(g.sym)}의</span> <span class="nw">${esc(exName(f.ex))} → ${esc(exName(t.ex))}</span> 경로는 맨 위 호가로 보면 `
+            + `<span class="nw">${fmtPct(g.raw)}지만,</span> $1,000어치를 실제로 사고팔면 <span class="nw">${fmtPct(g.pct)}입니다.</span> `
+        }
+        whyDepth.hidden = !g
         whyRate.textContent = `(지금 업비트 ₩${Math.round(live.rate).toLocaleString('ko-KR')})`
         whyRate.hidden = false
         whyOpen.innerHTML = (live.over1 === 0
           ? '지금은 1% 넘게 벌어진 곳이 없습니다.'
-          : `지금 1% 넘게 벌어진 <span class="nw">김프·역프</span> ${fmtCount(live.over1)}건 가운데 실제로 옮길 수 있는 것은 ${fmtCount(live.over1Movable)}건입니다.`) + ' '
+          : `지금 1% 넘게 벌어진 <span class="nw">김프·역프</span> ${fmtCount(live.over1)}건 가운데 실제로 옮길 수 있는 건 ${fmtCount(live.over1Movable)}건입니다.`) + ' '
         whyOpen.hidden = false
       }
 
@@ -480,9 +458,9 @@
 
       function showError() {
         card.classList.remove('is-stale')
-        card.innerHTML = '<div class="card-msg"><p>실시간 값을 불러오지 못했습니다</p><a class="btn" href="/app/">대시보드 열기</a></div>'
+        card.innerHTML = '<div class="card-msg"><p>실시간 값을 불러오지 못했습니다</p><a class="btn" href="/app/">서비스로 넘어가기</a></div>'
         next.hidden = true
-        whySlip.hidden = true
+        whyDepth.hidden = true
         whyRate.hidden = true
         whyOpen.hidden = true
       }
