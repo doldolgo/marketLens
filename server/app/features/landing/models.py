@@ -26,6 +26,18 @@ class RouteOut(BaseModel):
     net_fx: str | None
 
 
+class DepthGapOut(BaseModel):
+    """호가 깊이 예시 — 맨 위 호가 기준 원값과 $1,000 순값이 가장 크게 벌어진 옮길 수 있는 경로 하나."""
+
+    sym: str
+    dom: str
+    fx: str
+    dir: Direction
+    raw: float  # 원값 = pct + slip
+    pct: float  # 순값
+    slip: float  # 차감폭 %p
+
+
 class LiveOut(BaseModel):
     data_received_at: int | None  # 표의 값 그대로(epoch ms)
     rate: float  # 업비트 USDT 매도호가(원)
@@ -33,6 +45,7 @@ class LiveOut(BaseModel):
     pairs: int
     over1: int
     over1_movable: int
+    depth_gap: DepthGapOut | None  # 후보가 없으면 None
     top: list[RouteOut]
 
 

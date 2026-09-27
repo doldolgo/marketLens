@@ -208,6 +208,7 @@ def test_response_is_200_camel_case_no_store_and_ignores_query() -> None:
         "pairs",
         "over1",
         "over1Movable",
+        "depthGap",
         "top",
     ]
     assert list(body["live"]["top"][0]) == [

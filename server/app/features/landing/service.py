@@ -17,6 +17,7 @@ from typing import Any, Protocol
 from app.core.candles import TIER_BY_RES
 from app.core.influx import CandleRow, InfluxUnavailableError, PremiumEventRow
 from app.features.landing.models import (
+    DepthGapOut,
     EventOut,
     EventsOut,
     LandingResponse,
@@ -34,6 +35,10 @@ TRAIL_WINDOW_SEC = 3_600
 EVENTS_WINDOW_SEC = 604_800  # 7일
 TOP_N = 5
 OVER_PCT = 1.0  # 013 사건 진입 기준과 같은 값
+# 호가 깊이 예시 — 원값(맨 위 호가)이 이만큼 벌어졌고 차감폭이 이만큼 이상인 경로만. 1위 경로는 대개 호가가
+# 두꺼워 원값과 순값이 0.01~0.1%p 밖에 안 달라 요점이 안 보인다
+DEPTH_RAW_MIN = 1.0
+DEPTH_SLIP_MIN = 0.1
 TRAIL_MIN_POINTS = 2  # 선 하나를 그리려면 두 점이 있어야 한다
 TRAIL_BUCKET = TIER_BY_RES["1m"].bucket  # candles_1m (014)
 # Influx 부분은 이만큼만 기다리고 늦으면 직전 값 — 클라이언트 자체 타임아웃(60초)만큼 응답이 늦지 않게
@@ -88,6 +93,7 @@ def build_live(text: str) -> LiveOut | None:
         return None
     rows: list[dict[str, Any]] = table["rows"]
     best: dict[str, RouteOut] = {}
+    depth: DepthGapOut | None = None
     over1 = over1_movable = 0
     for row in rows:
         if row["status"] != "ok":
@@ -102,6 +108,26 @@ def build_live(text: str) -> LiveOut | None:
                     over1_movable += 1
             if not movable:
                 continue
+            slip = row[slip_key]
+            # 호가 깊이 예시 — 차감폭이 가장 큰 하나, 같으면 sym 오름차순(그래도 같으면 표에서 먼저 나온 것)
+            if (
+                value + slip >= DEPTH_RAW_MIN
+                and slip >= DEPTH_SLIP_MIN
+                and (
+                    depth is None
+                    or slip > depth.slip
+                    or (slip == depth.slip and row["sym"] < depth.sym)
+                )
+            ):
+                depth = DepthGapOut(
+                    sym=row["sym"],
+                    dom=row["dom"],
+                    fx=row["fx"],
+                    dir=direction,
+                    raw=value + slip,
+                    pct=value,
+                    slip=slip,
+                )
             current = best.get(row["sym"])
             # 코인당 하나 — 값이 같으면 표에서 먼저 나온 것을 둔다
             if current is None or value > current.pct:
@@ -111,7 +137,7 @@ def build_live(text: str) -> LiveOut | None:
                     fx=row["fx"],
                     dir=direction,
                     pct=value,
-                    slip=row[slip_key],
+                    slip=slip,
                     krw=row["krw"],
                     usd=row["usd"],
                     net_dom=row["netDom"],
@@ -126,6 +152,7 @@ def build_live(text: str) -> LiveOut | None:
         pairs=len(rows),
         over1=over1,
         over1_movable=over1_movable,
+        depth_gap=depth,
         top=top,
     )
 

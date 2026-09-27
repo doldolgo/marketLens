@@ -3,6 +3,8 @@
 공개 동작(HTTP 응답)만 본다. Redis·Influx 는 fake 다(helpers).
 """
 
+import pytest
+
 from app.features.landing.tests.helpers import (
     NOW,
     FakeBus,
@@ -143,6 +145,63 @@ def test_over1_includes_exactly_one_percent_and_counts_movable_separately() -> N
     live = _live(rows)
     assert live["over1"] == 2
     assert live["over1Movable"] == 1
+
+
+# ---- live: 호가 깊이 예시(depthGap) ----
+
+
+def test_depth_gap_is_the_largest_slip_among_movable_routes_over_the_thresholds() -> (
+    None
+):
+    rows = [
+        row("ZZZ", fwd=0.75, rev=-1.0, slip_fwd=0.5),  # 원값 1.25·차감폭 0.5
+        # 역프 — 맨 위 호가로는 1.27% 지만 $1,000 로는 −0.04%
+        row("HFT", dom="bithumb", fx="bybit", fwd=-2.0, rev=-0.04, slip_rev=1.31),
+        row(
+            "DDD", fwd=1.0, rev=-1.0, slip_fwd=2.0, wd_fx=False
+        ),  # 옮길 수 없는 방향 — 더 커도 무시
+        row("CCC", fwd=0.2, rev=-1.0, slip_fwd=0.7),  # 원값 0.9 — 1.0 미만
+        row("EEE", fwd=1.0, rev=-1.0, slip_fwd=3.0, status="stale"),  # 지금 값이 아니다
+        row("FFF", fwd=0.95, rev=-1.0, slip_fwd=0.09),  # 차감폭 0.1 미만
+    ]
+    gap = _live(rows)["depthGap"]
+    assert list(gap) == ["sym", "dom", "fx", "dir", "raw", "pct", "slip"]
+    assert (gap["sym"], gap["dom"], gap["fx"], gap["dir"]) == (
+        "HFT",
+        "bithumb",
+        "bybit",
+        "reverse",
+    )
+    assert (gap["pct"], gap["slip"]) == (-0.04, 1.31)
+    assert gap["raw"] == pytest.approx(1.27)  # raw = pct + slip
+
+
+def test_depth_gap_boundaries_are_inclusive_and_ties_go_to_the_lower_sym() -> None:
+    # 차감폭 0.1 은 들어간다
+    assert (
+        _live([row("BBB", fwd=1.5, rev=-1.0, slip_fwd=0.1)])["depthGap"]["sym"] == "BBB"
+    )
+    # 원값 1.0 은 들어간다(0.75 + 0.25)
+    gap = _live([row("CCC", fwd=0.75, rev=-1.0, slip_fwd=0.25)])["depthGap"]
+    assert (gap["sym"], gap["raw"]) == ("CCC", 1.0)
+    # 차감폭이 같으면 sym 오름차순 — 표 순서와 무관
+    rows = [
+        row("ZZZ", fwd=0.8, rev=-1.0, slip_fwd=0.5),
+        row("AAA", fwd=0.6, rev=-1.0, slip_fwd=0.5),
+    ]
+    assert _live(rows)["depthGap"]["sym"] == "AAA"
+
+
+def test_depth_gap_is_null_without_candidates() -> None:
+    rows = [
+        row("CCC", fwd=0.2, rev=-1.0, slip_fwd=0.7),
+        row("FFF", fwd=0.95, rev=-1.0, slip_fwd=0.09),
+        row("DDD", fwd=1.0, rev=-1.0, slip_fwd=2.0, dep_dom=None),
+        row("EEE", fwd=1.0, rev=-1.0, slip_fwd=3.0, status="fail"),
+    ]
+    live = _live(rows)
+    assert live["depthGap"] is None
+    assert live["top"]  # live 자체는 정상 — 예시만 없다
 
 
 # ---- trail ----
