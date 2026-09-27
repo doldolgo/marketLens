@@ -28,10 +28,11 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-# 스펙 §4: 응답 행 키는 정확히 이 18개다
+# 스펙 §4: 응답 행 키는 정확히 이 19개다
 ROW_KEYS = {
     "sym", "dom", "fx", "fwd", "rev", "usd", "spark", "status", "age",
     "slipFwd", "slipRev", "krw", "netDom", "depDom", "wdDom", "depFx", "wdFx", "netFx",
+    "dayChg",
 }  # fmt: skip
 
 # 최상위 6키 (§4)
@@ -467,7 +468,7 @@ def test_row_keys_are_exactly_the_17_camel_case_keys() -> None:
 
 
 def test_spark_is_taken_from_the_published_map_including_fail_rows() -> None:
-    """009 가 게시한 (dom, fx, base) 맵이 행의 `spark` 로 실린다 — 키 18개·타입은 불변."""
+    """009 가 게시한 (dom, fx, base) 맵이 행의 `spark` 로 실린다 — 키 19개·타입은 불변."""
     store = LiveStore()
     seed_basic(store)
     seed_rows(store, [make_row("upbit", "ETH", bids=[], asks=[[3_000.0, 1.0]])], _now())

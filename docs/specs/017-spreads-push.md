@@ -39,8 +39,8 @@
 ### 3.3 외부 계약 — `GET /ws/spreads` (WebSocket 업그레이드)
 - 인증 없음(`GET /spreads` 와 같다). 서브프로토콜 없음. 메시지는 **바이너리 프레임 1개 = gzip 으로 압축한 JSON 1개**(아래 네 종류 모두, 텍스트 프레임은 없다). 클라이언트는 풀어서 JSON 으로 읽는다. 클라이언트 → 서버 메시지는 없다 — 보내도 무시한다.
 - 서버 → 클라이언트:
-  - `{"type":"snapshot", "notional":1000, "rate":…, "rows":[…18키 행 전부…], "warnings":[…], "dataReceivedAt":…, "fetchedAt":…}` — 접속 직후(표가 있으면), 그리고 `waiting` 뒤 첫 표가 왔을 때. 행은 003 §3.2 그대로.
-  - `{"type":"delta", "notional":1000, "rate":…, "rows":[바뀐 행 전부 18키], "removed":["BTC|upbit|binance", …], "warnings":[…], "dataReceivedAt":…, "fetchedAt":…}` — 새 표마다. `removed` 의 원소는 `sym|dom|fx`. 바뀐 행이 없으면 `rows: []` 로 보낸다(`rate`·`warnings`·시각은 갱신돼야 하므로).
+  - `{"type":"snapshot", "notional":1000, "rate":…, "rows":[…19키 행 전부…], "warnings":[…], "dataReceivedAt":…, "fetchedAt":…}` — 접속 직후(표가 있으면), 그리고 `waiting` 뒤 첫 표가 왔을 때. 행은 003 §3.2 그대로.
+  - `{"type":"delta", "notional":1000, "rate":…, "rows":[바뀐 행 전부 19키], "removed":["BTC|upbit|binance", …], "warnings":[…], "dataReceivedAt":…, "fetchedAt":…}` — 새 표마다. `removed` 의 원소는 `sym|dom|fx`. 바뀐 행이 없으면 `rows: []` 로 보낸다(`rate`·`warnings`·시각은 갱신돼야 하므로).
   - `{"type":"heartbeat"}` — 1초 넘게 보낸 게 없을 때(3.2).
   - `{"type":"waiting"}` — 접속했는데 표가 아직 없을 때(수집 기동 직후·Redis 불달·첫 접속). 첫 표가 오면 snapshot.
 - 닫기 코드: 1008 = 느린 클라이언트, 1001 = 서버 종료. 클라이언트는 어느 코드든 재연결한다.

@@ -40,6 +40,9 @@ class SpreadRow(BaseModel):
     dep_fx: bool | None
     wd_fx: bool | None
     net_fx: str | None  # 맞춘 해외 망 이름 — 못 맞추면(모름·다름·강등) None
+    day_chg: (
+        float | None
+    )  # KST 00시 기준가 대비 국내 체결가 변동 % (026) — 기준가 없으면 None
 
 
 class SpreadsResponse(BaseModel):
