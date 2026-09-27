@@ -65,6 +65,24 @@ async def test_first_tick_after_load_pins_price_and_later_ticks_do_not_overwrite
     await book.aclose()
 
 
+async def test_prices_mapping_reference_survives_startup_and_midnight() -> None:
+    """게시기는 기동 때 받은 `prices` 참조를 매초 읽는다 — 장부가 비워져도 같은 객체여야 한다 (배포 후 dayChg 전부 null 이던 버그)."""
+    bus, _ = make_bus()
+    book = DayOpenBook(bus=bus)
+    view = book.prices  # 게시기가 들고 있는 참조
+    book.observe(tick(T, 100.0))
+    await settle()
+    book.observe(tick(T + 1, 100.0))
+    assert view == {("upbit", "BTC"): 100.0}
+    late = at(2026, 9, 27, 23, 59, 59)
+    book.observe(tick(late + 1, 120.0))  # 자정 — 비운다
+    assert view == {}
+    await settle()
+    book.observe(tick(late + 2, 120.0))
+    assert view == {("upbit", "BTC"): 120.0}
+    await book.aclose()
+
+
 async def test_midnight_rollover_clears_book_and_pins_new_price() -> None:
     bus, raw = make_bus()
     book = DayOpenBook(bus=bus)

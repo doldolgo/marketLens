@@ -54,7 +54,8 @@ class DayOpenBook:
         if date != self._date:
             # 자정(또는 기동) — 장부를 비우고 그 날짜의 해시부터 읽는다
             self._date = date
-            self._prices = {}
+            # 게시기가 `prices` 의 참조를 들고 있다 — 새 dict 로 갈아끼우면 게시기는 빈 옛 dict 를 본다
+            self._prices.clear()
             self._pending = {}
             self._loaded = False
             self._spawn(self._load(date))
