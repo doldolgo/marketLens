@@ -1,14 +1,94 @@
 # 023 — TLS 앞단. serve 박스에서 caddy 가 호스트 80·443 을 쥐고 nginx(web 컨테이너) 로 넘긴다.
 # 인증서는 Let's Encrypt 자동 발급·갱신, 저장은 compose 볼륨 caddy-data(재기동·재배포에도 재발급하지 않는다).
+# 027 — 이 파일은 caddy/ 디렉터리째 바인드된다. 파일 하나를 바인드하면 git 이 새 파일로 바꿔 써도 컨테이너는
+#   옛 내용을 본다. serve 배포가 up 뒤에 `caddy reload` 로 다시 읽힌다 — 깨진 설정은 다음 caddy 재시작에서
+#   사이트 전체를 내리므로, 고친 PR 은 로컬 `caddy validate` 결과를 본문에 적는다.
 {
 	# HTTP/3(UDP 443)는 compose 에서 안 열므로 광고하지 않는다 — 브라우저가 QUIC 을 헛시도하지 않게
 	servers {
 		protocols h1 h2
 	}
+	# 027 §3.2 — 기본 로거(오류 줄 — 예: 업스트림 502. docker 로그로 간다)에도 접속 로그와 같은 지우기 규칙.
+	# docker 로그에 원 IP·검색어가 남지 않게. 아래 access_log 조각의 format 과 같아야 한다(test_deploy.py 가 본다).
+	log default {
+		format filter {
+			wrap json
+			request>headers delete
+			resp_headers delete
+			request>remote_ip ip_mask {
+				ipv4 24
+				ipv6 48
+			}
+			request>client_ip ip_mask {
+				ipv4 24
+				ipv6 48
+			}
+			request>uri query {
+				delete s.q
+				delete g.q
+				delete p.q
+			}
+		}
+	}
+}
+
+# 027 §3.2 — 접속 로그. 개인정보로 다룬다 — 한 줄에 남기는 것은 허용 목록이다.
+# 도메인 블록만 불러온다. http:// catch-all(탄력 IP 직접 접속·봇 스캔)은 기록하지 않는다.
+(access_log) {
+	# 폴링·감시가 방문 기록을 덮지 않게 — 수집 상태 탭 5초·랜딩 10초·기록 탭 60초·uptime·canary
+	@nolog path /api/health /api/health/collect /api/landing /api/history/events /api/history/candles
+	log_skip @nolog
+	@canary header User-Agent *KimpTrack-Canary*
+	log_skip @canary
+
+	# 요청 헤더는 통째로 지우고 두 필드만 덧붙인다. referer 는 http(s) 스킴+호스트(+포트)만 — 그 모양이
+	# 아니면(android-app://·빈 값·사용자 정보가 든 주소) 빈 값. 경로·쿼리에는 검색어가 실릴 수 있다.
+	map {http.request.header.Referer} {referer_origin} {
+		~(?i)^(https?://(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])(?::[0-9]+)?)(?:[/?#].*)?$ "${1}"
+		default ""
+	}
+	log_append ua {http.request.header.User-Agent}
+	log_append referer {referer_origin}
+
+	log {
+		# 호스트 ./logs/caddy/ (compose 바인드, git 무시). 0644 — 사람이 호스트에서 읽게.
+		# 50MiB 에서 회전, gzip 된 회전 파일 5개, 회전 파일은 90일 뒤 지운다(caddy 기본과 같은 값).
+		output file /var/log/caddy/access.log {
+			mode 0644
+			roll_size 50MiB
+			roll_keep 5
+			roll_keep_for 90d
+		}
+		format filter {
+			wrap json
+			# 헤더 통째 — Accept-Language·Sec-Ch-Ua·임의 헤더가 합쳐지면 방문자를 가려낸다.
+			# 응답 Location 에는 022 의 301 이 쿼리(검색어 포함)를 그대로 싣는다.
+			request>headers delete
+			resp_headers delete
+			# 두 필드는 지금 같은 값이라 하나만 자르면 원본이 남는다
+			request>remote_ip ip_mask {
+				ipv4 24
+				ipv6 48
+			}
+			request>client_ip ip_mask {
+				ipv4 24
+				ipv6 48
+			}
+			# 스프레드·갭·선선갭 검색어. 나머지 키(utm_*·tab 등)는 어떤 주소로 들어왔는지 보려고 남긴다
+			request>uri query {
+				delete s.q
+				delete g.q
+				delete p.q
+			}
+		}
+	}
 }
 
 # 도메인 — 자동 HTTPS. http://kimptrack.com 은 caddy 가 https 로 308 리다이렉트한다(설정 없이 기본 동작).
 kimptrack.com, www.kimptrack.com {
+	import access_log
+	# 027 §3.2 — 브라우저 기본값은 같은 출처 요청에 전체 URL(검색어 포함)을 Referer 로 보낸다
+	header Referrer-Policy strict-origin
 	reverse_proxy web:80
 }
 
