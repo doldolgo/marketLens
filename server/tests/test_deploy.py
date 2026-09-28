@@ -29,9 +29,10 @@ def _on(workflow: dict) -> dict:
     return workflow.get("on") or workflow[True]
 
 
-# --- compose: 컨테이너 6개(016·023), 박스별 profile 3개(021) -------------------------
+# --- compose: 컨테이너 7개(016·023·030), 박스별 profile 3개(021) + serve 부속 tunnel(030) ----
 
 # 021 §3.2 — 서비스 → profile. 박스마다 자기 profile 만 띄운다.
+# 030 — cloudflared 의 tunnel 은 박스 profile 이 아니라 serve 박스 부속(배포가 토큰 파일이 있을 때만 따로 띄운다).
 PROFILE_OF = {
     "server": "collect",
     "redis": "data",
@@ -39,13 +40,22 @@ PROFILE_OF = {
     "api": "serve",
     "web": "serve",
     "caddy": "serve",
+    "cloudflared": "tunnel",
 }
 
 
-def test_compose_declares_six_containers_with_fixed_names() -> None:
+def test_compose_declares_seven_containers_with_fixed_names() -> None:
     compose = _yaml("docker-compose.yml")
     services = compose["services"]
-    assert set(services) == {"server", "api", "web", "caddy", "influxdb", "redis"}
+    assert set(services) == {
+        "server",
+        "api",
+        "web",
+        "caddy",
+        "influxdb",
+        "redis",
+        "cloudflared",
+    }
     # 프로젝트명 고정 — dev compose(marketlens-dev)와 컨테이너·볼륨을 나눈다
     assert compose["name"] == "marketlens"
     assert _yaml("docker-compose.dev.yml")["name"] != compose["name"]
@@ -67,7 +77,8 @@ def test_compose_caps_container_logs_on_every_service() -> None:
 
 
 def test_compose_gives_every_service_exactly_one_box_profile() -> None:
-    """021 §3.2 — server=collect / redis·influxdb=data / api·web=serve. profile 없이 up 하면 아무것도 안 뜬다."""
+    """021 §3.2 — server=collect / redis·influxdb=data / api·web·caddy=serve, 030 — cloudflared=tunnel(serve 부속).
+    profile 없이 up 하면 아무것도 안 뜬다."""
     services = _yaml("docker-compose.yml")["services"]
     for name, svc in services.items():
         assert svc.get("profiles") == [PROFILE_OF[name]], name
