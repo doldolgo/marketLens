@@ -288,3 +288,45 @@ def test_root_path_only_on_collector_and_public_api_docs_stay_closed() -> None:
         for path in ("/api/docs", "/api/redoc", "/api/openapi.json", "/api/refresh"):
             assert _route(path) in DENY, path
     assert (ROOT / ADMIN_CONF).is_file()
+
+
+# --- 관리자 화면 정적 단언 (§3.3) ---------------------------------------------------------
+
+SCREEN = ROOT / "web/admin"
+
+
+def test_screen_is_three_static_files_outside_the_public_root() -> None:
+    assert sorted(p.name for p in SCREEN.iterdir()) == [
+        "admin.css",
+        "admin.js",
+        "index.html",
+    ]
+    lines = _text("web/Dockerfile").splitlines()
+    assert "COPY admin /usr/share/nginx/admin" in lines
+    # 공개 root(dist ← public/)에 섞이지 않는다 — 공개 location / 로 받아 갈 수 없다
+    public = {p.name for p in (ROOT / "web/public").rglob("*")}
+    assert not {"admin", "admin.js", "admin.css"} & public
+
+
+def test_screen_script_sends_xhr_header_polls_while_visible_and_never_parses_html() -> (
+    None
+):
+    js = _text("web/admin/admin.js")
+    assert "'X-Requested-With': 'XMLHttpRequest'" in js
+    assert "visibilityState" in js
+    for banned in ("localStorage", "sessionStorage", "innerHTML", "window.open"):
+        assert banned not in js, banned
+    # 모든 요청이 한 함수를 지난다 — 헤더가 빠진 fetch 가 없게
+    assert js.count("fetch(") == 1
+
+
+def test_screen_page_has_no_inline_script_or_style() -> None:
+    html = _text("web/admin/index.html")
+    scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, flags=re.S)
+    assert scripts == [(' src="admin.js" defer', "")]
+    assert "<style" not in html and "style=" not in html
+    assert re.search(r'<input id="token" type="password" autocomplete="off"', html)
+    assert "<form" not in html  # 제출 없음 — 토큰이 URL·기록으로 새지 않게
+    for href in ("/api/docs", "/api/redoc", "/cdn-cgi/access/logout"):
+        assert f'href="{href}"' in html, href
+    assert 'target="' not in html  # 같은 탭 이동
