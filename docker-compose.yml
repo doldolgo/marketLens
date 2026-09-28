@@ -120,8 +120,10 @@ services:
       options:
         max-size: "50m"
         max-file: "3"
-    # t4g.micro(1GB + 스왑) — 부풀거나 새도 같은 박스의 api·web 몫을 먹지 않게. 실제 사용량은 배포 뒤 docker stats 로 본다
+    # t4g.micro(1GB + 스왑) — 부풀거나 새도 같은 박스의 api·web 몫을 먹지 않게. 실제 사용량은 배포 뒤 docker stats 로 본다.
+    # memswap_limit 을 같은 값으로 — 안 주면 docker 가 스왑을 같은 양 더 허락해 api·web 과 나눠 쓰는 스왑 1GB(027)를 먹는다
     mem_limit: 128m
+    memswap_limit: 128m
     # 이미지 ENTRYPOINT 가 `cloudflared --no-autoupdate`. loglevel 은 info 고정 — debug 는 요청 헤더 전부
     # (쿠키·Access JWT·X-Refresh-Token)를 로그로 낸다. metrics 는 컨테이너 안 루프백 — 헬스체크만 부른다.
     command: ["tunnel", "--loglevel", "info", "--metrics", "127.0.0.1:2000", "run"]

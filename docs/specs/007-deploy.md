@@ -25,7 +25,7 @@
   - `influxdb` — 2.7, dev compose 와 같은 첫 기동 설정(org·bucket `marketlens`, admin 토큰 = `INFLUX_TOKEN`). named volume, 호스트 비노출.
   - `redis` — `redis:7-alpine`, `--appendonly yes`, named volume, 호스트 비노출(009 의 틱 버퍼 — Influx 로 옮기기 전 틱만 든다).
   - `caddy` — serve profile, 호스트 80(`WEB_PORT`)·443, `./caddy:/etc/caddy:ro`(디렉터리째 — 파일 하나를 바인드하면 git 이 바꿔 쓴 새 파일을 못 본다)·`./logs/caddy:/var/log/caddy`(도메인 블록 접속 로그, git 무시)·`caddy-data`·`caddy-config` 볼륨(023·027).
-  - `cloudflared` — 관리자 터널(030). profile `tunnel` — 박스 profile 이 아니라 serve 부속이라 배포 serve 가 토큰 파일이 있을 때만 따로 띄우고, 로컬 통합 기동은 안 띄운다. 망 `admin` 만(web 이 기본 망과 `admin` 둘 — compose 이름으로는 web 하나만 푼다), 게시 포트 없음, 메모리 상한 128MB. 이미지 `cloudflare/cloudflared` 는 태그 + 멀티 아키텍처 인덱스 digest(`latest` 금지). 토큰은 최상위 `secrets`(파일 `./secrets/cloudflared-token` — git 무시, serve 박스에만) → env `TUNNEL_TOKEN_FILE`, 환경변수·`.env` 에 두지 않는다.
+  - `cloudflared` — 관리자 터널(030). profile `tunnel` — 박스 profile 이 아니라 serve 부속이라 배포 serve 가 토큰 파일이 있을 때만 따로 띄우고, 로컬 통합 기동은 안 띄운다. 망 `admin` 만(web 이 기본 망과 `admin` 둘 — compose 이름으로는 web 하나만 푼다), 게시 포트 없음, 메모리 상한 128MB(스왑 없음). 이미지 `cloudflare/cloudflared` 는 태그 + 멀티 아키텍처 인덱스 digest(`latest` 금지). 토큰은 최상위 `secrets`(파일 `./secrets/cloudflared-token` — git 무시, serve 박스에만) → env `TUNNEL_TOKEN_FILE`, 환경변수·`.env` 에 두지 않는다.
 
 ### 규칙 (왜 가 있는 것)
 - **앱은 자기 로거(`marketlens.*`)를 INFO 로, 타임스탬프와 함께 stderr 로 낸다.** 설정이 없으면 `logging.lastResort` 가 받아 WARNING 이상만, 시각도 없이 나간다 — 그러면 "S3 원문 업로드 재개"(010 §3.6)·"DB 저장 재개"(009 §3.5) 같은 복구 신호가 아예 보이지 않아 장애가 풀렸는지 알 수 없다. handler 는 루트에 달고 레벨은 `marketlens` 에만 내린다 — 라이브러리 INFO(httpx 의 요청 한 줄 등)는 루트의 WARNING 에 막혀야 로그가 초당 수십 줄로 불어나지 않는다.

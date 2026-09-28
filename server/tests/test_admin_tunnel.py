@@ -29,13 +29,15 @@ def _cloudflared() -> dict:
 
 
 def test_cloudflared_is_a_tunnel_profile_service_without_ports() -> None:
-    """이름·재시작·profile tunnel(박스 profile 아님)·게시 포트 없음·메모리 128MB·로그 상한 (§3.2)."""
+    """이름·재시작·profile tunnel(박스 profile 아님)·게시 포트 없음·메모리 128MB 스왑 없음·로그 상한 (§3.2)."""
     svc = _cloudflared()
     assert svc["container_name"] == "marketlens-cloudflared"
     assert svc["restart"] == "unless-stopped"
     assert svc["profiles"] == ["tunnel"]
     assert "ports" not in svc and "expose" not in svc
     assert svc["mem_limit"] == "128m"
+    # 메모리+스왑 합이 메모리와 같다 = 스왑 0. 안 주면 docker 가 스왑을 같은 양 더 준다(serve 의 공용 스왑)
+    assert svc["memswap_limit"] == svc["mem_limit"]
     assert svc["logging"] == {
         "driver": "json-file",
         "options": {"max-size": "50m", "max-file": "3"},
