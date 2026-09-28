@@ -139,5 +139,6 @@ docker ps -a · docker network ls · docker images · docker volume ls   # 시�
   - `docs/specs/023-domain-tls.md:§2` — "배포 워크플로 변경 없음(`--profile serve` 가 caddy 도 띄운다)" → serve 배포는 up 뒤 caddy reload(027)와 토큰 파일이 있을 때 `--profile tunnel up`(030).
 - 남은 빚:
   - §4 "배포·런북 뒤 — 사람" 항목 전부(status.md "운영 확인 대기") — 진짜 토큰이 없어 헬스체크 `ready`·엣지 연결·Protect with Access 는 로컬에서 못 봤다. 첫 확인은 런북 8·9단계.
-  - cloudflared 의 원격 관리(대시보드 실시간 로그·진단 — 이 버전의 `--management-diagnostics` 기본 켬)는 기본값 그대로다. 대시보드 권한자만 쓰지만 끄려면 후속.
+  - cloudflared 의 원격 관리(대시보드 실시간 로그·진단 — 이 버전의 `--management-diagnostics` 기본 켬)는 기본값 그대로다. 대시보드 실시간 로그는 로컬 `--loglevel info` 와 따로 더 자세한 요청 이벤트를 받을 수 있다 — 대시보드 권한자만 쓰지만 끄려면 후속(status.md 빚).
+  - 토큰이 틀리거나 만료돼 cloudflared 가 곧바로 끝나고 재시작을 되풀이해도 `--profile tunnel up -d` 는 0 으로 끝나 배포는 초록이다 — §3.3 의 "tunnel `up` 이 실패하면" 은 compose 가 컨테이너를 못 만드는 경우만 덮는다. 드러나는 곳은 런북 8단계의 사람 확인(커넥터 Healthy)과 Tunnel 상태 알림 메일(설계 세션 판단 — 배포가 엣지 연결을 기다리면 Cloudflare 쪽 지연이 배포 실패가 된다).
   - status.md 에 적은 030 빚 넷(대시보드에만 있는 설정·출구 제한 없음·Access 로그 24시간·021·023 제안 반영 대기).
