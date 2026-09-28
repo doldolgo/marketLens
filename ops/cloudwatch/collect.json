@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "metrics_collection_interval": 300,
+    "omit_hostname": true
+  },
+  "metrics": {
+    "namespace": "MarketLens",
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}"
+    },
+    "metrics_collected": {
+      "mem": {
+        "measurement": ["mem_available_percent"]
+      },
+      "disk": {
+        "measurement": ["used_percent"],
+        "resources": ["/"],
+        "drop_device": true
+      }
+    }
+  }
+}

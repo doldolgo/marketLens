@@ -5,6 +5,7 @@ test_deploy.py 와 같은 방식이다: Docker 없는 CI 에서 설정 파일을
 여기서 못 잡으므로 Caddyfile 을 고친 PR 은 로컬 `caddy validate` 결과를 본문에 적는다(§3.8).
 """
 
+import json
 import re
 import shlex
 
@@ -250,3 +251,101 @@ def test_compose_api_sends_the_ws_gauge_to_the_host_agent() -> None:
     for name, svc in services.items():
         if name != "api":
             assert "STATSD_ADDR" not in (svc.get("environment") or {}), name
+
+
+# --- CloudWatch Agent 설정 (§3.4) -----------------------------------------------------
+
+AGENT_BOXES = ("collect", "data", "serve")
+# 박스별 지표 — 플러그인 → 측정값(procstat 은 프로세스 식별자). serve 의 StatsD 게이지까지 12개 (§3.4)
+AGENT_METRICS = {
+    "collect": {"mem": ["mem_available_percent"], "disk": ["used_percent"]},
+    "data": {
+        "mem": ["mem_available_percent"],
+        "swap": ["swap_used_percent"],
+        "disk": ["used_percent"],
+        "procstat": [("exe", "influxd"), ("exe", "redis-server")],
+    },
+    "serve": {
+        "mem": ["mem_available_percent"],
+        "disk": ["used_percent"],
+        "procstat": [("exe", "caddy"), ("pattern", "uvicorn app.main:app")],
+        "statsd": [],
+    },
+}
+
+
+def _agent(name: str) -> dict:
+    return json.loads(_text(f"ops/cloudwatch/{name}.json"))
+
+
+def test_agent_metric_files_share_dimensions_and_run_as_root() -> None:
+    """네임스페이스 MarketLens·전역 차원 InstanceId 하나·호스트명 없음·디스크 / 만·장치 차원 없음·run_as_user 없음."""
+    for box in AGENT_BOXES:
+        conf = _agent(box)
+        assert set(conf) == {"agent", "metrics"}, box
+        assert "run_as_user" not in conf["agent"], box
+        assert conf["agent"]["omit_hostname"] is True, box
+        metrics = conf["metrics"]
+        assert metrics["namespace"] == "MarketLens", box
+        assert metrics["append_dimensions"] == {"InstanceId": "${aws:InstanceId}"}, box
+        disk = metrics["metrics_collected"]["disk"]
+        assert disk["resources"] == ["/"] and disk["drop_device"] is True, box
+
+
+def test_agent_metric_files_collect_only_the_listed_metrics() -> None:
+    """collect 300초·둘, data·serve 60초, procstat 은 실행 파일(api 는 명령줄), StatsD 는 serve 에만 (§3.4)."""
+    intervals = {"collect": 300, "data": 60, "serve": 60}
+    total = 0
+    for box, expected in AGENT_METRICS.items():
+        conf = _agent(box)
+        assert conf["agent"]["metrics_collection_interval"] == intervals[box], box
+        collected = conf["metrics"]["metrics_collected"]
+        assert set(collected) == set(expected), box
+        for plugin, want in expected.items():
+            if plugin == "procstat":
+                got = [
+                    (k, p[k])
+                    for p in collected[plugin]
+                    for k in ("exe", "pattern")
+                    if k in p
+                ]
+                assert got == want, box
+                assert all(
+                    p["measurement"] == ["memory_rss"] for p in collected[plugin]
+                )
+                total += len(want)
+            elif plugin == "statsd":
+                assert collected[plugin] == {
+                    "service_address": ":8125",
+                    "metrics_collection_interval": 10,
+                    "metrics_aggregation_interval": 60,
+                }
+                total += 1  # marketlens.ws_clients 하나
+            else:
+                assert collected[plugin]["measurement"] == want, (box, plugin)
+                total += len(want)
+    assert total == 12
+
+
+def test_serve_logs_file_ships_the_caddy_access_log_for_90_days() -> None:
+    """최상위 `logs` 하나, 경로 = 박스의 레포 + compose 로그 바인드 호스트 쪽 + caddy 파일 이름 (§3.4)."""
+    conf = _agent("serve-logs")
+    assert set(conf) == {"logs"}
+    (entry,) = conf["logs"]["logs_collected"]["files"]["collect_list"]
+    caddy = _yaml("docker-compose.yml")["services"]["caddy"]
+    host_dir = next(
+        v.split(":")[0] for v in caddy["volumes"] if v.split(":")[1] == "/var/log/caddy"
+    )
+    output = _block(
+        _block(_snippet(), "log"), "output", "file", "/var/log/caddy/access.log"
+    )
+    assert output  # caddy 가 쓰는 파일 이름
+    assert entry == {
+        "file_path": "/home/ubuntu/marketlens/"
+        + host_dir.removeprefix("./")
+        + "/access.log",
+        "log_group_name": "/marketlens/serve/caddy",
+        "log_stream_name": "{instance_id}",
+        "log_group_class": "STANDARD",
+        "retention_in_days": 90,
+    }
