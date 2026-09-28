@@ -443,6 +443,108 @@ def test_nginx_cache_rules_for_index_and_hashed_assets() -> None:
     assert "always" not in assets_block
 
 
+# --- 호출 경로 대조: 웹·감시가 부르는 /api 경로 ⊂ 공개 허용 목록 (028 §3.5·§4) -------
+
+# 경로 끝 — 쿼리·템플릿 보간·따옴표 앞에서 자른다
+_TAIL = r"[^?`$'\"]*"
+# 요청 경로로 쓰인 /api… — 따옴표·백틱·보간 닫는 } 바로 뒤이거나 URL 의 호스트 뒤. /apix 는 아니다
+_API_PATH = re.compile(
+    r"(?:['\"`}]|(?:https?|wss?)://[^/\s'\"`]+)(/api(?:/[\w.~%-]*)*)(?![\w.~%-])"
+)
+
+
+def _strip_comments(text: str, suffix: str) -> str:
+    """주석에 적힌 경로(‘/api/refresh 는 부르지 않는다’)가 호출로 잡히지 않게 뺀다."""
+    if suffix in (".html", ".js", ".mjs", ".cjs", ".ts"):
+        text = re.sub(r"<!--.*?-->|/\*.*?\*/", "", text, flags=re.S)
+        text = re.sub(r"(^|\s)//[^\n]*", r"\1", text)
+    elif suffix in (".py", ".sh", ".yml", ".yaml", ".toml"):
+        text = re.sub(r"(^|\s)#[^\n]*", r"\1", text)
+    return text
+
+
+def _web_src_paths() -> set[str]:
+    """(1) `${API_BASE}` 바로 뒤 리터럴 경로 — 리터럴 / 로 시작하지 않으면 대조할 수 없으니 실패."""
+    paths: set[str] = set()
+    for file in sorted((ROOT / "web/src").rglob("*.ts*")):
+        for tail in re.findall(
+            r"\$\{API_BASE\}(" + _TAIL + ")", file.read_text("utf-8")
+        ):
+            assert tail.startswith("/"), f"{file.name}: ${{API_BASE}} 뒤 {tail!r}"
+            paths.add("/api" + tail)
+    return paths
+
+
+def _public_html_paths() -> set[str]:
+    """(2) 정적 페이지(랜딩)의 `fetch(`·`new WebSocket(` 첫 인자 따옴표 안 `/api/…` (주석 제외)."""
+    call = re.compile(r"\b(?:fetch|new\s+WebSocket)\(\s*['\"`](/api/" + _TAIL + ")")
+    paths: set[str] = set()
+    for file in sorted((ROOT / "web/public").glob("*.html")):
+        paths |= set(call.findall(_strip_comments(file.read_text("utf-8"), ".html")))
+    return paths
+
+
+def _canary_paths(root: Path = ROOT / "ops/canary") -> set[str]:
+    """(3) canary(027) 코드·설정의 요청 경로. 디렉터리가 없으면(027 구현 전) 빈 집합이고, 생기면 테스트를
+    고치지 않아도 대조에 들어간다. 문서(.md)·숨김·의존성 폴더는 요청이 아니라 뺀다."""
+    paths: set[str] = set()
+    if not root.is_dir():
+        return paths
+    for file in sorted(root.rglob("*")):
+        parts = file.relative_to(root).parts
+        skip = any(
+            p.startswith(".") or p in ("node_modules", "__pycache__") for p in parts
+        )
+        if skip or not file.is_file() or file.suffix == ".md":
+            continue
+        try:
+            text = file.read_text("utf-8")
+        except UnicodeDecodeError:
+            continue
+        paths |= set(_API_PATH.findall(_strip_comments(text, file.suffix)))
+    return paths
+
+
+def _uptime_paths() -> set[str]:
+    """(3) 외부 uptime 모니터(025)에 등록하는 URL 의 경로."""
+    text = _text("docs/runbooks/uptime-monitor.md")
+    return set(re.findall(r"https?://[^/\s`'\")]+(/api(?:/[\w.~%-]*)*)", text))
+
+
+def test_web_and_monitor_call_paths_are_all_allowlisted() -> None:
+    """웹·감시가 새 경로를 부르면서 허용 목록(nginx·PUBLIC_API)에 한 줄을 더하지 않으면 여기서 실패한다."""
+    sources = {
+        "web/src": _web_src_paths(),
+        "web/public": _public_html_paths(),
+        "ops/canary": _canary_paths(),
+        "uptime-monitor.md": _uptime_paths(),
+    }
+    for name in ("web/src", "web/public", "uptime-monitor.md"):
+        assert sources[name], f"{name} 에서 호출 경로를 못 찾았다 — 추출 규칙이 깨졌다"
+    for name, paths in sources.items():
+        assert paths <= set(PUBLIC_API), (name, sorted(paths - set(PUBLIC_API)))
+
+
+def test_canary_paths_are_picked_up_once_the_directory_exists(tmp_path: Path) -> None:
+    """027 이 ops/canary/ 를 만들면 그 요청 경로가 그대로 대조에 들어간다 — 주석·문서는 빼고."""
+    assert _canary_paths(tmp_path / "missing") == set()
+    (tmp_path / "canary.js").write_text(
+        "// /api/refresh 는 부르지 않는다\n"
+        "const WS = 'wss://kimptrack.com/api/ws/spreads';\n"
+        "await get(`${BASE}/api/history/candles?base=BTC`);\n",
+        "utf-8",
+    )
+    (tmp_path / "steps.py").write_text(
+        '# /api/docs\nURL = BASE + "/api/health"\n', "utf-8"
+    )
+    (tmp_path / "README.md").write_text("`/api/spreads` 는 닫혀 있다\n", "utf-8")
+    assert _canary_paths(tmp_path) == {
+        "/api/ws/spreads",
+        "/api/history/candles",
+        "/api/health",
+    }
+
+
 def test_app_logging_puts_marketlens_info_on_a_timestamped_handler() -> None:
     """설정이 없으면 lastResort 가 WARNING 이상만, 시각 없이 낸다 — 복구 신호가 안 보인다 (007 §3)."""
     create_app()
