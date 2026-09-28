@@ -16,9 +16,8 @@ router = APIRouter()
 async def get_admin_status(request: Request) -> AdminStatusOut:
     state = request.app.state
     service: AdminStatusService = state.admin
-    # 허브·버스·Influx 자리는 api lifespan 이 채운다 — 기동 전이면 없다(접속 0·down)
+    # 버스·Influx 자리(core 객체)와 접속 수 세는 함수는 api lifespan 이 채운다 — 기동 전이면 down·0
     return await service.status(
-        hub=getattr(state, "spreads_hub", None),
         bus=getattr(state, "spreads_bus", None),
         influx=getattr(state, "influx", None),
     )

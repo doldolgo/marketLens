@@ -65,21 +65,22 @@ def api_role(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 def make_app(
     *,
-    hub: object | None = None,
+    hub: FakeHub | None = None,
     bus: object | None = None,
     influx: object | None = None,
     timeout_sec: float = 2.0,
 ) -> FastAPI:
-    """lifespan 없이 자리만 채운다 — None 이면 그 자리가 없는 것(기동 전·토큰 없음)과 같다."""
+    """lifespan 없이 자리만 채운다 — None 이면 그 자리가 없는 것(기동 전·토큰 없음)과 같다.
+
+    허브는 main.py 처럼 세는 함수로만 넘긴다 — admin 은 허브를 모른다."""
     app = create_app()
-    for name, value in (
-        ("spreads_hub", hub),
-        ("spreads_bus", bus),
-        ("influx", influx),
-    ):
+    for name, value in (("spreads_bus", bus), ("influx", influx)):
         if value is not None:
             setattr(app.state, name, value)
-    app.state.admin = AdminStatusService(timeout_sec=timeout_sec)
+    service = AdminStatusService(timeout_sec=timeout_sec)
+    if hub is not None:
+        service.ws_connections = lambda: hub.connections
+    app.state.admin = service
     return app
 
 

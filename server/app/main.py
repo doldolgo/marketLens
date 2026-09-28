@@ -107,8 +107,14 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
     hub.start()
     app.state.spreads_hub = hub
     app.state.spreads_bus = bus  # 018 — GET /spreads 가 요청마다 latest 읽기·want 쓰기
+
+    def ws_connections() -> int:
+        return hub.connections
+
     # 027 — WS 접속 수 게이지. collector 는 띄우지 않는다(허브가 늘 0 이라 api 값을 덮는다)
-    gauge = start_ws_gauge(app.state.settings.statsd_addr, lambda: hub.connections)
+    gauge = start_ws_gauge(app.state.settings.statsd_addr, ws_connections)
+    # 029 — 관리자 상태도 같은 함수로 센다(admin 은 spreads 허브를 모른다)
+    app.state.admin.ws_connections = ws_connections
     try:
         yield
     finally:

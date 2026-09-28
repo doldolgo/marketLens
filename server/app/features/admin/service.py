@@ -1,7 +1,8 @@
 """관리자 상태 — WS 접속 수·Redis·Influx 확인 (스펙 029 §3.4).
 
-허브·버스·Influx 는 api lifespan 이 `app.state` 에 둔 것을 라우터가 넘긴다. 허브는 spreads 기능의
-객체지만 import 하지 않고 `connections` 만 구조적 타입으로 안다(기능 간 import 금지).
+버스·Influx 는 api lifespan 이 `app.state` 에 둔 core 객체를 라우터가 넘긴다. 접속 수는 합성 지점인
+main.py 가 넘기는 세는 함수(`ws_connections`, 027 게이지와 같은 함수)로 읽는다 — admin 은 spreads 허브의
+이름·타입을 모른다(기능 간 결합 없음). 채우기 전(기동 전)이면 0.
 
 두 확인은 동시에 돌고 각각 2초 제한이다. Influx 클라이언트는 동기라 스레드에서 부르는데 자체 타임아웃이
 60초라, 제한을 넘긴 ping 은 스레드에서 계속 돈다 — 그 ping 이 끝나기 전에는 새로 띄우지 않고 down 을
@@ -9,17 +10,13 @@
 """
 
 import asyncio
+from collections.abc import Callable
 from typing import Protocol
 
 from app.core.config import APP_VERSION
 from app.features.admin.models import AdminStatusOut, Health
 
 CHECK_TIMEOUT_SEC = 2.0
-
-
-class Hub(Protocol):
-    @property
-    def connections(self) -> int: ...
 
 
 class Bus(Protocol):
@@ -34,15 +31,15 @@ class AdminStatusService:
     def __init__(self, *, timeout_sec: float = CHECK_TIMEOUT_SEC) -> None:
         self._timeout_sec = timeout_sec
         self._influx_ping: asyncio.Future[bool] | None = None
+        # 열린 /ws/spreads 연결 수(waiting 포함) — api lifespan 이 허브를 만든 뒤 채운다
+        self.ws_connections: Callable[[], int] = _no_hub
 
-    async def status(
-        self, *, hub: Hub | None, bus: Bus | None, influx: Influx | None
-    ) -> AdminStatusOut:
+    async def status(self, *, bus: Bus | None, influx: Influx | None) -> AdminStatusOut:
         redis, influx_health = await asyncio.gather(
             self._check_redis(bus), self._check_influx(influx)
         )
         return AdminStatusOut(
-            ws_connections=hub.connections if hub is not None else 0,
+            ws_connections=self.ws_connections(),
             redis=redis,
             influx=influx_health,
             version=APP_VERSION,
@@ -72,6 +69,10 @@ class AdminStatusService:
         except Exception:
             return "down"
         return "ok" if ok else "down"
+
+
+def _no_hub() -> int:
+    return 0
 
 
 def _consume(task: asyncio.Future[bool]) -> None:
