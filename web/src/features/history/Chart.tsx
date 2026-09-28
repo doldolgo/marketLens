@@ -15,7 +15,7 @@ import {
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { exName, fmtKrw, fmtPct, fmtTime, fmtUsdt, pctColor } from '../../shared/format'
 import { Pill, Seg, card, hint, kicker, type SegOpt } from '../../shared/ui'
-import { FX_CHOICES, INITIAL_BARS, REAL_FXS, exchangeStates, isMockFx, lineTone, type BandTone } from './candles'
+import { FX_CHOICES, INITIAL_BARS, exchangeStates, lineTone, type BandTone } from './candles'
 import { netPath } from './network'
 import { INTERVALS, INTERVAL_LABEL, INTERVAL_SEC, type Interval } from './rollup'
 import type { Candle1m, Dir, Dom, PremiumEvent } from './types'
@@ -182,10 +182,6 @@ export interface ToolbarProps {
   onInterval: (i: Interval) => void
   doms: Dom[]
   onDoms: (d: Dom[]) => void
-  fxs: string[]
-  onFxs: (f: string[]) => void
-  /** 이 코인이 있는 해외 거래소(피드 기준). 빈 배열 = 아직 모름 → 전부 고를 수 있다. 없는 거래소는 체크박스를 잠근다 — 고르면 빈 차트뿐이라. */
-  availableFxs: string[]
   /** 청크를 받는 중 — 직전 봉은 유지 (014 §3.7). */
   loading: boolean
   /** 마지막 조회 실패의 HTTP 상태(네트워크 실패 0). 없으면 null. */
@@ -198,34 +194,20 @@ export function ChartToolbar(p: ToolbarProps) {
     if (next.length > 0) set(next) // 최소 1개는 남긴다 — 빈 차트는 의미가 없어서
   }
   const cbStyle: CSSProperties = { accentColor: 'var(--color-accent)', width: 12, height: 12, cursor: 'pointer', margin: 0 }
-  const cbLabel = (on: boolean, off = false): CSSProperties => ({
-    display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, cursor: off ? 'not-allowed' : 'pointer',
-    color: on ? 'var(--color-neutral-300)' : 'var(--color-neutral-600)', opacity: off ? 0.4 : 1,
-  })
-  // 잠긴 항목(이 코인이 없는 해외 거래소)은 '전체' 와 개별 토글 어디서도 켜지지 않는다 — 고를 수 있는 것만이 '전체' 다
-  const group = <T extends string>(title: string, choices: T[], list: T[], label: (v: T) => string, set: (l: T[]) => void, enabled: (v: T) => boolean = () => true) => {
-    const all = choices.filter(enabled)
-    const allOn = all.length > 0 && all.every((v) => list.includes(v))
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ ...hint, fontSize: 11 }}>{title}</span>
-        <label style={cbLabel(allOn)}>
-          <input type="checkbox" style={cbStyle} checked={allOn} onChange={() => set(allOn ? [all[0]] : all)} />전체
+  const cbLabel = (on: boolean): CSSProperties => ({ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, cursor: 'pointer', color: on ? 'var(--color-neutral-300)' : 'var(--color-neutral-600)' })
+  const group = <T extends string>(title: string, all: T[], list: T[], label: (v: T) => string, set: (l: T[]) => void) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ ...hint, fontSize: 11 }}>{title}</span>
+      <label style={cbLabel(list.length === all.length)}>
+        <input type="checkbox" style={cbStyle} checked={list.length === all.length} onChange={() => set(list.length === all.length ? [all[0]] : all)} />전체
+      </label>
+      {all.map((v) => (
+        <label key={v} style={cbLabel(list.includes(v))}>
+          <input type="checkbox" style={cbStyle} checked={list.includes(v)} onChange={() => toggle(list, all, v, set)} />{label(v)}
         </label>
-        {choices.map((v) => {
-          const off = !enabled(v)
-          return (
-            <label key={v} style={cbLabel(list.includes(v), off)} title={off ? `${p.sym} 은 ${label(v)} 에 없습니다` : undefined}>
-              <input type="checkbox" style={cbStyle} disabled={off} checked={list.includes(v)} onChange={() => toggle(list, all, v, set)} />{label(v)}
-            </label>
-          )
-        })}
-      </span>
-    )
-  }
-  // mock 카드(MEXC)는 Binance 봉으로 만드므로 Binance 가 있을 때만
-  const fxEnabled = (id: string) => p.availableFxs.length === 0 || p.availableFxs.includes(isMockFx(id) ? REAL_FXS[0] : id)
-  const fxChoiceLabel = (id: string) => { const f = FX_CHOICES.find((x) => x.id === id); return f?.mock ? `${f.label} (mock)` : f?.label ?? id }
+      ))}
+    </span>
+  )
   const intervalOpts: SegOpt[] = INTERVALS.map((i) => ({
     label: INTERVAL_LABEL[i], onClick: () => p.onInterval(i),
     bg: p.interval === i ? 'var(--color-neutral-900)' : 'transparent',
@@ -239,10 +221,9 @@ export function ChartToolbar(p: ToolbarProps) {
         <Seg opts={intervalOpts} pad="5px 9px" />
       </span>
       {group('국내', DOMS, p.doms, exName, p.onDoms)}
-      {group('해외', FX_CHOICES.map((f) => f.id), p.fxs, fxChoiceLabel, p.onFxs, fxEnabled)}
       {p.loading && <Pill tone="accent">불러오는 중…</Pill>}
       {p.errorStatus != null && <Pill tone="warn">차트를 불러오지 못했습니다 (HTTP {p.errorStatus})</Pill>}
-      <span style={{ ...hint, marginLeft: 'auto' }}>해외 거래소 1개 = 차트 1개 · 휠 = 줌 · 드래그 = 이동 · 왼쪽 끝으로 끌면 과거 로드 (모든 차트 같이 움직임)</span>
+      <span style={{ ...hint, marginLeft: 'auto' }}>이 코인이 있는 해외 거래소마다 차트 1개(카드 오른쪽 접기) · 휠 = 줌 · 드래그 = 이동 · 왼쪽 끝으로 끌면 과거 로드 (모든 차트 같이 움직임)</span>
     </div>
   )
 }
@@ -263,6 +244,9 @@ export interface CardProps {
   sync: ChartSync
   /** 봉이 없을 때 "기간 내 기록 없음" 대신 보여 줄 안내(예: 이 코인이 있는 거래소). null 이면 기본 문구. */
   emptyHint: string | null
+  /** 접힘 — 헤더 줄만 그리고 차트를 만들지 않는다(봉도 안 부른다, Tab.tsx). */
+  collapsed: boolean
+  onToggle: () => void
 }
 
 interface Refs {
@@ -282,7 +266,36 @@ interface Refs {
 /** 입출금 띠의 행 하나 — 거래소 1개(해외 = 'fx', 국내 = dom id). */
 interface BandRow { id: string; label: string; pick: (c: Candle1m) => { deposit: boolean | null; withdraw: boolean | null }; from: PairSeries }
 
+/** 카드 헤더 줄 — 펼친 카드와 접힌 카드가 같은 줄을 쓴다. 오른쪽 끝이 접기/펼치기 버튼 */
+function CardHeader(p: { fx: string; dir: Dir; doms: string; mock: boolean; right?: string; collapsed: boolean; onToggle: () => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+      <span style={{ fontFamily: 'var(--font-heading)', fontSize: 16, fontWeight: 500, color: FX_COLOR }}>{fxLabel(p.fx)}</span>
+      <span style={{ fontSize: 12, color: dirColor(p.dir) }}>{DIR_LABEL[p.dir]} · {p.doms}</span>
+      {p.mock && <Pill tone="warn">MOCK — binance 봉을 변형한 시안 데이터</Pill>}
+      {p.right && <span style={{ ...hint, marginLeft: 'auto' }}>{p.right}</span>}
+      <button type="button" className="btn" onClick={p.onToggle}
+        style={{ marginLeft: p.right ? 0 : 'auto', fontSize: 12, padding: '2px 10px', color: 'var(--color-neutral-400)', borderColor: 'var(--color-neutral-800)' }}>
+        {p.collapsed ? '펼치기 ▾' : '접기 ▴'}
+      </button>
+    </div>
+  )
+}
+
 export default function FxChartCard(p: CardProps) {
+  // 접힌 카드는 헤더만 — 차트 훅을 태우지 않게 본체 컴포넌트를 따로 둔다(훅은 조건부로 못 부른다)
+  if (p.collapsed) {
+    const mock = FX_CHOICES.find((f) => f.id === p.fx)?.mock === true
+    return (
+      <div style={{ ...card, padding: 'var(--space-4) var(--space-8)' }}>
+        <CardHeader fx={p.fx} dir={p.dir} doms={p.series.map((s) => exName(s.dom)).join('·')} mock={mock} collapsed onToggle={p.onToggle} />
+      </div>
+    )
+  }
+  return <FxChartBody {...p} />
+}
+
+function FxChartBody(p: CardProps) {
   const boxRef = useRef<HTMLDivElement>(null)
   const refs = useRef<Refs | null>(null)
   const seriesRef = useRef<PairSeries[]>([])
@@ -521,11 +534,9 @@ export default function FxChartCard(p: CardProps) {
 
   return (
     <div style={{ ...card, padding: 'var(--space-6) var(--space-8) var(--space-6)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap', marginBottom: 'var(--space-3)' }}>
-        <span style={{ fontFamily: 'var(--font-heading)', fontSize: 16, fontWeight: 500, color: FX_COLOR }}>{fxLabel(p.fx)}</span>
-        <span style={{ fontSize: 12, color }}>{DIR_LABEL[p.dir]} · {S.map((s) => exName(s.dom)).join('·')}</span>
-        {mock && <Pill tone="warn">MOCK — binance 봉을 변형한 시안 데이터</Pill>}
-        <span style={{ ...hint, marginLeft: 'auto' }}>{single ? '캔들' : '국내 거래소별 종가 선'}</span>
+      <div style={{ marginBottom: 'var(--space-3)' }}>
+        <CardHeader fx={p.fx} dir={p.dir} doms={S.map((s) => exName(s.dom)).join('·')} mock={mock}
+          right={single ? '캔들' : '국내 거래소별 종가 선'} collapsed={false} onToggle={p.onToggle} />
       </div>
       {/* 읽기 줄 2줄 — 위: 시각·김프·가격, 아래: 거래소별 입출금. 한 줄에 몰면 폭에 따라 꺾여 읽기 어렵다 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 11.5, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-300)', marginBottom: 'var(--space-4)', minHeight: 36 }}>

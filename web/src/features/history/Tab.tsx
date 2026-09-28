@@ -2,7 +2,7 @@
 // 표·우측 column 은 /history/events 전 코인 조회(방향·기간·국내 거래소가 쿼리, 심볼·해외 거래소는 클라이언트에서 거른다).
 // 차트 음영은 선택 심볼만 차트 범위로 따로 조회 — 표 필터와 차트 설정은 서로 독립(맨 위 표 설정 → 표 → 차트 설정 → 차트 순서).
 // 참조 디자인(docs/design/reference/tabs/HistoryTab.tsx)의 김프/역프 열 분리 대신 서브탭 — 한 화면은 한 방향만.
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { exName, fmtAgo, fmtPct, fmtTime, pctColor } from '../../shared/format'
 import { Empty, Pill, Seg, card, hint, kicker, searchInput, type SegOpt } from '../../shared/ui'
 import { alias, list, oneOf, useUrlState, type Codec } from '../../shared/urlState'
@@ -102,23 +102,19 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
   // 차트 거래소 선택(국내·해외 각각 여러 개). 위 표 필터와는 별개 — 기본은 국내 둘 다라서 빗썸에만 있는 코인(HEMI 등)도 빈 화면이 되지 않는다.
   // 툴바 체크박스로만 좁힌다
   const [chartDoms, setChartDoms] = useUrlState<Dom[]>('h.doms', DOMS_ORDER, list(oneOf(DOMS_ORDER)))
-  const [chartFxs, setChartFxs] = useUrlState<string[]>('h.fx', ['binance'], list(oneOf(FX_CHOICES.map((f) => f.id))))
+  // 접힌 해외 카드(URL h.fxc). 카드는 이 코인이 있는 해외 거래소마다 하나씩 항상 있고, 접기만 고른다. mock(MEXC)은 시안이라 기본 접힘
+  const [collapsedFxs, setCollapsedFxs] = useUrlState<string[]>('h.fxc', FX_CHOICES.filter((f) => f.mock).map((f) => f.id), list(oneOf(FX_CHOICES.map((f) => f.id))))
+  const toggleFx = (id: string) => setCollapsedFxs(collapsedFxs.includes(id) ? collapsedFxs.filter((x) => x !== id) : [...collapsedFxs, id])
   // 선택 코인이 있는 해외 거래소(피드 기준, FX_CHOICES 순서). 피드가 아직 없으면 빈 배열 = 모름.
   // 피드 행의 fx 는 표시명(exName, 'Bitget')이라 id 도 표시명으로 바꿔 비교한다
   const availableFxs = useMemo(() => {
     const has = new Set(spreads.filter((r) => r.sym === selSym).map((r) => r.fx))
     return REAL_FXS.filter((id) => has.has(exName(id)))
   }, [spreads, selSym])
-  const availableKey = availableFxs.join('+')
-  // 코인이 바뀌면 켜진 해외 카드에서 이 코인이 없는 거래소를 뺀다(툴바에서도 잠기므로 빈 카드가 생기지 않게). 남는 게 없으면(CUDIS 는 Bitget 에만)
-  // 코인이 있는 거래소 전부로. mock 카드(MEXC)는 Binance 봉으로 만드므로 Binance 기준. 사용자가 고른 조합은 코인이 바뀌기 전까지 그대로(deps 에 chartFxs 없음)
-  useEffect(() => {
-    if (availableFxs.length === 0) return
-    const keep = chartFxs.filter((id) => availableFxs.includes(isMockFx(id) ? REAL_FXS[0] : id))
-    if (keep.length === chartFxs.length) return
-    setChartFxs(keep.length > 0 ? keep : availableFxs)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selSym, availableKey])
+  const mockBase = REAL_FXS[0] // mock 카드의 재료 봉 — binance
+  // 보여줄 카드 = 이 코인이 있는 해외 거래소(FX_CHOICES 순서). 피드가 아직 없으면 전부. mock 은 Binance 가 있을 때만
+  const shownFxs = FX_CHOICES.map((f) => f.id).filter((id) => availableFxs.length === 0 || availableFxs.includes(isMockFx(id) ? mockBase : id))
+  const openFxs = shownFxs.filter((id) => !collapsedFxs.includes(id))
   // 카드 간 시간축·십자선 연동 — 탭이 사는 동안 하나
   const [sync] = useState(() => new ChartSync())
   // 봉 종류 — 계층(1m·5m·1h·4h·1d) 하나를 골라 그 안에서 접는다 (candles.ts·rollup.ts)
@@ -155,18 +151,16 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
   const color = dirColor(dir)
 
   // 차트 데이터 — /history/candles 청크(쌍별)를 받아 봉 종류로 접는다. 접기까지 여기서 끝내 차트는 그리기만 한다.
-  // 실데이터 해외 거래소(binance·bybit·bitget)는 선택된 것만 부른다. mock 카드(MEXC)는 binance 봉을 변형해 만드므로 그때는 binance 도 부른다(015 시안, mock.ts)
+  // 실데이터 해외 거래소(binance·bybit·bitget)는 펼친 카드만 부른다. mock 카드(MEXC)는 binance 봉을 변형해 만드므로 그때는 binance 도 부른다(015 시안, mock.ts)
   const domsKey = chartDoms.join('+')
-  const fxsKey = chartFxs.join('+')
-  const mockBase = REAL_FXS[0] // mock 카드의 재료 봉 — binance
-  const realFxsToFetch = REAL_FXS.filter((id) => chartFxs.includes(id) || (id === mockBase && chartFxs.some(isMockFx)))
+  const fxsKey = openFxs.join('+')
+  const realFxsToFetch = REAL_FXS.filter((id) => openFxs.includes(id) || (id === mockBase && openFxs.some(isMockFx)))
   const { pairs, loading: candlesLoading, errorStatus: candlesError, oldestReached } = useCandles({
     base: selSym, dir, doms: DOMS_ORDER.filter((x) => chartDoms.includes(x)), fxs: realFxsToFetch, interval, older,
   })
-  // 카드 순서는 선택 순서가 아니라 FX_CHOICES 순서. 카드 = 해외 1개 × 선택한 국내 전부
+  // 카드 = 해외 1개 × 선택한 국내 전부. 접힌 카드는 봉이 없으니(안 불렀다) 헤더에 쓸 국내 목록만 빈 봉으로 채운다
   const cards = useMemo<{ fx: string; series: PairSeries[] }[]>(() => {
-    const fxs = FX_CHOICES.map((f) => f.id).filter((id) => chartFxs.includes(id))
-    return fxs.map((fx) => ({
+    return openFxs.map((fx) => ({
       fx,
       series: pairs.filter((p) => p.fx === (isMockFx(fx) ? mockBase : fx)).map((p) => {
         const raw = isMockFx(fx) ? mockCandles(fx, p.candles, dir, RES_SEC[res]) : p.candles
@@ -363,15 +357,21 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
 
         {/* 선택 심볼 봉 차트(표 아래) — 설정은 바로 위 툴바만 따른다. 해외 거래소 1개 = 카드 1개, 김프 + 가격 + 거래소별 입출금 (스펙 014 §3.7 · 015) */}
         <ChartToolbar sym={selSym} dir={dir} interval={interval} onInterval={setInterval_}
-          doms={chartDoms} onDoms={setChartDoms} fxs={chartFxs} onFxs={setChartFxs} availableFxs={availableFxs}
+          doms={chartDoms} onDoms={setChartDoms}
           loading={candlesLoading} errorStatus={candlesError} />
         {/* 카드 사이는 다른 블록보다 넓게 — 카드가 붙어 있으면 한 덩어리로 보여 답답하다 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
-          {cards.filter((c) => c.series.length > 0).map((c) => (
-            <FxChartCard key={c.fx} fx={c.fx} dir={dir} interval={interval}
-              series={c.series} events={cardEvents[c.fx] ?? NO_EVENTS} onNeedOlder={needOlder} loading={candlesLoading} sync={sync}
-              emptyHint={emptyHintFor(selSym, c.fx, availableFxs)} />
-          ))}
+          {shownFxs.map((fx) => {
+            const open = cards.find((c) => c.fx === fx)
+            // 접힌 카드의 series 는 헤더의 국내 목록용 빈 봉
+            const series = open?.series ?? DOMS_ORDER.filter((x) => chartDoms.includes(x)).map((dom) => ({ dom, fx, candles: [] }))
+            if (series.length === 0) return null
+            return (
+              <FxChartCard key={fx} fx={fx} dir={dir} interval={interval} collapsed={!open} onToggle={() => toggleFx(fx)}
+                series={series} events={cardEvents[fx] ?? NO_EVENTS} onNeedOlder={needOlder} loading={candlesLoading} sync={sync}
+                emptyHint={emptyHintFor(selSym, fx, availableFxs)} />
+            )
+          })}
         </div>
 
       </div>
