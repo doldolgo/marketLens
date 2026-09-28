@@ -129,8 +129,8 @@
 **PR 안 — 실행 세션(완료 조건)**
 - nginx: server 블록에 접속 로그 끔 / 기존 분기 계약 그대로(새 location 없음).
 - Caddyfile(`caddy/Caddyfile`): 조각 `access_log` 에 파일 출력(경로·0644·50MiB·5개), 요청·응답 헤더 삭제, `ua`·`referer` 덧붙임, IP 두 필드 24·48, 쿼리 세 키 삭제, 기록 제외 경로 다섯(공개 허용 목록에서 WS 를 뺀 것)과 canary UA / 도메인 블록에만 import, `http://` 블록엔 없음 / 기본 로거에 같은 지우기 규칙 / `Referrer-Policy strict-origin` / 023 계약(도메인 두 개·`reverse_proxy web:80` 둘·`protocols h1 h2`) 그대로.
-- compose: caddy 에 `./caddy:/etc/caddy:ro`·`./logs/caddy:/var/log/caddy`·`caddy-data:/data` / api 에 `STATSD_ADDR`·호스트 게이트웨이 / `.gitignore` 에 `logs/` / 기존 계약(컨테이너 6개·로그 상한·볼륨 4개) 그대로.
-- 배포 워크플로 serve: `up -d --build` 뒤 `docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile`, `docker image prune -f` 가 마지막, `--profile` 은 한 줄 그대로.
+- compose: caddy 에 `./caddy:/etc/caddy:ro`·`./logs/caddy:/var/log/caddy`·`caddy-data:/data` / api 에 `STATSD_ADDR`·호스트 게이트웨이 / `.gitignore` 에 `logs/` / 기존 계약(컨테이너 일곱(030)·로그 상한·볼륨 4개) 그대로.
+- 배포 워크플로 serve: `up -d --build` 뒤 `docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile`, `docker image prune -f` 가 마지막, `--profile` 은 serve·tunnel 두 줄(030).
 - `ops/cloudwatch/`: 네 파일 모두 JSON 으로 읽힌다 / 지표 파일 셋은 전역 추가 차원 `InstanceId` 하나·호스트명 없음·디스크 `/` 만·장치 차원 없음·`run_as_user` 없음, collect 는 주기 300·지표 둘, StatsD 는 serve 에만 / `serve-logs.json` 은 최상위 키가 `logs` 하나, 파일 경로 = `/home/ubuntu/marketlens/` + compose 로그 바인드의 호스트 쪽 + `/access.log`, 보존 90, 클래스 STANDARD.
 - 게이지: `STATSD_ADDR` 가 없으면 가짜 UDP 수신기에 아무것도 오지 않는다 / api 역할 앱에만 게이지 태스크가 있다(`tests/test_role.py` 방식) / 접속 0명이면 0, 연결 2개면 2 / `host:port` 가 아니면 WARNING 이고 앱은 뜬다 / 주기는 주입해 짧게.
 - 로컬 Docker: `caddy validate` 통과 / Caddyfile 사본 끝에 조각을 import 하는 `http://:8099` 블록(200 응답)을 붙여 띄우고 `/app/?s.q=x&tab=history`·`/?s.q=x`·canary UA·`/api/health`·`Referer: https://a.com?q=x`·`Referer: android-app://x/y` 요청 → 줄마다 IP 끝 `.0`, `s.q` 없음, 헤더는 `ua`·`referer` 뿐, `referer` 는 `https://a.com`·빈 값, canary·헬스 줄 없음 / upstream 이 없는 경로로 오류 줄을 내 docker 로그의 오류 줄도 IP·쿼리가 지워졌는지.

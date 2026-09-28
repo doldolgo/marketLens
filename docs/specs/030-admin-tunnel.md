@@ -1,6 +1,6 @@
 # 030 — admin-tunnel
 
-상태: TODO | 의존: **029 가 main 에 머지·배포된 뒤**. 계약을 쓰는 스펙: 007 deploy(compose·배포 워크플로), 021 infra-split(serve 박스·보안그룹), 023 domain-tls(DNS·caddy), 027 observability(serve 배포 순서의 caddy reload·`caddy/Caddyfile`), 029 admin(관리자 server `web:8081`)
+상태: DONE | 의존: **029 가 main 에 머지·배포된 뒤**. 계약을 쓰는 스펙: 007 deploy(compose·배포 워크플로), 021 infra-split(serve 박스·보안그룹), 023 domain-tls(DNS·caddy), 027 observability(serve 배포 순서의 caddy reload·`caddy/Caddyfile`), 029 admin(관리자 server `web:8081`)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -59,7 +59,40 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 2026-09-29 로컬(Mac, OrbStack Docker 29.4.0, compose v5.1.2). 브랜치 feat/030-admin-tunnel(029 구현 위)
+# 이미지 — 태그와 인덱스 digest
+docker buildx imagetools inspect cloudflare/cloudflared:2026.9.3
+#   MediaType manifest.list.v2 · Digest sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+#   Platform linux/amd64 (sha256:2fa795d0…0091) · linux/arm64 (sha256:b1b4c98a…c7b0)
+# Docker Hub 태그 목록(last_updated 순): 2026.9.3 = latest = 같은 인덱스 digest (2026-09-24 게시)
+docker run --rm --network none <이미지> tunnel run --help   # --token-file [$TUNNEL_TOKEN_FILE] 있음 · tunnel ready 있음
+
+# 기존 스펙 재검증 (마지막 코드 커밋 뒤)
+cd server && ruff check . && ruff format --check . && pytest -q   # All checks passed! · 237 files already formatted · 902 passed (시작 전 893 — test_admin_tunnel.py 9 추가)
+cd web && npm run lint && npm run build                            # oxlint 종료 코드 0 · ✓ built
+
+# 로컬 Docker — 덮어쓰기 파일(스크래치 compose.030.yml): 프로젝트 marketlens030, 컨테이너 이름 marketlens030-*,
+#   env_file 은 .env.example 사본, caddy 는 127.0.0.1:18030 만 게시·Caddyfile 사본(local_certs 만 더함), 접속 로그 바인드는 스크래치.
+#   secret 경로(./secrets/cloudflared-token)는 원본 그대로. 셸 COLLECT_HOST=127.0.0.1 DATA_HOST=127.0.0.1(collect·data 박스 없음)
+docker compose -p marketlens030 -f docker-compose.yml -f compose.030.yml --profile serve up -d --build   # secrets/ 없음 → exit 0, api·web·caddy Up
+#   망 marketlens030_default·marketlens030_admin 생성, web 만 두 망, api·caddy 는 default 만
+docker exec marketlens030-caddy caddy reload --config /etc/caddy/Caddyfile   # exit 0 · curl 127.0.0.1:18030/ → 200
+# 가짜 토큰(무작위 62바이트) → 레포 secrets/cloudflared-token (0444 — Mac 에서 65532 로 chown 불가). git status --short 빈 출력(git 무시)
+docker compose -p marketlens030 -f docker-compose.yml -f compose.030.yml --profile tunnel up -d   # cloudflared Created·Started 만
+#   api·web·caddy 의 컨테이너 ID·StartedAt·RestartCount 가 전후 같다 (diff 빈 출력)
+#   cloudflared: user 65532:65532 · Memory 134217728 · 망 marketlens030_admin 만 · PortBindings {} · env 에 TUNNEL_TOKEN_FILE 만(TUNNEL_TOKEN 없음)
+#   · 바인드 /run/secrets/cloudflared-token 읽기 전용 · 헬스체크 ["CMD","cloudflared","tunnel","--metrics","127.0.0.1:2000","ready"]
+#   · 로그 "Provided Tunnel token is not valid." 만 되풀이(exit 255 → 재시작) — 토큰을 읽고 곧바로 끝나 엣지 연결 시도 없음
+docker compose … --profile tunnel run --rm --no-deps -T cloudflared access curl http://api:8000/health
+#   lookup api on 127.0.0.11:53: no such host   (http://caddy:80/ 도 no such host, http://web:8081/ 은 닿음 — "failed to find Access application")
+docker run --rm --network marketlens030_admin busybox:1.36 nslookup api·caddy·web   # api·caddy NXDOMAIN, web 주소 · wget web:8081/ → <title>KimpTrack 관리자</title>
+COMPOSE_PROFILES=collect,data,serve docker compose … config --services   # influxdb redis server web api caddy (cloudflared 없음) · --profile tunnel → cloudflared 만
+# 두 번째 배포 흉내: serve up -d --build → api·web Recreate(같은 이미지여도 --build 면 compose v5 가 다시 만든다 — 030 과 무관, --build 없는 up 은 전부 Running)
+#   → caddy reload → tunnel up: cloudflared 컨테이너 ID 그대로
+docker compose … --profile serve --profile tunnel down -v --rmi local && rm -rf secrets && docker rmi <cloudflared 인덱스>
+docker ps -a · docker network ls · docker images · docker volume ls   # 시작 전 목록과 diff 0 (030 이름 0건)
+# compose 는 file secret 을 읽지 않는다: 모드 000 인 secret 파일로 busybox 서비스 up → Created·Started (운영의 65532·0400 파일을 배포 사용자가 못 읽어도 된다)
+# 배포 serve 꼬리(caddy reload 뒤 ~ prune)를 가짜 docker 함수로 bash 실행: 파일 없음·빈 파일 → "tunnel 건너뜀"·prune / 있음 → tunnel up·prune / tunnel up 실패 → exit 1(prune 안 감)
 ```
 
 ## 6. 갱신할 문서
@@ -78,6 +111,25 @@
 - 023 — §2 하지 않는 것의 "Cloudflare 프록시(주황 구름)" 뒤에 "(루트·www — `admin.kimptrack.com` 만 터널용 프록시 CNAME, 030)".
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+- 만든 것 (파일 목록): `docker-compose.yml`(서비스 `cloudflared` — 태그 `2026.9.3` + 인덱스 digest, profile `tunnel`, 망 `admin` 만, `mem_limit 128m`, 명령·exec 헬스체크, `TUNNEL_TOKEN_FILE` + 최상위 `secrets` / web 망 `default`·`admin` / 최상위 `networks.admin` / 머리 주석), `.gitignore`(`secrets/`), `.github/workflows/deploy.yml`(serve 의 caddy reload 뒤 `[ -s secrets/cloudflared-token ]` 일 때만 `--profile tunnel … up -d`, 아니면 "tunnel 건너뜀" 한 줄, prune 마지막), `README.md`(30행 일곱 컨테이너·cloudflared), 테스트 `server/tests/test_admin_tunnel.py`(신규 9 — compose 7·배포 2)·`test_deploy.py`(서비스 일곱·`PROFILE_OF` 에 tunnel·`--profile` 은 serve 만 serve·tunnel 두 줄·README 로컬 여섯/배포 일곱)·`test_observability.py`(caddy reload 는 up 뒤·prune 앞 — 끝에서 둘째 자리 단언을 풂), 런북 `docs/runbooks/admin-access.md`(신규). 문서: CLAUDE.md(§2 `secrets/`·런북 목록·인덱스 DONE), architecture(계약 규칙 관리자 경로·배포 토폴로지·현재 구조), dev-setup, status, 007 §2·§3, 027 §4. 앱 코드·라이브러리 변경 없음.
+- 의존 판단: 의존 줄 "029 가 main 에 머지·배포된 뒤" 는 운영에서 터널을 켜는 조건으로 읽었다 — 구현은 029 브랜치(feat/029-admin) 위에 쌓아 지금 했다. 머지 순서는 027 → 029 → 030 으로 고정되고, 터널은 serve 박스에 토큰 파일이 생겨야 뜨는데 그 파일은 사람이 런북(Cloudflare 설정) 뒤에 둔다. 의존 줄은 그대로 뒀다.
+- 이미지: `cloudflare/cloudflared:2026.9.3`, 인덱스 digest `sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c`(linux/amd64·linux/arm64) — 2026-09-29 `docker buildx imagetools inspect` 로 확인, 설계 세션 값과 같다. Docker Hub 에서 이 태그가 `latest` 와 같은 digest(2026-09-24 게시)라 실행 시점 최신 안정 태그다. 다음 갱신 2026-12(런북).
+- 추측한 지점 (묻지 않고 정한 사소한 것):
+  - 메모리 상한은 `mem_limit: 128m`(compose config 가 134217728 로 풂) — `deploy.resources` 대신 한 줄. 헬스체크 주기는 30초·제한 5초·재시도 3·시작 유예 30초(스펙은 exec 형식만 정함 — 평범한 docker 는 unhealthy 로 재시작하지 않으니 표시용이다).
+  - tunnel `up` 줄은 박스 `up` 과 같은 `--env-file .env --env-file server/.env`(compose 는 파일 전체를 치환한다 — 빼면 `INFLUX_TOKEN` 미설정 경고), `--build`·서비스 인자 없음. 건너뜀 문구 "tunnel 건너뜀 — secrets/cloudflared-token 이 없거나 비었다".
+  - 망 `admin` 은 기본 bridge(`internal` 아님 — 엣지로 나가야 한다). 테스트가 internal 이 아님을 단언한다.
+  - 런북: 터널 이름 `marketlens-serve`·Access 앱 이름 `marketlens-admin` 은 스펙에 없어 정했다(그룹 이름은 스펙 값). logrotate 에 `missingok`·`notifempty`·`su root root` 를 더했다(스펙은 주 1회·13개·copytruncate). 토큰 파일은 `umask 077` + `read -rs` 로 만든다(셸 기록·화면에 안 남게), `secrets/` 는 700.
+  - compose 머리 주석의 옛 개수("5개")를 여섯으로 고치고 cloudflared 줄을 더했다.
+  - 로컬 검증: 사용자 컨테이너·볼륨과 안 겹치게 스크래치 덮어쓰기(프로젝트·컨테이너 이름에 030, `.env.example` 사본, caddy 는 `127.0.0.1:18030` 만·Caddyfile 사본에 `local_certs` — 원본이면 운영 도메인 인증서를 Let's Encrypt 에 청한다). secret 경로는 원본 그대로라 레포에 `secrets/cloudflared-token` 을 만들었다가 지웠다(0444 — Mac 에서 65532 로 chown 불가). 가짜 토큰은 무작위 문자열이라 cloudflared 가 형식 검사에서 곧바로 끝난다 — **Cloudflare 엣지 연결 시도 없음**. 그 대신 컨테이너가 재시작을 되풀이해 그 안에서 이름을 풀 수 없어서, "cloudflared 컨테이너에서 api 가 안 풀린다" 는 같은 서비스 정의로 만든 컨테이너(`compose run cloudflared access curl http://api:8000/health` → no such host)와 `admin` 망의 busybox `nslookup`, cloudflared 의 망 목록(`admin` 하나)으로 봤다.
+  - 관측: compose v5 의 `up -d --build` 는 이미지가 같아도 빌드한 서비스(api·web)를 매번 다시 만든다(배포가 원래 그렇다 — 030 과 무관). tunnel `up` 은 cloudflared 만 만들고 두 번째엔 그대로 둔다. compose 는 file secret 을 읽지 않는다(모드 000 파일로 확인) — 운영 파일(65532·0400)을 배포 사용자가 못 읽어도 되고, 스크립트도 `-s`(크기)만 본다.
+- 실행 중 함께 고친 스펙 절: 007 §2(배포용 7컨테이너)·§3(컨테이너 7개 — `cloudflared` 줄, 로그 일곱, 배포 4-2 serve 터널, 계약 테스트 괄호), 027 §4(컨테이너 일곱·`--profile` serve·tunnel 두 줄). architecture 는 §6 의 serve 줄에 더해 "서비스 6개"·"여섯 컨테이너 모두" 를 일곱으로, 계약 규칙의 관리자 경로 문장에 들어오는 길, 현재 구조에 admin-tunnel 줄 — 안 고치면 문서끼리 어긋난다.
+- PR 본문에 옮길 것 (담당자 제안 — 이 PR 에서 고치지 않는다):
+  - 021 — serve 박스 설명에 "cloudflared — 밖으로만 나가는 연결(030)".
+  - 023 — §2 하지 않는 것의 "Cloudflare 프록시(주황 구름)" 뒤에 "(루트·www — `admin.kimptrack.com` 만 터널용 프록시 CNAME, 030)".
+  - `docs/specs/021-infra-split.md:§3.2` — "서비스마다 profile 하나: `server` → `collect`, `redis`·`influxdb` → `data`, `api`·`web` → `serve`" → 실제는 caddy 도 `serve`(023)이고 cloudflared 는 박스 profile 이 아닌 `tunnel`(serve 부속, 배포가 토큰 파일이 있을 때만 — 030).
+  - `docs/specs/023-domain-tls.md:§4` — "`test_deploy.py` — 컨테이너 여섯" → 일곱(030).
+  - `docs/specs/023-domain-tls.md:§2` — "배포 워크플로 변경 없음(`--profile serve` 가 caddy 도 띄운다)" → serve 배포는 up 뒤 caddy reload(027)와 토큰 파일이 있을 때 `--profile tunnel up`(030).
 - 남은 빚:
+  - §4 "배포·런북 뒤 — 사람" 항목 전부(status.md "운영 확인 대기") — 진짜 토큰이 없어 헬스체크 `ready`·엣지 연결·Protect with Access 는 로컬에서 못 봤다. 첫 확인은 런북 8·9단계.
+  - cloudflared 의 원격 관리(대시보드 실시간 로그·진단 — 이 버전의 `--management-diagnostics` 기본 켬)는 기본값 그대로다. 대시보드 권한자만 쓰지만 끄려면 후속.
+  - status.md 에 적은 030 빚 넷(대시보드에만 있는 설정·출구 제한 없음·Access 로그 24시간·021·023 제안 반영 대기).
