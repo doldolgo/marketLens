@@ -207,14 +207,9 @@ def test_web_image_is_multistage_node22_to_nginx() -> None:
 # --- nginx: /api 접두 제거·SPA fallback·캐시 규칙 ---------------------------
 
 
-def test_nginx_strips_api_prefix_and_falls_back_to_index() -> None:
+def test_nginx_falls_back_to_index_under_app_only() -> None:
     conf = _text("web/nginx.conf")
-    assert "location /api/ {" in conf
-    # proxy_pass 끝의 / 가 접두 제거를 만든다: /api/health → /health
-    # 021 — 업스트림 호스트는 COLLECT_HOST 치환(수집은 다른 박스). 고정 서비스명은 남지 않는다.
-    assert "proxy_pass http://${COLLECT_HOST}:8000/;" in conf
     assert "http://server:8000" not in conf
-    assert "location = /api { return 404; }" in conf
     # 022 — SPA fallback 은 /app/ 아래에서만, / 는 정적 랜딩
     assert "try_files $uri $uri/ /app/index.html;" in conf
     assert "try_files /landing.html =404;" in conf
@@ -230,107 +225,11 @@ def test_web_bundle_lives_under_app_prefix() -> None:
     assert "alias /usr/share/nginx/html/assets/;" in conf
 
 
-def _nginx_api_block() -> tuple[str, str]:
-    """api 로 보내는 정규식 location — (패턴, 블록 본문)."""
-    conf = _text("web/nginx.conf")
-    match = re.search(r"location ~ (\S+) \{(.*?)\n    \}", conf, re.S)
-    assert match is not None, "api 로 분기하는 정규식 location 이 없다"
-    return match.group(1), match.group(2)
-
-
-def test_nginx_routes_influx_history_paths_to_api_and_the_rest_to_server() -> None:
-    """네 경로만 api:8000 으로, 접두를 떼고 (016 §3.3). /api/history/events 는 server 로."""
-    pattern, block = _nginx_api_block()
-    to_api = (
-        "/api/history/premium",
-        "/api/history/streaks",
-        "/api/history/streaks/bulk",
-        "/api/history/candles",
-    )
-    for path in to_api:
-        assert re.search(pattern, path), path
-    for path in ("/api/history/events", "/api/spreads", "/api/health", "/api/refresh"):
-        assert not re.search(pattern, path), path
-    assert "proxy_pass http://api:8000;" in block
-    # proxy_pass 에 URI 가 없으므로 접두 제거는 rewrite 가 한다 — break 라 쿼리스트링은 그대로
-    assert "rewrite ^/api/(.*)$ /$1 break;" in block
-    for header in (
-        "proxy_set_header Host $http_host;",
-        "proxy_set_header X-Real-IP $remote_addr;",
-        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "proxy_set_header X-Forwarded-Proto $scheme;",
-    ):
-        assert header in block, header
-
-
-def test_nginx_routes_spreads_exactly_to_api_and_subpaths_to_server() -> None:
-    """`= /api/spreads` 만 api:8000 으로 — 접두 제거·쿼리 유지·헤더 4개, 하위 경로는 server 로 (018 §3.3)."""
-    conf = _text("web/nginx.conf")
-    block = conf.split("location = /api/spreads {", 1)[1].split("\n    }", 1)[0]
-    assert "proxy_pass http://api:8000;" in block
-    # 016 과 같은 방식 — rewrite 가 접두를 떼고 break 라 쿼리스트링은 그대로 따라간다
-    assert "rewrite ^/api/(.*)$ /$1 break;" in block
-    for header in (
-        "proxy_set_header Host $http_host;",
-        "proxy_set_header X-Real-IP $remote_addr;",
-        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "proxy_set_header X-Forwarded-Proto $scheme;",
-    ):
-        assert header in block, header
-    # 정확 일치뿐이라 /api/spreads/… 는 어느 api 분기에도 안 걸리고 접두 location /api/ 가 server 로 보낸다
-    assert "location /api/spreads" not in conf
-    pattern, _ = _nginx_api_block()
-    assert not re.search(pattern, "/api/spreads") and not re.search(
-        pattern, "/api/spreads/x"
-    )
-
-
-def test_nginx_routes_landing_summary_exactly_to_api() -> None:
-    """`= /api/landing` 은 api:8000 으로 — `/api/spreads` 와 같은 모양(접두 제거·헤더 4개) (022 §3.1)."""
-    conf = _text("web/nginx.conf")
-    block = conf.split("location = /api/landing {", 1)[1].split("\n    }", 1)[0]
-    assert "proxy_pass http://api:8000;" in block
-    assert "rewrite ^/api/(.*)$ /$1 break;" in block
-    for header in (
-        "proxy_set_header Host $http_host;",
-        "proxy_set_header X-Real-IP $remote_addr;",
-        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "proxy_set_header X-Forwarded-Proto $scheme;",
-    ):
-        assert header in block, header
-    pattern, _ = _nginx_api_block()
-    assert not re.search(pattern, "/api/landing")
-
-
-def test_nginx_upgrades_api_ws_to_api_without_touching_read_timeout() -> None:
-    """`/api/ws/` 접두 위치 → `api:8000/ws/`, Upgrade 헤더·HTTP/1.1, read timeout 은 기본 그대로 (017 §3.5)."""
-    conf = _text("web/nginx.conf")
-    block = conf.split("location /api/ws/ {", 1)[1].split("\n    }", 1)[0]
-    assert "proxy_pass http://api:8000/ws/;" in block
-    assert "proxy_http_version 1.1;" in block
-    assert "proxy_set_header Upgrade $http_upgrade;" in block
-    assert 'proxy_set_header Connection "upgrade";' in block
-    for header in (
-        "proxy_set_header Host $http_host;",
-        "proxy_set_header X-Real-IP $remote_addr;",
-        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "proxy_set_header X-Forwarded-Proto $scheme;",
-    ):
-        assert header in block, header
-    assert "proxy_read_timeout" not in conf
-    # 정규식 location(016)은 /api/ws/ 에 걸리지 않아야 접두 위치가 이긴다
-    pattern, _ = _nginx_api_block()
-    assert not re.search(pattern, "/api/ws/spreads")
-
-
 def test_nginx_template_substitutes_only_collect_host() -> None:
     """021 §3.2 — ${…} 꼴 치환 변수는 COLLECT_HOST 하나뿐이고 api 로 가는 세 분기는 서비스명 그대로다.
     nginx 자체 변수는 $name 꼴이라 필터(^COLLECT_HOST$)에 걸리지 않는다."""
     conf = _text("web/nginx.conf")
     assert set(re.findall(r"\$\{(\w+)\}", conf)) == {"COLLECT_HOST"}
-    # 016 정규식·018 /api/spreads·022 /api/landing
-    assert conf.count("proxy_pass http://api:8000;") == 3
-    assert "proxy_pass http://api:8000/ws/;" in conf
     for var in (
         "$http_host",
         "$remote_addr",

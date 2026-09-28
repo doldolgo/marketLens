@@ -65,7 +65,7 @@
   - `location /api/` 와 `location = /api` 는 404 만 답하고 `proxy_pass` 가 없다. 본문이 §3.2 JSON 이고 MIME 추정이 꺼져 있다.
   - `/api` 에 걸리는 정규식 location 이 없다. 접두 location `/api/ws/` 가 없다.
   - nginx 버전 숨김 설정이 있다.
-  - 호출 경로 대조: (1) `web/src/**/*.ts(x)` 에서 `${API_BASE}` 바로 뒤의 리터럴 `/…` 를 `?`·백틱·`$`·따옴표 전까지 뽑아 `/api` 를 붙인다 — `${API_BASE}` 뒤가 리터럴 `/` 로 시작하지 않는 곳이 있으면 실패. (2) `web/public/*.html` 은 `fetch(`·`new WebSocket(` 인자의 따옴표 안 `/api/…` 만(주석 제외). (3) `ops/canary/`(027)의 요청 경로와 `docs/runbooks/uptime-monitor.md` 의 모니터 URL 경로. 셋의 합집합이 허용 목록의 부분집합이다.
+  - 호출 경로 대조: (1) `web/src/**/*.ts(x)` 에서 `${API_BASE}` 바로 뒤의 리터럴 `/…` 를 `?`·백틱·`$`·따옴표 전까지 뽑아 `/api` 를 붙인다 — `${API_BASE}` 뒤가 리터럴 `/` 로 시작하지 않는 곳이 있으면 실패. (2) `web/public/*.html` 은 `fetch(`·`new WebSocket(` 인자의 따옴표 안 `/api/…` 만(주석 제외). (3) `ops/canary/`(027)의 요청 경로와 `docs/runbooks/uptime-monitor.md` 의 모니터 URL 경로. `ops/canary/` 가 아직 없으면(027 구현 전) 그 출처는 빈 집합이고, 생기면 테스트 수정 없이 대조에 들어간다. 셋의 합집합이 허용 목록의 부분집합이다.
   - 기존 테스트 고칠 것: `_nginx_api_block` 과 016 정규식 단언 → "정규식 location 없음" 단언 하나. `location = /api { return 404; }` 문자열 단언 → JSON 404 단언. `location /api/` 의 `proxy_pass http://${COLLECT_HOST}:8000/;` 단언 → 수집기로 가는 정확 일치 셋이 `${COLLECT_HOST}` 를 쓴다. spreads 테스트(`…_subpaths_to_server`)는 "`/api/spreads` 는 공개에 없다" 로. api `proxy_pass` 개수는 새 모양에 맞춘 값으로. 나머지(`try_files`·캐시 헤더·`COLLECT_HOST` 한 변수 치환)는 그대로.
 - 로컬 Docker: `docker network create` → server 이미지의 python 으로 받은 요청 줄을 stdout 에 찍는 에코 서버 둘(망 별칭 `api`·`server`, web 보다 먼저) → 같은 망에 web 이미지(`COLLECT_HOST=server`, `NGINX_ENVSUBST_FILTER=^COLLECT_HOST$`). 요청은 `curl --path-as-is` 로 보내고 도착 여부는 에코 서버의 `docker logs` 로 본다.
   - 허용 여섯(`/api/ws/spreads` 는 업그레이드 헤더)이 맞는 에코 서버에 접두가 떼진 경로·쿼리 그대로 도착한다.
