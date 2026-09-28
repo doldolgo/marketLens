@@ -57,6 +57,8 @@ from app.core.streams.upbit import UpbitStream
 from app.core.tick_store import Flusher, TickRelay
 from app.core.ticks import TickLoop
 from app.core.universe import UniverseRefresher
+from app.features.admin.router import router as admin_router
+from app.features.admin.service import AdminStatusService
 from app.features.analysis.router import router as analysis_router
 from app.features.health.router import router as health_router
 from app.features.history.router import events_router as history_events_router
@@ -455,13 +457,17 @@ def create_app() -> FastAPI:
         )
 
     # api 역할은 Influx 만 읽는 네 경로 + 017 의 /ws/spreads + 018 의 GET /spreads(Redis 읽기)
-    # + 022 의 GET /landing(Redis·Influx 읽기) — /history/events 는 진행 중 사건을 메모리에서 읽으므로
-    # 제외 (016 §3.1, 018 §3.4)
+    # + 022 의 GET /landing(Redis·Influx 읽기) + 029 의 GET /admin/status — /history/events 는 진행 중
+    # 사건을 메모리에서 읽으므로 제외 (016 §3.1, 018 §3.4)
     app.include_router(history_router)
     app.include_router(spreads_ws_router)
     app.include_router(spreads_router)
     app.include_router(landing_router)
-    if not api_only:
+    if api_only:
+        # 029 — 관리자 상태(WS 접속 수·Redis·Influx). 앞선 Influx ping 을 기억하는 자리라 앱마다 하나
+        app.state.admin = AdminStatusService()
+        app.include_router(admin_router)
+    else:
         app.include_router(spreads_refresh_router)
         app.include_router(analysis_router)
         app.include_router(history_events_router)
