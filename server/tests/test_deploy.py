@@ -354,7 +354,10 @@ def test_public_api_ws_spreads_upgrades_without_touching_read_timeout() -> None:
         assert (["Upgrade", "$http_upgrade"] in headers) == upgrades, key
         assert (["Connection", "upgrade"] in headers) == upgrades, key
         assert (_args(children, "proxy_http_version") == [["1.1"]]) == upgrades, key
-    assert "proxy_read_timeout" not in _text("web/nginx.conf")
+    server = _public_server()
+    assert not _args(server, "proxy_read_timeout")
+    for children in _locations(server).values():
+        assert not _args(children, "proxy_read_timeout")
 
 
 def test_public_api_rest_answers_app_shaped_json_404_without_proxy() -> None:
@@ -419,9 +422,8 @@ def test_nginx_template_substitutes_only_collect_host() -> None:
     nginx 자체 변수는 $name 꼴이라 필터(^COLLECT_HOST$)에 걸리지 않는다."""
     conf = _text("web/nginx.conf")
     assert set(re.findall(r"\$\{(\w+)\}", conf)) == {"COLLECT_HOST"}
-    # 028 — 수집기 셋(health·health/collect·history/events), api 셋(history/candles·landing·ws/spreads)
-    assert conf.count("proxy_pass http://${COLLECT_HOST}:8000;") == 3
-    assert conf.count("proxy_pass http://api:8000;") == 3
+    # 경로별 업스트림 개수는 세지 않는다 — 공개 쪽은 허용 여섯 테스트가 고정하고, 029 의 관리자 server 가
+    # 같은 파일에 프록시를 더해도 이 테스트가 깨지지 않게(028 §4 — 단언은 listen 80 블록만)
     for var in (
         "$http_host",
         "$remote_addr",
@@ -464,14 +466,24 @@ def _strip_comments(text: str, suffix: str) -> str:
 
 
 def _web_src_paths() -> set[str]:
-    """(1) `${API_BASE}` 바로 뒤 리터럴 경로 — 리터럴 / 로 시작하지 않으면 대조할 수 없으니 실패."""
+    """(1) `${API_BASE}` 바로 뒤 리터럴 경로 — 리터럴 / 로 시작하지 않으면 대조할 수 없으니 실패.
+    `API_BASE + …` 처럼 템플릿 밖에서 쓰면 경로를 못 뽑으므로 실패하고(정의·import 줄과 주석은 예외),
+    따옴표 안의 리터럴 `/api/…` 는 그대로 대조에 넣는다."""
     paths: set[str] = set()
     for file in sorted((ROOT / "web/src").rglob("*.ts*")):
-        for tail in re.findall(
-            r"\$\{API_BASE\}(" + _TAIL + ")", file.read_text("utf-8")
-        ):
+        text = _strip_comments(file.read_text("utf-8"), ".ts")
+        for tail in re.findall(r"\$\{API_BASE\}(" + _TAIL + ")", text):
             assert tail.startswith("/"), f"{file.name}: ${{API_BASE}} 뒤 {tail!r}"
             paths.add("/api" + tail)
+        for line in text.splitlines():
+            bare = re.sub(r"\$\{API_BASE\}", "", line)
+            if "API_BASE" in bare and not re.match(
+                r"\s*(import\b|export const API_BASE\b|API_BASE,|\})", line
+            ):
+                raise AssertionError(
+                    f"{file.name}: 템플릿 밖의 API_BASE — {line.strip()}"
+                )
+        paths |= set(re.findall(r"['\"`](/api/" + _TAIL + ")", text))
     return paths
 
 
@@ -501,7 +513,10 @@ def _canary_paths(root: Path = ROOT / "ops/canary") -> set[str]:
             text = file.read_text("utf-8")
         except UnicodeDecodeError:
             continue
-        paths |= set(_API_PATH.findall(_strip_comments(text, file.suffix)))
+        text = _strip_comments(text, file.suffix)
+        paths |= set(_API_PATH.findall(text))
+        if file.suffix in (".yml", ".yaml"):  # `path: /api/health` 처럼 따옴표 없는 값
+            paths |= set(re.findall(r":\s*(/api(?:/[\w.~%-]*)*)", text))
     return paths
 
 
@@ -538,10 +553,14 @@ def test_canary_paths_are_picked_up_once_the_directory_exists(tmp_path: Path) ->
         '# /api/docs\nURL = BASE + "/api/health"\n', "utf-8"
     )
     (tmp_path / "README.md").write_text("`/api/spreads` 는 닫혀 있다\n", "utf-8")
+    (tmp_path / "checks.yml").write_text(
+        "steps:\n  - path: /api/landing  # /api/docs\n", "utf-8"
+    )
     assert _canary_paths(tmp_path) == {
         "/api/ws/spreads",
         "/api/history/candles",
         "/api/health",
+        "/api/landing",
     }
 
 
