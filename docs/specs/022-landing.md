@@ -27,7 +27,7 @@
 | 그 밖의 루트 경로 | 정적 파일 또는 404 |
 
 - 기존 규칙(022 이전 판)은 그대로다: 쿼리 붙은 `/` 는 쿼리를 들고 301, SPA fallback 은 `/app/` 아래에서만, `landing.html`·`index.html` no-store, `assets/` 1년 immutable, `/landing/*`·`/robots.txt`·`/sitemap.xml`·`/favicon.svg` 는 정적 파일.
-- `/api/landing` 은 `= /api/spreads` 와 같은 모양의 **정확 일치** location — 접두 제거 rewrite·프록시 헤더 4개. 배포에서 api 가 죽으면 이 경로만 502 이고 랜딩 본문은 그대로 뜬다.
+- `/api/landing` 은 공개 허용 목록(028)의 **정확 일치** location 하나 — 다른 허용 경로와 같은 모양(접두 제거 rewrite·프록시 헤더 4개). 배포에서 api 가 죽으면 이 경로만 502 이고 랜딩 본문은 그대로 뜬다.
 
 ### 3.2 `GET /landing` — 요약 API
 - 두 역할(`api`·`collector`) 모두 포함한다 — 로컬 단일 프로세스에서도 뜨게(018 의 `/spreads` 와 같은 이유). 배포에선 nginx 가 api 로만 보낸다. 쿼리 파라미터는 없다(와도 무시).

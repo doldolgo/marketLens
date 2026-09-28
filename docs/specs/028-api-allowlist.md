@@ -15,7 +15,7 @@
   - 요청 속도 제한. `/api/history/events` 의 기간 상한 — 공개로 남지만 상한이 없다(`?start=0` 이면 사건 전부를 수집기가 읽는다). 후속 빚으로 남긴다(status.md).
   - 로컬 개발(vite proxy)은 바뀌지 않는다 — `/api/*` 를 그대로 `localhost:8000` 으로 넘긴다.
 - 바꾸는 기존 것: 007·016·018·021 의 nginx 분기 문장("그 외 `/api/*` → server", api 로 가는 history 정규식 분기, `/api/spreads` 공개), 003 `/refresh`·004 분석 6개·005 `/history/premium`·`streaks`·`bulk`·018 `GET /spreads` 가 공개 주소에서 404 가 된다(API 자체는 그대로). `/api/spreads` 로 하던 수동 확인(008·018·021·022·런북)은 박스 안 호출로 바꾼다(§3.4).
-- 담당: 003·004 는 팀원 담당, 016·018·021 은 hereokay 담당이다 — 이 PR 은 그 스펙들을 **고치지 않는다**(CLAUDE.md §5). §6 의 "담당자에게 제안" 목록을 PR 본문에 적고 담당자가 반영한다. 005·007·008·022·027 은 이 레포 주인 담당이라 고친다. CLAUDE.md §5 허용 목록 밖에서 고치는 것(사람 승인): `docker-compose.yml`(주석 한 줄), `web/Dockerfile`(주석 한 줄).
+- 담당: 003·004 는 팀원 담당, 016·017·018·021 은 hereokay 담당이다 — 이 PR 은 그 스펙들을 **고치지 않는다**(CLAUDE.md §5). §6 의 "담당자에게 제안" 목록을 PR 본문에 적고 담당자가 반영한다. 005·007·008·022·027 은 이 레포 주인 담당이라 고친다. CLAUDE.md §5 허용 목록 밖에서 고치는 것(사람 승인): `docker-compose.yml`(주석 한 줄), `web/Dockerfile`(주석 한 줄).
 
 ## 3. 동작
 
@@ -39,7 +39,7 @@
 - `/api` 자신과 위 표에 없는 `/api/*` 는 nginx 가 백엔드에 넘기지 않고 404 를 답한다. 메서드와 무관하다(`POST /api/refresh` 도 404).
 - 본문은 앱의 404 와 같은 JSON `{"error":{"code":"not_found","message":"Not Found","detail":null}}`, `Content-Type: application/json` — 경로 확장자(`/api/x.html`·`.js`·`.png`)와 무관하게 이 한 줄이다(확장자별 MIME 추정을 끈다). 403 을 쓰지 않는 이유: 경로가 있다는 사실을 드러낸다. 헤더까지 앱과 같지는 않다(앱 404 에는 `vary: Origin`) — 흉내 내지 않는다.
 - 공개 server 의 응답 헤더·오류 페이지에서 nginx 버전을 숨긴다(`Server: nginx`).
-- nginx 가 location 을 고르기 전에 거절하는 요청(`TRACE` 405, `/api/%00`·루트 밖 `..` 400, 1MB 넘는 본문 413)은 nginx 기본 오류 HTML(버전 없음)이다 — 이 규칙 밖이다.
+- nginx 가 location 을 고르기 전에 거절하는 요청(`TRACE` 405, `/api/%00`·루트 밖 `..` 400, 1MB 넘는 본문 413, 요청 줄이 헤더 버퍼 8KB 를 넘으면 414)은 nginx 기본 오류 HTML(버전 없음)이다 — 이 규칙 밖이다.
 - 허용 목록에 있는 경로라도 백엔드가 답하는 것은 백엔드 형식이다 — 예: api 에 없는 WebSocket 핸드셰이크는 uvicorn 이 403(본문 없음)으로 거절한다.
 
 ### 3.3 우회에 대한 규칙
@@ -83,7 +83,8 @@
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/pytest -q
 #   All checks passed! / 226 files already formatted / 839 passed (test_deploy.py 35 — 028 신규 7·수정 2·삭제 4)
 cd web && npm run lint && npm run build           # oxlint exit 0 / ✓ built
-# 로컬 Docker(OrbStack 29.4.0, nginx 1.27.5). echo.py = http.server 가 받은 요청 줄·Upgrade·Connection 을 stdout 에 찍고 200
+# 로컬 Docker(OrbStack 29.4.0, nginx 1.27.5). echo.py·verify028.py 는 레포 밖(실행 세션 scratchpad)에 있다 — 다시 돌릴 때는 §4 산문대로 만든다.
+# echo.py = python http.server 가 받은 요청 줄·Upgrade·Connection 을 stdout 에 찍고 200. verify028.py = 요청마다 curl --path-as-is -i 후 에코 서버 docker logs 줄 수로 도착을 센다
 docker build -t ml028-server ./server && docker build -t ml028-web ./web
 docker network create ml028-net
 docker run -d --name ml028-echo-api    --network ml028-net --network-alias api    ml028-server python -u -c "$(cat echo.py)" api
@@ -93,7 +94,7 @@ docker exec ml028-web nginx -t                    # syntax is ok / test is succe
 python verify028.py   # 요청마다 curl --path-as-is -i, 도착 = 에코 서버 docker logs 줄 수 차이 → 54 PASS, 0 failure(s)
 #   허용 6: /api/health?base=BTC&x=%20a%2Fb → 200, ECHO server GET /health?base=BTC&x=%20a%2Fb (health/collect·history/events 도 server)
 #           /api/history/candles·/api/landing → ECHO api, /api/ws/spreads → ECHO api GET /ws/spreads?… upgrade=websocket connection=upgrade
-#   닫힘 45: §4 목록 21(+ /api/x.png) · 변형 16(/api//premium /api/%70remium /api/./premium /api/x/../premium /api/ws/../docs
+#   닫힘 45: §4 목록 GET 20 + /api/x.png · 변형 16(/api//premium /api/%70remium /api/./premium /api/x/../premium /api/ws/../docs
 #           /api/history/candles/../../premium /api/%2e/premium /api/Health /api/health;x /api/landing;/../docs /api/%2570remium
 #           /api/ws/spreads%2F..%2F..%2Fdocs …) · 끝에 / 붙은 허용 6 · POST /api/refresh · /api/docs?x=1
 #           → 전부 404, Content-Type application/json, 본문 = 앱 404 JSON, arrived=0
@@ -117,6 +118,10 @@ docker rm -f ml028-web ml028-echo-api ml028-echo-server && docker network rm ml0
 - `docker-compose.yml` 80행 주석 "nginx 의 `location /api/` 업스트림" → "nginx 허용 목록 중 수집기로 가는 location 의 업스트림(028)", `web/Dockerfile` 11행 주석 "/api/ → ${COLLECT_HOST}:8000/ 프록시" → "/api 허용 목록 프록시(028)".
 
 **담당자에게 제안 — 이 PR 에서 고치지 않는다(PR 본문에 그대로 적는다)**
+- 017 — §3.5 59행 "`location /api/ws/`(앞부분 일치)를 `proxy_pass http://api:8000/ws/;`" → "`= /api/ws/spreads` 정확 일치 + 접두 제거 rewrite(028)", §4 77행 nginx 계약 문장도 같은 뜻으로(그 테스트는 028 이 지웠다). 코드 `server/app/features/spreads/ws.py` 머리 주석 "nginx 가 `/api/ws/` 를 api 로만" 도 같은 뜻으로.
+- 016 — §4 78행 "`location /api/` 의 기존 `proxy_pass` 와 `location = /api` 404 유지" → "공개 `/api` 는 028 허용 목록".
+- 018 — §1 9행·§2 16행 "nginx `/api/spreads` → `api` 분기" → "공개에는 없다(028) — 박스 안에서 `http://api:8000/spreads`", §3 40행 "`stop api` 면 `/api/spreads` 는 502" → 공개에서는 404.
+- 021 — 64행 "serve 의 `/api/*`(수집 경로)만 502" → "수집기로 가는 공개 셋만 502, 그 밖의 `/api/*` 는 404(028)".
 - 003 — §3.3 110행 "`POST /refresh` 200" bullet 끝에 "공개 주소에서는 404(028) — 박스 안·관리자 페이지(029)에서 부른다".
 - 004 — §1(9행)의 "curl/브라우저로 직접 호출하는 BE 전용 도구" 뒤에 "(공개 주소에서는 닫혀 있다 — 028, 관리자 페이지 029)".
 - 016 — §3.3 표의 "그 외 `/api/*` | `server:8000`" 행 삭제·api 로 가는 history 행을 `= /api/history/candles` 로, 57행 → "공개 분기는 전부 정확 일치다(028)", 58행 → "공개 server 의 `/api` 는 028 허용 목록이 정한다", 60행 "위 네 경로만 502" → "api 로 가는 공개 경로(`/api/history/candles`·`/api/landing`·`/api/ws/spreads`)만 502", §4 81행의 `curl localhost:8080/api/history/premium?...` → `…/api/history/candles?base=BTC`.
@@ -139,7 +144,9 @@ docker rm -f ml028-web ml028-echo-api ml028-echo-server && docker network rm ml0
   - `CLAUDE.md` §4 018 행 범위 — "nginx `/api/spreads` 를 `api` 로" → 028 뒤 공개에서 닫힘(018 담당).
   - `docs/runbooks/uptime-monitor.md` "왜 `/health` 하나로" — "`/api/health` 는 serve 박스의 api 가 답하지만" → nginx 가 수집기로 넘긴다(028 §3.1·027 §3.1). 판정(정체 → 503)은 같다.
   - `docs/context/architecture.md` '현재 구조' 017 — compose `api` 의 "`depends_on: redis`" → 021 이 depends_on 을 모두 없앴다(`test_compose_has_no_depends_on_anywhere`). 028 과 무관해 그대로 둠.
+- 설계 세션 검토 뒤 고친 것: `test_nginx_template_substitutes_only_collect_host` 의 파일 전체 proxy_pass 개수 두 줄을 지웠다(경로별 업스트림은 허용 여섯 테스트가 고정 — 029 관리자 server 가 같은 파일에 프록시를 더해도 깨지지 않게), read timeout 금지를 공개 블록만 보게, web/src 에서 `${API_BASE}` 밖의 `API_BASE` 사용을 실패로·따옴표 안 리터럴 `/api/…` 도 대조에, canary YAML 의 따옴표 없는 값도 추출. index fallback 테스트는 실행 세션이 이름을 `test_nginx_falls_back_to_index_under_app_only` 로 바꾸고 `/api` 단언 셋을 지웠다(허용 목록 테스트로 옮김). `test_canary_paths_are_picked_up_once_the_directory_exists` 는 추출 규칙의 자기 확인이다 — 027 의 ops/canary 가 오면 실제 대조로 충분한지 보고 정리한다. 022 §3.1 30행(`= /api/spreads` 를 기준으로 삼던 문장)과 `docs/runbooks/uptime-monitor.md` 의 라우팅 설명(수집기가 답한다)도 고쳤다.
 - 남은 빚:
+  - canary 추출의 JS 블록 주석 제거는 문자열 안의 `/*` 를 가리지 못한다 — 027 코드가 오면 실제 파일로 확인.
   - status.md 알려진 빚 셋 — `/api/history/events` 기간 상한 없음, 닫힌 API 는 029 전까지 박스 안, 003·004·016·018·021 문장 반영 대기.
   - 배포 뒤 운영 확인(사람, §4) 대기 — 실제 WebSocket 101 은 로컬 에코 서버로 보지 않았다(업그레이드 헤더 도착까지만).
   - 호출 경로 대조는 `${API_BASE}` 를 거치지 않는 web/src 호출(`API_BASE + …`·리터럴 `'/api/…'`)과 변수로 넘긴 `fetch(url)` 을 못 잡는다 — 지금 코드엔 없다. canary 추출 규칙은 027 의 실제 코드가 오면 한 번 확인할 것.
