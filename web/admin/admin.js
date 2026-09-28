@@ -34,13 +34,13 @@ const STATE_TONE = { ok: 'ok', stale: 'warn', down: 'bad' };
 const UP_TONE = { ok: 'ok', down: 'bad' };
 
 // 세션 판별 — (1) 401 + 앱 JSON(detail) = 토큰 오류, 그대로 돌려준다 (2) 401 인데 JSON 이 아니거나 fetch 자체가
-// 실패(교차 출처 리다이렉트) = 로그인 만료 → 전체 새로고침 (3) 403 은 호출한 쪽이 "권한·설정 오류" 로 보인다.
+// 실패(교차 출처 리다이렉트) = 로그인 만료 신호 — Expired 를 던지고, 새로고침할지는 부른 쪽이 정한다(expired)
+// (3) 403 은 호출한 쪽이 "권한·설정 오류" 로 보인다.
 async function call(path, init = {}) {
   let resp;
   try {
     resp = await fetch(path, { ...init, headers: { ...XHR, ...init.headers }, cache: 'no-store' });
   } catch {
-    expired();
     throw new Expired();
   }
   const text = await resp.text();
@@ -51,14 +51,13 @@ async function call(path, init = {}) {
     body = null;
   }
   const appJson = body !== null && typeof body === 'object' && 'detail' in body;
-  if (resp.status === 401 && !appJson) {
-    expired();
-    throw new Expired();
-  }
-  alive();
+  if (resp.status === 401 && !appJson) throw new Expired();
   return { status: resp.status, body: body !== null && typeof body === 'object' ? body : null };
 }
 
+// 로그인 만료 신호 — 표시가 없으면 한 번 새로고침하고, 표시가 있으면 알림만 보인다(연속 새로고침은 한 번까지).
+// 주소는 화면 주소 `/` 로 고정한다: nginx 는 `//다른호스트/..%2F/` 같은 경로도 `/` 로 정규화해 이 화면을 주는데,
+// 그 pathname 을 그대로 쓰면 프로토콜 상대 URL 이 되어 다른 출처(가짜 로그인 화면)로 간다.
 function expired() {
   if (reloading) return;
   if (new URLSearchParams(location.search).has(RELOAD_MARK)) {
@@ -66,38 +65,47 @@ function expired() {
     return;
   }
   reloading = true;
-  location.replace(`${location.pathname}?${RELOAD_MARK}=1`);
+  location.replace(`/?${RELOAD_MARK}=1`);
 }
 
+// 폴링 한 번의 호출이 모두 만료 신호 없이 끝났다 = 로그인이 살아 있다. 다음 만료 때 다시 한 번 새로고침할 수 있게
+// 표시를 지운다. 응답 하나만 보고 지우면, 한 경로만 계속 만료일 때 두 폴링마다 새로고침이 끝없이 되풀이된다.
 function alive() {
-  // 응답이 왔다 = 로그인이 살아 있다. 다음 만료 때 다시 한 번 새로고침할 수 있게 표시를 지운다
   if (new URLSearchParams(location.search).has(RELOAD_MARK)) {
-    history.replaceState(null, '', location.pathname);
+    history.replaceState(null, '', '/');
     notice('');
   }
 }
 
-// 경로 하나를 불러 그린다. 403 과 JSON 이 아닌 응답(502 등)은 칸에 사유를 적는다
+// 경로 하나를 불러 그린다. 403·JSON 이 아닌 응답(502 등)·만료 신호는 fail 이 사유를 적고 같은 묶음의 칸을 비운다
+// (직전 값이 정상으로 읽히지 않게). 돌려주는 값 = 만료 신호였는가(새로고침은 refreshAll 이 묶음 단위로 정한다)
 async function load(path, render, fail) {
   try {
     const { status, body } = await call(path);
     if (status === 403) fail('권한·설정 오류 (403)');
     else if (body === null) fail(`응답 오류 (HTTP ${status})`);
     else render(body, status);
+    return false;
   } catch (err) {
-    if (!(err instanceof Expired)) fail('불러오지 못함');
+    const gone = err instanceof Expired;
+    fail(gone ? '로그인 만료·연결 끊김' : '불러오지 못함');
+    return gone;
   }
 }
 
-// 025 /health — 503 도 상태 응답이라 본문을 그린다(오류가 아니다)
-function health(prefix) {
+// 025 /health — 503 도 상태 응답이라 본문을 그린다(오류가 아니다). api 의 버전 칸은 /admin/status 가 채운다
+function health(prefix, withVersion) {
   return [
     (body) => {
       put(`${prefix}-status`, String(body.status), HEALTH_TONE[body.status] || 'bad');
       put(`${prefix}-tick`, ago(body.lastTickAt));
-      if ($(`${prefix}-version`)) put(`${prefix}-version`, String(body.version));
+      if (withVersion) put(`${prefix}-version`, String(body.version));
     },
-    (why) => put(`${prefix}-status`, why, 'bad'),
+    (why) => {
+      put(`${prefix}-status`, why, 'bad');
+      put(`${prefix}-tick`, '-');
+      if (withVersion) put(`${prefix}-version`, '-');
+    },
   ];
 }
 
@@ -106,6 +114,11 @@ function renderStatus(body) {
   put('api-redis', String(body.redis), UP_TONE[body.redis] || 'bad');
   put('api-influx', String(body.influx), UP_TONE[body.influx] || 'bad');
   put('api-version', String(body.version));
+}
+
+function statusFail(why) {
+  put('api-ws', why, 'bad');
+  for (const id of ['api-redis', 'api-influx', 'api-version']) put(id, '-');
 }
 
 function cell(row, text, tone, title) {
@@ -134,16 +147,23 @@ function renderCollect(body) {
   put('collect-meta', `전체 1시간 ${Number(body.successRate1h).toFixed(1)}%`);
 }
 
+function collectFail(why) {
+  $('exchanges').replaceChildren();
+  put('collect-meta', why, 'bad');
+}
+
 async function refreshAll() {
   if (busy || reloading) return;
   busy = true;
   try {
-    await Promise.all([
-      load('/api/health', ...health('collector')),
-      load('/svc/api/health', ...health('api')),
-      load('/svc/api/admin/status', renderStatus, (why) => put('api-ws', why, 'bad')),
-      load('/api/health/collect', renderCollect, (why) => put('collect-meta', why, 'bad')),
+    const signals = await Promise.all([
+      load('/api/health', ...health('collector', true)),
+      load('/svc/api/health', ...health('api', false)),
+      load('/svc/api/admin/status', renderStatus, statusFail),
+      load('/api/health/collect', renderCollect, collectFail),
     ]);
+    if (signals.some(Boolean)) expired();
+    else alive();
     put('updated', `마지막 갱신 ${clock(Date.now())}`);
   } finally {
     busy = false;
@@ -181,7 +201,11 @@ $('refresh').addEventListener('click', async () => {
     const warnings = ok && Array.isArray(body.warnings) ? body.warnings : [];
     put('refresh-warnings', warnings.map(String).join(' / ') || '없음');
   } catch (err) {
-    if (!(err instanceof Expired)) put('refresh-status', '보내지 못함', 'bad');
+    // 버튼은 만료 표시를 지우지 않는다(지우는 것은 폴링 묶음뿐) — 만료 신호면 새로고침 한 번 또는 알림
+    if (err instanceof Expired) expired();
+    $('refresh-result').hidden = false;
+    put('refresh-status', err instanceof Expired ? '로그인 만료·연결 끊김' : '보내지 못함', 'bad');
+    for (const id of ['refresh-saved', 'refresh-failures', 'refresh-warnings']) put(id, '-');
   } finally {
     button.disabled = false;
   }

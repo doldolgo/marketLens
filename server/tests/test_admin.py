@@ -102,6 +102,11 @@ def test_admin_server_listens_on_8081_only_and_public_stays_on_80() -> None:
     assert _args(server, "server_tokens") == [["off"]]
 
 
+def test_admin_redirects_are_relative() -> None:
+    """`/api`·`/api/ws` 의 nginx 자동 301 이 `http://<Host>:8081/…` 로 가지 않게 — Tunnel(030) 뒤에서 닿지 않는다."""
+    assert _args(_admin_server(), "absolute_redirect") == [["off"]]
+
+
 def test_admin_upstreams_are_api_and_collect_host_only() -> None:
     """다른 이름을 못 풀면 nginx 기동이 실패해 공개 사이트까지 내려간다 (§3.1). URI 없는 proxy_pass 하나 모양."""
     for key, children in _proxied().items():
@@ -206,6 +211,8 @@ def test_frames_denied_on_every_response_and_csp_on_the_screen() -> None:
         "always",
     ]
     assert csp in screen
+    # 화면 스크립트가 API 계약을 따른다 — 공개 index.html 과 같은 이유로 캐시하지 않는다
+    assert ["Cache-Control", "no-store", "always"] in screen
     csp_elsewhere = [
         k
         for k, c in _locations(server).items()
@@ -318,6 +325,13 @@ def test_screen_script_sends_xhr_header_polls_while_visible_and_never_parses_htm
         assert banned not in js, banned
     # 모든 요청이 한 함수를 지난다 — 헤더가 빠진 fetch 가 없게
     assert js.count("fetch(") == 1
+    # 새로고침·표시 지우기 주소는 화면 주소 `/` 로 고정 — `//다른호스트/..%2F/` 로 열린 화면에서 pathname 을 쓰면
+    # 프로토콜 상대 URL 이 되어 다른 출처로 간다(열린 리다이렉트)
+    assert "location.pathname" not in js and "location.href" not in js
+    assert js.count("location.replace(") == 1
+    assert "location.replace(`/?${RELOAD_MARK}=1`)" in js
+    assert js.count("history.replaceState(") == 1
+    assert "history.replaceState(null, '', '/')" in js
 
 
 def test_screen_page_has_no_inline_script_or_style() -> None:
