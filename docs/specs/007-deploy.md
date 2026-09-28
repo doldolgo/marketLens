@@ -18,9 +18,9 @@
 ### 툴
 - CI/CD 는 **GitHub Actions**. 배포 단위는 **docker compose**. 서버는 **EC2 3대**(collect·data·serve — compose profile 하나씩, 021), 이미지는 각 EC2 에서 직접 빌드한다.
 - 컨테이너 6개:
-  - `server` — FastAPI + uvicorn 워커 1개(python 3.12 slim). 컨테이너 포트 8000 을 호스트 8000 으로 공개한다 — serve 박스의 nginx 가 사설 IP 로 붙고, 보안그룹이 serve 그룹 외 인바운드를 막는다(021 §3.1).
+  - `server` — FastAPI + uvicorn 워커 1개(python 3.12 slim). 컨테이너 포트 8000 을 호스트 8000 으로 공개한다 — serve 박스의 nginx 가 사설 IP 로 붙고, 보안그룹이 serve 그룹 외 인바운드를 막는다(021 §3.1). env `UVICORN_ROOT_PATH=/api`(029 — API 문서가 관리자 경로 `/api` 아래 스키마를 부른다, api 에는 안 준다).
   - `api` — `server` 와 같은 이미지에 `ROLE=api`. Influx 조회 경로(`/history/premium`·`streaks`·`streaks/bulk`·`candles`)만 서빙, 호스트 비노출(016). `STATSD_ADDR=host.docker.internal:8125` 와 그 이름을 호스트 게이트웨이로 잇는 `extra_hosts` — WS 접속 수 게이지를 serve 호스트의 CloudWatch Agent 로(027).
-  - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 허용 목록(028)의 `/api` 경로만 프록시하고(수집기로 `/api/health`·`/api/health/collect`·`/api/history/events`, `api` 로 `/api/history/candles`(016)·`/api/landing`(022)·`/api/ws/spreads`(WebSocket 업그레이드, 017) — 나머지 `/api` 는 404 JSON), 없는 경로는 index.html 을 준다(SPA). nginx 접속 로그는 끈다(기록은 caddy, 027 — 오류 로그는 남긴다).
+  - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 허용 목록(028)의 `/api` 경로만 프록시하고(수집기로 `/api/health`·`/api/health/collect`·`/api/history/events`, `api` 로 `/api/history/candles`(016)·`/api/landing`(022)·`/api/ws/spreads`(WebSocket 업그레이드, 017) — 나머지 `/api` 는 404 JSON), 없는 경로는 index.html 을 준다(SPA). nginx 접속 로그는 끈다(기록은 caddy, 027 — 오류 로그는 남긴다). 같은 nginx 에 관리자 server :8081(게시 안 함)·관리자 화면(`/usr/share/nginx/admin`)·접속 기록 바인드 `./logs/admin`(029).
     캐시 규칙: `index.html` 은 `no-store, must-revalidate` **+ `always`** — 배포가 FE·BE 를 함께 바꾸므로 캐시된 셸이 남으면 열려 있던 탭이 구 번들로 새 API 계약을 계속 친다. `/assets/` 의 해시 박힌 파일은 `max-age=31536000, immutable` 이되 **`always` 는 붙이지 않는다** — 붙이면 404 에도 1년 immutable 이 실려, 배포 직전 셸을 든 브라우저가 사라진 번들의 404 를 1년간 캐시한다(재배포로도 되돌릴 수 없다). `always` 없이도 200·304 는 헤더를 받는다.
   - `influxdb` — 2.7, dev compose 와 같은 첫 기동 설정(org·bucket `marketlens`, admin 토큰 = `INFLUX_TOKEN`). named volume, 호스트 비노출.
   - `redis` — `redis:7-alpine`, `--appendonly yes`, named volume, 호스트 비노출(009 의 틱 버퍼 — Influx 로 옮기기 전 틱만 든다).

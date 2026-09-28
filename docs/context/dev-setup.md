@@ -30,7 +30,7 @@ npm run lint       # oxlint
 vite proxy 는 허용 목록과 무관하게 모든 `/api/*` 를 넘긴다 — 공개 nginx 가 닫는 경로(028)도 로컬 dev 에서는 `/api/<경로>` 로 부른다.
 테스트 러너 없음 (현재). 스펙에서 도입하기 전까지 FE 검증은 `build` + `lint` + 수동 확인.
 
-랜딩(022)은 dev 서버에서 `http://localhost:5173/app/landing.html` 로 연다 — `public/` 이 base(`/app/`) 아래로 서빙되기 때문이다(그림·favicon 은 상대 경로라 그대로 보이고, `/api/landing` 은 위 프록시를 탄다). 배포와 같은 `/` 는 docker 통합 기동(:8080)에서 본다. oxlint 는 `src` 만 보므로 `landing.html` 의 스크립트는 lint 대상이 아니다.
+랜딩(022)은 dev 서버에서 `http://localhost:5173/app/landing.html` 로 연다 — `public/` 이 base(`/app/`) 아래로 서빙되기 때문이다(그림·favicon 은 상대 경로라 그대로 보이고, `/api/landing` 은 위 프록시를 탄다). 배포와 같은 `/` 는 docker 통합 기동(:8080)에서 본다. oxlint 는 `src` 만 보므로 `landing.html` 의 스크립트는 lint 대상이 아니다. `web/admin/`(관리자 화면, 029)도 oxlint·vite 빌드 대상이 아니다 — web 이미지가 그대로 복사한다.
 ```bash
 curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-store. live 는 Redis spreads:latest, trail·events 는 Influx 가 있을 때만 차고 없으면 그 부분만 null
 ```
@@ -63,6 +63,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 - `S3_REGION`: 버킷 리전. AWS 자격증명은 env 가 아니라 `~/.aws`(로컬, `aws configure`)·IAM 역할(EC2)이다.
 - `SLACK_WEBHOOK_URL`: Slack Incoming Webhook(025). 있으면 기동·수집 실패 60초 구간 발생/복구·ERROR 로그·처리 안 된 500 이 채널로 간다(키별 10분 억제). 없으면 알림 기능 전체가 꺼진다 — 로컬은 비워 둔다. 두 박스(collect·serve)의 `server/.env` 에 같은 값을 넣는다.
 - `STATSD_ADDR`: StatsD 수신 주소 `host:port`(027). 있으면 api 역할이 WS 접속 수 게이지 `marketlens.ws_clients:<n>|g` 를 10초마다 UDP 로 보낸다(collector 는 안 보낸다). compose 가 api 에만 `host.docker.internal:8125`(serve 호스트의 CloudWatch Agent)를 준다. 비면 끔 — 로컬은 비워 둔다. `host:port` 가 아니면 WARNING 1줄 뒤 끈다.
+- `UVICORN_ROOT_PATH`: `server/.env` 에 두지 않는다 — compose 가 `server`(collect)에만 `/api` 를 준다(029, api 에는 안 준다). 관리자 페이지의 API 문서가 `/api/openapi.json` 을 부르게 하는 값이고, 접두 없는 경로(`localhost:8000/health`)는 그대로 라우팅된다. 로컬 uvicorn 은 비워 둔다.
 
 **API 키는 .env 에만. 코드·문서·커밋에 절대 넣지 않는다.**
 
@@ -72,7 +73,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 ```bash
 COMPOSE_PROFILES=collect,data,serve WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 ```
-server·api·web·caddy·influxdb·redis 여섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 한 망에 뜬다. `COMPOSE_PROFILES` 가 없으면 아무것도 안 뜬다 — 배포는 박스마다 profile 하나씩이라(021) 로컬만 셋을 다 켠다. 호스트에는 caddy(8080·443) 외에 박스 간 포트 server 8000·redis 6379·influxdb 8086 도 열리므로 **dev compose(Influx :8086·Redis :6379)와 겹친다 — 통합 기동 전에 `docker compose -f docker-compose.dev.yml down` 으로 내린다**(볼륨 유지). 이후 `stop`·`start`·`down` 도 같은 `COMPOSE_PROFILES=…` 를 앞에 붙인다(안 붙이면 그 서비스가 모델에 없다). `localhost:8080` 에 화면, `/api` 는 nginx 허용 목록 여섯만 넘긴다(028, 전부 정확 일치·접두 제거) — `/api/health`·`/api/health/collect`·`/api/history/events` 는 server, `/api/history/candles`·`/api/landing`·`/api/ws/spreads` 는 api 로 간다(016·017·022). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/history/candles?base=BTC`·`/api/landing` 502, `/api/health` 는 200, `start api` 로 복구. `stop redis` 면 `/api/landing` 의 `live` 가 null·WebSocket 은 `waiting`(화면은 직전 표 유지), `start redis` 뒤 10초 안에 복구. 닫힌 경로(`/api/docs`·`/api/spreads` 등)는 404 JSON 이다(028). caddy 접속 로그는 `./logs/caddy/access.log`(git 무시, 도메인 블록만 기록하므로 로컬은 catch-all 이라 거의 비어 있다 — 027). Caddyfile 을 고치면 `docker run --rm -v ./caddy:/etc/caddy:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile` 결과를 PR 본문에 적는다. 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
+server·api·web·caddy·influxdb·redis 여섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 한 망에 뜬다. `COMPOSE_PROFILES` 가 없으면 아무것도 안 뜬다 — 배포는 박스마다 profile 하나씩이라(021) 로컬만 셋을 다 켠다. 호스트에는 caddy(8080·443) 외에 박스 간 포트 server 8000·redis 6379·influxdb 8086 도 열리므로 **dev compose(Influx :8086·Redis :6379)와 겹친다 — 통합 기동 전에 `docker compose -f docker-compose.dev.yml down` 으로 내린다**(볼륨 유지). 이후 `stop`·`start`·`down` 도 같은 `COMPOSE_PROFILES=…` 를 앞에 붙인다(안 붙이면 그 서비스가 모델에 없다). `localhost:8080` 에 화면, `/api` 는 nginx 허용 목록 여섯만 넘긴다(028, 전부 정확 일치·접두 제거) — `/api/health`·`/api/health/collect`·`/api/history/events` 는 server, `/api/history/candles`·`/api/landing`·`/api/ws/spreads` 는 api 로 간다(016·017·022). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/history/candles?base=BTC`·`/api/landing` 502, `/api/health` 는 200, `start api` 로 복구. `stop redis` 면 `/api/landing` 의 `live` 가 null·WebSocket 은 `waiting`(화면은 직전 표 유지), `start redis` 뒤 10초 안에 복구. 닫힌 경로(`/api/docs`·`/api/spreads` 등)는 404 JSON 이다(028). 관리자 server(:8081)는 호스트에 안 열린다 — `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/status` 로 확인(029). caddy 접속 로그는 `./logs/caddy/access.log`(git 무시, 도메인 블록만 기록하므로 로컬은 catch-all 이라 거의 비어 있다 — 027). Caddyfile 을 고치면 `docker run --rm -v ./caddy:/etc/caddy:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile` 결과를 PR 본문에 적는다. 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
 
 ## 검증용 스모크
 ```bash

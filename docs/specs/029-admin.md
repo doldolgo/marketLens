@@ -1,6 +1,6 @@
 # 029 — admin
 
-상태: TODO | 의존: **028 이 main 에 머지된 뒤 시작한다**(아니면 멈추고 묻는다 — §3.5). 계약을 쓰는 스펙: 003 spreads(`/refresh`), 007 deploy(web 이미지·compose), 011 health(`/health/collect`), 016 process-split(api 분기·역할), 017 spreads-push(허브), 018 spreads-serve(`/spreads`), 022 landing(`/landing`), 025 slack-alerts(`/health` 두 역할), 027 observability(nginx 접속 로그 규칙), 028 api-allowlist(공개 허용 목록). 밖에서 들어오는 길(Cloudflare Tunnel·Access)은 030.
+상태: DONE | 의존: **028 이 main 에 머지된 뒤 시작한다**(아니면 멈추고 묻는다 — §3.5). 계약을 쓰는 스펙: 003 spreads(`/refresh`), 007 deploy(web 이미지·compose), 011 health(`/health/collect`), 016 process-split(api 분기·역할), 017 spreads-push(허브), 018 spreads-serve(`/spreads`), 022 landing(`/landing`), 025 slack-alerts(`/health` 두 역할), 027 observability(nginx 접속 로그 규칙), 028 api-allowlist(공개 허용 목록). 밖에서 들어오는 길(Cloudflare Tunnel·Access)은 030.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -83,7 +83,49 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 시작 조건 — main 에 028(PR #74 머지 커밋)이 있다
+git fetch -q origin && git merge-base --is-ancestor f70305b228d9ba7501ed594e05c40eb3b2c98914 origin/main   # 종료 코드 0
+
+# 기존 스펙 재검증 (마지막 커밋 뒤)
+cd server && ruff check . && ruff format --check . && pytest -q   # All checks passed! · 236 files already formatted · 892 passed
+cd web && npm run lint && npm run build                            # oxlint 종료 코드 0 · ✓ built (dist 에 admin 없음)
+
+# 로컬 Docker — 망 ml029-net, 가짜 백엔드 둘(python:3.12-alpine, 망 별칭 server·api — 받은 요청을 JSON 으로 되돌리고 ACAO * 를 붙인다)
+docker build -t ml029-web web
+docker run -d --name ml029-web --network ml029-net --network-alias web -e COLLECT_HOST=server \
+  -e 'NGINX_ENVSUBST_FILTER=^COLLECT_HOST$' -v <scratch>/logs-admin:/var/log/nginx-admin ml029-web
+docker exec ml029-web nginx -t        # syntax is ok · test is successful (바인드 없이 띄운 컨테이너도 같다)
+docker exec ml029-web ls /etc/nginx/conf.d /usr/share/nginx/admin   # admin.conf default.conf · admin.css admin.js index.html, html 아래 admin 0개
+# 아래는 같은 망의 curl 컨테이너에서
+curl -i web:8081/                     # 200 text/html · X-Frame-Options DENY · CSP default-src 'self'; frame-ancestors 'none'
+curl web:8081/api/{docs,premium,history/events,refresh}             # 수집기 에코 /docs·/premium·/history/events·/refresh
+curl web:8081/api/{history/streaks,history/streaks/bulk,history/candles,spreads,landing,ws/spreads}   # api 에코
+curl web:8081/svc/api/admin/status · /svc/api/health                # api 에코 /admin/status · /health
+curl -H 'Cookie: …' -H 'Cf-Access-Jwt-Assertion: …' -H 'X-Refresh-Token: t0k' -H 'Origin: …' web:8081/api/premium
+  # 도착 헤더에 cookie·cf-access-jwt-assertion 없음, x-refresh-token 있음, 응답에 ACAO 없음(WS location 도 같음)
+curl -H "Sec-Fetch-Site: <cross-site|same-site|same-origin|none|없음>" web:8081<경로>
+  # /api/openapi.json·/api/docs/oauth2-redirect·/api/premium·/api/history/streaks·/api/ws/spreads·/svc/api/admin/status·/api/health
+  #   = 403·403·통과·통과·통과, /api/docs·/api/redoc·/ = 다섯 다 통과
+  # 403 = application/json {"error":{"code":"forbidden","message":"Forbidden","detail":null}} + X-Frame-Options DENY
+curl -H 'Host: admin.kimptrack.com' web:80/ · /api/docs · /svc/api/admin/status   # 200 랜딩 · 404 JSON(028) · 404 — 공개 server
+python3 -c '…json.loads 각 줄…' logs-admin/access.log
+  # 58줄 전부 JSON 아홉 키(time email ip method uri status rt ray sfs), email·ip·ray 는 보낸 Cf-* 값
+  # 성공한 폴링(/api/health·/api/health/collect·/svc/…) 0줄 — 폴링 경로로 남은 줄은 교차 사이트 403 넷뿐
+
+# 수집기 API 문서 — 레포 밖 cwd 에서(.env 를 읽지 않게) ROLE=api 로 같은 앱을 UVICORN_ROOT_PATH=/api 로
+env -i ROLE=api INFLUX_TOKEN= REDIS_URL=redis://127.0.0.1:6029/0 UVICORN_ROOT_PATH=/api \
+  server/.venv/bin/uvicorn app.main:app --app-dir server --port 8029
+curl localhost:8029/docs              # url: '/api/openapi.json'
+curl localhost:8029/openapi.json      # servers [{'url': '/api'}], /admin/status 스키마 있음
+curl localhost:8029/health            # 503(Redis 없음 — 접두 없는 경로가 라우팅된다), /api/health 는 404
+
+# 브라우저 — 127.0.0.1:8081 만 게시한 테스트 compose(scratchpad/029/compose.029.yml + fake.py)
+docker compose -f compose.029.yml up -d --build   # 가짜 /health/collect 의 bybit lastError.message 와 즉시 갱신 결과에 <img src=x onerror=alert(1)>
+  # 표·즉시 갱신 결과에 글자 그대로 보임 · img 요소 0 · alert 없음 · 콘솔 CSP 위반 없음(주입한 인라인 스크립트는 CSP 가 막음)
+  # 틀린 토큰 → "401 토큰 오류"(새로고침 없음) · test-token → 200·저장 1234·실패/경고 글자 그대로 · localStorage·sessionStorage 0
+  # 401 비JSON 응답 → ?relogin=1 로 한 번 새로고침 · 표시가 있는 채로 fetch 실패 → 알림만 · 403 → "권한·설정 오류 (403)"·표시 지움
+docker compose -f compose.029.yml down && docker rmi ml029-web
+docker ps -a · docker network ls · docker images | grep 029   # 0건
 ```
 
 ## 6. 갱신할 문서
@@ -106,5 +148,28 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
+  - server: `app/core/redis_bus.py`(`ping`), `app/features/admin/`(`models.py`·`service.py`·`router.py`, `tests/test_status.py` 9개), `app/main.py`(api 역할에만 `app.state.admin`·라우터), `tests/test_role.py`(여덟 경로·`API_ONLY`), `tests/test_admin.py`(설정·화면 계약 15개).
+  - web: `nginx-admin.conf`, `admin/index.html`·`admin.js`·`admin.css`, `Dockerfile`(템플릿·화면·로그 디렉터리). 루트: `docker-compose.yml`(web 바인드·server `UVICORN_ROOT_PATH`), `.gitignore`(주석만 — `logs/` 는 027 에 이미 있다).
+  - 문서: `CLAUDE.md`(인덱스·§2), `docs/context/`(status·architecture·dev-setup·product), 스펙 005·007·027·028·029.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - 403 JSON 은 `error_page 403 @forbidden` 이름 있는 location 하나가 만든다(백엔드 location 마다 `types`·`default_type` 을 반복하지 않으려고). 그래서 폴링 경로라도 교차 사이트 403 은 기록된다 — 안 남는 것은 화면의 성공한 폴링뿐.
+  - 백엔드로 넘길 때의 헤더(`proxy_set_header` 여섯·`proxy_hide_header` ACAO·`X-Frame-Options`)는 server 수준에 한 번 두고 상속한다 — 자기 것을 두는 WS·화면·`@forbidden` 만 반복. 계약 테스트는 nginx 상속 규칙(자기 것이 있으면 그것만)으로 실효 값을 본다.
+  - api 로 가는 history 셋은 028 이전의 정규식 대신 접두 location 셋(`/api/history/premium`·`streaks`·`candles`) — 도착지는 같고 정규식 location 은 없다.
+  - 화면 `location /` 에 `Cache-Control: no-store` 를 더했다(스펙에 없음) — 화면 스크립트가 API 계약을 따르므로 공개 `index.html` 과 같은 이유.
+  - 폴링 제외는 정확 일치 location 넷의 `access_log off`. `/svc/` 아래 다른 경로는 화면 404 로 기록된다.
+  - "연속 새로고침은 한 번까지" 의 표시는 URL 쿼리 `?relogin=1`(저장소 금지) — 응답이 오면 `history.replaceState` 로 지운다. Access 로그인을 거쳐 돌아와도 원래 URL 이 남는다. 화면 첫 호출도 보이는 동안에만 한다.
+  - `/admin/status` 의 Influx — 앞선 ping 이 진행 중이면 동시에 온 요청도 그 결과를 기다리지 않고 down(스펙 문구 그대로). Redis 는 `wait_for` 가 취소한다.
+  - 설정 계약 테스트는 새 파일 `tests/test_admin.py` 가 test_deploy 의 파서·상수를 import 한다(027 의 test_observability 와 같은 방식) — §4 ②의 "test_deploy" 를 이렇게 읽었고 test_deploy.py 는 고치지 않았다.
+  - 수집기의 `UVICORN_ROOT_PATH` 확인은 ROLE=api 로 띄운 같은 앱으로 했다 — 문서 경로는 역할과 무관하고, 수집기를 로컬에서 띄우면 거래소를 부른다.
+  - 커밋은 300줄 규칙으로 ①②③ 을 각각 둘로 나눴다(코드/테스트, 화면 껍데기/스크립트).
+  - 함께 고친 절: 028 §3.4 의 "API 문서: `ssh -L …` 뒤 `localhost:8000/docs`" — `UVICORN_ROOT_PATH` 뒤로는 문서가 `/api/openapi.json` 을 불러 터널에서 404 라, 관리자 페이지 경로와 `localhost:8000/openapi.json` 으로 고쳤다(029 §6 의 028 제목·첫 줄 변경과 함께). architecture.md 핵심 설계 결정의 "Redis 를 HTTP 가 만지는 곳" 에 `/admin/status` 의 ping, `/health` 문장에 관리자 페이지를 더했다.
 - 남은 빚:
+  - status.md 의 (029) 넷(접속 기록 개인정보·nginx-admin CI 문자열만·jsDelivr·담당자 제안 대기).
+  - 관리자 접속 기록 회전은 030 런북(호스트 logrotate) 전까지 없다 — 성공한 폴링은 안 남아 느리게 는다.
+  - 배포 뒤 사람 확인(§4): serve 박스 `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/status` 200 JSON, 공개 `https://kimptrack.com/api/docs` 404.
+  - 브라우저 확인은 Chromium 한 종류(Browser pane)다.
+- PR 본문에 옮길 것 — 담당자에게 제안(파일:절 — 문서 주장 → 실제). 028 의 제안(같은 자리)이 아직 반영되지 않아, 028 문장과 함께 넣거나 그 뒤에 잇는다:
+  - `docs/specs/003-spreads.md`:§3.3 110행 `POST /refresh` — 공개·관리자 언급 없음 → 공개 404(028), "…관리자 페이지의 즉시 갱신 버튼으로 부른다(029)".
+  - `docs/specs/004-analysis.md`:§1 9행 "curl/브라우저로 직접 호출하는 BE 전용 도구" → 공개 404(028), "관리자 페이지 API 문서의 Try it out 으로 부른다(029)".
+  - `docs/specs/016-process-split.md`:§3.1 28행 api 가 서빙하는 경로 목록 → `/admin/status`(029) 추가. §3.5 마지막 bullet(api 헬스는 박스 안에서 본다) → 끝에 "관리자 페이지 `/svc/api/health` 에서도 본다(029)".
+  - `docs/specs/018-spreads-serve.md`:§3 43행 "`api` 가 서빙하는 경로" → `/admin/status`(029) 추가.

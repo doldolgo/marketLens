@@ -39,13 +39,13 @@ dev compose 는 Influx 2.7 과 Redis(009) 를 띄운다. 첫 기동 시 org·buc
 HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*Ts` 는 epoch 초, `fetchedAt` 은 ms.
 공통 파라미터: `dom` ∈ {upbit, bithumb}(기본 upbit), `fx` ∈ {binance, bybit, bitget}(기본 binance — 020). `maxGap`(기본 600, ≥1) 은 streaks·bulk 만 받는다 — premium 은 구간 전체를 그대로 돌려주므로 gap 개념이 없다. streaks·bulk 의 `start`·`end` 는 0 ≤ 값 ≤ 4,102,444,800(2100-01-01) — 밖이면 422(연도 오버플로 500 방지). `end ≤ 0` 은 400(end ≤ start 의 특수형).
 
-**`/history/premium?base&unit&date`** — `base`·`unit ∈ {week, month}` 필수. 공개 주소에서는 404(028). `date=YYYY-MM-DD`(정확히 이 형식·연도 1970~2100, 밖이면 400. 없으면 오늘 UTC).
+**`/history/premium?base&unit&date`** — `base`·`unit ∈ {week, month}` 필수. 공개 주소에서는 404(028) — 관리자 페이지 API 문서에서 부른다(029). `date=YYYY-MM-DD`(정확히 이 형식·연도 1970~2100, 밖이면 400. 없으면 오늘 UTC).
 구간 = `date` 가 속한 ISO 주(월 00:00 UTC ~ 다음 월) 또는 달(1일 ~ 다음 달 1일), end exclusive. 구간에 기록 없으면 404. 구간 전체를 한 번에 반환한다. 응답 키:
 - `dom`·`fx`·`base`·`unit` 은 요청 그대로. `start`·`end` 는 구간 경계(ISO 8601, UTC). `firstTs` 는 구간 첫 기록 시각, `count` 는 기록 수, `fetchedAt`.
 - `summary` = `{firstFwd,lastFwd,minFwd,maxFwd}` — 구간 전체 통계.
 - `events` = `[{dt,fwd,rev}…]` 컴팩트 — 절대시각 대신 `dt`=직전 기록으로부터 경과 초(구간 첫 기록은 0).
 
-**`/history/streaks?base&threshold&start&end&maxGap`** — `threshold ≥ 0`(기본 0). 공개 주소에서는 404(028). `end` 없으면 지금+1초, **`start` 없으면 `end − 7일`(604,800초)** — 전 구간 조회를 막기 위해서다(2,700만 점 위에서 `start` 없는 조회는 Influx 를 죽인다, status.md 알려진 빚). 응답 `startTs` 는 실제로 쓴 값. 조회 구간 안에 기록이 0건이면 404(구간 밖 기록 유무는 보지 않는다), `end ≤ start` 면 400. 구간(streak) 규칙:
+**`/history/streaks?base&threshold&start&end&maxGap`** — `threshold ≥ 0`(기본 0). 공개 주소에서는 404(028) — 관리자 페이지 API 문서에서 부른다(029). `end` 없으면 지금+1초, **`start` 없으면 `end − 7일`(604,800초)** — 전 구간 조회를 막기 위해서다(2,700만 점 위에서 `start` 없는 조회는 Influx 를 죽인다, status.md 알려진 빚). 응답 `startTs` 는 실제로 쓴 값. 조회 구간 안에 기록이 0건이면 404(구간 밖 기록 유무는 보지 않는다), `end ≤ start` 면 400. 구간(streak) 규칙:
 1. ts 오름차순으로 값이 `threshold` **이상**인 연속 기록을 한 구간으로 묶는다(같은 값 포함).
 2. 값이 미만이거나 직전 기록과 `maxGap` 초보다 벌어지면 구간을 닫는다(끊긴 수집을 이어 붙여 "3시간 연속" 을 만들지 않는다).
 3. fwd(kimp) 와 rev(reverse) 를 절댓값 없이 **각각** 계산한다.
@@ -55,7 +55,7 @@ HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*
 7. 최상위 응답 = `{base,dom,fx,thresholdPercent,maxGapSeconds,startTs,endTs,kimp,reverse,overall,scanned,lastUpdatedTs,lastUpdated,fetchedAt}`. 방향 요약 키 이름은 bulk 와 같은 `kimp`(fwd)·`reverse`(rev). `scanned` 는 전체 행 수, `lastUpdated` 는 KST.
 예: 값 `0 1 3 6 29 4 31`(60초 간격), threshold 4 → 구간 1개(samples 4, max 31); threshold 5 → 2개.
 
-**`/history/streaks/bulk?threshold&start&end&maxGap`** — 전 코인 한 번에. 공개 주소에서는 404(028). `start`·`end` 기본값은 streaks 와 같다(`end − 7일` / 지금+1초).
+**`/history/streaks/bulk?threshold&start&end&maxGap`** — 전 코인 한 번에. 공개 주소에서는 404(028) — 관리자 페이지 API 문서에서 부른다(029). `start`·`end` 기본값은 streaks 와 같다(`end − 7일` / 지금+1초).
 응답 `{dom,fx,thresholdPercent,maxGapSeconds,startTs,endTs,coinCount,coins:[{base,scanned,lastTs,kimp,reverse,overall}…],fetchedAt}`. **기록 없으면 404 가 아니라 빈 `coins`.**
 수 MB 응답이라 압축(gzip)해 보낸다.
 
