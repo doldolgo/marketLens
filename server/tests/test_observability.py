@@ -8,7 +8,16 @@ test_deploy.py 와 같은 방식이다: Docker 없는 CI 에서 설정 파일을
 import re
 import shlex
 
-from tests.test_deploy import PUBLIC_API, ROOT, _text, _yaml
+from tests.test_deploy import (
+    PUBLIC_API,
+    ROOT,
+    _args,
+    _deploy_script,
+    _locations,
+    _public_server,
+    _text,
+    _yaml,
+)
 
 # 기록하지 않는 요청 경로 — 폴링·감시가 방문 기록을 덮는다 (§3.2)
 NOLOG_PATHS = {
@@ -195,3 +204,38 @@ def test_compose_binds_caddy_dir_and_host_log_dir() -> None:
     ]
     assert not (ROOT / "Caddyfile").exists()
     assert "logs/" in _text(".gitignore").splitlines()
+
+
+# 공개 server 의 location 전부 — 027 은 접속 로그만 끄고 분기는 건드리지 않는다 (§4)
+PUBLIC_LOCATIONS = {("=", path) for path in PUBLIC_API} | {
+    ("=", "/api"),
+    ("/api/",),
+    ("=", "/index.html"),
+    ("/assets/",),
+    ("=", "/"),
+    ("=", "/app"),
+    ("/app/assets/",),
+    ("=", "/app/index.html"),
+    ("/app/",),
+    ("/",),
+}
+CADDY_RELOAD = "docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile"
+
+
+def test_public_nginx_turns_off_access_log_and_keeps_its_locations() -> None:
+    """기록은 caddy 한 곳 — nginx 접속 로그는 끄고(오류 로그는 기본 그대로) 새 location 은 없다 (§3.2)."""
+    server = _public_server()
+    assert _args(server, "access_log") == [["off"]]
+    assert not _args(server, "error_log")
+    assert set(_locations(server)) == PUBLIC_LOCATIONS
+
+
+def test_serve_deploy_reloads_caddy_after_up_and_prunes_last() -> None:
+    """serve 는 up 뒤에 caddy 설정을 다시 읽히고 prune 이 마지막. data·collect 는 caddy 를 모른다 (§3.2)."""
+    script = _deploy_script("serve")
+    i_up = next(i for i, ln in enumerate(script) if "up -d --build" in ln)
+    assert script.count(CADDY_RELOAD) == 1
+    assert i_up < script.index(CADDY_RELOAD) == len(script) - 2
+    assert script[-1] == "docker image prune -f"
+    for box in ("data", "collect"):
+        assert not any("caddy" in ln for ln in _deploy_script(box)), box

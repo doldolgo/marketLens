@@ -97,4 +97,8 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             docker compose --profile serve --env-file .env --env-file server/.env up -d --build
+            # 027 — 정의가 안 바뀐 caddy 는 compose 가 다시 만들지 않는다. caddy/ 디렉터리의 새 Caddyfile 을 읽힌다.
+            # 깨진 설정이면 여기서 실패하고 돌던 caddy 는 옛 설정으로 계속 돈다 — 곧바로 되돌림 커밋을 머지한다
+            # (깨진 파일은 디스크에 남아 다음 caddy 재시작에서 사이트 전체를 내린다).
+            docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile
             docker image prune -f
