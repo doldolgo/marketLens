@@ -27,7 +27,7 @@
 | 그 밖의 루트 경로 | 정적 파일 또는 404 |
 
 - 기존 규칙(022 이전 판)은 그대로다: 쿼리 붙은 `/` 는 쿼리를 들고 301, SPA fallback 은 `/app/` 아래에서만, `landing.html`·`index.html` no-store, `assets/` 1년 immutable, `/landing/*`·`/robots.txt`·`/sitemap.xml`·`/favicon.svg` 는 정적 파일.
-- `/api/landing` 은 `= /api/spreads` 와 같은 모양의 **정확 일치** location — 접두 제거 rewrite·프록시 헤더 4개. 배포에서 api 가 죽으면 이 경로만 502 이고 랜딩 본문은 그대로 뜬다.
+- `/api/landing` 은 공개 허용 목록(028)의 **정확 일치** location 하나 — 다른 허용 경로와 같은 모양(접두 제거 rewrite·프록시 헤더 4개). 배포에서 api 가 죽으면 이 경로만 502 이고 랜딩 본문은 그대로 뜬다.
 
 ### 3.2 `GET /landing` — 요약 API
 - 두 역할(`api`·`collector`) 모두 포함한다 — 로컬 단일 프로세스에서도 뜨게(018 의 `/spreads` 와 같은 이유). 배포에선 nginx 가 api 로만 보낸다. 쿼리 파라미터는 없다(와도 무시).
@@ -141,7 +141,7 @@ server — `features/landing/tests/`(Redis·Influx 는 fake):
 - `server/tests/test_deploy.py` — nginx 에 `location = /api/landing` 이 api 로 간다
 
 수동:
-- 로컬 5컨테이너(dev-setup.md)에서 `curl /api/landing` 의 `top[0]` 이 같은 순간 `/api/spreads` 에 §3.2 규칙을 적용해 고른 행과 같다
+- 로컬 5컨테이너(dev-setup.md)에서 `curl /api/landing` 의 `top[0]` 이 같은 순간 `http://api:8000/spreads`(박스 안 — 공개에서는 028 이 닫는다) 에 §3.2 규칙을 적용해 고른 행과 같다
 - 브라우저 1440px·390px: 경로 카드·다음 경로·3번 두 단의 실데이터 문장(호가 깊이 예시는 1위와 다른 경로이고 원값과 순값 차이가 0.1%p 이상)·사건 표가 찬다 / "알아둘 점"·사실 목록·표 아래 작은 글이 없다 / `/app/` 로 가는 글자는 전부 "서비스로 넘어가기" / h1 이 1440·960·390·360px 에서 모두 두 줄 / 가로 스크롤 없음 / 탭을 숨기면 요청이 멈추고 다시 보이면 즉시 1회 / api 를 멈추면(502) §3.5 대로 / 자바스크립트를 끄면 본문이 읽힌다 / 네트워크 목록에 `/api/spreads`·`/api/ws/` 가 없다 / 경로 링크가 기록 탭의 그 코인·방향·거래소로 연다
 - `cd web && npm run lint && npm run build`, `cd server && ruff check . && pytest -q` 통과
 

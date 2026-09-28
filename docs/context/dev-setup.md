@@ -27,6 +27,7 @@ npm run dev        # http://localhost:5173/app/ (base 가 /app/, 022) , /api →
 npm run build      # tsc -b && vite build
 npm run lint       # oxlint
 ```
+vite proxy 는 허용 목록과 무관하게 모든 `/api/*` 를 넘긴다 — 공개 nginx 가 닫는 경로(028)도 로컬 dev 에서는 `/api/<경로>` 로 부른다.
 테스트 러너 없음 (현재). 스펙에서 도입하기 전까지 FE 검증은 `build` + `lint` + 수동 확인.
 
 랜딩(022)은 dev 서버에서 `http://localhost:5173/app/landing.html` 로 연다 — `public/` 이 base(`/app/`) 아래로 서빙되기 때문이다(그림·favicon 은 상대 경로라 그대로 보이고, `/api/landing` 은 위 프록시를 탄다). 배포와 같은 `/` 는 docker 통합 기동(:8080)에서 본다. oxlint 는 `src` 만 보므로 `landing.html` 의 스크립트는 lint 대상이 아니다.
@@ -69,7 +70,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 ```bash
 COMPOSE_PROFILES=collect,data,serve WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 ```
-server·api·web·influxdb·redis 다섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 한 망에 뜬다. `COMPOSE_PROFILES` 가 없으면 아무것도 안 뜬다 — 배포는 박스마다 profile 하나씩이라(021) 로컬만 셋을 다 켠다. 호스트에는 web(8080) 외에 박스 간 포트 server 8000·redis 6379·influxdb 8086 도 열리므로 **dev compose(Influx :8086·Redis :6379)와 겹친다 — 통합 기동 전에 `docker compose -f docker-compose.dev.yml down` 으로 내린다**(볼륨 유지). 이후 `stop`·`start`·`down` 도 같은 `COMPOSE_PROFILES=…` 를 앞에 붙인다(안 붙이면 그 서비스가 모델에 없다). `localhost:8080` 에 화면, `/api/*` 는 nginx 가 server 로 프록시(접두 제거)하되 `/api/history/{premium,streaks,candles}`·`/api/ws/`·`/api/spreads`·`/api/landing` 은 api 로 간다(016·017·018·022). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/spreads`·`/api/history/candles?base=BTC` 둘 다 502, `/api/health` 는 200, `start api` 로 복구. `stop redis` 면 `/api/spreads` 503·WebSocket 은 `waiting`(화면은 직전 표 유지), `start redis` 뒤 10초 안에 복구. 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
+server·api·web·influxdb·redis 다섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 한 망에 뜬다. `COMPOSE_PROFILES` 가 없으면 아무것도 안 뜬다 — 배포는 박스마다 profile 하나씩이라(021) 로컬만 셋을 다 켠다. 호스트에는 web(8080) 외에 박스 간 포트 server 8000·redis 6379·influxdb 8086 도 열리므로 **dev compose(Influx :8086·Redis :6379)와 겹친다 — 통합 기동 전에 `docker compose -f docker-compose.dev.yml down` 으로 내린다**(볼륨 유지). 이후 `stop`·`start`·`down` 도 같은 `COMPOSE_PROFILES=…` 를 앞에 붙인다(안 붙이면 그 서비스가 모델에 없다). `localhost:8080` 에 화면, `/api` 는 nginx 허용 목록 여섯만 넘긴다(028, 전부 정확 일치·접두 제거) — `/api/health`·`/api/health/collect`·`/api/history/events` 는 server, `/api/history/candles`·`/api/landing`·`/api/ws/spreads` 는 api 로 간다(016·017·022). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/history/candles?base=BTC`·`/api/landing` 502, `/api/health` 는 200, `start api` 로 복구. `stop redis` 면 `/api/landing` 의 `live` 가 null·WebSocket 은 `waiting`(화면은 직전 표 유지), `start redis` 뒤 10초 안에 복구. 닫힌 경로(`/api/docs`·`/api/spreads` 등)는 404 JSON 이다(028). 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
 
 ## 검증용 스모크
 ```bash

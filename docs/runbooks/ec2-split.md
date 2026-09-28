@@ -115,14 +115,14 @@ cd ~/marketlens && docker compose --profile collect --env-file .env --env-file s
 ## 9. serve 기동 + 탄력 IP 이동
 ```bash
 cd ~/marketlens && docker compose --profile serve --env-file .env --env-file server/.env up -d --build
-curl -s localhost/api/health && curl -s -o /dev/null -w '%{http_code} %{size_download}\n' localhost/api/spreads   # 200, 700KB 안팎
+curl -s localhost/api/health && docker exec marketlens-web wget -qO- http://api:8000/spreads | wc -c   # 700KB 안팎 (공개 /api/spreads 는 028 이 닫는다 — 박스 안에서)
 ```
 그 다음 로컬에서 탄력 IP 를 옮긴다(연결이 몇 초 끊긴다):
 ```bash
 ALLOC=$(aws ec2 describe-addresses --public-ips 3.34.104.16 --query 'Addresses[0].AllocationId' --output text)
 aws ec2 associate-address --allocation-id $ALLOC --instance-id <serve id> --allow-reassociation
 ```
-- 확인: 브라우저 `http://3.34.104.16/` 스프레드 표 매초 갱신, 기록 탭 차트, 수집 상태 탭 5거래소 ok. `curl /api/spreads` 첫 응답은 404 일 수 있다 — 아무도 안 보면 표 발행이 멈추는 017 동작이라 몇 초 뒤 다시 부르면 200. 탄력 IP 를 옮기면 serve 의 임시 공인 IP 는 사라지고, `ssh team` 은 호스트 키가 바뀌었다고 거부하므로 `ssh-keygen -R 3.34.104.16` 뒤 접속한다. `ssh team` 은 이제 serve 로 붙는다(`~/.ssh/config` 의 `team` 은 그대로 serve 를 뜻하게 된다 — collect·data 별칭을 추가한다).
+- 확인: 브라우저 `http://3.34.104.16/` 스프레드 표 매초 갱신, 기록 탭 차트, 수집 상태 탭 5거래소 ok. `docker exec marketlens-web wget -qO- http://api:8000/spreads` 첫 응답은 404 일 수 있다 — 아무도 안 보면 표 발행이 멈추는 017 동작이라 몇 초 뒤 다시 부르면 200. 탄력 IP 를 옮기면 serve 의 임시 공인 IP 는 사라지고, `ssh team` 은 호스트 키가 바뀌었다고 거부하므로 `ssh-keygen -R 3.34.104.16` 뒤 접속한다. `ssh team` 은 이제 serve 로 붙는다(`~/.ssh/config` 의 `team` 은 그대로 serve 를 뜻하게 된다 — collect·data 별칭을 추가한다).
 - 되돌리기: `aws ec2 associate-address --allocation-id $ALLOC --instance-id i-0ccec33dba9e27017 --allow-reassociation` 후 구 박스 `docker compose … up -d`(5컨테이너, 볼륨 그대로).
 
 ## 10. GitHub Secrets·워크플로

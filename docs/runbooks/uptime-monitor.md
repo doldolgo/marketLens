@@ -3,11 +3,13 @@
 박스가 통째로 죽으면 앱 안의 Slack 알림은 아무 소리도 못 낸다. 그래서 **박스 밖**에서 `/health` 를 주기적으로 찔러 주는 서비스가 하나 필요하다. 사람이 한 번 등록하면 끝이다.
 
 ## 왜 `/health` 하나로 되는가
-`https://kimptrack.com/api/health` 는 serve 박스의 api 가 답하지만, 그 답은 collect 박스의 수집기가 매초 Redis 에 쓰는 심장박동(`collect:heartbeat`, TTL 30초)을 읽은 결과다. 그래서 이 URL 하나가 다음을 전부 덮는다.
-- serve 박스·caddy·api 컨테이너가 죽음 → 응답 없음
-- data 박스(Redis)가 죽음 → `503 redis_down`
-- collect 박스·수집기가 죽거나 틱 루프가 30초 넘게 멈춤 → `503 stale`
+`https://kimptrack.com/api/health` 는 serve 박스의 nginx 가 collect 박스의 **수집기**로 넘기고(028 공개 허용 목록), 수집기는 메모리의 마지막 틱 시각으로 답한다(025 §3.5 — Redis 는 보지 않는다). 그래서 이 URL 하나가 다음을 덮는다.
+- serve 박스·caddy·nginx 가 죽음 → 응답 없음
+- collect 박스·수집기가 죽음 → 502·504
+- 틱 루프가 30초 넘게 멈춤 → `503 stale`(기동 직후 첫 틱 전은 `503 starting`)
 - 정상 → `200 {"status":"ok", …, "lastTickAt": <ms>}`
+
+serve 박스의 api 컨테이너나 data 박스(Redis·Influx)가 죽는 것은 **이 모니터로 잡히지 않는다** — 수집기는 그래도 틱을 돌린다. 그건 027(canary)이 맡는다.
 
 거래소 하나가 끊기는 것은 여기서 안 잡힌다(틱은 계속 돈다) — 그건 수집기가 직접 Slack 으로 보낸다(60초 넘게 끊길 때 발생·복구 짝).
 

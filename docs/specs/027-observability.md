@@ -15,7 +15,7 @@
   - 서버 기록의 국가·도시 해석 — IP 뒷자리를 지운 채 저장한다.
   - Route 53 헬스체크 — 박스 밖 시점은 025 의 uptime 서비스가 덮는다. Sentry·APM·트레이스 — 백엔드 ERROR·500 은 025 가 Slack 으로 보낸다.
   - 수집기의 Influx·Redis 쓰기 실패 알림 개편 — §3.5 3단계(최근 15분 1분 봉 확인)가 대신 잡는다.
-  - api 헬스의 공개 경로 — api·Redis·Influx 는 canary 3·4단계가 밖에서 보고, 앱 안쪽 상태는 로그인해야 들어가는 관리자 페이지(후속 스펙)에서 본다. 밖에 여는 헬스 경로는 지금의 `/api/health` 하나로 둔다.
+  - api 헬스의 공개 경로 — api·Redis·Influx 는 canary 3·4단계가 밖에서 보고, 앱 안쪽 상태는 로그인해야 들어가는 관리자 페이지(029)에서 본다. 밖에 여는 헬스 경로는 지금의 `/api/health` 하나로 둔다.
   - 022 의 `/?쿼리` → `/app/` 301(이미 운영 중 — `utm_*` 링크가 대시보드로 간다)과 기록 탭 검색칸의 입력 검증 — status.md 빚으로 남긴다.
   - 이상 탐지·복합 경보, 별도 대시보드 도구.
 - 바꾸는 기존 것:
@@ -29,7 +29,7 @@
 ## 3. 동작
 
 ### 3.1 무엇이 무엇을 보는가
-읽는 계약(025 §3.5 복사): 두 역할 모두 `GET /health` 는 `{"status","version","lastTickAt"}` 를 답하고 `status == "ok"` 만 200, 나머지는 503 이다. collector 는 메모리의 마지막 틱으로 `starting`·`stale`(30초 무틱)을 판정하고 Redis 를 보지 않는다. 밖에서 부르는 `/api/health` 는 nginx `location /api/` 를 거쳐 collector 가 답한다 — serve 의 api 나 data 의 Redis 가 죽어도 200 이다.
+읽는 계약(025 §3.5 복사): 두 역할 모두 `GET /health` 는 `{"status","version","lastTickAt"}` 를 답하고 `status == "ok"` 만 200, 나머지는 503 이다. collector 는 메모리의 마지막 틱으로 `starting`·`stale`(30초 무틱)을 판정하고 Redis 를 보지 않는다. 밖에서 부르는 `/api/health` 는 nginx 를 거쳐 collector 가 답한다 — serve 의 api 나 data 의 Redis 가 죽어도 200 이다.
 
 | 감시 | 주기 |
 |---|---|
@@ -40,7 +40,7 @@
 - uptime 서비스(025)는 `/api/health` 하나로 serve 박스·caddy·nginx·collect 박스·수집 정체를 본다.
 - canary(§3.5)는 화면·수집기·api·Redis·Influx·WebSocket 푸시 경로를 본다 — api·Redis·Influx 가 죽은 것은 3·4단계가 10분 안에 잡는다.
 - 에이전트(§3.4)는 박스의 메모리·디스크를 본다.
-- 새 공개 헬스 경로는 만들지 않는다. api 역할의 `/health`·거래소별 수집 상태 같은 앱 안쪽 상태는 관리자 페이지(후속 스펙)에서 본다.
+- 새 공개 헬스 경로는 만들지 않는다. api 역할의 `/health`·거래소별 수집 상태 같은 앱 안쪽 상태는 관리자 페이지(029)에서 본다.
 
 ### 3.2 접속 로그 — caddy
 - 이 기록은 개인정보로 다룬다. 남기는 항목·목적·보존기간(박스 안·CloudWatch 둘 다)을 후속 스펙의 처리방침에 옮기고, CloudWatch 로 보내는 것은 처리방침 게시 뒤다(§3.4).

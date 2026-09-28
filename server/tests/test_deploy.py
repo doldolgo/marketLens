@@ -204,17 +204,118 @@ def test_web_image_is_multistage_node22_to_nginx() -> None:
     assert ".env*" in _text("web/.dockerignore").splitlines()
 
 
-# --- nginx: /api 접두 제거·SPA fallback·캐시 규칙 ---------------------------
+# --- nginx: 공개 /api 허용 목록(028)·SPA fallback·캐시 규칙 ------------------
 
 
-def test_nginx_strips_api_prefix_and_falls_back_to_index() -> None:
+def _nginx_tokens(text: str) -> list[str]:
+    """nginx 설정 → 토큰. 주석은 버리고, 따옴표 문자열은 따옴표째 한 토큰, `${VAR}` 는 단어의 일부."""
+    tokens: list[str] = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch.isspace():
+            i += 1
+        elif ch == "#":
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+        elif ch in "{};":
+            tokens.append(ch)
+            i += 1
+        elif ch in "'\"":
+            j = i + 1
+            while text[j] != ch:
+                j += 2 if text[j] == "\\" else 1
+            tokens.append(text[i : j + 1])
+            i = j + 1
+        else:
+            j = i
+            while j < len(text) and not text[j].isspace() and text[j] not in ";{}":
+                j = text.index("}", j) + 1 if text.startswith("${", j) else j + 1
+            tokens.append(text[i:j])
+            i = j
+    return tokens
+
+
+# 지시어 하나 = (인자 — 첫 칸이 이름, 따옴표는 벗김, 블록 자식 또는 None)
+Directive = tuple[list[str], list | None]
+
+
+def _nginx_block(tokens: list[str], pos: int = 0) -> tuple[list[Directive], int]:
+    items: list[Directive] = []
+    args: list[str] = []
+    while pos < len(tokens):
+        tok = tokens[pos]
+        if tok == ";":
+            items.append((args, None))
+            args, pos = [], pos + 1
+        elif tok == "{":
+            children, pos = _nginx_block(tokens, pos + 1)
+            items.append((args, children))
+            args = []
+        elif tok == "}":
+            return items, pos + 1
+        else:
+            quoted = len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in "'\""
+            args.append(tok[1:-1] if quoted else tok)
+            pos += 1
+    return items, pos
+
+
+def _public_server() -> list[Directive]:
+    """`listen 80` server 블록 — 029 가 같은 파일에 관리자 server 를 더해도 공개 쪽만 본다 (028 §4)."""
+    tree, _ = _nginx_block(_nginx_tokens(_text("web/nginx.conf")))
+    servers = [children for args, children in tree if args == ["server"]]
+    public = [s for s in servers if (["listen", "80"], None) in s]
+    assert len(public) == 1, "listen 80 server 가 하나여야 한다"
+    return public[0]
+
+
+def _args(block: list[Directive], name: str) -> list[list[str]]:
+    return [args[1:] for args, _ in block if args[0] == name]
+
+
+def _locations(block: list[Directive]) -> dict[tuple[str, ...], list[Directive]]:
+    """location 전부(중첩 포함) — 키는 수식어와 경로 (`("=", "/api")`·`("/api/",)`·`("~", 패턴)`)."""
+    found: dict[tuple[str, ...], list[Directive]] = {}
+    for args, children in block:
+        if args[0] == "location" and children is not None:
+            found[tuple(args[1:])] = children
+            found.update(_locations(children))
+    return found
+
+
+def _route(path: str) -> tuple[str, ...]:
+    """정규식이 없는 공개 server 에서 nginx 가 고르는 location — 정확 일치, 없으면 가장 긴 접두."""
+    locations = _locations(_public_server())
+    if ("=", path) in locations:
+        return ("=", path)
+    prefixes = [key for key in locations if len(key) == 1 and path.startswith(key[0])]
+    return max(prefixes, key=lambda key: len(key[0]))
+
+
+COLLECTOR = "http://${COLLECT_HOST}:8000"
+API = "http://api:8000"
+# 028 §3.1 — 공개 허용 목록: 경로 → 업스트림. 웹·감시가 새 경로를 부르면 그 스펙이 여기와 nginx 에 한 줄을 더한다.
+PUBLIC_API = {
+    "/api/health": COLLECTOR,
+    "/api/health/collect": COLLECTOR,
+    "/api/history/events": COLLECTOR,
+    "/api/history/candles": API,
+    "/api/landing": API,
+    "/api/ws/spreads": API,
+}
+PROXY_HEADERS = (
+    ["Host", "$http_host"],
+    ["X-Real-IP", "$remote_addr"],
+    ["X-Forwarded-For", "$proxy_add_x_forwarded_for"],
+    ["X-Forwarded-Proto", "$scheme"],
+)
+DENY = {("=", "/api"), ("/api/",)}
+
+
+def test_nginx_falls_back_to_index_under_app_only() -> None:
     conf = _text("web/nginx.conf")
-    assert "location /api/ {" in conf
-    # proxy_pass 끝의 / 가 접두 제거를 만든다: /api/health → /health
-    # 021 — 업스트림 호스트는 COLLECT_HOST 치환(수집은 다른 박스). 고정 서비스명은 남지 않는다.
-    assert "proxy_pass http://${COLLECT_HOST}:8000/;" in conf
     assert "http://server:8000" not in conf
-    assert "location = /api { return 404; }" in conf
     # 022 — SPA fallback 은 /app/ 아래에서만, / 는 정적 랜딩
     assert "try_files $uri $uri/ /app/index.html;" in conf
     assert "try_files /landing.html =404;" in conf
@@ -230,97 +331,90 @@ def test_web_bundle_lives_under_app_prefix() -> None:
     assert "alias /usr/share/nginx/html/assets/;" in conf
 
 
-def _nginx_api_block() -> tuple[str, str]:
-    """api 로 보내는 정규식 location — (패턴, 블록 본문)."""
-    conf = _text("web/nginx.conf")
-    match = re.search(r"location ~ (\S+) \{(.*?)\n    \}", conf, re.S)
-    assert match is not None, "api 로 분기하는 정규식 location 이 없다"
-    return match.group(1), match.group(2)
+def test_public_api_forwards_exactly_the_six_allowlisted_paths() -> None:
+    """백엔드로 넘기는 location = 허용 여섯(전부 =), 모양은 접두 제거 rewrite + URI 없는 proxy_pass (028 §3.1·§3.3)."""
+    server = _public_server()
+    assert not _args(server, "proxy_pass")
+    proxied = {k: c for k, c in _locations(server).items() if _args(c, "proxy_pass")}
+    assert set(proxied) == {("=", path) for path in PUBLIC_API}
+    for (_, path), children in proxied.items():
+        assert _args(children, "proxy_pass") == [[PUBLIC_API[path]]], path
+        # 정규화된 경로에서 /api 를 뗀다 — break 라 쿼리스트링은 그대로 따라간다
+        assert _args(children, "rewrite") == [["^/api/(.*)$", "/$1", "break"]], path
+        headers = _args(children, "proxy_set_header")
+        for header in PROXY_HEADERS:
+            assert header in headers, (path, header)
 
 
-def test_nginx_routes_influx_history_paths_to_api_and_the_rest_to_server() -> None:
-    """네 경로만 api:8000 으로, 접두를 떼고 (016 §3.3). /api/history/events 는 server 로."""
-    pattern, block = _nginx_api_block()
-    to_api = (
+def test_public_api_ws_spreads_upgrades_without_touching_read_timeout() -> None:
+    """017 — 업그레이드 헤더·HTTP/1.1 은 `= /api/ws/spreads` 에만, read timeout 은 기본 그대로."""
+    for key, children in _locations(_public_server()).items():
+        headers = _args(children, "proxy_set_header")
+        upgrades = key == ("=", "/api/ws/spreads")
+        assert (["Upgrade", "$http_upgrade"] in headers) == upgrades, key
+        assert (["Connection", "upgrade"] in headers) == upgrades, key
+        assert (_args(children, "proxy_http_version") == [["1.1"]]) == upgrades, key
+    server = _public_server()
+    assert not _args(server, "proxy_read_timeout")
+    for children in _locations(server).values():
+        assert not _args(children, "proxy_read_timeout")
+
+
+def test_public_api_rest_answers_app_shaped_json_404_without_proxy() -> None:
+    """`/api` 와 그 밖의 `/api/*` 는 앱 404 와 같은 JSON, 확장자별 MIME 추정 끔, proxy_pass 없음 (028 §3.2)."""
+    app_404 = TestClient(create_app()).get("/nope")
+    assert app_404.status_code == 404
+    locations = _locations(_public_server())
+    for key in DENY:
+        children = locations[key]
+        assert sorted(args[0] for args, _ in children) == [
+            "default_type",
+            "return",
+            "types",
+        ], key
+        assert [c for args, c in children if args[0] == "types"] == [[]], key
+        assert _args(children, "default_type") == [["application/json"]], key
+        assert _args(children, "return") == [["404", app_404.text]], key
+
+
+def test_public_server_has_no_regex_location_and_hides_version() -> None:
+    """정규식 location 은 접두 /api/ 보다 먼저 이겨 허용 목록을 우회한다 — 하나도 두지 않는다 (028 §3.1)."""
+    server = _public_server()
+    keys = set(_locations(server))
+    assert not [k for k in keys if k[0] in ("~", "~*")]
+    assert ("/api/ws/",) not in keys
+    assert {k for k in keys if k[-1].startswith("/api")} == DENY | {
+        ("=", path) for path in PUBLIC_API
+    }
+    assert _args(server, "server_tokens") == [["off"]]
+
+
+def test_closed_api_paths_route_to_the_json_404() -> None:
+    """API 문서·분석 6개·/refresh·history 무거운 조회·/spreads·끝에 / 붙은 허용 경로는 공개에 없다 (028 §3.2·§4)."""
+    closed = [
+        "/api",
+        "/api/docs",
+        "/api/redoc",
+        "/api/openapi.json",
+        "/api/premium",
+        "/api/premium/scan",
+        "/api/matrix",
+        "/api/arbitrage",
+        "/api/orderbook/upbit",
+        "/api/slippage/upbit",
+        "/api/refresh",
         "/api/history/premium",
         "/api/history/streaks",
         "/api/history/streaks/bulk",
-        "/api/history/candles",
-    )
-    for path in to_api:
-        assert re.search(pattern, path), path
-    for path in ("/api/history/events", "/api/spreads", "/api/health", "/api/refresh"):
-        assert not re.search(pattern, path), path
-    assert "proxy_pass http://api:8000;" in block
-    # proxy_pass 에 URI 가 없으므로 접두 제거는 rewrite 가 한다 — break 라 쿼리스트링은 그대로
-    assert "rewrite ^/api/(.*)$ /$1 break;" in block
-    for header in (
-        "proxy_set_header Host $http_host;",
-        "proxy_set_header X-Real-IP $remote_addr;",
-        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "proxy_set_header X-Forwarded-Proto $scheme;",
-    ):
-        assert header in block, header
-
-
-def test_nginx_routes_spreads_exactly_to_api_and_subpaths_to_server() -> None:
-    """`= /api/spreads` 만 api:8000 으로 — 접두 제거·쿼리 유지·헤더 4개, 하위 경로는 server 로 (018 §3.3)."""
-    conf = _text("web/nginx.conf")
-    block = conf.split("location = /api/spreads {", 1)[1].split("\n    }", 1)[0]
-    assert "proxy_pass http://api:8000;" in block
-    # 016 과 같은 방식 — rewrite 가 접두를 떼고 break 라 쿼리스트링은 그대로 따라간다
-    assert "rewrite ^/api/(.*)$ /$1 break;" in block
-    for header in (
-        "proxy_set_header Host $http_host;",
-        "proxy_set_header X-Real-IP $remote_addr;",
-        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "proxy_set_header X-Forwarded-Proto $scheme;",
-    ):
-        assert header in block, header
-    # 정확 일치뿐이라 /api/spreads/… 는 어느 api 분기에도 안 걸리고 접두 location /api/ 가 server 로 보낸다
-    assert "location /api/spreads" not in conf
-    pattern, _ = _nginx_api_block()
-    assert not re.search(pattern, "/api/spreads") and not re.search(
-        pattern, "/api/spreads/x"
-    )
-
-
-def test_nginx_routes_landing_summary_exactly_to_api() -> None:
-    """`= /api/landing` 은 api:8000 으로 — `/api/spreads` 와 같은 모양(접두 제거·헤더 4개) (022 §3.1)."""
-    conf = _text("web/nginx.conf")
-    block = conf.split("location = /api/landing {", 1)[1].split("\n    }", 1)[0]
-    assert "proxy_pass http://api:8000;" in block
-    assert "rewrite ^/api/(.*)$ /$1 break;" in block
-    for header in (
-        "proxy_set_header Host $http_host;",
-        "proxy_set_header X-Real-IP $remote_addr;",
-        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "proxy_set_header X-Forwarded-Proto $scheme;",
-    ):
-        assert header in block, header
-    pattern, _ = _nginx_api_block()
-    assert not re.search(pattern, "/api/landing")
-
-
-def test_nginx_upgrades_api_ws_to_api_without_touching_read_timeout() -> None:
-    """`/api/ws/` 접두 위치 → `api:8000/ws/`, Upgrade 헤더·HTTP/1.1, read timeout 은 기본 그대로 (017 §3.5)."""
-    conf = _text("web/nginx.conf")
-    block = conf.split("location /api/ws/ {", 1)[1].split("\n    }", 1)[0]
-    assert "proxy_pass http://api:8000/ws/;" in block
-    assert "proxy_http_version 1.1;" in block
-    assert "proxy_set_header Upgrade $http_upgrade;" in block
-    assert 'proxy_set_header Connection "upgrade";' in block
-    for header in (
-        "proxy_set_header Host $http_host;",
-        "proxy_set_header X-Real-IP $remote_addr;",
-        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "proxy_set_header X-Forwarded-Proto $scheme;",
-    ):
-        assert header in block, header
-    assert "proxy_read_timeout" not in conf
-    # 정규식 location(016)은 /api/ws/ 에 걸리지 않아야 접두 위치가 이긴다
-    pattern, _ = _nginx_api_block()
-    assert not re.search(pattern, "/api/ws/spreads")
+        "/api/spreads",
+        "/api/ws",
+        "/api/ws/other",
+        "/api/nope",
+    ]
+    for path in closed + [path + "/" for path in PUBLIC_API]:
+        assert _route(path) in DENY, path
+    for path in PUBLIC_API:
+        assert _route(path) == ("=", path), path
 
 
 def test_nginx_template_substitutes_only_collect_host() -> None:
@@ -328,9 +422,8 @@ def test_nginx_template_substitutes_only_collect_host() -> None:
     nginx 자체 변수는 $name 꼴이라 필터(^COLLECT_HOST$)에 걸리지 않는다."""
     conf = _text("web/nginx.conf")
     assert set(re.findall(r"\$\{(\w+)\}", conf)) == {"COLLECT_HOST"}
-    # 016 정규식·018 /api/spreads·022 /api/landing
-    assert conf.count("proxy_pass http://api:8000;") == 3
-    assert "proxy_pass http://api:8000/ws/;" in conf
+    # 경로별 업스트림 개수는 세지 않는다 — 공개 쪽은 허용 여섯 테스트가 고정하고, 029 의 관리자 server 가
+    # 같은 파일에 프록시를 더해도 이 테스트가 깨지지 않게(028 §4 — 단언은 listen 80 블록만)
     for var in (
         "$http_host",
         "$remote_addr",
@@ -350,6 +443,125 @@ def test_nginx_cache_rules_for_index_and_hashed_assets() -> None:
     assert '"public, max-age=31536000, immutable"' in assets_block
     # `always` 가 붙으면 404 에도 1년 immutable 이 실려 되돌릴 수 없게 캐시된다
     assert "always" not in assets_block
+
+
+# --- 호출 경로 대조: 웹·감시가 부르는 /api 경로 ⊂ 공개 허용 목록 (028 §3.5·§4) -------
+
+# 경로 끝 — 쿼리·템플릿 보간·따옴표 앞에서 자른다
+_TAIL = r"[^?`$'\"]*"
+# 요청 경로로 쓰인 /api… — 따옴표·백틱·보간 닫는 } 바로 뒤이거나 URL 의 호스트 뒤. /apix 는 아니다
+_API_PATH = re.compile(
+    r"(?:['\"`}]|(?:https?|wss?)://[^/\s'\"`]+)(/api(?:/[\w.~%-]*)*)(?![\w.~%-])"
+)
+
+
+def _strip_comments(text: str, suffix: str) -> str:
+    """주석에 적힌 경로(‘/api/refresh 는 부르지 않는다’)가 호출로 잡히지 않게 뺀다."""
+    if suffix in (".html", ".js", ".mjs", ".cjs", ".ts"):
+        text = re.sub(r"<!--.*?-->|/\*.*?\*/", "", text, flags=re.S)
+        text = re.sub(r"(^|\s)//[^\n]*", r"\1", text)
+    elif suffix in (".py", ".sh", ".yml", ".yaml", ".toml"):
+        text = re.sub(r"(^|\s)#[^\n]*", r"\1", text)
+    return text
+
+
+def _web_src_paths() -> set[str]:
+    """(1) `${API_BASE}` 바로 뒤 리터럴 경로 — 리터럴 / 로 시작하지 않으면 대조할 수 없으니 실패.
+    `API_BASE + …` 처럼 템플릿 밖에서 쓰면 경로를 못 뽑으므로 실패하고(정의·import 줄과 주석은 예외),
+    따옴표 안의 리터럴 `/api/…` 는 그대로 대조에 넣는다."""
+    paths: set[str] = set()
+    for file in sorted((ROOT / "web/src").rglob("*.ts*")):
+        text = _strip_comments(file.read_text("utf-8"), ".ts")
+        for tail in re.findall(r"\$\{API_BASE\}(" + _TAIL + ")", text):
+            assert tail.startswith("/"), f"{file.name}: ${{API_BASE}} 뒤 {tail!r}"
+            paths.add("/api" + tail)
+        for line in text.splitlines():
+            bare = re.sub(r"\$\{API_BASE\}", "", line)
+            if "API_BASE" in bare and not re.match(
+                r"\s*(import\b|export const API_BASE\b|API_BASE,|\})", line
+            ):
+                raise AssertionError(
+                    f"{file.name}: 템플릿 밖의 API_BASE — {line.strip()}"
+                )
+        paths |= set(re.findall(r"['\"`](/api/" + _TAIL + ")", text))
+    return paths
+
+
+def _public_html_paths() -> set[str]:
+    """(2) 정적 페이지(랜딩)의 `fetch(`·`new WebSocket(` 첫 인자 따옴표 안 `/api/…` (주석 제외)."""
+    call = re.compile(r"\b(?:fetch|new\s+WebSocket)\(\s*['\"`](/api/" + _TAIL + ")")
+    paths: set[str] = set()
+    for file in sorted((ROOT / "web/public").glob("*.html")):
+        paths |= set(call.findall(_strip_comments(file.read_text("utf-8"), ".html")))
+    return paths
+
+
+def _canary_paths(root: Path = ROOT / "ops/canary") -> set[str]:
+    """(3) canary(027) 코드·설정의 요청 경로. 디렉터리가 없으면(027 구현 전) 빈 집합이고, 생기면 테스트를
+    고치지 않아도 대조에 들어간다. 문서(.md)·숨김·의존성 폴더는 요청이 아니라 뺀다."""
+    paths: set[str] = set()
+    if not root.is_dir():
+        return paths
+    for file in sorted(root.rglob("*")):
+        parts = file.relative_to(root).parts
+        skip = any(
+            p.startswith(".") or p in ("node_modules", "__pycache__") for p in parts
+        )
+        if skip or not file.is_file() or file.suffix == ".md":
+            continue
+        try:
+            text = file.read_text("utf-8")
+        except UnicodeDecodeError:
+            continue
+        text = _strip_comments(text, file.suffix)
+        paths |= set(_API_PATH.findall(text))
+        if file.suffix in (".yml", ".yaml"):  # `path: /api/health` 처럼 따옴표 없는 값
+            paths |= set(re.findall(r":\s*(/api(?:/[\w.~%-]*)*)", text))
+    return paths
+
+
+def _uptime_paths() -> set[str]:
+    """(3) 외부 uptime 모니터(025)에 등록하는 URL 의 경로."""
+    text = _text("docs/runbooks/uptime-monitor.md")
+    return set(re.findall(r"https?://[^/\s`'\")]+(/api(?:/[\w.~%-]*)*)", text))
+
+
+def test_web_and_monitor_call_paths_are_all_allowlisted() -> None:
+    """웹·감시가 새 경로를 부르면서 허용 목록(nginx·PUBLIC_API)에 한 줄을 더하지 않으면 여기서 실패한다."""
+    sources = {
+        "web/src": _web_src_paths(),
+        "web/public": _public_html_paths(),
+        "ops/canary": _canary_paths(),
+        "uptime-monitor.md": _uptime_paths(),
+    }
+    for name in ("web/src", "web/public", "uptime-monitor.md"):
+        assert sources[name], f"{name} 에서 호출 경로를 못 찾았다 — 추출 규칙이 깨졌다"
+    for name, paths in sources.items():
+        assert paths <= set(PUBLIC_API), (name, sorted(paths - set(PUBLIC_API)))
+
+
+def test_canary_paths_are_picked_up_once_the_directory_exists(tmp_path: Path) -> None:
+    """027 이 ops/canary/ 를 만들면 그 요청 경로가 그대로 대조에 들어간다 — 주석·문서는 빼고."""
+    assert _canary_paths(tmp_path / "missing") == set()
+    (tmp_path / "canary.js").write_text(
+        "// /api/refresh 는 부르지 않는다\n"
+        "const WS = 'wss://kimptrack.com/api/ws/spreads';\n"
+        "await get(`${BASE}/api/history/candles?base=BTC`);\n",
+        "utf-8",
+    )
+    (tmp_path / "steps.py").write_text(
+        '# /api/docs\nURL = BASE + "/api/health"\n', "utf-8"
+    )
+    (tmp_path / "README.md").write_text("`/api/spreads` 는 닫혀 있다\n", "utf-8")
+    (tmp_path / "checks.yml").write_text(
+        "steps:\n  - path: /api/landing  # /api/docs\n", "utf-8"
+    )
+    assert _canary_paths(tmp_path) == {
+        "/api/ws/spreads",
+        "/api/history/candles",
+        "/api/health",
+        "/api/landing",
+    }
 
 
 def test_app_logging_puts_marketlens_info_on_a_timestamped_handler() -> None:

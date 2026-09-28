@@ -32,12 +32,12 @@ USDT 시세는 이 시스템의 **유일한 원화↔USDT 변환값**이다(은�
 - 두 국내 거래소 다 61초 전 → 2줄, 거래소 id 오름차순
 - `warnings` 키는 경고가 없어도 항상 존재(빈 배열)하고, 최상위는 정확히 6키(`rate`·`notional`·`rows`·`warnings`·`dataReceivedAt`·`fetchedAt`), 행은 정확히 17키다
 - 시세를 시드하지 않은 거래소는 경고에 나타나지 않는다
-수동: 배포 후 `/api/spreads` 에 `warnings` 키가 있고 평상시 빈 배열이다.
+수동: 배포 후 `docker exec marketlens-web wget -qO- http://api:8000/spreads` 에 `warnings` 키가 있고 평상시 빈 배열이다(공개 `/api/spreads` 는 028 이 닫는다).
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
 cd server && .venv/bin/ruff format -q . && .venv/bin/ruff check -q . && .venv/bin/python -m pytest -q   # 221 passed (신규 4)
-# 배포 후 EC2: curl localhost:8080/api/spreads → warnings 키 존재·빈 배열 확인
+# 배포 후 EC2: docker exec marketlens-web wget -qO- http://api:8000/spreads → warnings 키 존재·빈 배열 확인
 ```
 
 ## 6. 갱신할 문서
