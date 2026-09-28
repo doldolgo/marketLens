@@ -103,6 +103,7 @@ marketlens/
 | 026 | day-change | DONE | 국내 거래소·코인별 KST 00시 첫 체결가 장부(Redis `dayopen:<날짜>`, 재기동 유지) → `/spreads` 행 `dayChg`(19키) + 스프레드 탭 열 개편(심볼·변동율·국내가격·해외가격·해외거래소·국내거래소·김프·입출금·네트워크) |
 | 027 | observability | TODO | caddy 접속 로그(IP /24·검색어·헤더 지움, 폴링 제외, `caddy/` 디렉터리 바인드·배포 뒤 reload) · api WS 접속 수 StatsD 게이지 → CloudWatch 서울(에이전트 세 박스, 로그 90일은 처리방침 뒤, canary 5분 4단계, 경보 17개(로그 뒤 18) → Slack) · serve 스왑 1GB (인프라) |
 | 028 | api-allowlist | TODO | 공개 nginx `/api` 를 허용 목록 여섯(정확 일치)으로 — 수집기 `/api/health`·`/api/health/collect`·`/api/history/events`, api `/api/history/candles`·`/api/landing`·`/api/ws/spreads`, 나머지 404 JSON(API 문서·분석 6개·`/refresh`·history 무거운 조회·`/spreads` 닫힘), 정규식 location 없음·정규화 우회 방어, 웹·감시 호출 경로 대조 테스트. 022 재작업 머지 뒤 (인프라) |
+| 029 | admin | TODO | 관리자 server — web nginx :8081(게시 안 함)·정적 화면(헬스·수집 상태·WS 접속 수·즉시 갱신), 닫힌 API 전체 분기·교차 사이트 403·JSON 접속 기록, api `GET /admin/status`·`RedisBus.ping`, 수집기 `UVICORN_ROOT_PATH=/api`. 028 머지 뒤 (BE·web·인프라) |
 
 실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
