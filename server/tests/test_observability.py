@@ -239,3 +239,14 @@ def test_serve_deploy_reloads_caddy_after_up_and_prunes_last() -> None:
     assert script[-1] == "docker image prune -f"
     for box in ("data", "collect"):
         assert not any("caddy" in ln for ln in _deploy_script(box)), box
+
+
+def test_compose_api_sends_the_ws_gauge_to_the_host_agent() -> None:
+    """api 만 `STATSD_ADDR` — 호스트 게이트웨이의 CloudWatch Agent(StatsD :8125)로 (§3.3)."""
+    services = _yaml("docker-compose.yml")["services"]
+    api = services["api"]
+    assert api["environment"]["STATSD_ADDR"] == "host.docker.internal:8125"
+    assert api["extra_hosts"] == ["host.docker.internal:host-gateway"]
+    for name, svc in services.items():
+        if name != "api":
+            assert "STATSD_ADDR" not in (svc.get("environment") or {}), name

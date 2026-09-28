@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     bybit_secret_key: str | None = None
     # Slack Incoming Webhook(025). 없으면 알림 기능 전체가 꺼진다 — 로컬·테스트 기본
     slack_webhook_url: str | None = None
+    # StatsD 수신 주소 `host:port`(027) — api 역할만 WS 접속 수 게이지를 보낸다. 비면 끔(로컬·테스트 기본)
+    statsd_addr: str | None = None
 
     @field_validator("s3_region", mode="before")
     @classmethod

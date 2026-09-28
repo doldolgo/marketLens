@@ -63,6 +63,7 @@ from app.features.history.router import events_router as history_events_router
 from app.features.history.router import router as history_router
 from app.features.landing.router import router as landing_router
 from app.features.landing.service import LandingService
+from app.features.spreads.gauge import start_ws_gauge
 from app.features.spreads.hub import SpreadsHub
 from app.features.spreads.push import SpreadsPublisher
 from app.features.spreads.router import refresh_router as spreads_refresh_router
@@ -94,7 +95,7 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     거래소·S3 에 연결하지 않고 기동 복원도 없다 — 하나라도 하면 collector 와 같은 measurement 를
     중복으로 쓰거나(collect_fail·premium_event·롤업) 거래소를 이중 구독한다. Redis 는 구독 목적으로만
-    쓰고(스트림 `ticks` 는 안 읽는다) 백그라운드 태스크는 그 구독 태스크 하나다.
+    쓰고(스트림 `ticks` 는 안 읽는다) 백그라운드 태스크는 그 구독 태스크 + 알림(025)·게이지(027) 각각 설정이 있을 때만.
     """
     _start_notifier(app)
     influx = await _open_influx(app.state.settings)
@@ -104,9 +105,13 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
     hub.start()
     app.state.spreads_hub = hub
     app.state.spreads_bus = bus  # 018 — GET /spreads 가 요청마다 latest 읽기·want 쓰기
+    # 027 — WS 접속 수 게이지. collector 는 띄우지 않는다(허브가 늘 0 이라 api 값을 덮는다)
+    gauge = start_ws_gauge(app.state.settings.statsd_addr, lambda: hub.connections)
     try:
         yield
     finally:
+        if gauge is not None:
+            await gauge.aclose()
         await hub.aclose()
         await bus.aclose()
         if influx is not None:
