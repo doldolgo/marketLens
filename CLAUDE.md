@@ -96,7 +96,7 @@ marketlens/
 | 019 | bybit | DONE | 바이빗 USDT 현물 추가 — WS 3샤드 orderbook.200(스냅샷+델타, 행 발행 500ms 제한)+publicTrade, instruments-info 매초, 입출금(HMAC), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗), `/history/*` `fx=bybit`, web 표시명·기록 탭 Bybit 실데이터 |
 | 020 | bitget | DONE | 비트겟 USDT 현물 추가 — WS 3샤드 books15(스냅샷)+trade, symbols 매초, 입출금(public·키 없음), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟), `/history/*` `fx=bitget`, web 표시명·기록 탭 Bitget 실데이터 |
 | 021 | infra-split | DONE | EC2 3대 분리 — compose profile 3개(collect=server c7g.medium / data=redis·influxdb t4g.small / serve=api·web t4g.micro), 박스 간 사설 IP(루트 .env DATA_HOST·COLLECT_HOST), nginx 업스트림 주입, 배포 3타깃(data→collect→serve), 런북 ec2-split.md (인프라) |
-| 022 | landing | DONE | 정적 HTML 랜딩 `/`(검색·미리보기 메타, `/api/spreads` 1회 티저, 스크린샷, 모바일) · 대시보드는 `/app/`(Vite base·nginx alias), 옛 쿼리 링크는 301 (web·nginx 전용) |
+| 022 | landing | DONE | 정적 HTML 랜딩 `/` — 실시간 경로 카드·7일 사건·만든 방식, 요약 API `GET /landing`(api), 대시보드는 `/app/` |
 | 023 | domain-tls | DONE | `kimptrack.com`·`www` HTTPS — serve 박스에 caddy 컨테이너(호스트 80·443, Let's Encrypt 자동 발급·갱신, 볼륨 보존), web 은 호스트 비공개, 탄력 IP 직접 접속은 평문 유지, DNS 는 Cloudflare(프록시 끔) (인프라·serve 전용) |
 | 024 | wallet-history | DONE | 틱 입출금 4상태 = 006 망 판정값 + 망 이름 2개 → 1분봉·사건 점 `net_dom`·`net_fx`, `/history/candles`·`events` 에 `netDom`·`netFx`, 기록 탭 읽기 줄·사건 표·로그에 망 표시 |
 | 025 | slack-alerts | DONE | Slack 웹훅 알림 — 기동·수집 실패 구간 60초 발생/복구·ERROR 로그·처리 안 된 500(키별 10분 억제, 새 라이브러리 없음), 수집기 심장박동 `collect:heartbeat`, `/health` 신선도 판정(비정상 503), 외부 uptime 감시 런북 |

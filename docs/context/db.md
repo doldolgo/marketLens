@@ -22,7 +22,7 @@
 - 읽고 지우는 쪽: 009 의 flusher — 60초마다 전량을 `XRANGE` 1,000건 페이지로 잘라 한 페이지씩 Influx 에 쓰고, **그 페이지의 모든 배치가 성공한 뒤에만** 그 페이지의 ID 를 `XDEL` 한다(메모리는 페이지 크기에 비례). 페이지가 실패하면 그 페이지부터는 지우지 않고 다음 회차가 같은 구간을 다시 보낸다(Influx 덮어쓰기라 무해).
 - `MAXLEN ~ 86400`(24시간)은 Influx 가 하루 넘게 막혔을 때만 작동하는 안전 상한이다. 잘리면 유실이고 flusher 가 다음 회차 로그로 알린다.
 - 채널 **`spreads`**(017) — `GET /spreads` 와 같은 표 JSON(camelCase, ≈240KB) 1장. 쓰는 쪽 수집(누가 볼 때만 틱 직후 매초), 읽는 쪽 api 의 구독 허브.
-- 키 **`spreads:latest`**(017) — 같은 JSON, TTL 10초. 쓰는 쪽 수집(게시와 한 왕복), 읽는 쪽 api(첫 접속자의 시작 표·`GET /spreads` 응답(018)). 만료 = 수집이 표를 안 만들거나 멈춤.
+- 키 **`spreads:latest`**(017) — 같은 JSON, TTL 10초. 쓰는 쪽 수집(게시와 한 왕복), 읽는 쪽 api(첫 접속자의 시작 표·`GET /spreads` 응답(018)·`GET /landing` 요약(022)). 만료 = 수집이 표를 안 만들거나 멈춤.
 - 키 **`spreads:want`**(017) — 값 `1`, TTL 15초. 쓰는 쪽 api(접속자가 있는 동안 5초마다·첫 접속 즉시·`GET /spreads` 요청마다(018)), 읽는 쪽 없음(2026-09-26 부터 수집은 접속자와 무관하게 매 틱 표를 만든다).
 - 해시 **`dayopen:<YYYY-MM-DD>`**(026) — field `<국내 거래소>:<코인>`, value KST 00시 이후 첫 체결가(문자열), TTL 48시간. 쓰는 쪽 수집(새로 못 박힌 항목을 틱 뒤 한 번에), 읽는 쪽 수집 자신(기동·자정 직후 HGETALL 로 복원). 사라지면 그날 기준 = 첫 관측 시각 가격.
 - 키 **`collect:heartbeat`**(025) — 값 = 마지막 틱 시각(epoch ms 문자열), TTL 30초. 쓰는 쪽 수집(매 틱 끝, 직전 쓰기가 안 끝났으면 건너뜀), 읽는 쪽 api 의 `/health`. 만료 = 수집이 30초 넘게 틱을 못 만듦(또는 죽음).
@@ -57,9 +57,9 @@
 - Influx·Redis·S3 어느 것이 닿지 않아도 앱은 뜬다. `INFLUX_TOKEN` 없으면 flusher 비활성, `S3_BUCKET` 없으면 아카이브 비활성.
 
 ## 읽는 쪽
-- `features/history` 의 `/history/premium`·`/history/streaks`·`/history/streaks/bulk`·`/history/events`(`premium_event` 닫힌 사건 + 메모리의 진행 중)·`/history/candles`(`res` 의 계층 버킷 하나, 요청당 1,440창 상한, 진행 중 창 없음) 만. 다른 조회 API 는 DB 를 0회 접근한다(메모리가 진실). 저장소 불가 시 503 `storage_unavailable`.
+- `features/history` 의 `/history/premium`·`/history/streaks`·`/history/streaks/bulk`·`/history/events`(`premium_event` 닫힌 사건 + 메모리의 진행 중)·`/history/candles`(`res` 의 계층 버킷 하나, 요청당 1,440창 상한, 진행 중 창 없음), 그리고 `features/landing` 의 `/landing`(022 — `candles_1m` 에서 1위 경로 1시간·`premium_event` 7일, 둘 다 60초 캐시) 만. 다른 조회 API 는 DB 를 0회 접근한다(메모리가 진실). 저장소 불가 시 `/history/*` 는 503 `storage_unavailable`, `/landing` 은 200 에 그 부분만 null.
 - 기동 시 1회: `collect_fail` 24시간 복원(011, 3초 상한), `premium_event` 7일 안 `end_ts 0` 복원(013, 3초 상한 — 600초 넘게 못 본 사건은 `last_ts` 로 닫아 쓴다), spark 용 `premium` 최근 30분 1분 버킷 집계(009, 10초 상한), 롤업 따라잡기 기준점 — 계층마다 위 버킷 가장 늦은 점·아래 계층들 가장 오래된 점(014, 계층당 3초 상한). 롤업 회차는 아래 계층 버킷을 창 단위로 읽는다.
-- Redis 스트림 `ticks` 는 flusher 만 읽는다. 채널 `spreads`·키 `spreads:latest` 는 api 의 구독 허브와 `GET /spreads`(두 역할, 018)가, 키 `spreads:want` 는 api 만 쓰고 아무도 읽지 않는다(017, 2026-09-26). `collect:heartbeat` 는 collector 가 매초 쓰고 api 의 `/health` 가 읽는다(025). S3 를 읽는 코드는 없다.
+- Redis 스트림 `ticks` 는 flusher 만 읽는다. 채널 `spreads`·키 `spreads:latest` 는 api 의 구독 허브와 `GET /spreads`(두 역할, 018)·`GET /landing`(두 역할, 5초 캐시, 022)이, 키 `spreads:want` 는 api 만 쓰고 아무도 읽지 않는다(017, 2026-09-26). `collect:heartbeat` 는 collector 가 매초 쓰고 api 의 `/health` 가 읽는다(025). S3 를 읽는 코드는 없다.
 
 ## 로컬 접속
 - dev compose 로 Influx 2.7 과 Redis 7 을 띄운다. env 는 `INFLUX_URL`(기본 `http://localhost:8086`)·`INFLUX_TOKEN`·`REDIS_URL`.
