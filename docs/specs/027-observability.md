@@ -234,7 +234,7 @@ docker compose … down -v && docker rmi marketlens027-server marketlens027-api 
   - `docs/context/dev-setup.md:docker 통합 기동` — "`stop api` 뒤 `/api/history/candles`·`/api/landing` 502" → 이번 로컬에서는 nginx 가 멈춘 api 로의 연결을 기다려 8초 안에 답이 없었다(기본 연결 타임아웃 60초 뒤 504). 027 §4 의 "502 또는 504" 와는 맞다.
   - 014(관찰) — 새로 띄운 로컬 스택에서 수집기의 봉 버킷 생성(기동 시 1회·3초 상한)이 Influx 첫 setup 보다 먼저 끝나 `candles_1m` 이 없었다 → `/history/candles` 503(Influx 404). 운영의 Influx 는 이미 떠 있어 해당 없다.
 - 남은 빚:
-  - canary 3·4단계는 이 망에서 못 봤다(거래소 차단 — 봉·표가 없다) → 배포 뒤 운영 canary 첫 실행으로 확인. 1·2단계와, 3단계가 api 정지·저장소 오류를 실패로 잡는 것만 로컬 확인. 4단계 판정 로직은 가짜 서버로(통과·delta 없음·빈 snapshot).
+  - canary 3·4단계는 이 망의 로컬 스택에서 못 봤다(거래소 차단 — 봉·표가 없다). 대신 같은 스크립트를 이 Mac 에서 운영 주소로 돌려 네 단계 모두 통과했다(2026-09-29, 028 배포 뒤 — `canary 통과 — https://kimptrack.com`, 4단계 1032ms). Synthetics 런타임에서의 첫 실행은 canary 를 만든 사람이 확인. 1·2단계와, 3단계가 api 정지·저장소 오류를 실패로 잡는 것만 로컬 확인. 4단계 판정 로직은 가짜 서버로(통과·delta 없음·빈 snapshot).
   - canary 의 WebSocket UA(`headers` 옵션)는 로컬 Node v26 에서만 확인했다 — Synthetics 런타임(Node 22)에서 헤더가 안 붙으면 canary WS 한 줄이 5분마다 접속 로그에 남을 뿐이다. 런타임 이름·실행 단위 지표 개수는 canary 를 만든 사람이 여기 적는다.
   - 이 PR 의 첫 serve 배포는 caddy 볼륨 정의가 바뀌어 caddy 를 새로 만든다 — 그 직후 `caddy reload` 가 admin 기동보다 먼저 닿으면 배포가 실패로 끝날 수 있다(로컬에선 up 직후 곧바로 불러도 성공했다). 배포가 실패하면 되돌리기 전에 `docker logs marketlens-caddy` 로 설정 오류(`unrecognized …`)인지 기동 경합인지 먼저 본다.
   - `caddy reload` 가 남기는 admin API 줄(`"logger":"admin.api"`, `remote_ip` 127.0.0.1 — 컨테이너 안 reload 명령)은 기본 로거 필터 밖이다 — 방문자 정보가 아니라 두었다.
