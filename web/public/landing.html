@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>KimpTrack — 이 김프, 지금 옮길 수 있습니까?</title>
-  <meta name="description" content="숫자가 커 보여도 입출금이 막혔거나 사고팔 때 단가가 밀리면 옮길 이유가 없습니다. KimpTrack은 이 질문에 답할 근거를 김프 옆에 붙여 둡니다." />
+  <title>KimpTrack — 김프가 우리에게 이득을 주는 김프가 아니다</title>
+  <meta name="description" content="기존 김프는 여러 사이트에서 수치를 일일이 확인해야 됩니다. 그런데 확인한 숫자마저도 실제로는 이득이 있는 김프가 아닐 수 있고, 이득이 있더라도 거래를 할 수 없는 경우가 존재합니다. KimpTrack은 출금·입금이 열렸는지 확인하고, 진짜 김프인지 판단해 사용자에게 실질적 이익을 가져다주고자 합니다." />
   <link rel="canonical" href="https://kimptrack.com/" />
   <!-- 그림·favicon 은 상대 경로 — 배포(/)와 vite dev(/app/landing.html) 양쪽에서 같은 파일을 찾는다 -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <meta name="theme-color" content="#161826" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="KimpTrack" />
-  <meta property="og:title" content="KimpTrack — 이 김프, 지금 옮길 수 있습니까?" />
-  <meta property="og:description" content="숫자가 커 보여도 입출금이 막혔거나 사고팔 때 단가가 밀리면 옮길 이유가 없습니다. KimpTrack은 이 질문에 답할 근거를 김프 옆에 붙여 둡니다." />
+  <meta property="og:title" content="KimpTrack — 김프가 우리에게 이득을 주는 김프가 아니다" />
+  <meta property="og:description" content="기존 김프는 여러 사이트에서 수치를 일일이 확인해야 됩니다. 그런데 확인한 숫자마저도 실제로는 이득이 있는 김프가 아닐 수 있고, 이득이 있더라도 거래를 할 수 없는 경우가 존재합니다. KimpTrack은 출금·입금이 열렸는지 확인하고, 진짜 김프인지 판단해 사용자에게 실질적 이익을 가져다주고자 합니다." />
   <meta property="og:url" content="https://kimptrack.com/" />
   <meta property="og:image" content="https://kimptrack.com/landing/og.png" />
   <meta property="og:image:width" content="1200" />
@@ -87,9 +87,9 @@
     /* 히어로 — 글 5 : 카드 7 */
     .hero { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; align-items: start; padding-block: 64px 112px; }
     .hero-text { padding-top: 20px; container-type: inline-size; }
-    /* h1 은 어느 폭에서나 "이 김프," / "지금 옮길 수 있습니까?" 두 줄 — 긴 둘째 줄(Pretendard 700 에서 8.55em)이
-       글 칸(100cqi)에 들어가는 크기, 최대 48px. 8.81 은 3% 여유. cqi 를 모르는 브라우저는 36px(360px 폭에서도 들어간다) */
-    h1 { font-size: 36px; font-size: min(48px, 100cqi / 8.81); line-height: 1.22; letter-spacing: -0.035em; }
+    /* h1 은 어느 폭에서나 "김프가 우리에게" / "이득을 주는 김프가 아니다" 두 줄 — 긴 둘째 줄(Pretendard 700 에서 9.71em)이
+       글 칸(100cqi)에 들어가는 크기, 최대 48px. 10.11 은 대체 글꼴(9.81em) + 3% 여유. cqi 를 모르는 브라우저는 27px(320px 폭에서도 들어간다) */
+    h1 { font-size: 27px; font-size: min(48px, 100cqi / 10.11); line-height: 1.22; letter-spacing: -0.035em; }
     .h1-line { display: block; white-space: nowrap; }
     .lead { margin-top: 24px; }
     .hero-text .btn-lg { margin-top: 36px; }
@@ -224,8 +224,8 @@
   <main>
     <section class="wrap hero" aria-labelledby="hero-title">
       <div class="hero-text">
-        <h1 id="hero-title"><span class="h1-line">이 김프,</span> <span class="h1-line">지금 옮길 수 있습니까?</span></h1>
-        <p class="prose lead">숫자가 커 보여도 입출금이 막혔거나 사고팔 때 단가가 밀리면 옮길 이유가 없습니다. KimpTrack은 이 질문에 답할 근거를 김프 옆에 붙여 둡니다.</p>
+        <h1 id="hero-title"><span class="h1-line">김프가 우리에게</span> <span class="h1-line">이득을 주는 김프가 아니다</span></h1>
+        <p class="prose lead">기존 김프는 여러 사이트에서 수치를 일일이 확인해야 됩니다. 그런데 확인한 숫자마저도 실제로는 이득이 있는 김프가 아닐 수 있고, 이득이 있더라도 거래를 할 수 없는 경우가 존재합니다. KimpTrack은 <span class="nw">출금·입금이</span> 열렸는지 확인하고, 진짜 김프인지 판단해 사용자에게 실질적 이익을 가져다주고자 합니다.</p>
         <a class="btn btn-lg" href="/app/">서비스로 넘어가기</a>
       </div>
       <div>
@@ -283,10 +283,10 @@
     <section class="wrap section" aria-labelledby="build-title">
       <h2 id="build-title">어떻게 만들었나</h2>
       <ol class="steps" role="list">
-        <li><span class="step-n" aria-hidden="true">1</span><h3>수집</h3><p>5개 거래소를 WebSocket 으로 받습니다(<span class="nw">업비트·빗썸</span> 호가와 현재가, 바이낸스 depth20, 바이빗 orderbook.200, 비트겟 books15). 마켓 목록은 매초, 입출금은 60초마다 확인합니다.</p></li>
-        <li><span class="step-n" aria-hidden="true">2</span><h3>계산</h3><p>매초 전 페어의 호가창을 $1,000 만큼 걷어 <span class="nw">김프·역프</span> 표 한 장을 만들고 Redis 로 넘깁니다.</p></li>
-        <li><span class="step-n" aria-hidden="true">3</span><h3>기록</h3><p>1초 원값은 InfluxDB 에, <span class="nw">사건(1.0% 진입·0.5% 이탈)과</span> 1분 <span class="nw">봉(5분·1시간·4시간·1일로</span> <span class="nw">접음)은</span> 따로 남기고, 거래소 원문은 S3 에 보관합니다.</p></li>
-        <li><span class="step-n" aria-hidden="true">4</span><h3>전달</h3><p>조회 서버가 표에서 바뀐 행만 모아 한 번만 압축하고, 접속자 모두에게 같은 바이트를 WebSocket 으로 보냅니다.</p></li>
+        <li><span class="step-n" aria-hidden="true">1</span><h3>수집</h3><p><span class="nw">업비트·빗썸과</span> 해외 거래소 3곳의 호가를 실시간으로 받습니다. 입출금이 열려 있는지도 수시로 확인합니다.</p></li>
+        <li><span class="step-n" aria-hidden="true">2</span><h3>계산</h3><p>매초 모든 코인의 <span class="nw">김프·역프를</span> 다시 계산합니다. 맨 위 호가 하나가 아니라 실제로 사고팔 때의 단가를 씁니다.</p></li>
+        <li><span class="step-n" aria-hidden="true">3</span><h3>기록</h3><p>계산한 값은 빠짐없이 저장합니다. 크게 벌어졌던 순간은 따로 모아 두어 나중에 다시 볼 수 있습니다.</p></li>
+        <li><span class="step-n" aria-hidden="true">4</span><h3>전달</h3><p>바뀐 값만 골라 보고 계신 화면에 곧바로 보냅니다.</p></li>
       </ol>
     </section>
   </main>
