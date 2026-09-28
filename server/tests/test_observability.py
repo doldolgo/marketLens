@@ -13,6 +13,7 @@ from tests.test_deploy import (
     PUBLIC_API,
     ROOT,
     _args,
+    _canary_paths,
     _deploy_script,
     _locations,
     _public_server,
@@ -349,3 +350,28 @@ def test_serve_logs_file_ships_the_caddy_access_log_for_90_days() -> None:
         "log_group_class": "STANDARD",
         "retention_in_days": 90,
     }
+
+
+# --- canary (§3.5) --------------------------------------------------------------------
+
+
+def test_canary_paths_are_its_three_allowlisted_calls() -> None:
+    """028 의 호출 경로 대조가 canary 의 실제 경로를 잡는다 — 빈 집합으로 조용히 통과하지 않는다."""
+    assert _canary_paths() == {
+        "/api/health",
+        "/api/history/candles",
+        "/api/ws/spreads",
+    }
+    assert _canary_paths() <= set(PUBLIC_API)
+
+
+def test_canary_marks_every_request_with_the_ua_caddy_skips() -> None:
+    """fetch·WebSocket 모두 `KimpTrack-Canary/1` — caddy 의 제외 규칙(부분 일치)에 걸린다 (§3.2·§3.5)."""
+    src = _text("ops/canary/index.mjs")
+    (ua,) = re.findall(r"const UA = '([^']+)'", src)
+    assert ua == CANARY_UA
+    matchers = {args[0]: args[1:] for args, _ in _snippet() if args[0].startswith("@")}
+    assert matchers["@canary"][2].strip("*") in ua
+    assert src.count("headers: { 'User-Agent': UA }") == 2
+    assert "export const handler" in src
+    assert "process.env.CANARY_BASE_URL || 'https://kimptrack.com'" in src
