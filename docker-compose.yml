@@ -77,7 +77,7 @@ services:
         max-file: "3"
     # 023 — 호스트 포트는 caddy 가 쥔다(80·443). web 은 같은 망의 caddy 만 부르므로 호스트에 열지 않는다.
     environment:
-      # 021 — nginx 의 `location /api/` 업스트림. collect 박스 사설 IP, 없으면 서비스명(한 박스).
+      # 021 — nginx 허용 목록 중 수집기로 가는 location 의 업스트림(028). collect 박스 사설 IP, 없으면 서비스명(한 박스).
       # nginx 이미지의 entrypoint 가 /etc/nginx/templates/*.template 을 envsubst 해 conf.d 에 쓴다(web/Dockerfile).
       COLLECT_HOST: ${COLLECT_HOST:-server}
       # envsubst 대상을 이 한 변수로 제한 — nginx 자체 변수($http_host·$http_upgrade…)가 치환되지 않게

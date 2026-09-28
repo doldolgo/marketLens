@@ -1,6 +1,6 @@
 # 028 — api-allowlist
 
-상태: TODO | 의존: **022 재작업이 main 에 머지된 뒤 main 에서 구현한다**(랜딩이 `/api/landing` 을 부르는 판). 계약을 쓰는 스펙: 003 spreads(`/refresh`), 004 analysis(분석 6개), 005 history(`/history/premium`·`streaks`·`bulk`), 007 deploy(nginx), 008 usdt-staleness(`/spreads` 경고 확인), 011 health(`/health/collect`), 013 premium-events(`/history/events`), 014 premium-1m(`/history/candles`), 016 process-split(api 분기), 017 spreads-push(`/ws/spreads`), 018 spreads-serve(`GET /spreads`), 021 infra-split(`COLLECT_HOST`), 022 landing(`/landing`), 025·027(uptime·canary 가 부르는 경로)
+상태: DONE | 의존: **022 재작업이 main 에 머지된 뒤 main 에서 구현한다**(랜딩이 `/api/landing` 을 부르는 판). 계약을 쓰는 스펙: 003 spreads(`/refresh`), 004 analysis(분석 6개), 005 history(`/history/premium`·`streaks`·`bulk`), 007 deploy(nginx), 008 usdt-staleness(`/spreads` 경고 확인), 011 health(`/health/collect`), 013 premium-events(`/history/events`), 014 premium-1m(`/history/candles`), 016 process-split(api 분기), 017 spreads-push(`/ws/spreads`), 018 spreads-serve(`GET /spreads`), 021 infra-split(`COLLECT_HOST`), 022 landing(`/landing`), 025·027(uptime·canary 가 부르는 경로)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -79,7 +79,26 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 2026-09-28, worktree feat/028-api-allowlist
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/pytest -q
+#   All checks passed! / 226 files already formatted / 839 passed (test_deploy.py 35 — 028 신규 7·수정 2·삭제 4)
+cd web && npm run lint && npm run build           # oxlint exit 0 / ✓ built
+# 로컬 Docker(OrbStack 29.4.0, nginx 1.27.5). echo.py = http.server 가 받은 요청 줄·Upgrade·Connection 을 stdout 에 찍고 200
+docker build -t ml028-server ./server && docker build -t ml028-web ./web
+docker network create ml028-net
+docker run -d --name ml028-echo-api    --network ml028-net --network-alias api    ml028-server python -u -c "$(cat echo.py)" api
+docker run -d --name ml028-echo-server --network ml028-net --network-alias server ml028-server python -u -c "$(cat echo.py)" server
+docker run -d --name ml028-web --network ml028-net -e COLLECT_HOST=server -e 'NGINX_ENVSUBST_FILTER=^COLLECT_HOST$' -p 18028:80 ml028-web
+docker exec ml028-web nginx -t                    # syntax is ok / test is successful
+python verify028.py   # 요청마다 curl --path-as-is -i, 도착 = 에코 서버 docker logs 줄 수 차이 → 54 PASS, 0 failure(s)
+#   허용 6: /api/health?base=BTC&x=%20a%2Fb → 200, ECHO server GET /health?base=BTC&x=%20a%2Fb (health/collect·history/events 도 server)
+#           /api/history/candles·/api/landing → ECHO api, /api/ws/spreads → ECHO api GET /ws/spreads?… upgrade=websocket connection=upgrade
+#   닫힘 45: §4 목록 21(+ /api/x.png) · 변형 16(/api//premium /api/%70remium /api/./premium /api/x/../premium /api/ws/../docs
+#           /api/history/candles/../../premium /api/%2e/premium /api/Health /api/health;x /api/landing;/../docs /api/%2570remium
+#           /api/ws/spreads%2F..%2F..%2Fdocs …) · 끝에 / 붙은 허용 6 · POST /api/refresh · /api/docs?x=1
+#           → 전부 404, Content-Type application/json, 본문 = 앱 404 JSON, arrived=0
+#   /API/health → 404 text/html(정적) arrived 0 · /api/%00 → 400 버전 없음 · Server 헤더 = {'nginx'}
+docker rm -f ml028-web ml028-echo-api ml028-echo-server && docker network rm ml028-net && docker rmi ml028-web ml028-server
 ```
 
 ## 6. 갱신할 문서
@@ -106,5 +125,21 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
+  - `web/nginx.conf` — 공개 server 에 `server_tokens off`, 정확 일치 location 여섯(수집기 셋 `${COLLECT_HOST}`·api 셋, 전부 `rewrite ^/api/(.*)$ /$1 break` + URI 없는 `proxy_pass`, ws 만 업그레이드 헤더), `= /api`·`/api/` 는 `types {}`·`default_type application/json`·`return 404 '<앱 404 JSON>'`. 016 정규식·017 `/api/ws/`·018 `= /api/spreads`·021 `location /api/` 프록시는 지웠다.
+  - `server/tests/test_deploy.py` — 작은 nginx 토큰 파서(`listen 80` server 블록만)·허용 표 `PUBLIC_API`, 새 테스트 7개 — nginx 5개(허용 여섯·ws 업그레이드·JSON 404·정규식 없음+버전 숨김·닫힌 경로가 404 location 으로 감)와 호출 경로 대조 2개(대조·canary 추출 자체 확인). 치환 변수 테스트는 개수만 고쳤고, 016·017·018·022 의 옛 분기 테스트 4개는 지웠다.
+  - 문서: `docs/context/{status,architecture,dev-setup}.md`, `docs/runbooks/ec2-split.md`, `CLAUDE.md`, 스펙 005·007·008·022·027·028, `docker-compose.yml`·`web/Dockerfile` 주석.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - JSON 404 본문은 테스트가 `create_app()` 의 `/nope` 응답 본문과 문자 단위로 비교한다 — 앱 형식이 바뀌면 nginx 쪽도 따라 고치게 된다.
+  - `= /api`·`/api/` 가 같은 세 줄을, 여섯 location 이 프록시 헤더 4개를 반복한다 — nginx 에 상수를 나눌 수단이 `set`(매 요청 실행)뿐이고, 헤더를 server 수준에 두면 ws location 에서 상속이 끊겨 읽기 어렵다.
+  - 호출 경로 추출: (1) `web/src/**/*.ts*`. (2) 주석 제거는 `<!-- -->`·`/* */`·공백 뒤 `//`. (3) canary 는 형식을 모르므로 `ops/canary/` 아래 텍스트 파일 전부(숨김·`node_modules`·`__pycache__`·`.md` 제외)에서 따옴표·백틱·`}`·URL 호스트 바로 뒤의 `/api…` 를 뽑고, 확장자별 주석(`.js`·`.ts` 계열 `//`·`/* */`, `.py`·`.sh`·`.yml`·`.toml` `#`)을 뺀다. 추출이 깨져 조용히 통과하지 않게 web/src·web/public·uptime 런북은 빈 집합이면 실패, canary 만 빈 집합 허용.
+  - 005 "절의 첫 문장 끝" 은 세 엔드포인트 문단 각각의 첫 문장 끝으로 읽었다.
+  - 로컬 Docker 검증은 호스트 포트 18028, 이름 `ml028-*`(끝나고 컨테이너·망·이미지 삭제).
+  - 함께 고친 절: 028 §4 (3) canary 빈 집합 규칙(설계 세션 답). 007 §3 web 줄의 괄호 안 분기 목록(016 정규식·017 `/api/ws/`·018 `/api/spreads`) — §6 은 앞 구절만 지정했지만 남기면 틀린 문장이라 허용 여섯으로. architecture.md '현재 구조' 017 의 `location /api/ws/` → `= /api/ws/spreads`, 018 의 `location = /api/spreads` → "공개에 없다"(같은 이유).
+- PR 본문에 옮길 것: §6 "담당자에게 제안" 003·004·016·018·021 다섯 항목 그대로. 덧붙여 실행 중 본 어긋남(고치지 않음):
+  - `CLAUDE.md` §4 018 행 범위 — "nginx `/api/spreads` 를 `api` 로" → 028 뒤 공개에서 닫힘(018 담당).
+  - `docs/runbooks/uptime-monitor.md` "왜 `/health` 하나로" — "`/api/health` 는 serve 박스의 api 가 답하지만" → nginx 가 수집기로 넘긴다(028 §3.1·027 §3.1). 판정(정체 → 503)은 같다.
+  - `docs/context/architecture.md` '현재 구조' 017 — compose `api` 의 "`depends_on: redis`" → 021 이 depends_on 을 모두 없앴다(`test_compose_has_no_depends_on_anywhere`). 028 과 무관해 그대로 둠.
 - 남은 빚:
+  - status.md 알려진 빚 셋 — `/api/history/events` 기간 상한 없음, 닫힌 API 는 029 전까지 박스 안, 003·004·016·018·021 문장 반영 대기.
+  - 배포 뒤 운영 확인(사람, §4) 대기 — 실제 WebSocket 101 은 로컬 에코 서버로 보지 않았다(업그레이드 헤더 도착까지만).
+  - 호출 경로 대조는 `${API_BASE}` 를 거치지 않는 web/src 호출(`API_BASE + …`·리터럴 `'/api/…'`)과 변수로 넘긴 `fetch(url)` 을 못 잡는다 — 지금 코드엔 없다. canary 추출 규칙은 027 의 실제 코드가 오면 한 번 확인할 것.

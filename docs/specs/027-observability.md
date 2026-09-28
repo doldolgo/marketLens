@@ -29,7 +29,7 @@
 ## 3. 동작
 
 ### 3.1 무엇이 무엇을 보는가
-읽는 계약(025 §3.5 복사): 두 역할 모두 `GET /health` 는 `{"status","version","lastTickAt"}` 를 답하고 `status == "ok"` 만 200, 나머지는 503 이다. collector 는 메모리의 마지막 틱으로 `starting`·`stale`(30초 무틱)을 판정하고 Redis 를 보지 않는다. 밖에서 부르는 `/api/health` 는 nginx `location /api/` 를 거쳐 collector 가 답한다 — serve 의 api 나 data 의 Redis 가 죽어도 200 이다.
+읽는 계약(025 §3.5 복사): 두 역할 모두 `GET /health` 는 `{"status","version","lastTickAt"}` 를 답하고 `status == "ok"` 만 200, 나머지는 503 이다. collector 는 메모리의 마지막 틱으로 `starting`·`stale`(30초 무틱)을 판정하고 Redis 를 보지 않는다. 밖에서 부르는 `/api/health` 는 nginx 를 거쳐 collector 가 답한다 — serve 의 api 나 data 의 Redis 가 죽어도 200 이다.
 
 | 감시 | 주기 |
 |---|---|
