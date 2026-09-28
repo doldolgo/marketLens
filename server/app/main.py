@@ -61,6 +61,8 @@ from app.features.analysis.router import router as analysis_router
 from app.features.health.router import router as health_router
 from app.features.history.router import events_router as history_events_router
 from app.features.history.router import router as history_router
+from app.features.landing.router import router as landing_router
+from app.features.landing.service import LandingService
 from app.features.spreads.hub import SpreadsHub
 from app.features.spreads.push import SpreadsPublisher
 from app.features.spreads.router import refresh_router as spreads_refresh_router
@@ -418,6 +420,8 @@ def create_app() -> FastAPI:
         lifespan=_api_lifespan if api_only else _lifespan,
     )
     app.state.settings = settings
+    # 022 — 랜딩 요약의 부분별 캐시. I/O 가 없는 메모리뿐이라 lifespan 이 아니라 앱을 만들 때 하나
+    app.state.landing = LandingService()
     _install_notifier(app, settings)
 
     app.add_middleware(
@@ -446,10 +450,12 @@ def create_app() -> FastAPI:
         )
 
     # api 역할은 Influx 만 읽는 네 경로 + 017 의 /ws/spreads + 018 의 GET /spreads(Redis 읽기)
-    # — /history/events 는 진행 중 사건을 메모리에서 읽으므로 제외 (016 §3.1, 018 §3.4)
+    # + 022 의 GET /landing(Redis·Influx 읽기) — /history/events 는 진행 중 사건을 메모리에서 읽으므로
+    # 제외 (016 §3.1, 018 §3.4)
     app.include_router(history_router)
     app.include_router(spreads_ws_router)
     app.include_router(spreads_router)
+    app.include_router(landing_router)
     if not api_only:
         app.include_router(spreads_refresh_router)
         app.include_router(analysis_router)

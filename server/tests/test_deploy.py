@@ -285,6 +285,23 @@ def test_nginx_routes_spreads_exactly_to_api_and_subpaths_to_server() -> None:
     )
 
 
+def test_nginx_routes_landing_summary_exactly_to_api() -> None:
+    """`= /api/landing` 은 api:8000 으로 — `/api/spreads` 와 같은 모양(접두 제거·헤더 4개) (022 §3.1)."""
+    conf = _text("web/nginx.conf")
+    block = conf.split("location = /api/landing {", 1)[1].split("\n    }", 1)[0]
+    assert "proxy_pass http://api:8000;" in block
+    assert "rewrite ^/api/(.*)$ /$1 break;" in block
+    for header in (
+        "proxy_set_header Host $http_host;",
+        "proxy_set_header X-Real-IP $remote_addr;",
+        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+        "proxy_set_header X-Forwarded-Proto $scheme;",
+    ):
+        assert header in block, header
+    pattern, _ = _nginx_api_block()
+    assert not re.search(pattern, "/api/landing")
+
+
 def test_nginx_upgrades_api_ws_to_api_without_touching_read_timeout() -> None:
     """`/api/ws/` 접두 위치 → `api:8000/ws/`, Upgrade 헤더·HTTP/1.1, read timeout 은 기본 그대로 (017 §3.5)."""
     conf = _text("web/nginx.conf")
@@ -311,7 +328,8 @@ def test_nginx_template_substitutes_only_collect_host() -> None:
     nginx 자체 변수는 $name 꼴이라 필터(^COLLECT_HOST$)에 걸리지 않는다."""
     conf = _text("web/nginx.conf")
     assert set(re.findall(r"\$\{(\w+)\}", conf)) == {"COLLECT_HOST"}
-    assert conf.count("proxy_pass http://api:8000;") == 2
+    # 016 정규식·018 /api/spreads·022 /api/landing
+    assert conf.count("proxy_pass http://api:8000;") == 3
     assert "proxy_pass http://api:8000/ws/;" in conf
     for var in (
         "$http_host",

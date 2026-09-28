@@ -40,8 +40,8 @@
 - 배포 뒤 `docker compose stop api` 면 `/api/spreads` 는 **502**(016 §7 의 "stop 된 upstream" 과 같다), `/api/health` 는 200. 016 §4 의 격리 확인("stop api 뒤 `/api/spreads` 정상") 은 이 스펙으로 뒤집힌다 — dev-setup 의 그 문장을 고친다(§6).
 
 ### 3.4 역할 계약 — 016 §3.1 에 얹는 것
-- `api` 가 서빙하는 경로: `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles`, `/ws/spreads`, **`/spreads`**. 그 외 404 는 유지.
-- `api` 의 Redis 용도: 017 의 채널 구독 + **`spreads:latest` 읽기·`spreads:want` 쓰기**(요청 단위, 연결은 명령마다 lazy — 009 의 클라이언트와 같은 수명). 백그라운드 태스크는 여전히 017 의 구독 태스크 하나.
+- `api` 가 서빙하는 경로: `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles`, `/ws/spreads`, **`/spreads`**, `/landing`(022). 그 외 404 는 유지.
+- `api` 의 Redis 용도: 017 의 채널 구독 + **`spreads:latest` 읽기·`spreads:want` 쓰기**(`GET /spreads`) + `spreads:latest` 읽기만(`GET /landing`, 022)(요청 단위, 연결은 명령마다 lazy — 009 의 클라이언트와 같은 수명). 백그라운드 태스크는 여전히 017 의 구독 태스크 하나.
 
 ### 3.5 엣지
 - **Redis 만 죽음**: `/ws/spreads` 는 `waiting`, `GET /spreads` 는 503 → FE 는 017 §3.4 규칙대로 직전 표를 지우지 않은 채 재연결을 반복한다. 표 갱신은 Redis 가 돌아올 때까지 멈춘다. 수집 프로세스의 메모리에는 표가 있지만 **꺼내는 길을 두지 않는다**(§1 결정).
