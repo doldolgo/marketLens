@@ -1,0 +1,58 @@
+/* KimpTrack 관리자 화면 (스펙 029 §3.3). 색 값은 docs/design/theme.css 토큰을 복사했다 — 이 화면은 번들 밖이라
+   web/src/shared 를 쓰지 못한다. CSP(default-src 'self')라 웹폰트를 받지 않고 시스템 글꼴을 쓴다. */
+:root {
+  --color-bg: #161826;
+  --color-surface: #232532;
+  --color-text: #e9e9ed;
+  --color-muted: #9397ab;
+  --color-accent: #9184d9;
+  --color-ok: #5fbf8f;
+  --color-warn: #c8825f;
+  --color-bad: #e0697d;
+  --color-divider: color-mix(in srgb, #e9e9ed 16%, transparent);
+  --radius-md: 8px;
+}
+
+* { box-sizing: border-box; }
+/* hidden 속성이 dl 의 display:grid 에 지지 않게 */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0 auto;
+  max-width: 1100px;
+  padding: 16px 20px 40px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: 14px/1.5 system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+}
+
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+h1 { font-size: 18px; font-weight: 600; margin: 8px 0 16px; }
+h2 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+nav { display: flex; gap: 16px; }
+a { color: var(--color-accent); }
+
+main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+section { background: var(--color-surface); border-radius: var(--radius-md); padding: 14px 16px; }
+section.wide { grid-column: 1 / -1; }
+
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+dt { color: var(--color-muted); }
+dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--color-divider); vertical-align: top; }
+th { color: var(--color-muted); font-weight: 500; }
+th:nth-child(1), th:nth-child(2), th:nth-child(3) { width: 12%; }
+td { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+
+.refresh { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+input { background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-divider); border-radius: 6px; padding: 6px 8px; }
+button { background: var(--color-accent); color: var(--color-bg); border: 0; border-radius: 6px; padding: 7px 14px; font-weight: 600; cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }
+
+.notice { background: color-mix(in srgb, var(--color-bad) 20%, transparent); border-radius: var(--radius-md); padding: 8px 12px; }
+.meta { color: var(--color-muted); font-weight: 400; font-size: 12px; }
+.tone-ok { color: var(--color-ok); }
+.tone-warn { color: var(--color-warn); }
+.tone-bad { color: var(--color-bad); }
