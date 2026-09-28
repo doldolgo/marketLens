@@ -16,6 +16,10 @@ export interface EventsQuery {
   dom: Dom | null
   /** 조회 기간(초). start = 지금 − periodSec, end = 지금 — 항상 둘 다 붙인다 (§3.5). */
   periodSec: number
+  /** 있으면 periodSec 대신 이 절대 시각(epoch 초)이 start — 차트 음영용. 청크 경계에 맞춘 값이라 매초 바뀌지 않아 재조회가 돌지 않는다. */
+  startSec?: number
+  /** 심볼 하나만(서버 `base`) — 차트 음영용. 표는 전 코인을 받아 클라이언트에서 거른다. */
+  base?: string
 }
 
 /** 빈 events 는 정상 응답(200)이라 별도 상태가 없다. 비 2xx 는 status 를 들고 오류로. */
@@ -26,11 +30,12 @@ export type EventsResult =
 export async function fetchEvents(q: EventsQuery, signal: AbortSignal): Promise<EventsResult> {
   const nowSec = Math.floor(Date.now() / 1000)
   const params = new URLSearchParams({
-    start: String(nowSec - q.periodSec),
+    start: String(q.startSec ?? nowSec - q.periodSec),
     end: String(nowSec),
     dir: q.dir,
   })
   if (q.dom) params.set('dom', q.dom)
+  if (q.base) params.set('base', q.base)
   const res = await fetch(`${API_BASE}/history/events?${params}`, { signal })
   if (!res.ok) return { kind: 'error', status: res.status }
   return { kind: 'ok', data: (await res.json()) as EventsResponse }
@@ -51,12 +56,12 @@ export function useEvents(q: EventsQuery): EventsState {
     return () => clearInterval(id)
   }, [])
   // 객체 q 를 통째 의존성에 넣으면 렌더마다 재조회되므로 원시값으로 푼다
-  const { dir, dom, periodSec } = q
+  const { dir, dom, periodSec, startSec, base } = q
   useEffect(() => {
     const ctl = new AbortController()
     setState((s) => ({ ...s, loading: true }))
     const timer = setTimeout(() => {
-      fetchEvents({ dir, dom, periodSec }, ctl.signal)
+      fetchEvents({ dir, dom, periodSec, startSec, base }, ctl.signal)
         .then((result) => setState({ result, loading: false }))
         .catch((err: unknown) => {
           // 취소는 정상 경로 — 새 요청이 상태를 이어받는다
@@ -68,7 +73,7 @@ export function useEvents(q: EventsQuery): EventsState {
       clearTimeout(timer)
       ctl.abort()
     }
-  }, [dir, dom, periodSec, round])
+  }, [dir, dom, periodSec, startSec, base, round])
   return state
 }
 
