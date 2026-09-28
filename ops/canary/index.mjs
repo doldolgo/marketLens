@@ -33,25 +33,34 @@ function fail(step, detail) {
 
 async function get(step, url) {
   let res
+  let body
   try {
     res = await fetch(url, {
       headers: { 'User-Agent': UA },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
+    // 8초 제한은 본문 읽기까지 덮는다 — 헤더 뒤 본문에서 멈추거나 끊겨도 단계 번호가 든 메시지로
+    body = await res.text()
   } catch (err) {
-    fail(step, `${url} 요청 오류 — ${err.name}: ${err.message}`)
+    fail(step, `${url} ${res ? '본문 읽기' : '요청'} 오류 — ${err.name}: ${err.message}`)
   }
-  const body = await res.text()
   if (res.status !== 200) fail(step, `${url} → ${res.status} ${body.slice(0, 200)}`)
   return body
 }
 
+function isObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
 function json(step, url, body) {
+  let data
   try {
-    return JSON.parse(body)
+    data = JSON.parse(body)
   } catch {
     fail(step, `${url} 응답이 JSON 이 아니다 — ${body.slice(0, 200)}`)
   }
+  if (!isObject(data)) fail(step, `${url} 응답이 JSON 객체가 아니다 — ${body.slice(0, 200)}`)
+  return data
 }
 
 async function landing(base) {
@@ -98,6 +107,10 @@ function spreads(base) {
         msg = JSON.parse(gunzipSync(Buffer.from(event.data)).toString('utf8'))
       } catch (err) {
         finish(`프레임을 못 풀었다 — ${err.message}`)
+        return
+      }
+      if (!isObject(msg)) {
+        finish('프레임이 JSON 객체가 아니다')
         return
       }
       if (!snapshot) {
