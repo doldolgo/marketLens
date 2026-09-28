@@ -154,6 +154,7 @@ done
 콘솔 CloudWatch Synthetics → canary 만들기 → 인라인 편집기.
 - 이름 `marketlens-smoke`, 런타임은 브라우저 없는 Node.js 런타임(`syn-nodejs-*` 계열, Node 22) 중 만들 때 최신 — 고른 이름을 027 §7 에 적는다.
 - 스크립트 = `ops/canary/index.mjs` 전체, handler `index.handler`. 환경 변수는 두지 않는다(기본 `https://kimptrack.com`).
+- 인라인 편집기가 ESM(`import`·`export`)을 거부하거나 첫 실행이 `SyntaxError` 로 끝나면: `cd ops/canary && zip canary.zip index.mjs` 로 묶어 "zip 파일 업로드" 로 올린다(handler 는 그대로 `index.handler`). zip 은 커밋하지 않는다.
 - 일정 5분마다(`rate(5 minutes)`), 실행 제한 90초. 더 자주 돌리지 않는다 — 1분이면 월 ≈$82 다.
 - 결과 버킷은 Synthetics 기본 버킷(원문 버킷 `marketlens-spreads-snapshot` 과 따로)에 수명주기 30일 만료 규칙을 건다. 실행 역할은 새로 만든다.
 - 만든 뒤 로그 그룹 보존: `aws logs put-retention-policy --log-group-name $(aws logs describe-log-groups --log-group-name-prefix /aws/lambda/cwsyn-marketlens-smoke --query 'logGroups[0].logGroupName' --output text) --retention-in-days 30`.
