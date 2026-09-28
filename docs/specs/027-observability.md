@@ -1,6 +1,6 @@
 # 027 — observability
 
-상태: TODO | 의존: 002 web-shell(URL 쿼리 키), 007 deploy(compose·nginx·배포 워크플로), 011 health(`/health/collect` 폴링), 013·014(기록 탭 60초 재조회·`/history/candles`), 016 process-split(api 역할·nginx 분기), 017 spreads-push(허브·프레임), 021 infra-split(박스·IAM), 022 landing(`/app/`·`/api/landing`), 023 domain-tls(caddy), 025 slack-alerts(`/health` 두 역할·Slack 채널)
+상태: DONE | 의존: 002 web-shell(URL 쿼리 키), 007 deploy(compose·nginx·배포 워크플로), 011 health(`/health/collect` 폴링), 013·014(기록 탭 60초 재조회·`/history/candles`), 016 process-split(api 역할·nginx 분기), 017 spreads-push(허브·프레임), 021 infra-split(박스·IAM), 022 landing(`/app/`·`/api/landing`), 023 domain-tls(caddy), 025 slack-alerts(`/health` 두 역할·Slack 채널)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -128,7 +128,7 @@
 ## 4. 검증
 **PR 안 — 실행 세션(완료 조건)**
 - nginx: server 블록에 접속 로그 끔 / 기존 분기 계약 그대로(새 location 없음).
-- Caddyfile(`caddy/Caddyfile`): 조각 `access_log` 에 파일 출력(경로·0644·50MiB·5개), 요청·응답 헤더 삭제, `ua`·`referer` 덧붙임, IP 두 필드 24·48, 쿼리 세 키 삭제, 기록 제외 경로 여섯과 canary UA / 도메인 블록에만 import, `http://` 블록엔 없음 / 기본 로거에 같은 지우기 규칙 / `Referrer-Policy strict-origin` / 023 계약(도메인 두 개·`reverse_proxy web:80` 둘·`protocols h1 h2`) 그대로.
+- Caddyfile(`caddy/Caddyfile`): 조각 `access_log` 에 파일 출력(경로·0644·50MiB·5개), 요청·응답 헤더 삭제, `ua`·`referer` 덧붙임, IP 두 필드 24·48, 쿼리 세 키 삭제, 기록 제외 경로 다섯(공개 허용 목록에서 WS 를 뺀 것)과 canary UA / 도메인 블록에만 import, `http://` 블록엔 없음 / 기본 로거에 같은 지우기 규칙 / `Referrer-Policy strict-origin` / 023 계약(도메인 두 개·`reverse_proxy web:80` 둘·`protocols h1 h2`) 그대로.
 - compose: caddy 에 `./caddy:/etc/caddy:ro`·`./logs/caddy:/var/log/caddy`·`caddy-data:/data` / api 에 `STATSD_ADDR`·호스트 게이트웨이 / `.gitignore` 에 `logs/` / 기존 계약(컨테이너 6개·로그 상한·볼륨 4개) 그대로.
 - 배포 워크플로 serve: `up -d --build` 뒤 `docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile`, `docker image prune -f` 가 마지막, `--profile` 은 한 줄 그대로.
 - `ops/cloudwatch/`: 네 파일 모두 JSON 으로 읽힌다 / 지표 파일 셋은 전역 추가 차원 `InstanceId` 하나·호스트명 없음·디스크 `/` 만·장치 차원 없음·`run_as_user` 없음, collect 는 주기 300·지표 둘, StatsD 는 serve 에만 / `serve-logs.json` 은 최상위 키가 `logs` 하나, 파일 경로 = `/home/ubuntu/marketlens/` + compose 로그 바인드의 호스트 쪽 + `/access.log`, 보존 90, 클래스 STANDARD.
@@ -142,7 +142,48 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 2026-09-29 로컬(Mac, OrbStack Docker, compose v5.1.2, caddy v2.11.4, node v26.4.0). 이 망은 거래소 도메인이 막혀 있다(수집기 로그 ConnectTimeout).
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q
+#   All checks passed! / 229 files already formatted / 865 passed (시작 전 839 — test_observability.py 14·test_gauge.py 12 추가)
+cd web && npm run lint && npm run build        # oxlint 경고 0 / ✓ built
+docker run --rm -v ./caddy:/etc/caddy:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile   # Valid configuration
+# 시험 사본(도메인 블록이 Let's Encrypt 로 가지 않게 local_certs 만 더함) + 끝에 `http://:8099 { import access_log; handle /bad* { reverse_proxy 127.0.0.1:9 }; respond "ok" 200 }`
+docker run -d --name marketlens027-caddytest -p 8099:8099 -p 8443:443 -v <사본>:/etc/caddy:ro -v <빈 폴더>:/var/log/caddy caddy:2-alpine
+curl ":8099/app/?s.q=x&tab=history&utm_source=t"  → uri "/app/?tab=history&utm_source=t", remote_ip·client_ip "192.168.215.0"
+curl ":8099/?s.q=x"                               → uri "/"
+curl -A KimpTrack-Canary/1 …, /api/health·/api/health/collect·/api/landing·/api/history/events·/api/history/candles → 줄 없음
+curl -H 'Referer: https://a.com?q=x' ":8099/app/?g.q=y&p.q=z" → uri "/app/", "referer":"https://a.com"
+curl -H 'Referer: android-app://x/y' …             → "referer":""   (user:pw@ 가 든 주소도 "", http://news.site:8080/a?q= → "http://news.site:8080")
+#   줄마다 키는 request{remote_ip,remote_port,client_ip,proto,method,host,uri}·bytes_read·user_id·duration·size·status·referer·ua 뿐(headers·resp_headers 없음), 파일 -rw-r--r--
+curl ":8099/bad?s.q=secret&tab=x" → 502. docker logs 의 http.log.error 줄: uri "/bad?tab=x", IP "192.168.215.0", headers 없음. docker logs·access.log 에 "secret" 0건, 끝이 .0 이 아닌 IP 0건
+curl -k --resolve kimptrack.com:8443:127.0.0.1 https://kimptrack.com:8443/app/?s.q=secret  → referrer-policy: strict-origin, access.log(log0) uri "/app/?tab=spreads" 꼴
+docker rm -f marketlens027-caddytest
+# canary 스크립트 — 가짜 서버(받은 UA 를 찍는다) 네 경우
+CANARY_BASE_URL=http://127.0.0.1:8127 node ops/canary/index.mjs
+#   ok → 1~4단계 통과, exit 0 / /api/health 503 → "2단계 실패: … → 503 {"status":"stale"}" exit 1
+#   heartbeat 만 → "4단계 실패: snapshot 뒤 5초 안에 delta 가 없다(heartbeat 만 — 수집 정체)" / 빈 snapshot → "4단계 실패: snapshot 의 rows 가 비었다"
+#   가짜 서버가 받은 UA: /, /api/health, /api/history/candles, WS 업그레이드 모두 "KimpTrack-Canary/1"
+# 로컬 통합 기동 — 사용자 것(marketlens_* 볼륨·marketlens-* 이미지)을 안 건드리게 덮어쓰기 파일(스크래치)로: 프로젝트 marketlens027,
+#   컨테이너·이미지 이름 marketlens027-*, env_file 은 server/.env.example + 셸에서 만든 시험 INFLUX_TOKEN, 호스트 포트는 caddy 8080·8443 뿐,
+#   caddy 는 Caddyfile 사본(local_certs 만 더함) 디렉터리 바인드. 호스트 UDP 8125 에 받는 스크립트.
+COMPOSE_PROFILES=collect,data,serve docker compose -f docker-compose.yml -f compose.027.yml up -d --build   # 6컨테이너 Up
+docker exec marketlens027-caddy caddy reload --config /etc/caddy/Caddyfile     # 새로 만든 caddy 에 up 직후 곧바로 — exit 0
+curl localhost:8080/ → 200 / curl -H 'Host: kimptrack.com' localhost:8080/ → 308 https://kimptrack.com/ (023)
+curl localhost:8080/api/health → 200 {"status":"ok",…} / /api/docs → 404 JSON (028)
+# 호스트 UDP 8125: "marketlens.ws_clients:0|g" 10초마다, WS 1개를 연 동안 ":1|g" (api → host.docker.internal → 호스트)
+node ws-probe.mjs ws://localhost:8080/api/ws/spreads   # caddy→nginx→api: waiting → heartbeat… (거래소가 막혀 표 없음)
+CANARY_BASE_URL=http://localhost:8080 node ops/canary/index.mjs
+#   1단계 통과 / 2단계 통과 / 3단계 실패: …/api/history/candles?… → 503 storage_unavailable (Influx 404 — 봉 버킷 없음·봉 없음) — 3·4단계는 배포 뒤 운영 canary 로
+docker compose … stop api && node ops/canary/index.mjs
+#   1·2단계 통과 / 3단계 실패: … 요청 오류 — TimeoutError (nginx 가 멈춘 api 에 연결을 기다림 — 60초 뒤면 504), /api/health 는 200
+docker compose … start api && node ops/canary/index.mjs   # 멈추기 전과 같은 상태(1·2 통과, 3단계 503)로 복구
+curl -k --resolve kimptrack.com:8443:127.0.0.1 "https://kimptrack.com:8443/?s.q=btc&utm_source=x"
+#   301 location /app/?s.q=btc&utm_source=x · referrer-policy: strict-origin / ./logs/caddy/access.log 줄: uri "/?utm_source=x", IP .0, 헤더 없음
+#   /app/ + Referer https://t.co/abc?q=1 → "referer":"https://t.co" / /api/health·canary UA → 줄 없음
+docker logs marketlens027-web | grep '"GET '   # 접속 줄 0 — 오류 줄만(client 는 caddy 컨테이너 IP)
+# Caddyfile 을 git 처럼 새 파일로 바꿔 쓰기(새 inode) → reload 전엔 옛 설정, `caddy reload` exit 0 뒤 새 설정(Referrer-Policy 값이 바뀜)
+# 모르는 지시어가 든 Caddyfile → reload exit 1 "unrecognized directive", 사이트는 옛 설정으로 200 — §3.8
+docker compose … down -v && docker rmi marketlens027-server marketlens027-api marketlens027-web && rm -rf logs   # 컨테이너·볼륨·망·이미지 0건 확인
 ```
 
 ## 6. 갱신할 문서
@@ -166,6 +207,33 @@
 - 025 — §3.6 의 CloudWatch 후속 후보 문장 삭제(모니터 URL 은 그대로). §2 하지 않는 것의 괄호 "(CloudWatch Agent — 런북에 후속으로만 적는다)" → "(027 — CloudWatch Agent)".
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+- 만든 것 (파일 목록): `caddy/Caddyfile`(루트에서 옮김 — 조각 `access_log`·기본 로거 지우기·도메인 블록 `import`·`Referrer-Policy`), `docker-compose.yml`(caddy 바인드 둘, api `STATSD_ADDR`·`extra_hosts`), `.gitignore`(`logs/`), `.github/workflows/deploy.yml`(serve `caddy reload`), `web/nginx.conf`(`access_log off`), `server/app/features/spreads/gauge.py`(`WsClientsGauge`·`start_ws_gauge`), `server/app/core/config.py`(`statsd_addr`), `server/app/main.py`(`_api_lifespan` 만 게이지), `server/.env.example`, `ops/cloudwatch/{collect,data,serve,serve-logs}.json`, `ops/canary/index.mjs`, 테스트 `server/tests/test_observability.py`(14)·`server/app/features/spreads/tests/test_gauge.py`(12)·`server/tests/test_deploy.py`(caddy 경로), 런북 `docs/runbooks/cloudwatch.md`. 문서: CLAUDE.md(§2·§4·§5), architecture·dev-setup·status, 007 §2·§3, 런북 uptime-monitor·ec2-split·ec2-setup. 라이브러리 추가 없음.
+- 028 호출 경로 대조: `ops/canary/` 가 생기자 028 의 `_canary_paths()` 가 canary 의 실제 경로 셋 `/api/health`·`/api/history/candles`·`/api/ws/spreads` 를 그대로 뽑았다(빈 집합 아님, 전부 허용 목록 안). `test_canary_paths_are_its_three_allowlisted_calls` 가 이 셋을 못박아 추출 규칙이 깨지면 빈 집합으로 조용히 통과하지 않는다. 028 의 테스트·nginx 공개 server 계약은 고치지 않았다(`access_log off` 는 server 수준 지시어라 location 대조에 안 걸린다).
+- 추측한 지점 (묻지 않고 정한 사소한 것):
+  - `referer` 모양 — 스킴은 대소문자 무관 `http(s)`, 호스트는 영숫자·`.`·`-` 또는 `[IPv6]`, 포트 선택. 사용자 정보(`user:pw@host`)가 든 주소는 빈 값. caddy `map` 정규식(RE2)으로 만든다.
+  - 기본 로거의 지우기 규칙은 접속 로그 조각의 `format` 과 똑같은 다섯 줄(`resp_headers` 삭제 포함) — 테스트가 둘의 일치를 본다. `Referrer-Policy` 는 조각이 아니라 도메인 블록에 둔다(조각은 로그 설정만).
+  - 회전 파일 보관 `roll_keep_for 90d` 를 적어 둔다(caddy 기본과 같은 값). canary UA 제외는 `header User-Agent *KimpTrack-Canary*`(부분 일치).
+  - 게이지 — 이름은 한 번 풀리면 계속 쓰고 실패했을 때만 다음 회차에 다시 푼다. 풀기·전송 실패 WARNING 은 둘이 한 억제(10분)를 나눠 쓴다. `[::1]:8125` 꼴을 받고 포트는 1~65535. 태스크 이름 `ws_clients_gauge`, 로거 `marketlens.ws_gauge`.
+  - 에이전트 — "호스트명 차원 없음" 은 `omit_hostname: true`, api RSS 는 procstat `pattern`(명령줄), 나머지 셋은 `exe`. StatsD 는 수집 10초(보내는 주기와 같게)·집계 60초. 에이전트 설정은 이 Mac 에서 에이전트 변환기로 돌려 보지 못했다 — 사람이 `fetch-config` 할 때 검사된다.
+  - canary — 파일 `ops/canary/index.mjs`(ESM, handler `index.handler`), 실패 메시지 `N단계 실패: …`, snapshot 전의 `waiting`·`heartbeat` 는 기다리고 delta 는 snapshot 뒤에만 센다, 15초는 연결 시작부터, fetch 는 리다이렉트를 따라간다. 로컬 실행은 같은 파일을 `node` 로(Synthetics 는 handler 만 부른다).
+  - 테스트 위치 — 027 계약은 `server/tests/test_observability.py`(test_deploy 의 헬퍼·`PUBLIC_API` 재사용, Caddyfile 은 작은 줄 파서). "collector 는 게이지를 안 띄운다" 는 거래소 커넥터·우주·틱 루프의 `start` 만 무동작으로 바꾸고 collector lifespan 을 그대로 돌려 본다.
+  - 로컬 통합 기동은 dev-setup 명령 그대로가 아니라 스크래치 덮어쓰기 파일로 했다 — 이 Mac 에 사용자의 `marketlens_*` 볼륨·`marketlens-*` 이미지가 있고 `server/.env` 는 읽지도 만들지도 않으므로(프로젝트 `marketlens027`, `.env.example` + 시험 토큰). caddy 는 Caddyfile 사본에 `local_certs` 만 더했다 — 원본 그대로면 도메인 블록이 Let's Encrypt 로 인증서를 청해 운영 도메인 검증 요청이 나간다. 그래서 023 §4 의 로컬 200·308 도 이 사본으로 봤다.
+- 실행 중 함께 고친 스펙 절: 027 §4 — "기록 제외 경로 여섯" → "다섯(공개 허용 목록에서 WS 를 뺀 것)"(§3.2 가 경로 다섯을 이름으로 적고 있어 그쪽을 따랐다). 007 §2·§3 은 §6 목록대로.
+- PR 본문에 옮길 것 — 담당자에게 제안(이 PR 은 고치지 않는다, §6 그대로):
+  - 016 — §3.1 "017 의 구독 태스크 하나뿐이다" → architecture.md 16행과 같은 문구. §3.5 마지막 bullet → "두 역할의 `/health` 는 025 §3.5 판정을 따른다. 밖에는 nginx 의 `/api/health`(`server`)만 열고, api 는 canary(027)가 밖에서 본다".
+  - 017 — §7 남은 빚의 "외부 헬스체크는 여전히 없다" → "밖에서는 canary 가 WebSocket 까지 본다(027)".
+  - 018 — §3.4 api 백그라운드 태스크 문장을 architecture.md 16행과 같은 문구로.
+  - 021 — §3.1 collect 문장의 "이 박스에만" → "S3 역할은 이 박스에만, 세 박스 모두 에이전트 정책(027)", serve 박스 설명에 "스왑 1GB(027)".
+  - 023 — §2 만드는 것의 "루트 `Caddyfile`" → "`caddy/Caddyfile`(027 이 옮김, 디렉터리 바인드)", §2 하지 않는 것의 "배포 워크플로 변경 없음(…)" → "serve 배포는 `up` 뒤 caddy 설정을 다시 읽는다(027)", §3.3 에 "도메인 블록은 접속 로그(027 §3.2)와 `Referrer-Policy: strict-origin`", §4 명령의 경로(`./Caddyfile` → `./caddy`).
+  - 025 — §3.6 의 CloudWatch 후속 후보 문장 삭제(모니터 URL 은 그대로). §2 하지 않는 것의 괄호 "(CloudWatch Agent — 런북에 후속으로만 적는다)" → "(027 — CloudWatch Agent)".
+- 실행 중 발견한 어긋남(파일:절 — 주장 → 실제, 고치지 않음):
+  - `docs/specs/007-deploy.md:§3` — "`server` … 호스트에 노출하지 않는다" → 021 부터 호스트 8000 을 열고 보안그룹이 막는다. "컨테이너 로그는 네 서비스 모두" → 여섯 서비스 모두(테스트가 전부 본다). §4 "`curl localhost:8080/foo` 도 index.html" → 022 부터 루트의 없는 경로는 404, SPA fallback 은 `/app/` 아래만.
+  - `docs/context/dev-setup.md:docker 통합 기동` — "`stop api` 뒤 `/api/history/candles`·`/api/landing` 502" → 이번 로컬에서는 nginx 가 멈춘 api 로의 연결을 기다려 8초 안에 답이 없었다(기본 연결 타임아웃 60초 뒤 504). 027 §4 의 "502 또는 504" 와는 맞다.
+  - 014(관찰) — 새로 띄운 로컬 스택에서 수집기의 봉 버킷 생성(기동 시 1회·3초 상한)이 Influx 첫 setup 보다 먼저 끝나 `candles_1m` 이 없었다 → `/history/candles` 503(Influx 404). 운영의 Influx 는 이미 떠 있어 해당 없다.
 - 남은 빚:
+  - canary 3·4단계는 이 망에서 못 봤다(거래소 차단 — 봉·표가 없다) → 배포 뒤 운영 canary 첫 실행으로 확인. 1·2단계와, 3단계가 api 정지·저장소 오류를 실패로 잡는 것만 로컬 확인. 4단계 판정 로직은 가짜 서버로(통과·delta 없음·빈 snapshot).
+  - canary 의 WebSocket UA(`headers` 옵션)는 로컬 Node v26 에서만 확인했다 — Synthetics 런타임(Node 22)에서 헤더가 안 붙으면 canary WS 한 줄이 5분마다 접속 로그에 남을 뿐이다. 런타임 이름·실행 단위 지표 개수는 canary 를 만든 사람이 여기 적는다.
+  - 이 PR 의 첫 serve 배포는 caddy 볼륨 정의가 바뀌어 caddy 를 새로 만든다 — 그 직후 `caddy reload` 가 admin 기동보다 먼저 닿으면 배포가 실패로 끝날 수 있다(로컬에선 up 직후 곧바로 불러도 성공했다). 배포가 실패하면 되돌리기 전에 `docker logs marketlens-caddy` 로 설정 오류(`unrecognized …`)인지 기동 경합인지 먼저 본다.
+  - `caddy reload` 가 남기는 admin API 줄(`"logger":"admin.api"`, `remote_ip` 127.0.0.1 — 컨테이너 안 reload 명령)은 기본 로거 필터 밖이다 — 방문자 정보가 아니라 두었다.
+  - actionlint 미설치 — `deploy.yml` 은 YAML 파싱과 테스트 단언으로 갈음.
+  - §4 "배포·런북 뒤 — 사람" 항목 전부(스왑·메모리 측정·지표 12/13개와 실제 차원·`ws_clients` 탭 2개·시험 경보·canary 첫 실행·에이전트 RSS·collect CPU 전후·첫 달 청구·로그 그룹 보존·처리방침 뒤 지우기 규칙) — status.md "EC2 확인 대기".
