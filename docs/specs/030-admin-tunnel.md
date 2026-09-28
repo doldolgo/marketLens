@@ -17,10 +17,10 @@
 ## 3. 동작
 
 ### 3.1 들어오는 길
-관리자 브라우저 → `admin.kimptrack.com`(Cloudflare 엣지 — 인증서는 Universal SSL) → Access 로그인 → Tunnel → serve 박스 `cloudflared` → `http://web:8081`(029 관리자 server). cloudflared 는 전용 compose 망 `admin` 에만 있고, web 이 기본 망과 `admin` 두 곳에 붙는다 — cloudflared 는 compose 이름으로 api·caddy 에 닿지 못한다. 보안그룹상 사설 주소(collect:8000·data:6379·8086)로는 여전히 나갈 수 있다(§3.5).
+관리자 브라우저 → `admin.kimptrack.com`(Cloudflare 엣지 — 인증서는 Universal SSL) → Access 로그인 → Tunnel → serve 박스 `cloudflared` → `http://web:8081`(029 관리자 server). cloudflared 는 전용 compose 망 `admin` 에만 있고, web 이 기본 망과 `admin` 두 곳에 붙는다 — cloudflared 는 compose 이름으로 api·caddy 에 닿지 못한다. 보안그룹상 사설 주소(collect:8000·data:6379·8086)로는 여전히 나갈 수 있다(§3.5). web 은 두 망에 붙어 기본 경로가 `admin` 망으로 잡힌다(web → 수집기도 admin 브리지로 나간다) — 나중에 출구를 막을 때는 admin 브리지가 아니라 cloudflared 컨테이너 기준으로 건다.
 
 ### 3.2 cloudflared 서비스
-- 컨테이너 이름 `marketlens-cloudflared`, `restart: unless-stopped`, profile **`tunnel`**(박스 profile 이 아니다 — serve 배포가 따로 띄운다), 망 `admin` 만, 게시 포트 없음, 메모리 상한 128MB, 로그 상한은 다른 서비스와 같다.
+- 컨테이너 이름 `marketlens-cloudflared`, `restart: unless-stopped`, profile **`tunnel`**(박스 profile 이 아니다 — serve 배포가 따로 띄운다), 망 `admin` 만, 게시 포트 없음, 메모리 상한 128MB(스왑 없음 — 스왑 1GB 는 api·web 과 같이 쓴다), 로그 상한은 다른 서비스와 같다.
 - 이미지 `cloudflare/cloudflared` 를 태그와 **멀티 아키텍처 인덱스 digest** 로 고정(serve 는 arm64 — 한 플랫폼 digest 를 박으면 exec format error). 2025.4.0 이상(토큰 파일 지원), 실행 시점 최신 안정 태그를 §7 에 기록, `latest` 금지, 분기마다 올린다.
 - 이미지 ENTRYPOINT 가 `cloudflared --no-autoupdate` 이므로 명령은 `tunnel --loglevel info --metrics 127.0.0.1:2000 run` 으로 시작한다. `--loglevel` 은 info 고정 — debug 는 요청 헤더 전부(쿠키·Access JWT·`X-Refresh-Token`)를 로그로 낸다.
 - 헬스체크는 **exec 형식**(`CMD`) `cloudflared tunnel --metrics 127.0.0.1:2000 ready` — 이미지가 distroless 라 셸 형식은 늘 unhealthy 다.
@@ -48,7 +48,7 @@
 
 ## 4. 검증
 **PR 안 — 실행 세션(완료 조건)**
-- compose: cloudflared 가 §3.2 대로 — 이름·restart·profile `tunnel`·망 `admin` 만·포트 없음·메모리·로그 상한·이미지 태그+digest(`latest` 아님)·명령이 `tunnel` 로 시작·`--loglevel info`·헬스체크 `test[0] == "CMD"`·`secrets` 와 `TUNNEL_TOKEN_FILE`(`TUNNEL_TOKEN` 없음) / web 이 기본 망과 `admin` 둘 / 컨테이너 수 일곱 / profile 단언은 `tunnel` 을 serve 박스 부속으로 허용 / `.gitignore` 에 `secrets/`.
+- compose: cloudflared 가 §3.2 대로 — 이름·restart·profile `tunnel`·망 `admin` 만·포트 없음·메모리(스왑 없음)·로그 상한·이미지 태그+digest(`latest` 아님)·명령이 `tunnel` 로 시작·`--loglevel info`·헬스체크 `test[0] == "CMD"`·`secrets` 와 `TUNNEL_TOKEN_FILE`(`TUNNEL_TOKEN` 없음) / web 이 기본 망과 `admin` 둘 / 컨테이너 수 일곱 / profile 단언은 `tunnel` 을 serve 박스 부속으로 허용 / `.gitignore` 에 `secrets/`.
 - 배포 워크플로 serve: §3.3 순서, 토큰 파일 확인은 비어 있지 않음(`-s`), `--profile` 줄은 serve·tunnel 두 줄(다른 박스는 한 줄 그대로), prune 마지막.
 - README 단언: 로컬 여섯·배포 정의 일곱.
 - 로컬 Docker(compose): secret 파일 없이 `--profile serve up` 성공 / 가짜 토큰 파일로 `--profile tunnel up` 이 serve 컨테이너의 시작 시각을 바꾸지 않는다 / cloudflared 컨테이너에서 `api:8000` 이름이 안 풀린다.
@@ -93,6 +93,13 @@ docker compose … --profile serve --profile tunnel down -v --rmi local && rm -r
 docker ps -a · docker network ls · docker images · docker volume ls   # 시작 전 목록과 diff 0 (030 이름 0건)
 # compose 는 file secret 을 읽지 않는다: 모드 000 인 secret 파일로 busybox 서비스 up → Created·Started (운영의 65532·0400 파일을 배포 사용자가 못 읽어도 된다)
 # 배포 serve 꼬리(caddy reload 뒤 ~ prune)를 가짜 docker 함수로 bash 실행: 파일 없음·빈 파일 → "tunnel 건너뜀"·prune / 있음 → tunnel up·prune / tunnel up 실패 → exit 1(prune 안 감)
+# 검토 반영(같은 날) — 프로젝트 ml030fix, 덮어쓰기로 api·web·caddy·cloudflared 를 busybox sleep 으로, 가짜 토큰은 스크래치 파일(엣지 연결 없음)
+#   tunnel stop cloudflared → serve down("Network ml030fix_admin Removed") → serve up → tunnel up: "network … not found" exit 1
+#   → tunnel up -d --force-recreate cloudflared: exit 0 / rm -sf cloudflared → serve down → serve up → tunnel up: 새로 만듦 exit 0
+#   / 돌고 있으면 serve down 이 "Network ml030fix_admin Resource is still in use" 로 망을 남긴다
+#   docker exec ml030fix-web ip route → default via admin 망 게이트웨이(ml030fix_admin 192.168.156.1)
+#   cloudflared inspect: mem_limit 만 → Memory 134217728·MemorySwap 268435456 / memswap_limit 128m → MemorySwap 134217728, cgroup memory.swap.max 0
+#   ruff check · ruff format --check · pytest -q → 902 passed / npm run lint·build exit 0 / down -v 뒤 docker ps·network·images·volume 시작 전과 diff 0
 ```
 
 ## 6. 갱신할 문서
@@ -102,7 +109,7 @@ docker ps -a · docker network ls · docker images · docker volume ls   # 시�
 - `docs/context/architecture.md` — '배포 토폴로지' serve 줄에 "cloudflared(profile tunnel, 망 admin) → web 관리자 server :8081 — 밖으로만 나가는 연결".
 - `docs/context/dev-setup.md` — 'docker 통합 기동' 절에 "cloudflared 는 로컬에서 띄우지 않는다(profile tunnel)" 한 문장.
 - `README.md` — 30행 EC2 설명에 "cloudflared(serve, 토큰 파일이 있을 때만 — 관리자 페이지 터널)" 와 컨테이너 일곱, 24행 로컬 여섯은 그대로.
-- `docs/runbooks/admin-access.md` — 신규: 대시보드에만 있는 상태의 기록(팀 이름·호스트명·Service URL·앱·그룹 이름·로그인 방식·세션·쿠키·Protect with Access·AUD 위치·인원수), 준비 순서(조직 → 구성원 2FA → OTP → 그룹 → 앱 → 터널 → 토큰 파일·권한 → 배포 → 라우트 → 알림 → Universal SSL·회색 확인), 드리프트 확인(전체 ingress·catch-all·private 라우트), 토큰 교체·AUD 갱신·팀원 이탈(§3.5 순서), logrotate, 되돌리기(라우트 삭제 또는 `docker compose stop cloudflared` — 공개 무관), 이미지 갱신 주기.
+- `docs/runbooks/admin-access.md` — 신규: 대시보드에만 있는 상태의 기록(팀 이름·호스트명·Service URL·앱·그룹 이름·로그인 방식·세션·쿠키·Protect with Access·AUD 위치·인원수), 준비 순서(조직 → 구성원 2FA → OTP → 그룹 → 앱 → 터널 → 토큰 파일·권한 → 배포 → 라우트 → 알림 → Universal SSL·회색 확인), 드리프트 확인(전체 ingress·catch-all·private 라우트), 토큰 교체·AUD 갱신·팀원 이탈(§3.5 순서), logrotate, 되돌리기(라우트 삭제 또는 `docker compose rm -sf cloudflared` — 공개 무관, serve `down` 뒤 cloudflared 다시 만들기), 이미지 갱신 주기.
 - `docs/specs/007-deploy.md` — §3 컨테이너 목록에 cloudflared(profile tunnel, 망 admin, 토큰 파일 secret), 배포 절에 serve 의 터널 줄.
 - `docs/specs/027-observability.md` — §4 배포 워크플로 serve 줄의 "`--profile` 은 한 줄 그대로" → "`--profile` 은 serve·tunnel 두 줄(030)", compose 줄의 "컨테이너 6개" → "일곱(030)".
 
@@ -111,11 +118,11 @@ docker ps -a · docker network ls · docker images · docker volume ls   # 시�
 - 023 — §2 하지 않는 것의 "Cloudflare 프록시(주황 구름)" 뒤에 "(루트·www — `admin.kimptrack.com` 만 터널용 프록시 CNAME, 030)".
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록): `docker-compose.yml`(서비스 `cloudflared` — 태그 `2026.9.3` + 인덱스 digest, profile `tunnel`, 망 `admin` 만, `mem_limit 128m`, 명령·exec 헬스체크, `TUNNEL_TOKEN_FILE` + 최상위 `secrets` / web 망 `default`·`admin` / 최상위 `networks.admin` / 머리 주석), `.gitignore`(`secrets/`), `.github/workflows/deploy.yml`(serve 의 caddy reload 뒤 `[ -s secrets/cloudflared-token ]` 일 때만 `--profile tunnel … up -d`, 아니면 "tunnel 건너뜀" 한 줄, prune 마지막), `README.md`(30행 일곱 컨테이너·cloudflared), 테스트 `server/tests/test_admin_tunnel.py`(신규 9 — compose 7·배포 2)·`test_deploy.py`(서비스 일곱·`PROFILE_OF` 에 tunnel·`--profile` 은 serve 만 serve·tunnel 두 줄·README 로컬 여섯/배포 일곱)·`test_observability.py`(caddy reload 는 up 뒤·prune 앞 — 끝에서 둘째 자리 단언을 풂), 런북 `docs/runbooks/admin-access.md`(신규). 문서: CLAUDE.md(§2 `secrets/`·런북 목록·인덱스 DONE), architecture(계약 규칙 관리자 경로·배포 토폴로지·현재 구조), dev-setup, status, 007 §2·§3, 027 §4. 앱 코드·라이브러리 변경 없음.
+- 만든 것 (파일 목록): `docker-compose.yml`(서비스 `cloudflared` — 태그 `2026.9.3` + 인덱스 digest, profile `tunnel`, 망 `admin` 만, `mem_limit`·`memswap_limit` 128m(스왑 없음), 명령·exec 헬스체크, `TUNNEL_TOKEN_FILE` + 최상위 `secrets` / web 망 `default`·`admin` / 최상위 `networks.admin` / 머리 주석), `.gitignore`(`secrets/`), `.github/workflows/deploy.yml`(serve 의 caddy reload 뒤 `[ -s secrets/cloudflared-token ]` 일 때만 `--profile tunnel … up -d`, 아니면 "tunnel 건너뜀" 한 줄, prune 마지막), `README.md`(30행 일곱 컨테이너·cloudflared), 테스트 `server/tests/test_admin_tunnel.py`(신규 9 — compose 7·배포 2)·`test_deploy.py`(서비스 일곱·`PROFILE_OF` 에 tunnel·`--profile` 은 serve 만 serve·tunnel 두 줄·README 로컬 여섯/배포 일곱)·`test_observability.py`(caddy reload 는 up 뒤·prune 앞 — 끝에서 둘째 자리 단언을 풂), 런북 `docs/runbooks/admin-access.md`(신규). 문서: CLAUDE.md(§2 `secrets/`·런북 목록·인덱스 DONE), architecture(계약 규칙 관리자 경로·배포 토폴로지·현재 구조), dev-setup, status, 007 §2·§3, 027 §4. 앱 코드·라이브러리 변경 없음.
 - 의존 판단: 의존 줄 "029 가 main 에 머지·배포된 뒤" 는 운영에서 터널을 켜는 조건으로 읽었다 — 구현은 029 브랜치(feat/029-admin) 위에 쌓아 지금 했다. 머지 순서는 027 → 029 → 030 으로 고정되고, 터널은 serve 박스에 토큰 파일이 생겨야 뜨는데 그 파일은 사람이 런북(Cloudflare 설정) 뒤에 둔다. 의존 줄은 그대로 뒀다.
 - 이미지: `cloudflare/cloudflared:2026.9.3`, 인덱스 digest `sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c`(linux/amd64·linux/arm64) — 2026-09-29 `docker buildx imagetools inspect` 로 확인, 설계 세션 값과 같다. Docker Hub 에서 이 태그가 `latest` 와 같은 digest(2026-09-24 게시)라 실행 시점 최신 안정 태그다. 다음 갱신 2026-12(런북).
 - 추측한 지점 (묻지 않고 정한 사소한 것):
-  - 메모리 상한은 `mem_limit: 128m`(compose config 가 134217728 로 풂) — `deploy.resources` 대신 한 줄. 헬스체크 주기는 30초·제한 5초·재시도 3·시작 유예 30초(스펙은 exec 형식만 정함 — 평범한 docker 는 unhealthy 로 재시작하지 않으니 표시용이다).
+  - 메모리 상한은 `mem_limit: 128m`(compose config 가 134217728 로 풂) — `deploy.resources` 대신 한 줄. `memswap_limit` 도 같은 값(검토 반영) — 안 주면 docker 가 스왑을 같은 양 더 준다. 헬스체크 주기는 30초·제한 5초·재시도 3·시작 유예 30초(스펙은 exec 형식만 정함 — 평범한 docker 는 unhealthy 로 재시작하지 않으니 표시용이다).
   - tunnel `up` 줄은 박스 `up` 과 같은 `--env-file .env --env-file server/.env`(compose 는 파일 전체를 치환한다 — 빼면 `INFLUX_TOKEN` 미설정 경고), `--build`·서비스 인자 없음. 건너뜀 문구 "tunnel 건너뜀 — secrets/cloudflared-token 이 없거나 비었다".
   - 망 `admin` 은 기본 bridge(`internal` 아님 — 엣지로 나가야 한다). 테스트가 internal 이 아님을 단언한다.
   - 런북: 터널 이름 `marketlens-serve`·Access 앱 이름 `marketlens-admin` 은 스펙에 없어 정했다(그룹 이름은 스펙 값). logrotate 에 `missingok`·`notifempty`·`su root root` 를 더했다(스펙은 주 1회·13개·copytruncate). 토큰 파일은 `umask 077` + `read -rs` 로 만든다(셸 기록·화면에 안 남게), `secrets/` 는 700.
@@ -123,6 +130,7 @@ docker ps -a · docker network ls · docker images · docker volume ls   # 시�
   - 로컬 검증: 사용자 컨테이너·볼륨과 안 겹치게 스크래치 덮어쓰기(프로젝트·컨테이너 이름에 030, `.env.example` 사본, caddy 는 `127.0.0.1:18030` 만·Caddyfile 사본에 `local_certs` — 원본이면 운영 도메인 인증서를 Let's Encrypt 에 청한다). secret 경로는 원본 그대로라 레포에 `secrets/cloudflared-token` 을 만들었다가 지웠다(0444 — Mac 에서 65532 로 chown 불가). 가짜 토큰은 무작위 문자열이라 cloudflared 가 형식 검사에서 곧바로 끝난다 — **Cloudflare 엣지 연결 시도 없음**. 그 대신 컨테이너가 재시작을 되풀이해 그 안에서 이름을 풀 수 없어서, "cloudflared 컨테이너에서 api 가 안 풀린다" 는 같은 서비스 정의로 만든 컨테이너(`compose run cloudflared access curl http://api:8000/health` → no such host)와 `admin` 망의 busybox `nslookup`, cloudflared 의 망 목록(`admin` 하나)으로 봤다.
   - 관측: compose v5 의 `up -d --build` 는 이미지가 같아도 빌드한 서비스(api·web)를 매번 다시 만든다(배포가 원래 그렇다 — 030 과 무관). tunnel `up` 은 cloudflared 만 만들고 두 번째엔 그대로 둔다. compose 는 file secret 을 읽지 않는다(모드 000 파일로 확인) — 운영 파일(65532·0400)을 배포 사용자가 못 읽어도 되고, 스크립트도 `-s`(크기)만 본다.
 - 실행 중 함께 고친 스펙 절: 007 §2(배포용 7컨테이너)·§3(컨테이너 7개 — `cloudflared` 줄, 로그 일곱, 배포 4-2 serve 터널, 계약 테스트 괄호), 027 §4(컨테이너 일곱·`--profile` serve·tunnel 두 줄). architecture 는 §6 의 serve 줄에 더해 "서비스 6개"·"여섯 컨테이너 모두" 를 일곱으로, 계약 규칙의 관리자 경로 문장에 들어오는 길, 현재 구조에 admin-tunnel 줄 — 안 고치면 문서끼리 어긋난다.
+- 검토 반영: 런북 "관리자 페이지만 닫기" 를 `stop` 에서 `rm -sf cloudflared` 로(멈춘 컨테이너가 serve `down` 뒤 옛 망 ID 를 쥐어 다음 배포의 tunnel `up` 이 실패) + serve `down` 뒤 `--force-recreate` 복구 한 줄 — 배포 줄에는 `--force-recreate` 를 넣지 않는다. cloudflared `memswap_limit: 128m`(테스트 단언 추가). web 의 기본 경로가 `admin` 망인 것은 §3.1·status.md 빚에 적기만 했다 — `gw_priority` 는 Engine 28+·compose 2.33+ 가 필요한데 serve 박스 Docker 버전을 보지 않았다. architecture '현재 구조' deploy 줄의 "컨테이너 6개"·deploy.yml 흐름(박스별 profile·caddy reload·tunnel), CLAUDE.md 인덱스 007 범위(caddy·cloudflared).
 - PR 본문에 옮길 것 (담당자 제안 — 이 PR 에서 고치지 않는다):
   - 021 — serve 박스 설명에 "cloudflared — 밖으로만 나가는 연결(030)".
   - 023 — §2 하지 않는 것의 "Cloudflare 프록시(주황 구름)" 뒤에 "(루트·www — `admin.kimptrack.com` 만 터널용 프록시 CNAME, 030)".

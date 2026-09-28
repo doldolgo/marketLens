@@ -90,7 +90,7 @@ marketlens/
 | 004 | analysis | DONE | 단일 종목 분석 — premium·scan·matrix·orderbook·slippage·arbitrage (BE 전용) |
 | 005 | history | DONE | Influx `premium` 점 규칙·`/history/*`(start 기본 7일 창)·백필 + 기록 탭 사건 로그 실데이터 (쓰기는 009) |
 | 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
-| 007 | deploy | DONE | Docker·compose(server·api·web·influxdb·redis)·CI·EC2 배포 |
+| 007 | deploy | DONE | Docker·compose(server·api·web·caddy·influxdb·redis + cloudflared(profile tunnel))·CI·EC2 배포 |
 | 008 | usdt-staleness | DONE | `/spreads` USDT 시세 미갱신 경고 (BE 전용) |
 | 009 | tick-store | DONE | 3계층 저장 — LiveStore 틱 슬롯 → Redis → 60초마다 Influx 전량 적재·비움, `spark` |
 | 010 | raw-archive | DONE | 거래소 원문(WS 프레임·REST 응답)을 S3 `raw/` 에 — 시세 프레임·매초 마켓 목록은 분당 마지막 1건, 그 외 전량, 거래소·분마다 객체 1개 (BE 전용) |

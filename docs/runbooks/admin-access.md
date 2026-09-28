@@ -98,7 +98,7 @@ sudo logrotate -d /etc/logrotate.d/marketlens-admin   # 오류 없이 rotating p
 - `https://kimptrack.com` 페이지 콘솔에서 `fetch('https://admin.kimptrack.com/api/health',{credentials:'include',mode:'no-cors'})` → `logs/admin/access.log` 에 `"sfs":"same-site"`·403.
 - 위조 `Cf-Access-Authenticated-User-Email` 헤더를 붙인 요청의 기록에 실제 이메일이 남는다.
 - 탄력 IP + `Host: admin.kimptrack.com`(`curl -H 'Host: admin.kimptrack.com' http://3.34.104.16/`)은 공개 사이트(랜딩)다.
-- `docker stats --no-stream marketlens-cloudflared` 메모리(상한 128MB) / 상태 알림 시험 메일 / 125초 응답 제한이 터널 경로에 그대로인지.
+- `docker stats --no-stream marketlens-cloudflared` 메모리(상한 128MB·스왑 없음) / 상태 알림 시험 메일 / 125초 응답 제한이 터널 경로에 그대로인지.
 
 ## 드리프트 확인 (분기마다·설정을 바꾼 뒤)
 대시보드: 터널 라우트가 위 "기록" 그대로(호스트 하나 + catch-all 404, Protect with Access 켬), Private networks 비어 있음, 커넥터 하나. Zero Trust → Logs → Admin 에 모르는 변경이 없다.
@@ -128,7 +128,8 @@ curl -s -H "$H" "$CF/cfd_tunnel/$TUNNEL_ID/connections" | jq '[.result[].id] | l
 그룹 `marketlens-admins` 에서 제거 → My Team → Users 에서 그 사용자 Revoke(기존 세션 끊기) → Remove users(좌석 반납) → 계정 Members 였으면 거기서도 제거 → 그 사람이 알던 토큰 교체(`REFRESH_TOKEN`, 터널 권한이 있었으면 위 "토큰 교체"). 위 "기록" 의 인원수를 고친다.
 
 ## 되돌리기 (공개 사이트와 무관)
-- 관리자 페이지만 닫기: 대시보드에서 라우트 삭제, 또는 serve 에서 `docker compose --profile tunnel --env-file .env --env-file server/.env stop cloudflared`. 다음 배포가 토큰 파일을 보고 다시 띄우므로 오래 닫으려면 파일을 치운다(`sudo mv secrets/cloudflared-token ~/cloudflared-token.off` — 배포가 "tunnel 건너뜀").
+- 관리자 페이지만 닫기: 대시보드에서 라우트 삭제, 또는 serve 에서 `docker compose --profile tunnel --env-file .env --env-file server/.env rm -sf cloudflared`. `stop` 이 아니라 지운다 — 멈춘 컨테이너는 옛 `admin` 망을 가리킨 채 남아, 그사이 serve 에 `down` 이 돌면 다음 배포의 tunnel `up` 이 "network … not found" 로 실패한다. 다음 배포가 토큰 파일을 보고 새로 만들므로 오래 닫으려면 파일을 치운다(`sudo mv secrets/cloudflared-token ~/cloudflared-token.off` — 배포가 "tunnel 건너뜀").
+- serve 에서 `docker compose --profile serve … down` 을 돌렸을 때 cloudflared 가 멈춰 있었거나 재시작을 되풀이하던 중이었다면 `admin` 망이 지워졌다 — `docker compose --profile tunnel --env-file .env --env-file server/.env up -d --force-recreate cloudflared` 로 다시 만든다. 돌고 있던 cloudflared 는 망을 쥐고 있어 `down` 이 망을 남긴다("Resource is still in use"). 배포 줄에는 `--force-recreate` 를 넣지 않는다(배포마다 터널이 끊긴다).
 - 걷어내기: 라우트 삭제 → 터널 삭제 → serve 에서 `docker compose --profile tunnel --env-file .env --env-file server/.env rm -sf cloudflared` → 토큰 파일 삭제 → Access 앱 삭제.
 
 ## 이미지 갱신 (분기마다 — 다음 2026-12)
