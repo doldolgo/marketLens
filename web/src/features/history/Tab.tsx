@@ -110,12 +110,13 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
     return REAL_FXS.filter((id) => has.has(exName(id)))
   }, [spreads, selSym])
   const availableKey = availableFxs.join('+')
-  // 켜진 해외 카드에 이 코인이 하나도 없으면(CUDIS 는 Bitget 에만) 코인이 있는 거래소로 카드를 바꾼다 — 기본 카드가 Binance 라
-  // 다른 곳에만 상장된 코인은 빈 차트만 보였다. 사용자가 직접 고른 조합은 코인이 바뀌기 전까지 그대로 둔다(deps 에 chartFxs 없음)
+  // 코인이 바뀌면 켜진 해외 카드에서 이 코인이 없는 거래소를 뺀다(툴바에서도 잠기므로 빈 카드가 생기지 않게). 남는 게 없으면(CUDIS 는 Bitget 에만)
+  // 코인이 있는 거래소 전부로. mock 카드(MEXC)는 Binance 봉으로 만드므로 Binance 기준. 사용자가 고른 조합은 코인이 바뀌기 전까지 그대로(deps 에 chartFxs 없음)
   useEffect(() => {
     if (availableFxs.length === 0) return
-    if (chartFxs.some((id) => availableFxs.includes(id))) return
-    setChartFxs(availableFxs)
+    const keep = chartFxs.filter((id) => availableFxs.includes(isMockFx(id) ? REAL_FXS[0] : id))
+    if (keep.length === chartFxs.length) return
+    setChartFxs(keep.length > 0 ? keep : availableFxs)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selSym, availableKey])
   // 카드 간 시간축·십자선 연동 — 탭이 사는 동안 하나
@@ -362,7 +363,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
 
         {/* 선택 심볼 봉 차트(표 아래) — 설정은 바로 위 툴바만 따른다. 해외 거래소 1개 = 카드 1개, 김프 + 가격 + 거래소별 입출금 (스펙 014 §3.7 · 015) */}
         <ChartToolbar sym={selSym} dir={dir} interval={interval} onInterval={setInterval_}
-          doms={chartDoms} onDoms={setChartDoms} fxs={chartFxs} onFxs={setChartFxs}
+          doms={chartDoms} onDoms={setChartDoms} fxs={chartFxs} onFxs={setChartFxs} availableFxs={availableFxs}
           loading={candlesLoading} errorStatus={candlesError} />
         {/* 카드 사이는 다른 블록보다 넓게 — 카드가 붙어 있으면 한 덩어리로 보여 답답하다 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>

@@ -15,7 +15,7 @@ import {
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { exName, fmtKrw, fmtPct, fmtTime, fmtUsdt, pctColor } from '../../shared/format'
 import { Pill, Seg, card, hint, kicker, type SegOpt } from '../../shared/ui'
-import { FX_CHOICES, INITIAL_BARS, exchangeStates, lineTone, type BandTone } from './candles'
+import { FX_CHOICES, INITIAL_BARS, REAL_FXS, exchangeStates, isMockFx, lineTone, type BandTone } from './candles'
 import { netPath } from './network'
 import { INTERVALS, INTERVAL_LABEL, INTERVAL_SEC, type Interval } from './rollup'
 import type { Candle1m, Dir, Dom, PremiumEvent } from './types'
@@ -184,6 +184,8 @@ export interface ToolbarProps {
   onDoms: (d: Dom[]) => void
   fxs: string[]
   onFxs: (f: string[]) => void
+  /** 이 코인이 있는 해외 거래소(피드 기준). 빈 배열 = 아직 모름 → 전부 고를 수 있다. 없는 거래소는 체크박스를 잠근다 — 고르면 빈 차트뿐이라. */
+  availableFxs: string[]
   /** 청크를 받는 중 — 직전 봉은 유지 (014 §3.7). */
   loading: boolean
   /** 마지막 조회 실패의 HTTP 상태(네트워크 실패 0). 없으면 null. */
@@ -196,20 +198,33 @@ export function ChartToolbar(p: ToolbarProps) {
     if (next.length > 0) set(next) // 최소 1개는 남긴다 — 빈 차트는 의미가 없어서
   }
   const cbStyle: CSSProperties = { accentColor: 'var(--color-accent)', width: 12, height: 12, cursor: 'pointer', margin: 0 }
-  const cbLabel = (on: boolean): CSSProperties => ({ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, cursor: 'pointer', color: on ? 'var(--color-neutral-300)' : 'var(--color-neutral-600)' })
-  const group = <T extends string>(title: string, all: T[], list: T[], label: (v: T) => string, set: (l: T[]) => void) => (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-      <span style={{ ...hint, fontSize: 11 }}>{title}</span>
-      <label style={cbLabel(list.length === all.length)}>
-        <input type="checkbox" style={cbStyle} checked={list.length === all.length} onChange={() => set(list.length === all.length ? [all[0]] : all)} />전체
-      </label>
-      {all.map((v) => (
-        <label key={v} style={cbLabel(list.includes(v))}>
-          <input type="checkbox" style={cbStyle} checked={list.includes(v)} onChange={() => toggle(list, all, v, set)} />{label(v)}
+  const cbLabel = (on: boolean, off = false): CSSProperties => ({
+    display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, cursor: off ? 'not-allowed' : 'pointer',
+    color: on ? 'var(--color-neutral-300)' : 'var(--color-neutral-600)', opacity: off ? 0.4 : 1,
+  })
+  // 잠긴 항목(이 코인이 없는 해외 거래소)은 '전체' 와 개별 토글 어디서도 켜지지 않는다 — 고를 수 있는 것만이 '전체' 다
+  const group = <T extends string>(title: string, choices: T[], list: T[], label: (v: T) => string, set: (l: T[]) => void, enabled: (v: T) => boolean = () => true) => {
+    const all = choices.filter(enabled)
+    const allOn = all.length > 0 && all.every((v) => list.includes(v))
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ ...hint, fontSize: 11 }}>{title}</span>
+        <label style={cbLabel(allOn)}>
+          <input type="checkbox" style={cbStyle} checked={allOn} onChange={() => set(allOn ? [all[0]] : all)} />전체
         </label>
-      ))}
-    </span>
-  )
+        {choices.map((v) => {
+          const off = !enabled(v)
+          return (
+            <label key={v} style={cbLabel(list.includes(v), off)} title={off ? `${p.sym} 은 ${label(v)} 에 없습니다` : undefined}>
+              <input type="checkbox" style={cbStyle} disabled={off} checked={list.includes(v)} onChange={() => toggle(list, all, v, set)} />{label(v)}
+            </label>
+          )
+        })}
+      </span>
+    )
+  }
+  // mock 카드(MEXC)는 Binance 봉으로 만드므로 Binance 가 있을 때만
+  const fxEnabled = (id: string) => p.availableFxs.length === 0 || p.availableFxs.includes(isMockFx(id) ? REAL_FXS[0] : id)
   const fxChoiceLabel = (id: string) => { const f = FX_CHOICES.find((x) => x.id === id); return f?.mock ? `${f.label} (mock)` : f?.label ?? id }
   const intervalOpts: SegOpt[] = INTERVALS.map((i) => ({
     label: INTERVAL_LABEL[i], onClick: () => p.onInterval(i),
@@ -224,7 +239,7 @@ export function ChartToolbar(p: ToolbarProps) {
         <Seg opts={intervalOpts} pad="5px 9px" />
       </span>
       {group('국내', DOMS, p.doms, exName, p.onDoms)}
-      {group('해외', FX_CHOICES.map((f) => f.id), p.fxs, fxChoiceLabel, p.onFxs)}
+      {group('해외', FX_CHOICES.map((f) => f.id), p.fxs, fxChoiceLabel, p.onFxs, fxEnabled)}
       {p.loading && <Pill tone="accent">불러오는 중…</Pill>}
       {p.errorStatus != null && <Pill tone="warn">차트를 불러오지 못했습니다 (HTTP {p.errorStatus})</Pill>}
       <span style={{ ...hint, marginLeft: 'auto' }}>해외 거래소 1개 = 차트 1개 · 휠 = 줌 · 드래그 = 이동 · 왼쪽 끝으로 끌면 과거 로드 (모든 차트 같이 움직임)</span>
