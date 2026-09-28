@@ -91,13 +91,15 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
   // 방향·기간·거래소·정렬·차트 선택은 URL 쿼리(h.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색 입력은 Enter 전까지 임시라 제외
   const [dir, setDir] = useUrlState<Dir>('h.dir', 'kimp', oneOf(['kimp', 'reverse']))
   const [per, setPer] = useUrlState<Per>('h.per', '7d', oneOf(PERS))
-  const [dom, setDom_] = useUrlState<Dom | null>('h.dom', null, alias([['all', null], ['upbit', 'upbit'], ['bithumb', 'bithumb']]))
+  const [dom, setDom] = useUrlState<Dom | null>('h.dom', null, alias([['all', null], ['upbit', 'upbit'], ['bithumb', 'bithumb']]))
+  // 표의 해외 거래소 필터 — API 에 fx 파라미터가 없어 응답을 클라이언트에서 거른다. 차트 카드 선택(h.fx)과는 별개
+  const [fxf, setFxf] = useUrlState<string | null>('h.fxf', null, alias([['all', null], ...REAL_FXS.map((id): [string, string | null] => [id, id])]))
   const [sort, setSort] = useUrlState<{ key: SortKey; dir: number }>('h.sort', { key: 'cnt', dir: -1 }, SORT_CODEC)
   const { key: sortKey, dir: sortDir } = sort
   // 심볼 검색 — Enter 로 선택 (표 클릭과 같은 onSelect)
   const [q, setQ] = useState('')
-  // 차트 거래소 선택(국내·해외 각각 여러 개). 국내는 위 필터를 그대로 따른다 — 전체면 둘 다, 하나면 그 하나.
-  // 빗썸에만 있는 코인(HEMI 등)이 기본 선택 업비트 때문에 빈 화면이 되지 않게. 툴바 체크박스는 그 뒤 더 좁힐 때만
+  // 차트 거래소 선택(국내·해외 각각 여러 개). 위 표 필터와는 별개 — 기본은 국내 둘 다라서 빗썸에만 있는 코인(HEMI 등)도 빈 화면이 되지 않는다.
+  // 툴바 체크박스로만 좁힌다
   const [chartDoms, setChartDoms] = useUrlState<Dom[]>('h.doms', DOMS_ORDER, list(oneOf(DOMS_ORDER)))
   const [chartFxs, setChartFxs] = useUrlState<string[]>('h.fx', ['binance'], list(oneOf(FX_CHOICES.map((f) => f.id))))
   // 선택 코인이 있는 해외 거래소(피드 기준, FX_CHOICES 순서). 피드가 아직 없으면 빈 배열 = 모름.
@@ -115,8 +117,6 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
     setChartFxs(availableFxs)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selSym, availableKey])
-  // 필터 변경 때만 차트 국내 선택을 따라가게 — effect 로 하면 마운트 때 URL 에서 복원한 chartDoms 를 덮어쓴다
-  const setDom = (d: Dom | null) => { setDom_(d); setChartDoms(d ? [d] : DOMS_ORDER) }
   // 카드 간 시간축·십자선 연동 — 탭이 사는 동안 하나
   const [sync] = useState(() => new ChartSync())
   // 봉 종류 — 계층(1m·5m·1h·4h·1d) 하나를 골라 그 안에서 접는다 (candles.ts·rollup.ts)
@@ -132,7 +132,9 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
   const periodSec = PER_SEC[per]
   const { result, loading } = useEvents({ dir, dom, periodSec })
   // 실패·미도착 때 `[]` 를 매 렌더 새로 만들면 아래 memo 들이 초마다 깨져 차트가 초마다 다시 그려진다 → 고정 빈 배열
-  const events: PremiumEvent[] = result?.kind === 'ok' ? result.data.events : NO_EVENTS
+  const allEvents: PremiumEvent[] = result?.kind === 'ok' ? result.data.events : NO_EVENTS
+  // 해외 거래소 필터 — 국내 필터(API dom)와 같은 범위로 탭 전체(표·요약·로그·차트 음영)에 걸린다. 60초 재조회·필터 변경 때만 새 배열
+  const events = useMemo(() => (fxf === null ? allEvents : allEvents.filter((e) => e.fx === fxf)), [allEvents, fxf])
 
   // 좌 표: 심볼별 집계 → 정렬 → 상위 30
   const rank = sortStats(aggregate(events, nowSec), sortKey, sortDir).slice(0, 30)
@@ -202,6 +204,10 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
             seg('전체', dom === null, () => setDom(null)),
             seg('업비트', dom === 'upbit', () => setDom('upbit')),
             seg('빗썸', dom === 'bithumb', () => setDom('bithumb')),
+          ]} />
+          <Seg opts={[
+            seg('전체', fxf === null, () => setFxf(null)),
+            ...REAL_FXS.map((id) => seg(exName(id), fxf === id, () => setFxf(id))),
           ]} />
           <input className="input" placeholder="심볼 검색 → Enter" value={q} style={searchInput}
             onChange={(e) => setQ(e.target.value.toUpperCase())}
