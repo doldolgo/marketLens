@@ -720,8 +720,9 @@ def test_deploy_script_per_box_guards_env_then_mirrors_main_then_builds_own_prof
             for g in guards:
                 if g not in GUARDS[box]:
                     assert g not in script, (box, other_box, g)
-        # profile 은 자기 것 하나만
-        assert sum("--profile" in ln for ln in script) == 1, box
+        # profile 은 자기 것 하나만 — serve 만 부속 tunnel 줄이 하나 더 (030 §3.3)
+        profiles = [ln.split()[3] for ln in script if "--profile" in ln]
+        assert profiles == ([box, "tunnel"] if box == "serve" else [box]), box
 
 
 def test_deploy_script_never_prints_env_values() -> None:
@@ -752,4 +753,8 @@ def test_readme_is_short_and_points_to_claude_md() -> None:
         "docker compose --profile <collect|data|serve> --env-file .env --env-file server/.env up -d --build"
         in readme
     )
-    assert "여섯 컨테이너" in readme or "6컨테이너" in readme
+    # 로컬 통합 기동은 여섯(cloudflared 는 profile tunnel 이라 안 뜬다), 배포 정의는 일곱 (030 §4)
+    local = next(ln for ln in readme.splitlines() if ln.startswith("# 로컬"))
+    assert "여섯 컨테이너" in local
+    deployed = [ln for ln in readme.splitlines() if "일곱 컨테이너" in ln]
+    assert len(deployed) == 1 and "cloudflared" in deployed[0]

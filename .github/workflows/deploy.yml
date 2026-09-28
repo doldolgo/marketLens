@@ -3,6 +3,7 @@
 # job 3개를 needs 로 이었다 — 한 박스가 실패하면 뒤 박스는 돌지 않고, Actions 화면에서 어느 박스가 죽었는지 바로 보인다.
 # Secrets: EC2_HOST_DATA·EC2_HOST_COLLECT·EC2_HOST_SERVE(박스별 공인 IP) + 공용 EC2_USER·EC2_SSH_KEY. 옛 EC2_HOST 는 안 쓴다.
 # 각 박스 스크립트는 같은 뼈대(가드 → 미러 동기화 → 자기 profile 만 up --build → prune)이고 가드 키만 다르다.
+# serve 만 up 뒤에 caddy 다시 읽기(027)와 관리자 터널(030 — 토큰 파일이 있을 때만 profile tunnel)이 붙는다.
 # 가드는 값을 출력하지 않는다: 존재·비어있지 않음만 `grep -q '^KEY=.'` 로 본다.
 name: Deploy
 
@@ -101,4 +102,13 @@ jobs:
             # 깨진 설정이면 여기서 실패하고 돌던 caddy 는 옛 설정으로 계속 돈다 — 곧바로 되돌림 커밋을 머지한다
             # (깨진 파일은 디스크에 남아 다음 caddy 재시작에서 사이트 전체를 내린다).
             docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile
+            # 030 — 관리자 터널. 토큰 파일(사람이 런북 admin-access.md 뒤에 둔다)이 비어 있지 않을 때만 띄운다.
+            # 공개 up 과 따로 돌린다 — 같은 up 에서 secret 오류가 나면 함께 다시 만들던 web·caddy·api 가 기동 안 된 채 남을 수 있다.
+            # --profile tunnel 은 serve 컨테이너를 건드리지 않는다. 실패하면 배포 실패(공개 서비스는 이미 떠 있다).
+            # 파일은 크기만 본다(-s) — 소유 65532·0400 이라 이 사용자는 읽을 수 없고, 읽을 일도 없다.
+            if [ -s secrets/cloudflared-token ]; then
+              docker compose --profile tunnel --env-file .env --env-file server/.env up -d
+            else
+              echo "tunnel 건너뜀 — secrets/cloudflared-token 이 없거나 비었다"
+            fi
             docker image prune -f

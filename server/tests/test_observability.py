@@ -233,11 +233,12 @@ def test_public_nginx_turns_off_access_log_and_keeps_its_locations() -> None:
 
 
 def test_serve_deploy_reloads_caddy_after_up_and_prunes_last() -> None:
-    """serve 는 up 뒤에 caddy 설정을 다시 읽히고 prune 이 마지막. data·collect 는 caddy 를 모른다 (§3.2)."""
+    """serve 는 up 뒤에 caddy 설정을 다시 읽히고 prune 이 마지막. data·collect 는 caddy 를 모른다 (§3.2).
+    reload 와 prune 사이에는 030 의 관리자 터널 줄이 온다(test_admin_tunnel.py)."""
     script = _deploy_script("serve")
     i_up = next(i for i, ln in enumerate(script) if "up -d --build" in ln)
     assert script.count(CADDY_RELOAD) == 1
-    assert i_up < script.index(CADDY_RELOAD) == len(script) - 2
+    assert i_up < script.index(CADDY_RELOAD) < len(script) - 1
     assert script[-1] == "docker image prune -f"
     for box in ("data", "collect"):
         assert not any("caddy" in ln for ln in _deploy_script(box)), box

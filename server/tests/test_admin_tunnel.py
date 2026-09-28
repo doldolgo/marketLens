@@ -1,4 +1,4 @@
-"""관리자 터널 설정 계약 — compose 의 cloudflared·admin 망·토큰 secret (스펙 030 §3.2·§4).
+"""관리자 터널 설정 계약 — compose 의 cloudflared·admin 망·토큰 secret·serve 배포의 터널 줄 (스펙 030 §3.2·§3.3·§4).
 
 test_deploy.py 와 같은 방식이다: Docker 없는 CI 에서 설정 파일을 읽어 단언한다. 컨테이너를 실제로 띄워
 serve 컨테이너가 안 바뀌는지·cloudflared 가 api 이름을 못 푸는지 보는 검증은 030 §5 의 로컬 Docker 명령이다.
@@ -7,11 +7,17 @@ serve 컨테이너가 안 바뀌는지·cloudflared 가 api 이름을 못 푸는
 
 import re
 
-from tests.test_deploy import _text, _yaml
+from tests.test_deploy import _deploy_script, _text, _yaml
 
 METRICS = "127.0.0.1:2000"
 SECRET = "cloudflared-token"
 TOKEN_PATH = "/run/secrets/cloudflared-token"
+SERVE_UP = "docker compose --profile serve --env-file .env --env-file server/.env up -d --build"
+CADDY_RELOAD = "docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile"
+TOKEN_CHECK = "if [ -s secrets/cloudflared-token ]; then"
+TUNNEL_UP = (
+    "docker compose --profile tunnel --env-file .env --env-file server/.env up -d"
+)
 
 
 def _compose() -> dict:
@@ -111,3 +117,37 @@ def test_local_integrated_run_does_not_start_cloudflared() -> None:
         for profiles in runs:
             assert profiles.split(",") == ["collect", "data", "serve"], rel
             assert tunnel not in profiles.split(","), rel
+
+
+# --- 배포 serve 스크립트 (§3.3) ---------------------------------------------------------
+
+
+def test_serve_deploy_starts_the_tunnel_after_caddy_only_with_a_token_file() -> None:
+    """가드 → 미러 → up serve → caddy reload → 토큰 파일이 비어 있지 않을 때만 tunnel up, 아니면 건너뜀 한 줄 → prune."""
+    script = _deploy_script("serve")
+    i_up = script.index(SERVE_UP)
+    i_reload = script.index(CADDY_RELOAD)
+    i_check = script.index(TOKEN_CHECK)
+    i_tunnel = script.index(TUNNEL_UP)
+    i_else = script.index("else", i_check)
+    i_fi = script.index("fi", i_else)
+    assert i_up < i_reload < i_check < i_tunnel < i_else < i_fi
+    # 참 가지는 tunnel up 한 줄, 거짓 가지는 건너뜀 한 줄
+    assert i_tunnel == i_check + 1 and i_else == i_tunnel + 1
+    skip = script[i_else + 1 : i_fi]
+    assert len(skip) == 1 and skip[0].startswith("echo") and "tunnel 건너뜀" in skip[0]
+    assert script[i_fi + 1 :] == ["docker image prune -f"]
+
+
+def test_tunnel_line_never_reads_the_token_and_other_boxes_skip_it() -> None:
+    """tunnel 줄은 정확히 하나(빌드·서비스 인자 없음). 토큰 파일은 크기만 본다(-s) — 값을 읽거나 찍지 않는다."""
+    serve = _deploy_script("serve")
+    assert [ln for ln in serve if "--profile tunnel" in ln] == [TUNNEL_UP]
+    # 토큰 파일 이름이 나오는 줄은 크기 확인과 건너뜀 안내 둘뿐 — cat·읽기 없음
+    touching = [ln for ln in serve if "cloudflared-token" in ln]
+    assert len(touching) == 2 and touching[0] == TOKEN_CHECK
+    assert touching[1].startswith("echo") and "tunnel 건너뜀" in touching[1]
+    for box in ("data", "collect"):
+        script = "\n".join(_deploy_script(box))
+        assert "tunnel" not in script and "secrets" not in script, box
+    assert not re.search(r"\bTUNNEL_TOKEN\b", _text(".github/workflows/deploy.yml"))
