@@ -101,6 +101,7 @@ marketlens/
 | 024 | wallet-history | DONE | 틱 입출금 4상태 = 006 망 판정값 + 망 이름 2개 → 1분봉·사건 점 `net_dom`·`net_fx`, `/history/candles`·`events` 에 `netDom`·`netFx`, 기록 탭 읽기 줄·사건 표·로그에 망 표시 |
 | 025 | slack-alerts | DONE | Slack 웹훅 알림 — 기동·수집 실패 구간 60초 발생/복구·ERROR 로그·처리 안 된 500(키별 10분 억제, 새 라이브러리 없음), 수집기 심장박동 `collect:heartbeat`, `/health` 신선도 판정(비정상 503), 외부 uptime 감시 런북 |
 | 026 | day-change | DONE | 국내 거래소·코인별 KST 00시 첫 체결가 장부(Redis `dayopen:<날짜>`, 재기동 유지) → `/spreads` 행 `dayChg`(19키) + 스프레드 탭 열 개편(심볼·변동율·국내가격·해외가격·해외거래소·국내거래소·김프·입출금·네트워크) |
+| 027 | observability | TODO | caddy 접속 로그(IP /24·검색어·헤더 지움, 폴링 제외, `caddy/` 디렉터리 바인드·배포 뒤 reload) · api WS 접속 수 StatsD 게이지 → CloudWatch 서울(에이전트 세 박스, 로그 90일은 처리방침 뒤, canary 5분 4단계, 경보 17개(로그 뒤 18) → Slack) · serve 스왑 1GB (인프라) |
 
 실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
