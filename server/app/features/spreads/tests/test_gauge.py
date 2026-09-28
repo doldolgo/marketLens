@@ -76,6 +76,54 @@ async def test_resolve_failure_warns_once_per_10_minutes_and_retries_next_round(
     assert len(warnings) == 1 and "다음 회차" in warnings[0].getMessage()
 
 
+async def test_empty_label_host_is_a_resolve_failure_not_a_dead_task(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`a..b` 는 parse_addr 를 통과하지만 getaddrinfo 가 UnicodeError(ValueError)로 던진다 — 같은 WARNING·재시도 길."""
+    monkeypatch.setattr(gauge_mod, "INTERVAL_SEC", 0.02)
+    caplog.set_level(logging.WARNING, logger="marketlens.ws_gauge")
+    gauge = gauge_mod.start_ws_gauge("a..b:1", lambda: 0)
+    assert gauge is not None
+    await asyncio.sleep(0.1)
+    assert "ws_clients_gauge" in [t.get_name() for t in asyncio.all_tasks()]
+    await gauge.aclose()
+    warnings = [r for r in caplog.records if r.name == "marketlens.ws_gauge"]
+    assert len(warnings) == 1 and "다음 회차" in warnings[0].getMessage()
+
+
+async def test_failure_warning_repeats_once_10_minutes_have_passed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    now = [0.0]
+    gauge = WsClientsGauge(count=lambda: 0, host="a..b", port=1, clock=lambda: now[0])
+    caplog.set_level(logging.WARNING, logger="marketlens.ws_gauge")
+    for t in (0.0, 599.0, 600.0, 1199.0):
+        now[0] = t
+        await gauge._send_once()
+    warnings = [r for r in caplog.records if r.name == "marketlens.ws_gauge"]
+    assert len(warnings) == 2  # 0초·600초 — 599초·1199초는 억제
+
+
+async def test_aclose_logs_a_dead_task_instead_of_raising(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """게이지가 예상 밖 예외로 죽어 있어도 aclose 는 던지지 않는다 — lifespan 의 나머지 정리가 돌게."""
+    transport, _, port = await _receiver()
+    gauge = WsClientsGauge(
+        count=lambda: 1 // 0, host="127.0.0.1", port=port, interval=0.02
+    )
+    caplog.set_level(logging.WARNING, logger="marketlens.ws_gauge")
+    gauge.start()
+    try:
+        await asyncio.sleep(0.05)
+        await gauge.aclose()
+    finally:
+        transport.close()
+    warnings = [r for r in caplog.records if r.name == "marketlens.ws_gauge"]
+    assert len(warnings) == 1 and warnings[0].exc_info is not None
+    assert warnings[0].exc_info[0] is ZeroDivisionError
+
+
 # --- 앱 배선: api 역할만, STATSD_ADDR 가 있을 때만 (test_role.py 방식) ------------
 
 

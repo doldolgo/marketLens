@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import socket
 import time
@@ -67,8 +66,15 @@ class WsClientsGauge:
     async def aclose(self) -> None:
         if self._task is not None:
             self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            try:
                 await self._task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                # 게이지가 죽어 있어도 lifespan 의 나머지 정리(허브·버스·Influx)는 돌아야 한다
+                logger.warning(
+                    "WS 접속 수 게이지 태스크가 예외로 끝나 있었다", exc_info=True
+                )
             self._task = None
         if self._sock is not None:
             self._sock.close()
@@ -97,7 +103,8 @@ class WsClientsGauge:
             family, kind, proto, _, dest = infos[0]
             sock = socket.socket(family, kind, proto)
             sock.setblocking(False)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
+            # ValueError — 빈 라벨(`a..b`)·63자를 넘는 라벨은 getaddrinfo 가 UnicodeError 로 던진다
             self._warn(
                 "StatsD 주소 %s:%d 를 못 풀었다 — 다음 회차에 다시: %r",
                 self._host,
