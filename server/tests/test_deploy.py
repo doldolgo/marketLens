@@ -204,7 +204,113 @@ def test_web_image_is_multistage_node22_to_nginx() -> None:
     assert ".env*" in _text("web/.dockerignore").splitlines()
 
 
-# --- nginx: /api 접두 제거·SPA fallback·캐시 규칙 ---------------------------
+# --- nginx: 공개 /api 허용 목록(028)·SPA fallback·캐시 규칙 ------------------
+
+
+def _nginx_tokens(text: str) -> list[str]:
+    """nginx 설정 → 토큰. 주석은 버리고, 따옴표 문자열은 따옴표째 한 토큰, `${VAR}` 는 단어의 일부."""
+    tokens: list[str] = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch.isspace():
+            i += 1
+        elif ch == "#":
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+        elif ch in "{};":
+            tokens.append(ch)
+            i += 1
+        elif ch in "'\"":
+            j = i + 1
+            while text[j] != ch:
+                j += 2 if text[j] == "\\" else 1
+            tokens.append(text[i : j + 1])
+            i = j + 1
+        else:
+            j = i
+            while j < len(text) and not text[j].isspace() and text[j] not in ";{}":
+                j = text.index("}", j) + 1 if text.startswith("${", j) else j + 1
+            tokens.append(text[i:j])
+            i = j
+    return tokens
+
+
+# 지시어 하나 = (인자 — 첫 칸이 이름, 따옴표는 벗김, 블록 자식 또는 None)
+Directive = tuple[list[str], list | None]
+
+
+def _nginx_block(tokens: list[str], pos: int = 0) -> tuple[list[Directive], int]:
+    items: list[Directive] = []
+    args: list[str] = []
+    while pos < len(tokens):
+        tok = tokens[pos]
+        if tok == ";":
+            items.append((args, None))
+            args, pos = [], pos + 1
+        elif tok == "{":
+            children, pos = _nginx_block(tokens, pos + 1)
+            items.append((args, children))
+            args = []
+        elif tok == "}":
+            return items, pos + 1
+        else:
+            quoted = len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in "'\""
+            args.append(tok[1:-1] if quoted else tok)
+            pos += 1
+    return items, pos
+
+
+def _public_server() -> list[Directive]:
+    """`listen 80` server 블록 — 029 가 같은 파일에 관리자 server 를 더해도 공개 쪽만 본다 (028 §4)."""
+    tree, _ = _nginx_block(_nginx_tokens(_text("web/nginx.conf")))
+    servers = [children for args, children in tree if args == ["server"]]
+    public = [s for s in servers if (["listen", "80"], None) in s]
+    assert len(public) == 1, "listen 80 server 가 하나여야 한다"
+    return public[0]
+
+
+def _args(block: list[Directive], name: str) -> list[list[str]]:
+    return [args[1:] for args, _ in block if args[0] == name]
+
+
+def _locations(block: list[Directive]) -> dict[tuple[str, ...], list[Directive]]:
+    """location 전부(중첩 포함) — 키는 수식어와 경로 (`("=", "/api")`·`("/api/",)`·`("~", 패턴)`)."""
+    found: dict[tuple[str, ...], list[Directive]] = {}
+    for args, children in block:
+        if args[0] == "location" and children is not None:
+            found[tuple(args[1:])] = children
+            found.update(_locations(children))
+    return found
+
+
+def _route(path: str) -> tuple[str, ...]:
+    """정규식이 없는 공개 server 에서 nginx 가 고르는 location — 정확 일치, 없으면 가장 긴 접두."""
+    locations = _locations(_public_server())
+    if ("=", path) in locations:
+        return ("=", path)
+    prefixes = [key for key in locations if len(key) == 1 and path.startswith(key[0])]
+    return max(prefixes, key=lambda key: len(key[0]))
+
+
+COLLECTOR = "http://${COLLECT_HOST}:8000"
+API = "http://api:8000"
+# 028 §3.1 — 공개 허용 목록: 경로 → 업스트림. 웹·감시가 새 경로를 부르면 그 스펙이 여기와 nginx 에 한 줄을 더한다.
+PUBLIC_API = {
+    "/api/health": COLLECTOR,
+    "/api/health/collect": COLLECTOR,
+    "/api/history/events": COLLECTOR,
+    "/api/history/candles": API,
+    "/api/landing": API,
+    "/api/ws/spreads": API,
+}
+PROXY_HEADERS = (
+    ["Host", "$http_host"],
+    ["X-Real-IP", "$remote_addr"],
+    ["X-Forwarded-For", "$proxy_add_x_forwarded_for"],
+    ["X-Forwarded-Proto", "$scheme"],
+)
+DENY = {("=", "/api"), ("/api/",)}
 
 
 def test_nginx_falls_back_to_index_under_app_only() -> None:
@@ -225,11 +331,97 @@ def test_web_bundle_lives_under_app_prefix() -> None:
     assert "alias /usr/share/nginx/html/assets/;" in conf
 
 
+def test_public_api_forwards_exactly_the_six_allowlisted_paths() -> None:
+    """백엔드로 넘기는 location = 허용 여섯(전부 =), 모양은 접두 제거 rewrite + URI 없는 proxy_pass (028 §3.1·§3.3)."""
+    server = _public_server()
+    assert not _args(server, "proxy_pass")
+    proxied = {k: c for k, c in _locations(server).items() if _args(c, "proxy_pass")}
+    assert set(proxied) == {("=", path) for path in PUBLIC_API}
+    for (_, path), children in proxied.items():
+        assert _args(children, "proxy_pass") == [[PUBLIC_API[path]]], path
+        # 정규화된 경로에서 /api 를 뗀다 — break 라 쿼리스트링은 그대로 따라간다
+        assert _args(children, "rewrite") == [["^/api/(.*)$", "/$1", "break"]], path
+        headers = _args(children, "proxy_set_header")
+        for header in PROXY_HEADERS:
+            assert header in headers, (path, header)
+
+
+def test_public_api_ws_spreads_upgrades_without_touching_read_timeout() -> None:
+    """017 — 업그레이드 헤더·HTTP/1.1 은 `= /api/ws/spreads` 에만, read timeout 은 기본 그대로."""
+    for key, children in _locations(_public_server()).items():
+        headers = _args(children, "proxy_set_header")
+        upgrades = key == ("=", "/api/ws/spreads")
+        assert (["Upgrade", "$http_upgrade"] in headers) == upgrades, key
+        assert (["Connection", "upgrade"] in headers) == upgrades, key
+        assert (_args(children, "proxy_http_version") == [["1.1"]]) == upgrades, key
+    assert "proxy_read_timeout" not in _text("web/nginx.conf")
+
+
+def test_public_api_rest_answers_app_shaped_json_404_without_proxy() -> None:
+    """`/api` 와 그 밖의 `/api/*` 는 앱 404 와 같은 JSON, 확장자별 MIME 추정 끔, proxy_pass 없음 (028 §3.2)."""
+    app_404 = TestClient(create_app()).get("/nope")
+    assert app_404.status_code == 404
+    locations = _locations(_public_server())
+    for key in DENY:
+        children = locations[key]
+        assert sorted(args[0] for args, _ in children) == [
+            "default_type",
+            "return",
+            "types",
+        ], key
+        assert [c for args, c in children if args[0] == "types"] == [[]], key
+        assert _args(children, "default_type") == [["application/json"]], key
+        assert _args(children, "return") == [["404", app_404.text]], key
+
+
+def test_public_server_has_no_regex_location_and_hides_version() -> None:
+    """정규식 location 은 접두 /api/ 보다 먼저 이겨 허용 목록을 우회한다 — 하나도 두지 않는다 (028 §3.1)."""
+    server = _public_server()
+    keys = set(_locations(server))
+    assert not [k for k in keys if k[0] in ("~", "~*")]
+    assert ("/api/ws/",) not in keys
+    assert {k for k in keys if k[-1].startswith("/api")} == DENY | {
+        ("=", path) for path in PUBLIC_API
+    }
+    assert _args(server, "server_tokens") == [["off"]]
+
+
+def test_closed_api_paths_route_to_the_json_404() -> None:
+    """API 문서·분석 6개·/refresh·history 무거운 조회·/spreads·끝에 / 붙은 허용 경로는 공개에 없다 (028 §3.2·§4)."""
+    closed = [
+        "/api",
+        "/api/docs",
+        "/api/redoc",
+        "/api/openapi.json",
+        "/api/premium",
+        "/api/premium/scan",
+        "/api/matrix",
+        "/api/arbitrage",
+        "/api/orderbook/upbit",
+        "/api/slippage/upbit",
+        "/api/refresh",
+        "/api/history/premium",
+        "/api/history/streaks",
+        "/api/history/streaks/bulk",
+        "/api/spreads",
+        "/api/ws",
+        "/api/ws/other",
+        "/api/nope",
+    ]
+    for path in closed + [path + "/" for path in PUBLIC_API]:
+        assert _route(path) in DENY, path
+    for path in PUBLIC_API:
+        assert _route(path) == ("=", path), path
+
+
 def test_nginx_template_substitutes_only_collect_host() -> None:
     """021 §3.2 — ${…} 꼴 치환 변수는 COLLECT_HOST 하나뿐이고 api 로 가는 세 분기는 서비스명 그대로다.
     nginx 자체 변수는 $name 꼴이라 필터(^COLLECT_HOST$)에 걸리지 않는다."""
     conf = _text("web/nginx.conf")
     assert set(re.findall(r"\$\{(\w+)\}", conf)) == {"COLLECT_HOST"}
+    # 028 — 수집기 셋(health·health/collect·history/events), api 셋(history/candles·landing·ws/spreads)
+    assert conf.count("proxy_pass http://${COLLECT_HOST}:8000;") == 3
+    assert conf.count("proxy_pass http://api:8000;") == 3
     for var in (
         "$http_host",
         "$remote_addr",
