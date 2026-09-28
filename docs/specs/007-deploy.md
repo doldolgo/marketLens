@@ -10,7 +10,7 @@
 **같은 EC2 에서 기존 marketlens-be(:8000)·fe(:80) 가 운영 중이므로, 이 레포는 그것을 건드리지 않고 공존한다.**
 
 ## 2. 범위
-- 만드는 것: server·web Dockerfile, 루트 `docker-compose.yml`(배포용 5컨테이너 — dev compose 는 Influx·Redis 둘), GitHub Actions 워크플로 2개(CI·deploy), PR 템플릿, 루트 README
+- 만드는 것: server·web Dockerfile, 루트 `docker-compose.yml`(배포용 6컨테이너 — dev compose 는 Influx·Redis 둘), GitHub Actions 워크플로 2개(CI·deploy), PR 템플릿, 루트 README
 - 하지 않는 것: EC2 생성 자동화, HTTPS·도메인, 컨테이너 레지스트리, 로그 수집·모니터링(027 이 CloudWatch 로 한다 — 컨테이너 로그 **상한**은 compose 가 둔다), 기존 be·fe 스택의 변경·중단
 
 ## 3. 정해진 것
@@ -28,7 +28,7 @@
 
 ### 규칙 (왜 가 있는 것)
 - **앱은 자기 로거(`marketlens.*`)를 INFO 로, 타임스탬프와 함께 stderr 로 낸다.** 설정이 없으면 `logging.lastResort` 가 받아 WARNING 이상만, 시각도 없이 나간다 — 그러면 "S3 원문 업로드 재개"(010 §3.6)·"DB 저장 재개"(009 §3.5) 같은 복구 신호가 아예 보이지 않아 장애가 풀렸는지 알 수 없다. handler 는 루트에 달고 레벨은 `marketlens` 에만 내린다 — 라이브러리 INFO(httpx 의 요청 한 줄 등)는 루트의 WARNING 에 막혀야 로그가 초당 수십 줄로 불어나지 않는다.
-- **컨테이너 로그는 네 서비스 모두 `json-file` 50MB × 3 으로 묶는다.** docker 기본값은 무한이고, 회전 없는 로그가 디스크를 채우면 Influx 가 쓰기를 거부한다 — 그 거부는 **공간을 되찾아도 컨테이너를 재시작하기 전까지 풀리지 않는다**(열지 못한 shard 를 캐시한다). 데몬 설정(`/etc/docker/daemon.json`)이 아니라 compose 에 두는 이유는 이 스택이 자기 한도를 들고 다니게 하기 위해서다.
+- **컨테이너 로그는 여섯 서비스 모두 `json-file` 50MB × 3 으로 묶는다.** docker 기본값은 무한이고, 회전 없는 로그가 디스크를 채우면 Influx 가 쓰기를 거부한다 — 그 거부는 **공간을 되찾아도 컨테이너를 재시작하기 전까지 풀리지 않는다**(열지 못한 shard 를 캐시한다). 데몬 설정(`/etc/docker/daemon.json`)이 아니라 compose 에 두는 이유는 이 스택이 자기 한도를 들고 다니게 하기 위해서다.
 - **호스트에 여는 포트는 박스마다 최소.** serve 는 caddy 의 80·443(023), collect 는 8000·data 는 6379/8086 을 다른 박스가 붙도록 열되 보안그룹으로 막는다(021). 공인으로 열린 것은 80·443 둘.
 - **호스트 포트는 compose 변수 `WEB_PORT`(기본 80).** 023 부터 이 포트를 잡는 컨테이너는 web 이 아니라 caddy 다(443 은 고정). EC2 는 루트 `.env` 의 `WEB_PORT=80`. 기존 marketlens-be·fe 컨테이너는 2026-09-04 정지(`docker compose stop`, 폴더·코드 유지) — 이 레포 소관이 아니므로 그 폴더는 건드리지 않는다. 로컬 통합 기동은 `:8000` 충돌을 피해 `WEB_PORT=8080` 을 쓴다(dev-setup.md).
 - **`/api` 는 허용 목록만 넘기며(028) 접두를 뗀다.** `/api/health` → server `/health`. dev 의 vite proxy 와 같은 규칙이라 FE 코드는 환경을 모른다.
@@ -48,7 +48,7 @@
   5. `docker image prune -f` — 오래된 레이어가 EC2 디스크를 채우지 않게.
 - Secrets 는 `EC2_HOST_DATA`·`EC2_HOST_COLLECT`·`EC2_HOST_SERVE`(박스별 공인 IP, 021)·`EC2_USER`·`EC2_SSH_KEY` 다섯. 값은 어디에도 적지 않는다.
 - PR 템플릿은 conventions.md 규칙 그대로 3줄 골격: 무엇을 / 왜 / 테스트.
-- **배포 설정의 계약은 테스트가 지킨다.** `server/tests/test_deploy.py` 가 루트 `docker-compose.yml`·워크플로 2개·Dockerfile·`.dockerignore`·`nginx.conf`·PR 템플릿·README 를 **파일로 읽어** §4 의 조건(컨테이너 5개, 호스트 노출은 web 하나, `.env` 는 `env_file` 로만·이미지 제외, `INFLUX_URL`·`REDIS_URL` 덮어쓰기, CI job 2개 무필터, deploy 스크립트의 가드·미러 동기화·`up -d --build`·prune 순서, nginx 접두 제거·캐시 규칙, 워커 1개)을 단언한다. Docker 가 없는 CI 에서 도는 유일한 회귀 장치라 pytest 안에 둔다. YAML 파싱은 dev 의존성 `pyyaml`(설치가 이미 전이 의존으로 들어오지만 명시해야 두 설치 경로가 같다). 워크플로의 `docker compose config`·컨테이너 기동 검증은 Docker 가 있는 로컬·EC2 에서 사람이 §5 명령으로 돈다.
+- **배포 설정의 계약은 테스트가 지킨다.** `server/tests/test_deploy.py` 가 루트 `docker-compose.yml`·워크플로 2개·Dockerfile·`.dockerignore`·`nginx.conf`·PR 템플릿·README 를 **파일로 읽어** §4 의 조건(컨테이너 6개, 호스트 노출은 web 하나, `.env` 는 `env_file` 로만·이미지 제외, `INFLUX_URL`·`REDIS_URL` 덮어쓰기, CI job 2개 무필터, deploy 스크립트의 가드·미러 동기화·`up -d --build`·prune 순서, nginx 접두 제거·캐시 규칙, 워커 1개)을 단언한다. Docker 가 없는 CI 에서 도는 유일한 회귀 장치라 pytest 안에 둔다. YAML 파싱은 dev 의존성 `pyyaml`(설치가 이미 전이 의존으로 들어오지만 명시해야 두 설치 경로가 같다). 워크플로의 `docker compose config`·컨테이너 기동 검증은 Docker 가 있는 로컬·EC2 에서 사람이 §5 명령으로 돈다.
 
 ### 사람이 하는 것
 - EC2 최초 설정은 `docs/runbooks/ec2-setup.md`.

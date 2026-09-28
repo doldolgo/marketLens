@@ -9,7 +9,7 @@
 		protocols h1 h2
 	}
 	# 027 §3.2 — 기본 로거(오류 줄 — 예: 업스트림 502. docker 로그로 간다)에도 접속 로그와 같은 지우기 규칙.
-	# docker 로그에 원 IP·검색어가 남지 않게. 아래 access_log 조각의 format 과 같아야 한다(test_deploy.py 가 본다).
+	# docker 로그에 원 IP·검색어가 남지 않게. 아래 access_log 조각의 format 과 같아야 한다(test_observability.py 가 본다).
 	log default {
 		format filter {
 			wrap json

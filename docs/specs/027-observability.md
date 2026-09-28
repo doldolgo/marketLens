@@ -156,7 +156,7 @@ curl -H 'Referer: https://a.com?q=x' ":8099/app/?g.q=y&p.q=z" → uri "/app/", "
 curl -H 'Referer: android-app://x/y' …             → "referer":""   (user:pw@ 가 든 주소도 "", http://news.site:8080/a?q= → "http://news.site:8080")
 #   줄마다 키는 request{remote_ip,remote_port,client_ip,proto,method,host,uri}·bytes_read·user_id·duration·size·status·referer·ua 뿐(headers·resp_headers 없음), 파일 -rw-r--r--
 curl ":8099/bad?s.q=secret&tab=x" → 502. docker logs 의 http.log.error 줄: uri "/bad?tab=x", IP "192.168.215.0", headers 없음. docker logs·access.log 에 "secret" 0건, 끝이 .0 이 아닌 IP 0건
-curl -k --resolve kimptrack.com:8443:127.0.0.1 https://kimptrack.com:8443/app/?s.q=secret  → referrer-policy: strict-origin, access.log(log0) uri "/app/?tab=spreads" 꼴
+curl -k --resolve kimptrack.com:8443:127.0.0.1 https://kimptrack.com:8443/app/?s.q=secret  → referrer-policy: strict-origin, access.log(log0) uri "/app/"(s.q 를 지우면 쿼리가 빈다)
 docker rm -f marketlens027-caddytest
 # canary 스크립트 — 가짜 서버(받은 UA 를 찍는다) 네 경우
 CANARY_BASE_URL=http://127.0.0.1:8127 node ops/canary/index.mjs
@@ -184,6 +184,9 @@ docker logs marketlens027-web | grep '"GET '   # 접속 줄 0 — 오류 줄만(
 # Caddyfile 을 git 처럼 새 파일로 바꿔 쓰기(새 inode) → reload 전엔 옛 설정, `caddy reload` exit 0 뒤 새 설정(Referrer-Policy 값이 바뀜)
 # 모르는 지시어가 든 Caddyfile → reload exit 1 "unrecognized directive", 사이트는 옛 설정으로 200 — §3.8
 docker compose … down -v && docker rmi marketlens027-server marketlens027-api marketlens027-web && rm -rf logs   # 컨테이너·볼륨·망·이미지 0건 확인
+# 검토 반영(같은 날·같은 Mac): ruff·format·pytest 868 passed(+3 test_gauge) / web lint·build / caddy validate Valid configuration
+#   사본 caddy 에 https://kimptrack.com:18443/app/?s.q=secret → access.log uri "/app/" (위 :8443 줄의 결과를 이 관측값으로 고침)
+#   canary 가짜 서버: 헤더 뒤 본문 정지 → 8초 뒤 "1단계 실패: … 본문 읽기 오류 — TimeoutError" / /api/health 본문 null → "2단계 실패: … JSON 객체가 아니다" / WS 프레임 null → "4단계 실패: 프레임이 JSON 객체가 아니다" / 정상 → 통과
 ```
 
 ## 6. 갱신할 문서
@@ -219,6 +222,7 @@ docker compose … down -v && docker rmi marketlens027-server marketlens027-api 
   - 테스트 위치 — 027 계약은 `server/tests/test_observability.py`(test_deploy 의 헬퍼·`PUBLIC_API` 재사용, Caddyfile 은 작은 줄 파서). "collector 는 게이지를 안 띄운다" 는 거래소 커넥터·우주·틱 루프의 `start` 만 무동작으로 바꾸고 collector lifespan 을 그대로 돌려 본다.
   - 로컬 통합 기동은 dev-setup 명령 그대로가 아니라 스크래치 덮어쓰기 파일로 했다 — 이 Mac 에 사용자의 `marketlens_*` 볼륨·`marketlens-*` 이미지가 있고 `server/.env` 는 읽지도 만들지도 않으므로(프로젝트 `marketlens027`, `.env.example` + 시험 토큰). caddy 는 Caddyfile 사본에 `local_certs` 만 더했다 — 원본 그대로면 도메인 블록이 Let's Encrypt 로 인증서를 청해 운영 도메인 검증 요청이 나간다. 그래서 023 §4 의 로컬 200·308 도 이 사본으로 봤다.
 - 실행 중 함께 고친 스펙 절: 027 §4 — "기록 제외 경로 여섯" → "다섯(공개 허용 목록에서 WS 를 뺀 것)"(§3.2 가 경로 다섯을 이름으로 적고 있어 그쪽을 따랐다). 007 §2·§3 은 §6 목록대로.
+- 검토 반영: 게이지 이름 풀기가 `ValueError`(빈 라벨 `a..b` 의 UnicodeError)도 풀기 실패로 받아 WARNING·다음 회차로 가고, `aclose` 는 죽어 있던 태스크의 예외를 WARNING 으로 남기고 던지지 않는다(lifespan 의 허브·버스·Influx 정리가 돈다) — 10분 뒤 WARNING 재출력 테스트로 `clock` 주입을 쓴다. canary 는 본문 읽기(8초 제한 안)와 JSON 이 객체가 아닌 응답·프레임도 `N단계 실패:` 로 던진다. 007 §2·§3·architecture·dev-setup 의 컨테이너 수를 caddy 를 넣은 여섯으로, Caddyfile 주석의 테스트 파일 이름, §5 의 `/app/?s.q=secret` 결과를 실제 관측값으로.
 - PR 본문에 옮길 것 — 담당자에게 제안(이 PR 은 고치지 않는다, §6 그대로):
   - 016 — §3.1 "017 의 구독 태스크 하나뿐이다" → architecture.md 16행과 같은 문구. §3.5 마지막 bullet → "두 역할의 `/health` 는 025 §3.5 판정을 따른다. 밖에는 nginx 의 `/api/health`(`server`)만 열고, api 는 canary(027)가 밖에서 본다".
   - 017 — §7 남은 빚의 "외부 헬스체크는 여전히 없다" → "밖에서는 canary 가 WebSocket 까지 본다(027)".
@@ -227,7 +231,8 @@ docker compose … down -v && docker rmi marketlens027-server marketlens027-api 
   - 023 — §2 만드는 것의 "루트 `Caddyfile`" → "`caddy/Caddyfile`(027 이 옮김, 디렉터리 바인드)", §2 하지 않는 것의 "배포 워크플로 변경 없음(…)" → "serve 배포는 `up` 뒤 caddy 설정을 다시 읽는다(027)", §3.3 에 "도메인 블록은 접속 로그(027 §3.2)와 `Referrer-Policy: strict-origin`", §4 명령의 경로(`./Caddyfile` → `./caddy`).
   - 025 — §3.6 의 CloudWatch 후속 후보 문장 삭제(모니터 URL 은 그대로). §2 하지 않는 것의 괄호 "(CloudWatch Agent — 런북에 후속으로만 적는다)" → "(027 — CloudWatch Agent)".
 - 실행 중 발견한 어긋남(파일:절 — 주장 → 실제, 고치지 않음):
-  - `docs/specs/007-deploy.md:§3` — "`server` … 호스트에 노출하지 않는다" → 021 부터 호스트 8000 을 열고 보안그룹이 막는다. "컨테이너 로그는 네 서비스 모두" → 여섯 서비스 모두(테스트가 전부 본다). §4 "`curl localhost:8080/foo` 도 index.html" → 022 부터 루트의 없는 경로는 404, SPA fallback 은 `/app/` 아래만.
+  - `docs/specs/007-deploy.md:§3` — "`server` … 호스트에 노출하지 않는다"·배포 설정 계약의 "호스트 노출은 web 하나" → 021 부터 호스트 8000 을 열고 보안그룹이 막는다, 호스트 포트는 caddy 80·443 과 박스 간 포트 셋(test_deploy 가 본다). §4 "`curl localhost:8080/foo` 도 index.html" → 022 부터 루트의 없는 경로는 404, SPA fallback 은 `/app/` 아래만.
+  - `docs/context/architecture.md:현재 구조 deploy (007)` — "web 만 `${WEB_PORT:-80}:80`, … named volume 2개" → 호스트 포트는 caddy 80·443 과 박스 간 포트 셋, 볼륨 4개(023 caddy 둘). 컨테이너 수만 여섯으로 고쳤다.
   - `docs/context/dev-setup.md:docker 통합 기동` — "`stop api` 뒤 `/api/history/candles`·`/api/landing` 502" → 이번 로컬에서는 nginx 가 멈춘 api 로의 연결을 기다려 8초 안에 답이 없었다(기본 연결 타임아웃 60초 뒤 504). 027 §4 의 "502 또는 504" 와는 맞다.
   - 014(관찰) — 새로 띄운 로컬 스택에서 수집기의 봉 버킷 생성(기동 시 1회·3초 상한)이 Influx 첫 setup 보다 먼저 끝나 `candles_1m` 이 없었다 → `/history/candles` 503(Influx 404). 운영의 Influx 는 이미 떠 있어 해당 없다.
 - 남은 빚:
