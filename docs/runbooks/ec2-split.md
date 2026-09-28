@@ -44,6 +44,7 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 - 확인: `free -m` 의 Swap total 1023.
 - 되돌리기: `sudo swapoff /swapfile && sudo rm /swapfile` + fstab 줄 삭제.
+- serve 도 같은 명령으로 스왑 1GB 를 붙인다(027 — `cloudwatch.md` 7단계, serve 에이전트보다 먼저).
 
 ## 4. env 파일 3벌
 `server/.env` 는 구 박스의 것을 **파일째** 옮긴다(값을 화면에 내지 않는다):

@@ -11,19 +11,20 @@
 
 ## 2. 범위
 - 만드는 것: server·web Dockerfile, 루트 `docker-compose.yml`(배포용 5컨테이너 — dev compose 는 Influx·Redis 둘), GitHub Actions 워크플로 2개(CI·deploy), PR 템플릿, 루트 README
-- 하지 않는 것: EC2 생성 자동화, HTTPS·도메인, 컨테이너 레지스트리, 로그 수집·모니터링(컨테이너 로그 **상한**은 compose 가 두지만 수집·대시보드는 없다), 기존 be·fe 스택의 변경·중단
+- 하지 않는 것: EC2 생성 자동화, HTTPS·도메인, 컨테이너 레지스트리, 로그 수집·모니터링(027 이 CloudWatch 로 한다 — 컨테이너 로그 **상한**은 compose 가 둔다), 기존 be·fe 스택의 변경·중단
 
 ## 3. 정해진 것
 
 ### 툴
 - CI/CD 는 **GitHub Actions**. 배포 단위는 **docker compose**. 서버는 **EC2 3대**(collect·data·serve — compose profile 하나씩, 021), 이미지는 각 EC2 에서 직접 빌드한다.
-- 컨테이너 5개:
+- 컨테이너 6개:
   - `server` — FastAPI + uvicorn 워커 1개(python 3.12 slim). 컨테이너 포트 8000, **호스트에 노출하지 않는다**(compose 내부 네트워크만).
-  - `api` — `server` 와 같은 이미지에 `ROLE=api`. Influx 조회 경로(`/history/premium`·`streaks`·`streaks/bulk`·`candles`)만 서빙, 호스트 비노출(016).
-  - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 허용 목록(028)의 `/api` 경로만 프록시하고(수집기로 `/api/health`·`/api/health/collect`·`/api/history/events`, `api` 로 `/api/history/candles`(016)·`/api/landing`(022)·`/api/ws/spreads`(WebSocket 업그레이드, 017) — 나머지 `/api` 는 404 JSON), 없는 경로는 index.html 을 준다(SPA).
+  - `api` — `server` 와 같은 이미지에 `ROLE=api`. Influx 조회 경로(`/history/premium`·`streaks`·`streaks/bulk`·`candles`)만 서빙, 호스트 비노출(016). `STATSD_ADDR=host.docker.internal:8125` 와 그 이름을 호스트 게이트웨이로 잇는 `extra_hosts` — WS 접속 수 게이지를 serve 호스트의 CloudWatch Agent 로(027).
+  - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 허용 목록(028)의 `/api` 경로만 프록시하고(수집기로 `/api/health`·`/api/health/collect`·`/api/history/events`, `api` 로 `/api/history/candles`(016)·`/api/landing`(022)·`/api/ws/spreads`(WebSocket 업그레이드, 017) — 나머지 `/api` 는 404 JSON), 없는 경로는 index.html 을 준다(SPA). nginx 접속 로그는 끈다(기록은 caddy, 027 — 오류 로그는 남긴다).
     캐시 규칙: `index.html` 은 `no-store, must-revalidate` **+ `always`** — 배포가 FE·BE 를 함께 바꾸므로 캐시된 셸이 남으면 열려 있던 탭이 구 번들로 새 API 계약을 계속 친다. `/assets/` 의 해시 박힌 파일은 `max-age=31536000, immutable` 이되 **`always` 는 붙이지 않는다** — 붙이면 404 에도 1년 immutable 이 실려, 배포 직전 셸을 든 브라우저가 사라진 번들의 404 를 1년간 캐시한다(재배포로도 되돌릴 수 없다). `always` 없이도 200·304 는 헤더를 받는다.
   - `influxdb` — 2.7, dev compose 와 같은 첫 기동 설정(org·bucket `marketlens`, admin 토큰 = `INFLUX_TOKEN`). named volume, 호스트 비노출.
   - `redis` — `redis:7-alpine`, `--appendonly yes`, named volume, 호스트 비노출(009 의 틱 버퍼 — Influx 로 옮기기 전 틱만 든다).
+  - `caddy` — serve profile, 호스트 80(`WEB_PORT`)·443, `./caddy:/etc/caddy:ro`(디렉터리째 — 파일 하나를 바인드하면 git 이 바꿔 쓴 새 파일을 못 본다)·`./logs/caddy:/var/log/caddy`(도메인 블록 접속 로그, git 무시)·`caddy-data`·`caddy-config` 볼륨(023·027).
 
 ### 규칙 (왜 가 있는 것)
 - **앱은 자기 로거(`marketlens.*`)를 INFO 로, 타임스탬프와 함께 stderr 로 낸다.** 설정이 없으면 `logging.lastResort` 가 받아 WARNING 이상만, 시각도 없이 나간다 — 그러면 "S3 원문 업로드 재개"(010 §3.6)·"DB 저장 재개"(009 §3.5) 같은 복구 신호가 아예 보이지 않아 장애가 풀렸는지 알 수 없다. handler 는 루트에 달고 레벨은 `marketlens` 에만 내린다 — 라이브러리 INFO(httpx 의 요청 한 줄 등)는 루트의 WARNING 에 막혀야 로그가 초당 수십 줄로 불어나지 않는다.
@@ -43,6 +44,7 @@
   2. `server/.env` 가 없거나 가드 키(박스별 — 021 §3.3: 셋 다 `INFLUX_TOKEN`, collect 는 `S3_BUCKET`·루트 `.env` 의 `DATA_HOST`, serve 는 `DATA_HOST`·`COLLECT_HOST`) 중 하나라도 비어 있으면 **배포 실패**(값은 출력하지 않는다 — 존재·비어있지 않음만 `grep -q '^KEY=.'` 로 본다). 토큰 없이 뜨면 저장 루프가, 버킷 없이 뜨면 원문 아카이브(010)가 꺼진 채 조용히 데이터를 잃는다. S3 자격증명은 env 가 아니라 EC2 인스턴스의 IAM 역할(`docs/runbooks/ec2-setup.md` 5-2)이므로 가드 대상이 아니다. 루트 `.env` 는 가드하지 않는다 — 없으면 4단계 `--env-file .env` 가 어차피 시끄럽게 실패한다.
   3. `git fetch origin main && git reset --hard origin/main` — pull 이 아니라 **미러 동기화**. 배포 트리는 main 의 사본일 뿐이므로, 서버 쪽 로컬 커밋·갈래가 있어도 항상 main 을 그대로 따른다(첫 배포에서 pull 이 갈래 때문에 실패한 실사례).
   4. `docker compose --profile <박스> --env-file .env --env-file server/.env up -d --build` — 자기 profile 만. `WEB_PORT`·`DATA_HOST`·`COLLECT_HOST` 는 루트 `.env`, Influx 첫 기동 admin 토큰(`DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN}`)은 `server/.env` 에서 치환한다. `--env-file` 을 명시하면 기본 `./.env` 자동 로드가 꺼지므로 둘 다 적는다.
+  4-1. serve 만: `docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile` — compose 는 정의가 안 바뀐 caddy 를 다시 만들지 않으므로 새 Caddyfile 을 읽힌다. 깨진 설정이면 여기서 배포가 실패하고 돌던 caddy 는 옛 설정으로 계속 돈다(027).
   5. `docker image prune -f` — 오래된 레이어가 EC2 디스크를 채우지 않게.
 - Secrets 는 `EC2_HOST_DATA`·`EC2_HOST_COLLECT`·`EC2_HOST_SERVE`(박스별 공인 IP, 021)·`EC2_USER`·`EC2_SSH_KEY` 다섯. 값은 어디에도 적지 않는다.
 - PR 템플릿은 conventions.md 규칙 그대로 3줄 골격: 무엇을 / 왜 / 테스트.
