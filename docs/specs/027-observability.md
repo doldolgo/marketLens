@@ -45,7 +45,7 @@
 ### 3.2 접속 로그 — caddy
 - 이 기록은 개인정보로 다룬다. 남기는 항목·목적·보존기간(박스 안·CloudWatch 둘 다)을 후속 스펙의 처리방침에 옮기고, CloudWatch 로 보내는 것은 처리방침 게시 뒤다(§3.4).
 - 서버 기록이 보는 것: 들어온 주소(첫 로드·새로고침·공유 링크의 경로와 쿼리, `utm_*`), 외부 출처(`Referer` 의 origin), 기기·브라우저(`User-Agent`), 대시보드를 열어 둔 시간(`/api/ws/spreads` 는 연결이 끝날 때 상태 101·`duration` 한 줄), 오류 응답.
-- 기록은 caddy 한 곳에서 한다. nginx 접속 로그는 끈다(오류 로그는 남긴다) — nginx 기본 형식의 마지막 칸이 caddy 가 넣은 원 IP(`X-Forwarded-For`)다.
+- 기록은 caddy 한 곳에서 한다. nginx 접속 로그는 끈다(공개 server — 관리자 server 는 029 가 자기 기록을 남긴다. 오류 로그는 남긴다) — nginx 기본 형식의 마지막 칸이 caddy 가 넣은 원 IP(`X-Forwarded-For`)다.
 - 로그 설정은 `caddy/Caddyfile` 안의 이름 있는 조각 `access_log` 하나에 두고 도메인 블록(`kimptrack.com`·`www`)만 불러온다. `http://` catch-all(탄력 IP 직접 접속·봇 스캔)은 기록하지 않는다.
 - 파일: 컨테이너 `/var/log/caddy/access.log`, 호스트 `./logs/caddy/`(레포 루트 기준 바인드, git 무시 — 배포의 `git reset --hard` 는 추적 안 하는 파일을 지우지 않는다). 권한 0644(사람이 호스트에서 읽게). 현재 파일 50MiB 에서 회전, gzip 된 회전 파일 5개까지, 회전 파일은 90일 뒤 지운다(caddy 기본).
 - 한 줄에 남기는 것은 허용 목록이다. caddy 기본 JSON 에서

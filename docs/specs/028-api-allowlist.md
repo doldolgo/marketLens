@@ -46,9 +46,10 @@
 - nginx 는 location 을 고르기 전에 경로를 정규화한다 — `%XX` 풀기, `.`·`..` 해석, 연속 슬래시 합치기. 그래서 `/api//premium`·`/api/%70remium`·`/api/./premium`·`/api/x/../premium`·`/api/ws/../docs`·`/api/history/candles/../../premium` 은 정규화된 경로로 판정되어 404 다. 대소문자가 다른 경로·세미콜론이 붙은 경로·이중 인코딩(`/api/%2570remium`)은 허용 목록에 없으니 404 다.
 - 백엔드로는 정규화된 경로를 넘긴다(§3.1 의 rewrite 모양). 원문 URI 를 넘기는 형태(rewrite 없는 URI 없는 `proxy_pass`)와, 정확 일치 location 에 옛 `proxy_pass http://…:8000/;` 를 옮겨 붙인 형태(경로가 `/` 로 바뀐다)는 쓰지 않는다.
 
-### 3.4 닫힌 경로를 쓰는 법 (029 전까지)
+### 3.4 닫힌 경로를 쓰는 법
+- 관리자 페이지(029·030)에서 쓴다 — 아래 박스 안 호출은 비상용.
 - 분석 API·`/refresh`: collect 박스에서 `curl localhost:8000/<경로>`(수집기 포트는 serve 보안그룹에만 열려 있다). `/refresh` 는 `X-Refresh-Token` 헤더가 필요하다(값은 사람이 안다).
-- API 문서: `ssh -L 8000:localhost:8000 <collect>` 뒤 브라우저 `localhost:8000/docs`.
+- API 문서: 관리자 페이지의 `/api/docs`. 수집기는 스키마 주소를 `/api` 로 알리므로(029 `UVICORN_ROOT_PATH`) `ssh -L 8000:localhost:8000 <collect>` 의 `localhost:8000/docs` 는 스키마를 못 불러온다 — 스키마 JSON 은 `localhost:8000/openapi.json` 으로 그대로 받는다.
 - `/history/premium`·`streaks`·`streaks/bulk`·`/spreads`: serve 박스에서 같은 망 컨테이너로 `docker exec marketlens-web wget -qO- 'http://api:8000/<경로>'`. history 무거운 조회는 수집기도 답하지만 수집 CPU 를 쓰므로 api 로 부른다.
 - 로컬 개발은 vite proxy 라 지금처럼 `/api/<경로>` 로 부른다.
 

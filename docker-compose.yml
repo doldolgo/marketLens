@@ -37,6 +37,10 @@ services:
       INFLUX_URL: http://${DATA_HOST:-influxdb}:8086
       # 틱 버퍼 Redis(009)도 같은 규칙 — server/.env 의 localhost 값을 덮는다
       REDIS_URL: redis://${DATA_HOST:-redis}:6379/0
+      # 029 — 관리자 페이지의 API 문서(/api/docs)가 /api/openapi.json 을 부르고 스키마의 서버 주소가 /api 가 되게.
+      # nginx 가 접두를 뗀 경로(/health)와 박스 안 localhost:8000/… 는 그대로 라우팅된다. api 에는 주지 않는다.
+      # 공개 nginx 의 /api/ 가 백엔드로 넘기지 않는 동안(028)만 안전하다 — 넘기면 인터넷에서 Try it out 이 된다
+      UVICORN_ROOT_PATH: /api
     ports:
       # serve 박스의 nginx 가 사설 IP 로 붙는다 — 보안그룹이 serve 그룹 외 인바운드를 막는다 (021 §3.1)
       - "8000:8000"
@@ -82,8 +86,13 @@ services:
         max-size: "50m"
         max-file: "3"
     # 023 — 호스트 포트는 caddy 가 쥔다(80·443). web 은 같은 망의 caddy 만 부르므로 호스트에 열지 않는다.
+    # 029 — 관리자 server :8081 도 게시하지 않는다(어떤 서비스도). 박스 안에서만 닿고, 들어오는 길은 030.
+    volumes:
+      # 029 — 관리자 접속 기록(JSON 한 줄씩) → 호스트 ./logs/admin/access.log (git 무시, 회전은 030 런북).
+      # /var/log/nginx 를 통째로 바인드하지 않는다 — 이미지의 stdout·stderr 링크가 가려진다
+      - ./logs/admin:/var/log/nginx-admin
     environment:
-      # 021 — nginx 허용 목록 중 수집기로 가는 location 의 업스트림(028). collect 박스 사설 IP, 없으면 서비스명(한 박스).
+      # 021 — nginx 허용 목록(028)·관리자 server(029) 중 수집기로 가는 location 의 업스트림. collect 박스 사설 IP, 없으면 서비스명(한 박스).
       # nginx 이미지의 entrypoint 가 /etc/nginx/templates/*.template 을 envsubst 해 conf.d 에 쓴다(web/Dockerfile).
       COLLECT_HOST: ${COLLECT_HOST:-server}
       # envsubst 대상을 이 한 변수로 제한 — nginx 자체 변수($http_host·$http_upgrade…)가 치환되지 않게

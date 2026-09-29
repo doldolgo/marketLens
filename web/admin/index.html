@@ -1,0 +1,69 @@
+<!doctype html>
+<!-- KimpTrack 관리자 화면 (스펙 029 §3.3) — web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
+     CSP 가 자기 출처만 허용하므로 인라인 스크립트·스타일을 쓰지 않는다(스크립트·스타일은 옆 파일). -->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>KimpTrack 관리자</title>
+    <link rel="stylesheet" href="admin.css" />
+    <script src="admin.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <h1>KimpTrack 관리자</h1>
+      <nav>
+        <a href="/api/docs">API 문서</a>
+        <a href="/api/redoc">ReDoc</a>
+        <a href="/cdn-cgi/access/logout">로그아웃</a>
+      </nav>
+    </header>
+    <p id="notice" class="notice" hidden></p>
+    <main>
+      <section>
+        <h2>수집기</h2>
+        <dl>
+          <dt>상태</dt><dd id="collector-status">…</dd>
+          <dt>마지막 틱</dt><dd id="collector-tick">…</dd>
+          <dt>버전</dt><dd id="collector-version">…</dd>
+        </dl>
+      </section>
+      <section>
+        <h2>api</h2>
+        <dl>
+          <dt>상태</dt><dd id="api-status">…</dd>
+          <dt>수집기 심장박동</dt><dd id="api-tick">…</dd>
+          <dt>WebSocket 접속</dt><dd id="api-ws">…</dd>
+          <dt>Redis</dt><dd id="api-redis">…</dd>
+          <dt>Influx</dt><dd id="api-influx">…</dd>
+          <dt>버전</dt><dd id="api-version">…</dd>
+        </dl>
+      </section>
+      <section class="wide">
+        <h2>거래소 수집 상태 <span id="collect-meta" class="meta"></span></h2>
+        <table>
+          <thead>
+            <tr><th>거래소</th><th>상태</th><th>1시간 성공률</th><th>열린 실패 구간</th><th>마지막 오류</th></tr>
+          </thead>
+          <tbody id="exchanges"></tbody>
+        </table>
+      </section>
+      <section class="wide">
+        <h2>즉시 갱신</h2>
+        <div class="refresh">
+          <label for="token">갱신 토큰</label>
+          <input id="token" type="password" autocomplete="off" spellcheck="false" />
+          <button id="refresh" type="button">즉시 갱신</button>
+        </div>
+        <dl id="refresh-result" hidden>
+          <dt>HTTP</dt><dd id="refresh-status"></dd>
+          <dt>저장</dt><dd id="refresh-saved"></dd>
+          <dt>실패</dt><dd id="refresh-failures"></dd>
+          <dt>경고</dt><dd id="refresh-warnings"></dd>
+        </dl>
+      </section>
+    </main>
+    <footer id="updated" class="meta"></footer>
+  </body>
+</html>
