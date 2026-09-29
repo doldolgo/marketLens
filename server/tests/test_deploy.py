@@ -120,14 +120,15 @@ def test_compose_web_receives_collect_host_and_limits_envsubst_to_it() -> None:
 
 
 def test_compose_caddy_fronts_web_with_domain_tls_and_plain_fallback() -> None:
-    """023 §3 — caddy 는 serve profile, Caddyfile 을 읽기 전용으로 마운트, 인증서는 이름 있는 볼륨에 남긴다."""
+    """023 §3 — caddy 는 serve profile, 설정 디렉터리를 읽기 전용으로 마운트(027 — `caddy/Caddyfile`),
+    인증서는 이름 있는 볼륨에 남긴다."""
     caddy = _yaml("docker-compose.yml")["services"]["caddy"]
     assert caddy["image"].startswith("caddy:2")
-    assert "./Caddyfile:/etc/caddy/Caddyfile:ro" in caddy["volumes"]
+    assert "./caddy:/etc/caddy:ro" in caddy["volumes"]
     assert "caddy-data:/data" in caddy["volumes"], (
         "볼륨이 없으면 재배포마다 재발급 → Let's Encrypt 한도"
     )
-    conf = _text("Caddyfile")
+    conf = _text("caddy/Caddyfile")
     # 도메인 두 개는 자동 HTTPS, 그 밖의 호스트(IP 직접)는 평문 catch-all — 둘 다 nginx(web:80) 로
     assert "kimptrack.com, www.kimptrack.com {" in conf
     assert "http:// {" in conf

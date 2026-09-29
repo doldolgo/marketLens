@@ -1,0 +1,37 @@
+{
+  "agent": {
+    "metrics_collection_interval": 60,
+    "omit_hostname": true
+  },
+  "metrics": {
+    "namespace": "MarketLens",
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}"
+    },
+    "metrics_collected": {
+      "mem": {
+        "measurement": ["mem_available_percent"]
+      },
+      "disk": {
+        "measurement": ["used_percent"],
+        "resources": ["/"],
+        "drop_device": true
+      },
+      "procstat": [
+        {
+          "exe": "caddy",
+          "measurement": ["memory_rss"]
+        },
+        {
+          "pattern": "uvicorn app.main:app",
+          "measurement": ["memory_rss"]
+        }
+      ],
+      "statsd": {
+        "service_address": ":8125",
+        "metrics_collection_interval": 10,
+        "metrics_aggregation_interval": 60
+      }
+    }
+  }
+}

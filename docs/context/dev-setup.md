@@ -52,8 +52,9 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 | S3_BUCKET | 없음 |
 | S3_REGION | `ap-northeast-2` |
 | SLACK_WEBHOOK_URL | 없음 |
+| STATSD_ADDR | 없음 |
 
-- `ROLE`: 프로세스 역할(016) — `collector`(전체 동작) | `api`(Influx 조회 + `/ws/spreads` + `GET /spreads` Redis 읽기, 백그라운드 태스크는 017 구독 하나). 로컬은 비워 둔다. `api` 는 compose 의 `api` 서비스가 `environment` 로만 준다. 둘 밖의 값이면 설정을 읽는 순간 실패한다.
+- `ROLE`: 프로세스 역할(016) — `collector`(전체 동작) | `api`(Influx 조회 + `/ws/spreads` + `GET /spreads` Redis 읽기, 백그라운드 태스크는 017 구독 태스크 + `SLACK_WEBHOOK_URL` 이 있으면 025 알림 태스크 + `STATSD_ADDR` 가 있으면 027 게이지 태스크(+ 접속마다 보내기 태스크)). 로컬은 비워 둔다. `api` 는 compose 의 `api` 서비스가 `environment` 로만 준다. 둘 밖의 값이면 설정을 읽는 순간 실패한다.
 - `INFLUX_URL`·`INFLUX_TOKEN`: InfluxDB 2.7 접속(org·bucket 은 `marketlens` 고정). 토큰이 없으면 flusher 비활성·`/history/*` 503 — 앱은 뜬다. 사람용 UI 는 `http://localhost:8086`(같은 토큰).
 - `REDIS_URL`: Redis 7 접속(009 틱 버퍼). compose 안에서는 `redis://redis:6379/0` 으로 덮어쓴다. 없으면 인계된 틱이 버려진다(앱은 뜬다).
 - `REFRESH_TOKEN`: 설정 시 `POST /refresh` 에 `X-Refresh-Token` 헤더가 필요하다.
@@ -61,6 +62,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 - `S3_BUCKET`: 거래소 원문 아카이브 S3 저장(010, 접두사 `raw/`). 없으면 아카이브 비활성, 앱은 뜬다.
 - `S3_REGION`: 버킷 리전. AWS 자격증명은 env 가 아니라 `~/.aws`(로컬, `aws configure`)·IAM 역할(EC2)이다.
 - `SLACK_WEBHOOK_URL`: Slack Incoming Webhook(025). 있으면 기동·수집 실패 60초 구간 발생/복구·ERROR 로그·처리 안 된 500 이 채널로 간다(키별 10분 억제). 없으면 알림 기능 전체가 꺼진다 — 로컬은 비워 둔다. 두 박스(collect·serve)의 `server/.env` 에 같은 값을 넣는다.
+- `STATSD_ADDR`: StatsD 수신 주소 `host:port`(027). 있으면 api 역할이 WS 접속 수 게이지 `marketlens.ws_clients:<n>|g` 를 10초마다 UDP 로 보낸다(collector 는 안 보낸다). compose 가 api 에만 `host.docker.internal:8125`(serve 호스트의 CloudWatch Agent)를 준다. 비면 끔 — 로컬은 비워 둔다. `host:port` 가 아니면 WARNING 1줄 뒤 끈다.
 
 **API 키는 .env 에만. 코드·문서·커밋에 절대 넣지 않는다.**
 
@@ -70,7 +72,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 ```bash
 COMPOSE_PROFILES=collect,data,serve WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 ```
-server·api·web·influxdb·redis 다섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 한 망에 뜬다. `COMPOSE_PROFILES` 가 없으면 아무것도 안 뜬다 — 배포는 박스마다 profile 하나씩이라(021) 로컬만 셋을 다 켠다. 호스트에는 web(8080) 외에 박스 간 포트 server 8000·redis 6379·influxdb 8086 도 열리므로 **dev compose(Influx :8086·Redis :6379)와 겹친다 — 통합 기동 전에 `docker compose -f docker-compose.dev.yml down` 으로 내린다**(볼륨 유지). 이후 `stop`·`start`·`down` 도 같은 `COMPOSE_PROFILES=…` 를 앞에 붙인다(안 붙이면 그 서비스가 모델에 없다). `localhost:8080` 에 화면, `/api` 는 nginx 허용 목록 여섯만 넘긴다(028, 전부 정확 일치·접두 제거) — `/api/health`·`/api/health/collect`·`/api/history/events` 는 server, `/api/history/candles`·`/api/landing`·`/api/ws/spreads` 는 api 로 간다(016·017·022). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/history/candles?base=BTC`·`/api/landing` 502, `/api/health` 는 200, `start api` 로 복구. `stop redis` 면 `/api/landing` 의 `live` 가 null·WebSocket 은 `waiting`(화면은 직전 표 유지), `start redis` 뒤 10초 안에 복구. 닫힌 경로(`/api/docs`·`/api/spreads` 등)는 404 JSON 이다(028). 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
+server·api·web·caddy·influxdb·redis 여섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 한 망에 뜬다. `COMPOSE_PROFILES` 가 없으면 아무것도 안 뜬다 — 배포는 박스마다 profile 하나씩이라(021) 로컬만 셋을 다 켠다. 호스트에는 caddy(8080·443) 외에 박스 간 포트 server 8000·redis 6379·influxdb 8086 도 열리므로 **dev compose(Influx :8086·Redis :6379)와 겹친다 — 통합 기동 전에 `docker compose -f docker-compose.dev.yml down` 으로 내린다**(볼륨 유지). 이후 `stop`·`start`·`down` 도 같은 `COMPOSE_PROFILES=…` 를 앞에 붙인다(안 붙이면 그 서비스가 모델에 없다). `localhost:8080` 에 화면, `/api` 는 nginx 허용 목록 여섯만 넘긴다(028, 전부 정확 일치·접두 제거) — `/api/health`·`/api/health/collect`·`/api/history/events` 는 server, `/api/history/candles`·`/api/landing`·`/api/ws/spreads` 는 api 로 간다(016·017·022). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/history/candles?base=BTC`·`/api/landing` 502, `/api/health` 는 200, `start api` 로 복구. `stop redis` 면 `/api/landing` 의 `live` 가 null·WebSocket 은 `waiting`(화면은 직전 표 유지), `start redis` 뒤 10초 안에 복구. 닫힌 경로(`/api/docs`·`/api/spreads` 등)는 404 JSON 이다(028). caddy 접속 로그는 `./logs/caddy/access.log`(git 무시, 도메인 블록만 기록하므로 로컬은 catch-all 이라 거의 비어 있다 — 027). Caddyfile 을 고치면 `docker run --rm -v ./caddy:/etc/caddy:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile` 결과를 PR 본문에 적는다. 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
 
 ## 검증용 스모크
 ```bash

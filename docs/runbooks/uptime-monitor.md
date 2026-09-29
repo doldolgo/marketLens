@@ -26,4 +26,3 @@ serve 박스의 api 컨테이너나 data 박스(Redis·Influx)가 죽는 것은 
 ## 알아둘 것
 - **배포 중 1~2분 다운 알림은 정상이다.** collect 박스는 배포 때 이미지를 다시 빌드해서 수집이 잠깐 멈추고(021), 그 30초 뒤부터 `/health` 가 `stale` 이 된다. 곧 복구 알림이 따라온다.
 - 알림이 너무 자주 오면 먼저 `docker logs marketlens-server` 로 `stale` 원인(거래소 끊김인지, 틱 루프 예외인지)을 본다. 앱의 Slack 메시지에 원인이 같이 와 있을 것이다.
-- 후속 후보: CloudWatch Agent 로 디스크 80%·메모리 알람 → SNS(스펙 025 범위 밖).

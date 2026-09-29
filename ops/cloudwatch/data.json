@@ -1,0 +1,35 @@
+{
+  "agent": {
+    "metrics_collection_interval": 60,
+    "omit_hostname": true
+  },
+  "metrics": {
+    "namespace": "MarketLens",
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}"
+    },
+    "metrics_collected": {
+      "mem": {
+        "measurement": ["mem_available_percent"]
+      },
+      "swap": {
+        "measurement": ["swap_used_percent"]
+      },
+      "disk": {
+        "measurement": ["used_percent"],
+        "resources": ["/"],
+        "drop_device": true
+      },
+      "procstat": [
+        {
+          "exe": "influxd",
+          "measurement": ["memory_rss"]
+        },
+        {
+          "exe": "redis-server",
+          "measurement": ["memory_rss"]
+        }
+      ]
+    }
+  }
+}
