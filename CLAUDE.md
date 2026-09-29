@@ -32,6 +32,7 @@ marketlens/
       ws-loadtest.md          스프레드 웹소켓 부하 측정 절차 + 2026-09-26 전후 기록 (사람용)
       uptime-monitor.md       외부 uptime 감시 등록 (사람용, 025)
       cloudwatch.md           CloudWatch 에이전트·경보·canary·로그 전송 설치 (사람용, 027)
+      admin-access.md         관리자 페이지 Cloudflare Access·Tunnel 설정 기록·토큰 교체·접속 기록 회전 (사람용, 030)
   server/                     FastAPI 앱 (Python 3.12)
     app/
       core/                   공유 인프라 — 스트림 커넥터·메모리 저장소(LiveStore)·틱 루프·김프 계산·망 매칭·Influx·Redis·S3 클라이언트 (모듈 이름은 개발 후 architecture.md "현재 구조"에)
@@ -47,6 +48,7 @@ marketlens/
     nginx-admin.conf          관리자 server(:8081, 게시 안 함) 템플릿 — 전체 `/api` 분기·교차 사이트 403·접속 기록(029)
   caddy/                      Caddyfile — serve 박스 TLS 앞단·접속 로그 (디렉터리째 바인드, 023·027)
   ops/                        박스에 올리는 설정(앱 코드 아님) — cloudwatch/(에이전트 JSON)·canary/(Synthetics 스크립트) (027)
+  secrets/                    터널 토큰 파일 cloudflared-token — git 무시, serve 박스에만 (030)
 ```
 - 화면이 있는 기능만 `web/src/features/<name>` 폴더를 가진다. 이름은 `server/app/features/<name>` 과 같게 한다.
 - `collect` 는 기능 폴더가 아니라 `core/` 에 산다. `wallet-status`(Python 패키지는 `wallet_status`) 는 BE 전용이다(화면은 spreads 표에 얹힌다).
@@ -88,7 +90,7 @@ marketlens/
 | 004 | analysis | DONE | 단일 종목 분석 — premium·scan·matrix·orderbook·slippage·arbitrage (BE 전용) |
 | 005 | history | DONE | Influx `premium` 점 규칙·`/history/*`(start 기본 7일 창)·백필 + 기록 탭 사건 로그 실데이터 (쓰기는 009) |
 | 006 | wallet-status | DONE | 거래소 입출금 상태·망 기준 판정 → 스프레드 표에 반영 |
-| 007 | deploy | DONE | Docker·compose(server·api·web·influxdb·redis)·CI·EC2 배포 |
+| 007 | deploy | DONE | Docker·compose(server·api·web·caddy·influxdb·redis + cloudflared(profile tunnel))·CI·EC2 배포 |
 | 008 | usdt-staleness | DONE | `/spreads` USDT 시세 미갱신 경고 (BE 전용) |
 | 009 | tick-store | DONE | 3계층 저장 — LiveStore 틱 슬롯 → Redis → 60초마다 Influx 전량 적재·비움, `spark` |
 | 010 | raw-archive | DONE | 거래소 원문(WS 프레임·REST 응답)을 S3 `raw/` 에 — 시세 프레임·매초 마켓 목록은 분당 마지막 1건, 그 외 전량, 거래소·분마다 객체 1개 (BE 전용) |
@@ -110,7 +112,7 @@ marketlens/
 | 027 | observability | DONE | caddy 접속 로그(IP /24·검색어·헤더 지움, 폴링 제외, `caddy/` 디렉터리 바인드·배포 뒤 reload) · api WS 접속 수 StatsD 게이지 → CloudWatch 서울(에이전트 세 박스, 로그 90일은 처리방침 뒤, canary 5분 4단계, 경보 17개(로그 뒤 18) → Slack) · serve 스왑 1GB (인프라) |
 | 028 | api-allowlist | DONE | 공개 nginx `/api` 를 허용 목록 여섯(정확 일치)으로 — 수집기 `/api/health`·`/api/health/collect`·`/api/history/events`, api `/api/history/candles`·`/api/landing`·`/api/ws/spreads`, 나머지 404 JSON(API 문서·분석 6개·`/refresh`·history 무거운 조회·`/spreads` 닫힘), 정규식 location 없음·정규화 우회 방어, 웹·감시 호출 경로 대조 테스트. 022 재작업 머지 뒤 (인프라) |
 | 029 | admin | DONE | 관리자 server — web nginx :8081(게시 안 함)·정적 화면(헬스·수집 상태·WS 접속 수·즉시 갱신), 닫힌 API 전체 분기·교차 사이트 403·JSON 접속 기록, api `GET /admin/status`·`RedisBus.ping`, 수집기 `UVICORN_ROOT_PATH=/api`. 028 머지 뒤 (BE·web·인프라) |
-| 030 | admin-tunnel | TODO | `admin.kimptrack.com` — cloudflared(profile tunnel, 전용 망, 토큰 파일 secret, 배포 시 파일이 있을 때만)·Cloudflare Access(이메일 OTP)·Protect with Access, 런북 admin-access.md (인프라) |
+| 030 | admin-tunnel | DONE | `admin.kimptrack.com` — cloudflared(profile tunnel, 전용 망, 토큰 파일 secret, 배포 시 파일이 있을 때만)·Cloudflare Access(이메일 OTP)·Protect with Access, 런북 admin-access.md (인프라) |
 
 실행 순서 = 번호 순. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).

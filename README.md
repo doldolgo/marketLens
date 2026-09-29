@@ -27,7 +27,7 @@ COMPOSE_PROFILES=collect,data,serve WEB_PORT=8080 docker compose --env-file serv
 docker compose --profile <collect|data|serve> --env-file .env --env-file server/.env up -d --build
 ```
 
-server·api·web·caddy·influxdb·redis 여섯 컨테이너(api 는 `/history/*` 조회 전용 — 수집과 프로세스가 다르다, caddy 는 `kimptrack.com` TLS 앞단)가 EC2 3대에 나뉘어 뜬다. 박스 간 주소는 루트 `.env` 의 `DATA_HOST`·`COLLECT_HOST`(사설 IP) — 안 주면 서비스 이름이라 로컬은 한 망에서 그대로 돈다. 호스트 포트: caddy `WEB_PORT`(기본 80)·443, 그리고 다른 박스가 붙는 server 8000·redis 6379·influxdb 8086(보안그룹이 막는다).
+server·api·web·caddy·influxdb·redis·cloudflared 일곱 컨테이너(api 는 `/history/*` 조회 전용 — 수집과 프로세스가 다르다, caddy 는 `kimptrack.com` TLS 앞단, cloudflared 는 serve 에 토큰 파일이 있을 때만 — 관리자 페이지 터널)가 EC2 3대에 나뉘어 뜬다. 박스 간 주소는 루트 `.env` 의 `DATA_HOST`·`COLLECT_HOST`(사설 IP) — 안 주면 서비스 이름이라 로컬은 한 망에서 그대로 돈다. 호스트 포트: caddy `WEB_PORT`(기본 80)·443, 그리고 다른 박스가 붙는 server 8000·redis 6379·influxdb 8086(보안그룹이 막는다).
 
 ## 배포
 

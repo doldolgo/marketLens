@@ -29,9 +29,10 @@ def _on(workflow: dict) -> dict:
     return workflow.get("on") or workflow[True]
 
 
-# --- compose: 컨테이너 6개(016·023), 박스별 profile 3개(021) -------------------------
+# --- compose: 컨테이너 7개(016·023·030), 박스별 profile 3개(021) + serve 부속 tunnel(030) ----
 
 # 021 §3.2 — 서비스 → profile. 박스마다 자기 profile 만 띄운다.
+# 030 — cloudflared 의 tunnel 은 박스 profile 이 아니라 serve 박스 부속(배포가 토큰 파일이 있을 때만 따로 띄운다).
 PROFILE_OF = {
     "server": "collect",
     "redis": "data",
@@ -39,13 +40,22 @@ PROFILE_OF = {
     "api": "serve",
     "web": "serve",
     "caddy": "serve",
+    "cloudflared": "tunnel",
 }
 
 
-def test_compose_declares_six_containers_with_fixed_names() -> None:
+def test_compose_declares_seven_containers_with_fixed_names() -> None:
     compose = _yaml("docker-compose.yml")
     services = compose["services"]
-    assert set(services) == {"server", "api", "web", "caddy", "influxdb", "redis"}
+    assert set(services) == {
+        "server",
+        "api",
+        "web",
+        "caddy",
+        "influxdb",
+        "redis",
+        "cloudflared",
+    }
     # 프로젝트명 고정 — dev compose(marketlens-dev)와 컨테이너·볼륨을 나눈다
     assert compose["name"] == "marketlens"
     assert _yaml("docker-compose.dev.yml")["name"] != compose["name"]
@@ -67,7 +77,8 @@ def test_compose_caps_container_logs_on_every_service() -> None:
 
 
 def test_compose_gives_every_service_exactly_one_box_profile() -> None:
-    """021 §3.2 — server=collect / redis·influxdb=data / api·web=serve. profile 없이 up 하면 아무것도 안 뜬다."""
+    """021 §3.2 — server=collect / redis·influxdb=data / api·web·caddy=serve, 030 — cloudflared=tunnel(serve 부속).
+    profile 없이 up 하면 아무것도 안 뜬다."""
     services = _yaml("docker-compose.yml")["services"]
     for name, svc in services.items():
         assert svc.get("profiles") == [PROFILE_OF[name]], name
@@ -709,8 +720,9 @@ def test_deploy_script_per_box_guards_env_then_mirrors_main_then_builds_own_prof
             for g in guards:
                 if g not in GUARDS[box]:
                     assert g not in script, (box, other_box, g)
-        # profile 은 자기 것 하나만
-        assert sum("--profile" in ln for ln in script) == 1, box
+        # profile 은 자기 것 하나만 — serve 만 부속 tunnel 줄이 하나 더 (030 §3.3)
+        profiles = [ln.split()[3] for ln in script if "--profile" in ln]
+        assert profiles == ([box, "tunnel"] if box == "serve" else [box]), box
 
 
 def test_deploy_script_never_prints_env_values() -> None:
@@ -741,4 +753,8 @@ def test_readme_is_short_and_points_to_claude_md() -> None:
         "docker compose --profile <collect|data|serve> --env-file .env --env-file server/.env up -d --build"
         in readme
     )
-    assert "여섯 컨테이너" in readme or "6컨테이너" in readme
+    # 로컬 통합 기동은 여섯(cloudflared 는 profile tunnel 이라 안 뜬다), 배포 정의는 일곱 (030 §4)
+    local = next(ln for ln in readme.splitlines() if ln.startswith("# 로컬"))
+    assert "여섯 컨테이너" in local
+    deployed = [ln for ln in readme.splitlines() if "일곱 컨테이너" in ln]
+    assert len(deployed) == 1 and "cloudflared" in deployed[0]
