@@ -2,16 +2,20 @@
 
 `GET /spreads` 는 두 역할(collector·api) 모두 같은 핸들러로, 메모리를 읽지 않고 Redis 키
 `spreads:latest`(017 게시기가 만든 $1,000 표)를 바이트 그대로 돌려준다 — 스프레드 탭이 보는
-데이터가 전부 api 컨테이너에서 오게 하기 위해서다. `/refresh` 는 collector 전용 — 001 의 즉시
-갱신 트리거(refresh_now)를 부를 뿐 시세를 REST 로 묻지 않는다.
+데이터가 전부 api 컨테이너에서 오게 하기 위해서다. gzip 을 받는 요청에는 표 텍스트가 바뀔 때 한 번만
+압축해 둔 바이트를 준다(2026-09-28). `/refresh` 는 collector 전용 — 001 의 즉시 갱신 트리거(refresh_now)를
+부를 뿐 시세를 REST 로 묻지 않는다.
 """
 
+import asyncio
+import gzip
 import secrets
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
 from app.core.collect import CollectService
+from app.core.config import GZIP_LEVEL
 from app.core.live_store import LiveStore
 from app.core.redis_bus import LATEST_KEY, RedisBus, RedisUnavailableError
 from app.core.serialization import camelize_json
@@ -21,6 +25,28 @@ from app.features.spreads.service import build_refresh
 router = APIRouter()  # GET /spreads — collector·api 둘 다
 # POST /refresh — collector 만 (메모리·수집기가 있는 프로세스)
 refresh_router = APIRouter()
+
+
+class GzipSlot:
+    """표 텍스트 1장 → gzip 바이트 한 칸 (018 §3.1). 앱마다 하나(`app.state.spreads_gzip`).
+
+    텍스트가 직전과 다를 때만 스레드에서 한 번 압축하고, 압축이 도는 동안 같은 텍스트로 온 요청은 같은 태스크를
+    기다린다 — 표는 1초에 한 장뿐인데 요청마다 790KB 를 다시 압축하면 CPU 가 요청 수에 비례한다.
+    비교는 텍스트 전체(같으면 압축 결과도 같다)라 낡은 바이트를 줄 여지가 없다.
+    """
+
+    def __init__(self) -> None:
+        self._text: str | None = None
+        self._task: asyncio.Future[bytes] | None = None
+
+    async def get(self, text: str) -> bytes:
+        if self._task is None or self._text != text:
+            self._text = text
+            self._task = asyncio.ensure_future(
+                asyncio.to_thread(gzip.compress, text.encode(), GZIP_LEVEL)
+            )
+        # 기다리던 요청이 끊겨도 압축은 끝까지 — 다음 요청이 그 결과를 쓴다
+        return await asyncio.shield(self._task)
 
 
 def _error(status: int, code: str, message: str, detail: object) -> JSONResponse:
@@ -62,7 +88,15 @@ async def get_spreads(request: Request) -> Response:
             "스프레드 표가 아직 없습니다. 수집이 표를 만드는 중이거나 멈춰 있습니다.",
             {"key": LATEST_KEY},
         )
-    # 파싱·재직렬화하지 않는다 — 수집이 만든 바이트가 곧 응답이다 (GZip 은 전역 미들웨어가)
+    # 파싱·재직렬화하지 않는다 — 수집이 만든 바이트가 곧 응답이다 (§3.1)
+    if "gzip" in request.headers.get("accept-encoding", ""):
+        slot: GzipSlot = request.app.state.spreads_gzip
+        # 이미 인코딩된 응답이라 전역 GZip 미들웨어는 다시 압축하지 않는다
+        return Response(
+            content=await slot.get(text),
+            media_type="application/json",
+            headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
+        )
     return Response(content=text, media_type="application/json")
 
 

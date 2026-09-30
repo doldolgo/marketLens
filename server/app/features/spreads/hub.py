@@ -3,10 +3,12 @@
 Redis 채널 `spreads` 를 구독하는 태스크 하나가 새 표마다 diff 를 1회 만들고 gzip 도 1회 해서, 접속자
 전원에게 같은 바이트를 넣는다. 압축을 여기서 한 번만 하는 이유 — uvicorn 의 permessage-deflate 는 접속마다
 따로 압축해서 api CPU 가 접속자 수에 비례했다(실측 2026-09-26: 50명에 1코어 포화). 그래서 Dockerfile 이
-그 압축을 끄고, 브라우저는 gzip 바이너리 프레임을 DecompressionStream 으로 푼다.
+그 압축을 끄고, 브라우저는 gzip 바이너리 프레임을 DecompressionStream 으로 푼다. 새 접속자에게 주는
+snapshot 도 표 1장당 한 번만 압축해 둔다(2026-09-28) — 배포 직후 전원이 다시 붙을 때 접속마다 790KB 를
+압축하면 루프가 수 초씩 멈췄다.
 접속자마다 보내기 대기열·보내기 태스크가 따로 있어 느린 한 명이 나머지를 막지 않는다.
-접속자가 없으면 상태(직전 표)를 들지 않고 채널 메시지를 파싱하지 않는다 — 배포의 `server` 컨테이너가
-같은 코드를 띄워도 비용이 없다.
+채널은 첫 접속자가 붙을 때 구독하고 마지막 접속자가 떠난 뒤 30초가 지나면 닫는다(2026-09-28) — 접속자가
+없는 허브(배포의 `server` 컨테이너, 아무도 안 보는 api)가 매초 790KB 를 받아 버리지 않게.
 """
 
 import asyncio
@@ -25,7 +27,10 @@ logger = logging.getLogger("marketlens.spreads_hub")
 HEARTBEAT_SEC = 1.0  # 이만큼 아무것도 안 보냈으면 heartbeat (§3.2)
 SEND_QUEUE_LIMIT = 5  # 대기열이 이만큼 쌓인 접속자는 1008 로 닫는다 (§3.2)
 WANT_REFRESH_SEC = 5.0
-SUB_POLL_SEC = 1.0  # 구독 메시지 대기 단위 — want 갱신·취소 확인 주기
+SUB_POLL_SEC = 1.0  # 구독 메시지 대기 단위 — want 갱신·취소·유휴 확인 주기
+IDLE_UNSUBSCRIBE_SEC = (
+    30.0  # 마지막 접속자가 떠난 뒤 이만큼 지나면 구독을 닫는다 (§3.2)
+)
 BACKOFF_MIN_SEC = 1.0
 BACKOFF_MAX_SEC = 30.0
 CODE_SLOW = 1008
@@ -137,7 +142,16 @@ class SpreadsHub:
         self._conns: set[Connection] = set()
         self._table: dict | None = None  # 직전 표 — 접속자가 있을 때만
         self._index: dict[str, dict] | None = None
+        # 지금 표의 snapshot 프레임 — 표 1장당 한 번만 압축한다. 표가 바뀌거나 버려지는 모든 자리에서 비운다:
+        # 옛 표의 snapshot 위에 새 표 기준 delta 가 얹히면 행이 틀어진다 (§3.2)
+        self._snap: bytes | None = None
         self._task: asyncio.Task[None] | None = None
+        self._wanted = (
+            asyncio.Event()
+        )  # 접속자가 생기면 켠다 — 구독 태스크가 이것을 기다렸다 구독한다
+        self._idle_since: float | None = None  # 마지막 접속자가 떠난 시각(monotonic)
+        self._loaded = asyncio.Event()  # 첫 접속자의 latest 읽기가 끝났는가
+        self._loaded.set()
 
     @property
     def connections(self) -> int:
@@ -149,11 +163,25 @@ class SpreadsHub:
         conn.start()
         first = not self._conns
         self._conns.add(conn)
+        self._idle_since = None
+        self._wanted.set()  # 구독이 닫혀 있으면 구독 태스크가 연다 — latest 읽기와 겹쳐 돈다
         if first:
-            await self._load_latest()
-            await self._refresh_want()  # 수집이 표를 만들기 시작하도록 지금 1회 (§3.1)
+            self._loaded = asyncio.Event()
+            try:
+                await self._load_latest()
+            finally:
+                self._loaded.set()
+            await (
+                self._refresh_want()
+            )  # 보는 사람이 있다는 흔적을 지금 1회 — 수집은 이 키를 읽지 않는다 (§3.1)
+        else:
+            # 첫 접속자가 latest 를 읽는 중이면 끝날 때까지 기다린다 — 그 사이 waiting 을 받은 접속자에게
+            # latest 기준 delta 가 이어지면 snapshot 없이 바뀐 행만 받는다 (§3.2, 배포 직후 전원 재접속)
+            await self._loaded.wait()
         if self._table is not None:
-            conn.offer(pack(make_snapshot(self._table)))
+            if self._snap is None:
+                self._snap = pack(make_snapshot(self._table))
+            conn.offer(self._snap)
         else:
             conn.offer(WAITING)
         return conn
@@ -162,6 +190,8 @@ class SpreadsHub:
         self._conns.discard(conn)
         if not self._conns:
             self._table = self._index = None  # 0명 — 상태를 버린다 (§3.2)
+            self._snap = None
+            self._idle_since = time.monotonic()
 
     def on_table(self, text: str) -> None:
         """새 표 1장 — 접속자가 없으면 파싱조차 안 한다. 있으면 diff 1회·gzip 1회, 전원에게 같은 바이트."""
@@ -169,12 +199,15 @@ class SpreadsHub:
             return
         table = json.loads(text)
         if self._index is None:
-            message = make_snapshot(table)  # waiting 중이던 접속자들의 첫 표
+            # waiting 중이던 접속자들의 첫 표 — 이 프레임이 곧 이 표의 snapshot 이라 그대로 캐시로 둔다
+            frame = pack(make_snapshot(table))
             self._index = index_rows(table)
+            self._snap = frame
         else:
             message, self._index = make_delta(self._index, table)
+            frame = pack(message)
+            self._snap = None  # 새 표 — 다음 접속자가 한 번 만든다
         self._table = table
-        frame = pack(message)
         for conn in list(self._conns):
             conn.offer(frame)
 
@@ -184,10 +217,11 @@ class SpreadsHub:
         except Exception as exc:
             logger.warning("spreads:latest 읽기 실패 — waiting 으로 시작: %r", exc)
             return
-        if text is None:
-            return
+        if text is None or not self._conns:
+            return  # 읽는 사이 전원이 떠났으면 상태를 들지 않는다 — 0명은 상태가 없다
         self._table = json.loads(text)
         self._index = index_rows(self._table)
+        self._snap = None
 
     async def _refresh_want(self) -> None:
         if not self._conns:
@@ -201,9 +235,11 @@ class SpreadsHub:
         self._task = asyncio.create_task(self.run(), name="spreads_hub")
 
     async def run(self) -> None:
-        """구독 태스크 하나 — 채널 수신 + 5초마다 want 갱신. 끊기면 1→2→…→30초 백오프."""
+        """구독 태스크 하나 — 접속자가 생기면 구독해 채널 수신 + 5초마다 want 갱신, 0명 30초면 구독을 닫고
+        다음 접속자를 기다린다. 끊기면 1→2→…→30초 백오프."""
         backoff = BACKOFF_MIN_SEC
         while True:
+            await self._wanted.wait()
             try:
                 sub = await self._bus.subscribe()
             except Exception as exc:
@@ -213,11 +249,13 @@ class SpreadsHub:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, BACKOFF_MAX_SEC)
                 continue
-            backoff = BACKOFF_MIN_SEC
             next_want = time.monotonic()
             try:
-                while True:
+                while not self._idle_expired():
                     text = await sub.get(SUB_POLL_SEC)
+                    # 백오프는 구독이 실제로 받는 것을 본 뒤에야 되돌린다 — SUBSCRIBE 거부(Redis 메모리 상한 등)는
+                    # 첫 get 에서야 드러나서, 연결 직후에 되돌리면 매초 재연결·경고를 되풀이한다
+                    backoff = BACKOFF_MIN_SEC
                     if text is not None:
                         self.on_table(text)
                     if time.monotonic() >= next_want:
@@ -232,6 +270,18 @@ class SpreadsHub:
                     await sub.aclose()
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, BACKOFF_MAX_SEC)
+                continue
+            # 0명 30초 — 구독을 닫는다. 닫는 사이에 누가 붙으면 attach 가 다시 켜 두어 곧바로 다시 구독한다
+            self._wanted.clear()
+            with contextlib.suppress(Exception):
+                await sub.aclose()
+
+    def _idle_expired(self) -> bool:
+        return (
+            not self._conns
+            and self._idle_since is not None
+            and time.monotonic() - self._idle_since >= IDLE_UNSUBSCRIBE_SEC
+        )
 
     async def aclose(self) -> None:
         """구독을 멈추고 접속자 전원을 1001 로 닫는다."""
@@ -243,3 +293,4 @@ class SpreadsHub:
         conns, self._conns = list(self._conns), set()
         await asyncio.gather(*(c.close(CODE_GOING_AWAY) for c in conns))
         self._table = self._index = None
+        self._snap = None
