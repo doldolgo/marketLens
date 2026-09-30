@@ -1,23 +1,23 @@
-# 034b — monitoring-visits
+# 035 — monitoring-visits
 
-상태: TODO | 의존: **032 privacy·033 clarity·034a monitoring-ops 가 main 에 머지된 뒤 시작한다**(caddy 회전 계약·방침 문장은 032, 런북 `clarity.md` 는 033, 공통 규칙의 문서 자리·`ADMIN_AWS_REGION` 설명은 034a 가 만든다). 계약을 쓰는 스펙: 027 observability(caddy 접속 로그 형식), 029 admin(관리자 nginx 분기·보호 규칙), 030 admin-tunnel(들어오는 길), 028 api-allowlist(공개 nginx 모양), 022 landing(3초 기다림 규칙의 모양), 002 web-shell(탭 id). 짝 스펙 034a(수집기 쪽 피드 둘)와 공통 규칙(§3.1)을 같은 문장으로 나눠 가진다. 화면은 035. Clarity 부분은 033 이 켜지고 사람이 토큰을 넣기 전까지 "연결 안 됨" 이다.
+상태: TODO | 의존: **032 privacy·033 clarity·034 monitoring-ops 가 main 에 머지된 뒤 시작한다**(caddy 회전 계약·방침 문장은 032, 런북 `clarity.md` 는 033, 공통 규칙의 문서 자리·`ADMIN_AWS_REGION` 설명은 034 가 만든다). 계약을 쓰는 스펙: 027 observability(caddy 접속 로그 형식), 029 admin(관리자 nginx 분기·보호 규칙), 030 admin-tunnel(들어오는 길), 028 api-allowlist(공개 nginx 모양), 022 landing(3초 기다림 규칙의 모양), 002 web-shell(탭 id). 짝 스펙 034(수집기 쪽 피드 둘)와 공통 규칙(§3.1)을 같은 문장으로 나눠 가진다. 화면은 036. Clarity 부분은 033 이 켜지고 사람이 토큰을 넣기 전까지 "연결 안 됨" 이다.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
 
 ## 1. 목적
-관리자 페이지(035)가 한 화면에 모을 운영 정보 중 api 가 만드는 두 가지를 준다 — caddy 접속 로그의 24시간 요약(어디서 들어와 무엇을 여는가)과 Clarity 요약. 지금은 serve 박스 셸에서 로그를 직접 읽거나 Clarity 대시보드를 따로 연다. 로그 파일이나 토큰이 없으면 그 부분만 상태로 답한다.
+관리자 페이지(036)가 한 화면에 모을 운영 정보 중 api 가 만드는 두 가지를 준다 — caddy 접속 로그의 24시간 요약(어디서 들어와 무엇을 여는가)과 Clarity 요약. 지금은 serve 박스 셸에서 로그를 직접 읽거나 Clarity 대시보드를 따로 연다. 로그 파일이나 토큰이 없으면 그 부분만 상태로 답한다.
 
 ## 2. 범위
 - 만드는 것: api 역할의 관리자 피드 두 경로(기능 폴더 `admin`), core `RedisBus` 공개 메서드 둘, 관리자 nginx 정확 일치 location 둘, compose(api 의 caddy 로그 읽기 전용 바인드·env), env 키 둘, 런북 절(`clarity.md` 의 Data Export 토큰), 계약 테스트.
-- 하지 않는 것: 화면(035). AWS·알림 기록(034a). 관리자 접속 기록(029)의 요약. 방문자 IP·UA 원문 내보내기. Clarity 설정을 바꾸는 조작. 새 라이브러리(httpx 는 이미 있다). 요약 전용 caddy 출력(§3.2 — 받아들인 위험).
+- 하지 않는 것: 화면(036). AWS·알림 기록(034). 관리자 접속 기록(029)의 요약. 방문자 IP·UA 원문 내보내기. Clarity 설정을 바꾸는 조작. 새 라이브러리(httpx 는 이미 있다). 요약 전용 caddy 출력(§3.2 — 받아들인 위험).
 - 처리방침(032): 새로 모으거나 밖으로 보내는 방문자 정보가 없다. 접속 요약은 caddy 기록을 읽어 메모리에서 셀 뿐이고(032 1절이 "api 가 읽는다" 를 적는다), Clarity 에서는 집계 숫자와 쿼리를 뗀 페이지 주소·출처만 받아 7일 뒤 버린다(§3.3). 둘 다 운영자만 본다.
 - 바꾸는 기존 것: 029(관리자 nginx location 둘·폴링 기록 제외, api 라우트), 027(serve 의 접속 로그를 api 가 읽는다), 033(런북 `clarity.md` 에 토큰 절), 030(런북 `admin-access.md` 에 가리키는 한 줄), 007(compose), 016·018(역할별 경로 집합).
 - 담당: 016·018·021 은 hereokay 담당 — 이 PR 은 그 스펙을 고치지 않고 §6 "담당자에게 제안" 을 PR 본문에 적는다(CLAUDE.md §5). 007·027·029·030·033 은 이 레포 주인 담당이라 고친다. §5 허용 목록 밖(사람 승인): `docker-compose.yml`.
 
 ## 3. 동작
 
-### 3.1 경로·공통 규칙 (034a 와 같은 문장)
+### 3.1 경로·공통 규칙 (034 와 같은 문장)
 | 경로 | 역할 |
 |---|---|
 | `/admin/access` | api |
@@ -59,7 +59,7 @@
   - `tabs`: `/app/` 페이지 요청의 쿼리 `tab` 값 — 허용 id 여섯(`spread`·`history`·`gap`·`pp`·`health`·`flow` — 002), 키가 없으면 `spread`(기본 탭), 그 밖은 `(기타)`. 대시보드 화면은 쿼리로 나뉘어 `paths` 만으로는 무엇을 보는지 모른다. 탭 전환은 요청을 만들지 않으므로 이 값은 "어느 탭 주소로 들어왔나" 이고, 들어온 뒤의 전환은 Clarity 가 본다(033).
   - 기기(대소문자 무관, 앞에서 맞은 것이 이긴다): `bot`(`bot`·`crawl`·`spider`·`slurp`·`curl`·`wget`·`python`·`go-http`·`headless`·`preview`) → `mobile`(`Mobi`·`Android`·`iPhone`·`iPad`) → `desktop`, UA 가 비면 `unknown`. 브라우저(bot 제외): `edge`(`Edg/`) → `samsung`(`SamsungBrowser`) → `firefox`(`Firefox`·`FxiOS`) → `chrome`(`Chrome`·`CriOS`) → `safari`(`Safari`) → `other`.
   - `status` = `{"2xx","3xx","4xx","5xx"}` 수(전체 줄), `recent5xx` = 최근 5xx 20줄 `{ts, path, status}` — `ts` 는 정수 초, `path` 는 `paths` 와 같이 쿼리를 뺀 경로·100자.
-  - `ws` = `{count, durations}` — 경로 `/api/ws/spreads`·상태 101 줄, `durations` = `{lt10s, lt1m, lt10m, lt1h, ge1h}` 수. 열린 연결은 아직 줄이 없다 — 지금 접속 수는 029 `wsConnections` 와 034a `wsClients` 가 말한다.
+  - `ws` = `{count, durations}` — 경로 `/api/ws/spreads`·상태 101 줄, `durations` = `{lt10s, lt1m, lt10m, lt1h, ge1h}` 수. 열린 연결은 아직 줄이 없다 — 지금 접속 수는 029 `wsConnections` 와 034 `wsClients` 가 말한다.
 - IP·UA 원문·쿼리는 응답에 싣지 않는다. 새로 저장하는 것은 없다(메모리 캐시뿐).
 
 ### 3.3 Clarity 요약 — `GET /admin/clarity`
@@ -69,8 +69,8 @@
 - 주소 줄이기(저장·응답 전): 행의 값 중 `http://`·`https://`·`/` 로 시작하는 문자열은 쿼리·해시를 뗀다 — 인기 페이지·페이지 주소에 광고 클릭 ID·utm·제3자 참조 주소의 쿼리가 실릴 수 있다. `Referrer URL` 지표의 값은 출처(`https://호스트[:포트]`)로 줄인다. 그 밖의 문자열 값은 200자에서 자른다.
 - 응답(부분 하나): `state` = 마지막 시도 결과(401·403 → `denied`, 429·5xx·시간 초과 → `error`), `fetchedAt` = 마지막 **성공** 시각, `nextAt` = 다음에 부를 수 있는 시각(ms). 값은 마지막 성공 값을 둔다(§3.1 의 예외 — 하루 한도 때문에 실패 한 번이 3시간 빈칸이 되지 않게, 경과는 `fetchedAt` 이 말한다. 7일 지나면 null).
   - `numOfDays` 1, `traffic` = `{sessions, botSessions, users, pagesPerSession}`(`Traffic` 첫 행을 숫자로, 없으면 null).
-  - `metrics` = `[{name, rows}]` — `Traffic` 밖 지표를 받은 이름·키 그대로(행 20개까지, 값은 위 줄이기 뒤). camelCase 로 바꾸지 않는다 — 1차 문서에 없는 모양을 추측으로 고정하지 않으려고. 첫 실제 응답의 모양을 사람이 §7 에 적고, 그때 정규화 키를 이 절과 035 에 함께 더한다.
-- 토큰 절차(사람 — 033 의 런북 `clarity.md` 에 절 "Data Export 토큰(034b)"): 032 게시·033 설치 뒤 발급(Settings → Data Export, 프로젝트 관리자) → serve `server/.env` 의 `CLARITY_API_TOKEN` → api 다시 띄우기 → 관리자 화면에서 확인. 교체(관리자 이탈 — Clarity 권장)·바로 부르기(`admin:clarity` 지우기)·하루 10회 한도를 함께 적는다. `admin-access.md` 에는 그 절을 가리키는 한 줄만 둔다.
+  - `metrics` = `[{name, rows}]` — `Traffic` 밖 지표를 받은 이름·키 그대로(행 20개까지, 값은 위 줄이기 뒤). camelCase 로 바꾸지 않는다 — 1차 문서에 없는 모양을 추측으로 고정하지 않으려고. 첫 실제 응답의 모양을 사람이 §7 에 적고, 그때 정규화 키를 이 절과 036 에 함께 더한다.
+- 토큰 절차(사람 — 033 의 런북 `clarity.md` 에 절 "Data Export 토큰(035)"): 032 게시·033 설치 뒤 발급(Settings → Data Export, 프로젝트 관리자) → serve `server/.env` 의 `CLARITY_API_TOKEN` → api 다시 띄우기 → 관리자 화면에서 확인. 교체(관리자 이탈 — Clarity 권장)·바로 부르기(`admin:clarity` 지우기)·하루 10회 한도를 함께 적는다. `admin-access.md` 에는 그 절을 가리키는 한 줄만 둔다.
 
 ### 3.4 부담 (2026-10-01 측정 — Mac M5 Pro·Python 3.12, 운영 값 아님)
 - serve(t4g.micro — 가용 최저 ≈378MB, 027): 합성 접속 로그 50MiB(11만 줄)를 전부 풀면 0.21초, `ts` 로 먼저 거르면 0.04초, 최대 RSS 17MB(흘려 읽기). 실제 하루치는 폴링을 뺀 수 MB 라 60초 회차가 수십 ms. 하루 50MiB 를 넘는 날은 창 안 회전 파일이 여럿이라 운영에서 1초 남짓이 60초마다 — 역시 보이는 동안만. Clarity 응답은 1,000행 상한이라 수백 KB, 3시간에 한 번.
@@ -78,7 +78,7 @@
 ### 3.5 엣지
 - 읽는 중에 회전: 그 회차는 읽은 만큼, 다음 회차가 회전 파일까지 읽는다. 로그 파일은 caddy 가 0644 로 쓰고 api 컨테이너는 root 라 읽힌다.
 - 로그 디렉터리·파일 없음(serve 밖 호스트·로컬): `unconfigured`(`no_file`).
-- 기록이 창보다 짧음(배포 직후·회전 직후 삭제): `firstTs` 가 `startTs` 보다 늦다 — 화면이 "기록 시작" 을 보인다(035).
+- 기록이 창보다 짧음(배포 직후·회전 직후 삭제): `firstTs` 가 `startTs` 보다 늦다 — 화면이 "기록 시작" 을 보인다(036).
 - Redis 불달: Clarity 는 부르지 않는다(`error`·`redis`). 접속 요약은 그대로.
 - Clarity 토큰 교체: 새 토큰을 넣고 api 를 다시 띄운다. 3시간 간격은 Redis 값이라 유지된다 — 바로 불러야 하면 `admin:clarity` 키를 지운다(런북).
 - Clarity 429(사람이 손으로 부른 뒤 등): `error`, 값은 마지막 성공 그대로, `nextAt` 3시간 뒤.
@@ -93,7 +93,7 @@
 - 예외: 처리기 안 예외 → 500 이 아니라 그 부분 `error`·WARNING 1줄(ERROR 없음).
 - 기존 스펙 재검증: `cd server && ruff check . && ruff format --check . && pytest -q`, `cd web && npm run lint && npm run build`. 로컬 Docker: web 이미지 `nginx -t`(029 와 같은 방법), caddy 이미지의 `caddy version`(2.11 이상)과 작은 `roll_size` 로 회전 파일 이름 모양 확인 — 둘 다 §7 에.
 
-**배포·런북 뒤 — 사람(완료 조건 아님, status.md 비고 "034b 운영 확인 대기")**: `/svc/api/admin/access` 가 실제 로그로 차는지·`firstTs` / Clarity(032·033 뒤): 토큰을 넣고 첫 응답의 `metricName` 목록과 행 키를 §7 에 옮긴다 / 관리자 접속 기록(029)에 폴링 둘이 없다.
+**배포·런북 뒤 — 사람(완료 조건 아님, status.md 비고 "035 운영 확인 대기")**: `/svc/api/admin/access` 가 실제 로그로 차는지·`firstTs` / Clarity(032·033 뒤): 토큰을 넣고 첫 응답의 `metricName` 목록과 행 키를 §7 에 옮긴다 / 관리자 접속 기록(029)에 폴링 둘이 없다.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
@@ -102,23 +102,23 @@
 
 ## 6. 갱신할 문서
 **이 PR 이 고치는 문서**
-- `docs/context/status.md` — admin 행 server 칸 끝에 "· api 관리자 피드 둘(034b) — `/admin/access`(caddy 로그 24시간 요약·탭별 진입)·`/admin/clarity`(3시간 간격·Redis 캐시·주소 쿼리 뗌·7일 뒤 버림)", 비고에 "034b 운영 확인 대기(Clarity 토큰)". 알려진 빚에 `(034b) Clarity 응답의 Traffic 밖 행 모양은 1차 문서에 없다 — 첫 응답 뒤 034b·035 를 함께 정규화`, `(034b) api 컨테이너가 caddy 로그 디렉터리 전체(90일)를 읽을 수 있다 — 요약 전용 출력은 두지 않았다`, `(034b) 016·018·021 의 해당 문장이 034b 동작과 다르다 — PR 에 담당자 제안으로 남김, 반영 대기`.
-- `CLAUDE.md` — 스펙 인덱스 034b 행 상태 → DONE.
-- `docs/context/architecture.md` — '핵심 설계 결정' 의 "Redis 를 HTTP 가 만지는 곳" 문장 괄호에 "034b 의 `/admin/clarity` 는 `admin:clarity` 읽기·쓰기". '계약 규칙' 의 관리자 피드 줄 "(034a)" → "(034a·034b)". '배포 토폴로지' serve 줄에 "api 가 `logs/caddy` 를 읽기 전용으로 읽는다(034b)". '현재 구조' admin 항목에 034b 모듈(api 라우터·접속 요약·Clarity·`RedisBus` 메서드 둘).
+- `docs/context/status.md` — admin 행 server 칸 끝에 "· api 관리자 피드 둘(035) — `/admin/access`(caddy 로그 24시간 요약·탭별 진입)·`/admin/clarity`(3시간 간격·Redis 캐시·주소 쿼리 뗌·7일 뒤 버림)", 비고에 "035 운영 확인 대기(Clarity 토큰)". 알려진 빚에 `(035) Clarity 응답의 Traffic 밖 행 모양은 1차 문서에 없다 — 첫 응답 뒤 035·036 를 함께 정규화`, `(035) api 컨테이너가 caddy 로그 디렉터리 전체(90일)를 읽을 수 있다 — 요약 전용 출력은 두지 않았다`, `(035) 016·018·021 의 해당 문장이 035 동작과 다르다 — PR 에 담당자 제안으로 남김, 반영 대기`.
+- `CLAUDE.md` — 스펙 인덱스 035 행 상태 → DONE.
+- `docs/context/architecture.md` — '핵심 설계 결정' 의 "Redis 를 HTTP 가 만지는 곳" 문장 괄호에 "035 의 `/admin/clarity` 는 `admin:clarity` 읽기·쓰기". '계약 규칙' 의 관리자 피드 줄 "(034)" → "(034·035)". '배포 토폴로지' serve 줄에 "api 가 `logs/caddy` 를 읽기 전용으로 읽는다(035)". '현재 구조' admin 항목에 035 모듈(api 라우터·접속 요약·Clarity·`RedisBus` 메서드 둘).
 - `docs/context/dev-setup.md` — env 표에 `CLARITY_API_TOKEN`(없음) 행과 설명, `ADMIN_AWS_REGION` 설명 옆에 같은 방식으로 `ACCESS_LOG_DIR`(compose 가 api 에만 — `server/.env` 에 두지 않는다). '검증용 스모크' 에 `curl -s localhost:<api 포트>/admin/access` → 로컬은 `unconfigured`.
 - `docs/context/db.md` — Redis 절에 `admin:clarity`(문자열 JSON, 만료 없음, api 가 읽고 쓴다 — 마지막 시도·결과·마지막 성공 값, 값은 7일 뒤 버린다).
 - `docs/context/product.md` — 기능 목록 admin 행 설명 끝에 "·접속 요약·Clarity 요약".
 - `server/.env.example` — `# CLARITY_API_TOKEN=` 과 설명 1줄(serve 의 api 만, 비면 Clarity 부분 꺼짐).
-- `docs/specs/007-deploy.md` — §3 api 줄에 caddy 로그 읽기 전용 바인드·`ACCESS_LOG_DIR`(034b).
-- `docs/specs/027-observability.md` — §3.2 끝에 "api 가 이 디렉터리를 읽기 전용으로 읽어 관리자 페이지에 24시간 요약을 준다(034b) — 새 저장은 없다".
+- `docs/specs/007-deploy.md` — §3 api 줄에 caddy 로그 읽기 전용 바인드·`ACCESS_LOG_DIR`(035).
+- `docs/specs/027-observability.md` — §3.2 끝에 "api 가 이 디렉터리를 읽기 전용으로 읽어 관리자 페이지에 24시간 요약을 준다(035) — 새 저장은 없다".
 - `docs/specs/029-admin.md` — §3.1 표에 둘(`= /svc/api/admin/access`·`= /svc/api/admin/clarity` → api). §3.2 접속 기록의 "기록하지 않는다" 목록에 둘.
-- `docs/runbooks/clarity.md` — 새 절 "Data Export 토큰(034b)"(§3.3).
-- `docs/runbooks/admin-access.md` — "Clarity 토큰은 `clarity.md` 의 Data Export 토큰 절(034b)" 한 줄.
+- `docs/runbooks/clarity.md` — 새 절 "Data Export 토큰(035)"(§3.3).
+- `docs/runbooks/admin-access.md` — "Clarity 토큰은 `clarity.md` 의 Data Export 토큰 절(035)" 한 줄.
 
 **담당자에게 제안 — 이 PR 에서 고치지 않는다(PR 본문에 그대로 적는다)**
-- 016 — §3.1 api 경로 목록에 `/admin/access`·`/admin/clarity`(034b).
-- 018 — §3 api 라우트 집합 문장에 `/admin/access`·`/admin/clarity`(034b).
-- 021 — §3.1 serve 설명에 "api 가 caddy 로그 디렉터리를 읽기 전용으로(034b)".
+- 016 — §3.1 api 경로 목록에 `/admin/access`·`/admin/clarity`(035).
+- 018 — §3 api 라우트 집합 문장에 `/admin/access`·`/admin/clarity`(035).
+- 021 — §3.1 serve 설명에 "api 가 caddy 로그 디렉터리를 읽기 전용으로(035)".
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):

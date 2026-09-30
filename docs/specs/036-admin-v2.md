@@ -1,16 +1,16 @@
-# 035 — admin-v2
+# 036 — admin-v2
 
-상태: TODO | 의존: **034a·034b 가 main 에 머지된 뒤 시작한다**(아니면 멈추고 묻는다). 계약을 쓰는 스펙(쓰는 계약은 §3.2 에 복사했다): 003 spreads(`/refresh`), 011 health(`/health/collect`), 025 slack-alerts(`/health` 두 역할), 027 observability(지표·경보 이름과 임계), 029 admin(화면·보안 계약 — 이 스펙이 화면을 바꾼다), 030 admin-tunnel(들어오는 길), 033 clarity(관리자 단언), 034a·034b(관리자 피드 넷). Clarity 칸은 033·034b 가 켜진 뒤에 찬다 — 그 전에는 "연결 안 됨" 이다.
+상태: TODO | 의존: **034·035 가 main 에 머지된 뒤 시작한다**(아니면 멈추고 묻는다). 계약을 쓰는 스펙(쓰는 계약은 §3.2 에 복사했다): 003 spreads(`/refresh`), 011 health(`/health/collect`), 025 slack-alerts(`/health` 두 역할), 027 observability(지표·경보 이름과 임계), 029 admin(화면·보안 계약 — 이 스펙이 화면을 바꾼다), 030 admin-tunnel(들어오는 길), 033 clarity(관리자 단언), 034·035(관리자 피드 넷). Clarity 칸은 033·035 가 켜진 뒤에 찬다 — 그 전에는 "연결 안 됨" 이다.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
 
 ## 1. 목적
-운영자가 `admin.kimptrack.com` 한 페이지를 위에서 아래로 읽으며 "지금 괜찮은가 → 어디가 문제인가 → 누가 얼마나 쓰는가 → 돈은 얼마나 나가는가" 를 안다. 029 의 앱 안쪽 상태(헬스·거래소 수집 상태·접속 수·즉시 갱신)에 034a·034b 가 모은 CloudWatch 경보·지표·canary·예산, Slack·경보 알림 기록, 서버 접속 요약, Clarity 요약을 더해 AWS·Clarity·Cloudflare·Slack 콘솔을 돌지 않게 한다. AWS 계정은 2026년 12월에 끝난다 — AWS·Clarity 가 없거나 막혀도 그 칸만 "연결 안 됨"·"권한 없음" 이고 나머지는 그대로 동작한다.
+운영자가 `admin.kimptrack.com` 한 페이지를 위에서 아래로 읽으며 "지금 괜찮은가 → 어디가 문제인가 → 누가 얼마나 쓰는가 → 돈은 얼마나 나가는가" 를 안다. 029 의 앱 안쪽 상태(헬스·거래소 수집 상태·접속 수·즉시 갱신)에 034·035 가 모은 CloudWatch 경보·지표·canary·예산, Slack·경보 알림 기록, 서버 접속 요약, Clarity 요약을 더해 AWS·Clarity·Cloudflare·Slack 콘솔을 돌지 않게 한다. AWS 계정은 2026년 12월에 끝난다 — AWS·Clarity 가 없거나 막혀도 그 칸만 "연결 안 됨"·"권한 없음" 이고 나머지는 그대로 동작한다.
 
 ## 2. 범위
 - 만드는 것: `web/admin/` 세 파일(`index.html`·`admin.js`·`admin.css`) 전면 재작성, `server/tests/test_admin.py` 의 화면 정적 단언 확장.
-- 하지 않는 것: 서버·nginx·관리자 경로(피드 경로·관리자 nginx 분기·접속 기록 제외는 034a·034b). 새 API. 빌드 도입·외부 라이브러리(차트 포함). 화면에서 AWS·Cloudflare·Clarity 를 바꾸는 조작 — 읽기 전용이고, 쓰는 버튼은 029 의 즉시 갱신 하나다. 브라우저에 값 쌓기(추이 누적 포함). 밝은 테마. 알림 규칙 변경(025·027).
+- 하지 않는 것: 서버·nginx·관리자 경로(피드 경로·관리자 nginx 분기·접속 기록 제외는 034·035). 새 API. 빌드 도입·외부 라이브러리(차트 포함). 화면에서 AWS·Cloudflare·Clarity 를 바꾸는 조작 — 읽기 전용이고, 쓰는 버튼은 029 의 즉시 갱신 하나다. 브라우저에 값 쌓기(추이 누적 포함). 밝은 테마. 알림 규칙 변경(025·027).
 - 바꾸는 기존 것: 029 §3.3(화면이 보이는 것·주기 — 보안 계약은 §3.8 로 옮겨 온다), 029 §2 하지 않는 것의 "CloudWatch 링크(027 배포 뒤 따로)", 029 §4 화면 정적 단언.
 - 담당: 029 는 이 레포 주인 담당이라 고친다. 011·025 는 hereokay 담당 — 계약을 읽기만 한다.
 - **빌드 없음을 유지한다.** 이유: Vite 다중 페이지에 넣으면 화면이 공개 root(dist)에 섞인다(029 가 막은 것) / CSP `default-src 'self'` 라 번들러 없이도 외부 코드가 없다 / 정적 단언이 소스 그대로를 본다. 스크립트가 길어져도 파일을 나누지 않는다 — 나누면 로드 순서·전역 이름이 계약이 되고 단언이 파일마다 는다.
@@ -38,14 +38,14 @@
 - 011 `/api/health/collect`: `{serverStartedAt, fetchedAt, successRate1h, exchanges[], outages[]}`. 거래소는 `upbit`·`bithumb`·`binance`·`bybit`·`bitget` 고정 순서, 항목마다 `exchange`·`state`(`ok`·`stale`·`down`)·`lastSuccessAt`·`markets`·`successRate1h`·`openOutage`·`lastError`(`at`·`kind`·`statusCode`·`message`). `outages` 는 24시간 구간 전부(`exchange`·`kind`·`startedAt`·`endedAt`(진행 중 null)·`count`·`statusCode`·`message`), 시각은 epoch ms.
 - 003 `POST /api/refresh`: 헤더 `X-Refresh-Token`, 200 `{totalSaved, failures[{exchange, errorCode}], warnings[], …}`, 토큰이 틀리면 401 `{"detail"}`.
 
-**느린 묶음 — 034a·034b 피드 넷(복사)**
+**느린 묶음 — 034·035 피드 넷(복사)**
 
 | 경로 | 스펙 |
 |---|---|
-| `/api/admin/aws` | 034a |
-| `/api/admin/alerts` | 034a |
-| `/svc/api/admin/access` | 034b |
-| `/svc/api/admin/clarity` | 034b |
+| `/api/admin/aws` | 034 |
+| `/api/admin/alerts` | 034 |
+| `/svc/api/admin/access` | 035 |
+| `/svc/api/admin/clarity` | 035 |
 
 - 공통: 늘 200 JSON, 키 camelCase. **시각 단위** — `…At`(`fetchedAt`·`changedAt`·`lastRunAt`·`nextAt`·알림 `at`)은 epoch **ms**, `…Ts`(`startTs`·`endTs`·`firstTs`)와 점·시간 칸·`recent5xx` 의 `ts` 는 epoch **초**다. 차트 가로축은 `ts × 1000` 으로 ms 에 맞춘다. 응답은 **부분**들이고 부분은 `{state, code, fetchedAt, refreshSec, …값 키}` 다. `state` 는 `ok`·`unconfigured`·`denied`·`error`·`pending`(첫 조회가 3초 안에 안 끝남), `code` 는 `ok` 면 null·아니면 짧은 사유(AWS 오류 코드·`no_credentials`·`http_<상태>`·`timeout`·`redis`·`no_file`·`partial` — 오류 문장·ARN 없음), `fetchedAt` 은 값을 만든 시각(없으면 null), `refreshSec` 는 서버 갱신 주기. `ok` 가 아니면 값 키는 null — 예외는 Clarity(값 = 마지막 성공, 7일 뒤 null).
 - `/api/admin/aws` = 부분 넷 `{alarms, metrics, canary, budget}`:
@@ -55,7 +55,7 @@
   - `budget`(6시간): `items[{name, unit, limit, actual, forecast, timeUnit}]` — 비용 예산 전부(`timeUnit` 은 `MONTHLY` 등), 금액 소수 둘째 자리, `forecast` 없으면 null.
 - `/api/admin/alerts` = `{items, slack, alarms}` — `slack`·`alarms` 는 상태만 있는 부분(`slack` 은 `refreshSec` 0), `items` 는 늘 목록(성공한 쪽만). 항목 `{at, source, text, role, key, delivered, alarm, fromState, toState}`(해당 없는 키 null), 최근 7일·최신순·200건. `source: "slack"` 은 025 알림 — `role` `collector`·`api`, `text` 는 🔴·🟢·⚠️ 머리 그대로, `delivered` 는 Slack 이 받았는지(전송 실패도 기록된다, 억제된 알림은 없다). `source: "alarm"` 은 경보 상태 변경 — `alarm`·`fromState`·`toState`·`text`(사유). ARN·12자리 숫자는 `[가림]` 으로 와 있다.
 - `/svc/api/admin/access` = 부분 하나(60초): `startTs`·`endTs`·`firstTs`(읽은 가장 이른 줄, 없으면 null)·`totals{requests, pages, ws, skipped}`·`hourly[{ts, requests, pages, errors}]` 24개(`errors` = 5xx)·상위 목록 여섯 `paths`·`tabs`·`referrers`·`utmSources`·`devices`·`browsers`(각 `[[이름, 수], …]` 20개까지 — `tabs` 는 탭 id 여섯과 `(기타)`, `devices` 는 `bot`·`mobile`·`desktop`·`unknown`)·`status{"2xx","3xx","4xx","5xx"}`·`recent5xx[{ts, path, status}]` 20줄(경로는 쿼리 없음)·`ws{count, durations{lt10s, lt1m, lt10m, lt1h, ge1h}}`. IP·UA 원문 없음, 폴링·canary 제외.
-- `/svc/api/admin/clarity` = 부분 하나(10800초) + `nextAt`·`numOfDays`(1)·`traffic{sessions, botSessions, users, pagesPerSession}`(없으면 null)·`metrics[{name, rows}]`(Clarity 가 준 지표 이름·행 키 그대로, 행 20개, 주소는 쿼리를 뗐다). Traffic 밖 행 모양은 1차 문서에 없어 034b 가 정규화하지 않았다. 값은 UTC 기준이다.
+- `/svc/api/admin/clarity` = 부분 하나(10800초) + `nextAt`·`numOfDays`(1)·`traffic{sessions, botSessions, users, pagesPerSession}`(없으면 null)·`metrics[{name, rows}]`(Clarity 가 준 지표 이름·행 키 그대로, 행 20개, 주소는 쿼리를 뗐다). Traffic 밖 행 모양은 1차 문서에 없어 035 가 정규화하지 않았다. 값은 UTC 기준이다.
 
 ### 3.3 갱신 주기
 - 빠른 묶음(경로 넷) 10초, 느린 묶음(피드 넷) 60초 — 둘 다 **보이는 동안만**(`visibilityState`). 두 묶음은 따로 돈다 — 느린 쪽이 늦어도 빠른 쪽 주기를 막지 않는다. 같은 묶음은 앞선 호출이 끝나기 전에 다시 부르지 않는다.
@@ -91,7 +91,7 @@
 **접속** — 세 덩어리.
 - 실시간: 지금 WebSocket 접속 수(빠른 묶음 `wsConnections`) 큰 숫자 + 24시간 `wsClients` 선. 부제 "열린 대시보드 수 — 사람 수가 아니다".
 - 서버 기록 24시간(접속 요약): 총 요청·페이지·시간대별 막대 24개(5xx 는 장애색으로 겹침)·상태 코드 대분류, WebSocket 연결 수·지속 시간 구간 막대, 표 여섯(경로·탭·외부 출처·`utm_source`·기기·브라우저 — 이름·수·비율 막대, 상위 10), 최근 5xx 표(시각·경로·상태, 20행). `firstTs` 가 `startTs` 보다 늦으면 부제에 "기록 시작 HH:mm". 부제 "폴링·canary 제외, IP 없음 · 읽지 못한 줄 n"(`skipped`).
-- Clarity(Clarity 요약): 타일 넷(세션·봇 세션·사용자·세션당 페이지)과 "받은 지표" 목록 — 지표마다 이름 한 줄과 행마다 `키:값 · 키:값` 글자 한 줄(20행, 한 줄 200자에서 자르고 전체는 `title`). 부제 "최근 1일 · UTC 기준 — Clarity 가 준 값". 스크롤 깊이·참여 시간·dead·rage click 같은 정규화 타일은 034b §7 에 첫 실제 응답이 기록되고 034b 가 키를 정한 뒤 두 스펙을 함께 고칠 때 더한다.
+- Clarity(Clarity 요약): 타일 넷(세션·봇 세션·사용자·세션당 페이지)과 "받은 지표" 목록 — 지표마다 이름 한 줄과 행마다 `키:값 · 키:값` 글자 한 줄(20행, 한 줄 200자에서 자르고 전체는 `title`). 부제 "최근 1일 · UTC 기준 — Clarity 가 준 값". 스크롤 깊이·참여 시간·dead·rage click 같은 정규화 타일은 035 §7 에 첫 실제 응답이 기록되고 035 가 키를 정한 뒤 두 스펙을 함께 고칠 때 더한다.
 
 **비용** — `budget`.
 - 월 단위(`timeUnit` `MONTHLY`) 비용 예산 전부를 한 줄씩: 이름·실제·한도·예측(달러 소수 2자리), 가로 막대 하나(실제 사용액, 85%·100% 표시선 — 027 예산 알림 기준)와 이번 달이 지난 비율 표시선. 예측이 한도를 넘으면 주의색. 월 단위가 아닌 예산은 막대 없이 이름·실제·한도만. 예산이 0개면 "예산 없음".
@@ -136,14 +136,14 @@
 - **더함**: 외부 링크는 `index.html` 의 고정 `https://` 주소뿐이고 모두 `rel="noreferrer"`(관리자 주소를 콘솔 쪽에 넘기지 않는다). 주소에 계정·영역 ID·Access AUD·팀 도메인(`*.cloudflareaccess.com`)·이메일·Clarity 프로젝트 ID(`/projects/view/<ID>`)·토큰을 넣지 않는다(레포 공개) — 대시보드에서 복사한 Cloudflare 주소에는 계정 ID 가 들어 있으니 루트 주소만 쓴다. 화면은 이미지 파일을 쓰지 않는다.
 
 ### 3.9 엣지
-- 034a·034b 전 배포(피드 경로 없음): 느린 묶음이 404 → 인프라·알림·접속(서버 기록·Clarity)·비용이 "응답 오류 (HTTP 404)", 빠른 묶음·즉시 갱신은 그대로 — 그래서 두 스펙 머지가 시작 조건이다.
+- 034·035 전 배포(피드 경로 없음): 느린 묶음이 404 → 인프라·알림·접속(서버 기록·Clarity)·비용이 "응답 오류 (HTTP 404)", 빠른 묶음·즉시 갱신은 그대로 — 그래서 두 스펙 머지가 시작 조건이다.
 - AWS 계정 종료(2026-12)·AWS 밖으로 옮김: AWS 요약 네 부분과 알림의 `alarms` 가 `unconfigured`(자격 없음)가 되고, 인프라·비용 절과 개요의 경보·canary·비용 타일·접속의 24시간 선만 "연결 안 됨" 이다. 종합 판정은 §3.4 대로 앱 쪽 값과 `alarms`·`canary` 의 `error` 로만 한다 — `unconfigured` 는 판정 밖이다. AWS 링크는 남는다 — 이전이 정해지면 사람이 이 스펙을 고친다.
-- Clarity 하루 호출 한도(프로젝트당 10회 — 034b): 실패해도 마지막 성공 값과 "마지막 성공 n시간 전" 배지가 보이고, 판정은 바뀌지 않는다.
+- Clarity 하루 호출 한도(프로젝트당 10회 — 035): 실패해도 마지막 성공 값과 "마지막 성공 n시간 전" 배지가 보이고, 판정은 바뀌지 않는다.
 - 브라우저 시계가 서버보다 빠름: 경과가 음수면 0초(029 와 같다). 시각은 브라우저 시간대.
 - 긴 목록: 피드 상한을 믿지 않고 화면도 자른다 — 알림 200행, 표 10행, 최근 5xx 20행, canary 로그 10줄, Clarity 지표마다 20행.
 
 ## 4. 검증
-**PR 안 — 실행 세션(완료 조건)**. 시작 전에 main 에 034a·034b 가 있는지 본다(없으면 멈추고 묻는다).
+**PR 안 — 실행 세션(완료 조건)**. 시작 전에 main 에 034·035 가 있는지 본다(없으면 멈추고 묻는다).
 - 정적 단언(`server/tests/test_admin.py` — 029 의 화면 단언은 유지하고 아래를 더한다):
   - `admin.js`: `X-Requested-With`·`visibilityState`·`createElementNS`·`refreshSec` 가 있다 / `fetch(` 는 1회 / `location.replace(`·`history.replaceState(` 각 1회, 주소 `/` 고정(029) / 10초·60초 주기 상수 / 금지: `localStorage`·`sessionStorage`·`indexedDB`·`document.cookie`·`innerHTML`·`outerHTML`·`insertAdjacentHTML`·`document.write`·`eval(`·`new Function`·`window.open`·`location.pathname`·`location.href`·`.style`·`setAttribute('style'`·`.href`·`setAttribute('href'`·`setAttribute('src'` / 파일 안의 `http://`·`https://` 는 SVG 이름공간 하나뿐.
   - `index.html`: 인라인 스크립트 본문·`style=`·`<form`·`target=` 없음(029) / 절 id 일곱이 §3.1 순서, 머리의 이동 링크 일곱 / 토큰칸·API 문서·ReDoc·로그아웃 링크(029) / 외부 링크는 전부 `https://` 이고 `rel="noreferrer"`, 호스트는 AWS 콘솔(`*.console.aws.amazon.com`)·`clarity.microsoft.com`·`dash.cloudflare.com`·`one.dash.cloudflare.com`·`github.com` 안이고 Cloudflare 링크는 경로가 `/` / 12자리 숫자·이메일 모양·`[0-9a-f]{32,}`·`cloudflareaccess.com`·`/projects/view/` 없음.
@@ -161,7 +161,7 @@
 - 기존 스펙 재검증: `cd server && ruff check . && ruff format --check . && pytest -q`, `cd web && npm run lint && npm run build`(dist 에 admin 없음).
 - 커밋: ① HTML·CSS ② JS(절 단위로 나눠 각 300줄 이하) ③ 정적 단언 ④ §6 문서·§5·§7.
 
-**배포 뒤 — 사람(완료 조건 아님, status.md 비고 "운영 확인 대기")**: 로그인 뒤 일곱 절이 실제 값 또는 정직한 상태("권한 없음" 등)로 보인다 / 예산이 SCP 로 막혔는지 비용 절에서 확인 / 휴대폰에서 가로 스크롤 없음 / 도구 링크가 맞는 콘솔 화면으로 간다 / 경보 수·canary 로그 줄이 콘솔과 같다 / 관리자 접속 기록(029)에 60초 폴링 경로가 없다(034a·034b).
+**배포 뒤 — 사람(완료 조건 아님, status.md 비고 "운영 확인 대기")**: 로그인 뒤 일곱 절이 실제 값 또는 정직한 상태("권한 없음" 등)로 보인다 / 예산이 SCP 로 막혔는지 비용 절에서 확인 / 휴대폰에서 가로 스크롤 없음 / 도구 링크가 맞는 콘솔 화면으로 간다 / 경보 수·canary 로그 줄이 콘솔과 같다 / 관리자 접속 기록(029)에 60초 폴링 경로가 없다(034·035).
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
@@ -170,11 +170,11 @@
 
 ## 6. 갱신할 문서
 **이 PR 이 고치는 문서**
-- `docs/context/status.md` — admin 행 web 칸을 "관리자 화면 v2(web/admin — 한 페이지 개요·수집·인프라·알림·접속·비용·도구, 빠른 10초·느린 60초 보이는 동안만, SVG 직접, 빌드 없음, 피드 부분별 상태)" 로, 비고에 "035 운영 확인 대기". 알려진 빚에 `(035) AWS 계정 종료(2026-12) 뒤 인프라·비용 절과 AWS 링크는 '연결 안 됨' — 이전이 정해지면 화면을 고친다`, `(035) Clarity 칸은 traffic 타일과 받은 지표 목록뿐 — 정규화 타일은 034b 첫 응답 뒤`, `(035) 화면 브라우저 확인은 Chromium 한 종류`.
-- `CLAUDE.md` — 스펙 인덱스 035 행 상태 → DONE. §2 `web/admin/` 설명 끝을 "(029·035)".
-- `docs/context/architecture.md` — "현재 구조" admin 항목의 `web/admin/` 설명에 "화면 v2(035) — 빠른·느린 두 폴링 묶음, 만료 표시는 여덟 경로가 모두 성공한 뒤 지움, SVG 차트를 DOM 으로 직접, 피드의 부분별 상태 표시".
+- `docs/context/status.md` — admin 행 web 칸을 "관리자 화면 v2(web/admin — 한 페이지 개요·수집·인프라·알림·접속·비용·도구, 빠른 10초·느린 60초 보이는 동안만, SVG 직접, 빌드 없음, 피드 부분별 상태)" 로, 비고에 "036 운영 확인 대기". 알려진 빚에 `(036) AWS 계정 종료(2026-12) 뒤 인프라·비용 절과 AWS 링크는 '연결 안 됨' — 이전이 정해지면 화면을 고친다`, `(036) Clarity 칸은 traffic 타일과 받은 지표 목록뿐 — 정규화 타일은 035 첫 응답 뒤`, `(036) 화면 브라우저 확인은 Chromium 한 종류`.
+- `CLAUDE.md` — 스펙 인덱스 036 행 상태 → DONE. §2 `web/admin/` 설명 끝을 "(029·036)".
+- `docs/context/architecture.md` — "현재 구조" admin 항목의 `web/admin/` 설명에 "화면 v2(036) — 빠른·느린 두 폴링 묶음, 만료 표시는 여덟 경로가 모두 성공한 뒤 지움, SVG 차트를 DOM 으로 직접, 피드의 부분별 상태 표시".
 - `docs/context/product.md` — 기능 목록 admin 행을 "관리자 페이지(운영자용 — 헬스·수집 상태·CloudWatch 경보·지표·canary·알림 기록·접속 요약·Clarity·비용·닫힌 API)" 로.
-- `docs/specs/029-admin.md` — §2 하지 않는 것의 "CloudWatch 링크(027 배포 뒤 따로)" 를 지운다. §3.3 을 "화면이 보이는 것·주기·차트·보안 계약은 035(§3.8 이 이 절의 규칙을 이어받는다)" 한 줄과 읽는 계약 셋으로 줄인다. §4 의 화면 정적 단언 줄 끝에 "(035 §4 가 넓힌다)".
+- `docs/specs/029-admin.md` — §2 하지 않는 것의 "CloudWatch 링크(027 배포 뒤 따로)" 를 지운다. §3.3 을 "화면이 보이는 것·주기·차트·보안 계약은 036(§3.8 이 이 절의 규칙을 이어받는다)" 한 줄과 읽는 계약 셋으로 줄인다. §4 의 화면 정적 단언 줄 끝에 "(036 §4 가 넓힌다)".
 
 담당자에게 제안: 없다 — 011·025 의 계약을 읽기만 한다.
 

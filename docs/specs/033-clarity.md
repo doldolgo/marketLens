@@ -11,7 +11,7 @@
 ## 2. 범위
 - 만드는 것: `web/public/clarity.js`(설정 한 곳 + 불러올지 판단), 랜딩·대시보드 HTML 의 그 파일 한 줄과 가림 해제 속성, `web/src/shared/` 의 Clarity 호출 두 개(태그·이벤트), 셸의 탭 태그·이벤트, nginx 캐시 규칙 한 줄, 계약 테스트 `server/tests/test_clarity.py`, 런북 `docs/runbooks/clarity.md`(Clarity 대시보드 설정·켜고 끄기, 사람용).
 - 하지 않는 것:
-  - 처리방침 문구·국외 이전·Clarity 약관이 요구하는 고지·거부 버튼 — 032. Clarity Data Export API·토큰과 관리자 화면의 Clarity 요약 — 034b·035(034b 가 토큰 절차를 이 스펙의 런북 `clarity.md` 에 더한다).
+  - 처리방침 문구·국외 이전·Clarity 약관이 요구하는 고지·거부 버튼 — 032. Clarity Data Export API·토큰과 관리자 화면의 Clarity 요약 — 035·036(035 가 토큰 절차를 이 스펙의 런북 `clarity.md` 에 더한다).
   - 동의 배너(opt-in). 기본은 거부 방식(opt-out)이다 — 법률 확인은 사람(§3.3).
   - `identify`(방문자 식별) — 계정이 없고 쓸 곳이 없다.
   - 관리자 페이지·처리방침 페이지의 Clarity, Google Fonts·jsDelivr 자체 호스팅, 기록 탭 차트(canvas) 녹화.
@@ -96,7 +96,7 @@ Clarity 동작(clarity-js 0.8.71, 2026-09-25 커밋 코드를 2026-10-01 에 읽
 - IP blocking: 운영자 고정 IPv4(CIDR 가능, IPv6·모바일·VPN 은 안 된다 — Clarity 문서). 목록은 **사람 확인**.
 - 팀: 녹화를 보는 사람은 개인정보를 다루는 사람이다 — 관리자·구성원 범위는 **사람 확인**.
 - 선택: Clarity 지원 메일로 URL 매개변수 `s.q`·`g.q`·`p.q` 가림을 요청한다(옛 링크 대비, 페이지 주소에만 적용된다).
-- GA·GTM 연동은 켜지 않는다. Data Export API 토큰은 034b 몫 — 034b 가 같은 런북에 토큰 절을 더한다(Clarity 운영을 한 런북에).
+- GA·GTM 연동은 켜지 않는다. Data Export API 토큰은 035 몫 — 035 가 같은 런북에 토큰 절을 더한다(Clarity 운영을 한 런북에).
 - 런북은 각 항목의 확인 방법(§4 배포 뒤)과 되돌리기(ID 비우기 PR)를 함께 적는다.
 
 ### 3.9 엣지
@@ -107,7 +107,7 @@ Clarity 동작(clarity-js 0.8.71, 2026-09-25 커밋 코드를 2026-10-01 에 읽
 
 ## 4. 검증
 **PR 안 — 실행 세션 완료 조건**
-- server `ruff check . && pytest -q` — `tests/test_clarity.py` 가 파일을 읽어 단언한다: `clarity.js` 의 ID 는 빈 문자열이거나 영숫자 1~32자이고 페이지 목록은 `landing`·`app` 안에서만 / 유럽 시간대 스위치가 불리언 / ID 가 비어 있지 않으면 `web/public/privacy.html` 이 있고 `〔` 가 없고 `Clarity`·`kt.analytics` 가 있다 / 파일에 `consentv2`·`ad_Storage`·`analytics_Storage`·`"granted"`·`globalPrivacyControl`·`kt.analytics`·`_clck`·`_clsk`·`_cltk`·`DOMContentLoaded`·`https://www.clarity.ms/tag/`·`resolvedOptions`·`Europe/`·`storage`·`visibilitychange`·`location.reload` 가 있고, 거부 값 리터럴 `'denied'`(또는 `"denied"`)가 있고 `'off'`·`"off"` 가 없으며, `'consent'`·`identify` 호출과 `www.kimptrack.com` 이 없다 / `web/index.html`·`web/public/landing.html` 이 파일을 `defer` 로 한 번씩 싣고 `#root`·랜딩 `<body>` 에 `data-clarity-unmask="true"` / `web/admin/*` 에 `clarity.js`·`clarity.ms` 가 없다(관리자 스크립트는 029 단언대로 `admin.js` 하나 — 035 의 Clarity 칸·`/svc/api/admin/clarity`·콘솔 링크는 걸리지 않는다) / `nginx.conf` 에 `location = /clarity.js` 와 `no-cache` / `web/src` 에 `useUrlState('s.q'`·`'g.q'`·`'p.q'` 가 없고 `urlState.ts` 에 `History.prototype.replaceState` 가 있다.
+- server `ruff check . && pytest -q` — `tests/test_clarity.py` 가 파일을 읽어 단언한다: `clarity.js` 의 ID 는 빈 문자열이거나 영숫자 1~32자이고 페이지 목록은 `landing`·`app` 안에서만 / 유럽 시간대 스위치가 불리언 / ID 가 비어 있지 않으면 `web/public/privacy.html` 이 있고 `〔` 가 없고 `Clarity`·`kt.analytics` 가 있다 / 파일에 `consentv2`·`ad_Storage`·`analytics_Storage`·`"granted"`·`globalPrivacyControl`·`kt.analytics`·`_clck`·`_clsk`·`_cltk`·`DOMContentLoaded`·`https://www.clarity.ms/tag/`·`resolvedOptions`·`Europe/`·`storage`·`visibilitychange`·`location.reload` 가 있고, 거부 값 리터럴 `'denied'`(또는 `"denied"`)가 있고 `'off'`·`"off"` 가 없으며, `'consent'`·`identify` 호출과 `www.kimptrack.com` 이 없다 / `web/index.html`·`web/public/landing.html` 이 파일을 `defer` 로 한 번씩 싣고 `#root`·랜딩 `<body>` 에 `data-clarity-unmask="true"` / `web/admin/*` 에 `clarity.js`·`clarity.ms` 가 없다(관리자 스크립트는 029 단언대로 `admin.js` 하나 — 036 의 Clarity 칸·`/svc/api/admin/clarity`·콘솔 링크는 걸리지 않는다) / `nginx.conf` 에 `location = /clarity.js` 와 `no-cache` / `web/src` 에 `useUrlState('s.q'`·`'g.q'`·`'p.q'` 가 없고 `urlState.ts` 에 `History.prototype.replaceState` 가 있다.
 - web `npm run lint && npm run build`, `node --check web/public/clarity.js`(oxlint 대상 밖). 빌드된 `dist/index.html` 에서 `clarity.js` 가 앱 모듈보다 앞, `dist/clarity.js` 있음.
 - 로컬 브라우저 — docker 통합 기동(:8080)에 헤드리스 크롬 `--host-resolver-rules` 로 `kimptrack.com`·`www.kimptrack.com` 을 로컬에, `*.clarity.ms` 를 닫힌 포트에 묶는다(요청은 시도만 되고 나가지 않는다). 시험 ID 는 커밋하지 않는 로컬 사본에만 넣는다:
   1. 기본: `DOMContentLoaded` 전에는 `clarity.ms` 요청이 없고 뒤에 `tag/<시험ID>` 1회, `window.clarity.q` 첫 항목이 `consentv2` 와 두 값 그대로.
@@ -141,7 +141,7 @@ Clarity 동작(clarity-js 0.8.71, 2026-09-25 커밋 코드를 2026-10-01 에 읽
 - `docs/specs/022-landing.md` — §3.5 스크립트 규칙에 "`<head>` 에 `clarity.js`(033) 한 줄, `<body>` 에 `data-clarity-unmask`" 한 줄.
 - `docs/specs/007-deploy.md` — nginx 정적 규칙에 `location = /clarity.js` 의 `Cache-Control: no-cache`(033).
 - `docs/specs/027-observability.md` — §2 하지 않는 것의 "브라우저 쪽 분석·개인정보처리방침·폰트 자체 호스팅 — 후속 브라우저 분석 스펙" 을 "브라우저 쪽 분석은 033, 처리방침은 032, 폰트 자체 호스팅은 후속" 으로(032 가 같은 줄을 고치면 합친다), §3.8 "검색 입력이 늘면 쿼리 키 목록도 같이 늘린다" 문장에 "검색어는 033 부터 URL 에 안 실린다 — 세 키 삭제는 옛 링크용" 을 붙인다.
-- `docs/runbooks/clarity.md` — 신규. §3.1 순서, §3.8 설정과 확인·되돌리기, 유럽 시간대 스위치(끄는 조건 = 법률 확인), §4 배포 뒤 항목. Data Export 토큰 절은 034b 가 더한다.
+- `docs/runbooks/clarity.md` — 신규. §3.1 순서, §3.8 설정과 확인·되돌리기, 유럽 시간대 스위치(끄는 조건 = 법률 확인), §4 배포 뒤 항목. Data Export 토큰 절은 035 가 더한다.
 
 **담당자에게 제안** (PR 본문에 적는다)
 - `002-web-shell.md` §3.5 — "화면 상태는 URL 쿼리에 실린다" 문단: 제외 목록을 "검색 입력 전부(spreads·gap·pp·history·flow)" 로, `sym` 은 영문 대문자·숫자 1~20자, "URL 쓰기는 `tab` 만 `window.history.replaceState`, 나머지는 원래 함수(033 — Clarity)". §4-4 는 그대로(탭 사이 유지는 메모리).

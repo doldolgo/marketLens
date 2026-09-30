@@ -1,22 +1,22 @@
-# 034a — monitoring-ops
+# 034 — monitoring-ops
 
-상태: TODO | 의존: 025 slack-alerts(알림기 `notify`·보내기 태스크·SlackLogHandler), 027 observability(에이전트 지표 이름·경보 이름·canary 로그), 010 raw-archive(collect 역할 자격증명), 029 admin(관리자 nginx 분기·보호 규칙), 030 admin-tunnel(들어오는 길), 028 api-allowlist(공개 허용 목록), 022 landing(3초 기다림 규칙의 모양). 짝 스펙 034b(api 쪽 피드 둘 — 이 스펙 뒤에 한다)와 공통 규칙(§3.1)을 같은 문장으로 나눠 가진다. 031·032·033 과는 코드가 겹치지 않는다. 화면은 035.
+상태: TODO | 의존: 025 slack-alerts(알림기 `notify`·보내기 태스크·SlackLogHandler), 027 observability(에이전트 지표 이름·경보 이름·canary 로그), 010 raw-archive(collect 역할 자격증명), 029 admin(관리자 nginx 분기·보호 규칙), 030 admin-tunnel(들어오는 길), 028 api-allowlist(공개 허용 목록), 022 landing(3초 기다림 규칙의 모양). 짝 스펙 035(api 쪽 피드 둘 — 이 스펙 뒤에 한다)와 공통 규칙(§3.1)을 같은 문장으로 나눠 가진다. 031·032·033 과는 코드가 겹치지 않는다. 화면은 036.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
 
 ## 1. 목적
-관리자 페이지(035)가 한 화면에 모을 운영 정보 중 수집기가 만드는 두 가지를 준다 — CloudWatch 경보·24시간 지표·canary·예산(AWS 요약), 그리고 025 가 Slack 으로 보낸 알림에 경보 상태 변경을 합친 알림 기록. 지금은 AWS 콘솔과 Slack 을 따로 열어야 하고, 보낸 알림은 어디에도 남지 않는다. AWS 계정은 2026년 12월에 끝나고 조직 SCP 가 일부 API 를 막는다 — 설정·자격증명·권한이 없으면 그 부분만 상태로 답하고 나머지는 그대로 동작한다.
+관리자 페이지(036)가 한 화면에 모을 운영 정보 중 수집기가 만드는 두 가지를 준다 — CloudWatch 경보·24시간 지표·canary·예산(AWS 요약), 그리고 025 가 Slack 으로 보낸 알림에 경보 상태 변경을 합친 알림 기록. 지금은 AWS 콘솔과 Slack 을 따로 열어야 하고, 보낸 알림은 어디에도 남지 않는다. AWS 계정은 2026년 12월에 끝나고 조직 SCP 가 일부 API 를 막는다 — 설정·자격증명·권한이 없으면 그 부분만 상태로 답하고 나머지는 그대로 동작한다.
 
 ## 2. 범위
 - 만드는 것: 수집기 역할의 관리자 피드 두 경로(기능 폴더 `admin` 에 collector 라우터), 025 알림기의 기록 자리와 core `RedisBus` 공개 메서드 둘, 관리자 nginx 정확 일치 location 둘, compose(server env 하나), 런북 절(IAM 읽기 정책), 계약 테스트.
-- 하지 않는 것: 화면(035). 접속 요약·Clarity(034b). Cost Explorer(`ce:GetCostAndUsage` — SCP 가 막는다)·Logs Insights·Synthetics. 예산 알림·Amazon Q 가 Slack 에 올린 메시지의 기록(읽을 API 가 없다 — 예산은 사용액으로 본다). 경보·예산 설정을 바꾸는 조작(전부 읽기). 새 라이브러리(boto3 는 010 이 이미 올렸다). serve 스왑 지표 추가(027 에이전트 설정 — 사람 결정, §3.2).
+- 하지 않는 것: 화면(036). 접속 요약·Clarity(035). Cost Explorer(`ce:GetCostAndUsage` — SCP 가 막는다)·Logs Insights·Synthetics. 예산 알림·Amazon Q 가 Slack 에 올린 메시지의 기록(읽을 API 가 없다 — 예산은 사용액으로 본다). 경보·예산 설정을 바꾸는 조작(전부 읽기). 새 라이브러리(boto3 는 010 이 이미 올렸다). serve 스왑 지표 추가(027 에이전트 설정 — 사람 결정, §3.2).
 - 바꾸는 기존 것: 025(알림기가 보낸 결과를 기록 — 보내는 규칙·문구·억제는 그대로), 029(관리자 nginx location 둘·폴링 기록 제외, collector 라우트), 027(collect 역할에 읽기 정책, 경보 이름을 박스 찾기에 씀), 007(compose), 016(역할별 경로 집합).
 - 담당: 016·021·025 는 hereokay 담당 — 이 PR 은 그 스펙을 고치지 않고 §6 "담당자에게 제안" 을 PR 본문에 적는다(CLAUDE.md §5). 코드(`core/notify.py`·`core/redis_bus.py`·`main.py`)는 이 스펙대로 고친다(027 과 같은 방식). 007·027·029 는 이 레포 주인 담당이라 고친다. §5 허용 목록 밖(사람 승인): `docker-compose.yml`.
 
 ## 3. 동작
 
-### 3.1 경로·공통 규칙 (034b 와 같은 문장)
+### 3.1 경로·공통 규칙 (035 와 같은 문장)
 | 경로 | 역할 |
 |---|---|
 | `/admin/aws` | collector |
@@ -101,7 +101,7 @@
 - 알림 기록: 보낸 알림 → `alerts:log` 한 줄(`delivered` true), 웹훅 500 → false 로 기록, 억제된 두 번째·큐 초과·웹훅 URL 없음 → 기록 없음, Redis 예외 → 다음 알림 전송 계속·WARNING 10분 1줄·Slack 으로 안 감, 1,001건째에 1,000건. 타임라인: 두 출처 시각순·7일 밖 제외·200건 상한·`marketlens-` 밖 경보 제외·깨진 줄 건너뜀·한쪽 실패에도 다른 쪽 항목.
 - 기존 스펙 재검증: `cd server && ruff check . && ruff format --check . && pytest -q`, `cd web && npm run lint && npm run build`. 로컬 Docker: web 이미지 `nginx -t`(029 와 같은 방법).
 
-**배포·런북 뒤 — 사람(완료 조건 아님, status.md 비고 "034a 운영 확인 대기")**: IAM 인라인 정책(런북 — 좁힌 경보 리소스가 되는지부터) 뒤 관리자 페이지에서 `/api/admin/aws` 네 부분 상태를 §7 에 적는다 — 특히 예산이 SCP 로 `denied` 인지 / 박스 셋·경보 17개 / canary 로그가 텍스트 형식인지 / 관리자 접속 기록(029)에 폴링 둘이 없다 / collect 컨테이너에서 §3.4 와 같은 합성 응답 풀기를 한 번 재 §7 에 / 첫 달 청구의 GetMetricData 지표 수.
+**배포·런북 뒤 — 사람(완료 조건 아님, status.md 비고 "034 운영 확인 대기")**: IAM 인라인 정책(런북 — 좁힌 경보 리소스가 되는지부터) 뒤 관리자 페이지에서 `/api/admin/aws` 네 부분 상태를 §7 에 적는다 — 특히 예산이 SCP 로 `denied` 인지 / 박스 셋·경보 17개 / canary 로그가 텍스트 형식인지 / 관리자 접속 기록(029)에 폴링 둘이 없다 / collect 컨테이너에서 §3.4 와 같은 합성 응답 풀기를 한 번 재 §7 에 / 첫 달 청구의 GetMetricData 지표 수.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
@@ -110,21 +110,21 @@
 
 ## 6. 갱신할 문서
 **이 PR 이 고치는 문서**
-- `docs/context/status.md` — admin 행 server 칸 끝에 "· 수집기 관리자 피드 둘(034a) — `/admin/aws`(경보·24시간 지표·canary·예산)·`/admin/alerts`(보낸 Slack 알림 + 경보 이력 7일), 부분별 state·보이는 동안만 호출·전용 스레드 1개", 비고에 "034a 운영 확인 대기(IAM)". slack-alerts 행 server 칸 끝에 "· 보낸 알림 기록 `alerts:log` 1,000건(034a)". 알려진 빚에 `(034a) FilterLogEvents·Budgets 요청 요금과 Budgets 의 SCP 여부 미확인 — 첫 달 청구·런북 확인`, `(034a) 수집기 컨테이너가 CloudWatch·예산 읽기 권한에 닿는다`, `(034a) 알림 기록은 웹훅이 있을 때만 — 억제된 알림은 기록도 없다`, `(034a) 알림 기록에 방문자 정보가 없다는 것은 025 문구 규칙에 기댄다`, `(034a) serve 스왑은 모으지 않는다(027 에이전트 설정은 data 만)`, `(034a) 016·021·025 의 해당 문장이 034a 동작과 다르다 — PR 에 담당자 제안으로 남김, 반영 대기`.
-- `CLAUDE.md` — 스펙 인덱스 034a 행 상태 → DONE.
-- `docs/context/architecture.md` — '핵심 설계 결정' 의 "Redis 를 HTTP 가 만지는 곳" 문장 괄호에 "034a 의 `/admin/alerts` 는 `alerts:log` 읽기". '계약 규칙' 에 한 줄: "관리자 피드(034a)는 부분별 `state`(ok·unconfigured·denied·error·pending)를 담은 200 상태 응답이고, 오류 문장·ARN·계정 ID 를 싣지 않는다 — 외부 호출은 요청이 있을 때만, 실패는 code 만 WARNING". '배포 토폴로지' collect 줄에 "역할에 관리자 읽기 인라인 정책 `marketlens-admin-read`(034a)". '현재 구조' admin 항목에 034a 모듈(collector 라우터·AWS 읽기·전용 실행기·가림·`RedisBus` 메서드 둘·알림기 기록 자리).
+- `docs/context/status.md` — admin 행 server 칸 끝에 "· 수집기 관리자 피드 둘(034) — `/admin/aws`(경보·24시간 지표·canary·예산)·`/admin/alerts`(보낸 Slack 알림 + 경보 이력 7일), 부분별 state·보이는 동안만 호출·전용 스레드 1개", 비고에 "034 운영 확인 대기(IAM)". slack-alerts 행 server 칸 끝에 "· 보낸 알림 기록 `alerts:log` 1,000건(034)". 알려진 빚에 `(034) FilterLogEvents·Budgets 요청 요금과 Budgets 의 SCP 여부 미확인 — 첫 달 청구·런북 확인`, `(034) 수집기 컨테이너가 CloudWatch·예산 읽기 권한에 닿는다`, `(034) 알림 기록은 웹훅이 있을 때만 — 억제된 알림은 기록도 없다`, `(034) 알림 기록에 방문자 정보가 없다는 것은 025 문구 규칙에 기댄다`, `(034) serve 스왑은 모으지 않는다(027 에이전트 설정은 data 만)`, `(034) 016·021·025 의 해당 문장이 034 동작과 다르다 — PR 에 담당자 제안으로 남김, 반영 대기`.
+- `CLAUDE.md` — 스펙 인덱스 034 행 상태 → DONE.
+- `docs/context/architecture.md` — '핵심 설계 결정' 의 "Redis 를 HTTP 가 만지는 곳" 문장 괄호에 "034 의 `/admin/alerts` 는 `alerts:log` 읽기". '계약 규칙' 에 한 줄: "관리자 피드(034)는 부분별 `state`(ok·unconfigured·denied·error·pending)를 담은 200 상태 응답이고, 오류 문장·ARN·계정 ID 를 싣지 않는다 — 외부 호출은 요청이 있을 때만, 실패는 code 만 WARNING". '배포 토폴로지' collect 줄에 "역할에 관리자 읽기 인라인 정책 `marketlens-admin-read`(034)". '현재 구조' admin 항목에 034 모듈(collector 라우터·AWS 읽기·전용 실행기·가림·`RedisBus` 메서드 둘·알림기 기록 자리).
 - `docs/context/dev-setup.md` — `UVICORN_ROOT_PATH` 설명 옆에 같은 방식으로 `ADMIN_AWS_REGION`(compose 가 server 에만 — `server/.env` 에 두지 않는다). '검증용 스모크' 에 `curl -s localhost:8000/admin/aws` → 로컬은 네 부분 `unconfigured`.
 - `docs/context/db.md` — Redis 절에 `alerts:log`(리스트, JSON 줄 최신 1,000건·만료 없음, 두 역할의 알림기가 쓰고 수집기 `/admin/alerts` 가 읽는다, ARN·12자리 숫자는 가려 넣는다).
 - `docs/context/product.md` — 기능 목록 admin 행 설명 끝에 "·CloudWatch 경보·지표·예산·알림 기록".
-- `docs/specs/007-deploy.md` — §3 server 줄에 `ADMIN_AWS_REGION`(034a).
-- `docs/specs/027-observability.md` — §3.6 끝에 "경보 이름 `marketlens-<박스>-memory` 는 034a 가 박스를 찾는 데 쓴다". §3.7 IAM 문장에 "collect 역할에 관리자 읽기 인라인 정책(034a)".
-- `docs/specs/029-admin.md` — §3.1 표에 둘(`= /api/admin/aws`·`= /api/admin/alerts` → 수집기)과 "관리자 피드는 034a·034b". §3.2 접속 기록의 "기록하지 않는다" 목록에 둘.
-- `docs/runbooks/cloudwatch.md` — 새 절 "관리자 읽기 권한(034a)": 인라인 정책(§3.2 액션·리소스, `$ACCOUNT` 변수, 경보는 좁힌 ARN 부터), 확인(CloudShell 두 명령·관리자 페이지 인프라 칸의 네 `state`·예산 조회가 SCP 에 막히는지), 넓히기(안 되는 액션만 `*`, 결과는 034a §7), 되돌리기(정책 삭제).
+- `docs/specs/007-deploy.md` — §3 server 줄에 `ADMIN_AWS_REGION`(034).
+- `docs/specs/027-observability.md` — §3.6 끝에 "경보 이름 `marketlens-<박스>-memory` 는 034 가 박스를 찾는 데 쓴다". §3.7 IAM 문장에 "collect 역할에 관리자 읽기 인라인 정책(034)".
+- `docs/specs/029-admin.md` — §3.1 표에 둘(`= /api/admin/aws`·`= /api/admin/alerts` → 수집기)과 "관리자 피드는 034·035". §3.2 접속 기록의 "기록하지 않는다" 목록에 둘.
+- `docs/runbooks/cloudwatch.md` — 새 절 "관리자 읽기 권한(034)": 인라인 정책(§3.2 액션·리소스, `$ACCOUNT` 변수, 경보는 좁힌 ARN 부터), 확인(CloudShell 두 명령·관리자 페이지 인프라 칸의 네 `state`·예산 조회가 SCP 에 막히는지), 넓히기(안 되는 액션만 `*`, 결과는 034 §7), 되돌리기(정책 삭제).
 
 **담당자에게 제안 — 이 PR 에서 고치지 않는다(PR 본문에 그대로 적는다)**
-- 025 — §2 하지 않는 것의 "알림 이력 저장" → "알림 이력은 034a 가 Redis `alerts:log` 에 남긴다". §3.2 큐 bullet 끝에 "보낸 뒤 결과(2xx 여부)를 기록 함수로 한 줄 남긴다(034a — 보내는 규칙은 그대로)". §4 알림기 목록에 "보낸 알림마다 기록 한 줄, 억제·큐 초과는 기록 없음(034a)".
-- 016 — §3.1 collector 경로 목록에 `/admin/aws`·`/admin/alerts`(034a).
-- 021 — §3.1 collect 설명에 "역할에 관리자 읽기 정책(034a)".
+- 025 — §2 하지 않는 것의 "알림 이력 저장" → "알림 이력은 034 가 Redis `alerts:log` 에 남긴다". §3.2 큐 bullet 끝에 "보낸 뒤 결과(2xx 여부)를 기록 함수로 한 줄 남긴다(034 — 보내는 규칙은 그대로)". §4 알림기 목록에 "보낸 알림마다 기록 한 줄, 억제·큐 초과는 기록 없음(034)".
+- 016 — §3.1 collector 경로 목록에 `/admin/aws`·`/admin/alerts`(034).
+- 021 — §3.1 collect 설명에 "역할에 관리자 읽기 정책(034)".
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
