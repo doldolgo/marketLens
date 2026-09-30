@@ -516,45 +516,52 @@ def _direction_summary(segments: list[Segment]) -> DirectionSummary:
     )
 
 
-def _overall(rows: list[PremiumRow], union: list[Segment]) -> Overall:
-    fwds = [r.fwd for r in rows]
-    revs = [r.rev for r in rows]
-    return Overall(
-        max_kimp_percent=max(fwds),
-        avg_kimp_percent=sum(fwds) / len(fwds),
-        max_reverse_percent=max(revs),
-        avg_reverse_percent=sum(revs) / len(revs),
+def _streak_parts(
+    fwd: _Run, rev: _Run
+) -> tuple[DirectionSummary, DirectionSummary, Overall]:
+    """두 줄기 → (kimp, reverse, overall). fwd/rev 를 절댓값 없이 각각 계산한다."""
+    union = fwd.segments + rev.segments
+    overall = Overall(
+        max_kimp_percent=fwd.peak,
+        avg_kimp_percent=fwd.mean(),
+        max_reverse_percent=rev.peak,
+        avg_reverse_percent=rev.mean(),
         max_duration_seconds=max((s.duration_seconds for s in union), default=0),
         avg_duration_seconds=(
             sum(s.duration_seconds for s in union) / len(union) if union else 0.0
         ),
         segment_count=len(union),
     )
+    return _direction_summary(fwd.segments), _direction_summary(rev.segments), overall
 
 
-def _streak_parts(
-    rows: list[PremiumRow], threshold: float, max_gap: int
-) -> tuple[DirectionSummary, DirectionSummary, Overall]:
-    """행 목록 → (kimp, reverse, overall). fwd/rev 를 절댓값 없이 각각 계산한다."""
-    kimp_segments = _segments([(r.ts, r.fwd) for r in rows], threshold, max_gap)
-    rev_segments = _segments([(r.ts, r.rev) for r in rows], threshold, max_gap)
-    union = kimp_segments + rev_segments
-    return (
-        _direction_summary(kimp_segments),
-        _direction_summary(rev_segments),
-        _overall(rows, union),
-    )
+# start 미지정 시 조회 창과 창 상한 (§3.4, 2026-09-28 사람 결정) — streaks 7일, bulk 1시간.
+# 넘으면 400. start 가 없으면 상한만큼(candles 의 1,440창 상한과 같은 방식)
+STREAKS_MAX_WINDOW_SEC = 7 * 86_400
+BULK_MAX_WINDOW_SEC = 3_600
 
 
-# start 미지정 시 조회 창 (§3.4) — 전 구간 조회가 Influx 를 죽이므로 최근 7일만
-DEFAULT_WINDOW_SEC = 7 * 86_400
-
-
-def default_start(start: int | None, end_eff: int) -> int:
-    """start 가 없으면 end − 7일 (음수는 0 으로 — Flux range 가 epoch 이전을 못 받는다)."""
-    if start is not None:
-        return start
-    return max(0, end_eff - DEFAULT_WINDOW_SEC)
+def _streaks_window(
+    start: int | None, end: int | None, *, limit: int, path: str
+) -> tuple[int, int]:
+    """(start, end) — `end` 없으면 지금+1초, `start` 없으면 `end − 상한`(음수는 0), `end ≤ start`·상한 초과는 400."""
+    end_eff = end if end is not None else int(time.time()) + 1
+    if start is not None and end_eff <= start:
+        raise HistoryApiError(
+            400,
+            "invalid_request",
+            f"end({end_eff})가 start({start}) 이하입니다.",
+        )
+    # Flux range 가 epoch 이전을 못 받는다 — 음수는 0 으로
+    start_eff = start if start is not None else max(0, end_eff - limit)
+    if end_eff - start_eff > limit:
+        raise HistoryApiError(
+            400,
+            "invalid_request",
+            f"window exceeds limit: {path} 는 한 번에 {limit}초까지입니다.",
+            {"limitSec": limit},
+        )
+    return start_eff, end_eff
 
 
 def build_streaks(
@@ -568,36 +575,32 @@ def build_streaks(
     end: int | None,
     max_gap: int,
 ) -> StreaksResponse:
-    now_sec = int(time.time())
-    end_eff = end if end is not None else now_sec + 1
-    if end is not None and end_eff <= 0:
+    if end is not None and end <= 0:
         # start 기본값(첫 ts ≥ 0)보다 항상 작거나 같다 — end ≤ start 규칙의 특수형
-        raise HistoryApiError(400, "invalid_request", f"end({end_eff})가 0 이하입니다.")
-    if start is not None and end_eff <= start:
-        raise HistoryApiError(
-            400,
-            "invalid_request",
-            f"end({end_eff})가 start({start}) 이하입니다.",
-        )
-    start_eff = default_start(start, end_eff)
-    rows = reader.query_premium(
-        dom=dom,
-        fx=fx,
-        base=base.upper(),
-        start=start_eff,
-        stop=end_eff,
+        raise HistoryApiError(400, "invalid_request", f"end({end})가 0 이하입니다.")
+    start_eff, end_eff = _streaks_window(
+        start, end, limit=STREAKS_MAX_WINDOW_SEC, path="/history/streaks"
     )
-    if not rows:
+    base_u = base.upper()
+    runs = _stream_runs(
+        reader.stream_premium(
+            dom=dom, fx=fx, base=base_u, start=start_eff, stop=end_eff
+        ),
+        threshold,
+        max_gap,
+    )
+    fwd, rev = runs.get((base_u, "fwd")), runs.get((base_u, "rev"))
+    if fwd is None or rev is None:
         raise HistoryApiError(
             404,
             "market_data_not_found",
-            f"{base.upper()} 의 기록이 없습니다.",
-            {"dom": dom, "fx": fx, "base": base.upper()},
+            f"{base_u} 의 기록이 없습니다.",
+            {"dom": dom, "fx": fx, "base": base_u},
         )
-    kimp, reverse, overall = _streak_parts(rows, threshold, max_gap)
-    last_ts = rows[-1].ts
+    kimp, reverse, overall = _streak_parts(fwd, rev)
+    last_ts = fwd.last_ts
     return StreaksResponse(
-        base=base.upper(),
+        base=base_u,
         dom=dom,
         fx=fx,
         threshold_percent=threshold,
@@ -607,7 +610,7 @@ def build_streaks(
         kimp=kimp,
         reverse=reverse,
         overall=overall,
-        scanned=len(rows),
+        scanned=fwd.n,
         last_updated_ts=last_ts,
         last_updated=_kst(last_ts),
         fetched_at=_now_ms(),
@@ -624,31 +627,25 @@ def build_bulk(
     end: int | None,
     max_gap: int,
 ) -> BulkResponse:
-    now_sec = int(time.time())
-    end_eff = end if end is not None else now_sec + 1
-    if start is not None and end_eff <= start:
-        raise HistoryApiError(
-            400,
-            "invalid_request",
-            f"end({end_eff})가 start({start}) 이하입니다.",
-        )
-    start_eff = default_start(start, end_eff)
-    rows = reader.query_premium(
-        dom=dom, fx=fx, base=None, start=start_eff, stop=end_eff
+    start_eff, end_eff = _streaks_window(
+        start, end, limit=BULK_MAX_WINDOW_SEC, path="/history/streaks/bulk"
     )
-    by_base: dict[str, list[PremiumRow]] = {}
-    for row in rows:
-        by_base.setdefault(row.base, []).append(row)
-
+    runs = _stream_runs(
+        reader.stream_premium(dom=dom, fx=fx, base=None, start=start_eff, stop=end_eff),
+        threshold,
+        max_gap,
+    )
     coins: list[BulkCoin] = []
-    for base in sorted(by_base):
-        coin_rows = by_base[base]
-        kimp, reverse, overall = _streak_parts(coin_rows, threshold, max_gap)
+    for base in sorted({b for b, _ in runs}):
+        fwd, rev = runs.get((base, "fwd")), runs.get((base, "rev"))
+        if fwd is None or rev is None:
+            continue  # 한쪽 방향뿐인 코인은 반쪽 점뿐이다 — 기록 없음과 같다
+        kimp, reverse, overall = _streak_parts(fwd, rev)
         coins.append(
             BulkCoin(
                 base=base,
-                scanned=len(coin_rows),
-                last_ts=coin_rows[-1].ts,
+                scanned=fwd.n,
+                last_ts=fwd.last_ts,
                 kimp=kimp,
                 reverse=reverse,
                 overall=overall,
@@ -668,6 +665,17 @@ def build_bulk(
     )
 
 
+# /history/events 의 start 미지정 시 조회 창 (013 §3.4) — 최근 7일
+DEFAULT_WINDOW_SEC = 7 * 86_400
+
+
+def default_start(start: int | None, end_eff: int) -> int:
+    """start 가 없으면 end − 7일 (음수는 0 으로 — Flux range 가 epoch 이전을 못 받는다)."""
+    if start is not None:
+        return start
+    return max(0, end_eff - DEFAULT_WINDOW_SEC)
+
+
 # ── /history/events (스펙 013 §3.4) ─────────────────────────────────────────
 
 
@@ -684,14 +692,7 @@ def build_events(
 ) -> EventsResponse:
     """Influx 의 닫힌 사건 + 메모리의 진행 중 사건. 구간 판정은 start_ts 기준(`start ≤ start_ts < end`)."""
     now = now_sec if now_sec is not None else int(time.time())
-    end_eff = end if end is not None else now + 1
-    if start is not None and end_eff <= start:
-        raise HistoryApiError(
-            400,
-            "invalid_request",
-            f"end({end_eff})가 start({start}) 이하입니다.",
-        )
-    start_eff = default_start(start, end_eff)
+    start_eff, end_eff = _events_window(start, end, now)
     base_u = base.upper() if base is not None else None
     rows = reader.query_premium_events(
         start=start_eff, stop=end_eff, dom=dom, dir=dir, base=base_u
@@ -716,17 +717,7 @@ def build_events(
             net_dom=r.net_dom,
             net_fx=r.net_fx,
         )
-    for ev in open_events:
-        if dom is not None and ev.dom != dom:
-            continue
-        if dir is not None and ev.dir != dir:
-            continue
-        if base_u is not None and ev.base != base_u:
-            continue
-        if not (start_eff <= ev.start_ts < end_eff):
-            continue
-        if now - ev.start_ts <= MIN_DURATION_SEC:
-            continue  # 열린 지 60초를 넘긴 것만 — 1분 못 넘길 스파이크는 아직 사건이 아니다
+    for ev in _open_in_window(open_events, dom, dir, base_u, start_eff, end_eff, now):
         by_key[(ev.dom, ev.fx, ev.base, ev.dir, ev.start_ts)] = EventOut(
             base=ev.base,
             dom=ev.dom,
@@ -742,7 +733,9 @@ def build_events(
             net_dom=ev.net_dom,
             net_fx=ev.net_fx,
         )
-    events = sorted(by_key.values(), key=lambda e: (-e.start_ts, e.base))
+    events = sorted(
+        by_key.values(), key=lambda e: (-e.start_ts, e.base, e.dom, e.fx, e.dir)
+    )
     return EventsResponse(
         start_ts=start_eff,
         end_ts=end_eff,
