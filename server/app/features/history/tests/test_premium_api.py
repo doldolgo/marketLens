@@ -61,42 +61,17 @@ def test_week_window_and_events() -> None:
     )
 
 
-def test_month_window_calendar_boundaries() -> None:
-    # 주/월 구간 경계가 ISO 주·달력 월과 일치 (§4)
-    reader = FakeInfluxReader()
-    reader.seed(
-        "upbit",
-        "binance",
-        "BTC",
-        [
-            (ts_of(2025, 2, 28, 23, 59, 59), 1.0, 0.1),  # 2월 — 밖
-            (ts_of(2025, 3, 1), 2.0, 0.2),
-            (ts_of(2025, 3, 31, 23, 59, 59), 3.0, 0.3),
-            (ts_of(2025, 4, 1), 4.0, 0.4),  # 4월 — 밖
-        ],
-    )
-    client = make_client(reader)
-    res = client.get(
+def test_month_is_400_before_reading_storage() -> None:
+    # 한 번에 1주까지 — unit=month 는 400 이고 저장소를 읽지 않는다(읽었다면 실패 리더가 503 을 냈다) (§3.4)
+    reader = seeded_reader()
+    reader.fail = True
+    res = make_client(reader).get(
         "/history/premium",
         params={"base": "BTC", "unit": "month", "date": "2025-03-15"},
     )
-    assert res.status_code == 200
-    body = res.json()
-    assert body["count"] == 2
-    assert body["start"] == "2025-03-01T00:00:00Z"
-    assert body["end"] == "2025-04-01T00:00:00Z"
-
-
-def test_december_month_rolls_to_next_year() -> None:
-    reader = FakeInfluxReader()
-    reader.seed("upbit", "binance", "BTC", [(ts_of(2025, 12, 31, 12), 1.0, 0.0)])
-    client = make_client(reader)
-    res = client.get(
-        "/history/premium",
-        params={"base": "BTC", "unit": "month", "date": "2025-12-05"},
-    )
-    assert res.status_code == 200
-    assert res.json()["end"] == "2026-01-01T00:00:00Z"
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "invalid_request"
+    assert "unit=week" in res.json()["error"]["message"]
 
 
 def test_default_date_is_today_utc() -> None:
@@ -166,10 +141,9 @@ def test_storage_unavailable_503() -> None:
 
 def test_extreme_date_returns_400_not_500():
     client = make_client(FakeInfluxReader())
-    for unit in ("month", "week"):
-        res = client.get(f"/history/premium?base=BTC&unit={unit}&date=9999-12-31")
-        assert res.status_code == 400
-        assert res.json()["error"]["code"] == "invalid_request"
+    res = client.get("/history/premium?base=BTC&unit=week&date=9999-12-31")
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "invalid_request"
 
 
 def test_non_dashed_date_formats_are_rejected():

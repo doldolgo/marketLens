@@ -5,6 +5,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import NamedTuple
 
 from app.core.networks import Network
 
@@ -75,9 +76,12 @@ class StreamState:
     )
 
 
-@dataclass(frozen=True)
-class TickRow:
-    """틱 1행 — 자격을 통과한 (국내, 해외, 코인) 조합의 김프 원값 (009 §3.2)."""
+class TickRow(NamedTuple):
+    """틱 1행 — 자격을 통과한 (국내, 해외, 코인) 조합의 김프 원값 (009 §3.2).
+
+    NamedTuple 이다(001 §3.6, 2026-09-28) — 매초 1,500행 가까이 만들어지므로 필드를 하나씩 넣는 frozen
+    dataclass 보다 생성이 약 4배 빠르고 행마다 속성 사전이 없다. 불변·속성 이름·순서·기본값은 그대로다.
+    """
 
     dom: str
     fx: str

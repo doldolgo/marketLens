@@ -118,6 +118,29 @@ def test_sorted_start_desc_then_base_asc() -> None:
     assert [e["base"] for e in body["events"]] == ["BTC", "AAVE", "ZRX"]
 
 
+def test_same_start_and_coin_are_ordered_by_dom_fx_dir_whatever_the_storage_order() -> (
+    None
+):
+    # 사건 목록 조회는 정렬하지 않는다 — 같은 시작·같은 코인은 dom·fx·dir 오름차순으로 응답이 정한다
+    routes = [
+        ("upbit", "bybit", "kimp"),
+        ("bithumb", "binance", "reverse"),
+        ("upbit", "binance", "reverse"),
+        ("upbit", "binance", "kimp"),
+    ]
+    for order in (routes, routes[::-1]):
+        reader = FakeInfluxReader()
+        for dom, fx, dir in order:
+            reader.seed_event("RVN", T0 + 100, T0 + 200, dom=dom, fx=fx, dir=dir)
+        body = get(make_client(reader), start=T0, end=T0 + 1000).json()
+        assert [(e["dom"], e["fx"], e["dir"]) for e in body["events"]] == [
+            ("bithumb", "binance", "reverse"),
+            ("upbit", "binance", "kimp"),
+            ("upbit", "binance", "reverse"),
+            ("upbit", "bybit", "kimp"),
+        ]
+
+
 def test_ongoing_event_from_memory_and_short_one_is_hidden() -> None:
     now = int(time.time())
     det = detector_with_open(now - 4800, now=now)

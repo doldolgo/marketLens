@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 import zlib
 from collections.abc import Awaitable, Callable
@@ -46,6 +47,10 @@ EXCHANGE_INFO_QUERY = "?showPermissionSets=false&symbolStatus=TRADING"
 EXCHANGE_INFO_URL = REST_URL + EXCHANGE_INFO_PATH + EXCHANGE_INFO_QUERY
 SYMBOLS_KEY = "symbols:all"  # 매초 오는 exchangeInfo 본문의 원문 싱크 key — 분당 마지막 1건 (001 §3.7)
 _BODY_LIMIT = 500  # 핸드셰이크 거부 응답 본문 상한 — 001 §3.1 과 같은 500자
+# exchangeInfo 에서 매 응답 바뀌는 것은 본문 머리의 serverTime 하나다 — 이것만 빼고 직전 본문과 비교한다 (§3.3)
+_SERVER_TIME = re.compile(rb'"serverTime":\s*\d+')
+# 머리 몇 바이트 안에서만 찾는다 — 못 찾으면 본문 전체로 비교한다(매번 달라 파싱으로 간다)
+_SERVER_TIME_WITHIN = 256
 
 SHARDS = 3
 PARAMS_PER_MESSAGE = 100  # SUBSCRIBE 한 메시지의 params 상한 (§3.3)
@@ -136,11 +141,18 @@ class BinanceStream:
         self._wake = asyncio.Event()  # set_universe 가 재조정 루프를 깨운다
         self._rebalance: asyncio.Task[None] | None = None
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다
+        # 직전에 맵까지 만든 200 응답의 비교용 바이트(serverTime 제외) — 같으면 파싱·맵 재생성을 건너뛴다 (§3.3)
+        self._symbols_body: bytes | None = None
 
     # --- 심볼 집합 (ForeignSymbolSource, §3.3) ---
 
     async def refresh(self, client: httpx.AsyncClient) -> int:
-        """exchangeInfo 1회 → TRADING·USDT 심볼 맵. 응답 본문은 해석 전에 원문 싱크로(`symbols:all`)."""
+        """exchangeInfo 1회 → TRADING·USDT 심볼 맵. 응답 본문은 해석 전에 원문 싱크로(`symbols:all`).
+
+        원문 기록은 매 응답 한다. 200 본문에서 serverTime 만 뺀 바이트가 직전에 맵을 만든 응답과 같으면
+        파싱·맵 재생성을 건너뛴다 — 2.5MB 파싱이 매초 이벤트 루프를 멈추는데 목록은 하루 몇 번만 바뀐다.
+        바이트가 같으면 맵도 같으므로 낡을 여지가 없다 (§3.3).
+        """
         url = EXCHANGE_INFO_URL
         try:
             resp = await client.get(url)
@@ -158,6 +170,9 @@ class BinanceStream:
         self._record(
             self.id, f"rest:{EXCHANGE_INFO_PATH}", self._clock(), resp.text, SYMBOLS_KEY
         )
+        comparable = _without_server_time(resp.content)
+        if resp.status_code == 200 and comparable == self._symbols_body:
+            return 1
         if resp.status_code != 200:
             raise ExchangeApiError(
                 self.id,
@@ -194,6 +209,7 @@ class BinanceStream:
             )  # 둘 이상이면 처음 것
         self._symbol_of = symbol_of
         self._base_of = {symbol: base for base, symbol in symbol_of.items()}
+        self._symbols_body = comparable
         return 1
 
     def bases(self) -> set[str]:
@@ -508,7 +524,11 @@ class BinanceStream:
                 continue
             shard.state.last_message_at = at
             shard.backoff = BACKOFF_START  # 구독까지 성공했다는 증거 = 첫 시세 프레임
-            self._publish()
+            # 시세 프레임이 바꾸는 집계값은 last_message_at 하나뿐이다 — 샤드 3개를 다시 집계하지 않고
+            # 올리기만 한다. 연결·끊김·구독 변경은 그 자리에서 _publish 가 전체를 다시 집계한다 (§3.5)
+            last = self._state.last_message_at
+            if last is None or at > last:
+                self._state.last_message_at = at
 
     def _on_depth(self, symbol: str, base: str, data: dict[str, Any], at: int) -> None:
         # depth20 에는 거래소 시각이 없다 — 체결가가 없을 때의 price_timestamp 는 수신 시각 (§3.4)
@@ -530,6 +550,12 @@ class BinanceStream:
             price=float(data["c"]),
             price_timestamp=int(data["E"]),
         )
+
+
+def _without_server_time(content: bytes) -> bytes:
+    """비교용 바이트 — 본문 머리의 `"serverTime":<ms>` 하나만 뺀 것. 없으면 본문 그대로."""
+    m = _SERVER_TIME.search(content, 0, _SERVER_TIME_WITHIN)
+    return content if m is None else content[: m.start()] + content[m.end() :]
 
 
 def _decode(text: str) -> dict[str, Any] | None:

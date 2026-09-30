@@ -944,3 +944,110 @@ async def test_handshake_rejection_without_body_records_nothing() -> None:
     stream, connector, _, raw, _, _ = await build([HandshakeRejected(418)])
     await run_until_exhausted(stream, connector)
     assert raw.payloads("ws-handshake:/stream") == []
+
+
+# --- 매초 목록 건너뛰기 (§3.3) ---
+
+
+def _count_parses(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """응답 본문 JSON 파싱 횟수 — 건너뛰었는지는 이 수로만 보인다."""
+    calls = [0]
+    real = httpx.Response.json
+
+    def counting(self: httpx.Response, **kw: Any) -> Any:
+        calls[0] += 1
+        return real(self, **kw)
+
+    monkeypatch.setattr(httpx.Response, "json", counting)
+    return calls
+
+
+def _info_body(server_time: int, symbols: list[str]) -> bytes:
+    """실물처럼 serverTime 이 머리에 있는 exchangeInfo 본문."""
+    body = exchange_info(symbols)
+    return json.dumps(
+        {
+            "timezone": "UTC",
+            "serverTime": server_time,
+            "rateLimits": [],
+            "symbols": body["symbols"],
+        }
+    ).encode()
+
+
+async def test_exchange_info_that_differs_only_in_server_time_is_recorded_but_not_parsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parses = _count_parses(monkeypatch)
+    responses = [
+        httpx.Response(200, content=_info_body(T0, ["BTCUSDT"])),
+        httpx.Response(
+            200, content=_info_body(T0 + 1_000, ["BTCUSDT"])
+        ),  # serverTime 만 다르다
+        httpx.Response(503, content=b"busy"),  # 실패는 직전 목록 유지
+        httpx.Response(200, content=_info_body(T0 + 3_000, ["BTCUSDT"])),
+        httpx.Response(
+            200, content=_info_body(T0 + 4_000, ["BTCUSDT", "ETHUSDT"])
+        ),  # 상장
+    ]
+    store, sink = store_with_universe(set())
+    raw = RawLog()
+    stream = BinanceStream(store=store, sink=sink, record=raw)
+    client = _client(lambda r: responses.pop(0))
+    assert await stream.refresh(client) == 1 and parses[0] == 1
+    assert await stream.refresh(client) == 1 and parses[0] == 1  # 파싱·맵 재생성 없음
+    assert stream.bases() == {"BTC"}
+    with pytest.raises(ExchangeApiError):
+        await stream.refresh(client)
+    assert await stream.refresh(client) == 1 and parses[0] == 1
+    assert (
+        await stream.refresh(client) == 1 and parses[0] == 2
+    )  # 목록이 바뀐 초에만 파싱
+    assert stream.bases() == {"BTC", "ETH"}
+    # 원문 기록은 매 응답 — 건너뛴 응답도 받은 텍스트 그대로
+    assert raw.keys(REST_SOURCE) == ["symbols:all"] * 5
+    assert json.loads(raw.payloads(REST_SOURCE)[1])["serverTime"] == T0 + 1_000
+
+
+async def test_a_body_that_failed_to_parse_is_not_remembered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """맵을 만들지 못한 200 본문은 기억하지 않는다 — 같은 본문이 다시 와도 다시 실패다."""
+    parses = _count_parses(monkeypatch)
+    bad = json.dumps({"timezone": "UTC", "serverTime": T0, "code": -1}).encode()
+    store, sink = store_with_universe(set())
+    stream = BinanceStream(store=store, sink=sink, record=RawLog())
+    client = _client(lambda r: httpx.Response(200, content=bad))
+    for expected in (1, 2):
+        with pytest.raises(ExchangeApiError):
+            await stream.refresh(client)
+        assert parses[0] == expected
+
+
+# --- 집계 상태 (§3.5) ---
+
+
+async def test_quote_frames_only_raise_last_message_at_and_leave_the_rest() -> None:
+    """시세 프레임은 집계의 last_message_at 만 올린다 — 시계가 뒤로 간 프레임이 집계를 내리지 않고,
+    연결·구독 수는 연결·구독 변경 때 정해진 값 그대로다."""
+    socks = [GatedSocket() for _ in range(SHARDS)]
+    stream, per_shard, clock, store, _ = await build_three(list(socks))
+    stream.start()
+    await asyncio.sleep(0.01)
+    state = store.stream_state("binance")
+    assert state is not None and state.connected and state.subscribed == 6
+    clock.now = T0 + 5_000
+    socks[0].push(depth(per_shard[0][0]))
+    await until(socks[0].delivered)
+    assert state.last_message_at == T0 + 5_000
+    clock.now = T0 + 3_000  # 시계가 뒤로 간 프레임
+    socks[1].push(depth(per_shard[1][0]))
+    await until(socks[1].delivered)
+    assert state.last_message_at == T0 + 5_000
+    assert state.connected and state.subscribed == 6
+    clock.now = T0 + 9_000
+    socks[2].push(mini(per_shard[2][0]))
+    await until(socks[2].delivered)
+    assert state.last_message_at == T0 + 9_000
+    await stream.aclose()
+    assert not state.connected and state.subscribed == 0

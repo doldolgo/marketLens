@@ -21,6 +21,8 @@ class FakeInflux:
         self.rows: list[PremiumEventRow] = []
         self.query_fail = False
         self.query_delay = 0.0
+        self.query_calls = 0
+        self.query_timeouts: list[float | None] = []  # 복원 조회가 받은 HTTP 타임아웃
 
     def write(self, points: list[InfluxPoint]) -> None:
         self.write_calls += 1
@@ -45,9 +47,42 @@ class FakeInflux:
             raise InfluxUnavailableError("조회 실패 (테스트)")
         return [r for r in self.rows if start <= r.start_ts < stop]
 
+    def query_ongoing_events(
+        self, *, start: int, stop: int, timeout_sec: float | None = None
+    ) -> list[PremiumEventRow]:
+        """실물의 두 단계 조회와 같은 결과 — 창 안에서 `end_ts == 0` 인 점만."""
+        self.query_calls += 1
+        self.query_timeouts.append(timeout_sec)
+        if self.query_delay:
+            time.sleep(self.query_delay)
+        if self.query_fail:
+            raise InfluxUnavailableError("조회 실패 (테스트)")
+        return [r for r in self.rows if start <= r.start_ts < stop and r.end_ts == 0]
+
     def only(self) -> dict[str, object]:
         assert len(self.data) == 1
         return next(iter(self.data.values()))
+
+
+class FakeSnapshots:
+    """열린 사건 사본 저장소 fake — core.redis_bus.RedisBus 의 open_events_load/save 시그니처."""
+
+    def __init__(self, data: str | None = None) -> None:
+        self.data = data
+        self.saves: list[str] = []
+        self.load_fail = False
+        self.save_fail = False
+
+    async def open_events_load(self) -> str | None:
+        if self.load_fail:
+            raise ConnectionError("Redis 불달 (테스트)")
+        return self.data
+
+    async def open_events_save(self, data: str) -> None:
+        if self.save_fail:
+            raise ConnectionError("Redis 불달 (테스트)")
+        self.data = data
+        self.saves.append(data)
 
 
 def row(

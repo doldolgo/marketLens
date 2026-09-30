@@ -35,13 +35,6 @@ export interface SpreadRow {
   dayChg: number | null
 }
 
-/** io 맵 항목 — 키는 "{sym}|{거래소 표시명}". */
-export interface IoEntry {
-  dep: IoState
-  wd: IoState
-  net: string
-}
-
 // ── mock 탭용 데이터 모양 (§3.6~3.10) ──────────────────────────────────────
 
 /** 현물 항목 — off 는 기준가 대비 편차 %. */
@@ -154,14 +147,12 @@ export interface Feed {
   spreads: SpreadRow[]
   /** USDT/KRW 암묵환율. 0 = 아직 없음. */
   rate: number
-  /** 키 "{sym}|{거래소 표시명}" → 입출금 상태. */
-  io: Record<string, IoEntry>
   markets: MockMarket[]
   /** /health/collect 마지막 응답 — 첫 응답 전 null (011). */
   health: HealthData | null
   flowAddrs: FlowAddr[]
   flowRows: FlowRow[]
-  /** spreads 행 + rate 통째 교체 — 017 구독이 snapshot·delta 마다 호출. io 는 새 행들로부터 재구성. */
+  /** spreads 행 + rate 통째 교체 — 017 구독이 snapshot·delta 마다 호출. 받은 배열을 그대로 쓴다. */
   replace(rows: SpreadRow[], rate: number): void
   /** 수집 상태 적용 — 011 이 5초 폴링으로 호출. */
   setHealth(data: HealthData): void

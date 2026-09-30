@@ -180,3 +180,20 @@ async def test_injected_recorder_receives_each_cycle_body() -> None:
             ("bithumb", "rest:/public/assetsstatus/multichain/ALL"),
         ]
     )  # 병렬 조회라 도착 순서는 정하지 않는다 — 키 없는 두 public 조회기만 원문이 있다 (020)
+
+
+async def test_apply_hangs_the_cached_network_list_without_copying() -> None:
+    """망 판정 메모(core, §3.7)가 맞으려면 틱마다 같은 목록 객체여야 한다 — 사본을 만들지 않는다 (§3.5)."""
+    _, client = routing_client(lambda: httpx.Response(200, json=_GOOD_BITHUMB))
+    service = keyless_service()
+    await service.refresh_if_due(client)
+    first, second = make_row("bithumb", "BTC"), make_row("bithumb", "BTC")
+    service.apply([first], "bithumb")
+    service.apply([second], "bithumb")  # 다음 틱
+    assert first.networks is second.networks
+    assert [n.code for n in first.networks] == ["BTC"]
+    # 모름인 행은 모두 같은 빈 목록 하나를 나눠 쓴다
+    etc, up = make_row("bithumb", "ETC"), make_row("upbit", "BTC")
+    service.apply([etc], "bithumb")
+    service.apply([up], "upbit")
+    assert etc.networks == [] and etc.networks is up.networks

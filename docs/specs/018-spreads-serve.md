@@ -21,12 +21,13 @@
 
 ### 3.1 `GET /spreads` — 두 역할 모두, Redis 에서 읽는다
 - 쿼리 파라미터 **없음.** `notional` 을 주면 값이 무엇이든 **400** `notional_fixed`, message "체결 규모는 $1,000 고정입니다. notional 쿼리는 받지 않습니다." — 옛 호출자(구 번들 탭·스크립트)가 다른 규모의 표를 받았다고 착각하지 않게 하기 위해서다. 에러 포장은 003 과 같은 `{"error":{"code","message","detail"}}`, detail 은 `{"notional": <받은 값>}`. 이 400 은 Redis 를 만지기 전에 나므로 want 도 쓰지 않는다.
-- 응답 200: Redis 키 `spreads:latest` 의 값을 **그대로** 돌려준다(017 §3.1 이 저장한 JSON — camelCase, `notional: 1000`, `rows` 19키, `warnings`, `rate`, `dataReceivedAt`, `fetchedAt`). 파싱·재직렬화하지 않는다 — 수집이 만든 바이트가 곧 응답이다. `Content-Type: application/json`, 기존 GZip 미들웨어 적용.
-- 키가 없으면 **404** `market_data_not_found`, message "스프레드 표가 아직 없습니다. 수집이 표를 만드는 중이거나 멈춰 있습니다.", detail `{"key": "spreads:latest"}`. 017 의 `waiting` 과 같은 상황이다 — 수집 기동 직후, 첫 접속 뒤 최대 5초, 수집 정지.
+- 응답 200: Redis 키 `spreads:latest` 의 값을 **그대로** 돌려준다(017 §3.1 이 저장한 JSON — camelCase, `notional: 1000`, `rows` 19키, `warnings`, `rate`, `dataReceivedAt`, `fetchedAt`). 파싱·재직렬화하지 않는다 — 수집이 만든 바이트가 곧 응답이다. `Content-Type: application/json`.
+- **gzip 을 받는 요청(`Accept-Encoding` 에 `gzip`)에는 표 텍스트가 바뀔 때 한 번만 레벨 6 으로 압축해 둔 바이트를 준다(2026-09-28 사람 결정)** — `Content-Encoding: gzip`·`Vary: Accept-Encoding` 을 붙이고, 풀면 키의 바이트 그대로다. 캐시는 앱마다 한 칸(마지막 텍스트와 그 압축 바이트)이다. 읽은 텍스트가 직전과 같으면 다시 압축하지 않고, 압축이 도는 동안 같은 텍스트로 온 요청은 같은 압축을 기다린다. 압축은 스레드에서 한다. gzip 을 받지 않는 요청은 키의 바이트를 압축 없이 받는다. 표는 1초에 한 장뿐인데 요청마다 790KB 를 다시 압축하면(레벨 9 로 요청당 44ms) api CPU 가 요청 수에 비례한다 — 브라우저는 부르지 않고 공개 주소에도 이 경로가 없지만(028) 관리자 화면·박스 안 호출이 몇 번을 부르든 압축은 표 1장당 한 번이게 한다.
+- 키가 없으면 **404** `market_data_not_found`, message "스프레드 표가 아직 없습니다. 수집이 표를 만드는 중이거나 멈춰 있습니다.", detail `{"key": "spreads:latest"}`. 017 의 `waiting` 과 같은 상황이다 — 수집 기동 직후(첫 게시 전)나 수집 정지(키 TTL 10초 만료).
 - Redis 불달(연결 실패·타임아웃)이면 **503** `redis_unavailable`, message "Redis 에 연결할 수 없습니다.", detail `{"reason": <드라이버 오류 문자열>}` — 016 의 Influx 불달 503 과 같은 톤. 이 요청은 want 도 못 쓴다. 요청마다 새로 시도한다(백오프 없음).
-- **`spreads:want` 갱신**: 200·404 어느 쪽이든 요청마다 `SET spreads:want 1 EX 15` 를 같이 한다(읽기와 한 왕복). curl·스크립트처럼 `GET` 만 부르는 호출자가 있는 동안에도 수집이 표를 만들어야 하기 때문이다(브라우저는 부르지 않는다 — 017 §3.4). 017 의 허브가 5초마다 하는 갱신과 같은 키·같은 TTL 이라 서로 방해하지 않는다. 첫 호출은 404 를 받고, 수집이 5초 안에 원함을 읽어 표를 만들면 그 뒤 호출부터 200 이다 — 017 의 "첫 접속자는 최대 5초" 와 같은 대기.
+- **`spreads:want` 갱신**: 200·404 어느 쪽이든 요청마다 `SET spreads:want 1 EX 15` 를 같이 한다(읽기와 한 왕복). 수집은 이 키를 읽지 않고 접속자와 무관하게 매 틱 표를 만든다(017 §3.1) — 키는 누가 표를 보고 있는지 남기는 흔적으로만 쓰인다. 017 의 허브가 5초마다 하는 갱신과 같은 키·같은 TTL 이라 서로 방해하지 않는다. 수집이 게시 중이면 첫 호출부터 200 이다.
 - `collector` 역할(로컬 단일 프로세스·배포의 `server` 컨테이너)도 **같은 핸들러**다 — 메모리를 읽지 않는다. 로컬 개발은 017 부터 dev compose 의 Redis 가 필요했으므로 조건이 늘지 않는다. 배포의 `server` 컨테이너에는 nginx 가 `/api/spreads` 를 보내지 않으므로 이 경로로 요청이 오지 않는다.
-- 응답 시간: 017 실측 표 1장 238KB 라 Redis 읽기는 1ms 급이고 비용은 GZip 뿐이다. 016 의 `api` 가 그대로 감당한다.
+- 응답 시간: Redis 읽기는 1ms 급이고 압축은 표가 바뀐 뒤 첫 요청에서 한 번뿐이다. 016 의 `api` 가 그대로 감당한다.
 
 ### 3.2 수집 프로세스 — 표를 만들지 않는 조건 (003 §3.2 의 404 조건이 여기로 옮겨온다)
 017 §3.1 의 게시기가 매초 표를 만들 때, 다음이면 그 회차는 **표를 만들지 않고 게시하지 않는다**(경고 없음 — 수집 기동 직후 정상 상태다). 키 `spreads:latest` 는 직전 값이 TTL 10초로 남았다가 사라진다.
@@ -47,18 +48,19 @@
 - **Redis 만 죽음**: `/ws/spreads` 는 `waiting`, `GET /spreads` 는 503 → FE 는 017 §3.4 규칙대로 직전 표를 지우지 않은 채 재연결을 반복한다. 표 갱신은 Redis 가 돌아올 때까지 멈춘다. 수집 프로세스의 메모리에는 표가 있지만 **꺼내는 길을 두지 않는다**(§1 결정).
 - **수집 재시작**: 키가 10초 뒤 만료 → 404 → 첫 게시 뒤 200. 그 사이 FE 는 직전 표 유지(stale 로 감).
 - **api 재시작**: 요청 단위라 상태 없음. nginx 가 재시작 중엔 502.
-- **want 만 갱신되고 아무도 안 봄**: `GET` 호출자가 사라지면 키가 15초 뒤 만료되고 수집이 다음 5초 읽기에서 멈춘다 — 017 §3.6 과 같다.
+- **want 만 갱신되고 아무도 안 봄**: `GET` 호출자가 사라지면 키가 15초 뒤 만료된다. 수집은 이 키와 무관하게 표를 계속 만든다(017 §3.1).
 - **옛 번들 탭**(`GET /spreads?notional=10000` 을 계속 부르는 브라우저 — 09-14 실측 1건): 400 을 받는다. 새로고침하면 사라진다.
 
 ## 4. 검증
 - `GET /spreads`: 키가 있으면 200 이고 본문 바이트가 키 값과 같다 / 키가 없으면 404 `market_data_not_found` / Redis 불달이면 503 `redis_unavailable` / `notional` 을 주면 400 `notional_fixed`(값 `1000` 이어도)
 - `GET /spreads` 요청마다 `spreads:want` 가 TTL 15초로 쓰인다(200·404 모두) / Redis 불달이면 안 쓰인다
+- gzip 을 받으면 `Content-Encoding: gzip`·`Vary: Accept-Encoding` 이고 풀면 키 바이트 그대로다 / 같은 표를 두 번 받으면 압축은 1번이고 바이트가 같으며 레벨 6 압축과 같다 / 키가 바뀌면 다시 1번 / gzip 을 받지 않으면 키 바이트 그대로 (`test_spreads_api.py`)
 - 두 역할에서 `GET /spreads` 가 메모리를 읽지 않는다 — 메모리에 행이 있고 Redis 키가 없으면 404
 - 게시기: 환율 없음 / 국내 또는 해외 스냅샷 없음 → 그 회차 게시 없음, 경고 없음, 다음 회차에 조건이 풀리면 게시
 - 역할: `api` 라우트 집합에 `/spreads` 포함, 그 외 404 유지 (`tests/test_role.py`)
 - nginx 계약: `/api/spreads` 가 `api:8000` 으로 가고 접두가 제거되며 쿼리가 유지된다, `/api/spreads` 뒤에 붙는 하위 경로는 `server` 로 간다, 프록시 헤더 4개 (`tests/test_deploy.py`)
 - 003 의 기존 `GET /spreads` 테스트(`features/spreads/tests/test_spreads_api.py`)는 메모리 기반이라 이 스펙에 맞게 다시 쓴다 — 표 **계산** 규칙 검증(003·006·008·009·005 의 테스트가 `GET /spreads` 로 표를 받아 보던 곳 전부)은 HTTP 대신 게시기와 같은 함수·직렬화로 만든 표 JSON 을 본다. `test_slippage.py` 의 `?notional=` 범위(422) 테스트는 쿼리가 사라졌으므로 삭제하고, 규모별 슬리피지 비교는 계산 함수로 돌린다
-- 수동(로컬 5컨테이너): DevTools 에서 `/api/ws/` 만 차단하면 브라우저는 `/api/spreads` 를 **부르지 않고** 백오프(1→30초)로 WebSocket 재연결만 반복한다, 차단을 풀면 다음 재연결에 snapshot 이 와 표가 복구된다. curl `localhost:8090/api/spreads` 는 404 → 5초 안에 200(want 갱신). `docker compose stop api` → `/api/spreads` 502·`/api/health` 200. `stop redis` → `/api/spreads` 503·WS `waiting`·화면은 직전 표 유지. `start redis` 뒤 Redis 가 뜬 뒤 10초 안에 복구(실측 12초 — Redis 기동 포함)
+- 수동(로컬 5컨테이너): DevTools 에서 `/api/ws/` 만 차단하면 브라우저는 `/api/spreads` 를 **부르지 않고** 백오프(1→30초)로 WebSocket 재연결만 반복한다, 차단을 풀면 다음 재연결에 snapshot 이 와 표가 복구된다. curl `localhost:8090/api/spreads` 는 수집이 첫 표를 게시한 뒤부터 200. `docker compose stop api` → `/api/spreads` 502·`/api/health` 200. `stop redis` → `/api/spreads` 503·WS `waiting`·화면은 직전 표 유지. `start redis` 뒤 Redis 가 뜬 뒤 10초 안에 복구(실측 12초 — Redis 기동 포함)
 - 수동(EC2): 배포 뒤 `docker logs marketlens-server` 에 `GET /spreads` 접근 로그가 **0건**(nginx 가 안 보낸다), `marketlens-api` 에만 있다
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
@@ -117,3 +119,4 @@ docker compose --env-file server/.env down
   - EC2 확인(§4 마지막 항목 — `marketlens-server` 로그에 `GET /spreads` 0건)은 배포 뒤. DevTools 로 WebSocket 만 막는 눈 확인은 사람 몫.
   - `MarketDataNotFoundError` 의 이름·메시지("POST /refresh 로 수집했는지 확인")는 더 이상 HTTP 로 나가지 않는데 남아 있다 — 다음 spreads 작업 때 "표를 만들지 않는 조건" 이름으로 정리.
   - 수집 프로세스의 나머지 HTTP(`/health/collect`·`/history/events`) 이동은 후속 스펙(범위 밖).
+- 2026-09-28 성능 개선: gzip 을 받는 요청에는 표 텍스트당 한 번 압축한 바이트(§3.1, 레벨 6·스레드). 이유: 전역 미들웨어가 요청마다 790KB 를 레벨 9 로 다시 압축했다. 측정(로컬, 실데이터 표 796KB, 같은 표 20회): 요청당 CPU 44 → 1.3ms, 표가 바뀐 뒤 첫 요청 18ms. 크기 173.0 → 175.2KB.

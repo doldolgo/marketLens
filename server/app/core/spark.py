@@ -1,12 +1,18 @@
 """spark — `/spreads` 행의 김프(fwd 원값) 추이 링버퍼 (스펙 009 §3.6).
 
 조합 (dom, fx, base) 마다 벽시계 1분 버킷(`ts // 60`)의 마지막 값 30개를 든다. 인계기가 틱마다
-갱신하고 스냅샷을 LiveStore 에 게시한다 — Redis·Influx 성공과 무관한 메모리 계산이다.
-기동 시 Influx 의 최근 30분 집계로 채운다(10초 상한, 실패면 빈 채로).
+갱신하고 LiveStore 에 게시한다 — Redis·Influx 성공과 무관한 메모리 계산이다.
+기동 시 Influx 의 최근 30분 집계로 채운다(10초 상한, 실패면 빈 채로 — 조회·채우기는 스레드에서).
+
+게시는 증분이다(2026-09-28). 원값이 직전과 같은 조합(약 80%)은 반올림도 링버퍼도 건너뛰고, 값이 바뀐
+조합만 목록과 JSON 조각을 새 객체로 갈아 끼운다. 게시 맵은 그 맵의 얕은 사본이라 이미 게시된 목록·조각은
+누구도 제자리에서 고치지 않는다. 조각은 017 게시기가 표 JSON 의 spark 자리에 그대로 끼운다 — 표 1장에 든
+spark 부동소수 4만여 개를 매초 다시 포맷하지 않기 위해서다.
 """
 
 import asyncio
 import logging
+import math
 from collections import deque
 from collections.abc import Iterable
 from typing import Protocol
@@ -28,23 +34,43 @@ SPARK_DIGITS = 3
 class SparkReader(Protocol):
     """기동 복원 조회 — 실물은 core.influx.InfluxClient, 테스트는 fake."""
 
-    def query_spark(self, *, start: int, stop: int) -> list[SparkBucketRow]: ...
+    def query_spark(
+        self, *, start: int, stop: int, timeout_sec: float | None = None
+    ) -> list[SparkBucketRow]: ...
 
 
 class SparkBuffer:
     def __init__(self) -> None:
         # 조합 → (버킷, fwd) 오래된 → 최신. 같은 버킷은 마지막 값으로 덮인다.
         self._buf: dict[SparkKey, deque[tuple[int, float]]] = {}
+        # 조합 → 직전 갱신의 (버킷, 원값) — 같으면 넣어도 끝값이 같은 값으로 덮일 뿐이라 건너뛴다
+        self._raw: dict[SparkKey, tuple[int, float]] = {}
+        # 게시용 — 값이 바뀐 조합만 새 목록·새 조각으로 갈아 끼운다(이미 게시된 객체는 고치지 않는다)
+        self._lists: dict[SparkKey, list[float]] = {}
+        self._json: dict[SparkKey, str] = {}
+        # 조합 → 조각에서 끝값 앞까지("[" 또는 "[a,b,"). 같은 분 안에서는 끝값만 바뀌어 앞부분을 다시 쓰지 않는다
+        self._heads: dict[SparkKey, str | None] = {}
 
     def update(self, tick: Tick) -> None:
         bucket = tick.ts // BUCKET_SEC
+        raw = self._raw
         for row in tick.rows:
-            self._put((row.dom, row.fx, row.base.upper()), bucket, row.fwd)
+            key = (row.dom, row.fx, row.base.upper())
+            fwd = row.fwd
+            prev = raw.get(key)
+            # 같은 분·같은 원값 — fwd 는 김프 식이라 −0.0 이 나오지 않으므로 == 가 곧 비트까지 같음이다
+            if prev is not None and prev[0] == bucket and prev[1] == fwd:
+                continue
+            raw[key] = (bucket, fwd)
+            self._put(key, bucket, fwd)
 
     def seed(self, rows: Iterable[SparkBucketRow]) -> None:
-        """복원 — 버킷 오름차순으로 넣는다(조회 결과 순서에 기대지 않는다)."""
+        """복원 — 버킷 오름차순으로 넣는다(조회 결과 순서에 기대지 않는다). 게시할 목록·조각도 함께 찬다."""
         for r in sorted(rows, key=lambda r: r.bucket_ts):
-            self._put((r.dom, r.fx, r.base.upper()), r.bucket_ts // BUCKET_SEC, r.fwd)
+            key = (r.dom, r.fx, r.base.upper())
+            # 복원한 값이 끝자리를 바꿨을 수 있다 — 직전 원값 기억을 지워 다음 틱이 건너뛰지 않게
+            self._raw.pop(key, None)
+            self._put(key, r.bucket_ts // BUCKET_SEC, r.fwd)
 
     def _put(self, key: SparkKey, bucket: int, value: float) -> None:
         value = round(value, SPARK_DIGITS)
@@ -53,14 +79,62 @@ class SparkBuffer:
             buf = deque(maxlen=SPARK_LEN)
             self._buf[key] = buf
         if buf and buf[-1][0] == bucket:
-            buf[-1] = (bucket, value)  # 같은 분 — 마지막 값
+            buf[-1] = (bucket, value)  # 같은 분 — 마지막 값, 앞부분은 그대로
+            # 게시한 목록은 고치지 않는다 — 사본의 끝값만 바꿔 새 목록으로 건다
+            values = self._lists[key].copy()
+            values[-1] = value
+            head = self._heads[key]
         elif not buf or buf[-1][0] < bucket:
+            dropped = len(buf) == SPARK_LEN  # 가득 찼으면 붙이는 순간 맨 앞 값이 빠진다
             buf.append((bucket, value))
-        # 이미 지난 버킷의 값은 무시한다 — 틱은 시각 순으로 오므로 정상 경로엔 없다
+            values = [v for _, v in buf]
+            head = self._next_head(key, buf, dropped)
+            self._heads[key] = head
+        else:
+            return  # 이미 지난 버킷의 값은 무시한다 — 틱은 시각 순으로 오므로 정상 경로엔 없다
+        self._lists[key] = values
+        if head is not None and math.isfinite(value):
+            self._json[key] = head + repr(value) + "]"
+        else:
+            # 유한하지 않은 값이 든 조합은 조각을 두지 않는다 — 게시기가 목록을 그대로 인코딩해 NaN 거부도 같게 난다
+            self._json.pop(key, None)
+
+    def _next_head(
+        self, key: SparkKey, buf: deque[tuple[int, float]], dropped: bool
+    ) -> str | None:
+        """새 분이 붙은 뒤의 앞부분 — 직전 조각의 끝 ']' 를 ',' 로 바꾸고, 맨 앞 값이 빠졌으면 첫 값을 뗀다."""
+        prev = self._json.get(key)
+        if prev is None:
+            # 첫 값이거나 직전 조각이 없다(유한하지 않은 값) — 버퍼에서 다시 쓴다
+            before = [v for _, v in buf][:-1]
+            if not all(math.isfinite(v) for v in before):
+                return None
+            return "[" + "".join(repr(v) + "," for v in before)
+        if dropped:
+            cut = prev.find(",")
+            rest = prev[cut + 1 : -1] if cut >= 0 else ""
+            return "[" + rest + "," if rest else "["
+        return prev[:-1] + ","
 
     def snapshot(self) -> dict[SparkKey, list[float]]:
-        """LiveStore 에 게시할 맵 — 매번 새로 만든다(≈2,400 × ≤30 값). 값은 이미 응답 자리(3자리)다."""
-        return {key: [v for _, v in buf] for key, buf in self._buf.items()}
+        """게시할 목록 맵 — 얕은 사본. 목록은 값이 바뀐 조합만 새로 만들어지고 그 뒤로 고치지 않는다. 값은 이미 응답 자리(3자리)다."""
+        return dict(self._lists)
+
+    def fragments(self) -> dict[SparkKey, str]:
+        """게시할 JSON 조각 맵 — 얕은 사본. 조각은 그 조합 목록을 공백 없이 `json.dumps` 한 글자와 같다."""
+        return dict(self._json)
+
+    def publish(self, store: LiveStore) -> None:
+        """목록 맵과 조각 맵을 한 번에 게시한다 — 둘은 늘 같은 순간의 값이다."""
+        store.set_spark(self.snapshot(), self.fragments())
+
+    def _adopt(self, other: "SparkBuffer") -> None:
+        """복원 — 스레드에서 채운 새 버퍼의 상태를 통째로 넘겨받는다(루프에서, 틱 루프 시작 전의 빈 버퍼에)."""
+        self._buf = other._buf
+        self._raw = other._raw
+        self._lists = other._lists
+        self._json = other._json
+        self._heads = other._heads
 
 
 async def restore_spark(
@@ -68,21 +142,34 @@ async def restore_spark(
 ) -> int:
     """기동 시 1회 — 기동 분을 포함한 30개 버킷을 Influx 에서 읽어 채우고 게시한다.
 
-    Influx 가 없거나 실패·10초 초과면 빈 채로 시작해 회차마다 찬다(경고 1줄). 채운 행 수를 돌려준다.
+    조회·채우기·게시 맵 만들기는 한 번의 스레드 호출이고(수집 스트림이 이미 도는 루프를 막지 않는다) 루프에서는
+    넘겨받기와 LiveStore 게시만 한다. 스레드는 새 버퍼를 채운다 — 상한을 넘겨 버려진 호출이 뒤늦게 끝나도 틱이
+    쓰는 버퍼를 건드리지 않는다. 조회의 HTTP 타임아웃도 상한과 같다(009 §3.6). Influx 가 없거나 실패·10초
+    초과면 빈 채로 시작해 회차마다 찬다(경고 1줄). 채운 행 수를 돌려준다.
     """
     if reader is None:
         logger.warning("Influx 가 없어 spark 를 복원하지 않는다 — 빈 채로 시작")
         return 0
     start = (now_sec // BUCKET_SEC - (SPARK_LEN - 1)) * BUCKET_SEC
+
+    def fill() -> tuple[
+        int, SparkBuffer, dict[SparkKey, list[float]], dict[SparkKey, str]
+    ]:
+        rows = reader.query_spark(
+            start=start, stop=now_sec, timeout_sec=RESTORE_TIMEOUT_SEC
+        )
+        fresh = SparkBuffer()
+        fresh.seed(rows)
+        return len(rows), fresh, fresh.snapshot(), fresh.fragments()
+
     try:
-        rows = await asyncio.wait_for(
-            asyncio.to_thread(reader.query_spark, start=start, stop=now_sec),
-            timeout=RESTORE_TIMEOUT_SEC,
+        n, fresh, lists, fragments = await asyncio.wait_for(
+            asyncio.to_thread(fill), timeout=RESTORE_TIMEOUT_SEC
         )
     except Exception as exc:
         logger.warning("spark 복원 실패 — 빈 채로 시작: %r", exc)
         return 0
-    buffer.seed(rows)
-    store.set_spark(buffer.snapshot())
-    logger.info("spark 복원: %d점 (조합 %d개)", len(rows), len(buffer.snapshot()))
-    return len(rows)
+    buffer._adopt(fresh)
+    store.set_spark(lists, fragments)
+    logger.info("spark 복원: %d점 (조합 %d개)", n, len(lists))
+    return n

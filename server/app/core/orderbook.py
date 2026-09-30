@@ -15,8 +15,8 @@ from dataclasses import dataclass
 
 from app.core.models import Row
 
-# 부동소수 잔액 찌꺼기를 "소진"으로 오판하지 않기 위한 허용 오차
-_EPSILON = 1e-9
+# 부동소수 잔액 찌꺼기를 "소진"으로 오판하지 않기 위한 허용 오차 — 003 표 계산이 풀어 쓴 걷기도 이 값을 쓴다
+WALK_EPSILON = 1e-9
 
 
 def walk_levels(row: Row, side: str) -> list[list[float]]:
@@ -61,7 +61,7 @@ def walk_amount(levels: list[list[float]], amount: float) -> WalkResult:
         quantity=quantity,
         amount=filled,
         levels_consumed=consumed,
-        exhausted=remaining > _EPSILON,
+        exhausted=remaining > WALK_EPSILON,
     )
 
 
@@ -87,7 +87,7 @@ def walk_quantity(levels: list[list[float]], quantity: float) -> WalkResult:
         quantity=filled_qty,
         amount=filled_amount,
         levels_consumed=consumed,
-        exhausted=remaining > _EPSILON,
+        exhausted=remaining > WALK_EPSILON,
     )
 
 

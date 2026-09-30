@@ -1,17 +1,15 @@
 // 실시간 스프레드 탭 — 코인 1개 = 행 1개 집계 표 (스펙 003 §3.5, 구조는 docs/design/reference/tabs/SpreadTab.tsx).
-import { HIGHLIGHT_PCT, STALE_SEC } from '../../shared/config'
+import { memo } from 'react'
+import { HIGHLIGHT_PCT } from '../../shared/config'
 import { fmtKrw, fmtPct, fmtUsdt, pctColor } from '../../shared/format'
 import { FX_EXS } from '../../shared/mock'
-import type { Feed, IoState, SpreadRow } from '../../shared/types'
+import type { Feed, IoState } from '../../shared/types'
 import {
   Empty, GridHeader, gridRow, NumField, Seg, segOpt, SymCell, TableFrame, ToggleBtn,
   bar, count, exTag, hint, label, searchInput, vDivider, type Header,
 } from '../../shared/ui'
 import { alias, bool, num, oneOf, sortOf, str, useUrlState, type Codec } from '../../shared/urlState'
-
-type View = 'kimp' | 'rev'
-type DomFilter = 'all' | '업비트' | '빗썸'
-type SortCol = 'sym' | 'chg' | 'price' | 'usd' | 'fxEx' | 'domEx' | 'val' | 'io' | 'net'
+import { aggregateCoins, slipText, sortCoins, type CoinRow, type DomFilter, type SortCol, type View } from './coins'
 
 /** 꺼진 해외 거래소 Record ↔ 쉼표 목록. FX_EXS 밖 이름은 버린다. */
 const FX_OFF_CODEC: Codec<Record<string, boolean>> = {
@@ -22,91 +20,6 @@ const FX_OFF_CODEC: Codec<Record<string, boolean>> = {
 /** 심볼 | 변동율 | 국내가격 | 해외가격 | 해외거래소 | 국내거래소 | 김프 | 입출금 | 네트워크 — 국내가격 열만 가변 폭 (026 §3.3).
  *  김프 열은 `슬 −N.NN%p` 배지 자리를 항상 비워 둔다 — 값이 바뀔 때마다 표가 흔들리지 않게. */
 const GRID = '112px 84px 1fr 112px 96px 84px 176px 148px 88px'
-
-/** 코인 1개의 집계 행. */
-interface CoinRow {
-  sym: string
-  allFail: boolean
-  allStale: boolean
-  age: number
-  /** 보기 기준(김프/역프) 최대 행의 값. 전부 fail 이면 null. */
-  val: number | null
-  /** 최대 행의 해외·국내 거래소(표시명) — 열 2개로 보인다. */
-  fxEx: string | null
-  domEx: string | null
-  /** 최대 행의 KST 00시 대비 국내 변동 %. 기준가 없으면 null (`–`). */
-  chg: number | null
-  /** 최대 행의 해외 마지막 체결가(USDT). fail 이거나 0 이면 null. */
-  usd: number | null
-  /** 출금(출발 거래소)·입금(도착 거래소) 상태. */
-  wd: IoState
-  dep: IoState
-  net: string
-  /** 맞춘 해외 망 이름 — null 이면 모름 또는 다름. "네트워크 같음" 필터는 이 값이 있는 행만 통과. */
-  netFx: string | null
-  /** 네트워크 다름 — 국내 망은 있는데 못 맞췄고 해외 입출금이 둘 다 false(006 absent). 모름(null)과 구분한다. */
-  netDiff: boolean
-  /** 국내가 KRW — 김프 최대 행의 `krw` 그대로. fail 이거나 0 이면 null. */
-  price: number | null
-  /** 그 방향에서 서버가 차감한 폭(%p, 양수). 0 이면 배지를 숨긴다. */
-  slip: number
-}
-
-/** 입출금 정렬 순위: 가능(둘 다 true) > 모름 > 중단(하나라도 false). */
-function ioRank(wd: IoState, dep: IoState): number {
-  if (wd === false || dep === false) return 0
-  if (wd === true && dep === true) return 2
-  return 1
-}
-
-function aggregate(
-  feed: Feed, domFilter: DomFilter, fxOff: Record<string, boolean>, view: View,
-): CoinRow[] {
-  // 응답의 fwd·rev 가 이미 순값이라 FE 는 슬리피지를 계산하지 않는다 — 그 값이 그대로
-  // 최대 행 선택·강조·임계 필터·정렬·표시에 쓰인다 (§3.5).
-  const byCoin = new Map<string, SpreadRow[]>()
-  for (const r of feed.spreads) {
-    if (domFilter !== 'all' && r.dom !== domFilter) continue
-    if (fxOff[r.fx]) continue
-    const list = byCoin.get(r.sym)
-    if (list) list.push(r)
-    else byCoin.set(r.sym, [r])
-  }
-  const out: CoinRow[] = []
-  for (const [sym, rows] of byCoin) {
-    const live = rows.filter((r) => r.status !== 'fail')
-    let fwdBest: SpreadRow | null = null
-    let revBest: SpreadRow | null = null
-    for (const r of live) {
-      if (!fwdBest || r.fwd > fwdBest.fwd) fwdBest = r
-      if (!revBest || r.rev > revBest.rev) revBest = r
-    }
-    const best = view === 'kimp' ? fwdBest : revBest
-    const age = live.length ? Math.min(...live.map((r) => r.age)) : 0
-    out.push({
-      sym,
-      allFail: live.length === 0,
-      allStale: live.length > 0 && live.every((r) => r.age >= STALE_SEC),
-      age,
-      val: best ? (view === 'kimp' ? best.fwd : best.rev) : null,
-      fxEx: best ? best.fx : null,
-      domEx: best ? best.dom : null,
-      chg: best ? best.dayChg : null,
-      usd: best && best.usd !== null && best.usd > 0 ? best.usd : null,
-      // 김프 = 해외 → 국내, 역프 = 국내 → 해외. 출금 거래소는 출발, 입금 거래소는 도착.
-      wd: best ? (view === 'kimp' ? best.wdFx : best.wdDom) : null,
-      dep: best ? (view === 'kimp' ? best.depDom : best.depFx) : null,
-      net: best ? (best.netDom ?? '–') : '–',
-      netFx: best ? best.netFx : null,
-      // null 은 다름이 아니다 — 해외 입출금이 둘 다 false 로 못 박힌 경우만 다름 (003 §3.2)
-      netDiff: best !== null && best.netDom !== null && best.netFx === null && best.depFx === false && best.wdFx === false,
-      // 서버가 그 행 국내 거래소의 최우선 매수호가를 그대로 준다 — 환산도 보정도 하지 않는다
-      price: fwdBest && fwdBest.krw > 0 ? fwdBest.krw : null,
-      slip: best ? (view === 'kimp' ? best.slipFwd : best.slipRev) : 0,
-    })
-  }
-  return out
-}
 
 // 세 상태를 세 모양으로 그린다. 확인 불가(null)를 초록(열림)으로 칠하지 않고, 중단과도 다르게(점선) 그린다.
 const okC = 'var(--color-accent-300)'
@@ -123,8 +36,99 @@ const ioLabel = (kind: string, state: IoState) => (state === null ? `${kind} ?` 
 const fxCheck = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' } as const
 const checkbox = { accentColor: 'var(--color-accent)', width: 13, height: 13, cursor: 'pointer' } as const
 
+/** 행 1개가 화면에 쓰는 값 — 전부 문자열·불리언 같은 원시값이라, memo 의 얕은 비교가 곧 "보이는 글자·색이 바뀌었나" 다.
+ *  매초 delta 가 와도 글자가 그대로인 행(보통 절반 넘게)은 다시 그리지 않는다. 화면에 쓰는 값은 빠짐없이 여기에 싣는다. */
+interface LineProps {
+  sym: string
+  hot: boolean
+  stale: boolean
+  chgText: string
+  chgColor: string
+  priceText: string
+  usdText: string
+  fxEx: string
+  domEx: string
+  slipText: string
+  valText: string
+  valColor: string
+  netDiff: boolean
+  wd: IoState
+  dep: IoState
+  net: string
+}
+
+function lineProps(c: CoinRow, thr: number): LineProps {
+  return {
+    sym: c.sym,
+    hot: !c.allFail && !c.allStale && c.val !== null && c.val >= thr,
+    stale: c.allStale,
+    // 변동율 — 기준가 없음(null)은 0% 가 아니라 `–` (026 §3.2)
+    chgText: c.chg !== null ? fmtPct(c.chg) : '–',
+    chgColor: c.chg !== null ? pctColor(c.chg) : 'var(--color-neutral-700)',
+    priceText: c.price !== null ? '₩' + fmtKrw(c.price) : '–',
+    usdText: c.usd !== null ? '$' + fmtUsdt(c.usd) : '–',
+    fxEx: c.fxEx ?? '–',
+    domEx: c.domEx ?? '–',
+    slipText: slipText(c.slip),
+    valText: c.val !== null ? fmtPct(c.val) : '–',
+    valColor: c.val !== null ? pctColor(c.val) : 'var(--color-neutral-700)',
+    netDiff: c.netDiff,
+    wd: c.wd,
+    dep: c.dep,
+    net: c.net,
+  }
+}
+
+const CoinLine = memo(function CoinLine(p: LineProps & { onPick: (sym: string) => void }) {
+  return (
+    // 화면 밖 행은 스타일·레이아웃·페인트를 건너뛴다(DOM 에는 남아 찾기·복사·접근성은 그대로). 행 높이가 40px 고정이라 자리 추정이 정확하다
+    <div onClick={() => p.onPick(p.sym)} className="hv-row"
+      style={{ ...gridRow(GRID, { hot: p.hot, stale: p.stale }), cursor: 'pointer', contentVisibility: 'auto', containIntrinsicSize: 'auto 40px' }}>
+      <SymCell sym={p.sym} hot={p.hot} />
+      <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: p.chgColor }}>
+        {p.chgText}
+      </div>
+      <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+        {p.priceText}
+      </div>
+      <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-300)' }}>
+        {p.usdText}
+      </div>
+      <div style={{ padding: '0 8px', display: 'flex', alignItems: 'center' }}>
+        <span style={exTag()}>{p.fxEx}</span>
+      </div>
+      <div style={{ padding: '0 8px', display: 'flex', alignItems: 'center' }}>
+        <span style={exTag()}>{p.domEx}</span>
+      </div>
+      <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-600)', whiteSpace: 'nowrap' }}>
+          {p.slipText}
+        </span>
+        <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 72, textAlign: 'right', color: p.valColor }}>
+          {p.valText}
+        </span>
+      </div>
+      <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 5 }}>
+        {/* 다름이면 어느 방향이든 옮길 길이 없다 — "중단" 두 개로 보이면 안 되므로 태그 하나 */}
+        {p.netDiff ? (
+          <span style={tagStyle(false)}>네트워크 다름</span>
+        ) : (
+          <>
+            <span style={tagStyle(p.wd)}>{ioLabel('출금', p.wd)}</span>
+            <span style={tagStyle(p.dep)}>{ioLabel('입금', p.dep)}</span>
+          </>
+        )}
+      </div>
+      <div style={{ padding: '0 8px', textAlign: 'right', fontSize: 11, color: 'var(--color-neutral-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {p.net}
+      </div>
+    </div>
+  )
+})
+
 interface Props {
   feed: Feed
+  /** 셸이 고정 참조로 준다 — 바뀌면 모든 행이 다시 그려진다. */
   onPick: (sym: string) => void
 }
 
@@ -142,7 +146,7 @@ export default function SpreadsTab({ feed, onPick }: Props) {
   const [fxOff, setFxOff] = useUrlState<Record<string, boolean>>('s.fxoff', {}, FX_OFF_CODEC)
   const fxAllOn = FX_EXS.every((fx) => !fxOff[fx])
 
-  const all = aggregate(feed, domFilter, fxOff, view)
+  const all = aggregateCoins(feed.spreads, domFilter, fxOff, view)
 
   const ql = q.trim().toLowerCase()
   let coins = all.filter((c) => c.sym.toLowerCase().includes(ql))
@@ -153,28 +157,7 @@ export default function SpreadsTab({ feed, onPick }: Props) {
   if (onlyNet) coins = coins.filter((c) => c.netFx !== null)
 
   const dir = sort.asc ? 1 : -1
-  coins = [...coins].sort((a, b) => {
-    // 전부 fail 인 코인은 항상 맨 뒤
-    if (a.allFail !== b.allFail) return a.allFail ? 1 : -1
-    const key = (c: CoinRow): number | string | null =>
-      sort.col === 'val' ? c.val
-      : sort.col === 'chg' ? c.chg
-      : sort.col === 'price' ? c.price
-      : sort.col === 'usd' ? c.usd
-      : sort.col === 'fxEx' ? c.fxEx
-      : sort.col === 'domEx' ? c.domEx
-      : sort.col === 'io' ? ioRank(c.wd, c.dep)
-      : sort.col === 'net' ? (c.net === '–' ? null : c.net)
-      : c.sym
-    const ka = key(a)
-    const kb = key(b)
-    // null 값은 뒤
-    if (ka === null && kb === null) return a.sym.localeCompare(b.sym)
-    if (ka === null) return 1
-    if (kb === null) return -1
-    const d = typeof ka === 'string' ? ka.localeCompare(kb as string) : ka - (kb as number)
-    return d * dir || a.sym.localeCompare(b.sym)
-  })
+  coins = sortCoins(coins, sort.col, sort.asc)
 
   function clickSort(col: string) {
     const c = col as SortCol
@@ -236,53 +219,7 @@ export default function SpreadsTab({ feed, onPick }: Props) {
         <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} />
         {feed.spreads.length === 0 && <Empty>백엔드에서 스프레드를 받는 중입니다…</Empty>}
         {feed.spreads.length > 0 && coins.length === 0 && <Empty>조건에 맞는 코인이 없습니다. 필터를 넓혀 보세요.</Empty>}
-        {coins.map((c) => {
-          const hot = !c.allFail && !c.allStale && c.val !== null && c.val >= thr
-          return (
-            <div key={c.sym} onClick={() => onPick(c.sym)} className="hv-row"
-              style={{ ...gridRow(GRID, { hot, stale: c.allStale }), cursor: 'pointer' }}>
-              <SymCell sym={c.sym} hot={hot} />
-              {/* 변동율 — 기준가 없음(null)은 0% 가 아니라 `–` (026 §3.2) */}
-              <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: c.chg !== null ? pctColor(c.chg) : 'var(--color-neutral-700)' }}>
-                {c.chg !== null ? fmtPct(c.chg) : '–'}
-              </div>
-              <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                {c.price !== null ? '₩' + fmtKrw(c.price) : '–'}
-              </div>
-              <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-300)' }}>
-                {c.usd !== null ? '$' + fmtUsdt(c.usd) : '–'}
-              </div>
-              <div style={{ padding: '0 8px', display: 'flex', alignItems: 'center' }}>
-                <span style={exTag()}>{c.fxEx ?? '–'}</span>
-              </div>
-              <div style={{ padding: '0 8px', display: 'flex', alignItems: 'center' }}>
-                <span style={exTag()}>{c.domEx ?? '–'}</span>
-              </div>
-              <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-600)', whiteSpace: 'nowrap' }}>
-                  {c.slip > 0 ? '슬 −' + c.slip.toFixed(2) + '%p' : ''}
-                </span>
-                <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 72, textAlign: 'right', color: c.val !== null ? pctColor(c.val) : 'var(--color-neutral-700)' }}>
-                  {c.val !== null ? fmtPct(c.val) : '–'}
-                </span>
-              </div>
-              <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 5 }}>
-                {/* 다름이면 어느 방향이든 옮길 길이 없다 — "중단" 두 개로 보이면 안 되므로 태그 하나 */}
-                {c.netDiff ? (
-                  <span style={tagStyle(false)}>네트워크 다름</span>
-                ) : (
-                  <>
-                    <span style={tagStyle(c.wd)}>{ioLabel('출금', c.wd)}</span>
-                    <span style={tagStyle(c.dep)}>{ioLabel('입금', c.dep)}</span>
-                  </>
-                )}
-              </div>
-              <div style={{ padding: '0 8px', textAlign: 'right', fontSize: 11, color: 'var(--color-neutral-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {c.net}
-              </div>
-            </div>
-          )
-        })}
+        {coins.map((c) => <CoinLine key={c.sym} {...lineProps(c, thr)} onPick={onPick} />)}
       </TableFrame>
     </>
   )

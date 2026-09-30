@@ -1,5 +1,6 @@
 """history 테스트 공용 도구 — Influx 를 띄우지 않고 fake 리더로 (architecture.md 원칙)."""
 
+from collections.abc import Iterator
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -7,8 +8,8 @@ from fastapi.testclient import TestClient
 
 from app.core.influx import (
     CandleRow,
+    EventListRow,
     InfluxUnavailableError,
-    PremiumEventRow,
     PremiumRow,
 )
 from app.core.live_store import LiveStore
@@ -17,12 +18,12 @@ from app.main import create_app
 
 
 class FakeInfluxReader:
-    """core.influx.InfluxClient 의 query_premium 시그니처를 그대로 흉내낸다."""
+    """core.influx.InfluxClient 의 조회 시그니처(query_premium·stream_premium·query_premium_events·query_candles)를 흉내낸다."""
 
     def __init__(self) -> None:
         # (dom, fx, base) → [(ts, fwd, rev)] — seed 순서 무관, 조회는 ts 오름차순
         self._rows: dict[tuple[str, str, str], list[tuple[int, float, float]]] = {}
-        self._events: list[PremiumEventRow] = []
+        self._events: list[EventListRow] = []
         self._candles: dict[str, list[CandleRow]] = {}  # 014 계층 버킷 이름 → 봉
         self.fail = False
 
@@ -48,6 +49,30 @@ class FakeInfluxReader:
         out.sort(key=lambda r: r.ts)
         return out
 
+    def stream_premium(
+        self, *, dom: str, fx: str, base: str | None, start: int, stop: int
+    ) -> Iterator[tuple[str, str, int, float]]:
+        """실물처럼 (코인, 방향) 줄기마다 시각 오름차순으로 흘려보낸다 — 줄기 순서는 일부러 뒤집는다(순서에 기대지 않게).
+
+        실패는 첫 점을 내기 전에 난다(제너레이터라 소비할 때).
+        """
+        if self.fail:
+            raise InfluxUnavailableError("연결 실패 (테스트)")
+        keys = sorted(
+            (b, f)
+            for (d, x, b) in self._rows
+            if d == dom and x == fx and (base is None or b == base.upper())
+            for f in ("fwd", "rev")
+        )
+        for b, f in reversed(keys):
+            points = sorted(
+                (ts, fwd if f == "fwd" else rev)
+                for ts, fwd, rev in self._rows[(dom, fx, b)]
+                if start <= ts < stop
+            )
+            for ts, value in points:
+                yield b, f, ts, value
+
     def seed_event(
         self,
         base: str,
@@ -55,6 +80,7 @@ class FakeInfluxReader:
         end_ts: int,
         *,
         dom: str = "upbit",
+        fx: str = "binance",
         dir: str = "kimp",
         max_percent: float = 1.5,
         last_ts: int | None = None,
@@ -64,20 +90,17 @@ class FakeInfluxReader:
     ) -> None:
         """사건 점 1개 — end_ts 0 은 진행 중(고아 점 검증용). 망 이름 None = 배포 전 점."""
         self._events.append(
-            PremiumEventRow(
+            EventListRow(
                 dom=dom,
-                fx="binance",
+                fx=fx,
                 base=base.upper(),
                 dir=dir,
                 start_ts=start_ts,
                 end_ts=end_ts,
-                duration_seconds=end_ts - start_ts if end_ts else 0,
                 max_percent=max_percent,
                 max_ts=start_ts,
                 last_ts=last_ts if last_ts is not None else (end_ts or start_ts),
                 samples=samples,
-                enter_percent=1.0,
-                exit_percent=0.5,
                 net_dom=net_dom,
                 net_fx=net_fx,
             )
@@ -91,7 +114,7 @@ class FakeInfluxReader:
         dom: str | None = None,
         dir: str | None = None,
         base: str | None = None,
-    ) -> list[PremiumEventRow]:
+    ) -> list[EventListRow]:
         if self.fail:
             raise InfluxUnavailableError("연결 실패 (테스트)")
         return [

@@ -15,6 +15,7 @@ import httpx
 
 from app.core.contracts import RawRecorder, noop_record
 from app.core.models import Row
+from app.core.networks import Network
 from app.features.wallet_status.binance import fetch_binance
 from app.features.wallet_status.bitget import fetch_bitget
 from app.features.wallet_status.bithumb import fetch_bithumb
@@ -29,6 +30,10 @@ WALLET_REFRESH_INTERVAL = 60.0
 
 # 경고·실패 목록의 순서 고정 — 사이클마다 순서가 바뀌면 비교가 성가시다
 _EXCHANGES = ("upbit", "bithumb", "binance", "bybit", "bitget")
+
+# 모름인 행에 거는 빈 망 목록 — 모든 행이 이 한 객체를 나눠 쓴다(누구도 고치지 않는다, §3.5).
+# 행마다 새 빈 목록을 걸면 틱·표의 망 판정 메모(core)가 매초 빗나간다
+_NO_NETWORKS: list[Network] = []
 
 
 @dataclass
@@ -117,23 +122,24 @@ class WalletStatusService:
         return {ex: n for ex, n in zip(_EXCHANGES, calls, strict=True) if n > 0}
 
     def apply(self, rows: list[Row], exchange: str) -> None:
-        """캐시를 스냅샷 행에 반영한다 — 확인 불가면 null·빈 망 목록으로 덮는다 (§3.1·§3.5)."""
+        """캐시를 스냅샷 행에 반영한다 — 확인 불가면 null·빈 망 목록으로 덮는다 (§3.1·§3.5).
+
+        망 목록은 사본을 만들지 않고 캐시의 목록 객체를 그대로 건다 — 60초 동안 같은 객체라야 틱·표의 망
+        판정 메모가 맞는다. 그래서 행의 망 목록(과 그 안의 망)은 누구도 제자리에서 고치지 않는다.
+        """
         state = self._states.get(exchange)
+        statuses = state.statuses if state is not None and state.available else None
         for row in rows:
-            status = (
-                state.statuses.get(row.base.upper())
-                if state is not None and state.available
-                else None
-            )
+            status = statuses.get(row.base.upper()) if statuses is not None else None
             if status is None:
                 # 키 없음·조회 실패·응답에 그 코인이 없음 → 전부 unknown
                 row.deposit_enabled = None
                 row.withdrawal_enabled = None
-                row.networks = []
+                row.networks = _NO_NETWORKS
             else:
                 row.deposit_enabled = status.deposit_enabled
                 row.withdrawal_enabled = status.withdrawal_enabled
-                row.networks = list(status.networks)
+                row.networks = status.networks
 
     def availability(self) -> dict[str, bool]:
         """거래소별 최근 조회 성공 여부 — /refresh 의 walletStatusAvailable (§3.5)."""

@@ -44,6 +44,45 @@ export function chunkStart(ts: number, res: Res): number {
 export interface ChunkRef { dom: Dom; fx: string; base: string; dir: Dir; res: Res; start: number }
 export const chunkKey = (c: ChunkRef) => `${c.dom}|${c.fx}|${c.base}|${c.dir}|${c.res}|${c.start}`
 
+/** 청크 캐시 상한(청크 수) — 청크 하나가 힙 약 100KB 라 약 12MB. 코인·봉 종류를 훑을수록 쌓이기만 하므로 오래 안 쓴 것부터 버린다. */
+export const CHUNK_CACHE_MAX = 120
+
+/** 캐시에서 꺼내며 가장 최근에 쓴 자리로 옮긴다 — Map 은 넣은 순서를 기억하므로 지웠다 다시 넣으면 맨 뒤(최근)가 된다. */
+export function touchChunk<T>(cache: Map<string, T>, key: string): T | undefined {
+  const v = cache.get(key)
+  if (v !== undefined) {
+    cache.delete(key)
+    cache.set(key, v)
+  }
+  return v
+}
+
+/** 상한을 넘은 만큼 가장 오래 안 쓴 청크부터 버린다. 지금 화면이 쓰는 청크(`keep`)는 버리지 않는다 — 그것만으로 상한을 넘으면 넘는 채로 둔다. */
+export function evictChunks<T>(cache: Map<string, T>, keep: ReadonlySet<string>, max: number = CHUNK_CACHE_MAX): void {
+  if (cache.size <= max) return
+  // Map 은 넣은 순서(= 오래 안 쓴 순서)로 돌고, 도는 중에 지워도 안전하다
+  for (const key of cache.keys()) {
+    if (cache.size <= max) return
+    if (!keep.has(key)) cache.delete(key)
+  }
+}
+
+/** 봉 하나가 모든 값까지 같은가 — 응답 JSON 이 만든 평평한 객체라 키마다 === 로 본다. */
+export function sameCandle(a: Candle1m, b: Candle1m): boolean {
+  if (a === b) return true
+  const keys = Object.keys(a) as (keyof Candle1m)[]
+  if (keys.length !== Object.keys(b).length) return false
+  for (const k of keys) if (a[k] !== b[k]) return false
+  return true
+}
+
+/** 다시 받은 청크가 들고 있던 것과 같은가 — 봉 수와 모든 봉의 시각·값. 같으면 들고 있던 배열을 그대로 둬 화면이 다시 그리지 않게 한다. */
+export function sameChunk(a: Candle1m[], b: Candle1m[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (!sameCandle(a[i], b[i])) return false
+  return true
+}
+
 /**
  * 지금 화면이 필요로 하는 청크 시작들(오래된 것부터, 마지막이 최신 청크).
  * 처음엔 INITIAL_BARS × 봉 초를 덮는 청크들, 왼쪽으로 끌 때마다 `older` 개를 더 앞에 붙인다.

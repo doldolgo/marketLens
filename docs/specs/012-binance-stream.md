@@ -16,7 +16,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 ## 3. 동작
 
 ### 3.1 읽는 계약 (복사)
-- 001 §3.3: 행 = `(exchange, base)` 당 `quote`·`native_symbol`·`price`·`price_timestamp`·`asks`·`bids`(누적 1,000,000 USDT 도달 단계까지, 최소 1단계)·입출금 3필드(물려받음)·`updated_at`. 거래소별 스트림 상태 `{connected, last_message_at, last_error, subscribed}`.
+- 001 §3.3·§3.5-1: 행 = `(exchange, base)` 당 `quote`·`native_symbol`·`price`·`price_timestamp`·`asks`·`bids`(가격 > 0 이고 유한·잔량 > 0 이고 유한한 단계만, 누적 1,000,000 USDT 도달 단계까지, 최소 1단계)·입출금 3필드(물려받음)·`updated_at`. 거래소별 스트림 상태 `{connected, last_message_at, last_error, subscribed}`.
 - 001 §3.2: 마켓 우주 = 국내 KRW base ∩ 바이낸스 USDT base. 이 스펙은 **바이낸스 USDT 현물 심볼 집합**을 제공하고, 우주의 심볼만 구독한다. 매초 갱신·`/refresh` 즉시 갱신.
 - 001 §3.7: 받은 모든 프레임과 REST 응답 본문은 원문 싱크 `record(exchange, source, received_at_ms, payload, key)` 로 넘긴다 — 행·상태 갱신 전에, `payload` 는 받은 텍스트 그대로. 시세 프레임은 `key` = `depth20:<심볼>`·`miniTicker:<심볼>`(대문자 원본 심볼), 매초 반복되는 exchangeInfo 본문은 `symbols:all`, 구독 응답·`serverShutdown`·깨진 프레임·핸드셰이크 거부 본문은 `key=None`. 010 이 `key` 있는 줄을 심볼·종류별 분당 마지막 1건으로 솎는다.
 - 001 §3.8·011: 매 틱 성공/실패를 판정해 추적기에 넘긴다. 실패 종류 8종.
@@ -30,7 +30,8 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 - 대역폭 감: depth20 ~1.3KB + miniTicker ~0.2KB, 300 종목 × 1/s ≈ 450KB/s.
 
 ### 3.3 심볼 목록과 샤딩
-- 심볼 목록: `GET https://api.binance.com/api/v3/exchangeInfo?showPermissionSets=false&symbolStatus=TRADING`(weight 20) 의 `symbols[]` 중 `status == "TRADING"` 이고 `quoteAsset == "USDT"` 인 것. base = `baseAsset`. **질의 두 개는 성능 때문에 반드시 붙인다** — 커넥터가 어차피 거르는 조건이라 심볼 집합은 같은데(TRADING·USDT 487개 동일) 본문이 17.5MB → 2.5MB 로 줄고, 매초 드는 파싱 + 원문 기록 비용이 EC2 코어에서 **505ms → 88ms** 가 된다(실측). **매초** 갱신(001 §3.2 — weight 20/초 = 분당 1,200, 한도 6,000 의 20%; 파싱은 스레드가 아니라 이벤트 루프에서 하므로 본문 크기가 곧 틱 루프의 여유다 — 파싱 결과가 같으면(심볼 집합 불변) 그 뒤로는 아무 일도 하지 않는다), 응답 본문은 질의를 뺀 경로를 source 로 원문 싱크(`rest:/api/v3/exchangeInfo`). 실패 시 직전 목록 유지 + 경고.
+- 심볼 목록: `GET https://api.binance.com/api/v3/exchangeInfo?showPermissionSets=false&symbolStatus=TRADING`(weight 20) 의 `symbols[]` 중 `status == "TRADING"` 이고 `quoteAsset == "USDT"` 인 것. base = `baseAsset`. **질의 두 개는 성능 때문에 반드시 붙인다** — 커넥터가 어차피 거르는 조건이라 심볼 집합은 같은데(TRADING·USDT 487개 동일) 본문이 17.5MB → 2.5MB 로 줄고, 매초 드는 파싱 + 원문 기록 비용이 EC2 코어에서 **505ms → 88ms** 가 된다(실측). **매초** 갱신(001 §3.2 — weight 20/초 = 분당 1,200, 한도 6,000 의 20%; 파싱은 스레드가 아니라 이벤트 루프에서 하므로 본문 크기가 곧 틱 루프의 여유다), 응답 본문은 질의를 뺀 경로를 source 로 원문 싱크(`rest:/api/v3/exchangeInfo`). 실패 시 직전 목록 유지 + 경고.
+- **본문이 직전과 같으면 파싱하지 않는다(001 §3.2 결정).** 커넥터는 직전에 심볼 맵까지 만든 200 응답의 비교용 바이트를 든다. 비교용 바이트 = 본문에서 머리의 `"serverTime":<ms>` 하나(앞 256바이트 안에서 찾는다)만 뺀 것 — 이 필드만 매 응답 바뀐다. 새 200 응답의 비교용 바이트가 같으면 원문 기록만 하고 파싱·맵 재생성 없이 돌아온다(호출 수 1). 필드를 못 찾으면 본문 전체로 비교해 매번 파싱으로 간다(느려질 뿐 틀리지 않는다). 맵을 만들지 못한 본문은 기억하지 않는다. 비교에 드는 것은 2.4MB 복사 한 번(0.2ms 안팎)이다.
 - 심볼 집합 계약은 커넥터 자신이 구현한다 — `refresh(client) -> int`(exchangeInfo 1회, 실패는 거래소 예외), `bases() -> set[str]`, `set_universe(bases)`. base↔symbol 은 exchangeInfo 의 `baseAsset`→`symbol` 맵 하나이고, 한 base 에 USDT 심볼이 둘 이상이면 처음 것을 쓴다. 우주 base 중 맵에 없는 것은 구독 대상이 아니다.
 - 구독 대상 = 001 의 마켓 우주 심볼. 001 의 우주 갱신(기동·매초·`/refresh`)이 우주를 확정할 때마다 `set_universe(bases)` 를 부르고, 커넥터는 그 자리에서 빠진 심볼의 행을 메모리에서 지운 뒤 재조정을 깨운다. 재조정은 연결된 샤드마다 원하는 구독과 실제 구독의 차이만 보낸다 — 새 심볼은 SUBSCRIBE, 빠진 심볼은 UNSUBSCRIBE. 실제 구독 집합은 **소켓에 묶인다** — 소켓이 바뀌면 빈 집합에서 시작해 연결 직후 배정 전체를 구독하고, 보내는 도중 소켓이 바뀐 재조정은 결과를 남기지 않는다(죽은 소켓에 보낸 구독을 새 소켓 것으로 세면 새 소켓은 차이가 없다고 보고 아무것도 구독하지 않는다). `set_universe` 가 깨우지 않아도 **60초마다** 한 번 돈다(재연결 뒤 등 어긋남을 맞춘다). 기동 직후 우주가 비어 있으면 구독이 없다 — 배정 심볼이 0 인 샤드는 연결하지 않고 배정이 생길 때까지 기다린다.
 - **3 샤드**(소켓 3개). 배정은 **심볼 문자열의 안정 해시(crc32) % 3** — 상장·상폐가 나머지 심볼의 배정을 흔들지 않고 재기동해도 같다. 한 소켓이 죽어도 1/3 만 잃고, 24시간 강제 종료가 샤드마다 다른 시각에 걸린다. 심볼의 두 스트림은 같은 샤드에 둔다. 샤드당 ≈ 200 스트림(한도 1,024).
@@ -39,7 +40,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 - 핸드셰이크가 HTTP 상태로 거부되면 011 §3.2 의 **바이낸스 REST 규칙**으로 분류한다: 429 `rate_limit`, 418·403 `banned`, 5xx `unavailable`, 그 외 4xx `bad_request`, 그 밖의 상태 `bad_response`. `Retry-After` 가 초 정수면 `retry_after_sec`. exchangeInfo 의 비-200 도 같은 규칙이다. 실패 `message` 는 샤드 번호를 말한다.
 
 ### 3.4 행 갱신
-- depth20 메시지 → 그 심볼 행의 `asks`/`bids` 교체(문자열 → float, 잔량 ≤0 단계 제거, 누적 1,000,000 USDT 도달 단계까지 — 첫 단계가 이미 넘어도 1단계는 남긴다), `updated_at` = 수신 시각. 한쪽이 비면 행을 저장하지 않는다(있던 행은 지운다).
+- depth20 메시지 → 그 심볼 행의 `asks`/`bids` 교체(문자열 → float, 001 §3.5-1 의 단계 거르기 — 가격·잔량이 0 이하이거나 유한하지 않은 단계 제거, 누적 1,000,000 USDT 도달 단계까지 — 첫 단계가 이미 넘어도 1단계는 남긴다), `updated_at` = 수신 시각. 한쪽이 비면 행을 저장하지 않는다(있던 행은 지운다).
 - miniTicker 메시지 → `price = c`, `price_timestamp = E`. 행이 없으면 보류했다가 depth20 이 오면 함께 싣는다. 체결가가 없으면 mid — 이때 `price_timestamp` 는 **수신 시각**이다(depth20 페이로드에는 거래소 시각이 없다).
 - 캐시 키는 원본 심볼 대문자(`BTCUSDT`) — 스트림 이름(`btcusdt@…`)과 `native_symbol` 이 같은 값으로 이어져 base↔symbol 변환이 한 곳(`baseAsset`)에만 있다. 스트림 이름의 심볼이 맵에 없으면 그 프레임은 버린다(시세로 세지 않는다).
 - 입출금 3필드 물려받기·우주 밖 버리기는 001 §3.5.
@@ -49,7 +50,7 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 - 샤드 하나의 판정은 001 §3.8 과 같다: 미연결이면 `last_error.kind`(오류 기록 없이 첫 시도 결과도 없으면 판정 없음, 시세를 받았다가 오류 없이 닫혔으면 `network`), 연결됐는데 조용한 시간 **30초** 이상이면 `stale_stream`.
 - 매 틱 바이낸스는 **셋 다 정상**이어야 성공이다. 판정 대상 샤드 중 하나라도 실패면 실패 — 여러 샤드가 동시에 나쁘면 **가장 오래 조용한** 샤드를 고른다(동률이면 작은 번호). 실패가 없고 판정 대상 전부가 아직 판정 없음이면 바이낸스도 판정 없음, 그 밖(일부 판정 없음 + 나머지 성공 포함)은 성공. 실패 `message` 는 샤드를 말한다: `"바이낸스 스트림 정체: 샤드 2 (구독 7종목) 30초 이상 무수신"`(종목 수 = 그 샤드 배정 수). `url` = WS URL, `status_code` 는 핸드셰이크 실패일 때만.
 - 정체 중에도 행은 그대로 남는다(001 — 행은 메시지로만 바뀐다). 스트림이 돌아오면 다음 틱이 성공으로 기록돼 구간이 닫힌다.
-- 001 스트림 상태 계약의 바이낸스 값(`store.stream("binance")` 하나로 집계): `connected` = 배정이 있는 샤드가 전부 연결(그런 샤드가 없으면 false), `last_message_at` = 샤드 중 최신, `last_error` = 마지막 판정에 쓴 샤드의 것(성공이면 null), `subscribed` = 열린 소켓에 실제 구독된 심볼 수의 합, `connected_since` = 연결된 샤드 중 가장 이른 구독 시각, `url` = WS URL. 시세 프레임마다 갱신되므로 003 의 `age` 는 바이낸스 행에서도 성립한다.
+- 001 스트림 상태 계약의 바이낸스 값(`store.stream("binance")` 하나로 집계): `connected` = 배정이 있는 샤드가 전부 연결(그런 샤드가 없으면 false), `last_message_at` = 샤드 중 최신, `last_error` = 마지막 판정에 쓴 샤드의 것(성공이면 null), `subscribed` = 열린 소켓에 실제 구독된 심볼 수의 합, `connected_since` = 연결된 샤드 중 가장 이른 구독 시각, `url` = WS URL. **시세 프레임은 샤드 3개를 다시 집계하지 않고 집계 `last_message_at` 만 그 프레임 수신 시각으로 올린다(더 클 때만)** — 프레임이 바꾸는 집계값은 그 하나뿐이고 해외 시세는 초당 수천 건이다. 나머지는 연결·끊김·구독 변경 때 전체를 다시 집계한다. 시세 프레임마다 올라가므로 003 의 `age` 는 바이낸스 행에서도 성립한다.
 
 ### 3.6 장애 격리
 - 한 번도 못 붙어도 앱은 뜬다. 연결 실패 1회 = 그 샤드의 경고 로그 1줄 + `last_error`, 백오프 재시도. 바이낸스 행은 비어 003 이 404 또는 행 없음으로 동작한다. 샤드 하나가 죽어도 다른 샤드의 행은 계속 갱신된다.
@@ -60,12 +61,14 @@ REST 로 깊이를 받을 수는 없다 — `GET /api/v3/depth` 는 심볼당 1�
 - depth20 메시지 → 행의 `asks`/`bids` 가 float 20단계, `asks` 오름차순·`bids` 내림차순, `updated_at` 갱신. 누적 1,000,000 USDT 에서 잘리고 첫 단계가 넘어도 1단계는 남는다.
 - miniTicker 메시지 → `price`·`price_timestamp`. depth 전에 오면 보류, depth 뒤에 실린다. 체결가 없으면 mid.
 - `exchangeInfo` 에서 `TRADING`·`USDT` 만 심볼 집합에 든다. 우주 밖 심볼 메시지는 버려진다.
+- `serverTime` 만 다른 exchangeInfo 200 본문이 연달아 오면 둘째는 원문 기록만 하고 파싱하지 않는다(사이에 실패 응답이 있어도 같다), 심볼이 바뀐 본문에서만 파싱해 집합이 바뀐다. 맵을 만들지 못한 200 본문은 같은 본문이 다시 와도 다시 실패다.
 - `exchangeInfo` 요청 URL 에 `showPermissionSets=false`·`symbolStatus=TRADING` 이 붙고, 원문 싱크 source 는 질의 없는 `rest:/api/v3/exchangeInfo` 그대로다 — `test_exchange_info_request_asks_for_the_slim_body`
 - 심볼 300개 → 3 샤드에 분산, 같은 심볼은 항상 같은 샤드(서브프로세스 2개로 해시 안정성 확인), 두 스트림이 같은 샤드. 추가·삭제가 나머지 배정을 안 바꾼다.
 - SUBSCRIBE 한 메시지 ≤ 100 스트림, 초당 ≤ 4 메시지. 재조정: 새 심볼 구독·빠진 심볼 해지·행 삭제. 같은 우주를 다시 받으면(매초) 보내는 것도 지우는 것도 없다. 재조정을 보내는 도중 `!serverShutdown` 으로 재연결되면 새 소켓에 배정 전체를 구독하고 `subscribed` 는 새 소켓 기준이다.
 - `connected_since` 는 첫 SUBSCRIBE 묶음을 다 보낸 시각이고 정체 30초는 거기서부터 센다(보내는 동안은 소켓이 열린 시각).
 - 정체: 샤드 2만 30초 무수신(0·1 은 수신) → 그 틱이 `stale_stream` 실패이고 message 에 "샤드 2". 30초 미만은 성공. 구독 0 샤드는 무시. 메시지가 오면 다음 틱 성공.
 - 미연결 샤드 → 그 샤드 `last_error.kind` 로 실패. 셋 중 둘이 나쁘면 더 오래 조용한 쪽.
+- 시세 프레임은 집계 `last_message_at` 만 올린다 — 시계가 뒤로 간 프레임은 집계를 내리지 않고, 연결·구독 수는 프레임으로 바뀌지 않으며 종료하면 미연결·구독 0 이 된다.
 - 모든 프레임(시세·구독 응답·serverShutdown)과 exchangeInfo 본문이 원문 싱크에 원문 그대로 기록된다 — depth20·miniTicker 프레임은 `key`(`depth20:BTCUSDT` 등), exchangeInfo 본문은 `key=symbols:all`, 나머지는 `key=None` 으로.
 - `!serverShutdown` 수신 → 재연결. 연결 실패 백오프 1·2·4…30, 구독 성공 후 1.
 - 연결 실패 기동(lifespan 을 실제로 돌리되 소켓·REST 는 가짜) → `/health` 200, 앱 정상, 샤드마다 경고 1줄. 샤드 1개 실패 시 나머지 2샤드 행은 계속 갱신된다.
@@ -117,3 +120,4 @@ EC2 에서 확인 필요(로컬에서 재현 불가): 네트워크를 끊고 30�
 - 남은 빚:
   - EC2 확인 항목(§5): 네트워크 차단 → `stale_stream` → 복구, 24시간 강제 종료 재연결, 실제 대역폭, 매초 exchangeInfo(1~2MB) 파싱이 이벤트 루프에 주는 지연(§3.3 의 10~40ms 는 추정).
   - 로컬 스모크에서 업비트 입출금 API 가 401 — 키·허용 IP 문제(006 소관), 이 스펙과 무관.
+- 2026-09-28 성능 개선: exchangeInfo 본문이 `serverTime` 만 다르면 파싱·맵 재생성을 건너뛰고(§3.3), 시세 프레임마다 집계 `last_message_at` 만 올린다(§3.5). 호가 정리는 001 §3.5-1(가격 0·NaN·inf 거르기, 한 번 훑기). 측정(로컬, 합성 본문·프레임): exchangeInfo 매초 동기 구간 21.6 → 0.4ms, 메시지당 처리(원문 기록 포함) 22.4 → 12.6µs, 원문 기록을 뺀 몫 12.4 → 11.0µs. 검증 — server ruff·format·pytest 865 passed.

@@ -2,17 +2,18 @@
 // 표·우측 column 은 /history/events 전 코인 조회(방향·기간·국내 거래소가 쿼리, 심볼·해외 거래소는 클라이언트에서 거른다).
 // 차트 음영은 선택 심볼만 차트 범위로 따로 조회 — 표 필터와 차트 설정은 서로 독립(맨 위 표 설정 → 표 → 차트 설정 → 차트 순서).
 // 참조 디자인(docs/design/reference/tabs/HistoryTab.tsx)의 김프/역프 열 분리 대신 서브탭 — 한 화면은 한 방향만.
-import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { exName, fmtAgo, fmtPct, fmtTime, pctColor } from '../../shared/format'
 import { Empty, Pill, Seg, card, hint, kicker, searchInput, type SegOpt } from '../../shared/ui'
 import { alias, list, oneOf, useUrlState, type Codec } from '../../shared/urlState'
 import { useCandles, useEvents } from './api'
 import { FX_CHOICES, REAL_FXS, RES_OF_INTERVAL, RES_SEC, isMockFx, neededChunks } from './candles'
-import FxChartCard, { ChartSync, ChartToolbar, type PairSeries } from './Chart'
+import FxChartCard, { ChartSync, ChartToolbar } from './Chart'
+import type { PairSeries } from './chartData'
 import { mockCandles, mockEvents } from './mock'
 import { NET_NONE, netPath } from './network'
 import { INTERVALS, INTERVAL_SEC, rollup, type Interval } from './rollup'
-import { aggregate, durationOf, sortStats, summarize, type SortKey } from './stats'
+import { durationOf, finishStats, fmtDur, prepareStats, sortStats, summarize, type SortKey } from './stats'
 import type { SpreadRow } from '../../shared/types'
 import type { Dir, Dom, PremiumEvent } from './types'
 
@@ -58,14 +59,6 @@ const SORT_CODEC: Codec<{ key: SortKey; dir: number }> = {
   format: (v) => `${v.key}:${v.dir === 1 ? 'asc' : 'desc'}`,
 }
 
-/** 지속 초 → 사람이 읽는 표기. */
-function fmtDur(sec: number): string {
-  const min = sec / 60
-  if (min < 60) return `${Math.round(min)}분`
-  if (min < 60 * 24) return `${(min / 60).toFixed(1)}시간`
-  return `${(min / 60 / 24).toFixed(1)}일`
-}
-
 /** 타임라인 축 라벨 (로컬). 기간이 하루 이하면 M/D 는 5칸이 전부 같은 날이라 시각으로, 1주 미만이면 날짜+시각, 그 이상은 M/D. */
 function fmtAxis(ms: number, periodSec: number): string {
   const d = new Date(ms)
@@ -84,10 +77,20 @@ function StatusPill({ since, nowSec }: { since: number | null; nowSec: number })
   return <Pill tone="accent">진행 중 · {fmtDur(nowSec - since)}</Pill>
 }
 
-export default function HistoryTab({ now, selSym, onSelect, spreads }: {
+/** 타임라인 막대 하나 — 받는 값이 전부 문자열이라, 글자·위치가 그대로인 막대(끝난 사건 대부분)는 셸의 1.5초 리렌더에서 다시 그리지 않는다. */
+const TimelineBar = memo(function TimelineBar({ title, left, width, color }: { title: string; left: string; width: string; color: string }) {
+  return (
+    <span title={title}
+      style={{ position: 'absolute', top: 3, bottom: 3, minWidth: 2, borderRadius: 2, background: color, left, width }} />
+  )
+})
+
+export default function HistoryTab({ now, selSym, onSelect, spreads, active }: {
   now: number; selSym: string; onSelect: (sym: string) => void
   /** 스프레드 피드의 현재 행 — 선택 코인이 어느 해외 거래소에 있는지 알아내는 데만 쓴다 (014 §3.7). */
   spreads: SpreadRow[]
+  /** 이 탭이 보이는 중 — 아닐 때는 사건·봉 60초 재조회를 멈춘다 (013 §3.5·014 §3.7). */
+  active: boolean
 }) {
   // 방향·기간·거래소·정렬·차트 선택은 URL 쿼리(h.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색 입력은 Enter 전까지 임시라 제외
   const [dir, setDir] = useUrlState<Dir>('h.dir', 'kimp', oneOf(['kimp', 'reverse']))
@@ -128,14 +131,15 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
 
   const nowSec = Math.floor(now / 1000)
   const periodSec = PER_SEC[per]
-  const { result, loading } = useEvents({ dir, dom, periodSec })
+  const { result, loading } = useEvents({ dir, dom, periodSec }, active)
   // 실패·미도착 때 `[]` 를 매 렌더 새로 만들면 아래 memo 들이 초마다 깨져 차트가 초마다 다시 그려진다 → 고정 빈 배열
   const allEvents: PremiumEvent[] = result?.kind === 'ok' ? result.data.events : NO_EVENTS
   // 해외 거래소 필터 — 국내 필터(API dom)와 같은 범위로 탭 전체(표·요약·로그·차트 음영)에 걸린다. 60초 재조회·필터 변경 때만 새 배열
   const events = useMemo(() => (fxf === null ? allEvents : allEvents.filter((e) => e.fx === fxf)), [allEvents, fxf])
 
-  // 좌 표: 심볼별 집계 → 정렬 → 상위 30
-  const rank = sortStats(aggregate(events, nowSec), sortKey, sortDir).slice(0, 30)
+  // 좌 표: 심볼별 집계 → 정렬 → 상위 30. 합·최대는 사건이 바뀔 때만 모으고, 렌더마다는 진행 중 사건의 지속만 더한다
+  const prepared = useMemo(() => prepareStats(events), [events])
+  const rank = sortStats(finishStats(prepared, nowSec), sortKey, sortDir).slice(0, 30)
   const onSort = (k: SortKey) => {
     if (k === sortKey) { setSort({ key: k, dir: -sortDir }); return }
     // 망 열은 문자열이라 첫 클릭이 오름차순, 수치 열은 내림차순 (024 §3.8)
@@ -146,6 +150,12 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
   // 우 column: 선택 심볼의 사건(최신순)·요약·타임라인
   // events 는 60초 재조회 때만 새 배열 — 매초 리렌더에서 같은 참조를 유지해 차트 setData 가 초마다 돌지 않게 memo
   const mine = useMemo(() => events.filter((e) => e.base === selSym).sort((a, b) => b.startTs - a.startTs), [events, selSym])
+  // 타임라인 막대의 key·툴팁은 사건마다 한 번 — 끝난 사건은 완성된 문자열, 진행 중은 지속 앞뒤 조각만(지속은 렌더마다 흐른다)
+  const bars = useMemo(() => mine.map((e) => {
+    const head = `${exName(e.dom)} · ${fmtTime(e.startTs * 1000)} 시작 · `
+    const tail = ` 지속 · 최대 ${fmtPct(e.maxPercent)}`
+    return { e, key: `${e.dom}-${e.fx}-${e.startTs}`, head, tail, title: e.ongoing ? null : head + fmtDur(e.durationSeconds) + tail }
+  }), [mine])
   const sum = summarize(mine, nowSec, periodSec)
   const t0Sec = nowSec - periodSec
   const color = dirColor(dir)
@@ -157,7 +167,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
   const realFxsToFetch = REAL_FXS.filter((id) => openFxs.includes(id) || (id === mockBase && openFxs.some(isMockFx)))
   const { pairs, loading: candlesLoading, errorStatus: candlesError, oldestReached } = useCandles({
     base: selSym, dir, doms: DOMS_ORDER.filter((x) => chartDoms.includes(x)), fxs: realFxsToFetch, interval, older,
-  })
+  }, active)
   // 카드 = 해외 1개 × 선택한 국내 전부. 접힌 카드는 봉이 없으니(안 불렀다) 헤더에 쓸 국내 목록만 빈 봉으로 채운다
   const cards = useMemo<{ fx: string; series: PairSeries[] }[]>(() => {
     return openFxs.map((fx) => ({
@@ -171,7 +181,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
   // 차트 음영은 표 필터(기간·국내·해외)와 무관하게 선택 심볼의 사건을 차트가 보여주는 범위(가장 오래된 청크 시작 ~ 지금)로 따로 받는다.
   // 청크 시작은 경계에 맞춰 떨어지므로 매초 리렌더에도 값이 그대로 — 과거 로드(older)·봉 종류가 바뀔 때만 재조회
   const chartStartSec = neededChunks(nowSec, res, INTERVAL_SEC[interval], older).starts[0]
-  const { result: chartResult } = useEvents({ dir, dom: null, periodSec: 0, startSec: chartStartSec, base: selSym })
+  const { result: chartResult } = useEvents({ dir, dom: null, periodSec: 0, startSec: chartStartSec, base: selSym }, active)
   const chartAll: PremiumEvent[] = chartResult?.kind === 'ok' ? chartResult.data.events : NO_EVENTS
   const chartEvents = useMemo(() => chartAll.filter((e) => chartDoms.includes(e.dom)), [chartAll, domsKey])
   // 카드별 사건 — 렌더마다 새 배열을 만들면 카드의 음영 effect 가 초마다 돌므로 memo (014 교훈)
@@ -299,16 +309,12 @@ export default function HistoryTab({ now, selSym, onSelect, spreads }: {
               <div style={{ display: 'grid', gridTemplateColumns: '40px 1fr', gap: '6px 10px', alignItems: 'center' }}>
                 <span style={{ fontSize: 11, color }}>{DIR_LABEL[dir]}</span>
                 <div style={{ position: 'relative', height: 20, background: 'var(--color-bg)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-                  {mine.map((e) => {
+                  {bars.map(({ e, key, head, tail, title }) => {
                     const dur = durationOf(e, nowSec)
                     return (
-                      <span key={`${e.dom}-${e.fx}-${e.startTs}`}
-                        title={`${exName(e.dom)} · ${fmtTime(e.startTs * 1000)} 시작 · ${fmtDur(dur)} 지속 · 최대 ${fmtPct(e.maxPercent)}`}
-                        style={{
-                          position: 'absolute', top: 3, bottom: 3, minWidth: 2, borderRadius: 2, background: color,
-                          left: `${((e.startTs - t0Sec) / periodSec * 100).toFixed(2)}%`,
-                          width: `${Math.max(0.4, dur / periodSec * 100).toFixed(2)}%`,
-                        }} />
+                      <TimelineBar key={key} title={title ?? head + fmtDur(dur) + tail} color={color}
+                        left={`${((e.startTs - t0Sec) / periodSec * 100).toFixed(2)}%`}
+                        width={`${Math.max(0.4, dur / periodSec * 100).toFixed(2)}%`} />
                     )
                   })}
                 </div>

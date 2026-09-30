@@ -23,6 +23,8 @@ class LiveStore:
         self._received_at: int | None = None
         self._tick: Tick | None = None  # 틱 슬롯 — 가장 최근 틱 1개 (§3.6)
         self._spark: dict[SparkKey, list[float]] = {}  # 009 가 게시한다
+        # 같은 게시의 조합별 JSON 조각 — 017 게시기가 표 JSON 의 spark 자리에 끼운다
+        self._spark_json: dict[SparkKey, str] = {}
 
     # --- 쓰기 (수집 경로만 부른다) ---
 
@@ -78,8 +80,14 @@ class LiveStore:
         """마지막 틱 시각(epoch 초)."""
         self._received_at = ts
 
-    def set_spark(self, spark: dict[SparkKey, list[float]]) -> None:
+    def set_spark(
+        self,
+        spark: dict[SparkKey, list[float]],
+        fragments: dict[SparkKey, str] | None = None,
+    ) -> None:
+        """spark 목록 맵과 그 JSON 조각 맵을 함께 바꾼다(009). 조각이 없는 조합은 게시기가 목록을 인코딩한다."""
         self._spark = spark
+        self._spark_json = fragments if fragments is not None else {}
 
     # --- 조회 (전부 동기) ---
 
@@ -123,9 +131,15 @@ class LiveStore:
         return self._received_at
 
     def spark(self, dom: str, fx: str, base: str) -> list[float]:
-        """게시된 목록 그 자체 — 호출자는 고치지 않는다. 맵은 틱마다 통째로 교체되고 목록은 그때 새로
-        만들어지므로(009) 복사할 이유가 없고, 표 1,400행이 매초 읽는 자리라 복사 비용을 안 낸다."""
+        """게시된 목록 그 자체 — 호출자는 고치지 않는다. 맵은 틱마다 얕은 사본으로 교체되고 값이 바뀐 조합의
+        목록만 새로 만들어진다(009) — 게시된 목록은 누구도 제자리에서 고치지 않으므로 복사할 이유가 없고,
+        표 1,400행이 매초 읽는 자리라 복사 비용을 안 낸다."""
         return self._spark.get((dom, fx, base.upper()), _NO_SPARK)
+
+    def spark_json(self) -> dict[SparkKey, str]:
+        """같은 게시의 JSON 조각 맵 그 자체 — 호출자는 고치지 않는다. 조각은 그 조합 목록을 공백 없이
+        `json.dumps` 한 글자와 같고, 값이 유한하지 않은 조합은 조각이 없다(017 게시기가 목록을 인코딩한다)."""
+        return self._spark_json
 
     def is_empty(self) -> bool:
         return not any(self._snapshots.values())

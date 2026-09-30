@@ -195,7 +195,7 @@ def test_bulk_threshold_zero_counts_every_coin_over_a_hundred() -> None:
         reader.seed("upbit", "binance", f"C{i:03d}", [(T0 + i, 1.0, -1.0)])
     # 시드 시각이 7일 기본 창(§3.4) 밖 — start 를 명시한다
     res = make_client(reader).get(
-        "/history/streaks/bulk", params={"threshold": 0, "start": T0}
+        "/history/streaks/bulk", params={"threshold": 0, "start": T0, "end": T0 + 3_600}
     )
     assert res.status_code == 200
     body = res.json()

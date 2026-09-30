@@ -263,6 +263,124 @@ async def test_gunzip_lines_are_sorted_by_received_at_and_pack_is_deterministic(
     await archive.aclose()
 
 
+# --- 지연 조립 (§3.5 기록·닫기 규칙) ---
+
+
+async def test_record_does_not_build_lines_and_close_builds_only_survivors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """기록 함수는 줄을 만들지 않는다 — 같은 키 300번 + key 없는 2번이면 닫을 때 조립은 3번뿐 (§3.5)."""
+    built: list[str] = []
+    real = raw_archive.format_line
+
+    def counting(exchange: str, source: str, at: int, payload: str) -> bytes:
+        built.append(payload)
+        return real(exchange, source, at, payload)
+
+    monkeypatch.setattr(raw_archive, "format_line", counting)
+    archive, s3, clock = build()
+    for i in range(300):
+        archive.record(
+            "bitget",
+            "ws:/v2/ws/public",
+            T0 + i,
+            json.dumps({"n": i}),
+            "orderbook:BTCUSDT",
+        )
+    archive.record("bitget", "ws:/v2/ws/public", T0 + 300, "pong")
+    archive.record("bitget", "rest:/api/v2/spot/public/coins", T0 + 301, "[]")
+    assert built == []  # 수신 경로에서는 한 번도 조립하지 않는다
+    clock.now = NEXT
+    await archive.run_once()
+    await settled(lambda: archive.pending == 0)
+    assert built == ['{"n": 299}', "pong", "[]"]
+    [(_, body)] = s3.puts
+    assert len(lines_of(body)) == 3
+    await archive.aclose()
+
+
+async def test_lazy_assembly_gives_the_same_object_bytes_as_building_on_record() -> (
+    None
+):
+    """지연 조립 전후 S3 객체 바이트가 같다 — 기록 시점에 줄을 만들어 같은 규칙으로 솎은 것과 비교 (§3.5)."""
+    frames: list[tuple[str, int, str, str | None]] = []
+    for sec in range(0, 59):
+        for sym in ("KRW-BTC", "KRW-ETH", "KRW-XRP"):
+            ob = f'{{"type":"orderbook","code":"{sym}","orderbook_units":[{{"ask_price":{100 + sec}.50,"ask_size":1.0}}],"timestamp":{T0 + sec * 1000}}}'
+            frames.append((WS, T0 + sec * 1000, ob, f"orderbook:{sym}"))
+            frames.append(
+                (
+                    WS,
+                    T0 + sec * 1000,
+                    f'{{"type":"ticker","code":"{sym}","trade_price":{sec}}}',
+                    f"ticker:{sym}",
+                )
+            )
+        frames.append((WS, T0 + sec * 1000 + 1, '{"status":"UP"}', None))
+        frames.append(
+            (
+                "rest:/v1/market/all",
+                T0 + sec * 1000 + 2,
+                '[{"market":"KRW-BTC"}]',
+                "markets:all",
+            )
+        )
+    frames.append(
+        ("ws-handshake:/websocket/v1", T0 + 500, "<html>429 Too Many</html>", None)
+    )
+    frames.append(
+        (WS, T0 + 700, '{"a": NaN}', None)
+    )  # 문자열로 감싸이는 원문도 같은 자리에
+    frames.append((WS, T0 + 800, '{\n "pretty": 1\n}', "orderbook:KRW-DOGE"))
+
+    archive, s3, clock = build()
+    keyed: dict[tuple[str, str], tuple[int, int, bytes]] = {}
+    plain: list[tuple[int, int, bytes]] = []
+    for seq, (source, at, payload, key) in enumerate(frames):
+        archive.record("upbit", source, at, payload, key)
+        line = format_line(
+            "upbit", source, at, payload
+        )  # 기록 시점에 조립하던 방식의 기준
+        if key is None:
+            plain.append((at, seq, line))
+        else:
+            keyed[source, key] = (at, seq, line)
+    expected = pack([ln for _, _, ln in sorted([*keyed.values(), *plain])])
+    clock.now = NEXT
+    await archive.run_once()
+    await settled(lambda: archive.pending == 0)
+    [(_, body)] = s3.puts
+    assert body == expected
+    await archive.aclose()
+
+
+async def test_a_line_that_fails_to_build_is_dropped_alone_and_logged(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """닫을 때 줄 하나의 조립이 실패하면 그 줄만 버리고 로그 — 객체는 나머지 줄로 올라간다 (§3.5)."""
+    real = raw_archive.format_line
+
+    def flaky(exchange: str, source: str, at: int, payload: str) -> bytes:
+        if payload == "boom":
+            raise UnicodeEncodeError("utf-8", "x", 0, 1, "surrogate")
+        return real(exchange, source, at, payload)
+
+    monkeypatch.setattr(raw_archive, "format_line", flaky)
+    archive, s3, clock = build()
+    archive.record("upbit", WS, T0, '{"n":1}', OB_BTC)
+    archive.record("upbit", WS, T0 + 1, "boom", "ticker:KRW-BTC")
+    archive.record("upbit", WS, T0 + 2, '{"n":2}')
+    clock.now = NEXT
+    with caplog.at_level(logging.ERROR, logger="marketlens.raw_archive"):
+        await archive.run_once()
+        await settled(lambda: archive.pending == 0)
+    [(_, body)] = s3.puts
+    assert [json.loads(ln)["raw"] for ln in lines_of(body)] == [{"n": 1}, {"n": 2}]
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1 and errors[0].startswith("원문 줄 조립 실패")
+    await archive.aclose()
+
+
 # --- 닫기 회차와 업로드 워커 (§3.6) ---
 
 

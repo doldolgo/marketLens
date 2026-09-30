@@ -7,15 +7,20 @@
 //            방향 경로에 안 드는 줄(김프면 해외 입금·국내 출금)은 흐리게 — "지금 봐야 할 두 줄"이 먼저 보이게
 //   카드끼리 시간축·십자선 연동(ChartSync): 한 카드에서 줌·드래그·마우스 이동이 전 카드에 같이 간다.
 // 휠 줌·드래그 이동은 라이브러리 기본. 왼쪽 끝에 가까워지면 onNeedOlder 로 과거를 더 달라고 한다.
-// 차트 객체는 ref 에 두고 데이터가 바뀔 때만 setData 한다 — 셸의 매초 리렌더가 캔버스를 다시 그리지 않게.
+// 차트 객체는 ref 에 두고 데이터가 바뀔 때만 채운다 — 셸의 매초 리렌더가 캔버스를 다시 그리지 않게.
+// 채울 점 배열은 chartData.ts(순수 함수)가 만든다.
 import {
   CandlestickSeries, HistogramSeries, LineSeries, LineStyle, createChart,
-  type IChartApi, type ISeriesApi, type LogicalRange, type MouseEventParams, type UTCTimestamp,
+  type IChartApi, type ISeriesApi, type LogicalRange, type MouseEventParams,
 } from 'lightweight-charts'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { exName, fmtKrw, fmtPct, fmtTime, fmtUsdt, pctColor } from '../../shared/format'
 import { Pill, Seg, card, hint, kicker, type SegOpt } from '../../shared/ui'
-import { FX_CHOICES, INITIAL_BARS, exchangeStates, lineTone, type BandTone } from './candles'
+import { FX_CHOICES, INITIAL_BARS, exchangeStates } from './candles'
+import {
+  alpha, appendStart, axisOf, axisTimes, bandDimmed, bandPalette, cardPoints, fromChartTime, shadePoints, toChartTime,
+  type CardPoints, type PairSeries,
+} from './chartData'
 import { netPath } from './network'
 import { INTERVALS, INTERVAL_LABEL, INTERVAL_SEC, type Interval } from './rollup'
 import type { Candle1m, Dir, Dom, PremiumEvent } from './types'
@@ -32,8 +37,6 @@ const BAND_SHARE = 0.09
 /** 국내 거래소 선 색 — 카드가 여럿이어도 같은 거래소는 같은 색. 해외 거래소(카드 주인)는 강조색. */
 const DOM_COLOR: Record<Dom, string> = { upbit: '#7fd0e8', bithumb: '#e6b45a' }
 const FX_COLOR = '#d2cefd'
-/** 경로에 안 드는 입출금 줄의 투명도 배율. */
-const DIM = 0.4
 
 const DIR_LABEL: Record<Dir, string> = { kimp: '김프', reverse: '역프' }
 const dirColor = (dir: Dir) => pctColor(dir === 'kimp' ? 1 : -1)
@@ -49,29 +52,13 @@ const premAutoscale = (orig: () => AutoscaleInfo): AutoscaleInfo => {
 }
 /** 입출금 판은 항상 0~2 — 아래 줄 0~0.9, 위 줄 1.1~2. 데이터에 따라 축이 흔들리면 줄 두께가 바뀌므로 고정. */
 const bandAutoscale = (): AutoscaleInfo => ({ priceRange: { minValue: 0, maxValue: 2 } })
-const PCT_FORMAT = { type: 'custom', minMove: 0.01, formatter: (v: number) => `${v.toFixed(2)}%` } as const
+// 축·십자선 라벨도 퍼센트 표시라, 반올림해 0 이면 `-0.00%` 대신 `0.00%` (002 §3.3)
+const PCT_FORMAT = { type: 'custom', minMove: 0.01, formatter: (v: number) => { const t = v.toFixed(2); return `${Number(t) === 0 ? '0.00' : t}%` } } as const
 
 /** 캔버스는 CSS 변수를 못 읽으므로 토큰 값을 한 번 풀어 온다. */
 function cssVar(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
   return v || fallback
-}
-function alpha(hex: string, a: number): string {
-  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex)
-  if (!m) return hex
-  return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${a})`
-}
-/** 라이브러리는 시각을 UTC 로 그린다 → 로컬(KST) 로 보이게 offset 을 더해 넣고, 읽을 때 뺀다. */
-const TZ_OFF = -new Date().getTimezoneOffset() * 60
-const toChartTime = (ts: number) => (ts + TZ_OFF) as UTCTimestamp
-const fromChartTime = (t: number) => t - TZ_OFF
-
-/** 카드의 시간축 = 카드에 붙은 모든 쌍의 봉 시각 합집합(오름차순). 라이브러리는 차트 안 모든 시리즈의 시각을 합쳐 봉 index 를 매기므로,
- *  쌍 하나의 봉 수로 범위를 잡으면 두 국내 거래소의 봉 수가 다른 코인에서 최신 구간이 화면 밖으로 밀린다. */
-function axisTimes(S: PairSeries[]): number[] {
-  const set = new Set<number>()
-  for (const s of S) for (const c of s.candles) set.add(c.ts)
-  return [...set].sort((a, b) => a - b)
 }
 /** 봉 index(소수 허용) → 시각. 데이터 밖은 봉 간격으로 늘려 잡는다 — 오른쪽 끝 여백까지 카드끼리 같은 시각을 보게. */
 function indexToTs(times: number[], step: number, i: number): number {
@@ -109,16 +96,7 @@ function findAt(arr: Candle1m[], ts: number): Candle1m | null {
   return null
 }
 
-/** (국내, 해외) 거래소 쌍 하나의 봉. */
-export interface PairSeries {
-  dom: Dom
-  fx: string
-  /** 시각 오름차순, 이미 interval 로 접힌 봉. */
-  candles: Candle1m[]
-}
 export const pairKey = (s: { dom: string; fx: string }) => `${s.dom}|${s.fx}`
-/** 시간축·음영·읽기 줄의 기준 쌍 — 봉이 있는 첫 쌍. 업비트에 원화 마켓이 없는 코인은 첫 쌍(업비트)이 비어 있어 이걸 축으로 잡으면 아무것도 안 보인다. */
-const axisOf = (S: PairSeries[]): PairSeries => S.find((s) => s.candles.length > 0) ?? S[0]
 
 // ── 카드 간 연동 ──
 // 시간축: 한 카드의 논리 범위(봉 index)를 그 카드의 시간축으로 시각 구간으로 바꾸고, 나머지 카드는 각자의 시간축으로 다시 index 로 바꿔 적용한다.
@@ -263,8 +241,20 @@ interface Refs {
   configKey: string | null
 }
 
-/** 입출금 띠의 행 하나 — 거래소 1개(해외 = 'fx', 국내 = dom id). */
-interface BandRow { id: string; label: string; pick: (c: Candle1m) => { deposit: boolean | null; withdraw: boolean | null }; from: PairSeries }
+/** 점 배열을 시리즈에 넣는다 — 전체 교체(setData), 또는 끝 봉부터 update(첫 점은 직전 마지막 봉과 같은 시각이라 덮어쓰고 나머지는 붙는다). */
+function fill<P>(series: { setData(d: P[]): void; update(d: P): void } | undefined, pts: P[], tail: boolean): void {
+  if (!series) return
+  if (!tail) { series.setData(pts); return }
+  for (const pt of pts) series.update(pt)
+}
+
+/** 카드의 모든 시리즈에 점을 넣는다 — 순서(캔들 → 김프 선 → 가격 → 띠)는 setData·update 모두 같다. */
+function fillCard(r: Refs, pts: CardPoints, tail: boolean): void {
+  fill(r.candle, pts.candle, tail)
+  for (const [dom, arr] of pts.prem) fill(r.premLines.get(dom), arr, tail)
+  for (const [key, arr] of pts.price) fill(r.priceLines.get(key), arr, tail)
+  for (const [key, arr] of pts.band) fill(r.bandLines.get(key), arr, tail)
+}
 
 /** 카드 헤더 줄 — 펼친 카드와 접힌 카드가 같은 줄을 쓴다. 오른쪽 끝이 접기/펼치기 버튼 */
 function CardHeader(p: { fx: string; dir: Dir; doms: string; mock: boolean; right?: string; collapsed: boolean; onToggle: () => void }) {
@@ -380,48 +370,60 @@ function FxChartBody(p: CardProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── 데이터·선택이 바뀔 때 시리즈를 채운다. 구성(국내 집합·방향)이 같으면 setData 만, 다르면 동적 시리즈를 다시 만든다.
+  // ── 데이터·선택이 바뀔 때 시리즈를 채운다. 구성(국내 집합·방향)이 같으면 채우기만, 다르면 동적 시리즈를 다시 만든다.
+  //    60초 갱신처럼 봉이 끝에만 붙었으면(구성·봉 종류가 같고 직전 마지막 봉 앞까지 그대로) 끝 봉부터 update 한다 —
+  //    setData 는 봉 수에 비례해 느리다(7일 1분봉 카드 1장 약 35ms). 보이는 범위는 두 경로 모두 라이브러리 기본 동작 그대로다.
   //    앞에 과거가 붙었으면 보이던 시간 범위를 복원해 화면이 튀지 않게
   //    (라이브러리는 setData 뒤 index 기준 범위를 유지하므로 앞에 N 개가 붙으면 화면이 N 개 앞으로 밀린다).
   useEffect(() => {
     const r = refs.current
     if (!r || p.series.length === 0) return
     const S = p.series
+    const prevS = seriesRef.current
     seriesRef.current = S
     const times = axisTimes(S)
     timesRef.current = times
     askedRef.current = false
     busyRef.current = true
-    const keepRange = r.chart.timeScale().getVisibleRange() // setData 전에 시각 기준으로 잡아둔다
+    const keepRange = r.chart.timeScale().getVisibleRange() // 채우기 전에 시각 기준으로 잡아둔다
+    // 라이브러리의 범위 이벤트는 다음 프레임에 도착하므로 두 프레임 뒤에 잠금을 푼다
+    const release = () => requestAnimationFrame(() => requestAnimationFrame(() => { busyRef.current = false }))
     const dirHex = cssVar(p.dir === 'kimp' ? '--color-up' : '--color-down', '#e0697d')
-    const blocked = cssVar('--color-up', '#e0697d')
-    const okHex = cssVar('--color-neutral-800', '#2e3040')
-    const unknownHex = cssVar('--color-neutral-600', '#6a6a78')
-    const toneColor = (t: BandTone, dim: boolean) => {
-      const k = dim ? DIM : 1
-      return t === 'blocked' ? alpha(blocked, 0.9 * k) : t === 'unknown' ? alpha(unknownHex, 0.55 * k) : alpha(okHex, 0.45 + (dim ? 0 : 0.2))
-    }
+    // 입출금 띠 색 6가지 — 봉마다 만들지 않게 갱신마다 한 번(테마 토큰은 지금처럼 갱신마다 다시 읽는다)
+    const palette = bandPalette(cssVar('--color-up', '#e0697d'), cssVar('--color-neutral-600', '#6a6a78'), cssVar('--color-neutral-800', '#2e3040'))
 
     const single = S.length === 1
     const axis = axisOf(S)
     const base = axis.candles
     const doms = S.map((s) => s.dom)
-    const priceSpecs: { key: string; label: string; color: string; pick: (c: Candle1m) => number; from: PairSeries }[] = [
-      { key: 'fx', label: fxLabel(p.fx), color: FX_COLOR, pick: (c) => c.usdt, from: axis },
-      ...S.map((s) => ({ key: `dom:${s.dom}`, label: exName(s.dom), color: DOM_COLOR[s.dom], pick: (c: Candle1m) => c.krw / c.fxRate, from: s })),
-    ]
-    // 입출금 행: 이 해외 거래소 → 국내 순. 김프 경로 = 해외 출금·국내 입금, 역프 = 국내 출금·해외 입금 — 나머지 줄은 흐리게
-    const rows: BandRow[] = [
-      { id: 'fx', label: fxLabel(p.fx), from: axis, pick: (c) => { const e = exchangeStates(c, p.dir); return { deposit: e.fxDeposit, withdraw: e.fxWithdraw } } },
-      ...S.map((s) => ({ id: s.dom, label: exName(s.dom), from: s, pick: (c: Candle1m) => { const e = exchangeStates(c, p.dir); return { deposit: e.domDeposit, withdraw: e.domWithdraw } } })),
-    ]
-    const dimmed = (row: BandRow, kind: 'deposit' | 'withdraw') => {
-      const relevant = row.id === 'fx' ? (p.dir === 'kimp' ? 'withdraw' : 'deposit') : (p.dir === 'kimp' ? 'deposit' : 'withdraw')
-      return kind !== relevant
-    }
     // 축 쌍이 바뀌면(로딩 중엔 다 비어 첫 쌍, 뒤에 빗썸만 도착) 기준선을 붙일 호스트도 바뀌어야 하므로 구성 키에 넣는다
     const configKey = `${doms.join(',')}|${p.dir}|${axis.dom}`
+    const viewKey = `${configKey}|${p.interval}`
 
+    if (r.configKey === configKey && viewKeyRef.current === viewKey && prevS.length === S.length) {
+      // 같은 구성이면 쌍 순서도 같다(configKey 가 국내 목록을 담는다)
+      const from = new Map<PairSeries, number>()
+      for (let i = 0; i < S.length; i++) {
+        const k = appendStart(prevS[i].candles, S[i].candles)
+        if (k === null) break
+        from.set(S[i], k)
+      }
+      if (from.size === S.length) {
+        try {
+          fillCard(r, cardPoints(S, p.dir, palette, (s) => from.get(s) ?? 0), true)
+          release()
+          return
+        } catch {
+          // 과거 시각 update 는 라이브러리가 거부한다 — 아래 setData 로 전부 다시 채운다
+        }
+      }
+    }
+
+    // 입출금 행: 이 해외 거래소 → 국내 순. 김프 경로 = 해외 출금·국내 입금, 역프 = 국내 출금·해외 입금 — 나머지 줄은 흐리게
+    const bandRows = [
+      { id: 'fx', label: fxLabel(p.fx), isFx: true },
+      ...S.map((s) => ({ id: s.dom as string, label: exName(s.dom), isFx: false })),
+    ]
     if (r.configKey !== configKey) {
       // 구성이 바뀜 → 동적 시리즈 재생성
       for (const s of [...r.premLines.values(), ...r.priceLines.values(), ...r.bandLines.values()]) r.chart.removeSeries(s)
@@ -435,7 +437,8 @@ function FxChartBody(p: CardProps) {
           }, 0))
         }
       }
-      // 판 1: 거래소별 USDT 가격 선
+      // 판 1: 거래소별 USDT 가격 선 — 이 해외 거래소 선(강조색) + 국내 환산 선
+      const priceSpecs = [{ key: 'fx', color: FX_COLOR }, ...S.map((s) => ({ key: `dom:${s.dom}`, color: DOM_COLOR[s.dom] }))]
       for (const ps of priceSpecs) {
         r.priceLines.set(ps.key, r.chart.addSeries(LineSeries, {
           color: ps.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
@@ -443,11 +446,11 @@ function FxChartBody(p: CardProps) {
         }, 1))
       }
       // 판 2~: 거래소별 입출금 — 판 하나에 입금(위 1.1~2)·출금(아래 0~0.9) 히스토그램 2개. 축 라벨은 제목만(값 없음)
-      rows.forEach((row, i) => {
+      bandRows.forEach((row, i) => {
         const pane = 2 + i
         const mk = (kind: 'deposit' | 'withdraw', base: number) => r.chart.addSeries(HistogramSeries, {
           priceLineVisible: false, lastValueVisible: true, base, title: `${row.label} ${kind === 'deposit' ? '입금' : '출금'}`,
-          color: toneColor('open', dimmed(row, kind)),
+          color: palette.open[bandDimmed(row.isFx, p.dir, kind) ? 1 : 0],
           priceFormat: { type: 'custom', minMove: 1, formatter: () => '' }, autoscaleInfoProvider: bandAutoscale,
         }, pane)
         const dep = mk('deposit', 1.1)
@@ -464,26 +467,16 @@ function FxChartBody(p: CardProps) {
       host.createPriceLine({ price: 0, color: cssVar('--color-neutral-600', '#6a6a78'), lineStyle: LineStyle.Solid, lineWidth: 1, title: '' })
       // 판 높이 비율 — 시리즈를 지웠다 만들면 판도 다시 생기므로 여기서
       const panes = r.chart.panes()
-      panes[0]?.setStretchFactor(1 - PRICE_SHARE - BAND_SHARE * rows.length)
+      panes[0]?.setStretchFactor(1 - PRICE_SHARE - BAND_SHARE * bandRows.length)
       panes[1]?.setStretchFactor(PRICE_SHARE)
       for (let i = 2; i < panes.length; i++) panes[i]?.setStretchFactor(BAND_SHARE)
       r.configKey = configKey
     }
 
-    // 데이터 채우기 (구성 무관, 매번)
-    r.candle.setData(single ? base.map((c) => ({ time: toChartTime(c.ts), open: c.open, high: c.high, low: c.low, close: c.close })) : [])
-    for (const s of S) r.premLines.get(s.dom)?.setData(s.candles.map((c) => ({ time: toChartTime(c.ts), value: c.close })))
-    for (const ps of priceSpecs) r.priceLines.get(ps.key)?.setData(ps.from.candles.map((c) => ({ time: toChartTime(c.ts), value: ps.pick(c) })))
-    for (const row of rows) {
-      for (const kind of ['deposit', 'withdraw'] as const) {
-        const dim = dimmed(row, kind)
-        const value = kind === 'deposit' ? 2 : 0.9
-        r.bandLines.get(`${row.id}:${kind}`)?.setData(row.from.candles.map((c) => ({ time: toChartTime(c.ts), value, color: toneColor(lineTone(row.pick(c)[kind]), dim) })))
-      }
-    }
+    // 데이터 채우기 (구성 무관, 전체)
+    fillCard(r, cardPoints(S, p.dir, palette), false)
 
     // 보이는 범위: 구성·봉 종류가 바뀌면 오른쪽 끝 최근 INITIAL_BARS 개, 과거가 앞에 붙었으면 그대로
-    const viewKey = `${configKey}|${p.interval}`
     const ts0 = base[0]?.ts ?? null
     const prev = firstTsRef.current
     if (viewKeyRef.current !== viewKey || prev == null || ts0 == null || ts0 > prev) {
@@ -500,19 +493,17 @@ function FxChartBody(p: CardProps) {
     }
     viewKeyRef.current = viewKey
     firstTsRef.current = ts0
-    // 라이브러리의 범위 이벤트는 다음 프레임에 도착하므로 두 프레임 뒤에 잠금을 푼다
-    requestAnimationFrame(() => requestAnimationFrame(() => { busyRef.current = false }))
+    release()
   }, [p.series, p.dir, p.interval, p.fx])
 
   // ── 사건 음영만 따로 — 60초 재조회로 사건이 바뀔 때 시리즈 전체를 다시 채우지 않게. 첫 쌍의 봉 시각을 축으로,
-  //    이 카드 사건이 하나라도 걸리면 칠한다
+  //    이 카드 사건이 봉 구간 [ts, ts + 봉 길이) 와 하나라도 겹치면 칠한다(shadePoints — 겹침 판정·한 번 훑기)
   useEffect(() => {
     const r = refs.current
     if (!r || p.series.length === 0) return
     const shadeColor = alpha(cssVar(p.dir === 'kimp' ? '--color-up' : '--color-down', '#e0697d'), 0.13)
-    const inEvent = (ts: number) => p.events.some((e) => ts >= e.startTs && (e.endTs == null || ts < e.endTs))
-    r.shade.setData(axisOf(p.series).candles.map((c) => inEvent(c.ts) ? { time: toChartTime(c.ts), value: 1, color: shadeColor } : { time: toChartTime(c.ts) }))
-  }, [p.series, p.events, p.dir])
+    r.shade.setData(shadePoints(axisOf(p.series).candles, p.events, INTERVAL_SEC[p.interval], shadeColor))
+  }, [p.series, p.events, p.dir, p.interval])
 
   // ── 읽기 줄: 십자선 시각(없으면 마지막 봉)의 국내별 김프·거래소별 가격·거래소별 입출금
   const S = p.series

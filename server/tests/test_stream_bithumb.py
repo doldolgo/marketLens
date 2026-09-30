@@ -318,3 +318,40 @@ async def test_handshake_rejection_without_body_records_nothing() -> None:
     stream, connector, _, raw, _, _ = build([HandshakeRejected(418), OSError("dns")])
     await run_until_exhausted(stream, connector)
     assert raw.payloads("ws-handshake:/websocket/v1") == []
+
+
+# --- 매초 목록 건너뛰기 (001 §3.2) ---
+
+
+async def test_same_market_list_body_is_recorded_but_not_parsed_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """200 본문 바이트가 직전 성공 응답과 같으면 파싱 없이 그때의 목록 — 원문 기록은 매 응답 (§3.2)."""
+    parses = [0]
+    real = httpx.Response.json
+
+    def counting(self: httpx.Response, **kw: object) -> object:
+        parses[0] += 1
+        return real(self, **kw)
+
+    monkeypatch.setattr(httpx.Response, "json", counting)
+    same = json.dumps([{"market": "KRW-BTC"}, {"market": "BTC-ETH"}]).encode()
+    listed = json.dumps([{"market": "KRW-BTC"}, {"market": "KRW-ETH"}]).encode()
+    responses = [
+        httpx.Response(200, content=same),
+        httpx.Response(200, content=same),
+        httpx.Response(
+            200, content=b'{"error":{"name":"500","message":"busy"}}'
+        ),  # 실패는 직전 목록 유지(우주 쪽)
+        httpx.Response(200, content=same),
+        httpx.Response(200, content=listed),  # 상장
+    ]
+    stream, _, _, raw, _, _ = build([])
+    client = _client(lambda r: responses.pop(0))
+    assert await stream.fetch_markets(client) == ["KRW-BTC"] and parses[0] == 1
+    assert await stream.fetch_markets(client) == ["KRW-BTC"] and parses[0] == 1
+    with pytest.raises(ExchangeApiError):
+        await stream.fetch_markets(client)
+    assert await stream.fetch_markets(client) == ["KRW-BTC"]
+    assert await stream.fetch_markets(client) == ["KRW-BTC", "KRW-ETH"]
+    assert raw.keys("rest:/v1/market/all") == ["markets:all"] * 5

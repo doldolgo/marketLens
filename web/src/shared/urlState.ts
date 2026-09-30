@@ -1,7 +1,8 @@
 // URL 쿼리에 실리는 화면 상태 — 새로고침·링크 공유 시 같은 화면이 나오게 (스펙 002 §3.5).
 // useState 와 같은 모양이되 초기값을 URL 에서 읽고, 바뀌면 자기 키만 replaceState 로 갱신한다.
 // 기본값이면 키를 지워 URL 을 짧게 유지하고, pushState 가 아니라 뒤로가기 히스토리는 쌓이지 않는다.
-// 탭은 언마운트 없이 전부 마운트돼 있으므로(002 §3.5) 각 탭이 자기 키만 읽고 쓰면 충돌이 없다 — 키는 탭 접두어로 구분.
+// 탭은 한 번 마운트되면 언마운트되지 않으므로(002 §3.5) 각 탭이 자기 키만 읽고 쓰면 충돌이 없다 — 키는 탭 접두어로 구분.
+// 기록 탭만 처음 볼 때 마운트된다 — 그 전에는 셸이 `h.` 키를 URL 에서 대신 빼고, 값은 마운트될 때 읽게 메모리에 둔다(dropParams).
 import { createContext, useContext, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 
 /** 값 ↔ URL 문자열. parse 가 undefined 를 돌려주면 잘못된 값이라 기본값으로 간다. */
@@ -45,14 +46,31 @@ export const sortOf = <C extends string>(cols: readonly C[]): Codec<{ col: C; as
   format: (v) => `${v.col}:${v.asc ? 'asc' : 'desc'}`,
 })
 
+// dropParams 가 URL 에서 뺀 값 — 아직 마운트하지 않은 탭이 나중에 마운트될 때 초기값으로 읽는다
+const parked = new Map<string, string>()
+
 function readParam(key: string): string | null {
-  return new URLSearchParams(window.location.search).get(key)
+  return new URLSearchParams(window.location.search).get(key) ?? parked.get(key) ?? null
 }
 
 function writeParam(key: string, value: string | null) {
   const url = new URL(window.location.href)
   if (value === null) url.searchParams.delete(key)
   else url.searchParams.set(key, value)
+  if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url)
+}
+
+/** 접두어로 시작하는 키를 URL 에서 모두 뺀다 — 아직 마운트하지 않은 탭은 자기 키를 지울 수 없어서, 셸이 대신 지운다
+ *  (마운트돼 있었다면 비활성이라 지웠을 키다 — URL 은 보이는 화면만 담는다). 값은 메모리에 남겨 그 탭이 처음 마운트될 때 초기값으로 쓴다
+ *  — 마운트돼 있던 비활성 탭이 URL 에서 키를 빼도 값은 들고 있는 것과 같게. */
+export function dropParams(prefix: string): void {
+  const url = new URL(window.location.href)
+  // 지우면서 훑으면 목록이 당겨져 건너뛰는 키가 생기므로 지울 키를 먼저 모은다
+  const drop = Array.from(url.searchParams.keys()).filter((key) => key.startsWith(prefix))
+  for (const key of drop) {
+    parked.set(key, url.searchParams.get(key) ?? '')
+    url.searchParams.delete(key)
+  }
   if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url)
 }
 

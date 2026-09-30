@@ -26,7 +26,8 @@ def test_empty_records_returns_empty_coins() -> None:
 
 def test_coin_count_and_shapes() -> None:
     res = make_client(seeded_reader()).get(
-        "/history/streaks/bulk", params={"threshold": 0, "maxGap": 123, "start": T0}
+        "/history/streaks/bulk",
+        params={"threshold": 0, "maxGap": 123, "start": T0, "end": T0 + 3_600},
     )
     assert res.status_code == 200
     body = res.json()
@@ -63,7 +64,7 @@ def test_coin_count_and_shapes() -> None:
 
 def test_dom_filter() -> None:
     res = make_client(seeded_reader()).get(
-        "/history/streaks/bulk", params={"dom": "bithumb", "start": T0}
+        "/history/streaks/bulk", params={"dom": "bithumb", "start": T0, "end": T0 + 60}
     )
     body = res.json()
     assert [c["base"] for c in body["coins"]] == ["XRP"]
@@ -90,11 +91,27 @@ def test_storage_unavailable_503() -> None:
     assert res.json()["error"]["code"] == "storage_unavailable"
 
 
-def test_default_window_is_last_7_days() -> None:
-    # start 없으면 end − 7일 — 2023년 시드는 전부 창 밖이라 빈 coins, 최근 기록만 잡힌다 (§3.4)
+def test_default_window_is_the_last_hour() -> None:
+    # start 없으면 end − 1시간(창 상한) — 2023년 시드와 2시간 전 기록은 창 밖, 30분 전 기록만 잡힌다 (§3.4)
     now = int(time.time())
     reader = seeded_reader()
-    reader.seed("upbit", "binance", "SOL", [(now - 86_400, 2.0, -1.0)])
+    reader.seed("upbit", "binance", "SOL", [(now - 1_800, 2.0, -1.0)])
+    reader.seed("upbit", "binance", "ADA", [(now - 7_200, 2.0, -1.0)])
     body = make_client(reader).get("/history/streaks/bulk").json()
     assert [c["base"] for c in body["coins"]] == ["SOL"]
-    assert body["startTs"] == body["endTs"] - 604_800
+    assert body["startTs"] == body["endTs"] - 3_600
+
+
+# ---- 창 상한 1시간 (§3.4, 2026-09-28) ----
+
+
+def test_window_over_an_hour_is_400_and_exactly_an_hour_is_fine() -> None:
+    client = make_client(seeded_reader())
+    res = client.get("/history/streaks/bulk", params={"start": T0, "end": T0 + 3_601})
+    assert res.status_code == 400
+    error = res.json()["error"]
+    assert error["code"] == "invalid_request"
+    assert error["detail"] == {"limitSec": 3_600}
+    res = client.get("/history/streaks/bulk", params={"start": T0, "end": T0 + 3_600})
+    assert res.status_code == 200
+    assert res.json()["coinCount"] == 2

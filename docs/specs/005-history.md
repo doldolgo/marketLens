@@ -33,19 +33,23 @@ dev compose 는 Influx 2.7 과 Redis(009) 를 띄운다. 첫 기동 시 org·buc
 - **김프 점 규칙**: base 마다 (국내 거래소 × 해외 거래소) 조합. 국내 행은 호가가 있고 **그 거래소의 USDT 시세**가 있어야 한다(시세 없는 국내 거래소는 빠진다 — 남의 시세를 빌리지 않는다). 해외 행도 호가 필수.
   수식은 003 의 `core/premium.py` 공개 함수 `premium_percent(*, buy_krw: float, sell_krw: float) -> float` = `(sell/buy − 1) × 100` 을 import 해 쓴다(재정의 금지). `fwd = premium_percent(buy_krw=fx_ask × rate_ask, sell_krw=dom_bid)`, `rev = premium_percent(buy_krw=dom_ask, sell_krw=fx_bid × rate_bid)` — **최우선 1단계 기준의 원값(raw)** 이다. `/spreads` 는 같은 식을 체결 규모만큼 걸은 평균가에 적용해 슬리피지 차감 후 순값을 내므로(003 §3.2-4) 두 값은 다르고, 그 차이가 `/spreads` 의 `slipFwd`·`slipRev` 다 — 저장 시점에는 체결 규모가 정의되지 않아 아카이브는 원값을 쓴다(003 §2). 여섯 값 중 하나라도 ≤ 0 이면 건너뜀. 점 `(dom, fx, base, time=틱 시각 초, fwd, rev)`.
 - 입출금 조회가 실패 상태인 거래소마다 `dw_fail` 1점(time = 틱 시각).
-- 시세가 멈춰도 틱은 매초 생기므로 같은 값이 초마다 새 점으로 남는다 — 주기가 곧 DB 증가 속도(하루 약 4,200만 점, 009 §3.5).
+- 시세가 멈춰도 틱은 매초 생기므로 같은 값이 초마다 새 점으로 남는다 — 주기가 곧 DB 증가 속도(하루 약 1.26억 점, 009 §3.5).
 
 ### 3.4 `GET /history/*`
 HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*Ts` 는 epoch 초, `fetchedAt` 은 ms.
+**응답은 조회부터 JSON 바이트까지 스레드에서 끝내고 이벤트 루프에는 바이트만 넘긴다(2026-09-28).** `/history/*` 모든 경로(013 `events`·014 `candles` 포함)가 Influx 조회·빌드·camelCase·JSON 인코딩을 한 스레드 작업으로 하고, 루프는 받은 바이트를 내보내기만 한다(압축은 전역 GZip 미들웨어, 001 §3.1 — 013·014 의 공유 캐시 경로는 미리 압축해 둔 바이트를 준다). 수집 박스의 루프는 거래소 수신·틱과, `api` 의 루프는 `/ws/spreads` 허브와 같은 루프라서다 — premium 1주(57만 점)를 루프에서 직렬화하면 1초 가까이 멈췄다. 큰 목록(`/history/premium` 의 `events`)은 점마다 모델을 만들지 않고 camelCase dict 를 바로 만들어 **2,000건씩** 인코딩해 이어 붙인다 — JSON 인코딩 한 번이 GIL 을 수백 ms 쥐지 않게. streaks·bulk 는 모델을 거치되 같은 스레드에서 인코딩한다. 두 경로(모델·dict)는 같은 바이트다(키 순서·숫자 표기·`fetchedAt` 위치까지). 오류 응답(400·404·503)의 상태·모양·문구도 같다.
 공통 파라미터: `dom` ∈ {upbit, bithumb}(기본 upbit), `fx` ∈ {binance, bybit, bitget}(기본 binance — 020). `maxGap`(기본 600, ≥1) 은 streaks·bulk 만 받는다 — premium 은 구간 전체를 그대로 돌려주므로 gap 개념이 없다. streaks·bulk 의 `start`·`end` 는 0 ≤ 값 ≤ 4,102,444,800(2100-01-01) — 밖이면 422(연도 오버플로 500 방지). `end ≤ 0` 은 400(end ≤ start 의 특수형).
+**세 경로는 무거운 조회라 한 번에 읽는 양과 동시 수를 묶는다(2026-09-28 사람 결정).** 창 상한은 streaks 604,800초(7일), bulk 3,600초(1시간), premium 은 `unit=week` 만이다 — 넘으면 400 `invalid_request`(streaks·bulk 는 메시지 `window exceeds limit: …`, `detail` `{"limitSec": 상한}`, premium `month` 는 저장소를 읽기 전에). streaks·bulk 의 `start` 가 없으면 `end − 상한`이다(`/history/candles` 의 1,440창 상한과 같은 방식). 세 경로는 앱 안의 게이트 하나를 같이 쓴다: 한 번에 하나만 돌고, 이미 돌고 있으면 기다리게 하지 않고 곧바로 429 `{"error":{"code":"busy","message":…,"detail":null}}` 이고 머리 `Retry-After: 1` 을 싣는다(조회 하나가 끝나기를 기다렸다 다시 부르면 된다). 혼잡 판정은 인자 검증(400·404)보다 먼저다. 게이트는 요청이 아니라 스레드의 조회·계산이 끝날 때 열린다 — 요청이 끊겨도 조회 스레드는 돌기 때문이다. 봉·사건 조회(013·014)는 게이트를 거치지 않는다. 이유: Influx 는 쿼리를 동시 2개까지만 돌려(021 §3.1) 무거운 조회들이 칸을 다 쥐면 차트·랜딩 조회가 수 초씩 줄을 섰고(동시 3칸 로컬 측정 3.5초 → 게이트 뒤 29ms), 상한 없는 조회 한 번이 api(t4g.micro 1GB, `/ws/spreads` 허브와 같은 프로세스)에 +0.5~1.3GB 를 잡았다. 공개 주소에서는 세 경로가 닫혀 있지만(028) 관리자 화면(029)과 박스 안 호출은 그대로 부르므로 상한·게이트를 둔다.
+**streaks·bulk 는 원값을 흘려 받으며 센다(2026-09-28 사람 결정).** 저장소는 core 공개 함수 `InfluxClient.stream_premium(*, dom: str, fx: str, base: str | None, start: int, stop: int) -> Iterator[tuple[str, str, int, float]]` 로 `(base, field, ts, value)` 를 (코인, 방향) 줄기마다 시각 오름차순으로 흘려보낸다 — pivot·group·sort 없이 두 필드의 시리즈 표 그대로, 응답은 64KB 조각으로 받아 헤더 CSV 를 줄마다 읽는다. 서비스는 줄기마다 상태 하나(열린 구간의 시작·끝·표본·최대·보정 합과 줄기 전체의 수·보정 합·최대)로 아래 규칙을 적용하고 점 목록을 만들지 않는다 — 메모리는 점 수가 아니라 구간 수에 비례한다. 평균은 CPython 3.12 `sum()` 과 같은 보정 합(Neumaier)으로 구해 점 목록으로 `sum()/len()` 한 결과와 바이트까지 같다. 흘리는 도중 실패하면 받은 것을 버리고 503 이다. 같은 시각에 fwd·rev 중 한 필드만 있는 반쪽 점은 방향마다 따로 센다 — `scanned`·`lastUpdatedTs`(bulk 는 `lastTs`)는 fwd 줄기 기준이고, 한 방향 줄기뿐인 코인은 기록 없음(streaks 404·bulk 에서 빠짐)이다. 두 필드는 늘 같이 쓰이므로(db.md) 실제 데이터에서는 차이가 없다.
+**premium 도 점 목록 없이 흘려 받는다(2026-09-28 사람 결정).** 같은 `stream_premium` 으로 fwd·rev 두 줄기를 받아 방향마다 시각·값 배열(점 하나 방향당 16바이트)에만 담고, 두 줄기를 다 받은 뒤(줄기 순서는 정해지지 않는다) 시각이 같은 점끼리 이어 컴팩트 `events`·`summary` 를 만들며 2,000건씩 인코딩한다(스레드 안). 한 방향에만 있는 시각(반쪽 점)은 건너뛴다 — 저장소에서 pivot 한 행 가운데 반쪽 행을 버리던 목록 경로와 같은 결과라 응답 바이트가 같고(`fetchedAt` 제외, streaks 와 달리 반쪽 점 처리 차이가 없다), 반쪽 점만 있는 주는 404 다. `summary` 의 최소·최대는 목록의 `min`·`max` 처럼 처음 만난 값을 지킨다(음의 0). 이유: 목록 경로는 1주(57만 점) 한 요청에 파이썬 메모리 최고치 440MB·프로세스 RSS +620MB 를 잡았다(행 객체·점 dict) — api(t4g.micro 1GB)가 한 요청으로 감당할 양이 아니다.
 
-**`/history/premium?base&unit&date`** — `base`·`unit ∈ {week, month}` 필수. 공개 주소에서는 404(028) — 관리자 페이지 API 문서에서 부른다(029). `date=YYYY-MM-DD`(정확히 이 형식·연도 1970~2100, 밖이면 400. 없으면 오늘 UTC).
-구간 = `date` 가 속한 ISO 주(월 00:00 UTC ~ 다음 월) 또는 달(1일 ~ 다음 달 1일), end exclusive. 구간에 기록 없으면 404. 구간 전체를 한 번에 반환한다. 응답 키:
+**`/history/premium?base&unit&date`** — `base`·`unit` 필수, `unit` 은 `week` 만 받는다(`month` 는 400, 그 밖의 값은 422). 공개 주소에서는 404(028) — 관리자 페이지 API 문서에서 부른다(029). `date=YYYY-MM-DD`(정확히 이 형식·연도 1970~2100, 밖이면 400. 없으면 오늘 UTC).
+구간 = `date` 가 속한 ISO 주(월 00:00 UTC ~ 다음 월), end exclusive. 구간에 기록 없으면 404. 구간 전체를 한 번에 반환한다. 응답 키:
 - `dom`·`fx`·`base`·`unit` 은 요청 그대로. `start`·`end` 는 구간 경계(ISO 8601, UTC). `firstTs` 는 구간 첫 기록 시각, `count` 는 기록 수, `fetchedAt`.
 - `summary` = `{firstFwd,lastFwd,minFwd,maxFwd}` — 구간 전체 통계.
 - `events` = `[{dt,fwd,rev}…]` 컴팩트 — 절대시각 대신 `dt`=직전 기록으로부터 경과 초(구간 첫 기록은 0).
 
-**`/history/streaks?base&threshold&start&end&maxGap`** — `threshold ≥ 0`(기본 0). 공개 주소에서는 404(028) — 관리자 페이지 API 문서에서 부른다(029). `end` 없으면 지금+1초, **`start` 없으면 `end − 7일`(604,800초)** — 전 구간 조회를 막기 위해서다(2,700만 점 위에서 `start` 없는 조회는 Influx 를 죽인다, status.md 알려진 빚). 응답 `startTs` 는 실제로 쓴 값. 조회 구간 안에 기록이 0건이면 404(구간 밖 기록 유무는 보지 않는다), `end ≤ start` 면 400. 구간(streak) 규칙:
+**`/history/streaks?base&threshold&start&end&maxGap`** — `threshold ≥ 0`(기본 0). 공개 주소에서는 404(028) — 관리자 페이지 API 문서에서 부른다(029). `end` 없으면 지금+1초, **`start` 없으면 `end − 7일`(604,800초)**, 창이 7일을 넘으면 400 — 전 구간 조회를 막기 위해서다(2,700만 점 위에서 전 구간 조회는 Influx 를 죽인다, status.md 알려진 빚). 응답 `startTs` 는 실제로 쓴 값. 조회 구간 안에 기록이 0건이면 404(구간 밖 기록 유무는 보지 않는다), `end ≤ start` 면 400. 구간(streak) 규칙:
 1. ts 오름차순으로 값이 `threshold` **이상**인 연속 기록을 한 구간으로 묶는다(같은 값 포함).
 2. 값이 미만이거나 직전 기록과 `maxGap` 초보다 벌어지면 구간을 닫는다(끊긴 수집을 이어 붙여 "3시간 연속" 을 만들지 않는다).
 3. fwd(kimp) 와 rev(reverse) 를 절댓값 없이 **각각** 계산한다.
@@ -55,13 +59,14 @@ HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*
 7. 최상위 응답 = `{base,dom,fx,thresholdPercent,maxGapSeconds,startTs,endTs,kimp,reverse,overall,scanned,lastUpdatedTs,lastUpdated,fetchedAt}`. 방향 요약 키 이름은 bulk 와 같은 `kimp`(fwd)·`reverse`(rev). `scanned` 는 전체 행 수, `lastUpdated` 는 KST.
 예: 값 `0 1 3 6 29 4 31`(60초 간격), threshold 4 → 구간 1개(samples 4, max 31); threshold 5 → 2개.
 
-**`/history/streaks/bulk?threshold&start&end&maxGap`** — 전 코인 한 번에. 공개 주소에서는 404(028) — 관리자 페이지 API 문서에서 부른다(029). `start`·`end` 기본값은 streaks 와 같다(`end − 7일` / 지금+1초).
+**`/history/streaks/bulk?threshold&start&end&maxGap`** — 전 코인 한 번에. 공개 주소에서는 404(028) — 관리자 페이지 API 문서에서 부른다(029). `end` 없으면 지금+1초, `start` 없으면 `end − 1시간`(3,600초), 창이 1시간을 넘으면 400.
 응답 `{dom,fx,thresholdPercent,maxGapSeconds,startTs,endTs,coinCount,coins:[{base,scanned,lastTs,kimp,reverse,overall}…],fetchedAt}`. **기록 없으면 404 가 아니라 빈 `coins`.**
 수 MB 응답이라 압축(gzip)해 보낸다.
 
 오류 응답:
 - 404 `market_data_not_found`: 구간에 기록 없음(`/premium`), 코인 기록 없음(`/streaks`).
-- 400 `invalid_request`: `date` 형식 오류, `end <= start`.
+- 400 `invalid_request`: `date` 형식 오류, `end <= start`, 창 상한 초과(streaks 7일·bulk 1시간), premium `unit=month`.
+- 429 `busy`(머리 `Retry-After: 1`): 무거운 세 경로 중 하나가 이미 돌고 있음.
 - 422(FastAPI 기본): `threshold<0`, `dom=binance` 등 파라미터 검증 실패.
 - 503 `storage_unavailable`: Influx 연결 실패 또는 `INFLUX_TOKEN` 없음.
 
@@ -89,11 +94,16 @@ HTTP JSON 키와 복합어 쿼리 파라미터는 camelCase다. 모든 시각 `*
 - `/history/premium`: 구간 밖 기록은 안 잡힘, `events[0].dt==0`, `count==len(events)`, `summary` 가 구간 전체 기준, 기록 없으면 404, `date=abc` 400
 - 구간 판정 예시: `0 1 3 6 29 4 31` threshold 4 → 1구간(samples 4, max 31), threshold 5 → 2구간; `maxGap` 초과 간격에서 구간이 끊긴다; 방향 avg 는 샘플 가중
 - `/history/streaks`: `end<=start` 400, 기록 없는 코인 404, `threshold=-1` 422, `lastUpdated` 가 `+09:00` 으로 끝난다
-- `/history/streaks`·`bulk`: `start` 없으면 `startTs == endTs − 604800` 이고 그보다 오래된 기록은 `scanned` 에 안 잡힌다; `end` 만 주면 `start = end − 7일`
+- `/history/streaks`: `start` 없으면 `startTs == endTs − 604800` 이고 그보다 오래된 기록은 `scanned` 에 안 잡힌다; `end` 만 주면 `start = end − 7일` / `bulk`: `start` 없으면 `startTs == endTs − 3600`
+- 창 상한: streaks 604,801초 400(`detail.limitSec` 604800)·604,800초 200·오래된 `start` 만 주면 400, bulk 3,601초 400(`limitSec` 3600)·3,600초 200, premium `unit=month` 400 이고 저장소를 읽지 않는다 (`test_streaks_api.py`·`test_bulk_api.py`·`test_premium_api.py`)
+- 게이트: 무거운 조회가 도는 동안 세 경로는 429 `busy`(머리 `Retry-After: 1`, 200 에는 없다), 봉·사건 조회는 200; 요청을 끊어도 조회 스레드가 끝날 때까지 429; 실패한 조회도 게이트를 연다 (`test_heavy_gate.py`)
+- 흘려 세기: 수집 공백·음의 0·1e15 가 섞인 무작위 원값에서 streaks(문턱 0·0.5·1·1.3)·bulk(0·0.5·1)가 점 목록으로 센 계산과 같은 바이트, 10만 점 streaks 의 파이썬 메모리 최고치 2MB 미만, 도중 끊김 503, 반쪽 점은 방향마다 (`test_streaks_stream.py`) / `stream_premium` 은 pivot·group·sort 없이 네 칸, 1바이트 조각에서도 같은 점, 오류 표·줄 중간에서 끝난 응답은 저장소 실패, 덜 읽은 연결은 닫는다 (`tests/test_influx_stream.py`)
 - `/history/streaks/bulk`: 기록 없으면 200 + 빈 `coins`
-- 백필 대상 구간 계산: 기록 없음 → 전체 구간, 기록 있음 → 앞·뒤 빈 구간만(가운데는 건드리지 않음); 주/월 구간 경계가 ISO 주·달력 월과 일치, 잘못된 unit 거부
+- 백필 대상 구간 계산: 기록 없음 → 전체 구간, 기록 있음 → 앞·뒤 빈 구간만(가운데는 건드리지 않음); 주 구간 경계가 ISO 주와 일치, `unit=month` 400·그 밖의 unit 422
 - 캔들 병합: 세 값이 갖춰지기 전 ts 는 건너뜀, fwd 불변이면 기록 없음, 종가 대칭식 결과
 - `/history/streaks/bulk?threshold=0`: `coinCount == len(coins)` 이고 100 을 넘는다(전 코인)
+- premium 흘려 읽기: 반쪽 점(구간 앞·가운데·끝)과 구간 밖 점이 섞인 두 줄기(rev 가 먼저)에서 응답이 점 목록 경로와 같은 바이트이고(`fetchedAt` 제외) 점 목록을 읽지 않는다, 반쪽 점만 있는 주는 두 경로 모두 같은 404 (`test_encoding.py`)
+- 응답 인코딩: `/history/premium` 이 모델 경로와 같은 바이트다(`fetchedAt` 제외 — 2,000건 경계 앞뒤·4,500점, 음의 0·지수 표기 포함), streaks·bulk 도 같다 / 400·404·503 이 모델 경로의 예외를 옮긴 것과 같은 상태·바이트다 / JSON 인코딩이 루프 스레드에서 한 번도 돌지 않는다 (`features/history/tests/test_encoding.py`)
 - 수동: dev compose + 서버 기동 후 **기동 약 60초 뒤**(009 flusher 첫 회차) `premium` 에 첫 점이 쌓이고, 75초 시점에 `/history/premium?base=BTC&unit=week` 가 `count ≥ 1`·`events[0].dt == 0` 을 돌려준다. Influx 컨테이너를 내리면 flusher 실패 로그가 회차마다 찍히되 `/spreads` 는 계속 갱신, `/history/premium` 은 503. 다시 올리면 밀린 구간이 한 회차에 들어가 `count` 에 구멍이 없다. 백필 스크립트 1일 실행 → "구간 완료, 김프 기록 N건" 에서 N > 1000, 재실행 시 "이미 전부 채워져". 기록 탭 확인은 013 §4. 마지막으로 서버 테스트·lint, web build·lint 통과.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
@@ -127,8 +137,8 @@ cd web && npm run build                        # tsc -b && vite build — ✓ bu
 001(틱)·009(flusher)·012(바이낸스 스트림) 위에서 돌아가는 현재 구현의 보고다.
 - 만든 것 (파일 목록):
   - `server/app/core/influx.py` — influxdb-client 를 import 하는 유일한 곳. `InfluxPoint`·`premium_point`·`dw_fail_point`(모델은 db.md), line protocol 직렬화(초 정밀도), `InfluxClient`(lazy 연결·`ping`·`write`·`query_premium`·`count_premium`·`first_last_premium`, 009 의 `query_spark`, 011 의 `collect_fail` 점·조회). 모든 실패는 `InfluxUnavailableError` 하나 — 호출자는 "재시도 또는 503" 으로만 다룬다.
-  - `server/app/features/history/service.py` — 순수 계산: 주/월 구간 경계, `/premium` 의 컴팩트 events·summary, streak 구간 판정(threshold 이상·maxGap)·방향 요약(샘플 가중)·overall(전체 행 + 두 방향 합집합), bulk 코인별 집계. 리더는 `query_premium` 하나만 쓰는 Protocol 로 받는다.
-  - `server/app/features/history/router.py` — 3 엔드포인트. 파라미터 검증은 FastAPI `Query`(422), 업무 오류는 `{"error":…}`(400·404), 저장소 없음·실패는 503. Influx 클라이언트는 동기라 스레드에서 돌린다.
+  - `server/app/features/history/service.py` — 순수 계산: 주 구간 경계, `/premium` 의 컴팩트 events·summary(두 방향 줄기를 시각으로 잇기), streak 구간 판정(threshold 이상·maxGap — 줄기별 상태기계)·방향 요약(샘플 가중)·overall(전체 점 + 두 방향 합집합), bulk 코인별 집계, 창 상한. 리더는 `stream_premium`(응답 경로) Protocol 로 받고, `query_premium`(점 목록)은 premium 의 모델 경로가 테스트 짝으로만 쓴다.
+  - `server/app/features/history/router.py` — 3 엔드포인트. 파라미터 검증은 FastAPI `Query`(422), 업무 오류는 `{"error":…}`(400·404), 혼잡은 429(`gate.py` 의 게이트), 저장소 없음·실패는 503. Influx 클라이언트는 동기라 스레드에서 돌린다.
   - `server/app/features/history/models.py` — 응답 모델(snake_case → 라우터에서 camelCase).
   - `server/app/features/history/tests/` — `helpers.py`(fake 리더 + lifespan 없는 앱, 선택적 LiveStore), `test_premium_api.py`·`test_streaks_api.py`·`test_bulk_api.py`(§3.4 계약·오류 4종·경계값), `test_point_rules.py`(§3.3 점 규칙·원값·`dw_fail`·저장소 장애 격리·bulk 100코인 초과).
   - `server/scripts/backfill.py` — §3.5 그대로. 순수 계산(`plan_day_slices`·`is_full_day`·`dedup_changes`·`merge_premiums`·`rates_for_slice`)과 거래소 호출(거래소별 재시도 정책·페이지 간격)을 나눈다. 테스트 `server/tests/test_backfill.py` 는 순수 계산만.
@@ -146,3 +156,6 @@ cd web && npm run build                        # tsc -b && vite build — ✓ bu
 - 남은 빚:
   - §4 수동 항목 전부(첫 점·`count` 구멍·백필 1일·재실행 문구)와 `bulk` 실데이터 100코인 초과 — **EC2 에서 확인 필요**.
   - 캔들 수집기(`fetch_*`)·백필 실호출의 자동 테스트 없음(순수 계산만).
+- 2026-09-28 성능 개선: 응답 인코딩을 스레드로(§3.4 — premium 은 dict 로 2,000건씩, streaks·bulk 는 모델 인코딩만 옮김). 이유: 스레드는 조회·빌드만 하고 model_dump·camelCase·JSON 렌더는 루프에서 돌았다. 측정(로컬, 가짜 리더 570,569점): premium 1주 루프 최대 정지 996 → 14ms, 요청 wall 3,019 → 435ms(camelCase 메모 001 §3.1 포함). 바이트 동일.
+- 2026-09-28 성능 개선 — 조회 상한·흘려 세기: §3.4 의 창 상한(streaks 7일·bulk 1시간·premium 주)·무거운 세 경로 게이트(동시 1개, 429 `busy`)와 streaks·bulk 흘려 세기(`stream_premium`). 이유: 상한 없는 GET 한 번이 api 메모리를 +0.5~1.3GB 잡았고(행 1개 ≈840B), 무거운 조회들이 Influx 의 동시 칸(021 은 2개)을 다 쥐면 가벼운 조회가 수 초 줄을 섰다. 측정(로컬 influxdb:2.7, 기준선 코드와 같은 데이터·같은 조건): BTC 7일 streaks(59.8만 점) wall 2,817 → 834ms, 파이썬 CPU 1,778 → 812ms, Influx CPU 1,429 → 383ms, 파이썬 메모리 최고치 458 → 5.1MB; bulk 20코인 1시간 wall 307 → 102ms, 51 → 1.0MB. 문턱 0·0.5·1 의 streaks·bulk 응답이 기준선과 바이트까지 같다. `bulk` 의 `start` 기본값은 창 상한(1시간)으로 바꿨다 — 7일 기본값을 두면 `start` 없는 요청이 늘 400 이 된다.
+- 2026-09-28 성능 개선 — premium 흘려 읽기·429 머리: `/history/premium` 을 `stream_premium` 두 줄기의 배열 이음으로(§3.4 — 점 목록·점 dict 목록 없음, 인코딩 조각은 응답 크기 사본 하나로 잇는다), 429 `busy` 에 `Retry-After: 1`. 이유: 1주 한 요청이 api 메모리를 수백 MB 잡았고, 429 를 받은 호출자가 언제 다시 부를지 알 길이 없었다. 측정(로컬 influxdb:2.7, BTC 한 ISO 주 576,248점·응답 36.1MB, 전후 바이트 동일): 파이썬 메모리 최고치(tracemalloc) 440 → 82MB, 프로세스 RSS 최고치 증가 620 → 102MB, wall 2,801 → 1,200ms, 파이썬 CPU 1,908 → 1,166ms. 남는 최고치는 인코딩 조각과 이은 응답 바이트(각 36MB)다. 같은 로컬 Influx 에 반쪽 점(주 첫 초 fwd 만·가운데 rev 만·끝 초 rev 만)과 음의 0 을 섞은 주도 두 경로가 같은 바이트다. 서버 검증 984 passed.

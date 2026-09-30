@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from app.core.influx import CandleRow, InfluxPoint, InfluxUnavailableError
 from app.core.models import Tick, TickRow
+from tests.line_protocol import parse_line
 
 # 2026-09-07 00:00 KST — 4h·1d 창 정렬 단언이 쉬운 기준점
 T0 = int(datetime(2026, 9, 6, 15, tzinfo=UTC).timestamp())
@@ -19,6 +20,9 @@ class FakeCandleStore:
         self.buckets: dict[str, int] = {"marketlens": 0}  # 이름 → retention 초
         self.data: dict[str, dict[Key, dict[str, float | int | str]]] = {}
         self.writes: list[tuple[str, int]] = []  # 쓰기 호출마다 (버킷, 점 수)
+        # write_lines 호출마다 (버킷, 받은 줄)
+        self.lines: list[tuple[str, list[str]]] = []
+        self.edge_timeouts: list[float | None] = []  # 기준점 조회가 받은 HTTP 타임아웃
         self.fail = False
         self.list_fail = False
         self.query_fail = False
@@ -35,6 +39,11 @@ class FakeCandleStore:
         for p in points:
             key = (p.tags["dom"], p.tags["fx"], p.tags["base"], p.ts)
             table.setdefault(key, {}).update(p.fields)
+
+    def write_lines(self, lines: list[str], bucket: str | None = None) -> None:
+        points = [parse_line(line) for line in lines]
+        self.write(points, bucket)
+        self.lines.append((bucket or "marketlens", list(lines)))
 
     def query_candles(
         self,
@@ -57,12 +66,18 @@ class FakeCandleStore:
         ]
         return out
 
-    def latest_candle_ts(self, bucket: str, *, start: int) -> int | None:
+    def latest_candle_ts(
+        self, bucket: str, *, start: int, timeout_sec: float | None = None
+    ) -> int | None:
+        self.edge_timeouts.append(timeout_sec)
         self._maybe_fail_query()
         ts = [r.ts for r in self.candles(bucket) if r.ts >= start]
         return max(ts) if ts else None
 
-    def earliest_candle_ts(self, bucket: str, *, start: int) -> int | None:
+    def earliest_candle_ts(
+        self, bucket: str, *, start: int, timeout_sec: float | None = None
+    ) -> int | None:
+        self.edge_timeouts.append(timeout_sec)
         self._maybe_fail_query()
         ts = [r.ts for r in self.candles(bucket) if r.ts >= start]
         return min(ts) if ts else None
@@ -90,9 +105,9 @@ class FakeCandleStore:
         rows = []
         for (d, f, b, ts), fields in self.data.get(bucket, {}).items():
             kw = dict(fields)
-            # 실물 읽기와 같은 규칙(024 §3.4) — 망 문자열 2개는 선택이고 없음·빈 문자열은 None
+            # 실물 읽기와 같은 규칙(024 §3.4) — 망 문자열 2개는 선택이고 없음·표식 `-`·빈 문자열은 None
             for k in ("net_dom", "net_fx"):
-                kw[k] = kw.get(k) or None
+                kw[k] = None if kw.get(k) in (None, "", "-") else kw[k]
             rows.append(CandleRow(dom=d, fx=f, base=b, ts=ts, **kw))  # type: ignore[arg-type]
         rows.sort(key=lambda r: (r.ts, r.dom, r.fx, r.base))
         return rows

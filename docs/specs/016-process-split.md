@@ -26,6 +26,7 @@ Influx 를 읽는 무거운 조회(`/history/premium`·`/history/streaks`·`/his
 - `collector`: 오늘의 `server` 컨테이너와 **완전히 같다.** 스트림·우주·틱 루프·인계·flusher·writer 태스크·원문 아카이브·입출금 조회 전부 돌고, 모든 엔드포인트를 서빙한다. 로컬 개발(`uvicorn app.main:app`)은 `ROLE` 을 안 주므로 이 역할이다.
 - `api`: 기동 시 **Influx 클라이언트 생성·ping 만** 한다. 거래소 REST·WebSocket 에 연결하지 않고, Redis 는 017 의 구독과 018 의 `spreads:latest` 읽기·`spreads:want` 쓰기(`GET /spreads` 요청 단위), 022 의 `spreads:latest` 읽기(`GET /landing`)에만 연결하며(스트림 `ticks` 는 안 읽는다), S3 를 만지지 않고, 백그라운드 태스크는 017 의 구독 태스크 하나뿐이다. 기동 시 복원(수집 실패 이력·사건·봉 버킷·spark)도 하지 않는다 — 이 중 하나라도 하면 두 프로세스가 같은 measurement 를 중복으로 쓰거나(`collect_fail`·`premium_event`·롤업) 거래소를 이중 구독한다.
 - `api` 가 서빙하는 경로는 `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles` 다섯과 017 의 `/ws/spreads`, 018 의 `/spreads`(Redis 읽기), 022 의 `/landing`(Redis·Influx 읽기 요약 — 저장소가 안 되면 그 부분만 null, 항상 200). `/history/*` 의 응답·파라미터·에러는 005·014 계약 그대로(Influx 불달·토큰 없음이면 503). **그 외 경로는 404.** `/history/events` 도 404 다 — 진행 중 사건을 메모리에서 읽는 엔드포인트라 `collector` 만 답할 수 있다.
+- 두 역할 모두 기동을 마친 직후(요청을 받기 직전) GC 를 정리한다 — `gc.collect()` → `gc.freeze()` → 세대 임계 (2000, 10, 10)(001 §3.1, 2026-09-28 사람 결정). 프로세스 전역 설정이라 두 lifespan 이 각자 한다.
 - `ROLE` 이 둘 중 하나가 아니면 **설정을 읽는 시점에** 실패한다(앱 객체를 만들기 전, lifespan 이 아니다 — 설정 오류 메시지에 허용값 둘을 적는다). 잘못 뜬 채로 조용히 수집이 두 벌 돌지 않게. 설정은 지금처럼 env 에서 읽되 모르는 키는 무시하는 규칙이라, `ROLE` 은 명시적 설정 항목이어야 검사가 된다.
 
 ### 3.2 compose
@@ -58,7 +59,7 @@ Influx 를 읽는 무거운 조회(`/history/premium`·`/history/streaks`·`/his
 - 어떻게 나눌지(정규식 location + rewrite, 접두 location + URI 치환 등)는 실행 세션이 정한다. 기존 `location /api/`(`proxy_pass http://server:8000/;`)와 `location = /api { return 404; }` 는 그대로 둔다.
 - 프록시 헤더 4개(`Host`·`X-Real-IP`·`X-Forwarded-For`·`X-Forwarded-Proto`)는 두 목적지에 **기존 값 그대로** 붙인다(`Host` 는 `$http_host`).
 - `api` 컨테이너가 죽어 있으면 위 네 경로만 502(프로세스가 죽어 재시작 중이면 즉시, `stop` 으로 정지돼 있으면 nginx 가 기동 시 푼 IP 로 연결을 시도하다 수 초~60초 뒤 502 또는 504), 나머지는 정상. 반대로 `server` 가 죽으면 위 네 경로는 정상이다 — 이게 이 스펙의 존재 이유다.
-- `proxy_read_timeout` 은 손대지 않는다(기본 60초). 전 구간 streaks 가 60초를 넘는 문제는 조회 상한 스펙(후속)의 몫이다.
+- `proxy_read_timeout` 은 손대지 않는다(기본 60초). 긴 조회는 005 §3.4 의 창 상한(streaks 7일·bulk 1시간·premium 1주)과 동시 1개 게이트가 막는다.
 
 ### 3.4 배포
 deploy 워크플로(007)는 안 바뀐다. `up -d --build` 가 `api` 도 같이 빌드·기동한다. 같은 컨텍스트라 빌드 캐시를 공유해 두 번째 빌드는 즉시 끝난다.
@@ -74,6 +75,7 @@ deploy 워크플로(007)는 안 바뀐다. `up -d --build` 가 `api` 도 같이 
 - `ROLE=api` 앱의 기동 로그에 S3·거래소 관련 줄이 없고, 백그라운드 태스크는 017 의 구독 태스크 1개(`/ws/spreads` 는 두 역할 모두)
 - `ROLE` 없음 = `collector` = 오늘과 같은 라우트 집합(기존 테스트 전부 그대로 통과)
 - `ROLE=foo` 는 설정을 읽는 순간 실패(앱 객체 생성 전)
+- 두 역할 모두 기동을 마치면 GC 세대 임계가 (2000, 10, 10) 이고 기동 객체가 얼려져 있다
 - compose 계약(`tests/test_deploy.py` 갱신): 컨테이너 5개·고정 이름, `api` 는 `ROLE=api` + `env_file` + `INFLUX_URL` 덮어쓰기 + `REDIS_URL` 없음 + 로그 상한 + 호스트 포트 없음, `server` 에 `ROLE` 없음, `web` 이 둘 다 `depends_on`, 호스트 노출은 web 하나. README 의 컨테이너 수 문구 검사는 5개 기준으로
 - nginx 계약: 네 경로가 `api:8000` 으로 가고 접두가 떼지며, `/api/history/events` 는 `server:8000` 으로, `location /api/` 의 기존 `proxy_pass` 와 `location = /api` 404 유지
 - `/history/events` 라우터 분리 뒤 005 의 기존 테스트가 전부 그대로 통과(경로·응답 무변경)
@@ -128,3 +130,4 @@ EC2 `docker stats` 비교(수동, 배포 후)는 사람 몫으로 남김.
   - 컨테이너 기동 순서: `depends_on` 은 준비를 기다리지 않아 server·api 모두 Influx 보다 먼저 떠 첫 ping·복원·봉 버킷 생성이 실패한다(로컬 실측 — 그래서 `/history/candles` 가 버킷 없음으로 503). 스펙 §1·§2 가 명시한 후속(Influx 장애 대응) 범위 — 여기서 손대지 않았다.
   - `stop` 된 upstream 에 즉시 502 를 주려면 nginx `resolver` + 변수 upstream 이 필요하다 — 트레이드오프라 후속 인프라 스펙에서.
   - EC2 `docker stats` 비교(§4 마지막 항목)와 `docker compose exec api` 헬스 확인은 배포 후 사람이.
+- 2026-09-28 성능 개선: 두 lifespan 이 yield 직전에 GC 를 정리한다(§3.1·001 §3.1). 점검 분석은 (10000, 50, 100) 을 권했지만 자동 전체 수집을 사실상 꺼 오래 살다 버려진 순환 객체가 치워지지 않아(검증 모의 300초 동안 0개 회수) 사람 결정으로 (2000, 10, 10) 을 택했다. 행 교체 3,000/초 모의에서 전체 수집 1회 정지가 로컬 33 → 약 10ms 다(점검 보고서 재현값). 배포 뒤 RSS 추이는 사람이 본다.

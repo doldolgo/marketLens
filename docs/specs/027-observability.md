@@ -54,7 +54,7 @@
   - `request.remote_ip`·`request.client_ip` 는 IPv4 /24, IPv6 /48 로 자른다. 지금 두 필드는 같은 값이라 하나만 자르면 원본이 남는다.
   - `request.uri` 의 쿼리 키 `s.q`·`g.q`·`p.q`(스프레드·갭·선선갭 검색어)를 지운다. 나머지 키는 남긴다 — 어떤 주소로 들어왔는지를 보기 위해서다.
 - caddy 기본 로거(오류 줄 — 예: 업스트림 502)에도 IP 자르기·쿼리 세 키·헤더 지우기를 똑같이 건다. docker 로그에 원 IP 가 남지 않게.
-- 기록하지 않는 요청: 경로 `/api/health`·`/api/health/collect`(수집 상태 탭 5초 폴링)·`/api/landing`(랜딩 10초 폴링)·`/api/history/events`·`/api/history/candles`(탭이 전부 마운트돼 기록 탭을 안 열어도 60초마다 부른다), `User-Agent` 에 `KimpTrack-Canary` 가 든 요청(§3.5). 폴링·감시가 방문 기록을 덮기 때문이다. 이 경로들의 5xx 는 5xx 경보에 안 잡힌다. canary 2~4단계가 같은 백엔드(수집기·api·Influx)를 보지만 `/api/health/collect`·`/api/history/events`·`/api/landing` 자체의 5xx 는 감시하지 않는다.
+- 기록하지 않는 요청: 경로 `/api/health`·`/api/health/collect`(수집 상태 탭 5초 폴링)·`/api/landing`(랜딩 10초 폴링)·`/api/history/events`·`/api/history/candles`(기록 탭이 보이는 동안 60초마다 부른다 — 013 §3.5·014 §3.7), `User-Agent` 에 `KimpTrack-Canary` 가 든 요청(§3.5). 폴링·감시가 방문 기록을 덮기 때문이다. 이 경로들의 5xx 는 5xx 경보에 안 잡힌다. canary 2~4단계가 같은 백엔드(수집기·api·Influx)를 보지만 `/api/health/collect`·`/api/history/events`·`/api/landing` 자체의 5xx 는 감시하지 않는다.
 - 도메인 블록의 모든 응답에 `Referrer-Policy: strict-origin` 을 붙인다. 브라우저 기본값은 같은 출처 요청에 전체 URL 을 `Referer` 로 보낸다.
 
 ### 3.3 WebSocket 접속 수
@@ -93,7 +93,7 @@
 - 모든 경보는 서울 SNS 주제 `marketlens-alerts` 하나로 보내고, Amazon Q Developer in chat applications(구 AWS Chatbot)가 025 와 같은 Slack 채널에 올린다. 풀릴 때(OK)도 보낸다.
 - 상태검사(세 박스, 최댓값): `StatusCheckFailed_Instance` 60초 주기 3점 연속 → 재부팅, `StatusCheckFailed_System` 60초 2점 연속 → 복구(recover). 기간을 다르게 두는 것은 AWS 권장이다 — 같으면 두 동작이 경쟁한다. 데이터 없음은 무시(missing).
 - 크레딧(data t4g.small — 최대 적립 576, serve t4g.micro — 최대 288): `CPUCreditBalance` 최솟값 300초 주기 3점 연속 최대치의 30%(data 173·serve 86) 미만, `CPUSurplusCreditsCharged` 합계 300초 1점 0 초과(unlimited 잉여 과금 시작). 데이터 없음은 무시. 잔고 경보는 최근 7일 최솟값을 보고 그보다 낮게 둔다(기본 30%).
-- 메모리(세 박스, 최솟값): 메모리 가용률 10% 미만이 5분 연속(60초 5점, collect 는 300초 1점). data 근거: 021 설계 상한 1.3GiB + OS·docker·에이전트 ≈0.4GiB = 1.7GiB 에서 가용 ≈8% — 10% 미만이면 설계 상한에 가까워진 것이다. 데이터 없음은 경보(에이전트가 죽은 것을 알아야 한다).
+- 메모리(세 박스, 최솟값): 메모리 가용률 10% 미만이 5분 연속(60초 5점, collect 는 300초 1점). data 근거: Influx 컨테이너 상한 1.3GiB(021 §3.1 — 넘으면 스왑 없이 Influx 만 재시작) + Redis 평소 ≈30MB + OS·docker·에이전트 ≈0.4GiB ≈ 1.73GiB 에서 가용 ≈8% — 10% 미만이면 Influx 가 상한에 가까워진 것이다(Redis 상한 600MB 는 Influx 쓰기가 몇 시간 막혀야 찬다). 데이터 없음은 경보(에이전트가 죽은 것을 알아야 한다).
 - 디스크(세 박스): 사용률 최댓값 300초 1점 80% 초과. 데이터 없음은 경보.
 - 요청: `http_5xx` 합계 300초 1점 10 이상. 데이터 없음은 정상(요청이 없으면 줄도 없다). 로그 전송을 켤 때 만든다.
 - canary: `AWS/Lambda` `Errors`(차원 `FunctionName=marketlens-smoke`) 합계 300초 2점 중 2점 1 이상 — 연속 두 번(10분) 실패. 시간 초과도 `Errors` 다. 배포 중 1회 실패는 울리지 않는다. 데이터 없음은 경보 — 일정이 멈추면 `Errors` 점이 생기지 않는다. 직접 실행이 통과하고 일정을 만든 뒤 만든다.

@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 import zlib
 from collections import deque
@@ -41,6 +42,11 @@ SYMBOLS_PATH = "/api/v2/spot/public/symbols"
 SYMBOLS_URL = REST_URL + SYMBOLS_PATH  # 파라미터 없음 = 전체 (§3.3)
 SYMBOLS_KEY = "symbols:all"  # 매초 오는 심볼 목록 본문의 원문 싱크 key — 분당 마지막 1건 (001 §3.7)
 _BODY_LIMIT = 500  # 핸드셰이크 거부 응답 본문 상한 — 001 §3.1 과 같은 500자
+# symbols 에서 매 응답 바뀌는 것은 봉투 머리의 requestTime 하나다 — 이것만 빼고 직전 본문과 비교한다 (§3.3)
+_REQUEST_TIME = re.compile(rb'"requestTime":\s*\d+')
+# 머리 몇 바이트 안에서만 찾는다 — 못 찾으면 본문 전체로 비교한다(매번 달라 파싱으로 간다)
+_REQUEST_TIME_WITHIN = 256
+_INF = float("inf")
 
 INST_TYPE = "SPOT"
 BOOKS_CHANNEL = "books15"  # 15단계 스냅샷 — 전체 깊이 `books` 는 update 마다 북 전체를 다시 정렬해 CPU 47% 를 먹었다 (§3.2 개정 2026-09-15)
@@ -101,18 +107,30 @@ class _SubscribeRejected(Exception):
 
 
 class _Book:
-    """심볼 하나의 로컬 북 — 가격 → 잔량 + 마지막 seq. 스냅샷으로 통째 교체, update 로 삽입·교체·삭제 (§3.4)."""
+    """심볼 하나의 로컬 북 — 가격 → 잔량 + 마지막 seq. 스냅샷으로 통째 교체, update 로 삽입·교체·삭제 (§3.4).
+
+    정렬돼 온 스냅샷은 dict 로 펴지 않고 받은 목록을 그대로 든다 — books15 는 스냅샷만 오므로 대개 끝까지
+    펴지 않는다. update 가 오면 그때 한 번 편다(전체 깊이 `books` 로 되돌려도 북이 맞도록).
+    """
 
     def __init__(self) -> None:
         self.asks: dict[float, float] = {}
         self.bids: dict[float, float] = {}
         self.seq = -1
+        self._held: tuple[list[list[float]], list[list[float]]] | None = None
 
-    def replace(self, data: dict[str, Any]) -> None:
-        self.asks = {float(p): float(q) for p, q in data["asks"]}
-        self.bids = {float(p): float(q) for p, q in data["bids"]}
+    def hold(self, asks: list[list[float]], bids: list[list[float]]) -> None:
+        """정렬이 확인된 스냅샷 목록을 그대로 든다."""
+        self._held = (asks, bids)
+
+    def replace(self, asks: list[list[float]], bids: list[list[float]]) -> None:
+        self.asks = {p: q for p, q in asks}
+        self.bids = {p: q for p, q in bids}
+        self._held = None
 
     def apply(self, data: dict[str, Any]) -> None:
+        if self._held is not None:
+            self.replace(*self._held)
         for side, levels in (("asks", self.asks), ("bids", self.bids)):
             for p, q in data.get(side) or []:
                 price, size = float(p), float(q)
@@ -190,13 +208,17 @@ class BitgetStream:
         self._wake = asyncio.Event()  # set_universe 가 재조정 루프를 깨운다
         self._rebalance: asyncio.Task[None] | None = None
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다
+        # 직전에 맵까지 만든 200 응답의 비교용 바이트(requestTime 제외) — 같으면 파싱·맵 재생성을 건너뛴다 (§3.3)
+        self._symbols_body: bytes | None = None
 
     # --- 심볼 집합 (ForeignSymbolSource, §3.3) ---
 
     async def refresh(self, client: httpx.AsyncClient) -> int:
         """symbols 1회 → online·USDT 심볼 맵. 응답 본문은 해석 전에 원문 싱크로(`symbols:all`).
 
-        HTTP 200 이어도 `code != "00000"` 이면 실패다 (§3.8).
+        HTTP 200 이어도 `code != "00000"` 이면 실패다 (§3.8). 원문 기록은 매 응답 하고, 200 본문에서
+        requestTime 만 뺀 바이트가 직전에 맵을 만든 응답과 같으면 파싱·맵 재생성을 건너뛴다 — 828KB 를
+        매초 파싱하는데 목록은 하루 몇 번만 바뀐다. 바이트가 같으면 맵도 같으므로 낡을 여지가 없다 (§3.3).
         """
         url = SYMBOLS_URL
         try:
@@ -215,6 +237,9 @@ class BitgetStream:
         self._record(
             self.id, f"rest:{SYMBOLS_PATH}", self._clock(), resp.text, SYMBOLS_KEY
         )
+        comparable = _without_request_time(resp.content)
+        if resp.status_code == 200 and comparable == self._symbols_body:
+            return 1
         if resp.status_code != 200:
             raise ExchangeApiError(
                 self.id,
@@ -262,6 +287,7 @@ class BitgetStream:
             )  # 둘 이상이면 처음 것
         self._symbol_of = symbol_of
         self._base_of = {symbol: base for base, symbol in symbol_of.items()}
+        self._symbols_body = comparable
         return 1
 
     def bases(self) -> set[str]:
@@ -648,7 +674,11 @@ class BitgetStream:
                 continue
             shard.state.last_message_at = at
             shard.backoff = BACKOFF_START  # 구독까지 성공했다는 증거 = 첫 시세 프레임
-            self._publish()
+            # 시세 프레임이 바꾸는 집계값은 last_message_at 하나뿐이다 — 샤드 3개를 다시 집계하지 않고
+            # 올리기만 한다. 연결·끊김·구독 변경은 그 자리에서 _publish 가 전체를 다시 집계한다 (§3.5)
+            last = self._state.last_message_at
+            if last is None or at > last:
+                self._state.last_message_at = at
 
     def _on_books(
         self,
@@ -661,19 +691,26 @@ class BitgetStream:
     ) -> None:
         item = data[0]  # data 는 원소 1개 (§3.2)
         seq = int(item["seq"])
-        book = shard.books.get(symbol)
         if action == "snapshot":
+            asks = [[float(p), float(q)] for p, q in item["asks"]]
+            bids = [[float(p), float(q)] for p, q in item["bids"]]
             book = _Book()  # 새 스냅샷 → 북 통째 교체 (§3.4)
-            book.replace(item)
+            if _strictly_ascending(asks) and _strictly_descending(bids):
+                # 정렬돼 온 스냅샷(가격 중복 없음)은 dict 북·정렬 없이 받은 목록 그대로 — 결과가 같다 (§3.4)
+                book.hold(asks, bids)
+            else:
+                book.replace(asks, bids)
+                asks, bids = book.sorted_levels()
             shard.books[symbol] = book
         else:
+            book = shard.books.get(symbol)
             if book is None:
                 return  # 스냅샷 전에 온 update — 북이 없으니 버린다 (§3.4)
             if seq <= book.seq:
                 return  # 중복·순서 뒤바뀜 — 버린다 (§3.4)
             book.apply(item)
+            asks, bids = book.sorted_levels()
         book.seq = seq
-        asks, bids = book.sorted_levels()
         self._sink.orderbook(
             exchange=self.id,
             base=base,
@@ -700,6 +737,32 @@ class BitgetStream:
             price=float(latest["price"]),
             price_timestamp=ts,
         )
+
+
+def _strictly_ascending(levels: list[list[float]]) -> bool:
+    """가격이 앞 단계보다 엄격히 큰가 — NaN 은 비교가 거짓이라 정렬 안 됨으로 본다."""
+    prev = -_INF
+    for price, _ in levels:
+        if not prev < price:
+            return False
+        prev = price
+    return True
+
+
+def _strictly_descending(levels: list[list[float]]) -> bool:
+    """가격이 앞 단계보다 엄격히 작은가 — NaN 은 비교가 거짓이라 정렬 안 됨으로 본다."""
+    prev = _INF
+    for price, _ in levels:
+        if not prev > price:
+            return False
+        prev = price
+    return True
+
+
+def _without_request_time(content: bytes) -> bytes:
+    """비교용 바이트 — 봉투 머리의 `"requestTime":<ms>` 하나만 뺀 것. 없으면 본문 그대로."""
+    m = _REQUEST_TIME.search(content, 0, _REQUEST_TIME_WITHIN)
+    return content if m is None else content[: m.start()] + content[m.end() :]
 
 
 def _decode(text: str) -> dict[str, Any] | None:

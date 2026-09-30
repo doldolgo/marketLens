@@ -1,10 +1,11 @@
 """메시지 → 행 갱신 규칙 (스펙 001 §3.4·§3.5) — 거래소와 무관한 공통 규칙.
 
 커넥터는 자기 거래소 형식을 디코드해 여기 `orderbook`·`trade` 로 넘긴다.
-우주 밖 버리기·잔량 필터·누적액 상한·체결가 보류·USDT 시세 추출·입출금 필드 물려받기가
-전부 여기서 일어난다. 전부 동기다.
+우주 밖 버리기·단계 거르기(가격·잔량 0 초과·유한)·누적액 상한·체결가 거르기(같은 기준)·보류·USDT 시세 추출·
+입출금 필드 물려받기가 전부 여기서 일어난다. 전부 동기다.
 """
 
+import math
 from datetime import UTC, datetime
 
 from app.core.live_store import LiveStore
@@ -93,9 +94,14 @@ class QuoteSink:
     def trade(
         self, *, exchange: str, base: str, price: float, price_timestamp: int
     ) -> None:
-        """체결가 메시지 1건 — price·price_timestamp 만 갱신. 행이 없으면 보류한다 (§3.5-2)."""
+        """체결가 메시지 1건 — price·price_timestamp 만 갱신. 행이 없으면 보류한다 (§3.5-2).
+
+        체결가가 0 이하이거나 유한하지 않으면(NaN·inf) 메시지를 무시한다 — 호가 정리(§3.5-1)와 같은 기준이다. NaN 이
+        행에 들어가면 표 게시 직렬화가 깨지고, 보류값으로 남으면 다음 호가 메시지마다 행에 다시 실린다.
+        """
         key = base.upper()
-        if key not in self._universe or price <= 0:
+        # 연쇄 비교 하나로 "0 초과·유한" — NaN 은 모든 비교가 거짓이라 여기서 빠진다
+        if key not in self._universe or not 0.0 < price < math.inf:
             return
         self._trades[(exchange, key)] = (float(price), int(price_timestamp))
         row = self._store.get(exchange, key)

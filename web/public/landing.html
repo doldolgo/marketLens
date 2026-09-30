@@ -424,7 +424,8 @@
         next.hidden = rest.length === 0
       }
 
-      // 3번 섹션의 실데이터 문장 — 호가 깊이 예시(depthGap)·USDT 괄호·over1. 나머지 문장은 HTML 에 그대로 있다
+      // 3번 섹션의 실데이터 문장 — 호가 깊이 예시(depthGap)·USDT 괄호·over1. 나머지 문장은 HTML 에 그대로 있다.
+      // over1 은 사건(4번 섹션)과 같은 맨 위 호가 기준 원값으로 센 수라 문장에 그 기준을 적는다
       function renderWhy(live) {
         const g = live.depthGap
         if (g) {
@@ -436,8 +437,8 @@
         whyRate.textContent = `(지금 업비트 ₩${Math.round(live.rate).toLocaleString('ko-KR')})`
         whyRate.hidden = false
         whyOpen.innerHTML = (live.over1 === 0
-          ? '지금은 1% 넘게 벌어진 곳이 없습니다.'
-          : `지금 1% 넘게 벌어진 <span class="nw">김프·역프</span> ${fmtCount(live.over1)}건 가운데 실제로 옮길 수 있는 건 ${fmtCount(live.over1Movable)}건입니다.`) + ' '
+          ? '지금은 맨 위 호가로 1% 넘게 벌어진 곳이 없습니다.'
+          : `지금 맨 위 호가로 1% 넘게 벌어진 <span class="nw">김프·역프</span> ${fmtCount(live.over1)}건 가운데 실제로 옮길 수 있는 건 ${fmtCount(live.over1Movable)}건입니다.`) + ' '
         whyOpen.hidden = false
       }
 

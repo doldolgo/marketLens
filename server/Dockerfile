@@ -14,5 +14,7 @@ COPY scripts ./scripts
 
 EXPOSE 8000
 # 워커 1개 고정 — 메모리가 진실이라 프로세스가 둘이면 진실도 둘 (architecture.md)
+# 루프·HTTP 파서를 uvloop·httptools 로 못 박는다 — auto 는 모듈이 빠지면 조용히 asyncio·h11 로 내려가
+# 작은 요청 처리량이 절반이 된다. 명시하면 모듈이 없을 때 기동이 실패해 바로 드러난다 (스펙 007, 2026-09-28)
 # permessage-deflate 끔 — /ws/spreads 는 hub 가 gzip 을 표 1장당 1회 하고, 켜 두면 접속자마다 또 압축한다 (스펙 017)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--ws-per-message-deflate", "false"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--loop", "uvloop", "--http", "httptools", "--ws-per-message-deflate", "false"]

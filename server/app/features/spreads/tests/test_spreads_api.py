@@ -4,6 +4,7 @@
 `spreads_json`(게시기와 같은 함수·직렬화)으로 본다. 네트워크 없음, 저장소 직접 시드, Redis 는 fakeredis.
 """
 
+import gzip
 from datetime import UTC, datetime, timedelta
 
 import fakeredis
@@ -153,6 +154,47 @@ def test_gzip_is_applied_to_the_verbatim_body() -> None:
     resp = client.get("/spreads", headers={"Accept-Encoding": "gzip"})
     assert resp.headers.get("content-encoding") == "gzip"
     assert resp.content == big.encode()  # httpx 가 풀어 준 본문은 키의 바이트 그대로
+
+
+def _raw(client, headers: dict[str, str]) -> tuple[dict, bytes]:  # noqa: ANN001
+    """httpx 가 풀기 전의 본문 그대로."""
+    with client.stream("GET", "/spreads", headers=headers) as resp:
+        return dict(resp.headers), b"".join(resp.iter_raw())
+
+
+def test_gzip_body_is_compressed_once_per_table_at_level_6(monkeypatch) -> None:  # noqa: ANN001
+    """018 §3.1 (2026-09-28) — 표 텍스트가 바뀔 때 한 번만 레벨 6 으로 압축한 바이트를 준다."""
+    levels: list[int] = []
+    real = gzip.compress
+
+    def counting(data: bytes, compresslevel: int = 9, **kw: object) -> bytes:
+        levels.append(compresslevel)
+        return real(data, compresslevel, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(gzip, "compress", counting)
+    client, redis = make_serving_client()
+    big = TABLE.replace('"rows":[]', '"rows":[' + ",".join(["{}"] * 300) + "]")
+    redis.set("spreads:latest", big, ex=10)
+
+    headers, first = _raw(client, {"Accept-Encoding": "gzip"})
+    _, second = _raw(client, {"Accept-Encoding": "gzip"})
+    assert headers["content-encoding"] == "gzip"
+    # CORS 미들웨어(Starlette 1.7+)가 Origin 을 덧붙일 수 있다 — Accept-Encoding 이 들어 있으면 된다
+    assert "Accept-Encoding" in [v.strip() for v in headers["vary"].split(",")]
+    assert gzip.decompress(first) == big.encode()
+    assert second == first and levels == [6]  # 같은 표 — 압축 1번
+    # 머리 10바이트(시각) 뒤는 레벨 6 압축과 같은 바이트다
+    assert first[10:] == real(big.encode(), 6, mtime=0)[10:]
+
+    newer = big.replace("1400.0", "1401.0")
+    redis.set("spreads:latest", newer, ex=10)
+    _, third = _raw(client, {"Accept-Encoding": "gzip"})
+    assert gzip.decompress(third) == newer.encode() and levels == [6, 6]
+
+    # gzip 을 받지 않는 요청은 키의 바이트 그대로
+    headers, plain = _raw(client, {"Accept-Encoding": "identity"})
+    assert "content-encoding" not in headers
+    assert plain == newer.encode()
 
 
 # ---- 003 §3.2·§4: 표 계산 규칙 — 게시기가 만드는 표(= GET /spreads 본문)의 내용 ----

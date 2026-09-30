@@ -79,7 +79,9 @@ class OutageWriter(Protocol):
 class OutageReader(Protocol):
     """기동 시 24시간 복원 조회 — 실물은 core.influx.InfluxClient, 테스트는 fake."""
 
-    def query_collect_fail(self, *, start: int) -> list[CollectFailRow]: ...
+    def query_collect_fail(
+        self, *, start: int, timeout_sec: float | None = None
+    ) -> list[CollectFailRow]: ...
 
 
 class OutageTracker:
@@ -102,7 +104,10 @@ class OutageTracker:
     # --- 복원 (수집 루프 시작 전에 1회) ---
 
     async def restore(self, reader: OutageReader | None, now_ms: int) -> None:
-        """최근 24시간 `collect_fail` 을 메모리로. 없거나·실패·3초 초과면 빈 목록 + 경고 1줄."""
+        """최근 24시간 `collect_fail` 을 메모리로. 없거나·실패·3초 초과면 빈 목록 + 경고 1줄.
+
+        조회의 HTTP 타임아웃도 3초다 — 상한을 넘긴 조회가 스레드·Influx 에 남아 첫 틱과 겹치지 않게.
+        """
         if reader is None:
             logger.warning(
                 "Influx 가 없어 실패 이력을 복원하지 않는다 — 빈 목록으로 시작"
@@ -111,7 +116,11 @@ class OutageTracker:
         start = (now_ms - RETENTION_MS) // 1000
         try:
             rows = await asyncio.wait_for(
-                asyncio.to_thread(reader.query_collect_fail, start=start),
+                asyncio.to_thread(
+                    reader.query_collect_fail,
+                    start=start,
+                    timeout_sec=RESTORE_TIMEOUT_SEC,
+                ),
                 timeout=RESTORE_TIMEOUT_SEC,
             )
         except Exception as exc:
