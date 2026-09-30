@@ -3,13 +3,17 @@
 /health 와 틱 루프는 기능 폴더가 아니라 여기(시스템) 소관이다.
 메모리가 진실이므로 uvicorn 워커는 1개여야 한다 — 워커가 둘이면 서로 다른 메모리를 본다.
 프로세스 역할은 ROLE(016) — collector(기본) 는 아래 전체, api 는 Influx 조회 전용(`_api_lifespan`).
-시작 순서(collector): Influx·Redis 연결 확인 → 010 원문 아카이브(S3_BUCKET 있을 때) → 011 이력 복원 → 013 사건 복원 → 014 봉 버킷·롤업 기준점
-→ 009 spark 복원 → 마켓 우주 → 스트림 기동(국내 2 + 바이낸스 3샤드) → 틱 루프 → 009 인계 보내기 태스크·flusher.
+시작 순서(collector): 010 원문 아카이브(S3_BUCKET 있을 때) → Influx·Redis 연결 확인 → 마켓 우주·스트림 기동(국내 2 +
+해외 3곳 샤드) → 011 이력 복원 → 013 사건 복원 → 014 봉 버킷·롤업 기준점 → 009 spark 복원 → 틱 루프 → 009 인계
+보내기 태스크·017 게시기·허브·flusher → GC 정리(001 §3.1 — 두 역할 모두 yield 직전).
+스트림을 복원보다 먼저 여는 것은 스트림 준비(목록 REST·WS 연결·스냅샷)가 거의 네트워크 대기라 복원 시간 뒤에
+줄 세울 이유가 없어서다(2026-09-28). 틱은 복원이 다 끝난 뒤에야 만들어진다 — 사건·봉·spark 가 복원 전 상태를 만지지 않는다.
 어느 것이 실패해도 앱은 뜬다.
 """
 
 import asyncio
 import contextlib
+import gc
 import logging
 import time
 from collections.abc import AsyncIterator, Callable
@@ -29,6 +33,8 @@ from app.core.config import (
     APP_VERSION,
     EXCHANGE_TIMEOUT_CONNECT,
     EXCHANGE_TIMEOUT_TOTAL,
+    GC_THRESHOLDS,
+    GZIP_LEVEL,
     USER_AGENT,
     Settings,
     get_settings,
@@ -39,6 +45,7 @@ from app.core.errors import ExchangeError
 from app.core.heartbeat import HeartbeatSink
 from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
+from app.core.networks import WalletMemo
 from app.core.notify import Notifier, SlackLogHandler
 from app.core.outages import OutageTracker
 from app.core.premium_events import PremiumEventDetector
@@ -61,6 +68,8 @@ from app.features.admin.router import router as admin_router
 from app.features.admin.service import AdminStatusService
 from app.features.analysis.router import router as analysis_router
 from app.features.health.router import router as health_router
+from app.features.history.cache import HistoryCache
+from app.features.history.gate import HeavyGate
 from app.features.history.router import events_router as history_events_router
 from app.features.history.router import router as history_router
 from app.features.landing.router import router as landing_router
@@ -68,6 +77,7 @@ from app.features.landing.service import LandingService
 from app.features.spreads.gauge import start_ws_gauge
 from app.features.spreads.hub import SpreadsHub
 from app.features.spreads.push import SpreadsPublisher
+from app.features.spreads.router import GzipSlot
 from app.features.spreads.router import refresh_router as spreads_refresh_router
 from app.features.spreads.router import router as spreads_router
 from app.features.spreads.ws import ws_router as spreads_ws_router
@@ -89,6 +99,17 @@ async def _open_influx(settings: Settings) -> InfluxClient | None:
             "InfluxDB 연결 실패: %s — 회차마다 재시도한다", settings.influx_url
         )
     return influx
+
+
+def _settle_gc() -> None:
+    """기동을 마친 직후(yield 직전) 한 번 — 001 §3.1·016 §3.1 (2026-09-28 결정).
+
+    기동 때 만든 모듈·클라이언트·복원 객체는 프로세스가 끝날 때까지 산다. 한 번 거둔 뒤 영구 세대로
+    옮겨(freeze) 전체 수집이 매번 훑지 않게 하고, 세대 임계를 올려 행 교체가 부르는 수집 빈도를 줄인다.
+    """
+    gc.collect()
+    gc.freeze()
+    gc.set_threshold(*GC_THRESHOLDS)
 
 
 @asynccontextmanager
@@ -115,6 +136,7 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
     gauge = start_ws_gauge(app.state.settings.statsd_addr, ws_connections)
     # 029 — 관리자 상태도 같은 함수로 센다(admin 은 spreads 허브를 모른다)
     app.state.admin.ws_connections = ws_connections
+    _settle_gc()
     try:
         yield
     finally:
@@ -195,38 +217,21 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     spark = SparkBuffer()
     handoff = TickRelay(stream=tick_stream, store=store, spark=spark)
-    # 017 — 표 게시(누가 볼 때만, 틱 직후)와 자기 게시를 자기 구독하는 허브(로컬 단일 프로세스용)
+    # 017 — 표 게시(틱 직후)와 자기 게시를 자기 구독하는 허브(로컬 단일 프로세스용 — 접속자가 있을 때만 구독)
     bus = RedisBus.from_url(settings.redis_url)
     # 026 — 일중 기준가 장부(KST 00시 첫 체결가, Redis 보존). 게시기가 매초 읽어 dayChg 를 만든다
     day_open = DayOpenBook(bus=bus)
-    publisher = SpreadsPublisher(store=store, bus=bus, day_open=day_open.prices)
+    # 006 §3.7 — 망 판정 메모. 틱이 회차를 열어 채우고 같은 회차의 표 게시기가 읽는다
+    wallet_memo = WalletMemo()
+    publisher = SpreadsPublisher(
+        store=store, bus=bus, day_open=day_open.prices, wallet_memo=wallet_memo
+    )
     hub = SpreadsHub(bus=bus)
 
-    # 1. 수집 실패 이력(011) 복원 — 틱 루프 시작 전에 끝난다. 쓰기는 별도 태스크가 순서대로.
-    outages = OutageTracker(writer=influx, alerts=_alerts(app))
-    app.state.started_at = int(time.time() * 1000)
-    await outages.restore(influx, app.state.started_at)
-    outage_writer_task = asyncio.create_task(outages.run_writer_loop())
-    app.state.outages = outages
-
-    # 1-1. 김프/역프 사건(013) 복원 — 7일 안의 진행 중 사건, 3초 상한. 쓰기는 별도 태스크가 회차마다.
-    events = PremiumEventDetector(writer=influx)
-    await events.restore(influx, app.state.started_at // 1000)
-    event_writer_task = asyncio.create_task(events.run_writer_loop())
-    app.state.premium_events = events
-
-    # 1-1-1. 1분 봉(014) — 계층 버킷 5개(없으면 생성, 3초 상한) → 롤업 기준점(계층당 3초 상한).
-    # Influx 가 없으면 집계만 돌고 쓰기·롤업은 실패로 남는다. 쓰기 태스크는 분이 닫히면 즉시·없어도 60초 회차.
-    candles = CandleAggregator(store=influx)
-    await ensure_candle_buckets(influx)
-    await candles.restore(app.state.started_at // 1000)
-    candle_writer_task = asyncio.create_task(candles.run_writer_loop())
-
-    # 1-2. spark 복원(009 §3.6) — 최근 30분 1분 버킷, 10초 상한. 틱 루프 시작 전에 끝난다.
-    await restore_spark(influx, spark, store, app.state.started_at // 1000)
-
-    # 2~3. 마켓 우주(매초) → 스트림 기동. 목록을 못 받은 거래소는 다음 초에 다시 — 그동안 구독은 없다.
+    # 1. 마켓 우주(매초) → 스트림 기동 — 복원보다 먼저(001 §3.6 앱 시작 순서). 목록을 못 받은 거래소는 다음 초에 다시.
     # 해외 커넥터(012 바이낸스·019 바이빗·020 비트겟)가 심볼 집합 계약도 맡는다 — 우주가 확정되면 각자 자기 심볼만 구독한다.
+    # 틱 루프가 아직 없으므로 스트림은 LiveStore 행·원문만 채운다(판정·사건·봉은 틱이 만든다).
+    app.state.started_at = int(time.time() * 1000)
     upbit = UpbitStream(store=store, sink=sink, record=record)
     bithumb = BithumbStream(store=store, sink=sink, record=record)
     binance = BinanceStream(store=store, sink=sink, record=record)
@@ -243,7 +248,31 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     for stream in streams:
         stream.start()
 
-    # 4. 틱 루프(1초) — 틱 생성·인계·판정. 025 — 틱 끝마다 Redis 심장박동(api 의 /health 가 읽는다)
+    # 2. 복원 4개 — 틱 루프 시작 전에 모두 끝난다. 조회마다 HTTP 타임아웃을 각자의 상한과 같게 건다.
+    # 2-1. 수집 실패 이력(011) — 24시간, 3초 상한. 쓰기는 별도 태스크가 순서대로.
+    outages = OutageTracker(writer=influx, alerts=_alerts(app))
+    await outages.restore(influx, app.state.started_at)
+    outage_writer_task = asyncio.create_task(outages.run_writer_loop())
+    app.state.outages = outages
+
+    # 2-2. 김프/역프 사건(013) — Redis 사본(`premium_events:open`) 먼저, 없거나 실패면 Influx 7일 안 진행 중, 3초 상한.
+    # 쓰기 태스크는 점이 생기면 즉시·60초 회차마다 Influx 에 쓰고 사본을 Redis 에 둔다.
+    events = PremiumEventDetector(writer=influx, snapshots=bus)
+    await events.restore(influx, app.state.started_at // 1000)
+    event_writer_task = asyncio.create_task(events.run_writer_loop())
+    app.state.premium_events = events
+
+    # 2-3. 1분 봉(014) — 계층 버킷 5개(없으면 생성, 3초 상한) → 롤업 기준점(계층당 3초 상한).
+    # Influx 가 없으면 집계만 돌고 쓰기·롤업은 실패로 남는다. 쓰기 태스크는 분이 닫히면 즉시·없어도 60초 회차.
+    candles = CandleAggregator(store=influx)
+    await ensure_candle_buckets(influx)
+    await candles.restore(app.state.started_at // 1000)
+    candle_writer_task = asyncio.create_task(candles.run_writer_loop())
+
+    # 2-4. spark(009 §3.6) — 최근 30분 1분 버킷, 10초 상한. 조회·채우기는 스레드, 게시만 루프에서.
+    await restore_spark(influx, spark, store, app.state.started_at // 1000)
+
+    # 3. 틱 루프(1초) — 틱 생성·인계·판정. 025 — 틱 끝마다 Redis 심장박동(api 의 /health 가 읽는다)
     heartbeat = HeartbeatSink(bus=bus)
     ticks = TickLoop(
         store=store,
@@ -257,10 +286,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         heartbeat=heartbeat,
         wallet=wallet,
         day_open=day_open,
+        wallet_memo=wallet_memo,
     )
     ticks.start()
 
-    # 5. 009 — 인계 큐 보내기 태스크와 flusher(60초, Influx 토큰 없으면 비활성). 017 — 게시·구독 태스크
+    # 4. 009 — 인계 큐 보내기 태스크와 flusher(60초, Influx 토큰 없으면 비활성). 017 — 게시·구독 태스크
     handoff.start()
     publisher.start()
     hub.start()
@@ -277,10 +307,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.collector = CollectService(
         store=store, universe=universe, streams=streams, client=client, wallet=wallet
     )
+    _settle_gc()
     try:
         yield
     finally:
         await ticks.aclose()  # 슬롯의 마지막 틱을 인계한다
+        # 013 — 쓰기 태스크를 멈추기 전에 열린 사건 사본 저장 1회·미전송 점 쓰기 1회(총 3초 상한)
+        await events.final_round()
         await heartbeat.aclose()
         await day_open.aclose()
         await publisher.aclose()  # 남은 표는 버린다 — 017
@@ -435,12 +468,18 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     # 022 — 랜딩 요약의 부분별 캐시. I/O 가 없는 메모리뿐이라 lifespan 이 아니라 앱을 만들 때 하나
     app.state.landing = LandingService()
+    # 018·013·014 — 미리 압축한 응답 바이트(GET /spreads 한 칸, 사건·봉 공유 캐시). 같은 이유로 여기서 하나씩
+    app.state.spreads_gzip = GzipSlot()
+    app.state.history_cache = HistoryCache()
+    # 005 §3.4 — /history/premium·streaks·streaks/bulk 동시 1개(돌고 있으면 429). 워커 1개라 앱 안에서 센다
+    app.state.history_heavy = HeavyGate()
     _install_notifier(app, settings)
 
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
     )
-    app.add_middleware(GZipMiddleware)
+    # 레벨 6 — 9 는 CPU 가 2.5배인데 크기는 1~5% 작을 뿐이다 (001 §3.1, 2026-09-28 결정)
+    app.add_middleware(GZipMiddleware, compresslevel=GZIP_LEVEL)
 
     app.add_exception_handler(ExchangeError, _exchange_error_handler)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
