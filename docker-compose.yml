@@ -43,6 +43,9 @@ services:
       # nginx 가 접두를 뗀 경로(/health)와 박스 안 localhost:8000/… 는 그대로 라우팅된다. api 에는 주지 않는다.
       # 공개 nginx 의 /api/ 가 백엔드로 넘기지 않는 동안(028)만 안전하다 — 넘기면 인터넷에서 Try it out 이 된다
       UVICORN_ROOT_PATH: /api
+      # 034 — 관리자 AWS 요약(/admin/aws·/admin/alerts 의 경보 이력)의 리전. 자격증명은 collect 박스 역할(010)이라
+      # 수집기에만 준다. 비면 네 부분이 unconfigured 이고 AWS 를 부르지 않는다(로컬 uvicorn·api)
+      ADMIN_AWS_REGION: ap-northeast-2
     ports:
       # serve 박스의 nginx 가 사설 IP 로 붙는다 — 보안그룹이 serve 그룹 외 인바운드를 막는다 (021 §3.1)
       - "8000:8000"

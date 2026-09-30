@@ -29,13 +29,14 @@ FORBIDDEN = '{"error":{"code":"forbidden","message":"Forbidden","detail":null}}'
 SFS_CHECK = (["if", "($admin_sfs_ok", "=", "0)"], [(["return", "403"], None)])
 # 교차 사이트 검사 예외 — 화면(/)과 문서 두 쪽 (§3.2)
 SFS_EXEMPT = {("=", "/api/docs"), ("=", "/api/redoc")}
-# 화면의 10초 폴링 — 기록하지 않는다 (§3.2)
+# 화면의 10초 폴링 — 기록하지 않는다 (§3.2). 034 의 수집기 관리자 피드 둘도 화면의 폴링이다
+FEEDS = {("=", "/api/admin/aws"), ("=", "/api/admin/alerts")}
 POLLING = {
     ("=", "/api/health"),
     ("=", "/api/health/collect"),
     ("=", "/svc/api/health"),
     ("=", "/svc/api/admin/status"),
-}
+} | FEEDS
 BASE_HEADERS = [
     ["Host", "$http_host"],
     ["X-Real-IP", "$remote_addr"],
@@ -137,6 +138,8 @@ def test_admin_routes_every_api_path_like_before_the_allowlist() -> None:
         "/api/ws/spreads": (API, "/ws/spreads"),
         "/svc/api/health": (API, "/health"),
         "/svc/api/admin/status": (API, "/admin/status"),
+        "/api/admin/aws": (COLLECTOR, "/admin/aws"),
+        "/api/admin/alerts": (COLLECTOR, "/admin/alerts"),
     }
     for path, target in expected.items():
         assert _forward(path) == target, path
@@ -148,6 +151,21 @@ def test_admin_routes_every_api_path_like_before_the_allowlist() -> None:
     assert _args(screen, "root") == [["/usr/share/nginx/admin"]]
     # 읽기 제한은 기본 60초 그대로
     assert "proxy_read_timeout" not in _text(ADMIN_CONF)
+
+
+def test_monitoring_feeds_are_exact_collector_locations_that_inherit_server_headers() -> (
+    None
+):
+    """034 §3.1 — 정확 일치 둘, 첫 줄 교차 사이트 검사, 기록 끔, 자기 헤더 없이 server 수준을 상속."""
+    locations = _locations(_admin_server())
+    for key in FEEDS:
+        children = locations[key]
+        assert children[0] == SFS_CHECK, key
+        assert _args(children, "access_log") == [["off"]], key
+        assert _args(children, "proxy_pass") == [[COLLECTOR]], key
+        assert not _args(children, "proxy_set_header"), key
+        assert not _args(children, "add_header"), key
+        assert not _args(children, "proxy_hide_header"), key
 
 
 def test_admin_ws_location_upgrades_and_repeats_the_base_headers() -> None:
@@ -280,6 +298,16 @@ def test_no_service_publishes_8081_and_caddy_never_calls_admin() -> None:
         ln for ln in _text("web/Dockerfile").splitlines() if ln.startswith("EXPOSE")
     ]
     assert exposes == ["EXPOSE 80"]
+
+
+def test_admin_aws_region_only_on_the_collector_service() -> None:
+    """034 §3.2 — compose 가 server 에만 리전을 준다(server/.env 에 두지 않는다 — 로컬·api 는 AWS 를 안 부른다)."""
+    services = _yaml("docker-compose.yml")["services"]
+    assert services["server"]["environment"]["ADMIN_AWS_REGION"] == "ap-northeast-2"
+    for name, svc in services.items():
+        if name != "server":
+            assert "ADMIN_AWS_REGION" not in (svc.get("environment") or {}), name
+    assert "ADMIN_AWS_REGION" not in _text("server/.env.example")
 
 
 def test_root_path_only_on_collector_and_public_api_docs_stay_closed() -> None:
