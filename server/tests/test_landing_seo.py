@@ -185,8 +185,11 @@ def test_modified_date_is_the_same_everywhere() -> None:
     html = (PUBLIC / "landing.html").read_text("utf-8")
     assert re.findall(r'<time datetime="([^"]+)">', html) == [MODIFIED]
     sitemap = (PUBLIC / "sitemap.xml").read_text("utf-8")
-    assert re.findall(r"<loc>([^<]+)</loc>", sitemap) == [SITE]
-    assert re.findall(r"<lastmod>([^<]+)</lastmod>", sitemap) == [MODIFIED]
+    # 두 줄 — 랜딩과 처리방침(032, lastmod 는 방침 시행일 — test_privacy.py). /app/ 은 넣지 않는다
+    urls = dict(re.findall(r"<loc>([^<]+)</loc><lastmod>([^<]+)</lastmod>", sitemap))
+    assert list(urls) == [SITE, SITE + "privacy"]
+    assert sitemap.count("<url>") == len(urls)
+    assert urls[SITE] == MODIFIED
 
 
 def test_icons_are_absolute_and_exist() -> None:

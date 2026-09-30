@@ -74,11 +74,11 @@
   </script>
   <!-- 글꼴 — Pretendard 를 이 페이지 글자만 남겨 자른 파일 하나를 같은 출처에서 받는다(OFL 이라 이름을 바꿨다: KimpTrack Sans).
        글자를 고치면 web/scripts/subset-landing-font.py 로 다시 만든다 — 빠진 글자는 시스템 글꼴로 보인다 (스펙 022 §3.4) -->
-  <link rel="preload" href="landing/fonts/kimptrack-sans-058ef60e.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="landing/fonts/kimptrack-sans-f3ac1cc6.woff2" as="font" type="font/woff2" crossorigin />
   <style>
     @font-face {
       font-family: "KimpTrack Sans";
-      src: url("landing/fonts/kimptrack-sans-058ef60e.woff2") format("woff2");
+      src: url("landing/fonts/kimptrack-sans-f3ac1cc6.woff2") format("woff2");
       font-weight: 400 700;
       font-style: normal;
       font-display: swap;
@@ -270,6 +270,8 @@
     .foot { display: grid; gap: 14px; padding-block: 32px 48px; border-top: 1px solid var(--divider); font-size: 13px; color: var(--n500); }
     .foot-nav { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 15px; color: var(--n300); }
     .foot-nav a:hover { color: var(--n100); }
+    /* 032 — 방침 링크는 바닥에서 가장 밝고 굵게(작성지침: 다른 고지와 구분해 보이게) */
+    .foot-nav .foot-privacy { color: var(--n100); font-weight: 700; }
     .foot .notice { max-width: 56em; color: var(--n400); }
 
     /* 960px 미만 — 한 단(글 → 카드 → 다음 경로) */
@@ -508,6 +510,7 @@
       <a href="#kimp"><span class="nw">김프·역프란</span></a>
       <a href="#method">계산 방법</a>
       <a href="#faq">자주 묻는 질문</a>
+      <a class="foot-privacy" href="/privacy">개인정보 처리방침</a>
     </nav>
     <p class="notice">KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다.</p>
     <p>설명을 마지막으로 고친 날 <time datetime="2026-10-01">2026년 10월 1일</time></p>
