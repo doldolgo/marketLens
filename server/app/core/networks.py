@@ -7,6 +7,7 @@ wallet_status(조회)와 spreads(행 판정)가 같이 쓰므로 core 에 둔다
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Literal, NamedTuple, Protocol
 
 Verdict = Literal["matched", "unknown", "absent"]
@@ -125,10 +126,17 @@ _EQUIV_INDEX: dict[frozenset[str], int] = {
 
 _PAREN_RE = re.compile(r"\([^)]*\)")
 _SPLIT_RE = re.compile(r"[^0-9a-z]+")
+# 정규화 결과를 이름별로 기억하는 칸 수 — 망 이름은 다섯 거래소를 합쳐 수백 종이고 60초에 한 번만 바뀐다
+_NAME_CACHE_SIZE = 4096
 
 
+@lru_cache(maxsize=_NAME_CACHE_SIZE)
 def normalize_name(name: str) -> frozenset[str]:
-    """망 이름 → 토큰 집합 — 스펙 006 §3.6 정규화 6단계. 토큰 순서는 무시한다."""
+    """망 이름 → 토큰 집합 — 스펙 006 §3.6 정규화 6단계. 토큰 순서는 무시한다.
+
+    결과를 이름별로 기억한다 — 순수 함수라 무효화가 없고(별칭·불용어는 상수), 틱과 표가 매초 같은 이름을
+    수천 번 정규화한다. 결과는 불변 집합이라 나눠 써도 안전하다.
+    """
     lowered = name.lower()
     without_paren = _PAREN_RE.sub(" ", lowered)  # 괄호 주석 제거는 분리보다 먼저
     tokens = [t for t in _SPLIT_RE.split(without_paren) if t]
@@ -261,3 +269,70 @@ def wallet_fields(dom_row: WalletRow, fx_row: WalletRow) -> WalletFields:
         dep_fx = fx_row.deposit_enabled
         wd_fx = fx_row.withdrawal_enabled
     return WalletFields(dom_net.name, net_fx, dom_net.dep, dom_net.wd, dep_fx, wd_fx)
+
+
+MemoKey = tuple[str, str, str]  # (dom, fx, base 대문자)
+# 입력 여섯(국내·해외 망 목록 객체, 국내 입금·출금, 해외 입금·출금) + 그때의 판정
+_MemoEntry = tuple[
+    list[Network],
+    list[Network],
+    bool | None,
+    bool | None,
+    bool | None,
+    bool | None,
+    WalletFields,
+]
+
+
+class WalletMemo:
+    """망 판정 조합 메모 — 006 §3.7. 틱과 같은 회차의 표(017)가 하나를 나눠 쓴다.
+
+    (국내, 해외, 코인) 마다 직전 판정과 그 입력(두 행의 망 목록 객체와 코인 단위 입출금 4값)을 든다.
+    입력이 전부 **같은 객체**면 다시 판정하지 않는다 — 입출금 캐시는 60초에 한 번 바뀌고 006 조회기는
+    행에 캐시의 망 목록을 사본 없이 걸기 때문이다. 이 메모가 맞는 전제는 "행의 망 목록과 그 안의 망은
+    제자리에서 고치지 않는다"(006 §3.5)이다. 회차(`rotate`)마다 직전·이번 회차에 쓰인 조합만 남는다 —
+    상폐 조합은 저절로 빠진다.
+    """
+
+    def __init__(self) -> None:
+        self._prev: dict[MemoKey, _MemoEntry] = {}
+        self._cur: dict[MemoKey, _MemoEntry] = {}
+
+    def rotate(self) -> None:
+        """새 회차 — 틱이 판정을 시작할 때 부른다."""
+        self._prev = self._cur
+        self._cur = {}
+
+    def fields(
+        self, key: MemoKey, dom_row: WalletRow, fx_row: WalletRow
+    ) -> WalletFields:
+        """`wallet_fields(dom_row, fx_row)` 와 같은 값 — 입력이 직전과 같은 객체면 기억한 결과를 돌려준다."""
+        entry = self._cur.get(key)
+        if entry is None:
+            entry = self._prev.get(key)
+        dom_nets = dom_row.networks
+        fx_nets = fx_row.networks
+        dom_dep = dom_row.deposit_enabled
+        dom_wd = dom_row.withdrawal_enabled
+        fx_dep = fx_row.deposit_enabled
+        fx_wd = fx_row.withdrawal_enabled
+        if not (
+            entry is not None
+            and entry[0] is dom_nets
+            and entry[1] is fx_nets
+            and entry[2] is dom_dep
+            and entry[3] is dom_wd
+            and entry[4] is fx_dep
+            and entry[5] is fx_wd
+        ):
+            entry = (
+                dom_nets,
+                fx_nets,
+                dom_dep,
+                dom_wd,
+                fx_dep,
+                fx_wd,
+                wallet_fields(dom_row, fx_row),
+            )
+        self._cur[key] = entry
+        return entry[6]
