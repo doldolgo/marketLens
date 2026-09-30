@@ -207,3 +207,104 @@ async def test_runtime_drops_are_reported_once_per_round(
         await det.flush()
     drops = [r.getMessage() for r in caplog.records if "버림" in r.getMessage()]
     assert drops == ["premium_event 미전송 1000건 초과 — 오래된 것부터 5건 버림"]
+
+
+async def _until(cond, what: str) -> None:  # noqa: ANN001
+    """쓰기 태스크(스레드 쓰기 포함)가 한 바퀴 돌 때까지 — 2초 안에 안 되면 실패."""
+    for _ in range(400):
+        if cond():
+            return
+        await asyncio.sleep(0.005)
+    raise AssertionError(f"{what} 이 일어나지 않았다")
+
+
+def _saved_bases(snaps: FakeSnapshots) -> list[str]:
+    return sorted(d["base"] for d in json.loads(snaps.data or "[]"))
+
+
+async def test_a_closed_event_is_not_reopened_after_an_abnormal_exit() -> None:
+    """닫힘 점을 쓴 회차가 사본도 다시 저장한다 — 60초 갱신 사이에 닫힌 사건이 비정상 종료(쓰기 태스크 취소,
+    종료 1회 없음) 뒤 600초 안의 재기동에서 다시 열려 Influx 의 닫힘 점을 덮지 않는다. 버린 스파이크도 같다."""
+    influx = FakeInflux()
+    snaps = FakeSnapshots()
+    det = PremiumEventDetector(writer=influx, snapshots=snaps)
+    writer = asyncio.create_task(det.run_writer_loop())
+    try:
+        # 첫 틱은 갱신 회차 — 사본에 둘
+        det.observe(tick(T0, row(fwd=1.5), row(base="BONK", fwd=1.5)))
+        det.observe(tick(T0 + 61, row(fwd=1.6), row(base="BONK", fwd=1.5)))
+        await _until(lambda: len(influx.data) == 2, "첫 점 쓰기")
+        # 60초를 못 넘길 사건 — 점은 없다
+        det.observe(tick(T0 + 100, row(base="NEW", fwd=1.2)))
+        det.observe(
+            tick(
+                T0 + 121,
+                row(fwd=1.6),
+                row(base="BONK", fwd=1.5),
+                row(base="NEW", fwd=1.2),
+            )
+        )
+        await _until(
+            lambda: _saved_bases(snaps) == ["BONK", "NEW", "SOPH"], "갱신 사본"
+        )
+        saves = len(snaps.saves)
+        # 갱신 회차가 아닌 틱에서 SOPH 는 닫히고(종료 이하) NEW 는 1분을 못 넘긴 스파이크로 버려진다
+        det.observe(
+            tick(
+                T0 + 130,
+                row(fwd=0.3),
+                row(base="BONK", fwd=1.5),
+                row(base="NEW", fwd=0.2),
+            )
+        )
+        await _until(lambda: _saved_bases(snaps) == ["BONK"], "닫힘 회차 사본")
+    finally:
+        writer.cancel()  # 비정상 종료 — final_round 없이 태스크만 멈춘다
+        with pytest.raises(asyncio.CancelledError):
+            await writer
+    assert len(snaps.saves) > saves
+    closed = next(p for p in influx.data.values() if p["end_ts"])
+    assert (closed["end_ts"], closed["last_ts"]) == (T0 + 130, T0 + 121)
+
+    after = PremiumEventDetector(writer=influx, snapshots=snaps)
+    await after.restore(influx, T0 + 200)  # 600초 안의 재기동 — 사본을 읽는다
+    assert [e.base for e in after.open_events()] == ["BONK"]
+    after.observe(
+        tick(
+            T0 + 201, row(fwd=0.3), row(base="BONK", fwd=1.5), row(base="NEW", fwd=0.2)
+        )
+    )
+    await after.flush()
+    closed = [p for p in influx.data.values() if p["end_ts"]]
+    assert [(p["end_ts"], p["last_ts"]) for p in closed] == [(T0 + 130, T0 + 121)]
+    assert influx.query_calls == 0
+
+
+async def test_snapshot_keeps_a_closed_event_until_its_close_is_written() -> None:
+    """닫힘 쓰기가 먼저, 사본이 다음 — 닫힘 점 쓰기가 실패한 회차는 사본을 다시 만들지 않는다."""
+    influx = FakeInflux()
+    snaps = FakeSnapshots()
+    det = PremiumEventDetector(writer=influx, snapshots=snaps)
+    det.observe(tick(T0, row(fwd=1.5)))
+    det.observe(tick(T0 + 61, row(fwd=1.6)))
+    await det.write_round()
+    assert _saved_bases(snaps) == ["SOPH"]
+    saves = len(snaps.saves)
+    influx.fail = True
+    det.observe(tick(T0 + 70, row(fwd=0.3)))  # 닫힘
+    await det.write_round()
+    assert len(snaps.saves) == saves and _saved_bases(snaps) == ["SOPH"]
+    influx.fail = False
+    await det.flush()
+    assert influx.only()["end_ts"] == T0 + 70
+    assert len(snaps.saves) == saves + 1 and _saved_bases(snaps) == []
+
+
+async def test_redis_snapshot_key_expires_after_the_gap_limit() -> None:
+    """사본 키는 결측 허용(600초)만 산다 — 오래 멈췄거나 되돌렸다 온 기동은 낡은 사본 대신 Influx 로 복원한다 (013 §3.3)."""
+    server = fakeredis.FakeServer()
+    bus = RedisBus(fakeredis.aioredis.FakeRedis(server=server))
+    await bus.open_events_save("[]")
+    ttl = fakeredis.FakeRedis(server=server).ttl(OPEN_EVENTS_KEY)
+    assert OPEN_EVENTS_TTL_SEC == MAX_GAP_SEC and 0 < ttl <= OPEN_EVENTS_TTL_SEC
+    assert await bus.open_events_load() == "[]"
