@@ -92,7 +92,7 @@ def _snippet() -> list[Directive]:
 
 
 def _domain() -> list[Directive]:
-    return _block(_caddyfile(), "kimptrack.com,", "www.kimptrack.com")
+    return _block(_caddyfile(), "kimptrack.com")
 
 
 # 지우기 규칙 — 접속 로그와 기본 로거가 똑같이 갖는다 (§3.2)
@@ -189,7 +189,14 @@ def test_only_domain_block_imports_access_log_with_referrer_policy() -> None:
     assert (["import", "access_log"], None) in domain
     assert (["header", "Referrer-Policy", "strict-origin"], None) in domain
     catch_all = _block(tree, "http://")
-    assert catch_all == [(["reverse_proxy", "web:80"], None)]
+    # 022 — IP 주소로 같은 본문이 색인되지 않게 noindex 만 덧붙인다(기록은 여전히 없다)
+    assert catch_all == [
+        (["header", "X-Robots-Tag", "noindex"], None),
+        (["reverse_proxy", "web:80"], None),
+    ]
+    # www 는 apex 로 301 만 — 본문이 없어 기록하지 않는다 (022·023)
+    www = _block(tree, "www.kimptrack.com,", "http://www.kimptrack.com")
+    assert www == [(["redir", "https://kimptrack.com{uri}", "permanent"], None)]
     assert _all(tree, "import") == [["access_log"]]
     # 023 계약 그대로 — 두 블록 모두 nginx(web:80)로
     assert (["reverse_proxy", "web:80"], None) in domain
@@ -216,6 +223,8 @@ PUBLIC_LOCATIONS = {("=", path) for path in PUBLIC_API} | {
     ("/assets/",),
     ("=", "/"),
     ("=", "/app"),
+    ("=", "/landing.html"),
+    ("=", "/app/landing.html"),
     ("/app/assets/",),
     ("=", "/app/index.html"),
     ("/app/",),
