@@ -124,6 +124,7 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
     influx = await _open_influx(app.state.settings)
     app.state.influx = influx
     bus = RedisBus.from_url(app.state.settings.redis_url)
+    _plug_alert_log(app, bus)
     hub = SpreadsHub(bus=bus)
     hub.start()
     app.state.spreads_hub = hub
@@ -219,6 +220,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     handoff = TickRelay(stream=tick_stream, store=store, spark=spark)
     # 017 — 표 게시(틱 직후)와 자기 게시를 자기 구독하는 허브(로컬 단일 프로세스용 — 접속자가 있을 때만 구독)
     bus = RedisBus.from_url(settings.redis_url)
+    _plug_alert_log(app, bus)
     # 026 — 일중 기준가 장부(KST 00시 첫 체결가, Redis 보존). 게시기가 매초 읽어 dayChg 를 만든다
     day_open = DayOpenBook(bus=bus)
     # 006 §3.7 — 망 판정 메모. 틱이 회차를 열어 채우고 같은 회차의 표 게시기가 읽는다
@@ -393,6 +395,13 @@ def _alerts(app: FastAPI) -> Callable[[str, str], None] | None:
     if notifier is None:
         return None
     return notifier.notify
+
+
+def _plug_alert_log(app: FastAPI, bus: RedisBus) -> None:
+    """034 §3.3 — 버스가 생긴 뒤 알림기에 기록 함수를 꽂는다. 그 전에 보낸 알림은 기록하지 않는다."""
+    notifier: Notifier | None = app.state.notifier
+    if notifier is not None:
+        notifier.record = bus.alert_log_push
 
 
 def _start_notifier(app: FastAPI) -> None:
