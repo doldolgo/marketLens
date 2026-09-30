@@ -1,10 +1,11 @@
 """거래소 원문 아카이브 — 원문 싱크·분 창 버퍼·표본화·객체 조립·닫기 회차·업로드 워커 (스펙 010).
 
 기록 함수는 001 의 core 계약 `record(exchange, source, received_at_ms, payload, key)`(동기·무예외)을
-구현한다. 줄을 만들어 그 거래소의 UTC 분 창 버퍼에 붙이는 메모리 작업뿐이라 수신 경로를 막지 않는다.
-`key` 가 있는 줄(시세 프레임)은 창 안에서 `(source, key)` 마다 마지막 1건만 남기고, 없는 줄은 전량 남긴다.
-닫기 회차(태스크, 매초)가 지난 창을 닫아 스레드에서 gzip 해 대기열에 넣고, 업로드 워커(데몬 스레드 하나)가
-대기열 머리부터 S3 에 올린다 — 둘은 잠금으로만 만나고 닫기 주기는 업로드 결과와 무관하다.
+구현한다. 받은 문자열을 그 거래소의 UTC 분 창 버퍼에 참조로만 붙이는 메모리 작업뿐이라 수신 경로를 막지 않는다.
+`key` 가 있는 원문(시세 프레임)은 창 안에서 `(source, key)` 마다 마지막 1건만 남기고, 없는 원문은 전량 남긴다.
+닫기 회차(태스크, 매초)가 지난 창을 닫고, 스레드에서 살아남은 원문만 줄로 조립(유효성 검사 포함)해 gzip 한 뒤
+대기열에 넣는다. 업로드 워커(데몬 스레드 하나)가 대기열 머리부터 S3 에 올린다 — 둘은 잠금으로만 만나고
+닫기 주기는 업로드 결과와 무관하다.
 어떤 실패도 수집·/spreads·Redis·Influx 경로에 번지지 않는다. S3 를 읽는 코드는 없다.
 """
 
@@ -89,16 +90,23 @@ def pack(lines: list[bytes]) -> bytes:
 # --- 분 창 버퍼와 닫힌 객체 (§3.5) ---
 
 
-@dataclass(frozen=True)
+@dataclass(slots=True)
 class _Entry:
+    """받은 원문의 참조 — 줄은 창을 닫을 때 살아남은 것만 조립한다 (§3.5).
+
+    시세 프레임은 분당 (source, key) 마지막 1건만 남으므로 기록마다 줄을 만들면 99% 이상을 버린다.
+    frozen 을 쓰지 않는 것은 수신 경로에서 프레임마다 만들어지기 때문이다(생성 비용이 절반).
+    """
+
     received_at_ms: int
     seq: int  # 기록 순 — receivedAt 이 같을 때의 순서
-    line: bytes
+    source: str
+    payload: str
 
 
 @dataclass
 class _Buffer:
-    """거래소 하나의 분 창 하나. `keyed` 는 (source, key) 당 마지막 1건, `plain` 은 key 없는 줄 전량."""
+    """거래소 하나의 분 창 하나. `keyed` 는 (source, key) 당 마지막 1건, `plain` 은 key 없는 원문 전량."""
 
     keyed: dict[tuple[str, str], _Entry] = field(default_factory=dict)
     plain: list[_Entry] = field(default_factory=list)
@@ -106,21 +114,36 @@ class _Buffer:
     def __len__(self) -> int:
         return len(self.keyed) + len(self.plain)
 
-    def lines(self) -> list[bytes]:
+    def entries(self) -> list[_Entry]:
         """줄 순서 = receivedAt 오름차순, 같으면 기록 순 (§3.5)."""
-        entries = sorted(
+        return sorted(
             [*self.keyed.values(), *self.plain], key=lambda e: (e.received_at_ms, e.seq)
         )
-        return [e.line for e in entries]
 
 
 @dataclass(frozen=True)
 class _Closed:
-    """닫혔지만 아직 gzip 전인 버퍼 — 직렬화는 스레드에서 한다."""
+    """닫혔지만 아직 줄 조립·gzip 전인 버퍼 — 둘 다 스레드에서 한다."""
 
     exchange: str
     key: str
-    lines: list[bytes]
+    entries: list[_Entry]
+
+
+def _format_entries(exchange: str, entries: list[_Entry]) -> list[bytes]:
+    """살아남은 원문을 순서대로 줄로 — 한 줄의 실패는 그 줄만 버리고 로그, 객체는 나머지로 만든다."""
+    lines: list[bytes] = []
+    for e in entries:
+        try:
+            lines.append(format_line(exchange, e.source, e.received_at_ms, e.payload))
+        except Exception:
+            logger.exception(
+                "원문 줄 조립 실패 — 이 줄은 버린다 %s %s receivedAt=%d",
+                exchange,
+                e.source,
+                e.received_at_ms,
+            )
+    return lines
 
 
 @dataclass(frozen=True)
@@ -172,19 +195,20 @@ class RawArchive:
         payload: str,
         key: str | None = None,
     ) -> None:
-        """동기·무예외·즉시 반환 — 줄을 만들어 그 거래소의 분 창 버퍼에 붙인다. 닫는 것은 닫기 회차의 몫.
+        """동기·무예외·즉시 반환 — 받은 문자열을 그 거래소의 분 창 버퍼에 참조로 붙인다.
 
-        `key` 가 있으면 창 안의 같은 (source, key) 줄을 이 줄로 바꾼다(표본화 — §3.5).
+        `key` 가 있으면 창 안의 같은 (source, key) 원문을 이것으로 바꾼다(표본화 — §3.5).
+        줄 조립(JSON 유효성 검사·머리 직렬화)은 여기서 하지 않는다 — 커넥터가 이미 파싱한 프레임을
+        수신 경로에서 다시 파싱하지 않고, 닫을 때 살아남은 원문에만 한다.
         """
         try:
-            line = format_line(exchange, source, received_at_ms, payload)
             window = received_at_ms // WINDOW_MS
             buf = self._buffers.get((exchange, window))
             if buf is None:
                 buf = _Buffer()
                 self._buffers[exchange, window] = buf
             self._seq += 1
-            entry = _Entry(received_at_ms, self._seq, line)
+            entry = _Entry(received_at_ms, self._seq, source, payload)
             if key is None:
                 buf.plain.append(entry)
             else:
@@ -195,7 +219,7 @@ class RawArchive:
             )
 
     def buffered(self, exchange: str) -> int:
-        """아직 닫히지 않은 그 거래소 버퍼의 줄 수(표본화 후, 열린 창 전부 합산)."""
+        """아직 닫히지 않은 그 거래소 버퍼의 원문 수(표본화 후, 열린 창 전부 합산)."""
         return sum(len(buf) for (ex, _), buf in self._buffers.items() if ex == exchange)
 
     @property
@@ -246,7 +270,7 @@ class RawArchive:
             logger.exception(
                 "원문 닫기 회차 예외 — 닫힌 객체 %d개(%d줄)를 잃는다, 다음 회차를 이어간다",
                 len(closed),
-                sum(len(item.lines) for item in closed),
+                sum(len(item.entries) for item in closed),
             )
         return len(closed)
 
@@ -261,15 +285,16 @@ class RawArchive:
             if force or window < current:
                 del self._buffers[exchange, window]
                 closed.append(
-                    _Closed(exchange, object_key(exchange, window), buf.lines())
+                    _Closed(exchange, object_key(exchange, window), buf.entries())
                 )
         return closed
 
     def _pack_and_enqueue(self, closed: list[_Closed]) -> None:
-        """스레드에서 — 닫힌 버퍼를 gzip 해 대기열 꼬리에 넣고 워커를 깨운다. 예외를 내지 않는다."""
+        """스레드에서 — 닫힌 버퍼의 원문을 줄로 조립·gzip 해 대기열 꼬리에 넣고 워커를 깨운다. 예외를 내지 않는다."""
         for item in closed:
             try:
-                obj = RawObject(item.key, pack(item.lines), len(item.lines))
+                lines = _format_entries(item.exchange, item.entries)
+                obj = RawObject(item.key, pack(lines), len(lines))
             except Exception:
                 logger.exception(
                     "원문 객체 직렬화 실패 — 이 객체는 잃는다 key=%s", item.key
