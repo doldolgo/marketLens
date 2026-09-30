@@ -17,10 +17,15 @@ from botocore.stub import ANY
 
 from app.features.admin.aws import AwsReader, PartialRead, classify
 from app.features.admin.tests.aws_fakes import (
+    END,
+    IDS,
     NOW,
+    START,
     Clients,
     alarms_response,
     history_item,
+    list_metrics_response,
+    metric_data_response,
 )
 
 ACCOUNT_ID = re.compile(r"(?<![0-9])[0-9]{12}(?![0-9])")
@@ -102,6 +107,90 @@ def test_alarms_are_name_ordered_with_counts_and_masked_short_reasons() -> None:
     assert "arn:aws:" not in canary["reason"] and not ACCOUNT_ID.search(
         canary["reason"]
     )
+
+
+# --- metrics ---
+
+
+def _metrics_stubs(
+    clients: Clients, *, with_serve: bool = True, captured: list | None = None
+) -> None:
+    cw = clients["cloudwatch"]
+    cw.add_response("describe_alarms", alarms_response(with_serve=with_serve))
+    cw.add_response(
+        "list_metrics", list_metrics_response(), {"Namespace": "MarketLens"}
+    )
+    ids = [f"{b}_{k}" for b in IDS for k in ("mem", "disk", "swap", "cpu", "credit")]
+    ids += ["ws", "canary_runs", "canary_errors", "canary_duration"]
+    cw.add_response("get_metric_data", metric_data_response(ids))
+    if captured is not None:
+        clients.clients["cloudwatch"].meta.events.register(
+            "provide-client-params.cloudwatch.GetMetricData",
+            lambda params, **kw: captured.append(params),
+        )
+
+
+def test_metrics_boxes_come_from_memory_alarm_names_on_a_288_point_grid() -> None:
+    clients, captured = Clients("cloudwatch"), []
+    _metrics_stubs(clients, captured=captured)
+    out = reader(clients).metrics()
+    assert (out["startTs"], out["endTs"], out["periodSec"]) == (START, END, 300)
+    assert [b["box"] for b in out["boxes"]] == ["collect", "data", "serve"]
+    assert [b["instanceId"] for b in out["boxes"]] == list(IDS.values())
+    data = out["boxes"][1]
+    assert len(data["mem"]) == 288
+    assert data["mem"][0] == [START, 12.35] and data["mem"][-1] == [END - 300, 45.68]
+    assert data["mem"][1] == [START + 300, None]  # 자료 없는 구간
+    assert all(p[0] == START + i * 300 for i, p in enumerate(data["mem"]))
+    collect, serve = out["boxes"][0], out["boxes"][2]
+    assert collect["credit"] is None  # c7g — 크레딧 자료 없음
+    assert (
+        data["swap"] is not None and collect["swap"] is None and serve["swap"] is None
+    )
+    assert out["wsClients"][-1] == [END - 300, 3] and isinstance(
+        out["wsClients"][0][1], int
+    )
+    assert out["canary"]["durationMs"][0] == [START, 12]
+    # 질의 한 번 — 에이전트 차원을 ListMetrics 에서 그대로, 통계는 지표마다
+    ((params,),) = [captured]
+    queries = {q["Id"]: q["MetricStat"] for q in params["MetricDataQueries"]}
+    assert len(queries) == 17
+    assert queries["data_disk"]["Metric"]["Dimensions"][1:] == [
+        {"Name": "path", "Value": "/"},
+        {"Name": "fstype", "Value": "ext4"},
+    ]
+    assert {k: q["Stat"] for k, q in queries.items() if k.startswith("serve_")} == {
+        "serve_mem": "Minimum",
+        "serve_disk": "Maximum",
+        "serve_cpu": "Average",
+        "serve_credit": "Minimum",
+    }
+    assert queries["ws"]["Metric"]["Dimensions"][1] == {
+        "Name": "metric_type",
+        "Value": "gauge",
+    }
+    assert (
+        queries["canary_runs"]["Stat"] == "Sum"
+        and queries["canary_duration"]["Stat"] == "Maximum"
+    )
+    assert all(q["Period"] == 300 for q in queries.values())
+
+
+def test_metrics_drop_a_box_without_its_memory_alarm_and_cache_discovery_for_an_hour() -> (
+    None
+):
+    clients, mono = Clients("cloudwatch"), [0.0]
+    _metrics_stubs(clients, with_serve=False)
+    r = reader(clients, mono)
+    assert [b["box"] for b in r.metrics()["boxes"]] == ["collect", "data"]
+    # 1시간 안 — 박스 찾기·차원은 캐시, GetMetricData 만
+    mono[0] = 3_599
+    clients["cloudwatch"].add_response("get_metric_data", {"MetricDataResults": []})
+    assert r.metrics()["boxes"][0]["mem"] is None  # 결과가 없는 질의는 null
+    mono[0] = 3_600
+    _metrics_stubs(clients)
+    assert len(r.metrics()["boxes"]) == 3
+    clients["cloudwatch"].assert_no_pending_responses()
 
 
 # --- 경보 이력 (§3.3) ---

@@ -110,6 +110,71 @@ def alarms_response(*, with_serve: bool = True) -> dict:
     return {"MetricAlarms": items}
 
 
+def list_metrics_response() -> dict:
+    """027 에이전트 설정 그대로 — swap 은 data 만, ws 게이지는 serve 의 StatsD."""
+    metrics = []
+    for iid in IDS.values():
+        metrics.append(
+            {
+                "Namespace": "MarketLens",
+                "MetricName": "mem_available_percent",
+                "Dimensions": [{"Name": "InstanceId", "Value": iid}],
+            }
+        )
+        metrics.append(
+            {
+                "Namespace": "MarketLens",
+                "MetricName": "disk_used_percent",
+                "Dimensions": [
+                    {"Name": "InstanceId", "Value": iid},
+                    {"Name": "path", "Value": "/"},
+                    {"Name": "fstype", "Value": "ext4"},
+                ],
+            }
+        )
+    metrics.append(
+        {
+            "Namespace": "MarketLens",
+            "MetricName": "swap_used_percent",
+            "Dimensions": [{"Name": "InstanceId", "Value": IDS["data"]}],
+        }
+    )
+    metrics.append(
+        {
+            "Namespace": "MarketLens",
+            "MetricName": "marketlens_ws_clients",
+            "Dimensions": [
+                {"Name": "InstanceId", "Value": IDS["serve"]},
+                {"Name": "metric_type", "Value": "gauge"},
+            ],
+        }
+    )
+    return {"Metrics": metrics}
+
+
+def metric_data_response(ids: list[str]) -> dict:
+    """질의마다 두 점 — 첫 구간과 마지막 구간. c7g(collect)의 크레딧은 자료 없음."""
+    results = []
+    for qid in ids:
+        if qid == "collect_credit":
+            results.append(
+                {"Id": qid, "Timestamps": [], "Values": [], "StatusCode": "Complete"}
+            )
+            continue
+        results.append(
+            {
+                "Id": qid,
+                "Timestamps": [dt(START), dt(END - 300)],
+                "Values": [
+                    12.3456,
+                    3.0 if qid.startswith(("ws", "canary")) else 45.678,
+                ],
+                "StatusCode": "Complete",
+            }
+        )
+    return {"MetricDataResults": results, "Messages": []}
+
+
 def history_item(
     name: str, ts: float, old: str, new: str, reason: str = "Threshold Crossed"
 ) -> dict:

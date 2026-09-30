@@ -156,6 +156,149 @@ class AwsReader:
                 break
         return alarms
 
+    # --- metrics ---
+
+    def metrics(self) -> dict[str, Any]:
+        end = int(self._clock()) // PERIOD_SEC * PERIOD_SEC
+        start = end - WINDOW_SEC
+        boxes = self._box_ids()
+        dims = self._metric_dims()
+        queries: list[dict[str, Any]] = []
+
+        def add(qid: str, ns: str, name: str, dimensions: list, stat: str) -> str:
+            metric = {"Namespace": ns, "MetricName": name, "Dimensions": dimensions}
+            queries.append(
+                {
+                    "Id": qid,
+                    "MetricStat": {
+                        "Metric": metric,
+                        "Period": PERIOD_SEC,
+                        "Stat": stat,
+                    },
+                    "ReturnData": True,
+                }
+            )
+            return qid
+
+        plan: list[tuple[str, str, dict[str, str | None]]] = []
+        for box in BOXES:
+            iid = boxes.get(box)
+            if iid is None:
+                continue  # 메모리 경보가 없는 박스는 빠진다 (§3.2 — 027 경보 이름 규칙)
+            ec2 = [{"Name": "InstanceId", "Value": iid}]
+            ids: dict[str, str | None] = {}
+            for key, name, stat in (
+                ("mem", "mem_available_percent", "Minimum"),
+                ("disk", "disk_used_percent", "Maximum"),
+                ("swap", "swap_used_percent", "Maximum"),
+            ):
+                found = _find_dims(dims, name, iid)
+                ids[key] = (
+                    None
+                    if found is None
+                    else add(f"{box}_{key}", NAMESPACE, name, found, stat)
+                )
+            ids["cpu"] = add(f"{box}_cpu", "AWS/EC2", "CPUUtilization", ec2, "Average")
+            ids["credit"] = add(
+                f"{box}_credit", "AWS/EC2", "CPUCreditBalance", ec2, "Minimum"
+            )
+            plan.append((box, iid, ids))
+        ws = next((m for m in dims if m["MetricName"] == "marketlens_ws_clients"), None)
+        ws_id = (
+            None
+            if ws is None
+            else add(
+                "ws", NAMESPACE, "marketlens_ws_clients", ws["Dimensions"], "Maximum"
+            )
+        )
+        fn = [{"Name": "FunctionName", "Value": CANARY_FUNCTION}]
+        runs = add("canary_runs", "AWS/Lambda", "Invocations", fn, "Sum")
+        errors = add("canary_errors", "AWS/Lambda", "Errors", fn, "Sum")
+        duration = add("canary_duration", "AWS/Lambda", "Duration", fn, "Maximum")
+
+        resp = self._client("cloudwatch").get_metric_data(
+            MetricDataQueries=queries,
+            StartTime=datetime.fromtimestamp(start, UTC),
+            EndTime=datetime.fromtimestamp(end, UTC),
+            ScanBy="TimestampAscending",
+        )
+        raw = {r["Id"]: r for r in resp.get("MetricDataResults", [])}
+
+        def series(qid: str | None, digits: int | None) -> list[list[Any]] | None:
+            if qid is None or qid not in raw:
+                return None
+            r = raw[qid]
+            by_ts = {
+                int(ts.timestamp()): v
+                for ts, v in zip(
+                    r.get("Timestamps", []), r.get("Values", []), strict=False
+                )
+            }
+            points = [
+                [ts, _round(by_ts.get(ts), digits)]
+                for ts in range(start, end, PERIOD_SEC)
+            ]
+            return None if all(v is None for _, v in points) else points
+
+        return {
+            "endTs": end,
+            "startTs": start,
+            "periodSec": PERIOD_SEC,
+            "boxes": [
+                {
+                    "box": box,
+                    "instanceId": iid,
+                    "mem": series(ids["mem"], 2),
+                    "disk": series(ids["disk"], 2),
+                    "cpu": series(ids["cpu"], 2),
+                    "credit": series(ids["credit"], 2),
+                    "swap": series(ids["swap"], 2),
+                }
+                for box, iid, ids in plan
+            ],
+            "wsClients": series(ws_id, None),
+            "canary": {
+                "runs": series(runs, None),
+                "errors": series(errors, None),
+                "durationMs": series(duration, None),
+            },
+        }
+
+    def _box_ids(self) -> dict[str, str]:
+        """경보 `marketlens-<박스>-memory` 의 InstanceId 차원 — 경보 부분 결과와 따로 부른다(1시간 캐시)."""
+        now = self._mono()
+        if self._boxes is not None and now - self._boxes[0] < DISCOVERY_TTL_SEC:
+            return self._boxes[1]
+        by_name = {a["AlarmName"]: a for a in self._describe_alarms()}
+        found: dict[str, str] = {}
+        for box in BOXES:
+            alarm = by_name.get(f"{ALARM_PREFIX}{box}-memory")
+            dims = {d["Name"]: d["Value"] for d in (alarm or {}).get("Dimensions", [])}
+            if "InstanceId" in dims:
+                found[box] = dims["InstanceId"]
+        self._boxes = (now, found)
+        return found
+
+    def _metric_dims(self) -> list[dict[str, Any]]:
+        """네임스페이스 MarketLens 의 지표·차원 목록 — 에이전트가 붙이는 차원을 그대로 쓰려고 (1시간 캐시)."""
+        now = self._mono()
+        if self._dims is not None and now - self._dims[0] < DISCOVERY_TTL_SEC:
+            return self._dims[1]
+        cw = self._client("cloudwatch")
+        metrics: list[dict[str, Any]] = []
+        token: str | None = None
+        for _ in range(LIST_MAX_PAGES):
+            kwargs: dict[str, Any] = {"Namespace": NAMESPACE}
+            if token:
+                kwargs["NextToken"] = token
+            resp = cw.list_metrics(**kwargs)
+            metrics.extend(resp.get("Metrics", []))
+            token = resp.get("NextToken")
+            if not token:
+                break
+        self._dims = (now, metrics)
+        return metrics
+
     # --- 경보 이력 (§3.3) ---
 
     def alarm_history(self) -> dict[str, Any]:
