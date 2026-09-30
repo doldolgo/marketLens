@@ -1,18 +1,20 @@
 // 셸 레이아웃 — 헤더 + KPI 스트립 + 탭 6개 + 푸터 (스펙 002 §3.5, 구조는 docs/design/reference/App.tsx).
-// 탭은 언마운트하지 않고 숨긴다: 검색어·필터·드릴다운 상태가 전환 후에도 유지되어야 하기 때문.
-import type { ReactNode } from 'react'
+// 탭은 한 번 마운트되면 언마운트하지 않고 숨긴다: 검색어·필터·드릴다운 상태가 전환 후에도 유지되어야 하기 때문.
+// 기록 탭만 처음 볼 때 마운트한다 — 그 코드(차트 라이브러리 포함)는 첫 화면 번들에서 빠져 처음 볼 때 받는다.
+import { Component, Suspense, lazy, memo, useCallback, useEffect, useState, type ReactNode } from 'react'
 import FlowTab from './features/flow/Tab'
 import GapTab from './features/gap/Tab'
 import { useHealthPolling } from './features/health/api'
 import HealthTab from './features/health/Tab'
-import HistoryTab from './features/history/Tab'
 import PpTab from './features/pp/Tab'
 import { useSpreadSocket } from './features/spreads/api'
 import SpreadsTab from './features/spreads/Tab'
 import { useFeed } from './shared/feed'
 import { exName, fmtPct, pctColor } from './shared/format'
-import { kicker, vDivider } from './shared/ui'
-import { UrlActive, oneOf, str, useUrlState } from './shared/urlState'
+import { Empty, kicker, vDivider } from './shared/ui'
+import { UrlActive, dropParams, oneOf, str, useUrlState } from './shared/urlState'
+
+const HistoryTab = lazy(() => import('./features/history/Tab'))
 
 type TabId = 'spread' | 'history' | 'gap' | 'pp' | 'health' | 'flow'
 
@@ -21,6 +23,35 @@ const TABS: [TabId, string][] = [
   ['spread', '실시간 스프레드'], ['history', '기록/통계'], ['gap', '선물–현물 갭'],
   ['pp', '선선갭'], ['health', '수집 상태'], ['flow', '입출금 레이더'],
 ]
+
+// 시계·환율 표기 — 로캘·옵션을 주는 toLocale*String 은 부를 때마다 Intl 객체를 새로 만든다. 셸은 초마다 다시 그리므로 한 번만 만든다(출력 동일).
+const KST_CLOCK = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+const RATE_1 = new Intl.NumberFormat('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+
+/**
+ * 탭 자리 하나. 숨김 탭은 레이아웃에 참여하지 않는다 — display:none, 보이는 탭은 contents 로 셸의 세로 flex 에 직접 참여.
+ * 계속 숨어 있는 탭은 셸의 리렌더(1.5초 tick·매초 delta)에서 다시 그리지 않는다 — 보이게 되는 순간 한 번 그려 최신이 되고,
+ * 숨은 동안에도 탭 자기 상태(폴링 결과 등)가 바뀌면 그 탭만 스스로 다시 그린다. UrlActive: 보이는 탭의 상태 키만 URL 에 남긴다 (shared/urlState)
+ */
+const Pane = memo(function Pane({ active, children }: { active: boolean; children: ReactNode }) {
+  return (
+    <div style={{ display: active ? 'contents' : 'none' }}>
+      <UrlActive.Provider value={active}>{children}</UrlActive.Provider>
+    </div>
+  )
+}, (prev, next) => !prev.active && !next.active)
+
+/** 기록 탭 코드를 받지 못하면(배포로 옛 청크가 사라진 뒤 처음 여는 경우 등) 그 탭 자리만 안내하고 셸·다른 탭은 그대로 둔다. */
+class TabLoadGuard extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true }
+  }
+  render() {
+    if (!this.state.failed) return this.props.children
+    return <div style={{ flex: 1 }}><Empty>기록 탭을 불러오지 못했습니다 — 새로고침해 주세요</Empty></div>
+  }
+}
 
 export default function App() {
   const { feed, now } = useFeed()
@@ -32,6 +63,18 @@ export default function App() {
   useHealthPolling(feed)
   // 스프레드 행 클릭 → 기록 탭으로 피벗할 선택된 심볼 — 초기값 'BTC' (스펙 005 §2)
   const [selSym, setSelSym] = useUrlState<string>('sym', 'BTC', str, tab === 'history')
+  // 고정 참조 — 스프레드 행이 memo 라 이 함수가 렌더마다 바뀌면 행 전부가 다시 그려진다
+  const onPick = useCallback((sym: string) => { setSelSym(sym); setTab('history') }, [setSelSym, setTab])
+  // 기록 탭은 처음 볼 때 마운트하고(?tab=history 로 들어오면 곧바로) 그 뒤로는 내리지 않는다
+  const [historySeen, setHistorySeen] = useState(tab === 'history')
+  if (tab === 'history' && !historySeen) setHistorySeen(true)
+  useEffect(() => {
+    // 첫 화면이 기록 탭이 아니면 URL 의 h.* 는 보이지 않는 화면의 키다 — 마운트돼 있었다면 기록 탭이 스스로 뺐을 것이므로 셸이 뺀다.
+    // 값은 메모리에 남아 기록 탭을 처음 열 때 초기값이 된다(다른 비활성 탭과 같다)
+    if (tab !== 'history') dropParams('h.')
+    // 첫 화면 기준 한 번만
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 수집 상태 KPI — /health/collect 마지막 응답 기준, 첫 응답 전엔 – (011 §3.7)
   const exs = feed.health?.exchanges ?? []
@@ -54,15 +97,9 @@ export default function App() {
   // rate 0 = 백엔드 첫 폴링 전. 숫자를 지어내지 않고 '–' 로 둔다.
   const hasRate = feed.rate > 0
   const coinCount = new Set(feed.spreads.map((r) => r.sym)).size
-  const clock = new Date(now).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const clock = KST_CLOCK.format(now)
 
-  // 숨김 탭은 레이아웃에 참여하지 않는다 — display:none, 보이는 탭은 contents 로 셸의 세로 flex 에 직접 참여.
-  // UrlActive: 보이는 탭의 상태 키만 URL 에 남긴다 (shared/urlState)
-  const wrap = (id: TabId, node: ReactNode) => (
-    <div key={id} style={{ display: tab === id ? 'contents' : 'none' }}>
-      <UrlActive.Provider value={tab === id}>{node}</UrlActive.Provider>
-    </div>
-  )
+  const wrap = (id: TabId, node: ReactNode) => <Pane key={id} active={tab === id}>{node}</Pane>
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'var(--font-body)', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
@@ -99,7 +136,7 @@ export default function App() {
           <div style={{ ...kicker, marginBottom: 2 }}>USDT/KRW 암묵환율</div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>
             <span style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums' }}>
-              {hasRate ? '₩' + feed.rate.toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '–'}
+              {hasRate ? '₩' + RATE_1.format(feed.rate) : '–'}
             </span>
           </div>
         </div>
@@ -126,8 +163,14 @@ export default function App() {
         </div>
       </div>
 
-      {wrap('spread', <SpreadsTab feed={feed} onPick={(sym) => { setSelSym(sym); setTab('history') }} />)}
-      {wrap('history', <HistoryTab now={now} selSym={selSym} onSelect={setSelSym} spreads={feed.spreads} />)}
+      {wrap('spread', <SpreadsTab feed={feed} onPick={onPick} />)}
+      {historySeen && wrap('history', (
+        <TabLoadGuard>
+          <Suspense fallback={null}>
+            <HistoryTab now={now} selSym={selSym} onSelect={setSelSym} spreads={feed.spreads} active={tab === 'history'} />
+          </Suspense>
+        </TabLoadGuard>
+      ))}
       {wrap('gap', <GapTab feed={feed} now={now} />)}
       {wrap('pp', <PpTab feed={feed} />)}
       {wrap('health', <HealthTab feed={feed} now={now} />)}

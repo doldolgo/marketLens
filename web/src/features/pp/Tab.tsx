@@ -124,7 +124,7 @@ export default function PpTab({ feed }: { feed: Feed }) {
                 </span>
               </div>
               <div style={{ padding: '0 8px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
-                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: p ? pctColor(p.fundDiffHr) : 'var(--color-neutral-700)' }}>{p ? fmtFundingHr(p.fundDiffHr) : '–'}</span>
+                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: p ? pctColor(p.fundDiffHr, 4) : 'var(--color-neutral-700)' }}>{p ? fmtFundingHr(p.fundDiffHr) : '–'}</span>
                 <span style={{ fontSize: 10, color: 'var(--color-neutral-600)' }}>해당 조합 펀딩갭</span>
               </div>
             </div>

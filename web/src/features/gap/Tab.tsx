@@ -146,7 +146,7 @@ export default function GapTab({ feed, now }: { feed: Feed; now: number }) {
                 </span>
               </div>
               <div style={{ padding: '0 8px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
-                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: c ? pctColor(c.funding) : 'var(--color-neutral-700)' }}>{c ? fmtFunding3(c.funding) : '–'}</span>
+                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: c ? pctColor(c.funding, 3) : 'var(--color-neutral-700)' }}>{c ? fmtFunding3(c.funding) : '–'}</span>
                 <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-600)' }}>{c ? fundingEta(c.perpEx, now) : ''}</span>
               </div>
             </div>
