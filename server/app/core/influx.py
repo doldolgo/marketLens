@@ -4,13 +4,21 @@ influxdb-client 를 import 하는 곳은 이 모듈뿐이다. 009 flusher·011 �
 `InfluxPoint` 와 아래 메서드 시그니처에만 의존한다 — 테스트는 같은 시그니처의 fake 를 쓴다.
 모든 실패는 `InfluxUnavailableError` 하나로 모은다: 호출자는 원인 구분 없이
 "저장소 불가"(재시도 또는 503) 로만 다룬다.
+line protocol 의 규칙(태그 정렬·이스케이프·필드 표기)은 이 모듈 한 곳에만 있다 — 점 객체 없이 줄을 바로 만드는
+경로(009 flusher·014 분 닫힘)도 여기의 머리·줄 함수를 쓰고, 테스트가 `to_line` 과 바이트가 같은지 지킨다.
 """
 
+import csv
+import functools
+import io
 import logging
+import re
+import threading
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from influxdb_client import BucketRetentionRules, InfluxDBClient
+from influxdb_client import BucketRetentionRules, Dialect, InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
 from influxdb_client.domain.write_precision import WritePrecision
 
@@ -22,6 +30,16 @@ INFLUX_BUCKET = "marketlens"
 
 # bulk 는 수 MB 를 읽을 수 있어 기본 10초보다 길게 잡는다
 _TIMEOUT_MS = 60_000
+# 봉·사건 점의 망 이름 "없음" 표식 (024 §3.4, 2026-09-28 사람 결정) — 빈 문자열로 쓰면 Influx 2.7 이 조회 창에 따라
+# 빈 값을 다른 점에 붙여 읽는다(로컬 재현: 빈 값 15% 인 봉의 43~46% 가 남의 망 이름). 읽을 때는 이것과 옛 빈 문자열 둘 다 없음이다
+_NO_NETWORK = "-"
+# 헤더 있는 무주석 CSV — FluxRecord 파싱보다 파이썬 CPU 가 훨씬 적다(복원 조회, 009 §3.6·013 §3.3)
+_CSV = Dialect(header=True, annotations=[])
+# 흘려 읽는 조회(`stream_premium`)가 응답을 받는 조각 크기 — 메모리는 조각 하나와 줄 하나만큼이다 (005 §3.4)
+_STREAM_CHUNK = 64 * 1024
+# 랜딩 요약의 "최근에 끝난 사건" 후보 — 끝난 시각이 늦은 순으로 이만큼 받아 파이썬이 코인별 동률 규칙을 적용한다.
+# 후보 끝자리의 동률 때문에 순위가 확정되지 않으면 닫힌 사건 전부로 다시 묻는다 (022 §3.2)
+_SUMMARY_CANDIDATES = 200
 
 
 class InfluxUnavailableError(Exception):
@@ -117,9 +135,58 @@ class PremiumEventRow:
     net_fx: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class EventListRow:
+    """`/history/events` 가 읽는 사건 점 1개 — 응답에 싣는 필드만 (013 §3.4). `end_ts == 0` 은 진행 중(또는 고아).
+
+    `PremiumEventRow` 와 따로 두는 것은 이 조회가 `duration_seconds`·기준값 필드를 읽지 않기 때문이다 — 0 을 채운
+    가짜 값이 다른 곳으로 새지 않게.
+    """
+
+    dom: str
+    fx: str
+    base: str
+    dir: str  # kimp | reverse
+    start_ts: int  # epoch 초 = 점의 time
+    end_ts: int  # 0 = 진행 중
+    max_percent: float
+    max_ts: int
+    last_ts: int
+    samples: int
+    net_dom: str | None
+    net_fx: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class EndedEventRow:
+    """랜딩 요약의 "최근에 끝난 사건" 1건 (022 §3.2) — 닫힌 사건(`end_ts > 0`)."""
+
+    dom: str
+    fx: str
+    base: str
+    dir: str
+    start_ts: int
+    end_ts: int
+    duration_seconds: int
+    max_percent: float
+    last_ts: int
+
+
+@dataclass(frozen=True)
+class EventSummary:
+    """`query_event_summary` 결과 — 창 안 사건 점의 방향별 수, 진행 중 조합 수, 코인마다 가장 늦게 끝난 사건."""
+
+    kimp: int
+    reverse: int
+    open: int  # end_ts 0 이고 last_ts ≥ open_since 인 (dom, fx, base, dir) 종류 수
+    latest: list[
+        EndedEventRow
+    ]  # 끝난 시각 내림차순(같으면 base 오름차순), top_n 개까지
+
+
 def _opt_str(v: object) -> str | None:
-    """문자열 필드의 없음·빈 문자열 → None — Influx 문자열에 null 이 없어 빈 문자열이 "없음" 이다(024 §3.4)."""
-    if v is None or v == "":
+    """망 이름 필드의 없음 → None — 필드 없음(배포 전 점)·표식 `-`·옛 점의 빈 문자열이 전부 "없음" 이다(024 §3.4)."""
+    if v is None or v == "" or v == _NO_NETWORK:
         return None
     return str(v)
 
@@ -141,9 +208,9 @@ def premium_event_point(row: PremiumEventRow) -> InfluxPoint:
             "samples": row.samples,
             "enter_percent": float(row.enter_percent),
             "exit_percent": float(row.exit_percent),
-            # 없음은 빈 문자열 — Influx 문자열 필드에 null 이 없다 (024 §3.5)
-            "net_dom": row.net_dom or "",
-            "net_fx": row.net_fx or "",
+            # 없음은 표식 `-` — Influx 문자열 필드에 null 이 없고, 빈 문자열은 조회 창에 따라 밀려 읽힌다 (024 §3.5)
+            "net_dom": row.net_dom or _NO_NETWORK,
+            "net_fx": row.net_fx or _NO_NETWORK,
         },
         ts=row.start_ts,
     )
@@ -154,7 +221,7 @@ class CandleRow:
     """`candle` 점 1개 — (국내, 해외, 코인) 조합의 창 1개(스펙 014 §3.4). 다섯 계층 버킷이 같은 모양이다.
 
     입출금 4개는 int 3상태(1 가능·0 불가·−1 모름) — Influx 에 null 이 없어서다. 값은 006 §3.7 판정값(024).
-    망 이름 2개는 문자열이고 없음은 빈 문자열로 쓴다. 배포 전 점에는 두 필드가 없다 — 읽을 때 선택이다.
+    망 이름 2개는 문자열이고 없음은 표식 `-` 로 쓴다. 배포 전 점에는 두 필드가 없다 — 읽을 때 선택이다.
     """
 
     dom: str
@@ -215,7 +282,7 @@ def candle_point(row: CandleRow) -> InfluxPoint:
         k: float(getattr(row, k)) for k in _CANDLE_FLOAT_FIELDS
     }
     fields.update({k: int(getattr(row, k)) for k in _CANDLE_INT_FIELDS})
-    fields.update({k: getattr(row, k) or "" for k in _CANDLE_STR_FIELDS})
+    fields.update({k: getattr(row, k) or _NO_NETWORK for k in _CANDLE_STR_FIELDS})
     return InfluxPoint(
         measurement="candle",
         tags={"dom": row.dom, "fx": row.fx, "base": row.base},
@@ -279,11 +346,152 @@ def _field_literal(v: float | int | str) -> str:
     return repr(v)
 
 
+def _head(measurement: str, tags: dict[str, str]) -> str:
+    """줄의 머리 — measurement, 이름순 태그(이스케이프), 뒤 공백 하나."""
+    tag_text = ",".join(f"{k}={_esc_tag(v)}" for k, v in sorted(tags.items()))
+    return f"{measurement},{tag_text} "
+
+
 def to_line(p: InfluxPoint) -> str:
-    """InfluxPoint → line protocol (초 정밀도)."""
-    tags = ",".join(f"{k}={_esc_tag(v)}" for k, v in sorted(p.tags.items()))
+    """InfluxPoint → line protocol (초 정밀도). 필드는 이름순."""
     fields = ",".join(f"{k}={_field_literal(v)}" for k, v in sorted(p.fields.items()))
-    return f"{p.measurement},{tags} {fields} {p.ts}"
+    return f"{_head(p.measurement, p.tags)}{fields} {p.ts}"
+
+
+# --- 점 객체 없이 줄 만들기 (009 §3.5 flusher·014 §3.4 분 닫힘) ---
+# 머리는 조합마다 한 번 만들어 호출자가 캐시한다. 줄은 같은 값의 `to_line(…_point(…))` 와 바이트가 같다 —
+# 필드 순서(이름순)·표기(float 는 repr, int 는 `i` 접미, 문자열은 따옴표·이스케이프)를 그대로 옮겼다.
+
+
+def premium_head(dom: str, fx: str, base: str) -> str:
+    """`premium` 줄의 머리 — `premium_point` 와 같은 태그(코인은 대문자)."""
+    return _head("premium", {"dom": dom, "fx": fx, "base": base.upper()})
+
+
+def premium_line(head: str, fwd: float, rev: float, ts: int) -> str:
+    """`premium` 한 줄 — `fwd`·`rev` 는 float 로 넘긴다(`premium_point` 의 필드와 같은 형)."""
+    return f"{head}fwd={fwd!r},rev={rev!r} {ts}"
+
+
+def candle_head(dom: str, fx: str, base: str) -> str:
+    """`candle` 줄의 머리 — `candle_point` 와 같은 태그(코인 이름 그대로)."""
+    return _head("candle", {"dom": dom, "fx": fx, "base": base})
+
+
+def candle_line(
+    head: str,
+    ts: int,
+    *,
+    fwd_o: float,
+    fwd_h: float,
+    fwd_l: float,
+    fwd_c: float,
+    rev_o: float,
+    rev_h: float,
+    rev_l: float,
+    rev_c: float,
+    krw: float,
+    usdt: float,
+    rate: float,
+    dom_dep: int,
+    dom_wd: int,
+    fx_dep: int,
+    fx_wd: int,
+    blocked_fwd_sec: int,
+    blocked_rev_sec: int,
+    samples: int,
+    net_dom: str | None,
+    net_fx: str | None,
+) -> str:
+    """`candle` 한 줄(20 필드) — 같은 값의 `to_line(candle_point(CandleRow(…)))` 와 같은 바이트."""
+    return (
+        f"{head}blocked_fwd_sec={int(blocked_fwd_sec)}i,blocked_rev_sec={int(blocked_rev_sec)}i,"
+        f"dom_dep={int(dom_dep)}i,dom_wd={int(dom_wd)}i,"
+        f"fwd_c={float(fwd_c)!r},fwd_h={float(fwd_h)!r},fwd_l={float(fwd_l)!r},fwd_o={float(fwd_o)!r},"
+        f"fx_dep={int(fx_dep)}i,fx_wd={int(fx_wd)}i,krw={float(krw)!r},"
+        f"net_dom={_field_literal(net_dom or _NO_NETWORK)},net_fx={_field_literal(net_fx or _NO_NETWORK)},"
+        f"rate={float(rate)!r},rev_c={float(rev_c)!r},rev_h={float(rev_h)!r},"
+        f"rev_l={float(rev_l)!r},rev_o={float(rev_o)!r},samples={int(samples)}i,usdt={float(usdt)!r} {ts}"
+    )
+
+
+def _epoch(text: str) -> int:
+    """CSV 의 RFC3339 시각 → epoch 초 — FluxRecord 의 `_time.timestamp()` 를 int 로 자른 것과 같다."""
+    return int(datetime.fromisoformat(text).timestamp())
+
+
+@functools.lru_cache(maxsize=64)
+def _day_epoch(day: str) -> int:
+    """`YYYY-MM-DD` → 그날 00:00 UTC 의 epoch 초. 조회 한 번에 같은 날이 수십만 번 나온다."""
+    return int(datetime.fromisoformat(day).replace(tzinfo=UTC).timestamp())
+
+
+def _epoch_fast(text: str) -> int:
+    """`_epoch` 와 같은 값 — 초 정밀도 `…T12:34:56Z` 는 날짜 캐시와 정수 연산으로, 그 밖의 모양은 `_epoch` 로."""
+    if len(text) == 20 and text[19] == "Z":
+        return (
+            _day_epoch(text[:10])
+            + int(text[11:13]) * 3600
+            + int(text[14:16]) * 60
+            + int(text[17:19])
+        )
+    return _epoch(text)
+
+
+def _cells(line: str) -> list[str]:
+    """CSV 한 줄 → 칸. 따옴표가 든 줄만 csv 모듈로 — 이름에 쉼표가 오면 Influx 가 따옴표로 감싼다."""
+    if '"' in line:
+        return next(csv.reader((line,)))
+    return line.split(",")
+
+
+# `/history/events` 가 싣는 사건 필드 — `duration_seconds` 는 end − start 로 다시 세고 기준값은 싣지 않는다 (013 §3.4)
+_EVENT_LIST_FIELDS = (
+    "end_ts",
+    "last_ts",
+    "max_percent",
+    "max_ts",
+    "samples",
+    "net_dom",
+    "net_fx",
+)
+_EVENT_LIST_COLUMNS = ("dom", "fx", "base", "dir", "_time", *_EVENT_LIST_FIELDS)
+
+# 요약 후보 한 건 — (끝난 시각, 시작 시각, dom, fx, base, dir)
+_Ended = tuple[int, int, str, str, str, str]
+
+
+def _latest_per_base(
+    cands: list[_Ended], top_n: int, *, complete: bool
+) -> list[_Ended] | None:
+    """코인마다 가장 늦게 끝난 닫힌 사건 → 끝난 시각 내림차순(같으면 base 오름차순) top_n 개 (022 §3.2).
+
+    같은 코인에서 끝난 시각이 같으면 늦게 시작한 것, 그것도 같으면 (dom, fx, dir) 이 앞서는 것. `complete` 가 아니면
+    후보는 끝난 시각이 늦은 순으로 잘린 것이다 — 가장 이른 후보보다 늦게 끝난 코인이 top_n 개 이상일 때만 순위가
+    확정된다(그 코인들의 그 시각 사건은 전부 후보에 들었다). 확정되지 않으면 None.
+    """
+    best: dict[str, _Ended] = {}
+    for c in cands:
+        cur = best.get(c[4])
+        if (
+            cur is None
+            or c[:2] > cur[:2]
+            or (c[:2] == cur[:2] and (c[2], c[3], c[5]) < (cur[2], cur[3], cur[5]))
+        ):
+            best[c[4]] = c
+    if not complete and cands:
+        floor = min(c[0] for c in cands)
+        if sum(1 for c in best.values() if c[0] > floor) < top_n:
+            return None
+    return sorted(best.values(), key=lambda c: (-c[0], c[4]))[:top_n]
+
+
+def _base_regex(bases: Iterable[str]) -> str:
+    """코인 이름 정규식 `^(A|B)$` 의 가운데 — 메타문자와 정규식 리터럴의 끝 `/` 를 이스케이프한다.
+
+    조건 수백 개를 or 로 늘어놓으면 Flux 가 "nested too deep" 으로 거부해 정규식 하나로 좁힌다.
+    """
+    return "|".join(re.escape(b).replace("/", "\\/") for b in sorted(set(bases)))
 
 
 @dataclass
@@ -294,14 +502,28 @@ class InfluxClient:
     token: str
     org: str = INFLUX_ORG
     bucket: str = INFLUX_BUCKET
-    _client: InfluxDBClient | None = field(default=None, init=False, repr=False)
+    # HTTP 타임아웃(ms) → 클라이언트. 기본 60초 하나와, 기동 복원이 상한과 같은 값으로 부르는 것(3초·10초)뿐이다
+    _clients: dict[int, InfluxDBClient] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
 
-    def _inner(self) -> InfluxDBClient:
-        if self._client is None:
-            self._client = InfluxDBClient(
-                url=self.url, token=self.token, org=self.org, timeout=_TIMEOUT_MS
-            )
-        return self._client
+    def _inner(self, timeout_sec: float | None = None) -> InfluxDBClient:
+        """`timeout_sec` 가 있으면 요청마다 그 시간에 끊기는 클라이언트 — 복원 상한에서 스레드·Influx 조회가 함께 끝나게.
+
+        호출은 여러 스레드에서 온다(쓰기 태스크들·복원) — 같은 타임아웃의 클라이언트를 둘 만들지 않게 잠근다.
+        """
+        timeout_ms = _TIMEOUT_MS if timeout_sec is None else int(timeout_sec * 1000)
+        with self._lock:
+            client = self._clients.get(timeout_ms)
+            if client is None:
+                client = InfluxDBClient(
+                    url=self.url, token=self.token, org=self.org, timeout=timeout_ms
+                )
+                self._clients[timeout_ms] = client
+        return client
 
     def ping(self) -> bool:
         """연결 확인 — 실패해도 예외 없이 False (기동 시 에러 로그 1줄용)."""
@@ -311,20 +533,30 @@ class InfluxClient:
             return False
 
     def close(self) -> None:
-        if self._client is not None:
-            self._client.close()
-            self._client = None
+        with self._lock:
+            clients = list(self._clients.values())
+            self._clients.clear()
+        for client in clients:
+            client.close()
 
     # --- 쓰기 ---
 
     def write(self, points: list[InfluxPoint], bucket: str | None = None) -> None:
         """점 목록을 쓰기 1번으로 보낸다 — 전부 성공 또는 예외(전부 없음). `bucket` 없으면 `marketlens`(014 계층 버킷만 지정)."""
-        lines = [to_line(p) for p in points]
+        self.write_lines([to_line(p) for p in points], bucket)
+
+    def write_lines(self, lines: list[str], bucket: str | None = None) -> None:
+        """line protocol 줄 목록을 쓰기 1번으로 — 본문은 줄을 개행으로 이은 UTF-8 바이트(`write` 와 같은 본문).
+
+        점 객체를 만들지 않는 경로(009 flusher·014 분 닫힘)가 쓴다. 빈 목록은 요청하지 않는다.
+        """
+        if not lines:
+            return
         try:
             with self._inner().write_api(write_options=SYNCHRONOUS) as write_api:
                 write_api.write(
                     bucket=bucket or self.bucket,
-                    record=lines,
+                    record="\n".join(lines).encode(),
                     write_precision=WritePrecision.S,
                 )
         except Exception as exc:
