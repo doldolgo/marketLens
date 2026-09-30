@@ -64,6 +64,8 @@ from app.core.streams.upbit import UpbitStream
 from app.core.tick_store import Flusher, TickRelay
 from app.core.ticks import TickLoop
 from app.core.universe import UniverseRefresher
+from app.features.admin.feeds import AdminFeeds
+from app.features.admin.router import collector_router as admin_collector_router
 from app.features.admin.router import router as admin_router
 from app.features.admin.service import AdminStatusService
 from app.features.analysis.router import router as analysis_router
@@ -337,6 +339,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await tick_stream.aclose()
         await bus.aclose()
         await client.aclose()
+        app.state.admin_feeds.close()  # 034 — 전용 AWS 스레드
         await _close_notifier(app)
 
 
@@ -526,6 +529,10 @@ def create_app() -> FastAPI:
         app.include_router(analysis_router)
         app.include_router(history_events_router)
         app.include_router(health_router)
+        # 034 — 관리자 피드 둘(AWS 요약·알림 기록). 자격증명이 collect 박스 역할에만 있어 수집기에 둔다.
+        # 부분별 캐시·전용 스레드 자리라 앱마다 하나 — 스레드는 첫 AWS 호출 때 생긴다
+        app.state.admin_feeds = AdminFeeds(region=settings.admin_aws_region)
+        app.include_router(admin_collector_router)
 
     return app
 
