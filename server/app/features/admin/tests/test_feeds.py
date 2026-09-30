@@ -4,16 +4,22 @@
 시계(벽·단조)는 손으로 돌리고, 3초 기다림은 0.2초로 줄인다.
 """
 
+import asyncio
 import json
+import logging
 import re
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
 from botocore.exceptions import ClientError, NoCredentialsError, ReadTimeoutError
 
+from app.core.notify import SlackLogHandler
 from app.features.admin.feeds import AdminFeeds
 from app.features.admin.tests.aws_fakes import (
+    ACCOUNT,
     ARN_TEXT,
     IDENTITY,
     IDS,
@@ -244,3 +250,134 @@ async def test_parts_refresh_on_their_own_periods_and_failures_are_cached_too() 
     assert body["budget"]["fetchedAt"] == int(NOW * 1000)  # 6시간 캐시
     for s in c.stubs.values():
         s.assert_no_pending_responses()
+
+
+class Slow:
+    """부를 때마다 게이트가 열릴 때까지 매달리는 가짜 — 느리거나 막힌 AWS. 동시에 몇 개가 도는지 센다."""
+
+    def __init__(self, result: Any) -> None:
+        self.gate = threading.Event()
+        self.calls = 0
+        self.running = 0
+        self.max_running = 0
+        self.threads: set[str] = set()
+        self._lock = threading.Lock()
+        self._result = result
+
+    def __getattr__(self, name: str) -> Any:
+        def call(**kwargs: Any) -> Any:
+            with self._lock:
+                self.calls += 1
+                self.running += 1
+                self.max_running = max(self.max_running, self.running)
+            self.threads.add(threading.current_thread().name)
+            try:
+                self.gate.wait(5)
+                return self._result
+            finally:
+                with self._lock:
+                    self.running -= 1
+
+        return call
+
+
+async def test_slow_refresh_answers_pending_then_the_same_refresh_fills_it() -> None:
+    slow = Slow(alarms_response())
+    w = World(lambda s: slow, wait=0.2)
+    first, second = await asyncio.gather(
+        w.feeds.aws(), w.feeds.aws()
+    )  # 동시 요청 = 갱신 하나
+    assert first["alarms"] == second["alarms"]
+    assert first["alarms"]["state"] == "pending" and first["alarms"]["code"] is None
+    assert first["alarms"]["items"] is None
+    slow.gate.set()
+    for _ in range(100):
+        await asyncio.sleep(0.02)
+        body = await w.feeds.aws()
+        if body["alarms"]["state"] != "pending":
+            break
+    assert body["alarms"]["state"] == "ok"
+    # alarms 한 번 + 나머지 셋이 한 번씩 — 뒤에서 마저 돈 갱신이 캐시를 채웠고 다시 부르지 않았다
+    assert (
+        slow.calls == 1 + 3 + 1 + 1
+    )  # alarms · metrics(박스 찾기·지표 목록·지표) · canary · budget(sts·예산)
+    assert slow.max_running == 1  # 전용 스레드 하나에서 한 번에 하나
+
+
+async def test_aws_calls_never_touch_the_default_executor_or_block_the_loop() -> None:
+    loop = asyncio.get_running_loop()
+    # c7g.medium(1 vCPU)의 기본 실행기 — 스레드 5개. AWS 가 여기서 돌면 아래 다섯이 줄을 선다
+    default = ThreadPoolExecutor(max_workers=5)
+    loop.set_default_executor(default)
+    slow = Slow(alarms_response())
+    w = World(lambda s: slow, wait=0.1)
+    try:
+        body = await w.feeds.aws()  # 네 부분 모두 느린 가짜(최대 5초)에 걸린다
+        assert {p["state"] for p in body.values()} == {"pending"}
+
+        async def timed(job: Any) -> float:
+            t0 = time.monotonic()
+            await job
+            return time.monotonic() - t0
+
+        spent = await asyncio.gather(
+            *(timed(asyncio.to_thread(time.sleep, 0.05)) for _ in range(5)),
+            timed(asyncio.sleep(0.01)),
+        )
+        assert max(spent) < 0.5
+        assert slow.running == 1 and slow.threads == {"admin-aws_0"}
+    finally:
+        slow.gate.set()
+        w.feeds.close()
+
+
+async def test_denied_budget_polled_for_ten_minutes_logs_one_warning_and_sends_no_slack(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    c = Clients("cloudwatch", "logs", "sts", "budgets")
+    sent: list[str] = []
+    handler = SlackLogHandler(lambda k, t: sent.append(t))
+    logging.getLogger().addHandler(handler)
+    caplog.set_level(logging.INFO, logger="marketlens")
+    fake_ok = Clients("cloudwatch", "logs")
+    w = World(lambda s: fake_ok.clients.get(s) or c.clients[s], wait=5.0)
+    try:
+        for minute in range(10):
+            stub_alarms(fake_ok)
+            if minute == 0:
+                stub_metrics(fake_ok)
+                c["sts"].add_response("get_caller_identity", IDENTITY)
+                c["budgets"].add_client_error(
+                    "describe_budgets", "AccessDeniedException", ARN_TEXT, 403
+                )
+            if minute == 5:
+                stub_metrics(fake_ok, discover=False)  # 300초 주기
+            stub_canary(fake_ok)
+            body = await w.feeds.aws()
+            assert body["budget"]["state"] == "denied"
+            w.advance(60)
+    finally:
+        logging.getLogger().removeHandler(handler)
+    warns = [r for r in caplog.records if r.name == "marketlens.admin"]
+    assert [r.getMessage() for r in warns] == [
+        "관리자 피드 aws.budget 실패 — AccessDeniedException"
+    ]
+    assert warns[0].levelno == logging.WARNING
+    assert sent == []  # ERROR 가 아니므로 Slack 으로 가지 않는다
+
+
+async def test_a_part_failing_every_minute_warns_once_per_ten_minutes(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fake = Raising(lambda: denied("AccessDenied"))
+    w = World(lambda s: fake, wait=5.0)
+    caplog.set_level(logging.WARNING, logger="marketlens.admin")
+    for _ in range(11):  # 0~10분
+        await w.feeds.aws()
+        w.advance(60)
+    alarms = [r for r in caplog.records if "aws.alarms" in r.getMessage()]
+    assert len(alarms) == 2  # 0분·10분
+    assert all(
+        "arn:aws:" not in r.getMessage() and ACCOUNT not in r.getMessage()
+        for r in caplog.records
+    )
