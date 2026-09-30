@@ -6,6 +6,9 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
+# 정적 자산을 빌드 때 미리 압축해 둔다 — nginx 가 gzip_static 으로 .gz 를 그대로 준다(요청마다 압축하지 않아
+# serve 박스 CPU 를 쓰지 않는다). -k 로 원본도 남겨 gzip 을 못 받는 클라이언트에 준다 (스펙 007, 2026-09-28)
+RUN find dist -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.svg' \) -exec gzip -9 -k {} +
 
 FROM nginx:1.27-alpine
 # /api 허용 목록 프록시(028) + SPA fallback (nginx.conf 참고)

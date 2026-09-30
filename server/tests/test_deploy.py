@@ -4,6 +4,7 @@ Docker 가 없는 CI 에서 도는 유일한 회귀 장치다. 컨테이너를 �
 Docker 가 있는 로컬·EC2 에서 사람이 돈다. 여기서는 설정 파일이 §4 의 조건을 말하는지만 본다.
 """
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -11,6 +12,7 @@ from pathlib import Path
 import yaml
 from fastapi.testclient import TestClient
 
+from app.core.redis_stream import MAXLEN
 from app.main import create_app
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -149,17 +151,40 @@ def test_compose_caddy_fronts_web_with_domain_tls_and_plain_fallback() -> None:
 
 
 def test_compose_influx_caps_query_memory_within_data_box() -> None:
-    """data 박스(2GB+스왑 1GB)에서 조회 폭주가 Influx 를 죽이지 않게 — 1개 256MB × 동시 3 = 전체 768MB (021 §3.1)."""
-    env = _yaml("docker-compose.yml")["services"]["influxdb"]["environment"]
+    """data 박스(2GB+스왑 1GB)에서 조회 폭주가 박스를 죽이지 않게 (021 §3.1, 2026-09-28 결정).
+
+    쿼리 1개 256MB × 동시 2 = 전체 512MB, Go 힙 목표 700MiB, 쓰기 캐시 256MB, 컨테이너 상한 1300m.
+    """
+    influx = _yaml("docker-compose.yml")["services"]["influxdb"]
+    env = influx["environment"]
     per_query = int(env["INFLUXD_QUERY_MEMORY_BYTES"])
     total = int(env["INFLUXD_QUERY_MAX_MEMORY_BYTES"])
     concurrency = int(env["INFLUXD_QUERY_CONCURRENCY"])
     assert per_query == 256 * 1024 * 1024
-    assert concurrency == 3
+    assert concurrency == 2
     # Influx 는 max = concurrency × memory 를 요구한다
-    assert total == per_query * concurrency
-    # 전체 상한 + Redis 상주 30MB + Influx 상주 0.5GB 가 1.5GB 를 넘지 않는다
-    assert total + 30 * 1024 * 1024 + 512 * 1024 * 1024 <= 1.5 * 1024 * 1024 * 1024
+    assert total == per_query * concurrency == 536_870_912
+    assert env["INFLUXD_STORAGE_CACHE_MAX_MEMORY_SIZE"] == "268435456"
+    # Go 힙 목표는 컨테이너 상한 안에 — 상한에 닿기 전에 GC 가 먼저 힙을 죈다
+    gomem = int(env["GOMEMLIMIT"].removesuffix("MiB"))
+    limit = int(influx["mem_limit"].removesuffix("m"))
+    assert (gomem, limit) == (700, 1300) and gomem < limit
+    # 스왑 없이 상한에서 재시작 — memswap_limit 이 없으면 docker 가 mem_limit 만큼 스왑을 더 허락한다
+    assert influx["memswap_limit"] == influx["mem_limit"]
+
+
+def test_compose_redis_caps_memory_without_evicting_and_the_tick_stream_fits() -> None:
+    """Redis 는 600MB 에서 쓰기를 거부한다(키를 지우지 않는다). 틱 스트림 상한이 그 안에 들어간다 (009 §3.4, 021 §3.1)."""
+    compose = _yaml("docker-compose.yml")["services"]
+    command = compose["redis"]["command"]
+    assert command[command.index("--maxmemory") + 1] == "600mb"
+    assert command[command.index("--maxmemory-policy") + 1] == "noeviction"
+    maxmemory = 600 * 1024 * 1024
+    # 엔트리 1건 ≈ 41KB(1,458조합 틱을 Redis 7 에 넣어 잰 값) — 상한까지 차도 표 키·사본이 들어갈 여유가 남는다
+    assert MAXLEN == 10_800 and MAXLEN * 41_227 < 0.8 * maxmemory
+    # 박스 예산: Influx 컨테이너 상한 + Redis 상한 ≤ 박스 메모리 2GiB (넘치는 순간은 스왑 1GB 가 받는다)
+    influx_limit = int(compose["influxdb"]["mem_limit"].removesuffix("m")) * 1024 * 1024
+    assert influx_limit + maxmemory <= 2 * 1024 * 1024 * 1024
 
 
 def test_compose_storage_containers_persist_and_match_dev_setup() -> None:
@@ -173,7 +198,7 @@ def test_compose_storage_containers_persist_and_match_dev_setup() -> None:
     assert env["DOCKER_INFLUXDB_INIT_BUCKET"] == "marketlens"
     assert env["DOCKER_INFLUXDB_INIT_ADMIN_TOKEN"] == "${INFLUX_TOKEN}"
     assert redis["image"] == "redis:7-alpine"
-    assert redis["command"] == ["redis-server", "--appendonly", "yes"]
+    assert redis["command"][:3] == ["redis-server", "--appendonly", "yes"]
     assert influx["volumes"] == ["influxdb-data:/var/lib/influxdb2"]
     assert redis["volumes"] == ["redis-data:/data"]
     assert set(compose["volumes"]) == {
@@ -201,6 +226,43 @@ def test_server_image_excludes_env_and_runs_one_worker() -> None:
     assert '"--port", "8000"' in dockerfile
     ignore = _text("server/.dockerignore").splitlines()
     assert ".env" in ignore
+
+
+def test_server_image_pins_uvloop_and_httptools() -> None:
+    """auto 는 모듈이 빠지면 조용히 asyncio·h11 로 내려간다 — 명시해 기동 실패로 드러나게 (007 §3, 2026-09-28)."""
+    cmd_line = next(
+        ln for ln in _text("server/Dockerfile").splitlines() if ln.startswith("CMD ")
+    )
+    cmd = json.loads(cmd_line.removeprefix("CMD "))
+    assert cmd[:2] == ["uvicorn", "app.main:app"]
+    assert cmd[cmd.index("--loop") + 1] == "uvloop"
+    assert cmd[cmd.index("--http") + 1] == "httptools"
+    assert cmd[cmd.index("--ws-per-message-deflate") + 1] == "false"  # 017
+    # api·collector 는 같은 이미지·같은 CMD 다 — compose 가 command 를 덮지 않는다
+    compose = _yaml("docker-compose.yml")["services"]
+    assert "command" not in compose["server"] and "command" not in compose["api"]
+    # 두 모듈은 uvicorn[standard] 가 설치한다 — 테스트 환경에도 있어야 한다
+    import httptools  # noqa: F401
+    import uvloop  # noqa: F401
+
+
+def test_web_image_precompresses_static_files_for_gzip_static() -> None:
+    """정적 자산은 빌드 때 gzip -9 -k 로 .gz 를 만들어 두고 nginx 가 그대로 준다 (007 §3, 2026-09-28)."""
+    build_stage = _text("web/Dockerfile").split("FROM nginx:", 1)[0]
+    lines = build_stage.splitlines()
+    gz = next(i for i, ln in enumerate(lines) if "gzip -9 -k" in ln)
+    assert gz > lines.index("RUN npm run build")
+    for ext in ("*.js", "*.css", "*.html", "*.svg"):
+        assert f"-name '{ext}'" in lines[gz]
+    assert lines[gz].startswith("RUN find dist -type f")
+    conf = _text("web/nginx.conf")
+    public = _public_server()  # 공개 server 블록 머리 — 그 안의 모든 location 에 걸린다
+    assert _args(public, "gzip_static") == [["on"]]
+    # 압축본과 원본이 같은 URL 이라 캐시가 둘을 가르게 Vary 를 붙인다 — /api location 은 건드리지 않는다
+    assert _args(public, "gzip_vary") == [["on"]]
+    # 즉석 압축은 켜지 않고 gzip_proxied 는 기본(off) — 앱이 이미 압축한 /api 응답을 다시 압축하지 않는다
+    assert not re.search(r"^\s*gzip\s+on;", conf, re.M)
+    assert not re.search(r"^\s*gzip_proxied\b", conf, re.M)
 
 
 def test_web_image_is_multistage_node22_to_nginx() -> None:
