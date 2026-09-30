@@ -36,7 +36,7 @@
 - Access 앱: Self-hosted, `admin.kimptrack.com` **전체**(경로 제한 없음), 정책 Allow + 그룹 하나(Bypass·Everyone·Service Auth 없음), 전역·앱 세션 12시간, 쿠키 SameSite=Lax·HttpOnly·Binding cookie, OPTIONS 우회 끔. **라우트보다 먼저 만든다** — 앱이 없는 동안 그 호스트는 누구에게나 열린다.
 - 터널: 원격 관리(토큰). 라우트는 `admin.kimptrack.com → http://web:8081` 하나, **Protect with Access**(required·팀 이름·Access 앱 AUD). cloudflared 가 요청마다 Access JWT 를 확인해 없거나 AUD 가 다르면 403, 서명·만료 실패는 엣지 5xx — 원점으로 넘기지 않는다. 이를 위해 serve 에서 `<팀>.cloudflareaccess.com:443` 으로 나가는 연결이 필요하다. catch-all 은 `http_status:404`. private network(CIDR)·WARP 라우트는 만들지 않는다. 계정 전체 "Require Access protection" 은 Free 에서 되면 켠다.
 - Universal SSL 이 Active 인지, 루트·www 가 여전히 DNS only(회색)인지 확인. Tunnel 상태 알림(메일)을 켠다.
-- 관리자 접속 기록(029) 회전: 호스트 logrotate — 주 1회·13개(≈90일)·copytruncate.
+- 관리자 접속 기록(029) 회전: 호스트 logrotate — 매일·90개·빈 날도 회전(90일, 032)·copytruncate.
 
 ### 3.5 엣지
 - 터널이 끊김·cloudflared 가 죽음: 관리자 페이지만 Cloudflare 오류 화면(공개 사이트 무관), 상태 알림 메일.

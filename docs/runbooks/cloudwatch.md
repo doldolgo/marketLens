@@ -263,8 +263,8 @@ grep -E '^pswp(in|out) ' /proc/vmstat; free -m; systemctl show amazon-cloudwatch
 - 판단: 가용률 최저가 10% 밑이거나 `pswpin`·`pswpout` 이 배포 밖에서도 계속 늘면(스왑을 계속 쓴다) t4g.small 승격(월 +$7.6, 정지 몇 분)을 사람이 정한다 — 그때 027 을 고치고 021 담당자에게 알린다. 아니면 t4g.micro + 스왑 그대로.
 - 확인: 가용률 최저·스왑 사용(pswp 차이·Swap used)·에이전트 RSS 최대를 027 §7 에 적는다.
 
-## 15. (처리방침 게시 뒤) 로그 전송·지표 필터·5xx 경보
-**처리방침 게시 전에는 하지 않는다** — 그때까지 접속 로그는 serve 박스 `~/marketlens/logs/caddy/` 에만 있다. 켜면 5-2 의 serve 두 단계가 이후 늘 쓰는 절차다.
+## 15. (032 처리방침(`https://kimptrack.com/privacy`) 게시 뒤) 로그 전송·지표 필터·5xx 경보
+**032 처리방침(`https://kimptrack.com/privacy`) 게시 전에는 하지 않는다** — 그때까지 접속 로그는 serve 박스 `~/marketlens/logs/caddy/` 에만 있다. 켜면 5-2 의 serve 두 단계가 이후 늘 쓰는 절차다.
 ```bash
 aws logs put-metric-filter --log-group-name /marketlens/serve/caddy --filter-name marketlens-http-5xx \
   --filter-pattern '{ ($.status >= 500) && ($.request.uri != "/api/ws/spreads") }' \

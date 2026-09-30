@@ -11,7 +11,7 @@
 ## 2. 범위
 - 만드는 것: caddy 접속 로그(IP 뒷자리·검색어·헤더를 지우고 남김), api 의 WebSocket 접속 수 게이지, CloudWatch Agent 설정(`ops/cloudwatch/`), canary 스크립트(`ops/canary/`), 런북 `docs/runbooks/cloudwatch.md`, 배포 계약 테스트. `ops/` 는 박스에 올리는 설정(앱 코드 아님)을 두는 최상위 폴더로 이 스펙이 만든다.
 - 하지 않는 것:
-  - 브라우저 쪽 분석·개인정보처리방침·폰트 자체 호스팅 — 후속 브라우저 분석 스펙.
+  - 개인정보 처리방침(032)·브라우저 분석(033)·폰트 자체 호스팅(별도 결정).
   - 서버 기록의 국가·도시 해석 — IP 뒷자리를 지운 채 저장한다.
   - Route 53 헬스체크 — 박스 밖 시점은 025 의 uptime 서비스가 덮는다. Sentry·APM·트레이스 — 백엔드 ERROR·500 은 025 가 Slack 으로 보낸다.
   - 수집기의 Influx·Redis 쓰기 실패 알림 개편 — §3.5 3단계(최근 15분 1분 봉 확인)가 대신 잡는다.
@@ -43,17 +43,17 @@
 - 새 공개 헬스 경로는 만들지 않는다. api 역할의 `/health`·거래소별 수집 상태 같은 앱 안쪽 상태는 관리자 페이지(029)에서 본다.
 
 ### 3.2 접속 로그 — caddy
-- 이 기록은 개인정보로 다룬다. 남기는 항목·목적·보존기간(박스 안·CloudWatch 둘 다)을 후속 스펙의 처리방침에 옮기고, CloudWatch 로 보내는 것은 처리방침 게시 뒤다(§3.4).
+- 이 기록은 개인정보로 다룬다. 남기는 항목·목적·보존기간(박스 안·CloudWatch 둘 다)은 032 처리방침(`https://kimptrack.com/privacy`)에 있고, CloudWatch 로 보내는 것은 032 게시 뒤다(§3.4).
 - 서버 기록이 보는 것: 들어온 주소(첫 로드·새로고침·공유 링크의 경로와 쿼리, `utm_*`), 외부 출처(`Referer` 의 origin), 기기·브라우저(`User-Agent`), 대시보드를 열어 둔 시간(`/api/ws/spreads` 는 연결이 끝날 때 상태 101·`duration` 한 줄), 오류 응답.
 - 기록은 caddy 한 곳에서 한다. nginx 접속 로그는 끈다(공개 server — 관리자 server 는 029 가 자기 기록을 남긴다. 오류 로그는 남긴다) — nginx 기본 형식의 마지막 칸이 caddy 가 넣은 원 IP(`X-Forwarded-For`)다.
 - 로그 설정은 `caddy/Caddyfile` 안의 이름 있는 조각 `access_log` 하나에 두고 도메인 블록(`kimptrack.com`)만 불러온다(`www` 는 apex 로 301 만 하는 블록이라 기록하지 않는다 — 022·023). `http://` catch-all(탄력 IP 직접 접속·봇 스캔)은 기록하지 않는다.
-- 파일: 컨테이너 `/var/log/caddy/access.log`, 호스트 `./logs/caddy/`(레포 루트 기준 바인드, git 무시 — 배포의 `git reset --hard` 는 추적 안 하는 파일을 지우지 않는다). 권한 0644(사람이 호스트에서 읽게). 현재 파일 50MiB 에서 회전, gzip 된 회전 파일 5개까지, 회전 파일은 90일 뒤 지운다(caddy 기본).
+- 파일: 컨테이너 `/var/log/caddy/access.log`, 호스트 `./logs/caddy/`(레포 루트 기준 바인드, git 무시 — 배포의 `git reset --hard` 는 추적 안 하는 파일을 지우지 않는다). 권한 0644(사람이 호스트에서 읽게). 하루(`roll_interval 24h`) 또는 50MiB 에서 회전, gzip 된 회전 파일 100개까지, 90일 뒤 삭제(032 — 지우기는 회전 때 돌아 최대 2일 늦다. 크기로만 돌리면 방문이 적을 때 90일보다 오래된 줄이 현재 파일에 남는다).
 - 한 줄에 남기는 것은 허용 목록이다. caddy 기본 JSON 에서
   - 요청 헤더·응답 헤더를 통째로 지운다. Accept-Language·Sec-Ch-Ua·임의 헤더(IP 가 든 것 포함)가 합쳐지면 방문자를 가려낼 수 있고, 응답 `Location` 에는 022 의 301 이 쿼리(검색어 포함)를 그대로 싣는다.
   - 대신 `ua`(`User-Agent` 그대로)와 `referer` 두 필드를 붙인다. `referer` 는 http(s) 스킴+호스트(+포트)만 남기고, 그 모양이 아니면 빈 값이다.
   - `request.remote_ip`·`request.client_ip` 는 IPv4 /24, IPv6 /48 로 자른다. 지금 두 필드는 같은 값이라 하나만 자르면 원본이 남는다.
   - `request.uri` 의 쿼리 키 `s.q`·`g.q`·`p.q`(스프레드·갭·선선갭 검색어)를 지운다. 나머지 키는 남긴다 — 어떤 주소로 들어왔는지를 보기 위해서다.
-- caddy 기본 로거(오류 줄 — 예: 업스트림 502)에도 IP 자르기·쿼리 세 키·헤더 지우기를 똑같이 건다. docker 로그에 원 IP 가 남지 않게.
+- caddy 기본 로거(오류 줄 — 예: 업스트림 502)는 IP 두 필드를 지우고(032), 쿼리 세 키·헤더 지우기는 접속 로그와 같게 건다. docker 로그에 원 IP 가 남지 않게 — docker 로그는 크기로만 회전해 방문이 적으면 90일보다 오래 남는다.
 - 기록하지 않는 요청: 경로 `/api/health`·`/api/health/collect`(수집 상태 탭 5초 폴링)·`/api/landing`(랜딩 10초 폴링)·`/api/history/events`·`/api/history/candles`(기록 탭이 보이는 동안 60초마다 부른다 — 013 §3.5·014 §3.7), `User-Agent` 에 `KimpTrack-Canary` 가 든 요청(§3.5). 폴링·감시가 방문 기록을 덮기 때문이다. 이 경로들의 5xx 는 5xx 경보에 안 잡힌다. canary 2~4단계가 같은 백엔드(수집기·api·Influx)를 보지만 `/api/health/collect`·`/api/history/events`·`/api/landing` 자체의 5xx 는 감시하지 않는다.
 - 도메인 블록의 모든 응답에 `Referrer-Policy: strict-origin` 을 붙인다. 브라우저 기본값은 같은 출처 요청에 전체 URL 을 `Referer` 로 보낸다.
 
@@ -71,7 +71,7 @@
 - collect(주기 300초): 메모리 가용률·디스크 사용률 둘만. 1 vCPU 를 수집기가 80~100% 쓰므로 가볍게 둔다. 에이전트 자체 CPU(systemd `CPUUsageNSec` 10분 차이)가 1% 를 넘으면 에이전트를 지운다(§7). 수집기 컨테이너 CPU 전후 비교로는 가르지 않는다 — 1분 값이 66~100% 로 흔들리고, 호스트의 에이전트를 재지 않는다.
 - data(60초): 메모리 가용률, 스왑 사용률(차트용), 디스크 사용률, 프로세스 RSS `influxd`·`redis-server`(실행 파일 이름으로).
 - serve(60초): 메모리 가용률, 디스크 사용률, 프로세스 RSS `caddy`(실행 파일)·api(명령줄 `uvicorn app.main:app` — 앱 모듈까지 못박는다), StatsD 수신 `:8125`(60초 집계)로 받은 `marketlens.ws_clients`.
-- 로그(`serve-logs.json`): `/home/ubuntu/marketlens/logs/caddy/access.log` → 로그 그룹 `/marketlens/serve/caddy`, 스트림 이름 = 인스턴스 ID, 클래스 STANDARD(IA 는 지표 필터가 안 되고 만든 뒤 못 바꾼다), 보존 90일. **처리방침 게시 전에는 적용하지 않는다** — 그때까지 기록은 박스 안에만 있다.
+- 로그(`serve-logs.json`): `/home/ubuntu/marketlens/logs/caddy/access.log` → 로그 그룹 `/marketlens/serve/caddy`, 스트림 이름 = 인스턴스 ID, 클래스 STANDARD(IA 는 지표 필터가 안 되고 만든 뒤 못 바꾼다), 보존 90일. **032 처리방침 게시 전에는 적용하지 않는다** — 그때까지 기록은 박스 안에만 있다.
   - 보존 90일: 분기 단위 비교면 충분하다. 통신비밀보호법 시행령의 3개월 보관 의무는 원 IP 를 요구해 이 기록으로는 채울 수 없다 — 우리에게 해당하는지는 사람이 법률 확인한다(status.md 빚).
 - 지표 필터 1개(로그 전송을 켤 때 함께 만든다): `status ≥ 500` 이고 `request.uri` 가 `/api/ws/spreads` 가 아닌 줄 수 → `MarketLens/http_5xx`. WS 를 빼는 이유: serve 배포 때 열린 대시보드가 전부 재접속하며 502 를 낸다. 그 전까지 5xx 는 canary·uptime 으로만 보인다.
 - 에이전트는 파일 위치를 기억한다 — caddy 재생성·회전 뒤에도 중복·누락 없이 이어 보낸다.
@@ -130,7 +130,7 @@
 ## 4. 검증
 **PR 안 — 실행 세션(완료 조건)**
 - nginx: server 블록에 접속 로그 끔 / 기존 분기 계약 그대로(새 location 없음).
-- Caddyfile(`caddy/Caddyfile`): 조각 `access_log` 에 파일 출력(경로·0644·50MiB·5개), 요청·응답 헤더 삭제, `ua`·`referer` 덧붙임, IP 두 필드 24·48, 쿼리 세 키 삭제, 기록 제외 경로 다섯(공개 허용 목록에서 WS 를 뺀 것)과 canary UA / 도메인 블록에만 import, `http://` 블록엔 없음 / 기본 로거에 같은 지우기 규칙 / `Referrer-Policy strict-origin` / 023 계약(도메인 두 개·`reverse_proxy web:80` 둘·`protocols h1 h2`) 그대로.
+- Caddyfile(`caddy/Caddyfile`): 조각 `access_log` 에 파일 출력(경로·0644·50MiB·24h·100개·90d), 요청·응답 헤더 삭제, `ua`·`referer` 덧붙임, IP 두 필드 24·48, 쿼리 세 키 삭제, 기록 제외 경로 다섯(공개 허용 목록에서 WS 를 뺀 것)과 canary UA / 도메인 블록에만 import, `http://` 블록엔 없음 / 기본 로거는 IP 두 필드 삭제·나머지는 같은 지우기 규칙(두 format 은 IP 두 줄만 다르다 — 032) / `Referrer-Policy strict-origin` / 023 계약(도메인 두 개·`reverse_proxy web:80` 둘·`protocols h1 h2`) 그대로.
 - compose: caddy 에 `./caddy:/etc/caddy:ro`·`./logs/caddy:/var/log/caddy`·`caddy-data:/data` / api 에 `STATSD_ADDR`·호스트 게이트웨이 / `.gitignore` 에 `logs/` / 기존 계약(컨테이너 일곱(030)·로그 상한·볼륨 4개) 그대로.
 - 배포 워크플로 serve: `up -d --build` 뒤 `docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile`, `docker image prune -f` 가 마지막, `--profile` 은 serve·tunnel 두 줄(030).
 - `ops/cloudwatch/`: 네 파일 모두 JSON 으로 읽힌다 / 지표 파일 셋은 전역 추가 차원 `InstanceId` 하나·호스트명 없음·디스크 `/` 만·장치 차원 없음·`run_as_user` 없음, collect 는 주기 300·지표 둘, StatsD 는 serve 에만 / `serve-logs.json` 은 최상위 키가 `logs` 하나, 파일 경로 = `/home/ubuntu/marketlens/` + compose 로그 바인드의 호스트 쪽 + `/access.log`, 보존 90, 클래스 STANDARD.
