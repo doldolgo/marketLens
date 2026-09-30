@@ -1,8 +1,9 @@
 /**
  * KimpTrack canary — 5분마다 밖에서 도는 점검 (스펙 027 §3.5).
  *
- * CloudWatch Synthetics(브라우저 없는 Node.js 런타임) 의 handler 이자 로컬 Node 22 스크립트다.
- * Synthetics 모듈은 부르지 않는다 — 표준 fetch·WebSocket 만 쓰고, 실패하면 단계 번호가 든 메시지로 던진다.
+ * AWS Lambda(nodejs22.x, EventBridge Scheduler 가 5분마다 부른다) 의 handler 이자 로컬 node 스크립트다.
+ * 표준 fetch·WebSocket 만 쓰고, 실패하면 단계 번호가 든 메시지로 던진다 — Lambda 는 그 호출을 Errors 로 센다.
+ * Node 22 가 필요하다 — 4단계가 내장 WebSocket 을 쓴다(Node 20 에는 없다).
  * 네 단계를 순서대로 돌고 하나라도 실패하면 그 실행은 실패다.
  *   1. GET /                      — 200, 본문에 KimpTrack (serve 박스·caddy·nginx)
  *   2. GET /api/health            — 200, status ok (수집기 틱 30초 이내)
@@ -144,7 +145,7 @@ export const handler = async () => {
   return 'ok'
 }
 
-// 로컬 실행 — Synthetics 는 handler 만 부른다
+// 로컬 실행 — Lambda 는 handler 만 부른다
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   handler().then(
     () => console.log(`canary 통과 — ${baseUrl()}`),
