@@ -12,6 +12,8 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
 - 키 `collect:heartbeat` — 틱 시각(ms) 문자열, TTL 30초. 수집이 매 틱 쓰고 api 의 `/health` 가 읽는다 (025)
 - 키 `premium_events:open` — 열린 사건 전체의 JSON 사본, TTL 600초. 수집의 사건 쓰기 태스크가 60초 갱신 회차·닫힘 점을
   쓴 회차·종료 때 쓰고 수집 자신이 기동 복원 때 읽는다 (013 §3.3)
+- 리스트 `alerts:log` — 보낸 Slack 알림 JSON 줄 최신 1,000건, 만료 없음. 두 역할의 알림기가 왼쪽에 넣고 수집기의
+  `/admin/alerts` 가 읽는다 (034 §3.3)
 """
 
 import time
@@ -37,6 +39,9 @@ DAY_OPEN_TTL_SEC = 48 * 3600
 # 수집이 오래 멈췄거나 옛 코드로 되돌렸다 온 기동은 낡은 사본 대신 Influx 로 복원한다
 OPEN_EVENTS_KEY = "premium_events:open"
 OPEN_EVENTS_TTL_SEC = 600
+# 034 — 보낸 알림 기록. 만료 없이 최신 이만큼만 남긴다(넣기·자르기 한 왕복)
+ALERT_LOG_KEY = "alerts:log"
+ALERT_LOG_MAX = 1000
 
 
 class RedisUnavailableError(Exception):
@@ -156,6 +161,18 @@ class RedisBus:
     async def ping(self) -> None:
         """`PING` — 관리자 상태의 Redis 확인(029 §3.4). 실패는 예외(시간 제한은 호출자가 건다)."""
         await self._client.ping()
+
+    async def alert_log_push(self, line: str) -> None:
+        """`LPUSH alerts:log` + `LTRIM 0 999` 를 한 왕복으로 — 알림기가 보낸 뒤 한 줄 (034 §3.3). 실패는 예외."""
+        async with self._client.pipeline(transaction=False) as pipe:
+            pipe.lpush(ALERT_LOG_KEY, line)
+            pipe.ltrim(ALERT_LOG_KEY, 0, ALERT_LOG_MAX - 1)
+            await pipe.execute()
+
+    async def alert_log_recent(self, limit: int) -> list[str]:
+        """`LRANGE alerts:log 0 limit-1` — 최신순. 없으면 빈 목록. 실패는 예외."""
+        values = await self._client.lrange(ALERT_LOG_KEY, 0, limit - 1)
+        return [_text(v) for v in values]
 
     async def subscribe(self) -> Subscription:
         """채널 구독 연결을 새로 연다 — 여기서 실제 연결이 일어나므로 실패는 예외."""
