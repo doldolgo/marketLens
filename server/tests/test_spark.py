@@ -1,5 +1,6 @@
 """spark — 1분 버킷 마지막 값 30개 링버퍼와 기동 복원 (스펙 009 §3.6, §4 "spark")."""
 
+import asyncio
 import logging
 
 import fakeredis
@@ -87,6 +88,7 @@ async def test_restore_fills_buffer_from_30_minute_aggregate() -> None:
     buffer = SparkBuffer()
     store = LiveStore()
     assert await restore_spark(influx, buffer, store, now) == 4
+    assert influx.spark_timeouts == [10.0]  # 조회의 HTTP 타임아웃 = 복원 상한
     assert store.spark("upbit", "binance", "BTC") == [0.5, 1.5, 2.5]
     assert store.spark("bithumb", "binance", "ETH") == [7.0]
     # 복원 뒤 같은 분의 틱은 마지막 값으로 덮고, 다음 분은 이어 붙는다
@@ -114,3 +116,19 @@ async def test_restore_starts_empty_without_influx_on_error_or_timeout(
         assert await restore_spark(slow, SparkBuffer(), store, T0) == 0
     assert store.spark("upbit", "binance", "BTC") == []
     assert len(caplog.records) == 3
+
+
+async def test_a_query_abandoned_at_the_cap_never_touches_the_live_buffer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """상한을 넘겨 버려진 조회가 뒤늦게 끝나도 틱이 쓰는 버퍼·LiveStore 는 빈 채다 — 스레드는 새 버퍼를 채운다."""
+    slow = FakeInflux()
+    slow.spark_rows = [SparkBucketRow("upbit", "binance", "BTC", T0 // 60 * 60, 1.0)]
+    slow.spark_delay_sec = 0.15
+    monkeypatch.setattr("app.core.spark.RESTORE_TIMEOUT_SEC", 0.05)
+    buffer = SparkBuffer()
+    store = LiveStore()
+    assert await restore_spark(slow, buffer, store, T0) == 0
+    await asyncio.sleep(0.3)  # 버려진 스레드가 끝날 때까지
+    assert buffer.snapshot() == {} and store.spark("upbit", "binance", "BTC") == []
+    assert slow.spark_timeouts == [0.05]
