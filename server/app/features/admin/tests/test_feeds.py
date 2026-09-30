@@ -7,10 +7,15 @@
 import asyncio
 import json
 import logging
+import os
 import re
+import subprocess
+import sys
+import textwrap
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,7 +23,7 @@ from botocore.exceptions import ClientError, NoCredentialsError, ReadTimeoutErro
 
 from app.core.notify import SlackLogHandler
 from app.features.admin import aws as aws_module
-from app.features.admin.feeds import AdminFeeds
+from app.features.admin.feeds import AdminFeeds, _DaemonWorker
 from app.features.admin.tests.aws_fakes import (
     ACCOUNT,
     ARN_TEXT,
@@ -101,8 +106,13 @@ def denied(code: str = "AccessDenied") -> ClientError:
     return ClientError({"Error": {"Code": code, "Message": ARN_TEXT}}, "Op")
 
 
+def admin_threads() -> set[threading.Thread]:
+    return {t for t in threading.enumerate() if t.name.startswith("admin-aws")}
+
+
 async def test_no_region_means_four_unconfigured_parts_and_no_aws_or_thread() -> None:
     made: list[str] = []
+    before = admin_threads()  # 앞선 테스트의 피드가 남긴 스레드는 빼고 센다
     w = World(lambda s: made.append(s), region=None)
     body = await w.feeds.aws()
     assert list(body) == ["alarms", "metrics", "canary", "budget"]
@@ -119,7 +129,7 @@ async def test_no_region_means_four_unconfigured_parts_and_no_aws_or_thread() ->
     }
     assert [p["refreshSec"] for p in body.values()] == [60, 300, 60, 21600]
     assert made == []
-    assert not [t for t in threading.enumerate() if t.name.startswith("admin-aws")]
+    assert admin_threads() - before == set()
 
 
 async def test_all_ok_fills_every_part_with_values() -> None:
@@ -386,6 +396,63 @@ async def test_aws_calls_never_touch_the_default_executor_or_block_the_loop() ->
     finally:
         slow.gate.set()
         w.feeds.close()
+
+
+def test_worker_runs_jobs_in_order_on_one_daemon_thread_and_close_drops_waiting_jobs() -> (
+    None
+):
+    worker, gate, order = _DaemonWorker("admin-aws-t"), threading.Event(), []
+    first = worker.submit(lambda: (gate.wait(5), order.append(1)))
+    second = worker.submit(order.append, 2)
+    (thread,) = [t for t in threading.enumerate() if t.name == "admin-aws-t_0"]
+    assert thread.daemon  # 인터프리터 종료가 도는 AWS 호출을 기다리지 않는다
+    worker.shutdown(wait=False, cancel_futures=True)
+    assert second.cancelled()
+    with pytest.raises(RuntimeError):
+        worker.submit(order.append, 3)
+    gate.set()
+    first.result(5)
+    thread.join(5)
+    assert order == [1] and not thread.is_alive()
+
+
+def test_close_does_not_hold_process_exit_on_a_running_aws_call() -> None:
+    # 도는 읽기(여기선 30초 매달림)가 있어도 close 뒤 프로세스는 곧 끝난다 — 배포 때 docker stop 유예 10초 안
+    code = textwrap.dedent(
+        """
+        import asyncio, sys, time
+        from app.features.admin.feeds import AdminFeeds
+
+        class Hang:
+            def __getattr__(self, name):
+                return lambda **kw: time.sleep(30)
+
+        async def main():
+            feeds = AdminFeeds(region="ap-northeast-2", client=lambda s: Hang(), wait_sec=0.1)
+            body = await feeds.aws()
+            assert {p["state"] for p in body.values()} == {"pending"}
+            feeds.close()
+            print("closed", flush=True)
+
+        asyncio.run(main())
+        """
+    )
+    server_dir = Path(__file__).resolve().parents[4]
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code],
+        stdout=subprocess.PIPE,
+        text=True,
+        cwd=server_dir,
+        env={**os.environ, "PYTHONPATH": str(server_dir)},
+    )
+    try:
+        assert proc.stdout is not None and proc.stdout.readline().strip() == "closed"
+        closed = time.monotonic()
+        assert proc.wait(timeout=20) == 0
+        assert time.monotonic() - closed < 3.0
+    finally:
+        proc.kill()
+        proc.wait()
 
 
 async def test_denied_budget_polled_for_ten_minutes_logs_one_warning_and_sends_no_slack(

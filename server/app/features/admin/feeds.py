@@ -3,7 +3,7 @@
 응답은 부분들이고 부분은 `{state, code, fetchedAt, refreshSec, …값 키}` 다. 갱신 규칙은 022 랜딩과 같은 모양이다 —
 요청이 왔을 때 비었거나 주기가 지났으면 갱신을 하나만 띄우고 3초까지 기다린 뒤, 늦으면 직전 결과(없으면 pending)를
 답하고 갱신은 뒤에서 마저 돈다. 실패도 주기만큼 캐시한다. 요청이 없으면 아무것도 부르지 않는다.
-AWS 호출은 전용 실행기(스레드 1개)에서 한 번에 하나씩 — 기본 실행기(`asyncio.to_thread`)는 수집 쓰기가 쓴다(§3.1).
+AWS 호출은 전용 실행기(데몬 스레드 1개)에서 한 번에 하나씩 — 기본 실행기(`asyncio.to_thread`)는 수집 쓰기가 쓴다(§3.1).
 실패는 `marketlens.admin` 에 WARNING 으로 부분 이름과 code 만, 부분마다 10분에 1줄. ERROR 로 남기지 않는다 —
 025 로그 핸들러가 `marketlens.*` 의 ERROR 를 예외 문장과 함께 Slack 으로 보낸다.
 """
@@ -11,9 +11,11 @@ AWS 호출은 전용 실행기(스레드 1개)에서 한 번에 하나씩 — �
 import asyncio
 import json
 import logging
+import queue
+import threading
 import time
 from collections.abc import Awaitable, Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, Future
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -75,6 +77,66 @@ def render(result: Result, refresh_sec: int, keys: tuple[str, ...]) -> dict[str,
         "refreshSec": refresh_sec,
         **{k: values.get(k) for k in keys},
     }
+
+
+class _DaemonWorker(Executor):
+    """스레드 1개·데몬 실행기 — 제출 순서대로 하나씩, 스레드는 첫 제출 때 생긴다.
+
+    `ThreadPoolExecutor` 의 작업 스레드는 데몬이 아니어서 `shutdown(wait=False)` 뒤에도 인터프리터 종료(atexit)가 join 한다 —
+    AWS 가 막혀 있으면 도는 읽기(호출마다 최대 7초, 지표는 호출 여러 개)가 끝날 때까지 프로세스가 안 끝나 배포 때
+    `docker stop` 유예(10초)를 넘길 수 있다. 읽기뿐이라 도중에 버려도 잃을 것이 없으므로 데몬 스레드로 둔다.
+    """
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+        self._jobs: queue.SimpleQueue[tuple[Future[Any], Callable[[], Any]] | None] = (
+            queue.SimpleQueue()
+        )
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._closed = False
+
+    def submit(
+        self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any
+    ) -> Future[Any]:
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("실행기가 닫혔다")
+            future: Future[Any] = Future()
+            self._jobs.put((future, lambda: fn(*args, **kwargs)))
+            if self._thread is None:
+                self._thread = threading.Thread(
+                    target=self._work, name=f"{self._name}_0", daemon=True
+                )
+                self._thread.start()
+            return future
+
+    def _work(self) -> None:
+        while (job := self._jobs.get()) is not None:
+            future, call = job
+            if not future.set_running_or_notify_cancel():
+                continue  # 닫기가 취소한 대기 작업
+            try:
+                result = call()
+            except BaseException as exc:
+                future.set_exception(exc)
+            else:
+                future.set_result(result)
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        with self._lock:
+            self._closed = True
+            if cancel_futures:
+                while True:
+                    try:
+                        job = self._jobs.get_nowait()
+                    except queue.Empty:
+                        break
+                    if job is not None:
+                        job[0].cancel()
+            self._jobs.put(None)  # 도는 작업 뒤에 스레드를 끝낸다
+        if wait and self._thread is not None:
+            self._thread.join()
 
 
 class _Slot:
@@ -141,9 +203,7 @@ class AdminFeeds:
 
         self._reader = AwsReader(cached, clock=clock, mono=mono)
         # 스레드는 첫 제출 때 생긴다 — 설정이 없거나 페이지를 안 보면 스레드도 없다
-        self._executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="admin-aws"
-        )
+        self._executor = _DaemonWorker("admin-aws")
         self._slots = {
             name: _Slot(refresh, mono, wait_sec)
             for name, (refresh, _) in AWS_PARTS.items()
@@ -257,7 +317,7 @@ class AdminFeeds:
         logger.warning("관리자 피드 %s 실패 — %s", name, code)
 
     def close(self) -> None:
-        """수집기 종료 때 — 대기 중인 호출은 버리고 도는 호출(최대 7초)은 기다리지 않는다."""
+        """수집기 종료 때 — 대기 중인 읽기는 버리고 도는 읽기는 기다리지 않는다(데몬 스레드라 프로세스 종료도 안 기다린다)."""
         self._executor.shutdown(wait=False, cancel_futures=True)
 
 
