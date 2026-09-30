@@ -103,7 +103,7 @@
 ### 3.7 박스·IAM·비용 (사람 — 런북)
 - 순서: 예산 → 기존 경보·지표 수 확인 → IMDS → 역할 → data 에이전트(RSS 24시간) → collect 에이전트(에이전트 CPU) → serve 스왑 1GB → serve 에이전트 → Slack 연결 → 경보(canary·5xx·잔고 제외 — 메모리·디스크는 세 박스 지표가 보인 뒤, 데이터 없음 = 경보라 먼저 만들면 곧바로 울린다) → canary(Lambda·일정) → canary 경보 → 잔고 경보(최근 7일 최솟값 확인 뒤) → serve 메모리 측정(24시간·배포 1회) → (처리방침 게시 뒤) serve 로그 전송·지표 필터·5xx 경보. 단계마다 확인·되돌리기.
 - serve(t4g.micro 1GB)는 올리지 않고 **스왑 1GB** 를 붙인다(data 와 같은 방식, 무료). 스왑 없는 1GB 박스가 배포마다 web 이미지를 직접 빌드하는데(npm ci·vite build) 에이전트가 더해지기 때문이다. 에이전트를 띄운 뒤 24시간과 배포 1회 동안 메모리 가용률 최저·스왑 사용량·에이전트 RSS 를 재서 §7 에 적는다. 가용률이 10% 밑으로 내려가거나 스왑을 계속 쓰면 t4g.small 승격(월 +$7.6, 정지 몇 분)을 사람이 정한다 — 그때 이 스펙을 고치고 021 담당자에게 알린다.
-- **역할을 붙이기 전에** data·serve 의 인스턴스 메타데이터를 토큰 필수(IMDSv2)·hop limit 1 로 둔다 — 도커 브리지 안의 컨테이너가 인스턴스 역할 자격증명에 닿지 못하게. data·serve 에 역할 `marketlens-cwagent`(관리형 정책 `CloudWatchAgentServerPolicy`)를 붙인다. collect 는 컨테이너가 S3 에 올리므로 hop 2 그대로(010)이고, 기존 역할 `marketlens-s3-snapshot` 이 붙어 있는지 먼저 확인한 뒤(없으면 붙인다) 같은 정책을 더한다. 컨테이너도 지표·로그 쓰기 권한에 닿지만 받아들인다.
+- **역할을 붙이기 전에** data·serve 의 인스턴스 메타데이터를 토큰 필수(IMDSv2)·hop limit 1 로 둔다 — 도커 브리지 안의 컨테이너가 인스턴스 역할 자격증명에 닿지 못하게. data·serve 에 역할 `marketlens-cwagent`(관리형 정책 `CloudWatchAgentServerPolicy`)를 붙인다. collect 는 컨테이너가 S3 에 올리므로 hop 2 그대로(010)이고, 기존 역할 `marketlens-s3-snapshot` 이 붙어 있는지 먼저 확인한 뒤(status.md 남은 작업 — 없으면 붙인다) 같은 정책을 더한다. 컨테이너도 지표·로그 쓰기 권한에 닿지만 받아들인다.
 - 콘솔 관리자가 할 일(CLI 사용자는 `iam:PassRole` 이 없다): collect 역할 부착 확인·세 박스 역할·정책, canary 의 Lambda·Scheduler 역할 둘과 함수·일정(만들 때 역할을 넘긴다), Q Developer Slack 채널 구성(채널 역할, Slack 워크스페이스 승인), EC2 동작 경보용 서비스 연결 역할 1회. 런북은 이 넷을 한 절에 묶는다.
 - 월 비용(달러, 로그 전송 뒤 기준, 부가세 10% 별도):
 
@@ -247,7 +247,7 @@ docker compose … down -v && docker rmi marketlens027-server marketlens027-api 
 - 남은 빚:
   - canary 3·4단계는 이 망의 로컬 스택에서 못 봤다(거래소 차단 — 봉·표가 없다). 대신 같은 스크립트를 이 Mac 에서 운영 주소로 돌려 네 단계 모두 통과했다(2026-09-29, 028 배포 뒤 — `canary 통과 — https://kimptrack.com`, 4단계 1032ms). Lambda(`nodejs22.x`)에서의 첫 실행은 위 운영 확인에서 통과. 1·2단계와, 3단계가 api 정지·저장소 오류를 실패로 잡는 것만 로컬 확인. 4단계 판정 로직은 가짜 서버로(통과·delta 없음·빈 snapshot).
   - canary 의 WebSocket UA(`headers` 옵션)는 가짜 서버로 로컬 Node v26.4.0·v22.23.3(`node:22-alpine`)에서 확인했다(2026-09-30 — 업그레이드 요청의 `User-Agent` 가 `KimpTrack-Canary/1`). Lambda 런타임의 Node 22 부 버전에서는 따로 보지 않았다 — 헤더가 안 붙으면 canary WS 한 줄이 5분마다 접속 로그에 남을 뿐이다.
-  - 사람 대기: data 에이전트 설치(RSS 24시간)·메모리·디스크 경보 6개(세 박스 지표가 보인 뒤)·잔고 경보 임계값 기록·serve 배포 1회 메모리 측정.
+  - 사람 대기: collect 인스턴스에 `marketlens-s3-snapshot` 이 붙었는지(런북 4단계 확인 결과 기록 — 위에는 역할에 정책을 더한 것까지만 있다)·data 에이전트 설치(RSS 24시간)·메모리·디스크 경보 6개(세 박스 지표가 보인 뒤)·잔고 경보 임계값 기록·serve 배포 1회 메모리 측정.
   - 이 PR 의 첫 serve 배포는 caddy 볼륨 정의가 바뀌어 caddy 를 새로 만든다 — 그 직후 `caddy reload` 가 admin 기동보다 먼저 닿으면 배포가 실패로 끝날 수 있다(로컬에선 up 직후 곧바로 불러도 성공했다). 배포가 실패하면 되돌리기 전에 `docker logs marketlens-caddy` 로 설정 오류(`unrecognized …`)인지 기동 경합인지 먼저 본다.
   - `caddy reload` 가 남기는 admin API 줄(`"logger":"admin.api"`, `remote_ip` 127.0.0.1 — 컨테이너 안 reload 명령)은 기본 로거 필터 밖이다 — 방문자 정보가 아니라 두었다.
   - actionlint 미설치 — `deploy.yml` 은 YAML 파싱과 테스트 단언으로 갈음.

@@ -17,7 +17,7 @@ CloudShell 에서 할 때:
 
 ## 관리자가 할 일 (한 번에 묶어 부탁한다)
 CLI 사용자(jin)는 `iam:PassRole` 이 없어 역할을 인스턴스·Lambda·일정에 못 넘긴다. 콘솔 관리자에게 아래 넷을 한 번에 부탁한다.
-1. **역할·정책** — collect 에 `marketlens-s3-snapshot` 이 붙어 있는지 확인하고(없으면 붙인다), 그 역할에 관리형 정책 `CloudWatchAgentServerPolicy` 를 더한다. 역할 `marketlens-cwagent`(신뢰 = EC2, 정책 = `CloudWatchAgentServerPolicy`)를 만들어 data·serve 에 붙인다 — **3단계(IMDS) 확인 뒤에**.
+1. **역할·정책** — collect 에 `marketlens-s3-snapshot` 이 붙어 있는지 확인하고(없으면 붙인다 — status.md 남은 작업), 그 역할에 관리형 정책 `CloudWatchAgentServerPolicy` 를 더한다. 역할 `marketlens-cwagent`(신뢰 = EC2, 정책 = `CloudWatchAgentServerPolicy`)를 만들어 data·serve 에 붙인다 — **3단계(IMDS) 확인 뒤에**.
 2. **canary — Lambda·일정** — 11단계. 역할 둘(`marketlens-smoke-lambda`·`marketlens-smoke-scheduler`)을 만들고 함수·일정을 만들 때 넘긴다. CloudShell(서울)에서 명령 그대로 한다.
 3. **Q Developer Slack 채널** — 9단계. Slack 워크스페이스 승인(Slack 관리자)과 채널 역할이 필요하다.
 4. **EC2 동작 경보용 서비스 연결 역할** — 재부팅·복구 동작이 걸린 경보를 처음 만들 때 CloudWatch 가 `AWSServiceRoleForCloudWatchEvents` 를 쓴다. 없으면 관리자가 `aws iam create-service-linked-role --aws-service-name events.amazonaws.com` 을 한 번 하거나 10단계의 상태검사 경보 하나를 콘솔에서 만든다.
@@ -166,7 +166,7 @@ for pair in ${=BOXES}; do box=${pair%%:*} id=${pair#*:}
     --evaluation-periods 1 --comparison-operator GreaterThanThreshold --threshold 80 --treat-missing-data breaching
 done
 ```
-- 확인: 같은 `describe-alarms` 에 10-1 과 합쳐 14줄, 몇 분 뒤 전부 `OK`. 시험은 **EC2 동작이 없는** 경보 하나로만 한다 — `aws cloudwatch set-alarm-state --alarm-name marketlens-data-disk --state-value ALARM --state-reason "027 시험"` → Slack 에 ALARM 한 줄, 다음 평가에 OK 한 줄.
+- 확인: `aws cloudwatch describe-alarms --alarm-names marketlens-{collect,data,serve}-{memory,disk} --query 'MetricAlarms[].[AlarmName,StateValue]' --output text` 에 6줄, 몇 분 뒤 전부 `OK`. 10-2 는 세 박스 지표를 기다리느라 12·13단계보다 늦을 수 있어 `--alarm-name-prefix marketlens-` 전체 줄 수는 그때그때 다르다(12·13 까지 끝났으면 17줄). 시험은 **EC2 동작이 없는** 경보 하나로만 한다 — `aws cloudwatch set-alarm-state --alarm-name marketlens-data-disk --state-value ALARM --state-reason "027 시험"` → Slack 에 ALARM 한 줄, 다음 평가에 OK 한 줄.
 - 되돌리기: `aws cloudwatch delete-alarms --alarm-names <이름…>`.
 
 ## 11. canary — Lambda + 일정 (관리자, CloudShell)
@@ -237,7 +237,7 @@ aws cloudwatch put-metric-alarm --alarm-name marketlens-canary --namespace AWS/L
   --comparison-operator GreaterThanOrEqualToThreshold --threshold 1 --treat-missing-data breaching --alarm-actions $TOPIC --ok-actions $TOPIC
 ```
 - 확인: 10분 뒤 `OK`. 되돌리기: 경보 삭제.
-- canary 전체 되돌리기(이 순서로): 일정 삭제(11-5) → 함수 삭제(11-3) → 역할 둘(정책을 뗀 뒤 — 11-4·11-2) → 경보 삭제 → `aws logs delete-log-group --log-group-name /aws/lambda/marketlens-smoke`.
+- canary 전체 되돌리기(이 순서로): 일정 삭제(11-5) → 함수 삭제(11-3) → 역할 둘(정책을 뗀 뒤 — 11-4·11-2) → 경보 삭제 → `aws logs delete-log-group --log-group-name /aws/lambda/marketlens-smoke`. 일정을 지우면 `Errors` 점이 끊겨(데이터 없음 = 경보) 마지막 실행에서 10분쯤 뒤 `marketlens-canary` 가 울린다 — 경보 삭제까지 쉬지 않고 이어서 한다(늦으면 Slack 에 ALARM 한 줄, 경보를 지우면 끝).
 
 ## 13. 잔고 경보 (최근 7일 최솟값 확인 뒤)
 기본 임계는 최대 적립의 30%(data t4g.small 576 → 173, serve t4g.micro 288 → 86)이고, 최근 7일 최솟값이 그보다 낮으면 그 최솟값보다 낮게 둔다 — 평상시에 울리지 않게.
