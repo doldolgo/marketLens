@@ -98,6 +98,37 @@ def test_zero_size_levels_are_dropped_so_best_has_size() -> None:
     assert row.asks == [[102.0, 3.0]] and row.bids == [[98.0, 4.0]]
 
 
+def test_zero_nan_and_infinite_price_levels_are_dropped() -> None:
+    """§3.5-1: 가격 > 0 이고 유한, 잔량 > 0 이고 유한한 단계만 남는다 — 최우선도 그 단계가 된다."""
+    store, sink = _sink()
+    nan, inf = math.nan, math.inf
+    _book(
+        sink,
+        exchange="binance",
+        asks=[[0.0, 5.0], [nan, 1.0], [inf, 1.0], [101.0, nan], [102.0, 3.0]],
+        bids=[[nan, 2.0], [-1.0, 1.0], [99.0, inf], [98.0, 4.0], [0.0, 9.0]],
+    )
+    row = store.get("binance", "BTC")
+    assert row is not None
+    assert row.asks == [[102.0, 3.0]] and row.bids == [[98.0, 4.0]]
+    # 걸러낸 뒤 한쪽이 비면 행을 저장하지 않는다(있던 행은 지운다)
+    _book(sink, exchange="binance", asks=[[0.0, 1.0], [nan, 1.0]], bids=[[98.0, 4.0]])
+    assert store.get("binance", "BTC") is None
+
+
+def test_usdt_rate_skips_zero_and_nan_top_levels() -> None:
+    """KRW-USDT 시세도 같은 거르기를 거친 최우선 — 가격 0·NaN 단계는 시세가 되지 않는다 (§3.4)."""
+    store, sink = _sink()
+    _book(
+        sink,
+        "USDT",
+        asks=[[math.nan, 1.0], [1401.0, 10.0]],
+        bids=[[0.0, 1.0], [1399.0, 10.0]],
+    )
+    rate = store.get_rate("upbit")
+    assert rate is not None and (rate.ask, rate.bid) == (1401.0, 1399.0)
+
+
 def test_levels_are_truncated_at_cumulative_cap() -> None:
     store, sink = _sink()
     half = NOTIONAL_CAP_KRW / 2
@@ -161,3 +192,24 @@ def test_trade_outside_universe_is_not_held(base: str) -> None:
     sink.set_universe({"BTC", "SOL"})
     _book(sink, "SOL")
     assert store.get("upbit", "SOL").price == 100.0  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf, 0.0, -1.0])
+def test_zero_nan_and_infinite_trade_prices_leave_the_row_price_alone(
+    bad: float,
+) -> None:
+    """체결가도 호가 정리와 같은 기준 — 0 이하·NaN·inf 체결가는 행 가격도 보류값도 바꾸지 않는다 (§3.5-2)."""
+    store, sink = _sink()
+    # 행이 없을 때 — 보류하지 않으므로 호가가 오면 mid 다
+    sink.trade(exchange="upbit", base="BTC", price=bad, price_timestamp=T0 - 3)
+    _book(sink)
+    row = store.get("upbit", "BTC")
+    assert row is not None and (row.price, row.price_timestamp) == (100.0, T0 - 5)
+    # 행이 있을 때 — 직전 체결가가 그대로 남고, 다음 호가도 그 값을 싣는다
+    sink.trade(exchange="upbit", base="BTC", price=100.5, price_timestamp=T0 + 1)
+    sink.trade(exchange="upbit", base="BTC", price=bad, price_timestamp=T0 + 2)
+    row = store.get("upbit", "BTC")
+    assert row is not None and (row.price, row.price_timestamp) == (100.5, T0 + 1)
+    _book(sink, at=T0 + 3)
+    row = store.get("upbit", "BTC")
+    assert row is not None and (row.price, row.price_timestamp) == (100.5, T0 + 1)
