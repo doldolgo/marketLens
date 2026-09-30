@@ -848,36 +848,252 @@ from(bucket: "{self.bucket}")
             conds.append(f'r.dir == "{_esc_flux(dir)}"')
         if base is not None:
             conds.append(f'r.base == "{_esc_flux(base.upper())}"')
+        fields = " or ".join(f'r._field == "{f}"' for f in _EVENT_LIST_FIELDS)
+        keep = ", ".join(
+            f'"{c}"' for c in ("_time", "dom", "fx", "base", "dir", *_EVENT_LIST_FIELDS)
+        )
         flux = f"""
 from(bucket: "{self.bucket}")
   |> range(start: {_rfc3339(start)}, stop: {_rfc3339(stop)})
-  |> filter(fn: (r) => {" and ".join(conds)})
+  |> filter(fn: (r) => {" and ".join(conds)} and ({fields}))
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
-  |> group()
-  |> sort(columns: ["_time"], desc: true)
+  |> keep(columns: [{keep}])
 """
-        rows: list[PremiumEventRow] = []
-        for record in self._records(flux):
-            v = record.values
-            if v.get("last_ts") is None or v.get("max_percent") is None:
+        rows: list[EventListRow] = []
+        seen: dict[str, int] | None = None
+        idx: tuple[int, ...] = ()
+        for cols, cells in self._table_rows(flux):
+            if cols is not seen:
+                # 표 모양(헤더)이 바뀔 때만 칸 번호를 다시 찾는다 — 옛 점의 표에는 망 칸이 없다(없으면 −1)
+                seen = cols
+                idx = tuple(cols.get(c, -1) for c in _EVENT_LIST_COLUMNS)
+            (
+                d,
+                f,
+                b,
+                dr,
+                t,
+                end_ts,
+                last_ts,
+                max_pct,
+                max_ts,
+                samples,
+                net_dom,
+                net_fx,
+            ) = (cells[i] if i >= 0 else "" for i in idx)
+            if not last_ts or not max_pct:
                 continue  # 반쪽 점은 싣지 않는다
             rows.append(
+                EventListRow(
+                    dom=d,
+                    fx=f,
+                    base=b,
+                    dir=dr,
+                    start_ts=_epoch_fast(t),
+                    end_ts=int(end_ts or 0),
+                    max_percent=float(max_pct),
+                    max_ts=int(max_ts or 0),
+                    last_ts=int(last_ts),
+                    samples=int(samples or 0),
+                    net_dom=_opt_str(net_dom),
+                    net_fx=_opt_str(net_fx),
+                )
+            )
+        return rows
+
+    def query_event_summary(
+        self, *, start: int, stop: int, open_since: int, top_n: int
+    ) -> EventSummary:
+        """`start ≤ start_ts < stop` 인 사건 점의 요약 — 랜딩 7일 사건 (022 §3.2). 점을 pivot 하지 않는다.
+
+        한 요청에서 Flux 가 접는다: `end_ts` 필드로 방향별 수, `end_ts == 0` 인 점과 `last_ts ≥ open_since` 인 점의
+        키, 닫힌 점 중 끝난 시각이 늦은 후보 `_SUMMARY_CANDIDATES` 개. 진행 중 = 두 키 집합에 모두 든 점의
+        (dom, fx, base, dir) 종류 수 — 고아 점(last_ts 가 오래됨)은 빠지고, 재기동 뒤 같은 조합이 다시 열려도 한 번이다.
+        코인마다 (끝난 시각, 시작 시각) 이 가장 늦은 사건을 골라 끝난 시각 내림차순(같으면 base 오름차순) top_n 개,
+        그 사건들만 한 번 더 좁혀 나머지 필드를 읽는다. 후보 끝자리 동률로 순위가 확정되지 않으면 닫힌 점 전부로 다시 묻는다.
+        """
+        window = f"range(start: {_rfc3339(start)}, stop: {_rfc3339(stop)})"
+        source = f'from(bucket: "{self.bucket}")\n  |> {window}'
+        tags = '"_time", "dom", "fx", "base", "dir"'
+        flux = f"""
+data = {source}
+  |> filter(fn: (r) => r._measurement == "premium_event" and r._field == "end_ts")
+data
+  |> group(columns: ["dir"])
+  |> count()
+  |> keep(columns: ["dir", "_value"])
+  |> yield(name: "bydir")
+data
+  |> filter(fn: (r) => r._value == 0)
+  |> keep(columns: [{tags}])
+  |> yield(name: "zero")
+{source}
+  |> filter(fn: (r) => r._measurement == "premium_event" and r._field == "last_ts")
+  |> filter(fn: (r) => r._value >= {int(open_since)})
+  |> keep(columns: [{tags}])
+  |> yield(name: "recent")
+data
+  |> filter(fn: (r) => r._value > 0)
+  |> group()
+  |> top(n: {_SUMMARY_CANDIDATES}, columns: ["_value"])
+  |> keep(columns: [{tags}, "_value"])
+  |> yield(name: "latest")
+"""
+        counts = {"kimp": 0, "reverse": 0}
+        zero: set[tuple[str, str, str, str, int]] = set()
+        recent: set[tuple[str, str, str, str, int]] = set()
+        cands: list[_Ended] = []
+        for cols, cells in self._table_rows(flux):
+            result = cells[cols["result"]]
+            if result == "bydir":
+                counts[cells[cols["dir"]]] = int(cells[cols["_value"]])
+                continue
+            key = (
+                cells[cols["dom"]],
+                cells[cols["fx"]],
+                cells[cols["base"]],
+                cells[cols["dir"]],
+                _epoch_fast(cells[cols["_time"]]),
+            )
+            if result == "zero":
+                zero.add(key)
+            elif result == "recent":
+                recent.add(key)
+            else:
+                cands.append((int(cells[cols["_value"]]), key[4], *key[:4]))
+        picks = _latest_per_base(
+            cands, top_n, complete=len(cands) < _SUMMARY_CANDIDATES
+        )
+        if picks is None:
+            # 후보 끝자리와 같은 시각에 끝난 사건이 잘려 순위가 확정되지 않았다(재기동이 고아를 한꺼번에 닫은 직후 등)
+            closed = f"""
+{source}
+  |> filter(fn: (r) => r._measurement == "premium_event" and r._field == "end_ts")
+  |> filter(fn: (r) => r._value > 0)
+  |> keep(columns: [{tags}, "_value"])
+"""
+            cands = [
+                (
+                    int(cells[cols["_value"]]),
+                    _epoch_fast(cells[cols["_time"]]),
+                    cells[cols["dom"]],
+                    cells[cols["fx"]],
+                    cells[cols["base"]],
+                    cells[cols["dir"]],
+                )
+                for cols, cells in self._table_rows(closed)
+            ]
+            picks = _latest_per_base(cands, top_n, complete=True)
+        return EventSummary(
+            kimp=counts["kimp"],
+            reverse=counts["reverse"],
+            open=len({k[:4] for k in zero & recent}),
+            latest=self._ended_details(window, picks or []),
+        )
+
+    def _ended_details(self, window: str, picks: list[_Ended]) -> list[EndedEventRow]:
+        """고른 닫힌 사건들의 나머지 필드 — 그 코인만 좁혀 세 필드를 pivot 한다(같은 창)."""
+        if not picks:
+            return []
+        flux = f"""
+from(bucket: "{self.bucket}")
+  |> {window}
+  |> filter(fn: (r) => r._measurement == "premium_event" and r.base =~ /^({_base_regex(p[4] for p in picks)})$/ and (r._field == "duration_seconds" or r._field == "last_ts" or r._field == "max_percent"))
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> keep(columns: ["_time", "dom", "fx", "base", "dir", "duration_seconds", "last_ts", "max_percent"])
+"""
+        wanted = {(p[2], p[3], p[4], p[5], p[1]): p for p in picks}
+        found: dict[tuple[str, str, str, str, int], EndedEventRow] = {}
+        for cols, cells in self._table_rows(flux):
+            key = (
+                cells[cols["dom"]],
+                cells[cols["fx"]],
+                cells[cols["base"]],
+                cells[cols["dir"]],
+                _epoch_fast(cells[cols["_time"]]),
+            )
+            pick = wanted.get(key)
+            if pick is None:
+                continue
+            dur, last_ts, max_pct = (
+                cells[cols[c]] if c in cols else ""
+                for c in ("duration_seconds", "last_ts", "max_percent")
+            )
+            if not last_ts or not max_pct:
+                continue  # 반쪽 점은 싣지 않는다
+            found[key] = EndedEventRow(
+                dom=key[0],
+                fx=key[1],
+                base=key[2],
+                dir=key[3],
+                start_ts=key[4],
+                end_ts=pick[0],
+                duration_seconds=int(dur or 0),
+                max_percent=float(max_pct),
+                last_ts=int(last_ts),
+            )
+        # 고른 순서(끝난 시각 내림차순, 같으면 base 오름차순) 그대로
+        return [found[k] for k in wanted if k in found]
+
+    def query_ongoing_events(
+        self, *, start: int, stop: int, timeout_sec: float | None = None
+    ) -> list[PremiumEventRow]:
+        """`start ≤ start_ts < stop` 이고 `end_ts == 0` 인 사건만 — 기동 복원용 두 단계 조회 (013 §3.3).
+
+        1단계는 `end_ts` 필드만 읽어 값이 0 인 (dom, fx, base, dir, 시각) 을 찾고, 2단계는 그 코인만 정규식으로 좁혀
+        pivot 한 뒤 1단계 키에 든 행만 남긴다. 두 단계 모두 같은 창이다 — 2단계 창을 좁히면 옛 점의 빈 문자열 망 이름이
+        창에 따라 다른 점으로 밀려 읽혀 결과가 달라진다. 순서는 정하지 않는다(복원이 정렬한다). `timeout_sec` 는
+        요청마다의 HTTP 타임아웃(복원 상한과 같은 값).
+        """
+        window = f"range(start: {_rfc3339(start)}, stop: {_rfc3339(stop)})"
+        keys: set[tuple[str, str, str, str, int]] = set()
+        for r in self._csv_rows(
+            f"""
+from(bucket: "{self.bucket}")
+  |> {window}
+  |> filter(fn: (r) => r._measurement == "premium_event" and r._field == "end_ts")
+  |> filter(fn: (r) => r._value == 0)
+  |> keep(columns: ["_time", "dom", "fx", "base", "dir"])
+""",
+            timeout_sec,
+        ):
+            keys.add((r["dom"], r["fx"], r["base"], r["dir"], _epoch(r["_time"])))
+        if not keys:
+            return []
+        bases = _base_regex(k[2] for k in keys)
+        rows: list[PremiumEventRow] = []
+        for r in self._csv_rows(
+            f"""
+from(bucket: "{self.bucket}")
+  |> {window}
+  |> filter(fn: (r) => r._measurement == "premium_event" and r.base =~ /^({bases})$/)
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> filter(fn: (r) => r.end_ts == 0)
+""",
+            timeout_sec,
+        ):
+            if not r.get("last_ts") or not r.get("max_percent"):
+                continue  # 반쪽 점은 싣지 않는다
+            start_ts = _epoch(r["_time"])
+            if (r["dom"], r["fx"], r["base"], r["dir"], start_ts) not in keys:
+                continue
+            rows.append(
                 PremiumEventRow(
-                    dom=str(v.get("dom", "")),
-                    fx=str(v.get("fx", "")),
-                    base=str(v.get("base", "")),
-                    dir=str(v.get("dir", "")),
-                    start_ts=int(v["_time"].timestamp()),
-                    end_ts=int(v.get("end_ts") or 0),
-                    duration_seconds=int(v.get("duration_seconds") or 0),
-                    max_percent=float(v["max_percent"]),
-                    max_ts=int(v.get("max_ts") or 0),
-                    last_ts=int(v["last_ts"]),
-                    samples=int(v.get("samples") or 0),
-                    enter_percent=float(v.get("enter_percent") or 0.0),
-                    exit_percent=float(v.get("exit_percent") or 0.0),
-                    net_dom=_opt_str(v.get("net_dom")),
-                    net_fx=_opt_str(v.get("net_fx")),
+                    dom=r["dom"],
+                    fx=r["fx"],
+                    base=r["base"],
+                    dir=r["dir"],
+                    start_ts=start_ts,
+                    end_ts=int(r.get("end_ts") or 0),
+                    duration_seconds=int(r.get("duration_seconds") or 0),
+                    max_percent=float(r["max_percent"]),
+                    max_ts=int(r.get("max_ts") or 0),
+                    last_ts=int(r["last_ts"]),
+                    samples=int(r.get("samples") or 0),
+                    enter_percent=float(r.get("enter_percent") or 0.0),
+                    exit_percent=float(r.get("exit_percent") or 0.0),
+                    net_dom=_opt_str(r.get("net_dom")),
+                    net_fx=_opt_str(r.get("net_fx")),
                 )
             )
         return rows
