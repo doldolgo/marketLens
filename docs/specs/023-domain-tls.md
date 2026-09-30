@@ -17,9 +17,10 @@
 ### 3.1 요청 경로
 | 요청 | 응답 |
 |---|---|
-| `https://kimptrack.com/…` `https://www.kimptrack.com/…` | caddy 가 TLS 종단 → `web:80`(nginx) → 022 의 경로 그대로 |
-| `http://kimptrack.com/…` `http://www.kimptrack.com/…` | caddy 가 `308` 로 같은 경로의 https 로 보낸다(Caddy 기본 동작) |
-| `http://3.34.104.16/…`·로컬 `http://localhost:WEB_PORT/…` | 평문 그대로 `web:80` 으로 — 리다이렉트 없음 |
+| `https://kimptrack.com/…` | caddy 가 TLS 종단 → `web:80`(nginx) → 022 의 경로 그대로 |
+| `http://kimptrack.com/…` | caddy 가 `308` 로 같은 경로의 https 로 보낸다(Caddy 기본 동작) |
+| `https://www.kimptrack.com/…` `http://www.kimptrack.com/…` | `301` 로 `https://kimptrack.com/…`(경로·쿼리 그대로, 한 번에) — 검색엔진이 두 호스트를 사본으로 따로 모으지 않게(022 §3.1, 2026-10-01). www 인증서는 계속 발급된다 |
+| `http://3.34.104.16/…`·로컬 `http://localhost:WEB_PORT/…` | 평문 그대로 `web:80` 으로 — 리다이렉트 없음. `X-Robots-Tag: noindex` 를 붙인다(IP 주소가 사본으로 색인되지 않게, 022) |
 | `https://3.34.104.16/…` | 인증서 없음 — 브라우저 오류(의도한 것, IP 로는 HTTPS 를 주지 않는다) |
 | `wss://kimptrack.com/api/ws/…` | caddy 의 `reverse_proxy` 가 WebSocket 업그레이드를 그대로 넘긴다. FE 는 `location.protocol` 로 `wss:` 를 고른다(이미 그렇게 돼 있다) |
 
@@ -36,7 +37,7 @@
 - `COMPOSE_PROFILES=collect,data,serve WEB_PORT=8090 …` 통합 기동은 그대로 된다. 다만 caddy 가 `kimptrack.com` 인증서를 받으려다 실패하는 로그가 몇 분 간격으로 남는다(로컬로는 도메인이 안 풀리므로). 평문 `http://localhost:8090/` 은 영향 없다. 호스트 443 도 잡으므로 로컬에서 443 을 쓰는 다른 것이 있으면 충돌한다.
 
 ## 4. 검증
-- `pytest server/tests/test_deploy.py` — 컨테이너 여섯, caddy 가 serve profile·호스트 `WEB_PORT`·443, web 은 호스트 포트 없음, Caddyfile 에 도메인 두 개 + `http://` catch-all + `reverse_proxy web:80` 둘.
+- `pytest server/tests/test_deploy.py` — 컨테이너 여섯, caddy 가 serve profile·호스트 `WEB_PORT`·443, web 은 호스트 포트 없음, Caddyfile 에 apex 블록 + www(http·https) 301 블록 + `http://` catch-all(`X-Robots-Tag noindex`) + `reverse_proxy web:80` 둘.
 - `docker run --rm -v ./Caddyfile:/etc/caddy/Caddyfile:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile` 이 통과한다.
 - 로컬 caddy + 더미 nginx(`web`) 로: `curl -s -o /dev/null -w '%{http_code}' localhost:8090/` = 200, `curl -sI -H 'Host: kimptrack.com' localhost:8090/` = 308 + `Location: https://kimptrack.com/`.
 - 배포 뒤(EC2): `curl -sI https://kimptrack.com/` 200, `curl -sI http://kimptrack.com/` 308, `curl -sI http://3.34.104.16/` 200, 대시보드 `/app/` 스프레드 표가 wss 로 갱신된다(개발자 도구 Network → WS 에 `wss://kimptrack.com/api/ws/spreads`).
