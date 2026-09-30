@@ -47,7 +47,7 @@ marketlens/
     admin/                    관리자 화면(정적 index.html·admin.js·admin.css, 빌드 없음 — 기능 폴더 규칙의 예외, 029)
     nginx-admin.conf          관리자 server(:8081, 게시 안 함) 템플릿 — 전체 `/api` 분기·교차 사이트 403·접속 기록(029)
   caddy/                      Caddyfile — serve 박스 TLS 앞단·접속 로그 (디렉터리째 바인드, 023·027)
-  ops/                        박스에 올리는 설정(앱 코드 아님) — cloudwatch/(에이전트 JSON)·canary/(Synthetics 스크립트) (027)
+  ops/                        박스에 올리는 설정(앱 코드 아님) — cloudwatch/(에이전트 JSON)·canary/(Lambda 점검 스크립트) (027)
   secrets/                    터널 토큰 파일 cloudflared-token — git 무시, serve 박스에만 (030)
 ```
 - 화면이 있는 기능만 `web/src/features/<name>` 폴더를 가진다. 이름은 `server/app/features/<name>` 과 같게 한다.

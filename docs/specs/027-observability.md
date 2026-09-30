@@ -68,7 +68,7 @@
 - 세 박스 호스트에 설치한다(컨테이너 아님, arm64 패키지, systemd, root 로 돈다 — `run_as_user` 를 두지 않는다. 홈 디렉터리가 0750 이라 다른 사용자는 로그 파일에 못 닿는다). systemd 로 메모리 200MB 상한.
 - 설정의 진실은 `ops/cloudwatch/collect.json`·`data.json`·`serve.json`(지표)과 `serve-logs.json`(최상위 키 `logs` 하나). 적용은 사람이 한다 — 설정을 바꾼 PR 이 머지되면 그 박스에서 에이전트 설정을 다시 불러온다(런북). serve 는 로그 전송을 켠 뒤로 늘 두 단계다: `serve.json` 을 불러온 다음 `serve-logs.json` 을 덧붙인다. 앞 단계만 하면 로그 설정이 지워진다. 배포 워크플로는 에이전트를 건드리지 않는다.
 - 지표 파일 공통: 네임스페이스 `MarketLens`, 전역 추가 차원 `InstanceId` 하나, 호스트명 차원 없음, 디스크는 루트 `/` 만·장치 차원 없음. 플러그인 고유 차원(디스크 `path`·`fstype`, procstat 프로세스 식별자, StatsD `metric_type`)은 남는다 — 지표마다 조합이 하나라 지표 1개 = 과금 1개다. 경보는 그 지표가 처음 보인 뒤, 실제 지표 목록에서 확인한 차원 그대로 만든다.
-- collect(주기 300초): 메모리 가용률·디스크 사용률 둘만. 1 vCPU 를 수집기가 80~100% 쓰므로 가볍게 둔다. 설치 전후 수집기 CPU 를 재서 1%p 넘게 늘면 에이전트를 지운다(§7).
+- collect(주기 300초): 메모리 가용률·디스크 사용률 둘만. 1 vCPU 를 수집기가 80~100% 쓰므로 가볍게 둔다. 에이전트 자체 CPU(systemd `CPUUsageNSec` 10분 차이)가 1% 를 넘으면 에이전트를 지운다(§7). 수집기 컨테이너 CPU 전후 비교로는 가르지 않는다 — 1분 값이 66~100% 로 흔들리고, 호스트의 에이전트를 재지 않는다.
 - data(60초): 메모리 가용률, 스왑 사용률(차트용), 디스크 사용률, 프로세스 RSS `influxd`·`redis-server`(실행 파일 이름으로).
 - serve(60초): 메모리 가용률, 디스크 사용률, 프로세스 RSS `caddy`(실행 파일)·api(명령줄 `uvicorn app.main:app` — 앱 모듈까지 못박는다), StatsD 수신 `:8125`(60초 집계)로 받은 `marketlens.ws_clients`.
 - 로그(`serve-logs.json`): `/home/ubuntu/marketlens/logs/caddy/access.log` → 로그 그룹 `/marketlens/serve/caddy`, 스트림 이름 = 인스턴스 ID, 클래스 STANDARD(IA 는 지표 필터가 안 되고 만든 뒤 못 바꾼다), 보존 90일. **처리방침 게시 전에는 적용하지 않는다** — 그때까지 기록은 박스 안에만 있다.
@@ -77,14 +77,17 @@
 - 에이전트는 파일 위치를 기억한다 — caddy 재생성·회전 뒤에도 중복·누락 없이 이어 보낸다.
 
 ### 3.5 canary — 5분마다 밖에서 도는 점검
-- CloudWatch Synthetics, 서울, 이름 `marketlens-smoke`, 5분마다, 실행 제한 90초, 브라우저 없는 Node.js 런타임(`syn-nodejs-*` 계열, Node 22) 중 만들 때 최신(이름은 §7). 결과 버킷은 Synthetics 기본 버킷(원문 버킷과 따로, 수명주기 30일), canary 의 Lambda 로그 그룹 보존 30일.
-- 스크립트는 `ops/canary/` 에 두고 만들고 올리는 것은 사람이 한다. Synthetics 모듈은 부르지 않는다 — handler 하나가 표준 `fetch`·`WebSocket` 으로 네 단계를 돌고 실패하면 단계 번호가 든 메시지로 던진다. 그래서 로컬 Node 22 로도 돈다. 실행 단위 지표(`SuccessPercent`·`Duration`·실패·HTTP 상태 수)는 런타임이 늘 올리고 끌 수 없다. 주소는 env `CANARY_BASE_URL`(기본 `https://kimptrack.com`)이고 WebSocket 주소도 여기서 스킴만 바꿔 만든다. 1~3단계는 요청마다 제한 8초, 재시도 없음. 모든 요청의 `User-Agent` 는 `KimpTrack-Canary/1` 이다 — WebSocket 은 표준 API 에 헤더 인자가 없어 Node 내장 WebSocket 의 헤더 옵션으로 붙인다.
+- 일반 Lambda + EventBridge Scheduler, 서울. CloudWatch Synthetics 는 이 계정에서 조직 서비스 제어 정책(SCP)이 막아 쓸 수 없다(2026-09-30 확인, 계정 관리자도 못 푼다).
+  - 함수 `marketlens-smoke`: 런타임 `nodejs22.x`, arm64, 메모리 128MB, 제한 60초, handler `index.handler`, 코드 = `ops/canary/index.mjs` 하나를 zip 루트에. 실행 역할 `marketlens-smoke-lambda`(관리형 정책 `AWSLambdaBasicExecutionRole` 하나). 비동기 호출 재시도 0 — 켜 두면 실패 한 번이 세 번으로 센다.
+  - 일정 `marketlens-smoke`(EventBridge Scheduler): `rate(5 minutes)`, 유연한 시간 창 끔, 대상 = 그 함수, 재시도 0. 일정 역할 `marketlens-smoke-scheduler`(그 함수 하나의 `lambda:InvokeFunction` 만).
+  - 로그 그룹 `/aws/lambda/marketlens-smoke` 보존 30일.
+- 스크립트는 `ops/canary/` 에 두고 만들고 올리는 것은 사람이 한다. handler 하나가 표준 `fetch`·`WebSocket` 으로 네 단계를 돌고 실패하면 단계 번호가 든 메시지로 던진다 — Lambda 는 던진 호출과 시간 초과를 `Errors` 로 센다. 같은 파일이 로컬 `node` 로도 돈다. Node.js 22 가 필요하다 — 4단계가 내장 `WebSocket` 을 쓴다(Node 20 에는 없다). 주소는 env `CANARY_BASE_URL`(기본 `https://kimptrack.com`)이고 WebSocket 주소도 여기서 스킴만 바꿔 만든다. 1~3단계는 요청마다 제한 8초, 재시도 없음. 모든 요청의 `User-Agent` 는 `KimpTrack-Canary/1` 이다 — WebSocket 은 표준 API 에 헤더 인자가 없어 Node 내장 WebSocket 의 헤더 옵션으로 붙인다.
 - 한 번 실행에 네 단계를 순서대로 돈다. 하나라도 실패하면 그 실행은 실패다.
   1. `GET /` — 200, 본문에 `KimpTrack`.
   2. `GET /api/health` — 200, `status == "ok"`(수집기 틱 30초 이내).
   3. `GET /api/history/candles?base=BTC&res=1m&start=<지금 epoch 초 − 900>&end=<지금 epoch 초>` — 200, `count ≥ 1`. 읽는 계약(014 복사): `start`·`end` 는 epoch 초(0~4,102,444,800, 밖이면 422), 생략한 쿼리는 `dom=upbit`·`fx=binance`·`dir=kimp`, 응답은 `{base,res,dom,fx,dir,startTs,endTs,count,fetchedAt,candles[]}`, 1m 창 상한 86,400초, 진행 중 창은 싣지 않는다, Influx 불달 503. 봉은 분이 닫힌 뒤 쓰이므로 15분 동안 0개면 쓰기가 멈춘 것이다. 이 요청은 nginx 를 거쳐 api 로 가므로 api 생존·api→Influx 읽기도 함께 본다.
   4. `/api/ws/spreads` — 15초 안에 `snapshot`(`rows` 길이 ≥ 1), 이어서 5초 안에 `delta` 를 받으면 끊는다. 읽는 계약(017 복사): 프레임은 바이너리 1개 = gzip 으로 압축한 JSON 1개, `type` 은 `snapshot`·`delta`·`heartbeat`·`waiting`. 접속 직후 표가 있으면 `snapshot`, 없으면 `waiting` 뒤 첫 표에 `snapshot`. 수집은 접속자와 무관하게 매 틱 표를 게시하고, 멈추면 `heartbeat` 만 온다 — `delta` 가 푸시 경로(수집기 → Redis → api 허브) 전체의 증거다.
-- 5분보다 자주 돌리지 않는다 — 1분이면 월 ≈$82 다.
+- 5분보다 자주 돌리지 않는다 — 실행마다 수집기·api·WebSocket 을 한 번씩 부른다.
 
 ### 3.6 경보 → Slack
 - 모든 경보는 서울 SNS 주제 `marketlens-alerts` 하나로 보내고, Amazon Q Developer in chat applications(구 AWS Chatbot)가 025 와 같은 Slack 채널에 올린다. 풀릴 때(OK)도 보낸다.
@@ -93,27 +96,26 @@
 - 메모리(세 박스, 최솟값): 메모리 가용률 10% 미만이 5분 연속(60초 5점, collect 는 300초 1점). data 근거: 021 설계 상한 1.3GiB + OS·docker·에이전트 ≈0.4GiB = 1.7GiB 에서 가용 ≈8% — 10% 미만이면 설계 상한에 가까워진 것이다. 데이터 없음은 경보(에이전트가 죽은 것을 알아야 한다).
 - 디스크(세 박스): 사용률 최댓값 300초 1점 80% 초과. 데이터 없음은 경보.
 - 요청: `http_5xx` 합계 300초 1점 10 이상. 데이터 없음은 정상(요청이 없으면 줄도 없다). 로그 전송을 켤 때 만든다.
-- canary: `SuccessPercent` 평균 600초 1점 50 미만 — 10분 안의 실행이 모두 실패. 배포 중 1회 실패는 50 이라 울리지 않는다. 데이터 없음은 경보. canary 가 첫 실행을 끝낸 뒤 만든다.
+- canary: `AWS/Lambda` `Errors`(차원 `FunctionName=marketlens-smoke`) 합계 300초 2점 중 2점 1 이상 — 연속 두 번(10분) 실패. 시간 초과도 `Errors` 다. 배포 중 1회 실패는 울리지 않는다. 데이터 없음은 경보 — 일정이 멈추면 `Errors` 점이 생기지 않는다. 직접 실행이 통과하고 일정을 만든 뒤 만든다.
 - 스왑 경보는 두지 않는다 — 한 번 찬 스왑은 압박이 끝나도 잘 안 줄어 경보가 풀리지 않는다.
-- 경보는 처리방침 전 17개, 로그 전송 뒤 18개다(상태 6·크레딧 4·메모리 3·디스크 3·canary 1, + 5xx 1). 예산: AWS Budgets 월 알림(실제·예측 $130, 이메일)을 사람이 건다.
+- 경보는 처리방침 전 17개, 로그 전송 뒤 18개다(상태 6·크레딧 4·메모리 3·디스크 3·canary 1, + 5xx 1). 예산: AWS Budgets 월 $130, 알림 실제 85%·실제 100%·예측 100%(이메일)를 사람이 건다.
 
 ### 3.7 박스·IAM·비용 (사람 — 런북)
-- 순서: 예산 → 기존 경보·지표 수 확인 → IMDS → 역할 → data 에이전트(RSS 24시간) → collect 에이전트(CPU 전후) → serve 스왑 1GB → serve 에이전트 → Slack 연결 → 경보(canary·5xx·잔고 제외) → canary → canary 경보 → 잔고 경보(최근 7일 최솟값 확인 뒤) → serve 메모리 측정(24시간·배포 1회) → (처리방침 게시 뒤) serve 로그 전송·지표 필터·5xx 경보. 단계마다 확인·되돌리기.
+- 순서: 예산 → 기존 경보·지표 수 확인 → IMDS → 역할 → data 에이전트(RSS 24시간) → collect 에이전트(에이전트 CPU) → serve 스왑 1GB → serve 에이전트 → Slack 연결 → 경보(canary·5xx·잔고 제외 — 메모리·디스크는 세 박스 지표가 보인 뒤, 데이터 없음 = 경보라 먼저 만들면 곧바로 울린다) → canary(Lambda·일정) → canary 경보 → 잔고 경보(최근 7일 최솟값 확인 뒤) → serve 메모리 측정(24시간·배포 1회) → (처리방침 게시 뒤) serve 로그 전송·지표 필터·5xx 경보. 단계마다 확인·되돌리기.
 - serve(t4g.micro 1GB)는 올리지 않고 **스왑 1GB** 를 붙인다(data 와 같은 방식, 무료). 스왑 없는 1GB 박스가 배포마다 web 이미지를 직접 빌드하는데(npm ci·vite build) 에이전트가 더해지기 때문이다. 에이전트를 띄운 뒤 24시간과 배포 1회 동안 메모리 가용률 최저·스왑 사용량·에이전트 RSS 를 재서 §7 에 적는다. 가용률이 10% 밑으로 내려가거나 스왑을 계속 쓰면 t4g.small 승격(월 +$7.6, 정지 몇 분)을 사람이 정한다 — 그때 이 스펙을 고치고 021 담당자에게 알린다.
 - **역할을 붙이기 전에** data·serve 의 인스턴스 메타데이터를 토큰 필수(IMDSv2)·hop limit 1 로 둔다 — 도커 브리지 안의 컨테이너가 인스턴스 역할 자격증명에 닿지 못하게. data·serve 에 역할 `marketlens-cwagent`(관리형 정책 `CloudWatchAgentServerPolicy`)를 붙인다. collect 는 컨테이너가 S3 에 올리므로 hop 2 그대로(010)이고, 기존 역할 `marketlens-s3-snapshot` 이 붙어 있는지 먼저 확인한 뒤(status.md 남은 작업 — 없으면 붙인다) 같은 정책을 더한다. 컨테이너도 지표·로그 쓰기 권한에 닿지만 받아들인다.
-- 콘솔 관리자가 할 일(CLI 사용자는 `iam:PassRole` 이 없다): collect 역할 부착 확인·세 박스 역할·정책, canary 생성(실행 역할 포함), Q Developer Slack 채널 구성(채널 역할, Slack 워크스페이스 승인), EC2 동작 경보용 서비스 연결 역할 1회. 런북은 이 넷을 한 절에 묶는다.
+- 콘솔 관리자가 할 일(CLI 사용자는 `iam:PassRole` 이 없다): collect 역할 부착 확인·세 박스 역할·정책, canary 의 Lambda·Scheduler 역할 둘과 함수·일정(만들 때 역할을 넘긴다), Q Developer Slack 채널 구성(채널 역할, Slack 워크스페이스 승인), EC2 동작 경보용 서비스 연결 역할 1회. 런북은 이 넷을 한 절에 묶는다.
 - 월 비용(달러, 로그 전송 뒤 기준, 부가세 10% 별도):
 
 | 항목 | 월 |
 |---|---|
-| canary | 16.2 |
-| canary지표 | 2.1 |
+| canary | 0 |
 | 에이전트지표 | 0.9 |
 | 경보 | 0.8 |
 | 로그 | 0 |
-| 합계 | 20.0 |
+| 합계 | 1.7 |
 
-  canary 는 (8,640 − 무료 100)회 × $0.0019. canary 지표는 실행 단위 지표 ≈7개 × $0.30 로 잡은 최댓값이다 — 과금되는지와 실제 개수는 첫 달 청구로 확인한다(§7). 에이전트 지표는 13개(collect 2·data 5·serve 5·5xx 1) 중 무료 10개를 넘는 3개 × $0.30, 경보는 18개 중 무료 10개를 넘는 8개 × $0.10. 로그는 서울 STANDARD 수집 $0.76/GB·저장 $0.0314/GB-월·Logs Insights $0.0076/GB 이고 각각 월 5GB 무료 — 폴링을 뺀 뒤 수 GB 안쪽으로 추정한다(실측 뒤 §7). 무료 한도는 계정 전체(모든 리전) 기준이다. canary 의 Lambda 는 무료 한도 안, S3 는 월 $0.1 미만, SNS·Q Developer 는 무료.
+  canary 는 Lambda·Scheduler·로그 모두 무료 한도 안이다(월 8,640회 × 수 초 × 128MB). Lambda 표준 지표(`Errors` 등)는 무료다. 에이전트 지표는 13개(collect 2·data 5·serve 5·5xx 1) 중 무료 10개를 넘는 3개 × $0.30, 경보는 18개 중 무료 10개를 넘는 8개 × $0.10. 로그는 서울 STANDARD 수집 $0.76/GB·저장 $0.0314/GB-월·Logs Insights $0.0076/GB 이고 각각 월 5GB 무료 — 폴링을 뺀 뒤 수 GB 안쪽으로 추정한다(실측 뒤 §7). 무료 한도는 계정 전체(모든 리전) 기준이다. SNS·Q Developer 는 무료.
 
 ### 3.8 엣지
 - 에이전트가 죽음: 지표가 끊겨 메모리·디스크 경보가 "데이터 없음" 으로 울린다. StatsD UDP 는 버려지고 api 는 영향이 없다.
@@ -138,7 +140,7 @@
 - 기존 스펙 재검증: `cd server && ruff check . && ruff format --check . && pytest -q`, `cd web && npm run lint && npm run build`, 023 §4 의 로컬 caddy 200·308(새 경로로).
 
 **배포·런북 뒤 — 사람(완료 조건 아님, status.md 비고에 "EC2 확인 대기" 로 남긴다)**
-- serve 스왑 1GB 와 메모리 측정값(가용률 최저·스왑 사용·에이전트 RSS — 승격 판단 근거) / 지표 12개(로그 전송 뒤 13개)와 실제 차원 / `/app/` 탭 2개를 열면 3분 안에 `ws_clients` 최댓값이 2 늘고 닫으면 다음 구간에 준다 / 시험 경보는 EC2 동작이 없는 메모리·디스크 경보 하나로만 `set-alarm-state` → Slack ALARM·OK 한 줄씩(EC2 동작이 걸린 경보에는 쓰지 않는다 — 재부팅된다) / canary 첫 실행 성공·실행 단위 지표 개수 / 에이전트 RSS 24시간 최댓값·collect CPU 전후 / 첫 달 청구의 지표 수 / 로그 그룹 보존(canary 30, 로그 전송 뒤 caddy 90) / 처리방침 게시 뒤 로그 그룹에 지우기 규칙이 지켜진 줄.
+- serve 스왑 1GB 와 메모리 측정값(가용률 최저·스왑 사용·에이전트 RSS — 승격 판단 근거) / 지표 12개(로그 전송 뒤 13개)와 실제 차원 / `/app/` 탭 2개를 열면 3분 안에 `ws_clients` 최댓값이 2 늘고 닫으면 다음 구간에 준다 / 시험 경보는 EC2 동작이 없는 메모리·디스크 경보 하나로만 `set-alarm-state` → Slack ALARM·OK 한 줄씩(EC2 동작이 걸린 경보에는 쓰지 않는다 — 재부팅된다) / canary 직접 실행 로그의 1~4단계 통과·반환 `"ok"` / 에이전트 RSS 24시간 최댓값·collect 에이전트 자체 CPU / 첫 달 청구의 지표 수 / 로그 그룹 보존(canary 30, 로그 전송 뒤 caddy 90) / 처리방침 게시 뒤 로그 그룹에 지우기 규칙이 지켜진 줄.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
@@ -218,11 +220,11 @@ docker compose … down -v && docker rmi marketlens027-server marketlens027-api 
   - 회전 파일 보관 `roll_keep_for 90d` 를 적어 둔다(caddy 기본과 같은 값). canary UA 제외는 `header User-Agent *KimpTrack-Canary*`(부분 일치).
   - 게이지 — 이름은 한 번 풀리면 계속 쓰고 실패했을 때만 다음 회차에 다시 푼다. 풀기·전송 실패 WARNING 은 둘이 한 억제(10분)를 나눠 쓴다. `[::1]:8125` 꼴을 받고 포트는 1~65535. 태스크 이름 `ws_clients_gauge`, 로거 `marketlens.ws_gauge`.
   - 에이전트 — "호스트명 차원 없음" 은 `omit_hostname: true`, api RSS 는 procstat `pattern`(명령줄), 나머지 셋은 `exe`. StatsD 는 수집 10초(보내는 주기와 같게)·집계 60초. 에이전트 설정은 이 Mac 에서 에이전트 변환기로 돌려 보지 못했다 — 사람이 `fetch-config` 할 때 검사된다.
-  - canary — 파일 `ops/canary/index.mjs`(ESM, handler `index.handler`), 실패 메시지 `N단계 실패: …`, snapshot 전의 `waiting`·`heartbeat` 는 기다리고 delta 는 snapshot 뒤에만 센다, 15초는 연결 시작부터, fetch 는 리다이렉트를 따라간다. 로컬 실행은 같은 파일을 `node` 로(Synthetics 는 handler 만 부른다).
+  - canary — 파일 `ops/canary/index.mjs`(ESM, handler `index.handler`), 실패 메시지 `N단계 실패: …`, snapshot 전의 `waiting`·`heartbeat` 는 기다리고 delta 는 snapshot 뒤에만 센다, 15초는 연결 시작부터, fetch 는 리다이렉트를 따라간다. 로컬 실행은 같은 파일을 `node` 로(Lambda 는 handler 만 부른다).
   - 테스트 위치 — 027 계약은 `server/tests/test_observability.py`(test_deploy 의 헬퍼·`PUBLIC_API` 재사용, Caddyfile 은 작은 줄 파서). "collector 는 게이지를 안 띄운다" 는 거래소 커넥터·우주·틱 루프의 `start` 만 무동작으로 바꾸고 collector lifespan 을 그대로 돌려 본다.
   - 로컬 통합 기동은 dev-setup 명령 그대로가 아니라 스크래치 덮어쓰기 파일로 했다 — 이 Mac 에 사용자의 `marketlens_*` 볼륨·`marketlens-*` 이미지가 있고 `server/.env` 는 읽지도 만들지도 않으므로(프로젝트 `marketlens027`, `.env.example` + 시험 토큰). caddy 는 Caddyfile 사본에 `local_certs` 만 더했다 — 원본 그대로면 도메인 블록이 Let's Encrypt 로 인증서를 청해 운영 도메인 검증 요청이 나간다. 그래서 023 §4 의 로컬 200·308 도 이 사본으로 봤다.
 - 실행 중 함께 고친 스펙 절: 027 §4 — "기록 제외 경로 여섯" → "다섯(공개 허용 목록에서 WS 를 뺀 것)"(§3.2 가 경로 다섯을 이름으로 적고 있어 그쪽을 따랐다). 007 §2·§3 은 §6 목록대로.
-- 검토 반영: 게이지 이름 풀기가 `ValueError`(빈 라벨 `a..b` 의 UnicodeError)도 풀기 실패로 받아 WARNING·다음 회차로 가고, `aclose` 는 죽어 있던 태스크의 예외를 WARNING 으로 남기고 던지지 않는다(lifespan 의 허브·버스·Influx 정리가 돈다) — 10분 뒤 WARNING 재출력 테스트로 `clock` 주입을 쓴다. canary 는 본문 읽기(8초 제한 안)와 JSON 이 객체가 아닌 응답·프레임도 `N단계 실패:` 로 던진다. 007 §2·§3·architecture·dev-setup 의 컨테이너 수를 caddy 를 넣은 여섯으로, Caddyfile 주석의 테스트 파일 이름, §5 의 `/app/?s.q=secret` 결과를 실제 관측값으로. 사람 검토에서: 007 §3·§4 와 architecture 현재 구조 deploy 줄의 호스트 포트·볼륨·SPA fallback 문장을 021·022 뒤 사실대로(§6 에 더함), cloudwatch 런북 11단계에 인라인 편집기가 ESM 을 거부할 때 zip 업로드.
+- 검토 반영: 게이지 이름 풀기가 `ValueError`(빈 라벨 `a..b` 의 UnicodeError)도 풀기 실패로 받아 WARNING·다음 회차로 가고, `aclose` 는 죽어 있던 태스크의 예외를 WARNING 으로 남기고 던지지 않는다(lifespan 의 허브·버스·Influx 정리가 돈다) — 10분 뒤 WARNING 재출력 테스트로 `clock` 주입을 쓴다. canary 는 본문 읽기(8초 제한 안)와 JSON 이 객체가 아닌 응답·프레임도 `N단계 실패:` 로 던진다. 007 §2·§3·architecture·dev-setup 의 컨테이너 수를 caddy 를 넣은 여섯으로, Caddyfile 주석의 테스트 파일 이름, §5 의 `/app/?s.q=secret` 결과를 실제 관측값으로. 사람 검토에서: 007 §3·§4 와 architecture 현재 구조 deploy 줄의 호스트 포트·볼륨·SPA fallback 문장을 021·022 뒤 사실대로(§6 에 더함).
 - PR 본문에 옮길 것 — 담당자에게 제안(이 PR 은 고치지 않는다, §6 그대로):
   - 016 — §3.1 "017 의 구독 태스크 하나뿐이다" → architecture.md 16행과 같은 문구. §3.5 마지막 bullet → "두 역할의 `/health` 는 025 §3.5 판정을 따른다. 밖에는 nginx 의 `/api/health`(`server`)만 열고, api 는 canary(027)가 밖에서 본다".
   - 017 — §7 남은 빚의 "외부 헬스체크는 여전히 없다" → "밖에서는 canary 가 WebSocket 까지 본다(027)".
@@ -233,10 +235,21 @@ docker compose … down -v && docker rmi marketlens027-server marketlens027-api 
 - 실행 중 발견한 어긋남(파일:절 — 주장 → 실제, 고치지 않음):
   - `docs/context/dev-setup.md:docker 통합 기동` — "`stop api` 뒤 `/api/history/candles`·`/api/landing` 502" → 이번 로컬에서는 nginx 가 멈춘 api 로의 연결을 기다려 8초 안에 답이 없었다(기본 연결 타임아웃 60초 뒤 504). 027 §4 의 "502 또는 504" 와는 맞다.
   - 014(관찰) — 새로 띄운 로컬 스택에서 수집기의 봉 버킷 생성(기동 시 1회·3초 상한)이 Influx 첫 setup 보다 먼저 끝나 `candles_1m` 이 없었다 → `/history/candles` 503(Influx 404). 운영의 Influx 는 이미 떠 있어 해당 없다.
+- 배포 뒤 운영 확인(2026-09-29~30, 사람 — 런북대로):
+  - canary: CloudShell 에서 `aws synthetics describe-runtime-versions` 가 AccessDenied — 조직 SCP 의 명시적 거부라 계정 관리자도 못 푼다(09-30). 그래서 같은 스크립트를 Lambda(`nodejs22.x`, arm64, 128MB, 60초) + EventBridge Scheduler(5분)로 돌린다(§3.5). 직접 실행 2회(09-30 07:05Z): 1~4단계 1886·100·259·586ms / 558·437·421·634ms, 반환 `"ok"`. 로컬 `node:22-alpine`(v22.23.3)에서 handler 를 import 해 운영 주소로 돌려도 4단계 통과. 일정·로그 그룹 보존 30일·경보 `marketlens-canary`(§3.6)까지 만들었다.
+  - 예산 월 $130 — 알림 실제 85%·실제 100%·예측 100%(콘솔 템플릿이 85% 를 더했다). Slack: SNS `marketlens-alerts`(서울) + Q Developer 채널 구성(정책 템플릿 Notification permissions 하나, 가드레일 ReadOnly 계열). 콘솔 편집에서 SNS 리전 기본값이 us-east-1 이라 서울을 골라야 주제가 보인다.
+  - IMDS(data·serve 토큰 필수·hop 1)·역할(data·serve `marketlens-cwagent`, collect 역할에 에이전트 정책)·serve 스왑 1GB. collect 인스턴스에 `marketlens-s3-snapshot` 이 붙어 있다(09-30 collect 호스트의 인스턴스 메타데이터 `iam/info` 로 확인, 수집기 로그의 S3 업로드 실패 경고 2시간 0건). 잔고 경보 임계값은 기본값 173·86.
+  - 에이전트: 세 박스 설치(collect `collect.json`·data `data.json`·serve `serve.json`). 09-30 `list-metrics` 에 collect 2·data 5·serve 5 가 보인다. collect·serve 에 처음 `data.json` 을 잘못 불러와 `swap_used_percent` 가 한 번씩 생겼다 — `fetch-config` 는 설정을 통째로 바꾸므로 맞는 파일로 다시 불러오면 되고, 새 값이 안 오는 지표는 2주 뒤 목록에서 사라진다(런북 5-2 에 박스 확인 한 줄). StatsD 게이지는 CloudWatch 에서 점이 밑줄로 바뀐 이름 `marketlens_ws_clients` 로 보인다(보내는 줄은 `marketlens.ws_clients:<n>|g` 그대로).
+  - 경보 17개 전부 OK(09-30 `describe-alarms`). 경보를 만든 직후 canary 경보가 ALARM → OK 한 번 — 일정의 첫 실행 전이라 데이터 없음을 실패로 셌다(만들 때 한 번 생기는 오탐). 예산 알림도 SNS `marketlens-alerts` 에 이어 Slack 으로 온다(주제 정책에 `budgets.amazonaws.com` Publish 허용). 예산 화면의 비용 그래프는 Cost Explorer(`ce:GetCostAndUsage`)도 조직 SCP 가 막아 안 뜬다 — 예산 평가·알림은 별개로 동작한다.
+  - collect CPU: 수집기 컨테이너 `docker stats` 10분 평균이 설치 전 81.6%, 설치 뒤 83.3%, 다시 재니 75.1% — 1분 값이 66~100% 로 흔들려 ±3%p 는 잡음이고, `docker stats` 는 호스트의 에이전트를 재지 않는다. 에이전트 자체 CPU(systemd `CPUUsageNSec` 10분 차이) 0.17% → 유지. 판정을 이 값으로 바꿨다(§3.4, 런북 6단계).
+  - 에이전트 메모리(`MemoryPeak`): collect 24MB, serve 최대 71MB(24시간), 상한 200MB.
+  - serve 메모리 24시간(09-29 05:02Z~09-30 04:57Z): 가용 최저 ≈378MB/904MB(≈41%, `sar -r`). 스왑 사용 238MB 지만 09-30 하루 `sar -W` 의 pswpin·pswpout 이 전부 0 — 09-29 스왑·에이전트 설치·설정 재적재 때 쓴 뒤 머문 것이다. 배포 1회(09-30 07:34Z, 029·030 — web 이미지 빌드): 04:57Z~07:39Z 사이 pswpout +33,047·pswpin +31,439 페이지(≈130MB 씩, `sar -W` 는 07:30 까지 0 이라 배포 몇 분 동안), OOM 0·컨테이너 재시작 0, 배포 뒤 가용 360MB·스왑 사용 187MB → 스왑은 배포 빌드 때만 쓴다. **t4g.micro + 스왑 1GB 유지, 승격하지 않는다.**
+  - 비용(§3.7 표): canary 행 ≈0(Lambda·Scheduler·로그 무료 한도 안, Lambda 표준 지표 무료) → 합계 ≈$1.7/월(부가세 별도). 경보 수는 17(로그 뒤 18) 그대로.
 - 남은 빚:
-  - canary 3·4단계는 이 망의 로컬 스택에서 못 봤다(거래소 차단 — 봉·표가 없다). 대신 같은 스크립트를 이 Mac 에서 운영 주소로 돌려 네 단계 모두 통과했다(2026-09-29, 028 배포 뒤 — `canary 통과 — https://kimptrack.com`, 4단계 1032ms). Synthetics 런타임에서의 첫 실행은 canary 를 만든 사람이 확인. 1·2단계와, 3단계가 api 정지·저장소 오류를 실패로 잡는 것만 로컬 확인. 4단계 판정 로직은 가짜 서버로(통과·delta 없음·빈 snapshot).
-  - canary 의 WebSocket UA(`headers` 옵션)는 로컬 Node v26 에서만 확인했다 — Synthetics 런타임(Node 22)에서 헤더가 안 붙으면 canary WS 한 줄이 5분마다 접속 로그에 남을 뿐이다. 런타임 이름·실행 단위 지표 개수는 canary 를 만든 사람이 여기 적는다.
+  - canary 3·4단계는 이 망의 로컬 스택에서 못 봤다(거래소 차단 — 봉·표가 없다). 대신 같은 스크립트를 이 Mac 에서 운영 주소로 돌려 네 단계 모두 통과했다(2026-09-29, 028 배포 뒤 — `canary 통과 — https://kimptrack.com`, 4단계 1032ms). Lambda(`nodejs22.x`)에서의 첫 실행은 위 운영 확인에서 통과. 1·2단계와, 3단계가 api 정지·저장소 오류를 실패로 잡는 것만 로컬 확인. 4단계 판정 로직은 가짜 서버로(통과·delta 없음·빈 snapshot).
+  - canary 의 WebSocket UA(`headers` 옵션)는 가짜 서버로 로컬 Node v26.4.0·v22.23.3(`node:22-alpine`)에서 확인했다(2026-09-30 — 업그레이드 요청의 `User-Agent` 가 `KimpTrack-Canary/1`). Lambda 런타임의 Node 22 부 버전에서는 따로 보지 않았다 — 헤더가 안 붙으면 canary WS 한 줄이 5분마다 접속 로그에 남을 뿐이다.
+  - 사람 대기: data 에이전트 RSS 24시간 최댓값(`MemoryPeak`) 기록, 기존 경보·지표 수(런북 2단계) 기록.
   - 이 PR 의 첫 serve 배포는 caddy 볼륨 정의가 바뀌어 caddy 를 새로 만든다 — 그 직후 `caddy reload` 가 admin 기동보다 먼저 닿으면 배포가 실패로 끝날 수 있다(로컬에선 up 직후 곧바로 불러도 성공했다). 배포가 실패하면 되돌리기 전에 `docker logs marketlens-caddy` 로 설정 오류(`unrecognized …`)인지 기동 경합인지 먼저 본다.
   - `caddy reload` 가 남기는 admin API 줄(`"logger":"admin.api"`, `remote_ip` 127.0.0.1 — 컨테이너 안 reload 명령)은 기본 로거 필터 밖이다 — 방문자 정보가 아니라 두었다.
   - actionlint 미설치 — `deploy.yml` 은 YAML 파싱과 테스트 단언으로 갈음.
-  - §4 "배포·런북 뒤 — 사람" 항목 전부(스왑·메모리 측정·지표 12/13개와 실제 차원·`ws_clients` 탭 2개·시험 경보·canary 첫 실행·에이전트 RSS·collect CPU 전후·첫 달 청구·로그 그룹 보존·처리방침 뒤 지우기 규칙) — status.md "EC2 확인 대기".
+  - §4 "배포·런북 뒤 — 사람" 의 나머지(기존 경보·지표 수(런북 2단계)·지표 12/13개와 실제 차원·`ws_clients` 탭 2개·시험 경보·첫 달 청구·처리방침 뒤 caddy 로그 그룹 보존·지우기 규칙) — status.md observability 비고.
