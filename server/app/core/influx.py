@@ -627,6 +627,96 @@ from(bucket: "{self.bucket}")
             )
         return rows
 
+    def stream_premium(
+        self,
+        *,
+        dom: str,
+        fx: str,
+        base: str | None,
+        start: int,
+        stop: int,
+    ) -> Iterator[tuple[str, str, int, float]]:
+        """[start, stop) 의 premium 을 `(base, field, ts, value)` 로 흘려보낸다 — pivot·group·sort 없음 (005 §3.4).
+
+        같은 (base, field) 의 점은 한 줄기로 시각 오름차순이 이어서 온다(Influx 시리즈 표 그대로). 줄기의 순서는
+        정하지 않는다. 응답을 조각으로 받아 줄마다 넘기므로 메모리는 행 수와 무관하다. 도중 실패는
+        `InfluxUnavailableError` — 호출자는 받은 것을 버리고 503 으로 답한다.
+        """
+        base_clause = (
+            f' and r.base == "{_esc_flux(base.upper())}"' if base is not None else ""
+        )
+        flux = f"""
+from(bucket: "{self.bucket}")
+  |> range(start: {_rfc3339(start)}, stop: {_rfc3339(stop)})
+  |> filter(fn: (r) => r._measurement == "premium" and r.dom == "{_esc_flux(dom)}" and r.fx == "{_esc_flux(fx)}"{base_clause} and (r._field == "fwd" or r._field == "rev"))
+  |> keep(columns: ["_time", "_value", "_field", "base"])
+"""
+        seen: dict[str, int] | None = None
+        ib = ifd = it = iv = 0
+        for cols, cells in self._table_rows(flux):
+            if cols is not seen:
+                seen = cols
+                ib, ifd, it, iv = (
+                    cols["base"],
+                    cols["_field"],
+                    cols["_time"],
+                    cols["_value"],
+                )
+            yield cells[ib], cells[ifd], _epoch_fast(cells[it]), float(cells[iv])
+
+    def _table_rows(self, flux: str) -> Iterator[tuple[dict[str, int], list[str]]]:
+        """헤더 CSV 를 흘려 읽어 행마다 (열 이름 → 칸 번호, 칸) — 표 모양이 바뀌면 빈 줄 뒤에 헤더가 다시 온다.
+
+        같은 헤더 아래의 행은 같은 사전 객체를 받는다(호출자가 칸 번호를 헤더마다 한 번만 찾게). 응답 도중 난 Flux
+        오류는 오류 표 하나로 온다 — 저장소 실패다.
+        """
+        cols: dict[str, int] | None = None
+        for line in self._stream_lines(flux):
+            if not line:
+                cols = None
+                continue
+            cells = _cells(line)
+            if cols is None:
+                if "error" in cells and "result" not in cells:
+                    raise InfluxUnavailableError(f"Influx 조회 실패: {line}")
+                cols = {name: i for i, name in enumerate(cells)}
+                continue
+            yield cols, cells
+
+    def _stream_lines(self, flux: str) -> Iterator[str]:
+        """헤더 있는 무주석 CSV 응답을 조각으로 받아 줄(끝의 `\\r` 뺌)로 — 받은 조각과 넘기지 못한 반쪽 줄만 든다."""
+        try:
+            resp = self._inner().query_api().query_raw(flux, dialect=_CSV)
+        except Exception as exc:
+            raise InfluxUnavailableError(f"Influx 조회 실패: {exc}") from exc
+        done = False
+        try:
+            carry = b""
+            try:
+                for chunk in resp.stream(_STREAM_CHUNK):
+                    buf = carry + chunk
+                    cut = buf.rfind(b"\n") + 1
+                    carry = buf[cut:]
+                    if cut:
+                        text = buf[:cut].decode("utf-8")
+                        for line in text.split("\n")[:-1]:
+                            yield line.rstrip("\r")
+            except InfluxUnavailableError:
+                raise
+            except Exception as exc:
+                raise InfluxUnavailableError(f"Influx 조회 실패: {exc}") from exc
+            if carry.strip():
+                raise InfluxUnavailableError(
+                    "Influx 조회 실패: 응답이 줄 중간에서 끝났다"
+                )
+            done = True
+        finally:
+            # 다 읽은 연결만 풀에 돌려준다 — 덜 읽은 연결을 돌려주면 다음 요청이 남은 바이트를 읽는다
+            if done:
+                resp.release_conn()
+            else:
+                resp.close()
+
     def count_premium(
         self, *, dom: str, fx: str, base: str, start: int, stop: int
     ) -> int:
@@ -666,8 +756,13 @@ from(bucket: "{self.bucket}")
 
     # --- 읽기 (spark 복원 — 기동 시 1회, HTTP 조회 없음. 스펙 009 §3.6) ---
 
-    def query_spark(self, *, start: int, stop: int) -> list[SparkBucketRow]:
-        """[start, stop) 의 `premium.fwd` 를 조합별 1분 버킷 `last` 로 — 버킷 시각은 창의 시작."""
+    def query_spark(
+        self, *, start: int, stop: int, timeout_sec: float | None = None
+    ) -> list[SparkBucketRow]:
+        """[start, stop) 의 `premium.fwd` 를 조합별 1분 버킷 `last` 로 — 버킷 시각은 창의 시작.
+
+        결과(수만 행)는 헤더 CSV 로 읽는다 — FluxRecord 로 읽은 행과 같다(009 §3.6). `timeout_sec` 는 복원 상한.
+        """
         flux = f"""
 from(bucket: "{self.bucket}")
   |> range(start: {_rfc3339(start)}, stop: {_rfc3339(stop)})
@@ -676,17 +771,16 @@ from(bucket: "{self.bucket}")
   |> keep(columns: ["_time", "_value", "dom", "fx", "base"])
 """
         rows: list[SparkBucketRow] = []
-        for record in self._records(flux):
-            v = record.values
-            value = v.get("_value")
-            if value is None:
+        for r in self._csv_rows(flux, timeout_sec):
+            value = r.get("_value", "")
+            if value == "":
                 continue
             rows.append(
                 SparkBucketRow(
-                    dom=str(v.get("dom", "")),
-                    fx=str(v.get("fx", "")),
-                    base=str(v.get("base", "")),
-                    bucket_ts=int(v["_time"].timestamp()),
+                    dom=r.get("dom", ""),
+                    fx=r.get("fx", ""),
+                    base=r.get("base", ""),
+                    bucket_ts=_epoch(r["_time"]),
                     fwd=float(value),
                 )
             )
@@ -694,8 +788,10 @@ from(bucket: "{self.bucket}")
 
     # --- 읽기 (collect_fail — 기동 시 복원 1회, HTTP 조회 없음. 스펙 011 §3.4) ---
 
-    def query_collect_fail(self, *, start: int) -> list[CollectFailRow]:
-        """start(epoch 초) 이후에 시작한 실패 구간 전부 — 진행 중(ended_ts 없음) 포함."""
+    def query_collect_fail(
+        self, *, start: int, timeout_sec: float | None = None
+    ) -> list[CollectFailRow]:
+        """start(epoch 초) 이후에 시작한 실패 구간 전부 — 진행 중(ended_ts 없음) 포함. `timeout_sec` 는 복원 상한."""
         flux = f"""
 from(bucket: "{self.bucket}")
   |> range(start: {_rfc3339(start)})
@@ -705,7 +801,7 @@ from(bucket: "{self.bucket}")
   |> sort(columns: ["_time"])
 """
         rows: list[CollectFailRow] = []
-        for record in self._records(flux):
+        for record in self._records(flux, timeout_sec):
             v = record.values
             if v.get("count") is None or v.get("last_failed_ts") is None:
                 continue  # 열림 쓰기가 유실된 반쪽 점은 복원하지 않는다
@@ -740,8 +836,11 @@ from(bucket: "{self.bucket}")
         dom: str | None = None,
         dir: str | None = None,
         base: str | None = None,
-    ) -> list[PremiumEventRow]:
-        """`start ≤ start_ts < stop` 인 사건 전부(진행 중 `end_ts 0` 포함) — start_ts 내림차순."""
+    ) -> list[EventListRow]:
+        """`start ≤ start_ts < stop` 인 사건 전부(진행 중 `end_ts 0` 포함) — `/history/events` 가 싣는 필드만 (013 §3.4).
+
+        그 필드만 pivot 하고 group·sort 없이 헤더 CSV 로 읽는다 — 순서는 정하지 않는다(응답 정렬은 호출자가 한다).
+        """
         conds = ['r._measurement == "premium_event"']
         if dom is not None:
             conds.append(f'r.dom == "{_esc_flux(dom)}"')
@@ -829,16 +928,30 @@ from(bucket: "{_esc_flux(bucket)}")
             )
         return rows
 
-    def latest_candle_ts(self, bucket: str, *, start: int) -> int | None:
+    def latest_candle_ts(
+        self, bucket: str, *, start: int, timeout_sec: float | None = None
+    ) -> int | None:
         """`start` 이후 그 버킷의 가장 늦은 봉의 창 시작 — 없으면 None. 시리즈별 last() 는 푸시다운이라 전 구간 정렬이 없다."""
-        return self._edge_candle_ts(bucket, start=start, fn="last", desc=True)
+        return self._edge_candle_ts(
+            bucket, start=start, fn="last", desc=True, timeout_sec=timeout_sec
+        )
 
-    def earliest_candle_ts(self, bucket: str, *, start: int) -> int | None:
+    def earliest_candle_ts(
+        self, bucket: str, *, start: int, timeout_sec: float | None = None
+    ) -> int | None:
         """`start` 이후 그 버킷의 가장 오래된 봉의 창 시작 — 없으면 None."""
-        return self._edge_candle_ts(bucket, start=start, fn="first", desc=False)
+        return self._edge_candle_ts(
+            bucket, start=start, fn="first", desc=False, timeout_sec=timeout_sec
+        )
 
     def _edge_candle_ts(
-        self, bucket: str, *, start: int, fn: str, desc: bool
+        self,
+        bucket: str,
+        *,
+        start: int,
+        fn: str,
+        desc: bool,
+        timeout_sec: float | None,
     ) -> int | None:
         flux = f"""
 from(bucket: "{_esc_flux(bucket)}")
@@ -849,14 +962,44 @@ from(bucket: "{_esc_flux(bucket)}")
   |> sort(columns: ["_time"], desc: {"true" if desc else "false"})
   |> limit(n: 1)
 """
-        for record in self._records(flux):
+        for record in self._records(flux, timeout_sec):
             return int(record.get_time().timestamp())
         return None
 
-    def _records(self, flux: str):  # noqa: ANN202 — influxdb-client 내부 타입 비노출
+    def _records(self, flux: str, timeout_sec: float | None = None):  # noqa: ANN202 — influxdb-client 내부 타입 비노출
         try:
-            tables = self._inner().query_api().query(flux)
+            tables = self._inner(timeout_sec).query_api().query(flux)
         except Exception as exc:
             raise InfluxUnavailableError(f"Influx 조회 실패: {exc}") from exc
         for table in tables:
             yield from table.records
+
+    def _csv_rows(
+        self, flux: str, timeout_sec: float | None = None
+    ) -> Iterator[dict[str, str]]:
+        """헤더 있는 무주석 CSV 를 행마다 {열 이름: 글자} 로. 표 모양이 바뀌면 빈 줄 뒤에 헤더가 다시 온다.
+
+        csv 모듈로 읽는다 — 망 이름·코인 이름에 콤마·따옴표가 와도 칸이 어긋나지 않는다. 값이 없는 칸은 빈 글자다.
+        """
+        try:
+            resp = self._inner(timeout_sec).query_api().query_raw(flux, dialect=_CSV)
+            try:
+                text = resp.data.decode("utf-8")
+            finally:
+                resp.release_conn()
+        except Exception as exc:
+            raise InfluxUnavailableError(f"Influx 조회 실패: {exc}") from exc
+        header: list[str] | None = None
+        for cells in csv.reader(io.StringIO(text)):
+            if not cells:
+                header = None
+                continue
+            if header is None:
+                header = cells
+                continue
+            if "error" in header and "result" not in header:
+                # 응답 도중 난 Flux 오류는 오류 표 하나로 온다
+                raise InfluxUnavailableError(
+                    f"Influx 조회 실패: {dict(zip(header, cells, strict=False))}"
+                )
+            yield dict(zip(header, cells, strict=False))
