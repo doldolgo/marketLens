@@ -261,7 +261,7 @@ class AdminFeeds:
 
 
 def _slack_item(line: str) -> dict[str, Any] | None:
-    """`alerts:log` 한 줄 → 타임라인 항목. 깨진 줄은 None(뺀다). 넣을 때 가렸지만 읽을 때도 한 번 더 가린다."""
+    """`alerts:log` 한 줄 → 타임라인 항목. 깨진 줄은 None(뺀다). 넣을 때 가렸지만 읽을 때도 한 번 더 가린다(`key` 도)."""
     try:
         data = json.loads(line)
     except ValueError:
@@ -281,6 +281,6 @@ def _slack_item(line: str) -> dict[str, Any] | None:
         "source": "slack",
         "text": redact(text),
         "role": role,
-        "key": key,
+        "key": redact(key),
         "delivered": delivered,
     }

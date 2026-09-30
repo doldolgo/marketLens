@@ -103,6 +103,23 @@ async def test_api_role_records_the_startup_alert(
     }
 
 
+async def test_no_webhook_means_no_notifier_and_nothing_recorded(
+    monkeypatch: pytest.MonkeyPatch, fake_bus: fakeredis.FakeServer
+) -> None:
+    monkeypatch.setenv("ROLE", "api")
+    monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
+    monkeypatch.setenv("INFLUX_TOKEN", "")
+    get_settings.cache_clear()
+    app = create_app()
+    assert app.state.notifier is None
+    async with app.router.lifespan_context(app):
+        logging.getLogger("marketlens.x").error(
+            "기동 뒤 ERROR"
+        )  # 웹훅이 있었다면 알림·기록 한 줄
+        await asyncio.sleep(0.05)
+    assert fakeredis.FakeRedis(server=fake_bus).llen(ALERT_LOG_KEY) == 0
+
+
 def test_collector_plugs_the_same_bus_into_the_notifier(
     monkeypatch: pytest.MonkeyPatch, fake_bus: fakeredis.FakeServer
 ) -> None:

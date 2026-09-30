@@ -249,23 +249,87 @@ async def test_record_failure_keeps_sending_and_warns_once_off_slack(
     assert sent_to_slack == []  # 순환 없음
 
 
+async def stuck(line: str) -> None:
+    await asyncio.Event().wait()  # 답하지 않는 Redis
+
+
 async def test_record_write_is_capped_at_its_time_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("app.core.notify.RECORD_TIMEOUT_SEC", 0.05)
-
-    async def stuck(line: str) -> None:
-        await asyncio.Event().wait()
-
     hook, clock = Hook(), [T0]
     n = make(hook, clock)
     n.record = stuck
     n.start()
     n.notify("a", "x")
     n.notify("b", "y")
-    await drain(n)  # 1초 안에 둘 다 — 매달린 기록이 다음 전송을 막지 않는다
+    await drain(
+        n
+    )  # 1초 안에 둘 다 — 큐는 기록이 끝나야 비는데, 매달린 기록은 제한에서 끊긴다
     await n.aclose()
     assert len(hook.bodies) == 2
+
+
+async def test_hanging_record_does_not_delay_the_next_send(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # data 박스가 내려가 Redis 가 답하지 않을 때가 알림이 몰릴 때다 — 기록 대기(최대 2초)만큼 전송이 밀리면 안 된다
+    monkeypatch.setattr("app.core.notify.RECORD_TIMEOUT_SEC", 1.0)
+    hook, clock = Hook(), [T0]
+    n = make(hook, clock)
+    n.record = stuck
+    n.start()
+    for key in ("a", "b", "c"):
+        n.notify(key, key)
+    for _ in range(50):
+        if len(hook.bodies) == 3:
+            break
+        await asyncio.sleep(0.01)
+    assert len(hook.bodies) == 3  # 0.5초 안 — 어느 기록도 아직 제한(1초)에 닿지 않았다
+    await drain(n)  # 기록 셋이 제한에서 끊긴 뒤 큐가 빈다
+    await n.aclose()
+
+
+async def test_close_drops_records_still_waiting_after_the_close_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.core.notify.CLOSE_WAIT_SEC", 0.1)
+    hook, clock = Hook(), [T0]
+    n = make(hook, clock)
+    n.record = stuck  # 기록 제한은 기본 2초
+    n.start()
+    n.notify("a", "x")
+    await asyncio.sleep(0.05)
+    t0 = asyncio.get_running_loop().time()
+    await n.aclose()
+    assert (
+        asyncio.get_running_loop().time() - t0 < 1.0
+    )  # 종료 5초 상한(여기선 0.1초)에 기록도 든다
+    assert not n._records and len(hook.bodies) == 1
+
+
+async def test_record_key_hides_arns_and_account_ids() -> None:
+    # 로그 알림의 키는 로그 템플릿 앞 80자 — 포맷된 문장·예외 객체를 넘긴 ERROR 로그면 ARN 이 키에 섞인다
+    hook, clock, log = Hook(), [T0], Log()
+    n = make(hook, clock)
+    n.record = log
+    n.start()
+    handler = SlackLogHandler(n.notify)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        lg = logging.getLogger("marketlens.x")
+        lg.error("실패 User: arn:aws:sts::123456789012:assumed-role/r/i")
+        lg.error(RuntimeError("acct 123456789012 is not authorized"))
+    finally:
+        root.removeHandler(handler)
+    await drain(n)
+    await n.aclose()
+    keys = [line["key"] for line in log.lines]
+    assert keys == [
+        "log:marketlens.x:실패 User: [가림]",
+        "log:marketlens.x:acct [가림] is not authorized",
+    ]
 
 
 async def test_record_text_hides_arns_and_account_ids() -> None:

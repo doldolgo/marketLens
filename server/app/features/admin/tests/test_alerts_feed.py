@@ -110,6 +110,16 @@ async def test_timeline_merges_both_sources_newest_first_within_seven_days() -> 
     assert "arn:aws:" not in raw and not ACCOUNT_ID.search(raw)
 
 
+async def test_timeline_masks_the_alert_key_too() -> None:
+    # 넣을 때 가렸어도 읽을 때 다시 — 가림 전에 쓰인 줄·다른 쓰기 경로가 있어도 응답에는 없다
+    bus = await bus_with(log_line(NOW_MS - 1_000, key="log:marketlens.x:" + ARN_TEXT))
+    body = await feeds(None, region=None).alerts(bus=bus, slack_configured=True)
+    (item,) = body["items"]
+    assert item["key"].startswith("log:marketlens.x:User: [가림]")
+    raw = json.dumps(body, ensure_ascii=False)
+    assert "arn:aws:" not in raw and not ACCOUNT_ID.search(raw)
+
+
 async def test_timeline_is_capped_at_two_hundred() -> None:
     bus = await bus_with(*(log_line(NOW_MS - 100_000 + i) for i in range(150)))
     items = [
