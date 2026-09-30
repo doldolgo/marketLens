@@ -33,7 +33,7 @@
 
 **어느 목록을 걷는가.** 걷기의 입력은 스냅샷의 `asks`/`bids` 그 자체다 — 001 §3.3 대로 세 거래소 모두 WebSocket 호가를 받아 업비트 최대 30·빗썸 최대 15·바이낸스 최대 20단계가 들어 있다. 표면값(최우선 1단계 = `asks[0]`·`bids[0]`)과 걷기가 같은 목록을 보므로 한 응답 안에서 출처가 갈리지 않는다.
 1. 단계를 최우선부터 순서대로 먹는다.
-2. 금액 기준 — 한 단계의 `price×size` 가 남은 금액 이상이면 그 단계에서 `남은 금액/price` 만큼 **부분 체결**하고 끝(`exhausted=false`). 모든 단계를 먹어도 남으면 `exhausted=true` 이고 `amount` 는 요청액이 아니라 **실제 체결액**.
+2. 금액 기준 — 한 단계의 `price×size` 가 남은 금액 이상이면 그 단계에서 `남은 금액/price` 만큼 **부분 체결**하고 끝(`exhausted=false`). 모든 단계를 먹어도 남으면 `exhausted=true` 이고 `amount` 는 요청액이 아니라 **실제 체결액**. 소진 판정의 허용 오차는 core 공개 상수 `WALK_EPSILON`(1e-9)이다 — 남은 금액·수량이 이보다 클 때만 소진이다(부동소수 잔액 찌꺼기를 소진으로 오판하지 않게, 003 표 계산의 걷기도 같은 값).
 3. 수량 기준도 대칭(부족하면 `quantity` = 실제 체결량).
 4. 입력 ≤ 0 또는 빈 호가 → 체결 0. `average_price = amount/quantity`(수량 0 이면 0).
 5. `slippage_percent = max(0, (average − best)/best × 100)`. 매도는 부호 반전(불리한 쪽이 양수). best ≤ 0 이면 0.
@@ -135,6 +135,7 @@
 - `/matrix` 표준 시드: 행은 BTC·ETH·XRP(SOL 제외), BTC fwd = binance→bithumb, `depositAvailable=false`, 첫 행 XRP, 조합 5개(BTC 2×1 + ETH 1×1 + XRP 2×1); `amountKrw=50,000,000` 이면 `depthExhausted=true`(한쪽 5단계 합 1,500만원)
 - `/matrix` 매도측 소진 시 매수측을 되맞춰 실효 수익률이 −50% 대로 떨어지지 않는다; 환율 없는 국내 거래소 조합은 빠진다
 - 모든 분석 응답 키는 camelCase이고 에러 본문은 `{"error":{code,message,detail}}`
+- 수신 경로(001 §3.5-1 호가 정리)로 최우선에 가격 0·NaN 단계가 낀 호가를 받아도 6개 API 가 200 이고 최우선은 첫 유효 단계다 — 0 나누기·NaN 직렬화가 생기지 않는다(`test_bad_levels.py`)
 
 실서버 확인 (기동 후 스트림 스냅샷이 온 뒤 — 수 초 — 실제 호출):
 - `/orderbook/upbit` BTC/KRW `depth=3` → `quote=="KRW"`, asks 3단계
