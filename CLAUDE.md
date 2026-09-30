@@ -115,13 +115,13 @@ marketlens/
 | 029 | admin | DONE | 관리자 server — web nginx :8081(게시 안 함)·정적 화면(헬스·수집 상태·WS 접속 수·즉시 갱신), 닫힌 API 전체 분기·교차 사이트 403·JSON 접속 기록, api `GET /admin/status`·`RedisBus.ping`, 수집기 `UVICORN_ROOT_PATH=/api`. 028 머지 뒤 (BE·web·인프라) |
 | 030 | admin-tunnel | DONE | `admin.kimptrack.com` — cloudflared(profile tunnel, 전용 망, 토큰 파일 secret, 배포 시 파일이 있을 때만)·Cloudflare Access(이메일 OTP)·Protect with Access, 런북 admin-access.md (인프라) |
 | 031 | events-window | TODO | 공개 `/history/events` 창 상한 90일(기록 탭 최장 기간 3달과 같음) — 넘으면 Influx 를 읽기 전에 400(`detail.limitSec`, 014 와 같은 모양), 차트 음영 조회는 최근 90일까지. 기간 버튼 그대로. 요약 응답·속도 제한·api 이관은 후속 (BE·web) |
-| 032 | privacy | TODO | 개인정보 처리방침 `/privacy`(번들 밖 정적·외부 자원 0·CSP, `/privacy.html`·`/app/privacy.html` 301)·분석 거부 저장값 `kt.analytics`(`denied`·`granted`)·랜딩 바닥·대시보드 헤더 링크, caddy 하루 회전·오류 줄 IP 삭제·관리자 기록 매일 90개. 자리표시자 `〔…〕` 를 사람이 채운 뒤 머지 = 게시 (web·인프라) |
+| 032 | privacy | IN_PROGRESS | 개인정보 처리방침 `/privacy`(번들 밖 정적·외부 자원 0·CSP, `/privacy.html`·`/app/privacy.html` 301)·분석 거부 저장값 `kt.analytics`(`denied`·`granted`)·랜딩 바닥·대시보드 헤더 링크, caddy 하루 회전·오류 줄 IP 삭제·관리자 기록 매일 90개. 자리표시자 `〔…〕` 를 사람이 채운 뒤 머지 = 게시 (web·인프라) |
 | 033 | clarity | TODO | Microsoft Clarity — `public/clarity.js` 한 곳(ID 빈 값으로 머지, 032 게시 뒤 사람이 켬), 호스트·유럽 시간대·GPC·거부 값 확인, consentv2 광고 거부·분석 허용, 다른 탭의 거부를 받아 새로고침, 검색어 URL 제외·필터 URL 쓰기 우회·`sym` 형식, 탭 태그·이벤트, 런북 clarity.md (web) |
 | 034 | monitoring-ops | TODO | 수집기 관리자 피드 — `/admin/aws`(경보·24시간 지표·canary·예산)·`/admin/alerts`(보낸 Slack 알림 `alerts:log` + 경보 이력 7일), 부분별 state(자격 없음 = 연결 안 됨)·요청 있을 때만·전용 스레드·ARN 가림, IAM 읽기 정책 런북 (BE·인프라) |
 | 035 | monitoring-visits | TODO | api 관리자 피드 — `/admin/access`(caddy 로그 24시간 요약·탭별 진입·최근 5xx)·`/admin/clarity`(Data Export 3시간 간격·Redis 캐시·주소 쿼리 뗌), 토큰 런북. 032·033·034 뒤 (BE·인프라) |
 | 036 | admin-v2 | TODO | 관리자 화면 v2 — 한 페이지 개요·수집·인프라·알림·접속·비용·도구, 빠른 10초·느린 60초(보이는 동안만), 부분별 상태 칸·SVG 직접·빌드 없음. 034·035 뒤 (web) |
 
-실행 순서 = 번호 순. 034·035 는 한 설계를 둘로 나눈 짝 스펙이다(034 → 035). 031 은 032~036 의 계약에 기대지 않아 그 앞뒤 어디서 해도 된다. 지금 IN_PROGRESS 인 것: 없음.
+실행 순서 = 번호 순. 034·035 는 한 설계를 둘로 나눈 짝 스펙이다(034 → 035). 031 은 032~036 의 계약에 기대지 않아 그 앞뒤 어디서 해도 된다. 지금 IN_PROGRESS 인 것: 032.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
 **스펙은 항상 지금 동작과 같아야 한다. DONE 이 된 뒤라도 동작을 바꾸고 싶으면 그 기능의 스펙을 그냥 고치면 된다.** 단, 스펙만 고치면 문서와 코드가 어긋나므로 — 같은 PR 에서 코드와 테스트도 스펙에 맞게 고치고, 그 기능의 §4 검증을 다시 통과시켜야 한다(§6). 변경이 여러 기능에 걸치면 관련 스펙을 전부 고친다. "예전에는 ~였다" 같은 설명은 남기지 않는다 — 과거 버전은 git 에서 보면 된다.
 
