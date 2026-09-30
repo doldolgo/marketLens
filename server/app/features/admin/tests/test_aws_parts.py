@@ -287,6 +287,25 @@ def test_canary_reads_newest_first_and_keeps_only_the_last_finished_run() -> Non
     clients["logs"].assert_no_pending_responses()  # START 를 찾아 토큰이 남아도 멈췄다
 
 
+def test_canary_keeps_only_the_later_of_two_finished_runs() -> None:
+    clients = Clients("logs")
+    t_later = T_A + 60_000
+    # 최신부터 — 뒤 실행(성공)이 먼저, 앞 실행(실패)이 뒤에 온다. 토큰이 남아도 뒤 실행의 START 를 찾으면 멈춘다
+    _logs(
+        clients,
+        (canary_run(REQ_B, t_later) + canary_run(REQ_A, T_A, fail=True), "more"),
+    )
+    out = reader(clients).canary()
+    assert out["lastRunAt"] == t_later and out["ok"] is True
+    assert out["lines"] == [
+        "1단계 통과 (100ms)",
+        "2단계 통과 (80ms)",
+        "3단계 통과 (90ms)",
+        "4단계 통과 (1200ms)",
+    ]  # 앞 실행의 `3단계 실패` 줄은 없다
+    clients["logs"].assert_no_pending_responses()
+
+
 def test_canary_failure_keeps_the_error_message_masked() -> None:
     clients = Clients("logs")
     _logs(clients, (canary_run(REQ_A, T_A, fail=True), None))

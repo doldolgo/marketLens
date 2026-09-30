@@ -317,6 +317,16 @@ async def test_parts_refresh_on_their_own_periods_and_failures_are_cached_too() 
     assert body["budget"]["fetchedAt"] == int(NOW * 1000)  # 6시간 캐시
     for s in c.stubs.values():
         s.assert_no_pending_responses()
+    w.advance(21_600 - 300)  # 6시간 — 예산도 다시(박스 찾기 1시간도 지났다)
+    stub_alarms(c)
+    stub_metrics(c)
+    stub_canary(c)
+    stub_budget(c)
+    body = await w.feeds.aws()
+    assert body["budget"]["state"] == "ok"
+    assert body["budget"]["fetchedAt"] == int((NOW + 21_600) * 1000)
+    for s in c.stubs.values():
+        s.assert_no_pending_responses()  # get_caller_identity·describe_budgets 두 번째 호출
 
 
 class Slow:
