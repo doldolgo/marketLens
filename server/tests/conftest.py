@@ -1,6 +1,7 @@
 """collect(core) 테스트 공용 도구 — 네트워크 호출 없음, 거래소는 fake 로 대체."""
 
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from app.core.influx import (
@@ -11,6 +12,7 @@ from app.core.influx import (
 )
 from app.core.models import Row, StreamError
 from app.core.ticks import StreamVerdict
+from tests.line_protocol import parse_line
 
 
 def make_row(
@@ -92,19 +94,23 @@ class RawLog:
 class FakeInflux:
     """Influx fake — (measurement, 태그, 시각) 을 유일키로 덮어쓴다(db.md). 009 flusher·spark 복원용.
 
-    `write`·`query_premium`·`query_spark` 는 core.influx.InfluxClient 와 같은 시그니처다.
+    `write`·`write_lines`·`query_premium`·`query_spark` 는 core.influx.InfluxClient 와 같은 시그니처다.
+    `write_lines` 는 받은 줄을 그대로 남기고(`batches`) 점으로 되돌려 같은 저장소에 쓴다.
     """
 
     def __init__(self) -> None:
         self.points: dict[
             tuple[str, tuple[tuple[str, str], ...], int], InfluxPoint
         ] = {}
-        self.writes: list[int] = []  # 쓰기 호출마다 점 수
+        self.writes: list[int] = []  # 쓰기 호출마다 점(줄) 수
+        self.batches: list[list[str]] = []  # write_lines 호출마다 받은 줄 그대로
         self.fail = False
         self.fail_after_batches: int | None = None  # 이만큼 성공한 뒤의 배치부터 실패
         self.spark_rows: list[SparkBucketRow] = []
         self.spark_fail = False
         self.spark_delay_sec = 0.0
+        # query_spark 가 받은 HTTP 타임아웃
+        self.spark_timeouts: list[float | None] = []
 
     def write(self, points: list[InfluxPoint]) -> None:
         if self.fail or (
@@ -115,6 +121,11 @@ class FakeInflux:
         self.writes.append(len(points))
         for p in points:
             self.points[(p.measurement, tuple(sorted(p.tags.items())), p.ts)] = p
+
+    def write_lines(self, lines: list[str], bucket: str | None = None) -> None:
+        points = [parse_line(line) for line in lines]
+        self.write(points)
+        self.batches.append(list(lines))
 
     def stored(self, measurement: str) -> list[InfluxPoint]:
         return [p for p in self.points.values() if p.measurement == measurement]
@@ -140,7 +151,21 @@ class FakeInflux:
         out.sort(key=lambda r: r.ts)
         return out
 
-    def query_spark(self, *, start: int, stop: int) -> list[SparkBucketRow]:
+    def stream_premium(
+        self, *, dom: str, fx: str, base: str | None, start: int, stop: int
+    ) -> Iterator[tuple[str, str, int, float]]:
+        """실물처럼 (코인, 방향) 줄기마다 시각 오름차순 `(base, field, ts, value)`."""
+        rows = self.query_premium(dom=dom, fx=fx, base=base, start=start, stop=stop)
+        for b in sorted({r.base for r in rows}):
+            for field in ("fwd", "rev"):
+                for r in rows:
+                    if r.base == b:
+                        yield b, field, r.ts, r.fwd if field == "fwd" else r.rev
+
+    def query_spark(
+        self, *, start: int, stop: int, timeout_sec: float | None = None
+    ) -> list[SparkBucketRow]:
+        self.spark_timeouts.append(timeout_sec)
         if self.spark_fail:
             raise InfluxUnavailableError("조회 실패 (테스트)")
         if self.spark_delay_sec:
