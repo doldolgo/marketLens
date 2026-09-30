@@ -37,6 +37,7 @@ class FakeInflux:
         self.rows: list[CollectFailRow] = []
         self.query_fail = False
         self.query_delay = 0.0
+        self.query_timeouts: list[float | None] = []  # 복원 조회가 받은 HTTP 타임아웃
 
     def write(self, points: list[InfluxPoint]) -> None:
         self.write_calls += 1
@@ -46,7 +47,10 @@ class FakeInflux:
             key = (p.measurement, frozenset(p.tags.items()), p.ts)
             self.data.setdefault(key, {}).update(p.fields)
 
-    def query_collect_fail(self, *, start: int) -> list[CollectFailRow]:
+    def query_collect_fail(
+        self, *, start: int, timeout_sec: float | None = None
+    ) -> list[CollectFailRow]:
+        self.query_timeouts.append(timeout_sec)
         if self.query_delay:
             time.sleep(self.query_delay)
         if self.query_fail:
@@ -203,6 +207,7 @@ async def test_restore_fills_memory_and_open_points_continue() -> None:
     ]
     t = OutageTracker(writer=influx)
     await t.restore(influx, T0)
+    assert influx.query_timeouts == [3.0]  # 조회의 HTTP 타임아웃 = 복원 상한
     assert [(o.exchange, o.ended_at is None) for o in t.outages()] == [
         ("binance", True),
         ("upbit", False),
