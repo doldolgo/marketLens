@@ -299,6 +299,94 @@ class AwsReader:
         self._dims = (now, metrics)
         return metrics
 
+    # --- canary ---
+
+    def canary(self) -> dict[str, Any]:
+        """최근에 끝난 실행 하나 — 최신부터 읽어 가장 늦은 REPORT 의 요청 ID 줄만 모은다 (§3.2)."""
+        logs = self._client("logs")
+        start_ms = int(self._clock() * 1000) - CANARY_WINDOW_MS
+        began = self._mono()
+        events: list[tuple[int, str, str | None]] = []  # (시각 ms, 메시지, 요청 ID)
+        token: str | None = None
+        pages = 0
+        while True:
+            kwargs: dict[str, Any] = {
+                "logGroupName": CANARY_LOG_GROUP,
+                "startTime": start_ms,
+                "startFromHead": False,
+            }
+            if token:
+                kwargs["nextToken"] = token
+            resp = logs.filter_log_events(**kwargs)
+            pages += 1
+            for ev in resp.get("events", []):
+                msg = str(ev.get("message", ""))
+                events.append((int(ev.get("timestamp", 0)), msg, _request_id(msg)))
+            token = resp.get("nextToken")
+            report = _latest_report(events)
+            if report is not None and _has_start(events, report[2]):
+                break
+            if not token:
+                break
+            if pages >= CANARY_MAX_PAGES or self._mono() - began >= CANARY_MAX_SEC:
+                break
+        report = _latest_report(events)
+        if report is None:
+            if token:
+                raise PartialRead
+            # 11분 안의 줄을 끝까지 읽었는데 끝난 실행이 없다 — 일정 멈춤은 canary.runs·canary 경보가 말한다
+            return {"lastRunAt": None, "durationMs": None, "ok": None, "lines": []}
+        rid = report[2]
+        run = sorted((e for e in events if e[2] == rid), key=lambda e: e[0])
+        start = next((e for e in run if e[1].startswith("START RequestId:")), None)
+        messages = [_message(e[1]) for e in run if not e[1].startswith(_CONTROL)]
+        m = _DURATION.search(report[1])
+        return {
+            "lastRunAt": (start or run[0])[0],
+            "durationMs": None if m is None else round(float(m.group(1))),
+            "ok": any("4단계 통과" in msg for msg in messages),
+            "lines": [
+                _text(msg, CANARY_LINE_LIMIT) for msg in messages[:CANARY_MAX_LINES]
+            ],
+        }
+
+    # --- budget ---
+
+    def budget(self) -> dict[str, Any]:
+        # 계정 ID 는 호출에만 쓴다 — 응답·로그에 싣지 않는다
+        account = self._client("sts").get_caller_identity()["Account"]
+        budgets = self._client("budgets")
+        items: list[dict[str, Any]] = []
+        token: str | None = None
+        for _ in range(LIST_MAX_PAGES):
+            kwargs: dict[str, Any] = {"AccountId": account, "MaxResults": 100}
+            if token:
+                kwargs["NextToken"] = token
+            resp = budgets.describe_budgets(**kwargs)
+            for b in resp.get("Budgets", []):
+                if b.get("BudgetType") != "COST":
+                    continue
+                limit = b.get("BudgetLimit") or {}
+                spend = b.get("CalculatedSpend") or {}
+                items.append(
+                    {
+                        "name": b.get("BudgetName"),
+                        "unit": limit.get("Unit"),
+                        "limit": _money(limit.get("Amount")),
+                        "actual": _money(
+                            (spend.get("ActualSpend") or {}).get("Amount")
+                        ),
+                        "forecast": _money(
+                            (spend.get("ForecastedSpend") or {}).get("Amount")
+                        ),
+                        "timeUnit": b.get("TimeUnit"),
+                    }
+                )
+            token = resp.get("NextToken")
+            if not token:
+                break
+        return {"items": items}
+
     # --- 경보 이력 (§3.3) ---
 
     def alarm_history(self) -> dict[str, Any]:

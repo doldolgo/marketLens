@@ -17,14 +17,21 @@ from botocore.stub import ANY
 
 from app.features.admin.aws import AwsReader, PartialRead, classify
 from app.features.admin.tests.aws_fakes import (
+    ACCOUNT,
     END,
+    IDENTITY,
     IDS,
     NOW,
+    REQ_A,
+    REQ_B,
     START,
     Clients,
     alarms_response,
+    budgets_response,
+    canary_run,
     history_item,
     list_metrics_response,
+    log_event,
     metric_data_response,
 )
 
@@ -191,6 +198,122 @@ def test_metrics_drop_a_box_without_its_memory_alarm_and_cache_discovery_for_an_
     _metrics_stubs(clients)
     assert len(r.metrics()["boxes"]) == 3
     clients["cloudwatch"].assert_no_pending_responses()
+
+
+# --- canary ---
+
+T_A = int(NOW * 1000) - 300_000  # 5분 전 실행
+T_B = int(NOW * 1000) - 5_000  # 방금 시작해 아직 안 끝난 실행
+
+
+def _logs(clients: Clients, *pages: tuple[list[dict], str | None]) -> None:
+    for i, (events, token) in enumerate(pages):
+        resp: dict = {"events": events, "searchedLogStreams": []}
+        if token:
+            resp["nextToken"] = token
+        expected = {
+            "logGroupName": "/aws/lambda/marketlens-smoke",
+            "startTime": int(NOW * 1000) - 660_000,
+            "startFromHead": False,
+        }
+        if i:
+            expected["nextToken"] = ANY
+        clients["logs"].add_response("filter_log_events", resp, expected)
+
+
+def test_canary_reads_newest_first_and_keeps_only_the_last_finished_run() -> None:
+    clients = Clients("logs")
+    running = [
+        log_event(
+            T_B + 10, f"2026-10-01T00:05:00.010Z\t{REQ_B}\tINFO\t1단계 통과 (90ms)\n"
+        ),
+        log_event(T_B, f"START RequestId: {REQ_B} Version: $LATEST\n"),
+    ]
+    _logs(clients, (running + canary_run(REQ_A, T_A), "more"))
+    out = reader(clients).canary()
+    assert out == {
+        "lastRunAt": T_A,
+        "durationMs": 1523,
+        "ok": True,
+        "lines": [
+            "1단계 통과 (100ms)",
+            "2단계 통과 (80ms)",
+            "3단계 통과 (90ms)",
+            "4단계 통과 (1200ms)",
+        ],
+    }
+    clients["logs"].assert_no_pending_responses()  # START 를 찾아 토큰이 남아도 멈췄다
+
+
+def test_canary_failure_keeps_the_error_message_masked() -> None:
+    clients = Clients("logs")
+    _logs(clients, (canary_run(REQ_A, T_A, fail=True), None))
+    out = reader(clients).canary()
+    assert out["ok"] is False
+    last = out["lines"][-1]
+    assert last.startswith("3단계 실패: User: [가림]")  # JSON 오류 줄은 errorMessage 만
+    assert "errorType" not in last and ACCOUNT not in last
+
+
+def test_canary_follows_an_empty_first_page_with_a_token() -> None:
+    clients = Clients("logs")
+    _logs(
+        clients,
+        ([], "t1"),
+        (canary_run(REQ_A, T_A)[:1], "t2"),
+        (canary_run(REQ_A, T_A)[1:], None),
+    )
+    assert reader(clients).canary()["lastRunAt"] == T_A
+    clients["logs"].assert_no_pending_responses()
+
+
+def test_canary_three_empty_pages_with_a_token_left_is_partial() -> None:
+    clients = Clients("logs")
+    _logs(clients, ([], "t1"), ([], "t2"), ([], "t3"))
+    with pytest.raises(PartialRead):
+        reader(clients).canary()
+    assert classify(PartialRead()) == ("error", "partial")
+
+
+def test_canary_without_a_finished_run_in_eleven_minutes_is_ok_and_empty() -> None:
+    clients = Clients("logs")
+    _logs(
+        clients,
+        ([log_event(T_B, f"START RequestId: {REQ_B} Version: $LATEST\n")], None),
+    )
+    assert reader(clients).canary() == {
+        "lastRunAt": None,
+        "durationMs": None,
+        "ok": None,
+        "lines": [],
+    }
+
+
+# --- budget ---
+
+
+def test_budget_lists_cost_budgets_without_the_account_id() -> None:
+    clients = Clients("sts", "budgets")
+    clients["sts"].add_response("get_caller_identity", IDENTITY)
+    clients["budgets"].add_response(
+        "describe_budgets",
+        budgets_response(),
+        {"AccountId": ACCOUNT, "MaxResults": 100},
+    )
+    out = reader(clients).budget()
+    assert out == {
+        "items": [
+            {
+                "name": "marketlens-monthly",
+                "unit": "USD",
+                "limit": 130.0,
+                "actual": 41.23,
+                "forecast": 88.1,
+                "timeUnit": "MONTHLY",
+            }
+        ]
+    }
+    assert ACCOUNT not in repr(out)
 
 
 # --- 경보 이력 (§3.3) ---

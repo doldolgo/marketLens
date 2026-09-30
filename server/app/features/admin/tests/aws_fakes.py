@@ -175,6 +175,85 @@ def metric_data_response(ids: list[str]) -> dict:
     return {"MetricDataResults": results, "Messages": []}
 
 
+def log_event(ts_ms: int, message: str) -> dict:
+    return {
+        "logStreamName": "2026/10/01/[$LATEST]abc",
+        "timestamp": ts_ms,
+        "message": message,
+        "ingestionTime": ts_ms,
+        "eventId": str(ts_ms),
+    }
+
+
+def canary_run(req: str, t0_ms: int, *, fail: bool = False) -> list[dict]:
+    """한 실행의 줄 — 최신부터(startFromHead=false 순서)."""
+    lines = [
+        log_event(t0_ms, f"START RequestId: {req} Version: $LATEST\n"),
+        log_event(
+            t0_ms + 100, f"2026-10-01T00:00:00.100Z\t{req}\tINFO\t1단계 통과 (100ms)\n"
+        ),
+        log_event(
+            t0_ms + 200, f"2026-10-01T00:00:00.200Z\t{req}\tINFO\t2단계 통과 (80ms)\n"
+        ),
+    ]
+    if fail:
+        err = (
+            '{"errorType":"Error","errorMessage":"3단계 실패: '
+            + ARN_TEXT
+            + '","stack":["Error: x"]}'
+        )
+        lines.append(
+            log_event(
+                t0_ms + 300,
+                f"2026-10-01T00:00:00.300Z\t{req}\tERROR\tInvoke Error \t{err}\n",
+            )
+        )
+    else:
+        lines.append(
+            log_event(
+                t0_ms + 300,
+                f"2026-10-01T00:00:00.300Z\t{req}\tINFO\t3단계 통과 (90ms)\n",
+            )
+        )
+        lines.append(
+            log_event(
+                t0_ms + 400,
+                f"2026-10-01T00:00:00.400Z\t{req}\tINFO\t4단계 통과 (1200ms)\n",
+            )
+        )
+    lines.append(log_event(t0_ms + 500, f"END RequestId: {req}\n"))
+    lines.append(
+        log_event(
+            t0_ms + 501,
+            f"REPORT RequestId: {req}\tDuration: 1523.46 ms\tBilled Duration: 1524 ms\tMemory Size: 128 MB\tMax Memory Used: 80 MB\t\n",
+        )
+    )
+    return list(reversed(lines))
+
+
+def budgets_response() -> dict:
+    return {
+        "Budgets": [
+            {
+                "BudgetName": "marketlens-monthly",
+                "BudgetLimit": {"Amount": "130.0", "Unit": "USD"},
+                "TimeUnit": "MONTHLY",
+                "BudgetType": "COST",
+                "CalculatedSpend": {
+                    "ActualSpend": {"Amount": "41.23456", "Unit": "USD"},
+                    "ForecastedSpend": {"Amount": "88.1", "Unit": "USD"},
+                },
+            },
+            {
+                "BudgetName": "usage",
+                "BudgetLimit": {"Amount": "10", "Unit": "GB"},
+                "TimeUnit": "MONTHLY",
+                "BudgetType": "USAGE",
+            },
+        ]
+    }
+
+
 def history_item(
     name: str, ts: float, old: str, new: str, reason: str = "Threshold Crossed"
 ) -> dict:
