@@ -93,11 +93,19 @@ class BithumbStream:
         self._resubscribe: asyncio.Task[None] | None = None
         self._backoff = BACKOFF_START
         self.decode_failures = 0
+        # 직전에 파싱까지 성공한 목록 응답의 본문 바이트와 그 결과 — 같은 바이트면 파싱을 건너뛴다 (001 §3.2)
+        self._markets_body: bytes | None = None
+        self._markets_codes: list[str] = []
 
     # --- 마켓 목록 (§3.2) ---
 
     async def fetch_markets(self, client: httpx.AsyncClient) -> list[str]:
-        """`GET /v1/market/all` 의 KRW- 마켓 코드(≈480). 본문은 해석 전에 원문 싱크로(`markets:all`)."""
+        """`GET /v1/market/all` 의 KRW- 마켓 코드(≈480). 본문은 해석 전에 원문 싱크로(`markets:all`).
+
+        원문 기록은 매 응답 하고, 200 본문 바이트가 직전 성공 응답과 같으면 파싱 없이 그때의 목록을 돌려준다
+        — 목록은 하루 몇 번만 바뀌는데 매초 온다. 바이트가 같으면 파싱 결과도 같아 낡을 여지가 없다 (001 §3.2).
+        빗썸의 200 + 에러 본문은 성공이 아니므로 기억하지 않는다 — 같은 에러 본문이 다시 와도 다시 실패다.
+        """
         url = REST_URL + MARKETS_PATH
         try:
             resp = await client.get(url)
@@ -115,6 +123,8 @@ class BithumbStream:
         self._record(
             self.id, f"rest:{MARKETS_PATH}", self._clock(), resp.text, MARKETS_KEY
         )
+        if resp.status_code == 200 and resp.content == self._markets_body:
+            return list(self._markets_codes)
         if resp.status_code != 200:
             raise ExchangeApiError(
                 self.id,
@@ -132,12 +142,14 @@ class BithumbStream:
                 self.id, url, f"빗썸 JSON 파싱 실패: {exc}", kind="bad_response"
             ) from exc
         if isinstance(data, list):
-            return [
+            codes = [
                 str(m["market"])
                 for m in data
                 if isinstance(m, dict)
                 and str(m.get("market", "")).startswith(f"{_QUOTE}-")
             ]
+            self._markets_body, self._markets_codes = resp.content, codes
+            return list(codes)
         # 빗썸 quirk: 에러를 HTTP 200 + {"error":{"name","message"}} 로 준다 (011 §3.2)
         error = data.get("error") if isinstance(data, dict) else None
         if isinstance(error, dict):

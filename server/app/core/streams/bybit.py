@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 import zlib
 from collections.abc import Awaitable, Callable
@@ -41,6 +42,10 @@ INSTRUMENTS_QUERY = "?category=spot&status=Trading"
 INSTRUMENTS_URL = REST_URL + INSTRUMENTS_PATH + INSTRUMENTS_QUERY
 SYMBOLS_KEY = "symbols:all"  # 매초 오는 심볼 목록 본문의 원문 싱크 key — 분당 마지막 1건 (001 §3.7)
 _BODY_LIMIT = 500  # 핸드셰이크 거부 응답 본문 상한 — 001 §3.1 과 같은 500자
+# instruments-info 에서 매 응답 바뀌는 것은 봉투 꼬리의 `"time":<ms>` 하나다 — 이것만 빼고 직전 본문과 비교한다 (§3.3)
+_ENVELOPE_TIME = re.compile(rb'"time":\s*\d+\s*\}\s*$')
+# 꼬리 몇 바이트 안에서만 찾는다 — 못 찾으면 본문 전체로 비교한다(매번 달라 파싱으로 간다)
+_ENVELOPE_TIME_WITHIN = 64
 
 DEPTH = (
     200  # 현물 호가 단계 — 1·50·200·1000 중 100ms 주기라 메시지가 50단계의 1/5 (§3.2)
@@ -182,13 +187,17 @@ class BybitStream:
         self._wake = asyncio.Event()  # set_universe 가 재조정 루프를 깨운다
         self._rebalance: asyncio.Task[None] | None = None
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다
+        # 직전에 맵까지 만든 200 응답의 비교용 바이트(꼬리 time 제외) — 같으면 파싱·맵 재생성을 건너뛴다 (§3.3)
+        self._symbols_body: bytes | None = None
 
     # --- 심볼 집합 (ForeignSymbolSource, §3.3) ---
 
     async def refresh(self, client: httpx.AsyncClient) -> int:
         """instruments-info 1회 → Trading·USDT 심볼 맵. 응답 본문은 해석 전에 원문 싱크로(`symbols:all`).
 
-        HTTP 200 이어도 `retCode != 0` 이면 실패다 (§3.8).
+        HTTP 200 이어도 `retCode != 0` 이면 실패다 (§3.8). 원문 기록은 매 응답 하고, 200 본문에서 꼬리의
+        time 만 뺀 바이트가 직전에 맵을 만든 응답과 같으면 파싱·맵 재생성을 건너뛴다 — 바이트가 같으면 맵도
+        같으므로 낡을 여지가 없다 (§3.3).
         """
         url = INSTRUMENTS_URL
         try:
@@ -207,6 +216,9 @@ class BybitStream:
         self._record(
             self.id, f"rest:{INSTRUMENTS_PATH}", self._clock(), resp.text, SYMBOLS_KEY
         )
+        comparable = _without_envelope_time(resp.content)
+        if resp.status_code == 200 and comparable == self._symbols_body:
+            return 1
         if resp.status_code != 200:
             raise ExchangeApiError(
                 self.id,
@@ -257,6 +269,7 @@ class BybitStream:
             )  # 둘 이상이면 처음 것
         self._symbol_of = symbol_of
         self._base_of = {symbol: base for base, symbol in symbol_of.items()}
+        self._symbols_body = comparable
         return 1
 
     def bases(self) -> set[str]:
@@ -643,7 +656,11 @@ class BybitStream:
                 continue
             shard.state.last_message_at = at
             shard.backoff = BACKOFF_START  # 구독까지 성공했다는 증거 = 첫 시세 프레임
-            self._publish()
+            # 시세 프레임이 바꾸는 집계값은 last_message_at 하나뿐이다 — 샤드 3개를 다시 집계하지 않고
+            # 올리기만 한다. 연결·끊김·구독 변경은 그 자리에서 _publish 가 전체를 다시 집계한다 (§3.5)
+            last = self._state.last_message_at
+            if last is None or at > last:
+                self._state.last_message_at = at
 
     def _on_orderbook(
         self, shard: _Shard, symbol: str, base: str, msg: dict[str, Any], at: int
@@ -699,6 +716,12 @@ class BybitStream:
             price=float(latest["p"]),
             price_timestamp=int(latest["T"]),
         )
+
+
+def _without_envelope_time(content: bytes) -> bytes:
+    """비교용 바이트 — 봉투 꼬리의 `"time":<ms>}` 를 뺀 것. 없으면 본문 그대로."""
+    m = _ENVELOPE_TIME.search(content, max(0, len(content) - _ENVELOPE_TIME_WITHIN))
+    return content if m is None else content[: m.start()]
 
 
 def _decode(text: str) -> dict[str, Any] | None:

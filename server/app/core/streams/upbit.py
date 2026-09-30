@@ -88,11 +88,18 @@ class UpbitStream:
         self._resubscribe: asyncio.Task[None] | None = None
         self._backoff = BACKOFF_START
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다 (§3.8)
+        # 직전에 파싱까지 성공한 목록 응답의 본문 바이트와 그 결과 — 같은 바이트면 파싱을 건너뛴다 (§3.2)
+        self._markets_body: bytes | None = None
+        self._markets_codes: list[str] = []
 
     # --- 마켓 목록 (§3.2) ---
 
     async def fetch_markets(self, client: httpx.AsyncClient) -> list[str]:
-        """`GET /v1/market/all` 의 KRW- 마켓 코드. 응답 본문은 해석 전에 원문 싱크로(`markets:all`)."""
+        """`GET /v1/market/all` 의 KRW- 마켓 코드. 응답 본문은 해석 전에 원문 싱크로(`markets:all`).
+
+        원문 기록은 매 응답 하고, 200 본문 바이트가 직전 성공 응답과 같으면 파싱 없이 그때의 목록을 돌려준다
+        — 목록은 하루 몇 번만 바뀌는데 매초 온다. 바이트가 같으면 파싱 결과도 같아 낡을 여지가 없다 (§3.2).
+        """
         url = REST_URL + MARKETS_PATH
         try:
             resp = await client.get(url)
@@ -110,6 +117,8 @@ class UpbitStream:
         self._record(
             self.id, f"rest:{MARKETS_PATH}", self._clock(), resp.text, MARKETS_KEY
         )
+        if resp.status_code == 200 and resp.content == self._markets_body:
+            return list(self._markets_codes)
         if resp.status_code != 200:
             raise ExchangeApiError(
                 self.id,
@@ -130,11 +139,13 @@ class UpbitStream:
             raise ExchangeApiError(
                 self.id, url, "업비트 마켓 목록이 리스트가 아니다", body=resp.text
             )
-        return [
+        codes = [
             str(m["market"])
             for m in data
             if isinstance(m, dict) and str(m.get("market", "")).startswith(f"{_QUOTE}-")
         ]
+        self._markets_body, self._markets_codes = resp.content, codes
+        return list(codes)
 
     def set_markets(self, codes: Iterable[str]) -> None:
         """구독 대상 전체 목록. 바뀌었고 연결 중이면 전 목록으로 재구독한다 (§3.11)."""
