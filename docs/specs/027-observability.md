@@ -47,7 +47,7 @@
 - 서버 기록이 보는 것: 들어온 주소(첫 로드·새로고침·공유 링크의 경로와 쿼리, `utm_*`), 외부 출처(`Referer` 의 origin), 기기·브라우저(`User-Agent`), 대시보드를 열어 둔 시간(`/api/ws/spreads` 는 연결이 끝날 때 상태 101·`duration` 한 줄), 오류 응답.
 - 기록은 caddy 한 곳에서 한다. nginx 접속 로그는 끈다(공개 server — 관리자 server 는 029 가 자기 기록을 남긴다. 오류 로그는 남긴다) — nginx 기본 형식의 마지막 칸이 caddy 가 넣은 원 IP(`X-Forwarded-For`)다.
 - 로그 설정은 `caddy/Caddyfile` 안의 이름 있는 조각 `access_log` 하나에 두고 도메인 블록(`kimptrack.com`)만 불러온다(`www` 는 apex 로 301 만 하는 블록이라 기록하지 않는다 — 022·023). `http://` catch-all(탄력 IP 직접 접속·봇 스캔)은 기록하지 않는다.
-- 파일: 컨테이너 `/var/log/caddy/access.log`, 호스트 `./logs/caddy/`(레포 루트 기준 바인드, git 무시 — 배포의 `git reset --hard` 는 추적 안 하는 파일을 지우지 않는다). 권한 0644(사람이 호스트에서 읽게). 하루(`roll_interval 24h`) 또는 50MiB 에서 회전, gzip 된 회전 파일 100개까지, 90일 뒤 삭제(032 — 지우기는 회전 때 돌아 최대 2일 늦다. 크기로만 돌리면 방문이 적을 때 90일보다 오래된 줄이 현재 파일에 남는다).
+- 파일: 컨테이너 `/var/log/caddy/access.log`, 호스트 `./logs/caddy/`(레포 루트 기준 바인드, git 무시 — 배포의 `git reset --hard` 는 추적 안 하는 파일을 지우지 않는다). 권한 0644(사람이 호스트에서 읽게). 하루(`roll_interval 24h`) 또는 50MiB 에서 회전, gzip 된 회전 파일 100개까지, 90일 뒤 삭제(032 — 지우기는 회전 때 돌아 최대 2일 늦다. 크기로만 돌리면 방문이 적을 때 90일보다 오래된 줄이 현재 파일에 남는다). 이 `output file` 블록(회전 설정)은 배포의 reload 로 바뀌지 않는다(caddy 가 파일 writer 를 파일 이름으로 재사용 — 032 로컬 재현) — 고친 배포 뒤 사람이 `docker restart marketlens-caddy` 를 한 번 한다. 지우기 규칙(`format`)은 reload 로 바뀐다.
 - 한 줄에 남기는 것은 허용 목록이다. caddy 기본 JSON 에서
   - 요청 헤더·응답 헤더를 통째로 지운다. Accept-Language·Sec-Ch-Ua·임의 헤더(IP 가 든 것 포함)가 합쳐지면 방문자를 가려낼 수 있고, 응답 `Location` 에는 022 의 301 이 쿼리(검색어 포함)를 그대로 싣는다.
   - 대신 `ua`(`User-Agent` 그대로)와 `referer` 두 필드를 붙인다. `referer` 는 http(s) 스킴+호스트(+포트)만 남기고, 그 모양이 아니면 빈 값이다.
