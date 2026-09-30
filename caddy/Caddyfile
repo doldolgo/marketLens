@@ -10,19 +10,15 @@
 	}
 	# 027 §3.2 — 기본 로거(오류 줄 — 예: 업스트림 502. docker 로그로 간다)에도 접속 로그와 같은 지우기 규칙.
 	# docker 로그에 원 IP·검색어가 남지 않게. 아래 access_log 조각의 format 과 같아야 한다(test_observability.py 가 본다).
+	# 032 — 단 IP 두 필드는 자르지 않고 지운다. 오류 줄에는 IP 가 필요 없고, docker 로그는 크기로만 회전해 방문이 적으면
+	# 처리방침의 90일보다 오래 남는다.
 	log default {
 		format filter {
 			wrap json
 			request>headers delete
 			resp_headers delete
-			request>remote_ip ip_mask {
-				ipv4 24
-				ipv6 48
-			}
-			request>client_ip ip_mask {
-				ipv4 24
-				ipv6 48
-			}
+			request>remote_ip delete
+			request>client_ip delete
 			request>uri query {
 				delete s.q
 				delete g.q
@@ -52,11 +48,14 @@
 
 	log {
 		# 호스트 ./logs/caddy/ (compose 바인드, git 무시). 0644 — 사람이 호스트에서 읽게.
-		# 50MiB 에서 회전, gzip 된 회전 파일 5개, 회전 파일은 90일 뒤 지운다(caddy 기본과 같은 값).
+		# 032 — 하루(또는 50MiB)마다 회전, gzip 된 회전 파일 100개(하루 1개 × 90일 + 크기 회전 여유), 회전 파일은 90일 뒤
+		# 지운다(지우기는 회전 때 돌아 최대 2일 늦다 — 처리방침의 파기 기한 5일 안). 크기로만 회전하면 방문이 적을 때
+		# 90일보다 오래된 줄이 현재 파일에 남는다. roll_interval 은 Caddy 2.11 부터다.
 		output file /var/log/caddy/access.log {
 			mode 0644
 			roll_size 50MiB
-			roll_keep 5
+			roll_interval 24h
+			roll_keep 100
 			roll_keep_for 90d
 		}
 		format filter {
