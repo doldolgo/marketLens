@@ -69,6 +69,10 @@ def _client_error(code: str) -> ClientError:
             ("unconfigured", "UnrecognizedClientException"),
         ),
         (_client_error("ExpiredToken"), ("unconfigured", "ExpiredToken")),
+        (
+            _client_error("ExpiredTokenException"),
+            ("unconfigured", "ExpiredTokenException"),
+        ),  # JSON 프로토콜(Logs·Budgets)의 만료 — canary·예산도 경보와 같은 상태로
         (_client_error("AccessDenied"), ("denied", "AccessDenied")),
         (_client_error("AccessDeniedException"), ("denied", "AccessDeniedException")),
         (_client_error("UnauthorizedOperation"), ("denied", "UnauthorizedOperation")),
@@ -181,6 +185,44 @@ def test_metrics_boxes_come_from_memory_alarm_names_on_a_288_point_grid() -> Non
         and queries["canary_duration"]["Stat"] == "Maximum"
     )
     assert all(q["Period"] == 300 for q in queries.values())
+
+
+def _ws_query(*, with_serve: bool) -> tuple[dict, dict]:
+    """ListMetrics 맨 앞에 바꾸기 전 serve 의 게이지를 둔 채 지표를 읽는다 — (응답, 질의 Id → 질의)."""
+    old_serve = {
+        "Namespace": "MarketLens",
+        "MetricName": "marketlens_ws_clients",
+        "Dimensions": [
+            {"Name": "InstanceId", "Value": "i-0aaaaaaaaaaaaaaaa"},
+            {"Name": "metric_type", "Value": "gauge"},
+        ],
+    }
+    clients, captured = Clients("cloudwatch"), []
+    cw = clients["cloudwatch"]
+    cw.add_response("describe_alarms", alarms_response(with_serve=with_serve))
+    listed = list_metrics_response()
+    listed["Metrics"].insert(0, old_serve)
+    cw.add_response("list_metrics", listed)
+    ids = [f"{b}_{k}" for b in IDS for k in ("mem", "disk", "cpu", "credit")]
+    cw.add_response("get_metric_data", metric_data_response([*ids, "ws"]))
+    clients.clients["cloudwatch"].meta.events.register(
+        "provide-client-params.cloudwatch.GetMetricData",
+        lambda params, **kw: captured.append(params),
+    )
+    out = reader(clients).metrics()
+    return out, {q["Id"]: q for q in captured[0]["MetricDataQueries"]}
+
+
+def test_ws_gauge_is_the_serve_instance_s_even_when_an_old_one_is_listed_first() -> (
+    None
+):
+    # ListMetrics 는 2주 안에 자료가 있던 지표를 순서 없이 준다 — 바꾸기 전 serve 의 게이지가 앞에 올 수 있다
+    out, queries = _ws_query(with_serve=True)
+    dims = queries["ws"]["MetricStat"]["Metric"]["Dimensions"]
+    assert dims[0] == {"Name": "InstanceId", "Value": IDS["serve"]}
+    assert out["wsClients"] is not None
+    out, queries = _ws_query(with_serve=False)
+    assert "ws" not in queries and out["wsClients"] is None  # serve 가 빠지면 null
 
 
 def test_metrics_drop_a_box_without_its_memory_alarm_and_cache_discovery_for_an_hour() -> (

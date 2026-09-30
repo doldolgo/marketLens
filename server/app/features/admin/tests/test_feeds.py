@@ -17,6 +17,7 @@ import pytest
 from botocore.exceptions import ClientError, NoCredentialsError, ReadTimeoutError
 
 from app.core.notify import SlackLogHandler
+from app.features.admin import aws as aws_module
 from app.features.admin.feeds import AdminFeeds
 from app.features.admin.tests.aws_fakes import (
     ACCOUNT,
@@ -200,6 +201,62 @@ async def test_missing_credentials_are_looked_up_again_on_the_next_refresh() -> 
     w.advance(60)
     second = await w.feeds.alerts(bus=None, slack_configured=False)
     assert second["alarms"]["state"] == "ok"
+
+
+class Session:
+    """boto3 세션 흉내 — 자격증명 조회(메타데이터 끝점이 답하지 않으면 한 번에 약 2초)를 센다."""
+
+    creds: Any = None
+    lookups = 0
+    delay = 0.0
+
+    def get_credentials(self) -> Any:
+        type(self).lookups += 1
+        time.sleep(self.delay)
+        return self.creds
+
+    def client(self, service: str, **kwargs: Any) -> Any:
+        return Raising(RuntimeError("부르지 않는다"))
+
+
+@pytest.fixture
+def session(monkeypatch: pytest.MonkeyPatch) -> type[Session]:
+    monkeypatch.setattr(Session, "creds", None)
+    monkeypatch.setattr(Session, "lookups", 0)
+    monkeypatch.setattr(Session, "delay", 0.0)
+    monkeypatch.setattr(aws_module.boto3.session, "Session", Session)
+    return Session
+
+
+def test_missing_credentials_are_looked_up_once_a_minute(
+    session: type[Session],
+) -> None:
+    t = [0.0]
+    make = aws_module.client_factory("ap-northeast-2", lambda: t[0])
+    for service in ("cloudwatch", "logs", "sts", "cloudwatch"):
+        with pytest.raises(NoCredentialsError):
+            make(service)
+    assert session.lookups == 1  # 1분 안 — 부분마다 다시 찾지 않는다
+    t[0] = 60.0
+    session.creds = object()  # 역할이 붙었다
+    assert isinstance(make("cloudwatch"), Raising)
+    assert session.lookups == 2
+
+
+async def test_slow_credential_lookup_still_answers_all_four_parts_in_time(
+    session: type[Session],
+) -> None:
+    # 밖으로 나가는 망은 있고 메타데이터 끝점이 없는 호스트 — 첫 요청이 3초 안에 네 부분 모두 unconfigured
+    session.delay = 0.3
+    feeds = AdminFeeds(region="ap-northeast-2", wait_sec=1.0)
+    try:
+        body = await feeds.aws()
+    finally:
+        feeds.close()
+    assert {(p["state"], p["code"]) for p in body.values()} == {
+        ("unconfigured", "no_credentials")
+    }
+    assert session.lookups == 1
 
 
 async def test_metrics_discovery_denied_marks_metrics_denied_even_when_alarms_are_ok() -> (

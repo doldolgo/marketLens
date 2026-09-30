@@ -130,7 +130,7 @@ class AdminFeeds:
         self._region = region or None
         self._clock = clock
         self._mono = mono
-        make = client if client is not None else client_factory(region or "")
+        make = client if client is not None else client_factory(region or "", mono)
         self._clients: dict[str, Any] = {}
 
         def cached(service: str) -> Any:
@@ -243,6 +243,7 @@ class AdminFeeds:
             state, code = classify(exc)
             if code == "no_credentials":
                 # 자격증명 없이 만든 클라이언트는 나중에 역할이 붙어도 계속 없다 — 버려 다음 갱신이 다시 찾게 한다
+                # (`client_factory` 는 자격증명이 없으면 만들지 않는다 — 주입한 클라이언트를 위한 자리)
                 self._clients.clear()
             return Result(state, code)
         return Result("ok", None, int(self._clock() * 1000), values)

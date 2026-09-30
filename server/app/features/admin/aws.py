@@ -49,11 +49,15 @@ HISTORY_WINDOW_SEC = 7 * 86_400
 HISTORY_PAGE = 100
 HISTORY_MAX_PAGES = 2
 LIST_MAX_PAGES = 5  # 경보·지표 목록 쪽 수 상한 — 지금은 한 쪽(경보 18개·지표 13개)
+# 자격증명을 못 찾은 결과를 들고 있는 시간 — 메타데이터 끝점이 답하지 않는 호스트는 조회 한 번이 약 2초다 (§3.2)
+NO_CREDENTIALS_TTL_SEC = 60.0
 
+# 앞 둘·뒤 둘이 각각 query·JSON 프로토콜의 같은 뜻 — Logs·Budgets 는 JSON 쪽 코드(`…Exception`)를 준다
 UNCONFIGURED_CODES = {
     "InvalidClientTokenId",
     "UnrecognizedClientException",
     "ExpiredToken",
+    "ExpiredTokenException",
 }
 DENIED_CODES = {"AccessDenied", "AccessDeniedException", "UnauthorizedOperation"}
 _CODE_SHAPE = re.compile(r"[A-Za-z0-9_.]{1,64}")
@@ -86,14 +90,29 @@ def classify(exc: BaseException) -> tuple[str, str]:
     return "error", type(exc).__name__
 
 
-def client_factory(region: str) -> Callable[[str], Any]:
-    """서비스 이름 → boto3 클라이언트. 자격증명은 SDK 기본 탐색(EC2 는 인스턴스 역할 — 010). 세션도 첫 호출 때 만든다."""
+def client_factory(
+    region: str, mono: Callable[[], float] = time.monotonic
+) -> Callable[[str], Any]:
+    """서비스 이름 → boto3 클라이언트. 자격증명은 SDK 기본 탐색(EC2 는 인스턴스 역할 — 010). 세션도 첫 호출 때 만든다.
+
+    자격증명을 못 찾으면 클라이언트를 만들지 않고 `NoCredentialsError` 를 낸다 — 자격증명 없이 만든 botocore 클라이언트는
+    나중에 역할이 붙어도 계속 없다. 못 찾은 결과는 1분 들고 있다: 밖으로 나가는 망은 있는데 메타데이터 끝점이 답하지 않는
+    호스트(AWS 밖·로컬 compose)는 조회 한 번이 약 2초라, 부분마다 다시 찾으면 첫 요청이 3초 안에 못 끝난다.
+    """
     session: boto3.session.Session | None = None
+    missing_at: float | None = None
 
     def make(service: str) -> Any:
-        nonlocal session
+        nonlocal session, missing_at
+        if missing_at is not None and mono() - missing_at < NO_CREDENTIALS_TTL_SEC:
+            raise NoCredentialsError
         if session is None:
             session = boto3.session.Session()
+        # 찾은 자격증명은 세션이 들고 있다(역할 자격증명은 스스로 갱신) — 못 찾은 결과는 세션이 들지 않아 다음에 다시 찾는다
+        if session.get_credentials() is None:
+            missing_at = mono()
+            raise NoCredentialsError
+        missing_at = None
         # budgets 는 리전과 무관하게 전역 끝점(budgets.amazonaws.com)으로 풀린다
         return session.client(service, region_name=region, config=CLIENT_CONFIG)
 
@@ -203,13 +222,14 @@ class AwsReader:
                 f"{box}_credit", "AWS/EC2", "CPUCreditBalance", ec2, "Minimum"
             )
             plan.append((box, iid, ids))
-        ws = next((m for m in dims if m["MetricName"] == "marketlens_ws_clients"), None)
+        # WS 접속 수는 serve 의 StatsD 게이지 — serve 의 InstanceId 로 고른다. ListMetrics 는 2주 안에 자료가 있던 지표를
+        # 순서 없이 주므로, 이름만 보면 바꾸기 전 serve 의 게이지를 고를 수 있다. serve 가 빠지면 null
+        serve = boxes.get("serve")
+        ws = None if serve is None else _find_dims(dims, "marketlens_ws_clients", serve)
         ws_id = (
             None
             if ws is None
-            else add(
-                "ws", NAMESPACE, "marketlens_ws_clients", ws["Dimensions"], "Maximum"
-            )
+            else add("ws", NAMESPACE, "marketlens_ws_clients", ws, "Maximum")
         )
         fn = [{"Name": "FunctionName", "Value": CANARY_FUNCTION}]
         runs = add("canary_runs", "AWS/Lambda", "Invocations", fn, "Sum")
