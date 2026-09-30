@@ -104,7 +104,7 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
 ## 8. serve 에이전트
 5-1 설치 → 5-2 를 `serve.json` 으로(로그 전송 전이라 한 단계). StatsD 는 호스트 `:8125` 로 받고, api 컨테이너가 `host.docker.internal`(호스트 게이트웨이)로 10초마다 보낸다.
-- 확인: 지표 5개(메모리·디스크·`caddy`·api RSS·`marketlens.ws_clients`). StatsD 가 지표로 생기는지 따로 본다(에이전트 버전의 StatsD 결함 보고가 있다): `echo -n 'marketlens.ws_clients:0|g' | nc -u -w1 127.0.0.1 8125` 뒤 3분 안에 `aws cloudwatch list-metrics --namespace MarketLens --metric-name marketlens.ws_clients`. 안 생기면 `sudo $CTL -a status` 의 버전과 함께 게이지만 빚으로 남기고 진행한다(api 코드는 그대로). `/app/` 탭 2개를 열면 3분 안에 최댓값이 2 늘고 닫으면 다음 구간에 준다.
+- 확인: 지표 5개(메모리·디스크·`caddy`·api RSS·`marketlens_ws_clients` — 에이전트가 점을 밑줄로 바꿔 올린다). StatsD 가 지표로 생기는지 따로 본다(에이전트 버전의 StatsD 결함 보고가 있다): `echo -n 'marketlens.ws_clients:0|g' | nc -u -w1 127.0.0.1 8125` 뒤 3분 안에 `aws cloudwatch list-metrics --namespace MarketLens --metric-name marketlens_ws_clients`. 안 생기면 `sudo $CTL -a status` 의 버전과 함께 게이지만 빚으로 남기고 진행한다(api 코드는 그대로). `/app/` 탭 2개를 열면 3분 안에 최댓값이 2 늘고 닫으면 다음 구간에 준다.
 - 되돌리기: 5-2 되돌리기. 스왑은 7단계에서 따로.
 
 ## 9. Slack 연결
