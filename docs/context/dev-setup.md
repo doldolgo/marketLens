@@ -107,7 +107,7 @@ curl -s "localhost:8000/history/premium?base=BTC&unit=week" | head -c 300
 ```bash
 curl -s "localhost:8000/history/candles?base=BTC" | head -c 400
 ```
-(dev compose 기동 + 61초 뒤) `count ≥ 1`·봉의 `samples ≤ 60`, 60초 뒤 `count` 가 1 늘면 정상, `res=5m` 은 5분 뒤 1개 (014). 기동 로그에 `봉 버킷 생성: candles_1m, …`(첫 기동만). Influx UI(`http://localhost:8086`) Data Explorer 에서 버킷 `candles_1m` 의 `candle` 점 수가 분당 ≈ 490 이면 정상.
+(dev compose 기동 + 61초 뒤) `count ≥ 1`·봉의 `samples ≤ 60`, 60초 뒤 `count` 가 1 늘면 정상, `res=5m` 은 5분 뒤 1개 (014). 기동 로그에 `봉 버킷 생성: candles_1m, …`(첫 기동만). Influx UI(`http://localhost:8086`) Data Explorer 에서 버킷 `candles_1m` 의 `candle` 점 수가 분당 ≈ 1,458(조합 수) 이면 정상.
 ```bash
 aws s3 ls s3://<bucket>/raw/ --recursive | tail -3
 ```
