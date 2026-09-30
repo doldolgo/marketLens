@@ -263,50 +263,235 @@ def build_premium_history(
     )
 
 
-# ── streaks ────────────────────────────────────────────────────────────────
+def encode_premium_history(
+    reader: PremiumReader,
+    *,
+    dom: str,
+    fx: str,
+    base: str,
+    unit: Literal["week", "month"],
+    date_str: str | None,
+) -> bytes:
+    """`build_premium_history` 와 같은 응답 바이트 — 점 목록을 만들지 않고 흘려 읽는다 (005 §3.4, 2026-09-28).
 
-
-def _segments(
-    points: list[tuple[int, float]], threshold: float, max_gap: int
-) -> list[Segment]:
-    """ts 오름차순 (ts, 값) 에서 threshold 이상 연속 구간을 묶는다 — 스펙 005 §3.4 규칙 1~2.
-
-    직전 기록(값과 무관)과 max_gap 초보다 벌어지면 구간을 닫는다 — 끊긴 수집을
-    이어 붙여 "3시간 연속" 을 만들지 않는다.
+    저장소가 방향(fwd·rev) 줄기마다 시각 오름차순으로 흘려보내는 원값을 방향마다 시각·값 배열(8바이트씩)에만
+    담는다 — 줄기 순서는 정해지지 않아 두 줄기를 다 받은 뒤, 시각이 같은 점끼리 이어 컴팩트 events 와 summary 를
+    만들며 ENCODE_CHUNK 건씩 인코딩한다. 한 방향에만 있는 시각(반쪽 점)은 건너뛴다 — 목록 경로가 pivot 한 행에서
+    반쪽 행을 버리는 것과 같은 결과다. summary 의 최소·최대는 내장 min·max 와 같이 처음 만난 값을 지킨다(음의 0).
     """
-    segments: list[Segment] = []
-    cur: list[tuple[int, float]] = []
+    start_dt, end_dt = _premium_window(unit, date_str)
+    b = base.upper()
+    series = {"fwd": (array("q"), array("d")), "rev": (array("q"), array("d"))}
+    for _, field, ts, value in reader.stream_premium(
+        dom=dom,
+        fx=fx,
+        base=b,
+        start=int(start_dt.timestamp()),
+        stop=int(end_dt.timestamp()),
+    ):
+        ts_arr, val_arr = series[field]
+        ts_arr.append(ts)
+        val_arr.append(value)
+    fts, fvs = series["fwd"]
+    rts, rvs = series["rev"]
+    nf, nr = len(fts), len(rts)
+    parts: list[bytes] = []
+    chunk: list[dict] = []
+    append = chunk.append
+    count = i = j = 0
+    first_ts = prev_ts = 0
+    first_fwd = last_fwd = min_fwd = max_fwd = 0.0
+    while i < nf and j < nr:
+        ts = fts[i]
+        rt = rts[j]
+        if ts < rt:
+            i += 1
+            continue
+        if rt < ts:
+            j += 1
+            continue
+        fwd = fvs[i]
+        rev = rvs[j]
+        i += 1
+        j += 1
+        if count == 0:
+            first_ts = prev_ts = ts
+            first_fwd = min_fwd = max_fwd = fwd
+        elif fwd < min_fwd:
+            min_fwd = fwd
+        elif fwd > max_fwd:
+            max_fwd = fwd
+        append({"dt": ts - prev_ts, "fwd": fwd, "rev": rev})
+        prev_ts = ts
+        last_fwd = fwd
+        count += 1
+        if len(chunk) == ENCODE_CHUNK:
+            parts.append(render_json(chunk)[1:-1])
+            chunk.clear()
+    if chunk:
+        parts.append(render_json(chunk)[1:-1])
+    # 배열은 이음이 끝나면 쓸 일이 없다 — 응답 크기 사본을 만드는 마지막 잇기 전에 놓는다
+    del series, fts, fvs, rts, rvs
+    if count == 0:
+        raise _no_premium(
+            dom=dom, fx=fx, base=b, unit=unit, start_dt=start_dt, end_dt=end_dt
+        )
+    head = {
+        "dom": dom,
+        "fx": fx,
+        "base": b,
+        "unit": unit,
+        "start": _utc_z(start_dt),
+        "end": _utc_z(end_dt),
+        "firstTs": first_ts,
+        "count": count,
+        "summary": {
+            "firstFwd": first_fwd,
+            "lastFwd": last_fwd,
+            "minFwd": min_fwd,
+            "maxFwd": max_fwd,
+        },
+    }
+    return _assemble(head, "events", parts, {"fetchedAt": _now_ms()})
 
-    def close() -> None:
-        if not cur:
+
+# ── streaks ────────────────────────────────────────────────────────────────
+# 점 목록을 만들지 않는다 — 저장소가 (코인, 방향) 줄기마다 시각 오름차순으로 흘려보내는 점을 줄기별 상태기계가
+# 받아 구간을 센다(005 §3.4). 메모리는 구간 수에 비례한다. 평균은 CPython 3.12 의 `sum()`(float 는 Neumaier 보정
+# 합)과 한 걸음씩 같은 계산이라, 목록을 만들어 `sum(values) / len(values)` 한 것과 비트까지 같다.
+
+
+class _Run:
+    """한 (코인, 방향) 줄기의 상태 — 열린 구간 하나(시작·끝·표본·최대·보정 합)와 줄기 전체의 수·합·최대·마지막 시각."""
+
+    __slots__ = (
+        "threshold",
+        "max_gap",
+        "segments",
+        "prev_ts",
+        "open_start",
+        "open_end",
+        "open_n",
+        "open_max",
+        "open_sum",
+        "open_comp",
+        "n",
+        "total",
+        "comp",
+        "peak",
+    )
+
+    def __init__(self, threshold: float, max_gap: int) -> None:
+        self.threshold = threshold
+        self.max_gap = max_gap
+        self.segments: list[Segment] = []
+        self.prev_ts: int | None = None
+        self.open_start: int | None = None
+        self.open_end = 0
+        self.open_n = 0
+        self.open_max = 0.0
+        self.open_sum = 0.0
+        self.open_comp = 0.0
+        self.n = 0
+        self.total = 0.0
+        self.comp = 0.0
+        self.peak = 0.0
+
+    @property
+    def last_ts(self) -> int:
+        """마지막 점의 시각 — 줄기는 점이 들어온 뒤에만 생긴다."""
+        return self.prev_ts or 0
+
+    def feed(self, ts: int, value: float) -> None:
+        # 줄기 전체(overall — 기준치 무관): 수·보정 합·최대. 점마다 도는 곳이라 `_neumaier` 를 풀어 쓴다
+        if self.n == 0:
+            self.total, self.comp, self.peak = 0.0 + value, 0.0, value
+        else:
+            total = self.total
+            t = total + value
+            if abs(total) >= abs(value):
+                self.comp += (total - t) + value
+            else:
+                self.comp += (value - t) + total
+            self.total = t
+            if value > self.peak:
+                self.peak = value
+        self.n += 1
+        # 규칙 2 — 직전 기록(값과 무관)과 maxGap 초보다 벌어지면 닫는다
+        if self.prev_ts is not None and ts - self.prev_ts > self.max_gap:
+            self.close()
+        # 규칙 1 — threshold 이상인 연속 기록을 한 구간으로
+        if value >= self.threshold:
+            if self.open_start is None:
+                self.open_start, self.open_n = ts, 1
+                self.open_max, self.open_sum, self.open_comp = value, 0.0 + value, 0.0
+            else:
+                self.open_n += 1
+                self.open_sum, self.open_comp = _neumaier(
+                    self.open_sum, self.open_comp, value
+                )
+                if value > self.open_max:
+                    self.open_max = value
+            self.open_end = ts
+        else:
+            self.close()
+        self.prev_ts = ts
+
+    def close(self) -> None:
+        start_ts = self.open_start
+        if start_ts is None:
             return
-        values = [v for _, v in cur]
-        start_ts, end_ts = cur[0][0], cur[-1][0]
-        segments.append(
+        end_ts = self.open_end
+        self.segments.append(
             Segment(
                 start_ts=start_ts,
                 end_ts=end_ts,
                 start=_kst(start_ts),
                 end=_kst(end_ts),
                 duration_seconds=end_ts - start_ts,
-                samples=len(cur),
-                max_percent=max(values),
-                avg_percent=sum(values) / len(values),
+                samples=self.open_n,
+                max_percent=self.open_max,
+                avg_percent=_sum_result(self.open_sum, self.open_comp) / self.open_n,
             )
         )
-        cur.clear()
+        self.open_start = None
 
-    prev_ts: int | None = None
-    for ts, value in points:
-        if prev_ts is not None and ts - prev_ts > max_gap:
-            close()
-        if value >= threshold:
-            cur.append((ts, value))
-        else:
-            close()
-        prev_ts = ts
-    close()
-    return segments
+    def mean(self) -> float:
+        return _sum_result(self.total, self.comp) / self.n
+
+
+def _neumaier(total: float, comp: float, value: float) -> tuple[float, float]:
+    """CPython 3.12 `sum()` 의 float 한 걸음 — (합, 보정) 을 돌려준다."""
+    t = total + value
+    if abs(total) >= abs(value):
+        comp += (total - t) + value
+    else:
+        comp += (value - t) + total
+    return t, comp
+
+
+def _sum_result(total: float, comp: float) -> float:
+    """`sum()` 의 끝 — 보정이 0 이 아니고 유한할 때만 더한다(음의 결과의 부호·무한대를 지키려고)."""
+    return total + comp if comp and math.isfinite(comp) else total
+
+
+def _stream_runs(
+    points: Iterable[tuple[str, str, int, float]], threshold: float, max_gap: int
+) -> dict[tuple[str, str], _Run]:
+    """`(base, field, ts, value)` 흐름 → (코인, 방향) 줄기마다 상태. 같은 줄기의 점이 이어서 오는 동안은 사전을 찾지 않는다."""
+    runs: dict[tuple[str, str], _Run] = {}
+    cur_base = cur_field = ""
+    run: _Run | None = None
+    for base, fld, ts, value in points:
+        if run is None or base != cur_base or fld != cur_field:
+            cur_base, cur_field = base, fld
+            run = runs.get((base, fld))
+            if run is None:
+                run = runs[(base, fld)] = _Run(threshold, max_gap)
+        run.feed(ts, value)
+    for r in runs.values():
+        r.close()
+    return runs
 
 
 def _direction_summary(segments: list[Segment]) -> DirectionSummary:
