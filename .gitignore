@@ -4,5 +4,7 @@ node_modules/
 dist/
 .env
 .DS_Store
-# 027 — caddy 접속 로그(호스트 바인드 ./logs/caddy)
+# 027·029 — caddy·관리자 nginx 접속 로그(호스트 바인드 ./logs/caddy·./logs/admin)
 logs/
+# 030 — 터널 토큰 파일(serve 박스에만, runbooks/admin-access.md)
+secrets/

@@ -1,8 +1,10 @@
-# 배포용 compose — server·api·web·influxdb·redis 5컨테이너 (스펙 007·009·016·021). dev 는 docker-compose.dev.yml(Influx+Redis).
+# 배포용 compose — server·api·web·caddy·influxdb·redis + cloudflared 7컨테이너 (스펙 007·009·016·021·023·030). dev 는 docker-compose.dev.yml(Influx+Redis).
+# 030 — cloudflared 는 박스 profile 이 아니라 profile tunnel(serve 부속). 배포가 토큰 파일이 있을 때만 따로 띄우고,
+#   로컬 통합 기동(COMPOSE_PROFILES=collect,data,serve)은 띄우지 않는다.
 # 021 — 박스(EC2) 3대에 나눠 뜬다. 서비스마다 profile 이 하나씩이라 profile 없이 up 하면 아무것도 안 뜬다
-#   (실수로 5개가 한 박스에 뜨는 사고 방지). 박스별 기동:
+#   (실수로 여섯이 한 박스에 뜨는 사고 방지). 박스별 기동:
 #   docker compose --profile <collect|data|serve> --env-file .env --env-file server/.env up -d --build
-#   로컬 통합 기동(예전처럼 5개가 한 망에): COMPOSE_PROFILES=collect,data,serve 로 위 명령(--profile 생략).
+#   로컬 통합 기동(예전처럼 여섯이 한 망에): COMPOSE_PROFILES=collect,data,serve 로 위 명령(--profile 생략).
 #   WEB_PORT·DATA_HOST·COLLECT_HOST 는 루트 .env 에서, INFLUX_TOKEN 은 server/.env 에서 치환된다.
 #   --env-file 을 명시하면 기본 ./.env 자동 로드가 꺼지므로 둘 다 적는다.
 # 박스 간 주소는 루트 .env 의 DATA_HOST(=data 박스 사설 IP)·COLLECT_HOST(=collect 박스 사설 IP).
@@ -37,6 +39,10 @@ services:
       INFLUX_URL: http://${DATA_HOST:-influxdb}:8086
       # 틱 버퍼 Redis(009)도 같은 규칙 — server/.env 의 localhost 값을 덮는다
       REDIS_URL: redis://${DATA_HOST:-redis}:6379/0
+      # 029 — 관리자 페이지의 API 문서(/api/docs)가 /api/openapi.json 을 부르고 스키마의 서버 주소가 /api 가 되게.
+      # nginx 가 접두를 뗀 경로(/health)와 박스 안 localhost:8000/… 는 그대로 라우팅된다. api 에는 주지 않는다.
+      # 공개 nginx 의 /api/ 가 백엔드로 넘기지 않는 동안(028)만 안전하다 — 넘기면 인터넷에서 Try it out 이 된다
+      UVICORN_ROOT_PATH: /api
     ports:
       # serve 박스의 nginx 가 사설 IP 로 붙는다 — 보안그룹이 serve 그룹 외 인바운드를 막는다 (021 §3.1)
       - "8000:8000"
@@ -82,12 +88,59 @@ services:
         max-size: "50m"
         max-file: "3"
     # 023 — 호스트 포트는 caddy 가 쥔다(80·443). web 은 같은 망의 caddy 만 부르므로 호스트에 열지 않는다.
+    # 029 — 관리자 server :8081 도 게시하지 않는다(어떤 서비스도). 박스 안에서만 닿고, 들어오는 길은 030.
+    volumes:
+      # 029 — 관리자 접속 기록(JSON 한 줄씩) → 호스트 ./logs/admin/access.log (git 무시, 회전은 030 런북).
+      # /var/log/nginx 를 통째로 바인드하지 않는다 — 이미지의 stdout·stderr 링크가 가려진다
+      - ./logs/admin:/var/log/nginx-admin
     environment:
-      # 021 — nginx 허용 목록 중 수집기로 가는 location 의 업스트림(028). collect 박스 사설 IP, 없으면 서비스명(한 박스).
+      # 021 — nginx 허용 목록(028)·관리자 server(029) 중 수집기로 가는 location 의 업스트림. collect 박스 사설 IP, 없으면 서비스명(한 박스).
       # nginx 이미지의 entrypoint 가 /etc/nginx/templates/*.template 을 envsubst 해 conf.d 에 쓴다(web/Dockerfile).
       COLLECT_HOST: ${COLLECT_HOST:-server}
       # envsubst 대상을 이 한 변수로 제한 — nginx 자체 변수($http_host·$http_upgrade…)가 치환되지 않게
       NGINX_ENVSUBST_FILTER: ^COLLECT_HOST$$
+    networks:
+      # 030 — 기본 망(caddy·api 와)과 관리자 터널 망 admin(cloudflared 와) 두 곳. cloudflared 는 admin 에만 있어
+      # compose 이름으로는 web 하나만 푼다 — api·caddy 에 닿는 길이 없다.
+      - default
+      - admin
+
+  # 030 — 관리자 페이지(admin.kimptrack.com)로 들어오는 유일한 길. serve 박스에서 Cloudflare 로 밖으로만 연결하고,
+  # Access 로그인을 통과한 요청만 web 관리자 server(:8081)로 넘긴다. 인바운드 포트 없음. 설정은 대시보드(runbooks/admin-access.md).
+  cloudflared:
+    # 태그 + 멀티 아키텍처 인덱스 digest — serve 는 arm64 라 한 플랫폼 digest 를 박으면 exec format error.
+    # latest 금지, 분기마다 올린다(런북 "이미지 갱신"). 2025.4.0 이상이어야 토큰 파일을 읽는다.
+    image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    container_name: marketlens-cloudflared
+    restart: unless-stopped
+    # 박스 profile 이 아니다 — serve 배포가 공개 up 과 따로, 토큰 파일이 있을 때만 띄운다 (030 §3.3)
+    profiles: [tunnel]
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    # t4g.micro(1GB + 스왑) — 부풀거나 새도 같은 박스의 api·web 몫을 먹지 않게. 실제 사용량은 배포 뒤 docker stats 로 본다.
+    # memswap_limit 을 같은 값으로 — 안 주면 docker 가 스왑을 같은 양 더 허락해 api·web 과 나눠 쓰는 스왑 1GB(027)를 먹는다
+    mem_limit: 128m
+    memswap_limit: 128m
+    # 이미지 ENTRYPOINT 가 `cloudflared --no-autoupdate`. loglevel 은 info 고정 — debug 는 요청 헤더 전부
+    # (쿠키·Access JWT·X-Refresh-Token)를 로그로 낸다. metrics 는 컨테이너 안 루프백 — 헬스체크만 부른다.
+    command: ["tunnel", "--loglevel", "info", "--metrics", "127.0.0.1:2000", "run"]
+    healthcheck:
+      # exec 형식 — 이미지가 distroless(셸 없음)라 CMD-SHELL 은 늘 unhealthy 다. 연결이 하나라도 서야 0
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    environment:
+      # 토큰은 파일로만 — 환경변수(TUNNEL_TOKEN)는 docker inspect·compose config 에 찍히고, server/.env 는 api·수집기에 들어간다
+      TUNNEL_TOKEN_FILE: /run/secrets/cloudflared-token
+    secrets:
+      - cloudflared-token
+    networks:
+      - admin
 
   caddy:
     image: caddy:2-alpine
@@ -176,3 +229,13 @@ volumes:
   redis-data:
   caddy-data:
   caddy-config:
+
+networks:
+  # 030 — cloudflared 전용 망. web 만 함께 붙는다. 엣지로 나가야 하므로 internal 이 아니다.
+  admin: {}
+
+secrets:
+  # 030 — 터널 토큰. serve 박스에만 두는 파일(git 무시), 소유 65532:65532·권한 0400 — 컨테이너가 UID 65532 로 돌고,
+  # 파일 secret 은 바인드라 compose 의 uid·mode 지정이 무시된다. 비었거나 없으면 배포가 tunnel 을 건너뛴다.
+  cloudflared-token:
+    file: ./secrets/cloudflared-token

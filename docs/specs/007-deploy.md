@@ -10,25 +10,26 @@
 **같은 EC2 에서 기존 marketlens-be(:8000)·fe(:80) 가 운영 중이므로, 이 레포는 그것을 건드리지 않고 공존한다.**
 
 ## 2. 범위
-- 만드는 것: server·web Dockerfile, 루트 `docker-compose.yml`(배포용 6컨테이너 — dev compose 는 Influx·Redis 둘), GitHub Actions 워크플로 2개(CI·deploy), PR 템플릿, 루트 README
+- 만드는 것: server·web Dockerfile, 루트 `docker-compose.yml`(배포용 7컨테이너 — 로컬 통합 기동은 cloudflared 를 뺀 여섯, dev compose 는 Influx·Redis 둘), GitHub Actions 워크플로 2개(CI·deploy), PR 템플릿, 루트 README
 - 하지 않는 것: EC2 생성 자동화, HTTPS·도메인, 컨테이너 레지스트리, 로그 수집·모니터링(027 이 CloudWatch 로 한다 — 컨테이너 로그 **상한**은 compose 가 둔다), 기존 be·fe 스택의 변경·중단
 
 ## 3. 정해진 것
 
 ### 툴
 - CI/CD 는 **GitHub Actions**. 배포 단위는 **docker compose**. 서버는 **EC2 3대**(collect·data·serve — compose profile 하나씩, 021), 이미지는 각 EC2 에서 직접 빌드한다.
-- 컨테이너 6개:
-  - `server` — FastAPI + uvicorn 워커 1개(python 3.12 slim). 컨테이너 포트 8000 을 호스트 8000 으로 공개한다 — serve 박스의 nginx 가 사설 IP 로 붙고, 보안그룹이 serve 그룹 외 인바운드를 막는다(021 §3.1).
+- 컨테이너 7개:
+  - `server` — FastAPI + uvicorn 워커 1개(python 3.12 slim). 컨테이너 포트 8000 을 호스트 8000 으로 공개한다 — serve 박스의 nginx 가 사설 IP 로 붙고, 보안그룹이 serve 그룹 외 인바운드를 막는다(021 §3.1). env `UVICORN_ROOT_PATH=/api`(029 — API 문서가 관리자 경로 `/api` 아래 스키마를 부른다, api 에는 안 준다).
   - `api` — `server` 와 같은 이미지에 `ROLE=api`. Influx 조회 경로(`/history/premium`·`streaks`·`streaks/bulk`·`candles`)만 서빙, 호스트 비노출(016). `STATSD_ADDR=host.docker.internal:8125` 와 그 이름을 호스트 게이트웨이로 잇는 `extra_hosts` — WS 접속 수 게이지를 serve 호스트의 CloudWatch Agent 로(027).
-  - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 허용 목록(028)의 `/api` 경로만 프록시하고(수집기로 `/api/health`·`/api/health/collect`·`/api/history/events`, `api` 로 `/api/history/candles`(016)·`/api/landing`(022)·`/api/ws/spreads`(WebSocket 업그레이드, 017) — 나머지 `/api` 는 404 JSON), 없는 경로는 index.html 을 준다(SPA). nginx 접속 로그는 끈다(기록은 caddy, 027 — 오류 로그는 남긴다).
+  - `web` — 멀티스테이지 빌드(Node 22 로 `npm run build` → nginx 가 정적 파일 서빙). nginx 는 허용 목록(028)의 `/api` 경로만 프록시하고(수집기로 `/api/health`·`/api/health/collect`·`/api/history/events`, `api` 로 `/api/history/candles`(016)·`/api/landing`(022)·`/api/ws/spreads`(WebSocket 업그레이드, 017) — 나머지 `/api` 는 404 JSON), 없는 경로는 index.html 을 준다(SPA). nginx 접속 로그는 끈다(기록은 caddy, 027 — 오류 로그는 남긴다). 같은 nginx 에 관리자 server :8081(게시 안 함)·관리자 화면(`/usr/share/nginx/admin`)·접속 기록 바인드 `./logs/admin`(029).
     캐시 규칙: `index.html` 은 `no-store, must-revalidate` **+ `always`** — 배포가 FE·BE 를 함께 바꾸므로 캐시된 셸이 남으면 열려 있던 탭이 구 번들로 새 API 계약을 계속 친다. `/assets/` 의 해시 박힌 파일은 `max-age=31536000, immutable` 이되 **`always` 는 붙이지 않는다** — 붙이면 404 에도 1년 immutable 이 실려, 배포 직전 셸을 든 브라우저가 사라진 번들의 404 를 1년간 캐시한다(재배포로도 되돌릴 수 없다). `always` 없이도 200·304 는 헤더를 받는다.
   - `influxdb` — 2.7, dev compose 와 같은 첫 기동 설정(org·bucket `marketlens`, admin 토큰 = `INFLUX_TOKEN`). named volume, 호스트 비노출.
   - `redis` — `redis:7-alpine`, `--appendonly yes`, named volume, 호스트 비노출(009 의 틱 버퍼 — Influx 로 옮기기 전 틱만 든다).
   - `caddy` — serve profile, 호스트 80(`WEB_PORT`)·443, `./caddy:/etc/caddy:ro`(디렉터리째 — 파일 하나를 바인드하면 git 이 바꿔 쓴 새 파일을 못 본다)·`./logs/caddy:/var/log/caddy`(도메인 블록 접속 로그, git 무시)·`caddy-data`·`caddy-config` 볼륨(023·027).
+  - `cloudflared` — 관리자 터널(030). profile `tunnel` — 박스 profile 이 아니라 serve 부속이라 배포 serve 가 토큰 파일이 있을 때만 따로 띄우고, 로컬 통합 기동은 안 띄운다. 망 `admin` 만(web 이 기본 망과 `admin` 둘 — compose 이름으로는 web 하나만 푼다), 게시 포트 없음, 메모리 상한 128MB(스왑 없음). 이미지 `cloudflare/cloudflared` 는 태그 + 멀티 아키텍처 인덱스 digest(`latest` 금지). 토큰은 최상위 `secrets`(파일 `./secrets/cloudflared-token` — git 무시, serve 박스에만) → env `TUNNEL_TOKEN_FILE`, 환경변수·`.env` 에 두지 않는다.
 
 ### 규칙 (왜 가 있는 것)
 - **앱은 자기 로거(`marketlens.*`)를 INFO 로, 타임스탬프와 함께 stderr 로 낸다.** 설정이 없으면 `logging.lastResort` 가 받아 WARNING 이상만, 시각도 없이 나간다 — 그러면 "S3 원문 업로드 재개"(010 §3.6)·"DB 저장 재개"(009 §3.5) 같은 복구 신호가 아예 보이지 않아 장애가 풀렸는지 알 수 없다. handler 는 루트에 달고 레벨은 `marketlens` 에만 내린다 — 라이브러리 INFO(httpx 의 요청 한 줄 등)는 루트의 WARNING 에 막혀야 로그가 초당 수십 줄로 불어나지 않는다.
-- **컨테이너 로그는 여섯 서비스 모두 `json-file` 50MB × 3 으로 묶는다.** docker 기본값은 무한이고, 회전 없는 로그가 디스크를 채우면 Influx 가 쓰기를 거부한다 — 그 거부는 **공간을 되찾아도 컨테이너를 재시작하기 전까지 풀리지 않는다**(열지 못한 shard 를 캐시한다). 데몬 설정(`/etc/docker/daemon.json`)이 아니라 compose 에 두는 이유는 이 스택이 자기 한도를 들고 다니게 하기 위해서다.
+- **컨테이너 로그는 일곱 서비스 모두 `json-file` 50MB × 3 으로 묶는다.** docker 기본값은 무한이고, 회전 없는 로그가 디스크를 채우면 Influx 가 쓰기를 거부한다 — 그 거부는 **공간을 되찾아도 컨테이너를 재시작하기 전까지 풀리지 않는다**(열지 못한 shard 를 캐시한다). 데몬 설정(`/etc/docker/daemon.json`)이 아니라 compose 에 두는 이유는 이 스택이 자기 한도를 들고 다니게 하기 위해서다.
 - **호스트에 여는 포트는 박스마다 최소.** serve 는 caddy 의 80·443(023), collect 는 8000·data 는 6379/8086 을 다른 박스가 붙도록 열되 보안그룹으로 막는다(021). 공인으로 열린 것은 80·443 둘.
 - **호스트 포트는 compose 변수 `WEB_PORT`(기본 80).** 023 부터 이 포트를 잡는 컨테이너는 web 이 아니라 caddy 다(443 은 고정). EC2 는 루트 `.env` 의 `WEB_PORT=80`. 기존 marketlens-be·fe 컨테이너는 2026-09-04 정지(`docker compose stop`, 폴더·코드 유지) — 이 레포 소관이 아니므로 그 폴더는 건드리지 않는다. 로컬 통합 기동은 `:8000` 충돌을 피해 `WEB_PORT=8080` 을 쓴다(dev-setup.md).
 - **`/api` 는 허용 목록만 넘기며(028) 접두를 뗀다.** `/api/health` → server `/health`. dev 의 vite proxy 와 같은 규칙이라 FE 코드는 환경을 모른다.
@@ -45,10 +46,11 @@
   3. `git fetch origin main && git reset --hard origin/main` — pull 이 아니라 **미러 동기화**. 배포 트리는 main 의 사본일 뿐이므로, 서버 쪽 로컬 커밋·갈래가 있어도 항상 main 을 그대로 따른다(첫 배포에서 pull 이 갈래 때문에 실패한 실사례).
   4. `docker compose --profile <박스> --env-file .env --env-file server/.env up -d --build` — 자기 profile 만. `WEB_PORT`·`DATA_HOST`·`COLLECT_HOST` 는 루트 `.env`, Influx 첫 기동 admin 토큰(`DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN}`)은 `server/.env` 에서 치환한다. `--env-file` 을 명시하면 기본 `./.env` 자동 로드가 꺼지므로 둘 다 적는다.
   4-1. serve 만: `docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile` — compose 는 정의가 안 바뀐 caddy 를 다시 만들지 않으므로 새 Caddyfile 을 읽힌다. 깨진 설정이면 여기서 배포가 실패하고 돌던 caddy 는 옛 설정으로 계속 돈다(027).
+  4-2. serve 만: `secrets/cloudflared-token` 이 비어 있지 않을 때만(`[ -s … ]`) `docker compose --profile tunnel --env-file .env --env-file server/.env up -d`, 아니면 "tunnel 건너뜀" 한 줄. 실패하면 배포 실패로 끝난다(공개 서비스는 이미 떠 있다). 공개 `up` 과 따로 돌리는 이유 — 같은 `up` 에서 secret 오류가 나면 함께 다시 만들던 web·caddy·api 가 기동 안 된 채 남을 수 있다. `--profile tunnel up` 은 serve 컨테이너를 건드리지 않는다(030).
   5. `docker image prune -f` — 오래된 레이어가 EC2 디스크를 채우지 않게.
 - Secrets 는 `EC2_HOST_DATA`·`EC2_HOST_COLLECT`·`EC2_HOST_SERVE`(박스별 공인 IP, 021)·`EC2_USER`·`EC2_SSH_KEY` 다섯. 값은 어디에도 적지 않는다.
 - PR 템플릿은 conventions.md 규칙 그대로 3줄 골격: 무엇을 / 왜 / 테스트.
-- **배포 설정의 계약은 테스트가 지킨다.** `server/tests/test_deploy.py` 가 루트 `docker-compose.yml`·워크플로 2개·Dockerfile·`.dockerignore`·`nginx.conf`·PR 템플릿·README 를 **파일로 읽어** §4 의 조건(컨테이너 6개, 호스트 노출은 caddy `${WEB_PORT:-80}`·443·server 8000·redis 6379·influxdb 8086 — web·api 는 없음(021·023), `.env` 는 `env_file` 로만·이미지 제외, `INFLUX_URL`·`REDIS_URL` 덮어쓰기, CI job 2개 무필터, deploy 스크립트의 가드·미러 동기화·`up -d --build`·prune 순서, nginx 접두 제거·캐시 규칙, 워커 1개)을 단언한다. Docker 가 없는 CI 에서 도는 유일한 회귀 장치라 pytest 안에 둔다. YAML 파싱은 dev 의존성 `pyyaml`(설치가 이미 전이 의존으로 들어오지만 명시해야 두 설치 경로가 같다). 워크플로의 `docker compose config`·컨테이너 기동 검증은 Docker 가 있는 로컬·EC2 에서 사람이 §5 명령으로 돈다.
+- **배포 설정의 계약은 테스트가 지킨다.** `server/tests/test_deploy.py` 가 루트 `docker-compose.yml`·워크플로 2개·Dockerfile·`.dockerignore`·`nginx.conf`·PR 템플릿·README 를 **파일로 읽어** §4 의 조건(컨테이너 7개 — cloudflared 의 세부는 030 의 `tests/test_admin_tunnel.py`, 호스트 노출은 caddy `${WEB_PORT:-80}`·443·server 8000·redis 6379·influxdb 8086 — web·api 는 없음(021·023), `.env` 는 `env_file` 로만·이미지 제외, `INFLUX_URL`·`REDIS_URL` 덮어쓰기, CI job 2개 무필터, deploy 스크립트의 가드·미러 동기화·`up -d --build`·prune 순서, nginx 접두 제거·캐시 규칙, 워커 1개)을 단언한다. Docker 가 없는 CI 에서 도는 유일한 회귀 장치라 pytest 안에 둔다. YAML 파싱은 dev 의존성 `pyyaml`(설치가 이미 전이 의존으로 들어오지만 명시해야 두 설치 경로가 같다). 워크플로의 `docker compose config`·컨테이너 기동 검증은 Docker 가 있는 로컬·EC2 에서 사람이 §5 명령으로 돈다.
 
 ### 사람이 하는 것
 - EC2 최초 설정은 `docs/runbooks/ec2-setup.md`.

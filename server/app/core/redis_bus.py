@@ -137,6 +137,10 @@ class RedisBus:
             return None
         return int(_text(value))
 
+    async def ping(self) -> None:
+        """`PING` — 관리자 상태의 Redis 확인(029 §3.4). 실패는 예외(시간 제한은 호출자가 건다)."""
+        await self._client.ping()
+
     async def subscribe(self) -> Subscription:
         """채널 구독 연결을 새로 연다 — 여기서 실제 연결이 일어나므로 실패는 예외."""
         pubsub = self._client.pubsub()
