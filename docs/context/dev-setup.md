@@ -84,7 +84,7 @@ curl -i -s localhost:8000/health
 ```bash
 curl -s localhost:8000/admin/aws
 ```
-034 — 로컬(`ADMIN_AWS_REGION` 없음)은 네 부분(`alarms`·`metrics`·`canary`·`budget`) 모두 `state: "unconfigured"`·`code: null` 이고 AWS 를 부르지 않는다. `/admin/alerts` 는 웹훅이 없으면 `slack`·`alarms` 둘 다 `unconfigured`·`items: []`.
+034 — 로컬(`ADMIN_AWS_REGION` 없음)은 네 부분(`alarms`·`metrics`·`canary`·`budget`) 모두 `state: "unconfigured"`·`code: null` 이고 AWS 를 부르지 않는다. `/admin/alerts` 는 웹훅이 없으면 `slack`·`alarms` 둘 다 `unconfigured`·`items: []`. 로컬 compose 의 `server`(`ADMIN_AWS_REGION` 있음·자격증명 없음)는 네 부분이 `unconfigured`·`code: "no_credentials"` 이고, 메타데이터 끝점을 찾느라 첫 요청(과 그 뒤 1분마다 한 번)이 2초 안팎 걸린다.
 ```bash
 curl -s localhost:8000/spreads | head -c 600
 ```
