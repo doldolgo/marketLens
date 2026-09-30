@@ -128,7 +128,7 @@
     <section aria-labelledby="optout-title">
       <h2 id="optout-title">화면 분석 거부</h2>
       <div class="optout">
-        <p class="state" id="an-state" role="status" aria-live="polite">지금 상태 <strong id="an-value">확인하는 중</strong></p>
+        <p class="state" id="an-state" role="status" aria-live="polite" hidden>지금 상태 <strong id="an-value"></strong></p>
         <div class="actions" id="an-actions" hidden>
           <button class="btn" type="button" id="an-deny">분석 거부</button>
           <button class="btn" type="button" id="an-allow">다시 허용</button>
@@ -346,6 +346,7 @@
         else if (stored === undefined) text = '저장할 수 없음'
         else if (stored === 'denied') text = '거부 — 이 브라우저의 선택'
         $('an-value').textContent = text
+        $('an-state').hidden = false // 자바스크립트가 꺼지면 상태 줄 대신 <noscript> 안내만 보인다
         $('an-gpc').hidden = !gpc
         $('an-nostore').hidden = gpc || stored !== undefined
         $('an-actions').hidden = gpc || stored === undefined
