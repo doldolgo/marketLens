@@ -139,7 +139,7 @@
       </div>
       <p>[분석 거부]를 누르면 이 브라우저에 <code>kt.analytics</code> = <code>denied</code>를 저장하고, 이 사이트의 Clarity 쿠키 <code>_clck</code>·<code>_clsk</code>를 지웁니다. [다시 허용]은 <code>granted</code>를 저장합니다. 아무것도 고르지 않으면 허용으로 봅니다. 브라우저가 GPC(Global Privacy Control)를 보내면 저장값과 상관없이 분석하지 않습니다. 이 선택은 브라우저 안에서만 일어나 서버로 가지 않습니다.</p>
       <p><code>kimptrack.com</code>에서 고른 선택이 이 브라우저에 저장되고, 브라우저 데이터를 지우면 다시 골라야 합니다. 일부 브라우저(Safari 등)는 이 사이트를 7일 동안 쓰지 않으면 선택을 지웁니다 — 계속 거부하려면 GPC나 광고 차단기를 쓰세요.</p>
-      <p>새로 여는 페이지는 거부를 곧바로 따릅니다. 같은 브라우저에 이미 열린 <code>kimptrack.com</code> 랜딩·대시보드 탭은 거부를 누르는 순간 Clarity에 거부 신호를 보내 쿠키를 지우고, 그 탭을 다시 볼 때 한 번 새로고침되어 그때부터 분석하지 않습니다.</p>
+      <p>새로 여는 페이지는 거부를 곧바로 따릅니다. 같은 브라우저에 이미 열린 <code>kimptrack.com</code> 랜딩·대시보드 탭은 거부를 누르는 순간 Clarity에 거부 신호를 보내 쿠키를 지우고, 그 탭을 다시 볼 때 한 번 새로고침되어 그때부터 분석하지 않습니다. 그 탭을 다시 보기 전까지는 Clarity가 쿠키 없이 기록을 이어갈 수 있습니다.</p>
       <p>Microsoft 도메인의 쿠키(<code>MUID</code> 등)는 이 페이지가 지울 수 없습니다. Clarity가 안내하는 광고 거부 페이지 <a class="link" href="https://optout.aboutads.info/">optout.aboutads.info</a>(DAA)에서 따로 거부할 수 있습니다.</p>
     </section>
 
@@ -167,20 +167,22 @@
       <h3>서버 접속 기록</h3>
       <p><code>kimptrack.com</code>으로 온 요청마다 한 줄을 남깁니다: 시각, IP 앞부분(IPv4는 마지막 마디, IPv6는 뒤 80비트를 지움), 접속 포트, 프로토콜·메서드·호스트, 경로와 쿼리(스프레드·갭·선선갭 화면의 검색어는 지움 — 기록 탭의 코인 칸 <code>sym</code>과 <code>utm_*</code>는 남음), 상태 코드·크기·처리 시간(대시보드 실시간 연결은 연결을 연 시간), 이전 페이지의 사이트 주소(도메인까지), 브라우저·기기 정보(User-Agent). 헤더·쿠키는 남기지 않고, 화면이 몇 초마다 부르는 조회와 감시용 요청은 기록하지 않습니다. <code>www.kimptrack.com</code>은 <code>kimptrack.com</code>으로 옮겨 주기만 하고 기록하지 않습니다. AWS 서울 리전의 서버 파일과 로그 저장소(Amazon CloudWatch Logs)에 둡니다. 운영자가 보는 관리자 화면이 같은 서버에서 이 파일을 읽어 24시간 요약을 만들며, 따로 저장하지 않습니다. 서버의 오류 기록에는 IP를 남기지 않습니다.</p>
       <h3>화면 이용 기록 — Microsoft Clarity</h3>
-      <p>랜딩과 대시보드에서만 돌고, 유럽 시간대로 설정된 브라우저에서는 돌지 않습니다. 받는 것: 페이지 주소(검색어는 뺌), 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 기기·브라우저·운영체제, IP 주소(Microsoft가 받아 대략의 위치를 추정), 쿠키 <code>_clck</code>·<code>_clsk</code>와 sessionStorage <code>_cltk</code>(7절). 받는 곳은 Microsoft Corporation(미국)이며, Microsoft는 이 정보를 Microsoft Advertising 제공 등 자기 목적에도 씁니다(<a class="link" href="https://privacy.microsoft.com/ko-kr/privacystatement">Microsoft 개인정보처리방침</a>에 따름). 한 사람분만 골라 지울 수는 없고 프로젝트를 통째로 지워야 합니다. KimpTrack은 광고 목적 저장에 거부 신호를 보냅니다.</p>
+      <p>랜딩과 대시보드에서만 돌고, 유럽 시간대로 설정된 브라우저에서는 돌지 않습니다. 받는 것: 페이지 주소(검색어는 뺌), 이전 페이지 주소(브라우저가 알려 주는 그대로 — 서버 기록과 달리 줄이지 않음), 누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(Microsoft가 받아 대략의 위치를 추정), 쿠키 <code>_clck</code>·<code>_clsk</code>와 sessionStorage <code>_cltk</code>(7절). 받는 곳은 Microsoft Corporation(미국)이며, Microsoft는 이 정보를 Microsoft Advertising 제공 등 자기 목적에도 씁니다(<a class="link" href="https://privacy.microsoft.com/ko-kr/privacystatement">Microsoft 개인정보처리방침</a>에 따름). 한 사람분만 골라 지울 수는 없고 프로젝트를 통째로 지워야 합니다. KimpTrack은 광고 목적 저장에 거부 신호를 보냅니다.</p>
       <h3>관리자 접속 기록(운영자만)</h3>
       <p><code>admin.kimptrack.com</code> 요청마다 시각·로그인 이메일·IP·메서드·경로와 쿼리·상태·처리 시간·Cloudflare 요청 ID·<code>Sec-Fetch-Site</code>를 AWS 서울 리전의 서버 파일에 남깁니다. 로그인은 Cloudflare Access(허용한 이메일로 받는 일회용 코드)가 하며, Cloudflare가 이메일·IP를 처리하고 인증 기록을 24시간 둡니다.</p>
       <h3>문의 메일</h3>
       <p>권리 행사·문의로 받은 이메일 주소와 내용을 답변에만 씁니다. 메일 서비스는 Gmail(Google LLC, 미국)입니다.</p>
       <h3>외부 글꼴 요청</h3>
       <p>대시보드(<code>/app/</code>)를 열면 방문자의 브라우저가 Google Fonts(Google LLC, 미국)에서 글꼴을 직접 받습니다. 이때 IP·User-Agent·요청 주소·이전 페이지 도메인이 Google로 가고 쿠키는 가지 않으며, Google이 요청 기록을 남깁니다. 운영자만 보는 관리자 화면의 API 문서는 jsDelivr·<code>fastapi.tiangolo.com</code>·Google Fonts에서 화면 파일을 받습니다. 랜딩과 이 페이지는 외부 글꼴을 부르지 않습니다.</p>
+      <h3>방문자 정보가 가지 않는 곳</h3>
+      <p>운영 알림(Slack·AWS 경보·가동 감시)에는 방문자 정보가 가지 않습니다 — 알림에는 거래소 수집 상태와 오류 내용, 오류가 난 요청의 경로(쿼리 없음)만 실립니다. 거래소 원문 보관(Amazon S3)과 시세 저장소(InfluxDB·Redis)에도 방문자 정보는 없습니다.</p>
       <h3>처리 근거</h3>
       <p>KimpTrack은 가입을 받지 않아 동의를 따로 받지 않습니다. 서버·관리자 접속 기록과 화면 이용 기록은 서비스를 제공하고 보안을 지키며 이용 통계를 내기 위한 정당한 이익(개인정보 보호법 제15조 제1항 제6호)으로, 그 목적에 필요한 범위에서만 처리합니다. 화면 이용 기록은 언제든 거부할 수 있습니다. 권리 행사 요청에 답하는 것은 법령상 의무(같은 항 제2호)이고, 그 밖의 문의 답변은 같은 항 제6호에 따릅니다.</p>
     </section>
 
     <section aria-labelledby="s3">
       <h2 id="s3">3. 개인정보의 파기</h2>
-      <p>보유 기간이 끝나면 끝난 날부터 5일 안에 지웁니다. 서버·관리자 접속 기록은 하루마다 새 파일로 나뉘고, 90일이 지난 파일은 자동으로 파일째 지워집니다. 로그 저장소(CloudWatch Logs)는 보존 기간 90일이 지난 기록을 AWS가 지웁니다. Clarity 기록은 2절의 기간이 지나면 Microsoft가 지웁니다. 문의 메일은 기간이 지나면 운영자가 메일함에서 지웁니다. 법령에 따라 따로 보존하는 기록은 없습니다.</p>
+      <p>KimpTrack이 보관하는 기록(서버·관리자 접속 기록, 로그 저장소, 문의 메일)은 보유 기간이 끝난 날부터 5일 안에 지웁니다. 서버·관리자 접속 기록은 하루마다 새 파일로 나뉘고, 90일이 지난 파일은 자동으로 파일째 지워집니다. 로그 저장소(CloudWatch Logs)는 보존 기간 90일이 지난 기록을 AWS가 지웁니다. 문의 메일은 기간이 끝나면 운영자가 메일함에서 지우고 휴지통까지 비웁니다. Clarity 기록은 Microsoft가 보관하며, 2절의 기간이 지나면 Microsoft가 지웁니다(지우는 시점은 Microsoft 기준). 법령에 따라 따로 보존하는 기록은 없습니다.</p>
     </section>
 
     <section aria-labelledby="s4">
@@ -253,7 +255,8 @@
       <h3>관리자 화면의 API 문서(운영자만)</h3>
       <dl class="kv">
         <dt>항목</dt><dd>IP, User-Agent, 요청 주소, 이전 페이지 도메인</dd>
-        <dt>국가·시기·방법</dt><dd>API 문서를 열 때 운영자의 브라우저가 직접 요청 — jsDelivr(Volentio JSD Limited, 영국 — Cloudflare·Fastly 등 CDN이 전달), <code>fastapi.tiangolo.com</code>의 아이콘(Cloudflare, Inc., 미국), ReDoc 화면의 Google Fonts(Google LLC, 미국)</dd>
+        <dt>국가·시기·방법</dt><dd>영국(jsDelivr — Cloudflare·Fastly 등 CDN이 전달)·미국(<code>fastapi.tiangolo.com</code>의 아이콘, ReDoc 화면의 Google Fonts) — API 문서를 열 때 운영자의 브라우저가 직접 요청</dd>
+        <dt>받는 자·연락처</dt><dd>jsDelivr: Volentio JSD Limited(잉글랜드·웨일스 등록) — <a class="link" href="https://www.jsdelivr.com/terms/privacy-policy">jsDelivr 개인정보처리방침</a>. 아이콘: Cloudflare, Inc.(위와 같음). Google Fonts: Google LLC(위와 같음)</dd>
         <dt>목적·보유 기간</dt><dd>화면 파일 전달 — 요청 기록은 각 회사의 방침에 따름</dd>
         <dt>거부 방법·효과</dt><dd>API 문서를 열지 않으면 요청하지 않습니다.</dd>
         <dt>근거</dt><dd>운영자의 브라우저가 직접 요청합니다 — 받는 곳을 알리려고 적습니다.</dd>

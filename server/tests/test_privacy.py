@@ -62,6 +62,7 @@ MUST_SAY = (
     "_cltk",
     "Safari",
     "7일",
+    "운영 알림",  # §3.4-6 — 알림에 방문자 정보가 가지 않는다(025 제안·034 가 이 문장에 기댄다)
     'href="https://privacy.microsoft.com/ko-kr/privacystatement"',
     'href="https://optout.aboutads.info/"',
     "개인정보분쟁조정위원회 1833-6972",
@@ -69,6 +70,15 @@ MUST_SAY = (
     "대검찰청 1301",
     "경찰청 182",
 )
+# §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(+ 근거)
+TRANSFER_TERMS = {
+    "항목",
+    "국가·시기·방법",
+    "받는 자·연락처",
+    "목적·보유 기간",
+    "거부 방법·효과",
+    "근거",
+}
 
 
 class _Page(HTMLParser):
@@ -201,6 +211,16 @@ def test_page_states_the_opt_out_contract_and_required_notices() -> None:
     # 버튼 둘과 자바스크립트가 꺼졌을 때의 안내 (§3.3·§3.7)
     assert ">분석 거부</button>" in html and ">다시 허용</button>" in html
     assert "<noscript>" in html
+
+
+def test_every_overseas_recipient_lists_the_five_items() -> None:
+    html, _ = _read(PUBLIC / "privacy.html")
+    section = html[html.index('<section aria-labelledby="s6">') :]
+    section = section[: section.index("</section>")]
+    groups = re.findall(r"<h3>(.*?)</h3>\s*<dl[^>]*>(.*?)</dl>", section, flags=re.S)
+    assert len(groups) >= 5
+    for name, body in groups:
+        assert set(re.findall(r"<dt>(.*?)</dt>", body)) == TRANSFER_TERMS, name
 
 
 def test_archived_versions_are_static_and_external_free() -> None:
