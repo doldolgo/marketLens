@@ -143,13 +143,20 @@ def build_table(
     excluded: Collection[str] | None = None,
     notional: float = DEFAULT_NOTIONAL,
     day_open: Mapping[tuple[str, str], float] | None = None,
+    wallet_memo: WalletMemo | None = None,
 ) -> dict[str, object]:
     """전 (국내 × 해외 × 코인) 페어의 김프/역프 표 — 스펙 003 §3.2.
 
     `day_open` 은 026 의 기준가 장부((국내 거래소, 코인) → KST 00시 가격) — 없으면 `dayChg` 는 전부 null.
+    `wallet_memo` 는 같은 회차의 틱이 채운 망 판정 메모(006 §3.7) — 없으면 행마다 판정한다.
 
     응답 모양(camelCase 키·순서) 그대로의 dict 를 돌려준다 — 017 게시기가 이걸 바로 json 으로
-    만든다. 모델이 필요하면 `build_spreads` (테스트·문서용, 같은 계산).
+    만든다. 모델이 필요하면 `build_spreads` (테스트·문서용, 같은 계산). 키 이름·순서의 진실은
+    `SpreadRow` 이고 이 dict 가 그것과 같은 바이트가 되는지는 테스트가 지킨다.
+
+    표 계산 경로(§3.2 끝): 거래소 단위 값(스트림 age)과 시장 단위 값(최우선 검사·age·dayChg·사는 쪽
+    걷기)은 처음 쓰일 때 한 번만 구하고, 행 루프는 원값·파는 쪽 걷기·되맞추기·평균가·순값만 한다.
+    연산과 그 순서는 행 하나의 규칙(§3.2-4) 그대로라 결과 바이트가 같다.
 
     표 조립 전체가 `await` 없이 끝난다 — 그것이 이 함수가 수집 락 없이도 한 응답 안에서
     스냅샷 교체 전·후 호가를 섞지 않는 유일한 근거다(§2). 걷기를 async 로 만들지 않는다.
@@ -181,36 +188,192 @@ def build_table(
             {"domestic": sorted(domestic), "foreign": sorted(foreign)},
         )
 
-    # 3~4. 페어 생성 — 국내 거래소마다 자기 환율, 환율 없는 국내 거래소는 행 전체가 빠진다
-    rows_out: list[dict[str, object]] = []
-    buy_memo: BuyMemo = {}  # 이 표 한 장의 수명 — 다음 회차는 새 호가로 새로 걷는다
-    for dom_ex, dom_table in domestic.items():
+    # 3. 국내 거래소마다 그 거래소 자신의 환율 — 환율 없는 국내 거래소는 행 전체가 빠진다
+    #    (남의 환율을 빌리면 테더 프리미엄이 섞인다). 역프의 사는 금액(notional × rate_ask)도 여기서 한 번.
+    doms: list[tuple[str, dict[str, Row], float, float, float]] = []
+    for dom_ex in sorted(domestic):
         rate = store.get_rate(dom_ex)
         if rate is None or rate.ask <= 0 or rate.bid <= 0:
-            continue  # 남의 환율을 빌리면 테더 프리미엄이 섞인다
-        for fx_ex, fx_table in foreign.items():
-            if fx_ex == dom_ex:
+            continue
+        doms.append((dom_ex, domestic[dom_ex], rate.ask, rate.bid, notional * rate.ask))
+    fxs = sorted(foreign.items())
+    bases: set[str] = set()
+    for _, dom_table, _, _, _ in doms:
+        bases.update(dom_table)
+
+    # 4~5. 코인 → 국내 거래소 → 해외 거래소 순으로 돌며 만든다 — 만든 순서가 곧 (sym, dom, fx)
+    #      오름차순이라 따로 정렬하지 않는다. 거래소·시장 단위 값은 처음 쓰일 때 한 번만 구한다.
+    now_ms = now.timestamp() * 1000
+    cutoff = now - _ROW_STALE
+    opens = day_open if day_open is not None else {}
+    stream_ages: dict[str, float] = {}
+    rows_out: list[dict[str, object]] = []
+    append = rows_out.append
+    for base in sorted(bases):
+        if base in excluded_upper:
+            continue
+        fx_markets: dict[
+            str, list[Any]
+        ] = {}  # 이 코인의 해외 시장 — 국내 거래소들이 나눠 쓴다
+        for dom_ex, dom_table, rate_ask, rate_bid, notional_krw in doms:
+            dom_row = dom_table.get(base)
+            if dom_row is None:
                 continue
-            for base in dom_table.keys() & fx_table.keys():
-                if base in excluded_upper:
+            dm: list[Any] | None = None
+            day_chg: float | None = None
+            for fx_ex, fx_table in fxs:
+                if fx_ex == dom_ex:
                     continue
-                rows_out.append(
-                    _build_row(
-                        base,
-                        dom_table[base],
-                        fx_table[base],
-                        rate.ask,
-                        rate.bid,
-                        store,
-                        now,
-                        notional,
-                        buy_memo,
-                        day_open if day_open is not None else {},
+                fx_row = fx_table.get(base)
+                if fx_row is None:
+                    continue
+                if dm is None:
+                    dm = _market(dom_row, store, stream_ages, now_ms, now, cutoff)
+                    # 026 §3.2 — KST 00시 기준가 대비 국내 체결가. fail 행도 계산(호가와 무관). 기준가 없으면 null 이지 0 이 아니다
+                    ref = opens.get((dom_ex, base))
+                    if ref is not None and ref > 0 and dom_row.price > 0:
+                        day_chg = (dom_row.price / ref - 1) * 100
+                fm = fx_markets.get(fx_ex)
+                if fm is None:
+                    fm = fx_markets[fx_ex] = _market(
+                        fx_row, store, stream_ages, now_ms, now, cutoff
                     )
+
+                # age 는 양측 스트림 중 오래된 쪽 — max(0.0, 국내, 해외) 와 같은 값(앞에서부터 더 큰 것만 바꾼다)
+                age = 0.0
+                if dm[0] > age:
+                    age = dm[0]
+                if fm[0] > age:
+                    age = fm[0]
+
+                if dm[3] and fm[3]:
+                    dom_bid = dm[1][0]
+                    dom_ask = dm[2][0]
+                    fx_bid = fm[1][0]
+                    fx_ask = fm[2][0]
+                    # 원값(raw) — 최우선 1단계 기준. 저장 계층(005·009)이 쓰는 값이고 응답에는 안 나간다.
+                    # 체결되는 쪽 호가: 김프는 해외 ask 에 사서 국내 bid 에 판다, 역프는 반대.
+                    fwd_raw = premium_percent(
+                        buy_krw=fx_ask * rate_ask, sell_krw=dom_bid
+                    )
+                    rev_raw = premium_percent(
+                        buy_krw=dom_ask, sell_krw=fx_bid * rate_bid
+                    )
+
+                    # 김프 — 해외 asks 를 notional(USDT)로 산 걷기(해외 시장당 한 번) → 그 수량을 국내 bids 에 판다
+                    buy = fm[4]
+                    if buy is None:
+                        buy = fm[4] = _walk_amount(fm[5], notional)
+                    bought = buy[0]
+                    left = bought
+                    sold = earned = 0.0
+                    if bought <= 0:
+                        left = 0.0  # 걷기의 "수량 ≤ 0 이면 체결 0·소진 아님" 과 같다
+                    else:
+                        for level in dm[6]:
+                            price = level[0]
+                            size = level[1]
+                            if size >= left:
+                                sold += left
+                                earned += left * price
+                                left = 0.0
+                                break
+                            sold += size
+                            earned += size * price
+                            left -= size
+                    if left > WALK_EPSILON and sold < bought:
+                        # 국내 bids 가 소진돼 못 판 수량 — 판 수량만큼 해외 매수를 되맞춘다(§3.2-4)
+                        quantity, amount = _walk_quantity(fm[5], sold)
+                        fx_ask_avg = amount / quantity if quantity > 0 else 0.0
+                    else:
+                        fx_ask_avg = buy[1] / bought if bought > 0 else 0.0
+                    dom_bid_avg = earned / sold if sold > 0 else 0.0
+
+                    # 역프 — 국내 asks 를 notional × rate_ask(원)로 산 걷기(국내 시장당 한 번) → 그 수량을 해외 bids 에 판다
+                    buy = dm[4]
+                    if buy is None:
+                        buy = dm[4] = _walk_amount(dm[5], notional_krw)
+                    bought = buy[0]
+                    left = bought
+                    sold = earned = 0.0
+                    if bought <= 0:
+                        left = 0.0
+                    else:
+                        for level in fm[6]:
+                            price = level[0]
+                            size = level[1]
+                            if size >= left:
+                                sold += left
+                                earned += left * price
+                                left = 0.0
+                                break
+                            sold += size
+                            earned += size * price
+                            left -= size
+                    if left > WALK_EPSILON and sold < bought:
+                        quantity, amount = _walk_quantity(dm[5], sold)
+                        dom_ask_avg = amount / quantity if quantity > 0 else 0.0
+                    else:
+                        dom_ask_avg = buy[1] / bought if bought > 0 else 0.0
+                    fx_bid_avg = earned / sold if sold > 0 else 0.0
+
+                    # 순값과 차감폭 — 반올림하지 않는다(상한도 없다). 차감폭은 max(0, 원값 − 순값) 과 같은 값
+                    fwd = premium_percent(
+                        buy_krw=fx_ask_avg * rate_ask, sell_krw=dom_bid_avg
+                    )
+                    rev = premium_percent(
+                        buy_krw=dom_ask_avg, sell_krw=fx_bid_avg * rate_bid
+                    )
+                    slip = fwd_raw - fwd
+                    slip_fwd = slip if slip > 0.0 else 0.0
+                    slip = rev_raw - rev
+                    slip_rev = slip if slip > 0.0 else 0.0
+
+                    # 국내 시세 자체라 환율·슬리피지와 무관하다 — FE 가 그대로 표시한다
+                    krw = dom_bid
+                    usd = fx_row.price
+                    status = "stale" if age >= STALE_AFTER_SEC else "ok"
+                else:
+                    # fail 이어도 입출금 값과 age 는 싣는다
+                    fwd = rev = usd = krw = slip_fwd = slip_rev = 0.0
+                    status = "fail"
+
+                # 입출금 6필드는 망 판정으로 채운다 — fail 행도 같은 규칙 (006 §3.7)
+                # 024 부터 core 공용 함수 — 틱도 같은 판정을 쓴다. `net_fx` 는 FE 의 "네트워크 같음/다름" 판단 재료다
+                wf = (
+                    wallet_fields(dom_row, fx_row)
+                    if wallet_memo is None
+                    else wallet_memo.fields((dom_ex, fx_ex, base), dom_row, fx_row)
                 )
 
-    # 5. 정렬 고정
-    rows_out.sort(key=lambda r: (r["sym"], r["dom"], r["fx"]))
+                # float() 는 모델이 하던 int→float 강제와 같다 — 거래소가 정수로 준 가격이 "100" 이 아니라
+                # "100.0" 으로 나가야 옛 바이트와 같다
+                append(
+                    {
+                        "sym": base,
+                        "dom": dom_ex,
+                        "fx": fx_ex,
+                        "fwd": float(fwd),
+                        "rev": float(rev),
+                        "usd": float(usd),
+                        # 009 가 게시한 fwd 추이(1분 버킷 ≤30개) — fail 행도 싣는다, 없으면 빈 배열.
+                        # 값은 009 가 버퍼에 넣을 때 이미 소수 3자리다(0.001%p = 김프 눈금보다 촘촘하다): 490행 ×
+                        # 30개를 1초마다 보내므로 배정밀도 그대로면 응답이 gzip 106KB 다. 원값은 Influx 에 남는다.
+                        "spark": store.spark(dom_ex, fx_ex, base),
+                        "status": status,
+                        "age": float(age),
+                        "slipFwd": float(slip_fwd),
+                        "slipRev": float(slip_rev),
+                        "krw": float(krw),
+                        "netDom": wf.net_dom,
+                        "depDom": wf.dep_dom,
+                        "wdDom": wf.wd_dom,
+                        "depFx": wf.dep_fx,
+                        "wdFx": wf.wd_fx,
+                        "netFx": wf.net_fx,
+                        "dayChg": day_chg,
+                    }
+                )
 
     # 6. 최상위 값 + USDT 시세 미갱신 경고 — 시세가 "있긴 한데 낡은" 거래소만 (스펙 008 §3.2)
     warnings: list[str] = []
