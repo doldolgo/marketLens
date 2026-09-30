@@ -25,7 +25,8 @@ EC2 1대에 몰린 컨테이너 5개를 **역할별 EC2 3대**(수집 · 데이�
 | serve | t4g.micro |
 
 - **collect** — 컨테이너 `server`(016 의 `collector` 역할) 하나. 거래소 WebSocket·마켓 우주·틱 루프·Redis 인계·flusher·원문 S3 아카이브·입출금 조회를 전부 맡는다. IAM 인스턴스 프로파일 `marketlens-s3-snapshot`(010 의 원문 업로드 주체)은 **이 박스에만** 붙이고 IMDS hop limit 2(ec2-setup.md 5-2). 컨테이너 포트 8000 을 호스트에 공개한다 — serve 의 nginx 가 사설 IP 로 붙기 위해서다. 탄력 IP 를 하나 붙인다 — 업비트 API 키가 IP 허용 목록이라 공인 IP 가 고정돼야 한다(t4g.small 실측에서 새 IP 는 401).
-- **data** — `redis` + `influxdb`. 6379·8086 을 호스트에 공개한다. 스왑 1GB. Influx 는 쿼리 메모리 상한을 env 로 건다: 쿼리 1개 256MB(`INFLUXD_QUERY_MEMORY_BYTES`)·동시 3개(`INFLUXD_QUERY_CONCURRENCY`)·전체 768MB(`INFLUXD_QUERY_MAX_MEMORY_BYTES` — Influx 는 전체 = 동시 × 1개 를 요구한다). **전체 상한 + Redis 상주(30MB) + Influx 상주(0.5GB) ≈ 1.3GB 로 1.5GB 를 넘지 않는다**. 근거: 2026-09-07 기간 지정 없는 `/history/streaks/bulk` 가 Influx 를 2.4GB 까지 키워 OOM 4회. 상한을 넘는 쿼리는 Influx 가 거부하고(503 으로 전파) 프로세스는 살아야 한다.
+- **data** — `redis` + `influxdb`. 6379·8086 을 호스트에 공개한다. 스왑 1GB. 근거: 2026-09-07 기간 지정 없는 `/history/streaks/bulk` 가 Influx 를 2.4GB 까지 키워 OOM 4회. 상한을 넘는 쿼리는 Influx 가 거부하고(503 으로 전파) 프로세스는 살아야 한다.
+  - **메모리 상한(2026-09-28 사람 결정).** Influx env: 쿼리 1개 256MB(`INFLUXD_QUERY_MEMORY_BYTES`)·동시 2개(`INFLUXD_QUERY_CONCURRENCY`)·전체 512MB(`INFLUXD_QUERY_MAX_MEMORY_BYTES` — Influx 는 전체 = 동시 × 1개 를 요구한다)·쓰기 캐시 256MB(`INFLUXD_STORAGE_CACHE_MAX_MEMORY_SIZE`)·Go 힙 목표 `GOMEMLIMIT` 700MiB, 컨테이너 `mem_limit` 1300m 에 `memswap_limit` 도 같은 값(Influx 는 스왑을 쓰지 않는다 — 안 걸면 docker 가 같은 양의 스왑을 더 허락해 상한에서 재시작되지 않고 박스 스왑을 먼저 먹는다). Redis 는 `--maxmemory 600mb --maxmemory-policy noeviction` — 넘치면 키를 지우지 않고 쓰기만 거부한다(009 인계기는 그 틱을 버리고 경고). 쿼리 상한이 세는 메모리는 실제 힙의 1/3~1/4 이고 256MB 에서 거부되는 쿼리도 힙을 +0.8GB 올려 내려놓지 않아, 쿼리 몫만으로는 박스를 지키지 못한다(무거운 조회 3개 겹침에 Influx 1.85~2.72GB). 이 설정에서 같은 조합은 0.83~1.16GB 이고 무거운 조회 벽시계는 +9~25% 다. 박스 예산은 **Influx 1,300MiB + Redis 600MiB = 1.9GiB ≤ 2GiB** — 둘이 동시에 상한에 닿을 때 모자라는 OS·Redis 몫은 스왑 1GB 가 받고, Influx 는 상한을 넘으면 스왑 없이 컨테이너만 재시작된다(1m 봉은 014 미전송 20분, 초 단위는 Redis 3시간이 버틴다). 동시 2 는 무거운 조회가 있을 때 대시보드 조회를 큐에서 기다리게 한다(2 vCPU 라 동시 3 도 처리량을 늘리지 못한다).
 - **serve** — `api`(016 의 `api` 역할) + `web`(nginx). 기존 탄력 IP `3.34.104.16` 을 이 박스로 옮긴다. 호스트에 여는 포트는 `WEB_PORT`(80) 하나.
 
 보안그룹은 3개, 규칙은 최소다. 셀 한 토큰, 의미는 아래 문장으로.
@@ -85,12 +86,13 @@ main push → 워크플로가 **data → collect → serve** 순서로 SSH 3번,
 - nginx 템플릿에서 `location /api/` 의 업스트림만 `COLLECT_HOST` 를 쓰고, api 로 가는 세 분기와 `$http_*` 변수는 그대로다
 - deploy 워크플로가 3타깃을 data → collect → serve 순서로 돌고, 각 스크립트가 자기 profile 과 자기 가드 키만 검사한다; `EC2_HOST` 단독 시크릿 참조가 없다
 - `COMPOSE_PROFILES=collect,data,serve` + 주소 키 없음 = 007 §4 의 한 박스 기동이 그대로 통과한다(로컬 수동)
+- 메모리 상한: Influx 쿼리 256MB × 동시 2 = 전체 512MB·쓰기 캐시 256MB·`GOMEMLIMIT` 700MiB < `mem_limit` 1300m = `memswap_limit`, Redis `--maxmemory 600mb`·`noeviction`, Influx 상한 + Redis 상한 ≤ 2GiB, 009 틱 스트림 상한(10,800 × 41KB)이 Redis 상한의 80% 안
 
 수동(EC2, 런북 순서대로 한 뒤):
 1. 각 박스 `docker ps` 에 자기 profile 의 컨테이너만 있다(collect 1, data 2, serve 2).
 2. serve 에서 `curl localhost/api/spreads` 가 200 이고 행 1,400 이상, `curl localhost/api/health/collect` 가 5거래소 `ok`, 성공률 1시간 99% 이상.
 3. collect `docker stats` 의 server CPU 가 코어 1개 기준 80~100% 이고 `top` 의 steal 이 0%.
-4. data `free -m` 에 스왑 1GB, Influx 컨테이너 env 에 쿼리 상한 세 값이 있고 `curl localhost:8086/health` 200.
+4. data `free -m` 에 스왑 1GB, Influx 컨테이너 env 에 쿼리 상한 세 값·캐시·`GOMEMLIMIT` 가 있고 `docker inspect` 의 메모리 상한 1300MiB 와 스왑 포함 상한(`MemorySwap`)도 1300MiB, `redis-cli config get maxmemory*` 가 600mb·noeviction, `curl localhost:8086/health` 200.
 5. main 에 빈 커밋 없이 실제 PR 하나로 워크플로 3타깃 success 1회.
 6. 브라우저에서 `http://3.34.104.16/` 스프레드 표가 매초 갱신되고 기록 탭 차트가 뜬다(탄력 IP 가 serve 에 붙음).
 7. 구 박스를 정지한 뒤에도 2·6 이 유지된다. 정지 3일 뒤 종료.
@@ -134,3 +136,4 @@ COMPOSE_PROFILES=collect,data,serve WEB_PORT=8090 docker compose -f docker-compo
 - 만든 것 (파일 목록): `docker-compose.yml`(profile 3개·`depends_on` 제거·`DATA_HOST`/`COLLECT_HOST` 치환·호스트 포트·Influx 쿼리 상한 3개·web 에 `NGINX_ENVSUBST_FILTER`), `web/nginx.conf`(`location /api/` 업스트림 `${COLLECT_HOST}`), `web/Dockerfile`(templates 경로로 복사), `.github/workflows/deploy.yml`(job 3개 data→collect→serve, 박스별 시크릿·가드·profile), `server/tests/test_deploy.py`(§4 계약 — profile·depends_on 없음·포트·치환식·템플릿 변수 1개·워크플로 3타깃·박스별 가드·README), `README.md`, 문서 6종(`status.md`·`architecture.md`·`dev-setup.md`·`007`·`016`·`ec2-setup.md`) + `CLAUDE.md` 021 DONE·런북 목록.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절: ① nginx 치환은 공식 이미지 templates 기능 + `NGINX_ENVSUBST_FILTER=^COLLECT_HOST$`(§3.2 에 적음). 컨테이너 안에서 `sh -c` 로 띄우면 entrypoint 가 안 돌아 치환이 안 된다 — 디버그 때 주의. ② 워크플로는 step 이 아니라 **job 3개 + needs** — 실패 박스가 Actions 에서 바로 보이고 뒤 job 이 자동으로 멈춘다. ③ Influx 상한 값 256MB×3=768MB(§3.1 에 적음). ④ data 박스 가드는 `INFLUX_TOKEN` 만(루트 `.env` 는 빈 파일이라 검사 없음). ⑤ 로컬 통합 기동은 dev compose 와 6379·8086 이 겹쳐 먼저 내려야 한다(dev-setup.md 에 적음). ⑥ `depends_on` 이 없어 serve 박스에서 web 이 api 보다 먼저 뜨면 nginx 가 "host not found in upstream api" 로 한 번 죽고 restart 로 다시 뜬다(로컬 실측에선 RestartCount 0 — status.md 알려진 빚에 적음).
 - 남은 빚: EC2 전환 자체(런북 11단계, 사람) 와 §4 수동 1~7. 007 §5 의 옛 기록("호스트 8000·8086 LISTEN 0건")은 그 시점 기록이라 손대지 않음. Redis 인증 없음·박스별 이미지 빌드·Influx 쿼리 기간 상한 미적용은 status.md 알려진 빚.
+- 2026-09-28 성능 개선 — data 박스 메모리 상한(§3.1): Influx 동시 3 → 2·전체 768 → 512MB·쓰기 캐시 256MB·`GOMEMLIMIT` 700MiB·`mem_limit` 1300m, Redis `maxmemory` 600mb·`noeviction`. 이유: 쿼리 몫 상한만으로는 거부되는 쿼리의 힙까지 막지 못했고, 009 틱 스트림(24시간 상한 ≈3.5GB)과 Redis 에 상한이 없어 Influx 장애가 박스 전체 OOM 으로 번질 수 있었다. 측정은 앞선 점검의 로컬 influxdb:2.7 재현값(§3.1 본문) — 운영 확인은 §4 수동 4. 계약은 `tests/test_deploy.py`. 서버 검증 951 passed.

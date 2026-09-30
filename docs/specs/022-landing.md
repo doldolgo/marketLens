@@ -26,7 +26,7 @@
 | `/api/landing` | `api:8000/landing` |
 | 그 밖의 루트 경로 | 정적 파일 또는 404 |
 
-- 기존 규칙(022 이전 판)은 그대로다: 쿼리 붙은 `/` 는 쿼리를 들고 301, SPA fallback 은 `/app/` 아래에서만, `landing.html`·`index.html` no-store, `assets/` 1년 immutable, `/landing/*`·`/robots.txt`·`/sitemap.xml`·`/favicon.svg` 는 정적 파일.
+- 기존 규칙(022 이전 판)은 그대로다: 쿼리 붙은 `/` 는 쿼리를 들고 301, SPA fallback 은 `/app/` 아래에서만, `landing.html`·`index.html` no-store, `assets/` 1년 immutable, `/landing/*`·`/robots.txt`·`/sitemap.xml`·`/favicon.svg` 는 정적 파일. 정적 파일은 빌드 때 만든 `.gz` 를 `gzip_static` 으로 준다(007 §3, 2026-09-28 — 캐시 헤더는 그대로, 랜딩 HTML 32.5KB → 11KB).
 - `/api/landing` 은 공개 허용 목록(028)의 **정확 일치** location 하나 — 다른 허용 경로와 같은 모양(접두 제거 rewrite·프록시 헤더 4개). 배포에서 api 가 죽으면 이 경로만 502 이고 랜딩 본문은 그대로 뜬다.
 
 ### 3.2 `GET /landing` — 요약 API
@@ -49,17 +49,18 @@
 **live** — Redis 키 `spreads:latest`(017 이 매 틱 쓰는 $1,000 표, TTL 10초)를 읽기만 한다(`spreads:want` 는 쓰지 않는다). 쓰는 표 계약(003·006·018): 최상위 `rate`(업비트 USDT 매도호가, 원)·`dataReceivedAt`, `rows[]` 행마다 `sym`·`dom`·`fx`·`fwd`·`rev`(슬리피지 **차감 후** 순값 %)·`slipFwd`·`slipRev`(차감폭 %p, 원값 = 순값 + 차감폭)·`krw`(국내 최우선 매수호가)·`usd`(해외 마지막 체결가)·`status`(`ok`·`stale`·`fail`)·`depDom`·`wdDom`·`depFx`·`wdFx`(true 열림·false 막힘·null 모름)·`netDom`·`netFx`(망 표시명, null 없음).
 - **옮길 수 있는 방향**: 김프 `kimp`(값 `fwd`) 는 `wdFx === true && depDom === true`, 역프 `reverse`(값 `rev`) 는 `wdDom === true && depFx === true`. null 은 열림이 아니다.
 - `top`: `status == "ok"` 행의 옮길 수 있는 방향만 후보다. 코인마다 값이 가장 큰 후보 하나를 남기고, 값 내림차순 상위 5개(같으면 `sym` 오름차순). 값이 0 이하여도 들어간다 — 지금 시장이 그렇다는 뜻이므로 숨기지 않는다. `pct` = 그 방향 값, `slip` = 그 방향 차감폭, `krw`·`usd`·`netDom`·`netFx` 는 행 그대로. 후보가 없으면 `[]`.
-- `coins` = `rows` 의 `sym` 종류 수, `pairs` = `rows` 길이(둘 다 상태 무관). `over1` = `status == "ok"` 인 (행, 방향) 가운데 값이 1.0 이상인 수, `over1Movable` = 그중 옮길 수 있는 방향인 수. 1.0 은 013 사건 진입 기준과 같다.
+- `coins` = `rows` 의 `sym` 종류 수, `pairs` = `rows` 길이(둘 다 상태 무관). `over1` = `status == "ok"` 인 (행, 방향) 가운데 **원값**(값 + 차감폭)이 1.0 이상인 수, `over1Movable` = 그중 옮길 수 있는 방향인 수. 값도 기준도 013 사건 진입과 같다 — 틱이 사건을 여는 값이 최우선 호가 기준 원값이라, 순값으로 세면 같은 페이지의 "1% 넘게 벌어진" 이 두 뜻이 된다(2026-09-28 운영 표 3장에서 순값 62~64건·원값 110~115건).
 - `depthGap`: 호가 깊이 예시 하나. `status == "ok"` 행의 옮길 수 있는 방향 가운데 원값(값 + 차감폭)이 1.0 이상이고 차감폭이 0.1%p 이상인 것 중 차감폭이 가장 큰 하나(같으면 `sym` 오름차순). 필드 `sym`·`dom`·`fx`·`dir`·`raw`(원값)·`pct`(순값)·`slip`(차감폭). 후보가 없으면 null. `top[0]` 을 예시로 쓰지 않는 이유: 1위 경로는 대개 호가가 두꺼워 원값과 순값이 0.01~0.1%p 밖에 차이 나지 않는다 — 코인 이름만 바뀌고 요점이 안 보였다(2026-09-28 실측 1위 +1.69→+1.63%, 이 규칙으로 고른 HFT 는 +1.27→−0.04%).
 - `null` 조건: Redis 불달, 키 없음, 값이 JSON 이 아니거나 `rows` 가 배열이 아님.
 
 **trail** — `top[0]` 경로의 최근 1시간. Influx 버킷 `candles_1m`(014)에서 그 (dom, fx, sym) 봉을 `[지금−3600, 지금)` 로 읽어, 방향이 `kimp` 면 `fwd_c`, `reverse` 면 `rev_c` 를 `[창 시작 ts, 값]` 으로 ts 오름차순(최대 60점). 봉 값은 **슬리피지 차감 전 원값**이라 `top[0].pct` 보다 크다 — 랜딩은 "최우선 호가 기준" 이라고 표시한다. `null` 조건: `live` 가 null, `top` 이 빔, Influx 없음(토큰 없음)·실패, 점이 2개 미만.
 
-**events** — Influx `premium_event`(013)를 `start = 지금 − 604800`, `stop = 지금` 으로 읽는다(사건 시작 시각 기준, 진행 중 포함). `count` 전체, `kimp`·`reverse` 방향별, `open` = `endTs == 0` 인 수. `top` = **닫힌 사건**(`endTs > 0`)만, 코인마다 가장 늦게 끝난 사건 하나, `endTs` 내림차순 상위 5개(같으면 `sym` 오름차순) — 필드 `sym`(점의 base)·`dom`·`fx`·`dir`·`maxPercent`·`startTs`·`endTs`·`durationSeconds`·`lastTs`. 최고값 순으로 고르지 않는 이유: 7일 최고값 자리는 입출금이 막혔거나 이름만 같은 다른 코인의 수백 % 값이 차지한다(2026-09-27 실측 코인별 최고 652%·415%·275%, 스테이블코인 106%). 계속 기록하고 있다는 것을 현실적인 값으로 보여 주려고 최근에 끝난 순으로 고른다. 사건 값도 원값이고 입출금 여부와 무관하게 잡힌다. `null` 조건: Influx 없음·실패.
+**events** — Influx `premium_event`(013)를 `start = 지금 − 604800`, `stop = 지금` 으로 읽는다(사건 시작 시각 기준, 진행 중 포함). `count` 전체, `kimp`·`reverse` 방향별, `open` = `endTs == 0` 이고 마지막 관측 `last_ts` 가 `지금 − 600` 이후인 점의 (dom, fx, base, dir) 종류 수 — 013 복원이 고아 점을 닫는 규칙(결측허용 600초)과 같다. 고아 점(재기동 전에 열려 닫히지 못한 점)은 세지 않고, 재기동 뒤 같은 조합이 다시 열려 두 점이 다 `endTs == 0` 이어도 한 번이다. `top` = **닫힌 사건**(`endTs > 0`)만, 코인마다 가장 늦게 끝난 사건 하나(같은 코인에서 끝난 시각이 같으면 늦게 시작한 것, 그것도 같으면 dom·fx·dir 오름차순), `endTs` 내림차순 상위 5개(같으면 `sym` 오름차순) — 필드 `sym`(점의 base)·`dom`·`fx`·`dir`·`maxPercent`·`startTs`·`endTs`·`durationSeconds`·`lastTs`. 최고값 순으로 고르지 않는 이유: 7일 최고값 자리는 입출금이 막혔거나 이름만 같은 다른 코인의 수백 % 값이 차지한다(2026-09-27 실측 코인별 최고 652%·415%·275%, 스테이블코인 106%). 계속 기록하고 있다는 것을 현실적인 값으로 보여 주려고 최근에 끝난 순으로 고른다. 사건 값도 원값이고 입출금 여부와 무관하게 잡힌다. `null` 조건: Influx 없음·실패.
+- **사건 점을 올리지 않고 Flux 에서 접는다(2026-09-28 사람 결정).** core 공개 함수 `InfluxClient.query_event_summary(*, start: int, stop: int, open_since: int, top_n: int) -> EventSummary`(`open_since` = 지금 − 600, `top_n` = 5)가 요청 하나에서 방향별 수(`end_ts` 필드 점 수), `end_ts == 0` 인 점과 `last_ts ≥ open_since` 인 점의 키(교집합이 진행 중), 닫힌 점 중 끝난 시각이 늦은 후보 200개(`top`)를 받는다 — 필드를 pivot 하지 않는다. 코인별 동률 규칙은 파이썬이 후보에 적용하고, 고른 5건만 그 코인들로 좁혀 `max_percent`·`duration_seconds`·`last_ts` 를 한 번 더 읽는다(같은 7일 창). 후보 끝자리와 같은 시각에 끝난 사건이 잘려 순위가 확정되지 않으면(가장 이른 후보보다 늦게 끝난 코인이 5개 미만 — 재기동이 고아 수백 건을 한 시각에 닫은 직후) 닫힌 점 전부의 `end_ts` 로 다시 묻는다. 한 필드만 있는 반쪽 점도 방향별 수와 후보에 들고, 후보에서 고른 반쪽 점은 상세 필드가 없어 `top` 에서 빠진다(다음 사건으로 채우지 않는다) — 실데이터에는 없다. 이유: 7일 사건 5.9만 점을 전부 pivot 해 api(t4g.micro)에서 세면 60초마다 파이썬 CPU 0.4초·메모리 +50MB 가 든다.
 
 - **캐시**(프로세스 메모리): `live` 5초, `events` 60초, `trail` 60초 — trail 은 경로(dom·fx·sym·dir)가 바뀌면 만료 전이라도 새로 읽는다. 비었거나 만료된 부분에 요청이 몰리면 **한 번만** 갱신하고 나머지는 그 결과를 쓴다. null 결과도 같은 시간만큼 캐시한다 — 장애 중에 요청마다 Redis·Influx 를 두드리지 않게. Influx 호출은 스레드로 넘긴다(동기 클라이언트 — 016 과 같다).
 - **Influx 는 3초까지만 기다린다.** `trail`·`events` 는 갱신이 3초 안에 끝나지 않으면 이번 응답에 그 부분의 직전 값(만료됐어도 그대로, 한 번도 채운 적 없으면 null)을 싣는다. `trail` 의 직전 값은 **같은 경로**의 것만이다 — 1위 경로가 막 바뀌었다면 null(다른 코인의 추이를 새 경로 카드에 싣지 않는다). 조회는 뒤에서 끝까지 돌고, 끝나는 순간 그 결과(실패면 null)로 캐시를 채워 그때부터 TTL 을 센다. 조회가 도는 동안 온 요청은 새 조회를 시작하지 않고 같은 조회를 같은 3초 규칙으로 기다린다. 그래서 Influx 가 느리거나 매달려도 응답은 Redis 읽기 + 3초 안에 오고, 경로 카드는 Influx 때문에 늦지 않는다(Influx 클라이언트 자체 타임아웃은 60초라 이 규칙이 없으면 응답 전체가 그만큼 늦는다).
-- `features/landing/` 은 다른 기능을 import 하지 않는다. core 의 Redis·Influx 클라이언트만 쓴다(`spreads:latest` 읽기, 봉 조회, 사건 조회).
+- `features/landing/` 은 다른 기능을 import 하지 않는다. core 의 Redis·Influx 클라이언트(`spreads:latest` 읽기, 봉 조회, 사건 요약 조회)와 013 의 결측허용 상수(`core.premium_events.MAX_GAP_SEC`)만 쓴다.
 
 ### 3.3 화면 — 위에서 아래로
 전부 한국어, 왼쪽 정렬, 최대 폭 1120px. 거래소 표시명 `upbit→업비트` `bithumb→빗썸` `binance→Binance` `bybit→Bybit` `bitget→Bitget`.
@@ -88,7 +89,7 @@ KimpTrack                                     [서비스로 넘어가기]
    - 카드와 다음 경로의 각 경로는 링크 `/app/?tab=history&sym={sym}&h.dir={dir}&h.dom={dom}&h.fx={fx}`(기록 탭이 그 코인·방향·거래소로 열린다).
 3. **표시된 김프와 먹을 수 있는 김프는 다릅니다**(h2) — 중간 발표(2026-08)에서 쓴 말 그대로의 틀이다. 두 단의 글이고 카드로 감싸지 않는다. 옆(모바일은 아래)에 `landing/spreads.png`.
    - 소제목 "호가창 깊이" — "흔히 보는 김프는 가격 하나로 계산한 값입니다. 실제로 주문을 넣으면 호가창을 파고들면서 평균 단가가 밀리고, 주문이 클수록 그 차이도 커집니다." + (`depthGap` 이 있으면) "지금 {sym}의 {출발} → {도착} 경로는 맨 위 호가로 보면 {raw}%지만, $1,000어치를 실제로 사고팔면 {pct}%입니다." + "원화와 USDT 환산도 은행 환율 대신 국내 거래소의 실제 USDT 호가로 합니다(지금 업비트 ₩{rate 정수})." 출발·도착은 경로 카드와 같은 규칙(kimp 는 fx → dom, reverse 는 dom → fx), 두 값은 부호·소수 2자리.
-   - 소제목 "입출금 상태" — "김프가 아무리 커도 출금이나 입금이 막혀 있으면 코인을 옮길 수 없습니다." + "지금 1% 넘게 벌어진 김프·역프 {over1}건 가운데 실제로 옮길 수 있는 건 {over1Movable}건입니다." + "거래소마다 입출금을 네트워크 단위로 확인해서, 한쪽이라도 막혔거나 네트워크가 맞지 않으면 옮길 수 없는 경로로 표시합니다." `over1` 이 0 이면 가운데 문장 대신 "지금은 1% 넘게 벌어진 곳이 없습니다."
+   - 소제목 "입출금 상태" — "김프가 아무리 커도 출금이나 입금이 막혀 있으면 코인을 옮길 수 없습니다." + "지금 맨 위 호가로 1% 넘게 벌어진 김프·역프 {over1}건 가운데 실제로 옮길 수 있는 건 {over1Movable}건입니다." + "거래소마다 입출금을 네트워크 단위로 확인해서, 한쪽이라도 막혔거나 네트워크가 맞지 않으면 옮길 수 없는 경로로 표시합니다." `over1` 이 0 이면 가운데 문장 대신 "지금은 맨 위 호가로 1% 넘게 벌어진 곳이 없습니다." "맨 위 호가로" 는 4번 섹션의 사건 기준(원값)과 같은 값임을 밝힌다.
    - 실데이터가 든 문장(`depthGap` 문장·USDT 괄호·`over1` 문장)만 `live` 에 따라 숨고, 나머지 문장은 HTML 에 그대로 있다.
 4. **지난 7일, 벌어졌던 순간들**(h2) — "1% 넘게 벌어져 1분 넘게 이어진 순간을 사건으로 남깁니다. 지난 7일 {count}건(김프 {kimp}건, 역프 {reverse}건), 지금 진행 중 {open}건." 그 아래 소제목 "최근에 끝난 사건" 과 `events.top` 표: 코인 / 경로 "{dom} · {fx}" / 방향 / 최고 "+{maxPercent}%" / 지속(`durationSeconds`) / 끝난 시각(`endTs`, KST, "9월 25일 14:03"). 행은 2번의 기록 탭 링크(`h.dir` 는 사건 방향). 표 아래에는 아무 글도 두지 않는다. 옆에 `landing/history.png`. `events` 가 null 이면 첫 문장의 둘째 문장부터와 표를 숨긴다.
 5. **어떻게 만들었나**(h2) — 네 단계를 가로로(모바일은 세로). 실제 순서이므로 번호를 붙인다.
@@ -130,10 +131,12 @@ server — `features/landing/tests/`(Redis·Influx 는 fake):
 - 옮길 수 있는 방향만 후보다 — `wdFx`·`depDom` 이 true 일 때만 kimp, `wdDom`·`depFx` 가 true 일 때만 reverse, null 은 열림이 아니다
 - `stale`·`fail` 행은 `top`·`over1` 에서 빠지고, `coins`·`pairs` 는 상태와 무관하다
 - 코인당 1개(방향·거래소 중 값이 큰 것), 값 내림차순 5개, 동률은 `sym` 오름차순, 0 이하 값도 들어간다
-- `over1` 경계 — 값 1.0 은 포함된다
+- `over1` — 원값(값 + 차감폭)으로 센다: 원값 1.0 은 포함, 순값 0.5·차감폭 0.5 도 포함, 원값 0.75 는 빠진다
 - `depthGap` — 옮길 수 있는 방향만, 원값 1.0 이상·차감폭 0.1 이상 가운데 차감폭 최대(동률 `sym` 오름차순), `raw = pct + slip`, 경계값(원값 1.0·차감폭 0.1)은 포함, 옮길 수 없는 방향의 더 큰 차감폭은 무시, 후보가 없으면 null
 - trail — kimp 는 `fwd_c`·reverse 는 `rev_c`, 버킷 `candles_1m`·창 1시간, ts 오름차순, 점이 2개 미만이면 null
 - events — 방향별·진행 중 수. `top` 은 닫힌 사건만, 코인당 가장 늦게 끝난 1개, `endTs` 내림차순 5개(동률 `sym` 오름차순) — 진행 중 사건과 같은 코인의 더 이른 사건은 빠진다
+- events `open` — 마지막 관측 601초 전인 고아 점은 빠지고 600초 전은 든다, 재기동 뒤 같은 조합의 옛 점·새 점은 한 번, 다른 조합은 따로; 요약 조회는 `open_since = 지금 − 600`·`top_n = 5` 로 한 번 (`test_rules.py`)
+- 요약 조회 — 점을 전부 올려 센 기준선과 같다(무작위 40벌·끝 시각 동률이 몰린 후보·코인 안 동률은 늦게 시작한 것·시작까지 같으면 dom·fx·dir), 후보 200개가 한 시각 동률로 잘리면 닫힌 점 전부로 다시 묻는다, 고른 반쪽 점은 `top` 에서 빠진다, 첫 요청에 pivot 없음·두 요청 같은 7일 창 (`tests/test_event_summary.py`)
 - Redis 불달·키 없음 → `live`·`trail` null, `events` 정상 / Influx 없음·실패 → `events`·`trail` null, `live` 정상 / 둘 다 → 200 에 셋 다 null
 - 캐시 — 5초 안의 두 번째 요청은 Redis 를 다시 읽지 않는다, 60초 안에는 사건 조회를 다시 하지 않는다, 동시 요청 10개에 Redis 읽기는 1번, 경로가 바뀌면 trail 을 새로 읽는다
 - Influx 3초 — 사건·봉 조회가 3초 넘게 걸리면 응답은 3초 뒤에 오고 그 부분은 직전 값(처음이면 null), `live` 는 정상이다 / 뒤에서 끝난 조회가 캐시를 채워 다음 요청이 새 값을 받는다 / 조회가 도는 동안 온 요청은 조회를 새로 시작하지 않는다
@@ -204,12 +207,12 @@ python3 check_depth.py   # 같은 spreads:latest(dataReceivedAt 이 같은 표)�
   - 0 의 색은 스펙대로 회색이다 — 대시보드 `pctColor` 는 0 을 글자색으로 칠해 조금 다르다.
   - 그림·favicon 은 상대 경로(`landing/…`) — 배포 `/` 와 dev `/app/landing.html` 에서 같은 파일을 찾는다. `og:image` 는 절대 주소 그대로.
   - 한국어 줄바꿈: 한글 뒤 "·" 앞, ")"·"%" 뒤 조사 앞에서 줄이 바뀌지 않게 그 묶음을 nowrap 으로 감쌌다(문구는 그대로).
-  - server: 저장소 불가(Redis 예외·`InfluxUnavailableError`)는 로그 없이 그 부분 null, 그 밖의 계산 예외는 WARNING 1줄 + null(항상 200). `LandingService` 는 I/O 가 없어 lifespan 이 아니라 `create_app` 에서 만든다. events 와 live→trail 을 함께 기다린다. core 변경 없음 — `RedisBus.latest()`(GET 만)·`query_candles`·`query_premium_events`·`TIER_BY_RES["1m"]` 를 그대로 쓴다.
+  - server: 저장소 불가(Redis 예외·`InfluxUnavailableError`)는 로그 없이 그 부분 null, 그 밖의 계산 예외는 WARNING 1줄 + null(항상 200). `LandingService` 는 I/O 가 없어 lifespan 이 아니라 `create_app` 에서 만든다. events 와 live→trail 을 함께 기다린다. core 는 `RedisBus.latest()`(GET 만)·`query_candles`·`query_event_summary`(사건 요약, 2026-09-28 추가)·`TIER_BY_RES["1m"]`·`MAX_GAP_SEC` 를 쓴다.
   - 함께 고친 절: 016 §3.1·018 §3.4(api 경로·Redis 용도), §6 목록 밖으로 db.md 읽는 쪽("다른 조회 API 는 DB 0회" 가 틀리게 돼서)·status.md deploy 행과 dev-setup 통합 기동의 api 분기 목록. §4 의 "test_deploy 단언 1개" 는 새 테스트 1개에 더해 기존 단언 하나(api 로 가는 `proxy_pass` 수)가 바뀌었다.
-  - `open` 은 `end_ts == 0` 을 센다 — 평소엔 진행 중 사건 수와 같다(운영 `/api/history/events` 에서 `endTs == 0` 248건 = `ongoing` 248건, 013 기동 복원이 600초 넘게 못 본 점을 닫는다). 수집이 멈춰 있는 동안만 그때 열려 있던 사건이 진행 중으로 남는다.
+  - `open` 은 `end_ts == 0` 이고 마지막 관측이 600초 안인 조합을 센다 — 013 기동 복원이 3초 상한을 넘겨 고아 점이 남으면 `end_ts == 0` 만으로는 운영 7일에서 3,232건(실제 진행 중 255건)이 됐다. 쓰기가 600초 넘게 막히면(Influx 불통) 그동안 진행 중이 적게 보인다.
   - 스펙 문구 보고: §3.5 마지막 줄 "자바스크립트가 꺼져도 제목·설명·섹션 글·면책·그림은 HTML 에 있다" 의 "면책" 은 §3.3-6(면책 섹션을 두지 않는다)과 어긋난다 — 코드는 면책이 없다. 설계 세션이 그 낱말을 지울 것.
 - 남은 빚:
-  - events 비용 — 7일 `premium_event` 전부(2026-09-27 58,601점)를 60초에 한 번 읽는다. 같은 점을 넣은 로컬 Influx 에서 조회 0.95초·파이썬 CPU 0.36초·메모리 +50MB. 느려져도 응답은 3초 규칙으로 늦지 않지만 비용은 그대로다 — 늘어서 api(t4g.micro)에 부담이 되면 Flux 쪽 집계(core 새 조회)로 옮기는 후속 스펙(status.md 빚).
   - 막 1위가 된 경로는 봉이 없어도 null 을 60초 캐시하므로 최대 60초 추이가 안 보일 수 있다(스펙의 null 캐시 그대로).
   - `landing.html` 인라인 스크립트는 oxlint 대상 밖이다(`node --check` 로 문법만).
   - 확인은 로컬 대역 구성(운영 공개 API 본문을 로컬 Redis·Influx 에)으로 했다 — EC2 배포 뒤 `/api/landing` 응답 시간·api CPU 실측 대기.
+- 2026-09-28 성능 개선 — 사건 요약·진행 중·over1: 사건 부분을 core 요약 조회로(§3.2 — Flux 에서 접고 후보 200개를 파이썬이 동률 규칙으로), 진행 중을 600초 규칙과 조합 종류 수로, `over1` 을 원값으로(`landing.html` 문장에 "맨 위 호가로"). 측정(로컬 influxdb:2.7, 운영 사건 7일 58,666건 + 고아·재개 흉내, 기준선 코드와 같은 조건): events 갱신 wall 920 → 126ms, 파이썬 CPU 380 → 5.5ms, Influx CPU 683 → 278ms. 방향별 수·`top` 5건 전 필드가 기준선과 같고, `open` 만 3,262 → 267(같은 점에 600초 규칙을 따로 적용한 값과 같다). 코인 안에서 끝·시작 시각까지 같은 사건은 기준선이 저장소 순서로 골랐고 이제 dom·fx·dir 오름차순이다. 후보가 동률로 잘리는 모양(한 시각에 520건)에서도 고른 코인이 기준선과 같다. 운영 표 3장의 `over1` 62·63·64 → 110·111·115, `over1Movable` 26·27·28 → 68·69·73.

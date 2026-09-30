@@ -23,7 +23,7 @@
 ## 3. 동작
 
 ### 3.1 읽는 계약 (복사)
-- 001 §3.3: 행 = `(exchange, base)` 당 `quote`·`native_symbol`·`price`·`price_timestamp`·`asks`·`bids`(누적 1,000,000 USDT 도달 단계까지, 최소 1단계, 잔량 ≤0 제거)·입출금 3필드(물려받음)·`updated_at`. 거래소별 스트림 상태 `{connected, last_message_at, last_error, subscribed, url, connected_since}`.
+- 001 §3.3·§3.5-1: 행 = `(exchange, base)` 당 `quote`·`native_symbol`·`price`·`price_timestamp`·`asks`·`bids`(가격 > 0 이고 유한·잔량 > 0 이고 유한한 단계만, 누적 1,000,000 USDT 도달 단계까지, 최소 1단계)·입출금 3필드(물려받음)·`updated_at`. 거래소별 스트림 상태 `{connected, last_message_at, last_error, subscribed, url, connected_since}`.
 - 001 §3.2 + 이 스펙 §2-1: 해외 심볼 원천 계약 `refresh(client) -> int`(REST 1회, 실패는 거래소 예외) / `bases() -> set[str]` / `set_universe(bases)`(매초·`/refresh`·기동, 배정이 같으면 무동작).
 - 001 §3.7: 받은 모든 프레임과 REST 본문은 원문 싱크 `record(exchange, source, received_at_ms, payload, key)` 로 — 행·상태 갱신 전에, 텍스트 그대로. 시세 프레임은 `key` = `orderbook:<심볼>`·`trade:<심볼>`(대문자 원본 심볼), 매초 오는 심볼 목록 본문은 `symbols:all`, 구독·핑 응답·깨진 프레임·핸드셰이크 거부 본문·입출금 본문은 `key=None`. 010 이 `key` 있는 줄을 분당 마지막 1건으로 솎는다 — 델타 프레임도 같은 규칙이라 **아카이브로 북을 재생할 수는 없다**(빚, §6 status.md).
 - 011 §3.2: 실패 8종 `timeout network rate_limit banned unavailable bad_request bad_response stale_stream`. 매 틱 거래소마다 판정해 추적기에 넘긴다.
@@ -38,19 +38,20 @@
 - 연결 한도: 도메인당 5분에 500 연결, IP 당 시세 연결 1,000. 재연결은 지수 백오프 1·2·4…30초, **구독 뒤 그 샤드의 첫 시세 프레임**에서 1초로 리셋(001·012 와 같다). 핸드셰이크 HTTP 거부는 §3.8 규칙.
 
 ### 3.3 심볼 목록과 샤딩
-- 심볼 목록: `GET https://api.bybit.com/v5/market/instruments-info?category=spot&status=Trading` → `result.list[]` 중 `status == "Trading"` 이고 `quoteCoin == "USDT"` 인 것. base = `baseCoin`, 심볼 = `symbol`(예 `BTCUSDT`). 현물은 페이지네이션이 없다(`limit`·`cursor` 무시). 응답 봉투 `{"retCode":0,"retMsg":"OK","result":{…},"time":…}` — **HTTP 200 이어도 `retCode != 0` 이면 실패**(§3.8). **매초** 갱신(001 §3.2 — IP 한도 5초에 600회의 0.8%), 본문은 질의를 뺀 `rest:/v5/market/instruments-info` 로 원문 싱크(`symbols:all`). 실패 시 직전 목록 유지 + 경고. 파싱 결과가 같으면 아무 일도 하지 않는다. 본문 크기·파싱 시간은 미확인(EC2 실측 항목).
+- 심볼 목록: `GET https://api.bybit.com/v5/market/instruments-info?category=spot&status=Trading` → `result.list[]` 중 `status == "Trading"` 이고 `quoteCoin == "USDT"` 인 것. base = `baseCoin`, 심볼 = `symbol`(예 `BTCUSDT`). 현물은 페이지네이션이 없다(`limit`·`cursor` 무시). 응답 봉투 `{"retCode":0,"retMsg":"OK","result":{…},"time":…}` — **HTTP 200 이어도 `retCode != 0` 이면 실패**(§3.8). **매초** 갱신(001 §3.2 — IP 한도 5초에 600회의 0.8%), 본문은 질의를 뺀 `rest:/v5/market/instruments-info` 로 원문 싱크(`symbols:all`). 실패 시 직전 목록 유지 + 경고. 본문 크기·파싱 시간은 미확인(EC2 실측 항목).
+- **본문이 직전과 같으면 파싱하지 않는다(001 §3.2 결정).** 커넥터는 직전에 심볼 맵까지 만든 200 응답의 비교용 바이트를 든다. 비교용 바이트 = 본문에서 봉투 꼬리의 `"time":<ms>}`(끝 64바이트 안에서 찾는다)를 뺀 것 — 이 필드만 매 응답 바뀐다. 새 200 응답의 비교용 바이트가 같으면 원문 기록만 하고 파싱·맵 재생성 없이 돌아온다(호출 수 1). 필드를 못 찾으면 본문 전체로 비교해 매번 파싱으로 간다. `retCode != 0` 처럼 맵을 만들지 못한 본문은 기억하지 않는다.
 - base 하나에 USDT 심볼이 둘 이상이면 처음 것. 우주 base 중 맵에 없는 것은 구독 대상이 아니다. `USDT` 자신은 우주에 없다(001).
 - **3 샤드**, 배정 = `crc32(심볼) % 3`, 한 심볼의 두 토픽은 같은 샤드 — 012 §3.3 과 같은 규칙. 이유가 하나 더 있다: 한 연결의 `args` 총길이 21,000자 한도에 심볼당 약 45자(`orderbook.200.XXXUSDT`+`publicTrade.XXXUSDT`)라 **한 소켓은 약 460 심볼**이 상한인데 우주가 그 근처까지 갈 수 있다.
 - 재조정 규칙은 012 §3.3 그대로: 우주 확정마다 `set_universe`, 빠진 심볼의 행은 그 자리에서 삭제, 연결된 샤드마다 원하는 구독과 실제 구독의 **차이만** 전송, 실제 구독 집합은 소켓에 묶인다, 60초마다 한 번 자동 재조정, 배정 0 샤드는 연결하지 않는다. 다른 점은 한 요청 `args` **10개 이하**이고, 요청 사이 **0.1초** 를 쉰다(요청 빈도 한도는 문서에 없다 — 미확인이라 보수값. 배정 150 심볼이면 30요청·3초).
 
 ### 3.4 호가 북과 행 갱신
 - 심볼마다 **로컬 북**(가격 → 잔량, 매도·매수 각각)을 둔다. `snapshot` → 북을 통째로 교체. `delta` → 잔량 `0` 은 그 가격 삭제, 없는 가격은 삽입, 있으면 잔량 교체(공식 문서 규칙). `u == 1` 은 서비스 재시작 스냅샷이므로 교체(문서상 `type` 도 snapshot 이다). 재연결하면 새 스냅샷이 오므로 소켓이 바뀔 때 그 샤드의 북을 전부 비운다 — 옛 북에 새 델타를 얹지 않는다. **스냅샷 전에 온 델타는 버린다**(북이 없으므로) — 다만 거래소가 보낸 시세 프레임이므로 수신 시각(`last_message_at`)에는 센다.
-- 매 호가 메시지 뒤 그 심볼의 행을 다시 만든다: `asks` 오름차순·`bids` 내림차순으로 정렬해 001 규칙(잔량 ≤0 제거·누적 1,000,000 USDT 까지·최소 1단계)으로 자른 것, `updated_at` = 수신 시각, 호가 시각 = 프레임 `ts`. 한쪽이 비면 행을 저장하지 않는다(있던 행은 지운다). 행은 메시지로만 바뀐다(001) — 다만 델타 뒤 행 재생성 시점은 §3.2 의 발행 제한(심볼당 500ms 1번, 스냅샷은 즉시)을 따른다.
+- 매 호가 메시지 뒤 그 심볼의 행을 다시 만든다: `asks` 오름차순·`bids` 내림차순으로 정렬해 001 규칙(가격·잔량이 0 이하이거나 유한하지 않은 단계 제거·누적 1,000,000 USDT 까지·최소 1단계)으로 자른 것, `updated_at` = 수신 시각, 호가 시각 = 프레임 `ts`. 한쪽이 비면 행을 저장하지 않는다(있던 행은 지운다). 행은 메시지로만 바뀐다(001) — 다만 델타 뒤 행 재생성 시점은 §3.2 의 발행 제한(심볼당 500ms 1번, 스냅샷은 즉시)을 따른다.
 - `publicTrade` → `data[]` 중 **`T` 가 가장 큰 원소**의 `p` 가 `price`, 그 `T` 가 `price_timestamp`(배열 순서를 믿지 않는다). 행이 없으면 보류했다가 호가가 오면 함께 싣는다. 체결가가 없으면 mid — 이때 `price_timestamp` 는 수신 시각(012 와 같다).
 - 캐시 키·`native_symbol` 은 원본 심볼 대문자(`BTCUSDT`). 토픽의 심볼이 맵에 없으면 그 프레임은 버린다. 입출금 3필드 물려받기·우주 밖 버리기는 001 §3.5.
 
 ### 3.5 정체 판정 (매 틱, 샤드 단위)
-012 §3.5 와 같다 — 샤드마다 `last_message_at`·배정 수·구독 시각(첫 구독 묶음을 다 보낸 시각), 조용한 시간 = 지금 − max(마지막 시세, 연결 중이면 구독 시각), 배정 0 샤드는 판정 대상 아님, 연결됐는데 **30초** 무수신 → `stale_stream`, 미연결 → `last_error.kind`, 여러 샤드가 나쁘면 가장 오래 조용한 샤드(동률이면 작은 번호), 전부 판정 없음이면 없음. pong 만 오고 시세가 없어도 30초면 정체다(pong 은 시세가 아니다). 실패 `message` = `"바이빗 스트림 정체: 샤드 2 (구독 7종목) 30초 이상 무수신"`, `url` = WS URL. `store.stream("bybit")` 집계도 012 §3.5 와 같다.
+012 §3.5 와 같다 — 샤드마다 `last_message_at`·배정 수·구독 시각(첫 구독 묶음을 다 보낸 시각), 조용한 시간 = 지금 − max(마지막 시세, 연결 중이면 구독 시각), 배정 0 샤드는 판정 대상 아님, 연결됐는데 **30초** 무수신 → `stale_stream`, 미연결 → `last_error.kind`, 여러 샤드가 나쁘면 가장 오래 조용한 샤드(동률이면 작은 번호), 전부 판정 없음이면 없음. pong 만 오고 시세가 없어도 30초면 정체다(pong 은 시세가 아니다). 실패 `message` = `"바이빗 스트림 정체: 샤드 2 (구독 7종목) 30초 이상 무수신"`, `url` = WS URL. `store.stream("bybit")` 집계도 012 §3.5 와 같다 — 시세 프레임은 샤드 3개를 다시 집계하지 않고 집계 `last_message_at` 만 그 프레임 수신 시각으로 올리며(더 클 때만), 연결·끊김·구독 변경 때 전체를 다시 집계한다.
 
 ### 3.6 입출금 상태 (006 의 네 번째 조회기)
 - `GET https://api.bybit.com/v5/asset/coin/query-info`(파라미터 없음 = 전 코인). 인증 헤더 `X-BAPI-API-KEY`·`X-BAPI-TIMESTAMP`(UTC ms)·`X-BAPI-RECV-WINDOW`(`10000`)·`X-BAPI-SIGN`. 서명 = `HMAC-SHA256(secret, timestamp + api_key + recv_window + queryString)` 의 **소문자 hex**, GET 이고 질의가 없으므로 queryString 은 빈 문자열. 타임스탬프 조건 `server_time − recv_window ≤ timestamp < server_time + 1000`. 한도 5회/초(60초 주기라 무관). 키 검사·메시지는 006 바이낸스와 같은 방식: `BYBIT_API_KEY / BYBIT_SECRET_KEY 가 비어 있습니다.`
@@ -71,6 +72,8 @@
 - snapshot → 행의 `asks` 오름차순·`bids` 내림차순 float, 누적 1,000,000 USDT 에서 잘리고 첫 단계가 넘어도 1단계는 남는다. `native_symbol` 은 `BTCUSDT`.
 - delta: 잔량 0 은 삭제, 새 가격 삽입, 기존 가격 교체 → 행이 그 결과로 다시 만들어진다. 스냅샷 전 델타는 무시. 새 snapshot(또는 `u=1`)은 북을 통째로 교체. 재연결 뒤 옛 북에 델타가 얹히지 않는다(새 소켓의 첫 델타는 스냅샷 전이므로 버려진다).
 - publicTrade 3건 중 `T` 가 가장 큰 것이 `price`·`price_timestamp`. 호가 전에 오면 보류, 호가 뒤에 실린다. 체결가 없으면 mid 이고 `price_timestamp` 는 수신 시각.
+- 꼬리 `time` 만 다른 instruments-info 200 본문이 연달아 오면 둘째는 원문 기록만 하고 파싱하지 않는다(사이에 실패 응답이 있어도 같다), 심볼이 바뀐 본문에서만 파싱해 집합이 바뀐다. `retCode != 0` 본문은 같은 본문이 다시 와도 다시 실패다.
+- 시세 프레임은 집계 `last_message_at` 만 올린다 — 시계가 뒤로 간 프레임은 집계를 내리지 않고, 연결·구독 수는 프레임으로 바뀌지 않는다.
 - instruments-info 에서 `Trading`·`USDT` 만 심볼 집합에 든다. 요청 URL 에 `category=spot&status=Trading`, 원문 source 는 `rest:/v5/market/instruments-info`, key `symbols:all`. `retCode != 0` 본문(HTTP 200)은 실패이고 직전 목록 유지.
 - 우주 = 국내 합집합 ∩ (바이낸스 ∪ 바이빗). 바이빗에만 있는 base 는 바이빗 행만, 바이낸스에만 있는 base 는 바이낸스 행만 생기고, 각 커넥터는 자기 맵에 없는 base 를 구독하지 않는다. 틱에 `(upbit, bybit, BTC)`·`(bithumb, bybit, BTC)` 행이 나온다.
 - 심볼 300개 → 3 샤드, 같은 심볼은 항상 같은 샤드(해시 안정성 — 서브프로세스 2회), 두 토픽 같은 샤드. 구독 요청 `args` ≤ 10, 요청 사이 0.1초. 재조정: 새 심볼 구독·빠진 심볼 해지·행 삭제, 같은 우주 재수신은 전송 0.
@@ -130,3 +133,4 @@ EC2 에서 확인 필요(로컬에서 재현 불가·미측정): 네트워크를
   - 원문 아카이브의 바이빗 호가는 델타 표본이라 재생 불가(status.md 빚).
   - 004 의 `/premium`·`scan`·`matrix`·`/arbitrage` 해외 선택은 바이낸스 고정(status.md 빚).
   - 다른 세션이 같은 시각에 018(spreads-serve)을 쓰고 있어 이 작업은 별도 워크트리(`feat/019-bybit`)에서 했다 — CLAUDE.md 인덱스는 018 행이 머지된 뒤 순서만 맞추면 된다.
+- 2026-09-28 성능 개선: instruments-info 본문이 꼬리 `time` 만 다르면 파싱·맵 재생성을 건너뛰고(§3.3), 시세 프레임마다 집계 `last_message_at` 만 올린다(§3.5). 호가 정리는 001 §3.5-1(가격 0·NaN·inf 거르기, 한 번 훑기 — 200단계 7.4 → 6.7µs). 측정(로컬, 합성 본문·프레임): instruments-info 매초 동기 구간 2.4 → 0.06ms, 메시지당 처리(원문 기록 포함) 14.2 → 7.2µs, 원문 기록을 뺀 몫 6.8 → 5.6µs. 검증 — server ruff·format·pytest 865 passed.
