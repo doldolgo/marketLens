@@ -133,18 +133,25 @@ def test_no_movable_route_gives_empty_top_not_null() -> None:
     assert live["over1"] == 2 and live["over1Movable"] == 0
 
 
-# ---- live: over1 경계 — 1.0 은 들어간다 ----
+# ---- live: over1 — 원값(순값 + 차감폭)을 사건 진입과 같은 1.0 과, 1.0 은 들어간다 ----
 
 
-def test_over1_includes_exactly_one_percent_and_counts_movable_separately() -> None:
+def test_over1_counts_the_raw_value_like_the_event_entry_and_includes_one_percent() -> (
+    None
+):
     rows = [
-        row("AAA", fwd=1.0, rev=-1.0),  # 1.0 — 들어간다, 옮길 수 있다
-        row("BBB", fwd=-1.0, rev=0.9999),  # 1.0 미만 — 안 들어간다
-        row("CCC", fwd=1.0, rev=-1.0, wd_fx=False),  # 들어가지만 옮길 수 없다
+        row(
+            "AAA", fwd=0.75, slip_fwd=0.25, rev=-1.0
+        ),  # 원값 1.0 — 들어간다, 옮길 수 있다
+        row(
+            "BBB", fwd=-1.0, rev=0.5, slip_rev=0.5
+        ),  # 순값 0.5 지만 원값 1.0 — 들어간다
+        row("CCC", fwd=0.5, slip_fwd=0.25, rev=-1.0),  # 원값 0.75 — 안 들어간다
+        row("DDD", fwd=0.75, slip_fwd=0.25, rev=-1.0, wd_fx=False),  # 옮길 수 없다
     ]
     live = _live(rows)
-    assert live["over1"] == 2
-    assert live["over1Movable"] == 1
+    assert live["over1"] == 3
+    assert live["over1Movable"] == 2
 
 
 # ---- live: 호가 깊이 예시(depthGap) ----
@@ -276,15 +283,36 @@ def test_events_counts_by_direction_and_open() -> None:
     influx.events += [
         event("AAA", NOW - 5_000, dir="reverse", end_ts=NOW - 4_000),
         event("BBB", NOW - 6_000, end_ts=NOW - 5_500),
-        event("CCC", NOW - 9_000),  # 진행 중
-        event("DDD", NOW - 9_500, dir="reverse"),  # 진행 중
+        event("CCC", NOW - 9_000, last_ts=NOW - 1),  # 진행 중
+        event(
+            "DDD", NOW - 9_500, dir="reverse", last_ts=NOW - 600
+        ),  # 진행 중 — 600초 경계는 든다
         event("EEE", NOW - 8_000, end_ts=NOW - 7_900),
     ]
     events = make_client(FakeBus(None), influx).get("/landing").json()["events"]
     assert (events["start"], events["stop"]) == (NOW - 604_800, NOW)
-    assert influx.event_calls == [{"start": NOW - 604_800, "stop": NOW}]
+    # 요약 조회 하나 — 진행 중 판정 시각은 지금 − 600초(013 결측허용), 끝난 사건 5개
+    assert influx.event_calls == [
+        {"start": NOW - 604_800, "stop": NOW, "open_since": NOW - 600, "top_n": 5}
+    ]
     assert events["count"] == 5
     assert (events["kimp"], events["reverse"], events["open"]) == (3, 2, 2)
+
+
+def test_open_skips_orphans_and_counts_a_reopened_route_once() -> None:
+    influx = FakeInflux()
+    influx.events += [
+        # 고아 — end_ts 0 인데 마지막 관측이 601초 전: 복원이라면 last_ts 로 닫을 점이라 진행 중이 아니다
+        event("OLD", NOW - 90_000, last_ts=NOW - 601),
+        # 재기동 직후 — 닫히지 못한 옛 점과 같은 조합의 새 사건이 둘 다 end_ts 0·600초 안: 한 번만
+        event("RE", NOW - 50_000, dom="bithumb", fx="bybit", last_ts=NOW - 400),
+        event("RE", NOW - 200, dom="bithumb", fx="bybit", last_ts=NOW - 10),
+        # 같은 코인이라도 다른 조합이면 따로 센다
+        event("RE", NOW - 300, dom="upbit", fx="bybit", last_ts=NOW - 10),
+    ]
+    events = make_client(FakeBus(None), influx).get("/landing").json()["events"]
+    assert events["count"] == 4 and events["kimp"] == 4
+    assert events["open"] == 2
 
 
 def test_events_top_is_closed_only_latest_end_per_coin_by_end_desc() -> None:

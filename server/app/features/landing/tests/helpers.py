@@ -8,9 +8,15 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.core.influx import CandleRow, InfluxUnavailableError, PremiumEventRow
+from app.core.influx import (
+    CandleRow,
+    EventSummary,
+    InfluxUnavailableError,
+    PremiumEventRow,
+)
 from app.features.landing.service import INFLUX_WAIT_SEC, LandingService
 from app.main import create_app
+from tests.event_summary_fakes import reference_summary
 
 NOW = 1_790_509_107  # 고정 시계의 시작(epoch 초)
 
@@ -106,7 +112,10 @@ class FakeBus:
 
 
 class FakeInflux:
-    """core.influx.InfluxClient 의 봉·사건 조회 시그니처 — 부른 인자를 남긴다. 순서는 넣은 그대로 돌려준다.
+    """core.influx.InfluxClient 의 봉 조회·사건 요약 시그니처 — 부른 인자를 남긴다. 봉은 넣은 순서 그대로 돌려준다.
+
+    사건 요약은 넣은 점 전부를 기준 계산(`tests/event_summary_fakes.reference_summary`)으로 센다 — 실물 요약 조회가
+    같은 값을 내는지는 `tests/test_event_summary.py` 가 가짜 Flux 로 지킨다.
 
     `gate` 를 닫아 두면(threading.Event, set 전) 조회가 스레드 안에서 멈춘다 — 느린 Influx 흉내. 테스트는
     끝나기 전에 반드시 연다(안 열어도 5초 뒤 스스로 풀린다). `finished` 는 끝까지 돈 조회 수.
@@ -160,21 +169,23 @@ class FakeInflux:
         finally:
             self.finished += 1
 
-    def query_premium_events(
-        self,
-        *,
-        start: int,
-        stop: int,
-        dom: str | None = None,
-        dir: str | None = None,
-        base: str | None = None,
-    ) -> list[PremiumEventRow]:
-        self.event_calls.append({"start": start, "stop": stop})
+    def query_event_summary(
+        self, *, start: int, stop: int, open_since: int, top_n: int
+    ) -> EventSummary:
+        self.event_calls.append(
+            {"start": start, "stop": stop, "open_since": open_since, "top_n": top_n}
+        )
         self._pass_gate()
         try:
             if self.fail:
                 raise InfluxUnavailableError("조회 실패 (테스트)")
-            return [e for e in self.events if start <= e.start_ts < stop]
+            return reference_summary(
+                self.events,
+                start=start,
+                stop=stop,
+                open_since=open_since,
+                top_n=top_n,
+            )
         finally:
             self.finished += 1
 

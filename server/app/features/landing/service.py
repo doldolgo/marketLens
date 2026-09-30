@@ -3,8 +3,9 @@
 계산(`build_live`·`build_trail`·`build_events`)은 순수 함수다. `LandingService` 는 부분마다 프로세스 메모리
 캐시(live 5초·trail·events 60초)를 들고, 비었거나 만료된 부분에 요청이 몰려도 저장소는 한 번만 읽는다.
 Influx 부분(trail·events)은 3초까지만 기다리고, 늦으면 직전 값을 싣고 조회는 뒤에서 마저 돈다.
-저장소는 core 의 Redis(`spreads:latest` 읽기만 — `spreads:want` 는 쓰지 않는다)와 Influx(봉·사건 조회)
-클라이언트를 인자로 받는다. 다른 기능은 import 하지 않는다.
+저장소는 core 의 Redis(`spreads:latest` 읽기만 — `spreads:want` 는 쓰지 않는다)와 Influx(봉 조회·사건 요약 조회)
+클라이언트를 인자로 받는다. 사건은 점을 올리지 않고 core 의 요약 조회가 Flux 에서 접은 결과만 받는다. 다른 기능은
+import 하지 않는다.
 """
 
 import asyncio
@@ -15,7 +16,8 @@ from collections.abc import Awaitable, Callable, Hashable
 from typing import Any, Protocol
 
 from app.core.candles import TIER_BY_RES
-from app.core.influx import CandleRow, InfluxUnavailableError, PremiumEventRow
+from app.core.influx import CandleRow, EventSummary, InfluxUnavailableError
+from app.core.premium_events import MAX_GAP_SEC
 from app.features.landing.models import (
     DepthGapOut,
     EventOut,
@@ -34,7 +36,8 @@ EVENTS_TTL_SEC = 60.0
 TRAIL_WINDOW_SEC = 3_600
 EVENTS_WINDOW_SEC = 604_800  # 7일
 TOP_N = 5
-OVER_PCT = 1.0  # 013 사건 진입 기준과 같은 값
+# 013 사건 진입 기준과 같은 값·같은 원값(순값 + 차감폭 — 틱의 최우선 호가 값)으로 센다
+OVER_PCT = 1.0
 # 호가 깊이 예시 — 원값(맨 위 호가)이 이만큼 벌어졌고 차감폭이 이만큼 이상인 경로만. 1위 경로는 대개 호가가
 # 두꺼워 원값과 순값이 0.01~0.1%p 밖에 안 달라 요점이 안 보인다
 DEPTH_RAW_MIN = 1.0
@@ -59,7 +62,7 @@ class TableReader(Protocol):
 
 
 class LandingReader(Protocol):
-    """Influx 읽기 두 가지 — core.influx.InfluxClient 시그니처의 일부."""
+    """Influx 읽기 두 가지(봉·사건 요약) — core.influx.InfluxClient 시그니처의 일부."""
 
     def query_candles(
         self,
@@ -72,15 +75,9 @@ class LandingReader(Protocol):
         base: str | None = None,
     ) -> list[CandleRow]: ...
 
-    def query_premium_events(
-        self,
-        *,
-        start: int,
-        stop: int,
-        dom: str | None = None,
-        dir: str | None = None,
-        base: str | None = None,
-    ) -> list[PremiumEventRow]: ...
+    def query_event_summary(
+        self, *, start: int, stop: int, open_since: int, top_n: int
+    ) -> EventSummary: ...
 
 
 def build_live(text: str) -> LiveOut | None:
@@ -100,18 +97,19 @@ def build_live(text: str) -> LiveOut | None:
             continue  # stale·fail 행의 값은 지금 값이 아니다
         for direction, value_key, slip_key, out_key, in_key in _DIRECTIONS:
             value = row[value_key]
+            slip = row[slip_key]
+            raw = value + slip  # 원값 — 사건 진입과 같은 기준으로 센다
             # null(모름)은 열림이 아니다 — true 일 때만 옮길 수 있다
             movable = row[out_key] is True and row[in_key] is True
-            if value >= OVER_PCT:
+            if raw >= OVER_PCT:
                 over1 += 1
                 if movable:
                     over1_movable += 1
             if not movable:
                 continue
-            slip = row[slip_key]
             # 호가 깊이 예시 — 차감폭이 가장 큰 하나, 같으면 sym 오름차순(그래도 같으면 표에서 먼저 나온 것)
             if (
-                value + slip >= DEPTH_RAW_MIN
+                raw >= DEPTH_RAW_MIN
                 and slip >= DEPTH_SLIP_MIN
                 and (
                     depth is None
@@ -124,7 +122,7 @@ def build_live(text: str) -> LiveOut | None:
                     dom=row["dom"],
                     fx=row["fx"],
                     dir=direction,
-                    raw=value + slip,
+                    raw=raw,
                     pct=value,
                     slip=slip,
                 )
@@ -169,31 +167,19 @@ def build_trail(route: RouteOut, candles: list[CandleRow]) -> TrailOut | None:
     )
 
 
-def build_events(rows: list[PremiumEventRow], *, start: int, stop: int) -> EventsOut:
-    """7일 사건 → 방향별·진행 중 수와, 닫힌 사건 중 코인마다 가장 늦게 끝난 것을 끝난 순 5개.
+def build_events(summary: EventSummary, *, start: int, stop: int) -> EventsOut:
+    """core 요약 → 7일 사건 부분. 코인마다 가장 늦게 끝난 닫힌 사건을 끝난 순 5개 — 고르기는 요약 조회가 한다.
 
     최고값 순으로 고르지 않는다 — 7일 최고값 자리는 입출금이 막혔거나 이름만 같은 다른 코인의
     수백 % 값이 차지해서, 계속 기록하고 있다는 것을 현실적인 값으로 보여 주지 못한다.
     """
-    latest: dict[str, PremiumEventRow] = {}
-    for row in rows:
-        if row.end_ts <= 0:
-            continue  # 진행 중 — 끝난 시각이 아직 없다
-        current = latest.get(row.base)
-        # 같은 코인에서 끝난 시각이 같으면 나중에 시작한 사건을 둔다
-        if current is None or (row.end_ts, row.start_ts) > (
-            current.end_ts,
-            current.start_ts,
-        ):
-            latest[row.base] = row
-    top = sorted(latest.values(), key=lambda r: (-r.end_ts, r.base))[:TOP_N]
     return EventsOut(
         start=start,
         stop=stop,
-        count=len(rows),
-        kimp=sum(r.dir == "kimp" for r in rows),
-        reverse=sum(r.dir == "reverse" for r in rows),
-        open=sum(r.end_ts == 0 for r in rows),
+        count=summary.kimp + summary.reverse,
+        kimp=summary.kimp,
+        reverse=summary.reverse,
+        open=summary.open,
         top=[
             EventOut(
                 sym=r.base,
@@ -206,7 +192,7 @@ def build_events(rows: list[PremiumEventRow], *, start: int, stop: int) -> Event
                 duration_seconds=r.duration_seconds,
                 last_ts=r.last_ts,
             )
-            for r in top
+            for r in summary.latest
         ],
     )
 
@@ -252,10 +238,15 @@ async def _load_trail(
 async def _load_events(influx: LandingReader, now: int) -> EventsOut | None:
     start = now - EVENTS_WINDOW_SEC
     try:
-        rows = await asyncio.to_thread(
-            influx.query_premium_events, start=start, stop=now
+        # 진행 중 = end_ts 0 이고 마지막 관측이 600초 안 — 013 복원이 고아 점을 닫는 규칙과 같다
+        summary = await asyncio.to_thread(
+            influx.query_event_summary,
+            start=start,
+            stop=now,
+            open_since=now - MAX_GAP_SEC,
+            top_n=TOP_N,
         )
-        return build_events(rows, start=start, stop=now)
+        return build_events(summary, start=start, stop=now)
     except InfluxUnavailableError:
         return None
     except Exception as exc:
