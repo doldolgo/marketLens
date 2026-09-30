@@ -101,7 +101,8 @@ def test_gzip_clients_get_the_precompressed_bytes_and_others_the_raw_bytes() -> 
         "GET", "/history/events", params=EVENTS, headers={"Accept-Encoding": "gzip"}
     ) as res:
         assert res.headers["content-encoding"] == "gzip"
-        assert res.headers["vary"] == "Accept-Encoding"
+        # CORS 미들웨어(Starlette 1.7+)가 Origin 을 덧붙일 수 있다 — Accept-Encoding 이 들어 있으면 된다
+        assert "Accept-Encoding" in [v.strip() for v in res.headers["vary"].split(",")]
         zipped = b"".join(res.iter_raw())
     with client.stream(
         "GET", "/history/events", params=EVENTS, headers={"Accept-Encoding": "identity"}

@@ -179,7 +179,8 @@ def test_gzip_body_is_compressed_once_per_table_at_level_6(monkeypatch) -> None:
     headers, first = _raw(client, {"Accept-Encoding": "gzip"})
     _, second = _raw(client, {"Accept-Encoding": "gzip"})
     assert headers["content-encoding"] == "gzip"
-    assert headers["vary"] == "Accept-Encoding"
+    # CORS 미들웨어(Starlette 1.7+)가 Origin 을 덧붙일 수 있다 — Accept-Encoding 이 들어 있으면 된다
+    assert "Accept-Encoding" in [v.strip() for v in headers["vary"].split(",")]
     assert gzip.decompress(first) == big.encode()
     assert second == first and levels == [6]  # 같은 표 — 압축 1번
     # 머리 10바이트(시각) 뒤는 레벨 6 압축과 같은 바이트다
