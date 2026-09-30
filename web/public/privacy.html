@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- 스펙 032 — 번들 밖 정적 한 파일. 외부 자원을 하나도 부르지 않는다(글꼴은 시스템 글꼴, 그림은 favicon 뿐) — nginx 의 CSP 가 이를 지키게 한다.
+       기록 항목·목적·보관·받는 곳을 바꾸는 변경은 같은 PR 에서 이 파일을 고치고, 이전 판은 privacy-<시행일>.html 로 남긴다 (§3.6) -->
+  <title>개인정보 처리방침 — KimpTrack</title>
+  <meta name="description" content="KimpTrack이 무엇을 기록하고 어디로 보내며 얼마 동안 두는지, 화면 분석을 거부하는 방법을 적은 개인정보 처리방침입니다." />
+  <link rel="canonical" href="https://kimptrack.com/privacy" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <meta name="theme-color" content="#161826" />
+  <style>
+    /* 색 값은 랜딩(landing.html)과 같은 docs/design/theme.css 토큰 복사본이다. 글꼴은 시스템 글꼴만 — 외부·같은 출처 글꼴 모두 부르지 않는다 */
+    :root {
+      color-scheme: dark;
+      --bg: #161826;
+      --surface: #232532;
+      --text: #e9e9ed;
+      --n100: #f3f5fe;
+      --n300: #cfd3e5;
+      --n400: #b2b6ca;
+      --n500: #9397ab;
+      --n600: #75798c;
+      --n700: #595d6c;
+      --accent: #9184d9;
+      --divider: rgba(233, 233, 237, 0.16);
+      --r-md: 8px;
+      --font: -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-padding-top: 24px; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 17px; line-height: 1.7; word-break: keep-all; overflow-wrap: anywhere; -webkit-font-smoothing: antialiased; }
+    h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
+    h1, h2, h3 { font-weight: 700; text-wrap: balance; }
+    a { color: inherit; text-decoration: none; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+    [hidden] { display: none !important; }
+    .wrap { width: min(1120px, 100% - 64px); margin-inline: auto; }
+    .link { color: var(--n100); text-decoration: underline; text-decoration-color: var(--n600); text-underline-offset: 4px; }
+    .link:hover { text-decoration-color: var(--n100); }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; color: var(--n100); }
+
+    .bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 72px; }
+    .mark { display: inline-flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+    .mark svg { flex: none; color: var(--accent); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 16px; border: 1px solid var(--accent); border-radius: var(--r-md); background: none; color: var(--accent); font: inherit; font-size: 15px; font-weight: 600; line-height: 1; white-space: nowrap; cursor: pointer; }
+    .btn:hover { background: rgba(145, 132, 217, 0.12); }
+    .btn:active { background: rgba(145, 132, 217, 0.22); }
+
+    .doc { padding-block: 48px 96px; }
+    .doc > * { max-width: 34em; }
+    h1 { font-size: 36px; line-height: 1.25; letter-spacing: -0.03em; }
+    .meta { margin-top: 8px; font-size: 15px; color: var(--n400); }
+    .lead { margin-top: 24px; color: var(--n300); }
+    section { margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--divider); }
+    h2 { font-size: 24px; line-height: 1.4; letter-spacing: -0.02em; }
+    h3 { margin-top: 28px; font-size: 17px; line-height: 1.5; }
+    section p, section ul, section ol, section dl, section table { margin-top: 12px; }
+    section p, section li, section dd { color: var(--n300); text-wrap: pretty; }
+    section ul, section ol { padding-left: 1.2em; }
+    section li + li { margin-top: 6px; }
+    b, strong { color: var(--text); font-weight: 700; }
+
+    .glance { list-style: none; padding: 0 !important; }
+    .glance li { padding: 12px 0; border-bottom: 1px solid var(--divider); }
+    .glance li + li { margin-top: 0; }
+
+    .optout { padding: 24px; border-radius: 14px; background: var(--surface); box-shadow: 0 0 0 1px var(--n700); }
+    .state { margin-top: 0 !important; font-size: 15px; color: var(--n400) !important; }
+    .state strong { font-size: 17px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+
+    /* 두 칸 정의 목록 — 받는 곳마다 한 묶음. 좁은 화면에서는 한 칸 */
+    .kv { display: grid; grid-template-columns: minmax(0, 8.5em) minmax(0, 1fr); gap: 6px 20px; padding: 16px 0; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); font-size: 15px; line-height: 1.6; }
+    .kv dt { color: var(--n500); }
+    .kv + .kv { margin-top: 0; border-top: 0; }
+
+    .tbl { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.5; }
+    .tbl th { padding: 0 14px 10px 0; border-bottom: 1px solid var(--divider); text-align: left; font-size: 13px; font-weight: 500; color: var(--n500); }
+    .tbl td, .tbl tbody th { padding: 12px 14px 12px 0; border-bottom: 1px solid var(--divider); text-align: left; vertical-align: baseline; color: var(--n300); }
+    .tbl tbody th { font-size: 15px; font-weight: 600; color: var(--text); }
+
+    .foot { padding-block: 32px 48px; border-top: 1px solid var(--divider); font-size: 13px; color: var(--n500); }
+
+    @media (max-width: 719px) {
+      .wrap { width: min(1120px, 100% - 32px); }
+      .doc { padding-block: 32px 72px; }
+      h1 { font-size: 30px; }
+      h2 { font-size: 21px; }
+      .bar .btn { height: 36px; padding: 0 12px; font-size: 14px; }
+      .optout { padding: 20px 16px; }
+      .kv { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+      .kv dd + dt { margin-top: 10px; }
+      /* 표는 행마다 세로로 쌓는다 — 390px 에서 가로 스크롤이 없게 */
+      .tbl thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+      .tbl, .tbl tbody, .tbl tr, .tbl tbody th, .tbl td { display: block; }
+      .tbl tr { padding-block: 12px; border-bottom: 1px solid var(--divider); }
+      .tbl tbody th, .tbl td { padding: 0; border: 0; }
+      .tbl td { margin-top: 2px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="wrap bar">
+    <a class="mark" href="/">
+      <svg width="22" height="10" viewBox="0 0 22 10" aria-hidden="true" focusable="false"><circle cx="4" cy="5" r="3.5" fill="currentColor" /><rect x="5" y="4" width="12" height="2" fill="currentColor" /><circle cx="18" cy="5" r="3.5" fill="currentColor" /></svg>
+      KimpTrack
+    </a>
+    <a class="btn" href="/app/">서비스로 넘어가기</a>
+  </header>
+
+  <main class="wrap doc">
+    <h1>개인정보 처리방침</h1>
+    <p class="meta">시행일 <time datetime="2026-10-01">2026년 10월 1일</time></p>
+    <p class="lead">KimpTrack(운영: 고원규, 이진중 — 이하 “KimpTrack”)은 김프·역프를 보여 주는 무료 서비스입니다. 이 방침은 KimpTrack이 방문자에 대해 무엇을 기록하고, 어디로 보내며, 얼마 동안 두는지를 적습니다. 가입이 없어 이름·전화번호·결제 정보는 받지 않습니다.</p>
+
+    <section aria-labelledby="glance">
+      <h2 id="glance">한눈에 보기</h2>
+      <ul class="glance">
+        <li><b>가입이 없습니다.</b> 회원가입·로그인·결제가 없고 나이를 묻지 않습니다.</li>
+        <li><b>서버 접속 기록은 90일.</b> IP 끝자리와 검색어를 지운 채 남기고 90일 뒤 지웁니다.</li>
+        <li><b>화면 분석은 Microsoft Clarity — 거부할 수 있습니다.</b> 아래 버튼 하나로 이 브라우저에서 끕니다.</li>
+        <li><b>연락처</b> <a class="link" href="mailto:joseph13ko15@gmail.com">joseph13ko15@gmail.com</a></li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="optout-title">
+      <h2 id="optout-title">화면 분석 거부</h2>
+      <div class="optout">
+        <p class="state" id="an-state" role="status" aria-live="polite">지금 상태 <strong id="an-value">확인하는 중</strong></p>
+        <div class="actions" id="an-actions" hidden>
+          <button class="btn" type="button" id="an-deny">분석 거부</button>
+          <button class="btn" type="button" id="an-allow">다시 허용</button>
+        </div>
+        <p id="an-gpc" hidden>브라우저가 GPC를 보내는 동안은 분석하지 않습니다.</p>
+        <p id="an-nostore" hidden>이 브라우저에는 선택을 저장할 수 없습니다. GPC·쿠키 차단·광고 차단기로도 거부할 수 있습니다.</p>
+        <noscript><p>자바스크립트가 꺼져 있어 버튼을 쓸 수 없습니다. GPC·쿠키 차단·광고 차단기로도 거부할 수 있습니다.</p></noscript>
+      </div>
+      <p>[분석 거부]를 누르면 이 브라우저에 <code>kt.analytics</code> = <code>denied</code>를 저장하고, 이 사이트의 Clarity 쿠키 <code>_clck</code>·<code>_clsk</code>를 지웁니다. [다시 허용]은 <code>granted</code>를 저장합니다. 아무것도 고르지 않으면 허용으로 봅니다. 브라우저가 GPC(Global Privacy Control)를 보내면 저장값과 상관없이 분석하지 않습니다. 이 선택은 브라우저 안에서만 일어나 서버로 가지 않습니다.</p>
+      <p><code>kimptrack.com</code>에서 고른 선택이 이 브라우저에 저장되고, 브라우저 데이터를 지우면 다시 골라야 합니다. 일부 브라우저(Safari 등)는 이 사이트를 7일 동안 쓰지 않으면 선택을 지웁니다 — 계속 거부하려면 GPC나 광고 차단기를 쓰세요.</p>
+      <p>새로 여는 페이지는 거부를 곧바로 따릅니다. 같은 브라우저에 이미 열린 <code>kimptrack.com</code> 랜딩·대시보드 탭은 거부를 누르는 순간 Clarity에 거부 신호를 보내 쿠키를 지우고, 그 탭을 다시 볼 때 한 번 새로고침되어 그때부터 분석하지 않습니다.</p>
+      <p>Microsoft 도메인의 쿠키(<code>MUID</code> 등)는 이 페이지가 지울 수 없습니다. Clarity가 안내하는 광고 거부 페이지 <a class="link" href="https://optout.aboutads.info/">optout.aboutads.info</a>(DAA)에서 따로 거부할 수 있습니다.</p>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    <p>KimpTrack · <a class="link" href="/">첫 화면</a> · <a class="link" href="/app/">실시간 김프 표</a></p>
+  </footer>
+
+  <script>
+    // 분석 거부 저장값 — 이 페이지만 쓰고 033(Clarity)은 읽기만 한다 (스펙 032 §3.3). 요청을 만들지 않는다.
+    (() => {
+      const KEY = 'kt.analytics'
+      const $ = (id) => document.getElementById(id)
+      const gpc = navigator.globalPrivacyControl === true
+
+      // 없으면 null, 저장소를 못 쓰면 undefined
+      const read = () => {
+        try { return window.localStorage.getItem(KEY) } catch { return undefined }
+      }
+      const write = (value) => {
+        try { window.localStorage.setItem(KEY, value); return true } catch { return false }
+      }
+      // Clarity 1차 쿠키 — 도메인 속성 없이 한 번, 앞의 www. 를 뗀 도메인으로 한 번(어느 쪽으로 심겼든 지워지게)
+      const expireClarityCookies = () => {
+        const host = location.hostname.replace(/^www\./, '')
+        for (const name of ['_clck', '_clsk']) {
+          const gone = name + '=; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/'
+          document.cookie = gone
+          document.cookie = gone + '; domain=' + host
+        }
+      }
+
+      const render = (stored) => {
+        let text = '허용'
+        if (gpc) text = '거부 — 브라우저가 GPC를 보냄'
+        else if (stored === undefined) text = '저장할 수 없음'
+        else if (stored === 'denied') text = '거부 — 이 브라우저의 선택'
+        $('an-value').textContent = text
+        $('an-gpc').hidden = !gpc
+        $('an-nostore').hidden = gpc || stored !== undefined
+        $('an-actions').hidden = gpc || stored === undefined
+      }
+
+      $('an-deny').addEventListener('click', () => {
+        expireClarityCookies()
+        render(write('denied') ? 'denied' : undefined)
+      })
+      $('an-allow').addEventListener('click', () => {
+        render(write('granted') ? 'granted' : undefined)
+      })
+      // 다른 탭에서 고른 값도 곧바로 보인다
+      window.addEventListener('storage', (e) => { if (e.key === KEY || e.key === null) render(read()) })
+      render(read())
+    })()
+  </script>
+</body>
+</html>
