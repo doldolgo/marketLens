@@ -219,3 +219,119 @@ def test_candle_line_matches_candle_point_serialization() -> None:
 
 
 # ── 망 이름 "없음" = `-` (024 §3.4) ─────────────────────────────────────────────
+
+
+def test_missing_network_names_are_written_as_dash() -> None:
+    ev = premium_event_point(
+        PremiumEventRow(
+            dom="upbit",
+            fx="binance",
+            base="SOPH",
+            dir="kimp",
+            start_ts=T0,
+            end_ts=0,
+            duration_seconds=0,
+            max_percent=1.5,
+            max_ts=T0,
+            last_ts=T0,
+            samples=1,
+            enter_percent=1.0,
+            exit_percent=0.5,
+            net_dom=None,
+            net_fx="",
+        )
+    )
+    assert (ev.fields["net_dom"], ev.fields["net_fx"]) == ("-", "-")
+    assert 'net_dom="-",net_fx="-"' in to_line(ev)
+
+
+# ── 복원 조회: HTTP 타임아웃·CSV (009 §3.6·011 §3.4·013 §3.3·014 §3.5) ────────────
+
+
+def test_restore_queries_use_a_client_whose_http_timeout_is_the_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    header = ",result,table,_time,_value,dom,fx,base\n"
+    client, log = _client(monkeypatch, [header, header])
+    client.query_spark(start=T0, stop=T0 + 60, timeout_sec=10.0)
+    client.query_spark(start=T0, stop=T0 + 60, timeout_sec=10.0)
+    client.write_lines(["x v=1.0 1"])
+    # 같은 타임아웃은 클라이언트 하나를 같이 쓰고, 쓰기는 기본(60초) 클라이언트다
+    assert log["created"] == [10_000, 60_000]
+
+
+def test_spark_query_reads_header_csv_into_the_same_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    csv_text = (
+        ",result,table,_time,_value,base,dom,fx\n"
+        f",_result,0,{_iso(T0)},1.25,BTC,upbit,binance\n"
+        f",_result,0,{_iso(T0 + 60)},,BTC,upbit,binance\n"  # 값 없음 — 건너뛴다
+        "\n"
+        ",result,table,_time,_value,base,dom,fx\n"  # 표 모양이 바뀌면 헤더가 다시 온다
+        f',_result,1,{_iso(T0)},-0.5,"A,B",bithumb,bybit\n'
+    )
+    client, log = _client(monkeypatch, [csv_text])
+    rows = client.query_spark(start=T0, stop=T0 + 120)
+    assert rows == [
+        SparkBucketRow("upbit", "binance", "BTC", T0, 1.25),
+        SparkBucketRow("bithumb", "bybit", "A,B", T0, -0.5),
+    ]
+    assert 'aggregateWindow(every: 1m, fn: last, timeSrc: "_start"' in log["flux"][0]
+
+
+def test_ongoing_events_two_step_query_keeps_the_seven_day_window_on_both_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    step1 = (
+        ",result,table,_time,base,dir,dom,fx\n"
+        f",_result,0,{_iso(T0)},SOPH,kimp,upbit,binance\n"
+        f",_result,1,{_iso(T0 + 5)},A.B,reverse,bithumb,bybit\n"
+        f",_result,2,{_iso(T0 + 9)},X/Y,kimp,upbit,bitget\n"
+    )
+    cols = ",result,table,_time,base,dir,dom,fx,end_ts,duration_seconds,max_percent,max_ts,last_ts,samples,enter_percent,exit_percent,net_dom,net_fx\n"
+    step2 = (
+        cols
+        + f",_result,0,{_iso(T0)},SOPH,kimp,upbit,binance,0,0,1.5,{T0},{T0 + 100},10,1,0.5,Ethereum,-\n"
+        # 1단계 키에 없는 행(같은 코인의 다른 경로) — 버린다
+        + f",_result,1,{_iso(T0)},SOPH,kimp,bithumb,binance,0,0,1.5,{T0},{T0 + 100},10,1,0.5,,\n"
+        # 반쪽 점(last_ts 없음) — 버린다
+        + f",_result,2,{_iso(T0 + 9)},X/Y,kimp,upbit,bitget,0,0,1.2,{T0},,10,1,0.5,,\n"
+        + "\n"
+        + ",result,table,_time,base,dir,dom,fx,end_ts,last_ts,max_percent,samples\n"  # 옛 점 — 망 칸 없음
+        + f",_result,3,{_iso(T0 + 5)},A.B,reverse,bithumb,bybit,0,{T0 + 50},2.0,3\n"
+    )
+    client, log = _client(monkeypatch, [step1, step2])
+    rows = client.query_ongoing_events(start=T0 - 604_800, stop=T0 + 1, timeout_sec=3.0)
+    assert sorted(
+        (r.base, r.dom, r.start_ts, r.last_ts, r.net_dom, r.net_fx) for r in rows
+    ) == [
+        ("A.B", "bithumb", T0 + 5, T0 + 50, None, None),
+        ("SOPH", "upbit", T0, T0 + 100, "Ethereum", None),
+    ]
+    q1, q2 = log["flux"]
+    window = f"range(start: {_iso(T0 - 604_800)}, stop: {_iso(T0 + 1)})"
+    assert window in q1 and window in q2  # 두 단계 모두 같은 7일 창
+    assert 'r._field == "end_ts"' in q1 and "r._value == 0" in q1
+    # 코인 이름은 정규식 메타문자·끝 `/` 까지 이스케이프
+    assert "r.base =~ /^(A\\.B|SOPH|X\\/Y)$/" in q2
+    assert "pivot(" in q2 and "r.end_ts == 0" in q2
+    assert log["created"] == [3_000]  # 두 요청 모두 상한과 같은 HTTP 타임아웃
+
+
+def test_ongoing_events_skip_the_second_step_when_nothing_is_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, log = _client(monkeypatch, [",result,table,_time,base,dir,dom,fx\n"])
+    assert client.query_ongoing_events(start=T0, stop=T0 + 1) == []
+    assert len(log["flux"]) == 1
+
+
+def test_flux_error_table_in_csv_is_a_storage_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _ = _client(
+        monkeypatch, [",error,reference\n,memory allocation limit reached,\n"]
+    )
+    with pytest.raises(influx_mod.InfluxUnavailableError):
+        client.query_spark(start=T0, stop=T0 + 60)
