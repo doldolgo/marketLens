@@ -15,7 +15,9 @@ from redis.backoff import NoBackoff
 logger = logging.getLogger("marketlens.redis")
 
 STREAM_KEY = "ticks"
-MAXLEN = 86_400  # 24시간 안전 상한 — 평상시 60건 안팎, Influx 가 하루 넘게 막혔을 때만 잘린다
+# 3시간 안전 상한(2026-09-28 사람 결정) — 평상시 60건 안팎, Influx 가 3시간 넘게 막혔을 때만 잘린다.
+# 틱 1장이 gzip 뒤 ≈36KB·Redis 안에서 ≈41KB(1,458조합)라 상한에서 ≈0.44GB — data 박스 Redis 상한 600MB 안이다(021 §3.1)
+MAXLEN = 10_800
 PAGE = 1_000  # XRANGE 페이지·XDEL 묶음 크기
 CONNECT_TIMEOUT_SEC = 2.0
 SOCKET_TIMEOUT_SEC = 5.0
@@ -54,7 +56,7 @@ class RedisTickStream:
             return False
 
     async def add(self, ts: int, data: bytes) -> str:
-        """`XADD ticks MAXLEN ~ 86400 * ts <ts> data <gzip JSON>` — 실패는 예외."""
+        """`XADD ticks MAXLEN ~ 10800 * ts <ts> data <gzip JSON>` — 실패는 예외(Redis 가 maxmemory 에 닿아 거부할 때 포함)."""
         entry_id = await self._client.xadd(
             STREAM_KEY, {"ts": ts, "data": data}, maxlen=MAXLEN, approximate=True
         )

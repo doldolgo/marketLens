@@ -1,9 +1,10 @@
 """틱 저장 3계층의 ②·③ — 인계기(LiveStore 슬롯 → Redis)와 flusher(Redis 전량 → Influx) (스펙 009).
 
-인계 함수는 001 의 core 계약 `handoff(tick)`(동기·무예외)을 구현한다. 틱을 §3.4 모양(gzip JSON)으로
+인계 함수는 001 의 core 계약 `handoff(tick)`(동기·무예외)을 구현한다. 틱을 §3.4 모양(gzip JSON, 레벨 6)으로
 큐에 넣고 별도 태스크가 순서대로 XADD 한다 — 틱 루프를 막지 않는다. Redis 가 안 닿으면 그 틱은
 버린다(원문은 010 에 남아 재생 가능). spark 링버퍼는 Redis 성공과 무관하게 여기서 갱신한다.
-flusher 는 LiveStore 도 틱 루프도 읽지 않는다 — 원천은 Redis 뿐이다.
+flusher 는 LiveStore 도 틱 루프도 읽지 않는다 — 원천은 Redis 뿐이다. 점 객체를 만들지 않고 엔트리에서 line
+protocol 줄을 바로 만들어 흘려 쓴다(§3.5).
 """
 
 import asyncio
@@ -15,9 +16,9 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from app.core.influx import InfluxPoint, dw_fail_point, premium_point
+from app.core.influx import dw_fail_point, premium_head, premium_line, to_line
 from app.core.live_store import LiveStore
-from app.core.models import Tick, TickRow
+from app.core.models import Tick
 from app.core.redis_stream import (
     PAGE,
     SOCKET_TIMEOUT_SEC,
@@ -33,20 +34,25 @@ DRAIN_DEADLINE_SEC = (
     SOCKET_TIMEOUT_SEC  # 종료 시 큐 비우기 총 상한 = 명령 타임아웃 1회분 (§3.3)
 )
 FLUSH_INTERVAL_SEC = 60.0
-WRITE_BATCH = 5_000  # Influx 쓰기 1번의 점 수 — 모든 배치가 성공해야 페이지 성공 (§3.5)
+WRITE_BATCH = 5_000  # Influx 쓰기 1번의 줄 수 — 모든 배치가 성공해야 페이지 성공 (§3.5)
+# gzip 레벨 6(2026-09-28 사람 결정) — 9 는 압축 CPU 가 약 2배인데 크기는 1.5% 작을 뿐이다. 틱 루프 동기 구간에서 돈다
+GZIP_LEVEL = 6
 
 
 class PointWriter(Protocol):
     """Influx 쓰기 — 실물은 core.influx.InfluxClient, 테스트는 fake."""
 
-    def write(self, points: list[InfluxPoint]) -> None: ...
+    def write_lines(self, lines: list[str], bucket: str | None = None) -> None: ...
 
 
-# --- 틱 레코드 ↔ 엔트리 `data` (§3.2·§3.4) ---
+# --- 틱 레코드 → 엔트리 `data` (§3.2·§3.4) ---
 
 
 def encode_tick(tick: Tick) -> bytes:
-    """`{ts, rows:[{dom,fx,base,fwd,rev}], dwFailed}` JSON 을 gzip — 계층을 넘을 때 유일한 변환."""
+    """`{ts, rows:[{dom,fx,base,fwd,rev}], dwFailed}` JSON 을 gzip — 계층을 넘을 때 유일한 변환.
+
+    gzip 머리의 시각은 0 으로 둔다 — 같은 틱은 언제 인코딩해도 같은 바이트다. 풀면 레벨과 무관하게 같은 JSON 이다.
+    """
     record = {
         "ts": tick.ts,
         "rows": [
@@ -55,35 +61,11 @@ def encode_tick(tick: Tick) -> bytes:
         ],
         "dwFailed": list(tick.dw_failed),
     }
-    return gzip.compress(json.dumps(record, separators=(",", ":")).encode())
-
-
-def decode_tick(data: bytes) -> Tick:
-    record = json.loads(gzip.decompress(data))
-    return Tick(
-        ts=int(record["ts"]),
-        rows=tuple(
-            TickRow(
-                dom=r["dom"],
-                fx=r["fx"],
-                base=r["base"],
-                fwd=float(r["fwd"]),
-                rev=float(r["rev"]),
-            )
-            for r in record["rows"]
-        ),
-        dw_failed=tuple(record["dwFailed"]),
+    return gzip.compress(
+        json.dumps(record, separators=(",", ":")).encode(),
+        compresslevel=GZIP_LEVEL,
+        mtime=0,
     )
-
-
-def tick_points(tick: Tick) -> list[InfluxPoint]:
-    """틱 1개 → `premium` 조합별 1점 + `dwFailed` 거래소별 `dw_fail` 1점. time 은 전부 틱의 ts."""
-    points = [
-        premium_point(dom=r.dom, fx=r.fx, base=r.base, ts=tick.ts, fwd=r.fwd, rev=r.rev)
-        for r in tick.rows
-    ]
-    points.extend(dw_fail_point(exchange=ex, ts=tick.ts) for ex in tick.dw_failed)
-    return points
 
 
 # --- 계층 ① → ② 인계기 (§3.3) ---
@@ -112,7 +94,7 @@ class TickRelay:
         try:
             # spark 는 Redis 와 무관한 메모리 계산 — 큐에 안 넣는 빈 틱도 갱신 대상은 아니다(rows 가 없다)
             self._spark.update(tick)
-            self._store.set_spark(self._spark.snapshot())
+            self._spark.publish(self._store)
             if not tick.rows and not tick.dw_failed:
                 return  # 실을 값이 없다 — 예: 어느 국내 거래소에서도 USDT 시세를 못 받은 초
             if len(self._queue) == QUEUE_LIMIT:
@@ -195,6 +177,9 @@ class Flusher:
         self._failures = 0  # 연속 실패 회차 수
         self._failed_first_id: str | None = None  # 실패한 회차의 첫 ID — 잘림 감지 기준
         self._task: asyncio.Task[None] | None = None
+        # (dom, fx, base) → `premium` 줄 머리. 조합당 한 번만 이스케이프한다(1,458개 수준 — 사라진 조합도 남지만 작다).
+        # 페이지 쓰기 스레드만 만진다(회차는 한 번에 하나)
+        self._heads: dict[tuple[str, str, str], str] = {}
 
     @property
     def consecutive_failures(self) -> int:
@@ -266,12 +251,36 @@ class Flusher:
             )
 
     def _write_page(self, page: list[StreamEntry]) -> None:
-        """스레드에서 — 페이지의 틱을 점으로 펼쳐 WRITE_BATCH 씩 쓴다. 모든 배치가 성공해야 페이지 성공."""
-        points: list[InfluxPoint] = []
+        """스레드에서 — 틱을 하나씩 풀어 줄을 바로 만들고 WRITE_BATCH 줄이 차면 그 자리에서 쓴다 (§3.5).
+
+        페이지를 점 목록으로 한꺼번에 펼치지 않는다 — 1,458조합 × 1,000틱이면 점 객체 146만 개(+1GB)가 한꺼번에
+        산다. 메모리는 배치 하나 크기에 비례하고, Influx 가 막혀 있으면 첫 배치에서 실패해 나머지 틱은 풀지 않는다.
+        순서(틱마다 `premium` 행 순서 → `dw_fail`)·배치 경계·본문 바이트는 페이지 전체를 점으로 만들어 5,000점씩
+        쓴 것과 같다. 예외는 그대로 올라가 페이지 실패가 된다(모든 배치가 성공해야 XDEL).
+        """
+        heads = self._heads
+        write = self._writer.write_lines
+        buf: list[str] = []
         for entry in page:
-            points.extend(tick_points(decode_tick(entry.data)))
-        for i in range(0, len(points), WRITE_BATCH):
-            self._writer.write(points[i : i + WRITE_BATCH])
+            record = json.loads(gzip.decompress(entry.data))
+            ts = int(record["ts"])
+            for r in record["rows"]:
+                key = (r["dom"], r["fx"], r["base"])
+                head = heads.get(key)
+                if head is None:
+                    head = premium_head(*key)
+                    heads[key] = head
+                buf.append(premium_line(head, float(r["fwd"]), float(r["rev"]), ts))
+                if len(buf) == WRITE_BATCH:
+                    write(buf)
+                    buf = []
+            for exchange in record["dwFailed"]:
+                buf.append(to_line(dw_fail_point(exchange=exchange, ts=ts)))
+                if len(buf) == WRITE_BATCH:
+                    write(buf)
+                    buf = []
+        if buf:
+            write(buf)
 
     async def aclose(self) -> None:
         if self._task is not None:

@@ -183,7 +183,9 @@ async def test_handoff_never_raises_even_when_fakes_do(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     class BrokenStore(LiveStore):
-        def set_spark(self, spark: dict[Any, list[float]]) -> None:
+        def set_spark(
+            self, spark: dict[Any, list[float]], fragments: dict[Any, str] | None = None
+        ) -> None:
             raise RuntimeError("게시 실패 (테스트)")
 
     class BrokenStream(RedisTickStream):
