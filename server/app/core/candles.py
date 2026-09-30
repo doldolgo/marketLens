@@ -14,7 +14,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.core.influx import CandleRow, InfluxPoint, candle_point
+from app.core.influx import (
+    CandleRow,
+    InfluxPoint,
+    candle_head,
+    candle_line,
+    candle_point,
+)
 from app.core.models import Tick, TickRow
 
 logger = logging.getLogger("marketlens.candles")
@@ -22,7 +28,9 @@ logger = logging.getLogger("marketlens.candles")
 # 창 정렬은 KST 벽시계 — 4h 를 UTC 로 자르면 KST 자정이 4h 경계에 안 걸려 일봉을 못 만든다 (§3.4)
 KST_OFFSET_SEC = 32_400
 WRITE_INTERVAL_SEC = 60  # 쓰기 회차·실패 재시도 주기
-PENDING_LIMIT = 10_000  # 1m 미전송 점 상한(≈20분치) — 넘치면 오래된 분부터 버린다
+# 1m 미전송 줄 상한 — 1,458조합 × 약 20분(2026-09-28 사람 결정). 넘치면 오래된 분부터 버린다. 줄 하나 ≈0.46KB 라 ≈14MB
+PENDING_LIMIT = 30_000
+WRITE_BATCH = 5_000  # 1m 쓰기 1번의 줄 수 — 009 flusher 와 같다. 밀린 3만 줄을 본문 하나로 보내지 않는다
 BUCKET_SETUP_TIMEOUT_SEC = 3.0  # 기동 시 버킷 생성 상한
 RESTORE_TIMEOUT_SEC = 3.0  # 기동 시 계층당 따라잡기 기준점 조회 상한
 MAX_WINDOWS_PER_ROUND = (
@@ -70,6 +78,8 @@ class CandleStore(Protocol):
 
     def write(self, points: list[InfluxPoint], bucket: str | None = None) -> None: ...
 
+    def write_lines(self, lines: list[str], bucket: str | None = None) -> None: ...
+
     def query_candles(
         self,
         bucket: str,
@@ -81,9 +91,13 @@ class CandleStore(Protocol):
         base: str | None = None,
     ) -> list[CandleRow]: ...
 
-    def latest_candle_ts(self, bucket: str, *, start: int) -> int | None: ...
+    def latest_candle_ts(
+        self, bucket: str, *, start: int, timeout_sec: float | None = None
+    ) -> int | None: ...
 
-    def earliest_candle_ts(self, bucket: str, *, start: int) -> int | None: ...
+    def earliest_candle_ts(
+        self, bucket: str, *, start: int, timeout_sec: float | None = None
+    ) -> int | None: ...
 
     def list_buckets(self) -> set[str]: ...
 
@@ -196,19 +210,24 @@ class Rollup:
 
         아래를 한 계층만 보지 않는 이유: 첫 배포에는 1m 만 있고 5m·1h 는 아직 비어 있다 — 1h 가 5m 만 보면
         지금 창에 앵커를 잡아 1m 에 있던 첫 시간을 영영 접지 않는다. 각 버킷은 자기 보관 기간 안에서만 찾는다 —
-        그 밖의 빈틈은 메울 수 없고 전 구간 스캔도 피한다.
+        그 밖의 빈틈은 메울 수 없고 전 구간 스캔도 피한다. 조회마다 HTTP 타임아웃을 상한과 같게 건다 — 상한을
+        넘긴 조회가 스레드와 Influx 에 남아 첫 틱과 겹치지 않게.
         """
         assert self._store is not None
         upper, lower = TIERS[i], TIERS[i - 1]
         latest = self._store.latest_candle_ts(
-            upper.bucket, start=now_sec - lower.retention_sec
+            upper.bucket,
+            start=now_sec - lower.retention_sec,
+            timeout_sec=RESTORE_TIMEOUT_SEC,
         )
         if latest is not None:
             return latest
         anchor = now_sec
         for tier in TIERS[:i]:
             earliest = self._store.earliest_candle_ts(
-                tier.bucket, start=now_sec - tier.retention_sec
+                tier.bucket,
+                start=now_sec - tier.retention_sec,
+                timeout_sec=RESTORE_TIMEOUT_SEC,
             )
             if earliest is not None:
                 anchor = min(anchor, earliest)
@@ -280,8 +299,10 @@ class CandleAggregator:
             None  # 지금 모으는 분의 시작 — 이 시각 전의 분은 전부 닫혔다
         )
         self._acc: dict[tuple[str, str, str], _Acc] = {}
-        # 미전송 1m 점 — 키 (dom, fx, base, 분). 삽입 순서 = 분 순서라 넘치면 앞에서부터 버린다
-        self._pending: dict[tuple[str, str, str, int], InfluxPoint] = {}
+        # 미전송 1m 줄(line protocol) — 키 (dom, fx, base, 분). 삽입 순서 = 분 순서라 넘치면 앞에서부터 버린다
+        self._pending: dict[tuple[str, str, str, int], str] = {}
+        # (dom, fx, base) → `candle` 줄 머리 — 조합당 한 번만 이스케이프한다. 틱 루프(분 닫힘)만 만진다
+        self._heads: dict[tuple[str, str, str], str] = {}
         self._wake = asyncio.Event()
         self._failed_at: float | None = (
             None  # 마지막 Influx 실패 시각 — 60초 안엔 재시도 안 함
@@ -306,17 +327,25 @@ class CandleAggregator:
             self._close_minute()  # 건너뛴 분은 없는 것 — 열려 있던 분 하나만 닫는다
         if self._open_minute is None:
             self._open_minute = tick.ts // 60 * 60
+        accs = self._acc
         for row in tick.rows:
             key = (row.dom, row.fx, row.base)
-            acc = self._acc.get(key)
+            acc = accs.get(key)
+            f = row.fwd
+            r = row.rev
             if acc is None:
-                acc = _Acc(row.fwd, row.fwd, row.fwd, row.rev, row.rev, row.rev, row)
-                self._acc[key] = acc
+                acc = _Acc(f, f, f, r, r, r, row)
+                accs[key] = acc
             else:
-                acc.fwd_h = max(acc.fwd_h, row.fwd)
-                acc.fwd_l = min(acc.fwd_l, row.fwd)
-                acc.rev_h = max(acc.rev_h, row.rev)
-                acc.rev_l = min(acc.rev_l, row.rev)
+                # 내장 max/min 과 같은 규칙 — 새 값이 엄격히 클(작을) 때만 바꾼다(동률·NaN 에서도 결과가 같다)
+                if f > acc.fwd_h:
+                    acc.fwd_h = f
+                if f < acc.fwd_l:
+                    acc.fwd_l = f
+                if r > acc.rev_h:
+                    acc.rev_h = r
+                if r < acc.rev_l:
+                    acc.rev_l = r
                 acc.last = row
             acc.samples += 1
             # 김프 = 해외 출금 → 국내 입금, 역프 = 국내 출금 → 해외 입금. None(모름)은 막힘으로 세지 않는다
@@ -326,16 +355,24 @@ class CandleAggregator:
                 acc.blocked_rev += 1
 
     def _close_minute(self) -> None:
+        """열린 분의 조합 전부를 `candles_1m` 줄로 — 봉 행·점 객체를 거치지 않고 누적에서 바로 만든다(§3.4).
+
+        줄은 같은 값의 `to_line(candle_point(CandleRow(…)))` 와 바이트가 같다. 틱 루프 동기 구간이라 가볍게 둔다.
+        """
         minute = self._open_minute
         assert minute is not None
         if self._store is not None:
-            for (dom, fx, base), acc in sorted(self._acc.items()):
+            pending = self._pending
+            heads = self._heads
+            for key, acc in sorted(self._acc.items()):
+                head = heads.get(key)
+                if head is None:
+                    head = candle_head(*key)
+                    heads[key] = head
                 last = acc.last
-                row = CandleRow(
-                    dom=dom,
-                    fx=fx,
-                    base=base,
-                    ts=minute,
+                pending[(*key, minute)] = candle_line(
+                    head,
+                    minute,
                     fwd_o=acc.fwd_o,
                     fwd_h=acc.fwd_h,
                     fwd_l=acc.fwd_l,
@@ -358,10 +395,9 @@ class CandleAggregator:
                     net_dom=last.net_dom,
                     net_fx=last.net_fx,
                 )
-                self._pending[(dom, fx, base, minute)] = candle_point(row)
             dropped = 0
-            while len(self._pending) > PENDING_LIMIT:
-                del self._pending[next(iter(self._pending))]
+            while len(pending) > PENDING_LIMIT:
+                del pending[next(iter(pending))]
                 dropped += 1
             if dropped:
                 logger.warning(
@@ -391,7 +427,7 @@ class CandleAggregator:
         await self.write_round(force=True)
 
     async def write_round(self, force: bool = False) -> None:
-        """회차 1번 — 미전송 1m 전부를 쓰기 1번으로 → 성공하면 같은 회차에서 롤업. 실패는 남겨 두고 60초 뒤."""
+        """회차 1번 — 미전송 1m 전부를 5,000줄씩 차례로 → 전부 성공하면 같은 회차에서 롤업. 실패는 남겨 두고 60초 뒤."""
         if self._store is None:
             return
         now = self._clock()
@@ -402,21 +438,28 @@ class CandleAggregator:
         ):
             return  # 불통 중 60초짜리 실패 호출이 쓰기 스레드를 연달아 막지 않게
         if self._pending:
-            batch = list(self._pending.items())
-            try:
-                await asyncio.to_thread(
-                    self._store.write, [p for _, p in batch], TIERS[0].bucket
-                )
-            except Exception as exc:
-                self._failed_at = now
-                logger.warning(
-                    "candle 쓰기 실패(%d점) — 다음 회차 재시도: %r", len(batch), exc
-                )
-                return
+            items = list(self._pending.items())
+            for i in range(0, len(items), WRITE_BATCH):
+                batch = items[i : i + WRITE_BATCH]
+                try:
+                    await asyncio.to_thread(
+                        self._store.write_lines,
+                        [line for _, line in batch],
+                        TIERS[0].bucket,
+                    )
+                except Exception as exc:
+                    # 앞 배치는 이미 맵에서 뺐다 — 남은 줄만 다음 회차에(같은 키 덮어쓰기라 다시 써도 안전하다)
+                    self._failed_at = now
+                    logger.warning(
+                        "candle 쓰기 실패(%d점) — 다음 회차 재시도: %r",
+                        len(items) - i,
+                        exc,
+                    )
+                    return
+                for key, line in batch:
+                    if self._pending.get(key) is line:
+                        del self._pending[key]
             self._failed_at = None
-            for key, point in batch:
-                if self._pending.get(key) is point:
-                    del self._pending[key]
         try:
             # 이 시각 전의 1m 은 전부 Influx 에 있다(썼거나 상한에서 버렸다) — 롤업이 앞지르지 못하는 선
             await asyncio.to_thread(self._rollup.run_round, int(now), self._open_minute)
