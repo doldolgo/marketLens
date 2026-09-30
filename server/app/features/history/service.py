@@ -745,6 +745,108 @@ def build_events(
     )
 
 
+def _events_window(start: int | None, end: int | None, now: int) -> tuple[int, int]:
+    """`end` 없으면 지금+1초, `start` 없으면 `end − 7일`, `end ≤ start` 400 — 두 경로 공용."""
+    end_eff = end if end is not None else now + 1
+    if start is not None and end_eff <= start:
+        raise HistoryApiError(
+            400,
+            "invalid_request",
+            f"end({end_eff})가 start({start}) 이하입니다.",
+        )
+    return default_start(start, end_eff), end_eff
+
+
+def _open_in_window(
+    open_events: list[OpenEvent],
+    dom: str | None,
+    dir: str | None,
+    base_u: str | None,
+    start_eff: int,
+    end_eff: int,
+    now: int,
+) -> Iterator[OpenEvent]:
+    """응답에 실을 진행 중 사건 — 필터·구간(start_ts 기준)·열린 지 60초 초과. 두 경로 공용."""
+    for ev in open_events:
+        if dom is not None and ev.dom != dom:
+            continue
+        if dir is not None and ev.dir != dir:
+            continue
+        if base_u is not None and ev.base != base_u:
+            continue
+        if not (start_eff <= ev.start_ts < end_eff):
+            continue
+        if now - ev.start_ts <= MIN_DURATION_SEC:
+            continue  # 열린 지 60초를 넘긴 것만 — 1분 못 넘길 스파이크는 아직 사건이 아니다
+        yield ev
+
+
+def encode_events(
+    reader: EventReader,
+    open_events: list[OpenEvent],
+    *,
+    start: int | None,
+    end: int | None,
+    dom: str | None,
+    dir: str | None,
+    base: str | None,
+    now_sec: int | None = None,
+) -> bytes:
+    """`build_events` 와 같은 응답 바이트 — 사건마다 모델을 만들지 않고 camelCase dict 로(역프 7일 5만여 건)."""
+    now = now_sec if now_sec is not None else int(time.time())
+    start_eff, end_eff = _events_window(start, end, now)
+    base_u = base.upper() if base is not None else None
+    rows = reader.query_premium_events(
+        start=start_eff, stop=end_eff, dom=dom, dir=dir, base=base_u
+    )
+    by_key: dict[tuple[str, str, str, str, int], dict] = {}
+    for r in rows:
+        # 고아 점은 build_events 와 같이 last_ts 에서 끝난 것으로 — 진행 중 사건이 같은 키를 덮는다
+        end_ts = r.end_ts or r.last_ts
+        by_key[(r.dom, r.fx, r.base, r.dir, r.start_ts)] = {
+            "base": r.base,
+            "dom": r.dom,
+            "fx": r.fx,
+            "dir": r.dir,
+            "startTs": r.start_ts,
+            "endTs": end_ts,
+            "durationSeconds": end_ts - r.start_ts,
+            "ongoing": False,
+            "maxPercent": r.max_percent,
+            "maxTs": r.max_ts,
+            "samples": r.samples,
+            "netDom": r.net_dom,
+            "netFx": r.net_fx,
+        }
+    for ev in _open_in_window(open_events, dom, dir, base_u, start_eff, end_eff, now):
+        by_key[(ev.dom, ev.fx, ev.base, ev.dir, ev.start_ts)] = {
+            "base": ev.base,
+            "dom": ev.dom,
+            "fx": ev.fx,
+            "dir": ev.dir,
+            "startTs": ev.start_ts,
+            "endTs": None,
+            "durationSeconds": now - ev.start_ts,
+            "ongoing": True,
+            "maxPercent": ev.max_percent,
+            "maxTs": ev.max_ts,
+            "samples": ev.samples,
+            "netDom": ev.net_dom,
+            "netFx": ev.net_fx,
+        }
+    events = sorted(
+        by_key.values(),
+        key=lambda e: (-e["startTs"], e["base"], e["dom"], e["fx"], e["dir"]),
+    )
+    head = {
+        "startTs": start_eff,
+        "endTs": end_eff,
+        "count": len(events),
+        "fetchedAt": _now_ms(),
+    }
+    return _render_with_list(head, "events", events)
+
+
 # ── /history/candles ───────────────────────────────────────────────────────
 
 
@@ -769,25 +871,7 @@ def build_candles(
 
     상한 = 1,440 × 창 길이. `end − start` 가 상한을 넘으면 400 — 실수로 수십만 점을 읽는 호출이 Influx 를 못 건드리게.
     """
-    tier = TIER_BY_RES[res]
-    limit = limit_sec(tier)
-    end_eff = (
-        end
-        if end is not None
-        else (now_sec if now_sec is not None else int(time.time()))
-    )
-    start_eff = start if start is not None else max(0, end_eff - limit)
-    if end_eff <= start_eff:
-        raise HistoryApiError(
-            400, "invalid_request", f"end({end_eff})가 start({start_eff}) 이하입니다."
-        )
-    if end_eff - start_eff > limit:
-        raise HistoryApiError(
-            400,
-            "invalid_request",
-            f"window exceeds limit: {res} 은 한 번에 {limit}초(1,440창)까지입니다.",
-            {"limitSec": limit},
-        )
+    tier, start_eff, end_eff = _candles_window(res, start, end, now_sec)
     base_u = base.upper()
     rows = reader.query_candles(
         tier.bucket, start=start_eff, stop=end_eff, dom=dom, fx=fx, base=base_u
@@ -829,4 +913,113 @@ def build_candles(
         count=len(candles),
         fetched_at=_now_ms(),
         candles=candles,
+    )
+
+
+def _candles_window(
+    res: str, start: int | None, end: int | None, now_sec: int | None
+) -> tuple[Tier, int, int]:
+    """(계층, start, end) — 상한 = 1,440 × 창 길이, 넘으면·`end ≤ start` 면 400. 두 경로 공용."""
+    tier = TIER_BY_RES[res]
+    limit = limit_sec(tier)
+    end_eff = (
+        end
+        if end is not None
+        else (now_sec if now_sec is not None else int(time.time()))
+    )
+    start_eff = start if start is not None else max(0, end_eff - limit)
+    if end_eff <= start_eff:
+        raise HistoryApiError(
+            400, "invalid_request", f"end({end_eff})가 start({start_eff}) 이하입니다."
+        )
+    if end_eff - start_eff > limit:
+        raise HistoryApiError(
+            400,
+            "invalid_request",
+            f"window exceeds limit: {res} 은 한 번에 {limit}초(1,440창)까지입니다.",
+            {"limitSec": limit},
+        )
+    return tier, start_eff, end_eff
+
+
+class _Tri(dict[int, bool | None]):
+    """저장값 → 3상태 조회표. −1·0·1 밖의 값은 `_tri_to_bool` 과 같은 규칙(음수 null·양수 true)으로."""
+
+    def __missing__(self, v: int) -> bool | None:
+        return _tri_to_bool(v)
+
+
+_TRI = _Tri({1: True, 0: False, -1: None})
+
+# 방향별로 읽는 필드 — (시가, 고가, 저가, 종가, 경로 입금 끝, 경로 출금 끝, 막힌 초). 김프 경로는 해외 출금 →
+# 국내 입금, 역프는 국내 출금 → 해외 입금 (014 §3.6)
+_DIR_FIELDS = {
+    "kimp": attrgetter(
+        "fwd_o", "fwd_h", "fwd_l", "fwd_c", "dom_dep", "fx_wd", "blocked_fwd_sec"
+    ),
+    "reverse": attrgetter(
+        "rev_o", "rev_h", "rev_l", "rev_c", "fx_dep", "dom_wd", "blocked_rev_sec"
+    ),
+}
+
+
+def encode_candles(
+    reader: CandleReader,
+    *,
+    base: str,
+    res: str,
+    dom: str,
+    fx: str,
+    dir: str,
+    start: int | None,
+    end: int | None,
+    now_sec: int | None = None,
+) -> bytes:
+    """`build_candles` 와 같은 응답 바이트 — 봉마다 모델을 만들지 않고 방향별 필드를 camelCase dict 로."""
+    tier, start_eff, end_eff = _candles_window(res, start, end, now_sec)
+    base_u = base.upper()
+    rows = reader.query_candles(
+        tier.bucket, start=start_eff, stop=end_eff, dom=dom, fx=fx, base=base_u
+    )
+    pick = _DIR_FIELDS["kimp" if dir == "kimp" else "reverse"]
+    tri = _TRI
+    candles: list[dict] = []
+    append = candles.append
+    for r in sorted(rows, key=attrgetter("ts")):
+        o, h, lo, c, dep, wd, blocked = pick(r)
+        append(
+            {
+                "ts": r.ts,
+                "open": o,
+                "high": h,
+                "low": lo,
+                "close": c,
+                "krw": r.krw,
+                "usdt": r.usdt,
+                "fxRate": r.rate,
+                "depositOk": tri[dep],
+                "withdrawOk": tri[wd],
+                "domDepositOk": tri[r.dom_dep],
+                "domWithdrawOk": tri[r.dom_wd],
+                "fxDepositOk": tri[r.fx_dep],
+                "fxWithdrawOk": tri[r.fx_wd],
+                "blockedSec": blocked,
+                "samples": r.samples,
+                "netDom": r.net_dom,
+                "netFx": r.net_fx,
+            }
+        )
+    return render_json(
+        {
+            "base": base_u,
+            "res": res,
+            "dom": dom,
+            "fx": fx,
+            "dir": dir,
+            "startTs": start_eff,
+            "endTs": end_eff,
+            "count": len(candles),
+            "fetchedAt": _now_ms(),
+            "candles": candles,
+        }
     )
