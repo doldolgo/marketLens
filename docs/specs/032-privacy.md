@@ -1,6 +1,6 @@
 # 032 — privacy
 
-상태: IN_PROGRESS | 의존: 027 observability(caddy 접속 기록·CloudWatch Logs 전송 보류), 029 admin(관리자 접속 기록), 030 admin-tunnel(Cloudflare Access·관리자 기록 회전), 022 landing(바닥 바로 가기 nav·sitemap — 자체 서브셋 글꼴·`www` 301 이후 판, #84), 002 web-shell(헤더 — 팀원 담당, 코드만 고친다), 025 slack-alerts(알림 문구), 028 api-allowlist(공개 nginx 모양), 023 domain-tls(apex·www). **사람 값(§3.6)을 PR 안에서 채운 뒤에만 머지한다 — 머지가 곧 게시다.** 033 clarity 는 이 스펙이 게시된 뒤 시작한다.
+상태: DONE | 의존: 027 observability(caddy 접속 기록·CloudWatch Logs 전송 보류), 029 admin(관리자 접속 기록), 030 admin-tunnel(Cloudflare Access·관리자 기록 회전), 022 landing(바닥 바로 가기 nav·sitemap — 자체 서브셋 글꼴·`www` 301 이후 판, #84), 002 web-shell(헤더 — 팀원 담당, 코드만 고친다), 025 slack-alerts(알림 문구), 028 api-allowlist(공개 nginx 모양), 023 domain-tls(apex·www). **사람 값(§3.6)을 PR 안에서 채운 뒤에만 머지한다 — 머지가 곧 게시다.** 033 clarity 는 이 스펙이 게시된 뒤 시작한다.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -110,7 +110,29 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 자동 (2026-10-01)
+cd server && ruff check . && ruff format --check . && pytest -q
+#   All checks passed! / 263 files already formatted / 1077 passed (test_privacy 10 새로, test_observability·test_landing_seo 단언 고침)
+cd web && npm run lint && npm run build
+#   oxlint 종료 0 / tsc -b && vite build ✓ — dist 에 privacy.html
+uv run web/scripts/subset-landing-font.py
+#   landing/fonts/kimptrack-sans-f3ac1cc6.woff2 57,948B · 글자 309개(바닥 링크의 '처'·'침' 더함) · 원본에 없는 글자 없음
+# 계약 테스트가 잡는지: privacy.html 에 〔·외부 icon·인라인 fetch(·절 제목·구제 번호를 하나씩 망가뜨리면 test_privacy 가 하나씩 실패
+# 로컬 Docker — 이 브랜치 web/Dockerfile 이미지, 업스트림 이름만 푸는 대역 컨테이너, 127.0.0.1:18932 (끝난 뒤 지움)
+docker exec web-032 nginx -t                        # syntax is ok · test is successful
+curl -sI 127.0.0.1:18932/privacy                    # 200 · Cache-Control: no-cache · CSP §3.1 그대로 (If-None-Match 304 에도 둘 다)
+curl -sI -H 'Accept-Encoding: gzip' …/privacy       # 200 · Content-Encoding: gzip — 풀면 레포 파일과 같다
+curl …/privacy.html · …/app/privacy.html            # 301 Location: /privacy
+curl …/privacy/ · …/privacy?utm_source=x            # 404(한국어 404.html) · 200 같은 페이지
+docker run --rm -v ./caddy:/etc/caddy:ro caddy:2-alpine caddy version    # v2.11.4
+… caddy validate --config /etc/caddy/Caddyfile     # Valid configuration
+… caddy adapt                                       # 접속 로그 roll_interval 24h·roll_keep 100·roll_keep_days 90·roll_size_mb 50, 기본 로거 remote_ip·client_ip = delete
+# 브라우저(Claude Browser pane, 같은 컨테이너, 1440·390)
+#   가로 스크롤 없음(넘치는 요소 0, 390 에서 표·정의 목록 한 칸) · 요청은 문서뿐(자원 0) · 페이지의 CSP 위반 0(콘솔에서 fetch 를 시도하면 CSP 가 막는 것도 확인)
+#   가짜 _clck·_clsk → [분석 거부] 뒤 둘만 사라지고 kt.analytics=denied · [다시 허용] 뒤 granted
+#   globalPrivacyControl=true 흉내 → "거부 — 브라우저가 GPC를 보냄"·버튼 대신 안내 · setItem·getItem 예외 흉내 → "저장할 수 없음"·안내
+#   자바스크립트 끔(스크립트를 빼고 noscript 를 펼친 사본) → 본문·h2 14개 그대로, 상태 줄·버튼 숨김, noscript 안내
+#   랜딩 바닥 링크(700·n100 — 다른 칸 400·n300) → 같은 탭 /privacy · 대시보드 헤더 링크 target=_blank·rel=noopener·12px·neutral-500
 ```
 
 ## 6. 갱신할 문서
@@ -132,6 +154,25 @@
 - 025 — §3.3 에 "알림 문구에 방문자 IP·User-Agent·쿼리·쿠키를 싣지 않는다 — 032 방침이 '운영 알림에 방문자 정보 없음' 이라고 적는다" 한 줄.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
+- 만든 것 (파일 목록): `web/public/privacy.html`, `web/nginx.conf`(위치 셋), `web/public/landing.html`(바닥 nav 한 칸·글꼴 주소), `web/public/landing/fonts/kimptrack-sans-f3ac1cc6.woff2`(옛 `058ef60e` 지움)·`web/scripts/landing-font-glyphs.txt`, `web/public/sitemap.xml`, `web/src/App.tsx`(헤더 링크), `caddy/Caddyfile`, 테스트 `server/tests/test_privacy.py`(10)·`test_observability.py`·`test_landing_seo.py`. 문서: 이 스펙, CLAUDE.md, context 넷, 스펙 007·022·027·029·030, 런북 `admin-access.md`·`cloudwatch.md`. 라이브러리 추가 없음.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - 설계 세션 허락으로 구현 전에 이 스펙을 #84 사실대로 고쳤다 — 랜딩 글꼴(자체 서브셋, jsDelivr 빠짐), 바닥은 바로 가기 nav 에 한 칸, sitemap 은 lastmod 와 함께, www 는 apex 로 301 이라 §3.3 출처 문단·§3.7 www 엣지·§6 의 023 제안·status 빚 한 줄을 지우고 §3.4-1 은 '`www` 는 기록하지 않는다' 로. §6 의 '022 §3.5 면책 낱말 삭제' 는 #84 뒤 그 낱말이 없어 할 일이 없었다. 사람 값(이메일 제외)과 법률 기본값은 §3.6 '정한 값' 에 적었다.
+  - 방침 링크는 바닥 nav 의 마지막 칸. 글자 '처'·'침' 이 랜딩에 처음 나와 글꼴 서브셋을 다시 만들었다(해시 이름이 바뀐다 — 022 §5 의 옛 해시는 그 실행의 기록이라 두었다).
+  - 절 제목 열두 개의 글자, 한눈에 보기 네 줄·각 절 문장은 §3.4 사실만으로 썼다. Gmail(Google LLC)은 국외 이전과 함께 위탁 절에도 넣었다(메일 보관도 처리위탁). `fastapi.tiangolo.com` 은 DNS 가 Cloudflare Pages(Cloudflare, Inc., 미국 — 2026-10-01 조회)라 파비콘 받는 곳을 그렇게 적었다. 받는 자 연락처는 회사 주소 + 개인정보 문의 링크(Microsoft 는 처리방침의 문의 양식, Google·Cloudflare 는 처리방침) — 회사 이메일은 적지 않았다.
+  - 거부 스크립트: 상태 줄은 스크립트가 그릴 때만 보인다(자바스크립트가 꺼지면 noscript 만), '허용' 은 선택 안 함과 `granted` 를 가르지 않는다, 쓰기가 실패해도 쿠키는 지운다, 다른 탭에서 바꾼 선택은 `storage` 이벤트로 곧바로 보인다. 파비콘은 같은 출처 `/favicon.ico`(랜딩의 절대 주소는 외부 자원 규칙에 걸린다). 상단 바 글자는 스펙의 '서비스로 넘어가기' 그대로(022 의 '목적지를 말하는 글자' 규칙과 다르다).
+  - 대시보드 헤더: `marginLeft: auto` 를 링크로 옮기고 시계와의 간격은 헤더 gap(22.4px). 탭 버튼과 같은 hover 클래스 `hv-txt`.
+  - 방침은 033(Clarity)·035(관리자 24시간 요약)·CloudWatch Logs 전송(027 런북 15단계)을 스펙대로 미리 적는다 — 그 셋이 켜지기 전에는 방침이 실제보다 앞서 있다.
+- 사람 확인(법률) — 게시 전에. 조항은 국가법령정보센터 현행(법 시행 2026-09-11 법률 제21445호, 시행령 시행 2026-09-11 대통령령 제36671호)으로 확인했다:
+  1. **Clarity 구분·국외 이전 근거(가장 먼저)**: 페이지는 Microsoft 를 제3자 제공(제17조 제1항 제2호 — 제15조 제1항 제6호로 수집한 목적 범위)으로 적고, 국외 이전 근거는 '방침에 공개(제28조의8 제1항 제3호 가목)' 로 적었다. 그런데 원문의 제3호는 '계약의 체결 및 이행을 위한 처리위탁·보관' 에만 쓰이고, 제공의 국외 이전은 별도 동의(제1호)·법률·인증·동등성 인정만 남는다 — 두 문장이 서로 맞지 않는다. 동의가 필요하다고 보면 033 을 켜기 전에 032·033 을 동의 방식으로 고친다(§3.6 (1)). 위탁으로 보면 4절을 '제공하지 않습니다' 로 바꾸고 Microsoft 를 위탁 절로 옮긴다.
+  2. 처리 근거: 접속 기록·화면 이용 기록은 제15조 제1항 제6호(정당한 이익 — '명백하게 정보주체의 권리보다 우선' 요건), 권리 행사 답변은 같은 항 제2호, 그 밖의 문의는 제6호.
+  3. 방문자 브라우저가 직접 부르는 자원(대시보드 Google Fonts, 운영자만 보는 API 문서의 jsDelivr·파비콘·Google Fonts)을 '넘기지 않고 알리려고 적는다' 로 쓴 방식. Gmail·Cloudflare 의 국외 이전 근거(제28조의8 제1항 제3호 가목).
+  4. 통신비밀보호법 접속 기록 보관 의무 — 해당하면 3절의 '법령에 따라 따로 보존하는 기록은 없습니다' 를 고치고 원 IP 보관을 별도 스펙으로.
+  5. 연락처가 이메일뿐(법 제30조 제1항 제6호 '전화번호 등 연락처'), 연락 이메일이 역할 주소가 아닌 개인 주소(§3.6 은 역할 주소를 권한다 — 사람 값 그대로 실었고 공개 레포에 남는다).
+  6. 위탁 절의 AWS 수탁자 — 조직 임대 계정의 실제 계약 당사자가 Amazon Web Services, Inc. 인지.
+  7. 게시 직전 원문 다시 보기: Clarity 약관의 방침 문구 요구(4.4(b))·받는 자·저장 국가, jsDelivr 운영사(Volentio JSD Limited, 영국 — 약관 페이지가 스크립트로 그려져 이번에도 원문을 읽지 못했다), Microsoft 문의 양식 주소.
 - 남은 빚:
+  - 배포 뒤 serve 적용: caddy 설정은 배포의 `caddy reload` 가 읽는다, 관리자 기록 logrotate 는 런북 `admin-access.md` 12단계를 다시 적용하고 `sudo logrotate -d …` 로 확인, 이틀 뒤 `logs/caddy/` 에 하루 회전 파일. 그 뒤 027 런북 15단계와 033 시작.
+  - 담당자 제안(PR 본문): 002 헤더 줄, 025 알림 문구 한 줄(§6).
+  - caddy 는 기록할 요청이 없는 날 회전·삭제를 하지 않는다 — 방문이 며칠 없으면 90일 지난 파일이 다음 방문 때 지워진다(§3.7).
+  - 대시보드 링크의 새 탭은 Browser pane 이 같은 탭으로 열어 속성(`target`·`rel`)으로만 확인했다 — 실제 브라우저에서 새 탭 확인은 배포 뒤 사람.
+  - 이전 판 규칙(`privacy-<시행일>.html`)은 첫 개정 때 처음 쓴다 — 테스트는 파일이 생기면 곧바로 본다.
