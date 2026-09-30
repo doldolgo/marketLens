@@ -1,18 +1,29 @@
 """`/history/*` 계산 — 순수 계산. Influx 리더를 인자로 받고 전역을 import 하지 않는다.
 
-리더는 `core.influx.InfluxClient` 시그니처의 일부(query_premium)만 쓴다 —
-테스트는 같은 시그니처의 fake 를 넣어 Influx 없이 돈다 (architecture.md 원칙).
+리더는 `core.influx.InfluxClient` 시그니처의 일부(query_premium·stream_premium·query_premium_events·query_candles)만
+쓴다 — 테스트는 같은 시그니처의 fake 를 넣어 Influx 없이 돈다 (architecture.md 원칙).
+
+엔드포인트마다 두 경로가 있다. `encode_*` 는 라우터가 스레드에서 부르는 응답 바이트 경로이고, `build_*` 는 같은
+응답을 모델로 만드는 경로다(테스트용 — 두 경로가 같은 바이트인지 테스트가 지킨다, 003 의 build_table 쌍과 같다).
 """
 
+import json
+import math
 import re
 import time
+from array import array
+from collections.abc import Iterable, Iterator
 from datetime import UTC, date, datetime, timedelta, timezone
+from operator import attrgetter
 from typing import Literal, Protocol
 
-from app.core.candles import TIER_BY_RES, limit_sec
-from app.core.influx import CandleRow, PremiumEventRow, PremiumRow
+from pydantic import BaseModel
+
+from app.core.candles import TIER_BY_RES, Tier, limit_sec
+from app.core.influx import CandleRow, EventListRow, PremiumRow
 from app.core.premium_events import MIN_DURATION_SEC
 from app.core.premium_events import PremiumEvent as OpenEvent
+from app.core.serialization import camelize_json
 from app.features.history.models import (
     BulkCoin,
     BulkResponse,
@@ -33,11 +44,15 @@ KST = timezone(timedelta(hours=9))
 
 
 class PremiumReader(Protocol):
-    """이 기능이 쓰는 저장소 읽기 최소 인터페이스."""
+    """이 기능이 쓰는 저장소 읽기 최소 인터페이스 — 세 경로 모두 흘려 읽기(목록은 모델 경로 `build_premium_history` 만)."""
 
     def query_premium(
         self, *, dom: str, fx: str, base: str | None, start: int, stop: int
     ) -> list[PremiumRow]: ...
+
+    def stream_premium(
+        self, *, dom: str, fx: str, base: str | None, start: int, stop: int
+    ) -> Iterator[tuple[str, str, int, float]]: ...
 
 
 class EventReader(Protocol):
@@ -51,7 +66,7 @@ class EventReader(Protocol):
         dom: str | None = None,
         dir: str | None = None,
         base: str | None = None,
-    ) -> list[PremiumEventRow]: ...
+    ) -> list[EventListRow]: ...
 
 
 class CandleReader(Protocol):
@@ -95,35 +110,70 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+# ── 응답 인코딩 (005 §3.4·013 §3.4·014 §3.6, 2026-09-28) ──────────────────────
+# 조회·빌드·camelCase·JSON 인코딩을 한 함수가 끝내 라우터가 통째로 스레드에 넘긴다 — 이벤트 루프에는 bytes 만
+# 돌아온다. 큰 목록(사건·premium 컴팩트 events)은 모델 없이 camelCase dict 로 만들고 ENCODE_CHUNK 건씩 인코딩해
+# 이어 붙인다 — json.dumps 한 번이 GIL 을 수십~수백 ms 쥐면 그동안 루프(수집 박스는 거래소 수신·틱)가 멈춘다.
+
+ENCODE_CHUNK = 2000
+
+
+def render_json(content: object) -> bytes:
+    """`JSONResponse` 와 같은 인코딩 — 공백 없음·ensure_ascii 끔·NaN 거부가 같아야 모델 경로와 바이트가 같다."""
+    return json.dumps(
+        content, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+    ).encode("utf-8")
+
+
+def _render_with_list(
+    head: dict, key: str, items: list[dict], tail: dict | None = None
+) -> bytes:
+    """`{head…, key: [items…], tail…}` — 키 순서는 모델 필드 순서 그대로, 목록만 조각으로 인코딩한다."""
+    parts = [
+        render_json(items[i : i + ENCODE_CHUNK])[1:-1]
+        for i in range(0, len(items), ENCODE_CHUNK)
+    ]
+    return _assemble(head, key, parts, tail)
+
+
+def _assemble(head: dict, key: str, parts: list[bytes], tail: dict | None) -> bytes:
+    """이미 인코딩한 목록 조각(각각 `[`·`]` 를 뗀 것)을 머리·꼬리와 한 번에 잇는다 — 응답 크기의 사본을 하나만 만든다."""
+    pieces = [render_json(head)[:-1], b',"' + key.encode() + b'":[']
+    for i, part in enumerate(parts):
+        if i:
+            pieces.append(b",")
+        pieces.append(part)
+    pieces.append(b"]}" if tail is None else b"]," + render_json(tail)[1:])
+    return b"".join(pieces)
+
+
+def encode_model(model: BaseModel) -> bytes:
+    """모델 응답(streaks·bulk)의 바이트 — 라우터가 빌드와 함께 스레드에서 부른다."""
+    return render_json(camelize_json(model.model_dump()))
+
+
 # ── /history/premium ───────────────────────────────────────────────────────
 
 
-def period_bounds(
-    unit: Literal["week", "month"], day: date
+def week_bounds(day: date) -> tuple[datetime, datetime]:
+    """`day` 가 속한 ISO 주(월 00:00 UTC ~ 다음 월), end exclusive."""
+    start = datetime(day.year, day.month, day.day, tzinfo=UTC) - timedelta(
+        days=day.weekday()
+    )
+    return start, start + timedelta(days=7)
+
+
+def _premium_window(
+    unit: Literal["week", "month"], date_str: str | None
 ) -> tuple[datetime, datetime]:
-    """`day` 가 속한 ISO 주(월 00:00 UTC ~ 다음 월) 또는 달(1일 ~ 다음 달 1일), end exclusive."""
-    if unit == "week":
-        start = datetime(day.year, day.month, day.day, tzinfo=UTC) - timedelta(
-            days=day.weekday()
+    """검증(400)과 구간 — 두 경로 공용. 저장소를 읽기 전에 끝난다."""
+    if unit != "week":
+        # 한 번에 1주까지 (§3.4, 2026-09-28 사람 결정) — 달 전체(≈250만 점)는 조회 한 번이 api 메모리를 넘긴다
+        raise HistoryApiError(
+            400,
+            "invalid_request",
+            f"unit={unit} 는 받지 않습니다 — 한 번에 1주(unit=week)까지입니다.",
         )
-        return start, start + timedelta(days=7)
-    start = datetime(day.year, day.month, 1, tzinfo=UTC)
-    if day.month == 12:
-        end = datetime(day.year + 1, 1, 1, tzinfo=UTC)
-    else:
-        end = datetime(day.year, day.month + 1, 1, tzinfo=UTC)
-    return start, end
-
-
-def build_premium_history(
-    reader: PremiumReader,
-    *,
-    dom: str,
-    fx: str,
-    base: str,
-    unit: Literal["week", "month"],
-    date_str: str | None,
-) -> PremiumHistoryResponse:
     if date_str is None:
         day = datetime.now(UTC).date()
     else:
@@ -143,27 +193,53 @@ def build_premium_history(
                 f"date 형식이 잘못됐습니다: {date_str!r} (YYYY-MM-DD)",
             ) from None
         if not 1970 <= day.year <= 2100:
-            # period_bounds 의 연도 연산이 넘치지 않는 안전 범위 — 밖이면 형식 오류와 같은 400
+            # week_bounds 의 날짜 연산이 넘치지 않는 안전 범위 — 밖이면 형식 오류와 같은 400
             raise HistoryApiError(
                 400,
                 "invalid_request",
                 f"date 는 1970~2100 범위여야 합니다: {date_str!r}",
             )
-    start_dt, end_dt = period_bounds(unit, day)
-    start_sec = int(start_dt.timestamp())
-    end_sec = int(end_dt.timestamp())
+    return week_bounds(day)
 
+
+def _no_premium(
+    *, dom: str, fx: str, base: str, unit: str, start_dt: datetime, end_dt: datetime
+) -> HistoryApiError:
+    return HistoryApiError(
+        404,
+        "market_data_not_found",
+        f"{base} 의 {unit} 구간({_utc_z(start_dt)} ~ {_utc_z(end_dt)})에 기록이 없습니다.",
+        {"dom": dom, "fx": fx, "base": base},
+    )
+
+
+def build_premium_history(
+    reader: PremiumReader,
+    *,
+    dom: str,
+    fx: str,
+    base: str,
+    unit: Literal["week", "month"],
+    date_str: str | None,
+) -> PremiumHistoryResponse:
+    """모델 경로 — 점 목록(pivot 한 행, 반쪽 점 제외)으로 만든다. 응답 바이트 경로가 이것과 같은지 테스트가 본다."""
+    start_dt, end_dt = _premium_window(unit, date_str)
     rows = reader.query_premium(
-        dom=dom, fx=fx, base=base.upper(), start=start_sec, stop=end_sec
+        dom=dom,
+        fx=fx,
+        base=base.upper(),
+        start=int(start_dt.timestamp()),
+        stop=int(end_dt.timestamp()),
     )
     if not rows:
-        raise HistoryApiError(
-            404,
-            "market_data_not_found",
-            f"{base.upper()} 의 {unit} 구간({_utc_z(start_dt)} ~ {_utc_z(end_dt)})에 기록이 없습니다.",
-            {"dom": dom, "fx": fx, "base": base.upper()},
+        raise _no_premium(
+            dom=dom,
+            fx=fx,
+            base=base.upper(),
+            unit=unit,
+            start_dt=start_dt,
+            end_dt=end_dt,
         )
-
     events: list[PremiumEvent] = []
     prev_ts = rows[0].ts
     for row in rows:
