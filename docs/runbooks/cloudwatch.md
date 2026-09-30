@@ -16,11 +16,12 @@ CloudShell 에서 할 때:
 - 메모리·디스크 경보(10-2)는 세 박스 지표가 보인 뒤에 만든다 — 데이터 없음 = 경보라 먼저 만들면 곧바로 울린다.
 
 ## 관리자가 할 일 (한 번에 묶어 부탁한다)
-CLI 사용자(jin)는 `iam:PassRole` 이 없어 역할을 인스턴스·Lambda·일정에 못 넘긴다. 콘솔 관리자에게 아래 넷을 한 번에 부탁한다.
+CLI 사용자(jin)는 `iam:PassRole` 이 없어 역할을 인스턴스·Lambda·일정에 못 넘긴다. 콘솔 관리자에게 아래를 한 번에 부탁한다(5번은 034 — 배포 뒤).
 1. **역할·정책** — collect 에 `marketlens-s3-snapshot` 이 붙어 있는지 확인하고(없으면 붙인다 — status.md 남은 작업), 그 역할에 관리형 정책 `CloudWatchAgentServerPolicy` 를 더한다. 역할 `marketlens-cwagent`(신뢰 = EC2, 정책 = `CloudWatchAgentServerPolicy`)를 만들어 data·serve 에 붙인다 — **3단계(IMDS) 확인 뒤에**.
 2. **canary — Lambda·일정** — 11단계. 역할 둘(`marketlens-smoke-lambda`·`marketlens-smoke-scheduler`)을 만들고 함수·일정을 만들 때 넘긴다. CloudShell(서울)에서 명령 그대로 한다.
 3. **Q Developer Slack 채널** — 9단계. Slack 워크스페이스 승인(Slack 관리자)과 채널 역할이 필요하다.
 4. **EC2 동작 경보용 서비스 연결 역할** — 재부팅·복구 동작이 걸린 경보를 처음 만들 때 CloudWatch 가 `AWSServiceRoleForCloudWatchEvents` 를 쓴다. 없으면 관리자가 `aws iam create-service-linked-role --aws-service-name events.amazonaws.com` 을 한 번 하거나 10단계의 상태검사 경보 하나를 콘솔에서 만든다.
+5. **관리자 읽기 정책(034)** — 16단계. collect 역할에 인라인 정책 하나를 더한다(`iam:PutRolePolicy`) — CloudShell(서울)에서 명령 그대로.
 
 ## 1. 예산
 콘솔 Billing → Budgets → 월 비용 예산 $130, 알림 셋(실제 85%·실제 100%·예측 100% — 85% 는 콘솔 템플릿이 더한다) → 이메일.
@@ -284,6 +285,38 @@ Logs Insights 저장 쿼리 3개(로그 그룹 `/marketlens/serve/caddy`, `aws l
   `filter referer != "" and referer != "https://kimptrack.com" and referer != "https://www.kimptrack.com" | stats count(*) as visits by referer | sort visits desc | limit 50`
 - `marketlens/WS 연결 지속 시간`:
   `filter request.uri = "/api/ws/spreads" and status = 101 | stats count(*) as connections, pct(duration, 50) as p50_sec, pct(duration, 90) as p90_sec, max(duration) as max_sec by bin(1d)`
+
+## 16. 관리자 읽기 권한 (034)
+수집기의 관리자 피드(`/admin/aws`·`/admin/alerts` 의 경보 이력)가 collect 역할 `marketlens-s3-snapshot` 으로 CloudWatch·canary 로그·예산을 **읽는다**. 인라인 정책 `marketlens-admin-read` 하나이고 쓰기 권한은 없다. 수집기 컨테이너도 이 읽기 권한에 닿는다(에이전트 정책과 같은 판단 — 034 §3.2). 경보 읽기는 먼저 `marketlens-*` 경보 ARN 으로 좁혀 붙이고, 안 되는 액션만 넓힌다 — 조직 임대 계정이라 다른 경보가 있으면 `*` 는 그것도 읽는다. 공통 변수 줄(`AWS_REGION`·`ACCOUNT`)부터.
+```bash
+cat > admin-read.json <<EOF
+{"Version":"2012-10-17","Statement":[
+  {"Sid":"Alarms","Effect":"Allow","Action":["cloudwatch:DescribeAlarms","cloudwatch:DescribeAlarmHistory"],
+   "Resource":"arn:aws:cloudwatch:$AWS_REGION:$ACCOUNT:alarm:marketlens-*"},
+  {"Sid":"Metrics","Effect":"Allow","Action":["cloudwatch:GetMetricData","cloudwatch:ListMetrics"],"Resource":"*"},
+  {"Sid":"CanaryLog","Effect":"Allow","Action":"logs:FilterLogEvents",
+   "Resource":["arn:aws:logs:$AWS_REGION:$ACCOUNT:log-group:/aws/lambda/marketlens-smoke",
+               "arn:aws:logs:$AWS_REGION:$ACCOUNT:log-group:/aws/lambda/marketlens-smoke:*"]},
+  {"Sid":"Budgets","Effect":"Allow","Action":"budgets:ViewBudget","Resource":"arn:aws:budgets::$ACCOUNT:budget/*"}
+]}
+EOF
+aws iam put-role-policy --role-name marketlens-s3-snapshot --policy-name marketlens-admin-read --policy-document file://admin-read.json
+```
+`GetMetricData`·`ListMetrics` 는 리소스 수준 권한이 없어 `*` 다. 따옴표 없는 `EOF` 라 셸이 `$AWS_REGION`·`$ACCOUNT` 를 풀어 넣는다 — 정책 문서를 레포에 커밋하지 않는다.
+- 확인 1 — 좁힌 경보 리소스가 되는지. CloudShell 은 관리자 신원이라 역할 정책을 시험하지 못한다 — collect 박스에서 수집기 컨테이너(역할 자격증명, hop 2)로 034 가 부르는 모양 그대로 부른다:
+  ```bash
+  docker exec marketlens-server python -c "
+  import boto3
+  cw = boto3.client('cloudwatch', region_name='ap-northeast-2')
+  print('alarms', len(cw.describe_alarms(AlarmNamePrefix='marketlens-', AlarmTypes=['MetricAlarm'])['MetricAlarms']))
+  print('history', len(cw.describe_alarm_history(HistoryItemType='StateUpdate', MaxRecords=10)['AlarmHistoryItems']))
+  "
+  ```
+  `alarms 17`(로그 전송 뒤 18)과 `history <n>` 두 줄이면 좁힌 정책으로 된다. `AccessDenied` 가 나는 줄의 액션만 넓힌다(아래).
+- 확인 2 — 관리자 페이지 인프라 칸의 네 `state`(또는 collect 에서 `curl -s localhost:8000/admin/aws` 를 두 번 — 첫 요청은 3초 안에 못 채운 부분이 `pending`). `alarms`·`metrics`·`canary` 는 `ok`, 예산은 `ok` 또는 SCP 에 막히면 `denied`·`AccessDeniedException`(034 §3.2 — 막히는지는 모른다). 결과(특히 예산)를 034 §7 에 적는다. 정책을 붙이기 전에 페이지를 열었다면 실패도 주기만큼 캐시돼 있다 — 경보·canary 60초, 지표 5분, 예산 6시간 뒤에 다시 부른다.
+- 확인 3 — 관리자 접속 기록(030 런북의 `logs/admin/access.log`)에 `/api/admin/aws`·`/api/admin/alerts` 줄이 없다(폴링은 기록하지 않는다).
+- 넓히기: 안 되는 액션만 `Alarms` 문에서 빼 `"Resource":"*"` 인 문으로 옮기고 같은 `put-role-policy` 를 다시 한다. 결과(어느 액션을 넓혔는지)는 034 §7 에 적는다.
+- 되돌리기: `aws iam delete-role-policy --role-name marketlens-s3-snapshot --policy-name marketlens-admin-read` — 네 부분이 `denied` 가 되고 수집은 영향이 없다.
 
 ## 경보 목록 (027 §3.6)
 - 상태검사 6 — 세 박스 × `StatusCheckFailed_Instance`(최댓값 60초 3점 → 재부팅)·`StatusCheckFailed_System`(최댓값 60초 2점 → 복구), 데이터 없음 무시.
