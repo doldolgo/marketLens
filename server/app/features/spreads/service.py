@@ -5,19 +5,14 @@
 
 import time
 from collections.abc import Collection, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from app.core.collect import RefreshSummary
 from app.core.live_store import LiveStore
 from app.core.models import Row
-from app.core.networks import wallet_fields
-from app.core.orderbook import (
-    WalkResult,
-    average_price,
-    walk_amount,
-    walk_levels,
-    walk_quantity,
-)
+from app.core.networks import WalletMemo, wallet_fields
+from app.core.orderbook import WALK_EPSILON, walk_levels
 from app.core.premium import premium_percent
 from app.features.spreads.models import (
     RefreshFailure,
@@ -34,6 +29,7 @@ FOREIGN_QUOTE = "USDT"
 STALE_AFTER_SEC = 5.0
 # 행 자체가 이만큼 안 바뀌면 스트림이 살아 있어도 그 행의 실제 경과 초를 age 로 낸다 (§3.2-4)
 ROW_STALE_SEC = 300.0
+_ROW_STALE = timedelta(seconds=ROW_STALE_SEC)
 # USDT 는 매 사이클(1초) 관측이 정상 — 60초 무관측은 구조적 문제다 (스펙 008 §3.2)
 USDT_STALE_WARN_SEC = 60.0
 EXCLUDED_COINS: frozenset[str] = frozenset()
@@ -52,171 +48,92 @@ class MarketDataNotFoundError(Exception):
         self.detail = detail
 
 
-# 한 표 안에서 "사는 쪽" 걷기 결과를 나누는 메모 — (거래소, 코인) → 그 마켓 asks 를 고정 금액으로 걷은 것
-BuyMemo = dict[tuple[str, str], WalkResult]
+def _walk_amount(levels: list[list[float]], amount: float) -> tuple[float, float]:
+    """금액 기준 걷기의 (체결 수량, 체결 금액) — core `walk_amount` 와 같은 연산·같은 순서 (004 §3.1).
 
-
-def _cross_walk(
-    buy_levels: list[list[float]],
-    sell_levels: list[list[float]],
-    buy_amount: float,
-    *,
-    memo: BuyMemo | None = None,
-    memo_key: tuple[str, str] | None = None,
-) -> tuple[float, float]:
-    """양쪽 다리를 **수량으로 연결해** 건넌 (평균 매수가, 평균 매도가) — 스펙 003 §3.2-4.
-
-    각 다리를 따로 걸으면 사지도 않은 수량을 파는 값이 나온다. 매도측이 소진돼 못 판
-    수량이 있으면 판 수량만큼 매수측을 되맞춘다 — 못 판 코인을 0원으로 치면 −50% 대
-    쓰레기 값이 나오기 때문이다(004 §3.2·§3.3 과 같은 규칙).
-
-    사는 쪽 걷기는 상대 거래소와 무관하다(같은 마켓·같은 금액) — 한 마켓이 여러 행에 나오므로
-    (해외 마켓은 국내 2곳, 국내 마켓은 해외 3곳) `memo` 가 있으면 한 표 안에서 한 번만 걷는다.
-    파는 쪽은 산 수량에 달려 있어 행마다 걷는다.
+    표 한 장에 걷기가 수천 번이라 결과 객체·제너레이터를 만들지 않는다. 소진 여부는 사는 쪽에선 쓰지 않는다.
     """
-    buy = memo.get(memo_key) if memo is not None else None
-    if buy is None:
-        buy = walk_amount(buy_levels, buy_amount)
-        if memo is not None and memo_key is not None:
-            memo[memo_key] = buy
-    sell = walk_quantity(sell_levels, buy.quantity)
-    if sell.exhausted and sell.quantity < buy.quantity:
-        buy = walk_quantity(buy_levels, sell.quantity)
-    return average_price(buy), average_price(sell)
+    if amount <= 0 or not levels:
+        return 0.0, 0.0
+    remaining = amount
+    quantity = 0.0
+    filled = 0.0
+    for level in levels:
+        price = level[0]
+        size = level[1]
+        level_amount = price * size
+        if level_amount >= remaining:
+            quantity += remaining / price
+            filled += remaining
+            break
+        quantity += size
+        filled += level_amount
+        remaining -= level_amount
+    return quantity, filled
 
 
-def _age_seconds(row: Row, store: LiveStore, now: datetime) -> float:
-    """그 거래소 스트림의 마지막 시세 수신 이후 경과 초 (§3.2-4).
+def _walk_quantity(levels: list[list[float]], quantity: float) -> tuple[float, float]:
+    """수량 기준 걷기의 (체결 수량, 체결 금액) — core `walk_quantity` 와 같은 연산·같은 순서."""
+    if quantity <= 0 or not levels:
+        return 0.0, 0.0
+    remaining = quantity
+    filled_qty = 0.0
+    filled_amount = 0.0
+    for level in levels:
+        price = level[0]
+        size = level[1]
+        if size >= remaining:
+            filled_qty += remaining
+            filled_amount += remaining * price
+            break
+        filled_qty += size
+        filled_amount += size * price
+        remaining -= size
+    return filled_qty, filled_amount
 
-    행 자체의 갱신 시각이 아니다 — 조용한 코인은 메시지가 안 와도 호가는 현재값이다.
-    행은 스트림 메시지로만 생기므로 행이 있는 거래소의 수신 시각과 행의 갱신 시각은 항상 있다.
 
-    예외: 행 자체가 300초 이상 안 바뀌었으면(거래 정지·심볼 장애 — 스트림은 살아 있는데
-    그 코인 프레임만 안 온다) 그 행의 실제 경과 초를 낸다. FE 의 stale 규칙(age ≥ 5)이
-    그대로 잡게 하기 위해서다.
-    """
-    state = store.stream_state(row.exchange)
-    assert state is not None and state.last_message_at is not None
-    assert row.updated_at is not None
-    stream_age = (now.timestamp() * 1000 - state.last_message_at) / 1000
-    row_age = (now - row.updated_at).total_seconds()
-    if row_age >= ROW_STALE_SEC:
-        return max(stream_age, row_age)
-    return stream_age
-
-
-def _build_row(
-    base: str,
-    dom_row: Row,
-    fx_row: Row,
-    rate_ask: float,
-    rate_bid: float,
+def _market(
+    row: Row,
     store: LiveStore,
+    stream_ages: dict[str, float],
+    now_ms: float,
     now: datetime,
-    notional: float,
-    buy_memo: BuyMemo,
-    day_open: Mapping[tuple[str, str], float],
-) -> dict[str, object]:
-    """행 하나의 규칙 — 스펙 003 §3.2-4.
+    cutoff: datetime,
+) -> list[Any]:
+    """시장(거래소, 코인) 하나의 표 재료 — 표 한 장에서 시장마다 한 번만 만든다 (§3.2 표 계산 경로).
 
-    응답 키(camelCase)·순서 그대로의 dict 를 만든다 — `SpreadRow` 모델을 거치지 않는다.
-    표는 매초 1,400행 넘게 만들어지므로(017) 모델 생성 → model_dump → 키 변환 → json 의
-    네 단계가 표 1장 비용의 절반이었다. 키 이름·순서의 진실은 `SpreadRow` 이고, 이 dict 가
-    그것과 같은 바이트가 되는지는 테스트가 옛 경로와 비교해 지킨다.
+    한 시장이 여러 행에 나온다(해외 시장은 국내 두 곳, 국내 시장은 해외 세 곳). 자리는
+    [age, 최우선 bid, 최우선 ask, 최우선 4값이 전부 양수인가, 사는 쪽 걷기(처음 쓸 때 채운다), asks, bids].
+    age 는 그 거래소 스트림의 마지막 시세 수신 이후 경과 초이고(거래소마다 한 번 구한다), 행 자체가
+    300초 넘게 안 바뀌었으면 둘 중 큰 값이다(§3.2-4 — 조용한 코인의 호가는 안 바뀌어도 현재값이다).
     """
-    dom_bid = dom_row.bids[0] if dom_row.bids else None
-    dom_ask = dom_row.asks[0] if dom_row.asks else None
-    fx_bid = fx_row.bids[0] if fx_row.bids else None
-    fx_ask = fx_row.asks[0] if fx_row.asks else None
-
-    # age 는 양측 스트림 중 오래된 쪽 기준(행 자체 300초 미갱신이면 그 행의 경과 초), 0 미만이면 0
-    age = max(0.0, _age_seconds(dom_row, store, now), _age_seconds(fx_row, store, now))
-
-    best = (dom_bid, dom_ask, fx_bid, fx_ask)
-    failed = any(level is None for level in best) or any(
-        # 가격뿐 아니라 잔량도 본다 — 잔량 0 이면 걷어도 체결 수량이 0 이라
-        # 평균가가 0 이 되고 순값 계산이 0 으로 나눈다 (§3.2-4)
-        level[0] <= 0 or level[1] <= 0
-        for level in best
-        if level is not None
+    exchange = row.exchange
+    age = stream_ages.get(exchange)
+    if age is None:
+        state = store.stream_state(exchange)
+        # 행은 스트림 메시지로만 생기므로 행이 있는 거래소의 수신 시각은 항상 있다
+        assert state is not None and state.last_message_at is not None
+        age = stream_ages[exchange] = (now_ms - state.last_message_at) / 1000
+    updated = row.updated_at
+    assert updated is not None
+    if updated <= cutoff:
+        # 거래 정지·심볼 장애 — 스트림은 살아 있는데 이 코인 프레임만 안 온다. timedelta 는 정수 µs 라
+        # 이 비교는 "행 경과 초 ≥ 300" 과 같다
+        age = max(age, (now - updated).total_seconds())
+    asks = walk_levels(row, "asks")
+    bids = walk_levels(row, "bids")
+    bid = bids[0] if bids else None
+    ask = asks[0] if asks else None
+    # 가격뿐 아니라 잔량도 본다 — 잔량 0 이면 걷어도 체결 수량이 0 이라 평균가가 0 이 되고 순값이 0 으로 나눈다
+    ok = not (
+        bid is None
+        or ask is None
+        or bid[0] <= 0
+        or bid[1] <= 0
+        or ask[0] <= 0
+        or ask[1] <= 0
     )
-    if failed:
-        # fail 이어도 입출금 값과 age 는 싣는다
-        fwd = rev = usd = krw = slip_fwd = slip_rev = 0.0
-        status = "fail"
-    else:
-        assert dom_bid is not None and dom_ask is not None
-        assert fx_bid is not None and fx_ask is not None
-        # 원값(raw) — 최우선 1단계 기준. 저장 계층(005·009)이 쓰는 값이고 응답에는 안 나간다.
-        # 체결되는 쪽 호가: 김프는 해외 ask 에 사서 국내 bid 에 판다, 역프는 반대.
-        fwd_raw = premium_percent(buy_krw=fx_ask[0] * rate_ask, sell_krw=dom_bid[0])
-        rev_raw = premium_percent(buy_krw=dom_ask[0], sell_krw=fx_bid[0] * rate_bid)
-
-        # 걷기 — 김프는 해외 asks 를 notional(USDT)로, 역프는 국내 asks 를 그 원화 환산액으로
-        # 사는 쪽 메모 키 = 마켓 — 해외 asks 는 늘 notional(USDT), 국내 asks 는 그 거래소 환율로
-        # 환산한 원화라 같은 마켓이면 금액도 같다
-        fx_ask_avg, dom_bid_avg = _cross_walk(
-            walk_levels(fx_row, "asks"),
-            walk_levels(dom_row, "bids"),
-            notional,
-            memo=buy_memo,
-            memo_key=(fx_row.exchange, base),
-        )
-        dom_ask_avg, fx_bid_avg = _cross_walk(
-            walk_levels(dom_row, "asks"),
-            walk_levels(fx_row, "bids"),
-            notional * rate_ask,
-            memo=buy_memo,
-            memo_key=(dom_row.exchange, base),
-        )
-
-        # 순값과 차감폭 — 반올림하지 않는다(상한도 없다)
-        fwd = premium_percent(buy_krw=fx_ask_avg * rate_ask, sell_krw=dom_bid_avg)
-        rev = premium_percent(buy_krw=dom_ask_avg, sell_krw=fx_bid_avg * rate_bid)
-        slip_fwd = max(0.0, fwd_raw - fwd)
-        slip_rev = max(0.0, rev_raw - rev)
-
-        # 국내 시세 자체라 환율·슬리피지와 무관하다 — FE 가 그대로 표시한다
-        krw = dom_bid[0]
-        usd = fx_row.price
-        status = "stale" if age >= STALE_AFTER_SEC else "ok"
-
-    # 입출금 6필드는 망 판정으로 채운다 — fail 행도 같은 규칙 (006 §3.7)
-    # 024 부터 core 공용 함수 — 틱도 같은 판정을 쓴다. `net_fx` 는 FE 의 "네트워크 같음/다름" 판단 재료다
-    wf = wallet_fields(dom_row, fx_row)
-
-    # 026 §3.2 — KST 00시 기준가 대비 국내 체결가. fail 행도 계산(호가와 무관). 기준가 없으면 null 이지 0 이 아니다
-    ref = day_open.get((dom_row.exchange, base))
-    day_chg: float | None = None
-    if ref is not None and ref > 0 and dom_row.price > 0:
-        day_chg = (dom_row.price / ref - 1) * 100
-
-    # float() 는 모델이 하던 int→float 강제와 같다 — 거래소가 정수로 준 가격이 "100" 이 아니라
-    # "100.0" 으로 나가야 옛 바이트와 같다
-    return {
-        "sym": base,
-        "dom": dom_row.exchange,
-        "fx": fx_row.exchange,
-        "fwd": float(fwd),
-        "rev": float(rev),
-        "usd": float(usd),
-        # 009 가 게시한 fwd 추이(1분 버킷 ≤30개) — fail 행도 싣는다, 없으면 빈 배열.
-        # 값은 009 가 버퍼에 넣을 때 이미 소수 3자리다(0.001%p = 김프 눈금보다 촘촘하다): 490행 ×
-        # 30개를 1초마다 보내므로 배정밀도 그대로면 응답이 gzip 106KB 다. 원값은 Influx 에 남는다.
-        "spark": store.spark(dom_row.exchange, fx_row.exchange, base),
-        "status": status,
-        "age": float(age),
-        "slipFwd": float(slip_fwd),
-        "slipRev": float(slip_rev),
-        "krw": float(krw),
-        "netDom": wf.net_dom,
-        "depDom": wf.dep_dom,
-        "wdDom": wf.wd_dom,
-        "depFx": wf.dep_fx,
-        "wdFx": wf.wd_fx,
-        "netFx": wf.net_fx,
-        "dayChg": day_chg,
-    }
+    return [age, bid, ask, ok, None, asks, bids]
 
 
 def build_table(
