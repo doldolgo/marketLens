@@ -175,7 +175,9 @@ async def test_restored_open_outage_spans_downtime_until_now() -> None:
     started = T0 - 30 * 60 * SEC
 
     class Reader:
-        def query_collect_fail(self, *, start: int) -> list[CollectFailRow]:
+        def query_collect_fail(
+            self, *, start: int, timeout_sec: float | None = None
+        ) -> list[CollectFailRow]:
             return [
                 CollectFailRow(
                     exchange="upbit",

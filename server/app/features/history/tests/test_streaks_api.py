@@ -22,9 +22,9 @@ def example_reader() -> FakeInfluxReader:
 
 
 def get(client, **params):
-    # 예시 데이터는 2023년 시각이라 start 를 안 주면 7일 기본 창(§3.4) 밖 — 기본은 T0 부터.
-    # start=None 을 넘기면 파라미터를 뺀다(기본 창 테스트용).
-    merged = {"base": "BTC", "start": T0, **params}
+    # 예시 데이터는 2023년 시각이라 start 를 안 주면 7일 기본 창(§3.4) 밖 — 기본은 T0 부터 하루(창 상한 7일 안).
+    # start=None·end=None 을 넘기면 파라미터를 뺀다(기본 창 테스트용).
+    merged = {"base": "BTC", "start": T0, "end": T0 + 86_400, **params}
     return client.get(
         "/history/streaks", params={k: v for k, v in merged.items() if v is not None}
     )
@@ -102,9 +102,9 @@ def test_top_level_14_keys_and_kst() -> None:
     assert body["lastUpdated"].endswith("+09:00")
     assert body["lastUpdatedTs"] == T0 + 6 * 60
     assert body["scanned"] == len(EXAMPLE)
-    # startTs 는 실제로 쓴 값, end 미지정 — 지금+1초 (§3.4)
+    # startTs·endTs 는 실제로 쓴 값 (§3.4)
     assert body["startTs"] == T0
-    assert body["endTs"] > int(time.time())
+    assert body["endTs"] == T0 + 86_400
     # 구간 start/end 도 KST 표기 (§3.4-4)
     assert body["kimp"]["segments"][0]["start"].endswith("+09:00")
 
@@ -184,8 +184,9 @@ def test_default_window_is_last_7_days() -> None:
         "BTC",
         [(now - 8 * 86_400, 5.0, -1.0), (now - 86_400, 5.0, -1.0)],
     )
-    body = get(make_client(reader), start=None).json()
+    body = get(make_client(reader), start=None, end=None).json()
     assert body["scanned"] == 1
+    assert body["endTs"] > now  # end 미지정 — 지금+1초
     assert body["startTs"] == body["endTs"] - 604_800
     assert body["lastUpdatedTs"] == now - 86_400
 
@@ -206,3 +207,18 @@ def test_end_only_window_is_7_days_before_end() -> None:
     assert body["endTs"] == end
     assert body["scanned"] == 1
     assert body["lastUpdatedTs"] == now - 8 * 86_400
+
+
+# ---- 창 상한 7일 (§3.4, 2026-09-28) ----
+
+
+def test_window_over_seven_days_is_400_and_exactly_seven_days_is_fine() -> None:
+    client = make_client(example_reader())
+    res = get(client, start=T0, end=T0 + 604_801)
+    assert res.status_code == 400
+    error = res.json()["error"]
+    assert error["code"] == "invalid_request"
+    assert error["detail"] == {"limitSec": 604_800}
+    assert get(client, threshold=4, start=T0, end=T0 + 604_800).status_code == 200
+    # end 없이 오래된 start 만 주면 창이 지금까지라 넘는다
+    assert get(client, start=T0, end=None).status_code == 400
