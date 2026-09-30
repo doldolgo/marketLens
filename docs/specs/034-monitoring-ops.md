@@ -1,6 +1,6 @@
 # 034 — monitoring-ops
 
-상태: TODO | 의존: 025 slack-alerts(알림기 `notify`·보내기 태스크·SlackLogHandler), 027 observability(에이전트 지표 이름·경보 이름·canary 로그), 010 raw-archive(collect 역할 자격증명), 029 admin(관리자 nginx 분기·보호 규칙), 030 admin-tunnel(들어오는 길), 028 api-allowlist(공개 허용 목록), 022 landing(3초 기다림 규칙의 모양). 짝 스펙 035(api 쪽 피드 둘 — 이 스펙 뒤에 한다)와 공통 규칙(§3.1)을 같은 문장으로 나눠 가진다. 031·032·033 과는 코드가 겹치지 않는다. 화면은 036.
+상태: DONE | 의존: 025 slack-alerts(알림기 `notify`·보내기 태스크·SlackLogHandler), 027 observability(에이전트 지표 이름·경보 이름·canary 로그), 010 raw-archive(collect 역할 자격증명), 029 admin(관리자 nginx 분기·보호 규칙), 030 admin-tunnel(들어오는 길), 028 api-allowlist(공개 허용 목록), 022 landing(3초 기다림 규칙의 모양). 짝 스펙 035(api 쪽 피드 둘 — 이 스펙 뒤에 한다)와 공통 규칙(§3.1)을 같은 문장으로 나눠 가진다. 031·032·033 과는 코드가 겹치지 않는다. 화면은 036.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -105,7 +105,48 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 환경 — 가상환경·node_modules 가 없어 만들었다(botocore 1.43.105). 설치가 바꾼 추적 파일 egg-info 는 git checkout 으로 되돌림
+cd server && uv venv -p 3.12 .venv && uv pip install -p .venv -e ".[dev]"
+cd web && npm ci
+
+# 기존 스펙 재검증 (마지막 코드 커밋 뒤, 이 문서 커밋 뒤에도 같은 결과)
+cd server && ruff check . && ruff format --check . && pytest -q   # All checks passed! · 270 files already formatted · 1114 passed
+cd web && npm run lint && npm run build                            # oxlint 종료 코드 0 · ✓ built (dist 에 admin 없음)
+
+# §4 목록 — 네트워크 없음(AWS 는 botocore Stubber·가짜 자격증명·가짜 클라이언트, Redis 는 fakeredis)
+pytest -q app/features/admin/tests/test_aws_parts.py app/features/admin/tests/test_feeds.py \
+  app/features/admin/tests/test_alerts_feed.py app/features/admin/tests/test_feeds_http.py   # 47 passed
+  #   분류(unconfigured·denied·error·timeout·partial) · 경보 순서·counts · 박스는 memory 경보 이름에서·경보 없는 박스 빠짐 ·
+  #   288점·빈 구간 null·c7g credit null·swap 은 data 만·질의 17개 한 번 · canary startFromHead=false·마지막 REPORT 의 실행 줄만·
+  #   4단계 통과 → ok·실패 줄·JSON 오류 줄은 errorMessage·빈 첫 쪽+토큰 따라감·3쪽 빈 채 토큰 → error partial·실행 없음 → ok·null ·
+  #   예산 COST 만·계정 ID 없음 · 설정 없음 → 네 부분 unconfigured·클라이언트·스레드 0 · 예산만 denied · NoCredentials·
+  #   InvalidClientTokenId → unconfigured · 시간 초과 → error timeout · 박스 찾기 AccessDenied → metrics denied(alarms ok) ·
+  #   60초 안 두 요청 호출 한 벌·지표 300초·예산 6시간·실패도 캐시 · 느린 가짜 → pending·같은 갱신이 채움·동시 요청 = 갱신 하나·
+  #   겹침 0 · 기본 실행기 5스레드에서 to_thread 5개·루프 0.5초 안(AWS 는 admin-aws 스레드) · 예산 denied 10분 폴링 →
+  #   WARNING 1줄·Slack 0 · 1분마다 실패 → 10분에 1줄 · 처리기 예외 → 200·그 부분 error · 응답에 arn:aws:·12자리 숫자 없음 ·
+  #   타임라인 시각순·7일 밖·200건·marketlens- 밖 경보·깨진 줄·한쪽 실패
+pytest -q tests/test_notify.py tests/test_alert_log.py            # 19 passed — 보낸 알림 1줄(delivered true)·웹훅 500·연결 실패 → false ·
+  #   억제·큐 초과·기록 함수 없음 → 기록 없음 · Redis 예외 → 다음 전송 계속·WARNING 1줄·Slack 0 · 매달린 기록 2초 제한 ·
+  #   ARN·계정 ID 가림 · 1,001건째에 1,000건·만료 없음 · 두 역할 lifespan 이 버스를 꽂음(api 는 기동 알림이 기록됨)
+pytest -q tests/test_role.py tests/test_admin.py tests/test_deploy.py   # 61 passed — collector 에 둘·api 404·OpenAPI ·
+  #   관리자 nginx 정확 일치 둘(수집기·접두 제거·첫 줄 교차 사이트·access_log off·자기 헤더 없음)·업스트림 둘 ·
+  #   compose ADMIN_AWS_REGION 은 server 만·.env.example 에 없음 · 공개 server·컨테이너 일곱 계약 그대로
+
+# 로컬 Docker — 망 ml034-net, 가짜 백엔드 둘(python:3.12-alpine, 별칭 server·api — 받은 경로·헤더를 JSON 으로 되돌리고 ACAO * 를 붙인다)
+docker build -t ml034-web web
+docker run -d --name ml034-web --network ml034-net --network-alias web -e COLLECT_HOST=server \
+  -e 'NGINX_ENVSUBST_FILTER=^COLLECT_HOST$' -v <scratch>/logs-admin:/var/log/nginx-admin ml034-web
+docker exec ml034-web nginx -t        # syntax is ok · test is successful
+# 같은 망의 curl 컨테이너에서
+curl -H 'Sec-Fetch-Site: same-origin' -H 'Cookie: c=1' -H 'Cf-Access-Jwt-Assertion: j' -H 'X-Refresh-Token: t0k' \
+  -H 'Origin: https://evil.example' web:8081/api/admin/{aws,alerts}
+  # 200 · 수집기 에코 /admin/aws·/admin/alerts · cookie·cf-access-jwt-assertion 도착 없음 · x-refresh-token 도착 ·
+  # 응답에 ACAO 없음·X-Frame-Options DENY
+curl -H 'Sec-Fetch-Site: <cross-site|same-site|none|없음>' web:8081/api/admin/{aws,alerts}   # 403 JSON · 403 JSON · 200 · 200
+curl web:80/api/admin/{aws,alerts}    # 404 {"error":{"code":"not_found",…}} — 공개 server(028 허용 목록 밖)
+cat <scratch>/logs-admin/access.log   # 4줄 — 교차 사이트 403 넷뿐, 200 폴링 0줄
+docker rm -f ml034-web ml034-server ml034-api && docker network rm ml034-net && docker rmi ml034-web
+docker ps -a · docker network ls · docker images | grep 034   # 0건
 ```
 
 ## 6. 갱신할 문서
@@ -119,7 +160,7 @@
 - `docs/specs/007-deploy.md` — §3 server 줄에 `ADMIN_AWS_REGION`(034).
 - `docs/specs/027-observability.md` — §3.6 끝에 "경보 이름 `marketlens-<박스>-memory` 는 034 가 박스를 찾는 데 쓴다". §3.7 IAM 문장에 "collect 역할에 관리자 읽기 인라인 정책(034)".
 - `docs/specs/029-admin.md` — §3.1 표에 둘(`= /api/admin/aws`·`= /api/admin/alerts` → 수집기)과 "관리자 피드는 034·035". §3.2 접속 기록의 "기록하지 않는다" 목록에 둘.
-- `docs/runbooks/cloudwatch.md` — 새 절 "관리자 읽기 권한(034)": 인라인 정책(§3.2 액션·리소스, `$ACCOUNT` 변수, 경보는 좁힌 ARN 부터), 확인(CloudShell 두 명령·관리자 페이지 인프라 칸의 네 `state`·예산 조회가 SCP 에 막히는지), 넓히기(안 되는 액션만 `*`, 결과는 034 §7), 되돌리기(정책 삭제).
+- `docs/runbooks/cloudwatch.md` — 새 절 "관리자 읽기 권한(034)": 인라인 정책(§3.2 액션·리소스, `$ACCOUNT` 변수, 경보는 좁힌 ARN 부터), 확인(collect 의 수집기 컨테이너에서 두 호출·관리자 페이지 인프라 칸의 네 `state`·예산 조회가 SCP 에 막히는지), 넓히기(안 되는 액션만 `*`, 결과는 034 §7), 되돌리기(정책 삭제).
 
 **담당자에게 제안 — 이 PR 에서 고치지 않는다(PR 본문에 그대로 적는다)**
 - 025 — §2 하지 않는 것의 "알림 이력 저장" → "알림 이력은 034 가 Redis `alerts:log` 에 남긴다". §3.2 큐 bullet 끝에 "보낸 뒤 결과(2xx 여부)를 기록 함수로 한 줄 남긴다(034 — 보내는 규칙은 그대로)". §4 알림기 목록에 "보낸 알림마다 기록 한 줄, 억제·큐 초과는 기록 없음(034)".
@@ -128,5 +169,28 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - core: `server/app/core/redact.py`(새 — `redact`), `notify.py`(보내기 태스크의 기록 자리 `Notifier.record`·2초 제한·WARNING), `redis_bus.py`(`alert_log_push`·`alert_log_recent`), `config.py`(`admin_aws_region`), `s3.py`(주석만), `server/app/main.py`(두 lifespan 이 버스를 만든 뒤 기록 함수를 꽂는다·collector 라우터·`app.state.admin_feeds`·종료 때 스레드 닫기).
+  - admin 기능: `server/app/features/admin/aws.py`(새 — `AwsReader`·`classify`·`client_factory`), `feeds.py`(새 — `AdminFeeds`·부분 캐시·전용 실행기·타임라인), `router.py`(`collector_router`).
+  - 테스트: `server/app/features/admin/tests/aws_fakes.py`·`test_aws_parts.py`·`test_feeds.py`·`test_alerts_feed.py`·`test_feeds_http.py`(새), `server/tests/test_alert_log.py`(새)·`test_notify.py`(기록 절)·`test_role.py`·`test_admin.py`·`test_heartbeat.py`(웹훅 픽스처가 닫힌 Redis 포트를 쓰게 — 기록이 로컬 Redis 에 쓰지 않게, 025 동작은 그대로).
+  - 앱 밖: `web/nginx-admin.conf`(정확 일치 둘), `docker-compose.yml`(server `ADMIN_AWS_REGION`), 문서 §6 목록 전부.
+- 추측한 지점 (묻지 않고 정한 사소한 것):
+  - 가림 함수는 core(`core/redact.py`) — 알림기(core)와 admin 이 같이 쓴다. 가린 뒤 자른다(먼저 자르면 잘린 계정 ID 조각이 남는다). 숫자는 ASCII `[0-9]` 만. 알림 기록은 읽을 때도 한 번 더 가린다.
+  - `pending`·설정 없음 `unconfigured`·웹훅 없음 `unconfigured` 의 code 는 null. 끝난 canary 실행이 없으면 `durationMs`·`ok` 도 null.
+  - 알림 기록: 기록 함수가 꽂혔는지는 보낸 뒤에 본다 — lifespan 이 버스를 꽂은 뒤 끝난 전송(대개 기동 알림 포함)은 기록된다. 기록 실패 WARNING 은 예외 종류만.
+  - `slack` 부분이 unconfigured(이 수집기 프로세스에 웹훅 없음)면 Redis 를 읽지 않아 slack 항목도 없다 — 운영은 두 박스에 같은 웹훅이다. Redis 읽기는 `RedisBus` 기본 시간 제한(연결 2초·명령 5초)만.
+  - 경보 목록은 `AlarmTypes=MetricAlarm`·100건씩, `ListMetrics`·`DescribeBudgets` 와 함께 다음 쪽 5쪽까지. 경보 이력은 `AlarmTypes` 를 주지 않고(기본 지표 경보), `HistoryData` 가 깨지면 상태·사유 null, 시각 없는 항목은 뺀다, 캐시된 이력도 응답 때 지금 기준 7일로 다시 자른다. 같은 시각 항목의 순서는 정하지 않았다.
+  - 지표: 크레딧은 세 박스 모두 질의한다(c7g 는 자료 없음 → null) — 질의 17개. `(이름, InstanceId)` 가 같은 지표가 `ListMetrics` 에 여럿이면 첫 번째, `marketlens_ws_clients` 는 그 이름의 첫 지표. `GetMetricData` 의 `nextToken` 은 따르지 않는다(17×288점은 한 번 한도 안). 유한하지 않은 값은 null(JSON 이 못 싣는다). 박스 찾기·차원은 성공만 1시간 캐시.
+  - canary: 요청 ID 는 START/END/REPORT 의 `RequestId:`, 앱 줄은 탭 둘째 칸, 그 밖(시간 초과 줄)은 UUID 모양. 줄은 시각순 앞 20줄. `4단계 통과` 는 자르기 전 메시지에서 찾는다. `durationMs` 는 REPORT `Duration` 반올림. REPORT 는 있는데 한도로 START 를 못 찾으면 `lastRunAt` 은 그 실행의 가장 이른 줄 시각.
+  - 예산: `BudgetType == COST` 만, API 순서, 금액 문자열 → 소수 둘째 자리(없거나 숫자가 아니면 null), 이름은 가리지 않는다. `GetCallerIdentity` 는 갱신마다(6시간에 한 번).
+  - 오류 code 가 `[A-Za-z0-9_.]{1,64}` 모양이 아니면 `ClientError`. 재시도 없음은 botocore `total_max_attempts: 1`.
+  - `no_credentials` 결과면 만든 클라이언트를 버려 다음 주기에 자격증명을 다시 찾는다 — 자격증명 없이 만든 botocore 클라이언트는 나중에 역할이 붙어도 계속 없다.
+  - 실행기 밖 예외(실행기 종료 등)는 그 부분 error·예외 이름, WARNING 은 스레드 결과가 ok 가 아닐 때만. 로그 부분 이름은 `aws.alarms`·`aws.metrics`·`aws.canary`·`aws.budget`·`alerts.slack`(code `redis`)·`alerts.alarms`, 문구 `관리자 피드 <부분> 실패 — <code>`.
+  - 응답은 모델 없이 dict → JSONResponse(OpenAPI 에는 경로만). 수집기 종료 때 전용 스레드는 기다리지 않고 닫는다(대기 호출 취소).
+- 실행 중 함께 고친 스펙 절: §3.2 IAM 과 §6 런북 항목 — 좁힌 경보 리소스 확인 위치를 CloudShell → collect 의 수집기 컨테이너로(CloudShell 은 관리자 신원이라 역할 정책을 시험하지 못하고, 역할 신뢰는 EC2 뿐이다). 런북 16단계도 같다.
+- 운영 확인 (사람 — 배포 뒤 채움): 네 부분 state(예산 SCP) / 넓힌 액션 / 박스 셋·경보 17개 / canary 로그 형식 / 관리자 접속 기록에 폴링 둘 없음 / collect 합성 응답 풀기 1회 / 첫 달 청구 지표 수.
 - 남은 빚:
+  - AWS 는 Stubber·가짜로만 확인했다 — 실제 응답(CBOR `GetMetricData`·canary 로그 줄 형식·Budgets SCP)은 운영에서 처음 본다(위 운영 확인).
+  - 수집기 종료 직전 버스가 닫힌 뒤 보낸 알림은 기록 실패 WARNING 1줄이 날 수 있다(드물다 — 동작 영향 없음).
+  - 관리자 nginx 문법은 CI 가 못 본다 — PR 본문에 위 로컬 `nginx -t` 결과를 적는다(029 규칙).
+  - 담당자 제안(025·016·021, §6)은 PR 본문에 — 이 실행은 push·PR 을 하지 않았다.
+  - status.md 알려진 빚 (034) 여섯 줄.
