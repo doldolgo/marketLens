@@ -54,6 +54,8 @@ def webhook_env(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
     monkeypatch.setenv("ROLE", "api")
     monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T/B/x")
     monkeypatch.setenv("INFLUX_TOKEN", "")
+    # 034 — 알림기가 보낸 뒤 alerts:log 에 쓴다. 로컬에 떠 있는 Redis 에 닿지 않게 닫힌 포트로
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:1/0")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

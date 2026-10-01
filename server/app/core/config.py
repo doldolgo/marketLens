@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     slack_webhook_url: str | None = None
     # StatsD 수신 주소 `host:port`(027) — api 역할만 WS 접속 수 게이지를 보낸다. 비면 끔(로컬·테스트 기본)
     statsd_addr: str | None = None
+    # 관리자 AWS 요약의 리전(034) — compose 가 server 에만 준다(server/.env 에 두지 않는다). 비면 AWS 를 부르지 않는다
+    admin_aws_region: str | None = None
 
     @field_validator("s3_region", mode="before")
     @classmethod

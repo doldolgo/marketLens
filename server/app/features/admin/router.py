@@ -1,15 +1,19 @@
-"""GET /admin/status — 관리자 페이지가 보는 api 안쪽 상태 (스펙 029 §3.4).
+"""관리자 경로 — api 의 `GET /admin/status`(029 §3.4)와 수집기의 피드 둘(034 §3.1).
 
-api 역할에만 포함한다(`main.py`) — collector 에는 없고, 공개 nginx 는 028 허용 목록 밖이라 404 다.
-관리자 nginx(:8081)가 `/svc/api/admin/status` 를 이 경로로 넘긴다. 항상 200 이다.
+`router` 는 api 역할에만, `collector_router` 는 collector 역할에만 포함한다(`main.py`) — 다른 역할에서는 404 다.
+공개 nginx 는 028 허용 목록 밖이라 404, 관리자 nginx(:8081)가 `/svc/api/admin/status` 와
+`= /api/admin/aws`·`= /api/admin/alerts` 를 넘긴다. 모두 항상 200 인 상태 응답이다.
 """
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
+from app.features.admin.feeds import AdminFeeds
 from app.features.admin.models import AdminStatusOut
 from app.features.admin.service import AdminStatusService
 
 router = APIRouter()
+collector_router = APIRouter()
 
 
 @router.get("/admin/status", response_model=AdminStatusOut)
@@ -20,4 +24,24 @@ async def get_admin_status(request: Request) -> AdminStatusOut:
     return await service.status(
         bus=getattr(state, "spreads_bus", None),
         influx=getattr(state, "influx", None),
+    )
+
+
+@collector_router.get("/admin/aws")
+async def get_admin_aws(request: Request) -> JSONResponse:
+    """경보·24시간 지표·canary·예산 — 부분별 state (034 §3.2)."""
+    feeds: AdminFeeds = request.app.state.admin_feeds
+    return JSONResponse(await feeds.aws())
+
+
+@collector_router.get("/admin/alerts")
+async def get_admin_alerts(request: Request) -> JSONResponse:
+    """보낸 Slack 알림 + 경보 이력 7일 (034 §3.3). 웹훅이 없는 프로세스면 slack 부분은 unconfigured."""
+    state = request.app.state
+    feeds: AdminFeeds = state.admin_feeds
+    return JSONResponse(
+        await feeds.alerts(
+            bus=getattr(state, "spreads_bus", None),
+            slack_configured=getattr(state, "notifier", None) is not None,
+        )
     )

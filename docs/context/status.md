@@ -23,11 +23,17 @@
 | bybit | WS 3샤드 orderbook.200(스냅샷+델타 로컬 북, 행 발행 심볼당 500ms 제한)+publicTrade·instruments-info 매초·JSON ping/pong 감시·샤드 단위 정체 판정·입출금(HMAC 헤더)·`/history/*` `fx=bybit`·`/orderbook/bybit` | 표시명 `Bybit`·기록 탭 Bybit 실데이터(선택된 해외만 조회) | 해외 최대 20단계, MEXC 는 mock |
 | bitget | WS 3샤드 books15(200ms 스냅샷, 15단계)+trade·symbols 매초·문자열 ping/pong 감시·샤드 단위 정체 판정·입출금(public, 키 없음)·`/history/*` `fx=bitget`·`/orderbook/bitget` | 표시명 `Bitget`·기록 탭 Bitget 실데이터 | 해외 최대 20단계, MEXC 는 mock |
 | wallet-history | server: 틱 4상태 = 006 판정값 + net_dom·net_fx, 봉·사건 점 문자열 2필드(없음은 `-` — 읽을 때 `-`·옛 빈 문자열 모두 null, 2026-09-28), /history/candles·events netDom·netFx | web: 읽기 줄·사건 표·로그 망 표시 | 배포 전 점은 망 null·4상태 코인 단위 |
-| slack-alerts | server: Slack 웹훅 알림(기동·수집 60초 구간 발생/복구·ERROR 로그·처리 안 된 500, 키별 10분 억제)·심장박동 `collect:heartbeat`·`/health` 신선도(두 역할, 비정상 503) | - | 외부 uptime 은 런북 uptime-monitor.md, 웹훅 운영 설정 확인(2026-09-29 — collect 의 server·serve 의 api 모두 `SLACK_WEBHOOK_URL` 있음, 기동 뒤 전송 실패 경고 0건), 외부 uptime 모니터 등록은 사람 몫 |
+| slack-alerts | server: Slack 웹훅 알림(기동·수집 60초 구간 발생/복구·ERROR 로그·처리 안 된 500, 키별 10분 억제)·심장박동 `collect:heartbeat`·`/health` 신선도(두 역할, 비정상 503) · 보낸 알림 기록 `alerts:log` 1,000건(034) | - | 외부 uptime 은 런북 uptime-monitor.md, 웹훅 운영 설정 확인(2026-09-29 — collect 의 server·serve 의 api 모두 `SLACK_WEBHOOK_URL` 있음, 기동 뒤 전송 실패 경고 0건), 외부 uptime 모니터 등록은 사람 몫 |
 | observability | server: api WS 접속 수 StatsD 게이지(STATSD_ADDR) | - | caddy 접속 로그(IP /24·검색어·헤더 지움, 폴링 제외) → 박스 안, 처리방침 뒤 CloudWatch Logs 서울 90일 · 에이전트 세 박스 · canary 5분 4단계(Lambda `nodejs22.x` + EventBridge Scheduler — Synthetics 는 조직 SCP 가 막는다) · 경보 17개(로그 뒤 18) → Slack · EC2 설치 완료(2026-09-29~30): 예산(알림은 메일·Slack)·Slack·IMDS·역할·serve 스왑·에이전트 세 박스(지표 12개, 게이지는 `marketlens_ws_clients`)·Lambda canary·경보 17개 전부 OK, serve 24시간·배포 1회 측정 끝(승격 안 함). 남은 사람 확인: data 에이전트 RSS 24시간·기존 경보·지표 수(런북 2단계)·`ws_clients` 탭 2개·첫 달 청구 |
-| admin | server: api GET /admin/status(WS 접속 수·Redis·Influx·버전), RedisBus.ping | web: 관리자 화면(web/admin, nginx :8081 — 게시 안 함) | admin.kimptrack.com — Cloudflare Access(OTP)·Tunnel(cloudflared, profile tunnel, Protect with Access) · 029 운영 확인 완료(2026-09-30 — serve 안에서 `web:8081/svc/api/admin/status` 200 JSON, 공개 `/api/docs`·`/svc/…` 404, collect `server` 의 `/docs` 가 `/api/openapi.json` 을 부른다), 030 운영 확인 완료(2026-10-01 — Access OTP 로그인·터널 serve 커넥터 healthy·JWT 검사 필수·로그인 전 302, 설정 기록은 런북 admin-access.md). 남은 사람 확인: Tunnel 상태 알림 메일·쿠키 속성·AUD 틀림 403·교차 사이트 fetch 기록·위조 헤더 |
+| admin | server: api GET /admin/status(WS 접속 수·Redis·Influx·버전), RedisBus.ping · 수집기 관리자 피드 둘(034) — `/admin/aws`(경보·24시간 지표·canary·예산)·`/admin/alerts`(보낸 Slack 알림 + 경보 이력 7일), 부분별 state·보이는 동안만 호출·전용 스레드 1개 | web: 관리자 화면(web/admin, nginx :8081 — 게시 안 함) | admin.kimptrack.com — Cloudflare Access(OTP)·Tunnel(cloudflared, profile tunnel, Protect with Access) · 029 운영 확인 완료(2026-09-30 — serve 안에서 `web:8081/svc/api/admin/status` 200 JSON, 공개 `/api/docs`·`/svc/…` 404, collect `server` 의 `/docs` 가 `/api/openapi.json` 을 부른다), 030 운영 확인 완료(2026-10-01 — Access OTP 로그인·터널 serve 커넥터 healthy·JWT 검사 필수·로그인 전 302, 설정 기록은 런북 admin-access.md). Tunnel 상태 알림 메일 켬(2026-10-01, 사람), 운영 11시간 커넥터 healthy·cloudflared 오류 0·메모리 20MiB. 선택 확인으로 남김: 쿠키 속성·AUD 틀림 403·교차 사이트 fetch 기록·위조 헤더 · 034 운영 확인 대기(IAM — 런북 cloudwatch.md 16단계, 로컬은 Stubber·Docker nginx 로만 확인) |
 
 ## 알려진 빚
+- (034) FilterLogEvents·Budgets 요청 요금과 Budgets 의 SCP 여부 미확인 — 첫 달 청구·런북 확인
+- (034) 수집기 컨테이너가 CloudWatch·예산 읽기 권한에 닿는다
+- (034) 알림 기록은 웹훅이 있을 때만 — 억제된 알림은 기록도 없다
+- (034) 알림 기록에 방문자 정보가 없다는 것은 025 문구 규칙에 기댄다
+- (034) serve 스왑은 모으지 않는다(027 에이전트 설정은 data 만)
+- (034) 016·021·025 의 해당 문장이 034 동작과 다르다 — PR 에 담당자 제안으로 남김, 반영 대기
 - (027) 법정 보관 의무 확인 전 — 해당하면 원 IP 보관 방법을 따로 정한다
 - (027) 기록 탭 검색칸 값(URL sym)은 검증 없이 기록된다
 - (027) 쿼리 키 삭제 목록은 검색 입력이 늘 때 손으로 맞춘다
