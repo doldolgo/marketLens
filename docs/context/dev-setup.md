@@ -65,6 +65,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 - `SLACK_WEBHOOK_URL`: Slack Incoming Webhook(025). 있으면 기동·수집 실패 60초 구간 발생/복구·ERROR 로그·처리 안 된 500 이 채널로 간다(키별 10분 억제). 없으면 알림 기능 전체가 꺼진다 — 로컬은 비워 둔다. 두 박스(collect·serve)의 `server/.env` 에 같은 값을 넣는다.
 - `STATSD_ADDR`: StatsD 수신 주소 `host:port`(027). 있으면 api 역할이 WS 접속 수 게이지 `marketlens.ws_clients:<n>|g` 를 10초마다 UDP 로 보낸다(collector 는 안 보낸다). compose 가 api 에만 `host.docker.internal:8125`(serve 호스트의 CloudWatch Agent)를 준다. 비면 끔 — 로컬은 비워 둔다. `host:port` 가 아니면 WARNING 1줄 뒤 끈다.
 - `UVICORN_ROOT_PATH`: `server/.env` 에 두지 않는다 — compose 가 `server`(collect)에만 `/api` 를 준다(029, api 에는 안 준다). 관리자 페이지의 API 문서가 `/api/openapi.json` 을 부르게 하는 값이고, 접두 없는 경로(`localhost:8000/health`)는 그대로 라우팅된다. 로컬 uvicorn 은 비워 둔다.
+- `ADMIN_AWS_REGION`: 같은 방식이다 — `server/.env` 에 두지 않고 compose 가 `server`(collect)에만 `ap-northeast-2` 를 준다(034). 수집기 관리자 피드(`/admin/aws`·`/admin/alerts` 의 경보 이력)가 CloudWatch·Logs·Budgets 를 읽는 리전이고, 자격증명은 collect 박스 역할이다. 비면 AWS 를 부르지 않고 그 부분은 `unconfigured` — 로컬 uvicorn 은 비워 둔다.
 
 **API 키는 .env 에만. 코드·문서·커밋에 절대 넣지 않는다.**
 
@@ -81,6 +82,10 @@ server·api·web·caddy·influxdb·redis 여섯 컨테이너(프로젝트 `marke
 curl -i -s localhost:8000/health
 ```
 025 — 틱이 흐르면 `200 {"status":"ok","version":…,"lastTickAt":<ms>}`, 기동 직후(첫 틱 전) `503 starting`, 30초 넘게 틱이 없으면 `503 stale`. api 역할(`ROLE=api`)은 Redis `collect:heartbeat` 로 같은 판정을 하고 Redis 에 못 닿으면 `503 redis_down`.
+```bash
+curl -s localhost:8000/admin/aws
+```
+034 — 로컬(`ADMIN_AWS_REGION` 없음)은 네 부분(`alarms`·`metrics`·`canary`·`budget`) 모두 `state: "unconfigured"`·`code: null` 이고 AWS 를 부르지 않는다. `/admin/alerts` 는 웹훅이 없으면 `slack`·`alarms` 둘 다 `unconfigured`·`items: []`. 로컬 compose 의 `server`(`ADMIN_AWS_REGION` 있음·자격증명 없음)는 네 부분이 `unconfigured`·`code: "no_credentials"` 이고, 메타데이터 끝점을 찾느라 첫 요청(과 그 뒤 1분마다 한 번)이 2초 안팎 걸린다.
 ```bash
 curl -s localhost:8000/spreads | head -c 600
 ```

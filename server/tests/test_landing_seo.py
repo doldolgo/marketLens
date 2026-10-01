@@ -174,7 +174,14 @@ def test_structured_data_matches_what_the_page_shows() -> None:
     assert app["offers"]["price"] == "0"
     # 평점은 없다 — 지어낸 평점은 금지
     assert "aggregateRating" not in app and "review" not in app
-    logo = g["Organization"]["logo"]["url"]
+    # 운영 주체·연락처 — 바닥에 보이는 값과 같다(2026-10-01 사람이 준 값)
+    org = g["Organization"]
+    html = (PUBLIC / "landing.html").read_text("utf-8")
+    for email in org["email"]:
+        assert f'href="mailto:{email}"' in html
+    for person in org["member"]:
+        assert person["name"] in html
+    logo = org["logo"]["url"]
     for url in (logo, OG_IMAGE, *app["screenshot"]):
         assert url.startswith(SITE)
         assert (PUBLIC / url.removeprefix(SITE)).is_file(), url

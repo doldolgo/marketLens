@@ -34,7 +34,7 @@
 - **같은 본문은 한 주소로.** `/landing.html`·`/app/landing.html` 은 `/` 로 301. `www.kimptrack.com` 은 http·https 모두 경로·쿼리를 들고 `https://kimptrack.com` 으로 301(caddy, 023). 탄력 IP·로컬 같은 그 밖의 호스트는 평문 그대로 주되 `X-Robots-Tag: noindex` 를 붙인다(caddy catch-all) — IP 주소가 사본으로 색인되지 않게.
 - **캐시.** 랜딩은 `Cache-Control: no-cache`(매번 다시 확인, 바뀌지 않았으면 304). 스크립트가 `/api/landing` 계약을 따르므로 낡은 사본을 쓰지 않게 하되, no-store 와 달리 뒤로 가기 캐시(bfcache)에는 들어간다. `index.html`·`/app/` 는 no-store 그대로, `assets/` 1년 immutable.
 - 없는 루트 경로는 서버 수준 `error_page 404 /404.html` — 상태 404 그대로 한국어 안내(첫 화면·실시간 김프 표 링크, `noindex`). `/api` 의 JSON 404(`return 404 '{…}'`)는 본문이 있어 가로채지 않는다. SPA fallback 은 `/app/` 아래에서만.
-- 정적 파일(`/landing/*`·아이콘·`robots.txt`·`sitemap.xml`·`404.html`)은 루트 `location /` 가 준다. 빌드 때 만든 `.gz` 를 `gzip_static` 으로 준다(007 §3 — caddy 뒤에서 나가려면 `gzip_proxied any` 가 필요하고, 그건 007 의 PR 이 고친다).
+- 정적 파일(`/landing/*`·아이콘·`robots.txt`·`sitemap.xml`·`404.html`)은 루트 `location /` 가 준다. 빌드 때 만든 `.gz` 를 `gzip_static` 으로 준다(007 §3 — caddy 뒤에서도 나가게 `gzip_proxied any`).
 - `/api/landing` 은 공개 허용 목록(028)의 **정확 일치** location 하나 — 다른 허용 경로와 같은 모양(접두 제거 rewrite·프록시 헤더 4개)에 `X-Robots-Tag: noindex`(JSON 자체는 색인하지 않는다). 배포에서 api 가 죽으면 이 경로만 502 이고 랜딩 본문은 그대로 뜬다.
 
 ### 3.2 `GET /landing` — 요약 API
@@ -110,7 +110,7 @@ KimpTrack                  김프·역프란  계산 방법  자주 묻는 질�
    4. 전달 — "실시간 김프 표에는 바뀐 값만 골라 곧바로 보냅니다."(이 랜딩은 10초 폴링이다)
    그 아래 소제목 "반영하지 않는 것" — "거래 수수료와 출금 수수료, 코인을 보내는 데 걸리는 시간과 그동안의 가격 변화, 출금 한도나 트래블룰 같은 거래소 정책은 계산에 넣지 않습니다. 실제로 옮기기 전에는 거래소에서 직접 확인해 주세요."
 7. **자주 묻는 질문**(h2, #faq) — 늘 펼친 h3 질문 + 답 8개(데스크톱 두 칸). 질문: 김프 사이트마다 숫자가 다른 이유 / 왜 $1,000 기준인가 / 환율은 무엇을 쓰나 / 옮길 수 없는 경로 판단 / 수수료·전송 시간 반영(아니요 — "표시된 김프만큼 수익이 난다는 뜻이 아닙니다") / 갱신 주기(매초 계산, 이 카드는 보이는 동안 10초) / 가입·비용(아니요, 실시간 김프 표는 PC 화면용) / 매수·매도 신호(아니요). 답 문장은 `landing.html` 이 진실이고, 사실은 이 스펙의 다른 절과 같아야 한다.
-8. **바닥** — 바로 가기(실시간 김프 표·김프 기록과 차트·김프·역프란·계산 방법·자주 묻는 질문·개인정보 처리방침 — 마지막 칸은 `/privacy`, 가장 밝고 굵게, 032), 참고값 안내 한 줄 "KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다.", "설명을 마지막으로 고친 날 {날짜}"(`<time>`, §3.6). 운영 주체·연락처는 사람이 정하면 여기에 더한다(아직 없음).
+8. **바닥** — 바로 가기(실시간 김프 표·김프 기록과 차트·김프·역프란·계산 방법·자주 묻는 질문·개인정보 처리방침 — 마지막 칸은 `/privacy`, 가장 밝고 굵게, 032), 참고값 안내 한 줄 "KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다.", "운영 고원규·이진중 · 문의 joseph13ko15@gmail.com, untilduck@gmail.com"(메일은 `mailto:` 링크 — 2026-10-01 사람이 준 값, 032 처리방침과 같은 운영 주체), "설명을 마지막으로 고친 날 {날짜}"(`<time>`, §3.6).
 - 수익을 약속하는 말(이득·이익·수익·차익·무위험)은 제목·설명·h1 에 쓰지 않는다. 본문에서는 "수익이 난다는 뜻이 아닙니다" 처럼 부정하는 자리에만.
 
 ### 3.4 시각 규칙
@@ -138,7 +138,7 @@ KimpTrack                  김프·역프란  계산 방법  자주 묻는 질�
 - `<meta name="robots" content="index, follow, max-image-preview:large">`, canonical·`og:url` `https://kimptrack.com/`, `lang="ko"`, `og:site_name` KimpTrack, `og:locale ko_KR`, `twitter:card summary_large_image`.
 - `og:image` `https://kimptrack.com/landing/og-v2.png`(1200×630, `og:image:type`·`width`·`height`·`alt`) — 어두운 배경에 워드마크, h1 두 줄, "$1,000 체결 단가 · 경로마다 출금·입금 확인", 5개 거래소 이름. 실시간 값은 넣지 않는다(미리보기는 오래 남는다). 그림을 바꾸면 파일 이름을 바꾼다 — 카카오·텔레그램이 같은 주소의 그림을 다시 받지 않는다.
 - 아이콘 — 워드마크(두 점과 선)를 어두운 둥근 사각형에 담은 한 모양. `favicon.ico`(16·32·48), `favicon.svg`(대시보드), `icon-192.png`, `apple-touch-icon.png`(180), `logo-512.png`(Organization 로고). 랜딩 head 에는 `rel=icon`(192 PNG)·`rel=apple-touch-icon` 하나씩, **절대 주소**(구글은 SVG 파비콘을 쓰지 않고 네이버는 상대 경로를 읽지 않는다). 주소는 바꾸지 않는다.
-- **구조화 데이터** — head 에 JSON-LD 한 블록(`@graph`, 절대 주소, 스크립트로 넣지 않는다): `WebSite`(name KimpTrack, alternateName ["김프트랙"], url, inLanguage ko-KR, publisher) · `Organization`(name, url, logo 512) · `WebPage`(name = title, description = description, isPartOf, about, primaryImageOfPage = og 그림, dateModified) · `WebApplication`(name, url `/app/`, applicationCategory FinanceApplication, operatingSystem Web, isAccessibleForFree, offers 0 KRW, description, screenshot 두 장, publisher). 평점·리뷰는 넣지 않는다(지어낸 평점 금지) — 그래서 구글 리치 결과 테스트·Search Console 'Software apps' 에는 WebApplication 이 invalid 로 뜬다(의도 — 리치 결과 대상이 아닐 뿐 순위 불이익은 없고, 네이버 Software 는 평점 없이 받는다). 보이는 글과 같은 값만 쓴다.
+- **구조화 데이터** — head 에 JSON-LD 한 블록(`@graph`, 절대 주소, 스크립트로 넣지 않는다): `WebSite`(name KimpTrack, alternateName ["김프트랙"], url, inLanguage ko-KR, publisher) · `Organization`(name, url, logo 512, email 두 개, member 고원규·이진중 — 바닥에 보이는 값과 같다) · `WebPage`(name = title, description = description, isPartOf, about, primaryImageOfPage = og 그림, dateModified) · `WebApplication`(name, url `/app/`, applicationCategory FinanceApplication, operatingSystem Web, isAccessibleForFree, offers 0 KRW, description, screenshot 두 장, publisher). 평점·리뷰는 넣지 않는다(지어낸 평점 금지) — 그래서 구글 리치 결과 테스트·Search Console 'Software apps' 에는 WebApplication 이 invalid 로 뜬다(의도 — 리치 결과 대상이 아닐 뿐 순위 불이익은 없고, 네이버 Software 는 평점 없이 받는다). 보이는 글과 같은 값만 쓴다.
 - **설명을 고친 날** — 바닥의 `<time datetime>`, `WebPage.dateModified`, `sitemap.xml` 의 `/` 줄 `lastmod` 가 같은 날짜다. 설명 글을 실제로 고칠 때만 올린다(실시간 값이 바뀌었다고 올리지 않는다).
 - **실시간 값은 스니펫에서 뺀다** — 경로 카드와 그다음 경로를 감싼 `div`, 3번 섹션의 실데이터 `span` 셋, 사건 요약 `span`·표 `div` 에 `data-nosnippet` 을 HTML 에 처음부터 둔다(구글은 span·div·section 에서만 읽고, 스크립트로 붙인 속성은 믿지 않는다). 매초 바뀌는 값이 몇 주 뒤 검색 결과·AI 답변에 '지금 값' 처럼 남지 않게. 정의·방법·질문과 답은 스니펫에 열어 둔다.
 - `robots.txt` — 규칙 네 줄 `User-agent: *` / `Allow: /api/landing` / `Disallow: /api/` / `Sitemap: https://kimptrack.com/sitemap.xml`(주석 줄 — 다음 PIN — 은 더해도 된다). 더 긴 규칙이 이겨(RFC 9309) 검색 로봇은 랜딩을 그릴 때 실데이터를 받고, 그 밖의 API 는 막힌다. 학습용 봇도 막지 않는다(따로 정할 일).
@@ -186,14 +186,14 @@ cd server && ruff check . && ruff format --check . && pytest -q
 #   All checks passed! / 262 files already formatted / 1067 passed (test_landing_seo 15 새로)
 cd web && npm run lint && npm run build
 #   oxlint 종료 0 / tsc -b && vite build ✓ — dist 에 landing.html·404.html·robots.txt·sitemap.xml·아이콘 5개·landing/{og-v2.png, 스크린샷 PNG·WebP, fonts/}
-uv run web/scripts/subset-landing-font.py   # landing/fonts/kimptrack-sans-058ef60e.woff2 57,900B · 글자 307개 · 원본에 없는 글자 없음
+uv run web/scripts/subset-landing-font.py   # landing/fonts/kimptrack-sans-eebfbed5.woff2 57,868B · 글자 308개 · 원본에 없는 글자 없음
 docker run --rm -v ./caddy:/etc/caddy:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile   # v2.11.4 Valid configuration
 
 # 수동 (2026-10-01) — 로컬 nginx:1.27-alpine(이 레포 nginx.conf + 새 dist, :8093). /api/landing 은 운영 응답을 넘겨 주는 대역
 #   (이 Mac 은 거래소가 막혀 수집을 못 하고, 운영 /api/spreads 는 028 이 닫았다. 운영 top 이 비어 있을 때는 카드 모양만 스펙 예시로 채움)
 #   / 200 no-cache · /?utm_source=naver&fbclid=x 200 랜딩 · /?tab=history 301 /app/?tab=history · /?s.q=xrp 301 /app/?s.q=xrp · /landing.html·/app/landing.html 301 /
 #   /nope 404 한국어 404.html · /api/nope 404 JSON 그대로 · /api/landing X-Robots-Tag: noindex · /robots.txt text/plain · /favicon.ico 200
-#   /landing/fonts/kimptrack-sans-058ef60e.woff2 font/woff2 · /app/ 200 no-store(noindex 메타)
+#   /landing/fonts/kimptrack-sans-<해시>.woff2 font/woff2 · /app/ 200 no-store(noindex 메타)
 # 로컬 caddy:2-alpine + 더미 nginx(web): Host www.kimptrack.com → 301 https://kimptrack.com/x?a=1 · Host 3.34.104.16·localhost → X-Robots-Tag: noindex
 # 브라우저(1440·390·320): h1 두 줄 — 1440 43.5px(둘째 줄 423/440px), 390 34.6px(336/350), 320 27.7px(269/280) · 가로 스크롤·넘치는 요소 없음
 #   글꼴은 KimpTrack Sans 하나(전송 58.2KB, 외부 요청 없음) · 카드 높이 값 온 뒤 557px(1440)·512px(390) → 최소 높이 480·400 · data-nosnippet 6곳
@@ -236,5 +236,5 @@ docker run --rm -v ./caddy:/etc/caddy:ro caddy:2-alpine caddy validate --config 
 - 2026-09-28 성능 개선 — 사건 요약·진행 중·over1: 사건 부분을 core 요약 조회로(§3.2 — Flux 에서 접고 후보 200개를 파이썬이 동률 규칙으로), 진행 중을 600초 규칙과 조합 종류 수로, `over1` 을 원값으로(`landing.html` 문장에 "맨 위 호가로"). 측정(로컬 influxdb:2.7, 운영 사건 7일 58,666건 + 고아·재개 흉내, 기준선 코드와 같은 조건): events 갱신 wall 920 → 126ms, 파이썬 CPU 380 → 5.5ms, Influx CPU 683 → 278ms. 방향별 수·`top` 5건 전 필드가 기준선과 같고, `open` 만 3,262 → 267(같은 점에 600초 규칙을 따로 적용한 값과 같다). 코인 안에서 끝·시작 시각까지 같은 사건은 기준선이 저장소 순서로 골랐고 이제 dom·fx·dir 오름차순이다. 후보가 동률로 잘리는 모양(한 시각에 520건)에서도 고른 코인이 기준선과 같다. 운영 표 3장의 `over1` 62·63·64 → 110·111·115, `over1Movable` 26·27·28 → 68·69·73.
 - 2026-10-01 검색 재구성 — 공식 가이드(구글 Search Central·네이버 서치어드바이저·schema.org)와 경쟁 김프 사이트 11곳의 head·본문을 조사해 다시 짰다. 만든 것: `landing.html`(head·정보 구조·문구, 스크립트는 정적 카드 설명·오류 안내·`pageshow` 만 바뀜), `landing/og-v2.png`·WebP 4개·`fonts/`(서브셋·OFL), 아이콘 5개, `404.html`, `robots.txt`·`sitemap.xml`, `web/index.html` 메타, `web/scripts/subset-landing-font.py`·`landing-font-glyphs.txt`, `nginx.conf`(`$arg_tab`·`/landing.html` 301·`error_page`·no-cache·`/api/landing` noindex), `caddy/Caddyfile`(apex·www 301·catch-all noindex), 테스트 `test_landing_seo.py` 새로·`test_deploy.py`·`test_observability.py` 고침.
   - 정한 것(사람이 위임): 제목·설명·h1 을 검색어 중심으로 바꾸고 2026-09-28 사람 문구("김프가 우리에게 이득을 주는 김프가 아니다")는 뺐다 — '김프가' 가 1위 경쟁 사이트 이름이라 제목·h1 에 두 번 들어가 있었고, '이득' 은 수익 약속으로 읽힌다. 같은 뜻은 3번 섹션 제목이 이어 간다. 참고값 안내 한 줄을 바닥에 되살렸다(YMYL 신뢰 — 2026-09-28 의 '면책 섹션 없음' 결정은 섹션이 아닌 한 줄로 바꿨다). 한글 이름 '김프트랙' 을 정의 문단과 WebSite.alternateName 에.
-  - 남은 사람 작업: 운영 주체·연락처(바닥·Organization 에 넣을 값), 검색엔진 등록·사이트맵 제출(§3.6), 배포 뒤 카카오 OG 캐시 초기화, 스크린샷을 다시 찍으면 WebP 도.
+  - 남은 사람 작업: 검색엔진 등록·사이트맵 제출(§3.6), 배포 뒤 카카오 OG 캐시 초기화, 스크린샷을 다시 찍으면 WebP 도.
   - 하지 않은 것(후속 후보): 서버가 최근 사건·상위 경로를 HTML 에 미리 넣는 렌더링(지금 크롤러 본문에는 실데이터가 없다 — 구글은 `/api/landing` 을 열어 렌더링으로 받는다), 코인별 페이지, HSTS(서브도메인·계정 이전 뒤), `/landing/*` 캐시 헤더.

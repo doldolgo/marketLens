@@ -99,11 +99,12 @@
 - canary: `AWS/Lambda` `Errors`(차원 `FunctionName=marketlens-smoke`) 합계 300초 2점 중 2점 1 이상 — 연속 두 번(10분) 실패. 시간 초과도 `Errors` 다. 배포 중 1회 실패는 울리지 않는다. 데이터 없음은 경보 — 일정이 멈추면 `Errors` 점이 생기지 않는다. 직접 실행이 통과하고 일정을 만든 뒤 만든다.
 - 스왑 경보는 두지 않는다 — 한 번 찬 스왑은 압박이 끝나도 잘 안 줄어 경보가 풀리지 않는다.
 - 경보는 처리방침 전 17개, 로그 전송 뒤 18개다(상태 6·크레딧 4·메모리 3·디스크 3·canary 1, + 5xx 1). 예산: AWS Budgets 월 $130, 알림 실제 85%·실제 100%·예측 100%(이메일)를 사람이 건다.
+- 경보 이름 `marketlens-<박스>-memory` 는 034 가 박스를 찾는 데 쓴다.
 
 ### 3.7 박스·IAM·비용 (사람 — 런북)
 - 순서: 예산 → 기존 경보·지표 수 확인 → IMDS → 역할 → data 에이전트(RSS 24시간) → collect 에이전트(에이전트 CPU) → serve 스왑 1GB → serve 에이전트 → Slack 연결 → 경보(canary·5xx·잔고 제외 — 메모리·디스크는 세 박스 지표가 보인 뒤, 데이터 없음 = 경보라 먼저 만들면 곧바로 울린다) → canary(Lambda·일정) → canary 경보 → 잔고 경보(최근 7일 최솟값 확인 뒤) → serve 메모리 측정(24시간·배포 1회) → (처리방침 게시 뒤) serve 로그 전송·지표 필터·5xx 경보. 단계마다 확인·되돌리기.
 - serve(t4g.micro 1GB)는 올리지 않고 **스왑 1GB** 를 붙인다(data 와 같은 방식, 무료). 스왑 없는 1GB 박스가 배포마다 web 이미지를 직접 빌드하는데(npm ci·vite build) 에이전트가 더해지기 때문이다. 에이전트를 띄운 뒤 24시간과 배포 1회 동안 메모리 가용률 최저·스왑 사용량·에이전트 RSS 를 재서 §7 에 적는다. 가용률이 10% 밑으로 내려가거나 스왑을 계속 쓰면 t4g.small 승격(월 +$7.6, 정지 몇 분)을 사람이 정한다 — 그때 이 스펙을 고치고 021 담당자에게 알린다.
-- **역할을 붙이기 전에** data·serve 의 인스턴스 메타데이터를 토큰 필수(IMDSv2)·hop limit 1 로 둔다 — 도커 브리지 안의 컨테이너가 인스턴스 역할 자격증명에 닿지 못하게. data·serve 에 역할 `marketlens-cwagent`(관리형 정책 `CloudWatchAgentServerPolicy`)를 붙인다. collect 는 컨테이너가 S3 에 올리므로 hop 2 그대로(010)이고, 기존 역할 `marketlens-s3-snapshot` 이 붙어 있는지 먼저 확인한 뒤(status.md 남은 작업 — 없으면 붙인다) 같은 정책을 더한다. 컨테이너도 지표·로그 쓰기 권한에 닿지만 받아들인다.
+- **역할을 붙이기 전에** data·serve 의 인스턴스 메타데이터를 토큰 필수(IMDSv2)·hop limit 1 로 둔다 — 도커 브리지 안의 컨테이너가 인스턴스 역할 자격증명에 닿지 못하게. data·serve 에 역할 `marketlens-cwagent`(관리형 정책 `CloudWatchAgentServerPolicy`)를 붙인다. collect 는 컨테이너가 S3 에 올리므로 hop 2 그대로(010)이고, 기존 역할 `marketlens-s3-snapshot` 이 붙어 있는지 먼저 확인한 뒤(status.md 남은 작업 — 없으면 붙인다) 같은 정책을 더한다. collect 역할에 관리자 읽기 인라인 정책(034)도 붙는다. 컨테이너도 지표·로그 쓰기 권한에 닿지만 받아들인다.
 - 콘솔 관리자가 할 일(CLI 사용자는 `iam:PassRole` 이 없다): collect 역할 부착 확인·세 박스 역할·정책, canary 의 Lambda·Scheduler 역할 둘과 함수·일정(만들 때 역할을 넘긴다), Q Developer Slack 채널 구성(채널 역할, Slack 워크스페이스 승인), EC2 동작 경보용 서비스 연결 역할 1회. 런북은 이 넷을 한 절에 묶는다.
 - 월 비용(달러, 로그 전송 뒤 기준, 부가세 10% 별도):
 

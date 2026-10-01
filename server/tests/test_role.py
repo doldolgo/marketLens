@@ -32,6 +32,8 @@ API_ROUTES = {
 }
 # 029 — api 에만 있는 경로. collector ⊇ api 단언의 예외
 API_ONLY = {"/admin/status"}
+# 034 — 수집기에만 있는 관리자 피드 둘(자격증명이 collect 박스 역할에만 있다)
+COLLECTOR_ADMIN = {"/admin/aws", "/admin/alerts"}
 
 
 @pytest.fixture
@@ -45,6 +47,8 @@ def set_role(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[[str | None],
             monkeypatch.setenv("ROLE", value)
         # 토큰이 있으면 lifespan 이 Influx 에 ping 한다 — 이 테스트는 네트워크 없이 돈다
         monkeypatch.setenv("INFLUX_TOKEN", "")
+        # 034 — 리전이 있으면 관리자 피드가 AWS 를 부른다
+        monkeypatch.delenv("ADMIN_AWS_REGION", raising=False)
         get_settings.cache_clear()
 
     yield _set
@@ -81,6 +85,8 @@ def test_api_role_serves_only_influx_routes_and_404s_the_rest(set_role) -> None:
     assert (
         client.get("/orderbook/upbit", params={"symbol": "BTC/KRW"}).status_code == 404
     )
+    for path in COLLECTOR_ADMIN:  # 034 — api 에는 없다
+        assert client.get(path).status_code == 404, path
     assert _paths(client.app) == API_ROUTES
     # WebSocket 경로는 OpenAPI 에 안 실린다 — 라우트 표에서 본다 (017 §3.3)
     assert _ws_paths(client.app) == {"/ws/spreads"}
@@ -156,6 +162,11 @@ def test_collector_is_default_and_keeps_full_route_set(set_role) -> None:  # noq
     assert not API_ONLY & paths  # 관리자 상태는 api 의 허브·버스를 본다 (029 §3.4)
     assert TestClient(app).get("/admin/status").status_code == 404
     assert {"/spreads", "/refresh", "/health/collect", "/history/events"} <= paths
+    # 034 — 관리자 피드 둘은 collector OpenAPI 에만(api 는 위 테스트의 경로 집합 등식이 막는다)
+    assert COLLECTOR_ADMIN <= paths
+    client = TestClient(app)
+    for path in COLLECTOR_ADMIN:
+        assert client.get(path).status_code == 200, path
     assert any(p.startswith("/orderbook") for p in paths)
     assert _ws_paths(app) == {"/ws/spreads"}  # 두 역할 모두 (017 §3.2)
 

@@ -23,12 +23,18 @@
 | bybit | WS 3샤드 orderbook.200(스냅샷+델타 로컬 북, 행 발행 심볼당 500ms 제한)+publicTrade·instruments-info 매초·JSON ping/pong 감시·샤드 단위 정체 판정·입출금(HMAC 헤더)·`/history/*` `fx=bybit`·`/orderbook/bybit` | 표시명 `Bybit`·기록 탭 Bybit 실데이터(선택된 해외만 조회) | 해외 최대 20단계, MEXC 는 mock |
 | bitget | WS 3샤드 books15(200ms 스냅샷, 15단계)+trade·symbols 매초·문자열 ping/pong 감시·샤드 단위 정체 판정·입출금(public, 키 없음)·`/history/*` `fx=bitget`·`/orderbook/bitget` | 표시명 `Bitget`·기록 탭 Bitget 실데이터 | 해외 최대 20단계, MEXC 는 mock |
 | wallet-history | server: 틱 4상태 = 006 판정값 + net_dom·net_fx, 봉·사건 점 문자열 2필드(없음은 `-` — 읽을 때 `-`·옛 빈 문자열 모두 null, 2026-09-28), /history/candles·events netDom·netFx | web: 읽기 줄·사건 표·로그 망 표시 | 배포 전 점은 망 null·4상태 코인 단위 |
-| slack-alerts | server: Slack 웹훅 알림(기동·수집 60초 구간 발생/복구·ERROR 로그·처리 안 된 500, 키별 10분 억제)·심장박동 `collect:heartbeat`·`/health` 신선도(두 역할, 비정상 503) | - | 외부 uptime 은 런북 uptime-monitor.md, 웹훅 운영 설정 확인(2026-09-29 — collect 의 server·serve 의 api 모두 `SLACK_WEBHOOK_URL` 있음, 기동 뒤 전송 실패 경고 0건), 외부 uptime 모니터 등록은 사람 몫 |
+| slack-alerts | server: Slack 웹훅 알림(기동·수집 60초 구간 발생/복구·ERROR 로그·처리 안 된 500, 키별 10분 억제)·심장박동 `collect:heartbeat`·`/health` 신선도(두 역할, 비정상 503) · 보낸 알림 기록 `alerts:log` 1,000건(034) | - | 외부 uptime 은 런북 uptime-monitor.md, 웹훅 운영 설정 확인(2026-09-29 — collect 의 server·serve 의 api 모두 `SLACK_WEBHOOK_URL` 있음, 기동 뒤 전송 실패 경고 0건), 외부 uptime 모니터 등록은 사람 몫 |
 | observability | server: api WS 접속 수 StatsD 게이지(STATSD_ADDR) | - | caddy 접속 로그(IP /24·검색어·헤더 지움, 폴링 제외, 하루 회전·90일 — 032) → 박스 안, 032 게시 뒤 CloudWatch Logs 서울 90일 · 에이전트 세 박스 · canary 5분 4단계(Lambda `nodejs22.x` + EventBridge Scheduler — Synthetics 는 조직 SCP 가 막는다) · 경보 17개(로그 뒤 18) → Slack · EC2 설치 완료(2026-09-29~30): 예산(알림은 메일·Slack)·Slack·IMDS·역할·serve 스왑·에이전트 세 박스(지표 12개, 게이지는 `marketlens_ws_clients`)·Lambda canary·경보 17개 전부 OK, serve 24시간·배포 1회 측정 끝(승격 안 함). 남은 사람 확인: data 에이전트 RSS 24시간·기존 경보·지표 수(런북 2단계)·`ws_clients` 탭 2개·첫 달 청구 |
-| admin | server: api GET /admin/status(WS 접속 수·Redis·Influx·버전), RedisBus.ping | web: 관리자 화면(web/admin, nginx :8081 — 게시 안 함) | admin.kimptrack.com — Cloudflare Access(OTP)·Tunnel(cloudflared, profile tunnel, Protect with Access) · 029 운영 확인 완료(2026-09-30 — serve 안에서 `web:8081/svc/api/admin/status` 200 JSON, 공개 `/api/docs`·`/svc/…` 404, collect `server` 의 `/docs` 가 `/api/openapi.json` 을 부른다), 030 은 Cloudflare 설정·토큰 파일 대기(배포는 "tunnel 건너뜀") |
+| admin | server: api GET /admin/status(WS 접속 수·Redis·Influx·버전), RedisBus.ping · 수집기 관리자 피드 둘(034) — `/admin/aws`(경보·24시간 지표·canary·예산)·`/admin/alerts`(보낸 Slack 알림 + 경보 이력 7일), 부분별 state·보이는 동안만 호출·전용 스레드 1개 | web: 관리자 화면(web/admin, nginx :8081 — 게시 안 함) | admin.kimptrack.com — Cloudflare Access(OTP)·Tunnel(cloudflared, profile tunnel, Protect with Access) · 029 운영 확인 완료(2026-09-30 — serve 안에서 `web:8081/svc/api/admin/status` 200 JSON, 공개 `/api/docs`·`/svc/…` 404, collect `server` 의 `/docs` 가 `/api/openapi.json` 을 부른다), 030 운영 확인 완료(2026-10-01 — Access OTP 로그인·터널 serve 커넥터 healthy·JWT 검사 필수·로그인 전 302, 설정 기록은 런북 admin-access.md). Tunnel 상태 알림 메일 켬(2026-10-01, 사람), 운영 11시간 커넥터 healthy·cloudflared 오류 0·메모리 20MiB. 선택 확인으로 남김: 쿠키 속성·AUD 틀림 403·교차 사이트 fetch 기록·위조 헤더 · 034 운영 확인 대기(IAM — 런북 cloudwatch.md 16단계, 로컬은 Stubber·Docker nginx 로만 확인) |
 | privacy | - | web: 정적 /privacy(외부 자원 없음·nginx CSP·no-cache, `/privacy.html`·`/app/privacy.html` 301)·랜딩 바닥 nav·대시보드 헤더(새 탭) 링크·sitemap·화면 분석 동의 관리 — 수집·이용·제공·국외 이전 세 칸(칸마다 알릴 사항, 처음엔 빈 칸), 셋 다 저장해야 kt.analytics `granted`+판 kt.analytics.v(지금 판 2026-10-01 — 다른 판은 정하지 않음), 하나라도 빠짐·[모두 거부]·[동의 철회] = `denied`·판 지움·`_clck`·`_clsk` 만료·쓰기 실패면 값 지움, 없음·그 밖 = 정하지 않음 = 꺼짐, GPC·저장 불가·철회 실패 안내) | 시행 2026-10-01 · 보관 설정(caddy 하루 회전·100개·90일 — reload 로 안 들어가 머지 뒤 caddy 를 한 번 다시 만든다, 기본 로거 IP 삭제, 관리자 기록 매일·90개 런북)은 배포 뒤 serve 에 적용 · 게시 뒤 027 런북 15단계·033 대기 · Clarity 는 동의 방식(사람 결정 2026-10-01) · 남은 법률 판단은 사람 확인 전(032 §7) |
 
 ## 알려진 빚
+- (034) FilterLogEvents·Budgets 요청 요금과 Budgets 의 SCP 여부 미확인 — 첫 달 청구·런북 확인
+- (034) 수집기 컨테이너가 CloudWatch·예산 읽기 권한에 닿는다
+- (034) 알림 기록은 웹훅이 있을 때만 — 억제된 알림은 기록도 없다
+- (034) 알림 기록에 방문자 정보가 없다는 것은 025 문구 규칙에 기댄다
+- (034) serve 스왑은 모으지 않는다(027 에이전트 설정은 data 만)
+- (034) 016·021·025 의 해당 문장이 034 동작과 다르다 — PR 에 담당자 제안으로 남김, 반영 대기
 - (027·032) 통신비밀보호법 접속 기록 3개월 보관 의무 해당 여부는 사람 확인 전(032 §3.6 (4)) — 해당하면 원 IP 보관을 별도 스펙으로 정하고 방침에 '법령에 따른 보관' 을 더한다
 - (027) 기록 탭 검색칸 값(URL sym)은 검증 없이 기록된다
 - (027) 쿼리 키 삭제 목록은 검색 입력이 늘 때 손으로 맞춘다
@@ -59,9 +65,8 @@
 - (032) caddy 는 기록할 요청이 없는 날 회전·삭제도 하지 않는다 — 방문이 며칠 없으면 90일 지난 파일이 다음 방문 때 지워진다
 - (032) 002·025 제안 반영 대기
 - (022) 랜딩 스크린샷은 정적이다 — 화면이 바뀌면 사람이 다시 찍는다(WebP 두 크기도).
-- (022) 검색엔진 등록(구글 Search Console 도메인 속성·네이버 서치어드바이저·다음 PIN)과 사이트맵 제출, 배포 뒤 카카오 OG 캐시 초기화, 운영 주체·연락처 표기는 사람 몫이다 — 아직 안 했다.
+- (022) 검색엔진 등록(구글 Search Console 도메인 속성·네이버 서치어드바이저·다음 PIN)과 사이트맵 제출, 배포 뒤 카카오 OG 캐시 초기화는 사람 몫이다 — 아직 안 했다.
 - (022) 구글 리치 결과 테스트·Search Console 'Software apps' 에 WebApplication 이 invalid 로 뜬다 — 평점·리뷰를 지어내지 않으므로 실제 평점 기능이 생기기 전까지 감수한다(리치 결과 대상이 아닐 뿐 순위 불이익은 없다).
-- (022) 운영에서 랜딩·대시보드 정적 파일이 압축 없이 나간다 — caddy 가 `Via` 를 붙여 nginx `gzip_static` 이 꺼진다. `gzip_proxied any` 는 007 PR(#82)이 고친다.
 - (022) 크롤러가 받는 HTML 에는 실데이터가 없다(구글만 `/api/landing` 을 렌더링으로 받는다). 서버가 최근 사건·상위 경로를 HTML 에 미리 넣는 렌더링은 후속 후보.
 - (022) 랜딩 글을 고치면 `uv run web/scripts/subset-landing-font.py` 로 글꼴 서브셋을 다시 만든다 — 안 하면 `test_landing_seo.py` 가 멈춘다.
 - (013) `/history/events` 공유 캐시는 담은 응답의 합을 64MB 로 묶는다(2026-09-28, 권장값이 없어 보수적으로 정함) — 역프 1달 이상 전 코인 응답(수십 MB)은 담기지 않아 그 조건은 요청마다 조회한다(조회 하나를 같이 기다리는 것은 그대로). 수집 박스 메모리 여유를 본 뒤 사람이 올린다.

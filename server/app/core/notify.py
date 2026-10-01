@@ -7,17 +7,24 @@
 - 전송 실패는 버린다(재시도 없음). 알림 실패를 다시 알리면 순환이라, 실패 로그는 `marketlens.notify`
   로거에만 남기고 로그 핸들러는 이 로거를 건너뛴다.
 - 웹훅 URL 이 없으면 아무것도 만들지 않는다 — 로컬·테스트 기본 상태.
+- 보낸 뒤(2xx 든 실패든) 기록 함수로 JSON 한 줄을 남긴다(034 §3.3 — 보내는 규칙은 그대로). 기록 함수는 lifespan 이
+  버스를 만든 뒤 꽂는다 — 그 전에 보낸 알림은 기록하지 않는다. 억제·큐 초과로 안 보낸 알림은 기록도 없다.
+  기록은 보내기와 따로 도는 태스크다 — Redis 가 답하지 않으면(연결 2초) 알림마다 다음 전송이 밀리는데, data 박스가
+  내려가 Redis 가 사라질 때가 바로 알림이 몰릴 때다. 큐 항목은 기록이 끝난 뒤 끝난 것으로 쳐서 종료 때 5초 대기에 든다.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 import httpx
+
+from app.core.redact import redact
 
 logger = logging.getLogger("marketlens.notify")
 
@@ -28,6 +35,7 @@ CLOSE_WAIT_SEC = 5.0  # 종료 시 남은 항목을 기다리는 상한 (§3.7)
 LOG_TEXT_LIMIT = 300
 LOG_EXC_LIMIT = 200
 LOG_KEY_LIMIT = 80
+RECORD_TIMEOUT_SEC = 2.0  # 기록 쓰기 제한 — 넘거나 실패하면 버린다 (034 §3.3)
 
 
 class Notifier:
@@ -46,10 +54,17 @@ class Notifier:
         self._client = client
         self._clock = clock
         self._last_sent: dict[str, int] = {}  # 키 → 마지막 전송 ms (억제용)
-        self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=QUEUE_LIMIT)
+        # (notify 가 불린 ms, 키, 머리 없는 문구) — 머리는 보낼 때 붙인다. 기록에는 머리 없는 문구가 들어간다
+        self._queue: asyncio.Queue[tuple[int, str, str]] = asyncio.Queue(
+            maxsize=QUEUE_LIMIT
+        )
         self._task: asyncio.Task[None] | None = None
         # 실패 로그도 10분에 1줄 — 웹훅이 죽으면 매 알림마다 WARNING 이 찍히지 않게
         self._last_warned: dict[str, int] = {}
+        # 034 — 보낸 알림 기록 함수(`RedisBus.alert_log_push`). lifespan 이 버스를 만든 뒤 꽂는다
+        self.record: Callable[[str], Awaitable[None]] | None = None
+        # 도는 기록 태스크 — 저마다 2초 안에 끝나므로 2초 동안 보낸 알림 수를 넘지 않는다
+        self._records: set[asyncio.Task[None]] = set()
 
     # --- 공개 계약 ---
 
@@ -61,7 +76,7 @@ class Notifier:
             return
         self._last_sent[key] = now_ms
         try:
-            self._queue.put_nowait(f"[{self._role}] {text}")
+            self._queue.put_nowait((now_ms, key, text))
         except asyncio.QueueFull:
             self._warn("queue_full", "알림 큐가 가득 차 버렸다 (상한 %d)", QUEUE_LIMIT)
 
@@ -75,13 +90,17 @@ class Notifier:
     async def aclose(self) -> None:
         if self._task is None:
             return
-        # 남은 항목은 최대 5초만 — 종료가 알림에 잡히면 안 된다
+        # 남은 항목(기록 포함)은 최대 5초만 — 종료가 알림에 잡히면 안 된다
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._queue.join(), CLOSE_WAIT_SEC)
         self._task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await self._task
         self._task = None
+        records = list(self._records)  # 그 안에 못 끝난 기록은 버린다
+        for task in records:
+            task.cancel()
+        await asyncio.gather(*records, return_exceptions=True)
         if self._client is not None:
             await self._client.aclose()
 
@@ -89,21 +108,65 @@ class Notifier:
 
     async def _run(self) -> None:
         while True:
-            text = await self._queue.get()
+            at_ms, key, text = await self._queue.get()
+            recording = False
             try:
-                await self._send(text)
+                delivered = await self._send(f"[{self._role}] {text}")
+                recording = self._start_record(at_ms, key, text, delivered)
             finally:
-                self._queue.task_done()
+                if not recording:
+                    self._queue.task_done()
 
-    async def _send(self, text: str) -> None:
+    def _start_record(self, at_ms: int, key: str, text: str, delivered: bool) -> bool:
+        """기록을 따로 띄운다 — 다음 전송이 기록(최대 2초)을 기다리지 않게. 이 항목의 task_done 은 기록이 끝난 뒤."""
+        if self.record is None:
+            return False  # 버스가 꽂히기 전
+        task = asyncio.create_task(self._record(at_ms, key, text, delivered))
+        self._records.add(task)
+        task.add_done_callback(self._record_done)
+        return True
+
+    def _record_done(self, task: asyncio.Task[None]) -> None:
+        self._records.discard(task)
+        self._queue.task_done()
+
+    async def _send(self, text: str) -> bool:
+        """Slack 이 2xx 로 받았는지 — 실패는 버리고 False (재시도 없음)."""
         assert self._client is not None
         try:
             resp = await self._client.post(self._url, json={"text": text})
         except Exception as exc:
             self._warn("send_error", "Slack 전송 실패 — 버린다: %r", exc)
-            return
+            return False
         if resp.status_code // 100 != 2:
             self._warn("send_status", "Slack 응답 %d — 버린다", resp.status_code)
+            return False
+        return True
+
+    async def _record(self, at_ms: int, key: str, text: str, delivered: bool) -> None:
+        """034 §3.3 — 보낸 알림 한 줄. 실패·2초 초과는 버리고 이 로거에 WARNING(Slack 으로 안 간다 — 순환 없음)."""
+        record = self.record
+        if record is None:
+            return  # 버스가 꽂히기 전
+        line = json.dumps(
+            {
+                "at": at_ms,
+                "role": self._role,
+                # 로그 알림의 키는 로그 템플릿 앞 80자 — 포맷된 문장이나 예외 객체를 넘긴 로그면 ARN 이 섞인다
+                "key": redact(key),
+                "text": redact(text),
+                "delivered": delivered,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        try:
+            await asyncio.wait_for(record(line), RECORD_TIMEOUT_SEC)
+        except Exception as exc:
+            # 오류 문장은 싣지 않는다 — 종류만
+            self._warn(
+                "record_error", "알림 기록 실패 — 버린다: %s", type(exc).__name__
+            )
 
     def _warn(self, key: str, msg: str, *args: object) -> None:
         now_ms = int(self._clock() * 1000)

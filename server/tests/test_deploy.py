@@ -263,9 +263,10 @@ def test_web_image_precompresses_static_files_for_gzip_static() -> None:
     assert _args(public, "gzip_static") == [["on"]]
     # 압축본과 원본이 같은 URL 이라 캐시가 둘을 가르게 Vary 를 붙인다 — /api location 은 건드리지 않는다
     assert _args(public, "gzip_vary") == [["on"]]
-    # 즉석 압축은 켜지 않고 gzip_proxied 는 기본(off) — 앱이 이미 압축한 /api 응답을 다시 압축하지 않는다
+    # 앞단 caddy 가 Via 를 붙이므로 gzip_proxied 가 기본(off)이면 gzip_static 이 .gz 를 주지 않는다 (007 §3, 2026-09-30)
+    assert _args(public, "gzip_proxied") == [["any"]]
+    # 즉석 압축은 켜지 않는다 — 앱이 이미 압축한 /api 응답을 다시 압축하지 않고, gzip_proxied 가 정적 파일에만 걸린다
     assert not re.search(r"^\s*gzip\s+on;", conf, re.M)
-    assert not re.search(r"^\s*gzip_proxied\b", conf, re.M)
 
 
 def test_web_image_is_multistage_node22_to_nginx() -> None:
@@ -772,6 +773,22 @@ def test_deploy_runs_three_boxes_in_order_data_collect_serve() -> None:
     assert jobs["serve"]["needs"] == "collect"
     # 옛 단일 시크릿은 어디에도 남지 않는다
     assert "secrets.EC2_HOST }}" not in _text(".github/workflows/deploy.yml")
+
+
+def test_deploy_runs_one_at_a_time_without_cancelling_the_running_one() -> None:
+    """배포는 한 번에 하나 — 도는 실행은 끝까지, 뒤 푸시는 pending, pending 은 최신 하나 (007 §3).
+
+    2026-10-01 두 실행이 serve 에서 `up --build` 를 겹쳐 돌아 앞 실행이 컨테이너 재생성에서 실패했다.
+    """
+    deploy = _yaml(".github/workflows/deploy.yml")
+    # 고정 group(박스 3대를 지킨다)·cancel-in-progress 끔(끊으면 반쪽 배포)·queue 기본(single)
+    assert deploy["concurrency"] == {
+        "group": "deploy-main",
+        "cancel-in-progress": False,
+    }
+    # 워크플로 단위라야 data→collect→serve 사슬이 통째로 한 단위다
+    for box in BOXES:
+        assert "concurrency" not in deploy["jobs"][box], box
 
 
 def _index_of(script: list[str], fragment: str) -> int:

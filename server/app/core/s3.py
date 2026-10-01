@@ -1,6 +1,6 @@
 """S3 업로더 — 거래소 원문 아카이브의 연결·쓰기 (스펙 010 §3.3).
 
-boto3 를 import 하는 곳은 이 모듈뿐이다. 아카이브(core.raw_archive)는 `put(key, body)` 시그니처에만
+core 에서 boto3 를 import 하는 곳은 이 모듈뿐이다(관리자 AWS 읽기는 admin 기능 안 — 034). 아카이브(core.raw_archive)는 `put(key, body)` 시그니처에만
 의존하고, 테스트는 같은 시그니처의 fake 를 꽂는다(실제 S3 를 만지지 않는다).
 자격증명은 SDK 기본 탐색(로컬 `~/.aws`, EC2 IAM 역할)뿐이다 — env 에 AWS 키를 두지 않는다.
 이 모듈은 로그를 찍지 않는다 — 실패는 예외로 올리고 호출자가 1줄로 남긴다.
