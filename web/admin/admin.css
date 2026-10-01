@@ -1,58 +1,153 @@
-/* KimpTrack 관리자 화면 (스펙 029 §3.3). 색 값은 docs/design/theme.css 토큰을 복사했다 — 이 화면은 번들 밖이라
-   web/src/shared 를 쓰지 못한다. CSP(default-src 'self')라 웹폰트를 받지 않고 시스템 글꼴을 쓴다. */
+/* KimpTrack 관리자 화면 v2 (스펙 036 §3.7). 토큰·컴포넌트 클래스는 docs/design/theme.css 를 복사했다 — 이 화면은
+   번들 밖이라 web/src/shared 를 쓰지 못한다(029 와 같다). theme.css 첫 줄의 웹폰트 불러오기와 Inter 는 뺐다 —
+   CSP(default-src 'self')가 막고, 불러오면 운영자 IP 가 국외로 나간다. 글꼴은 시스템 글꼴.
+   CSP 가 style 속성을 막으므로 모든 모양은 이 파일의 클래스와 SVG 기하 속성으로만 준다. 어두운 테마 하나. */
+
 :root {
+  color-scheme: dark;
+  /* 상태색 (한국식: 빨강=상승, 파랑=하락) — 화면에서는 정상·주의·장애로 쓴다 */
+  --color-ok:#5fbf8f;
+  --color-warn:#c8825f;
+  --color-up:#e0697d;
+  --color-down:#6f9bee;
   --color-bg: #161826;
   --color-surface: #232532;
   --color-text: #e9e9ed;
-  --color-muted: #9397ab;
   --color-accent: #9184d9;
-  --color-ok: #5fbf8f;
-  --color-warn: #c8825f;
-  --color-bad: #e0697d;
+  --color-accent-2: #a7a1db;
   --color-divider: color-mix(in srgb, #e9e9ed 16%, transparent);
+
+  --color-neutral-100: #f3f5fe;
+  --color-neutral-200: #e4e7f5;
+  --color-neutral-300: #cfd3e5;
+  --color-neutral-400: #b2b6ca;
+  --color-neutral-500: #9397ab;
+  --color-neutral-600: #75798c;
+  --color-neutral-700: #595d6c;
+  --color-neutral-800: #3f424d;
+  --color-neutral-900: #292b31;
+
+  --color-accent-100: #f5f4ff;
+  --color-accent-200: #e7e5fe;
+  --color-accent-300: #d2cefd;
+  --color-accent-400: #b5abfc;
+  --color-accent-500: #968ae0;
+  --color-accent-600: #796cbf;
+  --color-accent-700: #5d5294;
+  --color-accent-800: #423a6a;
+  --color-accent-900: #2b2741;
+
+  --font-heading: system-ui, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+  --font-heading-weight: 600;
+  --font-body: system-ui, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --space-1: 2.8px;
+  --space-2: 5.6px;
+  --space-3: 8.4px;
+  --space-4: 11.2px;
+  --space-6: 16.8px;
+  --space-8: 22.4px;
+
+  --radius-sm: 4px;
   --radius-md: 8px;
+  --radius-lg: 14px;
+
+  --shadow-sm: 0 0 0 1px #3f424d;
+  --shadow-md: 0 0 0 1px #595d6c, 0 6px 18px rgba(0,0,0,0.55);
+
+  /* 이 화면의 상태 네 갈래 — 색은 위 토큰, 흐림은 neutral-500 (§3.7) */
+  --tone-ok: var(--color-ok);
+  --tone-warn: var(--color-warn);
+  --tone-bad: var(--color-up);
+  --tone-dim: var(--color-neutral-500);
+  --gutter: 24px;
 }
 
-* { box-sizing: border-box; }
-/* hidden 속성이 dl 의 display:grid 에 지지 않게 */
+*, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
-
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+html { scroll-padding-top: 112px; }
 body {
-  margin: 0 auto;
-  max-width: 1100px;
-  padding: 16px 20px 40px;
+  margin: 0; background: var(--color-bg); color: var(--color-text);
+  font-family: var(--font-body); font-size: 14px; line-height: 1.5; font-weight: 400;
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+h1, h2, h3 {
+  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
+  line-height: 1.2; letter-spacing: -0.01em; margin: 0;
+}
+p { margin: 0; }
+a { color: var(--color-accent); text-underline-offset: 3px; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+::selection { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+
+/* — theme.css 컴포넌트 (복사) — */
+.hr {
+  height: 1px; border: 0; margin: var(--space-4) 0;
+  background: linear-gradient(to right,
+    transparent, var(--color-divider) 48px,
+    var(--color-divider) calc(100% - 48px), transparent);
+}
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  cursor: pointer; text-decoration: none;
+  font-family: var(--font-heading); font-weight: 500;
+  font-size: 14px; line-height: 1.2; color: var(--color-text);
+  background: transparent; border: 1px solid transparent;
+  padding: var(--space-2) calc(var(--space-3) * 1.2);
+  border-radius: var(--radius-md); min-height: 36px;
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { color: var(--color-accent); border-color: var(--color-accent); }
+.btn-primary:hover { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.btn-primary:active { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+.btn-secondary { border-color: var(--color-divider); }
+.btn-secondary:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.btn-secondary:active { background: color-mix(in srgb, var(--color-text) 14%, transparent); }
+.input {
+  width: 100%; min-height: 36px; padding: 6px 10px; font: inherit;
+  font-size: 14px; color: var(--color-text); caret-color: var(--color-accent);
   background: var(--color-bg);
-  color: var(--color-text);
-  font: 14px/1.5 system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+  border: 1px solid var(--color-divider); border-radius: var(--radius-md);
+}
+.input:hover { border-color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+.input:focus-visible { border-color: var(--color-accent); outline-offset: 0; }
+.card {
+  display: flex; flex-direction: column; gap: var(--space-3); min-width: 0;
+  padding: var(--space-6); border-radius: var(--radius-md); background: var(--color-surface);
+}
+.card-kicker { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent); }
+.tag {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11px; line-height: 1.4;
+  letter-spacing: 0.02em; padding: 2px 9px; white-space: nowrap;
+  border-radius: calc(var(--radius-md) * 0.75);
+  background: var(--color-neutral-800); color: var(--color-neutral-100);
+}
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th {
+  text-align: left; font-size: 11px; font-weight: 500; letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  padding: var(--space-2) var(--space-3); white-space: nowrap;
+}
+.table td { padding: var(--space-3); vertical-align: top; }
+.table thead tr {
+  background: linear-gradient(to right,
+    transparent, var(--color-divider) 48px,
+    var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+}
+.table tbody tr {
+  background: linear-gradient(to right,
+    transparent, color-mix(in srgb, var(--color-text) 8%, transparent) 48px,
+    color-mix(in srgb, var(--color-text) 8%, transparent) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+}
+.table tbody tr:hover {
+  background:
+    linear-gradient(color-mix(in srgb, var(--color-text) 4%, transparent),
+                    color-mix(in srgb, var(--color-text) 4%, transparent)) no-repeat 0 0 / 100% 100%,
+    linear-gradient(to right,
+      transparent, color-mix(in srgb, var(--color-text) 8%, transparent) 48px,
+      color-mix(in srgb, var(--color-text) 8%, transparent) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
 }
 
-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
-h1 { font-size: 18px; font-weight: 600; margin: 8px 0 16px; }
-h2 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
-nav { display: flex; gap: 16px; }
-a { color: var(--color-accent); }
-
-main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-section { background: var(--color-surface); border-radius: var(--radius-md); padding: 14px 16px; }
-section.wide { grid-column: 1 / -1; }
-
-dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
-dt { color: var(--color-muted); }
-dd { margin: 0; font-variant-numeric: tabular-nums; }
-
-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--color-divider); vertical-align: top; }
-th { color: var(--color-muted); font-weight: 500; }
-th:nth-child(1), th:nth-child(2), th:nth-child(3) { width: 12%; }
-td { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-
-.refresh { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-input { background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-divider); border-radius: 6px; padding: 6px 8px; }
-button { background: var(--color-accent); color: var(--color-bg); border: 0; border-radius: 6px; padding: 7px 14px; font-weight: 600; cursor: pointer; }
-button:disabled { opacity: 0.5; cursor: default; }
-
-.notice { background: color-mix(in srgb, var(--color-bad) 20%, transparent); border-radius: var(--radius-md); padding: 8px 12px; }
-.meta { color: var(--color-muted); font-weight: 400; font-size: 12px; }
-.tone-ok { color: var(--color-ok); }
-.tone-warn { color: var(--color-warn); }
-.tone-bad { color: var(--color-bad); }
