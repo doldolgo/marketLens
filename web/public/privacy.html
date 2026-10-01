@@ -74,9 +74,15 @@
     .pick input { flex: none; width: 20px; height: 20px; margin: 4px 0 0; accent-color: var(--accent); cursor: pointer; }
     .pick input:disabled, .pick input:disabled + span { cursor: default; }
     .cell .kv { margin-top: 8px; padding: 0 0 0 30px; border: 0; }
-    .state { margin-top: 16px !important; font-size: 15px; color: var(--n400) !important; }
+    /* 지금 상태와 [동의 철회]는 같은 문장 셋 바로 아래, 세 칸 앞 — /privacy#consent 로 온 방문자가 첫 화면에서 보고 철회한다(법 제38조 제4항) */
+    .now { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 16px; }
+    .now .btn { min-width: 176px; }
+    .state { margin-top: 0 !important; font-size: 15px; color: var(--n400) !important; }
     .state strong { font-size: 17px; }
-    /* 두 버튼은 같은 칸 너비 — 글자 길이를 따르지 않는다(033 띠의 [선택한 대로 저장]·[모두 거부]도 같은 해석) */
+    /* 동의를 받을 때 눈에 띄게 적는 중요한 내용(법 제22조 제2항·시행령 제17조 제3항 — 보유 기간, 받는 자와 그 목적·보유 기간):
+       다른 내용보다 20% 크게·굵게·밑줄. 033 띠도 같은 표시 */
+    .key { font-size: 1.2em; font-weight: 700; color: var(--text); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 4px; }
+    /* [선택한 대로 저장]·[모두 거부]는 세 칸 뒤, 같은 칸 너비 — 글자 길이를 따르지 않는다(033 띠의 두 버튼도 같은 해석) */
     .actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 12px; max-width: 384px; margin-top: 16px; }
 
     /* 두 칸 정의 목록 — 받는 곳마다 한 묶음. 좁은 화면에서는 한 칸 */
@@ -139,51 +145,53 @@
       <div class="consent">
         <p>랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 동의하지 않아도 모든 기능을 그대로 씁니다.</p>
         <p>세 가지에 모두 동의하고 [선택한 대로 저장]을 누른 경우에만 분석합니다 — Clarity는 셋이 다 있어야 돌아가므로 하나라도 빠지면 거부로 저장합니다. 만 14세 미만은 동의하지 마세요.</p>
-        <div class="cell">
-          <label class="pick"><input type="checkbox" id="an-collect" disabled /><span>(선택) 화면 이용 기록의 수집·이용에 동의합니다</span></label>
-          <dl class="kv">
-            <dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>)</dd>
-            <dt>목적</dt><dd>KimpTrack의 화면 이용 분석 — 어떤 화면·기능이 쓰이고 어디서 막히는지 알아 서비스를 고치기</dd>
-            <dt>보유 기간</dt><dd>녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월</dd>
-            <dt>거부 권리·불이익</dt><dd>동의하지 않을 수 있고, 동의한 뒤에도 처리방침의 “화면 분석 동의 관리”(<a class="link" href="/privacy#consent">/privacy#consent</a>)에서 [동의 철회]를 눌러 언제든 철회할 수 있습니다. 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
-          </dl>
-        </div>
-        <div class="cell">
-          <label class="pick"><input type="checkbox" id="an-provide" disabled /><span>(선택) 화면 이용 기록을 Microsoft에 제공하는 데 동의합니다</span></label>
-          <dl class="kv">
-            <dt>받는 자</dt><dd>Microsoft Corporation(미국)</dd>
-            <dt>받는 자의 목적</dt><dd>Clarity로 KimpTrack에 화면 이용 분석을 제공하고, Microsoft Advertising 제공 등 Microsoft 자신의 목적에 씁니다</dd>
-            <dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>)</dd>
-            <dt>받는 자의 보유 기간</dt><dd>Clarity의 기록은 녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월. Microsoft 자신의 목적에 쓰는 정보는 <a class="link" href="https://privacy.microsoft.com/ko-kr/privacystatement">Microsoft 개인정보처리방침</a>이 정한 기간</dd>
-            <dt>거부 권리·불이익</dt><dd>동의하지 않을 수 있고, 동의한 뒤에도 처리방침의 “화면 분석 동의 관리”(<a class="link" href="/privacy#consent">/privacy#consent</a>)에서 [동의 철회]를 눌러 언제든 철회할 수 있습니다. 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
-          </dl>
-        </div>
-        <div class="cell">
-          <label class="pick"><input type="checkbox" id="an-transfer" disabled /><span>(선택) 화면 이용 기록을 미국으로 이전하는 데 동의합니다</span></label>
-          <dl class="kv">
-            <dt>받는 자·연락처</dt><dd>Microsoft Corporation, One Microsoft Way, Redmond, WA 98052, USA — <a class="link" href="https://go.microsoft.com/fwlink/?linkid=2126612">개인정보 문의</a></dd>
-            <dt>국가·시기·방법</dt><dd>미국 — 동의한 뒤 랜딩·대시보드를 보는 동안 수시로, 방문자의 브라우저가 Microsoft 서버로 네트워크를 통해 전송</dd>
-            <dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>)</dd>
-            <dt>목적·보유 기간</dt><dd>KimpTrack의 화면 이용 분석과 Microsoft Advertising 제공 등 Microsoft 자신의 목적 — Clarity의 기록은 녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월, Microsoft 자신의 목적에 쓰는 정보는 Microsoft 개인정보처리방침이 정한 기간</dd>
-            <dt>거부 방법·효과</dt><dd>이 칸에 체크하지 않거나 [모두 거부]를 누르면 이전되지 않습니다. 동의한 뒤에는 처리방침의 “화면 분석 동의 관리”(<a class="link" href="/privacy#consent">/privacy#consent</a>)에서 [동의 철회]를 누르면 그 뒤로 이전되지 않습니다. 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
-          </dl>
-        </div>
-        <p class="state" id="an-state" role="status" aria-live="polite" hidden>지금 상태 <strong id="an-value"></strong></p>
-        <div class="actions" id="an-actions" hidden>
-          <button class="btn" type="button" id="an-save">선택한 대로 저장</button>
-          <button class="btn" type="button" id="an-deny">모두 거부</button>
+        <div class="now">
+          <p class="state" id="an-state" role="status" aria-live="polite" hidden>지금 상태 <strong id="an-value"></strong></p>
           <button class="btn" type="button" id="an-withdraw" hidden>동의 철회</button>
         </div>
         <p id="an-gpc" hidden>브라우저가 GPC를 보내는 동안은 분석하지 않습니다.</p>
         <p id="an-nostore" hidden>이 브라우저에는 선택을 저장할 수 없어 화면 분석을 하지 않습니다.</p>
         <p id="an-stuck" role="alert" hidden>철회를 저장하지 못했습니다 — 이 사이트의 브라우저 데이터를 지우거나 GPC를 켜면 분석을 막을 수 있습니다.</p>
         <noscript><p>자바스크립트가 꺼져 있어 버튼을 쓸 수 없습니다 — 자바스크립트가 꺼진 브라우저에서는 화면 분석도 돌지 않습니다.</p></noscript>
+        <div class="cell">
+          <label class="pick"><input type="checkbox" id="an-collect" disabled /><span>(선택) 화면 이용 기록의 수집·이용에 동의합니다</span></label>
+          <dl class="kv">
+            <dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>)</dd>
+            <dt>목적</dt><dd>KimpTrack의 화면 이용 분석 — 어떤 화면·기능이 쓰이고 어디서 막히는지 알아 서비스를 고치기</dd>
+            <dt>보유 기간</dt><dd><strong class="key">녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월</strong></dd>
+            <dt>거부 권리·불이익</dt><dd>동의하지 않을 수 있고, 동의한 뒤에도 처리방침의 “화면 분석 동의 관리”(<a class="link" href="/privacy#consent">/privacy#consent</a>)에서 [동의 철회]를 눌러 언제든 철회할 수 있습니다. 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
+          </dl>
+        </div>
+        <div class="cell">
+          <label class="pick"><input type="checkbox" id="an-provide" disabled /><span>(선택) 화면 이용 기록을 Microsoft에 제공하는 데 동의합니다</span></label>
+          <dl class="kv">
+            <dt>받는 자</dt><dd><strong class="key">Microsoft Corporation(미국)</strong></dd>
+            <dt>받는 자의 목적</dt><dd><strong class="key">Clarity로 KimpTrack에 화면 이용 분석을 제공하고, Microsoft Advertising 제공 등 Microsoft 자신의 목적에 씁니다</strong></dd>
+            <dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>)</dd>
+            <dt>받는 자의 보유 기간</dt><dd><strong class="key">Clarity의 기록은 녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월. Microsoft 자신의 목적에 쓰는 정보는 <a class="link" href="https://privacy.microsoft.com/ko-kr/privacystatement">Microsoft 개인정보처리방침</a>이 정한 기간</strong></dd>
+            <dt>거부 권리·불이익</dt><dd>동의하지 않을 수 있고, 동의한 뒤에도 처리방침의 “화면 분석 동의 관리”(<a class="link" href="/privacy#consent">/privacy#consent</a>)에서 [동의 철회]를 눌러 언제든 철회할 수 있습니다. 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
+          </dl>
+        </div>
+        <div class="cell">
+          <label class="pick"><input type="checkbox" id="an-transfer" disabled /><span>(선택) 화면 이용 기록을 미국으로 이전하는 데 동의합니다</span></label>
+          <dl class="kv">
+            <dt>받는 자·연락처</dt><dd><strong class="key">Microsoft Corporation, One Microsoft Way, Redmond, WA 98052, USA — <a class="link" href="https://go.microsoft.com/fwlink/?linkid=2126612">개인정보 문의</a></strong></dd>
+            <dt>국가·시기·방법</dt><dd>미국 — 동의한 뒤 랜딩·대시보드를 보는 동안 수시로, 방문자의 브라우저가 Microsoft 서버로 네트워크를 통해 전송</dd>
+            <dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>)</dd>
+            <dt>목적·보유 기간</dt><dd><strong class="key">KimpTrack의 화면 이용 분석과 Microsoft Advertising 제공 등 Microsoft 자신의 목적 — Clarity의 기록은 녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월, Microsoft 자신의 목적에 쓰는 정보는 Microsoft 개인정보처리방침이 정한 기간</strong></dd>
+            <dt>거부 방법·절차·효과</dt><dd>이 칸에 체크하지 않거나 [모두 거부]를 누르면 이전되지 않습니다. 동의한 뒤에는 처리방침의 “화면 분석 동의 관리”(<a class="link" href="/privacy#consent">/privacy#consent</a>)에서 [동의 철회]를 누르면 그 뒤로 이전되지 않습니다. 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
+          </dl>
+        </div>
+        <div class="actions" id="an-actions" hidden>
+          <button class="btn" type="button" id="an-save">선택한 대로 저장</button>
+          <button class="btn" type="button" id="an-deny">모두 거부</button>
+        </div>
       </div>
       <p>세 칸을 모두 체크하고 [선택한 대로 저장]을 누르면 이 브라우저에 <code>kt.analytics</code> = <code>granted</code>와 동의한 안내의 판 <code>kt.analytics.v</code>를 저장합니다. 하나라도 빠진 채 저장하거나 [모두 거부]·[동의 철회]를 누르면 <code>denied</code>를 저장하고(저장하지 못하면 값을 지워 정하지 않은 상태로 돌립니다) 판을 지우며, 이 사이트의 Clarity 쿠키 <code>_clck</code>·<code>_clsk</code>를 지웁니다. 아무것도 고르지 않으면 분석하지 않습니다 — 랜딩·대시보드에 뜨는 안내나 여기서 세 가지에 모두 동의한 경우에만 분석합니다. 브라우저가 GPC(Global Privacy Control)를 보내면 동의했더라도 분석하지 않습니다. 이 선택은 브라우저 안에서만 일어나 서버로 가지 않습니다.</p>
       <p>동의는 그때 본 안내의 판에 묶입니다. 받는 자·항목·목적·보유 기간이 바뀌면 KimpTrack은 판을 올리고, 예전 판의 동의로는 분석하지 않은 채 다시 묻습니다. 지금 안내의 판은 <code id="an-version">2026-10-01</code>입니다.</p>
       <p><code>kimptrack.com</code>에서 고른 선택이 이 브라우저에 저장되고, 브라우저 데이터를 지우면 다시 묻습니다. 일부 브라우저(Safari 등)는 이 사이트를 7일 동안 쓰지 않으면 선택을 지웁니다 — 그러면 분석은 꺼진 채로 있고 다음 방문에 다시 묻습니다.</p>
       <p>동의·철회는 그 뒤로 여는 페이지에 곧바로 따릅니다. 같은 브라우저에 이미 열린 <code>kimptrack.com</code> 랜딩·대시보드 탭에도 곧바로 반영됩니다 — 철회하면 그 탭이 한 번 새로고침되어 분석을 멈추고, 동의하면 그 탭에서도 분석을 시작합니다.</p>
-      <p>철회하면 그 뒤로는 보내지 않습니다. 이미 보낸 기록은 Clarity가 한 사람분만 골라 지울 수 없어 Microsoft가 2절의 기간 동안 보관합니다 — 바로 지우기를 원하면 <a class="link" href="#s10">10절</a>의 메일로 요청해 주세요. 운영자가 Clarity 프로젝트의 기록을 통째로 지우고(모든 방문자의 기록이 함께 지워집니다) 새 프로젝트로 다시 시작합니다.</p>
+      <p>철회하면 그 뒤로는 보내지 않습니다. 이미 보낸 기록은 Clarity가 한 사람분만 골라 지울 수 없어 Microsoft가 2절의 기간 동안 보관합니다 — 바로 지우기를 원하면 <a class="link" href="#s10">10절</a>의 메일로 요청해 주세요. 운영자가 Clarity 프로젝트의 기록을 통째로 지우고(모든 방문자의 기록이 함께 지워집니다) 새 프로젝트로 다시 시작합니다 — 지우는 시점은 Microsoft 기준입니다. Microsoft가 자기 목적에 쓰는 정보는 이것으로 지워지지 않으며 Microsoft에 직접 요청할 수 있습니다(<a class="link" href="https://go.microsoft.com/fwlink/?linkid=2126612">개인정보 문의</a>).</p>
       <p>Microsoft 도메인의 쿠키(<code>MUID</code> 등)는 이 페이지가 지울 수 없습니다. Clarity가 안내하는 광고 거부 페이지 <a class="link" href="https://optout.aboutads.info/">optout.aboutads.info</a>(DAA)에서 따로 거부할 수 있습니다.</p>
     </section>
 
@@ -226,7 +234,7 @@
 
     <section aria-labelledby="s3">
       <h2 id="s3">3. 개인정보의 파기</h2>
-      <p>KimpTrack은 보유 기간이 지난 기록을 아래 방식으로 지웁니다. 서버 접속 기록은 하루(또는 일정한 크기)마다 새 파일로 나뉘고, 보유 기간이 지난 파일은 다음에 파일을 나눌 때 자동으로 파일째 지워집니다 — 방문이 없는 동안에는 파일을 나누지 않아 지우는 때가 늦어질 수 있습니다. 관리자 접속 기록은 매일 새 파일로 나뉘고, 90개(90일)를 넘는 파일은 그때 자동으로 지워집니다. 로그 저장소(CloudWatch Logs)는 보존 기간 90일이 지난 기록을 AWS가 지웁니다. 문의 메일은 기간이 끝나면 운영자가 메일함에서 지우고 휴지통까지 비웁니다. Clarity 기록은 Microsoft가 보관하며, 2절의 기간이 지나면 Microsoft가 지웁니다(지우는 시점은 Microsoft 기준). 화면 분석 동의를 철회해도 이미 보낸 기록은 그 기간 동안 남습니다 — 바로 지우기를 원하면 8절대로 요청할 수 있고, 그러면 운영자가 Clarity 프로젝트의 기록을 통째로 지웁니다. 법령에 따라 따로 보존하는 기록은 없습니다.</p>
+      <p>KimpTrack은 보유 기간이 지난 기록을 아래 방식으로 지웁니다. 서버 접속 기록은 하루(또는 일정한 크기)마다 새 파일로 나뉘고, 보유 기간이 지난 파일은 다음에 파일을 나눌 때 자동으로 파일째 지워집니다 — 방문이 없는 동안에는 파일을 나누지 않아 지우는 때가 늦어질 수 있습니다. 관리자 접속 기록은 매일 새 파일로 나뉘고, 90개(90일)를 넘는 파일은 그때 자동으로 지워집니다. 로그 저장소(CloudWatch Logs)는 보존 기간 90일이 지난 기록을 AWS가 지웁니다. 문의 메일은 기간이 끝나면 운영자가 메일함에서 지우고 휴지통까지 비웁니다. Clarity 기록은 Microsoft가 보관하며, 2절의 기간이 지나면 Microsoft가 지웁니다(지우는 시점은 Microsoft 기준). 화면 분석 동의를 철회해도 이미 보낸 기록은 그 기간 동안 남습니다 — 바로 지우기를 원하면 8절대로 요청할 수 있고, 그러면 운영자가 Clarity 프로젝트의 기록을 통째로 지웁니다(지우는 시점은 Microsoft 기준). Microsoft가 자기 목적에 쓰는 정보는 이것으로 지워지지 않으며 Microsoft에 직접 요청할 수 있습니다(<a class="link" href="https://go.microsoft.com/fwlink/?linkid=2126612">개인정보 문의</a>). 법령에 따라 따로 보존하는 기록은 없습니다.</p>
     </section>
 
     <section aria-labelledby="s4">
@@ -267,7 +275,7 @@
         <dt>국가·시기·방법</dt><dd>미국 — 화면 분석에 동의한 뒤 랜딩·대시보드를 보는 동안 수시로, 방문자의 브라우저가 Microsoft 서버로 네트워크를 통해 전송</dd>
         <dt>받는 자·연락처</dt><dd>Microsoft Corporation, One Microsoft Way, Redmond, WA 98052, USA — <a class="link" href="https://go.microsoft.com/fwlink/?linkid=2126612">개인정보 문의</a></dd>
         <dt>목적·보유 기간</dt><dd>KimpTrack의 화면 이용 분석과 Microsoft Advertising 제공 등 Microsoft 자신의 목적 — Clarity의 기록은 녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월, Microsoft 자신의 목적에 쓰는 정보는 Microsoft 개인정보처리방침이 정한 기간</dd>
-        <dt>거부 방법·효과</dt><dd>위 “화면 분석 동의 관리”의 국외 이전 칸에 동의하지 않으면 이전되지 않습니다(세 가지가 다 있어야 분석하므로 화면 분석 전체가 꺼집니다). 동의한 뒤에도 [동의 철회]로 언제든 멈출 수 있고(GPC·광고 차단기로도 막힙니다), 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
+        <dt>거부 방법·절차·효과</dt><dd>위 “화면 분석 동의 관리”의 국외 이전 칸에 동의하지 않으면 이전되지 않습니다(세 가지가 다 있어야 분석하므로 화면 분석 전체가 꺼집니다). 동의한 뒤에도 [동의 철회]로 언제든 멈출 수 있고(GPC·광고 차단기로도 막힙니다), 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
         <dt>근거</dt><dd>국외 이전에 관한 별도의 동의(개인정보 보호법 제28조의8 제1항 제1호) — 수집·이용, 제공 동의와 칸을 나눠 랜딩·대시보드의 안내나 위 “화면 분석 동의 관리”에서 받습니다.</dd>
       </dl>
       <h3>Google LLC — 문의 메일(Gmail)</h3>
@@ -276,7 +284,7 @@
         <dt>국가·시기·방법</dt><dd>미국 — 메일을 받고 보낼 때 네트워크로 전송</dd>
         <dt>받는 자·연락처</dt><dd>Google LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA — <a class="link" href="https://policies.google.com/privacy?hl=ko">Google 개인정보처리방침</a></dd>
         <dt>목적·보유 기간</dt><dd>문의 수신·보관 — 답변을 마친 날부터 1년</dd>
-        <dt>거부 방법·효과</dt><dd>메일을 보내지 않으면 이전되지 않습니다. 문의는 이 메일로만 받습니다.</dd>
+        <dt>거부 방법·절차·효과</dt><dd>메일을 보내지 않으면 이전되지 않습니다. 문의는 이 메일로만 받습니다.</dd>
         <dt>근거</dt><dd>처리위탁·보관 사항을 이 방침에 공개(개인정보 보호법 제28조의8 제1항 제3호 가목)</dd>
       </dl>
       <h3>Google LLC — 대시보드 글꼴(Google Fonts)</h3>
@@ -285,7 +293,7 @@
         <dt>국가·시기·방법</dt><dd>미국 — 대시보드를 열 때 방문자의 브라우저가 직접 요청</dd>
         <dt>받는 자·연락처</dt><dd>Google LLC(위와 같음)</dd>
         <dt>목적·보유 기간</dt><dd>글꼴 전달 — 요청 기록은 Google의 방침에 따름</dd>
-        <dt>거부 방법·효과</dt><dd>브라우저·확장 프로그램으로 외부 글꼴을 막으면 기본 글꼴로 보입니다.</dd>
+        <dt>거부 방법·절차·효과</dt><dd>브라우저·확장 프로그램으로 외부 글꼴을 막으면 기본 글꼴로 보입니다.</dd>
         <dt>근거</dt><dd>KimpTrack이 넘기지 않고 방문자의 브라우저가 직접 요청합니다 — 받는 곳을 알리려고 적습니다.</dd>
       </dl>
       <h3>Cloudflare, Inc. — 관리자 로그인(운영자만)</h3>
@@ -294,7 +302,7 @@
         <dt>국가·시기·방법</dt><dd>미국 — 관리자 화면에 들어올 때 네트워크로 전송</dd>
         <dt>받는 자·연락처</dt><dd>Cloudflare, Inc., 101 Townsend St., San Francisco, CA 94107, USA — <a class="link" href="https://www.cloudflare.com/privacypolicy/">Cloudflare 개인정보처리방침</a></dd>
         <dt>목적·보유 기간</dt><dd>관리자 인증과 연결 — 인증 기록 24시간</dd>
-        <dt>거부 방법·효과</dt><dd>관리자 화면을 쓰지 않으면 이전되지 않습니다.</dd>
+        <dt>거부 방법·절차·효과</dt><dd>관리자 화면을 쓰지 않으면 이전되지 않습니다.</dd>
         <dt>근거</dt><dd>처리위탁 사항을 이 방침에 공개(개인정보 보호법 제28조의8 제1항 제3호 가목)</dd>
       </dl>
       <h3>관리자 화면의 API 문서(운영자만)</h3>
@@ -303,7 +311,7 @@
         <dt>국가·시기·방법</dt><dd>영국(jsDelivr — Cloudflare·Fastly 등 CDN이 전달)·미국(<code>fastapi.tiangolo.com</code>의 아이콘, ReDoc 화면의 Google Fonts) — API 문서를 열 때 운영자의 브라우저가 직접 요청</dd>
         <dt>받는 자·연락처</dt><dd>jsDelivr: Volentio JSD Limited(잉글랜드·웨일스 등록) — <a class="link" href="https://www.jsdelivr.com/terms/privacy-policy">jsDelivr 개인정보처리방침</a>. 아이콘: Cloudflare, Inc.(위와 같음). Google Fonts: Google LLC(위와 같음)</dd>
         <dt>목적·보유 기간</dt><dd>화면 파일 전달 — 요청 기록은 각 회사의 방침에 따름</dd>
-        <dt>거부 방법·효과</dt><dd>API 문서를 열지 않으면 요청하지 않습니다.</dd>
+        <dt>거부 방법·절차·효과</dt><dd>API 문서를 열지 않으면 요청하지 않습니다.</dd>
         <dt>근거</dt><dd>운영자의 브라우저가 직접 요청합니다 — 받는 곳을 알리려고 적습니다.</dd>
       </dl>
     </section>
@@ -382,6 +390,7 @@
       const KEY = 'kt.analytics'
       const VKEY = 'kt.analytics.v'
       // 지금 안내의 판 — 위 an-version 글자, 033 clarity.js 의 판과 같다(테스트가 본다). 받는 자·항목·목적·보유 기간이 바뀌면 올린다
+      // (세 칸의 글자를 바꾸면 test_privacy 의 판별 해시가 멈춘다 — 스펙 032 §3.3)
       const VERSION = '2026-10-01'
       const BOXES = ['an-collect', 'an-provide', 'an-transfer']
       const $ = (id) => document.getElementById(id)
@@ -429,9 +438,8 @@
           $(id).checked = usable && on
           $(id).disabled = !usable
         }
-        // 두 버튼은 같은 모양으로 늘 함께 — 동의한 동안은 [모두 거부] 자리에 같은 일을 하는 [동의 철회]
-        $('an-deny').hidden = on
-        $('an-withdraw').hidden = !on
+        // 버튼 줄은 늘 [선택한 대로 저장]·[모두 거부] 둘 — 동의한 동안은 세 칸 앞 상태 줄 옆에 같은 일을 하는 [동의 철회]도
+        $('an-withdraw').hidden = !(usable && on)
         $('an-stuck').hidden = true
       }
 

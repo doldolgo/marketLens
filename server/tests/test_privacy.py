@@ -5,6 +5,7 @@
 CSP·버튼을 보는 검증은 스펙 §5 의 로컬 Docker·브라우저 명령이다.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -81,8 +82,6 @@ MUST_SAY = (
     "철회하면 그 탭이 한 번 새로고침되어 분석을 멈추고, 동의하면 그 탭에서도 분석을 시작합니다",
     "kt.analytics.v",  # §3.3 — 동의한 안내의 판
     "나이를 확인하지 않",  # §3.4-2 — 만 14세 미만(사람 확인 §7)
-    # §3.3 — 철회 뒤 이미 보낸 기록을 바로 지우는 길(법 제37조 제3항, 절차는 033 런북)
-    "운영자가 Clarity 프로젝트의 기록을 통째로 지우고(모든 방문자의 기록이 함께 지워집니다) 새 프로젝트로 다시 시작합니다",
 )
 # 동의 방식(사람 결정 2026-10-01)과 맞지 않는 문장 — 페이지에 있으면 거짓이다
 # 파기는 날수 기한을 약속하지 않는다(§3.5 — '90일 뒤 지웁니다' 같은 단정 없음), Microsoft 의 자기 목적 이용은
@@ -105,15 +104,24 @@ SHARED_SENTENCES = (
     "하나라도 빠지면 거부로 저장합니다.",
     "만 14세 미만은 동의하지 마세요.",
 )
+# §3.3 — 철회 뒤 이미 보낸 기록을 바로 지우는 길(법 제37조 제3항, 절차는 033 런북)과 그 한계. 상자 아래 문단·3절에 따로
+INQUIRY = '<a class="link" href="https://go.microsoft.com/fwlink/?linkid=2126612">개인정보 문의</a>'
+DELETION = "운영자가 Clarity 프로젝트의 기록을 통째로 지우고(모든 방문자의 기록이 함께 지워집니다) 새 프로젝트로 다시 시작합니다"
+MICROSOFT_KEEPS = (
+    "Microsoft가 자기 목적에 쓰는 정보는 이것으로 지워지지 않으며 Microsoft에 직접 요청할 수 있습니다"
+    f"({INQUIRY})"
+)
 # §3.3 — 상태 줄의 다섯 글자(스크립트가 그린다)
 STATES = ("정하지 않음", "동의함", "거부함", "GPC로 거부", "저장할 수 없음")
 # §3.3 — 동의 세 칸(법 제22조 제1항 — 나눠 각각 받는다): 체크 상자 id, 체크 글자, 그 동의의 알릴 사항
-# (수집·이용 제15조 제2항 · 제3자 제공 제17조 제2항 · 국외 이전 제28조의8 제2항 — 033 의 띠와 같은 글자)
+# (수집·이용 제15조 제2항 · 제3자 제공 제17조 제2항 · 국외 이전 제28조의8 제2항 — 033 의 띠와 같은 글자),
+# 눈에 띄게 적는 중요한 내용(제22조 제2항·시행령 제17조 제3항 — 보유 기간, 받는 자와 그 목적·보유 기간)
 CONSENT_CELLS = (
     (
         "an-collect",
         "(선택) 화면 이용 기록의 수집·이용에 동의합니다",
         {"항목", "목적", "보유 기간", "거부 권리·불이익"},
+        {"보유 기간"},
     ),
     (
         "an-provide",
@@ -125,6 +133,7 @@ CONSENT_CELLS = (
             "받는 자의 보유 기간",
             "거부 권리·불이익",
         },
+        {"받는 자", "받는 자의 목적", "받는 자의 보유 기간"},
     ),
     (
         "an-transfer",
@@ -134,8 +143,9 @@ CONSENT_CELLS = (
             "국가·시기·방법",
             "항목",
             "목적·보유 기간",
-            "거부 방법·효과",
+            "거부 방법·절차·효과",
         },
+        {"받는 자·연락처", "목적·보유 기간"},
     ),
 )
 BOXES = [cell[0] for cell in CONSENT_CELLS]
@@ -165,7 +175,7 @@ BEHAVIOR_TERMS = {
     "거부 방법",
 }
 # §3.3 — 동의 관리 스크립트를 node 로 돌리는 가짜 브라우저. 표준 입력의 [스크립트, 경우들] 을 받아 경우마다 새로 돌리고,
-# 칸 체크·버튼 클릭·다른 탭의 storage 이벤트 뒤의 저장값·판·쿠키·상태 글자·보이는·체크된·막힌 요소를 JSON 으로 낸다.
+# 칸 체크·버튼 클릭·다른 탭의 storage 이벤트(키 하나·저장소 비우기) 뒤의 저장값·판·쿠키·상태 글자·보이는·체크된·막힌 요소를 JSON 으로 낸다.
 # 라이브러리 없음.
 HARNESS = r"""
 const [script, cases] = JSON.parse(require('fs').readFileSync(0, 'utf8'))
@@ -211,6 +221,7 @@ const out = cases.map((c) => {
     if (kind === 'click') el(arg).on.click()
     else if (kind === 'check') el(arg).checked = true
     else if (kind === 'uncheck') el(arg).checked = false
+    else if (kind === 'clear') { data.clear(); listeners.storage({ key: null }) } // 다른 탭이 저장소를 비움
     else { const [k, v] = arg.split('='); data.set(k, v); listeners.storage({ key: k }) } // 'other:<키>=<값>'
   }
   const ids = (pick) => Object.keys(els).filter((id) => pick(els[id])).sort()
@@ -233,14 +244,21 @@ def _notice_version() -> str:
 
 NOTICE = _notice_version()
 OLD = "2026-09-01"  # 예전 판 — 이 판의 동의로는 켜지 않고 다시 묻는다
-# 스크립트가 숨기고 보이는 상태 요소. 버튼 줄 안의 [모두 거부]·[동의 철회]는 an-actions 가 보일 때만 센다
+# §3.3 — 판마다 세 칸의 글자(체크 글자와 알릴 사항, 태그 뗀)의 sha256. 글자를 바꾸면 멈춘다 — 받는 자·항목·목적·보유 기간이
+# 바뀌었으면 판을 올리고(스크립트·보이는 판 글자·033 clarity.js) 새 판을 더한다. 문장만 다듬었으면 지금 판의 값만 고치고
+# PR 본문에 이유를 적는다
+NOTICE_DIGESTS = {
+    "2026-10-01": "7ee34255a0120818e76ffc210a12eb5cd556773eb6b06462a62cebb4a4bc6bc1",
+}
+# 스크립트가 숨기고 보이는 상태 요소. 버튼 줄 안의 [모두 거부]는 an-actions 가 보일 때만 센다
 STATUS_IDS = {"an-state", "an-actions", "an-gpc", "an-nostore", "an-stuck"}
-# 정하지 않음·거부함은 [선택한 대로 저장]·[모두 거부], 동의함은 [선택한 대로 저장]·[동의 철회]
+# 버튼 줄은 늘 [선택한 대로 저장]·[모두 거부], 동의함이면 세 칸 앞 상태 줄 옆에 [동의 철회]도
 UNDECIDED = {"an-state", "an-actions", "an-deny"}
-AGREED = {"an-state", "an-actions", "an-withdraw"}
+AGREED = UNDECIDED | {"an-withdraw"}
 ALL = [f"check:{box}" for box in BOXES]
 # (이름, 경우, 뒤의 저장값, 뒤의 판, 상태 글자, 보이는 상태 요소, 쿠키를 지웠나) — 경우: stored·v 처음 값(없으면 키 없음),
-# gpc, fail(get·set·remove 예외, set:<키> 는 그 키만), steps(check:·uncheck:<칸 id> · click:<버튼 id> · other:<키>=<다른 탭이 쓴 값>)
+# gpc, fail(get·set·remove 예외, set:<키> 는 그 키만), steps(check:·uncheck:<칸 id> · click:<버튼 id> · other:<키>=<다른 탭이 쓴 값>
+# · clear: 다른 탭이 저장소를 비움)
 # fmt: off
 CONSENT_CASES = [
     ("값 없음", {}, None, None, "정하지 않음", UNDECIDED, False),
@@ -266,6 +284,7 @@ CONSENT_CASES = [
     ("다른 탭의 동의", {"steps": [f"other:kt.analytics.v={NOTICE}", "other:kt.analytics=granted"]}, "granted", NOTICE, "동의함", AGREED, False),
     ("다른 탭의 철회", {"stored": "granted", "v": NOTICE, "steps": ["other:kt.analytics=denied"]}, "denied", NOTICE, "거부함", UNDECIDED, False),
     ("다른 탭이 판을 바꿈", {"stored": "granted", "v": NOTICE, "steps": [f"other:kt.analytics.v={OLD}"]}, "granted", OLD, "정하지 않음", UNDECIDED, False),
+    ("다른 탭이 저장소를 비움", {"stored": "granted", "v": NOTICE, "steps": ["clear:"]}, None, None, "정하지 않음", UNDECIDED, False),
 ]
 # fmt: on
 # §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(동의 상자의 국외 이전 칸과 같은 이름) + 근거
@@ -332,6 +351,31 @@ def _section(html: str, label: str) -> str:
 
 def _terms(dl: str) -> set[str]:
     return set(re.findall(r"<dt>(.*?)</dt>", dl))
+
+
+def _notes(dl: str) -> dict[str, str]:
+    return dict(re.findall(r"<dt>(.*?)</dt><dd>(.*?)</dd>", dl, flags=re.S))
+
+
+def _text(fragment: str) -> str:
+    """태그를 뗀 글자 — 033 의 띠와 같은 비교."""
+    return " ".join(re.sub(r"<[^>]+>", "", fragment).split())
+
+
+def _consent_box(html: str) -> tuple[str, list[str]]:
+    """동의 상자(`<div class="consent">` 부터 절 끝까지)와 그 안의 세 칸."""
+    section = _section(html, "consent-title")
+    box = section[section.index('<div class="consent">') :]
+    return box, re.findall(r'<div class="cell">(.*?)</div>', box, flags=re.S)
+
+
+def _notice_digest(html: str) -> str:
+    """세 칸의 체크 글자와 알릴 사항(태그 뗀 글자)의 sha256 — 판에 묶인 글자 (§3.3)."""
+    lines = []
+    for cell in _consent_box(html)[1]:
+        lines.append(_text(re.search(r"<span>(.*?)</span></label>", cell).group(1)))
+        lines += [f"{_text(dt)}: {_text(dd)}" for dt, dd in _notes(cell).items()]
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest()
 
 
 def _run_consent_script(cases: list[dict]) -> list[dict]:
@@ -440,7 +484,7 @@ def test_page_states_the_consent_contract_and_required_notices() -> None:
         assert text in html, text
     for text in MUST_NOT_SAY:
         assert text not in html, text
-    # 같은 모양의 버튼 둘 — [선택한 대로 저장]·[모두 거부], 동의한 동안은 [모두 거부] 자리에 [동의 철회] —
+    # 같은 모양의 버튼 — 세 칸 뒤 [선택한 대로 저장]·[모두 거부], 동의한 동안은 세 칸 앞 상태 줄 옆에 [동의 철회] —
     # 과 자바스크립트가 꺼졌을 때의 안내 (§3.3·§3.7)
     for button in (
         '<button class="btn" type="button" id="an-save">선택한 대로 저장</button>',
@@ -449,8 +493,19 @@ def test_page_states_the_consent_contract_and_required_notices() -> None:
     ):
         assert button in html, button
     assert "<noscript>" in html
-    # 두 버튼의 너비는 글자 길이가 아니라 같은 칸 너비를 따른다
-    assert re.search(r"\.actions \{[^}]*grid-template-columns: repeat\(auto-fit", html)
+    # 두 버튼의 너비는 글자 길이가 아니라 같은 칸 너비를 따른다. hidden 은 .btn 의 display 를 이긴다 — 없으면
+    # [모두 거부]·[동의 철회]와 GPC·저장 불가 때의 버튼 줄이 늘 보인다. 버튼 하나만 다르게 그리는 규칙은 없다
+    styles = "".join(re.findall(r"<style\b.*?</style>", html, flags=re.S))
+    assert re.search(
+        r"\.actions \{[^}]*grid-template-columns: repeat\(auto-fit", styles
+    )
+    assert "[hidden] { display: none !important; }" in styles
+    assert "#an-" not in styles
+    # 중요한 내용 표시 — 다른 내용보다 20% 크게·굵게·밑줄 (§3.3 — 법 제22조 제2항)
+    assert re.search(
+        r"\.key \{[^}]*font-size: 1\.2em;[^}]*font-weight: 700;[^}]*text-decoration: underline;",
+        styles,
+    )
     # 세 칸은 처음에 모두 빈 칸 — 미리 체크하지 않는다
     boxes = re.findall(r"<input [^>]*>", html)
     assert len(boxes) == 3 and all('type="checkbox"' in box for box in boxes)
@@ -469,6 +524,16 @@ def test_notice_version_is_shown_and_not_after_the_effective_date() -> None:
     assert NOTICE <= EFFECTIVE
 
 
+def test_notice_version_is_tied_to_the_notice_text() -> None:
+    """세 칸의 글자가 바뀌면 멈춘다 — 판을 올릴지(받는 자·항목·목적·보유 기간) 해시만 고칠지(문장 다듬기) 사람이 고른다 (§3.3)."""
+    html, _ = _read(PUBLIC / "privacy.html")
+    assert NOTICE in NOTICE_DIGESTS, NOTICE
+    digest = _notice_digest(html)
+    assert digest == NOTICE_DIGESTS[NOTICE], (
+        f"세 칸의 글자가 판 {NOTICE} 때와 다르다 — 판을 올리거나 해시를 {digest} 로 고친다"
+    )
+
+
 def test_consent_script_shows_the_stored_value_and_the_buttons_write_it() -> None:
     """동의 관리 스크립트를 node 로 돌린다 — 상태 글자·보이는 요소·칸·저장값·판·쿠키가 실제 저장값과 같다 (§3.3)."""
     cookies = ["_clck", "_clsk", "other"]
@@ -481,7 +546,7 @@ def test_consent_script_shows_the_stored_value_and_the_buttons_write_it() -> Non
         assert (got["stored"], got["v"], got["state"]) == (stored, version, state), name
         visible = set(got["shown"])
         if "an-actions" not in visible:
-            visible -= {"an-deny", "an-withdraw"}
+            visible -= {"an-deny"}
         assert visible & (STATUS_IDS | {"an-deny", "an-withdraw"}) == shown, name
         # 칸은 저장된 선택을 보인다 — 동의함이면 셋 다, 아니면 빈 칸. 버튼 줄이 없으면 칸도 막는다
         assert got["checked"] == (sorted(BOXES) if state == "동의함" else []), name
@@ -509,17 +574,23 @@ def test_withdrawal_expires_clarity_cookies_in_both_domain_shapes() -> None:
 
 
 def test_consent_box_splits_three_consents_before_the_buttons() -> None:
-    """동의를 셋으로 나눠 칸마다 그 동의의 알릴 사항을 버튼 앞에 둔다 (§3.3 — 법 제22조 제1항)."""
+    """동의를 셋으로 나눠 칸마다 그 동의의 알릴 사항을 두고, 지금 상태·[동의 철회]는 칸 앞, 저장·거부는 칸 뒤 (§3.3 — 법 제22조)."""
     html, _ = _read(PUBLIC / "privacy.html")
-    box = _section(html, "consent-title")
-    box = box[box.index('<div class="consent">') : box.index('id="an-actions"')]
-    # 033 의 띠와 같은 문장 — 세 칸보다 앞
+    box, cells = _consent_box(html)
+    # 033 의 띠와 같은 문장, 지금 상태와 [동의 철회] — 세 칸보다 앞(/privacy#consent 로 와서 첫 화면에서 철회한다, 제38조 제4항)
     first_cell = box.index('<div class="cell">')
     for sentence in SHARED_SENTENCES:
         assert 0 <= box.find(sentence) < first_cell, sentence
-    cells = re.findall(r'<div class="cell">(.*?)</div>', box, flags=re.S)
+    for element in ("an-state", "an-withdraw"):
+        assert box.index(f'id="{element}"') < first_cell, element
+    # [선택한 대로 저장]·[모두 거부] — 알릴 사항을 읽은 뒤 고르게 마지막 칸 뒤
+    last_cell_end = box.index("</div>", box.rindex('<div class="cell">'))
+    for element in ("an-save", "an-deny"):
+        assert box.index(f'id="{element}"') > last_cell_end, element
     assert len(cells) == len(CONSENT_CELLS)
-    for cell, (box_id, label, terms) in zip(cells, CONSENT_CELLS, strict=True):
+    for cell, (box_id, label, terms, key_terms) in zip(
+        cells, CONSENT_CELLS, strict=True
+    ):
         assert re.search(
             rf'<label class="pick"><input type="checkbox" id="{box_id}" disabled /><span>'
             rf"{re.escape(label)}</span></label>",
@@ -528,26 +599,59 @@ def test_consent_box_splits_three_consents_before_the_buttons() -> None:
         dls = re.findall(r"<dl[^>]*>(.*?)</dl>", cell, flags=re.S)
         assert len(dls) == 1 and _terms(dls[0]) == terms, box_id
         # 033 의 띠가 이 칸들을 옮긴다 — 랜딩·대시보드에는 방침의 절이 없으니 칸은 다른 절을 가리키지 않는다
-        assert "절" not in dls[0], box_id
-        notes = dict(re.findall(r"<dt>(.*?)</dt><dd>(.*?)</dd>", dls[0], flags=re.S))
+        assert not re.search(r"\d+절", dls[0]), box_id
+        notes = _notes(dls[0])
+        # 중요한 내용만 칸 전체를 강조 표시로 감싼다 (제22조 제2항·시행령 제17조 제3항)
+        for term, value in notes.items():
+            key = re.fullmatch(r'<strong class="key">.*</strong>', value, flags=re.S)
+            assert bool(key) == (term in key_terms), (box_id, term)
+            assert value.count('class="key"') == (term in key_terms), (box_id, term)
         assert "등" not in notes["항목"], box_id
         for item in CLARITY_ITEMS:
             assert item in notes["항목"], (box_id, item)
         # 거부 칸은 거부해도 불이익이 없다는 것과 철회하는 곳을 적는다 (법 제28조의8 제2항 제5호·제38조 제4항)
-        refusal = notes.get("거부 권리·불이익") or notes["거부 방법·효과"]
+        refusal = notes.get("거부 권리·불이익") or notes["거부 방법·절차·효과"]
         assert "불이익이 없습니다" in refusal, box_id
         assert 'href="/privacy#consent"' in refusal and "[동의 철회]" in refusal
+    raw = [_notes(cell) for cell in cells]
     collect, provide, transfer = (
-        dict(re.findall(r"<dt>(.*?)</dt><dd>(.*?)</dd>", cell, flags=re.S))
-        for cell in cells
+        {term: _text(value) for term, value in notes.items()} for notes in raw
     )
-    assert "KimpTrack의 화면 이용 분석" in collect["목적"]
+    assert collect["목적"] == (
+        "KimpTrack의 화면 이용 분석 — 어떤 화면·기능이 쓰이고 어디서 막히는지 알아 서비스를 고치기"
+    )
+    for period in (
+        collect["보유 기간"],
+        provide["받는 자의 보유 기간"],
+        transfer["목적·보유 기간"],
+    ):
+        assert "녹화 30일" in period and "최대 9개월" in period, period
+    for period in (provide["받는 자의 보유 기간"], transfer["목적·보유 기간"]):
+        assert "Microsoft 개인정보처리방침이 정한 기간" in period, period
     assert provide["받는 자"] == "Microsoft Corporation(미국)"
     assert "Microsoft Advertising" in provide["받는 자의 목적"]
-    assert "Microsoft 개인정보처리방침" in provide["받는 자의 보유 기간"]
     assert transfer["국가·시기·방법"].startswith("미국 — ")
-    assert "Microsoft Corporation" in transfer["받는 자·연락처"]
+    for word in ("수시로", "브라우저", "전송"):
+        assert word in transfer["국가·시기·방법"], word
+    assert transfer["받는 자·연락처"].startswith("Microsoft Corporation, ")
+    assert "Redmond" in transfer["받는 자·연락처"]
+    assert INQUIRY in raw[2]["받는 자·연락처"]
     assert "Microsoft Advertising" in transfer["목적·보유 기간"]
+
+
+def test_withdrawal_deletion_is_stated_under_the_box_and_in_section_3() -> None:
+    """철회 뒤 이미 보낸 기록을 지우는 길과 그 한계 — 띠에서 /privacy#consent 로 온 방문자가 처음 읽는 상자 아래 문단과
+    3절에 따로 적는다 (§3.3 — 법 제37조 제3항). 8절은 아래 테스트가 본다."""
+    html, _ = _read(PUBLIC / "privacy.html")
+    section = _section(html, "consent-title")
+    under_box = section[section.rindex("</div>") :]
+    assert DELETION in under_box
+    assert '<a class="link" href="#s10">10절</a>의 메일로 요청' in under_box
+    destruction = _section(html, "s3")
+    assert "운영자가 Clarity 프로젝트의 기록을 통째로 지웁니다" in destruction
+    for part in (under_box, destruction):
+        assert "지우는 시점은 Microsoft 기준" in part
+        assert MICROSOFT_KEEPS in part
 
 
 def test_clarity_rests_on_consent_for_collection_provision_and_transfer() -> None:
