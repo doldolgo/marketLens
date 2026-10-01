@@ -91,11 +91,49 @@ MUST_NOT_SAY = (
     "90일 뒤 지웁니다",
     "쓸 수 있어",
 )
+# §3.3 — 033 의 띠와 같은 문장(머리·셋 모두 규칙·나이). 동의 상자 안 세 칸보다 앞에 있다
+SHARED_SENTENCES = (
+    "랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? "
+    "Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 동의하지 않아도 모든 기능을 그대로 씁니다.",
+    "세 가지에 모두 동의하고 [선택한 대로 저장]을 누른 경우에만 분석합니다 — Clarity는 셋이 다 있어야 돌아가므로 "
+    "하나라도 빠지면 거부로 저장합니다.",
+    "만 14세 미만은 동의하지 마세요.",
+)
 # §3.3 — 상태 줄의 다섯 글자(스크립트가 그린다)
 STATES = ("정하지 않음", "동의함", "거부함", "GPC로 거부", "저장할 수 없음")
-# §3.3 — 동의 버튼 앞의 알릴 사항(법 제15조 제2항·제17조 제2항·제28조의8 제2항 — 033 의 띠와 같은 사실)
-CONSENT_TERMS = {"받는 자", "항목", "이전 국가·일시·방법", "목적", "보유 기간", "거부"}
-# §3.3 — 동의 상자의 항목 칸이 2절 없이도 다 읽히는지 보는 Clarity 항목들
+# §3.3 — 동의 세 칸(법 제22조 제1항 — 나눠 각각 받는다): 체크 상자 id, 체크 글자, 그 동의의 알릴 사항
+# (수집·이용 제15조 제2항 · 제3자 제공 제17조 제2항 · 국외 이전 제28조의8 제2항 — 033 의 띠와 같은 글자)
+CONSENT_CELLS = (
+    (
+        "an-collect",
+        "(선택) 화면 이용 기록의 수집·이용에 동의합니다",
+        {"항목", "목적", "보유 기간", "거부 권리·불이익"},
+    ),
+    (
+        "an-provide",
+        "(선택) 화면 이용 기록을 Microsoft에 제공하는 데 동의합니다",
+        {
+            "받는 자",
+            "받는 자의 목적",
+            "항목",
+            "받는 자의 보유 기간",
+            "거부 권리·불이익",
+        },
+    ),
+    (
+        "an-transfer",
+        "(선택) 화면 이용 기록을 미국으로 이전하는 데 동의합니다",
+        {
+            "받는 자·연락처",
+            "국가·시기·방법",
+            "항목",
+            "목적·보유 기간",
+            "거부 방법·효과",
+        },
+    ),
+)
+BOXES = [cell[0] for cell in CONSENT_CELLS]
+# §3.3 — 세 칸의 항목 칸이 2절 없이도 다 읽히는지 보는 Clarity 항목들
 CLARITY_ITEMS = (
     "페이지 주소",
     "이전 페이지 주소",
@@ -426,8 +464,8 @@ def test_page_states_the_consent_contract_and_required_notices() -> None:
         '<button class="btn" type="button" id="an-withdraw">동의 철회</button>' in html
     )
     assert "<noscript>" in html
-    # 두 버튼의 너비는 글자 길이가 아니라 공통 최소 너비를 따른다
-    assert re.search(r"\.actions \.btn \{[^}]*min-width:", html)
+    # 두 버튼의 너비는 글자 길이가 아니라 같은 칸 너비를 따른다
+    assert re.search(r"\.actions \{[^}]*grid-template-columns: repeat\(auto-fit", html)
     script = "".join(page.scripts)
     for state in STATES:
         assert f"'{state}'" in script, state
@@ -461,28 +499,46 @@ def test_withdrawal_expires_clarity_cookies_in_both_domain_shapes() -> None:
         assert any(line.endswith("; domain=kimptrack.com") for line in lines), name
 
 
-def test_consent_box_tells_the_notices_before_the_buttons() -> None:
-    """동의 전에 알릴 사항을 버튼 앞에서 읽을 수 있다 (§3.3)."""
+def test_consent_box_splits_three_consents_before_the_buttons() -> None:
+    """동의를 셋으로 나눠 칸마다 그 동의의 알릴 사항을 버튼 앞에 둔다 (§3.3 — 법 제22조 제1항)."""
     html, _ = _read(PUBLIC / "privacy.html")
     box = _section(html, "consent-title")
     box = box[box.index('<div class="consent">') : box.index('id="an-actions"')]
-    dls = re.findall(r"<dl[^>]*>(.*?)</dl>", box, flags=re.S)
-    assert len(dls) == 1 and _terms(dls[0]) == CONSENT_TERMS
-    for text in (
-        "Microsoft Corporation(미국)",
-        "Microsoft Advertising",
-        "불이익이 없습니다",
-    ):
-        assert text in dls[0], text
-    # 033 의 띠가 이 칸들을 옮긴다 — 랜딩·대시보드에는 방침의 절이 없으니 칸은 다른 절을 가리키지 않는다
-    assert "절" not in dls[0]
-    cells = dict(re.findall(r"<dt>(.*?)</dt><dd>(.*?)</dd>", dls[0], flags=re.S))
-    assert "등" not in cells["항목"]
-    for item in CLARITY_ITEMS:
-        assert item in cells["항목"], item
-    assert cells["이전 국가·일시·방법"].startswith("미국 — ")
-    # 거부 칸은 철회하는 곳을 적는다 (법 제28조의8 제2항 제5호·제38조 제4항)
-    assert 'href="/privacy#consent"' in cells["거부"] and "[동의 철회]" in cells["거부"]
+    # 033 의 띠와 같은 문장 — 세 칸보다 앞
+    first_cell = box.index('<div class="cell">')
+    for sentence in SHARED_SENTENCES:
+        assert 0 <= box.find(sentence) < first_cell, sentence
+    cells = re.findall(r'<div class="cell">(.*?)</div>', box, flags=re.S)
+    assert len(cells) == len(CONSENT_CELLS)
+    for cell, (box_id, label, terms) in zip(cells, CONSENT_CELLS, strict=True):
+        assert re.search(
+            rf'<label class="pick"><input type="checkbox" id="{box_id}" disabled /><span>'
+            rf"{re.escape(label)}</span></label>",
+            cell,
+        ), box_id
+        dls = re.findall(r"<dl[^>]*>(.*?)</dl>", cell, flags=re.S)
+        assert len(dls) == 1 and _terms(dls[0]) == terms, box_id
+        # 033 의 띠가 이 칸들을 옮긴다 — 랜딩·대시보드에는 방침의 절이 없으니 칸은 다른 절을 가리키지 않는다
+        assert "절" not in dls[0], box_id
+        notes = dict(re.findall(r"<dt>(.*?)</dt><dd>(.*?)</dd>", dls[0], flags=re.S))
+        assert "등" not in notes["항목"], box_id
+        for item in CLARITY_ITEMS:
+            assert item in notes["항목"], (box_id, item)
+        # 거부 칸은 거부해도 불이익이 없다는 것과 철회하는 곳을 적는다 (법 제28조의8 제2항 제5호·제38조 제4항)
+        refusal = notes.get("거부 권리·불이익") or notes["거부 방법·효과"]
+        assert "불이익이 없습니다" in refusal, box_id
+        assert 'href="/privacy#consent"' in refusal and "[동의 철회]" in refusal
+    collect, provide, transfer = (
+        dict(re.findall(r"<dt>(.*?)</dt><dd>(.*?)</dd>", cell, flags=re.S))
+        for cell in cells
+    )
+    assert "KimpTrack의 화면 이용 분석" in collect["목적"]
+    assert provide["받는 자"] == "Microsoft Corporation(미국)"
+    assert "Microsoft Advertising" in provide["받는 자의 목적"]
+    assert "Microsoft 개인정보처리방침" in provide["받는 자의 보유 기간"]
+    assert transfer["국가·시기·방법"].startswith("미국 — ")
+    assert "Microsoft Corporation" in transfer["받는 자·연락처"]
+    assert "Microsoft Advertising" in transfer["목적·보유 기간"]
 
 
 def test_clarity_rests_on_consent_for_collection_provision_and_transfer() -> None:
