@@ -90,11 +90,12 @@
 
       <section id="infra" aria-labelledby="h-infra">
         <div class="sec-head"><h2 id="h-infra">인프라</h2><p class="sec-sum" id="s-infra">…</p></div>
-        <div class="stack">
-          <div>
-            <div class="card-head"><span class="card-kicker">박스 · 24시간</span><span class="meta" id="m-metrics"></span></div>
-            <div class="grid" id="b-metrics"></div>
-          </div>
+        <!-- 지표·경보·canary 가 같은 이유로 비면(AWS 종료 뒤 등) 카드 하나로 접는다 -->
+        <div class="card" id="infra-fold" hidden>
+          <div class="card-head"><span class="card-kicker">AWS 지표·경보·canary</span><span class="meta" id="m-infra-fold"></span></div>
+          <div id="b-infra-fold"></div>
+        </div>
+        <div class="stack" id="infra-parts">
           <div class="grid-wide">
             <div class="card">
               <div class="card-head"><h3>경보</h3><span class="meta" id="m-alarms"></span></div>
@@ -105,6 +106,10 @@
               <div class="card-head"><h3>canary</h3><span class="meta" id="m-canary"></span></div>
               <div id="b-canary"></div>
             </div>
+          </div>
+          <div>
+            <div class="card-head"><span class="card-kicker">박스 · 24시간</span><span class="meta" id="m-metrics"></span></div>
+            <div class="grid" id="b-metrics"></div>
           </div>
         </div>
       </section>
@@ -122,6 +127,7 @@
           </div>
           <p class="muted small" id="alerts-count"></p>
           <div id="b-alerts"></div>
+          <ul class="feed" id="alerts-feed" tabindex="0" aria-label="알림 목록" hidden></ul>
         </div>
       </section>
 

@@ -748,7 +748,7 @@ const BOX_ROLE = { collect: '수집기', data: 'Influx·Redis', serve: 'caddy·w
 const CREDIT_FLOOR = { data: 173, serve: 86 };
 const pctFmt = (v) => (num(v) === null ? '–' : `${v.toFixed(1)}%`);
 
-// 지표 한 줄 — 이름·지금 값·24시간 최저 또는 최고(값 색은 임계 — 모양도 함께)·선
+// 지표 한 줄 — 이름·지금 값·24시간 최저 또는 최고(값 색은 임계 — 모양도 함께)·선. 지금 값의 상태는 o.worst 에 모은다
 function metricRow(box, name, points, o) {
   const s = stats(points);
   const fmt = o.format || ((v) => int(v));
@@ -756,11 +756,22 @@ function metricRow(box, name, points, o) {
     const tone = v === null || !o.tone ? null : o.tone(v);
     return tone ? marked(tone, fmt(v)) : el('span', null, fmt(v));
   };
+  if (o.worst && s.now !== null && o.tone) {
+    const tone = o.tone(s.now);
+    if (tone) o.worst.push([tone, `${o.short ?? name} ${fmt(s.now)}`]);
+  }
   const row = el('div', 'metric');
   const val = el('span', 'metric-val');
-  val.append(toned(s.now));
-  const ext = el('span', 'metric-ext', `24시간 ${o.extreme === 'min' ? '최저' : '최고'} `);
-  ext.append(toned(o.extreme === 'min' ? s.min : s.max));
+  let ext;
+  if (o.peak) {
+    // 같은 카드에 '지금' 값이 따로 있는 계열 — 굵은 값은 24시간 최고, 마지막 구간 값은 작게(두 '지금' 이 다투지 않게)
+    val.append(el('span', 'metric-tag', '24시간 최고 '), toned(s.max));
+    ext = el('span', 'metric-ext', `마지막 5분 구간 ${fmt(s.now)}`);
+  } else {
+    val.append(toned(s.now));
+    ext = el('span', 'metric-ext', `24시간 ${o.extreme === 'min' ? '최저' : '최고'} `);
+    ext.append(toned(o.extreme === 'min' ? s.min : s.max));
+  }
   if (o.ref !== undefined) ext.append(` · 경보 기준 ${fmt(o.ref)}`);
   // 박스 이름은 아는 셋만 aria-label 에(서버 글은 title 밖의 속성에 쓰지 않는다, §3.8)
   const who = own(BOX_ROLE, box) || box === 'canary' ? box : '박스';
@@ -768,6 +779,7 @@ function metricRow(box, name, points, o) {
   return row;
 }
 
+// 박스 카드 — 머리에 지금 값 중 가장 나쁜 상태 배지, 지표 줄 사이에는 축 글자 없이 카드 맨 아래 한 번
 function boxCard(box, where) {
   const card = el('div', 'card');
   const title = el('h3', null, `${box.box} ${own(BOX_ROLE, box.box) ?? ''}`.trim());
@@ -775,18 +787,24 @@ function boxCard(box, where) {
   const top = el('div', 'card-head');
   top.append(title);
   card.append(top);
-  const pctRow = (name, key, extra) => metricRow(box.box, name, box[key], { ...where, fixed100: true, format: pctFmt, ...extra });
+  const worst = [];
+  const base = { ...where, worst, noAxis: true };
+  const pctRow = (name, key, extra) => metricRow(box.box, name, box[key], { ...base, fixed100: true, format: pctFmt, ...extra });
   card.append(
-    pctRow('메모리 가용률', 'mem', { ref: 10, extreme: 'min', tone: (v) => (v < 10 ? 'bad' : v < 20 ? 'warn' : null) }),
-    pctRow('디스크 사용률', 'disk', { ref: 80, extreme: 'max', tone: (v) => (v > 80 ? 'bad' : v > 70 ? 'warn' : null) }),
+    pctRow('메모리 가용률', 'mem', { ref: 10, extreme: 'min', short: '메모리', tone: (v) => (v < 10 ? 'bad' : v < 20 ? 'warn' : null) }),
+    pctRow('디스크 사용률', 'disk', { ref: 80, extreme: 'max', short: '디스크', tone: (v) => (v > 80 ? 'bad' : v > 70 ? 'warn' : null) }),
     pctRow('CPU 사용률', 'cpu', { extreme: 'max' }),
   );
   const floor = own(CREDIT_FLOOR, box.box);
   if (floor !== undefined) {
-    card.append(metricRow(box.box, 'CPU 크레딧 잔고', box.credit, { ...where, ref: floor, extreme: 'min', tone: (v) => (v < floor ? 'bad' : null) }));
+    card.append(metricRow(box.box, 'CPU 크레딧 잔고', box.credit, { ...base, ref: floor, extreme: 'min', short: '크레딧', tone: (v) => (v < floor ? 'bad' : null) }));
   }
+  // 스왑은 값이 있는 박스만. serve 는 스왑(027)이 있지만 에이전트가 모으지 않는다 — 그 사실을 한 줄로(§3.4)
   if (box.swap != null) card.append(pctRow('스왑 사용률', 'swap', { extreme: 'max' }));
-  else card.append(el('p', 'muted small', '스왑 지표 없음'));
+  else if (box.box === 'serve') card.append(el('p', 'muted small', '스왑 지표 없음'));
+  card.append(axis('24시간 전', '지금'));
+  const pick = worst.find(([tone]) => tone === 'bad') || worst.find(([tone]) => tone === 'warn');
+  if (pick) top.append(badge(...pick));
   return card;
 }
 
@@ -800,14 +818,18 @@ function fillBoxes(node, part) {
 const ALARM_RANK = { ALARM: 0, INSUFFICIENT_DATA: 1, OK: 2 };
 const ALARM_STATE = { ALARM: ['bad', 'ALARM'], INSUFFICIENT_DATA: ['dim', '데이터 부족'], OK: ['ok', 'OK'] };
 const alarmName = (name) => clean(name).replace(/^marketlens-/, '');
+const alarmLabel = (state) => (own(ALARM_STATE, state) || ['dim', clean(state ?? '?')])[1];
 
+// 경보 한 행 — 이름·상태·바뀐 지, 사유는 이름 아래 둘째 줄(좁은 폭에서도 칸이 찌그러지지 않게)
 function alarmRow(a) {
   const tr = el('tr');
-  const name = cell(tr, alarmName(a.name), 'nowrap');
-  name.title = clean(a.name);
+  const name = cell(tr, '');
+  const strong = el('span', 'nowrap', alarmName(a.name));
+  strong.title = clean(a.name);
+  name.append(strong);
+  if (a.reason) name.append(clip(el('span', 'alarm-why'), a.reason, 160));
   cell(tr, badge(...(own(ALARM_STATE, a.state) || ['dim', String(a.state)])));
   cell(tr, ago(a.changedAt), 'num small');
-  clip(cell(tr, '', 'small muted'), a.reason ?? '', 160);
   return tr;
 }
 
@@ -848,9 +870,9 @@ function fillCanary(node, part, metrics) {
     const errors = sum(c.errors);
     runs.append(el('span', null, `24시간 실행 ${int(sum(c.runs))}`), errors ? marked('warn', `오류 ${int(errors)}`) : el('span', null, '오류 0'));
     const where = { startMs: metrics.startTs * 1000, endMs: metrics.endTs * 1000 };
-    out.push(runs, metricRow('canary', '실행 시간 (5분 최댓값)', c.durationMs, { ...where, extreme: 'max', format: (v) => `${int(v)}ms` }));
+    out.push(runs, metricRow('canary', '실행 시간 · CloudWatch 5분 최댓값', c.durationMs, { ...where, extreme: 'max', peak: true, format: (v) => `${int(v)}ms` }));
   } else {
-    const [tone, word] = stateWord(metrics);
+    const [tone, word] = softWord(metrics);
     out.push(marked(tone, `24시간 지표 ${word}`));
   }
   const lines = list(part.lines).slice(0, 10);
@@ -862,12 +884,23 @@ function fillCanary(node, part, metrics) {
   node.replaceChildren(...out);
 }
 
+// 지표·경보·canary 세 부분이 같은 이유로 비어 있는가 — 연결 안 됨·권한 없음·같은 호출 실패(AWS 종료 뒤 매일 보는 화면)
+function sameBlank(parts) {
+  const key = (p) => (p === undefined ? null : p.why ? `why:${p.why}` : p.state === 'unconfigured' || p.state === 'denied' ? p.state : null);
+  const first = key(parts[0]);
+  return first !== null && parts.every((p) => key(p) === first);
+}
+
 function drawInfra() {
   const metrics = partOf(P.aws, 'metrics');
-  region('metrics', metrics, CAUSE.aws, fillBoxes);
   const alarms = partOf(P.aws, 'alarms');
-  if (!region('alarms', alarms, CAUSE.aws, fillAlarms)) $('alarms-ok').hidden = true;
   const canary = partOf(P.aws, 'canary');
+  const folded = sameBlank([metrics, alarms, canary]);
+  $('infra-fold').hidden = !folded;
+  $('infra-parts').hidden = folded;
+  if (folded) region('infra-fold', alarms, CAUSE.aws, () => {});
+  region('metrics', metrics, CAUSE.aws, fillBoxes, undefined, true);
+  if (!region('alarms', alarms, CAUSE.aws, fillAlarms)) $('alarms-ok').hidden = true;
   region('canary', canary, CAUSE.aws, (node, part) => fillCanary(node, part, metrics));
   const bits = [];
   let tone = 'ok';
@@ -877,8 +910,8 @@ function drawInfra() {
     if (n) tone = 'bad';
     bits.push(n ? `경보 ${n}개 ALARM / ${items.length}` : `경보 ${items.length}개 ALARM 없음`);
   } else {
-    const [t, w] = stateWord(alarms);
-    tone = t === 'bad' ? 'warn' : t;
+    const [t, w] = softWord(alarms);
+    tone = t;
     bits.push(`경보 ${w}`);
   }
   if (usable(canary) && num(canary.lastRunAt) !== null) {
@@ -913,10 +946,11 @@ function alertRow(item) {
   const what = el('span', 'what');
   if (item.source === 'alarm') {
     li.append(el('span', 'tag', '경보'));
-    const name = el('span', null, `${alarmName(item.alarm)} ${clean(item.fromState ?? '?')} → `);
+    // 이전·새 상태는 경보 표와 같은 이름으로(ALARM·데이터 부족·OK)
+    const name = el('span', null, `${alarmName(item.alarm)} ${alarmLabel(item.fromState)} → `);
     name.title = clean(item.alarm);
     const to = String(item.toState ?? '?');
-    what.append(name, marked(own(TO_TONE, to) || 'dim', to));
+    what.append(name, marked(own(TO_TONE, to) || 'dim', alarmLabel(to)));
     if (item.text) what.append(clip(el('span', 'why'), item.text, 160));
   } else {
     li.append(el('span', 'tag', item.role ?? 'slack'));
@@ -930,9 +964,10 @@ function alertRow(item) {
   return li;
 }
 
+// 알림 머리의 출처 둘 — ok 면 경과("n분 전 값", refreshSec × 3 을 넘으면 주의 — slack 은 0 이라 보지 않는다, §3.3)
 function sourceState(label, part, cause) {
   const span = el('span', null, `${label} `);
-  if (part && !part.why && part.state === 'ok') span.append(el('span', 'muted', 'ok'));
+  if (part && !part.why && part.state === 'ok') span.append(age(part));
   else {
     const [tone, word] = stateWord(part);
     const tag = badge(tone, word);
@@ -944,29 +979,43 @@ function sourceState(label, part, cause) {
   return span;
 }
 
+// 알림 목록은 HTML 의 고정 ul 이고 내용이 바뀔 때만 자식을 바꾼다 — 목록 안 스크롤·초점·툴팁이 남게.
+// 필터를 바꾸면 새 목록이라 맨 위로
+const feedDrawn = { filter: null, key: '' };
+function fillFeed(shown) {
+  const feed = $('alerts-feed');
+  const key = JSON.stringify(shown);
+  if (feedDrawn.filter === alertFilter && feedDrawn.key === key) return;
+  const top = feedDrawn.filter === alertFilter ? feed.scrollTop : 0;
+  feed.replaceChildren(...shown.map(alertRow));
+  feed.scrollTop = top;
+  Object.assign(feedDrawn, { filter: alertFilter, key });
+}
+
 function drawAlerts() {
   const entry = got.get(P.alerts);
+  const feed = $('alerts-feed');
   if (!entry || entry.why) {
     const part = entry ? { why: entry.why } : undefined;
     $('m-alerts').replaceChildren(...head(part));
     $('b-alerts').replaceChildren(stateMsg(part));
+    feed.hidden = true;
     $('alerts-count').textContent = '';
-    $('s-alerts').replaceChildren(entry ? marked('bad', entry.why) : marked('wait', '불러오는 중'));
+    $('s-alerts').replaceChildren(entry ? marked('warn', entry.why) : marked('wait', '불러오는 중'));
     return;
   }
   const b = entry.body;
-  const slackPart = isObj(b.slack) ? b.slack : { why: '응답 모양 오류' };
-  const alarmPart = isObj(b.alarms) ? b.alarms : { why: '응답 모양 오류' };
+  const slackPart = isObj(b.slack) ? b.slack : BAD_SHAPE;
+  const alarmPart = isObj(b.alarms) ? b.alarms : BAD_SHAPE;
   $('m-alerts').replaceChildren(sourceState('Slack', slackPart, CAUSE.slack), sourceState('경보 이력', alarmPart, CAUSE.aws));
   const items = list(b.items).filter(isObj).slice(0, MAX_ALERTS);
   const shown = alertFilter === 'all' ? items : items.filter((i) => i.source === alertFilter);
   $('alerts-count').textContent = `${items.length}건 · 보낸 Slack 알림(전송 실패 포함)과 경보 상태 변경 — 억제된 알림은 없다`;
-  if (!shown.length) $('b-alerts').replaceChildren(el('p', 'empty', '지난 7일 기록 없음'));
-  else {
-    const feed = el('ul', 'feed');
-    feed.append(...shown.map(alertRow));
-    $('b-alerts').replaceChildren(feed);
-  }
+  feed.hidden = !shown.length;
+  if (shown.length) {
+    $('b-alerts').replaceChildren();
+    fillFeed(shown);
+  } else $('b-alerts').replaceChildren(el('p', 'empty', '지난 7일 기록 없음'));
   const failed = items.filter((i) => i.source === 'slack' && i.delivered === false).length;
   const changes = items.filter((i) => i.source === 'alarm').length;
   const text = `7일 ${items.length}건 · 경보 상태 변경 ${changes}${failed ? ` · 전송 실패 ${failed}` : ''}`;
@@ -1007,7 +1056,7 @@ function stat(label, value, tone) {
   return box;
 }
 
-// 상위 목록 표 — 이름(방문자가 정한 글자 — 글자로만)·수·페이지 대비 비율 막대, 상위 10
+// 상위 목록 표 — 이름(방문자가 정한 글자 — 글자로만)·수·페이지 대비 비율(막대와 % 를 한 줄에), 상위 10
 function topTable(rows, label, pages) {
   const card = el('div', 'card');
   card.append(el('span', 'card-kicker', label));
@@ -1023,8 +1072,8 @@ function topTable(rows, label, pages) {
     clip(cell(tr, ''), name, 60);
     cell(tr, int(n), 'num');
     const r = share(num(n) ?? 0, pages);
-    const td = cell(tr, `${(r * 100).toFixed(1)}%`, 'num share');
-    td.append(ratio(r, null, `페이지의 ${(r * 100).toFixed(1)}%`));
+    cell(tr, ratio(r, null, `페이지의 ${(r * 100).toFixed(1)}%`), 'share-bar');
+    cell(tr, `${(r * 100).toFixed(1)}%`, 'num');
     tbody.append(tr);
   }
   table.append(tbody);
@@ -1034,14 +1083,18 @@ function topTable(rows, label, pages) {
   return card;
 }
 
+// 5xx 는 수치·표·막대·절 요약이 같은 장애색(§3.4 — 시간대별 막대의 5xx 겹침이 장애색이다)
+const fiveTone = (n) => (n ? 'bad' : null);
+
 function fillAccess(node, a) {
   const totals = isObj(a.totals) ? a.totals : {};
   const sub = [`폴링·canary 제외, IP 없음 · 읽지 못한 줄 ${int(totals.skipped)}`];
   if (num(a.firstTs) !== null && num(a.startTs) !== null && a.firstTs > a.startTs) sub.push(`기록 시작 ${hm(a.firstTs * 1000)}`);
   $('access-sub').textContent = sub.join(' · ');
   const status = isObj(a.status) ? a.status : {};
+  const fives = num(status['5xx']) ?? 0;
   const stats = el('div', 'stats');
-  stats.append(stat('총 요청', int(totals.requests)), stat('페이지', int(totals.pages)), stat('5xx', int(status['5xx']), num(status['5xx']) ? 'bad' : null));
+  stats.append(stat('총 요청', int(totals.requests)), stat('페이지', int(totals.pages)), stat('5xx', int(fives), fiveTone(fives)));
   const hourly = list(a.hourly).filter(isObj);
   const bars = hourly.map((h) => ({
     value: num(h.requests) ?? 0,
@@ -1050,15 +1103,25 @@ function fillAccess(node, a) {
   }));
   const peak = Math.max(0, ...bars.map((b) => b.value));
   const chart = hourly.length ? columns(bars, `시간대별 요청 24시간 — 최고 ${int(peak)}, 5xx 는 겹쳐 표시`, 'tall') : el('p', 'empty', '데이터 부족');
+  // 막대 값은 title 에만 있으면 휴대폰에서 못 본다 — 최고 값과 5xx 가 난 시간을 글자로
+  const hourHead = el('p', 'summary-row');
+  hourHead.append(el('span', null, `시간대별 요청 · 최고 ${int(peak)}/시간`));
+  const errHours = hourly.filter((h) => num(h.errors) > 0);
+  if (errHours.length) {
+    const list5 = errHours.slice(-6).map((h) => `${hm(h.ts * 1000).slice(0, 2)}시 ${int(h.errors)}`);
+    hourHead.append(marked('bad', `5xx ${list5.join(' · ')}${errHours.length > 6 ? ` 외 ${errHours.length - 6}` : ''}`));
+  }
   const codes = el('table', 'table');
   const tbody = el('tbody');
   for (const key of ['2xx', '3xx', '4xx', '5xx']) {
     const tr = el('tr');
     const n = num(status[key]) ?? 0;
-    cell(tr, key === '5xx' && n ? marked('bad', key) : key);
+    const tone = key === '5xx' ? fiveTone(n) : null;
+    cell(tr, tone ? marked(tone, key) : key);
     cell(tr, int(n), 'num');
     const r = share(n, num(totals.requests) ?? 0);
-    cell(tr, `${(r * 100).toFixed(1)}%`, 'num share').append(ratio(r, key === '5xx' ? 'bad' : null, `${key} 요청의 ${(r * 100).toFixed(1)}%`));
+    cell(tr, ratio(r, tone, `${key} 요청의 ${(r * 100).toFixed(1)}%`), 'share-bar');
+    cell(tr, `${(r * 100).toFixed(1)}%`, 'num');
     tbody.append(tr);
   }
   codes.append(tbody);
@@ -1066,10 +1129,18 @@ function fillAccess(node, a) {
   const durations = isObj(ws.durations) ? ws.durations : {};
   const wsBars = WS_BUCKETS.map(([k, label]) => ({ value: num(durations[k]) ?? 0, over: 0, tip: `${label} · ${int(durations[k])}` }));
   const labels = el('div', 'cols5');
-  labels.append(...WS_BUCKETS.map(([, label]) => el('span', null, label)));
+  labels.append(
+    ...WS_BUCKETS.map(([k, label]) => {
+      const span = el('span', null, label);
+      span.append(el('b', null, int(durations[k])));
+      return span;
+    }),
+  );
   const wsHead = el('p', 'summary-row');
   wsHead.append(el('span', null, `WebSocket 연결 ${int(ws.count)} · 지속 시간`));
-  node.replaceChildren(stats, chart, axis(hourly.length ? hm(hourly[0].ts * 1000) : '', '지금'), codes, wsHead, columns(wsBars, `WebSocket 지속 시간 구간 — 연결 ${int(ws.count)}`), labels);
+  // 눈금은 막대 24개가 덮는 구간(첫 칸 시작 ~ 마지막 칸 끝)을 5등분 — 마지막 칸이 지금 시각을 품는다
+  const hourAxis = hourly.length ? ticks(hourly[0].ts * 1000, (hourly[0].ts + hourly.length * 3600) * 1000) : el('span');
+  node.replaceChildren(stats, hourHead, chart, hourAxis, codes, wsHead, columns(wsBars, `WebSocket 지속 시간 구간 — 연결 ${int(ws.count)}`), labels);
   const pages = num(totals.pages) ?? 0;
   $('access-tables').replaceChildren(...TOP_TABLES.map(([k, label]) => topTable(a[k], label, pages)));
   const recent = list(a.recent5xx).filter(isObj).slice(0, 20);
@@ -1092,6 +1163,14 @@ function clarityText(row) {
   return isObj(row) ? Object.entries(row).map(([k, v]) => `${k}:${show(v)}`).join(' · ') : show(row);
 }
 
+// 서버 주기(refreshSec) → "3시간" — 주기 상수를 화면에 복사해 두지 않는다(§3.3)
+function interval(sec) {
+  if (!(num(sec) > 0)) return null;
+  if (sec % 3600 === 0) return `${sec / 3600}시간`;
+  if (sec % 60 === 0) return `${sec / 60}분`;
+  return `${sec}초`;
+}
+
 function fillClarity(node, c) {
   const t = isObj(c.traffic) ? c.traffic : {};
   const tiles = el('div', 'clarity-tiles');
@@ -1103,7 +1182,8 @@ function fillClarity(node, c) {
   ]) {
     tiles.append(stat(label, v));
   }
-  const next = el('p', 'muted small', num(c.nextAt) === null ? '' : `다음 조회 ${when(c.nextAt)} 이후 — 하루 10회 한도라 3시간 간격`);
+  const every = interval(c.refreshSec);
+  const next = el('p', 'muted small', num(c.nextAt) === null ? '' : `다음 조회 ${when(c.nextAt)} 이후${every ? ` — ${every} 간격(Clarity 하루 호출 한도)` : ''}`);
   node.replaceChildren(tiles, next);
   const metrics = list(c.metrics).filter(isObj);
   $('clarity-more').hidden = false;
@@ -1125,7 +1205,8 @@ function drawTraffic() {
   const metrics = partOf(P.aws, 'metrics');
   region('ws24', metrics, CAUSE.aws, (node, m) => {
     const where = { startMs: m.startTs * 1000, endMs: m.endTs * 1000 };
-    node.replaceChildren(metricRow('serve', 'WebSocket 접속 수 (5분 최댓값)', m.wsClients, { ...where, extreme: 'max' }));
+    // 굵은 오른쪽 값은 '지금' 처럼 읽히니 24시간 최고로 — 지금 수는 위의 큰 숫자(빠른 묶음)다
+    node.replaceChildren(metricRow('serve', 'WebSocket 접속 수 · CloudWatch 5분 최댓값', m.wsClients, { ...where, extreme: 'max', peak: true }));
   });
   const access = partOf(P.access);
   if (!region('access', access, CAUSE.access, fillAccess)) {
@@ -1137,27 +1218,34 @@ function drawTraffic() {
   if (!region('clarity', clarity, CAUSE.clarity, fillClarity, 'numOfDays')) $('clarity-more').hidden = true;
   const bits = [`지금 ${st?.body ? int(st.body.wsConnections) : '–'} 접속`];
   let tone = 'ok';
+  let fives = 0;
   if (usable(access)) {
-    const fives = num(access.status?.['5xx']) ?? 0;
+    fives = num(access.status?.['5xx']) ?? 0;
     bits.push(`24시간 페이지 ${int(access.totals?.pages)}`);
-    if (fives) {
-      tone = 'warn';
-      bits.push(`5xx ${int(fives)}`);
-    }
   } else {
-    const [t, w] = stateWord(access);
+    const [t, w] = softWord(access);
     tone = t;
     bits.push(`서버 기록 ${w}`);
   }
-  $('s-traffic').replaceChildren(marked(st ? tone : 'wait', bits.join(' · ')));
+  // 5xx 는 판정 밖이라 줄 전체를 칠하지 않고 그 조각만 같은 장애색으로(수치·표와 같게)
+  const parts = [marked(st ? tone : 'wait', bits.join(' · '))];
+  if (fives) parts.push(marked(fiveTone(fives), `5xx ${int(fives)}`));
+  $('s-traffic').replaceChildren(...parts);
 }
 
 // --- 비용 (§3.4) -------------------------------------------------------------------------------
 
+const USD = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const TIME_UNIT = { MONTHLY: '월', QUARTERLY: '분기', ANNUALLY: '연' };
+const isUsd = (unit) => unit == null || unit === 'USD';
+
 function money(v, unit) {
   if (num(v) === null) return '–';
-  return unit && unit !== 'USD' ? `${v.toFixed(2)} ${clean(unit)}` : `$${v.toFixed(2)}`;
+  return isUsd(unit) ? `$${USD.format(v)}` : `${USD.format(v)} ${clean(unit)}`;
 }
+
+// aria-label 용 — 단위는 서버 글이라 싣지 않는다(§3.8 — title 밖의 속성 금지). USD 만 $ 를 붙인다
+const plainMoney = (v, unit) => (num(v) === null ? '–' : `${isUsd(unit) ? '$' : ''}${USD.format(v)}`);
 
 // 월 예산 중 한도 대비 실제 비율이 가장 큰 것 — 개요 칸·절 요약
 function worstMonthly(part) {
@@ -1179,27 +1267,29 @@ function monthElapsed() {
   return (Date.now() - start) / (end - start);
 }
 
+// 예산 막대 — 실제 사용액, 한도 85%·100% 세로선, 점선 = 한도 × 이번 달 지난 비율(한도 속도로 썼다면 지금 있을 자리 —
+// 실제 막대가 점선을 넘으면 한도보다 빠르게 쓰고 있다)
 function budgetBar(b) {
   const top = Math.max(b.limit * 1.15, b.actual ?? 0, b.forecast ?? 0);
   const x = (v) => ((v / top) * 100).toFixed(2);
   const r = (b.actual ?? 0) / b.limit;
   const elapsed = monthElapsed();
-  // 이름은 서버 글이라 aria-label 에 싣지 않는다(§3.8 — title 밖의 속성 금지). 같은 줄의 이름이 말한다
-  const label = `예산 막대 — 실제 ${money(b.actual, b.unit)}, 한도의 ${(r * 100).toFixed(0)}%, 이번 달 ${(elapsed * 100).toFixed(0)}% 지남`;
+  // 이름·단위는 서버 글이라 aria-label 에 싣지 않는다(§3.8 — title 밖의 속성 금지). 같은 줄의 이름이 말한다
+  const label = `예산 막대 — 실제 ${plainMoney(b.actual, b.unit)}, 한도의 ${(r * 100).toFixed(0)}%, 이번 달 ${(elapsed * 100).toFixed(0)}% 지남`;
   const root = frame(100, 14, 'bar12', label);
   root.append(svg('rect', { x: 0, y: 3, width: 100, height: 8 }, 'track'));
   root.append(tip(svg('rect', { x: 0, y: 3, width: x(b.actual ?? 0), height: 8 }, r >= 1 ? 'fill t-bad' : r >= 0.85 ? 'fill t-warn' : 'fill'), `실제 ${money(b.actual, b.unit)}`));
   const mark = (v, cls, text) => root.append(tip(svg('line', { x1: x(v), x2: x(v), y1: 0, y2: 14 }, cls), text));
   mark(b.limit * 0.85, 'mark', `한도 85% ${money(b.limit * 0.85, b.unit)} — 027 예산 알림`);
   mark(b.limit, 'mark t-bad', `한도 ${money(b.limit, b.unit)} — 027 예산 알림`);
-  mark(top * elapsed, 'mark now', `이번 달 ${(elapsed * 100).toFixed(0)}% 지남`);
+  mark(b.limit * elapsed, 'mark now', `이번 달 ${(elapsed * 100).toFixed(0)}% 지남 — 한도 속도면 ${money(b.limit * elapsed, b.unit)}`);
   return root;
 }
 
 function budgetRow(b) {
   const row = el('div', 'budget');
   const name = el('span', 'budget-name', b.name ?? '이름 없음');
-  if (b.timeUnit && b.timeUnit !== 'MONTHLY') name.append(el('span', 'muted small', ` · ${clean(b.timeUnit)}`));
+  if (b.timeUnit && b.timeUnit !== 'MONTHLY') name.append(el('span', 'muted small', ` · ${own(TIME_UNIT, b.timeUnit) ?? clean(b.timeUnit)}`));
   const nums = el('span', 'budget-nums', `실제 ${money(b.actual, b.unit)} / 한도 ${money(b.limit, b.unit)}`);
   const monthly = b.timeUnit === 'MONTHLY';
   if (monthly) {
@@ -1208,7 +1298,8 @@ function budgetRow(b) {
   }
   row.append(name, nums);
   if (monthly && num(b.limit) > 0) {
-    row.append(budgetBar(b), axis('0', `점선 = 이번 달 ${(monthElapsed() * 100).toFixed(0)}% 지남 · 세로선 = 한도 85%·100%`));
+    const pace = `점선 = 한도 × 이번 달 ${(monthElapsed() * 100).toFixed(0)}% (한도 속도) · 세로선 = 한도 85%·100%`;
+    row.append(budgetBar(b), axis('0', pace));
   }
   return row;
 }
@@ -1219,7 +1310,7 @@ function drawCost() {
     const items = list(part.items).filter(isObj);
     node.replaceChildren(...(items.length ? items.map(budgetRow) : [el('p', 'empty', '예산 없음')]));
   });
-  if (!usable(budget)) return $('s-cost').replaceChildren(marked(...stateWord(budget)));
+  if (!usable(budget)) return $('s-cost').replaceChildren(marked(...softWord(budget)));
   const worst = worstMonthly(budget);
   if (!worst) return $('s-cost').replaceChildren(marked('dim', '월 단위 예산 없음'));
   const fc = num(worst.b.forecast) === null ? '' : ` · 예측 ${money(worst.b.forecast, worst.b.unit)}`;
