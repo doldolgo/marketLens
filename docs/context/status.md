@@ -26,7 +26,7 @@
 | slack-alerts | server: Slack 웹훅 알림(기동·수집 60초 구간 발생/복구·ERROR 로그·처리 안 된 500, 키별 10분 억제)·심장박동 `collect:heartbeat`·`/health` 신선도(두 역할, 비정상 503) | - | 외부 uptime 은 런북 uptime-monitor.md, 웹훅 운영 설정 확인(2026-09-29 — collect 의 server·serve 의 api 모두 `SLACK_WEBHOOK_URL` 있음, 기동 뒤 전송 실패 경고 0건), 외부 uptime 모니터 등록은 사람 몫 |
 | observability | server: api WS 접속 수 StatsD 게이지(STATSD_ADDR) | - | caddy 접속 로그(IP /24·검색어·헤더 지움, 폴링 제외, 하루 회전·90일 — 032) → 박스 안, 032 게시 뒤 CloudWatch Logs 서울 90일 · 에이전트 세 박스 · canary 5분 4단계(Lambda `nodejs22.x` + EventBridge Scheduler — Synthetics 는 조직 SCP 가 막는다) · 경보 17개(로그 뒤 18) → Slack · EC2 설치 완료(2026-09-29~30): 예산(알림은 메일·Slack)·Slack·IMDS·역할·serve 스왑·에이전트 세 박스(지표 12개, 게이지는 `marketlens_ws_clients`)·Lambda canary·경보 17개 전부 OK, serve 24시간·배포 1회 측정 끝(승격 안 함). 남은 사람 확인: data 에이전트 RSS 24시간·기존 경보·지표 수(런북 2단계)·`ws_clients` 탭 2개·첫 달 청구 |
 | admin | server: api GET /admin/status(WS 접속 수·Redis·Influx·버전), RedisBus.ping | web: 관리자 화면(web/admin, nginx :8081 — 게시 안 함) | admin.kimptrack.com — Cloudflare Access(OTP)·Tunnel(cloudflared, profile tunnel, Protect with Access) · 029 운영 확인 완료(2026-09-30 — serve 안에서 `web:8081/svc/api/admin/status` 200 JSON, 공개 `/api/docs`·`/svc/…` 404, collect `server` 의 `/docs` 가 `/api/openapi.json` 을 부른다), 030 은 Cloudflare 설정·토큰 파일 대기(배포는 "tunnel 건너뜀") |
-| privacy | - | web: 정적 /privacy(외부 자원 없음·nginx CSP·no-cache, `/privacy.html`·`/app/privacy.html` 301)·랜딩 바닥 nav·대시보드 헤더(새 탭) 링크·sitemap·화면 분석 동의 관리 — 저장값 kt.analytics(`granted` 동의·`denied` 거부·철회·없음·그 밖 = 정하지 않음 = 꺼짐, [동의]·[동의 철회], 철회 때 `_clck`·`_clsk` 만료·쓰기 실패면 값 지움, GPC·저장 불가·철회 실패 안내) | 시행 2026-10-01 · 보관 설정(caddy 하루 회전·100개·90일 — reload 로 안 들어가 머지 뒤 caddy 를 한 번 다시 만든다, 기본 로거 IP 삭제, 관리자 기록 매일·90개 런북)은 배포 뒤 serve 에 적용 · 게시 뒤 027 런북 15단계·033 대기 · Clarity 는 동의 방식(사람 결정 2026-10-01) · 남은 법률 판단은 사람 확인 전(032 §7) |
+| privacy | - | web: 정적 /privacy(외부 자원 없음·nginx CSP·no-cache, `/privacy.html`·`/app/privacy.html` 301)·랜딩 바닥 nav·대시보드 헤더(새 탭) 링크·sitemap·화면 분석 동의 관리 — 수집·이용·제공·국외 이전 세 칸(칸마다 알릴 사항, 처음엔 빈 칸), 셋 다 저장해야 kt.analytics `granted`+판 kt.analytics.v(지금 판 2026-10-01 — 다른 판은 정하지 않음), 하나라도 빠짐·[모두 거부]·[동의 철회] = `denied`·판 지움·`_clck`·`_clsk` 만료·쓰기 실패면 값 지움, 없음·그 밖 = 정하지 않음 = 꺼짐, GPC·저장 불가·철회 실패 안내) | 시행 2026-10-01 · 보관 설정(caddy 하루 회전·100개·90일 — reload 로 안 들어가 머지 뒤 caddy 를 한 번 다시 만든다, 기본 로거 IP 삭제, 관리자 기록 매일·90개 런북)은 배포 뒤 serve 에 적용 · 게시 뒤 027 런북 15단계·033 대기 · Clarity 는 동의 방식(사람 결정 2026-10-01) · 남은 법률 판단은 사람 확인 전(032 §7) |
 
 ## 알려진 빚
 - (027·032) 통신비밀보호법 접속 기록 3개월 보관 의무 해당 여부는 사람 확인 전(032 §3.6 (4)) — 해당하면 원 IP 보관을 별도 스펙으로 정하고 방침에 '법령에 따른 보관' 을 더한다
@@ -50,11 +50,11 @@
 - (030) cloudflared 원격 관리(대시보드 실시간 로그·진단)는 기본값으로 켜져 있다 — 대시보드 권한자는 요청 이벤트를 볼 수 있다, 끄는 건 후속.
 - (030) 토큰이 틀려 cloudflared 가 재시작을 되풀이해도 배포는 초록 — 확인은 런북 8단계·Tunnel 상태 알림 메일.
 - (030) 021·023 의 해당 문장이 030 동작과 다르다 — PR 에 담당자 제안으로 남김, 반영 대기.
-- (032) Clarity 는 동의 방식(사람 결정 2026-10-01 — 수집·제공 동의, 국외 이전 별도 동의). 남은 법률 판단(버튼 하나로 받는 동의가 제22조 제1항에 맞는지·만 14세 미만·동의 입증, 서버 기록의 처리 근거, 이메일만의 연락처)은 사람 확인 전(032 §7) — Clarity(033)를 켜기 전에 끝낸다.
+- (032) Clarity 는 동의 방식(사람 결정 2026-10-01 — 수집·이용·제공·국외 이전을 세 칸으로 나눠 각각, 셋 다일 때만 켬). 남은 법률 판단(Microsoft 자체 보유 기간을 '받는 자의 보유 기간' 으로 적는 방식·Clarity(동의)와 Google Fonts(고지만)의 다른 취급·만 14세 미만·동의 입증, 서버 기록의 처리 근거, 이메일만의 연락처)은 사람 확인 전(032 §7) — Clarity(033)를 켜기 전에 끝낸다.
 - (032) 대시보드 글꼴(Google Fonts)이 방문자 IP 를 국외로 보낸다 — 자체 호스팅은 별도 결정
 - (032) 관리자 API 문서(Swagger·ReDoc)가 jsDelivr·fastapi.tiangolo.com·Google Fonts 를 부른다 — 없앨지는 029 에서 정한다
 - (032) Safari 는 7일 뒤 동의 저장값을 지운다 — 분석이 꺼지는 쪽이고 다음 방문에 띠가 다시 묻는다
-- (032) Clarity 기록은 한 사람분만 지울 수 없다 — 삭제 요청이 오면 프로젝트 삭제뿐
+- (032) Clarity 기록은 한 사람분만 지울 수 없다 — 삭제 요청(철회 뒤 바로 지우기 포함)이 오면 운영자가 프로젝트 기록을 통째로 지우고 새 프로젝트로 다시 시작한다(절차는 033 런북 clarity.md)
 - (032) caddy 접속 로그의 `output file` 블록(회전 설정)은 배포의 `caddy reload` 로 바뀌지 않는다 — 그 블록을 고친 배포 뒤엔 사람이 serve 에서 `docker compose --profile serve --env-file .env --env-file server/.env up -d --force-recreate caddy`(몇 초 끊김)
 - (032) caddy 는 기록할 요청이 없는 날 회전·삭제도 하지 않는다 — 방문이 며칠 없으면 90일 지난 파일이 다음 방문 때 지워진다
 - (032) 002·025 제안 반영 대기
