@@ -136,8 +136,11 @@
     }
   }
 
+  // defer 로 실린 이 파일은 문서 해석이 끝난 뒤(readyState 가 이미 "interactive")·DOMContentLoaded 전에 돈다 — 그래서 readyState 만
+  // 보지 않고 defer 로 실렸는지도 본다. 대시보드는 앱 모듈(defer)까지 돈 뒤에 DOMContentLoaded 가 온다
+  const beforeReady = document.readyState === "loading" || !!(document.currentScript && document.currentScript.defer)
   const whenReady = (fn) => {
-    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", guard(fn), { once: true })
+    if (beforeReady) document.addEventListener("DOMContentLoaded", guard(fn), { once: true })
     else fn()
   }
 

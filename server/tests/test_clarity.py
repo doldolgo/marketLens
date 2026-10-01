@@ -228,7 +228,8 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     remove() { for (const list of [head, body]) if (list.includes(this)) list.splice(list.indexOf(this), 1) },
   })
   const document = {
-    readyState: 'loading', createElement: el,
+    // defer 로 실리면 readyState 는 이미 interactive 이고 DOMContentLoaded 전이다
+    readyState: c.defer ? 'interactive' : 'loading', currentScript: c.defer ? { defer: true } : null, createElement: el,
     set cookie(line) { cookies.push(line) },
     head: { appendChild: (e) => head.push(e) },
     body: { get firstChild() { return body[0] || null }, insertBefore: (e) => body.unshift(e) },
@@ -365,14 +366,16 @@ def test_refused_blocked_and_unreadable_visitors_get_nothing() -> None:
 
 @with_id
 def test_agreed_visitor_queues_consent_first_and_gets_the_tag_after_parsing() -> None:
-    got = _one(ls=ON, path="/app/", steps=["ready"])
-    assert got["first"]["queue"] == [CONSENT] and got["first"]["tags"] == []
-    assert (
-        got["last"]["tags"] == TAG_ID
-        and got["last"]["strip"] is None
-        and got["last"]["fired"] == []
-    )
-    assert not got["last"]["forgot"]
+    """대기열은 곧바로(첫 항목 consentv2), 태그는 DOMContentLoaded 뒤 — defer 로 실려 readyState 가 interactive 여도 (§3.4)."""
+    for defer in (False, True):
+        got = _one(ls=ON, path="/app/", defer=defer, steps=["ready"])
+        assert got["first"]["queue"] == [CONSENT] and got["first"]["tags"] == [], defer
+        last = got["last"]
+        assert (last["tags"], last["strip"], last["fired"]) == (TAG_ID, None, []), defer
+        assert not last["forgot"], defer
+    # 정하지 않은 방문자의 띠도 DOMContentLoaded 뒤
+    got = _one(defer=True, steps=["ready"])
+    assert got["first"]["strip"] is None and got["last"]["strip"] is not None
 
 
 @with_id
