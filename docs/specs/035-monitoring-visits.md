@@ -1,6 +1,6 @@
 # 035 — monitoring-visits
 
-상태: TODO | 의존: **032 privacy·033 clarity·034 monitoring-ops 가 main 에 머지된 뒤 시작한다**(caddy 회전 계약·방침 문장은 032, 런북 `clarity.md` 는 033, 공통 규칙의 문서 자리·`ADMIN_AWS_REGION` 설명은 034 가 만든다). 계약을 쓰는 스펙: 027 observability(caddy 접속 로그 형식), 029 admin(관리자 nginx 분기·보호 규칙), 030 admin-tunnel(들어오는 길), 028 api-allowlist(공개 nginx 모양), 022 landing(3초 기다림 규칙의 모양), 002 web-shell(탭 id). 짝 스펙 034(수집기 쪽 피드 둘)와 공통 규칙(§3.1)을 같은 문장으로 나눠 가진다. 화면은 036. Clarity 부분은 033 이 켜지고 사람이 토큰을 넣기 전까지 "연결 안 됨" 이다.
+상태: DONE | 의존: **032 privacy·033 clarity·034 monitoring-ops 가 main 에 머지된 뒤 시작한다**(caddy 회전 계약·방침 문장은 032, 런북 `clarity.md` 는 033, 공통 규칙의 문서 자리·`ADMIN_AWS_REGION` 설명은 034 가 만든다). 계약을 쓰는 스펙: 027 observability(caddy 접속 로그 형식), 029 admin(관리자 nginx 분기·보호 규칙), 030 admin-tunnel(들어오는 길), 028 api-allowlist(공개 nginx 모양), 022 landing(3초 기다림 규칙의 모양), 002 web-shell(탭 id). 짝 스펙 034(수집기 쪽 피드 둘)와 공통 규칙(§3.1)을 같은 문장으로 나눠 가진다. 화면은 036. Clarity 부분은 033 이 켜지고 사람이 토큰을 넣기 전까지 "연결 안 됨" 이다.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -97,7 +97,44 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 시작 조건 — 033 PR(feat/033-clarity, #91 머지 전) 위의 브랜치. 그 아래 main 에 032(#90)·034(#86) 머지 — 설계 세션이 의존 충족으로 정한 쌓임
+git log --oneline -1   # 시작 e41a7f4 (033 줄기 마지막 커밋)
+
+# 기존 스펙 재검증 (마지막 코드 커밋 뒤)
+cd server && ruff check . && ruff format --check . && pytest -q   # All checks passed! · 286 files already formatted · 1221 passed
+cd web && npm run lint && npm run build   # oxlint 종료 0(출력 없음) · ✓ built — index 253.01 kB(gzip 78.58 kB)
+pytest -q app/features/admin tests/test_role.py tests/test_admin.py tests/test_clarity_store.py   # 131 passed (035 새 테스트 41 포함)
+
+# 로컬 Docker — caddy 회전 파일 이름(scratchpad/035/caddy-roll: 레포 Caddyfile 의 access_log 조각 그대로 + `:8080 { import access_log; respond "ok" }`, roll_size 만 1MiB)
+docker run --rm caddy:2-alpine caddy version   # v2.11.4
+docker run -d --name ml035-caddy -v <scratch>/caddy-roll/conf:/etc/caddy:ro -v <scratch>/caddy-roll/logs:/var/log/caddy caddy:2-alpine
+docker exec ml035-caddy sh -c 'for i in $(seq 1 900); do wget -q -O /dev/null -U "Mozilla/5.0 (iPhone) Safari" --header "Referer: https://www.google.com/search?q=1" "http://localhost:8080/app/?tab=history&utm_source=X&pad=<1500자>&s.q=secret$i"; done'
+ls <scratch>/caddy-roll/logs   # access-2026-10-01T08-41-59.574-size.log.gz · access.log
+#   roll_interval 1m 로 다시 띄워 1분 뒤 요청 → access-2026-10-01T08-43-48.568-time.log.gz
+#   회전 파일 mtime(1790844119) = 마지막 줄 ts · 줄의 둘째 필드가 "ts" · uri 의 s.q 지워짐 · referer 는 출처만
+docker rm -f ml035-caddy
+
+# 로컬 Docker — 관리자 nginx(029 와 같은 방법). 망 ml035-net, 가짜 백엔드 둘(caddy:2-alpine respond — 망 별칭 api·server, 받은 경로·Cookie·JWT 를 되돌린다)
+docker build -q -t ml035-web web/
+docker run -d --name ml035-webc --network ml035-net --network-alias web -e COLLECT_HOST=server -e 'NGINX_ENVSUBST_FILTER=^COLLECT_HOST$' ml035-web
+docker exec ml035-webc nginx -t   # nginx: the configuration file /etc/nginx/nginx.conf syntax is ok · test is successful
+docker exec ml035-webc wget -qO- --header 'Cookie: sid=abc' --header 'Cf-Access-Jwt-Assertion: jwt123' http://127.0.0.1:8081/svc/api/admin/access
+#   api /admin/access cookie=[] jwt=[] · /svc/api/admin/clarity → api /admin/clarity · /svc/api/admin/status → api · /api/admin/aws → collector
+#   Sec-Fetch-Site cross-site·same-site → 403 application/json {"error":{"code":"forbidden",…}} + X-Frame-Options DENY · same-origin·none → 통과
+#   기록 파일: /api/premium 한 줄 + 403 다섯 줄(@forbidden 은 server 수준 기록 — 029 그대로), 200 인 두 피드 0줄 · 공개 :80 의 /svc/api/admin/access → 404
+docker rm -f ml035-webc ml035-api ml035-server && docker network rm ml035-net && docker rmi ml035-web
+docker ps -a · docker network ls · docker images | grep 035   # 0건
+
+# api 역할 스모크 — 레포 밖 cwd(.env 를 읽지 않게), Redis 는 닿지 않는 주소
+ROLE=api INFLUX_TOKEN= ACCESS_LOG_DIR=<scratch>/caddy-roll/logs REDIS_URL=redis://127.0.0.1:1/0 uvicorn app.main:app --port 18935
+curl localhost:18935/admin/access    # ok · requests 902(실제 caddy 줄 — 회전 gz 둘 + access.log) · skipped 0 · tabs [["history",900]] · referrers [["https://www.google.com",900]] · utmSources [["x",900]] · devices mobile 900·bot 2(busybox wget)
+curl localhost:18935/admin/clarity   # unconfigured · code null · 값 null · refreshSec 10800
+curl -o /dev/null -w '%{http_code}' localhost:18935/admin/aws   # 404 (수집기 전용)
+#   같은 명령에 CLARITY_API_TOKEN=local-dummy·ACCESS_LOG_DIR 비움 → /admin/clarity error·redis(Clarity 호출 0) · /admin/access unconfigured·no_file · WARNING 한 줄, 로그에 토큰 0회
+
+# 부담(§3.4) — 합성 50MiB access.log 한 파일, 로컬 Mac·Python 3.12
+#   창 안 67,401줄: 0.44초·최대 RSS 변화 없음(20.1MiB — import 뒤 그대로) / 전부 창 밖: 0.03초
+#   테스트: 44MB 파일을 tracemalloc 최고 0.37MB 로(상한 8MB 단언 — test_access_files.py)
 ```
 
 ## 6. 갱신할 문서
@@ -122,5 +159,23 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - server: `app/features/admin/parts.py`(034 `feeds.py` 에서 옮긴 공통 — `Result`·`render`·`Slot`·`Warner`, 동작 같음), `feeds.py`(공통을 가져온다), `access.py`(파일 고르기·흘려 읽기), `access_tally.py`(한 줄 세기), `clarity.py`(호출·응답 줄이기·`admin:clarity` 기록), `visits.py`(`VisitFeeds`), `router.py`(두 경로), `app/main.py`(api 에만 `app.state.admin_visits`), `app/core/config.py`(`access_log_dir`·`clarity_api_token`), `app/core/redis_bus.py`(`clarity_load`·`clarity_save`), `.env.example`(`# CLARITY_API_TOKEN=`).
+  - 테스트: `features/admin/tests/`(`access_fakes.py`·`clarity_fakes.py`·`test_access_summary.py`·`test_access_files.py`·`test_clarity_feed.py`·`test_clarity_safety.py`·`test_visits.py`), `tests/test_clarity_store.py`, 고친 `tests/test_role.py`·`tests/test_admin.py`.
+  - 인프라: `web/nginx-admin.conf`(정확 일치 둘), `docker-compose.yml`(api 의 읽기 전용 바인드·`ACCESS_LOG_DIR`).
+  - 문서: context 다섯(status·architecture·dev-setup·db·product), 런북 `clarity.md`(6절)·`admin-access.md`(한 줄), 스펙 007·027·029, `CLAUDE.md` 인덱스.
+- 확인한 사실: caddy 2.11.4 회전 파일 이름은 `access-<UTC YYYY-MM-DDTHH-MM-SS.mmm>-<size|time>.log.gz`(크기·시간 회전의 꼬리가 다르다). 압축 중엔 같은 이름의 `.log` 가 잠깐 함께 있어 짝이면 `.log` 하나만 읽는다. 회전 파일의 수정 시각은 마지막 줄 `ts` 와 같았다. 줄의 둘째 필드가 `ts` 라 JSON 을 풀기 전에 창 밖을 버릴 수 있다.
+- 추측한 지점 (묻지 않고 정한 사소한 것):
+  - Clarity 는 요청마다(한 번에 하나·3초 기다림) Redis 기록을 읽어 3시간 지났을 때만 부른다 — 메모리에 3시간 묵히지 않아 런북의 '`admin:clarity` 지우면 바로 부르기' 가 재시작 없이 된다. 불렀는데 Redis 쓰기가 실패하면 그 시각을 메모리에 두고 3시간 동안 다시 부르지 않는다(한도 보호). Redis 읽기 실패 때는 메모리의 마지막 기록 값을 `error`·`redis` 와 함께 싣는다.
+  - Clarity 토큰 없음의 `code` 는 null(034 의 리전 없음과 같다). 값이 7일 지나 비면 `fetchedAt` 도 null(값을 만든 시각이 없다), 값 키 `numOfDays` 도 값이 있을 때만 1. `nextAt` 은 시도 기록이 없으면 null.
+  - Clarity 응답이 200 밖이면 401·403 → `denied`, 그 밖(3xx·4xx·5xx·429) → `error`·`http_<상태>`. 본문 모양이 틀리면 `error`·예외 이름. Traffic 의 정수 칸이 정수가 아니면 그 칸만 null. 지표 이름도 200자. 전체 10초는 httpx 제한과 `wait_for` 둘로. User-Agent 는 앱 공통 값. `admin:clarity` JSON 키는 `{attemptAt, state, code, successAt, values}`(db.md).
+  - 실패 WARNING 은 부분 이름 `access`·`clarity` 둘(Clarity 의 호출 실패·Redis 실패가 같은 10분 칸을 쓴다). `unconfigured`(파일·토큰 없음)는 실패가 아니라 남기지 않는다.
+  - 접속 요약: 창은 [지금이 든 시의 시작 − 23시간, 그 시의 끝) — 시계가 앞선 줄도 마지막 시에. `tabs` 는 경로가 정확히 `/app/` 인 페이지만(SPA 대체로 200 인 `/app/<x>` 는 세지 않는다), `tab=` 빈 값은 `(기타)`. 빈 `utm_source` 는 세지 않는다. 출처 키도 경로처럼 100자에서 자른다(키 상한과 함께 메모리를 묶으려고). 브라우저도 대소문자 무관. `status` 네 칸 밖(101 등)은 세지 않는다. 상위 목록은 같은 수면 이름순. `recent5xx` 는 최신이 앞. 빈 줄은 skipped 로 세지 않는다. 목록을 본 뒤 사라진 파일(회전·보관 삭제)은 건너뛴다.
+  - 034 공통을 `parts.py` 로 옮겼다 — `Slot` 의 예외 분류만 인자로(034 는 `aws.classify`, 035 는 예외 이름).
+- 실행 중 함께 고친 스펙 절: §6 목록대로 007 §3(api)·027 §3.2(끝 한 줄)·029 §3.1(표 둘·문장)·§3.2(기록하지 않는 목록). 035 본문은 고치지 않았다.
+- 담당자에게 제안 — 이 PR 에서 고치지 않는다(PR 본문에 그대로): 016 — §3.1 api 경로 목록에 `/admin/access`·`/admin/clarity`(035). 018 — §3 api 라우트 집합 문장에 `/admin/access`·`/admin/clarity`(035). 021 — §3.1 serve 설명에 "api 가 caddy 로그 디렉터리를 읽기 전용으로(035)".
 - 남은 빚:
+  - 배포 뒤 사람(status "035 운영 확인 대기"): `/svc/api/admin/access` 가 실제 로그로 차는지·`firstTs` / Clarity 토큰(런북 `clarity.md` 6절)을 넣고 첫 응답의 `metricName` 목록과 행 키를 이 절에 옮긴다 — 그때 `metrics` 정규화 키를 035·036 에 / 관리자 접속 기록에 폴링 둘이 없는지.
+  - Clarity 의 Traffic 밖 행 모양은 1차 문서에 없다 — 받은 이름·키 그대로 싣는다(status 빚).
+  - api 가 caddy 로그 디렉터리 전체(90일)를 읽을 수 있다 — 요약 전용 출력은 두지 않았다(status 빚, 받아들인 위험).
+  - Clarity 값의 7일 버림은 요청 때 한다 — 페이지를 7일 넘게 안 열거나 토큰을 지운 뒤에는 Redis 에 값이 남는다(런북 '끄기' 에 `DEL admin:clarity`, status 빚).
+  - 016·018·021 제안 반영 대기(status 빚).
