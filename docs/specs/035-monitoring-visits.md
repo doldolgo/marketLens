@@ -38,7 +38,7 @@
 - `code`: `ok` 면 null, 아니면 짧은 사유 — `http_<상태>`·예외 이름·`timeout`·`redis`·`no_file`. **오류 문장은 싣지 않는다.**
 - `fetchedAt` = 그 부분의 값을 만든 시각(못 만들었으면 null), `refreshSec` = 갱신 주기(화면이 신선도 판정에 쓴다). `ok` 가 아니면 값 키는 모두 null 이다 — 직전 값을 정상처럼 보이지 않게(029 §3.3 원칙). 예외는 Clarity(§3.3).
 - 갱신(022 랜딩의 3초 규칙과 같은 모양): 요청이 왔을 때 그 부분이 비었거나 `refreshSec` 가 지났으면 갱신을 하나만 띄우고 3초까지 기다린다. 끝나면 새 값, 아니면 직전 결과(없으면 `pending`)를 답하고 갱신은 뒤에서 마저 돈다. 그동안 온 요청은 같은 갱신을 기다린다. **요청이 없으면 아무것도 부르지 않는다** — 페이지를 안 보면 파일 읽기·Clarity 호출 0.
-- 스레드: 파일 읽기·JSON 풀기는 `asyncio.to_thread`(기본 실행기)에서 한다 — api 에는 수집 쓰기가 없어 기본 실행기로 충분하다.
+- 스레드: 파일 읽기·JSON 풀기(Clarity 응답·`admin:clarity`)는 `asyncio.to_thread`(기본 실행기)에서 한다 — api 에는 수집 쓰기가 없어 기본 실행기로 충분하다.
 - 로그·예외: 피드 처리기는 모든 예외를 잡아 부분 상태로 바꾼다 — 500 까지 올라가지 않는다(025 의 처리 안 된 500 알림은 예외 문장을 싣는다). 외부 호출·파일 읽기 실패는 `marketlens.admin` 로거에 **WARNING** 으로 부분 이름과 `code` 만(오류 문장·헤더·토큰 없이) 부분마다 10분에 1줄 남기고, ERROR 로는 남기지 않는다(025 SlackLogHandler 가 ERROR 를 예외 문장과 함께 Slack 으로 보낸다). Clarity 토큰은 로그·Redis·응답 어디에도 없다.
 
 | 부분 | 주기초 |
@@ -50,12 +50,12 @@
 
 ### 3.2 접속 요약 — `GET /admin/access`
 - 읽는 계약(027·032 복사): caddy 가 도메인 요청마다 JSON 한 줄을 serve 호스트 `logs/caddy/access.log` 에 쓴다. 쓰는 필드 — `ts`(epoch 초, 실수), `request.method`·`request.host`·`request.uri`(경로+쿼리, 검색어 `s.q`·`g.q`·`p.q` 는 지워져 있다), `status`, `duration`(초), `referer`(출처 `https://호스트[:포트]` 또는 빈 값), `ua`. IP 는 /24·/48 로 잘려 있다. 폴링 다섯 경로(`/api/health`·`/api/health/collect`·`/api/landing`·`/api/history/events`·`/api/history/candles`)와 canary UA 는 기록되지 않는다. `/api/ws/spreads` 는 연결이 끝날 때 상태 101·`duration` 한 줄. 파일은 하루(`roll_interval 24h`) 또는 50MiB 에서 회전하고, gzip 된 회전 파일을 100개까지·90일 동안 같은 디렉터리에 둔다(032). 회전 파일 이름 모양은 §4 에서 로컬 caddy 로 확인해 §7 에 적는다.
-- compose: api 에 `./logs/caddy:/var/log/caddy:ro`·env `ACCESS_LOG_DIR=/var/log/caddy`. env 가 비거나 `access.log`·회전 파일이 다 없으면 `unconfigured`(`no_file`). 읽기 실패는 `error`.
+- compose: api 에 `./logs/caddy:/var/log/caddy:ro`·env `ACCESS_LOG_DIR=/var/log/caddy`. env 가 비거나 `access.log`·회전 파일이 다 없으면 `unconfigured`(`no_file`). 읽기 실패는 `error` — 단 회전 파일 하나가 깨졌으면 그 파일만 건너뛴다(§3.5).
 - 읽는 범위(받아들인 위험): 인터넷 요청을 받고 root 로 도는 api 컨테이너가 디렉터리 전체 — 032 뒤 90일치 /24 IP·UA·출처·쿼리 — 를 읽을 수 있다. 요약에는 24시간만, IP 는 필요 없다. IP 를 지운 요약 전용 두 번째 caddy 출력(회전 1일·2개)을 두면 드러나는 범위가 2일로 줄지만 caddy 설정과 방침 판이 하나씩 늘어 이번에는 두지 않는다 — status 빚, 032 1절이 "api 가 읽는다" 를 적는다.
 - 창: 최근 24개 시(時) — 지금이 든 시의 시작 − 23시간부터 지금까지. 읽는 파일은 `access.log` 와 수정 시각이 창 안인 회전 파일(보통 1~2개). 줄을 흘려 읽고(통째로 올리지 않는다) 창 밖 줄은 JSON 을 풀기 전에 `ts` 만 보고 버린다. JSON 이 아니거나 필드가 빠진 줄은 `skipped` 로 센다. 집계 중 키(경로·출처·utm) 종류는 각 5,000까지 — 넘으면 `(기타)` 로 센다(봇의 무작위 경로가 메모리를 키우지 않게).
 - **페이지 요청** = GET·상태 200·경로 마지막 조각에 점이 없음(`/`·`/app/`·`/privacy` — 자산·`.php` 스캔 제외). 경로·탭·출처·utm·기기·브라우저는 페이지 요청만 센다.
 - 응답: `startTs`·`endTs`·`firstTs`(창 안에서 읽은 가장 이른 줄 — 기록이 창보다 짧은지 알게, 없으면 null)·`totals` = `{requests, pages, ws, skipped}`·`hourly` = 24개 `{ts, requests, pages, errors}`(`ts` 는 그 시의 시작, `errors` = 5xx 수).
-  - 상위 목록 여섯, 각 `[[이름, 수], …]` 수 내림차순 20개까지: `paths`(쿼리 뺀 경로, 100자), `tabs`, `referrers`(자기 호스트 `kimptrack.com`·`www.`·`admin.` 을 뺀 출처), `utmSources`(쿼리 `utm_source` 값, 소문자·50자 — 022 의 `/?쿼리` 301 줄은 페이지가 아니라 두 번 세지 않는다), `devices`, `browsers`.
+  - 상위 목록 여섯, 각 `[[이름, 수], …]` 수 내림차순 20개까지: `paths`(쿼리 뺀 경로, 100자), `tabs`, `referrers`(referer 를 `스킴://호스트[:포트]` 로 다시 만들어 — 027 의 줄이기에 기대지 않는다, http(s) 만 — 자기 호스트 `kimptrack.com`·`www.`·`admin.` 을 뺀 출처), `utmSources`(쿼리 `utm_source` 값, 소문자·50자 — 022 의 `/?쿼리` 301 줄은 페이지가 아니라 두 번 세지 않는다), `devices`, `browsers`.
   - `tabs`: `/app/` 페이지 요청의 쿼리 `tab` 값 — 허용 id 여섯(`spread`·`history`·`gap`·`pp`·`health`·`flow` — 002), 키가 없으면 `spread`(기본 탭), 그 밖은 `(기타)`. 대시보드 화면은 쿼리로 나뉘어 `paths` 만으로는 무엇을 보는지 모른다. 탭 전환은 요청을 만들지 않으므로 이 값은 "어느 탭 주소로 들어왔나" 이고, 들어온 뒤의 전환은 Clarity 가 본다(033).
   - 기기(대소문자 무관, 앞에서 맞은 것이 이긴다): `bot`(`bot`·`crawl`·`spider`·`slurp`·`curl`·`wget`·`python`·`go-http`·`headless`·`preview`) → `mobile`(`Mobi`·`Android`·`iPhone`·`iPad`) → `desktop`, UA 가 비면 `unknown`. 브라우저(bot 제외): `edge`(`Edg/`) → `samsung`(`SamsungBrowser`) → `firefox`(`Firefox`·`FxiOS`) → `chrome`(`Chrome`·`CriOS`) → `safari`(`Safari`) → `other`.
   - `status` = `{"2xx","3xx","4xx","5xx"}` 수(전체 줄), `recent5xx` = 최근 5xx 20줄 `{ts, path, status}` — `ts` 는 정수 초, `path` 는 `paths` 와 같이 쿼리를 뺀 경로·100자.
@@ -66,7 +66,7 @@
 - 외부 계약(Microsoft Learn "Clarity Data Export API", 2026-10-01 확인 — 문서 갱신 2025-12-05): `GET https://www.clarity.ms/export-data/api/v1/project-live-insights?numOfDays=1`, 헤더 `Authorization: Bearer <토큰>`. `numOfDays` 1·2·3 = 최근 24·48·72시간(UTC), 차원 셋까지(쓰지 않는다). 응답은 `[{metricName, information: [행…]}]`, 1,000행까지·페이지 없음. **프로젝트당 하루 10회** — 넘으면 429 "Exceeded daily limit". 401 = 토큰 없음·틀림·만료, 403 = 권한 없음, 400 = 인자 오류. 토큰은 프로젝트 관리자가 Settings → Data Export 에서 만든다. 지표 이름: Scroll Depth·Engagement Time·Traffic·Popular Pages·Browser·Device·OS·Country/Region·Page Title·Referrer URL·Dead Click Count·Excessive Scroll·Rage Click Count·Quickback Click·Script Error Count·Error Click Count. 문서가 행 모양을 적은 지표는 `Traffic` 하나(`totalSessionCount`·`totalBotSessionCount`·`distantUserCount` — 문자열 숫자, `PagesPerSessionPercentage` — 실수)다.
 - 설정: env `CLARITY_API_TOKEN`(serve 의 `server/.env`, 사람이 넣는 비밀). 없으면 `unconfigured`·호출 0. 프로젝트 ID 는 쓰지 않는다(토큰이 프로젝트에 묶여 있다).
 - 호출 규칙: 시도 사이 최소 3시간(성공·실패 모두 센다) — 어떤 24시간에도 8회 이하라 사람이 손으로 부를 2회가 남는다. 마지막 시도 시각·결과·마지막 성공 값은 Redis `admin:clarity`(JSON 문자열, 만료 없음)에 둔다 — api 재시작(배포)이 한도를 쓰지 않게. 값 부분은 마지막 성공에서 7일이 지나면 버린다(시도 시각·결과는 남긴다). Redis 에 못 닿으면 부르지 않는다(`error`·`redis`). 제한 10초, 재시도 없음. core 공개 계약: `RedisBus.clarity_load() -> str | None`·`RedisBus.clarity_save(data: str) -> None`.
-- 주소 줄이기(저장·응답 전): 행의 값 중 `http://`·`https://`·`/` 로 시작하는 문자열은 쿼리·해시를 뗀다 — 인기 페이지·페이지 주소에 광고 클릭 ID·utm·제3자 참조 주소의 쿼리가 실릴 수 있다. `Referrer URL` 지표의 값은 출처(`https://호스트[:포트]`)로 줄인다. 그 밖의 문자열 값은 200자에서 자른다.
+- 주소 줄이기(저장·응답 전): 행의 값과 키 중 주소 꼴 — 앞뒤 공백을 뗀 뒤 `<스킴>://`(대소문자 무관)·`/` 로 시작하거나, 공백 없이 `호스트.이름` 바로 뒤에 `/`·`?`·`#` — 은 쿼리·해시·사용자 정보를 뗀다 — 인기 페이지·페이지 주소에 광고 클릭 ID·utm·제3자 참조 주소의 쿼리가 실릴 수 있다. `Referrer URL` 지표의 주소는 출처(`<스킴>://호스트[:포트]`, 스킴 없는 꼴은 `호스트[:포트]`)로 줄인다. 그 밖의 문자열 값은 200자에서 자른다. 표준 밖 `NaN`·`Infinity`·넘치는 실수는 null, 짝 없는 서로게이트는 `?` 로 — 응답·Redis 에 다시 쓸 수 있게.
 - 응답(부분 하나): `state` = 마지막 시도 결과(401·403 → `denied`, 429·5xx·시간 초과 → `error`), `fetchedAt` = 마지막 **성공** 시각, `nextAt` = 다음에 부를 수 있는 시각(ms). 값은 마지막 성공 값을 둔다(§3.1 의 예외 — 하루 한도 때문에 실패 한 번이 3시간 빈칸이 되지 않게, 경과는 `fetchedAt` 이 말한다. 7일 지나면 null).
   - `numOfDays` 1, `traffic` = `{sessions, botSessions, users, pagesPerSession}`(`Traffic` 첫 행을 숫자로, 없으면 null).
   - `metrics` = `[{name, rows}]` — `Traffic` 밖 지표를 받은 이름·키 그대로(행 20개까지, 값은 위 줄이기 뒤). camelCase 로 바꾸지 않는다 — 1차 문서에 없는 모양을 추측으로 고정하지 않으려고. 첫 실제 응답의 모양을 사람이 §7 에 적고, 그때 정규화 키를 이 절과 036 에 함께 더한다.
@@ -82,15 +82,17 @@
 - Redis 불달: Clarity 는 부르지 않는다(`error`·`redis`). 접속 요약은 그대로.
 - Clarity 토큰 교체: 새 토큰을 넣고 api 를 다시 띄운다. 3시간 간격은 Redis 값이라 유지된다 — 바로 불러야 하면 `admin:clarity` 키를 지운다(런북).
 - Clarity 429(사람이 손으로 부른 뒤 등): `error`, 값은 마지막 성공 그대로, `nextAt` 3시간 뒤.
+- Clarity 200 인데 비지 않은 목록에 `{metricName: 문자열, information: 목록}` 이 하나도 없음: `error`·`ValueError`, 값은 마지막 성공 그대로. 빈 목록 `[]`(자료 없음)은 성공.
+- 회전 파일이 깨짐(잘린 gz·틀린 머리·권한): 그 파일은 읽은 데까지 세고 `skipped` 에 1 을 더해 다음 파일로, WARNING(`access`·예외 이름) — 창을 벗어나면(최대 하루) 사라진다. `access.log` 를 못 읽으면 `error`.
 
 ## 4. 검증
 **PR 안 — 실행 세션(완료 조건)**. 네트워크 없음 — Clarity 는 httpx MockTransport, Redis 는 fakeredis, 접속 로그는 테스트가 만든 파일.
 - 역할(`tests/test_role.py`): api 에 `/admin/access`·`/admin/clarity`, collector 에서는 404, api OpenAPI 에 둘·collector OpenAPI 에 없음.
 - nginx(`tests/test_admin.py`): 관리자 server 에 정확 일치 둘 — api 로·경로 바꿈, 첫 줄 교차 사이트 검사, `access_log off`, 자기 `proxy_set_header`·`add_header` 없음(상속). 업스트림 둘뿐. 공개 server 는 028 계약 그대로이고 `/svc/` 위치가 없다.
 - compose: api 에 caddy 로그 읽기 전용 바인드·`ACCESS_LOG_DIR`, 다른 서비스엔 없다. 기존 계약(컨테이너 일곱·profile·로그 상한) 그대로.
-- 접속 요약: 창 밖 줄 안 셈 / 페이지 판정(자산·`.php`·301 제외) / utm 두 번 안 셈 / 자기 호스트 출처 제외 / `tabs`(키 없음 → `spread`, 허용 밖 → `(기타)`, `/app/` 밖 페이지는 안 셈) / 기기·브라우저 분류(Edge·삼성·iPhone Safari·봇·빈 UA) / WS 지속 구간 경계값 / 5xx 최근 20·쿼리가 든 5xx 줄 → `recent5xx.path` 에 쿼리 없음 / 깨진 줄 `skipped` / 창 안 회전 gz 포함·창 밖 회전 파일 안 읽음 / 파일 없음 `unconfigured` / 응답 바이트에 IP·UA 원문 없음 / 키 5,000 넘으면 `(기타)` / `firstTs`.
-- Clarity: 토큰 없음 → `unconfigured`·호출 0 / 첫 요청 호출 1(Bearer·`numOfDays=1`)·Traffic 숫자 변환 / 3시간 안 재요청과 새로 만든 앱(재시작 흉내)도 호출 0 / 401 → `denied`, 429 → `error`·`nextAt` 3시간 뒤·직전 성공 값 유지 / 마지막 성공에서 7일 지남 → 값 null·시도 기록은 남음 / URL 값의 쿼리·해시 뗌·`Referrer URL` 은 출처로 / 토큰이 로그·Redis·응답 바이트에 없음 / Redis 불달 → 호출 0·`error`.
-- 예외: 처리기 안 예외 → 500 이 아니라 그 부분 `error`·WARNING 1줄(ERROR 없음).
+- 접속 요약: 창 밖 줄 안 셈 / 페이지 판정(자산·`.php`·301 제외) / utm 두 번 안 셈 / 자기 호스트 출처 제외·경로·쿼리가 든 referer 도 출처만 / `tabs`(키 없음 → `spread`, 허용 밖 → `(기타)`, `/app/` 밖 페이지는 안 셈) / 기기·브라우저 분류(Edge·삼성·iPhone Safari·봇·빈 UA) / WS 지속 구간 경계값 / 5xx 최근 20·쿼리가 든 5xx 줄 → `recent5xx.path` 에 쿼리 없음 / 깨진 줄 `skipped` / 창 안 회전 gz 포함·창 밖 회전 파일 안 읽음·깨진 회전 gz 는 읽은 데까지·`skipped` +1 / 파일 없음 `unconfigured` / 응답 바이트에 IP·UA 원문 없음 / 키 5,000 넘으면 `(기타)` / `firstTs`.
+- Clarity: 토큰 없음 → `unconfigured`·호출 0 / 첫 요청 호출 1(Bearer·`numOfDays=1`)·Traffic 숫자 변환 / 3시간 안 재요청과 새로 만든 앱(재시작 흉내)도 호출 0 / 401 → `denied`, 429 → `error`·`nextAt` 3시간 뒤·직전 성공 값 유지 / 마지막 성공에서 7일 지남 → 값 null·시도 기록은 남음 / URL 값의 쿼리·해시 뗌(대문자 스킴·앞 공백·스킴 없는 꼴·키 포함)·`Referrer URL` 은 출처로 / `NaN`·`Infinity`·서로게이트 → 200·null·`?` / 지표 없는 목록 → `error`·값 유지 / 토큰이 로그·Redis·응답 바이트에 없음 / Redis 불달 → 호출 0·`error`.
+- 예외: 처리기 안 예외·JSON 으로 다시 쓸 수 없는 답 → 500 이 아니라 그 부분 `error`·WARNING 1줄(ERROR 없음).
 - 기존 스펙 재검증: `cd server && ruff check . && ruff format --check . && pytest -q`, `cd web && npm run lint && npm run build`. 로컬 Docker: web 이미지 `nginx -t`(029 와 같은 방법), caddy 이미지의 `caddy version`(2.11 이상)과 작은 `roll_size` 로 회전 파일 이름 모양 확인 — 둘 다 §7 에.
 
 **배포·런북 뒤 — 사람(완료 조건 아님, status.md 비고 "035 운영 확인 대기")**: `/svc/api/admin/access` 가 실제 로그로 차는지·`firstTs` / Clarity(032·033 뒤): 토큰을 넣고 첫 응답의 `metricName` 목록과 행 키를 §7 에 옮긴다 / 관리자 접속 기록(029)에 폴링 둘이 없다.
@@ -101,9 +103,9 @@
 git log --oneline -1   # 시작 e41a7f4 (033 줄기 마지막 커밋)
 
 # 기존 스펙 재검증 (마지막 코드 커밋 뒤)
-cd server && ruff check . && ruff format --check . && pytest -q   # All checks passed! · 286 files already formatted · 1221 passed
+cd server && ruff check . && ruff format --check . && pytest -q   # All checks passed! · 286 files already formatted · 1232 passed
 cd web && npm run lint && npm run build   # oxlint 종료 0(출력 없음) · ✓ built — index 253.01 kB(gzip 78.58 kB)
-pytest -q app/features/admin tests/test_role.py tests/test_admin.py tests/test_clarity_store.py   # 131 passed (035 새 테스트 41 포함)
+pytest -q app/features/admin tests/test_role.py tests/test_admin.py tests/test_clarity_store.py   # 142 passed (035 새 테스트 52 포함)
 
 # 로컬 Docker — caddy 회전 파일 이름(scratchpad/035/caddy-roll: 레포 Caddyfile 의 access_log 조각 그대로 + `:8080 { import access_log; respond "ok" }`, roll_size 만 1MiB)
 docker run --rm caddy:2-alpine caddy version   # v2.11.4
@@ -135,6 +137,12 @@ curl -o /dev/null -w '%{http_code}' localhost:18935/admin/aws   # 404 (수집기
 # 부담(§3.4) — 합성 50MiB access.log 한 파일, 로컬 Mac·Python 3.12
 #   창 안 67,401줄: 0.44초·최대 RSS 변화 없음(20.1MiB — import 뒤 그대로) / 전부 창 밖: 0.03초
 #   테스트: 44MB 파일을 tracemalloc 최고 0.37MB 로(상한 8MB 단언 — test_access_files.py)
+
+# 검토 반영 — 같은 탐침을 고친 뒤 다시(scratchpad 035/nan.py·surr.py·trunc.py·clar.py, TestClient·fakeredis·MockTransport)
+#   본문 NaN·Infinity / 제목 "\ud83d" → GET /admin/clarity 두 번 200 ok(값 null·`?`), Redis 는 표준 JSON (전: 두 번 500)
+#   잘린 gz·틀린 머리 gz·디렉터리·권한 0 회전 파일 → ok·skipped 1 (전: error EOFError·BadGzipFile·IsADirectoryError·PermissionError)
+#   200 ["a","b"]·Traffic information 문자열 → error ValueError·직전 값 유지, [] → ok / HTTPS://·앞 공백·스킴 없는 주소·키·android-app 출처의 쿼리 0
+#   새 테스트 11개는 고치기 전 코드에서 모두 실패 · nginx·Caddyfile 은 바꾸지 않아 nginx -t·caddy validate 는 다시 돌리지 않음
 ```
 
 ## 6. 갱신할 문서
@@ -171,6 +179,7 @@ curl -o /dev/null -w '%{http_code}' localhost:18935/admin/aws   # 404 (수집기
   - 실패 WARNING 은 부분 이름 `access`·`clarity` 둘(Clarity 의 호출 실패·Redis 실패가 같은 10분 칸을 쓴다). `unconfigured`(파일·토큰 없음)는 실패가 아니라 남기지 않는다.
   - 접속 요약: 창은 [지금이 든 시의 시작 − 23시간, 그 시의 끝) — 시계가 앞선 줄도 마지막 시에. `tabs` 는 경로가 정확히 `/app/` 인 페이지만(SPA 대체로 200 인 `/app/<x>` 는 세지 않는다), `tab=` 빈 값은 `(기타)`. 빈 `utm_source` 는 세지 않는다. 출처 키도 경로처럼 100자에서 자른다(키 상한과 함께 메모리를 묶으려고). 브라우저도 대소문자 무관. `status` 네 칸 밖(101 등)은 세지 않는다. 상위 목록은 같은 수면 이름순. `recent5xx` 는 최신이 앞. 빈 줄은 skipped 로 세지 않는다. 목록을 본 뒤 사라진 파일(회전·보관 삭제)은 건너뛴다.
   - 034 공통을 `parts.py` 로 옮겼다 — `Slot` 의 예외 분류만 인자로(034 는 `aws.classify`, 035 는 예외 이름).
+  - 검토 반영: Clarity 의 `NaN`·`Infinity`·넘치는 실수는 거부하지 않고 null(한 지표의 빈 값이 피드를 3시간 막지 않게), 그래도 다시 쓸 수 없는 답(손으로 넣은 Redis 값 등)은 응답 직전 확인에서 `error`·예외 이름. 줄인 행 키가 겹치면 뒤의 값이 남는다. 깨진 회전 파일은 응답 키를 늘리지 않으려고 `skipped` 1 로 센다. 접속 요약의 출처 키는 `urlsplit` 으로 다시 만든다(끝 점 뗌·IPv6 는 대괄호) — 027 Caddyfile 의 출처 줄이기와 이중.
 - 실행 중 함께 고친 스펙 절: §6 목록대로 007 §3(api)·027 §3.2(끝 한 줄)·029 §3.1(표 둘·문장)·§3.2(기록하지 않는 목록). 035 본문은 고치지 않았다.
 - 담당자에게 제안 — 이 PR 에서 고치지 않는다(PR 본문에 그대로): 016 — §3.1 api 경로 목록에 `/admin/access`·`/admin/clarity`(035). 018 — §3 api 라우트 집합 문장에 `/admin/access`·`/admin/clarity`(035). 021 — §3.1 serve 설명에 "api 가 caddy 로그 디렉터리를 읽기 전용으로(035)".
 - 남은 빚:

@@ -91,8 +91,8 @@ curl -s localhost:8000/admin/aws
 ```
 034 — 로컬(`ADMIN_AWS_REGION` 없음)은 네 부분(`alarms`·`metrics`·`canary`·`budget`) 모두 `state: "unconfigured"`·`code: null` 이고 AWS 를 부르지 않는다. `/admin/alerts` 는 웹훅이 없으면 `slack`·`alarms` 둘 다 `unconfigured`·`items: []`. 로컬 compose 의 `server`(`ADMIN_AWS_REGION` 있음·자격증명 없음)는 네 부분이 `unconfigured`·`code: "no_credentials"` 이고, 메타데이터 끝점을 찾느라 첫 요청(과 그 뒤 1분마다 한 번)이 2초 안팎 걸린다.
 ```bash
-ROLE=api uvicorn app.main:app --port 8000   # 다른 셸 — api 역할로 띄운다
-curl -s localhost:8000/admin/access
+ROLE=api uvicorn app.main:app --port 8001   # 다른 셸 — api 역할로 띄운다(8000 은 위의 수집기·vite 프록시)
+curl -s localhost:8001/admin/access
 ```
 035 — api 역할에만 있다(collector 404, `/admin/clarity` 도 같다). 로컬(`ACCESS_LOG_DIR` 없음)은 `state: "unconfigured"`·`code: "no_file"`, `/admin/clarity` 는 토큰이 없으면 `unconfigured`·`code: null` 이고 Redis·Clarity 를 부르지 않는다. 로그를 세어 보려면 `ACCESS_LOG_DIR=<caddy 로그 디렉터리>` 를 주고 띄운다. docker 통합 기동에서는 `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/access`(api 는 `./logs/caddy` 를 읽는다 — 로컬은 catch-all 만이라 거의 비어 있다, 027).
 ```bash
