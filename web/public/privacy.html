@@ -146,9 +146,10 @@
         </div>
         <p id="an-gpc" hidden>브라우저가 GPC를 보내는 동안은 분석하지 않습니다.</p>
         <p id="an-nostore" hidden>이 브라우저에는 선택을 저장할 수 없어 화면 분석을 하지 않습니다.</p>
+        <p id="an-stuck" role="alert" hidden>철회를 저장하지 못했습니다 — 이 사이트의 브라우저 데이터를 지우거나 GPC를 켜면 분석을 막을 수 있습니다.</p>
         <noscript><p>자바스크립트가 꺼져 있어 버튼을 쓸 수 없습니다 — 자바스크립트가 꺼진 브라우저에서는 화면 분석도 돌지 않습니다.</p></noscript>
       </div>
-      <p>[동의]를 누르면 이 브라우저에 <code>kt.analytics</code> = <code>granted</code>를 저장합니다. [동의 철회]를 누르면 <code>denied</code>를 저장하고 이 사이트의 Clarity 쿠키 <code>_clck</code>·<code>_clsk</code>를 지웁니다. 아무것도 고르지 않으면 분석하지 않습니다 — 랜딩·대시보드에 뜨는 안내에서 [허용]을 누르거나 여기서 [동의]를 누른 경우에만 분석합니다. 브라우저가 GPC(Global Privacy Control)를 보내면 동의했더라도 분석하지 않습니다. 이 선택은 브라우저 안에서만 일어나 서버로 가지 않습니다.</p>
+      <p>[동의]를 누르면 이 브라우저에 <code>kt.analytics</code> = <code>granted</code>를 저장합니다. [동의 철회]를 누르면 <code>denied</code>를 저장하고(저장하지 못하면 값을 지워 정하지 않은 상태로 돌립니다) 이 사이트의 Clarity 쿠키 <code>_clck</code>·<code>_clsk</code>를 지웁니다. 아무것도 고르지 않으면 분석하지 않습니다 — 랜딩·대시보드에 뜨는 안내에서 [허용]을 누르거나 여기서 [동의]를 누른 경우에만 분석합니다. 브라우저가 GPC(Global Privacy Control)를 보내면 동의했더라도 분석하지 않습니다. 이 선택은 브라우저 안에서만 일어나 서버로 가지 않습니다.</p>
       <p><code>kimptrack.com</code>에서 고른 선택이 이 브라우저에 저장되고, 브라우저 데이터를 지우면 다시 묻습니다. 일부 브라우저(Safari 등)는 이 사이트를 7일 동안 쓰지 않으면 선택을 지웁니다 — 그러면 분석은 꺼진 채로 있고 다음 방문에 다시 묻습니다.</p>
       <p>동의·철회는 그 뒤로 여는 페이지에 곧바로 따릅니다. 같은 브라우저에 이미 열린 <code>kimptrack.com</code> 랜딩·대시보드 탭에도 곧바로 반영됩니다 — 철회하면 그 탭이 한 번 새로고침되어 분석을 멈추고, 동의하면 그 탭에서도 분석을 시작합니다.</p>
       <p>Microsoft 도메인의 쿠키(<code>MUID</code> 등)는 이 페이지가 지울 수 없습니다. Clarity가 안내하는 광고 거부 페이지 <a class="link" href="https://optout.aboutads.info/">optout.aboutads.info</a>(DAA)에서 따로 거부할 수 있습니다.</p>
@@ -356,6 +357,9 @@
       const write = (value) => {
         try { window.localStorage.setItem(KEY, value); return true } catch { return false }
       }
+      const remove = () => {
+        try { window.localStorage.removeItem(KEY) } catch { /* 아래에서 다시 읽어 알린다 */ }
+      }
       // Clarity 1차 쿠키 — 도메인 속성 없이 한 번, 앞의 www. 를 뗀 도메인으로 한 번(어느 쪽으로 심겼든 지워지게)
       const expireClarityCookies = () => {
         const host = location.hostname.replace(/^www\./, '')
@@ -378,14 +382,21 @@
         $('an-nostore').hidden = gpc || stored !== undefined
         // 두 버튼은 같은 모양으로 늘 함께 — 철회는 동의만큼 쉽다
         $('an-actions').hidden = gpc || stored === undefined
+        $('an-stuck').hidden = true
       }
 
+      // 누른 뒤에는 저장된 값을 다시 읽어 그린다 — 쓰기에 실패해도 화면이 실제 값(033 이 읽을 값)과 같다
       $('an-grant').addEventListener('click', () => {
-        render(write('granted') ? 'granted' : undefined)
+        write('granted')
+        render(read())
       })
       $('an-withdraw').addEventListener('click', () => {
         expireClarityCookies() // 쓰기에 실패해도 지운다
-        render(write('denied') ? 'denied' : undefined)
+        // 쓰지 못하면(저장 한도 등) 값을 지운다 — 값이 없어도 꺼짐이다
+        if (!write('denied')) remove()
+        const stored = read()
+        render(stored)
+        $('an-stuck').hidden = stored !== 'granted' // 지우기까지 실패해 동의가 남았다
       })
       // 다른 탭(033 의 띠 포함)에서 고른 값도 곧바로 보인다
       window.addEventListener('storage', (e) => { if (e.key === KEY || e.key === null) render(read()) })

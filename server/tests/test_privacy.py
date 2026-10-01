@@ -5,9 +5,15 @@
 CSP·버튼을 보는 검증은 스펙 §5 의 로컬 Docker·브라우저 명령이다.
 """
 
+import json
+import os
 import re
+import shutil
+import subprocess
 from html.parser import HTMLParser
 from pathlib import Path
+
+import pytest
 
 from tests.test_deploy import (
     PUBLIC_API,
@@ -95,6 +101,124 @@ BEHAVIOR_TERMS = {
     "수집하는 사업자",
     "거부 방법",
 }
+# §3.3 — 동의 관리 스크립트를 node 로 돌리는 가짜 브라우저. 표준 입력의 [스크립트, 경우들] 을 받아 경우마다 새로 돌리고,
+# 버튼 클릭·다른 탭의 storage 이벤트 뒤의 저장값·쿠키·상태 글자·보이는 요소를 JSON 으로 낸다. 라이브러리 없음.
+HARNESS = r"""
+const [script, cases] = JSON.parse(require('fs').readFileSync(0, 'utf8'))
+const KEY = 'kt.analytics'
+const out = cases.map((c) => {
+  const data = new Map(c.stored === undefined ? [] : [[KEY, c.stored]])
+  const fail = new Set(c.fail || [])
+  const localStorage = {
+    getItem: (k) => { if (fail.has('get')) throw new Error('get'); return data.has(k) ? data.get(k) : null },
+    setItem: (k, v) => { if (fail.has('set')) throw new Error('QuotaExceededError'); data.set(k, String(v)) },
+    removeItem: (k) => { if (fail.has('remove')) throw new Error('remove'); data.delete(k) },
+  }
+  const els = {}
+  const el = (id) => (els[id] = els[id] || {
+    hidden: c.hidden.includes(id), textContent: '', on: {},
+    addEventListener(type, fn) { this.on[type] = fn },
+  })
+  const jar = new Set(c.cookies || [])
+  const writes = []
+  const document = {
+    getElementById: el,
+    get cookie() { return [...jar].map((n) => n + '=1').join('; ') },
+    set cookie(line) {
+      writes.push(line)
+      const name = line.split('=')[0].trim()
+      if (/;\s*max-age=0\s*(;|$)/i.test(line)) jar.delete(name); else jar.add(name)
+    },
+  }
+  const listeners = {}
+  const window = { localStorage, addEventListener: (type, fn) => { listeners[type] = fn } }
+  const navigator = c.gpc ? { globalPrivacyControl: true } : {}
+  new Function('window', 'document', 'navigator', 'location', script)(
+    window, document, navigator, { hostname: 'kimptrack.com' })
+  for (const step of c.steps || []) {
+    if (step.startsWith('click:')) el(step.slice(6)).on.click()
+    else { data.set(KEY, step.slice(6)); listeners.storage({ key: KEY }) } // 'other:<값>'
+  }
+  return {
+    stored: data.has(KEY) ? data.get(KEY) : null, cookies: [...jar].sort(), writes,
+    state: el('an-value').textContent, shown: Object.keys(els).filter((id) => !els[id].hidden).sort(),
+  }
+})
+process.stdout.write(JSON.stringify(out))
+"""
+# 스크립트가 숨기고 보이는 상태 요소 — 버튼 둘은 an-actions 가 함께 숨긴다
+STATUS_IDS = {"an-state", "an-actions", "an-gpc", "an-nostore", "an-stuck"}
+WITH_BUTTONS = {"an-state", "an-actions"}
+# (이름, 경우, 뒤의 저장값, 상태 글자, 보이는 상태 요소) — 경우: stored 처음 값(없으면 키 없음), gpc, fail(get·set·remove 예외),
+# steps(click:<버튼 id> · other:<다른 탭이 쓴 값>)
+CONSENT_CASES = [
+    ("값 없음", {}, None, "정하지 않음", WITH_BUTTONS),
+    ("동의", {"stored": "granted"}, "granted", "동의함", WITH_BUTTONS),
+    ("거부", {"stored": "denied"}, "denied", "거부함", WITH_BUTTONS),
+    ("그 밖의 값", {"stored": "off"}, "off", "정하지 않음", WITH_BUTTONS),
+    (
+        "GPC 가 동의보다 앞선다",
+        {"stored": "granted", "gpc": True},
+        "granted",
+        "GPC로 거부",
+        {"an-state", "an-gpc"},
+    ),
+    (
+        "읽기 예외",
+        {"fail": ["get"]},
+        None,
+        "저장할 수 없음",
+        {"an-state", "an-nostore"},
+    ),
+    ("[동의]", {"steps": ["click:an-grant"]}, "granted", "동의함", WITH_BUTTONS),
+    (
+        "거부 뒤 [동의]",
+        {"stored": "denied", "steps": ["click:an-grant"]},
+        "granted",
+        "동의함",
+        WITH_BUTTONS,
+    ),
+    (
+        "[동의 철회]",
+        {"stored": "granted", "steps": ["click:an-withdraw"]},
+        "denied",
+        "거부함",
+        WITH_BUTTONS,
+    ),
+    (
+        "쓰기 예외의 [동의] — 실제 값 그대로",
+        {"fail": ["set"], "steps": ["click:an-grant"]},
+        None,
+        "정하지 않음",
+        WITH_BUTTONS,
+    ),
+    (
+        "쓰기 예외의 [동의 철회] — 값을 지운다",
+        {"stored": "granted", "fail": ["set"], "steps": ["click:an-withdraw"]},
+        None,
+        "정하지 않음",
+        WITH_BUTTONS,
+    ),
+    (
+        "지우기도 예외 — 동의가 남았다고 알린다",
+        {
+            "stored": "granted",
+            "fail": ["set", "remove"],
+            "steps": ["click:an-withdraw"],
+        },
+        "granted",
+        "동의함",
+        WITH_BUTTONS | {"an-stuck"},
+    ),
+    ("다른 탭의 동의", {"steps": ["other:granted"]}, "granted", "동의함", WITH_BUTTONS),
+    (
+        "다른 탭의 철회",
+        {"stored": "granted", "steps": ["other:denied"]},
+        "denied",
+        "거부함",
+        WITH_BUTTONS,
+    ),
+]
 # §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(+ 근거)
 TRANSFER_TERMS = {
     "항목",
@@ -166,6 +290,29 @@ def _section(html: str, label: str) -> str:
 
 def _terms(dl: str) -> set[str]:
     return set(re.findall(r"<dt>(.*?)</dt>", dl))
+
+
+def _run_consent_script(cases: list[dict]) -> list[dict]:
+    node = shutil.which("node")
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("node 가 없다 — CI 러너(ubuntu-latest)에는 있어야 한다")
+        pytest.skip("node 가 없어 동의 관리 스크립트를 돌리지 못한다")
+    html, page = _read(PUBLIC / "privacy.html")
+    hidden = re.findall(r'<[^>]* id="(an-[\w-]+)"[^>]*\shidden[\s>]', html)
+    payload = json.dumps(
+        ["".join(page.scripts), [{**c, "hidden": hidden} for c in cases]]
+    )
+    done = subprocess.run(
+        [node, "-e", HARNESS],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
 
 
 def _external(url: str) -> bool:
@@ -257,6 +404,33 @@ def test_page_states_the_consent_contract_and_required_notices() -> None:
     for state in STATES:
         assert f"'{state}'" in script, state
     assert "'granted'" in script and "'denied'" in script
+
+
+def test_consent_script_shows_the_stored_value_and_the_buttons_write_it() -> None:
+    """동의 관리 스크립트를 node 로 돌린다 — 상태 글자·보이는 요소·저장값·쿠키가 실제 저장값과 같다 (§3.3)."""
+    cookies = ["_clck", "_clsk", "other"]
+    results = _run_consent_script(
+        [{**case, "cookies": cookies} for _, case, *_ in CONSENT_CASES]
+    )
+    for (name, case, stored, state, shown), got in zip(
+        CONSENT_CASES, results, strict=True
+    ):
+        assert got["stored"] == stored, name
+        assert got["state"] == state, name
+        assert set(got["shown"]) & STATUS_IDS == shown, name
+        withdrew = "click:an-withdraw" in case.get("steps", [])
+        assert got["cookies"] == (["other"] if withdrew else cookies), name
+
+
+def test_withdrawal_expires_clarity_cookies_in_both_domain_shapes() -> None:
+    (got,) = _run_consent_script(
+        [{"stored": "granted", "cookies": ["_clck"], "steps": ["click:an-withdraw"]}]
+    )
+    for name in ("_clck", "_clsk"):
+        lines = [line for line in got["writes"] if line.startswith(f"{name}=;")]
+        assert all("Max-Age=0" in line and "path=/" in line for line in lines), name
+        assert any("domain=" not in line for line in lines), name
+        assert any(line.endswith("; domain=kimptrack.com") for line in lines), name
 
 
 def test_consent_box_tells_the_notices_before_the_buttons() -> None:
