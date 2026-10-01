@@ -196,6 +196,17 @@ curl -sI 127.0.0.1:18033/app/clarity.js   # 200 · Cache-Control: no-store, must
 #     기록 탭 심볼 eth Enter → 0회·set sym ETH · 스프레드로 돌아가 행 클릭 → 1회, set tab history·event pivot_history·set sym C022
 #   10 ?tab=history&sym=%ED%99%8D → ?tab=history·BTC · 홍길동 Enter → 선택 안 됨·입력칸 그대로 · eth Enter → sym=ETH
 #   11 랜딩 granted → body data-clarity-unmask·대기열 consentv2 하나 · 필터 URL 복원(s.dom·s.view·s.only·s.thr 새로고침 그대로)
+# 검토 반영 (2026-10-01) — origin/main(99975ec) 합침·뒤로 가기 캐시 복원·띠 글자 테스트 강화
+git merge-tree --write-tree --name-only origin/main bba7724   # CONFLICT docs/context/status.md → 손으로 푼 합침 aa28fc3
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/pytest -q
+#   All checks passed! / 273 files already formatted / 1177 passed (test_clarity 16 — 캐시 복원 1 더함)
+cd web && npm run lint && npm run build && node --check public/clarity.js   # 종료 0 / ✓ / 통과, dist 6행 clarity.js · 25행 앱 모듈
+# 변이 8개(pageshow 처리기 뺌·non-capture·stopImmediatePropagation 뺌·띠 칸 class="key" 뺌·다른 칸으로 옮김·나이 문장·규칙 문장 자리·복원 때 띠 안 지움) → 각각 test_clarity 실패
+# Browser pane(kimptrack.localhost:18034) — 리뷰의 시도 그대로: 랜딩 granted + 나중에 붙인 non-capture pageshow(Clarity 흉내) → 같은 문서에서 denied
+#   → PageTransitionEvent('pageshow',{persisted:true}) → 흉내 처리기 안 돎·새로고침·clarity 없음·태그 0 · 띠 + granted → 띠·style 지움·consentv2·태그 1 · 띠 + denied → 띠만 지움
+# 실제 bfcache(헤드리스 크롬·임시 프로필·CDP — Browser pane 은 notRestoredReasons masked): 랜딩 granted → 바닥 '화면 분석 설정' → [동의 철회] → 뒤로(BackForwardCacheRestore)
+#   고치기 전 clarity.js: 흉내 처리기가 돌고(Clarity 재시작) 늦은 storage 로 새로고침 / 고친 뒤: 흉내 처리기 안 돎 → 곧바로 새로고침 → clarity 없음·태그 0
+#   반대(띠 → '처리방침에서 자세히 보기' → 세 칸 저장 → 뒤로): 복원된 문서(새로고침 없음)에서 띠 지움·태그 1
 ```
 
 ## 6. 갱신할 문서
@@ -226,10 +237,12 @@ curl -sI 127.0.0.1:18033/app/clarity.js   # 200 · Cache-Control: no-store, must
   - 셸: 지금 탭을 다시 누르면 아무것도 안 한다(이벤트·URL 쓰기 없음). 태그는 `tab` URL 을 쓴 effect 다음 effect 에서 — 탭이 바뀐 뒤에만 `set tab` 과 이벤트, 기록 탭이면 심볼이 바뀔 때마다 `set sym`. `kt:clarity` 를 받으면 지금 탭(기록 탭이면 심볼도)을 다시 둔다.
   - `symbol`·`isSymbol`·`discardParams` 는 `shared/urlState.ts` 에 둔다 — 셸과 기록 탭이 같은 형식 규칙을 써야 하고(기능 간 import 금지), §4 테스트가 이 파일의 정규식을 본다. 기록 탭 검색 Enter 는 입력을 `trim()`·대문자로 바꾼 뒤 본다.
   - 계약 테스트의 node 단계는 가짜 window·document·location 으로 `clarity.js` 를 그대로 돌린다(새 라이브러리 없음). node 가 없으면 로컬은 건너뛰고 CI(`CI` 환경 변수)는 실패한다.
+  - 검토 반영(2026-10-01): 같은 탭 뒤로 가기 캐시 복원에서 철회가 Clarity 재시작을 못 막던 것을 고쳤다 — §3.5 에 `pageshow`(persisted) 줄, §3.4 판단 시점, §4 있어야 하는 글자·로컬 브라우저 5번. §4 의 032 와 같은 글자는 알릴 사항을 원문 HTML 로(중요한 내용 표시까지)·문장 셋은 자리까지 보게, 싣는 곳은 `src` 로 싣지 않는 것으로(방침 주석의 파일 이름은 괜찮다 — 테스트가 이미 그렇게 봤다, 관리자는 `web/admin` 전부). 런북 3절 6번에 띠 있음·없음 30초 3회 중앙값.
   - 로컬 브라우저: 바인드 마운트한 스크래치 디렉터리를 다시 만들면 OrbStack 컨테이너에서 비어 보여 `docker cp` 로 넣었다. 닫힌 포트를 9번으로 하면 크롬이 `ERR_UNSAFE_PORT` 로 막아 '시도' 를 보기 어려워 18039 로 했다(`ERR_CONNECTION_REFUSED` 1건 = 태그 1회).
 - 남은 빚:
-  - 머지 전 사람: §3.10 Clarity 대시보드 설정(쿠키 끔·봇 감지·가림 Balanced·IP 차단·팀)과 032 §7 법률 확인 — 이 PR 머지가 곧 켜기다. 032(#90)는 main 에 머지됐고 이 브랜치는 그 전 커밋 위다 — `git merge-tree` 로 main 과 충돌 없음을 봤다(PR 전에 main 을 합친다).
+  - 머지 전 사람: §3.10 Clarity 대시보드 설정(쿠키 끔·봇 감지·가림 Balanced·IP 차단·팀)과 032 §7 법률 확인 — 이 PR 머지가 곧 켜기다. 032(#90)·034 운영 확인(#89)이 든 origin/main(99975ec)을 이 브랜치에 합쳤다 — status.md 표가 내용 충돌해(main 이 고친 admin 행 바로 뒤에 clarity 행을 넣었다) 손으로 풀었다: admin 행은 main 것(034 운영 확인 완료), 그 뒤 clarity 행, privacy 행 끝은 이 브랜치 문구. 앞선 '충돌 없음' 은 낡은 로컬 `main`(8439448)에 대고 본 것이었다. 합친 뒤 server·web 검증을 다시 돌렸다(§5).
   - 배포 뒤 사람(§4): 실제 크롬의 `clarity.ms` 요청·쿠키 둘·`metadata` 동의 상태, 2시간 안 녹화(숫자 보임·입력칸 가림·탭 태그·필터로 페이지가 늘지 않음), Brave GPC·VoiceOver·실제 휴대폰, 스프레드 탭 Performance(동의·거부·띠 있음·없음)와 1시간 전송량 → `app` 유지 판단. 로컬은 시험 사본·닫힌 포트라 Clarity 태그가 실제로 돈 적이 없다.
+  - 뒤로 가기 캐시 복원은 크롬에서만 봤다(헤드리스 CDP·Browser pane 합성 이벤트). Safari·Firefox 도 표준 `pageshow`·capture 단계라 같게 돈다고 보지만 확인하지 않았다.
   - 375×667 처럼 낮은 화면은 접힌 띠(≈390px)도 상한(50dvh)을 넘어 띠 안에서 스크롤한다. 대시보드는 휴대폰 폭에서 셸이 넓어(레이아웃 뷰포트 708px) 띠도 함께 작게 보인다(모바일 비대응).
   - status 빚 그대로: Clarity 의 인스턴스 `replaceState` 덮어쓰기 의존(0.8.71), 전송 128회·2시간 녹화 멈춤, 동의한 방문자만(숫자는 하한), 열린 탭은 철회 뒤 한 번 새로고침, 동의 입증은 사람 확인(032 §7).
   - 담당자 제안(§6 — 002·003·013·014 스펙 문구)은 PR 본문에.
