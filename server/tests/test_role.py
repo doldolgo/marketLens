@@ -1,6 +1,6 @@
 """프로세스 역할 계약 — ROLE=api 앱은 Influx 조회 경로 + /ws/spreads + GET /spreads(Redis 읽기)
-+ GET /landing(022) + GET /admin/status(029) 만 서빙하고 백그라운드 태스크는 017 의 구독 태스크 하나다
-(스펙 016 §3.1·§4, 017 §4, 018 §3.4·§4, 029 §4).
++ GET /landing(022) + GET /admin/status(029) + 관리자 피드 둘(035) 만 서빙하고 백그라운드 태스크는 017 의
+구독 태스크 하나다(스펙 016 §3.1·§4, 017 §4, 018 §3.4·§4, 029 §4, 035 §4).
 
 collector(기본) 의 전체 동작은 기존 테스트가 그대로 지킨다 — 여기서는 라우트 집합만 본다.
 """
@@ -19,7 +19,7 @@ from app.core.config import get_settings
 from app.core.redis_bus import RedisBus
 from app.main import create_app
 
-# api 역할이 답하는 여덟 경로 (016 §3.1 + 018 §3.4 + 022 §3.2 + 029 §3.4) — 그 외는 전부 404
+# api 역할이 답하는 열 경로 (016 §3.1 + 018 §3.4 + 022 §3.2 + 029 §3.4 + 035 §3.1) — 그 외는 전부 404
 API_ROUTES = {
     "/health",
     "/history/premium",
@@ -29,9 +29,11 @@ API_ROUTES = {
     "/spreads",
     "/landing",
     "/admin/status",
+    "/admin/access",
+    "/admin/clarity",
 }
-# 029 — api 에만 있는 경로. collector ⊇ api 단언의 예외
-API_ONLY = {"/admin/status"}
+# 029·035 — api 에만 있는 경로. collector ⊇ api 단언의 예외
+API_ONLY = {"/admin/status", "/admin/access", "/admin/clarity"}
 # 034 — 수집기에만 있는 관리자 피드 둘(자격증명이 collect 박스 역할에만 있다)
 COLLECTOR_ADMIN = {"/admin/aws", "/admin/alerts"}
 
@@ -49,6 +51,9 @@ def set_role(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[[str | None],
         monkeypatch.setenv("INFLUX_TOKEN", "")
         # 034 — 리전이 있으면 관리자 피드가 AWS 를 부른다
         monkeypatch.delenv("ADMIN_AWS_REGION", raising=False)
+        # 035 — 로그 디렉터리·Clarity 토큰이 있으면 api 피드가 파일을 읽고 Clarity 를 부른다
+        monkeypatch.delenv("ACCESS_LOG_DIR", raising=False)
+        monkeypatch.delenv("CLARITY_API_TOKEN", raising=False)
         get_settings.cache_clear()
 
     yield _set
@@ -87,6 +92,12 @@ def test_api_role_serves_only_influx_routes_and_404s_the_rest(set_role) -> None:
     )
     for path in COLLECTOR_ADMIN:  # 034 — api 에는 없다
         assert client.get(path).status_code == 404, path
+    for path in (
+        "/admin/access",
+        "/admin/clarity",
+    ):  # 035 — 설정이 없으면 unconfigured 인 200
+        resp = client.get(path)
+        assert resp.status_code == 200 and resp.json()["state"] == "unconfigured", path
     assert _paths(client.app) == API_ROUTES
     # WebSocket 경로는 OpenAPI 에 안 실린다 — 라우트 표에서 본다 (017 §3.3)
     assert _ws_paths(client.app) == {"/ws/spreads"}
@@ -159,8 +170,10 @@ def test_collector_is_default_and_keeps_full_route_set(set_role) -> None:  # noq
     assert app.state.settings.role == "collector"
     paths = _paths(app)
     assert API_ROUTES - API_ONLY <= paths
-    assert not API_ONLY & paths  # 관리자 상태는 api 의 허브·버스를 본다 (029 §3.4)
-    assert TestClient(app).get("/admin/status").status_code == 404
+    # 관리자 상태는 api 의 허브·버스를, 035 피드는 serve 의 접속 로그·토큰을 본다 (029 §3.4·035 §3.1)
+    assert not API_ONLY & paths
+    for path in API_ONLY:
+        assert TestClient(app).get(path).status_code == 404, path
     assert {"/spreads", "/refresh", "/health/collect", "/history/events"} <= paths
     # 034 — 관리자 피드 둘은 collector OpenAPI 에만(api 는 위 테스트의 경로 집합 등식이 막는다)
     assert COLLECTOR_ADMIN <= paths

@@ -1,7 +1,7 @@
-"""관리자 경로 — api 의 `GET /admin/status`(029 §3.4)와 수집기의 피드 둘(034 §3.1).
+"""관리자 경로 — api 의 `GET /admin/status`(029 §3.4)·피드 둘(035 §3.1)과 수집기의 피드 둘(034 §3.1).
 
 `router` 는 api 역할에만, `collector_router` 는 collector 역할에만 포함한다(`main.py`) — 다른 역할에서는 404 다.
-공개 nginx 는 028 허용 목록 밖이라 404, 관리자 nginx(:8081)가 `/svc/api/admin/status` 와
+공개 nginx 는 028 허용 목록 밖이라 404, 관리자 nginx(:8081)가 `/svc/api/admin/{status,access,clarity}` 와
 `= /api/admin/aws`·`= /api/admin/alerts` 를 넘긴다. 모두 항상 200 인 상태 응답이다.
 """
 
@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from app.features.admin.feeds import AdminFeeds
 from app.features.admin.models import AdminStatusOut
 from app.features.admin.service import AdminStatusService
+from app.features.admin.visits import VisitFeeds
 
 router = APIRouter()
 collector_router = APIRouter()
@@ -25,6 +26,21 @@ async def get_admin_status(request: Request) -> AdminStatusOut:
         bus=getattr(state, "spreads_bus", None),
         influx=getattr(state, "influx", None),
     )
+
+
+@router.get("/admin/access")
+async def get_admin_access(request: Request) -> JSONResponse:
+    """caddy 접속 로그 24시간 요약 — 부분 하나 (035 §3.2)."""
+    feeds: VisitFeeds = request.app.state.admin_visits
+    return JSONResponse(await feeds.access())
+
+
+@router.get("/admin/clarity")
+async def get_admin_clarity(request: Request) -> JSONResponse:
+    """Clarity 요약 — 부분 하나, 3시간 간격·Redis 기록 (035 §3.3)."""
+    state = request.app.state
+    feeds: VisitFeeds = state.admin_visits
+    return JSONResponse(await feeds.clarity(bus=getattr(state, "spreads_bus", None)))
 
 
 @collector_router.get("/admin/aws")
