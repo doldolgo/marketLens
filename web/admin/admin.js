@@ -206,3 +206,181 @@ document.addEventListener('visibilitychange', () => {
   if (!slow.busy) schedule(slow);
 });
 
+// --- 부분 상태 (§3.5) ----------------------------------------------------------------------------
+
+// 연결 안 됨의 한 줄 원인
+const CAUSE = {
+  aws: 'AWS 자격 없음 또는 계정 종료',
+  slack: '이 수집기에 Slack 웹훅 없음',
+  access: '로그 파일 없음',
+  clarity: '토큰 없음 또는 033 전',
+};
+const DENIED = 'IAM 정책 또는 조직 SCP — 콘솔에서 본다';
+
+// 경로 응답에서 부분 하나 — undefined(첫 호출 전)·{ why }(호출 실패)·부분 객체 { state, code, fetchedAt, refreshSec, … }
+function partOf(path, key) {
+  const entry = got.get(path);
+  if (!entry) return undefined;
+  if (entry.why) return { why: entry.why };
+  const part = key ? entry.body[key] : entry.body;
+  return isObj(part) && typeof part.state === 'string' ? part : { why: '응답 모양 오류' };
+}
+
+// 값을 그릴 수 있는가 — ok, 또는 error 인데 값이 있다(Clarity 의 마지막 성공 값)
+function usable(part, valueKey) {
+  if (!part || part.why) return false;
+  if (part.state === 'ok') return true;
+  return part.state === 'error' && valueKey !== undefined && part[valueKey] != null;
+}
+
+// 머리의 경과 "4분 전 값" — 그 부분의 refreshSec × 3 을 넘으면 주의(refreshSec 0 은 보지 않는다, §3.3)
+function age(part) {
+  if (num(part.fetchedAt) === null) return el('span', 'muted', '값 시각 없음');
+  const stale = num(part.refreshSec) > 0 && Date.now() - part.fetchedAt > part.refreshSec * 3000;
+  return stale ? marked('warn', `${ago(part.fetchedAt)} 값 · 오래됨`) : el('span', 'muted', `${ago(part.fetchedAt)} 값`);
+}
+
+function head(part, valueKey) {
+  if (part === undefined) return [badge('wait', '불러오는 중')];
+  if (part.why) return [badge('bad', part.why)];
+  const out = [];
+  if (part.state === 'ok') out.push(age(part));
+  else if (part.state === 'pending') out.push(badge('wait', '첫 조회 중'));
+  else if (part.state === 'unconfigured') out.push(badge('dim', '연결 안 됨'));
+  else if (part.state === 'denied') out.push(badge('dim', '권한 없음'));
+  else if (usable(part, valueKey)) out.push(badge('bad', `불러오지 못함 · 마지막 성공 ${ago(part.fetchedAt)}`));
+  else out.push(badge('bad', '불러오지 못함'));
+  if (part.code) out.push(el('span', 'code', part.code));
+  return out;
+}
+
+// 값을 못 그릴 때 본문 — error 에 값이 없으면 빈칸(배지가 말한다)
+function stateMsg(part, cause) {
+  if (part === undefined) return el('p', 'state-msg span-all', '… 불러오는 중');
+  if (part.why) return el('p', 'state-msg t-bad span-all', `${part.why} — 이 칸의 값은 비웠다`);
+  if (part.state === 'pending') return el('p', 'state-msg span-all', '… 첫 조회 중 — 다음 갱신에 찬다');
+  if (part.state === 'unconfigured') return el('p', 'state-msg span-all', `연결 안 됨 — ${cause}`);
+  if (part.state === 'denied') return el('p', 'state-msg span-all', `권한 없음 — ${DENIED}`);
+  return el('p', 'state-msg span-all');
+}
+
+// 칸 하나 = 머리(m-이름) + 본문(b-이름). 값을 그렸으면 true
+function region(name, part, cause, fill, valueKey) {
+  $(`m-${name}`).replaceChildren(...head(part, valueKey));
+  const body = $(`b-${name}`);
+  if (usable(part, valueKey)) {
+    fill(body, part);
+    return true;
+  }
+  body.replaceChildren(stateMsg(part, cause));
+  return false;
+}
+
+// 개요 칸·절 요약에 쓰는 짧은 상태 — 값을 못 그릴 때
+function stateWord(part) {
+  if (part === undefined) return ['wait', '불러오는 중'];
+  if (part.why) return ['bad', '호출 실패'];
+  if (part.state === 'pending') return ['wait', '첫 조회 중'];
+  if (part.state === 'unconfigured') return ['dim', '연결 안 됨'];
+  if (part.state === 'denied') return ['dim', '권한 없음'];
+  return ['bad', '불러오지 못함'];
+}
+
+// --- 차트 (§3.6) — SVG 를 DOM 으로. 모양은 기하 속성, 색·굵기는 클래스 ----------------------------------
+
+function svg(tag, attrs, cls) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, String(v));
+  if (cls) node.setAttribute('class', cls);
+  return node;
+}
+
+function tip(node, text) {
+  const title = svg('title');
+  title.textContent = clean(text);
+  node.prepend(title);
+  return node;
+}
+
+function frame(w, h, cls, label) {
+  const attrs = { viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': clean(label) };
+  return svg('svg', attrs, `chart${cls ? ` ${cls}` : ''}`);
+}
+
+function axis(left, right) {
+  const row = el('div', 'axis');
+  row.append(el('span', null, left), el('span', null, right));
+  return row;
+}
+
+// 점 [[ts초, 값|null], …] → 지금(마지막 값)·최저·최고·값 수
+function stats(points) {
+  const vals = list(points).map((p) => (Array.isArray(p) ? num(p[1]) : null)).filter((v) => v !== null);
+  return { now: vals.length ? vals[vals.length - 1] : null, min: vals.length ? Math.min(...vals) : null, max: vals.length ? Math.max(...vals) : null, count: vals.length };
+}
+
+// 24시간 선 — 가로는 ts×1000 을 창에, null 에서 끊고(보간 없음) 비율은 0~100 고정·그 밖은 0~최댓값, 기준선은 점선
+function line(points, o) {
+  const s = stats(points);
+  if (s.count < 2) return el('p', 'empty', '데이터 부족');
+  const W = 288;
+  const H = 48;
+  const top = o.fixed100 ? 100 : Math.max(s.max, o.ref ?? 0) * 1.1 || 1;
+  const x = (ts) => ((ts * 1000 - o.startMs) / (o.endMs - o.startMs)) * W;
+  const y = (v) => H - (Math.min(Math.max(v, 0), top) / top) * H;
+  const segs = [];
+  let cur = null;
+  for (const p of list(points)) {
+    const v = Array.isArray(p) ? num(p[1]) : null;
+    if (v === null || num(p[0]) === null) {
+      cur = null;
+      continue;
+    }
+    if (!cur) segs.push((cur = []));
+    cur.push(`${x(p[0]).toFixed(1)} ${y(v).toFixed(1)}`);
+  }
+  // 앞뒤가 빈 점 하나는 길이 0 선 — 둥근 끝이 점으로 보인다
+  const d = segs.map((seg) => `M${seg.join(' L')}${seg.length === 1 ? ' h0.1' : ''}`).join(' ');
+  const fmt = o.format || ((v) => int(v));
+  const label = `${o.label} 24시간 — ${o.extreme === 'min' ? `최저 ${fmt(s.min)}` : `최고 ${fmt(s.max)}`}, 지금 ${fmt(s.now)}`;
+  const root = frame(W, H, '', label);
+  root.append(svg('line', { x1: 0, x2: W, y1: H, y2: H }, 'floor'));
+  if (o.ref !== undefined) {
+    root.append(tip(svg('line', { x1: 0, x2: W, y1: y(o.ref), y2: y(o.ref) }, 'ref t-bad'), `경보 기준 ${fmt(o.ref)}`));
+  }
+  root.append(svg('path', { d }, 'line'));
+  const out = document.createDocumentFragment();
+  out.append(root, axis('24시간 전', '지금'));
+  return out;
+}
+
+// 가로 비율 막대 하나(0~1)
+function ratio(frac, tone, label) {
+  const root = frame(100, 6, 'bar6', label);
+  const w = Math.min(1, Math.max(0, num(frac) ?? 0)) * 100;
+  root.append(svg('rect', { x: 0, y: 0, width: 100, height: 6 }, 'track'));
+  root.append(svg('rect', { x: 0, y: 0, width: w.toFixed(2), height: 6 }, tone ? `fill t-${tone}` : 'fill'));
+  return root;
+}
+
+// 세로 막대 — bars [{ value, over, tip }], over 는 같은 눈금으로 겹쳐 그린다(5xx)
+function columns(bars, label, cls) {
+  const W = bars.length * 10;
+  const H = 60;
+  const top = Math.max(1, ...bars.map((b) => b.value));
+  const root = frame(W, H, cls, label);
+  root.append(svg('line', { x1: 0, x2: W, y1: H, y2: H }, 'floor'));
+  bars.forEach((b, i) => {
+    const g = svg('g');
+    const h = (b.value / top) * H;
+    if (b.value > 0) g.append(svg('rect', { x: i * 10 + 1, y: H - h, width: 8, height: h }, 'fill'));
+    if (b.over > 0) {
+      const ho = Math.max(1.5, (b.over / top) * H);
+      g.append(svg('rect', { x: i * 10 + 1, y: H - ho, width: 8, height: ho }, 'err'));
+    }
+    g.append(svg('rect', { x: i * 10, y: 0, width: 10, height: H }, 'hit'));
+    root.append(tip(g, b.tip));
+  });
+  return root;
+}
+
