@@ -10,19 +10,20 @@
 - 호스트명: `admin.kimptrack.com` — DNS `admin` CNAME(프록시, 주황)은 라우트가 만든다. 루트·www 는 DNS only(회색) 그대로(023).
 - 터널: 이름 `marketlens-serve`, 원격 관리(토큰), 커넥터는 serve 박스 하나.
 - 라우트: `admin.kimptrack.com` → Service `http://web:8081` 하나 + catch-all `http_status:404`. private network(CIDR)·WARP 라우트 없음.
-- Protect with Access: 켬 — required · 팀 이름 · Access 앱 AUD.
-- Access 앱: 이름 `marketlens-admin`, Self-hosted, 도메인 `admin.kimptrack.com` **전체**(경로 없음).
-- 정책: Allow + 그룹 `marketlens-admins` 하나. Bypass·Everyone·Service Auth 정책 없음.
-- 그룹: `marketlens-admins`(Include → Emails) — 인원 `<N>`명. 이메일 목록은 대시보드 그룹 화면에서만 본다.
-- 로그인 방식: One-time PIN 하나 + Instant Auth(방식이 하나라 선택 화면 없이 코드 입력으로).
+- Protect with Access: 켬 — required · 팀 이름 · Access 앱 AUD. 2026-10 화면에서는 라우트의 "Access JSON 웹 토큰(JWT) 유효성 검사 적용" 스위치를 켜고 Access 앱(`admin`)을 고르면 팀 이름·AUD 가 따라 들어간다. 적용 확인: `docker logs marketlens-cloudflared 2>&1 | grep 'Updated to new configuration'` 의 ingress 에 `"access":{…"required":true,"teamName":…}` (AUD 는 출력에서 가린다).
+- Access 앱: 이름 `admin`(대시보드가 대상 호스트 이름에서 채운 기본값), 자체 호스팅 · 공개 DNS, 대상 `admin.kimptrack.com` **전체**(경로 없음).
+- 정책: 재사용 정책 `marketlens-admins` 하나 — Allow, Include → **Emails**(관리자 이메일을 정책에 직접), 정책 세션 12시간. Bypass·Everyone·Service Auth 정책 없음. 이메일 목록은 대시보드 정책 화면에서만 본다(인원 `<N>`명).
+- 그룹: 쓰지 않는다 — 2026-10 한국어 화면에서 Access 그룹 메뉴가 안 보여 정책에 이메일을 직접 넣었다. 사람을 넣고 뺄 때는 이 정책의 Emails 를 고친다.
+- 로그인 방식: 조직의 ID 공급자 목록에는 기본 항목과 One-time PIN 이 있고, 앱은 One-time PIN 하나만 고르고 Instant Auth(선택 화면 없이 코드 입력으로).
 - 세션: 전역(Settings → Authentication → Global session timeout)·앱 모두 12시간.
 - 쿠키(앱 → Settings → Cookie settings): SameSite=Lax · HTTP Only 켬 · Binding Cookie 켬. CORS 의 "Bypass OPTIONS requests to origin" 끔.
 - AUD 위치: Access 앱 → 앱 편집 → Overview(Basic information)의 Application Audience (AUD) Tag. 레포에 안 적는다.
 - 대시보드 구성원: `<N>`명(1~2명), 전원 2FA.
 - 알림: Tunnel 상태 알림 → 메일.
-- 기록한 날: `<YYYY-MM-DD>`
+- 기록한 날: 2026-10-01
 
 ## 준비 순서
+2026-10 한국어 대시보드의 메뉴 이름(번역이 어색하다): Access → **접근통제**(Applications 가 "에", Policies 가 "규약"), Tunnels → **네트워크 → 커넥터**, Login methods → **통합 → ID 공급자**, 라우트 → 터널의 **게시된 애플리케이션 경로**. 언어를 English 로 바꾸면 이 문서의 영문 이름과 맞는다.
 ### 1. 조직
 Zero Trust 가입 — 플랜 Free(50명). 결제수단 등록 단계가 있지만 청구는 없다. 팀 이름을 정한다(위 — 바꾸지 않는다).
 - 확인: Settings 에 팀 도메인 `<팀>.cloudflareaccess.com`.
@@ -44,6 +45,7 @@ Access → Access Groups(또는 Reusable components → Groups) → `marketlens-
 
 ### 6. 터널
 Networks → Tunnels → Create → Cloudflared → 이름 `marketlens-serve`. 설치 안내 화면의 명령(`… --token eyJ…`)은 **실행하지 않는다** — 토큰이 명령 인자·셸 기록에 남는다. 토큰 문자열만 7단계에서 파일로 옮긴다. 라우트 단계는 건너뛴다(9단계).
+- 설치 명령을 어느 기기에서든 실행하면 **그 기기가 커넥터가 된다**(2026-10-01 맥북에서 macOS 명령 `sudo cloudflared service install <토큰>` 이 한 번 실행돼 맥북이 커넥터가 됐다). 되돌리기: 그 기기에서 `sudo cloudflared service uninstall`. 토큰이 셸 기록에 남았으므로 그 터널은 지우고 새로 만든다(지우면 옛 토큰은 쓸모없어진다).
 
 ### 7. 토큰 파일·권한 (serve 박스)
 ```bash
@@ -67,6 +69,7 @@ docker logs marketlens-cloudflared 2>&1 | grep -c 'Registered tunnel connection'
 ### 9. 라우트
 터널 → Public hostname(Published application routes) → Add: subdomain `admin`, domain `kimptrack.com`, path 비움, Service `HTTP` · `web:8081`. Additional application settings → Access → **Protect with Access** 켬: required, Team name `<팀>`, AUD `<5단계 값>`. catch-all 은 `http_status:404` 그대로. 계정 전체 "Require Access protection" 이 Free 에서 켜지면 켠다.
 - 확인: `curl -sI https://admin.kimptrack.com/` 이 `302` 이고 `location` 이 `<팀>.cloudflareaccess.com` 로그인.
+- "이 이름의 DNS 레코드가 이미 있습니다": 터널을 지워도 라우트가 만든 DNS `admin` CNAME(`…cfargotunnel.com`, 프록시)은 남는다. 도메인 → DNS → 레코드에서 **`admin` 한 줄만** 지우고 다시 저장한다 — 루트·www 는 건드리지 않는다(운영 사이트).
 
 ### 10. 알림
 Notifications → Add → Tunnel 상태 알림(Tunnel Health) → 메일. 등록 직후 시험 메일.

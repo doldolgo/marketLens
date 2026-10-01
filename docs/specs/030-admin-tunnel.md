@@ -137,8 +137,13 @@ docker ps -a · docker network ls · docker images · docker volume ls   # 시�
   - `docs/specs/021-infra-split.md:§3.2` — "서비스마다 profile 하나: `server` → `collect`, `redis`·`influxdb` → `data`, `api`·`web` → `serve`" → 실제는 caddy 도 `serve`(023)이고 cloudflared 는 박스 profile 이 아닌 `tunnel`(serve 부속, 배포가 토큰 파일이 있을 때만 — 030).
   - `docs/specs/023-domain-tls.md:§4` — "`test_deploy.py` — 컨테이너 여섯" → 일곱(030).
   - `docs/specs/023-domain-tls.md:§2` — "배포 워크플로 변경 없음(`--profile serve` 가 caddy 도 띄운다)" → serve 배포는 up 뒤 caddy reload(027)와 토큰 파일이 있을 때 `--profile tunnel up`(030).
+- 배포·런북 뒤 운영 확인(2026-10-01, 사람 + 설계 세션):
+  - Cloudflare: kimptrack.com 이 있는 계정에서 Zero Trust Free 조직을 새로 시작(팀 이름은 레포에 안 적는다). 앱 `admin`(자체 호스팅·공개 DNS), 재사용 정책 `marketlens-admins`(Allow·Include Emails·정책 세션 12시간 — 그룹 대신), 로그인 One-time PIN 만·Instant Auth. 라우트 `admin.kimptrack.com` → `http://web:8081`, JWT 유효성 검사 켬(앱 선택). 설치 명령이 맥북에서 한 번 실행돼 맥북이 커넥터가 된 일이 있어 그 터널은 지우고 새로 만들었다 — 남은 DNS `admin` 레코드를 지우고 라우트를 다시 저장(런북 6·9단계에 한 줄씩).
+  - serve: 토큰 파일 `secrets/cloudflared-token`(65532:65532·0400·디렉터리 700) → `--profile tunnel up -d` → healthy, `Registered tunnel connection` 4, 망 `marketlens_admin` 하나, 메모리 17MiB/128MiB. 적용된 ingress: `admin.kimptrack.com` → `http://web:8081`(access.required true·teamName·audTag) + `http_status:404`, warp-routing 꺼짐.
+  - 밖에서: 로그인 전 `/`·`/api/health`·`/svc/api/admin/status` 모두 302 → `<팀>.cloudflareaccess.com` 로그인, OTP 로그인 뒤 관리자 화면 동작(사람 확인). 공개 `https://kimptrack.com` 200·`/api/docs` 404 그대로, 탄력 IP + `Host: admin.kimptrack.com` 은 공개 랜딩 200.
+  - 관리자 접속 기록: JSON 12줄 전부 파싱, 이메일이 든 줄 11(Access 뒤 요청), `sfs` 는 same-origin 9·cross-site 2(로그인 뒤 돌아오는 `/` — 예외 경로라 200)·없음 1. logrotate `/etc/logrotate.d/marketlens-admin` 설치(`logrotate -d` 로 weekly·13 확인).
 - 남은 빚:
-  - §4 "배포·런북 뒤 — 사람" 항목 전부(status.md "운영 확인 대기") — 진짜 토큰이 없어 헬스체크 `ready`·엣지 연결·Protect with Access 는 로컬에서 못 봤다. 첫 확인은 런북 8·9단계.
+  - §4 "배포·런북 뒤 — 사람" 의 나머지(Tunnel 상태 알림 메일·`Set-Cookie` 속성·AUD 틀림 403 시험·교차 사이트 fetch 기록·위조 이메일 헤더·허용 안 된 이메일은 코드 못 받음) — 위 운영 확인에서 하지 않았다 — 진짜 토큰이 없어 헬스체크 `ready`·엣지 연결·Protect with Access 는 로컬에서 못 봤다. 첫 확인은 런북 8·9단계.
   - cloudflared 의 원격 관리(대시보드 실시간 로그·진단 — 이 버전의 `--management-diagnostics` 기본 켬)는 기본값 그대로다. 대시보드 실시간 로그는 로컬 `--loglevel info` 와 따로 더 자세한 요청 이벤트를 받을 수 있다 — 대시보드 권한자만 쓰지만 끄려면 후속(status.md 빚).
   - 토큰이 틀리거나 만료돼 cloudflared 가 곧바로 끝나고 재시작을 되풀이해도 `--profile tunnel up -d` 는 0 으로 끝나 배포는 초록이다 — §3.3 의 "tunnel `up` 이 실패하면" 은 compose 가 컨테이너를 못 만드는 경우만 덮는다. 드러나는 곳은 런북 8단계의 사람 확인(커넥터 Healthy)과 Tunnel 상태 알림 메일(설계 세션 판단 — 배포가 엣지 연결을 기다리면 Cloudflare 쪽 지연이 배포 실패가 된다).
   - status.md 에 적은 030 빚 넷(대시보드에만 있는 설정·출구 제한 없음·Access 로그 24시간·021·023 제안 반영 대기).
