@@ -166,21 +166,28 @@ BEHAVIOR_TERMS = {
     "거부 방법",
 }
 # §3.3 — 동의 관리 스크립트를 node 로 돌리는 가짜 브라우저. 표준 입력의 [스크립트, 경우들] 을 받아 경우마다 새로 돌리고,
-# 버튼 클릭·다른 탭의 storage 이벤트 뒤의 저장값·쿠키·상태 글자·보이는 요소를 JSON 으로 낸다. 라이브러리 없음.
+# 칸 체크·버튼 클릭·다른 탭의 storage 이벤트 뒤의 저장값·판·쿠키·상태 글자·보이는·체크된·막힌 요소를 JSON 으로 낸다.
+# 라이브러리 없음.
 HARNESS = r"""
 const [script, cases] = JSON.parse(require('fs').readFileSync(0, 'utf8'))
 const KEY = 'kt.analytics'
+const VKEY = 'kt.analytics.v'
 const out = cases.map((c) => {
-  const data = new Map(c.stored === undefined ? [] : [[KEY, c.stored]])
+  const data = new Map()
+  if (c.stored !== undefined) data.set(KEY, c.stored)
+  if (c.v !== undefined) data.set(VKEY, c.v)
   const fail = new Set(c.fail || [])
   const localStorage = {
     getItem: (k) => { if (fail.has('get')) throw new Error('get'); return data.has(k) ? data.get(k) : null },
-    setItem: (k, v) => { if (fail.has('set')) throw new Error('QuotaExceededError'); data.set(k, String(v)) },
+    setItem: (k, v) => {
+      if (fail.has('set') || fail.has('set:' + k)) throw new Error('QuotaExceededError')
+      data.set(k, String(v))
+    },
     removeItem: (k) => { if (fail.has('remove')) throw new Error('remove'); data.delete(k) },
   }
   const els = {}
   const el = (id) => (els[id] = els[id] || {
-    hidden: c.hidden.includes(id), textContent: '', on: {},
+    hidden: c.hidden.includes(id), disabled: c.disabled.includes(id), checked: false, textContent: '', on: {},
     addEventListener(type, fn) { this.on[type] = fn },
   })
   const jar = new Set(c.cookies || [])
@@ -200,89 +207,68 @@ const out = cases.map((c) => {
   new Function('window', 'document', 'navigator', 'location', script)(
     window, document, navigator, { hostname: 'kimptrack.com' })
   for (const step of c.steps || []) {
-    if (step.startsWith('click:')) el(step.slice(6)).on.click()
-    else { data.set(KEY, step.slice(6)); listeners.storage({ key: KEY }) } // 'other:<값>'
+    const at = step.indexOf(':')
+    const kind = step.slice(0, at), arg = step.slice(at + 1)
+    if (kind === 'click') el(arg).on.click()
+    else if (kind === 'check') el(arg).checked = true
+    else if (kind === 'uncheck') el(arg).checked = false
+    else { const [k, v] = arg.split('='); data.set(k, v); listeners.storage({ key: k }) } // 'other:<키>=<값>'
   }
+  const ids = (pick) => Object.keys(els).filter((id) => pick(els[id])).sort()
   return {
-    stored: data.has(KEY) ? data.get(KEY) : null, cookies: [...jar].sort(), writes,
-    state: el('an-value').textContent, shown: Object.keys(els).filter((id) => !els[id].hidden).sort(),
+    stored: data.has(KEY) ? data.get(KEY) : null, v: data.has(VKEY) ? data.get(VKEY) : null,
+    cookies: [...jar].sort(), writes, state: el('an-value').textContent,
+    shown: ids((e) => !e.hidden), checked: ids((e) => e.checked), disabled: ids((e) => e.disabled),
   }
 })
 process.stdout.write(JSON.stringify(out))
 """
-# 스크립트가 숨기고 보이는 상태 요소 — 버튼 둘은 an-actions 가 함께 숨긴다
+
+
+def _notice_version() -> str:
+    """동의 관리 스크립트의 지금 판 — 033 clarity.js 의 판과 같아야 한다 (§3.3)."""
+    html = (PUBLIC / "privacy.html").read_text("utf-8")
+    found = re.search(r"const VERSION = '([^']*)'", html)
+    return found.group(1) if found else ""
+
+
+NOTICE = _notice_version()
+OLD = "2026-09-01"  # 예전 판 — 이 판의 동의로는 켜지 않고 다시 묻는다
+# 스크립트가 숨기고 보이는 상태 요소. 버튼 줄 안의 [모두 거부]·[동의 철회]는 an-actions 가 보일 때만 센다
 STATUS_IDS = {"an-state", "an-actions", "an-gpc", "an-nostore", "an-stuck"}
-WITH_BUTTONS = {"an-state", "an-actions"}
-# (이름, 경우, 뒤의 저장값, 상태 글자, 보이는 상태 요소) — 경우: stored 처음 값(없으면 키 없음), gpc, fail(get·set·remove 예외),
-# steps(click:<버튼 id> · other:<다른 탭이 쓴 값>)
+# 정하지 않음·거부함은 [선택한 대로 저장]·[모두 거부], 동의함은 [선택한 대로 저장]·[동의 철회]
+UNDECIDED = {"an-state", "an-actions", "an-deny"}
+AGREED = {"an-state", "an-actions", "an-withdraw"}
+ALL = [f"check:{box}" for box in BOXES]
+# (이름, 경우, 뒤의 저장값, 뒤의 판, 상태 글자, 보이는 상태 요소, 쿠키를 지웠나) — 경우: stored·v 처음 값(없으면 키 없음),
+# gpc, fail(get·set·remove 예외, set:<키> 는 그 키만), steps(check:·uncheck:<칸 id> · click:<버튼 id> · other:<키>=<다른 탭이 쓴 값>)
+# fmt: off
 CONSENT_CASES = [
-    ("값 없음", {}, None, "정하지 않음", WITH_BUTTONS),
-    ("동의", {"stored": "granted"}, "granted", "동의함", WITH_BUTTONS),
-    ("거부", {"stored": "denied"}, "denied", "거부함", WITH_BUTTONS),
-    ("그 밖의 값", {"stored": "off"}, "off", "정하지 않음", WITH_BUTTONS),
-    (
-        "GPC 가 동의보다 앞선다",
-        {"stored": "granted", "gpc": True},
-        "granted",
-        "GPC로 거부",
-        {"an-state", "an-gpc"},
-    ),
-    (
-        "읽기 예외",
-        {"fail": ["get"]},
-        None,
-        "저장할 수 없음",
-        {"an-state", "an-nostore"},
-    ),
-    ("[동의]", {"steps": ["click:an-grant"]}, "granted", "동의함", WITH_BUTTONS),
-    (
-        "거부 뒤 [동의]",
-        {"stored": "denied", "steps": ["click:an-grant"]},
-        "granted",
-        "동의함",
-        WITH_BUTTONS,
-    ),
-    (
-        "[동의 철회]",
-        {"stored": "granted", "steps": ["click:an-withdraw"]},
-        "denied",
-        "거부함",
-        WITH_BUTTONS,
-    ),
-    (
-        "쓰기 예외의 [동의] — 실제 값 그대로",
-        {"fail": ["set"], "steps": ["click:an-grant"]},
-        None,
-        "정하지 않음",
-        WITH_BUTTONS,
-    ),
-    (
-        "쓰기 예외의 [동의 철회] — 값을 지운다",
-        {"stored": "granted", "fail": ["set"], "steps": ["click:an-withdraw"]},
-        None,
-        "정하지 않음",
-        WITH_BUTTONS,
-    ),
-    (
-        "지우기도 예외 — 동의가 남았다고 알린다",
-        {
-            "stored": "granted",
-            "fail": ["set", "remove"],
-            "steps": ["click:an-withdraw"],
-        },
-        "granted",
-        "동의함",
-        WITH_BUTTONS | {"an-stuck"},
-    ),
-    ("다른 탭의 동의", {"steps": ["other:granted"]}, "granted", "동의함", WITH_BUTTONS),
-    (
-        "다른 탭의 철회",
-        {"stored": "granted", "steps": ["other:denied"]},
-        "denied",
-        "거부함",
-        WITH_BUTTONS,
-    ),
+    ("값 없음", {}, None, None, "정하지 않음", UNDECIDED, False),
+    ("지금 판의 동의", {"stored": "granted", "v": NOTICE}, "granted", NOTICE, "동의함", AGREED, False),
+    ("예전 판의 동의 — 다시 묻는다", {"stored": "granted", "v": OLD}, "granted", OLD, "정하지 않음", UNDECIDED, False),
+    ("판 없는 동의", {"stored": "granted"}, "granted", None, "정하지 않음", UNDECIDED, False),
+    ("거부", {"stored": "denied"}, "denied", None, "거부함", UNDECIDED, False),
+    ("그 밖의 값", {"stored": "off"}, "off", None, "정하지 않음", UNDECIDED, False),
+    ("GPC 가 동의보다 앞선다", {"stored": "granted", "v": NOTICE, "gpc": True}, "granted", NOTICE, "GPC로 거부", {"an-state", "an-gpc"}, False),
+    ("읽기 예외", {"fail": ["get"]}, None, None, "저장할 수 없음", {"an-state", "an-nostore"}, False),
+    ("세 칸 모두 체크하고 저장", {"steps": [*ALL, "click:an-save"]}, "granted", NOTICE, "동의함", AGREED, False),
+    ("한 칸 빠지면 거부", {"steps": [*ALL[:2], "click:an-save"]}, "denied", None, "거부함", UNDECIDED, True),
+    ("칸 없이 저장", {"steps": ["click:an-save"]}, "denied", None, "거부함", UNDECIDED, True),
+    ("[모두 거부]", {"steps": [*ALL, "click:an-deny"]}, "denied", None, "거부함", UNDECIDED, True),
+    ("거부 뒤 세 칸 동의", {"stored": "denied", "steps": [*ALL, "click:an-save"]}, "granted", NOTICE, "동의함", AGREED, False),
+    ("예전 판 동의를 지금 판으로", {"stored": "granted", "v": OLD, "steps": [*ALL, "click:an-save"]}, "granted", NOTICE, "동의함", AGREED, False),
+    ("[동의 철회]", {"stored": "granted", "v": NOTICE, "steps": ["click:an-withdraw"]}, "denied", None, "거부함", UNDECIDED, True),
+    ("동의한 칸 하나를 빼고 저장 — 철회", {"stored": "granted", "v": NOTICE, "steps": ["uncheck:an-transfer", "click:an-save"]}, "denied", None, "거부함", UNDECIDED, True),
+    ("쓰기 예외의 저장 — 실제 값 그대로", {"fail": ["set"], "steps": [*ALL, "click:an-save"]}, None, None, "정하지 않음", UNDECIDED, False),
+    ("판을 못 쓰면 동의도 쓰지 않는다", {"fail": ["set:kt.analytics.v"], "steps": [*ALL, "click:an-save"]}, None, None, "정하지 않음", UNDECIDED, False),
+    ("쓰기 예외의 [동의 철회] — 값과 판을 지운다", {"stored": "granted", "v": NOTICE, "fail": ["set"], "steps": ["click:an-withdraw"]}, None, None, "정하지 않음", UNDECIDED, True),
+    ("지우기도 예외 — 동의가 남았다고 알린다", {"stored": "granted", "v": NOTICE, "fail": ["set", "remove"], "steps": ["click:an-withdraw"]}, "granted", NOTICE, "동의함", AGREED | {"an-stuck"}, True),
+    ("다른 탭의 동의", {"steps": [f"other:kt.analytics.v={NOTICE}", "other:kt.analytics=granted"]}, "granted", NOTICE, "동의함", AGREED, False),
+    ("다른 탭의 철회", {"stored": "granted", "v": NOTICE, "steps": ["other:kt.analytics=denied"]}, "denied", NOTICE, "거부함", UNDECIDED, False),
+    ("다른 탭이 판을 바꿈", {"stored": "granted", "v": NOTICE, "steps": [f"other:kt.analytics.v={OLD}"]}, "granted", OLD, "정하지 않음", UNDECIDED, False),
 ]
+# fmt: on
 # §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(+ 근거)
 TRANSFER_TERMS = {
     "항목",
@@ -364,8 +350,12 @@ def _run_consent_script(cases: list[dict]) -> list[dict]:
         pytest.skip("node 가 없어 동의 관리 스크립트를 돌리지 못한다")
     html, page = _read(PUBLIC / "privacy.html")
     hidden = re.findall(r'<[^>]* id="(an-[\w-]+)"[^>]*\shidden[\s>]', html)
+    disabled = re.findall(r'<[^>]* id="(an-[\w-]+)"[^>]*\sdisabled[\s>/]', html)
     payload = json.dumps(
-        ["".join(page.scripts), [{**c, "hidden": hidden} for c in cases]]
+        [
+            "".join(page.scripts),
+            [{**c, "hidden": hidden, "disabled": disabled} for c in cases],
+        ]
     )
     done = subprocess.run(
         [node, "-e", HARNESS],
@@ -458,14 +448,21 @@ def test_page_states_the_consent_contract_and_required_notices() -> None:
         assert text in html, text
     for text in MUST_NOT_SAY:
         assert text not in html, text
-    # 같은 모양의 버튼 둘 — 철회는 동의만큼 쉽다 — 과 자바스크립트가 꺼졌을 때의 안내 (§3.3·§3.7)
-    assert '<button class="btn" type="button" id="an-grant">동의</button>' in html
-    assert (
-        '<button class="btn" type="button" id="an-withdraw">동의 철회</button>' in html
-    )
+    # 같은 모양의 버튼 둘 — [선택한 대로 저장]·[모두 거부], 동의한 동안은 [모두 거부] 자리에 [동의 철회] —
+    # 과 자바스크립트가 꺼졌을 때의 안내 (§3.3·§3.7)
+    for button in (
+        '<button class="btn" type="button" id="an-save">선택한 대로 저장</button>',
+        '<button class="btn" type="button" id="an-deny">모두 거부</button>',
+        '<button class="btn" type="button" id="an-withdraw" hidden>동의 철회</button>',
+    ):
+        assert button in html, button
     assert "<noscript>" in html
     # 두 버튼의 너비는 글자 길이가 아니라 같은 칸 너비를 따른다
     assert re.search(r"\.actions \{[^}]*grid-template-columns: repeat\(auto-fit", html)
+    # 세 칸은 처음에 모두 빈 칸 — 미리 체크하지 않는다
+    boxes = re.findall(r"<input [^>]*>", html)
+    assert len(boxes) == 3 and all('type="checkbox"' in box for box in boxes)
+    assert not [box for box in boxes if re.search(r"\schecked[\s/>=]", box)]
     script = "".join(page.scripts)
     for state in STATES:
         assert f"'{state}'" in script, state
@@ -473,24 +470,36 @@ def test_page_states_the_consent_contract_and_required_notices() -> None:
 
 
 def test_consent_script_shows_the_stored_value_and_the_buttons_write_it() -> None:
-    """동의 관리 스크립트를 node 로 돌린다 — 상태 글자·보이는 요소·저장값·쿠키가 실제 저장값과 같다 (§3.3)."""
+    """동의 관리 스크립트를 node 로 돌린다 — 상태 글자·보이는 요소·칸·저장값·판·쿠키가 실제 저장값과 같다 (§3.3)."""
     cookies = ["_clck", "_clsk", "other"]
     results = _run_consent_script(
         [{**case, "cookies": cookies} for _, case, *_ in CONSENT_CASES]
     )
-    for (name, case, stored, state, shown), got in zip(
+    for (name, _, stored, version, state, shown, cleared), got in zip(
         CONSENT_CASES, results, strict=True
     ):
-        assert got["stored"] == stored, name
-        assert got["state"] == state, name
-        assert set(got["shown"]) & STATUS_IDS == shown, name
-        withdrew = "click:an-withdraw" in case.get("steps", [])
-        assert got["cookies"] == (["other"] if withdrew else cookies), name
+        assert (got["stored"], got["v"], got["state"]) == (stored, version, state), name
+        visible = set(got["shown"])
+        if "an-actions" not in visible:
+            visible -= {"an-deny", "an-withdraw"}
+        assert visible & (STATUS_IDS | {"an-deny", "an-withdraw"}) == shown, name
+        # 칸은 저장된 선택을 보인다 — 동의함이면 셋 다, 아니면 빈 칸. 버튼 줄이 없으면 칸도 막는다
+        assert got["checked"] == (sorted(BOXES) if state == "동의함" else []), name
+        usable = "an-actions" in shown
+        assert set(got["disabled"]) == (set() if usable else set(BOXES)), name
+        assert got["cookies"] == (["other"] if cleared else cookies), name
 
 
 def test_withdrawal_expires_clarity_cookies_in_both_domain_shapes() -> None:
     (got,) = _run_consent_script(
-        [{"stored": "granted", "cookies": ["_clck"], "steps": ["click:an-withdraw"]}]
+        [
+            {
+                "stored": "granted",
+                "v": NOTICE,
+                "cookies": ["_clck"],
+                "steps": ["click:an-withdraw"],
+            }
+        ]
     )
     for name in ("_clck", "_clsk"):
         lines = [line for line in got["writes"] if line.startswith(f"{name}=;")]

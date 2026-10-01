@@ -170,8 +170,9 @@
         </div>
         <p class="state" id="an-state" role="status" aria-live="polite" hidden>지금 상태 <strong id="an-value"></strong></p>
         <div class="actions" id="an-actions" hidden>
-          <button class="btn" type="button" id="an-grant">동의</button>
-          <button class="btn" type="button" id="an-withdraw">동의 철회</button>
+          <button class="btn" type="button" id="an-save">선택한 대로 저장</button>
+          <button class="btn" type="button" id="an-deny">모두 거부</button>
+          <button class="btn" type="button" id="an-withdraw" hidden>동의 철회</button>
         </div>
         <p id="an-gpc" hidden>브라우저가 GPC를 보내는 동안은 분석하지 않습니다.</p>
         <p id="an-nostore" hidden>이 브라우저에는 선택을 저장할 수 없어 화면 분석을 하지 않습니다.</p>
@@ -373,22 +374,29 @@
 
   <script>
     // 분석 동의 저장값 — 이 페이지의 동의 관리와 033(Clarity)의 동의 안내 띠가 쓰고 033 이 읽는다 (스펙 032 §3.3).
-    // granted 이고 GPC 가 아닐 때만 분석한다 — 값이 없으면 정하지 않은 것이고 꺼져 있다. 요청을 만들지 않는다.
+    // granted 이고 판이 지금 판이며 GPC 가 아닐 때만 분석한다 — 값이 없거나 판이 다르면 정하지 않은 것이고 꺼져 있다.
+    // 동의는 세 칸(수집·이용 · 제3자 제공 · 국외 이전)으로 나눠 받고, 셋 다일 때만 granted 다. 요청을 만들지 않는다.
     (() => {
       const KEY = 'kt.analytics'
+      const VKEY = 'kt.analytics.v'
+      // 지금 안내의 판 — 위 an-version 글자, 033 clarity.js 의 판과 같다(테스트가 본다). 받는 자·항목·목적·보유 기간이 바뀌면 올린다
+      const VERSION = '2026-10-01'
+      const BOXES = ['an-collect', 'an-provide', 'an-transfer']
       const $ = (id) => document.getElementById(id)
       const gpc = navigator.globalPrivacyControl === true
 
       // 없으면 null, 저장소를 못 쓰면 undefined
-      const read = () => {
-        try { return window.localStorage.getItem(KEY) } catch { return undefined }
+      const read = (key) => {
+        try { return window.localStorage.getItem(key) } catch { return undefined }
       }
-      const write = (value) => {
-        try { window.localStorage.setItem(KEY, value); return true } catch { return false }
+      const write = (key, value) => {
+        try { window.localStorage.setItem(key, value); return true } catch { return false }
       }
-      const remove = () => {
-        try { window.localStorage.removeItem(KEY) } catch { /* 아래에서 다시 읽어 알린다 */ }
+      const remove = (key) => {
+        try { window.localStorage.removeItem(key) } catch { /* 아래에서 다시 읽어 알린다 */ }
       }
+      // 지금 판에 동의한 상태 — 033 이 Clarity 를 켜는 값(GPC 는 따로 본다)
+      const agreed = () => read(KEY) === 'granted' && read(VKEY) === VERSION
       // Clarity 1차 쿠키 — 도메인 속성 없이 한 번, 앞의 www. 를 뗀 도메인으로 한 번(어느 쪽으로 심겼든 지워지게)
       const expireClarityCookies = () => {
         const host = location.hostname.replace(/^www\./, '')
@@ -399,37 +407,54 @@
         }
       }
 
-      const render = (stored) => {
-        let text = '정하지 않음' // 값 없음·그 밖의 값 — 분석하지 않는다
+      // 늘 저장된 값을 다시 읽어 그린다 — 쓰기에 실패해도 화면이 실제 값(033 이 읽을 값)과 같다
+      const render = () => {
+        const stored = read(KEY)
+        const on = agreed()
+        let text = '정하지 않음' // 값 없음·그 밖의 값·예전 판의 동의 — 분석하지 않는다
         if (gpc) text = 'GPC로 거부'
         else if (stored === undefined) text = '저장할 수 없음'
-        else if (stored === 'granted') text = '동의함'
+        else if (on) text = '동의함'
         else if (stored === 'denied') text = '거부함'
         $('an-value').textContent = text
         $('an-state').hidden = false // 자바스크립트가 꺼지면 상태 줄 대신 <noscript> 안내만 보인다
         $('an-gpc').hidden = !gpc
         $('an-nostore').hidden = gpc || stored !== undefined
-        // 두 버튼은 같은 모양으로 늘 함께 — 철회는 동의만큼 쉽다
-        $('an-actions').hidden = gpc || stored === undefined
+        const usable = !gpc && stored !== undefined
+        $('an-actions').hidden = !usable
+        // 칸은 저장된 선택을 보인다 — 지금 판에 동의했으면 셋 다, 아니면 모두 빈 칸
+        for (const id of BOXES) {
+          $(id).checked = usable && on
+          $(id).disabled = !usable
+        }
+        // 두 버튼은 같은 모양으로 늘 함께 — 동의한 동안은 [모두 거부] 자리에 같은 일을 하는 [동의 철회]
+        $('an-deny').hidden = on
+        $('an-withdraw').hidden = !on
         $('an-stuck').hidden = true
       }
 
-      // 누른 뒤에는 저장된 값을 다시 읽어 그린다 — 쓰기에 실패해도 화면이 실제 값(033 이 읽을 값)과 같다
-      $('an-grant').addEventListener('click', () => {
-        write('granted')
-        render(read())
+      // 거부·철회 — 쓰기에 실패해도 쿠키는 지운다. denied 를 쓰지 못하면(저장 한도 등) 값을 지우고(값이 없어도 꺼짐), 판도 지운다
+      const refuse = () => {
+        expireClarityCookies()
+        if (!write(KEY, 'denied')) remove(KEY)
+        remove(VKEY)
+        render()
+        $('an-stuck').hidden = !agreed() // 지우기까지 실패해 동의가 남았다
+      }
+      $('an-save').addEventListener('click', () => {
+        // 하나라도 빠지면 거부 — Clarity 는 셋이 다 있어야 돈다
+        if (!BOXES.every((id) => $(id).checked)) return refuse()
+        // 판을 먼저 쓴다 — 다른 탭이 granted 를 볼 때 판이 이미 맞다. 판을 못 쓰면 granted 도 쓰지 않는다
+        if (write(VKEY, VERSION)) write(KEY, 'granted')
+        render()
       })
-      $('an-withdraw').addEventListener('click', () => {
-        expireClarityCookies() // 쓰기에 실패해도 지운다
-        // 쓰지 못하면(저장 한도 등) 값을 지운다 — 값이 없어도 꺼짐이다
-        if (!write('denied')) remove()
-        const stored = read()
-        render(stored)
-        $('an-stuck').hidden = stored !== 'granted' // 지우기까지 실패해 동의가 남았다
-      })
+      $('an-deny').addEventListener('click', refuse)
+      $('an-withdraw').addEventListener('click', refuse)
       // 다른 탭(033 의 띠 포함)에서 고른 값도 곧바로 보인다
-      window.addEventListener('storage', (e) => { if (e.key === KEY || e.key === null) render(read()) })
-      render(read())
+      window.addEventListener('storage', (e) => {
+        if (e.key === KEY || e.key === VKEY || e.key === null) render()
+      })
+      render()
     })()
   </script>
 </body>
