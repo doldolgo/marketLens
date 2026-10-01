@@ -45,7 +45,7 @@ marketlens/
       shared/                 config·theme·format·ui 조각
       features/<name>/        기능 1개 = 폴더 1개: Tab.tsx api.ts types.ts
       App.tsx main.tsx
-    admin/                    관리자 화면(정적 index.html·admin.js·admin.css, 빌드 없음 — 기능 폴더 규칙의 예외, 029)
+    admin/                    관리자 화면(정적 index.html·admin.js·admin.css, 빌드 없음 — 기능 폴더 규칙의 예외, 029·036)
     scripts/                  랜딩 글꼴 서브셋 스크립트·글자 목록(uv run, 빌드에 들지 않음 — 022)
     nginx-admin.conf          관리자 server(:8081, 게시 안 함) 템플릿 — 전체 `/api` 분기·교차 사이트 403·접속 기록(029)
   caddy/                      Caddyfile — serve 박스 TLS 앞단·접속 로그 (디렉터리째 바인드, 023·027)
@@ -120,7 +120,7 @@ marketlens/
 | 033 | clarity | DONE | Microsoft Clarity(동의 방식) — `public/clarity.js` 한 곳(ID 들어 있음 — 032 머지 뒤 이 PR 머지가 켜기), 랜딩·대시보드의 화면을 막지 않는 동의 안내 띠(정하지 않음 — 지금 판의 granted·denied 가 아니고 GPC 아닐 때, 032 와 같은 세 칸·칸마다 알릴 사항 '내용 보기'·접힌 띠·펼쳐도 높이 화면 절반까지·[선택한 대로 저장]·[모두 거부])·'화면 분석 설정' 링크(→ /privacy#consent), 세 칸 모두 동의한 방문자만 consentv2 광고 거부·분석 허용, 안내 판은 privacy.html 과 같은 값, 다른 탭의 철회는 곧바로 새로고침·동의는 그 자리에서 켬, 검색어 URL 제외·필터 URL 쓰기 우회·`sym` 형식, 탭 태그·이벤트, 런북 clarity.md(삭제 요청 = 프로젝트 통째 삭제) (web) |
 | 034 | monitoring-ops | DONE | 수집기 관리자 피드 — `/admin/aws`(경보·24시간 지표·canary·예산)·`/admin/alerts`(보낸 Slack 알림 `alerts:log` + 경보 이력 7일), 부분별 state(자격 없음 = 연결 안 됨)·요청 있을 때만·전용 스레드·ARN 가림, IAM 읽기 정책 런북 (BE·인프라) |
 | 035 | monitoring-visits | DONE | api 관리자 피드 — `/admin/access`(caddy 로그 24시간 요약·탭별 진입·최근 5xx)·`/admin/clarity`(Data Export 3시간 간격·Redis 캐시·주소 쿼리 뗌), 토큰 런북. 032·033·034 뒤 (BE·인프라) |
-| 036 | admin-v2 | TODO | 관리자 화면 v2 — 한 페이지 개요·수집·인프라·알림·접속·비용·도구, 빠른 10초·느린 60초(보이는 동안만), 부분별 상태 칸·SVG 직접·빌드 없음. 034·035 뒤 (web) |
+| 036 | admin-v2 | DONE | 관리자 화면 v2 — 한 페이지 개요·수집·인프라·알림·접속·비용·도구, 빠른 10초·느린 60초(보이는 동안만), 부분별 상태 칸·SVG 직접·빌드 없음. 034·035 뒤 (web) |
 
 실행 순서 = 번호 순. 034·035 는 한 설계를 둘로 나눈 짝 스펙이다(034 → 035). 031 은 032~036 의 계약에 기대지 않아 그 앞뒤 어디서 해도 된다. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).

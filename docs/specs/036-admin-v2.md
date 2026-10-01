@@ -1,6 +1,6 @@
 # 036 — admin-v2
 
-상태: TODO | 의존: **034·035 가 main 에 머지된 뒤 시작한다**(아니면 멈추고 묻는다). 계약을 쓰는 스펙(쓰는 계약은 §3.2 에 복사했다): 003 spreads(`/refresh`), 011 health(`/health/collect`), 025 slack-alerts(`/health` 두 역할), 027 observability(지표·경보 이름과 임계), 029 admin(화면·보안 계약 — 이 스펙이 화면을 바꾼다), 030 admin-tunnel(들어오는 길), 033 clarity(관리자 단언), 034·035(관리자 피드 넷). Clarity 칸은 033·035 가 켜진 뒤에 찬다 — 그 전에는 "연결 안 됨" 이다.
+상태: DONE | 의존: **034·035 가 main 에 머지된 뒤 시작한다**(아니면 멈추고 묻는다). 계약을 쓰는 스펙(쓰는 계약은 §3.2 에 복사했다): 003 spreads(`/refresh`), 011 health(`/health/collect`), 025 slack-alerts(`/health` 두 역할), 027 observability(지표·경보 이름과 임계), 029 admin(화면·보안 계약 — 이 스펙이 화면을 바꾼다), 030 admin-tunnel(들어오는 길), 033 clarity(관리자 단언), 034·035(관리자 피드 넷). Clarity 칸은 033·035 가 켜진 뒤에 찬다 — 그 전에는 "연결 안 됨" 이다.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -51,7 +51,7 @@
 - `/api/admin/aws` = 부분 넷 `{alarms, metrics, canary, budget}`:
   - `alarms`(60초): `items[{name, state, changedAt, reason}]`(이름 순, `state` 는 `OK`·`ALARM`·`INSUFFICIENT_DATA`, `reason` 200자)·`counts{ok, alarm, insufficientData}`.
   - `metrics`(300초): `startTs`·`endTs`·`periodSec`(300)·`boxes[{box, instanceId, mem, disk, cpu, credit, swap}]`(collect·data·serve 순, 경보가 없는 박스는 빠진다)·`wsClients`·`canary{runs, errors, durationMs}`. 시계열은 모두 `[[ts, 값|null], …]` 288점(5분 구간 시작), 전부 비면 null. `mem` = 메모리 가용률 최솟값, `disk` = 디스크 사용률 최댓값, `cpu` = CPU 평균, `swap` = 스왑 사용률 최댓값(%, 027 설정상 data 만 — collect·serve 는 null), `credit` = CPU 크레딧 잔고 최솟값(t4g 만 — collect c7g 는 null). `canary` 의 `runs`·`errors` 는 5분 합, `durationMs` 는 최댓값.
-  - `canary`(60초): `lastRunAt`·`durationMs`·`ok`·`lines[]`(300자·20줄 — "N단계 통과 (ms)" 또는 실패 메시지). 11분 안에 끝난 실행이 없으면 `lastRunAt` null·빈 `lines`(state `ok`).
+  - `canary`(60초): `lastRunAt`·`durationMs`·`ok`·`lines[]`(300자·20줄 — "N단계 통과 (ms)" 또는 실패 메시지). 11분 안에 끝난 실행이 없으면 `lastRunAt`·`durationMs`·`ok` null·빈 `lines`(state `ok`).
   - `budget`(6시간): `items[{name, unit, limit, actual, forecast, timeUnit}]` — 비용 예산 전부(`timeUnit` 은 `MONTHLY` 등), 금액 소수 둘째 자리, `forecast` 없으면 null.
 - `/api/admin/alerts` = `{items, slack, alarms}` — `slack`·`alarms` 는 상태만 있는 부분(`slack` 은 `refreshSec` 0), `items` 는 늘 목록(성공한 쪽만). 항목 `{at, source, text, role, key, delivered, alarm, fromState, toState}`(해당 없는 키 null), 최근 7일·최신순·200건. `source: "slack"` 은 025 알림 — `role` `collector`·`api`, `text` 는 🔴·🟢·⚠️ 머리 그대로, `delivered` 는 Slack 이 받았는지(전송 실패도 기록된다, 억제된 알림은 없다). `source: "alarm"` 은 경보 상태 변경 — `alarm`·`fromState`·`toState`·`text`(사유). ARN·12자리 숫자는 `[가림]` 으로 와 있다.
 - `/svc/api/admin/access` = 부분 하나(60초): `startTs`·`endTs`·`firstTs`(읽은 가장 이른 줄, 없으면 null)·`totals{requests, pages, ws, skipped}`·`hourly[{ts, requests, pages, errors}]` 24개(`errors` = 5xx)·상위 목록 여섯 `paths`·`tabs`·`referrers`·`utmSources`·`devices`·`browsers`(각 `[[이름, 수], …]` 20개까지 — `tabs` 는 탭 id 여섯과 `(기타)`, `devices` 는 `bot`·`mobile`·`desktop`·`unknown`)·`status{"2xx","3xx","4xx","5xx"}`·`recent5xx[{ts, path, status}]` 20줄(경로는 쿼리 없음)·`ws{count, durations{lt10s, lt1m, lt10m, lt1h, ge1h}}`. IP·UA 원문 없음, 폴링·canary 제외.
@@ -131,7 +131,7 @@
 ### 3.8 보안 계약 (029 에서 옮김 + 더함)
 - 029 그대로: 비밀값 없음. 서버·방문자가 정하는 글자는 `textContent` 로만 넣는다(HTML 해석 금지). 즉시 갱신 토큰은 입력칸과 JS 변수에만(`localStorage`·`sessionStorage`·IndexedDB·쿠키 금지, `form` 없음). 모든 요청은 한 함수를 지나 `X-Requested-With: XMLHttpRequest` 를 붙이고 같은 출처 상대 경로(`/api/…`·`/svc/…`)만 부른다. 링크는 같은 탭(`target`·`window.open` 없음). CSP 는 029 그대로(`default-src 'self'; frame-ancestors 'none'`).
 - 세션 판별(029 그대로): (1) 401 + 앱 JSON(`detail`)은 토큰 오류 — 새로고침하지 않는다. (2) 401 인데 JSON 이 아니거나 fetch 자체가 실패하면 로그인 만료 신호 — 표시 `?relogin=1` 이 없으면 `/?relogin=1` 로 한 번 새로고침, 있으면 알림 줄만. 주소는 `/` 로 고정한다. (3) 403 은 "권한·설정 오류".
-- **표시 지우기(바뀜)**: 이 화면을 연 뒤 여덟 경로(빠른 넷·느린 넷)가 모두 한 번 이상 만료 신호 없이 끝났고 그동안 만료 신호가 한 번도 없었을 때만 지운다. 묶음이 둘이라, 한 묶음만 보고 지우면 다른 묶음에만 있는 만료가 60초마다 새로고침을 되풀이한다. 즉시 갱신 버튼은 지우지 않는다(029).
+- **표시 지우기(바뀜)**: 마지막 만료 신호(없으면 이 화면을 연 때) 뒤 여덟 경로(빠른 넷·느린 넷)가 모두 한 번 이상 만료 신호 없이 끝났을 때만 지운다 — 만료 신호가 오면 센 것을 처음부터 다시 센다. 묶음이 둘이라, 한 묶음만 보고 지우면 다른 묶음에만 있는 만료가 60초마다 새로고침을 되풀이한다. 즉시 갱신 버튼은 지우지 않는다(029).
 - **더함**: 방문자가 정하는 값(경로·탭·외부 출처·`utm_source`·기기·브라우저 이름·Clarity 행)과 서버 글(경보 사유·Slack 글·canary 로그·거래소 오류)은 `title` 말고는 어떤 속성(특히 `href`·`src`)에도 쓰지 않는다 — 방문자가 정한 출처나 Clarity 주소가 누를 수 있는 링크가 되면 운영자를 낚는 길이 된다. 보이는 글자에서 양방향 제어문자(U+202A–U+202E·U+2066–U+2069)를 뺀다. 길면 자르고 전체는 `title`.
 - **더함**: 외부 링크는 `index.html` 의 고정 `https://` 주소뿐이고 모두 `rel="noreferrer"`(관리자 주소를 콘솔 쪽에 넘기지 않는다). 주소에 계정·영역 ID·Access AUD·팀 도메인(`*.cloudflareaccess.com`)·이메일·Clarity 프로젝트 ID(`/projects/view/<ID>`)·토큰을 넣지 않는다(레포 공개) — 대시보드에서 복사한 Cloudflare 주소에는 계정 ID 가 들어 있으니 루트 주소만 쓴다. 화면은 이미지 파일을 쓰지 않는다.
 
@@ -165,7 +165,46 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 시작 조건 — 이 브랜치는 035(PR #92, 머지 전) 위에 쌓였고 034 는 origin/main 에 있다(설계 세션이 이 쌓임으로 의존 충족으로 봄)
+git fetch -q origin && git merge-base --is-ancestor origin/main HEAD   # 종료 코드 0
+
+# 기존 스펙 재검증 (마지막 코드 커밋 뒤)
+cd server && ruff check . && ruff format --check . && pytest -q   # All checks passed! · 286 files already formatted · 1236 passed
+cd web && npm run lint && npm run build                            # oxlint 종료 코드 0 · ✓ built · dist 에 admin* 0개
+node --check web/admin/admin.js                                    # 종료 코드 0
+# 커밋마다 git archive → 임시 트리에서 pytest tests/test_admin.py tests/test_clarity.py tests/test_deploy.py
+#   76 passed ×8 · 80 passed(정적 단언 커밋) · node --check 통과 · 커밋당 diff 122~294줄
+
+# 로컬 Docker — 망 ml036-net, 가짜 백엔드 둘(python:3.12-alpine + <scratch>/036/fake.py, 망 별칭 server·api —
+# <scratch>/036/ctl/mode.json 으로 부분 상태를 바꾼다, 기본값은 2026-10-01 운영 034 값), web :8081 은 127.0.0.1:18036 에만
+docker build -t ml036-web web
+docker run -d --name ml036-web --network ml036-net -e COLLECT_HOST=server -e 'NGINX_ENVSUBST_FILTER=^COLLECT_HOST$' \
+  -v ./web/admin:/usr/share/nginx/admin:ro -p 127.0.0.1:18036:8081 ml036-web
+docker exec ml036-web nginx -t     # syntax is ok · test is successful (nginx-admin.conf 는 고치지 않았다)
+
+# 브라우저 — 헤드리스 Chrome 을 CDP 로(<scratch>/036/cdp.py·scenarios.py, scratch 프로필) + Claude 브라우저 창(1440·375, 어두운·밝은)
+cdp.py looks       # 1440·1280·768·375·360(1440·375 는 밝은 모드도): scrollWidth == innerWidth, 카드 밖 가로 넘침 0, img 0,
+                   #   securitypolicyviolation 0, Uncaught 0 — 콘솔은 브라우저가 스스로 부르는 /favicon.ico 404 한 줄뿐
+cdp.py xss         # 방문자·서버 글자 칸 전부(거래소 오류·구간 url·경보 이름·사유·Slack 글·key·canary 줄·경로·출처·utm·브라우저·
+                   #   최근 5xx·Clarity 이름·행·예산 이름·instanceId·버전·즉시 갱신 결과)에 <img onerror>·javascript:·U+202E
+                   #   → 글자로 49곳, img 0, 대화상자 0, U+202E 0, title 밖 속성에 0, [href]·[src] 는 index.html 고정 링크뿐
+states.sh          # 예산만 denied → 비용 칸·타일만 "권한 없음" / AWS 전부 unconfigured(+ 알림 alarms) → 정상(앱 값으로만)
+                   # 접속 error → 그 칸만·판정 정상 / alarms error → 주의 / pending → "첫 조회 중"·판정 밖
+                   # Clarity http_429 + 직전 값 → 값 + "불러오지 못함 · 마지막 성공 5시간 전" / fetchedAt > refreshSec×3 → "▲ … 오래됨"
+                   # 빈 목록 → "경보 없음"·"지난 7일 기록 없음"·"지난 24시간 기록 없음"·"최근 24시간 실패 없음"·"예산 없음"
+                   # null 섞인 점 → 선 조각 3개 / 점 1개 → "데이터 부족" / delivered false → "전송 실패" / firstTs 늦음 → "기록 시작 03:02"
+                   # 예산 월·연 → 두 줄, 월만 막대 / serve swap null → "스왑 지표 없음" / 경보 1개 ALARM → 장애
+                   # upbit stale → 주의 / canary 실패 → 주의 / 수집기 /health 403 → 알 수 없음 / 피드 넷 404 → 그 칸들 "응답 오류 (HTTP 404)"
+cdp.py axes        # 첫 점 x 0·마지막 점 x 287(viewBox 288 — ts×1000 을 startTs..endTs 에), "24시간 전·지금"
+cdp.py cadence     # 보이는 2분: 빠른 넷 각 12·느린 넷 각 2 / 숨긴 2분: 0 / 다시 보임 2초 안: 빠른 넷 각 1(느린 넷은 120초 지나 각 1)
+cdp.py flip        # 5초 뒤 3초 숨김 → 보임: 빠른 넷만 곧바로
+cdp.py slowpath    # /admin/aws 30초 지연 70초: 빠른 넷 각 7·느린 넷 각 2
+cdp.py session     # /admin/clarity 만 401 text/html → /?relogin=1 로 한 번, 그 뒤 65초 같은 문서·알림만 → 전부 정상으로 돌리면
+                   #   62초 안에 표시 지움(주소 /) · 틀린 토큰 "401 토큰 오류"(새로고침 없음) · test-token 200·저장 1234 · 브라우저 저장소 0
+cdp.py keyboard    # Tab: 절 이동 일곱 → 로그아웃 → 개요 칸 여섯 → 펼침·필터 → 알림 목록 → 도구 링크, 초점 2px 외곽선 /
+                   #   Enter 절 이동·필터(aria-pressed) / Space 로 연 '정상 17개' 가 다시 그려도 열림
+# Claude 브라우저 창: 창이 숨은 동안 document.visibilityState hidden → 요청 0(css·js 두 개뿐), 밝은 모드 에뮬레이션에서도 바탕 #161826
+docker rm -f ml036-web ml036-server ml036-api && docker network rm ml036-net && docker rmi ml036-web   # 036 자원 0건
 ```
 
 ## 6. 갱신할 문서
@@ -179,6 +218,27 @@
 담당자에게 제안: 없다 — 011·025 의 계약을 읽기만 한다.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+- 만든 것 (파일 목록): `web/admin/index.html`·`admin.css`·`admin.js`(전면 재작성 — 한 파일, 절 순서 공통 도구 → 요청·세션·주기 → 부분 상태·차트 → 개요·수집 → 인프라 → 알림·접속 → 비용·그리기·시작), `server/tests/test_admin.py`(화면 정적 단언 넷 → 일곱). 문서: 이 스펙, `029-admin.md`(§2·§3.3·§4), `docs/context/status.md`·`architecture.md`·`product.md`, `CLAUDE.md`(인덱스·§2).
+- 화면 사진(레포 밖 scratch, 헤드리스 Chrome): `<scratch>/036/shots/ok-1280-dark.png`·`ok-768-dark.png`·`ok-360-dark.png`(§4 의 세 장), `ok-1440-dark.png`·`ok-1440-light.png`·`ok-375-dark.png`·`ok-375-light.png`, 잘라 찍은 `m375-0…6.png`·`m375light-*.png`(장애 상태)·`bad-0…4.png`(1440, 장애·주의 섞음), `xss-1440.png`, 부분 상태 열다섯 `state-*.png`. Claude 브라우저 창의 화면은 저장되지 않아 경로가 없다.
+- 디자인: 맨 위 종합 띠(정상·주의·장애·알 수 없음 — 색 + 모양 ●▲✕? + 글자, 사유 셋, 오른쪽에 판정 재료 일곱 수집기·api·Redis·Influx·거래소·경보·canary) → 그 아래 개요 칸 여섯 → 절마다 머리 줄 요약(모양 + 글자) → 카드. 자세한 것(즉시 갱신·정상 경보·최근 5xx·Clarity 받은 지표)은 HTML 의 `details` 라 다시 그려도 펼침이 남는다. theme.css 토큰(어두운 바탕·카드·태그·표·버튼·입력) + 시스템 글꼴·tabular-nums, 차트 선은 accent-400·기준선은 장애색 점선.
+- 추측한 지점 (묻지 않고 정한 사소한 것):
+  - 밝은 테마: §2·§3.7 대로 어두운 테마 하나 — theme.css 에 밝은 토큰이 없다. 밝은 모드 브라우저에서도 같은 어두운 화면(`color-scheme: dark`).
+  - 응답 상태: 200(헬스 둘은 503 도)이 아니면 본문이 JSON 이어도 "응답 오류 (HTTP n)" — 034·035 전 배포의 FastAPI 404 `{"detail"}` 를 값으로 그리지 않게(§3.9).
+  - 판정 재료 일곱(띠 오른쪽)과 절 요약 줄은 화면 장식이 아니라 §3.4 판정과 같은 입력을 칸마다 보인 것 — 판정 밖(연결 안 됨·권한 없음·호출 실패)은 흐림. 부분 `error` 는 절 요약에서 주의(인프라)·장애(접속 서버 기록) 표시이지만 종합 판정은 §3.4 그대로.
+  - 개요 칸 값 자리의 상태 글("불러오는 중"·"첫 조회 중"·"연결 안 됨"·"호출 실패")은 작은 글자. api 칸은 헬스가 ok 여도 Redis·Influx 중 하나가 ok 가 아니면 "저장소 끊김".
+  - 값이 없는 `error` 는 본문을 비우고 머리 배지("불러오지 못함" + code)만. HTTP 수준 실패는 본문에 "사유 — 이 칸의 값은 비웠다".
+  - 스왑: `swap` 이 null 인 박스(지금 collect·serve)는 모두 "스왑 지표 없음". 크레딧 선은 data·serve 만(임계 173·86). CPU 는 색 없음.
+  - 차트: 선 viewBox 288×48·`preserveAspectRatio none`, 개수·ms·크레딧 세로 상한은 최댓값(기준선 포함)×1.1, 앞뒤가 빈 점 하나는 길이 0 선(둥근 끝 = 점). 시간대별 막대의 5xx 는 같은 눈금으로 겹치고 최소 높이 1.5. 실패 구간은 창 앞에서 시작한 구간을 창 시작에 자르고(title 은 실제 시각), 최소 폭 1000 중 4.
+  - aria-label 에는 서버·방문자 글을 싣지 않는다(§3.8 — title 밖 속성 금지): 박스 이름은 아는 셋만, 표의 비율 막대·예산 막대는 이름 없이. 서버 값으로 표를 찾을 때 `Object.hasOwn`(`constructor` 같은 이름).
+  - 상위 표 여섯의 비율 = 그 행 수 ÷ `totals.pages`(여섯 모두 페이지 요청만 센다). 경로·출처 이름은 60자, 최근 5xx 경로 120자, Slack 글 300자, 경보·이력 사유 160자, Clarity 지표 이름 120자에서 자르고 전체는 title.
+  - 알림: 경보 행은 사유를 둘째 줄(흐림)로, Slack 행은 `key` 를 행 title 로. 출처 배지는 `role`(collector·api) 또는 "경보". 시각은 오늘이면 HH:mm:ss.
+  - 예산 막대 눈금 = max(한도×1.15, 실제, 예측), 이번 달 지난 비율은 UTC 달(AWS 예산의 달), 예측 표시선은 두지 않고 글자("▲ 예측 … 한도 넘음"). 개요 비용 칸의 색은 실제/한도 ≥1 장애·≥0.85 또는 예측 > 한도 주의.
+  - "기록 시작 HH:mm" 은 글자 그대로 `firstTs > startTs` 일 때 — 창 시작 몇 초 뒤의 첫 줄에도 뜬다.
+  - 머리의 "마지막 갱신" 글자는 640px 이하에서 빼고 시각만(머리를 두 줄로). 마지막 갱신 = 어느 묶음이든 끝난 시각.
+  - canary 로그 줄은 펼침 없이 카드에(최대 10줄), 즉시 갱신은 접힌 `details` 안.
+- 실행 중 함께 고친 스펙 절: §3.2 canary — 끝난 실행이 없으면 `durationMs`·`ok` 도 null(034 코드·§7 이 진실). §3.8 표시 지우기 — "마지막 만료 신호(없으면 화면을 연 때) 뒤 여덟 경로가 모두 만료 신호 없이 끝났을 때만" 으로 문구를 좁혔다(§4 의 "전부 정상으로 돌리면 표시 지움" 과 같은 문서 안에서 맞도록 — 만료 신호마다 센 것을 처음부터). §6 대로 029 §2·§3.3·§4.
 - 남은 빚:
+  - 배포 뒤 사람(status "036 운영 확인 대기"): §4 '배포 뒤' 목록. 특히 도구 링크 중 CloudWatch 지표(`#metricsV2:graph=~();namespace=MarketLens`)·로그 그룹(`$252F` 인코딩) 주소 꼴은 콘솔에서 확인하지 않았다.
+  - 브라우저가 스스로 부르는 `/favicon.ico` 가 관리자 server 에서 404(029 때부터) — 콘솔에 자원 404 한 줄. 화면은 이미지 파일을 쓰지 않으므로(§3.8) 두지 않았다.
+  - 브라우저 확인은 Chromium(헤드리스 Chrome·Claude 브라우저 창) 한 종류(status 빚). 숨은 탭은 CDP 에서 `visibilityState` 를 바꿔 흉내 냈고, 실제 숨은 창(Claude 브라우저 창)에서도 요청 0 을 봤다.
+  - Clarity 정규화 타일·AWS 이전 뒤 화면은 status 빚 그대로.
