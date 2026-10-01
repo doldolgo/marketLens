@@ -895,3 +895,274 @@ for (const chip of document.querySelectorAll('.chip')) {
   });
 }
 
+// --- 접속 (§3.4) — 실시간·서버 기록 24시간·Clarity ---------------------------------------------------
+
+const TOP_TABLES = [
+  ['paths', '경로'],
+  ['tabs', '탭'],
+  ['referrers', '외부 출처'],
+  ['utmSources', 'utm_source'],
+  ['devices', '기기'],
+  ['browsers', '브라우저'],
+];
+const WS_BUCKETS = [
+  ['lt10s', '10초 미만'],
+  ['lt1m', '1분 미만'],
+  ['lt10m', '10분 미만'],
+  ['lt1h', '1시간 미만'],
+  ['ge1h', '1시간 이상'],
+];
+const share = (n, total) => (total > 0 ? n / total : 0);
+
+function stat(label, value, tone) {
+  const box = el('div', 'stat');
+  box.append(el('span', 'stat-label', label), tone ? marked(tone, value) : el('span', 'stat-val', value));
+  if (tone) box.lastChild.classList.add('stat-val');
+  return box;
+}
+
+// 상위 목록 표 — 이름(방문자가 정한 글자 — 글자로만)·수·페이지 대비 비율 막대, 상위 10
+function topTable(rows, label, pages) {
+  const card = el('div', 'card');
+  card.append(el('span', 'card-kicker', label));
+  const top = list(rows).filter((r) => Array.isArray(r)).slice(0, 10);
+  if (!top.length) {
+    card.append(el('p', 'empty', '지난 24시간 기록 없음'));
+    return card;
+  }
+  const table = el('table', 'table top-table');
+  const tbody = el('tbody');
+  for (const [name, n] of top) {
+    const tr = el('tr');
+    clip(cell(tr, ''), name, 60);
+    cell(tr, int(n), 'num');
+    const r = share(num(n) ?? 0, pages);
+    const td = cell(tr, `${(r * 100).toFixed(1)}%`, 'num share');
+    td.append(ratio(r, null, `페이지의 ${(r * 100).toFixed(1)}%`));
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  const wrap = el('div', 'scroll');
+  wrap.append(table);
+  card.append(wrap);
+  return card;
+}
+
+function fillAccess(node, a) {
+  const totals = isObj(a.totals) ? a.totals : {};
+  const sub = [`폴링·canary 제외, IP 없음 · 읽지 못한 줄 ${int(totals.skipped)}`];
+  if (num(a.firstTs) !== null && num(a.startTs) !== null && a.firstTs > a.startTs) sub.push(`기록 시작 ${hm(a.firstTs * 1000)}`);
+  $('access-sub').textContent = sub.join(' · ');
+  const status = isObj(a.status) ? a.status : {};
+  const stats = el('div', 'stats');
+  stats.append(stat('총 요청', int(totals.requests)), stat('페이지', int(totals.pages)), stat('5xx', int(status['5xx']), num(status['5xx']) ? 'bad' : null));
+  const hourly = list(a.hourly).filter(isObj);
+  const bars = hourly.map((h) => ({
+    value: num(h.requests) ?? 0,
+    over: num(h.errors) ?? 0,
+    tip: `${hm(h.ts * 1000)} · 요청 ${int(h.requests)} · 페이지 ${int(h.pages)} · 5xx ${int(h.errors)}`,
+  }));
+  const peak = Math.max(0, ...bars.map((b) => b.value));
+  const chart = hourly.length ? columns(bars, `시간대별 요청 24시간 — 최고 ${int(peak)}, 5xx 는 겹쳐 표시`, 'tall') : el('p', 'empty', '데이터 부족');
+  const codes = el('table', 'table');
+  const tbody = el('tbody');
+  for (const key of ['2xx', '3xx', '4xx', '5xx']) {
+    const tr = el('tr');
+    const n = num(status[key]) ?? 0;
+    cell(tr, key === '5xx' && n ? marked('bad', key) : key);
+    cell(tr, int(n), 'num');
+    const r = share(n, num(totals.requests) ?? 0);
+    cell(tr, `${(r * 100).toFixed(1)}%`, 'num share').append(ratio(r, key === '5xx' ? 'bad' : null, `${key} 요청의 ${(r * 100).toFixed(1)}%`));
+    tbody.append(tr);
+  }
+  codes.append(tbody);
+  const ws = isObj(a.ws) ? a.ws : {};
+  const durations = isObj(ws.durations) ? ws.durations : {};
+  const wsBars = WS_BUCKETS.map(([k, label]) => ({ value: num(durations[k]) ?? 0, over: 0, tip: `${label} · ${int(durations[k])}` }));
+  const labels = el('div', 'cols5');
+  labels.append(...WS_BUCKETS.map(([, label]) => el('span', null, label)));
+  const wsHead = el('p', 'summary-row');
+  wsHead.append(el('span', null, `WebSocket 연결 ${int(ws.count)} · 지속 시간`));
+  node.replaceChildren(stats, chart, axis(hourly.length ? hm(hourly[0].ts * 1000) : '', '지금'), codes, wsHead, columns(wsBars, `WebSocket 지속 시간 구간 — 연결 ${int(ws.count)}`), labels);
+  const pages = num(totals.pages) ?? 0;
+  $('access-tables').replaceChildren(...TOP_TABLES.map(([k, label]) => topTable(a[k], label, pages)));
+  const recent = list(a.recent5xx).filter(isObj).slice(0, 20);
+  $('r5xx').hidden = false;
+  $('r5xx-sum').textContent = recent.length ? `최근 5xx ${recent.length}건` : '최근 5xx 없음';
+  $('r5xx-rows').replaceChildren(
+    ...recent.map((r) => {
+      const tr = el('tr');
+      cell(tr, num(r.ts) === null ? '–' : when(r.ts * 1000), 'nowrap');
+      clip(cell(tr, ''), r.path, 120);
+      cell(tr, marked('bad', String(r.status)), 'num');
+      return tr;
+    }),
+  );
+}
+
+// Clarity 행 — 키·값을 글자 한 줄로(받은 이름·키 그대로 — 035 가 정규화하지 않았다)
+function clarityText(row) {
+  const show = (v) => (isObj(v) || Array.isArray(v) ? JSON.stringify(v) : String(v));
+  return isObj(row) ? Object.entries(row).map(([k, v]) => `${k}:${show(v)}`).join(' · ') : show(row);
+}
+
+function fillClarity(node, c) {
+  const t = isObj(c.traffic) ? c.traffic : {};
+  const tiles = el('div', 'clarity-tiles');
+  for (const [label, v] of [
+    ['세션', int(t.sessions)],
+    ['봇 세션', int(t.botSessions)],
+    ['사용자', int(t.users)],
+    ['세션당 페이지', fixed(t.pagesPerSession, 2)],
+  ]) {
+    tiles.append(stat(label, v));
+  }
+  const next = el('p', 'muted small', num(c.nextAt) === null ? '' : `다음 조회 ${when(c.nextAt)} 이후 — 하루 10회 한도라 3시간 간격`);
+  node.replaceChildren(tiles, next);
+  const metrics = list(c.metrics).filter(isObj);
+  $('clarity-more').hidden = false;
+  $('clarity-more-sum').textContent = metrics.length ? `받은 지표 ${metrics.length}개` : '받은 지표 없음';
+  $('clarity-metrics').replaceChildren(
+    ...metrics.map((m) => {
+      const box = el('div');
+      const rows = el('ol');
+      rows.append(...list(m.rows).slice(0, 20).map((r) => clip(el('li'), clarityText(r), 200)));
+      box.append(clip(el('h4'), m.name, 120), list(m.rows).length ? rows : el('p', 'empty', '행 없음'));
+      return box;
+    }),
+  );
+}
+
+function drawTraffic() {
+  const st = got.get(P.status);
+  $('ws-now').textContent = !st ? '…' : st.why ? '–' : int(st.body.wsConnections);
+  const metrics = partOf(P.aws, 'metrics');
+  region('ws24', metrics, CAUSE.aws, (node, m) => {
+    const where = { startMs: m.startTs * 1000, endMs: m.endTs * 1000 };
+    node.replaceChildren(metricRow('serve', 'WebSocket 접속 수 (5분 최댓값)', m.wsClients, { ...where, extreme: 'max' }));
+  });
+  const access = partOf(P.access);
+  if (!region('access', access, CAUSE.access, fillAccess)) {
+    $('access-sub').textContent = '';
+    $('access-tables').replaceChildren();
+    $('r5xx').hidden = true;
+  }
+  const clarity = partOf(P.clarity);
+  if (!region('clarity', clarity, CAUSE.clarity, fillClarity, 'numOfDays')) $('clarity-more').hidden = true;
+  const bits = [`지금 ${st?.body ? int(st.body.wsConnections) : '–'} 접속`];
+  let tone = 'ok';
+  if (usable(access)) {
+    const fives = num(access.status?.['5xx']) ?? 0;
+    bits.push(`24시간 페이지 ${int(access.totals?.pages)}`);
+    if (fives) {
+      tone = 'warn';
+      bits.push(`5xx ${int(fives)}`);
+    }
+  } else {
+    const [t, w] = stateWord(access);
+    tone = t;
+    bits.push(`서버 기록 ${w}`);
+  }
+  $('s-traffic').replaceChildren(marked(st ? tone : 'wait', bits.join(' · ')));
+}
+
+// --- 비용 (§3.4) -------------------------------------------------------------------------------
+
+function money(v, unit) {
+  if (num(v) === null) return '–';
+  return unit && unit !== 'USD' ? `${v.toFixed(2)} ${clean(unit)}` : `$${v.toFixed(2)}`;
+}
+
+// 월 예산 중 한도 대비 실제 비율이 가장 큰 것 — 개요 칸·절 요약
+function worstMonthly(part) {
+  let worst = null;
+  for (const b of list(part.items).filter(isObj)) {
+    if (b.timeUnit !== 'MONTHLY' || !(num(b.limit) > 0) || num(b.actual) === null) continue;
+    const r = b.actual / b.limit;
+    if (!worst || r > worst.r) worst = { b, r };
+  }
+  if (worst) worst.tone = worst.r >= 1 ? 'bad' : worst.r >= 0.85 || (num(worst.b.forecast) ?? 0) > worst.b.limit ? 'warn' : 'ok';
+  return worst;
+}
+
+// 이번 달(UTC — AWS 예산의 달)이 지난 비율
+function monthElapsed() {
+  const now = new Date();
+  const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  return (Date.now() - start) / (end - start);
+}
+
+function budgetBar(b) {
+  const top = Math.max(b.limit * 1.15, b.actual ?? 0, b.forecast ?? 0);
+  const x = (v) => ((v / top) * 100).toFixed(2);
+  const r = (b.actual ?? 0) / b.limit;
+  const elapsed = monthElapsed();
+  // 이름은 서버 글이라 aria-label 에 싣지 않는다(§3.8 — title 밖의 속성 금지). 같은 줄의 이름이 말한다
+  const label = `예산 막대 — 실제 ${money(b.actual, b.unit)}, 한도의 ${(r * 100).toFixed(0)}%, 이번 달 ${(elapsed * 100).toFixed(0)}% 지남`;
+  const root = frame(100, 14, 'bar12', label);
+  root.append(svg('rect', { x: 0, y: 3, width: 100, height: 8 }, 'track'));
+  root.append(tip(svg('rect', { x: 0, y: 3, width: x(b.actual ?? 0), height: 8 }, r >= 1 ? 'fill t-bad' : r >= 0.85 ? 'fill t-warn' : 'fill'), `실제 ${money(b.actual, b.unit)}`));
+  const mark = (v, cls, text) => root.append(tip(svg('line', { x1: x(v), x2: x(v), y1: 0, y2: 14 }, cls), text));
+  mark(b.limit * 0.85, 'mark', `한도 85% ${money(b.limit * 0.85, b.unit)} — 027 예산 알림`);
+  mark(b.limit, 'mark t-bad', `한도 ${money(b.limit, b.unit)} — 027 예산 알림`);
+  mark(top * elapsed, 'mark now', `이번 달 ${(elapsed * 100).toFixed(0)}% 지남`);
+  return root;
+}
+
+function budgetRow(b) {
+  const row = el('div', 'budget');
+  const name = el('span', 'budget-name', b.name ?? '이름 없음');
+  if (b.timeUnit && b.timeUnit !== 'MONTHLY') name.append(el('span', 'muted small', ` · ${clean(b.timeUnit)}`));
+  const nums = el('span', 'budget-nums', `실제 ${money(b.actual, b.unit)} / 한도 ${money(b.limit, b.unit)}`);
+  const monthly = b.timeUnit === 'MONTHLY';
+  if (monthly) {
+    const over = num(b.forecast) !== null && num(b.limit) !== null && b.forecast > b.limit;
+    nums.append(' · ', over ? marked('warn', `예측 ${money(b.forecast, b.unit)} 한도 넘음`) : el('span', null, `예측 ${money(b.forecast, b.unit)}`));
+  }
+  row.append(name, nums);
+  if (monthly && num(b.limit) > 0) {
+    row.append(budgetBar(b), axis('0', `점선 = 이번 달 ${(monthElapsed() * 100).toFixed(0)}% 지남 · 세로선 = 한도 85%·100%`));
+  }
+  return row;
+}
+
+function drawCost() {
+  const budget = partOf(P.aws, 'budget');
+  region('budget', budget, CAUSE.aws, (node, part) => {
+    const items = list(part.items).filter(isObj);
+    node.replaceChildren(...(items.length ? items.map(budgetRow) : [el('p', 'empty', '예산 없음')]));
+  });
+  if (!usable(budget)) return $('s-cost').replaceChildren(marked(...stateWord(budget)));
+  const worst = worstMonthly(budget);
+  if (!worst) return $('s-cost').replaceChildren(marked('dim', '월 단위 예산 없음'));
+  const fc = num(worst.b.forecast) === null ? '' : ` · 예측 ${money(worst.b.forecast, worst.b.unit)}`;
+  $('s-cost').replaceChildren(marked(worst.tone, `이번 달 ${money(worst.b.actual, worst.b.unit)} / ${money(worst.b.limit, worst.b.unit)} (${(worst.r * 100).toFixed(0)}%)${fc}`));
+}
+
+// --- 그리기·시작 ---------------------------------------------------------------------------------
+
+// 절마다 따로 — 한 절의 예상 밖 응답이 다른 절을 막지 않게
+const SECTIONS = [
+  ['overview', drawOverview],
+  ['collect', drawCollect],
+  ['infra', drawInfra],
+  ['alerts', drawAlerts],
+  ['traffic', drawTraffic],
+  ['cost', drawCost],
+];
+
+function paint() {
+  for (const [id, draw] of SECTIONS) {
+    try {
+      draw();
+    } catch {
+      const sumNode = $(`s-${id}`) || $('band-why');
+      sumNode.replaceChildren(marked('bad', '표시 오류 — 응답 모양이 예상과 다르다'));
+    }
+  }
+}
+
+paint();
+run(fast);
+run(slow);
