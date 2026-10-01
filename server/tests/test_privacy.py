@@ -1,8 +1,8 @@
 """개인정보 처리방침 계약 — nginx 위치 셋·privacy.html·링크·sitemap 을 파일로 읽어 단언한다 (스펙 032 §4).
 
-머지가 곧 게시다. 사람이 채울 자리표시자(`〔`)가 남았거나, 페이지가 외부 자원·서버 호출을 부르게 되거나, 033 이 읽는
-저장값 계약(`kt.analytics`)과 방침의 필수 안내가 빠지면 여기서 멈춘다. 실제로 브라우저에서 CSP·버튼을 보는 검증은
-스펙 §5 의 로컬 Docker·브라우저 명령이다.
+머지가 곧 게시다. 사람이 채울 자리표시자(`〔`)가 남았거나, 페이지가 외부 자원·서버 호출을 부르게 되거나, 033 과 함께 쓰는
+동의 계약(`kt.analytics` — 동의한 방문자만 분석, 기본 꺼짐)과 방침의 필수 안내가 빠지면 여기서 멈춘다. 실제로 브라우저에서
+CSP·버튼을 보는 검증은 스펙 §5 의 로컬 Docker·브라우저 명령이다.
 """
 
 import re
@@ -51,7 +51,7 @@ RESOURCE_RELS = {
 }
 # 인라인 스크립트 본문에 없어야 하는 요청 수단 — 본문 글자는 보지 않는다(요청 자체는 CSP 가 막는다)
 NO_CALLS = ("fetch(", "new WebSocket(", "XMLHttpRequest", "sendBeacon", "clarity.ms")
-# §3.3·§3.4 — 033 이 읽는 저장값, 거부 안내, Clarity 약관이 요구하는 링크, 구제 기관 넷
+# §3.3·§3.4 — 033 과 함께 쓰는 저장값, 동의·철회 안내, Clarity 약관이 요구하는 링크, 구제 기관 넷
 MUST_SAY = (
     "kt.analytics",
     "denied",
@@ -69,7 +69,32 @@ MUST_SAY = (
     "개인정보침해신고센터 118",
     "대검찰청 1301",
     "경찰청 182",
+    "아무것도 고르지 않으면 분석하지 않습니다",  # §3.3 — 값이 없으면 꺼짐(동의 방식)
 )
+# 동의 방식(사람 결정 2026-10-01)과 맞지 않는 문장 — 페이지에 있으면 거짓이다
+MUST_NOT_SAY = ("허용으로 봅니다", "다시 허용", "유럽 시간대", "5일 안에")
+# §3.3 — 상태 줄의 다섯 글자(스크립트가 그린다)
+STATES = ("정하지 않음", "동의함", "거부함", "GPC로 거부", "저장할 수 없음")
+# §3.3 — 동의 버튼 앞의 알릴 사항(법 제15조 제2항·제17조 제2항·제28조의8 제2항 — 033 의 띠와 같은 사실)
+CONSENT_TERMS = {"받는 자", "항목", "이전 일시·방법", "목적", "보유 기간", "거부"}
+# §3.4-4 — 제17조 제2항 다섯 가지 + 근거
+PROVISION_TERMS = {
+    "받는 자",
+    "받는 자의 목적",
+    "항목",
+    "보유 기간",
+    "거부 권리·불이익",
+    "근거",
+}
+# §3.4-7 — 작성지침의 행태정보 항목
+BEHAVIOR_TERMS = {
+    "수집 항목",
+    "수집 방법",
+    "목적",
+    "보유 기간",
+    "수집하는 사업자",
+    "거부 방법",
+}
 # §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(+ 근거)
 TRANSFER_TERMS = {
     "항목",
@@ -131,6 +156,18 @@ def _read(path: Path) -> tuple[str, _Page]:
     return html, page
 
 
+def _section(html: str, label: str) -> str:
+    """`<section aria-labelledby="…">` 하나의 본문."""
+    start = re.search(rf'<section[^>]* aria-labelledby="{label}"', html)
+    assert start, label
+    body = html[start.start() :]
+    return body[: body.index("</section>")]
+
+
+def _terms(dl: str) -> set[str]:
+    return set(re.findall(r"<dt>(.*?)</dt>", dl))
+
+
 def _external(url: str) -> bool:
     return url.startswith(("http://", "https://", "//"))
 
@@ -188,7 +225,7 @@ def test_page_has_no_placeholder_and_the_twelve_sections() -> None:
     canonical = [link["href"] for link in page.links if link.get("rel") == "canonical"]
     assert canonical == [CANONICAL]
     assert [h for h in page.h2 if re.match(r"\d+\. ", h)] == SECTIONS
-    assert "화면 분석 거부" in page.h2
+    assert "화면 분석 동의 관리" in page.h2
 
 
 def test_page_loads_nothing_external_and_scripts_make_no_requests() -> None:
@@ -196,7 +233,7 @@ def test_page_loads_nothing_external_and_scripts_make_no_requests() -> None:
     _assert_no_external_resources("privacy.html", page)
     styles = "".join(re.findall(r"<style\b.*?</style>", html, flags=re.S))
     assert "@import" not in styles and "url(" not in styles
-    assert page.scripts, "분석 거부 버튼 스크립트가 없다"
+    assert page.scripts, "동의 관리 버튼 스크립트가 없다"
     # 인라인만 — CSP 의 script-src 가 'unsafe-inline' 뿐이라 같은 출처 파일도 막힌다
     assert not [src for tag, src in page.srcs if tag == "script"]
     for body in page.scripts:
@@ -204,23 +241,78 @@ def test_page_loads_nothing_external_and_scripts_make_no_requests() -> None:
             assert call not in body, call
 
 
-def test_page_states_the_opt_out_contract_and_required_notices() -> None:
-    html, _ = _read(PUBLIC / "privacy.html")
+def test_page_states_the_consent_contract_and_required_notices() -> None:
+    html, page = _read(PUBLIC / "privacy.html")
     for text in MUST_SAY:
         assert text in html, text
-    # 버튼 둘과 자바스크립트가 꺼졌을 때의 안내 (§3.3·§3.7)
-    assert ">분석 거부</button>" in html and ">다시 허용</button>" in html
+    for text in MUST_NOT_SAY:
+        assert text not in html, text
+    # 같은 모양의 버튼 둘 — 철회는 동의만큼 쉽다 — 과 자바스크립트가 꺼졌을 때의 안내 (§3.3·§3.7)
+    assert '<button class="btn" type="button" id="an-grant">동의</button>' in html
+    assert (
+        '<button class="btn" type="button" id="an-withdraw">동의 철회</button>' in html
+    )
     assert "<noscript>" in html
+    script = "".join(page.scripts)
+    for state in STATES:
+        assert f"'{state}'" in script, state
+    assert "'granted'" in script and "'denied'" in script
+
+
+def test_consent_box_tells_the_notices_before_the_buttons() -> None:
+    """동의 전에 알릴 사항을 버튼 앞에서 읽을 수 있다 (§3.3)."""
+    html, _ = _read(PUBLIC / "privacy.html")
+    box = _section(html, "consent-title")
+    box = box[box.index('<div class="consent">') : box.index('id="an-actions"')]
+    dls = re.findall(r"<dl[^>]*>(.*?)</dl>", box, flags=re.S)
+    assert len(dls) == 1 and _terms(dls[0]) == CONSENT_TERMS
+    for text in (
+        "Microsoft Corporation(미국)",
+        "Microsoft Advertising",
+        "불이익이 없습니다",
+    ):
+        assert text in dls[0], text
+
+
+def test_clarity_rests_on_consent_for_collection_provision_and_transfer() -> None:
+    """사람 결정 2026-10-01 — 수집·제공은 동의, 국외 이전은 별도 동의 (§3.6)."""
+    html, _ = _read(PUBLIC / "privacy.html")
+    assert "제15조 제1항 제1호" in _section(html, "s2")
+    provision = _section(html, "s4")
+    dls = re.findall(r"<dl[^>]*>(.*?)</dl>", provision, flags=re.S)
+    assert len(dls) == 1 and _terms(dls[0]) == PROVISION_TERMS
+    assert "제17조 제1항 제1호" in provision and "제17조 제1항 제2호" not in provision
+    assert "불이익이 없습니다" in provision
+    groups = re.findall(
+        r"<h3>(.*?)</h3>\s*<dl[^>]*>(.*?)</dl>", _section(html, "s6"), flags=re.S
+    )
+    microsoft = [body for name, body in groups if name.startswith("Microsoft")]
+    assert len(microsoft) == 1
+    basis = re.search(r"<dt>근거</dt><dd>(.*?)</dd>", microsoft[0]).group(1)
+    assert "제28조의8 제1항 제1호" in basis and "제3호" not in basis
+    assert "불이익이 없습니다" in microsoft[0]
+
+
+def test_behavioral_information_has_the_guideline_items() -> None:
+    """행태정보를 제3자가 광고 목적에도 쓸 수 있다 — 7절 소항목에 작성지침 항목 (§3.4-7)."""
+    html, _ = _read(PUBLIC / "privacy.html")
+    section = _section(html, "s7")
+    block = re.search(
+        r"<h3>행태정보의 수집·이용·제공과 거부</h3>.*?<dl[^>]*>(.*?)</dl>",
+        section,
+        flags=re.S,
+    )
+    assert block and _terms(block.group(1)) == BEHAVIOR_TERMS
+    assert "Microsoft Corporation" in block.group(1) and "광고" in block.group(1)
 
 
 def test_every_overseas_recipient_lists_the_five_items() -> None:
     html, _ = _read(PUBLIC / "privacy.html")
-    section = html[html.index('<section aria-labelledby="s6">') :]
-    section = section[: section.index("</section>")]
+    section = _section(html, "s6")
     groups = re.findall(r"<h3>(.*?)</h3>\s*<dl[^>]*>(.*?)</dl>", section, flags=re.S)
     assert len(groups) >= 5
     for name, body in groups:
-        assert set(re.findall(r"<dt>(.*?)</dt>", body)) == TRANSFER_TERMS, name
+        assert _terms(body) == TRANSFER_TERMS, name
 
 
 def test_archived_versions_are_static_and_external_free() -> None:
