@@ -1,0 +1,95 @@
+"""`/admin/clarity` 가 남기지 않는 것 — 주소 쿼리·해시·토큰, Redis 불달·쓰기 실패·키 지우기 (스펙 035 §3.3·§3.5·§4)."""
+
+import json
+import logging
+
+import fakeredis
+import pytest
+
+from app.features.admin.tests.clarity_fakes import EXPORT, TOKEN, Clarity, World
+
+
+async def test_addresses_lose_query_and_hash_and_referrers_become_origins() -> None:
+    w = World(Clarity())
+    body = await w.get()
+    pages, referrers, titles = body["metrics"]
+    assert pages["rows"][:2] == [
+        {"url": "https://kimptrack.com/app/", "visits": "40"},
+        {"url": "/privacy", "visits": "3"},
+    ]
+    assert len(pages["rows"]) == 20
+    assert referrers["rows"] == [
+        {"url": "https://www.google.com:443", "sessions": "7"},
+        {"url": "Direct", "sessions": "50"},
+    ]
+    assert titles["rows"] == [{"title": "T" * 200, "nested": ["/a"]}]
+    stored = json.dumps(w.stored())
+    for leak in ("gclid", "utm_source", "secret", "user@", "#top", "consent"):
+        assert leak not in stored and leak not in json.dumps(body), leak
+
+
+async def test_token_never_reaches_logs_redis_or_response(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    w = World(Clarity((200, EXPORT), (401, {"token": TOKEN})))
+    first = await w.get()
+    w.advance(3)
+    second = await w.get()
+    raw = fakeredis.FakeRedis(server=w.server).get("admin:clarity").decode()
+    for text in (json.dumps(first), json.dumps(second), raw, caplog.text):
+        assert TOKEN not in text
+    assert [r.levelname for r in caplog.records if r.name == "marketlens.admin"] == [
+        "WARNING"
+    ]
+
+
+class DeadRedis:
+    async def clarity_load(self) -> str | None:
+        raise ConnectionError("redis://10.0.0.5:6379 refused")
+
+    async def clarity_save(self, data: str) -> None:
+        raise ConnectionError("down")
+
+
+async def test_unreachable_redis_means_no_call_and_error_redis(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="marketlens.admin")
+    w = World(Clarity())
+    body = await w.feeds.clarity(bus=DeadRedis())
+    assert (body["state"], body["code"], body["traffic"]) == ("error", "redis", None)
+    assert (await w.feeds.clarity(bus=None))["code"] == "redis"  # lifespan 전
+    assert w.clarity.requests == []
+    assert [r.getMessage() for r in caplog.records] == [
+        "관리자 피드 clarity 실패 — redis"
+    ]
+    assert "10.0.0.5" not in caplog.text
+
+
+async def test_failed_save_still_blocks_calls_for_three_hours() -> None:
+    class SaveFails:
+        async def clarity_load(self) -> str | None:
+            return None
+
+        async def clarity_save(self, data: str) -> None:
+            raise ConnectionError("down")
+
+    w = World(Clarity())
+    store = SaveFails()
+    assert (await w.feeds.clarity(bus=store))["state"] == "ok"
+    w.advance(1)
+    body = await w.feeds.clarity(bus=store)
+    assert body["state"] == "ok" and len(w.clarity.requests) == 1
+    w.advance(2)
+    await w.feeds.clarity(bus=store)
+    assert len(w.clarity.requests) == 2
+
+
+async def test_deleting_the_key_calls_on_the_next_request() -> None:
+    w = World(Clarity())
+    await w.get()
+    fakeredis.FakeRedis(server=w.server).delete("admin:clarity")  # 런북 — 바로 부르기
+    w.advance(sec=60)
+    await w.get()
+    assert len(w.clarity.requests) == 2
