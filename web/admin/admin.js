@@ -113,23 +113,30 @@ async function call(path, init = {}) {
   }
   const appJson = isObj(body) && 'detail' in body;
   if (resp.status === 401 && !appJson) throw new Expired();
-  return { status: resp.status, body: isObj(body) ? body : null };
+  return { status: resp.status, body: isObj(body) ? body : null, text };
+}
+
+// 직전 결과와 같으면 직전 객체를 그대로 둔다 — 그 값으로 그린 본문을 다시 그리지 않게(아래 redraw)
+function keep(path, next) {
+  const prev = got.get(path);
+  const same = prev && (next.why ? prev.why === next.why : prev.text === next.text);
+  if (!same) got.set(path, next);
 }
 
 // 경로 하나를 부르고 결과를 got 에 둔다. 403·JSON 아님·예상 밖 상태(피드 경로가 없는 404 등)는 사유만 남긴다 —
 // 그 경로가 채우는 칸은 비우고 사유를 적는다(직전 값이 정상으로 읽히지 않게). 돌려주는 값 = 만료 신호였는가
 async function load(path) {
   try {
-    const { status, body } = await call(path);
+    const { status, body, text } = await call(path);
     const fine = status === 200 || (status === 503 && HEALTH.has(path));
-    if (status === 403) got.set(path, { why: '권한·설정 오류 (403)' });
-    else if (body === null || !fine) got.set(path, { why: `응답 오류 (HTTP ${status})` });
-    else got.set(path, { body });
+    if (status === 403) keep(path, { why: '권한·설정 오류 (403)' });
+    else if (body === null || !fine) keep(path, { why: `응답 오류 (HTTP ${status})` });
+    else keep(path, { body, text });
     okSince.add(path);
     return false;
   } catch (err) {
     const gone = err instanceof Expired;
-    got.set(path, { why: gone ? '로그인 만료·연결 끊김' : '불러오지 못함' });
+    keep(path, { why: gone ? '로그인 만료·연결 끊김' : '불러오지 못함' });
     if (!gone) okSince.add(path);
     return gone;
   }
@@ -217,13 +224,26 @@ const CAUSE = {
 };
 const DENIED = 'IAM 정책 또는 조직 SCP — 콘솔에서 본다';
 
-// 경로 응답에서 부분 하나 — undefined(첫 호출 전)·{ why }(호출 실패)·부분 객체 { state, code, fetchedAt, refreshSec, … }
+const BAD_SHAPE = Object.freeze({ why: '응답 모양 오류' });
+
+// 경로 응답에서 부분 하나 — undefined(첫 호출 전)·{ why }(호출 실패)·부분 객체 { state, code, fetchedAt, refreshSec, … }.
+// 같은 호출 결과면 같은 객체다(다시 그리기 판단이 객체로 비교한다)
 function partOf(path, key) {
   const entry = got.get(path);
   if (!entry) return undefined;
-  if (entry.why) return { why: entry.why };
+  if (entry.why) return entry;
   const part = key ? entry.body[key] : entry.body;
-  return isObj(part) && typeof part.state === 'string' ? part : { why: '응답 모양 오류' };
+  return isObj(part) && typeof part.state === 'string' ? part : BAD_SHAPE;
+}
+
+// 본문은 그 본문이 기대는 값이 바뀌었을 때만 다시 그린다 — 느린 피드가 채우는 목록·표의 스크롤·초점·글자 선택·
+// SVG 툴팁이 빠른 묶음(10초)마다 날아가지 않게. 머리의 경과 글자와 절 요약은 매번 다시 쓴다.
+const drawn = new Map(); // 본문 이름 → 직전에 그린 입력들
+function redraw(name, deps, draw) {
+  const last = drawn.get(name);
+  if (last && last.length === deps.length && deps.every((d, i) => d === last[i])) return;
+  draw();
+  drawn.set(name, deps); // 그리다 예외가 나면 남기지 않는다 — 다음 묶음이 다시 그린다
 }
 
 // 값을 그릴 수 있는가 — ok, 또는 error 인데 값이 있다(Clarity 의 마지막 성공 값)
@@ -264,19 +284,24 @@ function stateMsg(part, cause) {
   return el('p', 'state-msg span-all');
 }
 
-// 칸 하나 = 머리(m-이름) + 본문(b-이름). 값을 그렸으면 true
-function region(name, part, cause, fill, valueKey) {
+// 칸 하나 = 머리(m-이름, 매번) + 본문(b-이름, 부분이 바뀌었을 때만). 값을 그릴 수 있으면 true.
+// boxed — 카드가 없는 칸(인프라 박스 영역)은 상태 글을 카드에 넣어 옆 칸들과 모양을 맞춘다
+function region(name, part, cause, fill, valueKey, boxed = false) {
   $(`m-${name}`).replaceChildren(...head(part, valueKey));
   const body = $(`b-${name}`);
-  if (usable(part, valueKey)) {
-    fill(body, part);
-    return true;
-  }
-  body.replaceChildren(stateMsg(part, cause));
-  return false;
+  const ok = usable(part, valueKey);
+  redraw(`b-${name}`, [part], () => {
+    if (ok) return fill(body, part);
+    const msg = stateMsg(part, cause);
+    if (!boxed) return body.replaceChildren(msg);
+    const card = el('div', 'card span-all');
+    card.append(msg);
+    body.replaceChildren(card);
+  });
+  return ok;
 }
 
-// 개요 칸·절 요약에 쓰는 짧은 상태 — 값을 못 그릴 때
+// 부분 머리의 짧은 상태 — 값을 못 그릴 때(§3.5 — error 는 장애색 "불러오지 못함")
 function stateWord(part) {
   if (part === undefined) return ['wait', '불러오는 중'];
   if (part.why) return ['bad', '호출 실패'];
@@ -286,11 +311,23 @@ function stateWord(part) {
   return ['bad', '불러오지 못함'];
 }
 
+// 개요 칸·절 요약의 짧은 상태 — ✕(장애색)는 §3.4 판정에서 장애인 것에만 쓴다. 판정 밖 호출 실패·error 는 ▲
+function softWord(part) {
+  const [tone, word] = stateWord(part);
+  return [tone === 'bad' ? 'warn' : tone, word];
+}
+
 // --- 차트 (§3.6) — SVG 를 DOM 으로. 모양은 기하 속성, 색·굵기는 클래스 ----------------------------------
+
+// SVG 에 쓰는 속성은 이 목록뿐 — 기하·이름표만. href·style·on… 같은 이름은 여기서 막는다(§3.6·§3.8)
+const SVG_ATTRS = new Set(['viewBox', 'preserveAspectRatio', 'role', 'aria-label', 'x', 'y', 'width', 'height', 'x1', 'x2', 'y1', 'y2', 'd', 'points']);
 
 function svg(tag, attrs, cls) {
   const node = document.createElementNS(SVG_NS, tag);
-  for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, String(v));
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (!SVG_ATTRS.has(k)) throw new Error(`SVG 속성 ${k} 은 쓰지 않는다`);
+    node.setAttribute(k, String(v));
+  }
   if (cls) node.setAttribute('class', cls);
   return node;
 }
@@ -349,18 +386,19 @@ function line(points, o) {
     root.append(tip(svg('line', { x1: 0, x2: W, y1: y(o.ref), y2: y(o.ref) }, 'ref t-bad'), `경보 기준 ${fmt(o.ref)}`));
   }
   root.append(svg('path', { d }, 'line'));
+  if (o.noAxis) return root; // 박스 카드는 축 글자를 카드 맨 아래 한 번만 단다
   const out = document.createDocumentFragment();
   out.append(root, axis('24시간 전', '지금'));
   return out;
 }
 
-// 가로 비율 막대 하나(0~1)
+// 가로 비율 막대 하나(0~1) — 막대 전체에 title(숫자만)
 function ratio(frac, tone, label) {
   const root = frame(100, 6, 'bar6', label);
-  const w = Math.min(1, Math.max(0, num(frac) ?? 0)) * 100;
+  const f = Math.min(1, Math.max(0, num(frac) ?? 0));
   root.append(svg('rect', { x: 0, y: 0, width: 100, height: 6 }, 'track'));
-  root.append(svg('rect', { x: 0, y: 0, width: w.toFixed(2), height: 6 }, tone ? `fill t-${tone}` : 'fill'));
-  return root;
+  root.append(svg('rect', { x: 0, y: 0, width: (f * 100).toFixed(2), height: 6 }, tone ? `fill t-${tone}` : 'fill'));
+  return tip(root, `${(f * 100).toFixed(1)}%`);
 }
 
 // 세로 막대 — bars [{ value, over, tip }], over 는 같은 눈금으로 겹쳐 그린다(5xx)
@@ -390,7 +428,6 @@ const bodyOf = (path) => {
   const entry = got.get(path);
   return entry && !entry.why ? entry.body : null;
 };
-const HEALTH_TONE = { ok: 'ok', starting: 'warn' }; // 그 밖(stale·redis_down)은 장애
 
 // 종합 판정 — 위에서부터 먼저 맞는 것. unconfigured·denied·pending 과 판정 밖 부분의 error 는 넣지 않는다
 function verdict() {
@@ -403,6 +440,10 @@ function verdict() {
   }
   const bad = [];
   const warn = [];
+  // 판정은 바꾸지 않지만 재료를 못 읽은 것은 사유에 적는다 — "이상 없음" 이 모르는 것까지 단정하지 않게
+  const blind = [];
+  if (got.get(P.collect)?.why) blind.push('거래소 상태 모름');
+  if (got.get(P.status)?.why) blind.push('Redis·Influx 상태 모름');
   if (col.body.status !== 'ok') bad.push(`수집기 ${col.body.status}`);
   if (api.body.status !== 'ok') bad.push(`api ${api.body.status}`);
   const st = bodyOf(P.status);
@@ -410,9 +451,10 @@ function verdict() {
   if (st?.influx === 'down') bad.push('Influx down');
   const alarms = partOf(P.aws, 'alarms');
   if (alarms?.state === 'ok') {
-    const n = list(alarms.items).filter((a) => isObj(a) && a.state === 'ALARM').length;
-    const count = Math.max(n, num(alarms.counts?.alarm) ?? 0);
-    if (count > 0) bad.push(`경보 ${count}개 ALARM`);
+    const names = list(alarms.items).filter((a) => isObj(a) && a.state === 'ALARM').map((a) => alarmName(a.name));
+    const count = Math.max(names.length, num(alarms.counts?.alarm) ?? 0);
+    // 둘까지는 이름을 댄다(서버 글 — 글자로만 들어간다), 셋 이상이면 수
+    if (count > 0) bad.push(count <= 2 && names.length === count ? `경보 ALARM ${names.join(', ')}` : `경보 ${count}개 ALARM`);
   } else if (alarms?.state === 'error') warn.push('경보 읽기 오류');
   for (const ex of list(bodyOf(P.collect)?.exchanges).filter(isObj)) {
     if (ex.state === 'down') bad.push(`${ex.exchange} 끊김`);
@@ -421,17 +463,18 @@ function verdict() {
   const canary = partOf(P.aws, 'canary');
   if (canary?.state === 'ok' && canary.ok === false) warn.push('canary 실패');
   else if (canary?.state === 'error') warn.push('canary 읽기 오류');
-  if (bad.length) return { tone: 'bad', word: '장애', why: [...bad, ...warn] };
-  if (warn.length) return { tone: 'warn', word: '주의', why: warn };
+  if (bad.length) return { tone: 'bad', word: '장애', why: [...bad, ...warn, ...blind] };
+  if (warn.length) return { tone: 'warn', word: '주의', why: [...warn, ...blind] };
   const judged = alarms?.state === 'ok' && canary?.state === 'ok';
-  return { tone: 'ok', word: '정상', why: [judged ? '수집·api·경보·canary 이상 없음' : '수집·api 이상 없음 — 경보·canary 는 판정 밖(연결 안 됨·첫 조회)'] };
+  const what = got.get(P.collect)?.why ? '수집기·api' : '수집·api';
+  return { tone: 'ok', word: '정상', why: [...blind, judged ? `${what}·경보·canary 이상 없음` : `${what} 이상 없음 — 경보·canary 는 판정 밖(연결 안 됨·첫 조회)`] };
 }
 
 // 띠 오른쪽의 판정 재료 일곱 — 어느 칸이 판정에 들었고 어떤 상태인지 (판정 밖은 흐림)
 function checks() {
   const health = (path) => {
     const e = got.get(path);
-    return !e ? 'wait' : e.why ? 'unknown' : own(HEALTH_TONE, e.body.status) === 'ok' ? 'ok' : 'bad';
+    return !e ? 'wait' : e.why ? 'unknown' : e.body.status === 'ok' ? 'ok' : 'bad';
   };
   const st = got.get(P.status);
   const store = (key) => (!st ? 'wait' : st.why ? 'dim' : st.body[key] === 'down' ? 'bad' : 'ok');
@@ -453,18 +496,30 @@ function checks() {
 
 const reasons = (why) => why.slice(0, 3).join(' · ') + (why.length > 3 ? ` 외 ${why.length - 3}` : '');
 
-// 개요 칸 — word 면 값 자리에 상태 글(작게), 아니면 값(크게)
+// 개요 칸 — word 면 값 자리에 상태 글(작게), 아니면 값(크게). tone null 은 상태가 없는 값(모양 없이 수만)
 function vital(id, tone, value, sub, word = false) {
-  const cls = [tone === 'ok' ? '' : `t-${tone}`, word ? 'state' : ''].join(' ').trim();
-  $(`v-${id}`).replaceChildren(el('span', `mk t-${tone}`, GLYPH[tone]), el('span', cls || null, value));
+  const cls = [tone && tone !== 'ok' ? `t-${tone}` : '', word ? 'state' : ''].join(' ').trim();
+  const mark = tone ? [el('span', `mk t-${tone}`, GLYPH[tone])] : [];
+  $(`v-${id}`).replaceChildren(...mark, el('span', cls || null, value));
   $(`v-${id}-s`).textContent = clean(sub);
 }
 
+// 헬스 칸 — 색·모양은 판정과 같다: ok 밖은 모두 장애(§3.4), 호출 실패는 판정처럼 알 수 없음
 function healthVital(id, entry, sub) {
   if (!entry) return vital(id, 'wait', '불러오는 중', '', true);
-  if (entry.why) return vital(id, 'bad', '호출 실패', entry.why, true);
+  if (entry.why) return vital(id, 'unknown', '호출 실패', entry.why, true);
   const status = String(entry.body.status);
-  vital(id, own(HEALTH_TONE, status) || 'bad', status === 'ok' ? '정상' : status, sub(entry.body));
+  vital(id, status === 'ok' ? 'ok' : 'bad', status === 'ok' ? '정상' : status, sub(entry.body));
+}
+
+// 개요 비용 칸의 아래 글 — 색의 이유가 보이게
+function costSub(w) {
+  const limit = money(w.b.limit, w.b.unit);
+  const pct = `${fixed(w.r * 100, 0)}%`;
+  if (w.r >= 1) return `한도 ${limit} 넘음 (${pct})`;
+  if ((num(w.b.forecast) ?? 0) > w.b.limit) return `예측 ${money(w.b.forecast, w.b.unit)} · 한도 ${limit} 넘음`;
+  if (w.r >= 0.85) return `한도 ${limit} 중 ${pct} — 85% 넘음`;
+  return `한도 ${limit} 중 ${pct}`;
 }
 
 function drawOverview() {
@@ -486,9 +541,10 @@ function drawOverview() {
   if (apiTile?.body?.status === 'ok' && st?.body && (st.body.redis !== 'ok' || st.body.influx !== 'ok')) {
     vital('api', 'bad', '저장소 끊김', `Redis ${st.body.redis} · Influx ${st.body.influx}`, true);
   }
+  // 지금 접속은 상태가 없는 수 — 모양 없이, 호출 실패(판정 밖)만 ▲
   if (!st) vital('ws', 'wait', '불러오는 중', '', true);
-  else if (st.why) vital('ws', 'bad', '호출 실패', st.why, true);
-  else vital('ws', 'ok', int(st.body.wsConnections), '열린 대시보드 수');
+  else if (st.why) vital('ws', 'warn', '호출 실패', st.why, true);
+  else vital('ws', null, int(st.body.wsConnections), '열린 대시보드 수');
 
   const alarms = partOf(P.aws, 'alarms');
   if (usable(alarms)) {
@@ -496,20 +552,20 @@ function drawOverview() {
     const n = items.filter((a) => a.state === 'ALARM').length;
     const nodata = items.filter((a) => a.state === 'INSUFFICIENT_DATA').length;
     vital('alarms', n ? 'bad' : 'ok', `${n} / ${items.length}`, `ALARM / 전체${nodata ? ` · 데이터 부족 ${nodata}` : ''}`);
-  } else vital('alarms', ...stateWord(alarms), alarms?.why || alarms?.code || '', true);
+  } else vital('alarms', ...softWord(alarms), alarms?.why || alarms?.code || '', true);
 
   const canary = partOf(P.aws, 'canary');
   if (usable(canary)) {
     if (num(canary.lastRunAt) === null) vital('canary', 'dim', '실행 없음', '11분 안에 끝난 실행 없음', true);
     else vital('canary', canary.ok ? 'ok' : 'warn', canary.ok ? '통과' : '실패', `${ago(canary.lastRunAt)} · ${int(canary.durationMs)}ms`);
-  } else vital('canary', ...stateWord(canary), canary?.why || canary?.code || '', true);
+  } else vital('canary', ...softWord(canary), canary?.why || canary?.code || '', true);
 
   const budget = partOf(P.aws, 'budget');
   if (usable(budget)) {
     const worst = worstMonthly(budget);
     if (!worst) vital('cost', 'dim', '예산 없음', '월 단위 비용 예산이 없다', true);
-    else vital('cost', worst.tone, money(worst.b.actual, worst.b.unit), `한도 ${money(worst.b.limit, worst.b.unit)} 중 ${fixed(worst.r * 100, 0)}%`);
-  } else vital('cost', ...stateWord(budget), budget?.why || budget?.code || '', true);
+    else vital('cost', worst.tone, money(worst.b.actual, worst.b.unit), costSub(worst));
+  } else vital('cost', ...softWord(budget), budget?.why || budget?.code || '', true);
 }
 
 // --- 수집 (§3.4) -------------------------------------------------------------------------------
@@ -531,20 +587,23 @@ function cell(tr, content, cls) {
   return td;
 }
 
+// 거래소 표 — 좁은 화면에서도 첫 화면에 들도록 상태 바로 옆에 열린 실패 구간
 function exchangeRow(ex) {
   const tr = el('tr');
   const [tone, word] = own(EX_STATE, ex.state) || ['bad', String(ex.state)];
   cell(tr, ex.exchange, 'nowrap');
   cell(tr, badge(tone, word));
-  cell(tr, ago(ex.lastSuccessAt), 'num');
-  cell(tr, int(ex.markets), 'num');
-  cell(tr, num(ex.successRate1h) === null ? '–' : `${ex.successRate1h.toFixed(2)}%`, 'num');
   const o = ex.openOutage;
   cell(tr, isObj(o) ? marked(kindTone(o.kind), `${o.kind} · ${int(o.count)}회 · ${lasting(o.startedAt)}`) : '–', 'nowrap');
+  cell(tr, ago(ex.lastSuccessAt), 'num');
+  cell(tr, num(ex.successRate1h) === null ? '–' : `${ex.successRate1h.toFixed(2)}%`, 'num');
+  cell(tr, int(ex.markets), 'num');
   const e = ex.lastError;
-  const last = cell(tr, isObj(e) ? '' : '–', 'small last-error');
+  // 지난 오류는 흐리게 한 줄 — 열린 구간이 있는 거래소만 본문색
+  const last = cell(tr, isObj(e) ? '' : '–', `small last-error${isObj(o) ? ' hot' : ''}`);
   if (isObj(e)) {
-    const head = `${num(e.at) === null ? '' : `${md(e.at)} ${clock(e.at)}`} · ${e.kind} · HTTP ${e.statusCode ?? '–'} · `;
+    const http = num(e.statusCode) === null ? '' : ` · HTTP ${e.statusCode}`;
+    const head = `${when(e.at)} · ${e.kind}${http} · `;
     const text = clip(el('span', 'clamp'), `${head}${clean(e.message)}`, head.length + 300);
     text.title = clean(e.message);
     last.append(text);
@@ -552,13 +611,23 @@ function exchangeRow(ex) {
   return tr;
 }
 
-// 실패 구간 타임라인 — 거래소 다섯 줄, 진행 중은 지금까지, 1분 미만도 최소 폭
+// 축 눈금 — 창을 5등분한 1/5~4/5 지점의 시각과 오른쪽 끝 "지금"(공개 수집 상태 탭과 같은 모양)
+function ticks(start, end) {
+  const row = el('div', 'axis ticks');
+  for (const i of [1, 2, 3, 4]) row.append(el('span', null, hm(start + ((end - start) * i) / 5)));
+  row.append(el('span', null, '지금'));
+  return row;
+}
+
+// 실패 구간 타임라인 — 거래소 다섯 줄, 진행 중은 지금까지, 1분 미만도 최소 폭. 차단·rate limit 은 꽉 찬 높이·장애색,
+// 그 밖은 낮은 막대·주의색(색만으로 가르지 않는다). 아래에 최신 다섯 구간을 글자로(휴대폰은 title 을 못 본다)
 function timeline(outages) {
   if (!outages.length) return el('p', 'empty', '최근 24시간 실패 없음');
   const now = Date.now();
   const start = now - 86_400_000;
   const W = 1000;
   const lanes = el('div', 'lanes');
+  const label = (o) => `${hm(o.startedAt)}–${num(o.endedAt) === null ? '진행 중' : hm(o.endedAt)} · ${o.kind} · ×${int(o.count)}`;
   for (const ex of EXCHANGES) {
     const mine = outages.filter((o) => o.exchange === ex && num(o.startedAt) !== null);
     const root = frame(W, 14, 'lane', `${ex} 실패 구간 24시간 — ${mine.length}건`);
@@ -569,13 +638,27 @@ function timeline(outages) {
       if (e < start) continue;
       const w = Math.max(4, ((e - s) / (now - start)) * W);
       const x = Math.min(W - w, ((s - start) / (now - start)) * W);
-      const span = `${hm(o.startedAt)}–${num(o.endedAt) === null ? '진행 중' : hm(o.endedAt)} · ${o.kind} · ×${int(o.count)}`;
-      root.append(tip(svg('rect', { x: x.toFixed(1), y: 1, width: w.toFixed(1), height: 12 }, `seg t-${kindTone(o.kind)}`), span));
+      const tone = kindTone(o.kind);
+      const [y, h] = tone === 'bad' ? [1, 12] : [4, 6];
+      root.append(tip(svg('rect', { x: x.toFixed(1), y, width: w.toFixed(1), height: h }, `seg t-${tone}`), label(o)));
     }
     lanes.append(el('span', 'lane-name', ex), root);
   }
-  lanes.append(axis('24시간 전', '지금'));
-  return lanes;
+  lanes.append(ticks(start, now));
+  const recent = outages.filter((o) => num(o.startedAt) !== null).sort((a, b) => b.startedAt - a.startedAt).slice(0, 5);
+  const log = el('ol', 'outage-log');
+  log.append(
+    ...recent.map((o) => {
+      const li = el('li');
+      // 시작 시각은 첫 칸(날짜 포함 꼴)에 있으니 글자는 끝·kind·횟수만
+      const end = num(o.endedAt) === null ? '진행 중' : `~${hm(o.endedAt)}`;
+      li.append(el('span', 'muted', when(o.startedAt)), el('span', null, o.exchange), marked(kindTone(o.kind), `${end} · ${o.kind} · ×${int(o.count)}`));
+      return li;
+    }),
+  );
+  const out = document.createDocumentFragment();
+  out.append(lanes, log);
+  return out;
 }
 
 function drawCollect() {
@@ -585,8 +668,9 @@ function drawCollect() {
     $('m-collect').replaceChildren(...head(part));
     $('exchanges').replaceChildren();
     $('collect-sum').replaceChildren(stateMsg(part));
-    $('timeline').replaceChildren();
-    $('s-collect').replaceChildren(entry ? marked('bad', entry.why) : marked('wait', '불러오는 중'));
+    redraw('timeline', [entry], () => $('timeline').replaceChildren());
+    // 판정 밖의 호출 실패는 ▲ (✕ 는 판정에서 장애인 것만)
+    $('s-collect').replaceChildren(entry ? marked('warn', entry.why) : marked('wait', '불러오는 중'));
     return;
   }
   const b = entry.body;
@@ -599,7 +683,7 @@ function drawCollect() {
   const parts = [
     ['전체 1시간', num(b.successRate1h) === null ? '–' : `${b.successRate1h.toFixed(2)}%`],
     ['마켓', int(markets)],
-    ['수집기 시작', num(b.serverStartedAt) === null ? '–' : `${md(b.serverStartedAt)} ${hm(b.serverStartedAt)}`],
+    ['수집기 시작', when(b.serverStartedAt)],
     ['버전', `수집기 ${colVer ?? '–'} · api ${apiVer ?? '–'}`],
   ];
   $('collect-sum').replaceChildren(
@@ -609,7 +693,9 @@ function drawCollect() {
       return span;
     }),
   );
-  $('timeline').replaceChildren(timeline(list(b.outages).filter(isObj)));
+  // 타임라인은 구간이 바뀌었거나 1분이 지났을 때만 다시 그린다 — 막대 툴팁이 10초마다 날아가지 않게
+  const outages = list(b.outages).filter(isObj);
+  redraw('timeline', [JSON.stringify(outages), Math.floor(Date.now() / 60_000)], () => $('timeline').replaceChildren(timeline(outages)));
   const down = exchanges.filter((ex) => ex.state === 'down').map((ex) => ex.exchange);
   const stale = exchanges.filter((ex) => ex.state === 'stale').map((ex) => ex.exchange);
   const tone = down.length ? 'bad' : stale.length ? 'warn' : 'ok';
