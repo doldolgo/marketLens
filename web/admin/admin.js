@@ -384,3 +384,274 @@ function columns(bars, label, cls) {
   return root;
 }
 
+// --- 개요 (§3.4) -------------------------------------------------------------------------------
+
+const bodyOf = (path) => {
+  const entry = got.get(path);
+  return entry && !entry.why ? entry.body : null;
+};
+const HEALTH_TONE = { ok: 'ok', starting: 'warn' }; // 그 밖(stale·redis_down)은 장애
+
+// 종합 판정 — 위에서부터 먼저 맞는 것. unconfigured·denied·pending 과 판정 밖 부분의 error 는 넣지 않는다
+function verdict() {
+  const col = got.get(P.collector);
+  const api = got.get(P.api);
+  if (!col || !api) return { tone: 'wait', word: '확인 중', why: ['첫 조회를 기다린다'] };
+  if (col.why || api.why) {
+    const why = [col.why && `수집기 헬스 ${col.why}`, api.why && `api 헬스 ${api.why}`];
+    return { tone: 'unknown', word: '알 수 없음', why: why.filter(Boolean) };
+  }
+  const bad = [];
+  const warn = [];
+  if (col.body.status !== 'ok') bad.push(`수집기 ${col.body.status}`);
+  if (api.body.status !== 'ok') bad.push(`api ${api.body.status}`);
+  const st = bodyOf(P.status);
+  if (st?.redis === 'down') bad.push('Redis down');
+  if (st?.influx === 'down') bad.push('Influx down');
+  const alarms = partOf(P.aws, 'alarms');
+  if (alarms?.state === 'ok') {
+    const n = list(alarms.items).filter((a) => isObj(a) && a.state === 'ALARM').length;
+    const count = Math.max(n, num(alarms.counts?.alarm) ?? 0);
+    if (count > 0) bad.push(`경보 ${count}개 ALARM`);
+  } else if (alarms?.state === 'error') warn.push('경보 읽기 오류');
+  for (const ex of list(bodyOf(P.collect)?.exchanges).filter(isObj)) {
+    if (ex.state === 'down') bad.push(`${ex.exchange} 끊김`);
+    else if (ex.state === 'stale') warn.push(`${ex.exchange} 지연`);
+  }
+  const canary = partOf(P.aws, 'canary');
+  if (canary?.state === 'ok' && canary.ok === false) warn.push('canary 실패');
+  else if (canary?.state === 'error') warn.push('canary 읽기 오류');
+  if (bad.length) return { tone: 'bad', word: '장애', why: [...bad, ...warn] };
+  if (warn.length) return { tone: 'warn', word: '주의', why: warn };
+  const judged = alarms?.state === 'ok' && canary?.state === 'ok';
+  return { tone: 'ok', word: '정상', why: [judged ? '수집·api·경보·canary 이상 없음' : '수집·api 이상 없음 — 경보·canary 는 판정 밖(연결 안 됨·첫 조회)'] };
+}
+
+// 띠 오른쪽의 판정 재료 일곱 — 어느 칸이 판정에 들었고 어떤 상태인지 (판정 밖은 흐림)
+function checks() {
+  const health = (path) => {
+    const e = got.get(path);
+    return !e ? 'wait' : e.why ? 'unknown' : own(HEALTH_TONE, e.body.status) === 'ok' ? 'ok' : 'bad';
+  };
+  const st = got.get(P.status);
+  const store = (key) => (!st ? 'wait' : st.why ? 'dim' : st.body[key] === 'down' ? 'bad' : 'ok');
+  const exs = list(bodyOf(P.collect)?.exchanges).filter(isObj);
+  const exTone = !got.get(P.collect) ? 'wait' : !exs.length ? 'dim' : exs.some((e) => e.state === 'down') ? 'bad' : exs.some((e) => e.state === 'stale') ? 'warn' : 'ok';
+  const judged = (part, test) => (part === undefined ? 'wait' : part.why ? 'dim' : part.state === 'ok' ? test(part) : part.state === 'error' ? 'warn' : part.state === 'pending' ? 'wait' : 'dim');
+  const alarms = judged(partOf(P.aws, 'alarms'), (a) => (list(a.items).some((i) => isObj(i) && i.state === 'ALARM') || num(a.counts?.alarm) > 0 ? 'bad' : 'ok'));
+  const canary = judged(partOf(P.aws, 'canary'), (c) => (c.ok === false ? 'warn' : 'ok'));
+  return [
+    ['수집기', health(P.collector)],
+    ['api', health(P.api)],
+    ['Redis', store('redis')],
+    ['Influx', store('influx')],
+    ['거래소', exTone],
+    ['경보', alarms],
+    ['canary', canary],
+  ];
+}
+
+const reasons = (why) => why.slice(0, 3).join(' · ') + (why.length > 3 ? ` 외 ${why.length - 3}` : '');
+
+// 개요 칸 — word 면 값 자리에 상태 글(작게), 아니면 값(크게)
+function vital(id, tone, value, sub, word = false) {
+  const cls = [tone === 'ok' ? '' : `t-${tone}`, word ? 'state' : ''].join(' ').trim();
+  $(`v-${id}`).replaceChildren(el('span', `mk t-${tone}`, GLYPH[tone]), el('span', cls || null, value));
+  $(`v-${id}-s`).textContent = clean(sub);
+}
+
+function healthVital(id, entry, sub) {
+  if (!entry) return vital(id, 'wait', '불러오는 중', '', true);
+  if (entry.why) return vital(id, 'bad', '호출 실패', entry.why, true);
+  const status = String(entry.body.status);
+  vital(id, own(HEALTH_TONE, status) || 'bad', status === 'ok' ? '정상' : status, sub(entry.body));
+}
+
+function drawOverview() {
+  const v = verdict();
+  $('band').className = `band t-${v.tone}`;
+  $('band-mark').textContent = GLYPH[v.tone];
+  $('band-word').textContent = v.word;
+  $('band-why').textContent = clean(reasons(v.why));
+  $('band-checks').replaceChildren(...checks().map(([label, tone]) => marked(tone, label)));
+  const hdr = $('hdr-verdict');
+  hdr.className = `tag t-${v.tone}`;
+  hdr.replaceChildren(el('span', 'mk', GLYPH[v.tone]), v.word);
+  hdr.title = clean(reasons(v.why));
+
+  healthVital('collector', got.get(P.collector), (b) => `마지막 틱 ${ago(b.lastTickAt)}`);
+  const st = got.get(P.status);
+  healthVital('api', got.get(P.api), () => (st?.body ? `Redis ${st.body.redis} · Influx ${st.body.influx}` : st?.why || ''));
+  const apiTile = got.get(P.api);
+  if (apiTile?.body?.status === 'ok' && st?.body && (st.body.redis !== 'ok' || st.body.influx !== 'ok')) {
+    vital('api', 'bad', '저장소 끊김', `Redis ${st.body.redis} · Influx ${st.body.influx}`, true);
+  }
+  if (!st) vital('ws', 'wait', '불러오는 중', '', true);
+  else if (st.why) vital('ws', 'bad', '호출 실패', st.why, true);
+  else vital('ws', 'ok', int(st.body.wsConnections), '열린 대시보드 수');
+
+  const alarms = partOf(P.aws, 'alarms');
+  if (usable(alarms)) {
+    const items = list(alarms.items).filter(isObj);
+    const n = items.filter((a) => a.state === 'ALARM').length;
+    const nodata = items.filter((a) => a.state === 'INSUFFICIENT_DATA').length;
+    vital('alarms', n ? 'bad' : 'ok', `${n} / ${items.length}`, `ALARM / 전체${nodata ? ` · 데이터 부족 ${nodata}` : ''}`);
+  } else vital('alarms', ...stateWord(alarms), alarms?.why || alarms?.code || '', true);
+
+  const canary = partOf(P.aws, 'canary');
+  if (usable(canary)) {
+    if (num(canary.lastRunAt) === null) vital('canary', 'dim', '실행 없음', '11분 안에 끝난 실행 없음', true);
+    else vital('canary', canary.ok ? 'ok' : 'warn', canary.ok ? '통과' : '실패', `${ago(canary.lastRunAt)} · ${int(canary.durationMs)}ms`);
+  } else vital('canary', ...stateWord(canary), canary?.why || canary?.code || '', true);
+
+  const budget = partOf(P.aws, 'budget');
+  if (usable(budget)) {
+    const worst = worstMonthly(budget);
+    if (!worst) vital('cost', 'dim', '예산 없음', '월 단위 비용 예산이 없다', true);
+    else vital('cost', worst.tone, money(worst.b.actual, worst.b.unit), `한도 ${money(worst.b.limit, worst.b.unit)} 중 ${fixed(worst.r * 100, 0)}%`);
+  } else vital('cost', ...stateWord(budget), budget?.why || budget?.code || '', true);
+}
+
+// --- 수집 (§3.4) -------------------------------------------------------------------------------
+
+const EXCHANGES = ['upbit', 'bithumb', 'binance', 'bybit', 'bitget'];
+const EX_STATE = { ok: ['ok', '수집 중'], stale: ['warn', '지연'], down: ['bad', '끊김'] };
+const kindTone = (kind) => (kind === 'banned' || kind === 'rate_limit' ? 'bad' : 'warn');
+
+function lasting(ms) {
+  const s = since(ms);
+  return s < 60 ? `${s}초째` : s < 3600 ? `${Math.floor(s / 60)}분째` : `${Math.floor(s / 3600)}시간 ${Math.floor((s % 3600) / 60)}분째`;
+}
+
+function cell(tr, content, cls) {
+  const td = el('td', cls);
+  if (content instanceof Node) td.append(content);
+  else td.textContent = clean(content);
+  tr.append(td);
+  return td;
+}
+
+function exchangeRow(ex) {
+  const tr = el('tr');
+  const [tone, word] = own(EX_STATE, ex.state) || ['bad', String(ex.state)];
+  cell(tr, ex.exchange, 'nowrap');
+  cell(tr, badge(tone, word));
+  cell(tr, ago(ex.lastSuccessAt), 'num');
+  cell(tr, int(ex.markets), 'num');
+  cell(tr, num(ex.successRate1h) === null ? '–' : `${ex.successRate1h.toFixed(2)}%`, 'num');
+  const o = ex.openOutage;
+  cell(tr, isObj(o) ? marked(kindTone(o.kind), `${o.kind} · ${int(o.count)}회 · ${lasting(o.startedAt)}`) : '–', 'nowrap');
+  const e = ex.lastError;
+  const last = cell(tr, isObj(e) ? '' : '–', 'small last-error');
+  if (isObj(e)) {
+    const head = `${num(e.at) === null ? '' : `${md(e.at)} ${clock(e.at)}`} · ${e.kind} · HTTP ${e.statusCode ?? '–'} · `;
+    const text = clip(el('span', 'clamp'), `${head}${clean(e.message)}`, head.length + 300);
+    text.title = clean(e.message);
+    last.append(text);
+  }
+  return tr;
+}
+
+// 실패 구간 타임라인 — 거래소 다섯 줄, 진행 중은 지금까지, 1분 미만도 최소 폭
+function timeline(outages) {
+  if (!outages.length) return el('p', 'empty', '최근 24시간 실패 없음');
+  const now = Date.now();
+  const start = now - 86_400_000;
+  const W = 1000;
+  const lanes = el('div', 'lanes');
+  for (const ex of EXCHANGES) {
+    const mine = outages.filter((o) => o.exchange === ex && num(o.startedAt) !== null);
+    const root = frame(W, 14, 'lane', `${ex} 실패 구간 24시간 — ${mine.length}건`);
+    root.append(svg('rect', { x: 0, y: 4, width: W, height: 6 }, 'track'));
+    for (const o of mine) {
+      const s = Math.max(start, o.startedAt);
+      const e = Math.min(now, num(o.endedAt) ?? now);
+      if (e < start) continue;
+      const w = Math.max(4, ((e - s) / (now - start)) * W);
+      const x = Math.min(W - w, ((s - start) / (now - start)) * W);
+      const span = `${hm(o.startedAt)}–${num(o.endedAt) === null ? '진행 중' : hm(o.endedAt)} · ${o.kind} · ×${int(o.count)}`;
+      root.append(tip(svg('rect', { x: x.toFixed(1), y: 1, width: w.toFixed(1), height: 12 }, `seg t-${kindTone(o.kind)}`), span));
+    }
+    lanes.append(el('span', 'lane-name', ex), root);
+  }
+  lanes.append(axis('24시간 전', '지금'));
+  return lanes;
+}
+
+function drawCollect() {
+  const entry = got.get(P.collect);
+  if (!entry || entry.why) {
+    const part = entry ? { why: entry.why } : undefined;
+    $('m-collect').replaceChildren(...head(part));
+    $('exchanges').replaceChildren();
+    $('collect-sum').replaceChildren(stateMsg(part));
+    $('timeline').replaceChildren();
+    $('s-collect').replaceChildren(entry ? marked('bad', entry.why) : marked('wait', '불러오는 중'));
+    return;
+  }
+  const b = entry.body;
+  $('m-collect').replaceChildren(el('span', 'muted', `${ago(b.fetchedAt)} 값`));
+  const exchanges = list(b.exchanges).filter(isObj);
+  $('exchanges').replaceChildren(...exchanges.map(exchangeRow));
+  const markets = exchanges.reduce((sum, ex) => sum + (num(ex.markets) ?? 0), 0);
+  const colVer = bodyOf(P.collector)?.version;
+  const apiVer = bodyOf(P.status)?.version;
+  const parts = [
+    ['전체 1시간', num(b.successRate1h) === null ? '–' : `${b.successRate1h.toFixed(2)}%`],
+    ['마켓', int(markets)],
+    ['수집기 시작', num(b.serverStartedAt) === null ? '–' : `${md(b.serverStartedAt)} ${hm(b.serverStartedAt)}`],
+    ['버전', `수집기 ${colVer ?? '–'} · api ${apiVer ?? '–'}`],
+  ];
+  $('collect-sum').replaceChildren(
+    ...parts.map(([k, v]) => {
+      const span = el('span', null, `${k} `);
+      span.append(el('b', null, v));
+      return span;
+    }),
+  );
+  $('timeline').replaceChildren(timeline(list(b.outages).filter(isObj)));
+  const down = exchanges.filter((ex) => ex.state === 'down').map((ex) => ex.exchange);
+  const stale = exchanges.filter((ex) => ex.state === 'stale').map((ex) => ex.exchange);
+  const tone = down.length ? 'bad' : stale.length ? 'warn' : 'ok';
+  const text = down.length || stale.length
+    ? [down.length && `끊김 ${down.join(', ')}`, stale.length && `지연 ${stale.join(', ')}`].filter(Boolean).join(' · ')
+    : `${exchanges.length}곳 모두 수집 중`;
+  $('s-collect').replaceChildren(marked(tone, `${text} · 1시간 ${parts[0][1]}`));
+}
+
+function put(id, text, tone) {
+  const node = $(id);
+  node.textContent = clean(text);
+  node.className = tone ? `t-${tone}` : '';
+}
+
+// 003 POST /refresh — 토큰이 틀리면 401 {"detail"} (새로고침하지 않는다)
+$('refresh').addEventListener('click', async () => {
+  const button = $('refresh');
+  const token = $('token').value;
+  button.disabled = true;
+  try {
+    const { status, body: res } = await call('/api/refresh', {
+      method: 'POST',
+      headers: token ? { 'X-Refresh-Token': token } : {},
+    });
+    $('refresh-result').hidden = false;
+    const label = status === 401 ? ' 토큰 오류' : status === 403 ? ' 권한·설정 오류' : '';
+    put('refresh-status', `${status}${label}`, status === 200 ? 'ok' : 'bad');
+    const ok = status === 200 && res !== null;
+    put('refresh-saved', ok ? String(res.totalSaved) : '-');
+    const failures = ok ? list(res.failures).filter(isObj) : [];
+    put('refresh-failures', failures.map((f) => `${f.exchange} · ${f.errorCode}`).join(', ') || '없음');
+    const warnings = ok ? list(res.warnings) : [];
+    put('refresh-warnings', warnings.map(String).join(' / ') || '없음');
+  } catch (err) {
+    // 버튼은 만료 표시를 지우지 않는다(지우는 것은 폴링 묶음뿐) — 만료 신호면 새로고침 한 번 또는 알림
+    if (err instanceof Expired) expired();
+    $('refresh-result').hidden = false;
+    put('refresh-status', err instanceof Expired ? '로그인 만료·연결 끊김' : '보내지 못함', 'bad');
+    for (const id of ['refresh-saved', 'refresh-failures', 'refresh-warnings']) put(id, '-');
+  } finally {
+    button.disabled = false;
+  }
+});
+
