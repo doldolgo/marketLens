@@ -6,12 +6,18 @@
 """
 
 import json
+import os
 import re
+import shutil
+import subprocess
+
+import pytest
 
 from tests.test_deploy import ROOT, _args, _locations, _public_server
 from tests.test_privacy import (
     CONSENT_CELLS,
     NOTICE,
+    OLD,
     SHARED_SENTENCES,
     _consent_box,
     _notes,
@@ -195,3 +201,262 @@ def test_search_terms_leave_the_url_and_filters_skip_the_clarity_hook() -> None:
     url_state = (WEB / "src/shared/urlState.ts").read_text("utf-8")
     assert "History.prototype.replaceState" in url_state
     assert "/^[A-Z0-9]{1,20}$/" in url_state
+
+
+# --- clarity.js 를 node 로 (§3.2~§3.5) ---------------------------------------------
+# 가짜 window·document·location 에서 돌리고, 단계(ready·check·click·다른 탭의 저장값) 뒤의 저장값·띠·대기열·태그·쿠키를 낸다
+HARNESS = r"""
+const [script, cases] = JSON.parse(require('fs').readFileSync(0, 'utf8'))
+process.stdout.write(JSON.stringify(cases.map((c) => {
+  const data = new Map(Object.entries(c.ls || {}))
+  const fail = new Set(c.fail || [])
+  const localStorage = {
+    getItem: (k) => { if (fail.has('get')) throw new Error('get'); return data.has(k) ? data.get(k) : null },
+    setItem: (k, v) => { if (fail.has('set')) throw new Error('set'); data.set(k, String(v)) },
+    removeItem: (k) => data.delete(k),
+  }
+  const session = new Set(['_cltk'])
+  const cookies = [], head = [], body = [], doc = {}, win = {}, fired = []
+  let reloads = 0
+  const el = (tag) => ({
+    tag, attrs: {}, kids: {}, on: {}, anchors: [], checked: false,
+    setAttribute(k, v) { this.attrs[k] = v },
+    set innerHTML(h) { this.html = h; this.anchors = (h.match(/<a /g) || []).map(() => ({ target: '', rel: '' })) },
+    querySelector(sel) { return this.kids[sel] || (this.kids[sel] = el('stub')) },
+    querySelectorAll(sel) { return sel === 'a' ? this.anchors : [] },
+    addEventListener(t, fn) { this.on[t] = fn },
+    remove() { for (const list of [head, body]) if (list.includes(this)) list.splice(list.indexOf(this), 1) },
+  })
+  const document = {
+    readyState: 'loading', createElement: el,
+    set cookie(line) { cookies.push(line) },
+    head: { appendChild: (e) => head.push(e) },
+    body: { get firstChild() { return body[0] || null }, insertBefore: (e) => body.unshift(e) },
+    getElementById: (id) => head.concat(body).find((e) => e.id === id) || null,
+    addEventListener: (t, fn) => { doc[t] = fn },
+  }
+  const window = {
+    localStorage, sessionStorage: { removeItem: (k) => session.delete(k) },
+    addEventListener: (t, fn) => { win[t] = fn }, dispatchEvent: (e) => fired.push(e.type),
+  }
+  const location = { hostname: c.host || 'kimptrack.com', pathname: c.path || '/', reload: () => reloads++ }
+  class Event { constructor(type) { this.type = type } }
+  new Function('window', 'document', 'navigator', 'location', 'Event', script)(
+    window, document, c.gpc ? { globalPrivacyControl: true } : {}, location, Event)
+  const strip = () => body.find((e) => e.id === 'kt-consent')
+  const snap = () => ({
+    stored: data.get('kt.analytics') ?? null, v: data.get('kt.analytics.v') ?? null,
+    strip: strip() ? { first: body[0] === strip(), ...strip().attrs, links: strip().anchors.map((a) => a.target + '|' + a.rel) } : null,
+    queue: window.clarity ? window.clarity.q.map((a) => Array.from(a)) : null,
+    tags: head.filter((e) => e.tag === 'script').map((e) => [e.src, e.async]),
+    style: head.filter((e) => e.tag === 'style').length, fired, reloads,
+    forgot: cookies.length > 0 && !session.has('_cltk'), cookies, listens: 'storage' in win,
+  })
+  const first = JSON.parse(JSON.stringify(snap()))
+  for (const step of c.steps || []) {
+    const [kind, arg = ''] = step.split(':')
+    if (kind === 'ready') { document.readyState = 'interactive'; if (doc.DOMContentLoaded) doc.DOMContentLoaded() }
+    else if (kind === 'check') strip().querySelector('#' + arg).checked = true
+    else if (kind === 'click') strip().querySelector('#' + arg).on.click()
+    else if (kind === 'clear') { data.clear(); win.storage({ key: null }) }
+    else { const [k, v] = arg.split('='); data.set(k, v); win.storage({ key: k }) } // 'other:<키>=<값>'
+  }
+  return { first, last: snap() }
+})))
+"""
+ALL = ["check:kt-c-collect", "check:kt-c-provide", "check:kt-c-transfer"]
+ON = {"kt.analytics": "granted", "kt.analytics.v": NOTICE}
+CONSENT = ["consentv2", {"ad_Storage": "denied", "analytics_Storage": "granted"}]
+TAG_ID = [[TAG + _clarity_id(), True]]
+
+
+def _run(cases: list[dict]) -> list[dict]:
+    node = shutil.which("node")
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("node 가 없다 — CI 러너(ubuntu-latest)에는 있어야 한다")
+        pytest.skip("node 가 없어 clarity.js 를 돌리지 못한다")
+    done = subprocess.run(
+        [node, "-e", HARNESS],
+        input=json.dumps([JS, cases]),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+def _one(**case: object) -> dict:
+    return _run([case])[0]
+
+
+# ID 가 비면 clarity.js 는 아무것도 하지 않는다 — 아래 동작 테스트는 ID 가 있을 때만
+with_id = pytest.mark.skipif(not _clarity_id(), reason="ID 가 비어 있다")
+
+
+@with_id
+def test_other_hosts_pages_do_nothing_at_all() -> None:
+    """www·localhost·처리방침 경로는 띠·대기열·쿠키 정리·듣기 모두 없다 (§3.2)."""
+    for case in (
+        {"host": "www.kimptrack.com"},
+        {"host": "localhost"},
+        {"path": "/privacy"},
+        {"path": "/404.html"},
+    ):
+        got = _one(**case, steps=["ready"])["last"]
+        assert (
+            got["strip"],
+            got["queue"],
+            got["tags"],
+            got["cookies"],
+            got["listens"],
+        ) == (None, None, [], [], False), case
+
+
+@with_id
+def test_undecided_visitor_gets_the_strip_after_the_document_is_parsed() -> None:
+    """없음·그 밖의 값·예전 판·판 없는 granted = 정하지 않음 — 남은 저장값을 지우고 DOMContentLoaded 뒤 띠 (§3.2·§3.3)."""
+    for ls in (
+        {},
+        {"kt.analytics": "off"},
+        {**ON, "kt.analytics.v": OLD},
+        {"kt.analytics": "granted"},
+    ):
+        got = _one(ls=ls, steps=["ready"])
+        assert got["first"]["strip"] is None and got["first"]["forgot"], ls
+        strip = got["last"]["strip"]
+        assert (
+            strip
+            and strip["first"]
+            and strip["role"] == "region"
+            and strip["aria-label"] == "화면 분석 동의"
+        ), ls
+        assert (
+            "data-nosnippet" in strip
+            and got["last"]["queue"] is None
+            and got["last"]["tags"] == []
+        ), ls
+        # 랜딩은 같은 탭, 대시보드는 띠 안 링크 모두 새 탭
+        assert set(strip["links"]) == {"|"}, ls
+    links = _one(path="/app/", steps=["ready"])["last"]["strip"]["links"]
+    assert len(links) == 6 and set(links) == {"_blank|noopener"}
+
+
+@with_id
+def test_refused_blocked_and_unreadable_visitors_get_nothing() -> None:
+    """denied·GPC(granted 여도)·저장소 예외 — 띠도 대기열도 없고 남은 쿠키·_cltk 를 지운다 (§3.2)."""
+    for case in (
+        {"ls": {"kt.analytics": "denied"}},
+        {"gpc": True},
+        {"gpc": True, "ls": ON},
+        {"fail": ["get"]},
+    ):
+        got = _one(**case, steps=["ready"])["last"]
+        assert (got["strip"], got["queue"], got["tags"]) == (None, None, []), case
+        assert got["forgot"], case
+        lines = [ln for ln in got["cookies"] if ln.startswith(("_clck=;", "_clsk=;"))]
+        assert len(lines) == 4 and all(
+            "Max-Age=0" in ln and "path=/" in ln for ln in lines
+        )
+        assert sum(ln.endswith("; domain=kimptrack.com") for ln in lines) == 2
+
+
+@with_id
+def test_agreed_visitor_queues_consent_first_and_gets_the_tag_after_parsing() -> None:
+    got = _one(ls=ON, path="/app/", steps=["ready"])
+    assert got["first"]["queue"] == [CONSENT] and got["first"]["tags"] == []
+    assert (
+        got["last"]["tags"] == TAG_ID
+        and got["last"]["strip"] is None
+        and got["last"]["fired"] == []
+    )
+    assert not got["last"]["forgot"]
+
+
+@with_id
+def test_strip_buttons_write_the_choice() -> None:
+    """[선택한 대로 저장] 셋 모두 → 판·granted·곧바로 태그와 kt:clarity, 하나라도 빠지면·[모두 거부] → denied (§3.3)."""
+    agree, partial, deny, broken = _run(
+        [
+            {"steps": ["ready", *ALL, "click:kt-c-save"]},
+            {"steps": ["ready", *ALL[:2], "click:kt-c-save"]},
+            {"ls": {"kt.analytics.v": OLD}, "steps": ["ready", "click:kt-c-deny"]},
+            {"fail": ["set"], "steps": ["ready", *ALL, "click:kt-c-save"]},
+        ]
+    )
+    last = agree["last"]
+    assert (last["stored"], last["v"], last["strip"], last["style"]) == (
+        "granted",
+        NOTICE,
+        None,
+        0,
+    )
+    assert (last["queue"], last["tags"], last["fired"]) == (
+        [CONSENT],
+        TAG_ID,
+        ["kt:clarity"],
+    )
+    for got in (partial, deny):
+        last = got["last"]
+        assert (
+            last["stored"],
+            last["v"],
+            last["strip"],
+            last["queue"],
+            last["tags"],
+        ) == ("denied", None, None, None, [])
+    last = broken["last"]
+    assert (last["stored"], last["strip"], last["queue"], last["tags"]) == (
+        None,
+        None,
+        None,
+        [],
+    )
+
+
+@with_id
+def test_other_tabs_reload_on_withdrawal_and_load_on_consent() -> None:
+    """부른 문서는 켜는 값이 아니게 되면 곧바로 한 번 새로고침, 띠 문서는 동의면 그 자리에서 부르고 거부면 띠만 지운다 (§3.5)."""
+    withdrawn, cleared, consent, refused, gpc, other_key = _run(
+        [
+            {
+                "ls": ON,
+                "steps": [
+                    "ready",
+                    "other:kt.analytics=denied",
+                    "other:kt.analytics.v=",
+                ],
+            },
+            {"ls": ON, "steps": ["ready", "clear"]},
+            {
+                "steps": [
+                    "ready",
+                    f"other:kt.analytics.v={NOTICE}",
+                    "other:kt.analytics=granted",
+                ]
+            },
+            {"steps": ["ready", "other:kt.analytics=denied"]},
+            {
+                "gpc": True,
+                "steps": [
+                    "ready",
+                    f"other:kt.analytics.v={NOTICE}",
+                    "other:kt.analytics=granted",
+                ],
+            },
+            {"steps": ["ready", "other:_cltk=1"]},
+        ]
+    )
+    assert withdrawn["last"]["reloads"] == 1 and cleared["last"]["reloads"] == 1
+    last = consent["last"]
+    assert (last["strip"], last["queue"], last["tags"], last["fired"]) == (
+        None,
+        [CONSENT],
+        TAG_ID,
+        ["kt:clarity"],
+    )
+    assert (refused["last"]["strip"], refused["last"]["queue"]) == (None, None)
+    assert (gpc["last"]["queue"], gpc["last"]["reloads"]) == (None, 0)
+    assert other_key["last"]["strip"] is not None and other_key["last"]["queue"] is None
