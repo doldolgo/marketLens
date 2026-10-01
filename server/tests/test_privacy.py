@@ -76,13 +76,39 @@ MUST_SAY = (
     "대검찰청 1301",
     "경찰청 182",
     "아무것도 고르지 않으면 분석하지 않습니다",  # §3.3 — 값이 없으면 꺼짐(동의 방식)
+    '<section id="consent"',  # 033 띠의 '처리방침에서 자세히 보기'·거부 칸 링크가 /privacy#consent 로 온다
+    # §3.3 — 033 과 같은 다른 탭 반영 문장
+    "철회하면 그 탭이 한 번 새로고침되어 분석을 멈추고, 동의하면 그 탭에서도 분석을 시작합니다",
 )
 # 동의 방식(사람 결정 2026-10-01)과 맞지 않는 문장 — 페이지에 있으면 거짓이다
-MUST_NOT_SAY = ("허용으로 봅니다", "다시 허용", "유럽 시간대", "5일 안에")
+# 파기는 날수 기한을 약속하지 않는다(§3.5 — '90일 뒤 지웁니다' 같은 단정 없음), Microsoft 의 자기 목적 이용은
+# 어디서나 '씁니다' 로 단정한다(§3.4-2 — '쓸 수 있어' 로 흐리지 않는다)
+MUST_NOT_SAY = (
+    "허용으로 봅니다",
+    "다시 허용",
+    "유럽 시간대",
+    "5일 안에",
+    "90일 뒤 지웁니다",
+    "쓸 수 있어",
+)
 # §3.3 — 상태 줄의 다섯 글자(스크립트가 그린다)
 STATES = ("정하지 않음", "동의함", "거부함", "GPC로 거부", "저장할 수 없음")
 # §3.3 — 동의 버튼 앞의 알릴 사항(법 제15조 제2항·제17조 제2항·제28조의8 제2항 — 033 의 띠와 같은 사실)
-CONSENT_TERMS = {"받는 자", "항목", "이전 일시·방법", "목적", "보유 기간", "거부"}
+CONSENT_TERMS = {"받는 자", "항목", "이전 국가·일시·방법", "목적", "보유 기간", "거부"}
+# §3.3 — 동의 상자의 항목 칸이 2절 없이도 다 읽히는지 보는 Clarity 항목들
+CLARITY_ITEMS = (
+    "페이지 주소",
+    "이전 페이지 주소",
+    "누른 링크의 주소",
+    "클릭·스크롤·마우스 움직임·화면 크기",
+    "화면 내용",
+    "고른 코인 이름",
+    "기기·브라우저·운영체제",
+    "IP 주소",
+    "_clck",
+    "_clsk",
+    "_cltk",
+)
 # §3.4-4 — 제17조 제2항 다섯 가지 + 근거
 PROVISION_TERMS = {
     "받는 자",
@@ -400,6 +426,8 @@ def test_page_states_the_consent_contract_and_required_notices() -> None:
         '<button class="btn" type="button" id="an-withdraw">동의 철회</button>' in html
     )
     assert "<noscript>" in html
+    # 두 버튼의 너비는 글자 길이가 아니라 공통 최소 너비를 따른다
+    assert re.search(r"\.actions \.btn \{[^}]*min-width:", html)
     script = "".join(page.scripts)
     for state in STATES:
         assert f"'{state}'" in script, state
@@ -446,6 +474,15 @@ def test_consent_box_tells_the_notices_before_the_buttons() -> None:
         "불이익이 없습니다",
     ):
         assert text in dls[0], text
+    # 033 의 띠가 이 칸들을 옮긴다 — 랜딩·대시보드에는 방침의 절이 없으니 칸은 다른 절을 가리키지 않는다
+    assert "절" not in dls[0]
+    cells = dict(re.findall(r"<dt>(.*?)</dt><dd>(.*?)</dd>", dls[0], flags=re.S))
+    assert "등" not in cells["항목"]
+    for item in CLARITY_ITEMS:
+        assert item in cells["항목"], item
+    assert cells["이전 국가·일시·방법"].startswith("미국 — ")
+    # 거부 칸은 철회하는 곳을 적는다 (법 제28조의8 제2항 제5호·제38조 제4항)
+    assert 'href="/privacy#consent"' in cells["거부"] and "[동의 철회]" in cells["거부"]
 
 
 def test_clarity_rests_on_consent_for_collection_provision_and_transfer() -> None:
