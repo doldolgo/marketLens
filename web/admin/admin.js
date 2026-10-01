@@ -655,3 +655,243 @@ $('refresh').addEventListener('click', async () => {
   }
 });
 
+// --- 인프라 (§3.4) — metrics·alarms·canary ----------------------------------------------------------
+
+const BOX_ROLE = { collect: '수집기', data: 'Influx·Redis', serve: 'caddy·web·api' };
+// 027 크레딧 잔고 경보 임계(최대 적립의 30%) — t4g 박스만
+const CREDIT_FLOOR = { data: 173, serve: 86 };
+const pctFmt = (v) => (num(v) === null ? '–' : `${v.toFixed(1)}%`);
+
+// 지표 한 줄 — 이름·지금 값·24시간 최저 또는 최고(값 색은 임계 — 모양도 함께)·선
+function metricRow(box, name, points, o) {
+  const s = stats(points);
+  const fmt = o.format || ((v) => int(v));
+  const toned = (v) => {
+    const tone = v === null || !o.tone ? null : o.tone(v);
+    return tone ? marked(tone, fmt(v)) : el('span', null, fmt(v));
+  };
+  const row = el('div', 'metric');
+  const val = el('span', 'metric-val');
+  val.append(toned(s.now));
+  const ext = el('span', 'metric-ext', `24시간 ${o.extreme === 'min' ? '최저' : '최고'} `);
+  ext.append(toned(o.extreme === 'min' ? s.min : s.max));
+  if (o.ref !== undefined) ext.append(` · 경보 기준 ${fmt(o.ref)}`);
+  // 박스 이름은 아는 셋만 aria-label 에(서버 글은 title 밖의 속성에 쓰지 않는다, §3.8)
+  const who = own(BOX_ROLE, box) || box === 'canary' ? box : '박스';
+  row.append(el('span', 'metric-name', name), val, ext, line(points, { ...o, format: fmt, label: `${who} ${name}` }));
+  return row;
+}
+
+function boxCard(box, where) {
+  const card = el('div', 'card');
+  const title = el('h3', null, `${box.box} ${own(BOX_ROLE, box.box) ?? ''}`.trim());
+  if (box.instanceId) title.title = clean(box.instanceId);
+  const top = el('div', 'card-head');
+  top.append(title);
+  card.append(top);
+  const pctRow = (name, key, extra) => metricRow(box.box, name, box[key], { ...where, fixed100: true, format: pctFmt, ...extra });
+  card.append(
+    pctRow('메모리 가용률', 'mem', { ref: 10, extreme: 'min', tone: (v) => (v < 10 ? 'bad' : v < 20 ? 'warn' : null) }),
+    pctRow('디스크 사용률', 'disk', { ref: 80, extreme: 'max', tone: (v) => (v > 80 ? 'bad' : v > 70 ? 'warn' : null) }),
+    pctRow('CPU 사용률', 'cpu', { extreme: 'max' }),
+  );
+  const floor = own(CREDIT_FLOOR, box.box);
+  if (floor !== undefined) {
+    card.append(metricRow(box.box, 'CPU 크레딧 잔고', box.credit, { ...where, ref: floor, extreme: 'min', tone: (v) => (v < floor ? 'bad' : null) }));
+  }
+  if (box.swap != null) card.append(pctRow('스왑 사용률', 'swap', { extreme: 'max' }));
+  else card.append(el('p', 'muted small', '스왑 지표 없음'));
+  return card;
+}
+
+function fillBoxes(node, part) {
+  const where = { startMs: part.startTs * 1000, endMs: part.endTs * 1000 };
+  const boxes = list(part.boxes).filter(isObj);
+  if (!boxes.length) return node.replaceChildren(el('p', 'empty span-all', '메모리 경보가 있는 박스 없음'));
+  node.replaceChildren(...boxes.map((b) => boxCard(b, where)));
+}
+
+const ALARM_RANK = { ALARM: 0, INSUFFICIENT_DATA: 1, OK: 2 };
+const ALARM_STATE = { ALARM: ['bad', 'ALARM'], INSUFFICIENT_DATA: ['dim', '데이터 부족'], OK: ['ok', 'OK'] };
+const alarmName = (name) => clean(name).replace(/^marketlens-/, '');
+
+function alarmRow(a) {
+  const tr = el('tr');
+  const name = cell(tr, alarmName(a.name), 'nowrap');
+  name.title = clean(a.name);
+  cell(tr, badge(...(own(ALARM_STATE, a.state) || ['dim', String(a.state)])));
+  cell(tr, ago(a.changedAt), 'num small');
+  clip(cell(tr, '', 'small muted'), a.reason ?? '', 160);
+  return tr;
+}
+
+function fillAlarms(node, part) {
+  const items = list(part.items).filter(isObj);
+  items.sort((a, b) => (own(ALARM_RANK, a.state) ?? 1) - (own(ALARM_RANK, b.state) ?? 1) || clean(a.name).localeCompare(clean(b.name)));
+  const hot = items.filter((a) => a.state !== 'OK');
+  const calm = items.filter((a) => a.state === 'OK');
+  // OK 행은 접힌 묶음 — 펼침 상태는 HTML 의 details 가 들고 있어 다시 그려도 그대로다
+  $('alarms-ok-rows').replaceChildren(...calm.map(alarmRow));
+  $('alarms-ok-sum').textContent = `정상 ${calm.length}개`;
+  $('alarms-ok').hidden = !calm.length;
+  if (!items.length) return node.replaceChildren(el('p', 'empty', '경보 없음'));
+  if (!hot.length) return node.replaceChildren(el('p', 'empty', `ALARM·데이터 부족 경보 없음 — ${items.length}개 모두 정상`));
+  const wrap = el('div', 'scroll');
+  const table = el('table', 'table');
+  const tbody = el('tbody');
+  tbody.append(...hot.map(alarmRow));
+  table.append(tbody);
+  wrap.append(table);
+  node.replaceChildren(wrap);
+}
+
+const sum = (points) => list(points).reduce((acc, p) => acc + (Array.isArray(p) ? num(p[1]) ?? 0 : 0), 0);
+
+function fillCanary(node, part, metrics) {
+  const out = [];
+  const last = el('p', 'summary-row');
+  if (num(part.lastRunAt) === null) last.append(marked('dim', '11분 안에 끝난 실행 없음'));
+  else {
+    last.append(marked(part.ok ? 'ok' : 'warn', part.ok ? '최근 실행 통과' : '최근 실행 실패'));
+    last.append(el('span', null, `${ago(part.lastRunAt)} · ${int(part.durationMs)}ms`));
+  }
+  out.push(last);
+  if (usable(metrics)) {
+    const c = isObj(metrics.canary) ? metrics.canary : {};
+    const runs = el('p', 'summary-row');
+    const errors = sum(c.errors);
+    runs.append(el('span', null, `24시간 실행 ${int(sum(c.runs))}`), errors ? marked('warn', `오류 ${int(errors)}`) : el('span', null, '오류 0'));
+    const where = { startMs: metrics.startTs * 1000, endMs: metrics.endTs * 1000 };
+    out.push(runs, metricRow('canary', '실행 시간 (5분 최댓값)', c.durationMs, { ...where, extreme: 'max', format: (v) => `${int(v)}ms` }));
+  } else {
+    const [tone, word] = stateWord(metrics);
+    out.push(marked(tone, `24시간 지표 ${word}`));
+  }
+  const lines = list(part.lines).slice(0, 10);
+  if (lines.length) {
+    const log = el('ol', 'mono log');
+    log.append(...lines.map((ln) => clip(el('li'), ln, 300)));
+    out.push(log);
+  }
+  node.replaceChildren(...out);
+}
+
+function drawInfra() {
+  const metrics = partOf(P.aws, 'metrics');
+  region('metrics', metrics, CAUSE.aws, fillBoxes);
+  const alarms = partOf(P.aws, 'alarms');
+  if (!region('alarms', alarms, CAUSE.aws, fillAlarms)) $('alarms-ok').hidden = true;
+  const canary = partOf(P.aws, 'canary');
+  region('canary', canary, CAUSE.aws, (node, part) => fillCanary(node, part, metrics));
+  const bits = [];
+  let tone = 'ok';
+  if (usable(alarms)) {
+    const items = list(alarms.items).filter(isObj);
+    const n = items.filter((a) => a.state === 'ALARM').length;
+    if (n) tone = 'bad';
+    bits.push(n ? `경보 ${n}개 ALARM / ${items.length}` : `경보 ${items.length}개 ALARM 없음`);
+  } else {
+    const [t, w] = stateWord(alarms);
+    tone = t === 'bad' ? 'warn' : t;
+    bits.push(`경보 ${w}`);
+  }
+  if (usable(canary) && num(canary.lastRunAt) !== null) {
+    if (!canary.ok && tone === 'ok') tone = 'warn';
+    bits.push(`canary ${canary.ok ? '통과' : '실패'} ${ago(canary.lastRunAt)}`);
+  } else if (!usable(canary)) bits.push(`canary ${stateWord(canary)[1]}`);
+  $('s-infra').replaceChildren(marked(tone, bits.join(' · ')));
+}
+
+// --- 알림 (§3.4) — 보낸 Slack 알림 + 경보 상태 변경 ------------------------------------------------------
+
+const TO_TONE = { ALARM: 'bad', OK: 'ok', INSUFFICIENT_DATA: 'dim' };
+const MAX_ALERTS = 200;
+
+function when(ms) {
+  if (num(ms) === null) return '–';
+  const today = new Date().toDateString() === new Date(ms).toDateString();
+  return today ? clock(ms) : `${md(ms)} ${hm(ms)}`;
+}
+
+// Slack 글의 머리 그림 → 색 (025 문구 규칙)
+function slackTone(text) {
+  if (text.startsWith('🔴')) return 'bad';
+  if (text.startsWith('🟢')) return 'ok';
+  if (text.startsWith('⚠')) return 'warn';
+  return null;
+}
+
+function alertRow(item) {
+  const li = el('li');
+  li.append(el('span', 'when', when(item.at)));
+  const what = el('span', 'what');
+  if (item.source === 'alarm') {
+    li.append(el('span', 'tag', '경보'));
+    const name = el('span', null, `${alarmName(item.alarm)} ${clean(item.fromState ?? '?')} → `);
+    name.title = clean(item.alarm);
+    const to = String(item.toState ?? '?');
+    what.append(name, marked(own(TO_TONE, to) || 'dim', to));
+    if (item.text) what.append(clip(el('span', 'why'), item.text, 160));
+  } else {
+    li.append(el('span', 'tag', item.role ?? 'slack'));
+    const text = clean(item.text);
+    const tone = slackTone(text);
+    what.append(clip(el('span', tone ? `t-${tone}` : null), text, 300));
+    if (item.delivered === false) what.append(' ', badge('warn', '전송 실패'));
+    if (item.key) li.title = clean(item.key);
+  }
+  li.append(what);
+  return li;
+}
+
+function sourceState(label, part, cause) {
+  const span = el('span', null, `${label} `);
+  if (part && !part.why && part.state === 'ok') span.append(el('span', 'muted', 'ok'));
+  else {
+    const [tone, word] = stateWord(part);
+    const tag = badge(tone, word);
+    if (part?.state === 'unconfigured') tag.title = cause;
+    if (part?.state === 'denied') tag.title = DENIED;
+    span.append(tag);
+    if (part?.code) span.append(el('span', 'code', ` ${clean(part.code)}`));
+  }
+  return span;
+}
+
+function drawAlerts() {
+  const entry = got.get(P.alerts);
+  if (!entry || entry.why) {
+    const part = entry ? { why: entry.why } : undefined;
+    $('m-alerts').replaceChildren(...head(part));
+    $('b-alerts').replaceChildren(stateMsg(part));
+    $('alerts-count').textContent = '';
+    $('s-alerts').replaceChildren(entry ? marked('bad', entry.why) : marked('wait', '불러오는 중'));
+    return;
+  }
+  const b = entry.body;
+  const slackPart = isObj(b.slack) ? b.slack : { why: '응답 모양 오류' };
+  const alarmPart = isObj(b.alarms) ? b.alarms : { why: '응답 모양 오류' };
+  $('m-alerts').replaceChildren(sourceState('Slack', slackPart, CAUSE.slack), sourceState('경보 이력', alarmPart, CAUSE.aws));
+  const items = list(b.items).filter(isObj).slice(0, MAX_ALERTS);
+  const shown = alertFilter === 'all' ? items : items.filter((i) => i.source === alertFilter);
+  $('alerts-count').textContent = `${items.length}건 · 보낸 Slack 알림(전송 실패 포함)과 경보 상태 변경 — 억제된 알림은 없다`;
+  if (!shown.length) $('b-alerts').replaceChildren(el('p', 'empty', '지난 7일 기록 없음'));
+  else {
+    const feed = el('ul', 'feed');
+    feed.append(...shown.map(alertRow));
+    $('b-alerts').replaceChildren(feed);
+  }
+  const failed = items.filter((i) => i.source === 'slack' && i.delivered === false).length;
+  const changes = items.filter((i) => i.source === 'alarm').length;
+  const text = `7일 ${items.length}건 · 경보 상태 변경 ${changes}${failed ? ` · 전송 실패 ${failed}` : ''}`;
+  $('s-alerts').replaceChildren(marked(failed ? 'warn' : 'ok', text));
+}
+
+for (const chip of document.querySelectorAll('.chip')) {
+  chip.addEventListener('click', () => {
+    alertFilter = chip.dataset.filter;
+    for (const other of document.querySelectorAll('.chip')) other.setAttribute('aria-pressed', String(other === chip));
+    drawAlerts();
+  });
+}
+
