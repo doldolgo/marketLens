@@ -19,8 +19,9 @@
   1. 002·003 — 스프레드·갭·선선갭 검색어(`s.q`·`g.q`·`p.q`)를 URL 상태에서 뺀다(메모리만 — 기록 탭·입출금 레이더 검색과 같아진다). Clarity 는 전송할 때마다 그때의 페이지 주소를 통째로 싣는다 — 입력칸을 가려도 주소의 검색어는 그대로 간다.
   2. 002 — URL 쓰기를 둘로 나눈다(§3.7). Clarity 가 `history.replaceState` 를 덮어써서 주소가 바뀔 때마다 녹화를 끊고 DOM 전체를 다시 보낸다(스프레드 탭 gzip ≈110KB, 2026-09-28 실측).
   3. 002·013·014 — URL 의 `sym` 과 기록 탭 검색 확정 값을 심볼 형식으로 제한한다(§3.7). 입력한 글자가 가림 해제된 제목·주소·태그로 Clarity 에 가기 때문이다. 027 빚 "기록 탭 검색칸 값(URL sym)은 검증 없이 기록된다" 를 갚는다.
-  4. 022 — 랜딩 `<head>` 에 파일 한 줄, `<body>` 에 가림 해제 속성.
+  4. 022 — 랜딩 `<head>` 에 파일 한 줄, `<body>` 에 가림 해제 속성, 바닥 바로 가기 nav 의 방침 링크 뒤에 '화면 분석 설정'(→ `/privacy#consent`, 같은 탭 — 글자 '석' 이 랜딩 글꼴 서브셋에 없어 022 의 글꼴 스크립트로 다시 자른다).
   5. 007 — nginx 가 `/clarity.js` 를 매번 재검증하게 한다.
+  6. 002(코드만) — 대시보드 헤더의 방침 링크 옆에 '화면 분석 설정'(→ `/privacy#consent`, 새 탭 `rel="noopener"`, 방침 링크와 같은 모양). 띠는 한 번 고르면 다시 뜨지 않으므로 철회하러 가는 길을 랜딩·대시보드에 늘 둔다 — 철회가 동의보다 어렵지 않게(법 제38조 제4항).
 - 담당: 033 은 사용자 담당이다. 002·003(팀원)·013·014(hereokay)는 코드만 바꾸고 스펙 문구는 **고치지 않는다**(CLAUDE.md §5) — §6 "담당자에게 제안" 을 PR 본문에 적는다. 007·022·027 은 이 PR 이 고친다.
 
 ## 3. 동작
@@ -29,7 +30,7 @@
 - 설정은 `web/public/clarity.js` 머리의 두 값이다: Clarity 프로젝트 ID(공개 값 — 페이지 소스에 그대로 보인다), 켤 페이지 목록(`landing`·`app`). ID 가 빈 문자열이면 파일은 아무것도 하지 않는다 — 물을 도구가 없으니 띠도 띄우지 않는다. **이 PR 은 빈 값으로 머지한다.**
 - 켜는 순서(사람, 런북): 032 처리방침 게시 → Clarity 대시보드 설정(§3.10) → ID 를 넣는 PR. ID 가 비어 있지 않은데 `web/public/privacy.html`(032)이 없거나, 032 자리표시자 표식 `〔` 가 남았거나, `Clarity`·`kt.analytics`·`제28조의8 제1항 제1호`(동의 방식의 국외 이전 근거) 글자가 없으면 계약 테스트가 실패한다 — 게시 전에, 또는 동의 방식이 아닌 방침으로 켜는 실수를 CI 가 막는다.
 - 끄기: ID 를 비우는 PR(배포 뒤 다음 페이지 로드부터). 대시보드만 끄려면 목록에서 `app` 을 뺀다. 파일 응답은 매번 재검증되므로(nginx `Cache-Control: no-cache`, `/app/` 아래는 이미 no-store — 007) 브라우저에 옛 설정이 남지 않는다. Clarity 프로젝트 삭제는 데이터가 전부 사라지고 되돌릴 수 없어 끄는 방법으로 쓰지 않는다.
-- 받는 곳·항목·목적이 바뀌면 예전 동의(`granted`)로 켜지 않는다 — 그 PR 이 032 의 알릴 사항과 저장값 계약을 함께 고쳐 다시 묻는다(방법은 그때 사람이 정한다).
+- 받는 곳·항목·목적이 바뀌면 예전 동의(`granted`)로 켜지 않는다 — 그 PR 이 032 의 알릴 사항과 저장값 계약을 함께 고쳐 다시 묻는다(방법은 그때 사람이 정한다). 그 밖의 값은 띠가 다시 묻으므로(§3.2) 켜는 값의 이름을 바꾸면 옛 `granted` 는 꺼지고 띠가 뜬다.
 
 ### 3.2 불러오는 조건 — 하나라도 걸리면 부르지 않는다
 
@@ -47,15 +48,15 @@
 - GPC: `navigator.globalPrivacyControl === true` 면 부르지 않고 띠도 띄우지 않는다 — 값이 `granted` 여도. Clarity 도 GPC 면 시작하지 않지만(clarity-js 0.8.71) 스크립트를 받는 순간 방문자 IP 가 Microsoft 로 가므로 아예 받지 않는다. DNT 는 보지 않는다(폐기된 신호이고 Clarity 도 따르지 않는다 — Clarity FAQ).
 - 동의값(032 §3.3 계약 복사): localStorage 키 `kt.analytics` — `granted`(동의)면 부른다. `denied`(거부·철회)·없음(아직 정하지 않음 — **기본 꺼짐**)·그 밖의 값이면 부르지 않는다. 저장소를 읽다 예외가 나면 부르지 않고 띠도 띄우지 않는다(고른 값을 저장할 수 없다). 값을 쓰는 곳은 032 방침의 동의 관리와 이 파일의 띠 둘이고, 둘 다 `granted`·`denied` 만 쓴다.
 - 부르지 않을 때(GPC·`granted` 아님·저장소 예외)는 예전 방문에서 남은 Clarity 저장값을 지운다: 쿠키 `_clck`·`_clsk`(도메인 `.kimptrack.com` 과 호스트 전용 두 모양 모두), sessionStorage `_cltk`.
-- 띠: 앞의 다섯 조건(ID·호스트·페이지·GPC·저장소)을 지나고 값이 **없을 때만** 띄운다(§3.3). `denied`·그 밖의 값이면 띠도 없다 — 다시 고르는 곳은 032 방침의 동의 관리다.
+- 띠: 앞의 다섯 조건(ID·호스트·페이지·GPC·저장소)을 지나고 값이 **`granted`·`denied` 가 아닐 때**(없음·그 밖의 값 — 032 의 '정하지 않음')만 띄운다(§3.3). `denied` 면 띠가 없다 — 다시 고르는 곳은 032 방침의 동의 관리다.
 
 ### 3.3 동의 안내 띠
-- 어디·언제: 랜딩·대시보드 문서에서 §3.2 의 띠 조건이 맞을 때, `DOMContentLoaded` 뒤 한 번 넣는다. 고른 뒤에는 그 브라우저에서 다시 뜨지 않는다(저장값이 지워지면 — 브라우저 데이터 삭제·Safari 7일 — 다시 뜬다).
+- 어디·언제: 랜딩·대시보드 문서에서 §3.2 의 띠 조건이 맞을 때, `DOMContentLoaded` 뒤 한 번 넣는다. 고른 뒤(`granted`·`denied`)에는 그 브라우저에서 다시 뜨지 않는다(저장값이 지워지거나 — 브라우저 데이터 삭제·Safari 7일 — 그 밖의 값이 되면 다시 뜬다). 고른 뒤 바꾸는 길은 랜딩 바닥·대시보드 헤더의 '화면 분석 설정'(§2)이다.
 - 모양: 화면을 막지 않는 아래 고정 띠다 — 모달이 아니고 배경을 가리지 않으며 스크롤·클릭·키보드는 페이지에 그대로 간다. 넓은 화면에서는 가운데 최대 720px 카드, 좁은 화면에서는 좌우 16px 여백(390px 에서 가로 스크롤 없음). 접힌 상태는 문장 + 버튼 한 줄, 펼치면 띠 안에서 스크롤한다(화면 높이의 70% 까지). 색은 랜딩 토큰 복사(032 방침의 동의 상자와 같은 surface·accent), 글꼴은 시스템 글꼴(032 방침 페이지와 같은 목록) — 랜딩 자체 서브셋 글꼴(022)에 없는 글자가 섞이지 않고 대시보드의 Google Fonts 를 기다리지 않게. 애니메이션 없음.
 - 보이는 것:
   1. 문장(고정): "화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 동의하지 않아도 모든 기능을 그대로 씁니다."
-  2. "자세히" 펼침 — 032 방침 동의 상자의 알릴 사항 여섯 칸을 같은 이름·같은 사실로: 받는 자(Microsoft Corporation(미국)과 개인정보 문의 링크), 항목, 이전 일시·방법, 목적(Microsoft Advertising 제공 등 Microsoft 자신의 목적 포함), 보유 기간, 거부(거부·철회해도 서비스 이용에 불이익 없음). 끝에 "처리방침에서 자세히 보기" 링크 `/privacy#consent`(랜딩은 같은 탭, 대시보드는 새 탭 `rel="noopener"` — 열어 둔 WebSocket 을 끊지 않게). 펼치기 전에도 접힌 문장에 받는 자·국가·광고 목적·불이익 없음이 있다.
-  3. 버튼 [허용]·[거부] — 같은 크기·같은 모양(둘 다 외곽선, 어느 쪽도 강조하지 않는다). 닫기(×)는 두지 않는다 — 닫기는 '정하지 않음' 과 같아 다음 페이지에 또 뜨고, 고르지 않고 두어도 화면을 막지 않는다.
+  2. "자세히" 펼침 — 032 방침 동의 상자의 알릴 사항 여섯 칸을 같은 이름·같은 사실로: 받는 자(Microsoft Corporation(미국)과 개인정보 문의 링크), 항목(032 2절의 Clarity 항목을 '등' 없이 모두), 이전 국가·일시·방법('미국 — …'), 목적(Microsoft Advertising 제공 등 Microsoft 자신의 목적 포함), 보유 기간, 거부(철회하는 곳 — 처리방침의 '화면 분석 동의 관리'(`/privacy#consent`)의 [동의 철회] — 와 거부·철회해도 서비스 이용에 불이익 없음). 띠의 칸은 다른 절을 가리키지 않고 그 자리에서 다 읽힌다 — 랜딩·대시보드에는 방침의 절이 없다. 끝에 "처리방침에서 자세히 보기" 링크 `/privacy#consent`(랜딩은 같은 탭, 대시보드는 새 탭 `rel="noopener"` — 열어 둔 WebSocket 을 끊지 않게). 펼치기 전에도 접힌 문장에 받는 자·국가·광고 목적·불이익 없음이 있다.
+  3. 버튼 [허용]·[거부] — 같은 너비·높이·모양(글자 길이가 아닌 공통 최소 너비 — 032 동의 관리 버튼과 같은 해석, 둘 다 외곽선, 어느 쪽도 강조하지 않는다). 닫기(×)는 두지 않는다 — 닫기는 '정하지 않음' 과 같아 다음 페이지에 또 뜨고, 고르지 않고 두어도 화면을 막지 않는다.
   - 이 띠는 화면 분석 동의 하나만 받는다 — 다른 동의·안내와 묶지 않는다.
 - 누르면:
   - [허용]: `kt.analytics` 에 `granted` 를 쓰고 띠를 지운 뒤 그 자리에서 §3.4 대로 부른다. 쓰기가 예외면 부르지 않고 띠만 지운다(동의를 저장할 수 없으면 이어 갈 수 없다).
@@ -128,16 +129,16 @@ Clarity 동작(clarity-js 0.8.71, 2026-09-25 커밋 코드를 2026-10-01 에 읽
 
 ## 4. 검증
 **PR 안 — 실행 세션 완료 조건**
-- server `ruff check . && pytest -q` — `tests/test_clarity.py` 가 파일을 읽어 단언한다: `clarity.js` 의 ID 는 빈 문자열이거나 영숫자 1~32자이고 페이지 목록은 `landing`·`app` 안에서만 / ID 가 비어 있지 않으면 `web/public/privacy.html` 이 있고 `〔` 가 없고 `Clarity`·`kt.analytics`·`제28조의8 제1항 제1호` 가 있다 / 파일에 `consentv2`·`ad_Storage`·`analytics_Storage`·`"granted"`·`"denied"`·`globalPrivacyControl`·`kt.analytics`·`_clck`·`_clsk`·`_cltk`·`DOMContentLoaded`·`https://www.clarity.ms/tag/`·`storage`·`location.reload`·`region`·`aria-label`·`details`·`summary`·`/privacy#consent`·`noopener`·`kt:clarity`·`허용`·`거부`·`불이익` 이 있고(`web/src` 에도 `kt:clarity`), 032 방침 동의 상자의 알릴 사항 `<dt>` 여섯 이름이 모두 있다(두 파일을 함께 읽는다) / `resolvedOptions`·`Europe/`·`'off'`·`"off"`·`'consent'` 호출·`identify`·`www.kimptrack.com` 이 없다 / `http(s)://` 리터럴은 태그 주소·Microsoft 처리방침·Microsoft 개인정보 문의 셋뿐(띠는 외부 자원을 부르지 않는다) / `web/index.html`·`web/public/landing.html` 이 파일을 `defer` 로 한 번씩 싣고 `#root`·랜딩 `<body>` 에 `data-clarity-unmask="true"` / `web/admin/*`·`privacy.html`·`404.html` 에 `clarity.js`·`clarity.ms` 가 없다(관리자 스크립트는 029 단언대로 `admin.js` 하나 — 036 의 Clarity 칸·`/svc/api/admin/clarity`·콘솔 링크는 걸리지 않는다) / `nginx.conf` 에 `location = /clarity.js` 와 `no-cache` / `web/src` 에 `useUrlState('s.q'`·`'g.q'`·`'p.q'` 가 없고 `urlState.ts` 에 `History.prototype.replaceState` 가 있다.
+- server `ruff check . && pytest -q` — `tests/test_clarity.py` 가 파일을 읽어 단언한다: `clarity.js` 의 ID 는 빈 문자열이거나 영숫자 1~32자이고 페이지 목록은 `landing`·`app` 안에서만 / ID 가 비어 있지 않으면 `web/public/privacy.html` 이 있고 `〔` 가 없고 `Clarity`·`kt.analytics`·`제28조의8 제1항 제1호` 가 있다 / 파일에 `consentv2`·`ad_Storage`·`analytics_Storage`·`"granted"`·`"denied"`·`globalPrivacyControl`·`kt.analytics`·`_clck`·`_clsk`·`_cltk`·`DOMContentLoaded`·`https://www.clarity.ms/tag/`·`storage`·`location.reload`·`region`·`aria-label`·`details`·`summary`·`/privacy#consent`·`noopener`·`kt:clarity`·`허용`·`거부`·`불이익` 이 있고(`web/src` 에도 `kt:clarity`), 032 방침 동의 상자의 알릴 사항 `<dt>` 여섯 이름이 모두 있다(두 파일을 함께 읽는다 — 이름은 그 파일에서 읽는다), 띠의 '거부' 칸 문자열 안에 `/privacy#consent` 와 `동의 철회` 가 있고, `privacy.html` 에 `id="consent"` 가 있다 / `setInterval`·`setTimeout`·`requestAnimationFrame`·`Observer` 가 없다(띠는 타이머·관찰자를 만들지 않는다, §3.3) / `resolvedOptions`·`Europe/`·`'off'`·`"off"`·`'consent'` 호출·`identify`·`www.kimptrack.com` 이 없다 / `http(s)://` 리터럴은 태그 주소·Microsoft 처리방침·Microsoft 개인정보 문의 셋뿐(띠는 외부 자원을 부르지 않는다) / `web/index.html`·`web/public/landing.html` 이 파일을 `defer` 로 한 번씩 싣고 `#root`·랜딩 `<body>` 에 `data-clarity-unmask="true"` / 랜딩 바닥 nav 와 `web/src/App.tsx` 에 '화면 분석 설정' → `/privacy#consent`(대시보드는 `noopener`), 랜딩 글자가 글꼴 서브셋에 모두 있다(022 의 `test_landing_seo.py`) / `web/admin/*`·`privacy.html`·`404.html` 에 `clarity.js`·`clarity.ms` 가 없다(관리자 스크립트는 029 단언대로 `admin.js` 하나 — 036 의 Clarity 칸·`/svc/api/admin/clarity`·콘솔 링크는 걸리지 않는다) / `nginx.conf` 에 `location = /clarity.js` 와 `no-cache` / `web/src` 에 `useUrlState('s.q'`·`'g.q'`·`'p.q'` 가 없고 `urlState.ts` 에 `History.prototype.replaceState` 가 있다.
 - web `npm run lint && npm run build`, `node --check web/public/clarity.js`(oxlint 대상 밖). 빌드된 `dist/index.html` 에서 `clarity.js` 가 앱 모듈보다 앞, `dist/clarity.js` 있음.
 - 로컬 브라우저 — docker 통합 기동(:8080)에 헤드리스 크롬 `--host-resolver-rules` 로 `kimptrack.com`·`www.kimptrack.com` 을 로컬에, `*.clarity.ms` 를 닫힌 포트에 묶는다(요청은 시도만 되고 나가지 않는다). 시험 ID 는 커밋하지 않는 로컬 사본에만 넣는다. 랜딩·대시보드 각각:
-  1. 값 없음: 띠가 `<body>` 첫 자식으로 보이고(버튼 둘 같은 크기), `clarity.ms` 요청 0, `window.clarity` 없음. 첫 Tab 초점이 띠 안, Enter 로 펼침·버튼이 된다. 390px 가로 스크롤 0, 펼친 띠는 안에서 스크롤.
+  1. 값 없음: 띠가 `<body>` 첫 자식으로 보이고(버튼 둘 같은 너비·높이), `clarity.ms` 요청 0, `window.clarity` 없음. 첫 Tab 초점이 띠 안, Enter 로 펼침·버튼이 된다. 390px 가로 스크롤 0, 펼친 띠는 안에서 스크롤.
   2. [허용] → `kt.analytics=granted`·띠 없음·`tag/<시험ID>` 1회·대기열 첫 항목 `consentv2` 와 두 값 그대로(대시보드는 이어서 `set tab <id>`). 새로고침 → 띠 없음, `DOMContentLoaded` 전 요청 0 뒤 태그 1회.
   3. [거부] → `denied`·띠 없음·요청 0, 새로고침 뒤에도 띠 없음·요청 0.
-  4. GPC 주입(값 없음·`granted` 각각)·localStorage 예외 주입·값 `off` → 띠 없음·요청 0, 미리 심은 `_clck`·`_clsk`(두 도메인 모양)·`_cltk` 가 지워진다.
+  4. GPC 주입(값 없음·`granted` 각각)·localStorage 예외 주입 → 띠 없음·요청 0, 미리 심은 `_clck`·`_clsk`(두 도메인 모양)·`_cltk` 가 지워진다. 그 밖의 값(`off`) → 띠가 뜨고 요청 0, 남은 저장값은 같이 지워진다.
   5. 두 탭: 탭 A `/app/` 가 `granted` 로 Clarity 를 부른 뒤 탭 B `/privacy` 에서 [동의 철회] → A 가 (뒤에 있어도) 곧바로 한 번 새로고침되고 그 뒤 `clarity.ms` 요청 0·띠 없음. A 가 값 없음(띠)일 때 B 에서 [동의] → A 의 띠가 사라지고 태그 1회.
   6. 호스트 `www.kimptrack.com`·`localhost:8080` → 띠 없음·요청 0.
-  7. 대시보드 부하: 띠가 떠 있는 동안 스프레드 표가 계속 재정렬되고, 띠를 넣고 지워도 `#root` 가 다시 마운트되지 않는다(검색칸 입력값 그대로). 스프레드 탭 30초 Performance 에서 띠 있음·없음의 스크립트 시간 차가 5% 안.
+  7. 대시보드 부하(결정적 확인): 띠가 떠 있는 동안 스프레드 표 갱신이 이어지고(행 순서·값이 계속 바뀐다), 띠를 넣고 지워도 `#root` 가 다시 마운트되지 않는다(검색칸 입력값 그대로), 띠를 넣고 지우는 동안 `clarity.js` 가 타이머·관찰자를 만들지 않는다(`setTimeout`·`setInterval`·`requestAnimationFrame`·`MutationObserver` 를 감싸 세면 0). 로컬 망이 거래소를 막아 표가 멈추면 이 항목은 EC2 에서 돈다. 숫자 비교는 배포 뒤 사람 항목이다.
   8. `/app/?s.q=btc&s.view=rev` → `DOMContentLoaded` 때 `location.search` 가 `?s.view=rev`, 검색칸은 비어 있고 검색을 입력해도 URL 이 그대로.
   9. (`granted`) 첫 스크립트로 인스턴스 `history.replaceState` 를 감싸 센다: 필터 세 번·기록 탭 심볼 변경 → 0회, 탭 단추 두 번 → 2회, 표 행 클릭 → 1회. 바뀔 때마다 대기열에 `set tab <id>` 뒤 `event tab_<id>`(행 클릭은 `pivot_history`).
   10. `?tab=history&sym=%ED%99%8D` → BTC 이고 URL 에 `sym` 이 없다. 기록 탭 검색 `홍길동` Enter → 선택 안 됨·입력칸 그대로, `eth` Enter → ETH·`sym=ETH`·(`granted` 면) 대기열에 `set sym ETH`.
@@ -149,7 +150,7 @@ Clarity 동작(clarity-js 0.8.71, 2026-09-25 커밋 코드를 2026-10-01 에 읽
 - 실제 크롬(`https://kimptrack.com`, 새 프로필): 띠가 뜨고 `clarity.ms` 요청 0 → [허용] 뒤 `www.clarity.ms/tag`·`scripts.clarity.ms`·`*.clarity.ms/collect` 요청이 있고 `c.clarity.ms` 는 0건, 쿠키는 `_clck`·`_clsk` 둘뿐(도메인 `.kimptrack.com`), 콘솔 `clarity('metadata', cb, false, true, true)` 의 동의 상태가 ad DENIED·analytics GRANTED.
 - 2시간 안 Clarity 녹화: 숫자가 보이고 입력칸은 가려짐, 탭 두 번 → 같은 세션에 페이지 셋과 태그 `tab`, 필터를 여러 번 바꿔도 페이지가 늘지 않음, 이벤트 보임.
 - GPC 브라우저(Brave)·[거부]·`www` → 띠(GPC·거부는 없음)와 `clarity.ms` 요청 0. VoiceOver 로 띠를 읽고 버튼을 누를 수 있다.
-- 같은 기기에서 스프레드 탭 60초 Performance 기록(동의·거부)의 스크립트 시간과 1시간 전송량 → §7 에 적고 §3.9 기준으로 `app` 유지 여부를 사람이 정한다.
+- 같은 기기에서 스프레드 탭 60초 Performance 기록(동의·거부)의 스크립트 시간과 1시간 전송량 → §7 에 적고 §3.9 기준으로 `app` 유지 여부를 사람이 정한다. 띠 있음·없음(값 없음·`denied`)의 스프레드 탭 30초 스크립트 시간도 각 3회 기록의 중앙값으로 비교해 적는다(5% 안이 목표).
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
@@ -158,18 +159,18 @@ Clarity 동작(clarity-js 0.8.71, 2026-09-25 커밋 코드를 2026-10-01 에 읽
 
 ## 6. 갱신할 문서
 **이 PR 이 고치는 문서**
-- `docs/context/status.md` — 표 admin 행 뒤에 `| clarity | - | web: clarity.js(ID·페이지 목록 한 곳, 동의 안내 띠 — 값 없음·GPC 아님일 때 랜딩·대시보드에, 호스트·GPC·동의 값 확인, 동의한 방문자만 consentv2 광고 거부·분석 허용, DOMContentLoaded 뒤 태그, 다른 탭의 철회는 storage 이벤트로 곧바로 새로고침·동의는 그 자리에서 켬), 랜딩·대시보드 가림 해제, 탭 태그·이벤트, 검색어 URL 제외·필터 URL 쓰기 우회·sym 형식 | ID 비어 있음 — 032 게시 뒤 사람이 켠다 |`. web-shell 행 "탭·심볼·탭별 필터가 URL 쿼리로 복원" 뒤에 "(검색어 제외, 033)". 알려진 빚: `(027) 기록 탭 검색칸 값(URL sym)은 검증 없이 기록된다` 를 지우고, `(027) 탭·필터 조작은 서버가 못 본다 — 후속 브라우저 분석` 을 `(027) 탭·필터 조작은 서버가 못 본다 — Clarity(033)가 본다(동의한 방문자만 — 차단·GPC·www 제외)` 로, `(027) 쿼리 키 삭제 목록은 검색 입력이 늘 때 손으로 맞춘다` 를 `(027·033) 검색어는 033 부터 URL 에 안 실린다 — caddy 의 세 키 삭제는 옛 링크용` 으로. 추가: `(033) 필터 URL 쓰기의 Clarity 우회는 clarity-js 가 인스턴스 replaceState 를 덮어쓰는 구현(0.8.71)에 기댄다`, `(033) Clarity 페이지 하나가 전송 128회(≈57분)·2시간이면 그 문서는 새로고침 전까지 녹화가 멈춘다`, `(033) Clarity 는 동의한 방문자만 본다 — 숫자는 하한(동의율·차단·GPC)`, `(033) 이미 열린 탭은 철회 뒤 곧바로 한 번 새로고침된다(storage 이벤트 — 같은 출처 탭만)`, `(033) 동의 기록은 방문자 브라우저에만 있다 — 입증 방법은 사람 확인(032 §7)`.
+- `docs/context/status.md` — 표 admin 행 뒤에 `| clarity | - | web: clarity.js(ID·페이지 목록 한 곳, 동의 안내 띠 — 값이 granted·denied 가 아니고 GPC 아닐 때 랜딩·대시보드에, '화면 분석 설정' 링크(랜딩 바닥·대시보드 헤더 → /privacy#consent), 호스트·GPC·동의 값 확인, 동의한 방문자만 consentv2 광고 거부·분석 허용, DOMContentLoaded 뒤 태그, 다른 탭의 철회는 storage 이벤트로 곧바로 새로고침·동의는 그 자리에서 켬), 랜딩·대시보드 가림 해제, 탭 태그·이벤트, 검색어 URL 제외·필터 URL 쓰기 우회·sym 형식 | ID 비어 있음 — 032 게시 뒤 사람이 켠다 |`. web-shell 행 "탭·심볼·탭별 필터가 URL 쿼리로 복원" 뒤에 "(검색어 제외, 033)". 알려진 빚: `(027) 기록 탭 검색칸 값(URL sym)은 검증 없이 기록된다` 를 지우고, `(027) 탭·필터 조작은 서버가 못 본다 — 후속 브라우저 분석` 을 `(027) 탭·필터 조작은 서버가 못 본다 — Clarity(033)가 본다(동의한 방문자만 — 차단·GPC·www 제외)` 로, `(027) 쿼리 키 삭제 목록은 검색 입력이 늘 때 손으로 맞춘다` 를 `(027·033) 검색어는 033 부터 URL 에 안 실린다 — caddy 의 세 키 삭제는 옛 링크용` 으로. 추가: `(033) 필터 URL 쓰기의 Clarity 우회는 clarity-js 가 인스턴스 replaceState 를 덮어쓰는 구현(0.8.71)에 기댄다`, `(033) Clarity 페이지 하나가 전송 128회(≈57분)·2시간이면 그 문서는 새로고침 전까지 녹화가 멈춘다`, `(033) Clarity 는 동의한 방문자만 본다 — 숫자는 하한(동의율·차단·GPC)`, `(033) 이미 열린 탭은 철회 뒤 곧바로 한 번 새로고침된다(storage 이벤트 — 같은 출처 탭만)`, `(033) 동의 기록은 방문자 브라우저에만 있다 — 입증 방법은 사람 확인(032 §7)`.
 - `CLAUDE.md` — 스펙 인덱스 033 행 상태 → DONE. §2 runbooks 목록에 `clarity.md  Clarity 대시보드 설정·켜고 끄기 (사람용, 033)`.
 - `docs/context/architecture.md` — 런타임 구성 web/ 줄 끝에 "랜딩·대시보드는 `public/clarity.js` 가 동의 안내 띠를 띄우고, 동의(`kt.analytics=granted`)·GPC 아님·호스트·ID 가 맞을 때만 Microsoft Clarity 태그를 부른다(033) — 관리자·처리방침 페이지는 부르지 않는다". 현재 구조 web-shell(002) 줄의 `urlState` 설명에 "`tab` 만 `window.history.replaceState`, 나머지 쓰기는 `History.prototype.replaceState` — Clarity 가 필터 변경을 새 페이지로 보지 않게(033), 검색어는 URL 밖" 을 넣고, 현재 구조에 `clarity (033)` 항목(파일·띠·shared 함수·셸 호출 위치 1~3줄).
 - `docs/context/dev-setup.md` — web 절: `public/clarity.js` 는 oxlint 대상 밖(`node --check`), 로컬에서는 호스트가 달라 띠도 Clarity 도 없다, 확인은 §4 의 `--host-resolver-rules` 방법.
-- `docs/context/product.md` — 용어 "분석 동의" 끝에 "띠는 값이 없을 때만 뜬다(033)" — 032 가 쓴 문장과 어긋나지 않게.
-- `docs/specs/022-landing.md` — §3.5 스크립트 규칙에 "`<head>` 에 `clarity.js`(033) 한 줄 — 동의 안내 띠도 이 파일이 그린다, `<body>` 에 `data-clarity-unmask`" 한 줄.
+- `docs/context/product.md` — 용어 "분석 동의" 끝에 "띠는 값이 `granted`·`denied` 가 아닐 때(없음·그 밖) 뜨고, 고른 뒤 바꾸는 길은 랜딩 바닥·대시보드 헤더의 '화면 분석 설정'(033)" — 032 가 쓴 문장과 어긋나지 않게.
+- `docs/specs/022-landing.md` — §3.5 스크립트 규칙에 "`<head>` 에 `clarity.js`(033) 한 줄 — 동의 안내 띠도 이 파일이 그린다, `<body>` 에 `data-clarity-unmask`" 한 줄. §3.3-8 바닥 nav 목록의 방침 링크 뒤에 "화면 분석 설정(→ `/privacy#consent`, 033)".
 - `docs/specs/007-deploy.md` — nginx 정적 규칙에 `location = /clarity.js` 의 `Cache-Control: no-cache`(033).
 - `docs/specs/027-observability.md` — §2 하지 않는 것 줄을 "브라우저 쪽 분석은 033, 처리방침은 032, 폰트 자체 호스팅은 후속" 으로(032 가 고친 줄과 합친다), §3.8 "검색 입력이 늘면 쿼리 키 목록도 같이 늘린다" 문장에 "검색어는 033 부터 URL 에 안 실린다 — 세 키 삭제는 옛 링크용" 을 붙인다.
 - `docs/runbooks/clarity.md` — 신규. §3.1 순서, §3.10 설정과 확인·되돌리기, §4 배포 뒤 항목. Data Export 토큰 절은 035 가 더한다.
 
 **담당자에게 제안** (PR 본문에 적는다)
-- `002-web-shell.md` §3.5 — "화면 상태는 URL 쿼리에 실린다" 문단: 제외 목록을 "검색 입력 전부(spreads·gap·pp·history·flow)" 로, `sym` 은 영문 대문자·숫자 1~20자, "URL 쓰기는 `tab` 만 `window.history.replaceState`, 나머지는 원래 함수(033 — Clarity)". §4-4 는 그대로(탭 사이 유지는 메모리). 셸 밖의 동의 안내 띠(033 `clarity.js`)가 대시보드 아래에 뜰 수 있다는 한 줄.
+- `002-web-shell.md` §3.5 — "화면 상태는 URL 쿼리에 실린다" 문단: 제외 목록을 "검색 입력 전부(spreads·gap·pp·history·flow)" 로, `sym` 은 영문 대문자·숫자 1~20자, "URL 쓰기는 `tab` 만 `window.history.replaceState`, 나머지는 원래 함수(033 — Clarity)". §4-4 는 그대로(탭 사이 유지는 메모리). 셸 밖의 동의 안내 띠(033 `clarity.js`)가 대시보드 아래에 뜰 수 있다는 한 줄. §3.5-1 헤더 줄에 방침 링크 옆 '화면 분석 설정'(→ `/privacy#consent`, 새 탭, 033).
 - `003-spreads.md` §3 필터바 — "심볼 검색은 URL 에 싣지 않는다(033)".
 - `013-premium-events.md` §3.5·`014-premium-1m.md` 차트 카드 — "심볼 검색 Enter 는 영문 대문자·숫자 1~20자일 때만 선택(033)".
 
