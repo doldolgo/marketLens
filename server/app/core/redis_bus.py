@@ -14,6 +14,7 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
   쓴 회차·종료 때 쓰고 수집 자신이 기동 복원 때 읽는다 (013 §3.3)
 - 리스트 `alerts:log` — 보낸 Slack 알림 JSON 줄 최신 1,000건, 만료 없음. 두 역할의 알림기가 왼쪽에 넣고 수집기의
   `/admin/alerts` 가 읽는다 (034 §3.3)
+- 키 `admin:clarity` — Clarity 마지막 시도·결과·마지막 성공 값 JSON, 만료 없음. api 의 `/admin/clarity` 가 읽고 쓴다 (035 §3.3)
 """
 
 import time
@@ -42,6 +43,8 @@ OPEN_EVENTS_TTL_SEC = 600
 # 034 — 보낸 알림 기록. 만료 없이 최신 이만큼만 남긴다(넣기·자르기 한 왕복)
 ALERT_LOG_KEY = "alerts:log"
 ALERT_LOG_MAX = 1000
+# 035 — Clarity 호출 기록. 만료 없음 — api 재시작(배포)이 하루 10회 한도를 쓰지 않게 시도 시각을 남긴다
+CLARITY_KEY = "admin:clarity"
 
 
 class RedisUnavailableError(Exception):
@@ -173,6 +176,15 @@ class RedisBus:
         """`LRANGE alerts:log 0 limit-1` — 최신순. 없으면 빈 목록. 실패는 예외."""
         values = await self._client.lrange(ALERT_LOG_KEY, 0, limit - 1)
         return [_text(v) for v in values]
+
+    async def clarity_load(self) -> str | None:
+        """`GET admin:clarity` — Clarity 마지막 시도·결과·마지막 성공 값 JSON (035 §3.3). 없으면 None. 실패는 예외."""
+        value = await self._client.get(CLARITY_KEY)
+        return None if value is None else _text(value)
+
+    async def clarity_save(self, data: str) -> None:
+        """`SET admin:clarity <JSON>` — 만료 없음 (035 §3.3). 실패는 예외."""
+        await self._client.set(CLARITY_KEY, data)
 
     async def subscribe(self) -> Subscription:
         """채널 구독 연결을 새로 연다 — 여기서 실제 연결이 일어나므로 실패는 예외."""
