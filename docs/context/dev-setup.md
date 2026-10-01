@@ -31,7 +31,7 @@ vite proxy 는 허용 목록과 무관하게 모든 `/api/*` 를 넘긴다 — �
 테스트 러너 없음 (현재). 스펙에서 도입하기 전까지 FE 검증은 `build` + `lint` + 수동 확인.
 
 랜딩(022)은 dev 서버에서 `http://localhost:5173/app/landing.html` 로 연다 — `public/` 이 base(`/app/`) 아래로 서빙되기 때문이다(본문 그림·글꼴은 상대 경로라 그대로 보이고, 아이콘·og 그림·JSON-LD 는 운영 절대 주소 `https://kimptrack.com/…` 를 가리킨다. `/api/landing` 은 위 프록시를 탄다. 랜딩 글을 고치면 `uv run web/scripts/subset-landing-font.py` 로 글꼴 서브셋을 다시 만든다 — 안 하면 `test_landing_seo.py` 가 멈춘다). 배포와 같은 `/` 는 docker 통합 기동(:8080)에서 본다. oxlint 는 `src` 만 보므로 `landing.html` 의 스크립트는 lint 대상이 아니다. `web/admin/`(관리자 화면, 029)도 oxlint·vite 빌드 대상이 아니다 — web 이미지가 그대로 복사한다.
-처리방침(032)은 dev 서버에서 `http://localhost:5173/app/privacy.html` 로 연다(랜딩과 같은 이유). 번들 밖 정적 파일이라 oxlint 대상이 아니다. 배포와 같은 `/privacy`(`Cache-Control: no-cache`·CSP)는 docker 통합 기동에서 본다 — dev 서버는 CSP 를 붙이지 않는다. 분석 동의 저장값은 브라우저 개발자 도구의 localStorage `kt.analytics` 로 본다(없음 = 정하지 않음).
+처리방침(032)은 dev 서버에서 `http://localhost:5173/app/privacy.html` 로 연다(랜딩과 같은 이유). 번들 밖 정적 파일이라 oxlint 대상이 아니다. 배포와 같은 `/privacy`(`Cache-Control: no-cache`·CSP)는 docker 통합 기동에서 본다 — dev 서버는 CSP 를 붙이지 않는다. 분석 동의 저장값은 브라우저 개발자 도구의 localStorage `kt.analytics` 로 본다(없음·그 밖 = 정하지 않음). server `pytest` 의 `test_privacy.py` 는 이 페이지의 동의 스크립트를 node 로 돌린다 — node 가 없으면 그 테스트만 건너뛰고, `CI` 환경 변수가 있으면 실패한다(CI 러너에는 node 가 있다).
 ```bash
 curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-store. live 는 Redis spreads:latest, trail·events 는 Influx 가 있을 때만 차고 없으면 그 부분만 null
 ```
