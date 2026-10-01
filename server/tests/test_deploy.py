@@ -260,9 +260,10 @@ def test_web_image_precompresses_static_files_for_gzip_static() -> None:
     assert _args(public, "gzip_static") == [["on"]]
     # 압축본과 원본이 같은 URL 이라 캐시가 둘을 가르게 Vary 를 붙인다 — /api location 은 건드리지 않는다
     assert _args(public, "gzip_vary") == [["on"]]
-    # 즉석 압축은 켜지 않고 gzip_proxied 는 기본(off) — 앱이 이미 압축한 /api 응답을 다시 압축하지 않는다
+    # 앞단 caddy 가 Via 를 붙이므로 gzip_proxied 가 기본(off)이면 gzip_static 이 .gz 를 주지 않는다 (007 §3, 2026-09-30)
+    assert _args(public, "gzip_proxied") == [["any"]]
+    # 즉석 압축은 켜지 않는다 — 앱이 이미 압축한 /api 응답을 다시 압축하지 않고, gzip_proxied 가 정적 파일에만 걸린다
     assert not re.search(r"^\s*gzip\s+on;", conf, re.M)
-    assert not re.search(r"^\s*gzip_proxied\b", conf, re.M)
 
 
 def test_web_image_is_multistage_node22_to_nginx() -> None:
