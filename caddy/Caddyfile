@@ -85,14 +85,23 @@
 }
 
 # 도메인 — 자동 HTTPS. http://kimptrack.com 은 caddy 가 https 로 308 리다이렉트한다(설정 없이 기본 동작).
-kimptrack.com, www.kimptrack.com {
+kimptrack.com {
 	import access_log
 	# 027 §3.2 — 브라우저 기본값은 같은 출처 요청에 전체 URL(검색어 포함)을 Referer 로 보낸다
 	header Referrer-Policy strict-origin
 	reverse_proxy web:80
 }
 
+# 023·022 — www 는 경로·쿼리를 들고 apex 로 301. 검색엔진이 두 호스트를 같은 본문의 사본으로 따로 모으지 않게
+# (네이버는 메인 페이지 중복을 canonical 보다 리다이렉트로 합치라고 한다). http://www 도 한 번에 apex https 로.
+# 인증서는 www 도 계속 발급된다. 접속 기록은 남기지 않는다 — 본문이 없는 리다이렉트뿐이다
+www.kimptrack.com, http://www.kimptrack.com {
+	redir https://kimptrack.com{uri} permanent
+}
+
 # 그 밖의 호스트(탄력 IP 직접 접속·로컬 :WEB_PORT)는 평문 HTTP 그대로 — 인증서 없음, 리다이렉트 없음.
+# 022 — 같은 본문이 IP 주소로 색인되지 않게 X-Robots-Tag noindex(로컬 확인에는 영향 없음)
 http:// {
+	header X-Robots-Tag "noindex"
 	reverse_proxy web:80
 }

@@ -3,26 +3,88 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>KimpTrack — 김프가 우리에게 이득을 주는 김프가 아니다</title>
-  <meta name="description" content="기존 김프는 여러 사이트에서 수치를 일일이 확인해야 됩니다. 그런데 확인한 숫자마저도 실제로는 이득이 있는 김프가 아닐 수 있고, 이득이 있더라도 거래를 할 수 없는 경우가 존재합니다. KimpTrack은 출금·입금이 열렸는지 확인하고, 진짜 김프인지 판단해 사용자에게 실질적 이익을 가져다주고자 합니다." />
+  <!-- 검색·미리보기 문구는 스펙 022 §3.6 글자 그대로. 네이버는 메인 제목·설명을 자주 바꾸면 불이익을 준다 — 고치기 전에 스펙부터 -->
+  <title>KimpTrack - 실시간 김프(김치 프리미엄)·역프</title>
+  <meta name="description" content="업비트·빗썸과 바이낸스·바이비트·비트겟 사이 김치 프리미엄을 매초 계산하고, 경로마다 입출금이 열렸는지 함께 보여 주는 무료 서비스입니다." />
+  <meta name="robots" content="index, follow, max-image-preview:large" />
   <link rel="canonical" href="https://kimptrack.com/" />
-  <!-- 그림·favicon 은 상대 경로 — 배포(/)와 vite dev(/app/landing.html) 양쪽에서 같은 파일을 찾는다 -->
-  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <!-- 아이콘은 절대 주소 — 네이버는 상대 경로를 읽지 않고, 구글은 SVG 파비콘을 쓰지 않는다. rel 마다 하나만 둔다 -->
+  <link rel="icon" type="image/png" sizes="192x192" href="https://kimptrack.com/icon-192.png" />
+  <link rel="apple-touch-icon" href="https://kimptrack.com/apple-touch-icon.png" />
   <meta name="theme-color" content="#161826" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="KimpTrack" />
-  <meta property="og:title" content="KimpTrack — 김프가 우리에게 이득을 주는 김프가 아니다" />
-  <meta property="og:description" content="기존 김프는 여러 사이트에서 수치를 일일이 확인해야 됩니다. 그런데 확인한 숫자마저도 실제로는 이득이 있는 김프가 아닐 수 있고, 이득이 있더라도 거래를 할 수 없는 경우가 존재합니다. KimpTrack은 출금·입금이 열렸는지 확인하고, 진짜 김프인지 판단해 사용자에게 실질적 이익을 가져다주고자 합니다." />
+  <meta property="og:title" content="KimpTrack - 실시간 김프(김치 프리미엄)·역프" />
+  <meta property="og:description" content="업비트·빗썸과 바이낸스·바이비트·비트겟 사이 김치 프리미엄을 매초 계산하고, 경로마다 입출금이 열렸는지 함께 보여 주는 무료 서비스입니다." />
   <meta property="og:url" content="https://kimptrack.com/" />
-  <meta property="og:image" content="https://kimptrack.com/landing/og.png" />
+  <meta property="og:image" content="https://kimptrack.com/landing/og-v2.png" />
+  <meta property="og:image:type" content="image/png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="KimpTrack — 실시간 김프·역프, 실제로 옮길 수 있는지까지. 업비트·빗썸과 바이낸스·바이비트·비트겟을 잇는 경로" />
   <meta property="og:locale" content="ko_KR" />
   <meta name="twitter:card" content="summary_large_image" />
-  <!-- Pretendard 동적 서브셋 — 페이지가 쓰는 한글 조각만 받는다. 라틴 글리프가 Inter 기반이라 대시보드 숫자와 모양이 같다 (스펙 022 §3.4) -->
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://kimptrack.com/#website",
+        "url": "https://kimptrack.com/",
+        "name": "KimpTrack",
+        "alternateName": ["김프트랙"],
+        "inLanguage": "ko-KR",
+        "publisher": { "@id": "https://kimptrack.com/#organization" }
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://kimptrack.com/#organization",
+        "name": "KimpTrack",
+        "url": "https://kimptrack.com/",
+        "logo": { "@type": "ImageObject", "url": "https://kimptrack.com/logo-512.png", "width": 512, "height": 512 },
+        "email": ["joseph13ko15@gmail.com", "untilduck@gmail.com"],
+        "member": [{ "@type": "Person", "name": "고원규" }, { "@type": "Person", "name": "이진중" }]
+      },
+      {
+        "@type": "WebPage",
+        "@id": "https://kimptrack.com/#webpage",
+        "url": "https://kimptrack.com/",
+        "name": "KimpTrack - 실시간 김프(김치 프리미엄)·역프",
+        "description": "업비트·빗썸과 바이낸스·바이비트·비트겟 사이 김치 프리미엄을 매초 계산하고, 경로마다 입출금이 열렸는지 함께 보여 주는 무료 서비스입니다.",
+        "inLanguage": "ko-KR",
+        "isPartOf": { "@id": "https://kimptrack.com/#website" },
+        "about": { "@id": "https://kimptrack.com/#webapp" },
+        "primaryImageOfPage": { "@type": "ImageObject", "url": "https://kimptrack.com/landing/og-v2.png", "width": 1200, "height": 630 },
+        "dateModified": "2026-10-01"
+      },
+      {
+        "@type": "WebApplication",
+        "@id": "https://kimptrack.com/#webapp",
+        "name": "KimpTrack",
+        "url": "https://kimptrack.com/app/",
+        "applicationCategory": "FinanceApplication",
+        "operatingSystem": "Web",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "KRW" },
+        "description": "업비트·빗썸과 바이낸스·바이비트·비트겟 사이의 김프(김치 프리미엄)와 역프를 매초 계산합니다.",
+        "screenshot": ["https://kimptrack.com/landing/spreads.png", "https://kimptrack.com/landing/history.png"],
+        "publisher": { "@id": "https://kimptrack.com/#organization" }
+      }
+    ]
+  }
+  </script>
+  <!-- 글꼴 — Pretendard 를 이 페이지 글자만 남겨 자른 파일 하나를 같은 출처에서 받는다(OFL 이라 이름을 바꿨다: KimpTrack Sans).
+       글자를 고치면 web/scripts/subset-landing-font.py 로 다시 만든다 — 빠진 글자는 시스템 글꼴로 보인다 (스펙 022 §3.4) -->
+  <link rel="preload" href="landing/fonts/kimptrack-sans-eebfbed5.woff2" as="font" type="font/woff2" crossorigin />
   <style>
+    @font-face {
+      font-family: "KimpTrack Sans";
+      src: url("landing/fonts/kimptrack-sans-eebfbed5.woff2") format("woff2");
+      font-weight: 400 700;
+      font-style: normal;
+      font-display: swap;
+    }
     /* 색 값은 docs/design/theme.css 토큰을 복사했다 — 이 파일은 번들 밖(public)이라 import 할 수 없다. 테마가 바뀌면 여기도 맞춘다. */
     :root {
       color-scheme: dark;
@@ -42,10 +104,10 @@
       --divider: rgba(233, 233, 237, 0.16);
       --r-md: 8px;
       --r-lg: 14px;
-      --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+      --font: "KimpTrack Sans", -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
     }
     *, *::before, *::after { box-sizing: border-box; }
-    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-padding-top: 24px; }
     body {
       margin: 0;
       background: var(--bg);
@@ -58,7 +120,7 @@
       overflow-wrap: anywhere; /* 긴 망 이름·심볼이 좁은 화면에서 가로 스크롤을 만들지 않게 */
       -webkit-font-smoothing: antialiased;
     }
-    h1, h2, h3, p, ol, ul, figure { margin: 0; }
+    h1, h2, h3, p, ol, ul, dl, dd, figure { margin: 0; }
     h1, h2, h3 { font-weight: 700; color: var(--text); text-wrap: balance; }
     a { color: inherit; text-decoration: none; }
     img { display: block; max-width: 100%; height: auto; }
@@ -72,11 +134,17 @@
     .up { color: var(--up); }
     .down { color: var(--down); }
     .flat { color: var(--n400); }
+    /* 글 속 링크 — 밑줄로 링크임을 보인다 */
+    .link { color: var(--n100); text-decoration: underline; text-decoration-color: var(--n600); text-underline-offset: 4px; }
+    .link:hover { text-decoration-color: var(--n100); }
 
     /* 상단 바 — 워드마크의 두 점과 선은 경로 카드의 경로 선과 같은 모양이다 */
-    .bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 72px; }
+    .bar { display: flex; align-items: center; gap: 16px 32px; height: 72px; }
     .mark { display: inline-flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
     .mark svg { flex: none; color: var(--accent); }
+    .nav { display: flex; gap: 24px; margin-left: auto; font-size: 15px; color: var(--n300); }
+    .nav a:hover { color: var(--n100); }
+    .bar .btn { margin-left: 8px; }
 
     /* 버튼 — 디자인 시스템의 primary(보라 테두리·보라 글자). 채운 보라 위 흰 글자는 대비가 3.2:1 이라 쓰지 않는다 */
     .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 16px; border: 1px solid var(--accent); border-radius: var(--r-md); color: var(--accent); font-size: 15px; font-weight: 600; line-height: 1; white-space: nowrap; }
@@ -87,21 +155,22 @@
     /* 히어로 — 글 5 : 카드 7 */
     .hero { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; align-items: start; padding-block: 64px 112px; }
     .hero-text { padding-top: 20px; container-type: inline-size; }
-    /* h1 은 어느 폭에서나 "김프가 우리에게" / "이득을 주는 김프가 아니다" 두 줄 — 긴 둘째 줄(Pretendard 700 에서 9.71em)이
+    /* h1 은 어느 폭에서나 "실시간 김프·역프," / "실제로 옮길 수 있는지까지" 두 줄 — 긴 둘째 줄(KimpTrack Sans 700 에서 9.71em)이
        글 칸(100cqi)에 들어가는 크기, 최대 48px. 10.11 은 대체 글꼴(9.81em) + 3% 여유. cqi 를 모르는 브라우저는 27px(320px 폭에서도 들어간다) */
     h1 { font-size: 27px; font-size: min(48px, 100cqi / 10.11); line-height: 1.22; letter-spacing: -0.035em; }
     .h1-line { display: block; white-space: nowrap; }
     .lead { margin-top: 24px; }
-    .hero-text .btn-lg { margin-top: 36px; }
+    .cta { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; margin-top: 36px; }
 
-    /* 경로 카드 — 페이지에서 떠 있는 면은 이것 하나다 */
-    .card { position: relative; border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 0 0 1px var(--n700), 0 28px 64px rgba(0, 0, 0, 0.55); }
+    /* 경로 카드 — 페이지에서 떠 있는 면은 이것 하나다. 값이 오기 전에도 카드 크기를 잡아 둬 아래 글이 밀리지 않게 */
+    .card { position: relative; min-height: 480px; border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 0 0 1px var(--n700), 0 28px 64px rgba(0, 0, 0, 0.55); }
     .card-link { display: block; padding: 28px 32px 30px; border-radius: inherit; }
     .card-link:hover { background: rgba(233, 233, 237, 0.025); }
     .card-link:focus-visible { outline-offset: 4px; border-radius: var(--r-lg); }
     .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; font-size: 13px; line-height: 1.6; color: var(--n400); }
     .age { color: var(--n500); text-align: right; }
-    .card.is-stale .card-body { opacity: 0.45; }
+    /* 낡은 값은 부호색 대신 회색 — 투명도로 흐리면 누를 수 있는 링크의 글자 대비가 기준 아래로 떨어진다 */
+    .card.is-stale .value, .card.is-stale .trail-plot { color: var(--n400); }
     .sym { margin-top: 22px; font-size: 30px; line-height: 1.2; font-weight: 700; letter-spacing: -0.02em; }
     .route { margin-top: 6px; color: var(--n300); }
     .value { margin-top: 18px; font-size: 80px; line-height: 1; font-weight: 650; letter-spacing: -0.045em; }
@@ -125,6 +194,8 @@
     .prices { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--divider); font-size: 15px; }
     .prices .ex { color: var(--n500); }
     .card-msg { padding: 28px 32px; color: var(--n300); }
+    .card-msg p + p { margin-top: 10px; }
+    .card-msg-title { font-size: 13px; color: var(--n400); }
     .card-msg .btn { margin-top: 18px; }
 
     /* 폴링으로 1위 값이 바뀌면 한 번 밝아졌다 돌아온다 — 페이지의 유일한 움직임 */
@@ -132,7 +203,7 @@
     .value.flash { animation: flash 0.6s ease-out; }
     @media (prefers-reduced-motion: reduce) { .value.flash { animation: none; } }
 
-    /* 다음 경로 — 카드 밖, 한 줄에 하나 */
+    /* 그다음으로 큰 경로 — 카드 밖, 한 줄에 하나 */
     .next { margin-top: 28px; }
     .next-title { padding: 0 2px 8px; font-size: 13px; color: var(--n400); }
     .next ol { list-style: none; padding: 0; border-top: 1px solid var(--divider); }
@@ -146,16 +217,26 @@
     .section { padding-block: 96px; border-top: 1px solid var(--divider); }
     h2 { font-size: 30px; line-height: 1.35; letter-spacing: -0.025em; }
     h3 { font-size: 17px; line-height: 1.5; letter-spacing: -0.01em; }
+    .section > .prose { margin-top: 16px; }
     .split { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 56px; align-items: start; margin-top: 40px; }
     .point h3 + .prose { margin-top: 8px; }
     .point + .point { margin-top: 40px; }
     .shot img { border: 1px solid var(--n800); border-radius: var(--r-md); }
+    .shot figcaption { margin-top: 12px; font-size: 13px; line-height: 1.6; color: var(--n400); }
+    .more { margin-top: 20px; }
+
+    /* 표 — 사건 표와 비교 표가 같은 모양 */
+    .tbl { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.5; }
+    .tbl th { padding: 0 14px 10px 0; border-bottom: 1px solid var(--divider); text-align: left; font-size: 13px; font-weight: 500; color: var(--n500); white-space: nowrap; }
+    .tbl td, .tbl tbody th { padding: 12px 14px 12px 0; border-bottom: 1px solid var(--divider); vertical-align: baseline; }
+    .tbl th:last-child, .tbl td:last-child { padding-right: 0; }
+    .cmp { margin-top: 48px; }
+    .cmp tbody th { font-size: 15px; font-weight: 600; color: var(--text); }
+    .cmp td { color: var(--n300); }
+    .cmp td:last-child { color: var(--text); }
 
     /* 7일 사건 표 */
-    .ev { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 15px; line-height: 1.5; }
-    .ev th { padding: 0 14px 10px 0; border-bottom: 1px solid var(--divider); text-align: left; font-size: 13px; font-weight: 500; color: var(--n500); white-space: nowrap; }
-    .ev td { padding: 12px 14px 12px 0; border-bottom: 1px solid var(--divider); vertical-align: baseline; }
-    .ev th:last-child, .ev td:last-child { padding-right: 0; }
+    .ev { margin-top: 12px; }
     .ev .num { text-align: right; }
     .ev .c-sym, .ev .c-max, .ev .c-end { white-space: nowrap; }
     .ev .c-sym a { font-weight: 650; }
@@ -164,18 +245,34 @@
     .ev tbody tr:hover { background: rgba(233, 233, 237, 0.03); }
     .ev-title { margin-top: 28px; }
 
-    /* 어떻게 만들었나 — 실제 순서라 번호와 잇는 선을 둔다 */
+    /* 김프·역프란 — 용어와 풀이를 두 칸으로 */
+    .terms { margin-top: 40px; border-top: 1px solid var(--divider); }
+    .terms > div { display: grid; grid-template-columns: minmax(0, 13em) minmax(0, 1fr); gap: 8px 40px; padding-block: 22px; border-bottom: 1px solid var(--divider); }
+    .terms dt { font-weight: 700; }
+    .terms dd { max-width: 40em; color: var(--n300); text-wrap: pretty; }
+    .terms dd p + p { margin-top: 8px; }
+    .formula { display: inline-block; padding: 2px 0; color: var(--text); font-weight: 600; }
+
+    /* 계산 방법 — 실제 순서라 번호와 잇는 선을 둔다 */
     .steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 40px; margin-top: 44px; padding: 0; list-style: none; }
     .steps li { position: relative; padding-top: 48px; }
     .steps li::before { content: ""; position: absolute; top: 14px; left: 36px; right: -32px; height: 1px; background: var(--n700); }
     .steps li:last-child::before { content: none; }
     .step-n { position: absolute; top: 0; left: 0; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--n600); border-radius: 50%; font-size: 13px; font-weight: 600; line-height: 1; color: var(--n300); }
     .steps h3 + p { margin-top: 8px; color: var(--n300); text-wrap: pretty; }
+    .limits { margin-top: 56px; padding-top: 28px; border-top: 1px solid var(--divider); }
+    .limits h3 + .prose { margin-top: 8px; }
 
-    /* 바닥 */
-    .foot { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 12px 24px; padding-block: 28px 48px; border-top: 1px solid var(--divider); font-size: 13px; color: var(--n500); }
-    .foot a { color: var(--n300); text-decoration: underline; text-decoration-color: var(--n700); text-underline-offset: 4px; }
-    .foot a:hover { text-decoration-color: var(--n300); }
+    /* 자주 묻는 질문 — 늘 펼쳐 둔다 */
+    .faq { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 56px; margin-top: 32px; }
+    .qa { padding-block: 24px; border-top: 1px solid var(--divider); }
+    .qa h3 + p { margin-top: 8px; color: var(--n300); text-wrap: pretty; }
+
+    /* 바닥 — 바로 가기, 참고값 안내, 설명을 고친 날 */
+    .foot { display: grid; gap: 14px; padding-block: 32px 48px; border-top: 1px solid var(--divider); font-size: 13px; color: var(--n500); }
+    .foot-nav { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 15px; color: var(--n300); }
+    .foot-nav a:hover { color: var(--n100); }
+    .foot .notice { max-width: 56em; color: var(--n400); }
 
     /* 960px 미만 — 한 단(글 → 카드 → 다음 경로) */
     @media (max-width: 959px) {
@@ -186,6 +283,9 @@
       .steps li { padding-top: 0; padding-left: 48px; }
       .steps li::before { top: 36px; bottom: -28px; left: 14px; right: auto; width: 1px; height: auto; }
       .section { padding-block: 72px; }
+      .faq { grid-template-columns: minmax(0, 1fr); }
+      .nav { display: none; } /* 좁은 화면에서는 바닥의 바로 가기로 */
+      .bar { justify-content: space-between; }
     }
 
     /* 720px 미만 — 모바일 글자 크기, 사건 표는 행마다 두 줄(코인·최고 / 경로·방향·지속·끝난 시각) */
@@ -194,9 +294,11 @@
       h2 { font-size: 24px; }
       .value { font-size: 52px; }
       .sym { font-size: 26px; }
+      .card { min-height: 400px; }
       .card-link, .card-msg { padding: 22px 20px 24px; }
       .bar .btn { height: 36px; padding: 0 12px; font-size: 14px; }
       .section { padding-block: 64px; }
+      .terms > div { grid-template-columns: minmax(0, 1fr); }
       .ev thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
       .ev, .ev tbody { display: block; }
       .ev tr { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; padding-block: 12px; border-bottom: 1px solid var(--divider); }
@@ -209,6 +311,12 @@
       .ev .c-dur { order: 6; }
       .ev .c-end { order: 7; }
       .ev .c-route, .ev .c-dir, .ev .c-dur, .ev .c-end { font-size: 13px; color: var(--n400); }
+      .cmp thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+      .cmp, .cmp tbody, .cmp tr { display: block; }
+      .cmp tr { padding-block: 14px; border-bottom: 1px solid var(--divider); }
+      .cmp tbody th, .cmp td { display: block; padding: 0; border: 0; }
+      .cmp td::before { content: attr(data-col) " · "; color: var(--n500); }
+      .cmp td + td { margin-top: 4px; }
     }
   </style>
 </head>
@@ -218,81 +326,194 @@
       <svg width="22" height="10" viewBox="0 0 22 10" aria-hidden="true" focusable="false"><circle cx="4" cy="5" r="3.5" fill="currentColor" /><rect x="5" y="4" width="12" height="2" fill="currentColor" /><circle cx="18" cy="5" r="3.5" fill="currentColor" /></svg>
       KimpTrack
     </a>
-    <a class="btn" href="/app/">서비스로 넘어가기</a>
+    <nav class="nav" aria-label="이 페이지">
+      <a href="#kimp"><span class="nw">김프·역프란</span></a>
+      <a href="#method">계산 방법</a>
+      <a href="#faq">자주 묻는 질문</a>
+    </nav>
+    <a class="btn" href="/app/">실시간 김프 표</a>
   </header>
 
   <main>
     <section class="wrap hero" aria-labelledby="hero-title">
       <div class="hero-text">
-        <h1 id="hero-title"><span class="h1-line">김프가 우리에게</span> <span class="h1-line">이득을 주는 김프가 아니다</span></h1>
-        <p class="prose lead">기존 김프는 여러 사이트에서 수치를 일일이 확인해야 됩니다. 그런데 확인한 숫자마저도 실제로는 이득이 있는 김프가 아닐 수 있고, 이득이 있더라도 거래를 할 수 없는 경우가 존재합니다. KimpTrack은 <span class="nw">출금·입금이</span> 열렸는지 확인하고, 진짜 김프인지 판단해 사용자에게 실질적 이익을 가져다주고자 합니다.</p>
-        <a class="btn btn-lg" href="/app/">서비스로 넘어가기</a>
+        <h1 id="hero-title"><span class="h1-line">실시간 김프·역프,</span> <span class="h1-line">실제로 옮길 수 있는지까지</span></h1>
+        <p class="prose lead">KimpTrack(김프트랙)은 <span class="nw">업비트·빗썸과</span> <span class="nw">바이낸스·바이비트·비트겟</span> 사이의 <span class="nw">김프(김치 프리미엄)와</span> 역프를 매초 계산합니다. 맨 위 호가 대신 $1,000어치를 실제로 사고팔 때의 단가를 쓰고, 경로마다 출금과 입금이 열렸는지 네트워크 단위로 함께 보여 줍니다. 코인 약 400개를 가입 없이 무료로 볼 수 있습니다.</p>
+        <div class="cta">
+          <a class="btn btn-lg" href="/app/">실시간 김프 표 보기</a>
+          <a class="link" href="/app/?tab=history">김프 기록과 차트</a>
+        </div>
       </div>
-      <div>
-        <!-- 경로 카드 — 스크립트가 /api/landing 으로 채운다. 지어낸 숫자·자리표시 숫자는 넣지 않는다 (스펙 022 §3.5) -->
+      <!-- 실데이터 자리 — 스크립트가 /api/landing 으로 채운다. 지어낸 숫자·자리표시 숫자는 넣지 않는다 (스펙 022 §3.5).
+           data-nosnippet: 매초 바뀌는 값이 검색 결과·AI 답변에 '지금 값'처럼 남지 않게. 속성은 HTML 에 처음부터 둔다 -->
+      <div data-nosnippet>
         <div class="card" id="card">
-          <noscript><p class="card-msg">실시간 값은 자바스크립트를 켜면 보입니다</p></noscript>
+          <div class="card-msg">
+            <p class="card-msg-title">지금 가장 큰 경로</p>
+            <p>약 1,500개 경로 가운데 출금과 입금이 모두 열린 곳만 골라, 김프·역프가 가장 큰 경로를 이 자리에 보여 줍니다.</p>
+            <noscript><p>실시간 값은 자바스크립트를 켜면 보입니다.</p></noscript>
+          </div>
         </div>
         <div class="next" id="next" hidden>
-          <p class="next-title">다음 경로</p>
+          <p class="next-title">그다음으로 큰 경로</p>
           <ol id="next-list" role="list"></ol>
         </div>
       </div>
     </section>
 
-    <section class="wrap section" aria-labelledby="why-title">
-      <h2 id="why-title"><span class="nw">표시된 김프와</span> <span class="nw">먹을 수 있는 김프는</span> <span class="nw">다릅니다</span></h2>
+    <section class="wrap section" id="real" aria-labelledby="why-title">
+      <h2 id="why-title"><span class="nw">표시된 김프와</span> <span class="nw">실제로 먹을 수 있는 김프는</span> <span class="nw">다릅니다</span></h2>
       <div class="split">
         <div>
           <div class="point">
             <h3>호가창 깊이</h3>
-            <p class="prose">흔히 보는 김프는 가격 하나로 계산한 값입니다. 실제로 주문을 넣으면 호가창을 파고들면서 평균 단가가 밀리고, 주문이 클수록 그 차이도 커집니다. <span id="why-depth" hidden></span>원화와 USDT 환산도 은행 환율 대신 국내 거래소의 실제 USDT 호가로 <span class="nw">합니다<span id="why-rate" hidden></span>.</span></p>
+            <p class="prose">흔히 보는 김프는 가격 하나로 계산한 값입니다. 실제로 주문을 넣으면 호가창을 파고들면서 평균 단가가 밀리고, 주문이 클수록 그 차이도 커집니다. <span id="why-depth" data-nosnippet hidden></span>원화와 USDT 환산도 은행 환율 대신 국내 거래소의 실제 USDT 호가로 <span class="nw">합니다<span id="why-rate" data-nosnippet hidden></span>.</span></p>
           </div>
           <div class="point">
             <h3>입출금 상태</h3>
-            <p class="prose">김프가 아무리 커도 출금이나 입금이 막혀 있으면 코인을 옮길 수 없습니다. <span id="why-open" hidden></span>거래소마다 입출금을 네트워크 단위로 확인해서, 한쪽이라도 막혔거나 네트워크가 맞지 않으면 옮길 수 없는 경로로 표시합니다.</p>
+            <p class="prose">김프가 아무리 커도 출금이나 입금이 막혀 있으면 코인을 옮길 수 없습니다. <span id="why-open" data-nosnippet hidden></span>거래소마다 입출금을 네트워크 단위로 확인해서, 한쪽이라도 막혔거나 네트워크가 맞지 않으면 옮길 수 없는 경로로 표시합니다.</p>
           </div>
         </div>
         <figure class="shot">
-          <img src="landing/spreads.png" width="2040" height="1230" loading="lazy" decoding="async" alt="코인마다 슬리피지를 뺀 김프와 입출금 상태, 네트워크를 한 줄씩 보여 주는 대시보드 스프레드 탭 화면" />
+          <picture>
+            <source type="image/webp" srcset="landing/spreads-1020.webp 1020w, landing/spreads-2040.webp 2040w" sizes="(max-width: 719px) calc(100vw - 40px), (max-width: 959px) calc(100vw - 64px), 444px" />
+            <img src="landing/spreads.png" width="2040" height="1230" loading="lazy" decoding="async" alt="코인마다 슬리피지를 뺀 김프와 입출금 상태, 네트워크를 한 줄씩 보여 주는 대시보드 스프레드 탭 화면" />
+          </picture>
+          <figcaption>실시간 김프 표 — 코인마다 $1,000 체결 기준 김프·역프와 거래소별 입출금 상태, 네트워크를 한 줄로 보여 줍니다.</figcaption>
         </figure>
       </div>
+      <table class="tbl cmp" aria-label="흔한 김프 계산과 KimpTrack 계산 비교">
+        <thead>
+          <tr><th scope="col">항목</th><th scope="col">흔한 계산</th><th scope="col">KimpTrack</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">가격</th><td data-col="흔한 계산">맨 위 호가나 마지막 체결가 하나</td><td data-col="KimpTrack">$1,000어치를 호가창에 체결한 평균 단가</td></tr>
+          <tr><th scope="row">원화 환산</th><td data-col="흔한 계산">은행 환율</td><td data-col="KimpTrack">업비트·빗썸의 USDT(테더) 호가</td></tr>
+          <tr><th scope="row">입출금</th><td data-col="흔한 계산">코인 단위로 표시하거나 거래소에서 따로 확인</td><td data-col="KimpTrack">보내는 쪽 출금과 받는 쪽 입금을 같은 네트워크 기준으로 확인</td></tr>
+        </tbody>
+      </table>
     </section>
 
-    <section class="wrap section" aria-labelledby="events-title">
-      <h2 id="events-title">지난 7일, 벌어졌던 순간들</h2>
+    <section class="wrap section" id="events" aria-labelledby="events-title">
+      <h2 id="events-title">지난 7일 김프·역프 사건</h2>
       <div class="split">
         <div>
-          <p class="prose">1% 넘게 벌어져 1분 넘게 이어진 순간을 사건으로 남깁니다.<span id="events-sum" hidden></span></p>
-          <div id="events-table" hidden>
+          <p class="prose">맨 위 호가로 1% 이상 벌어져 1분 넘게 이어진 구간을 사건으로 남깁니다. 입출금이 막혔던 경로도 함께 남깁니다.<span id="events-sum" data-nosnippet hidden></span></p>
+          <div id="events-table" data-nosnippet hidden>
             <h3 class="ev-title">최근에 끝난 사건</h3>
-            <table class="ev">
+            <table class="tbl ev">
               <thead>
                 <tr><th scope="col">코인</th><th scope="col">경로</th><th scope="col">방향</th><th scope="col" class="num">최고</th><th scope="col" class="num">지속</th><th scope="col" class="num">끝난 시각</th></tr>
               </thead>
               <tbody id="events-rows"></tbody>
             </table>
           </div>
+          <p class="more"><a class="link" href="/app/?tab=history&amp;sym=BTC">비트코인(BTC) 김프 기록과 차트 보기</a></p>
         </div>
         <figure class="shot">
-          <img src="landing/history.png" width="2040" height="1230" loading="lazy" decoding="async" alt="BTC 김프를 1분 봉 차트로 그리고 거래소별 입출금 띠를 함께 보여 주는 대시보드 기록 탭 화면" />
+          <picture>
+            <source type="image/webp" srcset="landing/history-1020.webp 1020w, landing/history-2040.webp 2040w" sizes="(max-width: 719px) calc(100vw - 40px), (max-width: 959px) calc(100vw - 64px), 444px" />
+            <img src="landing/history.png" width="2040" height="1230" loading="lazy" decoding="async" alt="BTC 김프를 1분 봉 차트로 그리고 거래소별 입출금 띠를 함께 보여 주는 대시보드 기록 탭 화면" />
+          </picture>
+          <figcaption>김프 기록과 차트 — 코인·거래소별 맨 위 호가 기준 김프를 1분에서 1일까지 봉으로 그리고, 입출금이 막혔던 구간을 띠로 함께 보여 줍니다.</figcaption>
         </figure>
       </div>
     </section>
 
-    <section class="wrap section" aria-labelledby="build-title">
-      <h2 id="build-title">어떻게 만들었나</h2>
+    <section class="wrap section" id="kimp" aria-labelledby="kimp-title">
+      <h2 id="kimp-title">김프(김치 프리미엄)와 역프란</h2>
+      <dl class="terms">
+        <div>
+          <dt>김프(김치 프리미엄)</dt>
+          <dd>같은 코인이 국내 거래소에서 해외 거래소보다 비싸게 거래되는 정도입니다. 국내 원화 가격이 해외 가격을 원화로 바꾼 값보다 몇 % 높은지로 나타냅니다.</dd>
+        </div>
+        <div>
+          <dt>역프(역프리미엄)</dt>
+          <dd>반대로 국내 가격이 해외보다 싼 상태입니다. KimpTrack은 두 방향을 따로 계산해, 역프도 국내에서 사서 해외에서 팔 때 얼마나 벌어지는지를 양수로 보여 줍니다.</dd>
+        </div>
+        <div>
+          <dt>계산식</dt>
+          <dd>
+            <p><span class="formula">김프(%) = (국내 원화 가격 ÷ (해외 USDT 가격 × USDT 원화 가격) − 1) × 100</span></p>
+            <p><span class="formula">역프(%) = (해외 USDT 가격 × USDT 원화 가격 ÷ 국내 원화 가격 − 1) × 100</span></p>
+            <p>예를 들어 국내에서 10,500원인 코인이 해외에서 7.00 USDT이고 USDT가 1,450원이면, 해외 가격은 10,150원이라 김프는 약 3.45%입니다.</p>
+          </dd>
+        </div>
+        <div>
+          <dt>USDT(테더) 환산</dt>
+          <dd>해외 거래소 가격은 USDT 단위라 원화로 바꿔야 비교할 수 있습니다. KimpTrack은 은행 환율 대신 업비트·빗썸의 USDT 원화 호가를 씁니다. 돈이 실제로 원화 → USDT → 해외 거래소 순서로 움직이기 때문이고, 그래서 테더 김프도 값에 들어갑니다.</dd>
+        </div>
+        <div>
+          <dt>사건</dt>
+          <dd>맨 위 호가로 본 김프나 역프가 1% 이상 벌어져 1분 넘게 이어진 구간입니다. 0.5% 이하로 내려오면 끝난 것으로 봅니다.</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="wrap section" id="method" aria-labelledby="method-title">
+      <h2 id="method-title">KimpTrack이 김프를 계산하는 방법</h2>
       <ol class="steps" role="list">
         <li><span class="step-n" aria-hidden="true">1</span><h3>수집</h3><p><span class="nw">업비트·빗썸과</span> 해외 거래소 3곳의 호가를 실시간으로 받습니다. 입출금이 열려 있는지도 수시로 확인합니다.</p></li>
         <li><span class="step-n" aria-hidden="true">2</span><h3>계산</h3><p>매초 모든 코인의 <span class="nw">김프·역프를</span> 다시 계산합니다. 맨 위 호가 하나가 아니라 실제로 사고팔 때의 단가를 씁니다.</p></li>
-        <li><span class="step-n" aria-hidden="true">3</span><h3>기록</h3><p>계산한 값은 빠짐없이 저장합니다. 크게 벌어졌던 순간은 따로 모아 두어 나중에 다시 볼 수 있습니다.</p></li>
-        <li><span class="step-n" aria-hidden="true">4</span><h3>전달</h3><p>바뀐 값만 골라 보고 계신 화면에 곧바로 보냅니다.</p></li>
+        <li><span class="step-n" aria-hidden="true">3</span><h3>기록</h3><p>맨 위 호가로 계산한 값은 빠짐없이 저장합니다. 크게 벌어졌던 구간은 따로 모아 두어 나중에 다시 볼 수 있습니다.</p></li>
+        <li><span class="step-n" aria-hidden="true">4</span><h3>전달</h3><p>실시간 김프 표에는 바뀐 값만 골라 곧바로 보냅니다.</p></li>
       </ol>
+      <div class="limits">
+        <h3>반영하지 않는 것</h3>
+        <p class="prose">거래 수수료와 출금 수수료, 코인을 보내는 데 걸리는 시간과 그동안의 가격 변화, 출금 한도나 트래블룰 같은 거래소 정책은 계산에 넣지 않습니다. 실제로 옮기기 전에는 거래소에서 직접 확인해 주세요.</p>
+      </div>
+    </section>
+
+    <section class="wrap section" id="faq" aria-labelledby="faq-title">
+      <h2 id="faq-title">자주 묻는 질문</h2>
+      <div class="faq">
+        <div class="qa">
+          <h3>김프 사이트마다 숫자가 다른 이유는 무엇인가요?</h3>
+          <p>계산에 쓰는 가격과 환율이 다르기 때문입니다. 대개는 가격 하나와 은행 환율로 계산하지만, KimpTrack은 $1,000어치를 호가창에 체결한 평균 단가와 국내 거래소의 USDT 호가를 씁니다. 호가가 얇은 코인일수록 값이 작게 나옵니다.</p>
+        </div>
+        <div class="qa">
+          <h3>왜 $1,000 기준인가요?</h3>
+          <p>모든 코인의 호가창 두께를 같은 기준으로 비교하려는 것입니다. 금액이 클수록 단가가 더 밀리므로, 더 큰 금액을 옮긴다면 김프가 이보다 작아질 수 있습니다.</p>
+        </div>
+        <div class="qa">
+          <h3>환율은 무엇을 쓰나요?</h3>
+          <p>은행 환율이 아니라 업비트·빗썸이 각자 가진 USDT(테더) 원화 호가를 씁니다. 은행 환율 대신 이 호가를 쓰기 때문에 테더 김프가 값에 들어갑니다. 김프는 USDT를 사는 쪽이라 매도호가를, 역프는 USDT를 파는 쪽이라 매수호가를 씁니다.</p>
+        </div>
+        <div class="qa">
+          <h3>옮길 수 없는 경로는 어떻게 판단하나요?</h3>
+          <p>보내는 거래소의 출금과 받는 거래소의 입금을 같은 네트워크 기준으로 확인합니다. 한쪽이라도 막혔거나, 상태를 확인하지 못했거나, 두 거래소가 같은 네트워크를 지원하지 않으면 옮길 수 없는 경로로 봅니다.</p>
+        </div>
+        <div class="qa">
+          <h3>수수료와 전송 시간도 반영하나요?</h3>
+          <p>아니요. 거래·출금 수수료와 전송 시간, 그 사이의 가격 변화는 빠져 있습니다. 표시된 김프만큼 수익이 난다는 뜻이 아닙니다.</p>
+        </div>
+        <div class="qa">
+          <h3>얼마나 자주 갱신되나요?</h3>
+          <p>모든 경로를 매초 다시 계산합니다. 이 페이지의 카드는 화면을 보고 있는 동안 10초마다 새 값을 받고, 실시간 김프 표는 바뀐 값을 곧바로 받습니다.</p>
+        </div>
+        <div class="qa">
+          <h3>가입이나 비용이 필요한가요?</h3>
+          <p>아니요. 로그인이나 앱 설치 없이 웹에서 무료로 볼 수 있습니다. 실시간 김프 표는 PC 화면에 맞춰 만들었습니다.</p>
+        </div>
+        <div class="qa">
+          <h3>매수·매도 신호를 주나요?</h3>
+          <p>아니요. 거래소 사이의 가격 차이와 입출금 상태를 보여 줄 뿐, 언제 사고팔지 권하지 않습니다.</p>
+        </div>
+      </div>
     </section>
   </main>
 
   <footer class="wrap foot">
-    <a href="/app/">서비스로 넘어가기</a>
+    <nav class="foot-nav" aria-label="바로 가기">
+      <a href="/app/">실시간 김프 표</a>
+      <a href="/app/?tab=history">김프 기록과 차트</a>
+      <a href="#kimp"><span class="nw">김프·역프란</span></a>
+      <a href="#method">계산 방법</a>
+      <a href="#faq">자주 묻는 질문</a>
+    </nav>
+    <p class="notice">KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다.</p>
+    <p>운영 고원규·이진중 · 문의 <a class="link" href="mailto:joseph13ko15@gmail.com">joseph13ko15@gmail.com</a>, <a class="link" href="mailto:untilduck@gmail.com">untilduck@gmail.com</a></p>
+    <p>설명을 마지막으로 고친 날 <time datetime="2026-10-01">2026년 10월 1일</time></p>
   </footer>
 
   <script>
@@ -305,6 +526,7 @@
       const card = $('card')
       const next = $('next')
       const nextList = $('next-list')
+      const intro = card.innerHTML // 값이 오기 전의 설명 — 크롤러와 첫 화면이 보는 글. 실패하면 이 글 아래에 안내를 단다
       const whyDepth = $('why-depth')
       const whyRate = $('why-rate')
       const whyOpen = $('why-open')
@@ -354,9 +576,13 @@
         + '&h.dom=' + encodeURIComponent(r.dom) + '&h.fx=' + encodeURIComponent(r.fx)
 
       // 10초마다 다시 그려도 키보드 포커스가 사라지지 않게 — 같은 자리의 링크로 되돌린다
+      // 그린 글이 직전과 같으면 DOM 을 건드리지 않는다 — 포커스가 튀거나 스크린리더가 같은 링크를 다시 읽지 않게
+      const drawn = new WeakMap()
       const keepFocus = (box, html) => {
+        if (drawn.get(box) === html) return
         const i = [...box.querySelectorAll('a')].indexOf(document.activeElement)
         box.innerHTML = html
+        drawn.set(box, html)
         if (i >= 0) box.querySelectorAll('a')[i]?.focus()
       }
 
@@ -382,14 +608,15 @@
           + `<line class="zero" x1="0" x2="100" y1="${y(0)}" y2="${y(0)}" vector-effect="non-scaling-stroke" />`
           + `<path d="${d}" vector-effect="non-scaling-stroke" /></svg>`
           + `<span class="trail-dot" style="left:${x(last[0])}%;top:${y(last[1])}%"></span>`
-          + `</div></div><p class="trail-label">최근 1시간 · 최우선 호가 기준</p></div>`
+          + `</div></div><p class="trail-label">최근 1시간 · 맨 위 호가 기준</p></div>`
       }
 
       function renderCard(live, trail) {
         card.classList.remove('is-stale')
         const t = live.top[0]
         if (!t) {
-          card.innerHTML = '<p class="card-msg">지금 옮길 수 있는 경로가 없습니다</p>'
+          drawn.delete(card) // 직접 바꾼 자리 — 다음 그림이 직전 그림과 같아도 다시 그리게
+          card.innerHTML = '<div class="card-msg"><p class="card-msg-title">지금 가장 큰 경로</p><p>지금 옮길 수 있는 경로가 없습니다. 출금과 입금이 모두 열린 경로가 생기면 이 자리에 보여 줍니다.</p></div>'
           next.hidden = true
           valueKey = null
           return
@@ -437,8 +664,8 @@
         whyRate.textContent = `(지금 업비트 ₩${Math.round(live.rate).toLocaleString('ko-KR')})`
         whyRate.hidden = false
         whyOpen.innerHTML = (live.over1 === 0
-          ? '지금은 맨 위 호가로 1% 넘게 벌어진 곳이 없습니다.'
-          : `지금 맨 위 호가로 1% 넘게 벌어진 <span class="nw">김프·역프</span> ${fmtCount(live.over1)}건 가운데 실제로 옮길 수 있는 건 ${fmtCount(live.over1Movable)}건입니다.`) + ' '
+          ? '지금은 맨 위 호가로 1% 이상 벌어진 곳이 없습니다.'
+          : `지금 맨 위 호가로 1% 이상 벌어진 <span class="nw">김프·역프</span> ${fmtCount(live.over1)}건 가운데 실제로 옮길 수 있는 것은 ${fmtCount(live.over1Movable)}건입니다.`) + ' '
         whyOpen.hidden = false
       }
 
@@ -446,7 +673,7 @@
         eventsSum.hidden = !ev
         eventsTable.hidden = !ev || ev.top.length === 0
         if (!ev) return
-        eventsSum.textContent = ` 지난 7일 ${fmtCount(ev.count)}건(김프 ${fmtCount(ev.kimp)}건, 역프 ${fmtCount(ev.reverse)}건), 지금 진행 중 ${fmtCount(ev.open)}건.`
+        eventsSum.textContent = ` 지난 7일 동안 ${fmtCount(ev.count)}건(김프 ${fmtCount(ev.kimp)}건, 역프 ${fmtCount(ev.reverse)}건)이 있었고, 지금 ${fmtCount(ev.open)}건이 진행 중입니다.`
         keepFocus(eventsRows, ev.top.map((e) => {
           return `<tr><td class="c-sym"><a href="${esc(historyLink(e))}">${esc(e.sym)}</a></td>`
             + `<td class="c-route">${esc(exName(e.dom))} · ${esc(exName(e.fx))}</td>`
@@ -458,7 +685,9 @@
 
       function showError() {
         card.classList.remove('is-stale')
-        card.innerHTML = '<div class="card-msg"><p>실시간 값을 불러오지 못했습니다</p><a class="btn" href="/app/">서비스로 넘어가기</a></div>'
+        drawn.delete(card)
+        card.innerHTML = intro
+        card.querySelector('.card-msg')?.insertAdjacentHTML('beforeend', '<p>실시간 값을 불러오지 못했습니다.</p><a class="btn" href="/app/">실시간 김프 표 보기</a>')
         next.hidden = true
         whyDepth.hidden = true
         whyRate.hidden = true
@@ -533,7 +762,10 @@
         if (link) link.click()
       })
 
-      card.innerHTML = '<p class="card-msg">값을 받는 중입니다</p>'
+      // 뒤로 가기로 돌아온 페이지(bfcache)는 멈춰 있던 값이라 곧바로 새로 받는다
+      window.addEventListener('pageshow', (e) => {
+        if (e.persisted) load()
+      })
       load()
       setInterval(tickAge, 1000)
     })()

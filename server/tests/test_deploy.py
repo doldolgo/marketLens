@@ -142,8 +142,11 @@ def test_compose_caddy_fronts_web_with_domain_tls_and_plain_fallback() -> None:
         "볼륨이 없으면 재배포마다 재발급 → Let's Encrypt 한도"
     )
     conf = _text("caddy/Caddyfile")
-    # 도메인 두 개는 자동 HTTPS, 그 밖의 호스트(IP 직접)는 평문 catch-all — 둘 다 nginx(web:80) 로
-    assert "kimptrack.com, www.kimptrack.com {" in conf
+    # apex 는 자동 HTTPS, 그 밖의 호스트(IP 직접)는 평문 catch-all — 둘 다 nginx(web:80) 로.
+    # www 는 http·https 모두 apex 로 301 만 한다(022 — 중복 호스트를 리다이렉트로 합친다)
+    assert "\nkimptrack.com {" in conf
+    assert "www.kimptrack.com, http://www.kimptrack.com {" in conf
+    assert "redir https://kimptrack.com{uri} permanent" in conf
     assert "http:// {" in conf
     assert conf.count("reverse_proxy web:80") == 2
     # HTTP/3 은 UDP 443 을 안 열므로 광고하지 않는다
@@ -395,6 +398,25 @@ def test_nginx_falls_back_to_index_under_app_only() -> None:
     assert "try_files $uri $uri/ /app/index.html;" in conf
     assert "try_files /landing.html =404;" in conf
     assert "return 301 /app/$is_args$args;" in conf
+    # 022 — 옛 대시보드 링크(tab, 또는 기본 탭이라 tab 없이 남은 s.* 키)만 /app/ 로. utm 같은 다른 쿼리는 랜딩을 그대로 준다
+    legacy = 'if ($args ~ "(^|&)(tab|s\\.[a-z]+)=") { return 301 /app/$is_args$args; }'
+    assert legacy in conf
+    assert "if ($args)" not in conf
+    pattern = re.compile(r"(^|&)(tab|s\.[a-z]+)=")
+    for args in (
+        "tab=history&sym=BTC",
+        "s.q=xrp",
+        "s.view=rev&s.sort=val:asc",
+        "a=1&s.fxoff=bybit",
+    ):
+        assert pattern.search(args), args
+    for args in (
+        "utm_source=naver&fbclid=x",
+        "NaPm=ct%3Dabc",
+        "utm_source=s.q",
+        "gclid=1&stab=1",
+    ):
+        assert not pattern.search(args), args
     assert "try_files $uri $uri/ /index.html;" not in conf
 
 
