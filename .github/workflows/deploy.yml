@@ -11,6 +11,14 @@ on:
   push:
     branches: [main]
 
+# 배포는 한 번에 하나(007 §3). 도는 실행은 세 박스를 끝까지 돌고, 그 사이 머지된 푸시는 pending 으로 기다린다.
+# pending 은 최신 하나뿐(queue 기본값 single) — 기다리던 실행은 더 새 푸시에 자리를 내주고 취소된다.
+# 잃는 커밋은 없다: 스크립트가 트리거 커밋이 아니라 그 순간의 origin/main 을 따르므로 마지막 실행이 main 끝을 배포한다.
+# 도는 실행을 끊지 않는다 — 끊으면 박스 사슬이나 up --build 중간에 멈춰 막으려던 반쪽 배포가 남는다.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
 jobs:
   data:
     runs-on: ubuntu-latest
