@@ -26,6 +26,7 @@
 | `/app` | `301 /app/` |
 | `/app/…` | 대시보드 |
 | `/api/landing` | `api:8000/landing` |
+| `/privacy` | privacy.html(032) |
 | 없는 루트 경로 | `404.html`(404) |
 | `www` | `301` apex |
 
@@ -109,7 +110,7 @@ KimpTrack                  김프·역프란  계산 방법  자주 묻는 질�
    4. 전달 — "실시간 김프 표에는 바뀐 값만 골라 곧바로 보냅니다."(이 랜딩은 10초 폴링이다)
    그 아래 소제목 "반영하지 않는 것" — "거래 수수료와 출금 수수료, 코인을 보내는 데 걸리는 시간과 그동안의 가격 변화, 출금 한도나 트래블룰 같은 거래소 정책은 계산에 넣지 않습니다. 실제로 옮기기 전에는 거래소에서 직접 확인해 주세요."
 7. **자주 묻는 질문**(h2, #faq) — 늘 펼친 h3 질문 + 답 8개(데스크톱 두 칸). 질문: 김프 사이트마다 숫자가 다른 이유 / 왜 $1,000 기준인가 / 환율은 무엇을 쓰나 / 옮길 수 없는 경로 판단 / 수수료·전송 시간 반영(아니요 — "표시된 김프만큼 수익이 난다는 뜻이 아닙니다") / 갱신 주기(매초 계산, 이 카드는 보이는 동안 10초) / 가입·비용(아니요, 실시간 김프 표는 PC 화면용) / 매수·매도 신호(아니요). 답 문장은 `landing.html` 이 진실이고, 사실은 이 스펙의 다른 절과 같아야 한다.
-8. **바닥** — 바로 가기(실시간 김프 표·김프 기록과 차트·김프·역프란·계산 방법·자주 묻는 질문), 참고값 안내 한 줄 "KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다.", "운영 고원규·이진중 · 문의 joseph13ko15@gmail.com, untilduck@gmail.com"(메일은 `mailto:` 링크 — 2026-10-01 사람이 준 값, 032 처리방침과 같은 운영 주체), "설명을 마지막으로 고친 날 {날짜}"(`<time>`, §3.6).
+8. **바닥** — 바로 가기(실시간 김프 표·김프 기록과 차트·김프·역프란·계산 방법·자주 묻는 질문·개인정보 처리방침 — 마지막 칸은 `/privacy`, 가장 밝고 굵게, 032), 참고값 안내 한 줄 "KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다.", "운영 고원규·이진중 · 문의 joseph13ko15@gmail.com, untilduck@gmail.com"(메일은 `mailto:` 링크 — 2026-10-01 사람이 준 값, 032 처리방침과 같은 운영 주체), "설명을 마지막으로 고친 날 {날짜}"(`<time>`, §3.6).
 - 수익을 약속하는 말(이득·이익·수익·차익·무위험)은 제목·설명·h1 에 쓰지 않는다. 본문에서는 "수익이 난다는 뜻이 아닙니다" 처럼 부정하는 자리에만.
 
 ### 3.4 시각 규칙
@@ -138,10 +139,10 @@ KimpTrack                  김프·역프란  계산 방법  자주 묻는 질�
 - `og:image` `https://kimptrack.com/landing/og-v2.png`(1200×630, `og:image:type`·`width`·`height`·`alt`) — 어두운 배경에 워드마크, h1 두 줄, "$1,000 체결 단가 · 경로마다 출금·입금 확인", 5개 거래소 이름. 실시간 값은 넣지 않는다(미리보기는 오래 남는다). 그림을 바꾸면 파일 이름을 바꾼다 — 카카오·텔레그램이 같은 주소의 그림을 다시 받지 않는다.
 - 아이콘 — 워드마크(두 점과 선)를 어두운 둥근 사각형에 담은 한 모양. `favicon.ico`(16·32·48), `favicon.svg`(대시보드), `icon-192.png`, `apple-touch-icon.png`(180), `logo-512.png`(Organization 로고). 랜딩 head 에는 `rel=icon`(192 PNG)·`rel=apple-touch-icon` 하나씩, **절대 주소**(구글은 SVG 파비콘을 쓰지 않고 네이버는 상대 경로를 읽지 않는다). 주소는 바꾸지 않는다.
 - **구조화 데이터** — head 에 JSON-LD 한 블록(`@graph`, 절대 주소, 스크립트로 넣지 않는다): `WebSite`(name KimpTrack, alternateName ["김프트랙"], url, inLanguage ko-KR, publisher) · `Organization`(name, url, logo 512, email 두 개, member 고원규·이진중 — 바닥에 보이는 값과 같다) · `WebPage`(name = title, description = description, isPartOf, about, primaryImageOfPage = og 그림, dateModified) · `WebApplication`(name, url `/app/`, applicationCategory FinanceApplication, operatingSystem Web, isAccessibleForFree, offers 0 KRW, description, screenshot 두 장, publisher). 평점·리뷰는 넣지 않는다(지어낸 평점 금지) — 그래서 구글 리치 결과 테스트·Search Console 'Software apps' 에는 WebApplication 이 invalid 로 뜬다(의도 — 리치 결과 대상이 아닐 뿐 순위 불이익은 없고, 네이버 Software 는 평점 없이 받는다). 보이는 글과 같은 값만 쓴다.
-- **설명을 고친 날** — 바닥의 `<time datetime>`, `WebPage.dateModified`, `sitemap.xml` 의 `lastmod` 가 같은 날짜다. 설명 글을 실제로 고칠 때만 올린다(실시간 값이 바뀌었다고 올리지 않는다).
+- **설명을 고친 날** — 바닥의 `<time datetime>`, `WebPage.dateModified`, `sitemap.xml` 의 `/` 줄 `lastmod` 가 같은 날짜다. 설명 글을 실제로 고칠 때만 올린다(실시간 값이 바뀌었다고 올리지 않는다).
 - **실시간 값은 스니펫에서 뺀다** — 경로 카드와 그다음 경로를 감싼 `div`, 3번 섹션의 실데이터 `span` 셋, 사건 요약 `span`·표 `div` 에 `data-nosnippet` 을 HTML 에 처음부터 둔다(구글은 span·div·section 에서만 읽고, 스크립트로 붙인 속성은 믿지 않는다). 매초 바뀌는 값이 몇 주 뒤 검색 결과·AI 답변에 '지금 값' 처럼 남지 않게. 정의·방법·질문과 답은 스니펫에 열어 둔다.
 - `robots.txt` — 규칙 네 줄 `User-agent: *` / `Allow: /api/landing` / `Disallow: /api/` / `Sitemap: https://kimptrack.com/sitemap.xml`(주석 줄 — 다음 PIN — 은 더해도 된다). 더 긴 규칙이 이겨(RFC 9309) 검색 로봇은 랜딩을 그릴 때 실데이터를 받고, 그 밖의 API 는 막힌다. 학습용 봇도 막지 않는다(따로 정할 일).
-- `sitemap.xml` — `https://kimptrack.com/` 하나와 `lastmod`. `/app/` 은 넣지 않는다.
+- `sitemap.xml` — `https://kimptrack.com/` 과 `https://kimptrack.com/privacy`(032 — `lastmod` 는 방침 시행일) 두 줄, 각각 `lastmod`. `/app/` 은 넣지 않는다.
 - **대시보드 셸**(`web/index.html`) — 정적 `<meta name="robots" content="noindex, follow">`(스크립트로 바꾸지 않는다 — 구글은 noindex 를 보면 렌더링 전에 건너뛴다), description, 공유 미리보기용 og(title "KimpTrack - 실시간 김프 표", 그림은 랜딩과 같은 `og-v2.png`, url `/app/`). `<title>KimpTrack</title>` 은 007 의 스모크 문자열이라 그대로.
 - **검색엔진 등록은 사람 몫** — 구글 Search Console 은 도메인 속성(Cloudflare DNS TXT), 네이버 서치어드바이저는 `https://kimptrack.com` 을 등록하고 소유 확인(메타 태그면 head 에 `naver-site-verification` 한 줄, HTML 파일이면 `web/public/` 에), 두 곳 모두 `sitemap.xml` 제출. 다음 웹마스터도구는 `robots.txt` 맨 위에 PIN 주석 줄. 문구·그림을 바꾼 뒤에는 카카오 공유 디버거로 OG 캐시를 지운다.
 - `spreads.png`·`history.png`: `https://kimptrack.com/app/` 실화면을 1360×820 @1.5x 로 찍는다(스프레드 탭 기본 화면, 기록 탭 `?tab=history&sym=BTC`). 다시 찍으면 WebP 두 크기(1020·2040)도 다시 만든다.

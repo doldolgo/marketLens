@@ -79,21 +79,20 @@ SSL/TLS → Edge Certificates 의 Universal SSL 이 Active(`*.kimptrack.com` 을
 - 확인: `curl -sI https://kimptrack.com/` 의 인증서가 여전히 Let's Encrypt(caddy, 023).
 
 ### 12. 관리자 접속 기록 회전 (serve 박스, 029 기록)
-nginx 가 컨테이너 안에서 파일을 연 채 쓰므로 `copytruncate`. 주 1회·13개 ≈ 90일.
+nginx 가 컨테이너 안에서 파일을 연 채 쓰므로 `copytruncate`. 매일·90개 = 90일(032 처리방침의 보관 기간) — 빈 날도 회전해야(`ifempty`) 90개가 곧 90일이다. 바꾼 뒤에는 아래 블록을 다시 적용한다.
 ```bash
 sudo tee /etc/logrotate.d/marketlens-admin >/dev/null <<'EOF'
 /home/ubuntu/marketlens/logs/admin/access.log {
-    weekly
-    rotate 13
+    daily
+    rotate 90
     copytruncate
     missingok
-    notifempty
+    ifempty
     su root root
 }
 EOF
 sudo logrotate -d /etc/logrotate.d/marketlens-admin   # 오류 없이 rotating pattern … 한 줄
 ```
-보존 기간은 후속 처리방침 스펙이 정하면 여기를 고친다.
 
 ## 배포·런북 뒤 확인 (030 §4 사람 항목 — 결과는 status.md admin 행에)
 - OTP 로그인 뒤 화면·API 문서·Try it out·즉시 갱신 동작 / 허용 안 된 이메일은 코드를 못 받는다 / 응답 `Set-Cookie` 에 `SameSite=Lax`·`HttpOnly`.

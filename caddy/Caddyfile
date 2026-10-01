@@ -3,6 +3,10 @@
 # 027 — 이 파일은 caddy/ 디렉터리째 바인드된다. 파일 하나를 바인드하면 git 이 새 파일로 바꿔 써도 컨테이너는
 #   옛 내용을 본다. serve 배포가 up 뒤에 `caddy reload` 로 다시 읽힌다 — 깨진 설정은 다음 caddy 재시작에서
 #   사이트 전체를 내리므로, 고친 PR 은 로컬 `caddy validate` 결과를 본문에 적는다.
+# 032 — 단 `output file` 블록(roll_*)은 reload 로 바뀌지 않는다 — caddy 가 파일 writer 를 파일 이름으로 재사용한다
+#   (2.11.4 로컬 재현, format 의 지우기 규칙은 reload 로 바뀐다). 그 블록을 고친 배포 뒤엔 사람이 serve 에서
+#   `docker compose --profile serve --env-file .env --env-file server/.env up -d --force-recreate caddy` 로
+#   caddy 를 한 번 다시 만든다(몇 초 끊김, 인증서는 볼륨에 있다).
 {
 	# HTTP/3(UDP 443)는 compose 에서 안 열므로 광고하지 않는다 — 브라우저가 QUIC 을 헛시도하지 않게
 	servers {
@@ -10,19 +14,15 @@
 	}
 	# 027 §3.2 — 기본 로거(오류 줄 — 예: 업스트림 502. docker 로그로 간다)에도 접속 로그와 같은 지우기 규칙.
 	# docker 로그에 원 IP·검색어가 남지 않게. 아래 access_log 조각의 format 과 같아야 한다(test_observability.py 가 본다).
+	# 032 — 단 IP 두 필드는 자르지 않고 지운다. 오류 줄에는 IP 가 필요 없고, docker 로그는 크기로만 회전해 방문이 적으면
+	# 처리방침의 90일보다 오래 남는다.
 	log default {
 		format filter {
 			wrap json
 			request>headers delete
 			resp_headers delete
-			request>remote_ip ip_mask {
-				ipv4 24
-				ipv6 48
-			}
-			request>client_ip ip_mask {
-				ipv4 24
-				ipv6 48
-			}
+			request>remote_ip delete
+			request>client_ip delete
 			request>uri query {
 				delete s.q
 				delete g.q
@@ -52,11 +52,14 @@
 
 	log {
 		# 호스트 ./logs/caddy/ (compose 바인드, git 무시). 0644 — 사람이 호스트에서 읽게.
-		# 50MiB 에서 회전, gzip 된 회전 파일 5개, 회전 파일은 90일 뒤 지운다(caddy 기본과 같은 값).
+		# 032 — 하루(또는 50MiB)마다 회전, gzip 된 회전 파일 100개(하루 1개 × 90일 + 크기 회전 여유). 보관 기간(90일)이
+		# 지난 회전 파일은 다음 회전 때 지운다 — 방문이 없으면 회전이 없어 늦어질 수 있다(032 §3.5). 크기로만 회전하면
+		# 방문이 적을 때 90일보다 오래된 줄이 현재 파일에 남는다. roll_interval 은 Caddy 2.11 부터다.
 		output file /var/log/caddy/access.log {
 			mode 0644
 			roll_size 50MiB
-			roll_keep 5
+			roll_interval 24h
+			roll_keep 100
 			roll_keep_for 90d
 		}
 		format filter {

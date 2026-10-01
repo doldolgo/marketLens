@@ -125,7 +125,12 @@ export default function App() {
             </button>
           ))}
         </div>
-        <div style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-500)', fontSize: 12 }}>
+        {/* 032 — 방침은 새 탭으로. 열어 둔 대시보드의 WebSocket 을 끊지 않게. 푸터가 아닌 이유: 입출금 레이더 탭은 셸 푸터를 그리지 않는다 */}
+        <a href="/privacy" target="_blank" rel="noopener" className="hv-txt"
+          style={{ marginLeft: 'auto', color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
+          개인정보 처리방침
+        </a>
+        <div style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-500)', fontSize: 12 }}>
           {clock} KST
         </div>
       </div>

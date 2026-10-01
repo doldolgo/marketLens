@@ -120,23 +120,32 @@ SCRUB = [
 
 
 def test_access_log_snippet_writes_rotated_0644_file() -> None:
-    """파일 `/var/log/caddy/access.log`·0644·50MiB 회전·회전 파일 5개·90일 (§3.2)."""
+    """파일 `/var/log/caddy/access.log`·0644·하루 또는 50MiB 회전·회전 파일 100개·90일 (§3.2, 032 §3.5)."""
     log = _block(_snippet(), "log")
     output = _block(log, "output", "file", "/var/log/caddy/access.log")
     assert output == [
         (["mode", "0644"], None),
         (["roll_size", "50MiB"], None),
-        (["roll_keep", "5"], None),
+        (["roll_interval", "24h"], None),
+        (["roll_keep", "100"], None),
         (["roll_keep_for", "90d"], None),
     ]
 
 
 def test_access_log_and_default_logger_share_the_scrub_rules() -> None:
-    """헤더 통째 삭제·IP 두 필드 /24·/48·검색어 세 키 삭제 — 기본 로거(오류 줄)도 같다 (§3.2)."""
+    """헤더 통째 삭제·IP 두 필드 /24·/48·검색어 세 키 삭제 (§3.2). 기본 로거(오류 줄)도 같되 IP 두 필드는
+    자르지 않고 지운다 — docker 로그가 처리방침의 90일보다 오래 남을 수 있다 (032 §3.5)."""
     access = _block(_block(_snippet(), "log"), "format", "filter")
     assert access == SCRUB
     default = _block(_block(_block(_caddyfile()), "log", "default"), "format", "filter")
-    assert default == SCRUB
+    ip_fields = ("request>remote_ip", "request>client_ip")
+    assert [(args, c) for args, c in default if args[0] not in ip_fields] == [
+        (args, c) for args, c in SCRUB if args[0] not in ip_fields
+    ]
+    assert [args for args, c in default if args[0] in ip_fields] == [
+        [field, "delete"] for field in ip_fields
+    ]
+    assert all(c is None for args, c in default if args[0] in ip_fields)
 
 
 def test_access_log_appends_only_ua_and_origin_referer() -> None:
@@ -215,7 +224,7 @@ def test_compose_binds_caddy_dir_and_host_log_dir() -> None:
     assert "logs/" in _text(".gitignore").splitlines()
 
 
-# 공개 server 의 location 전부 — 027 은 접속 로그만 끄고 분기는 건드리지 않는다 (§4)
+# 공개 server 의 location 전부 — 027 은 접속 로그만 끄고 분기는 건드리지 않는다 (§4). 방침 셋은 032
 PUBLIC_LOCATIONS = {("=", path) for path in PUBLIC_API} | {
     ("=", "/api"),
     ("/api/",),
@@ -225,6 +234,9 @@ PUBLIC_LOCATIONS = {("=", path) for path in PUBLIC_API} | {
     ("=", "/app"),
     ("=", "/landing.html"),
     ("=", "/app/landing.html"),
+    ("=", "/privacy"),
+    ("=", "/privacy.html"),
+    ("=", "/app/privacy.html"),
     ("/app/assets/",),
     ("=", "/app/index.html"),
     ("/app/",),
