@@ -93,3 +93,94 @@ async def test_deleting_the_key_calls_on_the_next_request() -> None:
     w.advance(sec=60)
     await w.get()
     assert len(w.clarity.requests) == 2
+
+
+async def test_every_address_form_loses_query_hash_and_user_info() -> None:
+    export = [
+        {
+            "metricName": "Popular Pages",
+            "information": [
+                {"url": "HTTPS://kimptrack.com/app/?gclid=SECRET1#top"},
+                {"url": "  https://kimptrack.com/?q=SECRET2"},
+                {"url": "kimptrack.com/app/?utm_source=SECRET3"},
+                {"url": "https://u:SECRET4@kimptrack.com/privacy?x=1"},
+                {"https://kimptrack.com/?q=SECRET5": "4"},  # 키에 든 주소
+                {"title": "김프란? | KimpTrack", "os": "Android/14?"},  # 주소 꼴이 아님
+            ],
+        },
+        {
+            "metricName": "Referrer URL",
+            "information": [
+                {"url": "android-app://com.google.android.gm/?x=SECRET6"},
+                {"url": "www.google.com/search?q=SECRET7"},
+            ],
+        },
+    ]
+    w = World(Clarity((200, export)))
+    body = await w.get()
+    pages, referrers = body["metrics"]
+    assert pages["rows"] == [
+        {"url": "https://kimptrack.com/app/"},
+        {"url": "https://kimptrack.com/"},
+        {"url": "kimptrack.com/app/"},
+        {"url": "https://kimptrack.com/privacy"},
+        {"https://kimptrack.com/": "4"},
+        {"title": "김프란? | KimpTrack", "os": "Android/14?"},
+    ]
+    assert referrers["rows"] == [
+        {"url": "android-app://com.google.android.gm"},
+        {"url": "www.google.com"},
+    ]
+    stored = json.dumps(w.stored())
+    for leak in ("SECRET", "gclid", "u:", "#top"):
+        assert leak not in stored and leak not in json.dumps(body), leak
+
+
+NOT_JSON_STANDARD = (
+    b'[{"metricName":"Traffic","information":[{"totalSessionCount":"5",'
+    b'"PagesPerSessionPercentage":NaN}]},'
+    b'{"metricName":"Scroll Depth","information":[{"avg":NaN,"max":Infinity,'
+    b'"min":-Infinity,"big":1e400,"n":2.5}]},'
+    b'{"metricName":"Page Title","information":[{"title":"Kimp \\ud83d","\\udc00k":"1"}]}]'
+)
+
+
+async def test_non_finite_numbers_become_null_and_lone_surrogates_question_marks() -> (
+    None
+):
+    w = World(Clarity((200, NOT_JSON_STANDARD)))
+    body = await w.get()
+    assert body["state"] == "ok"
+    assert body["traffic"] == {
+        "sessions": 5,
+        "botSessions": None,
+        "users": None,
+        "pagesPerSession": None,
+    }
+    depth, title = body["metrics"]
+    assert depth["rows"] == [
+        {"avg": None, "max": None, "min": None, "big": None, "n": 2.5}
+    ]
+    assert title["rows"] == [{"title": "Kimp ?", "?k": "1"}]
+    raw = fakeredis.FakeRedis(server=w.server).get("admin:clarity")
+    assert b"NaN" not in raw and b"Infinity" not in raw
+    json.loads(raw, parse_constant=lambda c: pytest.fail(c))  # 표준 JSON 으로 저장
+
+
+@pytest.mark.parametrize(
+    "junk",
+    [["a", "b"], [{"metricName": "Traffic", "information": "notalist"}], [{}]],
+)
+async def test_a_list_without_any_metric_is_error_and_keeps_the_last_success(
+    junk: list,
+) -> None:
+    w = World(Clarity((200, EXPORT), (200, junk), (200, [])))
+    ok = await w.get()
+    w.advance(3)
+    body = await w.get()
+    assert (body["state"], body["code"]) == ("error", "ValueError")
+    assert body["fetchedAt"] == ok["fetchedAt"] and body["traffic"] == ok["traffic"]
+    assert w.stored()["values"]["traffic"] == ok["traffic"]
+    w.advance(3)
+    empty = await w.get()  # 빈 목록 = 자료 없음 — 성공이다
+    assert (empty["state"], empty["traffic"], empty["metrics"]) == ("ok", None, [])

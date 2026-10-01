@@ -66,6 +66,10 @@ class Clarity:
         if self.gate is not None:
             await self.gate.wait()
         status, body = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+        if isinstance(body, bytes):  # JSON 표준 밖 리터럴 등 — 받은 바이트 그대로
+            return httpx.Response(
+                status, content=body, headers={"content-type": "application/json"}
+            )
         return httpx.Response(status, json=body)
 
     @property
