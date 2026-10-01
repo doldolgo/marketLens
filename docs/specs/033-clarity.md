@@ -1,6 +1,6 @@
 # 033 — clarity
 
-상태: TODO | 의존: **032 privacy 가 게시된 뒤에 켠다** — 이 PR 은 032 위에 쌓여(같은 줄기, 032 가 먼저 머지·게시된다) ID 를 넣어 머지한다(§3.1, ID 가 비어 있으면 아무것도 안 한다). 계약을 쓰는 스펙: 032 privacy(처리방침 파일·분석 동의 값·동의 전에 알릴 사항), 002 web-shell(URL 쿼리 상태), 022 landing(정적 랜딩), 027 observability(caddy 쿼리 키 삭제), 007 deploy(nginx 정적 규칙), 013·014(기록 탭 심볼 검색)
+상태: DONE | 의존: **032 privacy 가 게시된 뒤에 켠다** — 이 PR 은 032 위에 쌓여(같은 줄기, 032 가 먼저 머지·게시된다) ID 를 넣어 머지한다(§3.1, ID 가 비어 있으면 아무것도 안 한다). 계약을 쓰는 스펙: 032 privacy(처리방침 파일·분석 동의 값·동의 전에 알릴 사항), 002 web-shell(URL 쿼리 상태), 022 landing(정적 랜딩), 027 observability(caddy 쿼리 키 삭제), 007 deploy(nginx 정적 규칙), 013·014(기록 탭 심볼 검색)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -141,7 +141,7 @@ Clarity 동작(clarity-js 0.8.71, 2026-09-25 커밋 코드를 2026-10-01 에 읽
   - 싣는 곳: `web/index.html`·`web/public/landing.html` 이 파일을 `defer` 로 한 번씩 싣고 `#root`·랜딩 `<body>` 에 `data-clarity-unmask="true"`. 랜딩 바닥 nav 와 `web/src/App.tsx` 에 '화면 분석 설정' → `/privacy#consent`(대시보드는 `noopener`), 랜딩 글자가 글꼴 서브셋에 모두 있다(022 의 `test_landing_seo.py`). `web/admin/*`·`privacy.html`·`404.html` 에 `clarity.js`·`clarity.ms` 가 없다(관리자 스크립트는 029 단언대로 `admin.js` 하나 — 036 의 Clarity 칸·`/svc/api/admin/clarity`·콘솔 링크는 걸리지 않는다).
   - 그 밖: `nginx.conf` 에 `location = /clarity.js` 와 `no-cache`. `web/src` 에 `useUrlState('s.q'`·`'g.q'`·`'p.q'` 가 없고 `urlState.ts` 에 `History.prototype.replaceState` 가 있다.
 - web `npm run lint && npm run build`, `node --check web/public/clarity.js`(oxlint 대상 밖). 빌드된 `dist/index.html` 에서 `clarity.js` 가 앱 모듈보다 앞, `dist/clarity.js` 있음.
-- 로컬 브라우저 — docker 통합 기동(:8080)에 헤드리스 크롬 `--host-resolver-rules` 로 `kimptrack.com`·`www.kimptrack.com` 을 로컬에, `*.clarity.ms` 를 닫힌 포트에 묶는다(요청은 시도만 되고 나가지 않는다). 시험 ID 는 커밋하지 않는 로컬 사본에만 넣는다. 랜딩·대시보드 각각:
+- 로컬 브라우저 — docker 통합 기동(:8080)에 헤드리스 크롬 `--host-resolver-rules` 로 `kimptrack.com`·`www.kimptrack.com` 을 로컬에, `*.clarity.ms` 를 닫힌 포트에 묶는다(요청은 시도만 되고 나가지 않는다). 크롬 인자를 줄 수 없는 브라우저면 커밋하지 않는 시험 사본의 `clarity.js` 에서 호스트를 `kimptrack.localhost`(크롬이 루프백으로 푼다 — `www.` 도), 태그 주소를 닫힌 포트로 바꿔 같은 항목을 본다(dev-setup). 시험 ID 는 커밋하지 않는 로컬 사본에만 넣는다. 랜딩·대시보드 각각:
   1. 값 없음: 띠가 `<body>` 첫 자식으로 보이고(접힌 띠 — 칸은 빈 칸, '내용 보기'를 펼치면 알릴 사항 전문이 보이고 중요한 내용은 크게·굵게·밑줄, 버튼 둘 같은 너비·높이), 띠 안의 `<a>` 가 대시보드에서는 모두 `target="_blank"`·`rel="noopener"`(칸 안 링크 포함)이고 랜딩에서는 `target` 이 없다, `clarity.ms` 요청 0, `window.clarity` 없음. 첫 Tab 초점이 띠 안, Space 로 칸·Enter 로 버튼이 된다. 접힌 띠는 화면 높이의 절반 이하이고 띠 안 스크롤이 없으며(375×812), 펼치면 절반까지에서 안에서 스크롤, 버튼 줄은 늘 보인다(1440·375). 375px 가로 스크롤 0.
   2. 세 칸 체크하고 [선택한 대로 저장] → `kt.analytics=granted`·`kt.analytics.v=<지금 판>`·띠 없음·`tag/<시험ID>` 1회·대기열 첫 항목 `consentv2` 와 두 값 그대로(대시보드는 이어서 `set tab <id>`). 새로고침 → 띠 없음, `DOMContentLoaded` 전 요청 0 뒤 태그 1회. 두 칸만 체크하고 저장 → `denied`·띠 없음·요청 0.
   3. [모두 거부] → `denied`·판 없음·띠 없음·요청 0, 새로고침 뒤에도 띠 없음·요청 0. 예전 판의 `granted`(`kt.analytics.v=2026-09-01`) → 띠가 뜨고 요청 0.
@@ -164,7 +164,37 @@ Clarity 동작(clarity-js 0.8.71, 2026-09-25 커밋 코드를 2026-10-01 에 읽
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 자동 (2026-10-01)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/pytest -q
+#   All checks passed! / 273 files already formatted / 1176 passed (test_clarity 15 — 글자·032 와 같은 글자·싣는 곳·nginx·URL 규칙 + node 로 판단·띠 버튼·다른 탭)
+cd web && npm run lint && npm run build && node --check public/clarity.js
+#   oxlint 종료 0 / tsc -b && vite build ✓ / 문법 통과
+grep -n -E 'clarity.js|type="module"' dist/index.html; ls dist/clarity.js
+#   6: <script defer src="/app/clarity.js"> · 25: 앱 모듈 — clarity.js 가 앞 / dist/clarity.js 있음
+# 로컬 Docker — nginx:1.27-alpine 둘(127.0.0.1 만 게시, dist·nginx.conf 를 docker cp, 끝난 뒤 지움) + 가짜 api 127.0.0.1:18035(/ws/spreads snapshot·매초 delta)
+#   ml033-web      :18033 dist 그대로 / ml033-web-test :18034 시험 사본 — HOST → kimptrack.localhost, 태그 → http://127.0.0.1:18039/tag/(닫힌 포트),
+#   두 HTML 머리에 첫 스크립트(clarity.js 가 만든 타이머·관찰자, 인스턴스 replaceState, DOMContentLoaded 때 태그 수를 센다 · #gpc·#lsfail 주입)
+curl -sI 127.0.0.1:18033/clarity.js       # 200 · Cache-Control: no-cache
+curl -sI 127.0.0.1:18033/app/clarity.js   # 200 · Cache-Control: no-store, must-revalidate (007 의 /app/)
+# 브라우저(Claude Browser pane, kimptrack.localhost:18034, 1440×900·375×812) — 랜딩·대시보드 각각
+#   1 값 없음: 띠 = body 첫 자식·role region·aria-label·data-nosnippet·칸 셋 빈 칸·버튼 둘 176×44(375: 152×44)·clarity 없음·태그 0
+#     링크 6개 — 대시보드 전부 _blank·noopener, 랜딩 target 없음 · 첫 Tab = 띠 안 스크롤 영역 → Tab·Space 로 칸 체크 → Tab·Enter 로 '내용 보기' 펼침
+#     접힌 띠 1440: 299px·띠 안 스크롤 없음 / 375 랜딩: 390px ≤ 406(절반)·스크롤 없음·좌우 16px·가로 넘침 0
+#     펼침 1440: 450px(=절반)·안에서 스크롤·버튼 줄 아래 그대로 / 375: 406px·안에서 스크롤 · 중요한 내용 18px(=1.2×15)·700·밑줄, 띠 글자 최소 15px
+#     대시보드 375 는 셸이 넓어 레이아웃 뷰포트 708px(모바일 비대응) — 접힌 285·펼침 406(50dvh), 가로 넘침 0
+#   2 세 칸 [선택한 대로 저장] → granted·2026-10-01·띠 없음·태그 1(ERR_CONNECTION_REFUSED 1건)·대기열 consentv2 {ad denied, analytics granted}(대시보드는 이어서 set tab spread)
+#     새로고침 → 띠 없음·DOMContentLoaded 때 태그 0 → 뒤 1 · 두 칸만 저장(키보드 Enter) → denied·판 없음·띠 없음·태그 0
+#   3 [모두 거부] → denied·판 없음·띠 없음·태그 0, 새로고침 뒤도 0 · 예전 판 granted(2026-09-01) → 띠·태그 0
+#   4 GPC(값 없음·granted)·getItem 예외 → 띠 없음·태그 0, 심은 _clck(호스트)·_clsk(도메인·호스트)·_cltk 지워짐 · off → 띠·태그 0·같이 지워짐
+#   5 탭 A /app/(granted, 숨김) · 탭 B /privacy [동의 철회] → A 가 reload(navigation type reload)·clarity 없음·띠 없음
+#     A 띠 · B 세 칸 [선택한 대로 저장] → A 새로고침 없이 띠·style 지워짐·태그 1·대기열 consentv2 뒤 set tab spread(kt:clarity) · A 랜딩 띠 · B [모두 거부] → 띠만 지워짐
+#   6 www.kimptrack.localhost(값 없음·granted)·localhost:18033(/ ·/app/, granted) → 띠 없음·태그 0 · /privacy 에 clarity 자원 0
+#   7 띠가 뜬 동안 표 글자가 2.5초 사이 바뀜 · 검색칸 'btc' 입력 뒤 [모두 거부] → 띠 지워짐·#root 첫 자식 같은 객체·입력값 그대로 · clarity.js 의 타이머·관찰자 0
+#   8 /app/?s.q=btc&s.view=rev → DOMContentLoaded 때 ?s.view=rev·검색칸 빈 칸·입력해도 URL 그대로
+#   9 (granted) 필터 셋(역프 기준·업비트·임계 초과만) → 인스턴스 replaceState 0회 · 탭 단추 둘(갭·기록) → 2회, 대기열 set tab gap·event tab_gap·set tab history·event tab_history·set sym BTC
+#     기록 탭 심볼 eth Enter → 0회·set sym ETH · 스프레드로 돌아가 행 클릭 → 1회, set tab history·event pivot_history·set sym C022
+#   10 ?tab=history&sym=%ED%99%8D → ?tab=history·BTC · 홍길동 Enter → 선택 안 됨·입력칸 그대로 · eth Enter → sym=ETH
+#   11 랜딩 granted → body data-clarity-unmask·대기열 consentv2 하나 · 필터 URL 복원(s.dom·s.view·s.only·s.thr 새로고침 그대로)
 ```
 
 ## 6. 갱신할 문서
@@ -185,6 +215,20 @@ Clarity 동작(clarity-js 0.8.71, 2026-09-25 커밋 코드를 2026-10-01 에 읽
 - `013-premium-events.md` §3.5·`014-premium-1m.md` 차트 카드 — "심볼 검색 Enter 는 영문 대문자·숫자 1~20자일 때만 선택(033)".
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
+- 만든 것 (파일 목록): 새로 — `web/public/clarity.js`(18.8KB), `web/src/shared/clarity.ts`, `server/tests/test_clarity.py`, `docs/runbooks/clarity.md`, `web/public/landing/fonts/kimptrack-sans-54942925.woff2`(글자 '석' 더해 다시 자름 — 옛 `99c0953a` 지움). 고침 — `web/index.html`·`web/public/landing.html`(파일 한 줄·가림 해제·바닥 링크·글꼴 주소), `web/nginx.conf`, `web/scripts/landing-font-glyphs.txt`, `web/src/App.tsx`(검색어 키 버리기·`sym` 형식·태그·이벤트·헤더 링크), `web/src/shared/urlState.ts`(`replaceUrl` 둘·`discardParams`·`symbol`/`isSymbol`), `web/src/features/{spreads,gap,pp}/Tab.tsx`(검색어 메모리), `web/src/features/history/Tab.tsx`(Enter 형식), `server/tests/test_observability.py`(공개 location 목록에 `/clarity.js`), 스펙 007·022·027·033, `docs/context/{status,architecture,dev-setup,product}.md`, `CLAUDE.md`.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - 설계 세션 결정(2026-10-01)으로 구현 전에 이 스펙을 고쳤다 — 머리·§3.1 ID `yqqzmx15ps` 를 이 PR 에 넣는다(032 가 같은 줄기에서 먼저 게시, 테스트의 '게시 표식이 있을 때만 ID' 조건은 그대로), §3.3 접힌 띠(랜딩 세션 요청 — 칸마다 '내용 보기' `<details>`, '저장 규칙', 접힌 띠는 375×812 에서 절반 안, 펼쳐야 띠 안 스크롤, `data-nosnippet`, 시스템 글꼴), §4 의 있어야 하는 글자·브라우저 1번(375·접힌 띠), §6 status 행. §6 대로 007(nginx 캐시)·022(§3.3-8 바닥 칸·§3.5 스크립트)·027(§2·§3.8) 을 고쳤다. 실행 중 §4 로컬 브라우저에 '크롬 인자를 못 주면 `kimptrack.localhost` 시험 사본' 한 문장을 더했다(Browser pane 은 `--host-resolver-rules` 를 줄 수 없다).
+  - `defer` 로 실린 파일은 문서 해석이 끝난 뒤(`readyState` 이미 `interactive`)·`DOMContentLoaded` 전에 돈다 — `readyState` 만 보면 태그·띠를 너무 일찍 넣어서 `document.currentScript.defer` 도 본다.
+  - 저장값 정리: 쿠키마다 도메인 속성 없이 한 줄(호스트 전용)과 `domain=kimptrack.com` 한 줄(`.kimptrack.com`) — 두 모양 모두 지운다. 띠 저장은 판을 먼저, 값을 나중에 쓴다(스펙 그대로), 둘 중 하나라도 예외면 부르지 않는다.
+  - 띠 모양: z-index 2147483000, 599px 아래는 정의 목록 한 칸·여백 축소, '처리방침에서 자세히 보기' 와 '저장 규칙' 은 한 줄(규칙은 오른쪽 `<details>`), 버튼 줄은 최대 404px 두 칸. 글자는 모두 15px 이상 — 방침은 쿠키 이름(`code`)을 0.88em 으로 줄이지만 띠는 1em(테스트가 띠 CSS 의 1em 미만·px 글자 크기를 막는다). 색 대비는 가장 낮은 accent 글자 4.71:1(AA).
+  - `data-nosnippet` 은 띠의 가장 바깥 요소(`#kt-consent`)에 단다.
+  - 셸: 지금 탭을 다시 누르면 아무것도 안 한다(이벤트·URL 쓰기 없음). 태그는 `tab` URL 을 쓴 effect 다음 effect 에서 — 탭이 바뀐 뒤에만 `set tab` 과 이벤트, 기록 탭이면 심볼이 바뀔 때마다 `set sym`. `kt:clarity` 를 받으면 지금 탭(기록 탭이면 심볼도)을 다시 둔다.
+  - `symbol`·`isSymbol`·`discardParams` 는 `shared/urlState.ts` 에 둔다 — 셸과 기록 탭이 같은 형식 규칙을 써야 하고(기능 간 import 금지), §4 테스트가 이 파일의 정규식을 본다. 기록 탭 검색 Enter 는 입력을 `trim()`·대문자로 바꾼 뒤 본다.
+  - 계약 테스트의 node 단계는 가짜 window·document·location 으로 `clarity.js` 를 그대로 돌린다(새 라이브러리 없음). node 가 없으면 로컬은 건너뛰고 CI(`CI` 환경 변수)는 실패한다.
+  - 로컬 브라우저: 바인드 마운트한 스크래치 디렉터리를 다시 만들면 OrbStack 컨테이너에서 비어 보여 `docker cp` 로 넣었다. 닫힌 포트를 9번으로 하면 크롬이 `ERR_UNSAFE_PORT` 로 막아 '시도' 를 보기 어려워 18039 로 했다(`ERR_CONNECTION_REFUSED` 1건 = 태그 1회).
 - 남은 빚:
+  - 머지 전 사람: §3.10 Clarity 대시보드 설정(쿠키 끔·봇 감지·가림 Balanced·IP 차단·팀)과 032 §7 법률 확인 — 이 PR 머지가 곧 켜기다. 032(#90)는 main 에 머지됐고 이 브랜치는 그 전 커밋 위다 — `git merge-tree` 로 main 과 충돌 없음을 봤다(PR 전에 main 을 합친다).
+  - 배포 뒤 사람(§4): 실제 크롬의 `clarity.ms` 요청·쿠키 둘·`metadata` 동의 상태, 2시간 안 녹화(숫자 보임·입력칸 가림·탭 태그·필터로 페이지가 늘지 않음), Brave GPC·VoiceOver·실제 휴대폰, 스프레드 탭 Performance(동의·거부·띠 있음·없음)와 1시간 전송량 → `app` 유지 판단. 로컬은 시험 사본·닫힌 포트라 Clarity 태그가 실제로 돈 적이 없다.
+  - 375×667 처럼 낮은 화면은 접힌 띠(≈390px)도 상한(50dvh)을 넘어 띠 안에서 스크롤한다. 대시보드는 휴대폰 폭에서 셸이 넓어(레이아웃 뷰포트 708px) 띠도 함께 작게 보인다(모바일 비대응).
+  - status 빚 그대로: Clarity 의 인스턴스 `replaceState` 덮어쓰기 의존(0.8.71), 전송 128회·2시간 녹화 멈춤, 동의한 방문자만(숫자는 하한), 열린 탭은 철회 뒤 한 번 새로고침, 동의 입증은 사람 확인(032 §7).
+  - 담당자 제안(§6 — 002·003·013·014 스펙 문구)은 PR 본문에.
