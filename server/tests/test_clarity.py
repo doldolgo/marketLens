@@ -36,7 +36,7 @@ MUST = (
     "kt.analytics", "kt.analytics.v", "_clck", "_clsk", "_cltk", "DOMContentLoaded", TAG, "storage",
     "location.reload", "region", "aria-label", "checkbox", "label", "/privacy#consent", "_blank",
     "noopener", "kt:clarity", "선택한 대로 저장", "모두 거부", "<details>", "<summary", "내용 보기",
-    "저장 규칙", "data-nosnippet",
+    "저장 규칙", "data-nosnippet", "pageshow", "persisted", "stopImmediatePropagation",
 )  # fmt: skip
 MUST_NOT = (
     "setInterval", "setTimeout", "requestAnimationFrame", "Observer", "resolvedOptions", "Europe/",
@@ -232,8 +232,8 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     removeItem: (k) => data.delete(k),
   }
   const session = new Set(['_cltk'])
-  const cookies = [], head = [], body = [], doc = {}, win = {}, fired = []
-  let reloads = 0
+  const cookies = [], head = [], body = [], doc = {}, win = {}, capture = {}, fired = []
+  let reloads = 0, stopped = 0
   const el = (tag) => ({
     tag, attrs: {}, kids: {}, on: {}, anchors: [], checked: false,
     setAttribute(k, v) { this.attrs[k] = v },
@@ -254,7 +254,8 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
   }
   const window = {
     localStorage, sessionStorage: { removeItem: (k) => session.delete(k) },
-    addEventListener: (t, fn) => { win[t] = fn }, dispatchEvent: (e) => fired.push(e.type),
+    addEventListener: (t, fn, opt) => { win[t] = fn; capture[t] = opt === true || !!(opt && opt.capture) },
+    dispatchEvent: (e) => fired.push(e.type),
   }
   const location = { hostname: c.host || 'kimptrack.com', pathname: c.path || '/', reload: () => reloads++ }
   class Event { constructor(type) { this.type = type } }
@@ -266,8 +267,8 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     strip: strip() ? { first: body[0] === strip(), ...strip().attrs, links: strip().anchors.map((a) => a.target + '|' + a.rel) } : null,
     queue: window.clarity ? window.clarity.q.map((a) => Array.from(a)) : null,
     tags: head.filter((e) => e.tag === 'script').map((e) => [e.src, e.async]),
-    style: head.filter((e) => e.tag === 'style').length, fired, reloads,
-    forgot: cookies.length > 0 && !session.has('_cltk'), cookies, listens: 'storage' in win,
+    style: head.filter((e) => e.tag === 'style').length, fired, reloads, stopped, capture,
+    forgot: cookies.length > 0 && !session.has('_cltk'), cookies, listens: 'storage' in win || 'pageshow' in win,
   })
   const first = JSON.parse(JSON.stringify(snap()))
   for (const step of c.steps || []) {
@@ -276,6 +277,10 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     else if (kind === 'check') strip().querySelector('#' + arg).checked = true
     else if (kind === 'click') strip().querySelector('#' + arg).on.click()
     else if (kind === 'clear') { data.clear(); win.storage({ key: null }) }
+    // 'quiet:<키>=<값>' — 이 문서가 뒤로 가기 캐시에 든 동안 다른 페이지가 쓴 값(storage 이벤트 없음, 빈 값은 지움)
+    else if (kind === 'quiet') { const [k, v] = arg.split('='); if (v) data.set(k, v); else data.delete(k) }
+    // 'back' — 캐시에서 복원(pageshow persisted), 'show' — 보통 로드의 pageshow
+    else if (kind === 'back' || kind === 'show') win.pageshow({ persisted: kind === 'back', stopImmediatePropagation: () => stopped++ })
     else { const [k, v] = arg.split('='); data.set(k, v); win.storage({ key: k }) } // 'other:<키>=<값>'
   }
   return { first, last: snap() }
@@ -479,3 +484,59 @@ def test_other_tabs_reload_on_withdrawal_and_load_on_consent() -> None:
     assert (refused["last"]["strip"], refused["last"]["queue"]) == (None, None)
     assert (gpc["last"]["queue"], gpc["last"]["reloads"]) == (None, 0)
     assert other_key["last"]["strip"] is not None and other_key["last"]["queue"] is None
+
+
+@with_id
+def test_back_forward_restore_rechecks_the_choice() -> None:
+    """뒤로 가기 캐시에서 돌아온 문서는 storage 이벤트 없이도 다시 본다 (§3.5).
+
+    부른 문서는 켜는 값이 아니면 Clarity 의 재시작(같은 pageshow 의 non-capture 처리기)을 막고 한 번 새로고침한다 — 같은 탭에서
+    랜딩 → 방침 [동의 철회] → 뒤로 가기. 띠 문서는 동의면 띠를 지우고 부르고, 고른 값이면 띠만 지운다.
+    """
+    agree = [f"quiet:kt.analytics.v={NOTICE}", "quiet:kt.analytics=granted", "back"]
+    withdrawn, late, kept, first_show, consent, refused, unchanged, gpc = _run(
+        [
+            {
+                "ls": ON,
+                "steps": [
+                    "ready",
+                    "quiet:kt.analytics=denied",
+                    "quiet:kt.analytics.v=",
+                    "back",
+                ],
+            },
+            # 크롬처럼 storage 이벤트가 복원 뒤에 늦게 와도 새로고침은 한 번
+            {
+                "ls": ON,
+                "steps": [
+                    "ready",
+                    "quiet:kt.analytics=denied",
+                    "back",
+                    "other:kt.analytics=denied",
+                ],
+            },
+            {"ls": ON, "steps": ["ready", "back"]},
+            {"ls": ON, "steps": ["ready", "quiet:kt.analytics=denied", "show"]},
+            {"steps": ["ready", *agree]},
+            {"steps": ["ready", "quiet:kt.analytics=denied", "back"]},
+            {"steps": ["ready", "back"]},
+            {"gpc": True, "steps": ["ready", *agree]},
+        ]
+    )
+    # capture 단계 — 나중에 붙는 Clarity 의 pageshow 처리기(non-capture)보다 먼저 돈다
+    assert withdrawn["last"]["capture"]["pageshow"] is True
+    for got in (withdrawn, late):
+        assert (got["last"]["reloads"], got["last"]["stopped"]) == (1, 1)
+    for got in (kept, first_show):
+        assert (got["last"]["reloads"], got["last"]["stopped"]) == (0, 0)
+    last = consent["last"]
+    assert (last["strip"], last["style"], last["queue"], last["tags"]) == (
+        None,
+        0,
+        [CONSENT],
+        TAG_ID,
+    )
+    assert last["fired"] == ["kt:clarity"]
+    assert (refused["last"]["strip"], refused["last"]["queue"]) == (None, None)
+    assert unchanged["last"]["strip"] is not None
+    assert (gpc["last"]["queue"], gpc["last"]["tags"]) == (None, [])

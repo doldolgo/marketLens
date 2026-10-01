@@ -90,7 +90,7 @@
 @media (max-width:599px){#kt-consent .kt-c-body{padding:12px 14px 2px}#kt-consent .kt-c-actions{max-width:none;padding:8px 14px}#kt-consent details>dl,#kt-consent details>p{margin-left:0}#kt-consent dl{grid-template-columns:minmax(0,1fr);gap:0}#kt-consent dd+dt{margin-top:8px}}
 `
 
-  // 하나라도 걸리면 부르지 않는 조건의 앞 셋(§3.2) — ID·호스트·페이지. 여기서 빠진 문서는 듣지도 않는다
+  // 하나라도 걸리면 부르지 않는 조건의 앞 셋(§3.2) — ID·호스트·페이지. 여기서 빠진 문서는 듣지도 않는다(storage·pageshow)
   const page = location.pathname === "/" ? "landing" : location.pathname.indexOf("/app/") === 0 ? "app" : ""
   if (!CLARITY_ID || location.hostname !== HOST || PAGES.indexOf(page) < 0) return
 
@@ -250,6 +250,28 @@
     } else if (now === "denied") removeStrip()
   }
 
+  // 뒤로 가기 캐시(bfcache)에서 돌아온 문서(§3.5) — 캐시에 든 동안 바뀐 값의 storage 이벤트는 오지 않거나 복원 뒤에 늦게 온다
+  // (브라우저마다 다르다). 같은 탭에서 랜딩 → 방침 [동의 철회] → 뒤로 가기면 Clarity 가 이 pageshow 로 녹화를 다시 시작하므로,
+  // 부른 문서가 켜는 값이 아니면 capture 단계에서 Clarity 의 처리기(나중에 붙은 non-capture)를 막고 곧바로 한 번 새로고침한다.
+  // 부르지 않은 문서는 켜는 값이면 띠를 지우고 부르고, 띠 조건(정하지 않음)이 아니면 띠만 지운다
+  const onPageShow = (event) => {
+    if (!event.persisted) return
+    const now = judge()
+    if (loaded) {
+      if (now === "on") return
+      event.stopImmediatePropagation()
+      if (!reloading) {
+        reloading = true
+        location.reload()
+      }
+      return
+    }
+    if (now === "on") {
+      removeStrip()
+      load(true)
+    } else if (now !== "undecided") removeStrip()
+  }
+
   try {
     if (judge() === "on") load(false)
     else {
@@ -257,6 +279,7 @@
       whenReady(showStrip)
     }
     window.addEventListener("storage", guard(onStorage))
+    window.addEventListener("pageshow", guard(onPageShow), true)
   } catch (e) {
     // 위와 같다
   }
