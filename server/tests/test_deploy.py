@@ -775,6 +775,22 @@ def test_deploy_runs_three_boxes_in_order_data_collect_serve() -> None:
     assert "secrets.EC2_HOST }}" not in _text(".github/workflows/deploy.yml")
 
 
+def test_deploy_runs_one_at_a_time_without_cancelling_the_running_one() -> None:
+    """배포는 한 번에 하나 — 도는 실행은 끝까지, 뒤 푸시는 pending, pending 은 최신 하나 (007 §3).
+
+    2026-10-01 두 실행이 serve 에서 `up --build` 를 겹쳐 돌아 앞 실행이 컨테이너 재생성에서 실패했다.
+    """
+    deploy = _yaml(".github/workflows/deploy.yml")
+    # 고정 group(박스 3대를 지킨다)·cancel-in-progress 끔(끊으면 반쪽 배포)·queue 기본(single)
+    assert deploy["concurrency"] == {
+        "group": "deploy-main",
+        "cancel-in-progress": False,
+    }
+    # 워크플로 단위라야 data→collect→serve 사슬이 통째로 한 단위다
+    for box in BOXES:
+        assert "concurrency" not in deploy["jobs"][box], box
+
+
 def _index_of(script: list[str], fragment: str) -> int:
     return next(i for i, ln in enumerate(script) if fragment in ln)
 
