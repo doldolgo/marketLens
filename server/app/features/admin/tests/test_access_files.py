@@ -1,6 +1,7 @@
-"""접속 요약 읽기 — 깨진 줄·회전 파일·파일 없음·새지 않음·키 상한·메모리 (스펙 035 §3.2·§3.4·§3.5·§4)."""
+"""접속 요약 읽기 — 깨진 줄·회전 파일(깨진 gz 포함)·파일 없음·새지 않음·키 상한·메모리 (스펙 035 §3.2·§3.4·§3.5·§4)."""
 
 import json
+import os
 import tracemalloc
 from pathlib import Path
 
@@ -160,3 +161,36 @@ def test_memory_stays_flat_while_streaming_a_large_log(tmp_path: Path) -> None:
         tracemalloc.stop()
     assert body["totals"]["requests"] == 60_000
     assert peak < 8 * 1024 * 1024, peak  # 파일(40MB 넘음)을 통째로 올리지 않는다
+
+
+def test_a_broken_rotated_file_is_skipped_and_the_rest_counted(
+    tmp_path: Path,
+) -> None:
+    # 잘린 gz(앞 절반) — 그 파일은 읽은 데까지, 틀린 머리 gz 는 0줄. 둘 다 skipped 1씩, 요약은 그대로
+    whole = write(
+        tmp_path,
+        "access-2026-10-01T03-00-00.000-size.log.gz",
+        [line(at(3, i), "/rotated") for i in range(2_000)],
+        mtime=at(4),
+    )
+    data = whole.read_bytes()
+    whole.write_bytes(data[: len(data) // 2])
+    os.utime(whole, (at(4), at(4)))
+    bad = tmp_path / "access-2026-10-01T05-00-00.000-size.log.gz"
+    bad.write_bytes(b"not gzip at all\n")
+    os.utime(bad, (at(5), at(5)))
+    write(tmp_path, "access.log", [line(at(20), "/current")])
+    broken: list[str] = []
+    body = summarize(str(tmp_path), NOW, broken.append)
+    assert broken == ["EOFError", "BadGzipFile"]
+    assert body["totals"]["skipped"] == 2
+    rotated = dict(body["paths"])["/rotated"]
+    assert 0 < rotated < 2_000 and dict(body["paths"])["/current"] == 1
+
+
+def test_a_current_log_read_failure_still_fails(tmp_path: Path) -> None:
+    (tmp_path / "access.log").mkdir()  # 지금 파일을 못 읽음 — 부분 전체의 error
+    broken: list[str] = []
+    with pytest.raises(IsADirectoryError):
+        summarize(str(tmp_path), NOW, broken.append)
+    assert broken == []

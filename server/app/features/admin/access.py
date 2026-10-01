@@ -7,16 +7,23 @@
 읽는 계약(027·032): caddy 가 도메인 요청마다 JSON 한 줄을 `access.log` 에 쓰고, 하루 또는 50MiB 에서 회전해
 gzip 된 회전 파일을 같은 디렉터리에 둔다. 회전 파일 이름은 `access-<UTC 시각>-<size|time>.log.gz`
 (caddy 2.11.4 로컬 확인 — 압축 중에는 같은 이름의 `.log` 가 잠깐 함께 있다).
+창 안 회전 파일 하나가 깨졌으면(잘린 gz·틀린 머리·CRC·권한) 그 파일은 읽은 데까지만 세고 `skipped` 에 1 을 더해
+다음 파일로 간다 — 깨진 파일이 창을 벗어날 때까지(최대 하루) 요약 전체가 실패하지 않게. `access.log`·디렉터리
+읽기 실패는 그대로 실패다.
 """
 
 import gzip
 import os
+import zlib
+from collections.abc import Callable
 from typing import Any
 
 from app.features.admin.access_tally import HOURS, Tally
 
 LOG_NAME = "access.log"
 ROTATED_PREFIX = "access-"
+# 회전 파일이 깨졌을 때 나는 것 — 잘린 gz(EOFError)·틀린 머리·CRC(BadGzipFile ⊂ OSError)·압축 자료(zlib.error)·권한
+BROKEN = (EOFError, OSError, zlib.error)
 # 응답 부분의 값 키 — 순서 그대로
 VALUE_KEYS = tuple(
     "startTs endTs firstTs totals hourly paths tabs referrers utmSources devices browsers status recent5xx ws".split()
@@ -27,8 +34,13 @@ class NoLogFile(Exception):
     """디렉터리가 없거나 비었음(env 없음 포함) — `unconfigured`·`no_file`."""
 
 
-def summarize(directory: str | None, now: float) -> dict[str, Any]:
-    """`now`(epoch 초)가 든 시의 시작 − 23시간부터 지금까지를 센다. 디렉터리·파일이 없으면 `NoLogFile`."""
+def summarize(
+    directory: str | None,
+    now: float,
+    on_broken: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """`now`(epoch 초)가 든 시의 시작 − 23시간부터 지금까지를 센다. 디렉터리·파일이 없으면 `NoLogFile`.
+    깨진 회전 파일은 `on_broken(예외 이름)` 을 부르고 건너뛴다."""
     if not directory:
         raise NoLogFile
     end_ts = int(now)
@@ -36,16 +48,21 @@ def summarize(directory: str | None, now: float) -> dict[str, Any]:
     tally = Tally(start_ts)
     for path in _files(directory, start_ts):
         try:
-            handle = (
+            with (
                 gzip.open(path, "rt", encoding="utf-8", errors="replace")
                 if path.endswith(".gz")
                 else open(path, encoding="utf-8", errors="replace")
-            )
+            ) as handle:
+                for line in handle:
+                    tally.line(line)
         except FileNotFoundError:
             continue  # 목록을 본 뒤 회전·보관 삭제로 사라졌다 — 다음 회차가 새 이름으로 읽는다
-        with handle:
-            for line in handle:
-                tally.line(line)
+        except BROKEN as exc:
+            if os.path.basename(path) == LOG_NAME:
+                raise  # 지금 파일 읽기 실패는 부분 전체의 error
+            tally.skipped += 1  # 읽은 줄은 두고, 깨진 파일 하나를 1로 센다
+            if on_broken is not None:
+                on_broken(type(exc).__name__)
     return tally.result(end_ts)
 
 

@@ -160,9 +160,9 @@ class Tally:
         utm = params.get("utm_source", [""])[0]
         if utm:
             _count(self.utm, utm.lower()[:UTM_LIMIT])
-        host = _host(rec.referer)
-        if host and host not in SELF_HOSTS:
-            _count(self.referrers, rec.referer[:REFERRER_LIMIT])
+        ref = _referrer(rec.referer)
+        if ref is not None and ref[1] not in SELF_HOSTS:
+            _count(self.referrers, ref[0][:REFERRER_LIMIT])
         device = _device(rec.ua)
         self.devices[device] += 1
         if device != "bot":
@@ -228,11 +228,19 @@ def _parse(line: str) -> Line | None:
     )
 
 
-def _host(origin: str) -> str | None:
-    """출처 `https://호스트[:포트]` 의 호스트(소문자). 빈 값·모양이 아니면 None."""
-    if not origin:
+def _referrer(referer: str) -> tuple[str, str] | None:
+    """referer → (출처 키 `스킴://호스트[:포트]`, 호스트) — 소문자·사용자 정보 없음·호스트 끝 점 뗌.
+    027 caddy 가 출처만 남기지만 그 계약에 기대지 않는다 — 경로·쿼리(검색어·이메일)는 여기서도 버린다.
+    빈 값·http(s) 밖·모양이 아니면 None(세지 않는다)."""
+    if not referer:
         return None
     try:
-        return urlsplit(origin).hostname
+        parts = urlsplit(referer.strip())
+        host, port = parts.hostname, parts.port
     except ValueError:
         return None
+    host = (host or "").rstrip(".")
+    if parts.scheme not in ("http", "https") or not host:
+        return None
+    shown = f"[{host}]" if ":" in host else host  # IPv6
+    return f"{parts.scheme}://{shown}{'' if port is None else f':{port}'}", host

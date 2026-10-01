@@ -120,6 +120,31 @@ def test_referrers_exclude_own_hosts_and_empty(tmp_path: Path) -> None:
     ]
 
 
+def test_referrers_are_rebuilt_as_origins_without_the_caddy_map(
+    tmp_path: Path,
+) -> None:
+    # 027 caddy 의 출처 줄이기가 빠진 줄 — 경로·쿼리·사용자 정보는 요약에서도 버린다
+    body = run(
+        tmp_path,
+        [
+            line(at(3), referer="https://evil.example/search?q=secret-term&e=a@b.c"),
+            line(at(3), referer="HTTPS://User:pw@Evil.Example:8443/x#frag"),
+            line(at(3), referer="https://kimptrack.com./app/"),  # 끝 점 — 자기 호스트
+            line(at(3), referer="android-app://com.google.android.gm/p?token=abc"),
+            line(at(3), referer="https://[2001:db8::1]:8443/p?q=1"),
+            line(at(3), referer="https://bad:port/"),
+        ],
+    )
+    assert body["referrers"] == [
+        ["https://[2001:db8::1]:8443", 1],
+        ["https://evil.example", 1],
+        ["https://evil.example:8443", 1],
+    ]
+    raw = json.dumps(body)
+    for leak in ("secret-term", "a@b.c", "User", "pw@", "frag", "token", "android"):
+        assert leak not in raw, leak
+
+
 def test_tabs_count_dashboard_page_entries_only(tmp_path: Path) -> None:
     body = run(
         tmp_path,
