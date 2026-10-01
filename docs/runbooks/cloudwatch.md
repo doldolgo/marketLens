@@ -288,12 +288,11 @@ Logs Insights 저장 쿼리 3개(로그 그룹 `/marketlens/serve/caddy`, `aws l
   `filter request.uri = "/api/ws/spreads" and status = 101 | stats count(*) as connections, pct(duration, 50) as p50_sec, pct(duration, 90) as p90_sec, max(duration) as max_sec by bin(1d)`
 
 ## 16. 관리자 읽기 권한 (034)
-수집기의 관리자 피드(`/admin/aws`·`/admin/alerts` 의 경보 이력)가 collect 역할 `marketlens-s3-snapshot` 으로 CloudWatch·canary 로그·예산을 **읽는다**. 인라인 정책 `marketlens-admin-read` 하나이고 쓰기 권한은 없다. 수집기 컨테이너도 이 읽기 권한에 닿는다(에이전트 정책과 같은 판단 — 034 §3.2). 경보 읽기는 먼저 `marketlens-*` 경보 ARN 으로 좁혀 붙이고, 안 되는 액션만 넓힌다 — 조직 임대 계정이라 다른 경보가 있으면 `*` 는 그것도 읽는다. 공통 변수 줄(`AWS_REGION`·`ACCOUNT`)부터.
+수집기의 관리자 피드(`/admin/aws`·`/admin/alerts` 의 경보 이력)가 collect 역할 `marketlens-s3-snapshot` 으로 CloudWatch·canary 로그·예산을 **읽는다**. 인라인 정책 `marketlens-admin-read` 하나이고 쓰기 권한은 없다. 수집기 컨테이너도 이 읽기 권한에 닿는다(에이전트 정책과 같은 판단 — 034 §3.2). 경보 읽기 두 액션은 리소스 `*` 다 — 접두로 걸러 불러도 IAM 이 `alarm:*` 로 검사해 경보 ARN 으로 좁히면 AccessDenied 다(2026-10-01 확인). 조직 임대 계정이라 다른 경보가 있으면 그것도 읽을 수 있다(읽기만). 공통 변수 줄(`AWS_REGION`·`ACCOUNT`)부터.
 ```bash
 cat > admin-read.json <<EOF
 {"Version":"2012-10-17","Statement":[
-  {"Sid":"Alarms","Effect":"Allow","Action":["cloudwatch:DescribeAlarms","cloudwatch:DescribeAlarmHistory"],
-   "Resource":"arn:aws:cloudwatch:$AWS_REGION:$ACCOUNT:alarm:marketlens-*"},
+  {"Sid":"Alarms","Effect":"Allow","Action":["cloudwatch:DescribeAlarms","cloudwatch:DescribeAlarmHistory"],"Resource":"*"},
   {"Sid":"Metrics","Effect":"Allow","Action":["cloudwatch:GetMetricData","cloudwatch:ListMetrics"],"Resource":"*"},
   {"Sid":"CanaryLog","Effect":"Allow","Action":"logs:FilterLogEvents",
    "Resource":["arn:aws:logs:$AWS_REGION:$ACCOUNT:log-group:/aws/lambda/marketlens-smoke",
@@ -304,7 +303,7 @@ EOF
 aws iam put-role-policy --role-name marketlens-s3-snapshot --policy-name marketlens-admin-read --policy-document file://admin-read.json
 ```
 `GetMetricData`·`ListMetrics` 는 리소스 수준 권한이 없어 `*` 다. 따옴표 없는 `EOF` 라 셸이 `$AWS_REGION`·`$ACCOUNT` 를 풀어 넣는다 — 정책 문서를 레포에 커밋하지 않는다.
-- 확인 1 — 좁힌 경보 리소스가 되는지. CloudShell 은 관리자 신원이라 역할 정책을 시험하지 못한다 — collect 박스에서 수집기 컨테이너(역할 자격증명, hop 2)로 034 가 부르는 모양 그대로 부른다:
+- 확인 1 — 역할로 경보를 읽는지. CloudShell 은 관리자 신원이라 역할 정책을 시험하지 못한다 — collect 박스에서 수집기 컨테이너(역할 자격증명, hop 2)로 034 가 부르는 모양 그대로 부른다:
   ```bash
   docker exec marketlens-server python -c "
   import boto3
@@ -313,10 +312,10 @@ aws iam put-role-policy --role-name marketlens-s3-snapshot --policy-name marketl
   print('history', len(cw.describe_alarm_history(HistoryItemType='StateUpdate', MaxRecords=10)['AlarmHistoryItems']))
   "
   ```
-  `alarms 17`(로그 전송 뒤 18)과 `history <n>` 두 줄이면 좁힌 정책으로 된다. `AccessDenied` 가 나는 줄의 액션만 넓힌다(아래).
+  `alarms 17`(로그 전송 뒤 18)과 `history <n>` 두 줄이면 된다(2026-10-01: `alarms 17`·`history 10`). `AccessDenied` 면 정책이 아직 퍼지지 않았거나(몇 초 뒤 다시) 문서가 틀린 것이다.
 - 확인 2 — 관리자 페이지 인프라 칸의 네 `state`(또는 collect 에서 `curl -s localhost:8000/admin/aws` 를 두 번 — 첫 요청은 3초 안에 못 채운 부분이 `pending`). `alarms`·`metrics`·`canary` 는 `ok`, 예산은 `ok` 또는 SCP 에 막히면 `denied`·`AccessDeniedException`(034 §3.2 — 막히는지는 모른다). 결과(특히 예산)를 034 §7 에 적는다. 정책을 붙이기 전에 페이지를 열었다면 실패도 주기만큼 캐시돼 있다 — 경보·canary 60초, 지표 5분, 예산 6시간 뒤에 다시 부른다.
 - 확인 3 — 관리자 접속 기록(030 런북의 `logs/admin/access.log`)에 `/api/admin/aws`·`/api/admin/alerts` 줄이 없다(폴링은 기록하지 않는다).
-- 넓히기: 안 되는 액션만 `Alarms` 문에서 빼 `"Resource":"*"` 인 문으로 옮기고 같은 `put-role-policy` 를 다시 한다. 결과(어느 액션을 넓혔는지)는 034 §7 에 적는다.
+- 2026-10-01 결과: 네 부분 모두 `ok` — 예산(`budgets:ViewBudget`)은 조직 SCP 에 막히지 않았다.
 - 되돌리기: `aws iam delete-role-policy --role-name marketlens-s3-snapshot --policy-name marketlens-admin-read` — 네 부분이 `denied` 가 되고 수집은 영향이 없다.
 
 ## 경보 목록 (027 §3.6)
