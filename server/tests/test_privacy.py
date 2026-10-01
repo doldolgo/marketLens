@@ -79,10 +79,14 @@ MUST_SAY = (
     '<section id="consent"',  # 033 띠의 '처리방침에서 자세히 보기'·거부 칸 링크가 /privacy#consent 로 온다
     # §3.3 — 033 과 같은 다른 탭 반영 문장
     "철회하면 그 탭이 한 번 새로고침되어 분석을 멈추고, 동의하면 그 탭에서도 분석을 시작합니다",
+    "kt.analytics.v",  # §3.3 — 동의한 안내의 판
+    "나이를 확인하지 않",  # §3.4-2 — 만 14세 미만(사람 확인 §7)
+    # §3.3 — 철회 뒤 이미 보낸 기록을 바로 지우는 길(법 제37조 제3항, 절차는 033 런북)
+    "운영자가 Clarity 프로젝트의 기록을 통째로 지우고(모든 방문자의 기록이 함께 지워집니다) 새 프로젝트로 다시 시작합니다",
 )
 # 동의 방식(사람 결정 2026-10-01)과 맞지 않는 문장 — 페이지에 있으면 거짓이다
 # 파기는 날수 기한을 약속하지 않는다(§3.5 — '90일 뒤 지웁니다' 같은 단정 없음), Microsoft 의 자기 목적 이용은
-# 어디서나 '씁니다' 로 단정한다(§3.4-2 — '쓸 수 있어' 로 흐리지 않는다)
+# 어디서나 '씁니다' 로 단정한다(§3.4-2 — '쓸 수 있어' 로 흐리지 않는다). 버튼 하나로 받던 동의([동의]·[허용])는 없다
 MUST_NOT_SAY = (
     "허용으로 봅니다",
     "다시 허용",
@@ -90,6 +94,8 @@ MUST_NOT_SAY = (
     "5일 안에",
     "90일 뒤 지웁니다",
     "쓸 수 있어",
+    "[동의]",
+    "[허용]",
 )
 # §3.3 — 033 의 띠와 같은 문장(머리·셋 모두 규칙·나이). 동의 상자 안 세 칸보다 앞에 있다
 SHARED_SENTENCES = (
@@ -147,15 +153,8 @@ CLARITY_ITEMS = (
     "_clsk",
     "_cltk",
 )
-# §3.4-4 — 제17조 제2항 다섯 가지 + 근거
-PROVISION_TERMS = {
-    "받는 자",
-    "받는 자의 목적",
-    "항목",
-    "보유 기간",
-    "거부 권리·불이익",
-    "근거",
-}
+# §3.4-4 — 제17조 제2항 다섯 가지(동의 상자의 제공 칸과 같은 이름) + 근거
+PROVISION_TERMS = CONSENT_CELLS[1][2] | {"근거"}
 # §3.4-7 — 작성지침의 행태정보 항목
 BEHAVIOR_TERMS = {
     "수집 항목",
@@ -269,15 +268,8 @@ CONSENT_CASES = [
     ("다른 탭이 판을 바꿈", {"stored": "granted", "v": NOTICE, "steps": [f"other:kt.analytics.v={OLD}"]}, "granted", OLD, "정하지 않음", UNDECIDED, False),
 ]
 # fmt: on
-# §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(+ 근거)
-TRANSFER_TERMS = {
-    "항목",
-    "국가·시기·방법",
-    "받는 자·연락처",
-    "목적·보유 기간",
-    "거부 방법·효과",
-    "근거",
-}
+# §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(동의 상자의 국외 이전 칸과 같은 이름) + 근거
+TRANSFER_TERMS = CONSENT_CELLS[2][2] | {"근거"}
 
 
 class _Page(HTMLParser):
@@ -469,6 +461,14 @@ def test_page_states_the_consent_contract_and_required_notices() -> None:
     assert "'granted'" in script and "'denied'" in script
 
 
+def test_notice_version_is_shown_and_not_after_the_effective_date() -> None:
+    """지금 판은 스크립트·보이는 글자가 같고 시행일보다 늦지 않다 (§3.3 — 033 clarity.js 의 판도 같다)."""
+    html, _ = _read(PUBLIC / "privacy.html")
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", NOTICE), NOTICE
+    assert f'<code id="an-version">{NOTICE}</code>' in html
+    assert NOTICE <= EFFECTIVE
+
+
 def test_consent_script_shows_the_stored_value_and_the_buttons_write_it() -> None:
     """동의 관리 스크립트를 node 로 돌린다 — 상태 글자·보이는 요소·칸·저장값·판·쿠키가 실제 저장값과 같다 (§3.3)."""
     cookies = ["_clck", "_clsk", "other"]
@@ -554,6 +554,8 @@ def test_clarity_rests_on_consent_for_collection_provision_and_transfer() -> Non
     """사람 결정 2026-10-01 — 수집·제공은 동의, 국외 이전은 별도 동의 (§3.6)."""
     html, _ = _read(PUBLIC / "privacy.html")
     assert "제15조 제1항 제1호" in _section(html, "s2")
+    # 철회 뒤 이미 보낸 기록 — 한 사람분은 못 지우니 프로젝트를 통째로 지운다 (§3.3 — 법 제37조 제3항)
+    assert "프로젝트의 기록을 통째로 지우고" in _section(html, "s8")
     provision = _section(html, "s4")
     dls = re.findall(r"<dl[^>]*>(.*?)</dl>", provision, flags=re.S)
     assert len(dls) == 1 and _terms(dls[0]) == PROVISION_TERMS
