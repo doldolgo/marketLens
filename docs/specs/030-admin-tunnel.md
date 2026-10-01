@@ -143,7 +143,7 @@ docker ps -a · docker network ls · docker images · docker volume ls   # 시�
   - 밖에서: 로그인 전 `/`·`/api/health`·`/svc/api/admin/status` 모두 302 → `<팀>.cloudflareaccess.com` 로그인, OTP 로그인 뒤 관리자 화면 동작(사람 확인). 공개 `https://kimptrack.com` 200·`/api/docs` 404 그대로, 탄력 IP + `Host: admin.kimptrack.com` 은 공개 랜딩 200.
   - 관리자 접속 기록: JSON 12줄 전부 파싱, 이메일이 든 줄 11(Access 뒤 요청), `sfs` 는 same-origin 9·cross-site 2(로그인 뒤 돌아오는 `/` — 예외 경로라 200)·없음 1. logrotate `/etc/logrotate.d/marketlens-admin` 설치(`logrotate -d` 로 weekly·13 확인).
 - 남은 빚:
-  - §4 "배포·런북 뒤 — 사람" 의 나머지(`Set-Cookie` 속성·AUD 틀림 403 시험·교차 사이트 fetch 기록·위조 이메일 헤더·허용 안 된 이메일은 코드 못 받음) — 선택 확인으로 남긴다. Tunnel 상태 알림 메일은 켰다(2026-10-01, 사람) — 진짜 토큰이 없어 헬스체크 `ready`·엣지 연결·Protect with Access 는 로컬에서 못 봤다. 첫 확인은 런북 8·9단계.
+  - §4 "배포·런북 뒤 — 사람" 의 나머지(`Set-Cookie` 속성·AUD 틀림 403 시험·교차 사이트 fetch 기록·위조 이메일 헤더·허용 안 된 이메일은 코드 못 받음) — 선택 확인으로 남긴다. Tunnel 상태 알림 메일은 켰다(2026-10-01, 사람). 헬스체크 `ready`·엣지 연결·Protect with Access 는 로컬에서 못 보고 운영에서 확인했다(위 운영 확인).
   - cloudflared 의 원격 관리(대시보드 실시간 로그·진단 — 이 버전의 `--management-diagnostics` 기본 켬)는 기본값 그대로다. 대시보드 실시간 로그는 로컬 `--loglevel info` 와 따로 더 자세한 요청 이벤트를 받을 수 있다 — 대시보드 권한자만 쓰지만 끄려면 후속(status.md 빚).
   - 토큰이 틀리거나 만료돼 cloudflared 가 곧바로 끝나고 재시작을 되풀이해도 `--profile tunnel up -d` 는 0 으로 끝나 배포는 초록이다 — §3.3 의 "tunnel `up` 이 실패하면" 은 compose 가 컨테이너를 못 만드는 경우만 덮는다. 드러나는 곳은 런북 8단계의 사람 확인(커넥터 Healthy)과 Tunnel 상태 알림 메일(설계 세션 판단 — 배포가 엣지 연결을 기다리면 Cloudflare 쪽 지연이 배포 실패가 된다).
   - status.md 에 적은 030 빚 넷(대시보드에만 있는 설정·출구 제한 없음·Access 로그 24시간·021·023 제안 반영 대기).
