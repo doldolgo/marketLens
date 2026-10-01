@@ -112,14 +112,23 @@ def test_file_has_the_consent_contract_and_no_timers_or_regional_guessing() -> N
 
 
 def test_strip_text_is_the_policy_consent_box_text() -> None:
-    """같은 문장 셋·세 칸의 체크 글자·알릴 사항이 032 방침의 동의 상자와 같은 글자다(태그를 떼고 비교) (§3.3)."""
-    strip = _text(JS)
-    for sentence in SHARED_SENTENCES:
-        assert sentence in strip, sentence
+    """같은 문장 셋·세 칸의 체크 글자·알릴 사항이 032 방침의 동의 상자와 같은 글자다 (§3.3).
+
+    알릴 사항은 원문 HTML(`<dt>`·`<dd>`)을 그대로 비교한다 — 중요한 내용 표시(`<strong class="key">`)가 빠지거나 다른 칸으로
+    옮겨도 멈춘다. 문장 셋은 자리까지 본다: 머리와 나이는 맨 위 한 문단, 셋 모두 규칙은 '저장 규칙' 안.
+    """
+    head, rule, age = SHARED_SENTENCES
+    html = JS.split("const HTML = `", 1)[1].split("`", 1)[0]
+    first = re.search(r'<div class="kt-c-body"[^>]*>\s*<p>(.*?)</p>', html, flags=re.S)
+    assert first and _text(first.group(1)) == f"{head} {age}"
+    rules = re.search(
+        r"<details><summary>저장 규칙</summary><p>(.*?)</p></details>", html, flags=re.S
+    )
+    assert rules and _text(rules.group(1)) == rule
     cells = _strip_cells()
     policy = _consent_box(PRIVACY)[1]
     assert len(cells) == len(policy) == len(CONSENT_CELLS)
-    for mine, theirs, (_, label, terms, _) in zip(
+    for mine, theirs, (_, label, terms, key_terms) in zip(
         cells, policy, CONSENT_CELLS, strict=True
     ):
         assert (
@@ -128,13 +137,14 @@ def test_strip_text_is_the_policy_consent_box_text() -> None:
             ).group(1)
             == label
         )
-        assert [(_text(k), _text(v)) for k, v in _notes(mine).items()] == [
-            (_text(k), _text(v)) for k, v in _notes(theirs).items()
-        ], label
-        assert set(_notes(mine)) == terms
-        refusal = (
-            _notes(mine).get("거부 권리·불이익") or _notes(mine)["거부 방법·절차·효과"]
-        )
+        notes = _notes(mine)
+        assert list(notes.items()) == list(_notes(theirs).items()), label
+        assert set(notes) == terms
+        for term, value in notes.items():
+            key = re.fullmatch(r'<strong class="key">.*</strong>', value, flags=re.S)
+            assert bool(key) == (term in key_terms), (label, term)
+            assert value.count('class="key"') == (term in key_terms), (label, term)
+        refusal = notes.get("거부 권리·불이익") or notes["거부 방법·절차·효과"]
         assert 'href="/privacy#consent"' in refusal and "동의 철회" in refusal
         assert "<details>" in mine and "내용 보기" in mine
     # 세 칸은 처음에 빈 칸이다
@@ -181,16 +191,16 @@ def test_settings_link_sits_on_the_landing_footer_and_the_dashboard_header() -> 
 
 
 def test_policy_admin_and_not_found_pages_never_load_clarity() -> None:
-    """방침·404·관리자는 파일을 싣지 않고 Clarity 주소도 없다(방침 스크립트 주석이 판 계약으로 파일 이름을 말하는 것은 괜찮다)."""
-    for rel in (
-        "public/privacy.html",
-        "public/404.html",
-        "admin/index.html",
-        "admin/admin.js",
-    ):
-        text = (WEB / rel).read_text("utf-8")
-        assert not re.search(r"""src=["'][^"']*clarity""", text), rel
-        assert "clarity.ms" not in text, rel
+    """방침·404·관리자 파일 전부는 clarity.js 를 싣지 않고(src) Clarity 주소도 없다 (§4).
+
+    파일 이름 글자 자체는 막지 않는다 — 방침 동의 스크립트 주석이 판 계약으로 `clarity.js` 를 말한다.
+    """
+    admin = sorted(p for p in (WEB / "admin").rglob("*") if p.is_file())
+    assert {p.name for p in admin} >= {"index.html", "admin.js", "admin.css"}
+    for path in (WEB / "public/privacy.html", WEB / "public/404.html", *admin):
+        text = path.read_text("utf-8")
+        assert not re.search(r"""src=["'][^"']*clarity""", text), path.name
+        assert "clarity.ms" not in text, path.name
 
 
 def test_nginx_revalidates_the_file_every_time() -> None:
