@@ -4,7 +4,9 @@
 (기본 실행기 — api 에는 수집 쓰기가 없다). Clarity 는 요청마다 Redis `admin:clarity` 를 읽어 마지막 시도에서 3시간이
 지났을 때만 부른다 — 기록이 Redis 에 있어 재시작이 하루 한도를 쓰지 않고, 키를 지우면 다음 요청이 바로 부른다(런북).
 읽기·부르기는 한 번에 하나이고 3초까지 기다린 뒤 늦으면 직전 결과(없으면 pending)를 답한다. 요청이 없으면 아무것도
-읽거나 부르지 않는다. 처리기 안 예외도 500 이 아니라 그 부분 `error` 와 WARNING 1줄(부분마다 10분에 1줄)이다.
+읽거나 부르지 않는다. 처리기 안 예외도 500 이 아니라 그 부분 `error` 와 WARNING 1줄(부분마다 10분에 1줄)이다 —
+라우터가 응답을 JSON 으로 쓰다 실패하지 않게, 쓸 수 없는 값(NaN·짝 없는 서로게이트)이 든 답도 여기서 `error` 로 바꾼다.
+JSON 풀기·쓰기(`admin:clarity`)는 파일 읽기와 같이 `asyncio.to_thread` 에서 한다.
 """
 
 import asyncio
@@ -15,7 +17,14 @@ from typing import Any
 import httpx
 
 from app.features.admin.access import VALUE_KEYS, NoLogFile, summarize
-from app.features.admin.clarity import GAP_MS, ClarityStore, Record, fetch, load_record
+from app.features.admin.clarity import (
+    GAP_MS,
+    ClarityStore,
+    Record,
+    check_json,
+    fetch,
+    load_record,
+)
 from app.features.admin.parts import (
     UNCONFIGURED,
     WAIT_SEC,
@@ -65,16 +74,21 @@ class VisitFeeds:
             result = await self._access.get(self._load_access)
         except Exception as exc:
             result = self._failed("access", exc)
-        return render(result, ACCESS_REFRESH_SEC, VALUE_KEYS)
+        return self._writable(
+            "access", render(result, ACCESS_REFRESH_SEC, VALUE_KEYS), VALUE_KEYS
+        )
 
     async def _load_access(self) -> Result:
         now = self._clock()
+        broken: list[str] = []  # 깨진 회전 파일 — 그 파일만 건너뛰고 WARNING 1줄
         try:
-            values = await asyncio.to_thread(summarize, self._dir, now)
+            values = await asyncio.to_thread(summarize, self._dir, now, broken.append)
         except NoLogFile:
             return Result("unconfigured", "no_file")
         except Exception as exc:
             return self._failed("access", exc)
+        if broken:
+            self._warn("access", broken[0])
         return Result("ok", None, int(now * 1000), values)
 
     # --- /admin/clarity ---
@@ -89,13 +103,14 @@ class VisitFeeds:
                 result = self._failed("clarity", exc)
         values = result.values or {}
         # 값은 state 와 무관하게 마지막 성공 값이다(§3.3 — §3.1 의 예외). 경과는 fetchedAt 이 말한다
-        return {
+        body = {
             "state": result.state,
             "code": result.code,
             "fetchedAt": result.fetched_at,
             "refreshSec": CLARITY_REFRESH_SEC,
             **{k: values.get(k) for k in CLARITY_KEYS},
         }
+        return self._writable("clarity", body, CLARITY_KEYS)
 
     async def _refresh_clarity(self, bus: ClarityStore | None) -> Result:
         now_ms = int(self._clock() * 1000)
@@ -114,7 +129,7 @@ class VisitFeeds:
             # 시도 시각을 모르면 부르지 않는다 — 한도를 지킨다
             self._warn("clarity", "redis")
             return self._from_record(self._record, now_ms, "error", "redis")
-        record = load_record(text)
+        record = await asyncio.to_thread(load_record, text)
         if self._unsaved_at is not None and (record.attempt_at or 0) < self._unsaved_at:
             record = self._record  # Redis 에 못 쓴 마지막 시도가 더 늦다
         if record.attempt_at is not None and now_ms - record.attempt_at < GAP_MS:
@@ -129,7 +144,7 @@ class VisitFeeds:
             record = Record(now_ms, state, code, kept.success_at, kept.values)
         self._record = record
         try:
-            await bus.clarity_save(record.dump())
+            await bus.clarity_save(await asyncio.to_thread(record.dump))
             self._unsaved_at = None
         except Exception:
             self._unsaved_at = now_ms
@@ -157,3 +172,21 @@ class VisitFeeds:
         code = type(exc).__name__
         self._warn(name, code)
         return Result("error", code)
+
+    def _writable(
+        self, name: str, body: dict[str, Any], keys: tuple[str, ...]
+    ) -> dict[str, Any]:
+        """라우터가 JSON 으로 쓸 수 있는 답인지 — 아니면 그 부분 `error`·예외 이름, 값 키는 모두 null."""
+        try:
+            check_json(body)
+        except (TypeError, ValueError) as exc:
+            code = type(exc).__name__
+            self._warn(name, code)
+            return {
+                "state": "error",
+                "code": code,
+                "fetchedAt": None,
+                "refreshSec": body["refreshSec"],
+                **dict.fromkeys(keys),
+            }
+        return body

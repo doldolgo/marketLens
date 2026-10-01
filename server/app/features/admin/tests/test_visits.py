@@ -1,6 +1,7 @@
-"""api 피드 HTTP·공통 규칙 — 항상 200·부분 하나·unconfigured·60초 캐시·처리기 예외도 200·WARNING 만 (스펙 035 §3.1·§3.2·§4)."""
+"""api 피드 HTTP·공통 규칙 — 항상 200·부분 하나·unconfigured·60초 캐시·처리기 예외·JSON 으로 못 쓰는 값도 200·WARNING 만 (스펙 035 §3.1·§3.2·§4)."""
 
 import logging
+import os
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -74,7 +75,7 @@ async def test_access_is_cached_for_its_60_second_period(tmp_path: Path) -> None
 async def test_read_failure_is_error_with_one_warning_and_no_error_log(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    def denied(directory: str | None, now: float) -> dict:
+    def denied(directory: str | None, now: float, *_: object) -> dict:
         raise PermissionError("/var/log/caddy/access.log 203.0.113.0")
 
     monkeypatch.setattr(visits, "summarize", denied)
@@ -95,6 +96,27 @@ async def test_read_failure_is_error_with_one_warning_and_no_error_log(
     ]
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
     assert "203.0.113.0" not in caplog.text
+
+
+async def test_broken_rotated_file_keeps_the_part_ok_with_one_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    bad = tmp_path / "access-2026-10-01T05-00-00.000-size.log.gz"
+    bad.write_bytes(b"\x1f\x8b\x08\x00")  # 머리만 있는 잘린 gz
+    os.utime(bad, (at(5), at(5)))
+    write(tmp_path, "access.log", [line(at(6))])
+    caplog.set_level(logging.INFO)
+    clock = Clock()
+    feeds = clock.feeds(str(tmp_path))
+    body = await feeds.access()
+    assert (body["state"], body["code"]) == ("ok", None)
+    assert body["totals"] == {"requests": 1, "pages": 1, "ws": 0, "skipped": 1}
+    clock.t = 61  # 다음 회차도 같은 파일 — 10분 안이라 줄은 하나
+    assert (await feeds.access())["state"] == "ok"
+    records = [r for r in caplog.records if r.name == "marketlens.admin"]
+    assert [(r.levelname, r.getMessage()) for r in records] == [
+        ("WARNING", "관리자 피드 access 실패 — EOFError")
+    ]
 
 
 @pytest.fixture
@@ -171,3 +193,61 @@ def test_handler_exceptions_become_error_parts_not_500(
         "관리자 피드 clarity 실패 — TypeError",
     ]
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def test_http_clarity_with_nan_infinity_and_surrogates_stays_200(
+    api: TestClient,
+) -> None:
+    body = (
+        b'[{"metricName":"Traffic","information":[{"totalSessionCount":"5"}]},'
+        b'{"metricName":"Scroll Depth","information":[{"avg":NaN,"x":Infinity}]},'
+        b'{"metricName":"Page Title","information":[{"title":"BTC \\ud83d"}]}]'
+    )
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(
+            200, content=body, headers={"content-type": "application/json"}
+        )
+    )
+    api.app.state.admin_visits = VisitFeeds(
+        access_dir=None, clarity_token=TOKEN, transport=transport
+    )
+    for _ in range(2):
+        resp = api.get("/admin/clarity")
+        assert resp.status_code == 200 and resp.json()["state"] == "ok"
+    depth, title = resp.json()["metrics"]
+    assert depth["rows"] == [{"avg": None, "x": None}]
+    assert title["rows"] == [{"title": "BTC ?"}]
+
+
+def test_http_unwritable_record_in_redis_is_an_error_part_not_500(
+    api: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    # 손으로 넣은 기록 — 짝 없는 서로게이트는 응답으로 쓸 수 없다. 3시간 안이라 부르지도 않는다
+    now_ms = int(time.time() * 1000)
+    record = (
+        f'{{"attemptAt":{now_ms},"state":"ok","code":null,"successAt":{now_ms},'
+        '"values":{"numOfDays":1,"traffic":null,"metrics":[{"name":"\\ud83d","rows":[]}]}}'
+    )
+    server = fakeredis.FakeServer()
+    fakeredis.FakeRedis(server=server).set("admin:clarity", record)
+    api.app.state.spreads_bus = RedisBus(fakeredis.aioredis.FakeRedis(server=server))
+    calls: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(500)
+
+    api.app.state.admin_visits = VisitFeeds(
+        access_dir=None, clarity_token=TOKEN, transport=httpx.MockTransport(handle)
+    )
+    caplog.set_level(logging.INFO)
+    resp = api.get("/admin/clarity")
+    assert resp.status_code == 200
+    assert (resp.json()["state"], resp.json()["code"]) == (
+        "error",
+        "UnicodeEncodeError",
+    )
+    assert resp.json()["metrics"] is None and calls == []
+    assert [r.getMessage() for r in caplog.records if r.name == "marketlens.admin"] == [
+        "관리자 피드 clarity 실패 — UnicodeEncodeError"
+    ]
