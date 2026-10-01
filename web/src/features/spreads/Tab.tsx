@@ -1,5 +1,5 @@
 // 실시간 스프레드 탭 — 코인 1개 = 행 1개 집계 표 (스펙 003 §3.5, 구조는 docs/design/reference/tabs/SpreadTab.tsx).
-import { memo } from 'react'
+import { memo, useState } from 'react'
 import { HIGHLIGHT_PCT } from '../../shared/config'
 import { fmtKrw, fmtPct, fmtUsdt, pctColor } from '../../shared/format'
 import { FX_EXS } from '../../shared/mock'
@@ -8,7 +8,7 @@ import {
   Empty, GridHeader, gridRow, NumField, Seg, segOpt, SymCell, TableFrame, ToggleBtn,
   bar, count, exTag, hint, label, searchInput, vDivider, type Header,
 } from '../../shared/ui'
-import { alias, bool, num, oneOf, sortOf, str, useUrlState, type Codec } from '../../shared/urlState'
+import { alias, bool, num, oneOf, sortOf, useUrlState, type Codec } from '../../shared/urlState'
 import { aggregateCoins, slipText, sortCoins, type CoinRow, type DomFilter, type SortCol, type View } from './coins'
 
 /** 꺼진 해외 거래소 Record ↔ 쉼표 목록. FX_EXS 밖 이름은 버린다. */
@@ -133,8 +133,8 @@ interface Props {
 }
 
 export default function SpreadsTab({ feed, onPick }: Props) {
-  // 검색어·필터·정렬은 URL 쿼리(s.*)에 실려 새로고침해도 같은 화면 (002 §3.5)
-  const [q, setQ] = useUrlState('s.q', '', str)
+  // 필터·정렬은 URL 쿼리(s.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색어는 메모리만 — Clarity 가 주소를 통째로 싣는다 (033)
+  const [q, setQ] = useState('')
   const [domFilter, setDomFilter] = useUrlState<DomFilter>('s.dom', 'all', alias([['all', 'all'], ['upbit', '업비트'], ['bithumb', '빗썸']]))
   const [view, setView] = useUrlState<View>('s.view', 'kimp', oneOf(['kimp', 'rev']))
   const [thr, setThr] = useUrlState('s.thr', HIGHLIGHT_PCT, num)

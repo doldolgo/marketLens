@@ -5,7 +5,7 @@
 import { memo, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { exName, fmtAgo, fmtPct, fmtTime, pctColor } from '../../shared/format'
 import { Empty, Pill, Seg, card, hint, kicker, searchInput, type SegOpt } from '../../shared/ui'
-import { alias, list, oneOf, useUrlState, type Codec } from '../../shared/urlState'
+import { alias, isSymbol, list, oneOf, useUrlState, type Codec } from '../../shared/urlState'
 import { useCandles, useEvents } from './api'
 import { FX_CHOICES, REAL_FXS, RES_OF_INTERVAL, RES_SEC, isMockFx, neededChunks } from './candles'
 import FxChartCard, { ChartSync, ChartToolbar } from './Chart'
@@ -100,7 +100,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads, active }: {
   const [fxf, setFxf] = useUrlState<string | null>('h.fxf', null, alias([['all', null], ...REAL_FXS.map((id): [string, string | null] => [id, id])]))
   const [sort, setSort] = useUrlState<{ key: SortKey; dir: number }>('h.sort', { key: 'cnt', dir: -1 }, SORT_CODEC)
   const { key: sortKey, dir: sortDir } = sort
-  // 심볼 검색 — Enter 로 선택 (표 클릭과 같은 onSelect)
+  // 심볼 검색 — Enter 로 선택 (표 클릭과 같은 onSelect). 영문 대문자·숫자 1~20자일 때만 — 아니면 고르지 않고 입력칸을 그대로 둔다 (033)
   const [q, setQ] = useState('')
   // 차트 거래소 선택(국내·해외 각각 여러 개). 위 표 필터와는 별개 — 기본은 국내 둘 다라서 빗썸에만 있는 코인(HEMI 등)도 빈 화면이 되지 않는다.
   // 툴바 체크박스로만 좁힌다
@@ -228,7 +228,10 @@ export default function HistoryTab({ now, selSym, onSelect, spreads, active }: {
           ]} />)}
           <input className="input" placeholder="심볼 검색 → Enter" value={q} style={searchInput}
             onChange={(e) => setQ(e.target.value.toUpperCase())}
-            onKeyDown={(e) => { if (e.key === 'Enter' && q.trim()) { onSelect(q.trim()); setQ('') } }} />
+            onKeyDown={(e) => {
+              const s = q.trim().toUpperCase()
+              if (e.key === 'Enter' && isSymbol(s)) { onSelect(s); setQ('') }
+            }} />
           <span style={{ ...hint, marginLeft: 'auto' }}>
             사건 = 원값 {DIR_LABEL[dir]} 1.0% 진입 → 0.5% 이탈, 1분 이하 제외 · 기간 내 {events.length}건
             {loading && <span style={{ color: 'var(--color-accent-300)', marginLeft: 8 }}>조회 중…</span>}
