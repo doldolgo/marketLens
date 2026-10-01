@@ -103,6 +103,12 @@ def test_file_has_the_consent_contract_and_no_timers_or_regional_guessing() -> N
     assert re.search(
         r"\.key\{font-size:1\.2em;font-weight:700;[^}]*text-decoration:underline", JS
     )
+    # 글자 15px 이상 — 띠 기본 15px 이고 어느 요소도 그보다 줄이지 않는다 (§3.3 접근성)
+    css = JS.split("const CSS = `", 1)[1].split("`", 1)[0]
+    assert re.search(r"#kt-consent\{[^}]*font:400 15px/", css)
+    for size in re.findall(r"font-size:([\d.]+)em", css):
+        assert float(size) >= 1, size
+    assert not re.search(r"font-size:\d+px", css)
 
 
 def test_strip_text_is_the_policy_consent_box_text() -> None:

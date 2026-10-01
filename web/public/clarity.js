@@ -59,7 +59,8 @@
 
   // 색은 랜딩 토큰 복사(032 동의 상자와 같은 surface·accent), 글꼴은 시스템 글꼴(032 방침과 같은 목록) — 랜딩 서브셋 글꼴에 없는
   // 글자가 섞이지 않고 대시보드의 웹 글꼴을 기다리지 않게. 아래 고정이라 페이지 배치(랜딩 카드·대시보드 표)를 바꾸지 않는다.
-  // 높이는 화면 절반까지 — 넘치면(내용 보기를 펼쳤을 때) 띠 안에서 스크롤하고 버튼 줄은 늘 보인다. 애니메이션 없음
+  // 높이는 화면 절반까지 — 넘치면(내용 보기를 펼쳤을 때) 띠 안에서 스크롤하고 버튼 줄은 늘 보인다. 애니메이션 없음.
+  // 글자는 모두 15px 이상(§3.3) — 방침은 쿠키 이름(code)을 0.88em 으로 줄이지만 띠는 줄이지 않는다
   const CSS = `
 #kt-consent{position:fixed;z-index:2147483000;left:16px;right:16px;bottom:16px;max-width:720px;max-height:50vh;max-height:50dvh;margin:0 auto;display:flex;flex-direction:column;border-radius:14px;background:#232532;box-shadow:0 0 0 1px #595d6c,0 18px 48px rgba(0,0,0,.55);color:#e9e9ed;font:400 15px/1.4 -apple-system,BlinkMacSystemFont,system-ui,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;letter-spacing:normal;text-align:left;word-break:keep-all;overflow-wrap:anywhere;font-variant-numeric:normal;-webkit-font-smoothing:antialiased}
 #kt-consent *,#kt-consent *::before,#kt-consent *::after{box-sizing:border-box}
@@ -79,7 +80,7 @@
 #kt-consent dl{display:grid;grid-template-columns:minmax(0,8.5em) minmax(0,1fr);gap:4px 16px;line-height:1.6}
 #kt-consent dt{color:#9397ab}
 #kt-consent dd{color:#cfd3e5}
-#kt-consent code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em;color:#f3f5fe}
+#kt-consent code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:1em;color:#f3f5fe}
 #kt-consent .key{font-size:1.2em;font-weight:700;color:#e9e9ed;text-decoration:underline;text-decoration-color:#9184d9;text-underline-offset:4px}
 #kt-consent .kt-c-actions{flex:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;max-width:404px;padding:12px 20px 16px}
 #kt-consent button{height:44px;padding:0 8px;border:1px solid #9184d9;border-radius:8px;background:none;color:#9184d9;font:inherit;font-weight:600;line-height:1;white-space:nowrap;cursor:pointer}
