@@ -285,3 +285,15 @@ def test_devices_os_browsers_and_in_app_from_the_user_agent(tmp_path: Path) -> N
         ["whale", 0, 1],
     ]
     assert people["inApp"] == [["kakaotalk", 0, 1], ["other", 0, 1]]
+
+
+def test_traits_use_the_first_1024_characters_and_pairs_the_whole_agent(
+    tmp_path: Path,
+) -> None:
+    # 특성은 UA 앞 1,024자로 정하고(그 뒤 KAKAOTALK 은 인앱이 아니다), 짝은 UA 전체라 꼬리만 다른 둘은 두 짝 (038 §3.5)
+    head = IPHONE + " " + "x" * (1_024 - len(IPHONE) - 1)
+    lines = [line(T0 + i, "/", ua=f"{head} KAKAOTALK 10.4.{i}") for i in range(2)]
+    write(tmp_path, "access.log", lines)
+    people = summary(tmp_path, AFTER)["visitors"]
+    assert people["shaped"] == 2 and people["inApp"] == []
+    assert people["browsers"] == [["safari", 0, 2]]

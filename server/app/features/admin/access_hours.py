@@ -4,7 +4,7 @@
 읽기 시작점 앞 줄은 JSON 을 풀기 전에 `ts` 만 보고 버린다. 시마다 목록 키는 목록마다 30까지(넘는 새 키는 `(기타)`)라
 메모리는 줄 수와 무관하다. 짝은 처리방침 v2 시행일(게이트) 뒤 줄에서만 만든다 — 게이트 앞 줄은 해시하지 않는다.
 UA 원문·IP 는 세는 동안의 지역 변수에만 있고 남기지 않는다(UA·출처 판정 메모도 파일 읽기가 끝나면 — 깨진 파일로
-예외가 나도 — 버리고, 512자를 넘는 글자는 메모하지 않는다).
+예외가 나도 — 버린다. UA 메모의 키는 판정이 보는 앞 1,024자, 출처는 512자를 넘으면 메모하지 않는다).
 """
 
 import heapq
@@ -60,13 +60,15 @@ DURATION_AT = tuple((limit, AT[k]) for k, limit in WS_BUCKETS)
 MEMO_CAP = (
     4_096  # 파일 하나를 읽는 동안의 UA·출처 판정 메모 — 다 읽으면(깨진 파일도) 버린다
 )
-# 메모에 넣는 글자 길이 상한 — 긴 UA(헤더 상한 ≈1MB 안)가 줄마다 달라도 메모가 파일 크기만큼 붙들지 않게(판정은 그대로)
+# 출처 메모에 넣는 글자 길이 상한 — 긴 출처가 줄마다 달라도 메모가 파일 크기만큼 붙들지 않게(판정은 그대로).
+# UA 메모의 키는 판정이 보는 앞 1,024자라 따로 막지 않는다(4,096 × 1,024자 ≈4MB 까지)
 MEMO_KEY_MAX = 512
 Ref = tuple[str, str] | None  # (출처 키, 호스트)
 _NO_REF: tuple[None, bool] = (None, False)
 # 어느 줄의 날과도 맞지 않는 빈 자리
 _NO_DAY: tuple[int, DayPairs, bytes] = (-DAY_SEC, DayPairs(), b"")
 _line_ts, _parse, _probe = lines.line_ts, lines.parse, lines.PROBE.search
+UA_JUDGE = lines.UA_JUDGE
 JS_PATHS, WS_PATH = lines.JS_PATHS, lines.WS_PATH
 
 
@@ -150,12 +152,13 @@ class FileTally:
             return
         self._add(ts, hour, rec)
 
-    def _kind(self, ua: str) -> str:
-        kind = self._kinds.get(ua)
+    def _kind(self, judged: str) -> str:
+        """`judged` = UA 앞 1,024자 — 판정·메모의 키."""
+        kind = self._kinds.get(judged)
         if kind is None:
-            kind = lines.ua_kind(ua)
-            if len(self._kinds) < MEMO_CAP and len(ua) <= MEMO_KEY_MAX:
-                self._kinds[ua] = kind
+            kind = lines.ua_kind(judged)
+            if len(self._kinds) < MEMO_CAP:
+                self._kinds[judged] = kind
         return kind
 
     def _ref(self, referer: str) -> tuple[Ref, bool]:
@@ -168,12 +171,12 @@ class FileTally:
                 self._refs[referer] = found
         return found
 
-    def _trait(self, ua: str) -> Traits:
-        found = self._traits.get(ua)
+    def _trait(self, judged: str) -> Traits:
+        found = self._traits.get(judged)
         if found is None:
-            found = access_traits.traits(ua)
-            if len(self._traits) < MEMO_CAP and len(ua) <= MEMO_KEY_MAX:
-                self._traits[ua] = found
+            found = access_traits.traits(judged)
+            if len(self._traits) < MEMO_CAP:
+                self._traits[judged] = found
         return found
 
     def _add(self, ts: float, hour: Hour, rec: Line) -> None:
@@ -185,7 +188,9 @@ class FileTally:
             hour.first = ts
         ref, operator = self._ref(referer) if referer else _NO_REF
         probe = _probe(path.lower()) is not None
-        ua_kind = self._kind(ua)
+        # 판정은 앞 1,024자 — 짝 해시는 UA 전체(`_pair` 가 rec 에서)
+        judged = ua[:UA_JUDGE]
+        ua_kind = self._kind(judged)
         if operator:
             kind = "operator"
         elif probe and ua_kind == "browser":
@@ -226,13 +231,13 @@ class FileTally:
                 c[JS] += 1
             if page:
                 c[HUMAN] += 1
-                self._lists(hour, ua, path, query, ref)
+                self._lists(hour, judged, path, query, ref)
         if ua_kind == "browser" and ip and ts >= self.gate_ts:
             flags = (PROBED if probe else 0) | (OPERATED if operator else 0)
             signal = js_view or upgraded
-            self._pair(ts, rec, path, query, ref, page, signal, upgraded, flags)
+            self._pair(ts, rec, judged, path, query, ref, page, signal, upgraded, flags)
 
-    def _lists(self, hour: Hour, ua: str, path: str, query: str, ref: Ref) -> None:
+    def _lists(self, hour: Hour, judged: str, path: str, query: str, ref: Ref) -> None:
         if hour.lists is None:
             hour.lists = [{} for _ in LISTS]
         paths, tabs, refs, utms, devices, browsers = hour.lists
@@ -249,7 +254,7 @@ class FileTally:
             keys.append((tabs, DEFAULT_TAB))
         if ref is not None and ref[1] not in lines.SELF_HOSTS:
             keys.append((refs, ref[0][:REFERRER_LIMIT]))
-        traits = self._trait(ua)
+        traits = self._trait(judged)
         keys += ((devices, traits.device), (browsers, traits.browser))
         for table, key in keys:
             # 시마다 목록마다 30 — 이미 있는 키는 세고 새 키가 넘치면 (기타)
@@ -261,9 +266,17 @@ class FileTally:
                 table[OTHER] = table.get(OTHER, 0) + 1
 
     def _pair(
-        self, ts: float, rec: Line, path: str, query: str, ref: Ref, *how: Any
+        self,
+        ts: float,
+        rec: Line,
+        judged: str,
+        path: str,
+        query: str,
+        ref: Ref,
+        *how: Any,
     ) -> None:
-        """짝 하나의 그날 기록 — `how` 는 (페이지 줄, JS 신호 줄, 101 줄, 탐색·운영자 흔적 비트)."""
+        """짝 하나의 그날 기록 — 해시는 (IP, UA 전체), 특성은 UA 앞 1,024자(`judged`).
+        `how` 는 (페이지 줄, JS 신호 줄, 101 줄, 탐색·운영자 흔적 비트)."""
         page, signal, upgraded, flags = how
         its = int(ts)
         day, record, key = self._day
@@ -272,14 +285,13 @@ class FileTally:
             day = kst_day(ts)
             record, key = recorded(self.days, day), self.keys.day_key(day)
             self._day = day, record, key
-        ua = rec[4]
-        h = pair_hash(key, rec[6], ua)
+        h = pair_hash(key, rec[6], rec[4])
         pair = record.pairs.get(h)
         if pair is None:
             if len(record.pairs) >= PAIR_CAP:
                 record.capped = True  # 넘는 짝은 기록하지 않는다 — 줄 세기는 그대로
                 return
-            pair = record.pairs[h] = PairDay(self._trait(ua))
+            pair = record.pairs[h] = PairDay(self._trait(judged))
         bit = 1 << ((its - day) // 3600)
         pair.flags |= flags
         if signal:

@@ -1,13 +1,14 @@
 """방문자 짝의 날 속성 — 유입 채널·인앱·기기·OS·브라우저 (스펙 038 §3.5).
 
-UA 토큰은 적힌 대소문자 그대로 보고(§3.4 의 종류와 다르다) 위에서 먼저 맞은 것이 이긴다. 채널은 그날 첫 페이지 줄 하나로
-정하고, 출처 호스트가 이름과 같거나 `.<이름>` 으로 끝나면 맞는다(`spacex.com` 은 `x.com` 이 아니다).
+UA 앞 1,024자에서 토큰을 적힌 대소문자 그대로 보고(§3.4 의 종류와 다르다) 위에서 먼저 맞은 것이 이긴다.
+채널은 그날 첫 페이지 줄 하나로 정하고, 출처 호스트가 이름과 같거나 `.<이름>` 으로 끝나면 맞는다(`spacex.com` 은
+`x.com` 이 아니다).
 """
 
 from typing import NamedTuple
 from urllib.parse import parse_qs
 
-from app.features.admin.access_classes import SELF_HOSTS
+from app.features.admin.access_classes import SELF_HOSTS, UA_JUDGE
 
 # 채널 — `*` 은 도메인 끝(최상위 도메인 — `com`·`co.kr`·`de` 등)
 AI_SITES = tuple(
@@ -63,6 +64,7 @@ class Traits(NamedTuple):
 
 def traits(ua: str) -> Traits:
     # 줄마다 부를 수 있어(UA 가 모두 다른 날) 생성식 없이 앞에서 맞은 것에서 멈춘다
+    ua = ua[:UA_JUDGE]
     inapp = None
     for token, name in IN_APPS:
         if token in ua:

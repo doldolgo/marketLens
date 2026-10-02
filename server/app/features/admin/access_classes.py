@@ -17,6 +17,8 @@ SELF_HOSTS = frozenset(("kimptrack.com", "www.kimptrack.com", "admin.kimptrack.c
 CLASSES = tuple("browser search ai preview tool scanner operator unknown".split())
 # 9999-12-30T00:00Z — 이 뒤의 `ts` 는 KST 날짜(짝 열쇠)로 바꿀 수 없다
 TS_LIMIT = 253_402_128_000.0
+# UA 종류·특성 판정은 앞 1,024자만 본다 — 줄마다 다른 긴 UA 의 판정 비용을 묶는다(짝 해시는 UA 전체, §3.4·§3.5)
+UA_JUDGE = 1_024
 
 
 def _words(text: str) -> re.Pattern[str]:
@@ -157,10 +159,11 @@ def is_operator(host: str) -> bool:
 
 
 def ua_kind(ua: str) -> str:
-    """UA 로만 정한 종류(§3.4 의 2~9) — 운영자 흔적·탐색 줄의 덮어쓰기 전. `browser` 면 짝을 기록하는 브라우저 모양이다."""
+    """UA 로만 정한 종류(§3.4 의 2~9) — 운영자 흔적·탐색 줄의 덮어쓰기 전. `browser` 면 짝을 기록하는 브라우저 모양이다.
+    앞 1,024자만 본다."""
     if not ua:
         return "unknown"
-    low = ua.lower()
+    low = ua[:UA_JUDGE].lower()
     if any(map(low.__contains__, ANY_KIND)):
         for name, words in UA_KINDS:
             if any(map(low.__contains__, words)):

@@ -104,6 +104,19 @@ def test_one_user_agent_lands_in_its_kind(
     assert sum(c["pages"] for c in body["classes"].values()) == body["totals"]["pages"]
 
 
+def test_kind_is_judged_on_the_first_1024_characters(tmp_path: Path) -> None:
+    # 판정은 앞 1,024자 — 그 뒤의 봇 낱말은 보지 않고, 그 안의 것은 본다 (038 §3.4)
+    pad = " " + "x" * (1_024 - len(CHROME) - 1)
+    assert len(CHROME + pad) == 1_024
+    lines = [
+        line(at(0), "/", ua=CHROME + pad + " Googlebot/2.1"),
+        line(at(1), "/", ua=CHROME + pad[:-20] + " Googlebot/2.1" + "y" * 900),
+    ]
+    write(tmp_path, "access.log", lines)
+    classes = summary(tmp_path, NOW)["classes"]
+    assert (classes["browser"]["pages"], classes["search"]["pages"]) == (1, 1)
+
+
 PROBES = "wp- wordpress xmlrpc .php .env .git .aws .ssh cgi-bin phpmyadmin actuator /admin /login /config /vendor/ /boaform /hnap1 /owa/ /autodiscover /server-status /solr /console .ini .sql .bak /backup /shell /setup /install /debug .ds_store".split()
 
 

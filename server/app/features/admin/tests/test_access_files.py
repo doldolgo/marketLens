@@ -184,7 +184,8 @@ def test_memory_stays_flat_while_streaming_a_large_log(tmp_path: Path) -> None:
 
 
 def test_memory_stays_flat_with_long_distinct_user_agents(tmp_path: Path) -> None:
-    """긴 UA·출처(헤더 상한 ≈1MB 안)가 줄마다 달라도 판정 메모가 원문을 붙들지 않는다 — 메모는 512자까지만 (038)."""
+    """긴 UA·출처(헤더 상한 ≈1MB 안)가 줄마다 달라도 판정 메모가 원문을 붙들지 않는다 — 키는 UA 앞 1,024자·출처는
+    512자까지만 (038 §3.4)."""
     tail = "0123456789" * 300
     lines = [
         line(
@@ -204,8 +205,8 @@ def test_memory_stays_flat_with_long_distinct_user_agents(tmp_path: Path) -> Non
         tracemalloc.stop()
     assert body["totals"]["humanPages"] == 4_200
     assert dict(body["referrers"])["https://r0.example"] == 84
-    # 메모가 원문을 담으면 4,096 × 4,000자 ≈16MB
-    assert peak < 4 * 1024 * 1024, peak
+    # 메모가 원문을 담으면 4,096 × 4,000자 ≈16MB, 앞 1,024자면 ≈4MB
+    assert peak < 8 * 1024 * 1024, peak
 
 
 def test_a_line_whose_ts_is_not_a_time_is_skipped(tmp_path: Path) -> None:
