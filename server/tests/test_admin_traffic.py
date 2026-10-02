@@ -21,18 +21,23 @@ DAY = 86_400
 G = int(datetime(2026, 10, 10, 15, tzinfo=UTC).timestamp())
 
 HARNESS = r"""
-const { script, cases } = JSON.parse(require('fs').readFileSync(0, 'utf8'))
+const { script, cases, draws } = JSON.parse(require('fs').readFileSync(0, 'utf8'))
+// 노드는 부모 하나 — 다른 곳에 붙이면 앞 부모에서 빠진다(브라우저 DOM 처럼. 한 노드를 두 칸에 붙이는 실수가 드러난다)
 class Node {
   constructor(tag) {
-    Object.assign(this, { tag, kids: [], dataset: {}, attrs: {}, _text: '', title: '', className: '', hidden: false, open: false, disabled: false, listeners: {} })
+    Object.assign(this, { tag, kids: [], parent: null, dataset: {}, attrs: {}, _text: '', title: '', className: '', hidden: false, open: false, disabled: false, listeners: {} })
   }
   get textContent() { return this._text + this.kids.map((k) => (typeof k === 'string' ? k : k.textContent)).join('') }
   set textContent(v) { this._text = String(v); this.kids = [] }
   get classList() { const n = this; return { add(c) { n.className = `${n.className} ${c}`.trim() } } }
   get lastChild() { return this.kids[this.kids.length - 1] }
-  append(...k) { this.kids.push(...k) }
-  prepend(...k) { this.kids.unshift(...k) }
-  replaceChildren(...k) { this._text = ''; this.kids = k }
+  adopt(k) {
+    for (const c of k) if (c instanceof Node) { if (c.parent) c.parent.kids = c.parent.kids.filter((x) => x !== c); c.parent = this }
+    return k
+  }
+  append(...k) { this.kids.push(...this.adopt(k)) }
+  prepend(...k) { this.kids.unshift(...this.adopt(k)) }
+  replaceChildren(...k) { this.kids.forEach((c) => c instanceof Node && (c.parent = null)); this._text = ''; this.kids = []; this.kids = this.adopt(k) }
   setAttribute(k, v) { this.attrs[k] = String(v) }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn) }
 }
@@ -67,13 +72,16 @@ function screen(respond) {
   const location = { search: '', replace: (to) => s.replaced.push(to) }
   const history = { replaceState() {} }
   const api = new Function('document', 'fetch', 'location', 'history', 'setTimeout', 'clearTimeout', 'Node',
-    script + '\n;return { answers, plain, heatLevel, sentence }')(
+    script + '\n;return { answers, plain, heatLevel, sentence, fillTraffic }')(
     document, fetch, location, history, () => ++s.timers, () => {}, Node)
   const click = (w) => buttons.find((b) => b.dataset.window === w).listeners.click.forEach((fn) => fn())
   const text = (id) => byId.get(id).textContent
   const pressed = () => buttons.filter((b) => b.attrs['aria-pressed'] === 'true').map((b) => b.dataset.window)
-  return { api, s, click, text, pressed, accessCalls: () => s.calls.filter((u) => u.startsWith('/svc/api/admin/access')) }
+  return { api, s, click, text, node: (id) => byId.get(id), pressed, accessCalls: () => s.calls.filter((u) => u.startsWith('/svc/api/admin/access')) }
 }
+const txt = (n) => (typeof n === 'string' ? n : n.textContent)
+const find = (n, cls) => (typeof n === 'string' ? [] : [...(` ${n.className} `.includes(` ${cls} `) ? [n] : []), ...n.kids.flatMap((k) => find(k, cls))])
+const bolds = (n) => (typeof n === 'string' ? [] : [...(n.tag === 'b' ? [n] : []), ...n.kids.flatMap(bolds)])
 
 const NOW = Math.floor(Date.now() / 1000)
 // 접속 응답 — 요청 창으로 답한다(answerAs 가 있으면 그 창으로), 세 창 모두 열림
@@ -138,7 +146,23 @@ async function run() {
   out.answers = cases.map((a) => v.api.answers(a).map(v.api.plain))
   const node = new Node('p')
   v.api.sentence(node, v.api.answers(cases[0])[0])
-  out.bold = node.kids.filter((k) => typeof k !== 'string').map((k) => [k.tag, k.textContent])
+  out.bold = bolds(node).map((k) => [k.tag, k.textContent])
+  out.glue = node.kids.filter((k) => typeof k !== 'string').map((k) => [k.tag, k.className, k.textContent])
+  // 마지막 답 틀 경우 = 긴 경로 — 자른 b 의 title 은 전체, 붙이지 않는다(20자 넘음)
+  const long = new Node('p')
+  v.api.sentence(long, v.api.answers(cases[cases.length - 1])[4])
+  out.titled = long.kids.map((k) => (typeof k === 'string' ? 'text' : [k.tag, k.className, k.textContent, k.title]))
+  // 그리기 — ② 단서·③ 칸·④ 눈금·덩어리 머리·본문 글자(창 목록 밖 이름이 Object 의 것을 집지 않는지)
+  out.draws = draws.map((a) => {
+    v.api.fillTraffic(a)
+    return {
+      cols: find(v.node('b-q3'), 'col').map((c) => [txt(c.kids[0].kids[0]), c.kids.slice(1).map(txt), find(c, 'brow').length]),
+      clues: find(v.node('b-q2'), 'clue').map(txt),
+      hours: find(v.node('b-q4'), 'hours').map((h) => h.kids.map(txt).filter(Boolean)),
+      meta: v.text('m-q1'),
+      all: [1, 2, 3, 4, 5, 6].map((q) => v.text(`m-q${q}`) + v.text(`a-q${q}`) + v.text(`b-q${q}`)).join('\n'),
+    }
+  })
   out.levels = [[0, 100], [100, 100], [20, 100], [21, 100], [1, 3], [3, 0]].map(([x, m]) => v.api.heatLevel(x, m))
   return out
 }
@@ -160,6 +184,7 @@ def _vis(confirmed: int, shaped: int, returning: int = 0, **extra: Any) -> dict:
 
 
 ALL = ["24h", "7d", "30d"]
+LONG_PATH = "/" + "a" * 79
 BEFORE = {
     "state": "unconfigured",
     "code": "before_gate",
@@ -196,6 +221,13 @@ NETS = [["telecom_kr", 30, 60], ["cloud", 2, 40], ["telecom", 8, 20]]
 CHANNELS = [["direct", 20, 50], ["search", 12, 30], ["social", 5, 10], ["ai", 3, 4]]
 PRE = {"windows": ["24h"], "visitors": BEFORE, "geo": BEFORE}
 TOTALS = {"requests": 1000, "humanPages": 200, "jsViews": 50, "probes": 1234}
+
+
+def _hours(start: int, *hours: int) -> list[dict]:
+    """시행일 0시부터 n시간 뒤 칸마다 스크립트가 돈 페이지 10."""
+    return [{"ts": start + h * 3600, "jsViews": 10} for h in hours]
+
+
 # 7일 창 — 시행일로 잘린 시작, 끝 = 시행 + 2일 5시간(그날 = 오늘 KST)
 END7 = G + 2 * DAY + 5 * 3600
 HOURLY7 = [
@@ -355,6 +387,77 @@ CASES: list[tuple[dict, dict[int, str]]] = [
             4: "사람 모양 페이지는 /app/ 경로가 40%로 가장 많다.",
         },
     ),
+    # 10·11. ④-기간 {h2} = {h1}+3 — 24 를 넘을 때만 24 를 뺀다(21 → 21~24시, 22 → 22~1시)
+    (
+        _case("7d", G, END7, hourly=_hours(G, 21, 22, 23)),
+        {
+            3: "화면이 실제로 뜬 페이지 보기는 21~24시에 가장 몰린다."
+            " 가장 많은 칸은 일요일 21시(10회)."
+        },
+    ),
+    (
+        _case("7d", G, END7, hourly=_hours(G, 22, 23, 24)),
+        {
+            3: "화면이 실제로 뜬 페이지 보기는 22~1시에 가장 몰린다."
+            " 가장 많은 칸은 월요일 0시(10회)."
+        },
+    ),
+    # 12. (마지막) ⑤ 경로가 60자를 넘으면 자르고 '…' — 전체는 그 b 의 title(§3.10)
+    (
+        _case(
+            "7d",
+            G,
+            END7,
+            paths=[[LONG_PATH, 5]],
+            totals={"humanPages": 10},
+            visitors=_vis(1, 2, sinceTs=G),
+        ),
+        {4: f"사람 모양 페이지는 {LONG_PATH[:60]}… 경로가 50%로 가장 많다."},
+    ),
+]
+
+# 그리기 경우 — fillTraffic 을 통째로 돌려 칸 글자만 본다(§3.8 geo 글·§3.9 화면 상한·§3.4 ④ 눈금·§3.10 창 이름)
+NETS_OK = [["telecom_kr", 30, 60], ["cloud", 2, 40]]
+COUNTRIES = [[f"{chr(65 + i // 26)}{chr(65 + i % 26)}", 30 - i, 40] for i in range(30)]
+END24 = G + 20 * 3600 + 600  # 20:10 KST — 마지막 칸이 20시
+DRAWS = [
+    # 0. geo 받는 중 — 나라·망 두 칸 모두 같은 글(노드 하나를 두 칸에 붙이면 나라 칸이 빈다)
+    _case("7d", G, END7, visitors=_vis(1, 2, sinceTs=G), geo={"state": "pending"}),
+    # 1. 지난달 판 — 두 칸에 ▲ 글, cloud 단서는 '그중 확인' 과 ▲ 글을 함께
+    _case(
+        "7d",
+        G,
+        END7,
+        visitors=_vis(1, 2, sinceTs=G),
+        geo={"state": "ok", "month": "2026-09", "networks": NETS_OK, "countries": []},
+    ),
+    # 2. 나라 30행 — 화면 상한 21행(위 5 + '16개 더')
+    _case(
+        "7d",
+        G,
+        END7,
+        visitors=_vis(1, 2, sinceTs=G),
+        geo={
+            "state": "ok",
+            "month": "2026-10",
+            "networks": NETS_OK,
+            "countries": COUNTRIES,
+        },
+    ),
+    # 3. 24시간 — 마지막 칸 20시: 끝 글자 '지금' 앞 두 칸의 18시는 비운다
+    _case(
+        "24h",
+        END24 - DAY,
+        END24,
+        hourly=[
+            {"ts": END24 - END24 % 3600 - (23 - i) * 3600, "jsViews": 1}
+            for i in range(24)
+        ],
+    ),
+    # 4. 목록 밖 창 이름 — Object 의 것을 집지 않고 고른 창(24시간)으로 그린다
+    _case(
+        "constructor", G, G + 6 * DAY, visitors=_vis(60, 600, 15, sinceTs=G, days=DAYS7)
+    ),
 ]
 
 
@@ -368,7 +471,11 @@ def traffic() -> dict[str, Any]:
     done = subprocess.run(
         [node, "-e", HARNESS],
         input=json.dumps(
-            {"script": _text("web/admin/admin.js"), "cases": [c for c, _ in CASES]}
+            {
+                "script": _text("web/admin/admin.js"),
+                "cases": [c for c, _ in CASES],
+                "draws": DRAWS,
+            }
         ),
         capture_output=True,
         text=True,
@@ -389,13 +496,47 @@ def test_answer_sentences_follow_the_templates(traffic: dict[str, Any]) -> None:
 
 
 def test_answer_values_are_bold_elements(traffic: dict[str, Any]) -> None:
-    """§3.5 — `{…}` 자리는 b 요소다(글자는 textContent)."""
+    """§3.5 — `{…}` 자리는 b 요소다(글자는 textContent). §3.9 — 값은 바로 뒤 글자(공백 전까지)와 줄 안 바꿈 span 하나."""
     assert traffic["bold"] == [
         ["b", "개정 시행 뒤 센 6일"],
         ["b", "10.0"],
         ["b", "100.0"],
         ["b", "25"],
     ]
+    assert traffic["glue"] == [
+        ["span", "nb", "개정 시행 뒤 센 6일"],
+        ["span", "nb", "10.0명,"],
+        ["span", "nb", "100.0명"],
+        ["span", "nb", "25%는"],
+    ]
+
+
+def test_long_path_in_the_answer_is_cut_with_the_full_text_in_title(
+    traffic: dict[str, Any],
+) -> None:
+    """§3.10 — 답 ⑤ 의 경로(방문자 글자)는 60자에서 자르고 전체는 그 b 의 title, 20자를 넘어 붙이지 않는다(줄을 바꾼다)."""
+    assert traffic["titled"][1] == ["b", "", f"{LONG_PATH[:60]}…", LONG_PATH]
+    assert traffic["titled"][0] == "text"
+
+
+def test_drawn_blocks_keep_geo_words_in_both_columns_and_cap_long_lists(
+    traffic: dict[str, Any],
+) -> None:
+    """§3.8 — geo 글은 나라·망 두 칸 모두에(받는 중·지난달 판), 지난달 판의 cloud 단서는 '그중 확인' 과 ▲ 글을 함께.
+    036 §3.9 — 피드 상한을 믿지 않고 목록은 21행까지. §3.4 ④ — '지금' 앞 두 칸의 정시는 비운다. §3.10 — 목록 밖 창 이름."""
+    pending, old, many, day, odd = traffic["draws"]
+    for name in ("나라", "망 종류"):
+        col = next(c for c in pending["cols"] if c[0] == name)
+        assert col[1] == ["자료 받는 중 — 다음 갱신(60초)에 찬다"], col
+        col = next(c for c in old["cols"] if c[0] == name)
+        assert col[1][0] == "▲지난달 판 2026-09 으로 셈", col
+    assert "그중 확인 2 · ▲지난달 판 2026-09 으로 셈" in old["clues"][1]
+    country = next(c for c in many["cols"] if c[0] == "나라")
+    assert country[2] == 21
+    assert country[1][5].startswith("16개 더 — ")
+    assert day["hours"] == [["0시", "6시", "12시", "지금"]]
+    assert odd["meta"] == "24시간 · 날마다 센 방문자"
+    assert "function" not in odd["all"] and "native code" not in odd["all"]
 
 
 def test_window_click_calls_only_the_access_path_at_once(
