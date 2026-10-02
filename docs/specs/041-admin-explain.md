@@ -173,7 +173,19 @@ cd web && npm run lint && npm run build   # 종료 코드 0 · ✓ built · dist
 #   서버 기록 부제 지움·Clarity 부제 지움·탭 이름표 연결 끊음·요약 줄 fixed(…, 2)·버전 b['version'])과
 #   stat 부제 줄 지움·부제 글 오타까지 여덟 모두 실패로 잡힘. mutate.py 아홉도 그대로 잡힘
 
-# 설계 세션 확인(§4 의 1~11) — 아직(설계 세션이 돌리고 여기 적는다)
+# 설계 세션 확인(§4 의 1~11) — 2026-10-02 설계 세션(5f7df1f, 샌드박스 밖). 망 fu041-net, 가짜 백엔드 둘(python:3.12-alpine +
+#   <scratch>/041chk/fake.py — 036 후속 fake 사본, 별칭 server·api), nginx:1.27-alpine 에 nginx.conf·nginx-admin.conf 템플릿·web/admin, 127.0.0.1:19141
+docker exec fu041-web nginx -t     # test is successful
+# Claude 브라우저 창(127.0.0.1:19141)
+#  1 폭 1280·768·360 × 모두 접음·모두 폄(details 21개): scrollWidth == innerWidth, 카드 밖 넘침 0, 한글 음절 중간 줄바꿈 0 — 여섯 경우 모두
+#  2 접속 explain·접속 첫 terms·인프라 첫 terms·수집 첫 terms 를 편 채 78초(빠른 묶음 10회·느린 2회, 값이 바뀌는 기본 가짜): 넷 다 열림·같은 요소·스크롤 1500 그대로
+#  3 summary 21개 모두 tabIndex 0, :focus-visible 외곽선 2px(admin.css) — Enter·Space 는 브라우저 details 기본 동작
+#  4~6 이름표(가짜 override — kind 여덟+zzz+constructor, 경보 아홉, 탭 여섯+(기타)): 한국어 이름 모두 나옴(접힌 칸·title 포함), zzz·constructor·foo 는 원래 글자, 행 예 'canary 바깥 점검'·'collect-status-instance 인스턴스 상태검사'
+#  7 99.8%·97.5%, '버전' 없음, '계정 종료' 없음, AWS 다섯 부분 unconfigured → '연결 안 됨' 14곳·'AWS 자격 없음', 비용 고정 글 하나
+#  9 xss 가짜: <img onerror> 글자로 70곳, img 0, title 밖 속성에 0, javascript: 링크 0, U+202E 0
+# 10 대비(편 상태): explain dd 10.43·dt 17.03·summary 10.43, terms dd 7.55·dt 12.33·summary 7.55, dt 안 id 5.25, 타일 부제 5.25 — 모두 4.5 이상
+#  콘솔 오류·CSP 위반 0(브라우저 창·헤드리스 둘 다)
+# 11 사진 셋(헤드리스 Chrome CDP, <scratch>/041chk/shot041.py): 접속 explain 편 1280·360, 수집 '이 칸 뜻' 편 360 — PR 본문에
 ```
 
 ## 6. 갱신할 문서
@@ -219,7 +231,7 @@ cd web && npm run lint && npm run build   # 종료 코드 0 · ✓ built · dist
   - node 확인은 가짜 DOM(요소 = 글자·자식·title 만)에 `visibilityState: hidden` 으로 싣는다 — 묶음이 돌지 않아 요청 0 이고, 이름표 찾기와 행 글자(`exchangeRow`·`timeline`·`alarmRow`·`alertRow`)·title, 가짜 응답으로 부른 채우기(`fillAccess`·`fillClarity`·`drawCollect`)의 탭 표·타일 부제·요약 줄까지 본다.
 - 검토 반영(커밋 ⑥ dfd454c): 설명 글을 코드와 다시 맞췄다 — 페이지는 GET 으로 열어 오류·리다이렉트가 아닌 응답(035 200·038 200·304 — 숫자는 적지 않음), 총 요청은 읽은 줄 전부(읽지 못한 줄 제외, 부제도), 상태 코드 넷 밖의 101, 상위 표 % 는 여섯 표가 같은 분모라 일부만 세는 표는 합이 100% 아님(분모 이름은 038 이 바꿔 적지 않음), 마지막 오류 글은 거래소 응답 본문이 있으면 그 글·없으면 수집기 글, 열린 구간은 실패 종류가 바뀌면 닫고 새로 열림, 타임라인 최소 폭 ≈6분(1000 중 4), 판정 재료는 위치 말 없이(640px 이하는 띠 아래 줄), 수집기의 경보·canary 읽기 오류(주의)와 이 화면의 호출 실패(판정 밖)를 나눔, 연결 안 됨에 알림 절 경보 이력, 보낸 알림도 Redis 기록 실패·기록을 붙이기 전이면 빠짐. CSS `.grid + .terms` 위 간격을 블록 부모에만(flex `.stack` 에서 gap 과 겹쳐 28px). 단언은 경보 조건 여덟을 §3.4 복사와 대조하고, node 하네스가 `fillAccess`·`fillClarity`·`drawCollect` 를 가짜 응답으로 불러 탭 표 이름표·부제 여섯·요약 줄 성공률·버전 없음을 본다.
 - 실행 중 함께 고친 스펙 절: §3.3 인프라 판정·알림 항목의 괄호(검토 반영), §4 이름표·node 확인 줄(검토 반영), §3.2·§3.3 의 Clarity 간격 — '칸 머리' 가 아니라 칸 본문('다음 조회 … — n 간격')에 있어 'Clarity 칸에 적힌 간격' 으로 고쳤다(화면 글도 같다). §6 대로 036 §1·§3.2·§3.4·§3.5·§3.9·§4, 034 §1·§3.2·§3.5.
-- 설계 세션 확인(§4 의 1~11)은 하지 못했다 — 이 세션 샌드박스가 Docker·헤드리스 Chrome·포트 bind 를 막고, Browser pane 은 로컬 파일을 정적 사진으로만 열어(옆 CSS·스크립트 없음, 페이지 도구 불가) 쓸 수 없었다. 폭 1280·768·360 가로 넘침·한글 음절 중간 줄바꿈, 펼침 유지 75초, 키보드, 이름표·문구·부제·XSS·대비 화면 확인, 사진 셋은 설계 세션 몫이다.
+- 설계 세션 확인(§4 의 1~11)은 설계 세션이 샌드박스 밖에서 돌렸다(2026-10-02, §5) — 모두 통과. 검토 반영 뒤 설계 세션이 고친 것: 개요 판정의 흐린 ○ 까닭 '이 화면이 그 값을 부르지 못함', 경보 canary 꼬리 이름표를 '바깥 점검' 으로(이름 canary 와 겹치지 않게 — §3.4).
 - 남은 빚:
   - 설계 세션 확인 1~11(머지 전 — 결과는 §5 에).
   - 배포 뒤 사람 확인(status 비고 "041 운영 확인 대기").
