@@ -406,7 +406,8 @@ details > summary:hover { color: var(--color-accent-300); }
 /* 카드 밖 덩어리(상위 표 여섯·박스)의 설명은 접힌 칸 모양으로 */
 :not(.card) > .terms { padding: 2px var(--space-6); border-radius: var(--radius-md); background: var(--color-surface); box-shadow: none; }
 :not(.card) > .terms[open] { padding-bottom: var(--space-4); }
-.grid + .terms { margin-top: 14px; }
+/* 블록 부모(박스)에서만 — flex 묶음(.stack)은 gap 14px 이 이미 띄우고 flex 의 margin 은 겹치지 않아 두 배가 된다 */
+:not(.stack) > .grid + .terms { margin-top: 14px; }
 .explain dl, .terms dl {
   display: grid; grid-template-columns: minmax(5.5em, 9.5em) minmax(0, 1fr); gap: 6px 16px;
   margin: 4px 0 0; font-size: 12.5px; line-height: 1.55;

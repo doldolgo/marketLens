@@ -689,6 +689,17 @@ ALARM_TAIL_NAMES = {
     "canary": "canary",
     "http-5xx": "사이트 5xx",
 }
+# 041 §3.4 경보 꼬리의 울리는 조건(계약 복사 — 끝 마침표·백틱만 뺐다)
+ALARM_TAIL_CONDITIONS = {
+    "status-instance": "60초 3점 연속 실패면 AWS 가 재부팅",
+    "status-system": "60초 2점 연속 실패면 AWS 가 복구(recover)",
+    "credit-balance": "5분 3점 연속 최대 적립의 30%(data 173·serve 86) 미만",
+    "credit-surplus": "5분 1점 0 초과(unlimited 과금 시작)",
+    "memory": "가용률 10% 미만 5분 연속(collect 는 5분 1점), 데이터 없음도 울린다",
+    "disk": "사용률 80% 초과 5분 1점, 데이터 없음도 울린다",
+    "canary": "Lambda 실패가 5분 2점 연속(10분), 데이터 없음도 울린다",
+    "http-5xx": "5분 합 10 이상(/api/ws/spreads 는 세지 않는다), 데이터 없음은 정상",
+}
 TAB_NAMES = {
     "spread": "실시간 스프레드",
     "history": "기록/통계",
@@ -827,7 +838,7 @@ def test_name_tables_match_the_spec_and_every_key_is_explained() -> None:
     assert {k: v[0] for k, v in kinds.items()} == KIND_NAMES
     tails = _js_table(js, "ALARM_TAIL")
     assert {k: v[0] for k, v in tails.items()} == ALARM_TAIL_NAMES
-    assert all(len(v) == 2 and v[1] for v in tails.values())  # 이름표와 조건
+    assert {k: v[1] for k, v in tails.items()} == ALARM_TAIL_CONDITIONS
     tabs = _js_table(js, "TAB_NAME")
     assert {k: v[0] for k, v in tabs.items()} == TAB_NAMES
     html = _text("web/admin/index.html")
@@ -904,13 +915,31 @@ const fetch = (...a) => { calls.push('fetch'); return new Promise(() => {}) }
 const location = { search: '', replace() { calls.push('replace') } }
 const history = { replaceState() { calls.push('replaceState') } }
 const api = new Function('document', 'fetch', 'location', 'history', 'Node',
-  script + '\n;return { kindName, alarmTail, tabName, pctFmt, exchangeRow, timeline, alarmRow, alertRow, topTable, stat }')(
+  script + '\n;return { kindName, alarmTail, tabName, pctFmt, exchangeRow, timeline, alarmRow, alertRow, fillAccess, fillClarity, drawCollect, got, P }')(
   document, fetch, location, history, Node)
 const text = (n) => (typeof n === 'string' ? n : n.textContent + n.kids.map(text).join(''))
 const titles = (n) => (typeof n === 'string' ? [] : [
   ...(n.title ? [n.title] : []), ...(n.tag === 'title' ? [n.textContent] : []), ...n.kids.flatMap(titles)])
 const show = (n) => ({ text: text(n), titles: titles(n) })
+const find = (n, cls) => (typeof n === 'string' ? [] : [...(n.className === cls ? [n] : []), ...n.kids.flatMap((k) => find(k, cls))])
+// 타일마다 [이름, 부제…] — 부제가 없으면 이름만
+const tiles = (n) => find(n, 'stat').map((t) => [text(t.kids[0]), ...find(t, 'stat-sub').map(text)])
 const now = Date.now()
+const sec = Math.floor(now / 1000)
+const access = { state: 'ok', startTs: sec - 86400, firstTs: sec - 3600, totals: { requests: 100, pages: 40, ws: 2, skipped: 1 },
+  hourly: [{ ts: sec - 3600, requests: 60, pages: 25, errors: 1 }, { ts: sec, requests: 40, pages: 15, errors: 0 }],
+  status: { '2xx': 80, '3xx': 10, '4xx': 7, '5xx': 1 }, ws: { count: 2, durations: { lt10s: 1, ge1h: 1 } },
+  paths: [['/', 30]], tabs: tabs.map((t, i) => [t, i + 1]), referrers: [], utmSources: [['x', 2]], devices: [['desktop', 30]],
+  browsers: [['chrome', 20]], recent5xx: [{ ts: sec - 60, path: '/', status: 502 }] }
+const accessBox = new Node('div')
+api.fillAccess(accessBox, access)
+const clarityBox = new Node('div')
+api.fillClarity(clarityBox, { state: 'ok', refreshSec: 10800, nextAt: now + 60000, metrics: [],
+  traffic: { sessions: 3, botSessions: 1, users: 2, pagesPerSession: 1.5 } })
+// 수집 요약 줄·절 요약 — 성공률 99.8 과 앱 버전(그리지 않는다)
+api.got.set(api.P.collect, { text: 'collect', body: { fetchedAt: now, successRate1h: 99.8, serverStartedAt: now - 3600000,
+  version: '0.1.0', outages: [], exchanges: [{ exchange: 'upbit', state: 'ok', lastSuccessAt: now, successRate1h: 99.8, markets: 255 }] } })
+api.drawCollect()
 const exchange = (kind) => ({ exchange: 'upbit', state: 'ok', lastSuccessAt: now, successRate1h: 97.5, markets: 255,
   openOutage: { kind, count: 3, startedAt: now - 120000 }, lastError: { at: now, kind, statusCode: 418, message: 'm' } })
 const outages = kinds.map((kind, i) => ({ exchange: 'bybit', kind, startedAt: now - (i + 2) * 60000, endedAt: now - 60000, count: i + 1 }))
@@ -923,8 +952,10 @@ process.stdout.write(JSON.stringify({
   timeline: show(api.timeline(outages)),
   alarmRows: alarms.map((name) => show(api.alarmRow({ name, state: 'ALARM', changedAt: now, reason: 'r' }))),
   alertRows: alarms.map((alarm) => show(api.alertRow({ source: 'alarm', alarm, fromState: 'OK', toState: 'ALARM', at: now }))),
-  tabTable: show(api.topTable(tabs.map((t, i) => [t, i + 1]), '탭', 40, api.tabName)),
-  tile: show(api.stat('세션', '3', null, '동의한 방문자만')),
+  accessTiles: tiles(accessBox),
+  accessTables: byId.get('access-tables').kids.map((card) => ({ kicker: text(card.kids[0]), ...show(card) })),
+  clarityTiles: tiles(clarityBox),
+  collect: { sum: text(byId.get('collect-sum')), head: text(byId.get('s-collect')) },
   calls,
 }))
 """
@@ -945,6 +976,18 @@ ALARM_NAMES = [
 ODD = ["zzz", "constructor", "__proto__"]
 KINDS = [*KIND_NAMES, *ODD]
 TABS = [*TAB_NAMES, "(기타)", "constructor"]
+# 041 §3.1·§7 타일 부제 — [이름, 부제] (5xx 는 부제 없음)
+ACCESS_TILES = [
+    ("총 요청", "파일·봇·스캔까지 기록된 모든 줄"),
+    ("페이지", "화면 주소 요청 · 봇 섞임"),
+    ("5xx",),
+]
+CLARITY_TILES = [
+    ("세션", "동의한 방문자만"),
+    ("봇 세션", "Clarity 가 봇으로 본 세션"),
+    ("사용자", "동의한 방문자 · Clarity 기준"),
+    ("세션당 페이지", "Clarity 값 그대로"),
+]
 
 
 @pytest.fixture(scope="module")
@@ -1009,11 +1052,13 @@ def test_alarm_rows_show_tail_labels_and_conditions_in_title(
     admin_js: dict[str, Any],
 ) -> None:
     """041 §3.4 — 경보 표·알림 경보 행의 이름 뒤 꼬리 이름표, 이름의 title 은 '전체 이름 — 조건'. foo 는 이름표 없음."""
+    keys = dict(zip(ALARM_NAMES, ALARM_TAIL_NAMES, strict=False))  # foo 는 꼬리 없음
     rows = zip(ALARM_NAMES, admin_js["alarmRows"], admin_js["alertRows"], strict=True)
     for name, row, alert in rows:
         short = name.removeprefix("marketlens-")
         tail = admin_js["alarms"][name]
-        if tail is None:
+        if name not in keys:
+            assert tail is None
             assert row["titles"] == [name] and alert["titles"] == [name]
             assert not any(
                 label in row["text"]
@@ -1022,7 +1067,9 @@ def test_alarm_rows_show_tail_labels_and_conditions_in_title(
             )
             assert f"{short} OK → " in alert["text"]
             continue
-        label, condition = tail
+        label = ALARM_TAIL_NAMES[keys[name]]
+        condition = ALARM_TAIL_CONDITIONS[keys[name]]
+        assert tail == [label, condition], name
         assert f"{short} {label}" in row["text"], name
         assert row["titles"] == [f"{name} — {condition}"], name
         assert f"{short} {label} OK → " in alert["text"], name
@@ -1032,9 +1079,31 @@ def test_alarm_rows_show_tail_labels_and_conditions_in_title(
 def test_tab_table_and_tiles_show_names_and_subtitles(
     admin_js: dict[str, Any],
 ) -> None:
-    """041 §3.4·§3.1 — 접속 탭 표는 한국어 탭 이름(title 은 id, (기타)는 그대로), 타일은 값 아래 부제 한 줄."""
-    table = admin_js["tabTable"]
+    """041 §3.4·§3.1 — 접속을 실제로 채우면 탭 표는 한국어 탭 이름(title 은 id, (기타)는 그대로), 서버 기록 둘·
+    Clarity 넷 타일은 값 아래 부제 한 줄이다(5xx 는 부제 없음)."""
+    tables = admin_js["accessTables"]
+    assert [t["kicker"] for t in tables] == [
+        "경로",
+        "탭",
+        "외부 출처",
+        "utm_source",
+        "기기",
+        "브라우저",
+    ]
+    table = tables[1]
     for tab in TABS:
         assert admin_js["tabs"][tab] in table["text"], tab
         assert tab in table["titles"], tab
-    assert admin_js["tile"]["text"] == "세션3동의한 방문자만"
+    assert admin_js["accessTiles"] == [[label, *sub] for label, *sub in ACCESS_TILES]
+    assert admin_js["clarityTiles"] == [list(t) for t in CLARITY_TILES]
+
+
+def test_collect_summary_shows_one_decimal_rate_and_no_version(
+    admin_js: dict[str, Any],
+) -> None:
+    """041 §3.5 — 수집 요약 줄·절 요약의 1시간 성공률은 소수 1자리, 버전 칸은 없다(응답에 version 이 있어도)."""
+    collect = admin_js["collect"]
+    assert "전체 1시간 99.8%" in collect["sum"], collect
+    assert collect["head"].endswith(" · 1시간 99.8%"), collect
+    for text in collect.values():
+        assert "버전" not in text and "0.1.0" not in text, text

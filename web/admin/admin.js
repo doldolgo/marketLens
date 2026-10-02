@@ -655,7 +655,7 @@ function ticks(start, end) {
   return row;
 }
 
-// 실패 구간 타임라인 — 거래소 다섯 줄, 진행 중은 지금까지, 1분 미만도 최소 폭. 차단·rate limit 은 꽉 찬 높이·장애색,
+// 실패 구간 타임라인 — 거래소 다섯 줄, 진행 중은 지금까지, 짧은 구간은 최소 폭(1000 중 4 ≈ 6분). 차단·rate limit 은 꽉 찬 높이·장애색,
 // 그 밖은 낮은 막대·주의색(색만으로 가르지 않는다). 아래에 최신 다섯 구간을 글자로(휴대폰은 title 을 못 본다)
 function timeline(outages) {
   if (!outages.length) return el('p', 'empty', '최근 24시간 실패 없음');
@@ -1169,7 +1169,7 @@ function fillAccess(node, a) {
   const fives = num(status['5xx']) ?? 0;
   const stats = el('div', 'stats');
   stats.append(
-    stat('총 요청', int(totals.requests), null, '파일·봇·스캔까지 모든 요청'),
+    stat('총 요청', int(totals.requests), null, '파일·봇·스캔까지 기록된 모든 줄'),
     stat('페이지', int(totals.pages), null, '화면 주소 요청 · 봇 섞임'),
     stat('5xx', int(fives), fiveTone(fives)),
   );
