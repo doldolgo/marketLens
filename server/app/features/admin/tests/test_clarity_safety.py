@@ -6,7 +6,14 @@ import logging
 import fakeredis
 import pytest
 
-from app.features.admin.tests.clarity_fakes import EXPORT, TOKEN, Clarity, World
+from app.features.admin.tests.clarity_fakes import (
+    DOC_NAMES,
+    EXPORT,
+    REAL_EXPORT,
+    TOKEN,
+    Clarity,
+    World,
+)
 
 
 async def test_addresses_lose_query_and_hash_and_referrers_become_origins() -> None:
@@ -133,6 +140,46 @@ async def test_every_address_form_loses_query_hash_and_user_info() -> None:
     ]
     stored = json.dumps(w.stored())
     for leak in ("SECRET", "gclid", "u:", "#top"):
+        assert leak not in stored and leak not in json.dumps(body), leak
+
+
+@pytest.mark.parametrize("spelling", ["real", "documented"])
+async def test_named_metrics_match_in_real_camel_case_and_documented_spelling(
+    spelling: str,
+) -> None:
+    """실제 응답(`ReferrerUrl`·`PopularPages`)과 문서 철자(`Referrer URL`·`Popular Pages`)가 같게 다뤄진다 (§3.3)."""
+    export = [
+        {**m, "metricName": DOC_NAMES.get(m["metricName"], m["metricName"])}
+        if spelling == "documented"
+        else m
+        for m in REAL_EXPORT
+    ]
+    w = World(Clarity((200, export)))
+    body = await w.get()
+    assert body["traffic"] == {
+        "sessions": 3,
+        "botSessions": 0,
+        "users": 2,
+        "pagesPerSession": 1.5,
+    }
+    dead, pages, referrers = body["metrics"]
+    # 이름은 받은 그대로 싣는다
+    assert [dead["name"], pages["name"], referrers["name"]] == [
+        m["metricName"] for m in export[1:]
+    ]
+    assert dead["rows"] == REAL_EXPORT[1]["information"]
+    assert pages["rows"] == [
+        {"url": "https://kimptrack.com/app/"},
+        {"url": "/privacy"},
+    ]
+    assert referrers["rows"] == [
+        {"url": "https://www.google.com:443"},
+        {"url": "android-app://com.google.android.gm"},
+        {"url": "www.google.com"},
+        {"url": "Direct"},
+    ]
+    stored = json.dumps(w.stored())
+    for leak in ("SECRET", "gclid", "u:", "/search", "#top", "consent"):
         assert leak not in stored and leak not in json.dumps(body), leak
 
 
