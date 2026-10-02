@@ -185,6 +185,7 @@ curl -o /dev/null -w '%{http_code}' localhost:18935/admin/aws   # 404 (수집기
 - 남은 빚:
   - 배포 뒤 사람(status "035 운영 확인 대기"): `/svc/api/admin/access` 가 실제 로그로 차는지·`firstTs` / Clarity 토큰(런북 `clarity.md` 6절)을 넣고 첫 응답의 `metricName` 목록과 행 키를 이 절에 옮긴다 — 그때 `metrics` 정규화 키를 035·036 에 / 관리자 접속 기록에 폴링 둘이 없는지.
   - Clarity 의 Traffic 밖 행 모양은 1차 문서에 없다 — 받은 이름·키 그대로 싣는다(status 빚).
+  - Clarity 첫 실제 응답(2026-10-02 00:45Z, 토큰을 넣고 api 를 다시 만든 직후 — 033 배포 18분 뒤라 동의한 방문자가 없어 세션 0): `Traffic` 밖 `metricName` 15개. 행 하나짜리 여섯 `DeadClickCount`·`ExcessiveScroll`·`RageClickCount`·`QuickbackClick`·`ScriptErrorCount`·`ErrorClickCount` — 키 `sessionsCount`·`sessionsWithMetricPercentage`·`sessionsWithoutMetricPercentage`·`pagesViews`·`subTotal`. `ScrollDepth` — `averageScrollDepth`. `EngagementTime` — `totalTime`·`activeTime`. 행 0개 일곱 `Browser`·`Device`·`OS`·`Country`·`PageTitle`·`ReferrerUrl`·`PopularPages`(키 모름). 세션 0 이라 값의 꼴(정수·실수·글자)과 차원 지표의 키를 아직 모른다 — 정규화 키(§3.3·036 타일)는 세션이 있는 응답을 본 뒤로 미룬다(status 빚).
   - api 가 caddy 로그 디렉터리 전체(90일)를 읽을 수 있다 — 요약 전용 출력은 두지 않았다(status 빚, 받아들인 위험).
   - Clarity 값의 7일 버림은 요청 때 한다 — 페이지를 7일 넘게 안 열거나 토큰을 지운 뒤에는 Redis 에 값이 남는다(런북 '끄기' 에 `DEL admin:clarity`, status 빚).
   - 016·018·021 제안 반영 대기(status 빚).
