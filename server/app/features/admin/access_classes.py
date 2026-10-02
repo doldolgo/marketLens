@@ -15,6 +15,8 @@ JS_PATHS = frozenset(("/clarity.js", "/app/clarity.js"))
 RETURNING_PATHS = frozenset(("/", "/privacy"))
 SELF_HOSTS = frozenset(("kimptrack.com", "www.kimptrack.com", "admin.kimptrack.com"))
 CLASSES = tuple("browser search ai preview tool scanner operator unknown".split())
+# 9999-12-30T00:00Z — 이 뒤의 `ts` 는 KST 날짜(짝 열쇠)로 바꿀 수 없다
+TS_LIMIT = 253_402_128_000.0
 
 
 def _words(text: str) -> re.Pattern[str]:
@@ -75,15 +77,18 @@ _decode = json.JSONDecoder().raw_decode
 
 
 def line_ts(line: str) -> float | None:
-    """JSON 을 풀지 않고 맨 앞 `"ts":` 의 수를 읽는다 — caddy 는 `ts` 를 두 번째 필드로 쓴다(문자열 안의 따옴표는 이스케이프된다)."""
+    """JSON 을 풀지 않고 맨 앞 `"ts":` 의 수를 읽는다 — caddy 는 `ts` 를 두 번째 필드로 쓴다(문자열 안의 따옴표는 이스케이프된다).
+    NaN·무한·날짜로 바꿀 수 없는 먼 미래(손상·손으로 고친 줄)는 ts 없는 줄이다 — 한 줄이 요약 전체를 깨지 않게."""
     i = line.find('"ts":')
     if i < 0:
         return None
     end = line.find(",", i + 5)
     try:
-        return float(line[i + 5 : end])
+        ts = float(line[i + 5 : end])
     except ValueError:
         return None
+    # NaN 은 비교가 늘 거짓이라 이 한 번으로 NaN·무한·음수·먼 미래가 함께 빠진다
+    return ts if 0 <= ts < TS_LIMIT else None
 
 
 def parse(line: str) -> Line | None:

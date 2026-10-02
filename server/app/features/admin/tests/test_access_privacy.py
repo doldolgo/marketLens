@@ -2,9 +2,11 @@
 
 import asyncio
 import logging
+import os
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,9 +14,11 @@ from fastapi.testclient import TestClient
 from app.core.config import get_settings
 from app.core.notify import SlackLogHandler
 from app.features.admin import access_hours
+from app.features.admin.access_cache import AccessLog
 from app.features.admin.access_pairs import pair_hash
 from app.features.admin.tests.access_fakes import (
     AFTER,
+    GATE,
     HOUR,
     IP,
     IPHONE,
@@ -120,3 +124,51 @@ async def test_parser_exceptions_leave_only_the_kind_name(
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR] and slack == []
     for banned in (IP, IPHONE, "bad line"):
         assert banned not in caplog.text
+
+
+def _strings(obj: Any, seen: set[int] | None = None) -> Iterator[str]:
+    """객체에서 닿는 모든 글자 — dict 키·값, 목록, `__slots__`·`__dict__` 속성."""
+    seen = set() if seen is None else seen
+    if id(obj) in seen:
+        return
+    seen.add(id(obj))
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            yield from _strings(k, seen)
+            yield from _strings(v, seen)
+    elif isinstance(obj, list | tuple | set | frozenset):
+        for v in obj:
+            yield from _strings(v, seen)
+    elif hasattr(obj, "__dict__") or hasattr(obj, "__slots__"):
+        names = list(getattr(obj, "__dict__", {}))
+        names += [n for c in type(obj).__mro__ for n in getattr(c, "__slots__", ())]
+        for n in names:
+            yield from _strings(getattr(obj, n, None), seen)
+
+
+def test_a_broken_rotated_file_keeps_no_user_agent_or_referrer_memo(
+    tmp_path: Path,
+) -> None:
+    # 꼬리(CRC·크기)를 자른 회전 gz — 읽다 EOFError 가 나도 그 결과째 캐시되므로 UA·출처 원문 메모는 버려져야 한다
+    t0 = AFTER - 5 * HOUR
+    lines = [
+        line(t0 + i, "/", ua=f"{IPHONE} uniq{i}", referer="https://evil.example/")
+        for i in range(50)
+    ]
+    whole = rotated(tmp_path, lines)
+    whole.write_bytes(whole.read_bytes()[:-12])
+    os.utime(whole, (t0 + 49, t0 + 49))
+    write(tmp_path, "access.log", [line(AFTER - 60, "/", ua=KAKAO)])
+    log = AccessLog(str(tmp_path), GATE)
+    values, broken = log.summary("24h", AFTER)
+    assert broken == ["EOFError"] and values["totals"]["skipped"] == 1
+    assert values["visitors"]["shaped"] == 51  # 읽은 데까지는 센다
+    tallies = [e.tally for e in log._files.values()] + [log._current]
+    assert len(tallies) == 2
+    for tally in tallies:
+        assert (tally._kinds, tally._traits, tally._refs) == ({}, {}, {})
+        assert tally._day[2] == b""  # 날 열쇠도 남기지 않는다
+        found = [x for x in _strings(tally) if "uniq" in x or "iPhone" in x]
+        assert found == []

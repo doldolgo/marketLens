@@ -3,7 +3,8 @@
 회전 파일은 압축이 끝나면 바뀌지 않아 파일마다 한 번 세어 메모리에 두고, 창은 시 버킷을 더해 만든다(`access_cache.py`).
 읽기 시작점 앞 줄은 JSON 을 풀기 전에 `ts` 만 보고 버린다. 시마다 목록 키는 목록마다 30까지(넘는 새 키는 `(기타)`)라
 메모리는 줄 수와 무관하다. 짝은 처리방침 v2 시행일(게이트) 뒤 줄에서만 만든다 — 게이트 앞 줄은 해시하지 않는다.
-UA 원문·IP 는 세는 동안의 지역 변수에만 있고 남기지 않는다(UA 판정 메모도 파일을 다 읽으면 버린다).
+UA 원문·IP 는 세는 동안의 지역 변수에만 있고 남기지 않는다(UA·출처 판정 메모도 파일 읽기가 끝나면 — 깨진 파일로
+예외가 나도 — 버리고, 512자를 넘는 글자는 메모하지 않는다).
 """
 
 import heapq
@@ -56,7 +57,11 @@ REQ, PAGES, HUMAN, JS, PROBES, WS, SKIP, ERR, WS_ERR, WS_5XX, GE_1H = (
 STATUS_AT = {n: AT[f"{n}xx"] for n in (2, 3, 4, 5)}
 KIND_AT = {k: (AT[f"{k}:requests"], AT[f"{k}:pages"]) for k in CLASSES}
 DURATION_AT = tuple((limit, AT[k]) for k, limit in WS_BUCKETS)
-MEMO_CAP = 4_096  # 파일 하나를 읽는 동안의 UA·출처 판정 메모 — 다 읽으면 버린다
+MEMO_CAP = (
+    4_096  # 파일 하나를 읽는 동안의 UA·출처 판정 메모 — 다 읽으면(깨진 파일도) 버린다
+)
+# 메모에 넣는 글자 길이 상한 — 긴 UA(헤더 상한 ≈1MB 안)가 줄마다 달라도 메모가 파일 크기만큼 붙들지 않게(판정은 그대로)
+MEMO_KEY_MAX = 512
 Ref = tuple[str, str] | None  # (출처 키, 호스트)
 _NO_REF: tuple[None, bool] = (None, False)
 # 어느 줄의 날과도 맞지 않는 빈 자리
@@ -107,19 +112,22 @@ class FileTally:
         self, handle: Iterable[str], pause: Callable[[float], None] = time.sleep
     ) -> None:
         lines_in, line = iter(handle), self.line
-        while True:
-            n = 0
-            for raw in islice(lines_in, YIELD_EVERY):
-                line(raw)
-                n += 1
-            if n < YIELD_EVERY:
-                break
-            # 0초 잠들기 — GIL 을 놓아 같은 프로세스의 이벤트 루프가 차례를 얻는다
-            pause(0)
-        self._kinds.clear()
-        self._traits.clear()
-        self._refs.clear()
-        self._day = _NO_DAY
+        try:
+            while True:
+                n = 0
+                for raw in islice(lines_in, YIELD_EVERY):
+                    line(raw)
+                    n += 1
+                if n < YIELD_EVERY:
+                    break
+                # 0초 잠들기 — GIL 을 놓아 같은 프로세스의 이벤트 루프가 차례를 얻는다
+                pause(0)
+        finally:
+            # 깨진 회전 파일(읽다 예외)도 이 결과째 캐시된다 — UA·출처 원문 메모와 열쇠는 늘 여기서 버린다
+            self._kinds.clear()
+            self._traits.clear()
+            self._refs.clear()
+            self._day = _NO_DAY
 
     def line(self, raw: str) -> None:
         ts = _line_ts(raw)
@@ -146,7 +154,7 @@ class FileTally:
         kind = self._kinds.get(ua)
         if kind is None:
             kind = lines.ua_kind(ua)
-            if len(self._kinds) < MEMO_CAP:
+            if len(self._kinds) < MEMO_CAP and len(ua) <= MEMO_KEY_MAX:
                 self._kinds[ua] = kind
         return kind
 
@@ -156,7 +164,7 @@ class FileTally:
         if found is None:
             ref = lines.referrer(referer)
             found = ref, ref is not None and lines.is_operator(ref[1])
-            if len(self._refs) < MEMO_CAP:
+            if len(self._refs) < MEMO_CAP and len(referer) <= MEMO_KEY_MAX:
                 self._refs[referer] = found
         return found
 
@@ -164,7 +172,7 @@ class FileTally:
         found = self._traits.get(ua)
         if found is None:
             found = access_traits.traits(ua)
-            if len(self._traits) < MEMO_CAP:
+            if len(self._traits) < MEMO_CAP and len(ua) <= MEMO_KEY_MAX:
                 self._traits[ua] = found
         return found
 

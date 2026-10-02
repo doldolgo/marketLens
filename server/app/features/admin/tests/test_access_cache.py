@@ -1,5 +1,5 @@
-"""회전 파일별 메모리 캐시 — 다시 열지 않음·access.log 60초·사라짐·압축 짝·크기 바뀜·시작점 이동·한 번에 하나·
-첫 채움 pending·압축 10MB·1시간 비움 (스펙 038 §3.3·§4)."""
+"""회전 파일별 메모리 캐시 — 다시 열지 않음·access.log 60초·60초 안 회전·사라짐·압축 짝·크기 바뀜·시작점 이동·
+한 번에 하나·첫 채움 pending·압축 10MB·1시간 비움 (스펙 038 §3.3·§3.8·§4)."""
 
 import asyncio
 import gzip
@@ -7,6 +7,7 @@ import os
 import random
 import time
 from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,36 @@ async def test_rotated_files_are_read_once_and_access_log_every_60_seconds(
     write(tmp_path, "access.log", [line(T0 + HOUR, "/b"), line(T0 + HOUR + 1, "/c")])
     assert (await f.get())["totals"]["requests"] == 3
     assert opened == {old.name: 1, "access.log": 2}
+
+
+@pytest.mark.parametrize("how", ["rename", "copytruncate"])
+async def test_a_rotation_inside_60_seconds_never_counts_a_line_twice(
+    tmp_path: Path, opened: Counter[str], how: str
+) -> None:
+    # 24시간 갱신 → caddy 회전 → 30초 뒤 다른 창. 옛 access.log 결과를 새 회전 파일과 함께 세면 안 된다(§3.8)
+    lines = [
+        line(T0 + i, "/" if i % 2 else "/boom", status=200 if i % 2 else 500)
+        for i in range(20)
+    ]
+    log = write(tmp_path, "access.log", lines)
+    f = Feeds(tmp_path, AFTER)
+    assert (await f.get())["totals"]["requests"] == 20
+    stamp = datetime.fromtimestamp(T0 + 19, UTC).strftime("%Y-%m-%dT%H-%M-%S.%f")
+    moved = tmp_path / f"access-{stamp[:-3]}-time.log"
+    if how == "rename":  # caddy — 옮기고 새 파일(새 inode)
+        log.rename(moved)
+        log.write_text("")
+    else:  # 같은 inode 를 비움 — 크기가 줄었다
+        moved.write_bytes(log.read_bytes())
+        log.write_text("")
+    os.utime(moved, (T0 + 19, T0 + 19))
+    f.t = 30
+    week = await f.get("7d")
+    assert week["totals"]["requests"] == 20 and week["status"]["5xx"] == 10
+    assert sum(h["requests"] for h in week["hourly"]) == 20
+    errors = {(e["ts"], e["path"]) for e in week["recent5xx"]}
+    assert len(errors) == len(week["recent5xx"]) == 10
+    assert opened == {"access.log": 2, moved.name: 1}
 
 
 async def test_a_vanished_rotated_file_takes_its_counts_with_it(tmp_path: Path) -> None:

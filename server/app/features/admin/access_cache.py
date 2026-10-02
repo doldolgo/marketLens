@@ -3,7 +3,8 @@
 읽는 계약(027·035): caddy 가 도메인 요청마다 JSON 한 줄을 `access.log` 에 쓰고, 하루 또는 50MiB 에서 회전해 gzip 된
 회전 파일 `access-<UTC 시각>-<size|time>.log.gz` 를 같은 디렉터리에 둔다(압축 중엔 같은 이름 `.log` 가 잠깐 함께 있고
 그때는 `.log` 하나만 읽는다). 회전 파일은 압축이 끝나면 바뀌지 않아 확장자를 뗀 이름마다 한 번 세어 두고, `access.log` 는
-60초가 지났을 때만 통째로 다시 읽는다. 창은 늘 읽는 범위 전체를 채운 캐시에서 시 버킷을 더해 만든다.
+60초가 지났거나 회전을 본 회차(새 회전 파일 키·바뀐 inode·줄어든 크기)에만 통째로 다시 읽는다 — 회전된 줄을 두 번 세지 않게.
+창은 늘 읽는 범위 전체를 채운 캐시에서 시 버킷을 더해 만든다.
 게이트(처리방침 v2 시행일 00:00 KST) 전에는 읽는 범위가 24시간 창과 같고 짝을 하나도 만들지 않는다.
 동기 함수뿐이다 — api 가 `asyncio.to_thread` 에서 부르고, 캐시 만들기는 잠금 하나로 프로세스에서 한 번에 하나다.
 저장소(Redis·디스크)에는 아무것도 쓰지 않는다.
@@ -56,6 +57,14 @@ class Entry(NamedTuple):
     size: int
     mtime: float
     tally: FileTally
+
+
+class Current(NamedTuple):
+    """목록에서 본 `access.log` — 회전(바뀐 inode·줄어든 크기)을 알아보는 데 쓴다."""
+
+    path: str
+    ino: int
+    size: int
 
 
 def gate_ts(effective: str) -> int:
@@ -116,6 +125,9 @@ class AccessLog:
         self._files: dict[str, Entry] = {}  # 확장자를 뗀 이름 → 회전 파일 하나의 세기
         self._current: FileTally | None = None
         self._current_at: float | None = None
+        # 지금 `_current` 를 읽은 회차의 목록 값
+        self._current_seen: Current | None = None
+        self._stems: set[str] = set()  # 직전 회차 목록의 회전 파일 키
 
     def summary(self, name: str, now: float) -> tuple[dict[str, Any], list[str]]:
         """창 하나의 값과 이번 회차에 깨진 것으로 본 회전 파일의 예외 이름들. 디렉터리·파일이 없으면 `NoLogFile`.
@@ -130,8 +142,12 @@ class AccessLog:
             current, rotated = self._listing()
         except NoLogFile:
             self._files.clear()  # 원본이 모두 사라졌다 — 요약도 같은 회차에 버린다
-            self._current = self._current_at = None
+            self._current = self._current_at = self._current_seen = None
+            self._stems = set()
             raise
+        # 새 회전 파일 키가 나타났다 = 회전 — 그 줄은 이번 회차에 회전 파일로 센다
+        rotated_now = not rotated.keys() <= self._stems
+        self._stems = set(rotated)
         chosen: dict[str, tuple[str, int, float]] = {}
         spent = 0
         for stem, (path, size, mtime) in sorted(
@@ -167,36 +183,48 @@ class AccessLog:
                 broken.append(type(exc).__name__)
             self._files[stem] = Entry(size, mtime, tally)
         mono = self._mono()
+        seen = self._current_seen
         if current is None:
-            self._current, self._current_at = None, None
+            self._current = self._current_at = self._current_seen = None
         elif (
             self._current is None
             or self._current_at is None
+            or seen is None
             or mono - self._current_at >= CURRENT_EVERY_SEC
             or self._current.read_start != start
+            # 회전을 본 회차 — 60초와 무관하게 통째로 바꾼다. 옛 `access.log` 의 줄을 새 회전 파일과 두 번 세지 않게(§3.8)
+            or rotated_now
+            or current.ino != seen.ino
+            or current.size < seen.size
         ):
             tally = FileTally(start, self._gate, self._keys)
             try:
-                with open_log(current) as handle:
+                with open_log(current.path) as handle:
                     tally.read(handle)  # 읽기 실패는 부분 전체의 error
             except FileNotFoundError:
                 pass  # 회전 직후 — 빈 파일로 본다
-            self._current, self._current_at = tally, mono
+            self._current, self._current_at, self._current_seen = tally, mono, current
         return broken
 
-    def _listing(self) -> tuple[str | None, dict[str, tuple[str, int, float]]]:
+    def _listing(self) -> tuple[Current | None, dict[str, tuple[str, int, float]]]:
         if not self._dir:
             raise NoLogFile
         try:
             entries = list(os.scandir(self._dir))
         except (FileNotFoundError, NotADirectoryError) as exc:
             raise NoLogFile from exc
-        current: str | None = None
+        current: Current | None = None
         rotated: dict[str, tuple[str, int, float]] = {}
         for entry in entries:
             name = entry.name
             if name == LOG_NAME:
-                current = entry.path
+                try:
+                    st = entry.stat()
+                except FileNotFoundError:
+                    st = None  # 회전 중 — 열기도 빈 파일로 본다
+                # 크기를 모르면 -1 — 다음 회차의 어떤 크기도 '줄어듦' 이 아니다
+                ino, size = (0, -1) if st is None else (st.st_ino, st.st_size)
+                current = Current(entry.path, ino, size)
             elif name.startswith(ROTATED_PREFIX) and name.endswith((".log", ".log.gz")):
                 stem = name.removesuffix(".gz").removesuffix(".log")
                 # 압축 중이면 같은 줄을 담은 `.log` 와 덜 쓴 `.log.gz` 가 함께 있다 — 다 쓴 `.log` 를 읽는다
