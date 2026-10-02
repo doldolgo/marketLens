@@ -52,6 +52,56 @@ EXPORT = [
     },
 ]
 
+# 실제 응답의 이름 철자(2026-10-02 첫 응답 — 035 §7) — 공백 없는 CamelCase. 위 EXPORT 는 문서 철자다.
+# 첫 응답은 세션 0 이라 행 값·차원 지표의 키는 지어낸 것이고, 한 행 지표의 키만 실제와 같다
+REAL_EXPORT = [
+    {
+        "metricName": "Traffic",
+        "information": [
+            {
+                "totalSessionCount": "3",
+                "totalBotSessionCount": "0",
+                "distantUserCount": "2",
+                "PagesPerSessionPercentage": 1.5,
+            }
+        ],
+    },
+    {
+        "metricName": "DeadClickCount",
+        "information": [
+            {
+                "sessionsCount": "0",
+                "sessionsWithMetricPercentage": 0,
+                "sessionsWithoutMetricPercentage": 100,
+                "pagesViews": "4",
+                "subTotal": "0",
+            }
+        ],
+    },
+    {
+        "metricName": "PopularPages",
+        "information": [
+            {"url": "https://kimptrack.com/app/?tab=history&gclid=SECRET1#top"},
+            {"url": "/privacy?utm_source=SECRET2#consent"},
+        ],
+    },
+    {
+        "metricName": "ReferrerUrl",
+        "information": [
+            {"url": "https://u:SECRET3@www.google.com:443/search?q=SECRET4#x"},
+            {"url": "android-app://com.google.android.gm/?x=SECRET5"},
+            {"url": "www.google.com/search?q=SECRET6"},
+            {"url": "Direct"},
+        ],
+    },
+]
+# 같은 지표의 문서 철자(Microsoft Learn) — 실제 이름 → 문서 이름
+DOC_NAMES = {
+    "DeadClickCount": "Dead Click Count",
+    "PopularPages": "Popular Pages",
+    "ReferrerUrl": "Referrer URL",
+}
+
 
 class Clarity:
     """가짜 Data Export — 부른 요청을 모으고, 차례로 응답(상태·본문)을 준다."""

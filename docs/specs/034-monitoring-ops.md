@@ -190,7 +190,11 @@ docker ps -a · docker network ls · docker images | grep 034   # 0건
   - 실행기 밖 예외(실행기 종료 등)는 그 부분 error·예외 이름, WARNING 은 스레드 결과가 ok 가 아닐 때만. 로그 부분 이름은 `aws.alarms`·`aws.metrics`·`aws.canary`·`aws.budget`·`alerts.slack`(code `redis`)·`alerts.alarms`, 문구 `관리자 피드 <부분> 실패 — <code>`.
   - 응답은 모델 없이 dict → JSONResponse(OpenAPI 에는 경로만). 전용 실행기는 데몬 스레드 하나다 — `ThreadPoolExecutor` 의 작업 스레드는 인터프리터 종료가 join 해 막힌 AWS 읽기(호출마다 최대 7초)가 `docker stop` 유예 10초를 넘길 수 있다. 수집기 종료 때 대기 읽기는 취소하고 도는 읽기는 lifespan 도 프로세스 종료도 기다리지 않는다.
 - 실행 중 함께 고친 스펙 절: §3.2 IAM 과 §6 런북 항목 — 좁힌 경보 리소스 확인 위치를 CloudShell → collect 의 수집기 컨테이너로(CloudShell 은 관리자 신원이라 역할 정책을 시험하지 못하고, 역할 신뢰는 EC2 뿐이다). 런북 16단계도 같다. 검토 반영(2026-10-01): §3.1 가림에 알림 `key`, §3.2 자격증명 없음 1분·`ExpiredTokenException`·`wsClients` 는 serve 의 게이지, §3.3 기록은 보내기와 따로, §3.4 CloudWatch 는 JSON 1.0(CBOR 아님)·요금 17지표, §4 해당 항목.
-- 운영 확인(2026-10-01, PR #86 배포 뒤 — 설계 세션이 collect 에서): 경보 ARN 으로 좁힌 정책은 `DescribeAlarms` AccessDenied(IAM 이 `alarm:*` 로 검사) → 경보 두 액션을 `*` 로 넓혀 다시 붙임. 수집기 컨테이너에서 `alarms 17`·`history 10`. `/admin/aws` 네 부분 모두 `ok`(예산은 SCP 에 막히지 않았다) — 경보 counts ok 17, 지표 박스 collect·data·serve, canary 최근 실행 ok·1,338ms·줄 넷(`1단계 통과 (141ms)` … — Lambda 로그는 텍스트 형식), 예산 한도 130·실제 83.91·예측 84.97. `/admin/alerts` 21건(Slack 기동 알림 둘 + 경보 이력). 두 응답에 `arn:aws`·12자리 계정 ID 없음. 남음: 관리자 접속 기록에 폴링 둘 없음(036 화면이 부른 뒤)·collect 합성 응답 풀기 1회·첫 달 청구 지표 수.
+- 운영 확인(2026-10-01, PR #86 배포 뒤 — 설계 세션이 collect 에서): 경보 ARN 으로 좁힌 정책은 `DescribeAlarms` AccessDenied(IAM 이 `alarm:*` 로 검사) → 경보 두 액션을 `*` 로 넓혀 다시 붙임. 수집기 컨테이너에서 `alarms 17`·`history 10`. `/admin/aws` 네 부분 모두 `ok`(예산은 SCP 에 막히지 않았다) — 경보 counts ok 17, 지표 박스 collect·data·serve, canary 최근 실행 ok·1,338ms·줄 넷(`1단계 통과 (141ms)` … — Lambda 로그는 텍스트 형식), 예산 한도 130·실제 83.91·예측 84.97. `/admin/alerts` 21건(Slack 기동 알림 둘 + 경보 이력). 두 응답에 `arn:aws`·12자리 계정 ID 없음. 남음: collect 합성 응답 풀기 1회·첫 달 청구 지표 수.
+- 운영 확인 보충(2026-10-02, 036 배포 뒤 — 설계 세션, 반박 검증까지):
+  - 관리자 접속 기록에 두 피드의 60초 폴링 줄이 없다. 공개 쪽 `/api/admin/*` 는 404, 관리자 쪽 교차 사이트 요청은 403.
+  - 위 예산 값(실제 83.91·예측 84.97)은 9월 값이다 — AWS Budgets 는 값을 하루 최대 세 번 갱신해, 10-01 은 물론 10-02 에도 9월 값이 남아 있었다. 달이 바뀐 직후의 비용 칸은 지난달 값일 수 있다.
+  - §3.2 는 collect 의 `swap` 을 null 로 적었지만(027 설정상 data 만 보낸다), 피드는 collect 스왑을 0.0 시계열로 준다 — collect 에서 그 지표가 오고 있다는 뜻이다. 원인은 보지 않았다(027 §7 의 설정 파일 오적재 이력이 있다). 화면은 값이 있는 박스에 스왑 줄을 두므로 collect 카드에 0% 줄이 보일 뿐 문제는 없다.
 - 남은 빚:
   - AWS 는 Stubber·가짜로만 확인했다 — 실제 응답(`GetMetricData` 크기·canary 로그 줄 형식·Budgets SCP)은 운영에서 처음 본다(위 운영 확인).
   - 수집기 종료 직전 버스가 닫힌 뒤 보낸 알림은 기록 실패 WARNING 1줄이 날 수 있다(드물다 — 동작 영향 없음).

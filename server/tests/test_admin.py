@@ -42,6 +42,8 @@ POLLING = (
     | FEEDS
     | API_FEEDS
 )
+# 브라우저가 스스로 부르는 아이콘 — 본문 없는 204, 기록하지 않는다 (§3.1·§3.2)
+FAVICON = ("=", "/favicon.ico")
 BASE_HEADERS = [
     ["Host", "$http_host"],
     ["X-Real-IP", "$remote_addr"],
@@ -302,7 +304,18 @@ def test_access_log_is_one_json_line_per_request_without_polling() -> None:
     off = {
         k for k, c in _locations(server).items() if _args(c, "access_log") == [["off"]]
     }
-    assert off == POLLING
+    assert off == POLLING | {FAVICON}
+
+
+def test_favicon_is_an_empty_204_that_inherits_server_headers() -> None:
+    """브라우저의 아이콘 요청이 화면 root 의 404·error 로그 줄이 되지 않게 — 본문 없는 204, 기록 끔, 자기 헤더 없음."""
+    locations = _locations(_admin_server())
+    assert _admin_route("/favicon.ico") == FAVICON
+    assert locations[FAVICON] == [
+        (["access_log", "off"], None),
+        (["return", "204"], None),
+    ]
+    assert XFO in _effective(locations[FAVICON], "add_header")
 
 
 # --- web 이미지·compose·caddy (§3.1·§3.2·§3.5) ------------------------------------------
@@ -548,6 +561,38 @@ def test_screen_script_has_two_polling_bundles_and_no_outside_address() -> None:
         assert f"'{path}'" in js, path
 
 
+def test_screen_chart_empty_words_differ_from_the_alarm_state_name() -> None:
+    """036 §3.5 — 점 2개 미만 차트는 "값 없음"·"값 1개뿐", "데이터 부족" 은 경보 INSUFFICIENT_DATA 만."""
+    js = _text("web/admin/admin.js")
+    assert "s.count ? '값 1개뿐' : '값 없음'" in js
+    assert "el('p', 'empty', '데이터 부족')" not in js
+    assert "INSUFFICIENT_DATA: ['dim', '데이터 부족']" in js
+
+
+def _js_function(js: str, name: str) -> str:
+    """`function 이름(…) {` 부터 맨 앞 칸의 `}` 까지 — 파일의 함수는 맨 위 수준에만 있다."""
+    found = re.search(rf"\nfunction {name}\([^)]*\) \{{\n(.*?)\n\}}\n", js, flags=re.S)
+    assert found, name
+    return found.group(1)
+
+
+def test_screen_body_elapsed_words_are_retold_after_every_paint() -> None:
+    """036 §3.3 — 본문 안 경과 글자는 시각을 data-at 에 둔 span 이고, 그리기 끝에 글자만 고친다(본문은 그대로)."""
+    js = _text("web/admin/admin.js")
+    assert "span.dataset.at = String(ms)" in _js_function(js, "agoSpan")
+    retick = _js_function(js, "retick")
+    assert "document.querySelectorAll('span[data-at]')" in retick
+    # 글자가 바뀔 때만 쓴다 — 같은 글자를 다시 쓰면 텍스트 노드가 바뀌어 글자 선택이 풀린다
+    assert "const text = ago(Number(span.dataset.at));" in retick
+    assert "if (span.textContent !== text) span.textContent = text;" in retick
+    assert retick.count("span.textContent =") == 1
+    assert _js_function(js, "paint").rstrip().endswith("retick();")
+    # 값이 바뀔 때만 다시 그리는 본문의 경과는 모두 그 span 으로
+    for name in ("alarmRow", "fillCanary"):
+        body = _js_function(js, name)
+        assert "agoSpan(" in body and "ago(" not in body.replace("agoSpan(", ""), name
+
+
 def test_screen_page_has_no_inline_script_or_style() -> None:
     html = _text("web/admin/index.html")
     scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, flags=re.S)
@@ -603,3 +648,8 @@ def test_screen_styles_copy_theme_tokens_without_outside_resources() -> None:
     for token in TOKENS:
         assert ours[token] == theme[token], token
     assert "@media (max-width: 640px)" in css
+    # 한국어는 낱말 단위로 줄을 바꾸고, 칸보다 긴 낱말만 넘칠 때 끊는다 (§3.7)
+    body = re.search(r"\nbody \{([^}]*)\}", re.sub(r"/\*.*?\*/", "", css, flags=re.S))
+    assert body, "body 규칙"
+    assert "word-break: keep-all;" in body.group(1)
+    assert "overflow-wrap: break-word;" in body.group(1)
