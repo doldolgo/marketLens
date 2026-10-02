@@ -1131,3 +1131,104 @@ def test_collect_summary_shows_one_decimal_rate_and_no_version(
     assert collect["head"].endswith(" · 1시간 99.8%"), collect
     for text in collect.values():
         assert "버전" not in text and "0.1.0" not in text, text
+
+
+# --- 접속 절 v3 — 창 줄·질문 여섯 덩어리 (042 §4 정적 단언) -----------------------------------------
+
+WINDOWS = ["24h", "7d", "30d"]
+DBIP = '<a href="https://db-ip.com" rel="noreferrer">IP Geolocation by DB-IP</a>'
+
+
+def test_traffic_window_is_one_query_with_three_window_words() -> None:
+    """042 §3.2 — `?window=` 는 창을 붙이는 한 곳뿐이고 창 글자는 24h·7d·30d 셋, 창은 주소·저장소에 싣지 않는다."""
+    js = _text("web/admin/admin.js")
+    assert js.count("?window=") == 1
+    assert "`${path}?window=${asked}`" in js
+    assert set(re.findall(r"'(\d+[a-z])'", js)) == set(WINDOWS)
+    assert _object_keys(
+        re.search(r"const WINDOW_NAME = \{([^}]*)\};", js).group(1)
+    ) == (WINDOWS)
+    for banned in ("location.hash", "pushState", "localStorage", "sessionStorage"):
+        assert banned not in js, banned
+
+
+def test_traffic_window_buttons_and_block_order_in_the_page() -> None:
+    """042 §4 — 창 버튼 셋(type=button·data-window 순서·7d·30d disabled), `#traffic` 안 순서 — 041 설명 → 실시간 →
+    창 줄 → 답 줄 여섯 → Clarity 카드, 답 줄과 다음 덩어리 사이에 본문 하나·'이 칸 뜻' 하나."""
+    html = _text("web/admin/index.html")
+    body = _section_bodies(html)["traffic"]
+    buttons = re.findall(r"<button\b[^>]*\bdata-window=[^>]*>", body)
+    assert [re.search(r'data-window="([^"]+)"', b).group(1) for b in buttons] == (
+        WINDOWS
+    )
+    for button, window in zip(buttons, WINDOWS, strict=True):
+        assert 'type="button"' in button, button
+        assert (" disabled" in button) == (window != "24h"), button
+    marks = [EXPLAIN, 'id="b-ws24"', 'class="window-bar"']
+    marks += [f'id="a-q{n}"' for n in range(1, 7)] + ['id="m-clarity"']
+    at = [body.index(m) for m in marks]
+    assert at == sorted(at) and all(body.count(m) == 1 for m in marks)
+    for n in range(1, 7):
+        start = body.index(f'id="a-q{n}"')
+        end = body.index(f'id="a-q{n + 1}"' if n < 6 else 'id="m-clarity"')
+        between = body[start:end]
+        assert re.findall(r'id="b-q\d"', between) == [f'id="b-q{n}"'], n
+        assert between.count(TERMS) == 1, n
+        assert between.index(f'id="b-q{n}"') < between.index(TERMS), n
+        assert f'<p class="answer" id="a-q{n}"></p>' in body, n
+        assert body.index(f'id="m-q{n}"') < start, n
+    # 묶음·덩어리 카드에는 id 가 없다(041 — 설명의 id 가진 조상은 section 뿐)
+    for card in re.findall(r'<div class="card q"[^>]*>', body):
+        assert "id=" not in card, card
+
+
+def test_traffic_dbip_attribution_is_one_fixed_link_outside_the_terms() -> None:
+    """039 §3.2·042 §3.4 ③ — DB-IP CC BY 표시는 index.html 의 고정 링크 하나(③ 바닥 — 설명 dl 밖)."""
+    html = _text("web/admin/index.html")
+    assert html.count("db-ip.com") == 1 and html.count(DBIP) == 1
+    dbip = [a for a in _anchors(html) if "db-ip" in a["href"]]
+    assert dbip == [{"href": "https://db-ip.com", "rel": "noreferrer"}]
+    for block in _folded(html, TERMS):
+        assert "db-ip.com" not in block
+    body = _section_bodies(html)["traffic"]
+    assert body.index('id="b-q3"') < body.index(DBIP) < body.index('id="a-q4"')
+
+
+def test_traffic_words_name_daily_counted_visitors() -> None:
+    """042 §3.1 — 화면 낱말은 '날마다 센 방문자'(방문자-일 아님), 24시간 값은 사람 수가 아니라고 적는다."""
+    js = _text("web/admin/admin.js")
+    assert "날마다 센 방문자" in js
+    assert "오늘·어제(KST)를 따로 세어 더한 수" in js
+    for name in SCREEN_FILES:
+        text = _text(f"web/admin/{name}")
+        for word in ("방문자-일", "visitor-day", "visitor day"):
+            assert word not in text, (name, word)
+
+
+def _css_rule(css: str, selector: str) -> str:
+    found = re.findall(rf"(?m)^{re.escape(selector)}[^{{]*\{{([^}}]*)\}}", css)
+    assert len(found) == 1, selector
+    return found[0]
+
+
+def test_traffic_colors_use_the_spec_tokens_and_narrow_rows_stack() -> None:
+    """042 §3.7·§3.9 — 확인 accent-400·모양 neutral-700·다시 온 accent-600·봇 neutral-600, 강도 h1~h5 = accent
+    700·600·500·400·200(h0 은 막대 바탕), 480px 이하는 막대 행이 두 줄."""
+    css = re.sub(r"/\*.*?\*/", "", _text("web/admin/admin.css"), flags=re.S)
+    for selector, token in (
+        (".chart .confirmed", "--color-accent-400"),
+        (".chart .shaped", "--color-neutral-700"),
+        (".chart .returning", "--color-accent-600"),
+        (".chart .bot", "--color-neutral-600"),
+        (".chart .h0", "--color-neutral-900"),
+    ):
+        assert f"var({token})" in _css_rule(css, selector), selector
+    steps = [
+        re.search(r"fill: var\((--color-accent-\d+)\)", _css_rule(css, f".chart .h{i}"))
+        for i in range(1, 6)
+    ]
+    assert [m.group(1) for m in steps] == [
+        f"--color-accent-{n}" for n in (700, 600, 500, 400, 200)
+    ]
+    narrow = re.search(r"@media \(max-width: 480px\) \{(.*?)\n\}", css, flags=re.S)
+    assert narrow and ".brow" in narrow.group(1) and "'bar bar'" in narrow.group(1)
