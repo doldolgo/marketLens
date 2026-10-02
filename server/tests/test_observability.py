@@ -261,7 +261,7 @@ def test_serve_deploy_reloads_caddy_after_up_and_prunes_last() -> None:
     i_up = next(i for i, ln in enumerate(script) if "up -d --build" in ln)
     assert script.count(CADDY_RELOAD) == 1
     assert i_up < script.index(CADDY_RELOAD) < len(script) - 1
-    assert script[-1] == "docker image prune -f"
+    assert script[-2:] == ["docker image prune -f", "docker builder prune -f"]
     for box in ("data", "collect"):
         assert not any("caddy" in ln for ln in _deploy_script(box)), box
 

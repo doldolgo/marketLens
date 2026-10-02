@@ -138,7 +138,7 @@ def test_serve_deploy_starts_the_tunnel_after_caddy_only_with_a_token_file() -> 
     assert i_tunnel == i_check + 1 and i_else == i_tunnel + 1
     skip = script[i_else + 1 : i_fi]
     assert len(skip) == 1 and skip[0].startswith("echo") and "tunnel 건너뜀" in skip[0]
-    assert script[i_fi + 1 :] == ["docker image prune -f"]
+    assert script[i_fi + 1 :] == ["docker image prune -f", "docker builder prune -f"]
 
 
 def test_tunnel_line_never_reads_the_token_and_other_boxes_skip_it() -> None:
