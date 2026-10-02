@@ -964,12 +964,21 @@ def test_diff_table_rows_match_both_versions() -> None:
         assert old and old in before, (section, old)
         assert new and new in now, (section, new)
         assert why, section
+        if section.startswith("12절"):
+            continue  # 12절(변경 규칙)은 시행 문장·이력도 판마다 달라 되돌려 맞대는 범위 밖이다 — 전후 글자만 본다
         assert new in restored, (section, new)
         restored = restored.replace(new, old)
     assert restored == _body_sections(archived)
     purpose = [row for row in rows if row[0].startswith("1절")]
     assert len(purpose) == 1
     assert "풀어 적" in purpose[0][3] and "시행일 전" in purpose[0][3]
+    assert "새 목적" not in purpose[0][3]  # 2절 처리 근거(이용 통계)와 어긋나지 않게
+    rules = [row for row in rows if row[0].startswith("12절")]
+    assert (
+        len(rules) == 1
+        and "7일 전" in rules[0][2]
+        and "시행일 전에 이 페이지에 알리고" in rules[0][1]
+    )
 
 
 # --- 링크·sitemap (§3.2) ------------------------------------------------------------
