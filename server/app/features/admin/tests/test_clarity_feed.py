@@ -31,6 +31,8 @@ async def test_without_token_is_unconfigured_and_calls_nothing() -> None:
         "nextAt": None,
         "numOfDays": None,
         "traffic": None,
+        "summary": None,
+        "countries": None,
         "metrics": None,
     }
     assert w.clarity.requests == [] and w.stored() is None

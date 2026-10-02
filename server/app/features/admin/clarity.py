@@ -5,7 +5,8 @@
 **프로젝트당 하루 10회**(넘으면 429). 호출은 둘이다 — 기본 요약(차원 없음)과 페이지×기기 묶음(`URL`·`Device`, 72시간).
 일정·한도 지키기는 `visits.py`, 값 만들기는 `clarity_values.py`(기본)·`clarity_pages.py`(묶음)가 한다.
 기록은 Redis 에 `{attemptAt, state, code, successAt, values}` 로 둔다 — api 재시작(배포)이 한도를 쓰지 않게.
-주소 값은 쿼리·해시를 떼고(출처 지표는 출처로) 저장·응답한다.
+주소 값은 쿼리·해시를 떼고(출처 지표는 출처로) 저장·응답한다. 대시보드 주소(`kimptrack.com/app/`)만 허용된 탭 id 하나를
+`?tab=<id>` 로 남긴다 — 탭을 바꾸면 Clarity 가 새 페이지로 세므로 탭마다 값이 갈리게 하려는 것이다.
 지표 이름·행 키는 정규화해 비교한다 — 실제 응답은 `ReferrerUrl`·`ScrollDepth` 처럼 CamelCase 이고 문서는 띄어 쓴다.
 출처 지표는 이름에 `referr`·`referer` 가 들면 — 철자가 또 바뀌어도 경로가 남지 않는 쪽(닫힌 쪽)으로.
 JSON 은 다시 쓸 수 있는 값만 남긴다 — 표준 밖 `NaN`·`Infinity`·넘치는 실수는 null, 짝 없는 서로게이트는 `?`.
@@ -35,12 +36,16 @@ TEXT_LIMIT = 200
 # 출처 지표 — 실제 `ReferrerUrl`(2026-10-02 첫 응답), 문서 `Referrer URL`. 조각 포함으로 고른다:
 # `Referrer`·`Referer Url`·`Referring URL`·`Referral…` 처럼 철자가 바뀌어도 출처로 줄인다(잘못 맞으면 경로만 잃는다)
 REFERRER_PARTS = ("referr", "referer")
+# 우리 주소 — 대시보드 `tab` 남기기(§3.3)와 페이지 종류(§3.4)는 이 호스트의 주소에만
+OUR_HOSTS = frozenset({"kimptrack.com", "www.kimptrack.com"})
+# 대시보드 탭 id 여섯(002) — 글자가 정확히 같을 때만 남긴다
+TAB_IDS = ("spread", "history", "gap", "pp", "health", "flow")
 _NOT_ALNUM = re.compile(r"[^a-z0-9]")
 _AUTHORITY_END = re.compile(r"[/?#]")
-# 주소 꼴 — `<스킴>://`(대소문자 무관) 또는 스킴 없는 `호스트.이름` 바로 뒤에 `/`·`?`·`#`
+# 주소 꼴 — `<스킴>://`(대소문자 무관) 또는 스킴 없는 `호스트.이름`(끝 점 하나 허용) 바로 뒤에 `/`·`?`·`#`
 _SCHEME = re.compile(r"[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 _HOST_LIKE = re.compile(
-    r"(?:[a-z0-9-]+\.)+[a-z]{2,}(?::[0-9]+)?(?=[/?#])", re.IGNORECASE
+    r"(?:[a-z0-9-]+\.)+[a-z]{2,}\.?(?::[0-9]+)?(?=[/?#])", re.IGNORECASE
 )
 
 
@@ -260,20 +265,68 @@ def reduce_value(value: Any, referrer: bool) -> Any:
 
 def _reduce_text(value: str, referrer: bool) -> str:
     """주소 꼴(`<스킴>://`·`/`·스킴 없는 `호스트.이름/…`)은 앞뒤 공백·쿼리·해시·사용자 정보를 떼고
-    (`Referrer URL` 은 출처로), 그 밖은 200자에서 자른다."""
+    (출처 지표는 출처로, 우리 대시보드 주소는 탭 id 하나만 남겨), 그 밖은 200자에서 자른다."""
     text = utf8(value)
     s = text.strip()
     if _SCHEME.match(s):
         scheme, authority, rest = _split(s)
         if referrer:
             return f"{scheme}://{authority}"
-        return f"{scheme}://{authority}{_strip(rest)}"
+        return f"{scheme}://{authority}{_keep_tab(authority, rest)}"
     if s.startswith("/"):
-        return _strip(s)
+        return _strip(
+            s
+        )  # 호스트가 없으면 탭도 남기지 않는다(§3.3 — 우리 호스트의 주소만)
     host = None if any(c.isspace() for c in s) else _HOST_LIKE.match(s)
     if host is not None:
-        return host.group(0) if referrer else _strip(s)
+        authority = host.group(0)
+        if referrer:
+            return authority
+        return f"{authority}{_keep_tab(authority, s[host.end() :])}"
     return text[:TEXT_LIMIT]
+
+
+def _keep_tab(authority: str, rest: str) -> str:
+    """`/경로?쿼리#해시` → 경로. 우리 호스트의 `/app/` 이고 쿼리의 첫 `tab` 이 탭 id 면 `?tab=<id>` 를 붙인다."""
+    path, query = split_path(rest)
+    if path == "/app/" and is_ours(authority):
+        tab = first_tab(query)
+        if tab in TAB_IDS:
+            return f"{path}?tab={tab}"
+    return path
+
+
+def split_path(rest: str) -> tuple[str, str]:
+    """`/경로?쿼리#해시` → (경로, 쿼리). 해시 안의 `?` 는 쿼리가 아니다."""
+    path, _, query = rest.split("#", 1)[0].partition("?")
+    return path, query
+
+
+def first_tab(query: str) -> str | None:
+    """쿼리의 첫 `tab` 값(키는 글자 그대로 비교) — 없으면 None, `?tab` 처럼 값이 없으면 빈 글자."""
+    for part in query.split("&"):
+        key, _, value = part.partition("=")
+        if key == "tab":
+            return value
+    return None
+
+
+def is_ours(authority: str) -> bool:
+    """`사용자@호스트:포트` 의 호스트가 kimptrack.com·www.kimptrack.com 인지 — 대소문자 무관·끝 점 하나 무시."""
+    host = authority.rsplit("@", 1)[-1].split(":", 1)[0].lower().removesuffix(".")
+    return host in OUR_HOSTS
+
+
+def address_parts(value: str) -> tuple[str | None, str] | None:
+    """주소 꼴이면 (호스트 자리 — 경로만이면 None, `/경로?쿼리#해시`), 아니면 None. 페이지 종류 판정용(§3.4)."""
+    s = value.strip()
+    if _SCHEME.match(s):
+        _, authority, rest = _split(s)
+        return authority, rest
+    if s.startswith("/"):
+        return None, s
+    host = None if any(c.isspace() for c in s) else _HOST_LIKE.match(s)
+    return None if host is None else (host.group(0), s[host.end() :])
 
 
 def utf8(text: str) -> str:

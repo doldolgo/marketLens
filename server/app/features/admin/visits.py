@@ -38,7 +38,7 @@ ACCESS_REFRESH_SEC = 60
 CLARITY_REFRESH_SEC = (
     10_800  # 시도 사이 최소 3시간 — 하루 10회 한도와 신선도의 교환 (§3.4)
 )
-CLARITY_KEYS = ("nextAt", "numOfDays", "traffic", "metrics")
+CLARITY_KEYS = ("nextAt", "numOfDays", "traffic", "summary", "countries", "metrics")
 GAP_MS = CLARITY_REFRESH_SEC * 1000
 
 

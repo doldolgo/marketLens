@@ -21,7 +21,7 @@ async def test_addresses_lose_query_and_hash_and_referrers_become_origins() -> N
     body = await w.get()
     pages, referrers, titles = body["metrics"]
     assert pages["rows"][:2] == [
-        {"url": "https://kimptrack.com/app/", "visits": "40"},
+        {"url": "https://kimptrack.com/app/?tab=history", "visits": "40"},  # 040 §3.3
         {"url": "/privacy", "visits": "3"},
     ]
     assert len(pages["rows"]) == 20
@@ -169,7 +169,9 @@ async def test_named_metrics_match_in_real_camel_case_and_documented_spelling(
     ]
     assert dead["rows"] == REAL_EXPORT[1]["information"]
     assert pages["rows"] == [
-        {"url": "https://kimptrack.com/app/"},
+        {
+            "url": "https://kimptrack.com/app/?tab=history"
+        },  # 탭 id 하나만 남는다(040 §3.3)
         {"url": "/privacy"},
     ]
     assert referrers["rows"] == [
