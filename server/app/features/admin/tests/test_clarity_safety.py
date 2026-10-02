@@ -183,6 +183,37 @@ async def test_named_metrics_match_in_real_camel_case_and_documented_spelling(
         assert leak not in stored and leak not in json.dumps(body), leak
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Referrer",
+        "Referrers",
+        "ReferrerUrls",
+        "Referer Url",
+        "Referring URL",
+        "Referral Source",
+        "\uff32\uff45\uff46\uff45\uff52\uff52\uff45\uff52\uff35\uff52\uff4c",  # 전각
+    ],
+)
+async def test_referrer_like_names_still_become_origins(name: str) -> None:
+    """출처 판정은 닫힌 쪽 — 철자가 조금 바뀌어도(단수·복수·`Referer`·`Referring`·전각) 경로가 남지 않는다 (§3.3)."""
+    rows = [
+        {"url": "https://mail.example.com/inbox/123/secret-path?x=1"},
+        {"url": "www.google.com/search"},
+    ]
+    w = World(Clarity((200, [{"metricName": name, "information": rows}])))
+    body = await w.get()
+    (metric,) = body["metrics"]
+    assert metric["name"] == name
+    assert metric["rows"] == [
+        {"url": "https://mail.example.com"},
+        {"url": "www.google.com"},
+    ]
+    stored = json.dumps(w.stored())
+    for leak in ("inbox", "secret", "/search"):
+        assert leak not in stored and leak not in json.dumps(body), leak
+
+
 NOT_JSON_STANDARD = (
     b'[{"metricName":"Traffic","information":[{"totalSessionCount":"5",'
     b'"PagesPerSessionPercentage":NaN}]},'
