@@ -561,6 +561,13 @@ def test_screen_script_has_two_polling_bundles_and_no_outside_address() -> None:
         assert f"'{path}'" in js, path
 
 
+def test_screen_script_never_copies_the_clarity_periods() -> None:
+    """040 §4 — Clarity 주기(035 의 3시간·040 의 4시간·12시간)는 서버의 `refreshSec` 로만 적는다(036 §3.3)."""
+    js = _text("web/admin/admin.js")
+    for number in ("10800", "10_800", "14400", "14_400", "43200", "43_200"):
+        assert number not in js, number
+
+
 def test_screen_chart_empty_words_differ_from_the_alarm_state_name() -> None:
     """036 §3.5 — 점 2개 미만 차트는 "값 없음"·"값 1개뿐", "데이터 부족" 은 경보 INSUFFICIENT_DATA 만."""
     js = _text("web/admin/admin.js")
