@@ -78,6 +78,22 @@ function ago(ms) {
   return `${Math.floor(s / 86_400)}일 전`;
 }
 
+// 본문 안 경과 글자 — 본문은 값이 바뀔 때만 다시 그려(§3.3) 그 안의 "n분 전" 이 그린 때에 멈춘다. 시각(ms)을
+// data-at 에 두고 그리기 끝(retick)에 글자만 고친다 — 본문 DOM·스크롤·초점·펼침은 그대로, 개요 칸과 같은 경과.
+// 글자가 바뀔 때만 쓴다 — 같은 글자라도 textContent 를 쓰면 텍스트 노드가 새로 생겨 그 안의 글자 선택이 풀린다
+function agoSpan(ms) {
+  const span = el('span', null, ago(ms));
+  if (num(ms) !== null) span.dataset.at = String(ms);
+  return span;
+}
+
+function retick() {
+  for (const span of document.querySelectorAll('span[data-at]')) {
+    const text = ago(Number(span.dataset.at));
+    if (span.textContent !== text) span.textContent = text;
+  }
+}
+
 // 상태는 색 + 모양 + 글자 (§3.7)
 const GLYPH = { ok: '●', warn: '▲', bad: '✕', dim: '○', wait: '…', unknown: '?' };
 
@@ -359,7 +375,7 @@ function stats(points) {
 // 24시간 선 — 가로는 ts×1000 을 창에, null 에서 끊고(보간 없음) 비율은 0~100 고정·그 밖은 0~최댓값, 기준선은 점선
 function line(points, o) {
   const s = stats(points);
-  if (s.count < 2) return el('p', 'empty', '데이터 부족');
+  if (s.count < 2) return el('p', 'empty', s.count ? '값 1개뿐' : '값 없음');
   const W = 288;
   const H = 48;
   const top = o.fixed100 ? 100 : Math.max(s.max, o.ref ?? 0) * 1.1 || 1;
@@ -829,7 +845,7 @@ function alarmRow(a) {
   name.append(strong);
   if (a.reason) name.append(clip(el('span', 'alarm-why'), a.reason, 160));
   cell(tr, badge(...(own(ALARM_STATE, a.state) || ['dim', String(a.state)])));
-  cell(tr, ago(a.changedAt), 'num small');
+  cell(tr, agoSpan(a.changedAt), 'num small');
   return tr;
 }
 
@@ -861,7 +877,9 @@ function fillCanary(node, part, metrics) {
   if (num(part.lastRunAt) === null) last.append(marked('dim', '11분 안에 끝난 실행 없음'));
   else {
     last.append(marked(part.ok ? 'ok' : 'warn', part.ok ? '최근 실행 통과' : '최근 실행 실패'));
-    last.append(el('span', null, `${ago(part.lastRunAt)} · ${int(part.durationMs)}ms`));
+    const ran = el('span');
+    ran.append(agoSpan(part.lastRunAt), ` · ${int(part.durationMs)}ms`);
+    last.append(ran);
   }
   out.push(last);
   if (usable(metrics)) {
@@ -1102,7 +1120,7 @@ function fillAccess(node, a) {
     tip: `${hm(h.ts * 1000)} · 요청 ${int(h.requests)} · 페이지 ${int(h.pages)} · 5xx ${int(h.errors)}`,
   }));
   const peak = Math.max(0, ...bars.map((b) => b.value));
-  const chart = hourly.length ? columns(bars, `시간대별 요청 24시간 — 최고 ${int(peak)}, 5xx 는 겹쳐 표시`, 'tall') : el('p', 'empty', '데이터 부족');
+  const chart = hourly.length ? columns(bars, `시간대별 요청 24시간 — 최고 ${int(peak)}, 5xx 는 겹쳐 표시`, 'tall') : el('p', 'empty', '값 없음');
   // 막대 값은 title 에만 있으면 휴대폰에서 못 본다 — 최고 값과 5xx 가 난 시간을 글자로
   const hourHead = el('p', 'summary-row');
   hourHead.append(el('span', null, `시간대별 요청 · 최고 ${int(peak)}/시간`));
@@ -1338,6 +1356,7 @@ function paint() {
       sumNode.replaceChildren(marked('bad', '표시 오류 — 응답 모양이 예상과 다르다'));
     }
   }
+  retick();
 }
 
 paint();

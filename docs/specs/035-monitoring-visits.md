@@ -63,13 +63,14 @@
 - IP·UA 원문·쿼리는 응답에 싣지 않는다. 새로 저장하는 것은 없다(메모리 캐시뿐).
 
 ### 3.3 Clarity 요약 — `GET /admin/clarity`
-- 외부 계약(Microsoft Learn "Clarity Data Export API", 2026-10-01 확인 — 문서 갱신 2025-12-05): `GET https://www.clarity.ms/export-data/api/v1/project-live-insights?numOfDays=1`, 헤더 `Authorization: Bearer <토큰>`. `numOfDays` 1·2·3 = 최근 24·48·72시간(UTC), 차원 셋까지(쓰지 않는다). 응답은 `[{metricName, information: [행…]}]`, 1,000행까지·페이지 없음. **프로젝트당 하루 10회** — 넘으면 429 "Exceeded daily limit". 401 = 토큰 없음·틀림·만료, 403 = 권한 없음, 400 = 인자 오류. 토큰은 프로젝트 관리자가 Settings → Data Export 에서 만든다. 지표 이름: Scroll Depth·Engagement Time·Traffic·Popular Pages·Browser·Device·OS·Country/Region·Page Title·Referrer URL·Dead Click Count·Excessive Scroll·Rage Click Count·Quickback Click·Script Error Count·Error Click Count. 문서가 행 모양을 적은 지표는 `Traffic` 하나(`totalSessionCount`·`totalBotSessionCount`·`distantUserCount` — 문자열 숫자, `PagesPerSessionPercentage` — 실수)다.
+- 외부 계약(Microsoft Learn "Clarity Data Export API", 2026-10-01 확인 — 문서 갱신 2025-12-05): `GET https://www.clarity.ms/export-data/api/v1/project-live-insights?numOfDays=1`, 헤더 `Authorization: Bearer <토큰>`. `numOfDays` 1·2·3 = 최근 24·48·72시간(UTC), 차원 셋까지(쓰지 않는다). 응답은 `[{metricName, information: [행…]}]`, 1,000행까지·페이지 없음. **프로젝트당 하루 10회** — 넘으면 429 "Exceeded daily limit". 401 = 토큰 없음·틀림·만료, 403 = 권한 없음, 400 = 인자 오류. 토큰은 프로젝트 관리자가 Settings → Data Export 에서 만든다. 지표 이름(문서 철자): Scroll Depth·Engagement Time·Traffic·Popular Pages·Browser·Device·OS·Country/Region·Page Title·Referrer URL·Dead Click Count·Excessive Scroll·Rage Click Count·Quickback Click·Script Error Count·Error Click Count. **실제 응답의 `metricName` 은 공백·빗금 없는 CamelCase 다**(2026-10-02 첫 응답, §7): `Traffic`·`ScrollDepth`·`EngagementTime`·`PopularPages`·`Browser`·`Device`·`OS`·`Country`·`PageTitle`·`ReferrerUrl`·`DeadClickCount`·`ExcessiveScroll`·`RageClickCount`·`QuickbackClick`·`ScriptErrorCount`·`ErrorClickCount`. 문서가 행 모양을 적은 지표는 `Traffic` 하나(`totalSessionCount`·`totalBotSessionCount`·`distantUserCount` — 문자열 숫자, `PagesPerSessionPercentage` — 실수)다.
+- 이름 비교: 이름에 따라 다르게 다루는 곳(`Traffic` 고르기·`Referrer URL` 의 출처 줄이기)은 이름을 NFKC 로 바꾼 뒤(전각 → 반각) 소문자로, 영문자·숫자만 남겨 비교한다 — `ReferrerUrl`·`Referrer URL` 은 둘 다 `referrerurl`, `Traffic` 은 `traffic`. 실제 철자와 문서 철자가 모두 맞는다. `Traffic` 은 정확히 `traffic` 일 때, 출처 줄이기는 `referr`·`referer` 조각이 들어 있을 때 — 철자가 또 바뀌어도(`Referrer`·`Referer Url`·`Referring URL`) 경로가 남지 않는 쪽(닫힌 쪽)이고, 잘못 맞으면 그 지표의 경로만 잃는다. 응답의 `name` 은 받은 그대로 싣는다.
 - 설정: env `CLARITY_API_TOKEN`(serve 의 `server/.env`, 사람이 넣는 비밀). 없으면 `unconfigured`·호출 0. 프로젝트 ID 는 쓰지 않는다(토큰이 프로젝트에 묶여 있다).
 - 호출 규칙: 시도 사이 최소 3시간(성공·실패 모두 센다) — 어떤 24시간에도 8회 이하라 사람이 손으로 부를 2회가 남는다. 마지막 시도 시각·결과·마지막 성공 값은 Redis `admin:clarity`(JSON 문자열, 만료 없음)에 둔다 — api 재시작(배포)이 한도를 쓰지 않게. 값 부분은 마지막 성공에서 7일이 지나면 버린다(시도 시각·결과는 남긴다). Redis 에 못 닿으면 부르지 않는다(`error`·`redis`). 제한 10초, 재시도 없음. core 공개 계약: `RedisBus.clarity_load() -> str | None`·`RedisBus.clarity_save(data: str) -> None`.
-- 주소 줄이기(저장·응답 전): 행의 값과 키 중 주소 꼴 — 앞뒤 공백을 뗀 뒤 `<스킴>://`(대소문자 무관)·`/` 로 시작하거나, 공백 없이 `호스트.이름` 바로 뒤에 `/`·`?`·`#` — 은 쿼리·해시·사용자 정보를 뗀다 — 인기 페이지·페이지 주소에 광고 클릭 ID·utm·제3자 참조 주소의 쿼리가 실릴 수 있다. `Referrer URL` 지표의 주소는 출처(`<스킴>://호스트[:포트]`, 스킴 없는 꼴은 `호스트[:포트]`)로 줄인다. 그 밖의 문자열 값은 200자에서 자른다. 표준 밖 `NaN`·`Infinity`·넘치는 실수는 null, 짝 없는 서로게이트는 `?` 로 — 응답·Redis 에 다시 쓸 수 있게.
+- 주소 줄이기(저장·응답 전): 행의 값과 키 중 주소 꼴 — 앞뒤 공백을 뗀 뒤 `<스킴>://`(대소문자 무관)·`/` 로 시작하거나, 공백 없이 `호스트.이름` 바로 뒤에 `/`·`?`·`#` — 은 지표 이름과 무관하게 쿼리·해시·사용자 정보를 뗀다 — 인기 페이지·페이지 주소에 광고 클릭 ID·utm·제3자 참조 주소의 쿼리가 실릴 수 있다. `Referrer URL`(실제 `ReferrerUrl`) 지표의 주소는 출처(`<스킴>://호스트[:포트]`, 스킴 없는 꼴은 `호스트[:포트]`)로 줄인다. 그 밖의 문자열 값은 200자에서 자른다. 표준 밖 `NaN`·`Infinity`·넘치는 실수는 null, 짝 없는 서로게이트는 `?` 로 — 응답·Redis 에 다시 쓸 수 있게.
 - 응답(부분 하나): `state` = 마지막 시도 결과(401·403 → `denied`, 429·5xx·시간 초과 → `error`), `fetchedAt` = 마지막 **성공** 시각, `nextAt` = 다음에 부를 수 있는 시각(ms). 값은 마지막 성공 값을 둔다(§3.1 의 예외 — 하루 한도 때문에 실패 한 번이 3시간 빈칸이 되지 않게, 경과는 `fetchedAt` 이 말한다. 7일 지나면 null).
   - `numOfDays` 1, `traffic` = `{sessions, botSessions, users, pagesPerSession}`(`Traffic` 첫 행을 숫자로, 없으면 null).
-  - `metrics` = `[{name, rows}]` — `Traffic` 밖 지표를 받은 이름·키 그대로(행 20개까지, 값은 위 줄이기 뒤). camelCase 로 바꾸지 않는다 — 1차 문서에 없는 모양을 추측으로 고정하지 않으려고. 첫 실제 응답의 모양을 사람이 §7 에 적고, 그때 정규화 키를 이 절과 036 에 함께 더한다.
+  - `metrics` = `[{name, rows}]` — `Traffic` 밖 지표를 받은 이름·키 그대로(행 20개까지, 값은 위 줄이기 뒤). camelCase 로 바꾸지 않는다 — 1차 문서에 없는 모양을 추측으로 고정하지 않으려고. 첫 응답(2026-10-02, 세션 0)의 이름·키는 §7 에 있다. 값의 꼴과 차원 지표의 키는 그 응답으로 알 수 없어, 정규화 키는 세션이 있는 응답을 본 뒤 이 절과 036 에 함께 더한다.
 - 토큰 절차(사람 — 033 의 런북 `clarity.md` 에 절 "Data Export 토큰(035)"): 032 게시·033 설치 뒤 발급(Settings → Data Export, 프로젝트 관리자) → serve `server/.env` 의 `CLARITY_API_TOKEN` → api 다시 띄우기 → 관리자 화면에서 확인. 교체(관리자 이탈 — Clarity 권장)·바로 부르기(`admin:clarity` 지우기)·하루 10회 한도를 함께 적는다. `admin-access.md` 에는 그 절을 가리키는 한 줄만 둔다.
 
 ### 3.4 부담 (2026-10-01 측정 — Mac M5 Pro·Python 3.12, 운영 값 아님)
@@ -91,7 +92,7 @@
 - nginx(`tests/test_admin.py`): 관리자 server 에 정확 일치 둘 — api 로·경로 바꿈, 첫 줄 교차 사이트 검사, `access_log off`, 자기 `proxy_set_header`·`add_header` 없음(상속). 업스트림 둘뿐. 공개 server 는 028 계약 그대로이고 `/svc/` 위치가 없다.
 - compose: api 에 caddy 로그 읽기 전용 바인드·`ACCESS_LOG_DIR`, 다른 서비스엔 없다. 기존 계약(컨테이너 일곱·profile·로그 상한) 그대로.
 - 접속 요약: 창 밖 줄 안 셈 / 페이지 판정(자산·`.php`·301 제외) / utm 두 번 안 셈 / 자기 호스트 출처 제외·경로·쿼리가 든 referer 도 출처만 / `tabs`(키 없음 → `spread`, 허용 밖 → `(기타)`, `/app/` 밖 페이지는 안 셈) / 기기·브라우저 분류(Edge·삼성·iPhone Safari·봇·빈 UA) / WS 지속 구간 경계값 / 5xx 최근 20·쿼리가 든 5xx 줄 → `recent5xx.path` 에 쿼리 없음 / 깨진 줄 `skipped` / 창 안 회전 gz 포함·창 밖 회전 파일 안 읽음·깨진 회전 gz 는 읽은 데까지·`skipped` +1 / 파일 없음 `unconfigured` / 응답 바이트에 IP·UA 원문 없음 / 키 5,000 넘으면 `(기타)` / `firstTs`.
-- Clarity: 토큰 없음 → `unconfigured`·호출 0 / 첫 요청 호출 1(Bearer·`numOfDays=1`)·Traffic 숫자 변환 / 3시간 안 재요청과 새로 만든 앱(재시작 흉내)도 호출 0 / 401 → `denied`, 429 → `error`·`nextAt` 3시간 뒤·직전 성공 값 유지 / 마지막 성공에서 7일 지남 → 값 null·시도 기록은 남음 / URL 값의 쿼리·해시 뗌(대문자 스킴·앞 공백·스킴 없는 꼴·키 포함)·`Referrer URL` 은 출처로 / `NaN`·`Infinity`·서로게이트 → 200·null·`?` / 지표 없는 목록 → `error`·값 유지 / 토큰이 로그·Redis·응답 바이트에 없음 / Redis 불달 → 호출 0·`error`.
+- Clarity: 토큰 없음 → `unconfigured`·호출 0 / 첫 요청 호출 1(Bearer·`numOfDays=1`)·Traffic 숫자 변환 / 3시간 안 재요청과 새로 만든 앱(재시작 흉내)도 호출 0 / 401 → `denied`, 429 → `error`·`nextAt` 3시간 뒤·직전 성공 값 유지 / 마지막 성공에서 7일 지남 → 값 null·시도 기록은 남음 / URL 값의 쿼리·해시 뗌(대문자 스킴·앞 공백·스킴 없는 꼴·키 포함)·`Referrer URL` 은 출처로 / 실제 이름(`Traffic`·`PopularPages`·`ReferrerUrl`)과 문서 철자 둘 다 — Traffic 숫자·인기 페이지 쿼리 뗌·출처로 줄임, `name` 은 받은 그대로 / 출처 철자 변형(`Referrer`·`Referrers`·`ReferrerUrls`·`Referer Url`·`Referring URL`·`Referral Source`·전각)도 출처로 / `NaN`·`Infinity`·서로게이트 → 200·null·`?` / 지표 없는 목록 → `error`·값 유지 / 토큰이 로그·Redis·응답 바이트에 없음 / Redis 불달 → 호출 0·`error`.
 - 예외: 처리기 안 예외·JSON 으로 다시 쓸 수 없는 답 → 500 이 아니라 그 부분 `error`·WARNING 1줄(ERROR 없음).
 - 기존 스펙 재검증: `cd server && ruff check . && ruff format --check . && pytest -q`, `cd web && npm run lint && npm run build`. 로컬 Docker: web 이미지 `nginx -t`(029 와 같은 방법), caddy 이미지의 `caddy version`(2.11 이상)과 작은 `roll_size` 로 회전 파일 이름 모양 확인 — 둘 다 §7 에.
 
@@ -143,6 +144,14 @@ curl -o /dev/null -w '%{http_code}' localhost:18935/admin/aws   # 404 (수집기
 #   잘린 gz·틀린 머리 gz·디렉터리·권한 0 회전 파일 → ok·skipped 1 (전: error EOFError·BadGzipFile·IsADirectoryError·PermissionError)
 #   200 ["a","b"]·Traffic information 문자열 → error ValueError·직전 값 유지, [] → ok / HTTPS://·앞 공백·스킴 없는 주소·키·android-app 출처의 쿼리 0
 #   새 테스트 11개는 고치기 전 코드에서 모두 실패 · nginx·Caddyfile 은 바꾸지 않아 nginx -t·caddy validate 는 다시 돌리지 않음
+
+# 후속(2026-10-02, 운영 확인 반영 — 지표 이름 정규화)
+pytest -q app/features/admin/tests/test_clarity_safety.py   # 고치기 전: 실제 철자 1 failed(ReferrerUrl 행이 출처로 안 줄어듦)·문서 철자 통과(11 passed) → 고친 뒤 12 passed
+cd server && ruff check . && ruff format --check . && pytest -q   # All checks passed! · 286 files already formatted · 1239 passed
+# 검토 반영(같은 날) — 출처 판정을 닫힌 쪽으로. <scratch>/followup/apply/ref_probe.py(shape() 에 철자 14개)
+#   고치기 전: Referrers·Referrer·ReferrerUrls·Referer Url·Referring URL·전각·키릴 e 일곱이 경로를 남김 → 고친 뒤 키릴 e 하나만
+pytest -q app/features/admin/tests/test_clarity_safety.py   # 고치기 전 7 failed·12 passed(철자 변형 일곱) → 고친 뒤 19 passed
+cd server && ruff check . && ruff format --check . && pytest -q   # All checks passed! · 286 files already formatted · 1248 passed
 ```
 
 ## 6. 갱신할 문서
@@ -182,9 +191,14 @@ curl -o /dev/null -w '%{http_code}' localhost:18935/admin/aws   # 404 (수집기
   - 검토 반영: Clarity 의 `NaN`·`Infinity`·넘치는 실수는 거부하지 않고 null(한 지표의 빈 값이 피드를 3시간 막지 않게), 그래도 다시 쓸 수 없는 답(손으로 넣은 Redis 값 등)은 응답 직전 확인에서 `error`·예외 이름. 줄인 행 키가 겹치면 뒤의 값이 남는다. 깨진 회전 파일은 응답 키를 늘리지 않으려고 `skipped` 1 로 센다. 접속 요약의 출처 키는 `urlsplit` 으로 다시 만든다(끝 점 뗌·IPv6 는 대괄호) — 027 Caddyfile 의 출처 줄이기와 이중.
 - 실행 중 함께 고친 스펙 절: §6 목록대로 007 §3(api)·027 §3.2(끝 한 줄)·029 §3.1(표 둘·문장)·§3.2(기록하지 않는 목록). 035 본문은 고치지 않았다.
 - 담당자에게 제안 — 이 PR 에서 고치지 않는다(PR 본문에 그대로): 016 — §3.1 api 경로 목록에 `/admin/access`·`/admin/clarity`(035). 018 — §3 api 라우트 집합 문장에 `/admin/access`·`/admin/clarity`(035). 021 — §3.1 serve 설명에 "api 가 caddy 로그 디렉터리를 읽기 전용으로(035)".
+- 후속 PR 검토 반영(2026-10-02): 출처 판정을 조각 포함(닫힌 쪽)으로(§3.3 '이름 비교'·§4). §3.3 `metrics` 끝 문장과 런북 `clarity.md` 6절 5단계를 '정규화 키는 세션이 있는 응답 뒤' 에 맞추고, 런북에 세션 0 이면 Traffic 두 칸이 null 일 수 있다고 적었다.
 - 남은 빚:
-  - 배포 뒤 사람(status "035 운영 확인 대기"): `/svc/api/admin/access` 가 실제 로그로 차는지·`firstTs` / Clarity 토큰(런북 `clarity.md` 6절)을 넣고 첫 응답의 `metricName` 목록과 행 키를 이 절에 옮긴다 — 그때 `metrics` 정규화 키를 035·036 에 / 관리자 접속 기록에 폴링 둘이 없는지.
+  - 배포 뒤 사람 확인(2026-10-02, 아래 운영 확인): `/svc/api/admin/access` 가 실제 로그로 차는지 / Clarity 토큰(런북 `clarity.md` 6절)을 넣고 첫 응답의 `metricName` 목록과 행 키를 이 절에 옮긴다 / 관리자 접속 기록에 폴링 둘이 없는지 — 셋은 끝났다. `firstTs` 를 본 기록은 없다 — 남긴다(status 비고).
   - Clarity 의 Traffic 밖 행 모양은 1차 문서에 없다 — 받은 이름·키 그대로 싣는다(status 빚).
+  - 운영 확인(2026-10-02, 설계 세션 — 배포 뒤 반박 검증까지): 관리자 여덟 경로 모두 200·계약 모양. `/admin/access` 의 수를 serve 의 caddy 로그로 따로 세어 정확히 일치. 관리자 접속 기록에 두 피드의 폴링 줄 없음, 공개 쪽 `/api/admin/*` 404. Clarity 는 토큰을 넣고 api 를 다시 만든 뒤(00:44Z) 00:45:31Z 첫 조회 `ok`(세션 0). 이때 `ReferrerUrl` 이 문서 철자(`Referrer URL`)와 정확 일치 비교라 출처 줄이기에서 빠져 쿼리·해시만 떼고 경로가 남는 것을 찾았다 — 세션 0 이라 행 0, 실제로 남은 경로는 없다. 후속 PR 에서 이름 비교를 정규화로 고쳤다(§3.3 '이름 비교', 테스트는 실제·문서 철자 둘 다).
+  - Traffic 의 `users`·`pagesPerSession` 이 첫 응답에서 null 이다 — 세션 0 이라 빈 것인지 키(`distantUserCount`·`PagesPerSessionPercentage`)가 실제와 다른 것인지는 세션이 있는 응답을 본 뒤 정한다. 그 전엔 Traffic 키를 바꾸지 않는다(status 빚).
+  - Clarity 첫 실제 응답(2026-10-02 00:45Z, 토큰을 넣고 api 를 다시 만든 직후 — 033 배포 18분 뒤라 동의한 방문자가 없어 세션 0): `Traffic` 밖 `metricName` 15개. 행 하나짜리 여섯 `DeadClickCount`·`ExcessiveScroll`·`RageClickCount`·`QuickbackClick`·`ScriptErrorCount`·`ErrorClickCount` — 키 `sessionsCount`·`sessionsWithMetricPercentage`·`sessionsWithoutMetricPercentage`·`pagesViews`·`subTotal`. `ScrollDepth` — `averageScrollDepth`. `EngagementTime` — `totalTime`·`activeTime`. 행 0개 일곱 `Browser`·`Device`·`OS`·`Country`·`PageTitle`·`ReferrerUrl`·`PopularPages`(키 모름). 세션 0 이라 값의 꼴(정수·실수·글자)과 차원 지표의 키를 아직 모른다 — 정규화 키(§3.3·036 타일)는 세션이 있는 응답을 본 뒤로 미룬다(status 빚).
+  - 출처 판정은 조각 포함(`referr`·`referer`, NFKC 뒤)이라 철자 변형·전각에는 닫혀 있지만, 다른 문자 체계가 섞인 이름(키릴 `е` 등)과 낱말이 아예 다른 이름(예: `Source`)은 출처로 줄이지 않는다 — 지표 이름은 Clarity 서버가 정해 방문자가 고를 수 없다. 이름이 바뀌면 다음 응답을 볼 때 §7 이름 목록과 대조한다.
   - api 가 caddy 로그 디렉터리 전체(90일)를 읽을 수 있다 — 요약 전용 출력은 두지 않았다(status 빚, 받아들인 위험).
   - Clarity 값의 7일 버림은 요청 때 한다 — 페이지를 7일 넘게 안 열거나 토큰을 지운 뒤에는 Redis 에 값이 남는다(런북 '끄기' 에 `DEL admin:clarity`, status 빚).
   - 016·018·021 제안 반영 대기(status 빚).

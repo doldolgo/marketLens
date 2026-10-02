@@ -247,6 +247,7 @@ docker compose … down -v && docker rmi marketlens027-server marketlens027-api 
   - 에이전트 메모리(`MemoryPeak`): collect 24MB, serve 최대 71MB(24시간), 상한 200MB.
   - serve 메모리 24시간(09-29 05:02Z~09-30 04:57Z): 가용 최저 ≈378MB/904MB(≈41%, `sar -r`). 스왑 사용 238MB 지만 09-30 하루 `sar -W` 의 pswpin·pswpout 이 전부 0 — 09-29 스왑·에이전트 설치·설정 재적재 때 쓴 뒤 머문 것이다. 배포 1회(09-30 07:34Z, 029·030 — web 이미지 빌드): 04:57Z~07:39Z 사이 pswpout +33,047·pswpin +31,439 페이지(≈130MB 씩, `sar -W` 는 07:30 까지 0 이라 배포 몇 분 동안), OOM 0·컨테이너 재시작 0, 배포 뒤 가용 360MB·스왑 사용 187MB → 스왑은 배포 빌드 때만 쓴다. **t4g.micro + 스왑 1GB 유지, 승격하지 않는다.**
   - 비용(§3.7 표): canary 행 ≈0(Lambda·Scheduler·로그 무료 한도 안, Lambda 표준 지표 무료) → 합계 ≈$1.7/월(부가세 별도). 경보 수는 17(로그 뒤 18) 그대로.
+- 로그 전송(런북 15단계, 2026-10-02 — 설계 세션): CloudWatch Logs 전송을 00:35Z 에 켰다. 런북의 '하루 회전 파일을 본 뒤' 조건은 기다리지 않았다(설계 세션 판단). 그래서 그때의 첫 `access.log`(09-29 02:44Z~, 1,927줄 — IP 가림·헤더 없음·검색어 없음을 확인)가 줄의 시각이 아니라 보낸 때로 찍혀, 그 줄들은 CloudWatch 에서 최대 3일 더(90일 넘게) 남을 수 있다. 방침 v2(037)는 로그 저장소 보관을 '보낸 때부터 90일' 로 적는다. 지표 필터와 경보 `marketlens-http-5xx` 를 만들었고, 경보 18개가 모두 OK 였다.
 - 남은 빚:
   - canary 3·4단계는 이 망의 로컬 스택에서 못 봤다(거래소 차단 — 봉·표가 없다). 대신 같은 스크립트를 이 Mac 에서 운영 주소로 돌려 네 단계 모두 통과했다(2026-09-29, 028 배포 뒤 — `canary 통과 — https://kimptrack.com`, 4단계 1032ms). Lambda(`nodejs22.x`)에서의 첫 실행은 위 운영 확인에서 통과. 1·2단계와, 3단계가 api 정지·저장소 오류를 실패로 잡는 것만 로컬 확인. 4단계 판정 로직은 가짜 서버로(통과·delta 없음·빈 snapshot).
   - canary 의 WebSocket UA(`headers` 옵션)는 가짜 서버로 로컬 Node v26.4.0·v22.23.3(`node:22-alpine`)에서 확인했다(2026-09-30 — 업그레이드 요청의 `User-Agent` 가 `KimpTrack-Canary/1`). Lambda 런타임의 Node 22 부 버전에서는 따로 보지 않았다 — 헤더가 안 붙으면 canary WS 한 줄이 5분마다 접속 로그에 남을 뿐이다.
@@ -254,4 +255,4 @@ docker compose … down -v && docker rmi marketlens027-server marketlens027-api 
   - 이 PR 의 첫 serve 배포는 caddy 볼륨 정의가 바뀌어 caddy 를 새로 만든다 — 그 직후 `caddy reload` 가 admin 기동보다 먼저 닿으면 배포가 실패로 끝날 수 있다(로컬에선 up 직후 곧바로 불러도 성공했다). 배포가 실패하면 되돌리기 전에 `docker logs marketlens-caddy` 로 설정 오류(`unrecognized …`)인지 기동 경합인지 먼저 본다.
   - `caddy reload` 가 남기는 admin API 줄(`"logger":"admin.api"`, `remote_ip` 127.0.0.1 — 컨테이너 안 reload 명령)은 기본 로거 필터 밖이다 — 방문자 정보가 아니라 두었다.
   - actionlint 미설치 — `deploy.yml` 은 YAML 파싱과 테스트 단언으로 갈음.
-  - §4 "배포·런북 뒤 — 사람" 의 나머지(기존 경보·지표 수(런북 2단계)·지표 12/13개와 실제 차원·`ws_clients` 탭 2개·시험 경보·첫 달 청구·처리방침 뒤 caddy 로그 그룹 보존·지우기 규칙) — status.md observability 비고.
+  - §4 "배포·런북 뒤 — 사람" 의 나머지(기존 경보·지표 수(런북 2단계)·지표 12/13개와 실제 차원·`ws_clients` 탭 2개·시험 경보·첫 달 청구·caddy 로그 그룹 보존(지우기 규칙은 2026-10-02 로그 전송 때 확인 — 위)) — status.md observability 비고.
