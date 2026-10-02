@@ -7,6 +7,7 @@
 
 import ipaddress
 import json
+import math
 import re
 from urllib.parse import urlsplit
 
@@ -94,7 +95,8 @@ def line_ts(line: str) -> float | None:
 
 
 def parse(line: str) -> Line | None:
-    """한 줄 → 쓰는 필드(평범한 튜플 — 줄마다 만들어 가볍게). JSON 이 아니거나 필드가 빠지면 None.
+    """한 줄 → 쓰는 필드(평범한 튜플 — 줄마다 만들어 가볍게). JSON 이 아니거나 필드가 빠지거나 모양이 틀리면
+    (`status` 가 정수가 아님·`duration` 이 유한한 수가 아님) None — 한 줄이 요약 전체를 깨지 않게.
     ua·referer·IP 는 없으면 빈 값. `json.loads` 와 같이 객체 뒤에 공백 밖의 글자가 있으면 None 이다."""
     try:
         # caddy 줄은 `{` 로 시작한다 — 아니면 json.loads 처럼 앞 공백을 건너뛴다
@@ -112,13 +114,19 @@ def parse(line: str) -> Line | None:
         return None
     if type(duration) not in (int, float):
         return None
+    try:
+        duration = float(duration)  # 실수로 바꿀 수 없는 큰 정수는 OverflowError
+    except (OverflowError, ValueError):
+        return None
+    if not math.isfinite(duration):
+        return None  # NaN·무한(JSON 의 `NaN`·`1e999`) — 모양이 틀린 줄
     ua, referer = data.get("ua", ""), data.get("referer", "")
     ip = request.get("client_ip") or request.get("remote_ip") or ""
     return (  # type: ignore[return-value]
         method,
         uri,
         status,
-        float(duration),
+        duration,
         ua if type(ua) is str else "",
         referer if type(referer) is str else "",
         ip if type(ip) is str else "",

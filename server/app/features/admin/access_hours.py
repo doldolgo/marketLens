@@ -207,7 +207,7 @@ class FileTally:
         c[kind_requests] += 1
         if 200 <= status < 600:
             c[WS_5XX if status >= 500 and ws_path else STATUS_AT[status // 100]] += 1
-        if status >= 500:
+        if 500 <= status < 600:
             if ws_path:
                 c[WS_ERR] += 1
             else:

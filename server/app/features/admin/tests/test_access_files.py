@@ -1,5 +1,5 @@
-"""접속 요약 읽기 — 깨진 줄·시각이 아닌 ts·회전 파일(깨진 gz 포함)·파일 없음·새지 않음·키 상한·메모리(긴 UA 포함)
-(스펙 035 §3.2·§3.4·§3.5·§4 → 038 §3.3·§3.6)."""
+"""접속 요약 읽기 — 깨진 줄·시각이 아닌 ts·유한하지 않은 duration·5xx 밖 상태·회전 파일(깨진 gz 포함)·파일 없음·
+새지 않음·키 상한·메모리(긴 UA 포함) (스펙 035 §3.2·§3.4·§3.5·§4 → 038 §3.3·§3.6)."""
 
 import json
 import os
@@ -24,6 +24,8 @@ from app.features.admin.tests.access_fakes import (
 )
 
 BAD_TS = ("NaN", "Infinity", "-Infinity", "1e999", "1e300", "300000000000", "-5")
+# 실수로 바꿀 수 없는 큰 정수(OverflowError)·풀 수 없는 긴 정수(ValueError)·NaN·무한
+BAD_DURATION = ("1" + "0" * 400, "9" * 5_000, "NaN", "Infinity", "-Infinity", "1e999")
 
 
 def run(tmp_path: Path, lines: list[str]) -> dict:
@@ -224,6 +226,29 @@ def test_a_line_whose_ts_is_not_a_time_is_skipped(tmp_path: Path) -> None:
     body = summarize(str(tmp_path), NOW)
     assert body["totals"]["requests"] == 3
     assert body["totals"]["skipped"] == len(BAD_TS)
+
+
+def test_a_line_whose_duration_is_not_a_finite_number_is_skipped(
+    tmp_path: Path,
+) -> None:
+    # 한 줄이 float 바꾸기에서 요약 전체를 error 로 만들지 않는다 — 그 줄만 skipped (038 §3.3)
+    good = line(at(10), "/api/ws/spreads", status=101, duration=5)
+    bad = [good.replace('"duration":5', f'"duration":{v}', 1) for v in BAD_DURATION]
+    assert all(b != good for b in bad)
+    body = run(tmp_path, [good, *bad])
+    assert (body["totals"]["requests"], body["totals"]["skipped"]) == (1, 6)
+    assert body["ws"]["durations"]["lt10s"] == 1 and body["ws"]["count"] == 1
+
+
+def test_a_status_outside_5xx_is_not_an_error(tmp_path: Path) -> None:
+    huge = 10**30
+    body = run(
+        tmp_path,
+        [line(at(10), "/x", status=s) for s in (599, 600, 999, huge, 0, 101)],
+    )
+    assert body["totals"]["requests"] == 6 and body["status"]["5xx"] == 1
+    assert [e["status"] for e in body["recent5xx"]] == [599]
+    assert sum(h["errors"] for h in body["hourly"]) == 1
 
 
 def test_a_broken_rotated_file_is_skipped_and_the_rest_counted(
