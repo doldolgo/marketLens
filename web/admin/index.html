@@ -56,7 +56,7 @@
           <summary>이 절 읽는 법<span class="tail">· 10초마다 · 경보·canary 60초</span></summary>
           <dl>
             <dt>읽는 값</dt><dd>수집기·api 헬스, api 상태(연결 수·Redis·Influx), 거래소 수집 상태를 10초마다 읽고 CloudWatch 경보·canary 를 60초마다 읽는다. 이 탭이 보이는 동안만 부른다.</dd>
-            <dt>판정</dt><dd>일곱 재료(수집기·api·Redis·Influx·거래소·CloudWatch 경보·canary)만 보고 위에서부터 <b>알 수 없음</b>(헬스 호출 실패) → <b>장애</b>(수집기·api 상태가 ok 아님, Redis·Influx down, ALARM 경보, 거래소 끊김) → <b>주의</b>(거래소 지연, canary 실패, 경보·canary 읽기 오류) → <b>정상</b> 이다. 띠 오른쪽의 흐린 ○ 는 판정에 넣지 않은 재료(연결 안 됨·권한 없음·호출 실패)이고, 지표·알림·접속·비용은 처음부터 판정 밖이다.</dd>
+            <dt>판정</dt><dd>일곱 재료(수집기·api·Redis·Influx, 거래소, CloudWatch 경보·canary)만 보고 위에서부터 <b>알 수 없음</b>(헬스 호출 실패) → <b>장애</b>(수집기·api 상태가 ok 아님, Redis·Influx down, ALARM 경보, 거래소 끊김) → <b>주의</b>(거래소 지연, canary 실패, 경보·canary 읽기 오류) → <b>정상</b> 이다. 띠 오른쪽의 흐린 ○ 는 판정에 넣지 않은 재료(연결 안 됨·권한 없음·호출 실패)이고, 지표·알림·접속·비용은 처음부터 판정 밖이다.</dd>
             <dt>사유 줄</dt><dd>판정을 만든 까닭을 셋까지 적는다 — ALARM 경보는 둘까지 이름, 셋 이상이면 수. '상태 모름' 은 그 재료를 읽지 못했다는 뜻이고 판정은 바꾸지 않는다.</dd>
             <dt>수집기</dt><dd>수집기 헬스와 마지막 틱이 지난 시간. 첫 틱 전은 starting, 30초 넘게 틱이 없으면 stale 이고 둘 다 장애다.</dd>
             <dt>api</dt><dd>api 헬스 — Redis 에 남는 수집기 심장박동으로 같은 판정을 하고, Redis 에 못 닿으면 redis_down 이다. 아래 줄은 api 가 본 Redis·Influx 연결이고, 헬스가 정상이어도 하나가 down 이면 '저장소 끊김' 이다.</dd>

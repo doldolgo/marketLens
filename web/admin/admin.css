@@ -408,7 +408,7 @@ details > summary:hover { color: var(--color-accent-300); }
 :not(.card) > .terms[open] { padding-bottom: var(--space-4); }
 .grid + .terms { margin-top: 14px; }
 .explain dl, .terms dl {
-  display: grid; grid-template-columns: minmax(6em, 11em) minmax(0, 1fr); gap: 6px 18px;
+  display: grid; grid-template-columns: minmax(5.5em, 9.5em) minmax(0, 1fr); gap: 6px 16px;
   margin: 4px 0 0; font-size: 12.5px; line-height: 1.55;
 }
 .explain dt, .terms dt { min-width: 0; color: var(--color-neutral-200); font-weight: 600; }
