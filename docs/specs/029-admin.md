@@ -10,7 +10,7 @@
 
 ## 2. 범위
 - 만드는 것: web nginx 관리자 server(`web/nginx-admin.conf`, listen 8081), 관리자 화면(`web/admin/` — `index.html`·`admin.js`·`admin.css`), api 역할의 `GET /admin/status`(기능 폴더 `admin`)와 core `RedisBus` 의 PING 공개 메서드, collect 박스 `server` 의 `UVICORN_ROOT_PATH=/api`, 관리자 접속 기록(호스트 바인드), 계약 테스트.
-- 하지 않는 것: cloudflared·Cloudflare 설정·런북(030). 분석 API 전용 화면(API 문서의 Try it out 으로 쓴다). 앱 쪽 로그인·JWT 검증. CloudWatch 링크(027 배포 뒤 따로). 버전에 git SHA.
+- 하지 않는 것: cloudflared·Cloudflare 설정·런북(030). 분석 API 전용 화면(API 문서의 Try it out 으로 쓴다). 앱 쪽 로그인·JWT 검증. 버전에 git SHA.
 - 바꾸는 기존 것: 007(web 이미지에 관리자 설정·화면, compose web 바인드·server env), 016(api 역할 라우트에 `/admin/status`, api 헬스를 관리자 페이지에서도 본다), 018(api 라우트 집합), 027(nginx 접속 로그 끔은 공개 server 에만), 003·004·005(닫힌 경로를 쓰는 곳 = 관리자 페이지).
 - 담당: 003·004 는 팀원 담당, 016·018 은 hereokay 담당이다 — 이 PR 은 그 스펙들을 **고치지 않는다**(CLAUDE.md §5). §6 의 "담당자에게 제안" 목록을 PR 본문에 적고 담당자가 반영한다. 005·007·027·028 은 이 레포 주인 담당이라 고친다. §5 허용 목록 밖에서 고치는 것(사람 승인): `docker-compose.yml`·`.gitignore`, CLAUDE.md §2.
 
@@ -46,15 +46,11 @@
 - **접속 기록**: 요청마다 JSON 한 줄 — `time`·`email`(`Cf-Access-Authenticated-User-Email`)·`ip`(`Cf-Connecting-Ip`)·`method`·`uri`(경로와 쿼리)·`status`·`rt`(처리 초)·`ray`(`Cf-Ray`)·`sfs`(`Sec-Fetch-Site` — 이 헤더가 실제로 도착하는지 보려고). 따옴표·역슬래시·제어문자는 이스케이프하지만 UTF-8 은 보장되지 않는다(0x80 이상 바이트를 그대로 쓴다) — 읽는 도구는 관대하게 푼다(`errors='replace'`). 컨테이너 `/var/log/nginx-admin/access.log`(이미지가 디렉터리를 만든다 — 바인드가 없어도 기동한다), compose web 에 `./logs/admin:/var/log/nginx-admin` 바인드(git 무시). `/var/log/nginx` 를 통째로 바인드하지 않는다 — 이미지의 stdout·stderr 링크가 가려진다. 화면의 10초 폴링(`/svc/…`·`= /api/health`·`= /api/health/collect`)과 관리자 피드(`= /api/admin/aws`·`= /api/admin/alerts`(034), `= /svc/api/admin/access`·`= /svc/api/admin/clarity`(035))는 기록하지 않는다. 회전은 030 런북(호스트 logrotate, copytruncate). 이 기록은 개인정보(이메일·IP)다 — 항목·보존(90일)은 032 처리방침에 있다.
 
 ### 3.3 관리자 화면
-- 파일 셋(`index.html`·`admin.js`·`admin.css`), 비밀값 없음, 빌드 없음(oxlint·vite 대상 아님 — landing.html 과 같다). 보이는 동안만 10초마다 새로 부른다.
+- 화면 파일 셋(`index.html`·`admin.js`·`admin.css`)이 보이는 것·주기·차트·보안 계약은 036(§3.8 이 이 절의 규칙을 이어받는다).
 - 읽는 계약(복사):
   - 025 `/health`(두 역할): `{status, version, lastTickAt}` — `lastTickAt` 은 epoch ms 또는 null, `status == "ok"` 만 200 이고 나머지(`starting`·`stale`·`redis_down`)는 503 이지만 **본문을 읽어 표시한다**(오류가 아니라 상태다). collector 는 메모리 틱, api 는 Redis 심장박동을 본다 — 경로가 같아도 따로 보인다.
   - 011 `/health/collect`: `{serverStartedAt, fetchedAt, successRate1h, exchanges[], outages[]}`, 거래소마다 `exchange`·`state`(`ok`·`stale`·`down`)·`lastSuccessAt`·`markets`·`successRate1h`·`openOutage`(열린 실패 구간 또는 null)·`lastError`(`at`·`kind`·`statusCode`·`message` 또는 null).
   - 003 `POST /refresh`: 헤더 `X-Refresh-Token`(서버에 값이 있을 때 필요), 200 `{snapshots[], usdkrw[], totalSaved, failures[{exchange, errorCode, message}], warnings[], durationMs, fetchedAt}`, 토큰이 틀리면 401 `{"detail": "…"}`.
-- 보여 주는 것: 수집기 상태와 마지막 틱이 몇 초 전인지, 거래소별 상태·1시간 성공률·열린 실패 구간·마지막 오류, api 상태, `/admin/status` 의 접속 수·Redis·Influx·버전, 링크(API 문서 `/api/docs`·ReDoc `/api/redoc`·로그아웃 `/cdn-cgi/access/logout`). 호출이 실패하면(403·JSON 아닌 응답·만료) 그 호출이 채우는 칸을 모두 비우고 사유를 적는다 — 직전 값이 정상으로 읽히지 않게.
-- 즉시 갱신: 토큰 입력칸(`type=password`, 자동완성 끔, form 제출 없음)과 버튼. 입력한 토큰은 JS 변수에만 둔다(localStorage·sessionStorage 금지). 결과로 HTTP 상태, `totalSaved`, `failures` 의 거래소·`errorCode`, `warnings` 를 보인다.
-- 서버 응답의 문자열(특히 거래소 오류 `message` — WAF HTML 이 흔하다)은 **글자로만** 넣는다(HTML 해석 금지). 링크는 같은 탭 이동, `window.open` 은 쓰지 않는다.
-- 세션 판별: 모든 fetch 에 `X-Requested-With: XMLHttpRequest`. (1) 401 이고 본문이 앱 JSON(`detail` 키)이면 토큰 오류로 보이고 새로고침하지 않는다. (2) 401 인데 본문이 JSON 이 아니거나 fetch 자체가 실패(교차 출처 리다이렉트)하면 로그인 만료로 보고 전체 새로고침 — 연속 새로고침은 한 번까지. 판단은 폴링 한 번의 호출 묶음 단위다: 만료 신호가 하나라도 있으면 새로고침(이미 한 번 했으면 알림만), 묶음 전체가 만료 신호 없이 끝나야 다음 새로고침을 다시 허락한다. 새로고침 주소는 화면 주소 `/` 로 고정한다 — 현재 경로를 쓰면 nginx 가 `/` 로 정규화해 화면을 준 `//다른호스트/..%2F/` 같은 경로에서 다른 출처로 간다. (3) 403 은 "권한·설정 오류" 로 보인다.
 
 ### 3.4 `GET /admin/status` (api 역할만)
 - 응답 200 `{"wsConnections": <정수>, "redis": "ok"|"down", "influx": "ok"|"down", "version": "<앱 버전>"}`. 상태 응답이라 `{"error":…}` 형식이 아니다. OpenAPI 스키마에 넣는다. collector 에는 없다(공개에서도 028 허용 목록 밖이라 404).
@@ -79,7 +75,7 @@
 - compose: web 에 `./logs/admin:/var/log/nginx-admin` / 어떤 서비스도 8081 을 게시하지 않는다 / `server` 에만 `UVICORN_ROOT_PATH=/api` / 그러면 공개 server 의 `location /api/` 에 `proxy_pass` 가 없다(028 가드) / `.gitignore` 에 `logs/`. 기존 계약(컨테이너 수·로그 상한·profile) 그대로.
 - web 이미지: 관리자 템플릿이 nginx templates 로 복사되고, 화면 파일은 `/usr/share/nginx/admin` 에 있고 공개 root 에 없다, `/var/log/nginx-admin` 이 있다.
 - `web/nginx-admin.conf`: listen 8081 뿐 / `absolute_redirect off` / 업스트림 `api`·`${COLLECT_HOST}` 뿐 / `Sec-Fetch-Site` 검사와 예외 셋 / 모든 프록시 location 에서 `Cookie`·`Cf-Access-Jwt-Assertion` 비움·ACAO 지움 / `X-Frame-Options DENY always`·화면 CSP / JSON 접속 기록 경로와 폴링 제외. 공개 `web/nginx.conf` 는 028 계약 그대로(단언은 `listen 80` 블록만). Caddyfile(027 뒤 `caddy/Caddyfile`)에 `8081`·`admin` 이 없다.
-- 화면 정적 단언: `admin.js` 에 `X-Requested-With`·`visibilityState` 가 있고 `localStorage`·`sessionStorage`·`innerHTML`·`window.open`·`location.pathname` 이 없다(새로고침 주소 `/` 고정), `index.html` 에 인라인 `<script>` 본문·`style=` 이 없다.
+- 화면 정적 단언: `admin.js` 에 `X-Requested-With`·`visibilityState` 가 있고 `localStorage`·`sessionStorage`·`innerHTML`·`window.open`·`location.pathname` 이 없다(새로고침 주소 `/` 고정), `index.html` 에 인라인 `<script>` 본문·`style=` 이 없다. (036 §4 가 넓힌다)
 - `GET /admin/status`: api 역할에만(`tests/test_role.py` 라우트 집합, collector ⊇ api 단언은 이 경로 예외) / 접속 2개면 2, 허브 없으면 0 / Redis 예외면 `redis: "down"` / Influx 없음이면 `influx: "down"` / Influx 가 2초 넘게 걸리면 `"down"`, 그동안 두 번째 요청은 새 ping 을 띄우지 않고 `"down"` / Redis·Influx 둘 다 멈춤 → 둘 다 down, 3초 안. `RedisBus.ping` 은 fakeredis 로.
 - 로컬 Docker: web 이미지에서 `nginx -t` 통과. 028 과 같은 에코 서버 둘(망 별칭 `api`·`server`)로 — 같은 망에서 `web:8081/` 이 화면, `/api/docs`·`/api/premium` 이 수집기 에코로, `/api/history/streaks` 가 api 에코로, `/svc/api/admin/status` 가 api `/admin/status` 로 도착 / 도착한 요청에 `Cookie`·`Cf-Access-Jwt-Assertion` 이 없다 / `Sec-Fetch-Site: cross-site` 는 403 JSON(`/api/openapi.json`·`/api/docs/oauth2-redirect` 포함), `same-origin`·없음은 통과, `/api/docs` 는 cross-site 여도 통과 / 공개 포트로 `Host: admin.kimptrack.com` 은 공개 server 응답 / 기록 파일에 JSON 한 줄, 폴링 경로는 없음. `UVICORN_ROOT_PATH=/api` 로 띄운 수집기의 `/docs` 가 `/api/openapi.json` 을 부른다. 브라우저로 화면을 열어(8081 을 잠시 로컬에만 게시한 테스트 compose) 오류 `message` 에 `<img src=x onerror=alert(1)>` 를 넣은 가짜 응답이 글자로 보이는지.
 - 기존 스펙 재검증: `cd server && ruff check . && ruff format --check . && pytest -q`, `cd web && npm run lint && npm run build`.

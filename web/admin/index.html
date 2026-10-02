@@ -1,69 +1,208 @@
 <!doctype html>
-<!-- KimpTrack 관리자 화면 (스펙 029 §3.3) — web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
-     CSP 가 자기 출처만 허용하므로 인라인 스크립트·스타일을 쓰지 않는다(스크립트·스타일은 옆 파일). -->
+<!-- KimpTrack 관리자 화면 v2 (스펙 036) — web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
+     CSP 가 자기 출처만 허용하므로 인라인 스크립트·스타일을 쓰지 않는다(스크립트·스타일은 옆 파일).
+     한 페이지에 절 일곱(개요·수집·인프라·알림·접속·비용·도구), 값은 admin.js 가 글자(textContent)와 SVG 로 채운다.
+     밖으로 나가는 링크는 이 파일의 고정 주소뿐이다 — 계정·영역 ID·팀 도메인·프로젝트 ID 를 넣지 않는다(레포 공개). -->
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex, nofollow" />
+    <meta name="color-scheme" content="dark" />
     <title>KimpTrack 관리자</title>
     <link rel="stylesheet" href="admin.css" />
     <script src="admin.js" defer></script>
   </head>
   <body>
-    <header>
-      <h1>KimpTrack 관리자</h1>
-      <nav>
-        <a href="/api/docs">API 문서</a>
-        <a href="/api/redoc">ReDoc</a>
-        <a href="/cdn-cgi/access/logout">로그아웃</a>
-      </nav>
-    </header>
-    <p id="notice" class="notice" hidden></p>
-    <main>
-      <section>
-        <h2>수집기</h2>
-        <dl>
-          <dt>상태</dt><dd id="collector-status">…</dd>
-          <dt>마지막 틱</dt><dd id="collector-tick">…</dd>
-          <dt>버전</dt><dd id="collector-version">…</dd>
-        </dl>
-      </section>
-      <section>
-        <h2>api</h2>
-        <dl>
-          <dt>상태</dt><dd id="api-status">…</dd>
-          <dt>수집기 심장박동</dt><dd id="api-tick">…</dd>
-          <dt>WebSocket 접속</dt><dd id="api-ws">…</dd>
-          <dt>Redis</dt><dd id="api-redis">…</dd>
-          <dt>Influx</dt><dd id="api-influx">…</dd>
-          <dt>버전</dt><dd id="api-version">…</dd>
-        </dl>
-      </section>
-      <section class="wide">
-        <h2>거래소 수집 상태 <span id="collect-meta" class="meta"></span></h2>
-        <table>
-          <thead>
-            <tr><th>거래소</th><th>상태</th><th>1시간 성공률</th><th>열린 실패 구간</th><th>마지막 오류</th></tr>
-          </thead>
-          <tbody id="exchanges"></tbody>
-        </table>
-      </section>
-      <section class="wide">
-        <h2>즉시 갱신</h2>
-        <div class="refresh">
-          <label for="token">갱신 토큰</label>
-          <input id="token" type="password" autocomplete="off" spellcheck="false" />
-          <button id="refresh" type="button">즉시 갱신</button>
+    <header class="top">
+      <div class="top-row">
+        <h1 class="brand">KimpTrack <span class="brand-sub">관리자</span></h1>
+        <nav class="jump" aria-label="절 이동">
+          <a href="#overview">개요</a>
+          <a href="#collect">수집</a>
+          <a href="#infra">인프라</a>
+          <a href="#alerts">알림</a>
+          <a href="#traffic">접속</a>
+          <a href="#cost">비용</a>
+          <a href="#tools">도구</a>
+        </nav>
+        <div class="top-side">
+          <span id="hdr-verdict" class="tag t-wait"><span class="mk">…</span>확인 중</span>
+          <span class="stamp"><span class="wide-only">마지막 갱신 </span><span id="updated">--:--:--</span></span>
+          <a class="logout" href="/cdn-cgi/access/logout">로그아웃</a>
         </div>
-        <dl id="refresh-result" hidden>
-          <dt>HTTP</dt><dd id="refresh-status"></dd>
-          <dt>저장</dt><dd id="refresh-saved"></dd>
-          <dt>실패</dt><dd id="refresh-failures"></dd>
-          <dt>경고</dt><dd id="refresh-warnings"></dd>
-        </dl>
+      </div>
+    </header>
+    <p id="notice" class="notice" role="alert" hidden></p>
+
+    <main>
+      <section id="overview" aria-labelledby="h-overview">
+        <h2 id="h-overview" class="sr">개요</h2>
+        <div id="band" class="band t-wait">
+          <span id="band-mark" class="band-mark" aria-hidden="true">…</span>
+          <span id="band-word" class="band-word">확인 중</span>
+          <span id="band-why" class="band-why">첫 조회를 기다린다</span>
+          <span id="band-checks" class="band-checks" aria-label="판정 재료"></span>
+        </div>
+        <div class="vitals">
+          <a class="vital" href="#collect"><span class="vital-label">수집기</span><span class="vital-value" id="v-collector">…</span><span class="vital-sub" id="v-collector-s"></span></a>
+          <a class="vital" href="#collect"><span class="vital-label">api</span><span class="vital-value" id="v-api">…</span><span class="vital-sub" id="v-api-s"></span></a>
+          <a class="vital" href="#traffic"><span class="vital-label">지금 접속</span><span class="vital-value" id="v-ws">…</span><span class="vital-sub" id="v-ws-s">열린 대시보드 수</span></a>
+          <a class="vital" href="#infra"><span class="vital-label">경보</span><span class="vital-value" id="v-alarms">…</span><span class="vital-sub" id="v-alarms-s"></span></a>
+          <a class="vital" href="#infra"><span class="vital-label">canary</span><span class="vital-value" id="v-canary">…</span><span class="vital-sub" id="v-canary-s"></span></a>
+          <a class="vital" href="#cost"><span class="vital-label">이번 달 비용</span><span class="vital-value" id="v-cost">…</span><span class="vital-sub" id="v-cost-s"></span></a>
+        </div>
+      </section>
+
+      <section id="collect" aria-labelledby="h-collect">
+        <div class="sec-head"><h2 id="h-collect">수집</h2><p class="sec-sum" id="s-collect">…</p></div>
+        <div class="stack">
+          <div class="card">
+            <div class="card-head"><span class="card-kicker">거래소 다섯</span><span class="meta" id="m-collect"></span></div>
+            <p class="summary-row" id="collect-sum"></p>
+            <div class="scroll"><table class="table">
+              <thead><tr><th>거래소</th><th>상태</th><th>열린 실패 구간</th><th class="num">마지막 성공</th><th class="num">1시간 성공률</th><th class="num">마켓</th><th>마지막 오류</th></tr></thead>
+              <tbody id="exchanges"></tbody>
+            </table></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-kicker">실패 구간 · 최근 24시간</span><span class="meta small"><span class="t-bad">■ 차단·rate limit</span><span class="t-warn">▬ 그 밖</span></span></div>
+            <div id="timeline"></div>
+          </div>
+          <details class="fold" id="refresh-fold">
+            <summary>즉시 갱신 — 마켓 목록·구독·입출금을 지금 다시 읽힌다</summary>
+            <div class="stack">
+              <div class="refresh">
+                <label for="token">갱신 토큰</label>
+                <input id="token" type="password" autocomplete="off" spellcheck="false" class="input" />
+                <button id="refresh" type="button" class="btn btn-primary">즉시 갱신</button>
+              </div>
+              <dl id="refresh-result" class="kv" hidden>
+                <dt>HTTP</dt><dd id="refresh-status"></dd>
+                <dt>저장</dt><dd id="refresh-saved"></dd>
+                <dt>실패</dt><dd id="refresh-failures"></dd>
+                <dt>경고</dt><dd id="refresh-warnings"></dd>
+              </dl>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section id="infra" aria-labelledby="h-infra">
+        <div class="sec-head"><h2 id="h-infra">인프라</h2><p class="sec-sum" id="s-infra">…</p></div>
+        <!-- 지표·경보·canary 가 같은 이유로 비면(AWS 종료 뒤 등) 카드 하나로 접는다 -->
+        <div class="card" id="infra-fold" hidden>
+          <div class="card-head"><span class="card-kicker">AWS 지표·경보·canary</span><span class="meta" id="m-infra-fold"></span></div>
+          <div id="b-infra-fold"></div>
+        </div>
+        <div class="stack" id="infra-parts">
+          <div class="grid-wide">
+            <div class="card">
+              <div class="card-head"><h3>경보</h3><span class="meta" id="m-alarms"></span></div>
+              <div id="b-alarms"></div>
+              <details id="alarms-ok"><summary id="alarms-ok-sum">정상 0개</summary><div class="scroll"><table class="table"><tbody id="alarms-ok-rows"></tbody></table></div></details>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>canary</h3><span class="meta" id="m-canary"></span></div>
+              <div id="b-canary"></div>
+            </div>
+          </div>
+          <div>
+            <div class="card-head"><span class="card-kicker">박스 · 24시간</span><span class="meta" id="m-metrics"></span></div>
+            <div class="grid" id="b-metrics"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="alerts" aria-labelledby="h-alerts">
+        <div class="sec-head"><h2 id="h-alerts">알림</h2><p class="sec-sum" id="s-alerts">…</p></div>
+        <div class="card">
+          <div class="card-head">
+            <div class="chips" role="group" aria-label="알림 출처">
+              <button type="button" class="chip" data-filter="all" aria-pressed="true">전체</button>
+              <button type="button" class="chip" data-filter="slack" aria-pressed="false">앱(Slack)</button>
+              <button type="button" class="chip" data-filter="alarm" aria-pressed="false">경보(CloudWatch)</button>
+            </div>
+            <span class="meta" id="m-alerts"></span>
+          </div>
+          <p class="muted small" id="alerts-count"></p>
+          <div id="b-alerts"></div>
+          <ul class="feed" id="alerts-feed" tabindex="0" aria-label="알림 목록" hidden></ul>
+        </div>
+      </section>
+
+      <section id="traffic" aria-labelledby="h-traffic">
+        <div class="sec-head"><h2 id="h-traffic">접속</h2><p class="sec-sum" id="s-traffic">…</p></div>
+        <div class="stack">
+          <div class="grid-wide traffic-top">
+            <div class="card">
+              <div class="card-head"><span class="card-kicker">실시간</span><span class="meta" id="m-ws24"></span></div>
+              <p><span class="big" id="ws-now">…</span></p>
+              <p class="muted small">열린 대시보드 수 — 사람 수가 아니다</p>
+              <div id="b-ws24"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><span class="card-kicker">서버 기록 · 24시간</span><span class="meta" id="m-access"></span></div>
+              <p class="muted small" id="access-sub"></p>
+              <div id="b-access"></div>
+            </div>
+          </div>
+          <div class="grid grid3" id="access-tables"></div>
+          <details class="fold" id="r5xx" hidden>
+            <summary id="r5xx-sum">최근 5xx</summary>
+            <div class="scroll"><table class="table">
+              <thead><tr><th>시각</th><th>경로</th><th class="num">상태</th></tr></thead>
+              <tbody id="r5xx-rows"></tbody>
+            </table></div>
+          </details>
+          <div class="card">
+            <div class="card-head"><span class="card-kicker">Clarity 요약</span><span class="meta" id="m-clarity"></span></div>
+            <p class="muted small">최근 1일 · UTC 기준 — Clarity 가 준 값</p>
+            <div id="b-clarity"></div>
+            <details id="clarity-more" hidden>
+              <summary id="clarity-more-sum">받은 지표</summary>
+              <div id="clarity-metrics" class="metric-list"></div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section id="cost" aria-labelledby="h-cost">
+        <div class="sec-head"><h2 id="h-cost">비용</h2><p class="sec-sum" id="s-cost">…</p></div>
+        <div class="card">
+          <div class="card-head"><span class="card-kicker">AWS 비용 예산</span><span class="meta" id="m-budget"></span></div>
+          <div id="b-budget"></div>
+          <ul class="notes">
+            <li>서비스별 내역은 조직 SCP 가 Cost Explorer 를 막아 여기 없다 — 결제 콘솔에서 본다</li>
+            <li>AWS 계정 종료 예정 2026-12</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="tools" aria-labelledby="h-tools">
+        <div class="sec-head"><h2 id="h-tools">도구</h2><p class="sec-sum">콘솔과 문서 — 읽기 전용 화면이라 바꾸는 일은 각 콘솔에서 한다</p></div>
+        <div class="links">
+          <div class="card"><span class="card-kicker">앱</span><ul>
+            <li><a href="/api/docs">API 문서</a></li>
+            <li><a href="/api/redoc">ReDoc</a></li>
+          </ul></div>
+          <div class="card"><span class="card-kicker">AWS 서울</span><ul>
+            <li><a rel="noreferrer" href="https://ap-northeast-2.console.aws.amazon.com/cloudwatch/home?region=ap-northeast-2#alarmsV2:">CloudWatch 경보</a></li>
+            <li><a rel="noreferrer" href="https://ap-northeast-2.console.aws.amazon.com/cloudwatch/home?region=ap-northeast-2#metricsV2:graph=~();namespace=MarketLens">CloudWatch 지표 (MarketLens)</a></li>
+            <li><a rel="noreferrer" href="https://ap-northeast-2.console.aws.amazon.com/lambda/home?region=ap-northeast-2#/functions/marketlens-smoke">Lambda marketlens-smoke</a></li>
+            <li><a rel="noreferrer" href="https://ap-northeast-2.console.aws.amazon.com/cloudwatch/home?region=ap-northeast-2#logsV2:log-groups/log-group/$252Faws$252Flambda$252Fmarketlens-smoke">로그 그룹 /aws/lambda/marketlens-smoke</a></li>
+            <li><a rel="noreferrer" href="https://us-east-1.console.aws.amazon.com/billing/home#/budgets">예산 (결제 콘솔)</a></li>
+          </ul></div>
+          <div class="card"><span class="card-kicker">Clarity · Cloudflare</span><ul>
+            <li><a rel="noreferrer" href="https://clarity.microsoft.com/projects">Clarity 프로젝트 목록</a></li>
+            <li><a rel="noreferrer" href="https://one.dash.cloudflare.com/">Cloudflare Zero Trust</a></li>
+            <li><a rel="noreferrer" href="https://dash.cloudflare.com/">Cloudflare DNS</a></li>
+          </ul></div>
+          <div class="card"><span class="card-kicker">GitHub</span><ul>
+            <li><a rel="noreferrer" href="https://github.com/doldolgo/marketLens/actions">레포 Actions</a></li>
+          </ul></div>
+        </div>
       </section>
     </main>
-    <footer id="updated" class="meta"></footer>
   </body>
 </html>

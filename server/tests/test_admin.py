@@ -377,9 +377,105 @@ def test_root_path_only_on_collector_and_public_api_docs_stay_closed() -> None:
     assert (ROOT / ADMIN_CONF).is_file()
 
 
-# --- 관리자 화면 정적 단언 (§3.3) ---------------------------------------------------------
+# --- 관리자 화면 정적 단언 (029 §3.3 → 036 §3.8·§4) -------------------------------------------
 
 SCREEN = ROOT / "web/admin"
+# 036 §3.1 — 한 페이지 절 일곱, 이 순서
+SECTIONS = ["overview", "collect", "infra", "alerts", "traffic", "cost", "tools"]
+# 036 §3.8 — 밖으로 나가는 링크의 호스트(고정 https 주소뿐)
+EXTERNAL_HOSTS = {
+    "clarity.microsoft.com",
+    "dash.cloudflare.com",
+    "one.dash.cloudflare.com",
+    "github.com",
+}
+# 036 §4 — 화면 스크립트에 없어야 하는 것: 브라우저 저장소·HTML 해석·코드 실행·새 창·주소 읽기·style 속성·링크 쓰기·
+# fetch 밖의 요청 길(헤더를 붙이는 한 함수를 우회한다)
+SCRIPT_BANNED = (
+    "localStorage",
+    "sessionStorage",
+    "indexedDB",
+    "document.cookie",
+    "innerHTML",
+    "outerHTML",
+    "insertAdjacentHTML",
+    "document.write",
+    "eval(",
+    "new Function",
+    "window.open",
+    "location.pathname",
+    "location.href",
+    ".style",
+    "setAttribute('style'",
+    ".href",
+    "setAttribute('href'",
+    "setAttribute('src'",
+    ".src",
+    "setAttributeNS",
+    "xlink:href",
+    "new XMLHttpRequest",
+    "sendBeacon",
+    "new WebSocket",
+    "EventSource",
+)
+# 036 §3.6·§3.8 — svg() 가 받는 속성 이름은 기하·이름표뿐(href·style·on… 은 svg() 가 던진다)
+SVG_ATTRS = {
+    "viewBox",
+    "preserveAspectRatio",
+    "role",
+    "aria-label",
+    "x",
+    "y",
+    "width",
+    "height",
+    "x1",
+    "x2",
+    "y1",
+    "y2",
+    "d",
+    "points",
+}
+# theme.css 와 같은 값이어야 하는 토큰 (036 §3.7)
+TOKENS = ("--color-bg", "--color-surface", "--color-ok", "--color-warn", "--color-up")
+
+
+def _root_tokens(css: str) -> dict[str, str]:
+    """첫 `:root { … }` 안의 `--이름: 값;` — 주석은 지운다."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    block = re.search(r":root\s*\{(.*?)\}", css, flags=re.S)
+    assert block, ":root 블록"
+    return {
+        k: v.strip()
+        for k, v in re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", block.group(1))
+    }
+
+
+def _object_keys(literal: str) -> list[str]:
+    """JS 객체 글자 `{ … }` 안의 키 — 맨 위 수준의 쉼표로 나누고, 콜론 앞(없으면 줄임 표기 그 이름)."""
+    pieces, depth, cur = [], 0, ""
+    for ch in literal:
+        depth += ch in "([{"
+        depth -= ch in ")]}"
+        if ch == "," and depth == 0:
+            pieces.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    pieces.append(cur)
+    return [p.split(":", 1)[0].strip().strip("'\"") for p in pieces if p.strip()]
+
+
+def _anchors(html: str) -> list[dict[str, str]]:
+    """`<a …>` 의 속성 — 큰따옴표·작은따옴표·따옴표 없는 값 모두. href 를 못 읽는 a 는 실패시킨다."""
+    out = []
+    for attrs in re.findall(r"<a\b([^>]*)>", html):
+        pairs = re.findall(
+            r"""([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))""", attrs
+        )
+        found = {k.lower(): a or b or c for k, a, b, c in pairs}
+        assert "href" in found, f"href 를 못 읽는 링크: <a{attrs}>"
+        out.append(found)
+    return out
 
 
 def test_screen_is_three_static_files_outside_the_public_root() -> None:
@@ -400,18 +496,56 @@ def test_screen_script_sends_xhr_header_polls_while_visible_and_never_parses_htm
 ):
     js = _text("web/admin/admin.js")
     assert "'X-Requested-With': 'XMLHttpRequest'" in js
-    assert "visibilityState" in js
-    for banned in ("localStorage", "sessionStorage", "innerHTML", "window.open"):
+    for needed in ("visibilityState", "createElementNS", "refreshSec"):
+        assert needed in js, needed
+    for banned in SCRIPT_BANNED:
         assert banned not in js, banned
-    # 모든 요청이 한 함수를 지난다 — 헤더가 빠진 fetch 가 없게
+    # SVG 속성은 허용 목록 하나를 지난다 — 목록이 기하·이름표 밖으로 늘지 않게
+    allow = re.search(r"const SVG_ATTRS = new Set\(\[([^\]]*)\]\);", js)
+    assert allow, "svg() 의 속성 허용 목록"
+    assert set(re.findall(r"'([\w-]+)'", allow.group(1))) == SVG_ATTRS
+    assert "if (!SVG_ATTRS.has(k)) throw" in js
+    assert js.count(".setAttribute(k,") == 1
+    # 만드는 SVG 요소는 그림 요소뿐 — a·image·use·foreignObject(누를 수 있는 링크·외부 자원)가 없다.
+    # 글자 그대로 적은 속성 키도 허용 목록 안이다(런타임 검사 앞에서 한 번 더)
+    assert set(re.findall(r"\bsvg\('(\w+)'", js)) <= {
+        "svg",
+        "title",
+        "line",
+        "rect",
+        "path",
+        "g",
+    }
+    for literal in re.findall(r"\bsvg\('\w+',\s*\{([^}]*)\}", js):
+        assert set(_object_keys(literal)) <= SVG_ATTRS, literal
+    # 모든 요청이 한 함수를 지난다 — 헤더가 빠진 요청이 없게
     assert js.count("fetch(") == 1
-    # 새로고침·표시 지우기 주소는 화면 주소 `/` 로 고정 — `//다른호스트/..%2F/` 로 열린 화면에서 pathname 을 쓰면
+    # 새로고침·표시 지우기 주소는 화면 주소 `/` 로 고정 — `//다른호스트/..%2F/` 로 열린 화면에서 현재 경로를 쓰면
     # 프로토콜 상대 URL 이 되어 다른 출처로 간다(열린 리다이렉트)
-    assert "location.pathname" not in js and "location.href" not in js
     assert js.count("location.replace(") == 1
     assert "location.replace(`/?${RELOAD_MARK}=1`)" in js
     assert js.count("history.replaceState(") == 1
     assert "history.replaceState(null, '', '/')" in js
+
+
+def test_screen_script_has_two_polling_bundles_and_no_outside_address() -> None:
+    """036 §3.3 — 빠른 10초·느린 60초, §4 — 파일 안의 주소는 SVG 이름공간 하나뿐."""
+    js = _text("web/admin/admin.js")
+    assert re.search(r"\bFAST_MS = 10_000;", js)
+    assert re.search(r"\bSLOW_MS = 60_000;", js)
+    assert re.findall(r"https?://[^\s'\"`]*", js) == ["http://www.w3.org/2000/svg"]
+    # 피드 넷과 029 의 네 경로 — 같은 출처 상대 경로
+    for path in (
+        "/api/health",
+        "/svc/api/health",
+        "/svc/api/admin/status",
+        "/api/health/collect",
+        "/api/admin/aws",
+        "/api/admin/alerts",
+        "/svc/api/admin/access",
+        "/svc/api/admin/clarity",
+    ):
+        assert f"'{path}'" in js, path
 
 
 def test_screen_page_has_no_inline_script_or_style() -> None:
@@ -423,4 +557,49 @@ def test_screen_page_has_no_inline_script_or_style() -> None:
     assert "<form" not in html  # 제출 없음 — 토큰이 URL·기록으로 새지 않게
     for href in ("/api/docs", "/api/redoc", "/cdn-cgi/access/logout"):
         assert f'href="{href}"' in html, href
-    assert 'target="' not in html  # 같은 탭 이동
+    assert not re.search(r"\btarget\s*=", html, flags=re.I)  # 같은 탭 이동
+
+
+def test_screen_page_has_seven_sections_in_order_and_jump_links() -> None:
+    html = _text("web/admin/index.html")
+    assert re.findall(r'<section id="([\w-]+)"', html) == SECTIONS
+    nav = re.search(r'<nav class="jump"[^>]*>(.*?)</nav>', html, flags=re.S)
+    assert nav, "머리의 절 이동"
+    assert re.findall(r'href="#([\w-]+)"', nav.group(1)) == SECTIONS
+
+
+def test_screen_outside_links_are_fixed_https_with_noreferrer_and_no_ids() -> None:
+    """036 §3.8 — 밖으로 나가는 링크는 고정 https 주소·noreferrer, 계정·팀·프로젝트 ID·이메일·토큰 없음(레포 공개)."""
+    html = _text("web/admin/index.html")
+    # `//호스트` 는 프로토콜 상대 주소 — 밖으로 나가는 링크로 본다(그리고 https:// 가 아니라 실패한다)
+    outside = [
+        a
+        for a in _anchors(html)
+        if a["href"].startswith("//") or not a["href"].startswith(("/", "#"))
+    ]
+    assert outside, "도구 절의 콘솔 링크"
+    for a in outside:
+        href = a["href"]
+        assert href.startswith("https://"), href
+        assert a.get("rel") == "noreferrer", href
+        host = href.split("/")[2]
+        assert host in EXTERNAL_HOSTS or host.endswith(".console.aws.amazon.com"), href
+        if "cloudflare.com" in host:
+            assert href == f"https://{host}/", (
+                href
+            )  # 대시보드 주소에는 계정 ID 가 든다 — 루트만
+    assert not re.search(r"(?<!\d)\d{12}(?!\d)", html)
+    assert not re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", html)
+    assert not re.search(r"[0-9a-f]{32,}", html)
+    assert "cloudflareaccess.com" not in html
+    assert "/projects/view/" not in html
+
+
+def test_screen_styles_copy_theme_tokens_without_outside_resources() -> None:
+    css = _text("web/admin/admin.css")
+    assert "@import" not in css and "url(" not in css
+    ours = _root_tokens(css)
+    theme = _root_tokens(_text("docs/design/theme.css"))
+    for token in TOKENS:
+        assert ours[token] == theme[token], token
+    assert "@media (max-width: 640px)" in css

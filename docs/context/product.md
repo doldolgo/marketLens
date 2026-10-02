@@ -36,7 +36,7 @@
 | (gap) 선물–현물 갭, 선선갭 | 해외 선물 vs 현물. FE mock 까지만 — 비범위 |
 | health | 거래소별 실패 구간 이력·상태·성공률(`/health/collect`). 백오프는 비범위 |
 | landing | 처음 온 사람용 소개 페이지(정적 HTML) + 요약 API |
-| admin | 관리자 페이지(운영자용 — 헬스·수집 상태·접속 수·닫힌 API·CloudWatch 경보·지표·예산·알림 기록·접속 요약·Clarity 요약) |
+| admin | 관리자 페이지(운영자용 — 헬스·수집 상태·CloudWatch 경보·지표·canary·알림 기록·접속 요약·Clarity·비용·닫힌 API) |
 | privacy | 개인정보 처리방침 페이지 + 화면 분석 동의 관리 |
 
 ## 비범위 (지금 단계에서 하지 않음)
