@@ -160,6 +160,10 @@ def _vis(confirmed: int, shaped: int, returning: int = 0, **extra: Any) -> dict:
 
 
 ALL = ["24h", "7d", "30d"]
+BEFORE = {
+    "state": "unconfigured",
+    "code": "before_gate",
+}
 
 
 def _case(window: str, start: int, end: int, **extra: Any) -> dict:
@@ -178,6 +182,34 @@ def _case(window: str, start: int, end: int, **extra: Any) -> dict:
     }
 
 
+CLASSES = {
+    "browser": {"requests": 410, "pages": 200},
+    "search": {"requests": 120, "pages": 0},
+    "ai": {"requests": 60, "pages": 0},
+    "preview": {"requests": 0, "pages": 0},
+    "tool": {"requests": 130, "pages": 0},
+    "scanner": {"requests": 220, "pages": 0},
+    "operator": {"requests": 50, "pages": 0},
+    "unknown": {"requests": 10, "pages": 0},
+}
+NETS = [["telecom_kr", 30, 60], ["cloud", 2, 40], ["telecom", 8, 20]]
+CHANNELS = [["direct", 20, 50], ["search", 12, 30], ["social", 5, 10], ["ai", 3, 4]]
+PRE = {"windows": ["24h"], "visitors": BEFORE, "geo": BEFORE}
+TOTALS = {"requests": 1000, "humanPages": 200, "jsViews": 50, "probes": 1234}
+# 7일 창 — 시행일로 잘린 시작, 끝 = 시행 + 2일 5시간(그날 = 오늘 KST)
+END7 = G + 2 * DAY + 5 * 3600
+HOURLY7 = [
+    {"ts": G + 19 * 3600, "jsViews": 10},  # 일요일 19시
+    {"ts": G + 20 * 3600, "jsViews": 10},
+    {"ts": G + 21 * 3600, "jsViews": 10},
+    {"ts": G + DAY + 9 * 3600, "jsViews": 12},  # 월요일 9시
+]
+DAYS7 = [
+    {"ts": G, "confirmed": 5, "shaped": 9, "returning": 1},
+    {"ts": G + DAY, "confirmed": 9, "shaped": 20, "returning": 2},
+    {"ts": G + 2 * DAY, "confirmed": 1, "shaped": 3, "returning": 0},
+]
+
 CASES: list[tuple[dict, dict[int, str]]] = [
     # 0. §4 예 — 30일·시작이 시행일로 잘림·6일, confirmed 60·shaped 600·returning 15 → 10.0·100.0·25%, '대부분 봇' 경계 = 붙음
     (
@@ -193,6 +225,134 @@ CASES: list[tuple[dict, dict[int, str]]] = [
         {
             0: "개정 시행 뒤 센 6일 동안 스크립트가 돈 방문자는 하루 평균 10.2명, 브라우저 모양까지 치면 100.0명"
             " — 실제 사람은 이 사이다. 확인의 25%는 다시 온 사람이다.",
+        },
+    ),
+    # 2. 24시간·시행 뒤 — 창이 시행 전 시간을 품어 꼬리, ② 다 채움, ③ ok·국내 통신사·클라우드 대부분 봇, ⑥ 5xx 0·ws5xx 3
+    (
+        _case(
+            "24h",
+            G - 10 * 3600,
+            G + 13 * 3600 + 120,
+            visitors=_vis(3, 40, sinceTs=G, channels=CHANNELS),
+            geo={"state": "ok", "networks": NETS},
+            totals=TOTALS,
+            classes=CLASSES,
+            status={"5xx": 0, "ws5xx": 3, "4xx": 12},
+        ),
+        {
+            0: "확인 3, 브라우저 모양 40(날마다 센 방문자) — 오늘·어제(KST)를 따로 세어 더한 수라 사람 수가 아니다."
+            " 시행 10-11 00:00 부터 센 값이다. 브라우저 모양의 대부분은 봇이다.",
+            1: "요청 1,000줄 가운데 사람 브라우저 모양은 41%다. 자동 요청은 스캐너(22%)·자동화 도구(13%) 순으로"
+            " 많다. 사람 모양 페이지 가운데 스크립트가 돈 것은 25%다.",
+            2: "확인의 75%는 국내 통신사 망에서 왔다. 데이터센터·클라우드 망은 브라우저 모양의 33%이고 그중 확인은"
+            " 2뿐 — 대부분 봇이다. 들어온 길은 직접 50%·검색 30%·소셜·커뮤니티 13% 순이다.",
+            5: "서버 오류(5xx)는 없었고, 대시보드 재접속 실패는 3건(배포 때 몇 건은 정상)이다. 4xx 는 12건,"
+            " 탐색 경로 요청은 1,234줄이다.",
+        },
+    ),
+    # 3. 시행 전 — ①·③·⑤ 전 틀, ④ 24시간(가장 많은 시 = 같으면 이른 시), ⑥ 5xx 있음·ws5xx 0
+    (
+        _case(
+            "24h",
+            G - 4 * DAY,
+            G - 3 * DAY,
+            **PRE,
+            totals={"humanPages": 1234, "jsViews": 56},
+            hourly=[
+                {"ts": G - 4 * DAY + 3600, "jsViews": 2, "humanPages": 10},
+                {"ts": G - 4 * DAY + 7200, "jsViews": 5, "humanPages": 20},
+                {"ts": G - 4 * DAY + 10800, "jsViews": 5, "humanPages": 1},
+            ],
+            paths=[["/", 617]],
+            tabs=[["history", 3], ["spread", 1]],
+            devices=[["mobile", 600]],
+            status={"5xx": 2, "ws5xx": 0, "4xx": 0},
+        ),
+        {
+            0: "방문자는 처리방침 개정 시행 10-11 00:00 부터 센다. 지금은 줄 수만 — 사람 모양 페이지 1,234,"
+            " 그중 스크립트가 돈 페이지 56.",
+            2: "나라·망 종류와 들어온 길은 처리방침 개정 시행 10-11 00:00 부터 센다. 지금은 외부 출처·utm 만"
+            " 페이지 줄로 보인다.",
+            3: "최근 24시간 중 화면이 가장 많이 뜬 때는 2시(5회)다. 스크립트가 돈 페이지 보기 12회, 사람 모양"
+            " 페이지 31회.",
+            4: "사람 모양 페이지는 / 경로가 50%로 가장 많고, 대시보드는 기록/통계 탭으로 들어온 경우가 75%다."
+            " 기기는 휴대폰 49%(페이지 줄 기준).",
+            5: "서버 오류(5xx)는 2건, 대시보드 재접속 실패는 0건이다. 4xx 는 0건, 탐색 경로 요청은 0줄이다.",
+        },
+    ),
+    # 4. 분모 0 — 요청·페이지가 없으면 ② 는 '기록 없음', ④ 24시간 스크립트 0 문장
+    (
+        _case(
+            "24h", G - 4 * DAY, G - 3 * DAY, **PRE, hourly=[{"ts": G, "humanPages": 7}]
+        ),
+        {
+            1: "기록 없음",
+            3: "최근 24시간 동안 스크립트가 돈 페이지 보기가 없다. 사람 모양 페이지 7회.",
+        },
+    ),
+    # 5. 분모 0 조각만 빠짐 — 요청 0 이라 ② 앞 두 문장이 빠진다
+    (
+        _case(
+            "24h",
+            G - 4 * DAY,
+            G - 3 * DAY,
+            **PRE,
+            totals={"humanPages": 10, "jsViews": 5},
+        ),
+        {1: "사람 모양 페이지 가운데 스크립트가 돈 것은 50%다."},
+    ),
+    # 6. 7일 — ④ 가장 몰린 세 시간·가장 많은 칸(월요일)·오늘을 뺀 날마다 범위, ③ 국내 통신사 없음·클라우드 경계 5 > 4
+    (
+        _case(
+            "7d",
+            G,
+            END7,
+            hourly=HOURLY7,
+            visitors=_vis(15, 32, sinceTs=G, days=DAYS7, channels=CHANNELS),
+            geo={"state": "ok", "networks": [["telecom", 35, 60], ["cloud", 5, 40]]},
+        ),
+        {
+            2: "데이터센터·클라우드 망은 브라우저 모양의 40%이고 그중 확인은 5다. 들어온 길은 직접 50%·검색 30%·"
+            "소셜·커뮤니티 13% 순이다.",
+            3: "화면이 실제로 뜬 페이지 보기는 19~22시에 가장 몰린다. 가장 많은 칸은 월요일 9시(12회)."
+            " 날마다 확인 방문자는 5~9명이다.",
+        },
+    ),
+    # 7. ③ 클라우드 경계 4 ≤ 4 → '뿐', geo 받는 중·받지 못함, ⑤ 시행 뒤(경로 없음 — 탭·기기만)
+    (
+        _case(
+            "7d",
+            G,
+            END7,
+            visitors=_vis(
+                12, 50, sinceTs=G, devices=[["desktop", 5, 30], ["mobile", 7, 20]]
+            ),
+            geo={"state": "ok", "networks": [["telecom_kr", 36, 60], ["cloud", 4, 40]]},
+            tabs=[["spread", 2]],
+        ),
+        {
+            2: "확인의 90%는 국내 통신사 망에서 왔다. 데이터센터·클라우드 망은 브라우저 모양의 40%이고 그중 확인은"
+            " 4뿐 — 대부분 봇이다.",
+            4: "대시보드는 실시간 스프레드 탭으로 들어온 경우가 100%다. 기기는 휴대폰 58%(확인 방문자 기준).",
+        },
+    ),
+    (
+        _case("7d", G, END7, visitors=_vis(1, 2, sinceTs=G), geo={"state": "pending"}),
+        {2: "나라·망 종류는 자료를 받는 중이다."},
+    ),
+    (
+        _case(
+            "7d",
+            G,
+            END7,
+            visitors=_vis(1, 2, sinceTs=G),
+            geo={"state": "error", "code": "http_404"},
+            paths=[["/app/", 4]],
+            totals={"humanPages": 10},
+        ),
+        {
+            2: "나라·망 종류 자료를 받지 못했다(http_404).",
+            4: "사람 모양 페이지는 /app/ 경로가 40%로 가장 많다.",
         },
     ),
 ]
