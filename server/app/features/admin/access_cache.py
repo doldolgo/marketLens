@@ -73,6 +73,10 @@ class Current(NamedTuple):
     size: int
 
 
+def _no_table() -> GeoTable | None:
+    return None
+
+
 def gate_ts(effective: str) -> int:
     """처리방침 v2 시행일(KST 날짜) 00:00 Asia/Seoul 의 epoch 초."""
     d = date.fromisoformat(effective)
@@ -156,11 +160,14 @@ class AccessLog:
         self._geo_version = 0  # 캐시를 만든 DB-IP 판 번호(0 = 판 없음)
 
     def summary(
-        self, name: str, now: float, table: GeoTable | None = None
+        self, name: str, now: float, geo: Callable[[], GeoTable | None] = _no_table
     ) -> tuple[dict[str, Any], list[str]]:
         """창 하나의 값과 이번 회차에 깨진 것으로 본 회전 파일의 예외 이름들. 디렉터리·파일이 없으면 `NoLogFile`.
-        지금 고를 수 없는 창은 24시간이다(§3.1). `table` 은 이 회차가 쓰는 DB-IP 판(039, 없으면 None)."""
+        지금 고를 수 없는 창은 24시간이다(§3.1). `geo` 는 지금 올린 DB-IP 판(039, 없으면 None)을 돌려주고, 잠금 안에서
+        한 번 불러 그 판으로 이 회차를 센다 — 창 둘의 갱신이 갈아 끼우는 순간에 겹쳐도 판 번호가 줄지 않아, 먼저 띄운
+        갱신이 옛 판(또는 판 없음)으로 캐시를 다시 만들지 않는다."""
         with self._lock:
+            table = geo()
             broken = self._sync(now, table)
             return self._assemble(choose(name, now, self._gate), now, table), broken
 

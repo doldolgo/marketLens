@@ -6,7 +6,8 @@
 하위 부분 `pages`). 요청마다 Redis 기록 둘을 읽어 때를 정하고(`clarity_schedule.py`), 한 갱신 안에서 기본 → 묶음
 순서로 하나씩 부른다 — Clarity 호출이 동시에 둘 나가지 않는다. 기본이 401·403·429 면 묶음은 미룬다.
 접속 갱신이 게이트 뒤 ok 이면 DB-IP 판(039)이 필요한지 보고 받기를 띄운다 — 갱신은 받기를 기다리지 않고, 판이 없는
-동안 하위 부분 `geo` 는 받는 중 `pending`·실패 `error` 다. 판은 갱신을 시작할 때 하나 집어 그 회차 끝까지 쓴다.
+동안 하위 부분 `geo` 는 받는 중 `pending`·실패 `error` 다. 판은 캐시 잠금 안에서 하나 집어 그 회차 끝까지 쓴다 — 창
+둘의 갱신이 갈아 끼우는 순간에 겹쳐도 옛 판으로 캐시를 다시 만들지 않게.
 읽기·부르기는 한 번에 하나이고 3초까지 기다린 뒤 늦으면 직전 결과(없으면 pending)를 답한다. 요청이 없으면 아무것도
 읽거나 부르지 않는다. 처리기 안 예외도 500 이 아니라 그 부분 `error` 와 WARNING 1줄(부분마다 10분에 1줄, 예외 이름만 —
 문장에 가린 IP·UA 가 실릴 수 있다)이다 — 라우터가 응답을 JSON 으로 쓰다 실패하지 않게, 쓸 수 없는 값(NaN·짝 없는
@@ -155,9 +156,10 @@ class VisitFeeds:
 
     async def _load_access(self, log: AccessLog, name: str) -> Result:
         now = self._clock()
-        table = self.geo.table
         try:
-            values, broken = await asyncio.to_thread(log.summary, name, now, table)
+            values, broken = await asyncio.to_thread(
+                log.summary, name, now, lambda: self.geo.table
+            )
         except NoLogFile:
             return Result("unconfigured", "no_file")
         except Exception as exc:
@@ -167,7 +169,8 @@ class VisitFeeds:
         if now >= self._gate:
             self.geo.ensure()  # 판이 없거나 낡았으면 받기를 띄운다 — 기다리지 않는다
             geo = values["geo"]
-            if table is None:
+            # 이 회차는 판 없이 셌다 — 받는 중·실패를 싣는다
+            if geo["state"] == "pending":
                 geo["state"], geo["code"] = self.geo.waiting()
         return Result("ok", None, int(now * 1000), values)
 

@@ -103,7 +103,8 @@ class FileTally:
         self.read_start = read_start
         self.gate_ts = gate_ts
         self.keys = keys
-        self.table = table  # 039 — 짝을 처음 기록할 때 나라·망 종류를 찾는 판(없으면 찾지 않는다)
+        # 039 — 짝을 처음 기록할 때 나라·망 종류를 찾는 판(없으면 찾지 않는다). 읽는 동안만 쥔다
+        self.table = table
         self.hours: dict[int, Hour] = {}
         self.recent: list[Error5xx] = []  # 최소 힙 — 가장 늦은 20줄(WS 경로 뺌)
         self.days: dict[int, DayPairs] = {}  # KST 날 → 짝 기록(게이트 뒤만)
@@ -123,7 +124,9 @@ class FileTally:
             for raw in handle:
                 line(raw)
         finally:
-            # 깨진 회전 파일(읽다 예외)도 이 결과째 캐시된다 — UA·출처 원문 메모와 열쇠는 늘 여기서 버린다
+            # 깨진 회전 파일(읽다 예외)도 이 결과째 캐시된다 — UA·출처 원문 메모와 열쇠는 늘 여기서 버린다.
+            # 판도 놓는다 — 캐시된 세기가 옛 판을 쥐면 갈아 끼운 뒤에도 다음 갱신·1시간 비움까지 판 둘이 남는다
+            self.table = None
             self._kinds.clear()
             self._traits.clear()
             self._refs.clear()
