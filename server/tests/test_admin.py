@@ -1,4 +1,5 @@
-"""관리자 server 설정 계약 — nginx-admin.conf·web 이미지·compose (스펙 029 §3.1·§3.2·§3.5·§4, 034·035 의 피드 넷).
+"""관리자 server 설정 계약 — nginx-admin.conf·web 이미지·compose (스펙 029 §3.1·§3.2·§3.5·§4, 034·035 의 피드 넷)
+와 관리자 화면 정적 단언(036 §4, 설명·이름표·문구는 041 §4).
 
 test_deploy.py 와 같은 방식이다: Docker 없는 CI 에서 설정 파일을 읽어 단언한다. 실제로 nginx 를 띄워
 분기·403·기록을 보는 검증은 029 §5 의 로컬 Docker 명령이다. 문법은 여기서 못 잡는다 — nginx-admin.conf 를
@@ -7,6 +8,7 @@ test_deploy.py 와 같은 방식이다: Docker 없는 CI 에서 설정 파일을
 
 import json
 import re
+from html.parser import HTMLParser
 
 from tests.test_deploy import (
     API,
@@ -653,3 +655,215 @@ def test_screen_styles_copy_theme_tokens_without_outside_resources() -> None:
     assert body, "body 규칙"
     assert "word-break: keep-all;" in body.group(1)
     assert "overflow-wrap: break-word;" in body.group(1)
+
+
+# --- 설명·이름표·문구 고침 (041 §4) ----------------------------------------------------------
+
+EXPLAIN = '<details class="explain">'
+TERMS = '<details class="terms">'
+SCREEN_FILES = ("admin.css", "admin.js", "index.html")
+# 041 §3.4 — 실패 종류(011 유형 칩)·경보 꼬리(027 경보 이름)·대시보드 탭(002) 이름표
+KIND_NAMES = {
+    "timeout": "타임아웃",
+    "network": "연결 실패",
+    "rate_limit": "rate limit",
+    "banned": "차단",
+    "unavailable": "거래소 오류",
+    "bad_request": "요청 오류",
+    "bad_response": "응답 오류",
+    "stale_stream": "스트림 정체",
+}
+ALARM_TAIL_NAMES = {
+    "status-instance": "인스턴스 상태검사",
+    "status-system": "시스템 상태검사",
+    "credit-balance": "CPU 크레딧 잔고",
+    "credit-surplus": "잉여 크레딧 과금",
+    "memory": "메모리",
+    "disk": "디스크",
+    "canary": "canary",
+    "http-5xx": "사이트 5xx",
+}
+TAB_NAMES = {
+    "spread": "실시간 스프레드",
+    "history": "기록/통계",
+    "gap": "선물–현물 갭",
+    "pp": "선선갭",
+    "health": "수집 상태",
+    "flow": "입출금 레이더",
+}
+
+
+def _section_bodies(html: str) -> dict[str, str]:
+    return dict(
+        re.findall(r'<section id="([\w-]+)"[^>]*>(.*?)</section>', html, flags=re.S)
+    )
+
+
+def _folded(html: str, opening: str) -> list[str]:
+    """`opening` 으로 여는 설명 details 의 안 — 설명 안에는 details 가 없다."""
+    return re.findall(re.escape(opening) + r"(.*?)</details>", html, flags=re.S)
+
+
+def _plain(fragment: str) -> str:
+    return re.sub(r"<[^>]+>", "", fragment).strip()
+
+
+def _dl(block: str) -> tuple[list[str], list[str]]:
+    """설명 details 하나 → dl 하나의 (dt 글자들, dd 글자들)."""
+    assert block.count("<dl") == 1, block[:80]
+    (dl,) = re.findall(r"<dl>(.*?)</dl>", block, flags=re.S)
+    dts = [_plain(x) for x in re.findall(r"<dt>(.*?)</dt>", dl, flags=re.S)]
+    dds = [_plain(x) for x in re.findall(r"<dd>(.*?)</dd>", dl, flags=re.S)]
+    return dts, dds
+
+
+def _summary(block: str) -> str:
+    found = re.search(r"<summary>(.*?)</summary>", block, flags=re.S)
+    assert found, block[:80]
+    return _plain(found.group(1))
+
+
+def test_every_section_has_one_folded_explain_right_under_its_head() -> None:
+    """041 §3.1 — 절 일곱마다 접힌 '이 절 읽는 법' 하나, 머리 줄 바로 다음(개요는 칸 여섯 다음이고 절의 끝)."""
+    html = _text("web/admin/index.html")
+    # 설명 details 는 글자 그대로 — open 같은 다른 속성이 없다
+    for tag in re.findall(r"<details\b[^>]*>", html):
+        if "explain" in tag or "terms" in tag:
+            assert tag in (EXPLAIN, TERMS), tag
+    bodies = _section_bodies(html)
+    assert list(bodies) == SECTIONS
+    no_div = r"(?:(?!</div>).)*</div>\s*"
+    for sid, body in bodies.items():
+        assert body.count(EXPLAIN) == 1, sid
+        if sid == "overview":
+            tail = re.escape(EXPLAIN) + r"(?:(?!</details>).)*</details>\s*$"
+            assert re.search(r'<div class="vitals">' + no_div + tail, body, flags=re.S)
+        else:
+            head = r'<div class="sec-head">' + no_div + re.escape(EXPLAIN)
+            assert re.search(head, body, flags=re.S), sid
+        (block,) = _folded(body, EXPLAIN)
+        assert _summary(block).startswith("이 절 읽는 법"), sid
+        dts, dds = _dl(block)
+        assert len(dts) == len(dds) >= 3, sid
+        assert dts[:2] == ["읽는 값", "판정"], sid
+
+
+def test_block_terms_are_folded_lists_in_collect_infra_traffic_and_cost() -> None:
+    """041 §3.1 — 덩어리 끝 '이 칸 뜻' 은 dl 하나·dt 수 = dd 수 ≥ 2. 수는 고정하지 않는다(042·043 이 바꾼다)."""
+    html = _text("web/admin/index.html")
+    blocks = _folded(html, TERMS)
+    assert blocks
+    for block in blocks:
+        assert _summary(block) == "이 칸 뜻"
+        dts, dds = _dl(block)
+        assert len(dts) == len(dds) >= 2, dts
+    with_terms = {sid for sid, body in _section_bodies(html).items() if TERMS in body}
+    assert {"collect", "infra", "traffic", "cost"} <= with_terms
+
+
+class _Ancestors(HTMLParser):
+    """설명 details 마다 조상 가운데 id 를 가진 요소의 id — 빈 요소(input·meta 등)는 쌓지 않는다."""
+
+    VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[tuple[str, str | None]] = []
+        self.found: list[list[str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        found = dict(attrs)
+        if tag == "details" and found.get("class") in ("explain", "terms"):
+            self.found.append([i for _, i in self.stack if i])
+        if tag not in self.VOID:
+            self.stack.append((tag, found.get("id")))
+
+    def handle_endtag(self, tag: str) -> None:
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                return
+
+
+def test_explanations_sit_outside_every_redrawn_box() -> None:
+    """041 §3.1 — admin.js 가 내용을 바꾸는 칸은 모두 id 를 가진다. 설명의 id 있는 조상은 그 절과 `infra-parts`
+    (admin.js 가 hidden 만 바꾼다)뿐이라 다시 그리기가 닿지 않는다. admin.js 는 설명을 만들지도 건드리지도 않는다."""
+    html = _text("web/admin/index.html")
+    parser = _Ancestors()
+    parser.feed(html)
+    parser.close()
+    assert parser.stack == []
+    assert len(parser.found) == html.count(EXPLAIN) + html.count(TERMS)
+    for ids in parser.found:
+        assert ids[0] in SECTIONS and set(ids[1:]) <= {"infra-parts"}, ids
+    js = _text("web/admin/admin.js")
+    assert "explain" not in js and "terms" not in js
+
+
+def _js_table(js: str, name: str) -> dict[str, list[str]]:
+    """admin.js 의 `const 이름 = { 키: '글', … };`(값은 글 하나 또는 글 둘의 배열) → 키 → 글 목록."""
+    block = re.search(rf"\nconst {name} = \{{\n(.*?)\n\}};\n", js, flags=re.S)
+    assert block, name
+    table: dict[str, list[str]] = {}
+    for line in block.group(1).splitlines():
+        row = re.fullmatch(
+            r"  '?([\w-]+)'?: (?:'([^']*)'|\['([^']*)', '([^']*)'\]),", line
+        )
+        assert row, line
+        table[row[1]] = [v for v in row.groups()[1:] if v is not None]
+    return table
+
+
+def test_name_tables_match_the_spec_and_every_key_is_explained() -> None:
+    """041 §3.4 — 이름표 표 셋의 키·한국어 이름, 그리고 키 스물둘이 모두 설명 dl 안에 원래 id 로 있다."""
+    js = _text("web/admin/admin.js")
+    kinds = _js_table(js, "KIND_NAME")
+    assert {k: v[0] for k, v in kinds.items()} == KIND_NAMES
+    tails = _js_table(js, "ALARM_TAIL")
+    assert {k: v[0] for k, v in tails.items()} == ALARM_TAIL_NAMES
+    assert all(len(v) == 2 and v[1] for v in tails.values())  # 이름표와 조건
+    tabs = _js_table(js, "TAB_NAME")
+    assert {k: v[0] for k, v in tabs.items()} == TAB_NAMES
+    html = _text("web/admin/index.html")
+    folded = "".join(_folded(html, EXPLAIN) + _folded(html, TERMS))
+    explained = "".join(re.findall(r"<dl>(.*?)</dl>", folded, flags=re.S))
+    for key in [*KIND_NAMES, *ALARM_TAIL_NAMES, *TAB_NAMES]:
+        assert f"<code>{key}</code>" in explained, key
+
+
+def test_misleading_words_are_fixed() -> None:
+    """041 §3.5 — 억제 문구·성공률 소수 1자리·버전 칸 지움·AWS 계정 종료 문구 지움(동작은 같다)."""
+    js = _text("web/admin/admin.js")
+    assert "10분 억제로 보내지 않은 알림은 기록에도 없다" in js
+    assert "억제된 알림은 없다" not in js
+    assert "successRate1h.toFixed(2)" not in js
+    assert "'버전'" not in js and not re.search(r"\.version\b", js)
+    assert "\n  aws: 'AWS 자격 없음',\n" in js
+    for name in SCREEN_FILES:
+        text = _text(f"web/admin/{name}")
+        for word in ("계정 종료", "AWS 종료", "종료 예정", "방문자-일", "visitor-day"):
+            assert word not in text, (name, word)
+    notes = re.search(
+        r'<ul class="notes">(.*?)</ul>', _text("web/admin/index.html"), flags=re.S
+    )
+    assert notes and notes.group(1).count("<li>") == 1  # SCP 글 하나
+
+
+def test_overview_tiles_stay_plain_links_and_there_is_no_popover() -> None:
+    """041 §2 — 개요 칸(링크) 안에는 span 셋뿐(누르는 요소를 넣지 않는다), 칸 위에 뜨는 풍선 없음."""
+    html = _text("web/admin/index.html")
+    tiles = re.findall(r'<a class="vital"[^>]*>(.*?)</a>', html, flags=re.S)
+    assert len(tiles) == 6
+    span = r'<span class="[\w-]+"(?: id="[\w-]+")?>[^<]*</span>'
+    for inner in tiles:
+        assert re.fullmatch(f"(?:{span}){{3}}", inner), inner
+    for name in SCREEN_FILES:
+        assert "popover" not in _text(f"web/admin/{name}").lower(), name
+
+
+def test_explanation_text_has_no_links_media_scripts_or_addresses() -> None:
+    """041 §3.2 — 설명 글 안에는 링크·이미지·스크립트·SVG·style·스킴 주소가 없다(12자리 숫자·이메일은 036 단언)."""
+    html = _text("web/admin/index.html")
+    for block in _folded(html, EXPLAIN) + _folded(html, TERMS):
+        for banned in ("<a", "<img", "<script", "<svg", "style=", "://"):
+            assert banned not in block, (banned, _summary(block))
