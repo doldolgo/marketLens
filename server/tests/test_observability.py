@@ -224,7 +224,7 @@ def test_compose_binds_caddy_dir_and_host_log_dir() -> None:
     assert "logs/" in _text(".gitignore").splitlines()
 
 
-# 공개 server 의 location 전부 — 027 은 접속 로그만 끄고 분기는 건드리지 않는다 (§4). 방침 셋은 032
+# 공개 server 의 location 전부 — 027 은 접속 로그만 끄고 분기는 건드리지 않는다 (§4). 방침 셋은 032, clarity.js 는 033
 PUBLIC_LOCATIONS = {("=", path) for path in PUBLIC_API} | {
     ("=", "/api"),
     ("/api/",),
@@ -237,6 +237,7 @@ PUBLIC_LOCATIONS = {("=", path) for path in PUBLIC_API} | {
     ("=", "/privacy"),
     ("=", "/privacy.html"),
     ("=", "/app/privacy.html"),
+    ("=", "/clarity.js"),
     ("/app/assets/",),
     ("=", "/app/index.html"),
     ("/app/",),

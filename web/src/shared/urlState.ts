@@ -3,6 +3,7 @@
 // 기본값이면 키를 지워 URL 을 짧게 유지하고, pushState 가 아니라 뒤로가기 히스토리는 쌓이지 않는다.
 // 탭은 한 번 마운트되면 언마운트되지 않으므로(002 §3.5) 각 탭이 자기 키만 읽고 쓰면 충돌이 없다 — 키는 탭 접두어로 구분.
 // 기록 탭만 처음 볼 때 마운트된다 — 그 전에는 셸이 `h.` 키를 URL 에서 대신 빼고, 값은 마운트될 때 읽게 메모리에 둔다(dropParams).
+// 033 — 검색어는 URL 에 싣지 않는다(Clarity 가 전송마다 주소를 통째로 싣는다). URL 쓰기는 둘이다(replaceUrl).
 import { createContext, useContext, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 
 /** 값 ↔ URL 문자열. parse 가 undefined 를 돌려주면 잘못된 값이라 기본값으로 간다. */
@@ -17,6 +18,10 @@ export const num: Codec<number> = {
   format: (v) => String(v),
 }
 export const bool: Codec<boolean> = { parse: (s) => (s === '1' ? true : s === '0' ? false : undefined), format: (v) => (v ? '1' : '0') }
+
+/** 033 — 심볼은 영문 대문자·숫자 1~20자. 입력한 글자가 가림 해제된 제목·주소·Clarity 태그로 가지 않게 이 형식만 읽고 고른다. */
+export const isSymbol = (s: string): boolean => /^[A-Z0-9]{1,20}$/.test(s)
+export const symbol: Codec<string> = { parse: (s) => (isSymbol(s) ? s : undefined), format: (v) => v }
 
 /** 허용 값 집합 — URL 토큰이 값 그 자체. */
 export const oneOf = <T extends string>(values: readonly T[]): Codec<T> => ({
@@ -53,11 +58,26 @@ function readParam(key: string): string | null {
   return new URLSearchParams(window.location.search).get(key) ?? parked.get(key) ?? null
 }
 
+/** 033 — URL 쓰기는 둘로 나눈다. `tab` 만 window.history.replaceState(Clarity 가 인스턴스 속성으로 덮어쓴 것 — 탭을 바꾸면
+ *  Clarity 새 페이지), 그 밖(탭 접두어 키·sym·dropParams·첫 정리)은 원래 함수를 window.history 에 걸어 부른다 — Clarity 가 몰라
+ *  필터를 바꿔도 녹화가 이어지고 다음 전송 주소에 새 필터가 실린다. Clarity 가 없으면 둘은 같은 함수다. */
+function replaceUrl(url: URL, newPage: boolean) {
+  if (newPage) window.history.replaceState(window.history.state, '', url)
+  else History.prototype.replaceState.call(window.history, window.history.state, '', url)
+}
+
 function writeParam(key: string, value: string | null) {
   const url = new URL(window.location.href)
   if (value === null) url.searchParams.delete(key)
   else url.searchParams.set(key, value)
-  if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url)
+  if (url.href !== window.location.href) replaceUrl(url, key === 'tab')
+}
+
+/** 033 — 키를 URL 에서 빼고 값은 버린다(옛 링크에 남은 검색어). 셸이 첫 렌더 전에 부른다. */
+export function discardParams(keys: string[]): void {
+  const url = new URL(window.location.href)
+  for (const key of keys) if (url.searchParams.has(key)) url.searchParams.delete(key)
+  if (url.href !== window.location.href) replaceUrl(url, false)
 }
 
 /** 접두어로 시작하는 키를 URL 에서 모두 뺀다 — 아직 마운트하지 않은 탭은 자기 키를 지울 수 없어서, 셸이 대신 지운다
@@ -71,7 +91,7 @@ export function dropParams(prefix: string): void {
     parked.set(key, url.searchParams.get(key) ?? '')
     url.searchParams.delete(key)
   }
-  if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url)
+  if (url.href !== window.location.href) replaceUrl(url, false)
 }
 
 /** URL 은 지금 보이는 화면만 담는다 — 셸이 탭마다 활성 여부를 내려 주고, 비활성 탭의 키는 URL 에서 빠진다(값은 메모리에 남는다). */

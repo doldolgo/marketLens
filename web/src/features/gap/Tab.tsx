@@ -1,4 +1,5 @@
 // 선물–현물 갭 탭 (mock) — 스펙 002 §3.7, 구조는 docs/design/reference/tabs/GapTab.tsx.
+import { useState } from 'react'
 import { STALE_SEC } from '../../shared/config'
 import { fmtFunding3, fmtPct, fmtUsdt, pctColor } from '../../shared/format'
 import type { Feed } from '../../shared/types'
@@ -6,7 +7,7 @@ import {
   GridHeader, gridRow, NumField, Seg, segOpt, SymCell, TableFrame, ToggleBtn,
   bar, count, exTag, hint, label, searchInput, type Header,
 } from '../../shared/ui'
-import { bool, num, oneOf, sortOf, str, useUrlState } from '../../shared/urlState'
+import { bool, num, oneOf, sortOf, useUrlState } from '../../shared/urlState'
 
 /** 심볼 | 현물가 USDT | 갭(가변) | 펀딩비 */
 const GRID = '100px 1fr 320px 150px'
@@ -38,8 +39,8 @@ function fundingEta(ex: string, now: number): string {
 }
 
 export default function GapTab({ feed, now }: { feed: Feed; now: number }) {
-  // 검색어·필터·정렬은 URL 쿼리(g.*)에 실려 새로고침해도 같은 화면 (002 §3.5)
-  const [q, setQ] = useUrlState('g.q', '', str)
+  // 필터·정렬은 URL 쿼리(g.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색어는 메모리만 — Clarity 가 주소를 통째로 싣는다 (033)
+  const [q, setQ] = useState('')
   const [mode, setMode] = useUrlState<Mode>('g.mode', 'entry', oneOf(['entry', 'exit']))
   const [thr, setThr] = useUrlState('g.thr', 0.5, num)
   const [only, setOnly] = useUrlState('g.only', false, bool)

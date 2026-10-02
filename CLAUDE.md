@@ -33,6 +33,7 @@ marketlens/
       uptime-monitor.md       외부 uptime 감시 등록 (사람용, 025)
       cloudwatch.md           CloudWatch 에이전트·경보·canary·로그 전송 설치 (사람용, 027)
       admin-access.md         관리자 페이지 Cloudflare Access·Tunnel 설정 기록·토큰 교체·접속 기록 회전 (사람용, 030)
+      clarity.md              Clarity 대시보드 설정·켜고 끄기·삭제 요청(프로젝트 통째 삭제) (사람용, 033)
   server/                     FastAPI 앱 (Python 3.12)
     app/
       core/                   공유 인프라 — 스트림 커넥터·메모리 저장소(LiveStore)·틱 루프·김프 계산·망 매칭·Influx·Redis·S3 클라이언트 (모듈 이름은 개발 후 architecture.md "현재 구조"에)
@@ -116,7 +117,7 @@ marketlens/
 | 030 | admin-tunnel | DONE | `admin.kimptrack.com` — cloudflared(profile tunnel, 전용 망, 토큰 파일 secret, 배포 시 파일이 있을 때만)·Cloudflare Access(이메일 OTP)·Protect with Access, 런북 admin-access.md (인프라) |
 | 031 | events-window | TODO | 공개 `/history/events` 창 상한 90일(기록 탭 최장 기간 3달과 같음) — 넘으면 Influx 를 읽기 전에 400(`detail.limitSec`, 014 와 같은 모양), 차트 음영 조회는 최근 90일까지. 기간 버튼 그대로. 요약 응답·속도 제한·api 이관은 후속 (BE·web) |
 | 032 | privacy | DONE | 개인정보 처리방침 `/privacy`(번들 밖 정적·외부 자원 0·CSP·no-cache, `/privacy.html`·`/app/privacy.html` 301)·화면 분석 동의 관리(Clarity 는 동의 방식 — 사람 결정 2026-10-01, 수집·이용·제공·국외 이전 세 칸을 따로 받아 셋 다일 때만 `kt.analytics` `granted`+판 `kt.analytics.v`·다른 판은 다시 묻기·없음 = 기본 꺼짐·GPC 우선, [선택한 대로 저장]·[모두 거부]·[동의 철회], 철회 뒤 삭제 요청은 프로젝트 통째 삭제)·랜딩 바닥 nav·대시보드 헤더 링크·sitemap, caddy 하루 회전·100개·오류 줄 IP 삭제(머지 뒤 caddy 다시 만들기)·관리자 기록 매일 90개. 사람 값 채움(2026-10-01) — 법률 확인(§7) 뒤 머지 = 게시 (web·인프라) |
-| 033 | clarity | TODO | Microsoft Clarity(동의 방식) — `public/clarity.js` 한 곳(ID 빈 값으로 머지, 032 게시 뒤 사람이 켬), 랜딩·대시보드의 화면을 막지 않는 동의 안내 띠(정하지 않음 — 지금 판의 granted·denied 가 아니고 GPC 아닐 때, 032 와 같은 세 칸·알릴 사항 펼침·높이 화면 절반까지·[선택한 대로 저장]·[모두 거부])·'화면 분석 설정' 링크(→ /privacy#consent), 세 칸 모두 동의한 방문자만 consentv2 광고 거부·분석 허용, 안내 판은 privacy.html 과 같은 값, 다른 탭의 철회는 곧바로 새로고침·동의는 그 자리에서 켬, 검색어 URL 제외·필터 URL 쓰기 우회·`sym` 형식, 탭 태그·이벤트, 런북 clarity.md(삭제 요청 = 프로젝트 통째 삭제) (web) |
+| 033 | clarity | DONE | Microsoft Clarity(동의 방식) — `public/clarity.js` 한 곳(ID 들어 있음 — 032 머지 뒤 이 PR 머지가 켜기), 랜딩·대시보드의 화면을 막지 않는 동의 안내 띠(정하지 않음 — 지금 판의 granted·denied 가 아니고 GPC 아닐 때, 032 와 같은 세 칸·칸마다 알릴 사항 '내용 보기'·접힌 띠·펼쳐도 높이 화면 절반까지·[선택한 대로 저장]·[모두 거부])·'화면 분석 설정' 링크(→ /privacy#consent), 세 칸 모두 동의한 방문자만 consentv2 광고 거부·분석 허용, 안내 판은 privacy.html 과 같은 값, 다른 탭의 철회는 곧바로 새로고침·동의는 그 자리에서 켬, 검색어 URL 제외·필터 URL 쓰기 우회·`sym` 형식, 탭 태그·이벤트, 런북 clarity.md(삭제 요청 = 프로젝트 통째 삭제) (web) |
 | 034 | monitoring-ops | DONE | 수집기 관리자 피드 — `/admin/aws`(경보·24시간 지표·canary·예산)·`/admin/alerts`(보낸 Slack 알림 `alerts:log` + 경보 이력 7일), 부분별 state(자격 없음 = 연결 안 됨)·요청 있을 때만·전용 스레드·ARN 가림, IAM 읽기 정책 런북 (BE·인프라) |
 | 035 | monitoring-visits | TODO | api 관리자 피드 — `/admin/access`(caddy 로그 24시간 요약·탭별 진입·최근 5xx)·`/admin/clarity`(Data Export 3시간 간격·Redis 캐시·주소 쿼리 뗌), 토큰 런북. 032·033·034 뒤 (BE·인프라) |
 | 036 | admin-v2 | TODO | 관리자 화면 v2 — 한 페이지 개요·수집·인프라·알림·접속·비용·도구, 빠른 10초·느린 60초(보이는 동안만), 부분별 상태 칸·SVG 직접·빌드 없음. 034·035 뒤 (web) |

@@ -2,6 +2,8 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
+    <!-- 033 — 화면 분석(Clarity) 동의 안내 띠·불러올지 판단. 앱 모듈보다 앞에 둔다(defer 는 문서 순서대로 실행된다 — 대기열이 셸의 첫 태그보다 먼저) -->
+    <script defer src="/clarity.js"></script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -22,7 +24,7 @@
     <meta name="twitter:card" content="summary_large_image" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root" data-clarity-unmask="true"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

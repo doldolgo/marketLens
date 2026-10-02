@@ -1,7 +1,7 @@
 // 셸 레이아웃 — 헤더 + KPI 스트립 + 탭 6개 + 푸터 (스펙 002 §3.5, 구조는 docs/design/reference/App.tsx).
 // 탭은 한 번 마운트되면 언마운트하지 않고 숨긴다: 검색어·필터·드릴다운 상태가 전환 후에도 유지되어야 하기 때문.
 // 기록 탭만 처음 볼 때 마운트한다 — 그 코드(차트 라이브러리 포함)는 첫 화면 번들에서 빠져 처음 볼 때 받는다.
-import { Component, Suspense, lazy, memo, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Component, Suspense, lazy, memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import FlowTab from './features/flow/Tab'
 import GapTab from './features/gap/Tab'
 import { useHealthPolling } from './features/health/api'
@@ -9,12 +9,17 @@ import HealthTab from './features/health/Tab'
 import PpTab from './features/pp/Tab'
 import { useSpreadSocket } from './features/spreads/api'
 import SpreadsTab from './features/spreads/Tab'
+import { CLARITY_READY, clarityEvent, clarityTag } from './shared/clarity'
 import { useFeed } from './shared/feed'
 import { exName, fmtPct, pctColor } from './shared/format'
 import { Empty, kicker, vDivider } from './shared/ui'
-import { UrlActive, dropParams, oneOf, str, useUrlState } from './shared/urlState'
+import { UrlActive, discardParams, dropParams, oneOf, symbol, useUrlState } from './shared/urlState'
 
 const HistoryTab = lazy(() => import('./features/history/Tab'))
+
+// 033 — 검색어(s.q·g.q·p.q)는 URL 에 싣지 않는다. 옛 링크에 남은 키는 첫 렌더 전(이 모듈이 실행될 때)에 지우고 값은 버린다 —
+// Clarity 는 전송마다 그때의 주소를 통째로 싣는다(입력칸을 가려도 주소의 검색어는 간다)
+discardParams(['s.q', 'g.q', 'p.q'])
 
 type TabId = 'spread' | 'history' | 'gap' | 'pp' | 'health' | 'flow'
 
@@ -61,10 +66,21 @@ export default function App() {
   // 셸이 공유 피드를 만든 직후 /ws/spreads 구독 시작 (스펙 017 §3.4), 그 옆에서 /health/collect 5초 폴링 (011 §3.6)
   useSpreadSocket(feed)
   useHealthPolling(feed)
-  // 스프레드 행 클릭 → 기록 탭으로 피벗할 선택된 심볼 — 초기값 'BTC' (스펙 005 §2)
-  const [selSym, setSelSym] = useUrlState<string>('sym', 'BTC', str, tab === 'history')
+  // 스프레드 행 클릭 → 기록 탭으로 피벗할 선택된 심볼 — 초기값 'BTC' (스펙 005 §2). 영문 대문자·숫자 1~20자만 URL 에서 읽고 쓴다 (033)
+  const [selSym, setSelSym] = useUrlState<string>('sym', 'BTC', symbol, tab === 'history')
+  // 033 — 탭이 바뀐 뒤 남길 Clarity 이벤트(탭 단추 tab_<id>, 행 클릭 pivot_history). tab 태그를 둔 다음에 남긴다
+  const clarityNext = useRef<string | null>(null)
   // 고정 참조 — 스프레드 행이 memo 라 이 함수가 렌더마다 바뀌면 행 전부가 다시 그려진다
-  const onPick = useCallback((sym: string) => { setSelSym(sym); setTab('history') }, [setSelSym, setTab])
+  const onPick = useCallback((sym: string) => {
+    setSelSym(sym)
+    clarityNext.current = 'pivot_history'
+    setTab('history')
+  }, [setSelSym, setTab])
+  const pickTab = (id: TabId) => {
+    if (id === tab) return
+    clarityNext.current = `tab_${id}`
+    setTab(id)
+  }
   // 기록 탭은 처음 볼 때 마운트하고(?tab=history 로 들어오면 곧바로) 그 뒤로는 내리지 않는다
   const [historySeen, setHistorySeen] = useState(tab === 'history')
   if (tab === 'history' && !historySeen) setHistorySeen(true)
@@ -75,6 +91,28 @@ export default function App() {
     // 첫 화면 기준 한 번만
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 033 — Clarity 태그·이벤트(동의하지 않은 방문자는 아무것도 안 한다). 이 effect 는 위 useUrlState('tab') 의 URL 쓰기 다음에 돈다 —
+  // tab 을 쓰면 Clarity 가 새 페이지를 시작하므로 태그가 새 페이지에 실린다. 첫 화면에는 이벤트를 남기지 않는다
+  const clarityTabRef = useRef<TabId | null>(null)
+  useEffect(() => {
+    if (clarityTabRef.current !== tab) {
+      clarityTabRef.current = tab
+      clarityTag('tab', tab)
+      if (clarityNext.current) clarityEvent(clarityNext.current)
+    }
+    clarityNext.current = null
+    if (tab === 'history') clarityTag('sym', selSym)
+  }, [tab, selSym])
+  // clarity.js 가 문서 중간에(띠의 저장·다른 탭의 동의로) 대기열을 만들면 지금 보이는 화면의 태그를 한 번 둔다
+  useEffect(() => {
+    const onReady = () => {
+      clarityTag('tab', tab)
+      if (tab === 'history') clarityTag('sym', selSym)
+    }
+    window.addEventListener(CLARITY_READY, onReady)
+    return () => window.removeEventListener(CLARITY_READY, onReady)
+  }, [tab, selSym])
 
   // 수집 상태 KPI — /health/collect 마지막 응답 기준, 첫 응답 전엔 – (011 §3.7)
   const exs = feed.health?.exchanges ?? []
@@ -114,7 +152,7 @@ export default function App() {
         </div>
         <div style={{ display: 'flex', gap: 'var(--space-2)', alignSelf: 'stretch', alignItems: 'stretch' }}>
           {TABS.map(([id, text]) => (
-            <button key={id} onClick={() => setTab(id)} className="hv-txt"
+            <button key={id} onClick={() => pickTab(id)} className="hv-txt"
               style={{
                 appearance: 'none', background: 'none', border: 'none',
                 borderBottom: `2px solid ${tab === id ? 'var(--color-accent)' : 'transparent'}`,
@@ -129,6 +167,11 @@ export default function App() {
         <a href="/privacy" target="_blank" rel="noopener" className="hv-txt"
           style={{ marginLeft: 'auto', color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
           개인정보 처리방침
+        </a>
+        {/* 033 — 동의 안내 띠는 한 번 고르면 다시 뜨지 않으므로 바꾸러 가는 길을 늘 둔다(철회가 동의보다 어렵지 않게). 방침과 같은 모양·새 탭 */}
+        <a href="/privacy#consent" target="_blank" rel="noopener" className="hv-txt"
+          style={{ color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
+          화면 분석 설정
         </a>
         <div style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-500)', fontSize: 12 }}>
           {clock} KST
