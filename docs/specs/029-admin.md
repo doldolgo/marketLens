@@ -139,6 +139,11 @@ curl -D - -H 'Host: admin.kimptrack.com' web:8081/api · /api/ws   # 301 Locatio
   # 두 백엔드 정지(502): 수집기·api 칸 전부 사유 또는 '-'·거래소 표 비움 · XSS 문자열 글자 그대로 · CSP 위반·Uncaught 0
 docker rm -f ml029fix-web ml029fix-server ml029fix-api && docker network rm ml029fix-net && docker rmi ml029fix-web
 docker ps -a · docker network ls · docker images | grep 029   # 0건(검토 반영 뒤에도)
+
+# 후속(2026-10-02, 036 운영 확인 반영 — favicon) — 망 fu036-net, nginx:1.27-alpine 에 nginx-admin.conf 템플릿·web/admin, 127.0.0.1:19041
+docker exec fu036-web nginx -t        # syntax is ok · test is successful
+curl -D - 127.0.0.1:19041/favicon.ico # 204 No Content · X-Frame-Options DENY(server 수준 상속) — 고치기 전 404
+  # 고친 뒤 error 로그의 favicon open() 줄 0·접속 기록 줄 0(대조 /nope.png 는 404·두 줄 다 남음), 헤드리스 Chrome 콘솔 자원 오류 0
 ```
 
 ## 6. 갱신할 문서
@@ -187,6 +192,7 @@ docker ps -a · docker network ls · docker images | grep 029   # 0건(검토 �
   - 배포 뒤 사람 확인(§4): serve 박스 `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/status` 200 JSON, 공개 `https://kimptrack.com/api/docs` 404.
   - 브라우저 확인은 Chromium 한 종류(Browser pane)다.
   - api 가 내는 끝 `/` 307(`/api/history/streaks/` → `Location: …/history/streaks`)은 `/api` 접두를 잃는다 — api 에는 `UVICORN_ROOT_PATH` 를 주지 않으므로(§3.5) 주소를 직접 칠 때만 생긴다. 수집기 쪽 307 은 접두를 지킨다.
+- 후속(2026-10-02, 036 운영 확인 반영): 브라우저가 스스로 부르는 `/favicon.ico` 가 화면 root 에서 404·error 로그 줄·접속 기록 줄이 되던 것(029 때부터 — 036 §7 의 빚)을 정확 일치 location 의 본문 없는 204·기록 끔으로 고쳤다(§3.1 표·문장, §3.2 기록하지 않는 목록, §4). `log_not_found off` 는 두지 않았다 — `return` 은 파일을 열지 않아 error 로그 줄이 생기지 않는다(로컬 확인). 화면은 그대로 이미지 파일을 쓰지 않는다.
 - PR 본문에 옮길 것 — 담당자에게 제안(파일:절 — 문서 주장 → 실제). 028 의 제안(같은 자리)이 아직 반영되지 않아, 028 문장과 함께 넣거나 그 뒤에 잇는다:
   - `docs/specs/003-spreads.md`:§3.3 110행 `POST /refresh` — 공개·관리자 언급 없음 → 공개 404(028), "…관리자 페이지의 즉시 갱신 버튼으로 부른다(029)".
   - `docs/specs/004-analysis.md`:§1 9행 "curl/브라우저로 직접 호출하는 BE 전용 도구" → 공개 404(028), "관리자 페이지 API 문서의 Try it out 으로 부른다(029)".

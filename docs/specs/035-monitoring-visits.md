@@ -144,6 +144,10 @@ curl -o /dev/null -w '%{http_code}' localhost:18935/admin/aws   # 404 (수집기
 #   잘린 gz·틀린 머리 gz·디렉터리·권한 0 회전 파일 → ok·skipped 1 (전: error EOFError·BadGzipFile·IsADirectoryError·PermissionError)
 #   200 ["a","b"]·Traffic information 문자열 → error ValueError·직전 값 유지, [] → ok / HTTPS://·앞 공백·스킴 없는 주소·키·android-app 출처의 쿼리 0
 #   새 테스트 11개는 고치기 전 코드에서 모두 실패 · nginx·Caddyfile 은 바꾸지 않아 nginx -t·caddy validate 는 다시 돌리지 않음
+
+# 후속(2026-10-02, 운영 확인 반영 — 지표 이름 정규화)
+pytest -q app/features/admin/tests/test_clarity_safety.py   # 고치기 전: 실제 철자 1 failed(ReferrerUrl 행이 출처로 안 줄어듦)·문서 철자 통과(11 passed) → 고친 뒤 12 passed
+cd server && ruff check . && ruff format --check . && pytest -q   # All checks passed! · 286 files already formatted · 1239 passed
 ```
 
 ## 6. 갱신할 문서

@@ -155,7 +155,7 @@
 - 브라우저(Chromium, 029 §5 처럼 127.0.0.1 에만 게시한 테스트 compose + 가짜 백엔드 — 피드 넷을 `ok`·`unconfigured`·`denied`·`error`·`pending`·빈 목록·오래된 `fetchedAt`·null 섞인 점으로 바꿔 줄 수 있게):
   - 일곱 절이 다 채워지고 콘솔에 CSP 위반·Uncaught 0. 차트 가로축이 초 단위 `ts` 를 ms 로 옮겨 "24시간 전·지금" 이 맞다.
   - 방문자·서버 글자 칸 전부에 `<img src=x onerror=alert(1)>`·`javascript:alert(1)`·U+202E 를 넣은 응답 → 글자로 보이고 img 요소 0·alert 없음·U+202E 빠짐·그 글자가 링크가 아니다(`a[href]` 는 `index.html` 의 고정 링크뿐).
-  - 부분 상태: AWS 예산만 `denied` → 비용만 "권한 없음" / AWS 전부 `unconfigured` → 판정은 앱 값으로만(정상) / 접속 `error` → 그 칸만, 판정 그대로 / `alarms` `error` → 주의 / `pending` → `…`·판정 제외 / Clarity 429(`error`) + 직전 값 → 값이 보이고 "불러오지 못함 · 마지막 성공 n시간 전" 배지 / `fetchedAt` 이 `refreshSec` × 3 보다 오래됨 → 주의색 / 빈 목록 → 빈 문구 / null 섞인 점 → 선이 끊김 / 점 1개 → "데이터 부족".
+  - 부분 상태: AWS 예산만 `denied` → 비용만 "권한 없음" / AWS 전부 `unconfigured` → 판정은 앱 값으로만(정상) / 접속 `error` → 그 칸만, 판정 그대로 / `alarms` `error` → 주의 / `pending` → `…`·판정 제외 / Clarity 429(`error`) + 직전 값 → 값이 보이고 "불러오지 못함 · 마지막 성공 n시간 전" 배지 / `fetchedAt` 이 `refreshSec` × 3 보다 오래됨 → 주의색 / 빈 목록 → 빈 문구 / null 섞인 점 → 선이 끊김 / 점 1개 → "값 1개뿐".
   - 값: `delivered` false → "전송 실패" 배지 / `firstTs` 가 창 시작보다 늦음 → "기록 시작" / 예산 둘(월·연) → 두 줄, 월만 막대 / serve `swap` null → "스왑 지표 없음".
   - 종합 판정: 경보 1개 `ALARM` → 장애, 거래소 `stale` → 주의, 수집기 헬스 403 → 알 수 없음.
   - 주기: 보이는 탭 2분 동안 빠른 경로 각 12±1회·느린 경로 각 2~3회 / 숨긴 탭 2분 동안 0회 / 다시 보이면 빠른 묶음 곧바로 / 느린 가짜 경로를 30초 늦춰도 빠른 묶음은 10초 주기.
@@ -229,6 +229,18 @@ chk.py cadence      # 70초: 빠른 넷 각 7·느린 넷 각 2
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/pytest -q   # All checks passed! · 286 files · 1236 passed
 cd web && npm run lint && npm run build   # oxlint 종료 코드 0 · ✓ built · dist 에 admin* 0개
 docker rm -f ml036fix-web ml036fix-web1 ml036fix-server ml036fix-api && docker network rm ml036fix-net   # 036 자원 0건
+
+# 후속(2026-10-02, 배포 뒤 운영 확인 반영) — 망 fu036-net, 가짜 백엔드 둘(python:3.12-alpine + <scratch>/followup/fake.py —
+#   036/fix/fake.py 에 FREEZE(시계 멈춤 — 응답 글자가 매번 같아 본문을 다시 그리지 않는다)), nginx:1.27-alpine 에 nginx-admin.conf
+#   템플릿·web/admin 을 붙여 127.0.0.1:19041(고친 것)·19042(후속 전 507e06d 의 화면·설정), 헤드리스 Chrome CDP <scratch>/followup/chk.py
+docker exec fu036-web nginx -t   # syntax is ok · test is successful
+chk.py elapsed   # 75초 뒤: 경보 ALARM 행 '5분 전'→'6분 전'·canary 카드 '3분 전'→'4분 전' = 개요 칸·절 요약, 같은 요소·details 열림·초점 그대로,
+                 #   span[data-at] 18 / 후속 전: 본문 '6분 전'·'4분 전' 그대로인데 개요 칸은 '5분 전'
+chk.py wrap      # 한글 음절 중간 줄바꿈 360·375·768·1280 = 후속 전 6·2·0·0('5분 최댓|값' 등) → 0·0·0·0, 가로 넘침 0(XSS·장애 섞은 값도)
+chk.py favicon   # /favicon.ico 후속 전 404·콘솔 자원 오류 한 줄 → 204·콘솔 0 · curl: 204·X-Frame-Options DENY, error 로그·접속 기록 줄 0
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/pytest -q   # All checks passed! · 286 files · 1241 passed
+cd web && npm run lint && npm run build   # oxlint 종료 코드 0 · ✓ built · dist 에 admin* 0개
+docker rm -f fu036-web fu036-web-old fu036-server fu036-api && docker network rm fu036-net   # fu036 자원 0건
 ```
 
 ## 6. 갱신할 문서
@@ -263,11 +275,13 @@ docker rm -f ml036fix-web ml036fix-web1 ml036fix-server ml036fix-api && docker n
   - canary 로그 줄은 펼침 없이 카드에(최대 10줄), 즉시 갱신은 접힌 `details` 안.
 - 검토 반영(2026-10-01, 같은 브랜치): 빠른 묶음마다 모든 본문을 새로 만들어 알림 목록 안 스크롤·초점이 10초마다 날아가던 것을 고쳤다 — 본문은 그 칸의 값이 바뀔 때만(§3.3), 같은 응답 글자면 직전 값 객체를 그대로 둔다, 알림 목록은 HTML 고정 `ul`(`tabindex=0`)에 자식만 바꾸고 스크롤을 되살린다. 알림 머리의 출처 둘에 경과·오래됨, 예산 점선 위치(한도 기준), 비율 막대 title, Clarity 간격을 `refreshSec` 로, 판정 사유의 "상태 모름"·경보 이름, 헬스 칸 색, SVG 속성 허용 목록·정적 단언 보강, 좁은 폭의 예산 이름·경보 사유 칸, 대비, 인프라 순서·접기, 타임라인 모양·눈금·글자 목록, 거래소 열 순서, 표기 통일. §3.3·§3.4·§3.6·§3.7·§4 문구를 함께 고쳤다.
 - 실행 중 함께 고친 스펙 절: §3.2 canary — 끝난 실행이 없으면 `durationMs`·`ok` 도 null(034 코드·§7 이 진실). §3.8 표시 지우기 — "마지막 만료 신호(없으면 화면을 연 때) 뒤 여덟 경로가 모두 만료 신호 없이 끝났을 때만" 으로 문구를 좁혔다(§4 의 "전부 정상으로 돌리면 표시 지움" 과 같은 문서 안에서 맞도록 — 만료 신호마다 센 것을 처음부터). §6 대로 029 §2·§3.3·§4.
+- 배포 뒤 운영 확인(2026-10-02, 설계 세션 — 반박 검증까지): 관리자 여덟 경로 모두 200·계약 모양, `/admin/access` 를 caddy 로그로 따로 세어 정확히 일치, 배포된 화면 파일 sha256 이 main 과 같음, 관리자 접속 기록에 60초 폴링 경로 없음, 공개 쪽 `/api/admin/*` 404, 교차 사이트 403. collect 카드에 스왑 0% 줄이 보인다(피드가 collect 스왑을 0.0 시계열로 준다 — 034 §7).
+- 후속 PR(같은 날, 운영 확인에서 찾은 것): ① 차트 빈 칸 문구를 "값 없음"·"값 1개뿐" 으로(§3.5 — 경보 "데이터 부족" 과 겹침). ② 본문 안 경과 글자가 그린 때에 멈춰 개요 칸과 달랐다 — 시각을 `data-at` 에 둔 span 으로 만들고 그리기 끝에 글자만 고친다(§3.3·§4). ③ 360 폭에서 한국어가 음절 중간에서 줄바꿈 — `body` 에 `word-break: keep-all`(§3.7·§4). ④ 브라우저의 `/favicon.ico` 가 관리자 server 에서 404·error 로그·접속 기록 줄 — 204·기록 끔(029 §3.1·§3.2). ⑤ Clarity 지표 이름이 실제로는 CamelCase(`ReferrerUrl`)라 출처 줄이기가 빠졌다 — 정규화 비교(035 §3.3). 화면은 그대로다.
 - 남은 빚:
-  - 배포 뒤 사람(status "036 운영 확인 대기"): §4 '배포 뒤' 목록. 특히 도구 링크 중 CloudWatch 지표(`#metricsV2:graph=~();namespace=MarketLens`)·로그 그룹(`$252F` 인코딩) 주소 꼴은 콘솔에서 확인하지 않았다.
-  - 브라우저가 스스로 부르는 `/favicon.ico` 가 관리자 server 에서 404(029 때부터) — 콘솔에 자원 404 한 줄. 화면은 이미지 파일을 쓰지 않으므로(§3.8) 두지 않았다.
+  - 배포 뒤 사람 확인은 끝났다(2026-10-02, 위). 도구 링크 중 CloudWatch 지표(`#metricsV2:graph=~();namespace=MarketLens`)·로그 그룹(`$252F` 인코딩) 주소 꼴을 콘솔에서 확인한 기록은 없다 — 남긴다.
   - 브라우저 확인은 Chromium(헤드리스 Chrome·Claude 브라우저 창) 한 종류(status 빚). 숨은 탭은 CDP 에서 `visibilityState` 를 바꿔 흉내 냈고, 실제 숨은 창(Claude 브라우저 창)에서도 요청 0 을 봤다.
   - Clarity 정규화 타일·AWS 이전 뒤 화면은 status 빚 그대로.
 - PR 본문에 옮길 것:
   - §4 의 화면 사진 세 장(1280·768·360) 첨부 — 검토 반영 뒤 찍은 것.
+  - 후속 PR: 360 폭 canary 카드 전·후 사진 두 장(줄바꿈 — '5분 최댓|값' → '5분 / 최댓값'), 관리자 nginx 의 로컬 `nginx -t` 결과(029 규칙).
   - ~~사람이 정할 것: 경보 상태 `INSUFFICIENT_DATA` 의 화면 이름 "데이터 부족" 이 차트의 "데이터 부족"(§3.5, 점 2개 미만)과 같은 낱말이다~~ → 정함(2026-10-02, 후속 PR): 경보 쪽은 AWS 한국어 문서·콘솔과 같은 "데이터 부족" 그대로, 차트 쪽을 "값 없음"·"값 1개뿐" 으로 바꿨다(§3.5).
