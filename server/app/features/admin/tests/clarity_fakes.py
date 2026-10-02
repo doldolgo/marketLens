@@ -100,7 +100,91 @@ DOC_NAMES = {
     "DeadClickCount": "Dead Click Count",
     "PopularPages": "Popular Pages",
     "ReferrerUrl": "Referrer URL",
+    "ScrollDepth": "Scroll Depth",
+    "EngagementTime": "Engagement Time",
+    "RageClickCount": "Rage Click Count",
+    "ExcessiveScroll": "Excessive Scroll",
+    "QuickbackClick": "Quickback Click",
+    "ScriptErrorCount": "Script Error Count",
+    "ErrorClickCount": "Error Click Count",
+    "Country": "Country/Region",
 }
+
+
+def signal(sessions: Any, pct: Any, views: Any, total: Any) -> dict[str, Any]:
+    """불만 신호 한 행 — 035 §7 의 실제 행 키 다섯."""
+    return {
+        "sessionsCount": sessions,
+        "sessionsWithMetricPercentage": pct,
+        "sessionsWithoutMetricPercentage": 50,
+        "pagesViews": views,
+        "subTotal": total,
+    }
+
+
+# 세션이 있는 기본 응답(지어낸 값 — 숫자와 숫자 글자를 섞는다). 이름·행 키는 실제 철자(040 §3.1)
+SESSIONS_EXPORT = [
+    {
+        "metricName": "Traffic",
+        "information": [
+            {
+                "totalSessionCount": "42",
+                "totalBotSessionCount": "3",
+                "distantUserCount": "37",
+                "PagesPerSessionPercentage": 1.8571,
+            }
+        ],
+    },
+    {"metricName": "ScrollDepth", "information": [{"averageScrollDepth": 57.456}]},
+    {
+        "metricName": "EngagementTime",
+        "information": [{"totalTime": "185", "activeTime": 61.333}],
+    },
+    {"metricName": "DeadClickCount", "information": [signal("6", 14.2857, "9", "11")]},
+    {"metricName": "RageClickCount", "information": [signal(2, "4.76", 2, 3)]},
+    {"metricName": "ExcessiveScroll", "information": [signal("0", 0, "0", "0")]},
+    {"metricName": "QuickbackClick", "information": [signal("5", 11.904, 7, "5")]},
+    {"metricName": "ScriptErrorCount", "information": [signal(1, 2.381, "1", 4)]},
+    {"metricName": "ErrorClickCount", "information": [signal("1", "2.38", "1", "1")]},
+    {
+        "metricName": "Country",
+        "information": [
+            {"name": "Japan", "sessionsCount": "5"},
+            {"name": "South Korea", "sessionsCount": "30"},
+            {"name": "Canada", "sessionsCount": 5},
+        ],
+    },
+    {
+        "metricName": "PopularPages",
+        "information": [{"url": "https://kimptrack.com/app/?tab=gap&sym=ETH"}],
+    },
+]
+SESSIONS_SUMMARY = {
+    "scrollDepth": 57.46,
+    "totalSec": 185.0,
+    "activeSec": 61.33,
+    "signals": {
+        "deadClick": {"sessions": 6, "sessionPct": 14.29, "pageViews": 9, "count": 11},
+        "rageClick": {"sessions": 2, "sessionPct": 4.76, "pageViews": 2, "count": 3},
+        "excessiveScroll": {
+            "sessions": 0,
+            "sessionPct": 0.0,
+            "pageViews": 0,
+            "count": 0,
+        },
+        "quickback": {"sessions": 5, "sessionPct": 11.9, "pageViews": 7, "count": 5},
+        "scriptError": {"sessions": 1, "sessionPct": 2.38, "pageViews": 1, "count": 4},
+        "errorClick": {"sessions": 1, "sessionPct": 2.38, "pageViews": 1, "count": 1},
+    },
+}
+
+
+def documented(export: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """같은 응답을 문서 철자 이름으로."""
+    return [
+        {**m, "metricName": DOC_NAMES.get(m["metricName"], m["metricName"])}
+        for m in export
+    ]
 
 
 class Clarity:
