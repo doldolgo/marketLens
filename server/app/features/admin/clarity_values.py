@@ -11,6 +11,7 @@ from typing import Any
 from app.features.admin.clarity import (
     ROW_LIMIT,
     TEXT_LIMIT,
+    address_parts,
     is_referrer,
     loads,
     metric_items,
@@ -155,7 +156,7 @@ def _countries(rows: list[Any] | None) -> list[list[Any]] | None:
 
 def _country(row: dict[str, Any]) -> tuple[str, int] | None:
     """행 → (이름, 세션). 이름은 아는 키의 글자 값, 없으면 행의 글자 값이 하나뿐일 때 그 값 — 숫자로 읽히는 글자
-    (`"5"`)는 수라서 글자 값으로 세지 않는다. 세션은 아는 키 중 처음 있는 정수."""
+    (`"5"`)는 수라서 글자 값으로 세지 않는다. 주소 꼴 글자는 이름이 아니다(`_is_name`). 세션은 아는 키 중 처음 있는 정수."""
     found = pick(row, frozenset(COUNTRY_NAME_KEYS + COUNTRY_SESSION_KEYS))
     sessions = next(
         (
@@ -169,7 +170,13 @@ def _country(row: dict[str, Any]) -> tuple[str, int] | None:
         return None
     for key in COUNTRY_NAME_KEYS:
         value = found.get(key)
-        if isinstance(value, str):
+        if _is_name(value):
             return value, sessions
     texts = [v for v in row.values() if isinstance(v, str) and read_number(v) is None]
-    return (texts[0], sessions) if len(texts) == 1 else None
+    return (texts[0], sessions) if len(texts) == 1 and _is_name(texts[0]) else None
+
+
+def _is_name(value: Any) -> bool:
+    """나라 이름이 될 글자인지 — 주소 꼴(`<스킴>://`·`/`·`호스트.이름/…`)은 아니다. 이름은 줄이지 않고 실으므로
+    주소가 쿼리째 Redis·응답에 남지 않게 버린다(`metrics` 의 같은 행은 주소 줄이기를 거친다)."""
+    return isinstance(value, str) and address_parts(value) is None

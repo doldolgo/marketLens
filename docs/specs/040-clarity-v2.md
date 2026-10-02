@@ -50,7 +50,7 @@
 - `traffic` = `{sessions, botSessions, users, pagesPerSession}` — `traffic` 지표 첫 행(035 그대로).
 - `summary` = `{scrollDepth, totalSec, activeSec, signals}` — 지표마다 첫 행에서 읽는다. `scrollDepth` ← `scrolldepth` 의 `averagescrolldepth`(%), `totalSec`·`activeSec` ← `engagementtime` 의 `totaltime`·`activetime`. `signals` 는 늘 키 여섯이다 — `deadClick` ← `deadclickcount`, `rageClick` ← `rageclickcount`, `excessiveScroll` ← `excessivescroll`, `quickback` ← `quickbackclick`, `scriptError` ← `scripterrorcount`, `errorClick` ← `errorclickcount`. 값 `{sessions, sessionPct, pageViews, count}` 는 그 지표의 `sessionscount`·`sessionswithmetricpercentage`·`pagesviews`·`subtotal` 이다.
 - 수 읽기: 숫자나 숫자 글자를 받는다. 정수 칸(`sessions`·`pageViews`·`count`)은 정수일 때만, 실수 칸은 유한할 때만 쓰고 아니면 그 칸은 null 이다. 지표·행 키를 못 찾은 칸도 null 이고 객체 모양은 그대로다. `summary` 의 실수는 소수 둘째 자리까지 반올림한다.
-- `countries` = `[[이름, 세션], …]` — 이름이 `country`·`countryregion` 인 지표의 행에서 만든다. 이름 = 행 키 `country`·`countryregion`·`name` 중 처음 있는 글자 값(셋 다 없으면 그 행에 글자 값이 하나뿐일 때 그 값), 세션 = 행 키 `sessionscount`·`totalsessioncount`·`sessions`·`count` 중 처음 있는 정수. 알아본 행만 세션 내림차순·같으면 이름순으로 20행, 이름은 Clarity 가 준 그대로 200자까지. 지표가 없거나 한 행도 못 알아보면 null, 행이 0개면 `[]`.
+- `countries` = `[[이름, 세션], …]` — 이름이 `country`·`countryregion` 인 지표의 행에서 만든다. 이름 = 행 키 `country`·`countryregion`·`name` 중 처음 있는 글자 값(셋 다 없으면 그 행에 글자 값이 하나뿐일 때 그 값), 세션 = 행 키 `sessionscount`·`totalsessioncount`·`sessions`·`count` 중 처음 있는 정수. 주소 꼴 글자(아래 주소 줄이기가 주소로 보는 `<스킴>://`·`/`·`호스트.이름/…`)는 이름이 아니다 — 그 키는 건너뛰고, 하나뿐인 글자 값이면 그 행을 버린다(쿼리째 남지 않게). 알아본 행만 세션 내림차순·같으면 이름순으로 20행, 이름은 Clarity 가 준 그대로 200자까지. 지표가 없거나 한 행도 못 알아보면 null, 행이 0개면 `[]`.
 - `metrics` = 035 그대로 — `traffic` 밖 지표를 받은 이름·키 그대로 행 20개, 주소 줄이기 뒤. 정규화한 지표도 남긴다(세션이 있는 응답에서 짐작을 대조하려고).
 - 주소 줄이기(035 §3.3 그대로 + 하나): 주소 꼴 값과 키는 쿼리·해시·사용자 정보를 떼고, 출처 지표는 출처(`스킴://호스트[:포트]`)로 줄인다. **더함**: 출처 지표 밖에서, 호스트가 `kimptrack.com`·`www.kimptrack.com`(대소문자 무관, 끝 점 무시, 스킴 없는 `호스트/…` 꼴 포함)이고 경로가 정확히 `/app/` 인 주소는 `?tab=<id>` 를 남길 수 있다. 쿼리의 첫 `tab` 값이 `spread`·`history`·`gap`·`pp`·`health`·`flow` 중 하나와 글자가 같을 때만이다. 다른 쿼리 키·해시는 늘 뗀다. 탭을 바꾸면 Clarity 가 새 페이지로 센다(033 — `tab` 쓰기만 Clarity 가 덮어쓴 `replaceState` 를 지난다). 탭마다 값이 갈리게 하려는 것이다.
 
@@ -117,7 +117,7 @@
   - 마지막 성공에서 7일 → 그 기록의 값만 null(두 기록이 따로), 시도 기록은 남음 / 035 모양 옛 `admin:clarity` → 200·`summary`·`countries` null·`traffic`·`metrics` 그대로.
 - 정규화:
   - 실제 이름과 문서 이름이 같은 `summary` / 숫자 글자 → 수 / 지표 하나 빠짐 → 그 칸 null·`signals` 키 여섯 그대로 / 정수 칸의 `2.5`·`NaN`·`"abc"` → null / 본문 `{}`·`"x"`·JSON 아님 → `bad_data`·직전 값.
-  - `countries`: 키 `Country`·`countryRegion`·`name` 각각 / 키를 모르는데 글자 값 하나 → 그 값, 글자 값 둘 → 그 행 버림 / 다 못 알아봄 → null / 행 0 → `[]` / 25행 → 20행·정렬.
+  - `countries`: 키 `Country`·`countryRegion`·`name` 각각 / 키를 모르는데 글자 값 하나 → 그 값, 글자 값 둘 → 그 행 버림 / 주소 꼴 이름(아는 키·하나뿐인 글자 값) → 이름 아님, 표시 글자가 응답·Redis 에 없음 / 다 못 알아봄 → null / 행 0 → `[]` / 25행 → 20행·정렬.
   - `metrics` 에 정규화한 지표도 남음.
 - 주소(`metrics`):
   - `https://kimptrack.com/app/?tab=history&h.dir=reverse&sym=ETH#x` → `https://kimptrack.com/app/?tab=history` / 대문자 스킴·`WWW.KimpTrack.com.`·`?sym=BTC&tab=gap` → `?tab=gap` 만.

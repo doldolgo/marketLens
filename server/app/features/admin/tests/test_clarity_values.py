@@ -178,6 +178,21 @@ async def test_countries_keep_twenty_by_sessions_then_name_and_long_names_cut() 
     assert [s for _, s in got] == sorted((s for _, s in got), reverse=True)
 
 
+async def test_country_names_never_take_an_address() -> None:
+    """주소 꼴 글자는 나라 이름이 아니다 — 아는 키에 있어도, 하나뿐인 글자 값이어도. 쿼리가 응답·Redis 어디에도 없다."""
+    rows = [
+        {"name": "Korea", "sessionsCount": "3"},
+        {"where": "https://kimptrack.com/app/?email=CMARK1", "sessionsCount": 2},
+        {"country": "kimptrack.com/?x=CMARK2", "name": "Japan", "sessionsCount": 1},
+        {"Country": "/app/?tab=gap&sym=CMARK3", "sessionsCount": 4},
+    ]
+    w = World(Clarity((200, countries(rows))))
+    body = await w.get()
+    assert body["countries"] == [["Korea", 3], ["Japan", 1]]
+    for raw in (json.dumps(body), json.dumps(w.stored())):
+        assert "CMARK" not in raw
+
+
 async def test_no_country_metric_is_null() -> None:
     assert (await base(SESSIONS_EXPORT[:3]))["countries"] is None
 
