@@ -45,7 +45,7 @@
 | `/api/admin/aws` | 034 |
 | `/api/admin/alerts` | 034 |
 | `/svc/api/admin/access` | 035 |
-| `/svc/api/admin/clarity` | 035 |
+| `/svc/api/admin/clarity` | 040 |
 
 - 공통: 늘 200 JSON, 키 camelCase. **시각 단위** — `…At`(`fetchedAt`·`changedAt`·`lastRunAt`·`nextAt`·알림 `at`)은 epoch **ms**, `…Ts`(`startTs`·`endTs`·`firstTs`)와 점·시간 칸·`recent5xx` 의 `ts` 는 epoch **초**다. 차트 가로축은 `ts × 1000` 으로 ms 에 맞춘다. 응답은 **부분**들이고 부분은 `{state, code, fetchedAt, refreshSec, …값 키}` 다. `state` 는 `ok`·`unconfigured`·`denied`·`error`·`pending`(첫 조회가 3초 안에 안 끝남), `code` 는 `ok` 면 null·아니면 짧은 사유(AWS 오류 코드·`no_credentials`·`http_<상태>`·`timeout`·`redis`·`no_file`·`partial` — 오류 문장·ARN 없음), `fetchedAt` 은 값을 만든 시각(없으면 null), `refreshSec` 는 서버 갱신 주기. `ok` 가 아니면 값 키는 null — 예외는 Clarity(값 = 마지막 성공, 7일 뒤 null).
 - `/api/admin/aws` = 부분 넷 `{alarms, metrics, canary, budget}`:
@@ -55,7 +55,7 @@
   - `budget`(6시간): `items[{name, unit, limit, actual, forecast, timeUnit}]` — 비용 예산 전부(`timeUnit` 은 `MONTHLY` 등), 금액 소수 둘째 자리, `forecast` 없으면 null.
 - `/api/admin/alerts` = `{items, slack, alarms}` — `slack`·`alarms` 는 상태만 있는 부분(`slack` 은 `refreshSec` 0), `items` 는 늘 목록(성공한 쪽만). 항목 `{at, source, text, role, key, delivered, alarm, fromState, toState}`(해당 없는 키 null), 최근 7일·최신순·200건. `source: "slack"` 은 025 알림 — `role` `collector`·`api`, `text` 는 🔴·🟢·⚠️ 머리 그대로, `delivered` 는 Slack 이 받았는지(전송 실패도 기록된다, 억제된 알림은 없다). `source: "alarm"` 은 경보 상태 변경 — `alarm`·`fromState`·`toState`·`text`(사유). ARN·12자리 숫자는 `[가림]` 으로 와 있다.
 - `/svc/api/admin/access` = 부분 하나(60초): `startTs`·`endTs`·`firstTs`(읽은 가장 이른 줄, 없으면 null)·`totals{requests, pages, ws, skipped}`·`hourly[{ts, requests, pages, errors}]` 24개(`errors` = 5xx)·상위 목록 여섯 `paths`·`tabs`·`referrers`·`utmSources`·`devices`·`browsers`(각 `[[이름, 수], …]` 20개까지 — `tabs` 는 탭 id 여섯과 `(기타)`, `devices` 는 `bot`·`mobile`·`desktop`·`unknown`)·`status{"2xx","3xx","4xx","5xx"}`·`recent5xx[{ts, path, status}]` 20줄(경로는 쿼리 없음)·`ws{count, durations{lt10s, lt1m, lt10m, lt1h, ge1h}}`. IP·UA 원문 없음, 폴링·canary 제외.
-- `/svc/api/admin/clarity` = 부분 하나(10800초) + `nextAt`·`numOfDays`(1)·`traffic{sessions, botSessions, users, pagesPerSession}`(없으면 null)·`metrics[{name, rows}]`(Clarity 가 준 지표 이름·행 키 그대로, 행 20개, 주소는 쿼리를 뗐다). Traffic 밖 행 모양은 1차 문서에 없어 035 가 정규화하지 않았다. 값은 UTC 기준이다.
+- `/svc/api/admin/clarity` = 부분 하나(14400초, 040) + `nextAt`·`numOfDays`(1)·`traffic{sessions, botSessions, users, pagesPerSession}`·`summary{scrollDepth, totalSec, activeSec, signals}`(signals 키 여섯 `deadClick`·`rageClick`·`excessiveScroll`·`quickback`·`scriptError`·`errorClick`, 값 `{sessions, sessionPct, pageViews, count}`)·`countries[[이름, 세션]]`(20행, 못 알아보면 null)·`metrics[{name, rows}]`(받은 이름·키 그대로, 행 20개, 주소는 쿼리를 떼되 대시보드 주소는 `?tab=<id>` 만)·`pages`(하위 부분 `{state, code, fetchedAt, refreshSec 43200, nextAt, numOfDays 3, rowsIn, rowLimitHit, groups}` — `groups[{page, device, sessions, scrollDepth, totalSec, activeSec, deadClickPct, rageClickPct, excessiveScrollPct, quickbackPct, scriptErrorPct, errorClickPct}]` 40개 이하, 주소 없음). 못 알아본 칸은 null. 창은 부른 때 직전 24시간(기본)·72시간(`pages`)이고 시간대가 없다(Clarity 문서는 결과를 UTC 로 적는다).
 
 ### 3.3 갱신 주기
 - 빠른 묶음(경로 넷) 10초, 느린 묶음(피드 넷) 60초 — 둘 다 **보이는 동안만**(`visibilityState`). 두 묶음은 따로 돈다 — 느린 쪽이 늦어도 빠른 쪽 주기를 막지 않는다. 같은 묶음은 앞선 호출이 끝나기 전에 다시 부르지 않는다.
@@ -93,7 +93,7 @@
 **접속** — 세 덩어리.
 - 실시간: 지금 WebSocket 접속 수(빠른 묶음 `wsConnections`) 큰 숫자 + 24시간 `wsClients` 선. 부제 "열린 대시보드 수 — 사람 수가 아니다".
 - 서버 기록 24시간(접속 요약): 총 요청·페이지·시간대별 막대 24개(5xx 는 장애색으로 겹침 — 최고 n/시간과 5xx 가 난 시간은 글자로도)·상태 코드 대분류, WebSocket 연결 수·지속 시간 구간 막대(구간 이름 아래 수), 표 여섯(경로·탭·외부 출처·`utm_source`·기기·브라우저 — 이름·수·비율 막대, 상위 10), 최근 5xx 표(시각·경로·상태, 20행). `firstTs` 가 `startTs` 보다 늦으면 부제에 "기록 시작 HH:mm". 부제 "폴링·canary 제외, IP 없음 · 읽지 못한 줄 n"(`skipped`).
-- Clarity(Clarity 요약): 타일 넷(세션·봇 세션·사용자·세션당 페이지)과 "받은 지표" 목록 — 지표마다 이름 한 줄과 행마다 `키:값 · 키:값` 글자 한 줄(20행, 한 줄 200자에서 자르고 전체는 `title`). 부제 "최근 1일 · UTC 기준 — Clarity 가 준 값". 스크롤 깊이·참여 시간·dead·rage click 같은 정규화 타일은 세션이 있는 응답을 보고 035 가 키를 정한 뒤 두 스펙을 함께 고칠 때 더한다(첫 응답은 세션 0 — 이름·키는 035 §7).
+- Clarity(Clarity 요약): 타일 넷(세션·봇 세션·사용자·세션당 페이지)과 "받은 지표" 목록 — 지표마다 이름 한 줄과 행마다 `키:값 · 키:값` 글자 한 줄(20행, 한 줄 200자에서 자르고 전체는 `title`). 부제 "최근 1일 · UTC 기준 — Clarity 가 준 값". 정규화 값(`summary`·`countries`·`pages`)은 040 응답에 있다 — 그리는 것은 043.
 
 **비용** — `budget`.
 - 월 단위(`timeUnit` `MONTHLY`) 비용 예산 전부를 한 줄씩: 이름·실제·한도·예측(달러 소수 2자리), 가로 막대 하나(실제 사용액, 85%·100% 표시선 — 027 예산 알림 기준)와 이번 달이 지난 비율 표시선(한도 × 지난 비율 자리 — 실제 막대가 넘으면 한도보다 빠르게 쓰는 중). 예측이 한도를 넘으면 주의색. 월 단위가 아닌 예산은 막대 없이 이름·실제·한도만. 예산이 0개면 "예산 없음".

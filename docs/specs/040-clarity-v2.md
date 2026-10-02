@@ -1,6 +1,6 @@
 # 040 — clarity-v2
 
-상태: TODO | 의존: **main** — fix/036-admin-followup 이 머지돼 있어야 한다(035 §3.3 '이름 비교'와 `ReferrerUrl` 출처 줄이기). 없으면 멈추고 묻는다. 037~039·041 과 나란히 간다(권장 머지 순서 037 → 041 → 040 → 038). 계약을 쓰는 스펙(쓰는 계약은 §3.1 에 복사했다): 035(경로·부분 공통 규칙·Clarity 외부 계약·주소 줄이기·이름 비교·토큰), 036(화면이 읽는 키, 간격을 `refreshSec` 로 적는 규칙), 033(대시보드 주소의 `tab` 쓰기), 002(탭 id 여섯). 이 응답의 `summary`·`countries`·`pages` 를 그리는 것은 043 이다.
+상태: DONE | 의존: **main** — fix/036-admin-followup 이 머지돼 있어야 한다(035 §3.3 '이름 비교'와 `ReferrerUrl` 출처 줄이기). 없으면 멈추고 묻는다. 037~039·041 과 나란히 간다(권장 머지 순서 037 → 041 → 040 → 038). 계약을 쓰는 스펙(쓰는 계약은 §3.1 에 복사했다): 035(경로·부분 공통 규칙·Clarity 외부 계약·주소 줄이기·이름 비교·토큰), 036(화면이 읽는 키, 간격을 `refreshSec` 로 적는 규칙), 033(대시보드 주소의 `tab` 쓰기), 002(탭 id 여섯). 이 응답의 `summary`·`countries`·`pages` 를 그리는 것은 043 이다.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -122,7 +122,7 @@
 - 주소(`metrics`):
   - `https://kimptrack.com/app/?tab=history&h.dir=reverse&sym=ETH#x` → `https://kimptrack.com/app/?tab=history` / 대문자 스킴·`WWW.KimpTrack.com.`·`?sym=BTC&tab=gap` → `?tab=gap` 만.
   - `?tab=zzz`·`?tab=`·`?TAB=gap`·`?tab=Gap` → 쿼리 없음 / `https://evil.example/app/?tab=history`·`https://kimptrack.com/app/index.html?tab=pp`·`https://kimptrack.com/?tab=gap` → 쿼리 없음.
-  - 스킴 없는 `kimptrack.com/app/?tab=flow&x=1` → `kimptrack.com/app/?tab=flow` / 출처 지표의 `https://kimptrack.com/app/?tab=history` → `https://kimptrack.com` / 035·036b 의 주소 줄이기·출처 테스트는 그대로 통과.
+  - 스킴 없는 `kimptrack.com/app/?tab=flow&x=1` → `kimptrack.com/app/?tab=flow` / 출처 지표의 `https://kimptrack.com/app/?tab=history` → `https://kimptrack.com` / 035·036b 의 주소 줄이기·출처 테스트는 그대로 통과 — 단 가짜 응답의 대시보드 주소에 허용된 `tab=history` 가 든 두 행은 위 규칙대로 기대값이 `…/app/?tab=history` 로 바뀐다.
 - 묶음:
   - 종류 표 전부 — www·대문자·끝 점, 경로만 `/app/?tab=gap` → `app:gap`, `/app/` 탭 없음 → `app:spread`, `?tab=` → `app:other`, `/privacy`, `/privacy-20261001.html`·`/app/index.html` → `other`, 다른 호스트 → `other`.
   - 기기 `Mobile`·`Tablet`·`PC`·`Email`·`Other`·빈 값.
@@ -132,7 +132,7 @@
 - 새지 않음: 토큰 글자가 `caplog`·두 Redis 값·응답 바이트에 없다 / WARNING 은 부분 이름(`clarity`·`clarity.pages`)과 `code` 만, ERROR 0.
 - 성능 — pytest 밖 임시 스크립트로 잰다(레포에 넣지 않는다), 숫자는 §5. 합성 페이지 응답(지표 16 × 1,000행, 주소마다 다른 쿼리 — ≈3MB)의 풀기·묶기가 로컬 ≤ 0.2초(serve 환산 ×6 을 함께 적는다), tracemalloc 최고 ≤ 32MB. 넘으면 멈추고 묻는다.
 - 화면·nginx: `web/admin/*`·`web/nginx-admin.conf` 는 바꾸지 않는다. `server/tests/test_admin.py` 의 기존 단언은 고치지 않고 통과한다 — 화면 파일 셋(`index.html`·`admin.js`·`admin.css`), `fetch(` 1회와 느린 묶음 경로 넷(`/svc/api/admin/clarity` 포함), `SCRIPT_BANNED`, `SVG_ATTRS` 허용 목록과 `svg()` 요소, 외부 링크 `EXTERNAL_HOSTS`, nginx 정확 일치 위치. 더하는 단언 하나: `admin.js` 에 Clarity 주기 숫자(`10800`·`10_800`·`14400`·`14_400`·`43200`·`43_200`)가 없다 — 화면은 `refreshSec` 로 적는다(036 §3.3).
-- 035 회귀: 035 의 Clarity 테스트 중 이 스펙이 바꾼 것(3시간 → 4시간, 모양 틀림 `code` → `bad_data`, `refreshSec`)만 이 계약으로 고친다. `tests/test_clarity_store.py` 에 새 메서드 둘(키 이름·만료 없음)을 더한다.
+- 035 회귀: 035 의 Clarity 테스트 중 이 스펙이 바꾼 것(3시간 → 4시간, 모양 틀림 `code` → `bad_data`, `refreshSec`, 더한 값 키와 `pages`, 묶음 호출이 더해져 호출 수는 기본만 세기·HTTP 테스트의 호출 2회·묶음 기록 자리)만 이 계약으로 고친다. `tests/test_clarity_store.py` 에 새 메서드 둘(키 이름·만료 없음)을 더한다.
 - 기존 스펙 재검증: `cd server && ruff check . && ruff format --check . && pytest -q`, `cd web && npm run lint && npm run build`. 커밋은 각 diff 300줄 이하 — ① core 메서드 ② 일정·기록·한도 ③ 정규화·주소 ④ 페이지 묶음 ⑤ 테스트(나눠서) ⑥ §6 문서·§5·§7.
 
 **배포 뒤 — 운영 확인(완료 조건 아님, status 비고 "040 운영 확인 대기")**:
@@ -144,7 +144,31 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 시작 조건 — 스펙 PR #96(docs/specs-037-040) 위에 후속 PR #95(fix/036-admin-followup)를 합친 4db0c04.
+# 둘 다 main 머지 전이지만 설계 세션이 의존 충족으로 정했다. 035 §3.3 '이름 비교'(metric_key)·ReferrerUrl 출처 줄이기(is_referrer)가 있다
+git log --oneline -1   # 4db0c04
+
+# 환경 — 샌드박스가 ~/.cache/uv 쓰기를 막아 UV_CACHE_DIR 를 scratchpad 에 두었다
+cd server && uv venv -p 3.12 .venv && uv pip install -p .venv -e ".[dev]" && git checkout server/marketlens_server.egg-info
+cd web && npm ci
+
+# 기존 스펙 재검증 (마지막 코드 커밋 뒤)
+cd server && ruff check . && ruff format --check . && pytest -q
+#   All checks passed! · 295 files already formatted · 1332 passed, 6 failed
+#   — 실패 6건은 모두 app/features/spreads/tests/test_gauge.py 의 UDP bind PermissionError(샌드박스). 그 6건을 뺀 1332 통과
+cd web && npm run lint && npm run build   # oxlint 종료 0(출력 없음) · ✓ built — index 253.01 kB(gzip 78.58 kB)
+pytest -q app/features/admin tests/test_admin.py tests/test_clarity_store.py tests/test_role.py   # 248 passed
+pytest -q app/features/admin/tests/test_clarity_{values,schedule,defer,pages,leaks}.py tests/test_clarity_store.py   # 90 passed (040 새 테스트)
+
+# 가짜 주입이 빠지면 실패하는지 — 임시 테스트(커밋 안 함)에서 transport 없이 VisitFeeds 를 부르면
+#   conftest 의 막기가 "가짜 transport 없이 실제 transport 를 썼다: ['www.clarity.ms', 'www.clarity.ms']" 로 실패시켰다
+
+# 성능 — pytest 밖 임시 스크립트(scratchpad/040/perf_pages.py, 레포에 넣지 않음).
+# 합성 묶음 응답 2.99MB(지표 16 × 1,000행, 주소마다 다른 쿼리, 기기 넷 무작위), parse_pages + check_json, 9회
+.venv/bin/python perf_pages.py
+#   첫 실행 16.5 ms · 중앙값 15.7 ms(최소 15.5·최대 19.0) — serve ×6 ≈ 94 ms (상한 0.2초)
+#   tracemalloc 최고 10.9 MB (상한 32MB) · 칸 20개 · rowsIn 16000 · rowLimitHit true · 기록 5.4 KB
+#   (같은 스크립트를 기기와 주소 종류가 겹친 첫 판으로 돌렸을 때 중앙값 23.5 ms·10.9 MB)
 ```
 
 ## 6. 갱신할 문서
@@ -194,5 +218,28 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - core: `server/app/core/redis_bus.py` — 키 `admin:clarity:pages`, `clarity_pages_load`·`clarity_pages_save`(만료 없음).
+  - `server/app/features/admin/clarity.py` — 호출 하나(`fetch` 가 종류별 인자·값 만들기를 받는다, 모양 틀림 → `bad_data`)·기록 `Record`·이름 비교 `metric_key`(결과 4,096개 기억)·수 읽기(`read_number`·`read_int`)·행 키 고르기 `pick`·지표 목록 `metric_items`·주소 줄이기(대시보드 `tab` 남기기 — `is_ours`·`first_tab`·`split_path`, 묶음 판정용 `address_parts`).
+  - 새 파일: `clarity_values.py`(`parse_base` — `traffic`·`summary`·`countries`·`metrics`), `clarity_pages.py`(`parse_pages`·`page_kind`·`device_kind` — 칸 40개 이하, 주소는 메모리에서만), `clarity_schedule.py`(`ClarityKind` — 종류마다 인자·Redis 자리·프로세스 기억, `settle` 이 §3.2 의 때 정하기·다시 쓰기·바로 부르기 24시간 한 번).
+  - `visits.py` — 한 갱신 안에서 기본 → 묶음, 미루기, 하위 부분 `pages`, 부분마다 JSON 으로 쓸 수 있는지 따로.
+  - 테스트: `features/admin/tests/conftest.py`(실제 transport 를 쓰면 실패), `clarity_fakes.py`(세션이 있는 기본·묶음 응답, 종류별 응답 줄·부른 시각·동시 호출 수, 읽기·쓰기를 따로 깨는 `FlakyBus`), `test_clarity_values.py`·`test_clarity_schedule.py`·`test_clarity_defer.py`·`test_clarity_pages.py`·`test_clarity_leaks.py`, `server/tests/test_clarity_store.py`(새 메서드 둘)·`server/tests/test_admin.py`(admin.js 에 Clarity 주기 숫자 없음). 035 테스트 고침: `test_clarity_feed.py`·`test_clarity_safety.py`·`test_visits.py`.
+  - 문서: `CLAUDE.md`(040 DONE·035 범위), `docs/context/{status,architecture,dev-setup,db}.md`, `docs/runbooks/clarity.md`, `docs/specs/035-monitoring-visits.md`·`036-admin-v2.md`·이 문서. web·nginx·compose·env 는 바꾸지 않았다. Clarity 실서비스는 부르지 않았다(테스트는 가짜).
+- 추측한 지점 (묻지 않고 정한 사소한 것):
+  - `countries` 의 "글자 값이 하나뿐" 에서 숫자로 읽히는 글자(`"5"`)는 수로 보아 세지 않는다(§3.3 '수 읽기' 와 같은 기준) — 세면 세션 칸이 글자라서 대부분 행이 '글자 값 둘' 로 버려진다. 아는 이름 키가 있어도 값이 글자가 아니면 다음 키·이 규칙으로 넘어간다.
+  - 같은 정규화 이름의 지표가 둘이면 앞의 것을 쓴다(기본·묶음 모두). `countries` 는 `country`·`countryregion` 중 응답에서 먼저 온 지표 하나. 행 키 비교(`pick`)도 정규화한 꼴이고 같은 이름이 둘이면 앞의 것 — Traffic 행도 이 비교를 쓴다(035 는 정확한 키였다, 같은 '이름 비교' 규칙).
+  - 대시보드 `tab` 남기기: 호스트 비교는 사용자 정보·포트를 뗀 뒤(`https://u:p@kimptrack.com:443/app/?tab=health` → `https://kimptrack.com:443/app/?tab=health`), 해시 뒤의 `?` 는 쿼리가 아니다, `tab` 이 둘이면 첫 값만 본다. 호스트 없는 `/app/?tab=gap` 은 `metrics` 에서 탭을 남기지 않는다(§3.3 은 우리 호스트의 주소만 말한다 — §3.4 종류 판정은 호스트 없는 꼴도 받는다).
+  - 스킴 없는 주소 꼴의 호스트 끝 점 하나를 허용했다(`www.kimptrack.com./app/…`) — 035 의 꼴 판정은 이것을 주소로 못 알아봐 쿼리째 200자 글자로 남겼다. 닫힌 쪽(더 많이 뗀다)으로 넓힘.
+  - 페이지 종류: 호스트 뒤 빈 경로(`https://kimptrack.com`·`kimptrack.com?x`)는 `/` 로 보아 `landing`. `?TAB=gap` 은 키가 글자 그대로 `tab` 이 아니므로 '탭 없음' → `app:spread`(§3.3 의 키 비교와 같게).
+  - 묶음 칸 `sessions` 는 Traffic 행의 `totalsessioncount` 중 정수로 읽히는 것만 더한다(하나도 없으면 null). 같은 (주소, 기기) 글자의 Traffic 행이 둘이면 그 합을 가중치로. `rowsIn` 은 `{metricName: 글자, information: 목록}` 꼴 지표의 행만 세고, `url`·`device` 를 함께 가진 행 찾기는 묶지 않는 지표까지 모든 행에서 본다.
+  - Redis 읽기 실패·기록 풀기 예외는 원인이 하나라 WARNING 을 `clarity` 한 줄로만 남긴다(두 부분 모두 `error`) — 035 테스트의 '한 줄' 단언 그대로. 묶음 호출·묶음 기록 쓰기·묶음 처리 예외는 `clarity.pages`.
+  - 묶음이 때가 됐는데 미뤄진 갱신에서는 메모리 기록을 Redis 에 다시 쓰지 않는다 — 사람이 지운 키를 되살려 '바로 부르기' 를 잃지 않게. 간격 안이라 부르지 않을 때만 다시 쓴다. 바로 부르기 시각은 실제로 부른 때만 적는다.
+  - `pending`: 갱신 하나가 3초 안에 안 끝나면(기본이 끝나고 묶음을 기다리는 중 포함) 직전 결과, 없으면 바깥·`pages` 둘 다 `pending` — 갱신 중간 값을 따로 내지 않는다(§3.1 갱신 규칙 그대로).
+  - `bad_data` 로 바꾸는 예외는 풀기·만들기의 ValueError(JSON 아님·UTF-8 아님·다시 쓸 수 없는 값 포함)·TypeError·RecursionError, 그 밖 예외는 035 처럼 예외 이름.
+  - JSON 으로 못 쓰는 값이 든 답(손으로 넣은 기록 등): `pages` 만 못 쓰면 `pages` 만 `error`·예외 이름(값 null), 바깥이 못 쓰면 바깥 값 키만 null 이고 `pages` 는 그대로 객체.
+  - 테스트의 '느린 가짜 기본(5초)' 은 실제 0.5초 지연 + 기다림 0.1초로 흉내 냈다(같은 비율 — 테스트 시간). '72시간 60초마다'·'매시간 두 키 지움' 은 4,320·4,200 요청을 그대로 돈다(약 5초).
+- 실행 중 함께 고친 스펙 절: §4 '주소(`metrics`)' 의 "035·036b … 그대로 통과" 에 `tab=history` 가 든 두 행의 기대값이 §3.3 규칙대로 바뀐다는 말을 더했다(035 `test_addresses_lose_query_and_hash_and_referrers_become_origins`·036b `test_named_metrics_match_in_real_camel_case_and_documented_spelling` 의 대시보드 행 — 나머지 단언은 그대로). §4 '035 회귀' 에 묶음 호출이 더해져 바뀐 것(호출 수는 기본만 세기·HTTP 테스트의 호출 2회·`test_http_unwritable_record_in_redis_is_an_error_part_not_500` 에 12시간 안 묶음 기록·`SaveFails` 가짜에 묶음 메서드·응답 dict 에 더한 키)을 더했다.
 - 남은 빚:
+  - §4 '배포 뒤' 확인 전부 — 세션이 있는 응답의 차원 행 키 철자·값 꼴·`Country` 행 키·`totalTime` 단위와 평균/합·스크롤 깊이 정의·`PopularPages` 주소에 `?tab` 이 실리는지(status "040 운영 확인 대기").
+  - 미뤄진 묶음에 기록이 있으면 그 기록의 state(예: `ok`)와 지난 `nextAt` 이 그대로 보인다 — '미뤘다' 표시는 기록이 없을 때만(§3.5 그대로). 화면(043)이 `nextAt` 이 지났는데 바깥이 `denied`·`http_429` 인 것으로 읽어야 한다.
+  - 035 §3.1 '스레드' 줄은 JSON 풀기 대상으로 `admin:clarity` 만 적는다(§6 목록 밖이라 두었다 — 묶음 기록도 같은 스레드에서 푼다).
+  - 샌드박스라 Docker·로컬 포트 검증은 하지 않았다(경로·nginx·compose 변경 없음 — §4 가 요구하지 않는다). `test_gauge.py` 6건은 UDP bind 가 막혀 실패한다(샌드박스, 이 변경과 무관).
