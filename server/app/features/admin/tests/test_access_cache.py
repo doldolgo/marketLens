@@ -257,14 +257,3 @@ async def test_an_hour_without_requests_drops_caches_pairs_and_the_key(
     f.timers[1].callback()  # 요청 없이 1시간
     assert (await f.get())["visitors"]["shaped"] == 1  # 60초 안이어도 첫 채움부터
     assert opened[old.name] == 2 and len(keys) == 2 and keys[0] != keys[1]
-
-
-def test_reading_yields_every_5000_lines(tmp_path: Path) -> None:
-    path = tmp_path / "x.log.gz"
-    with gzip.open(path, "wt") as out:
-        out.writelines(f"{line(T0 + i % 60, '/')}\n" for i in range(12_000))
-    pauses: list[float] = []
-    tally = access_hours.FileTally(0, GATE, access_hours.PairKeys())
-    with gzip.open(path, "rt") as handle:
-        tally.read(handle, pauses.append)
-    assert pauses == [0, 0]

@@ -5,12 +5,11 @@
 메모리는 줄 수와 무관하다. 짝은 처리방침 v2 시행일(게이트) 뒤 줄에서만 만든다 — 게이트 앞 줄은 해시하지 않는다.
 UA 원문·IP 는 세는 동안의 지역 변수에만 있고 남기지 않는다(UA·출처 판정 메모도 파일 읽기가 끝나면 — 깨진 파일로
 예외가 나도 — 버린다. UA 메모의 키는 판정이 보는 앞 1,024자, 출처는 512자를 넘으면 메모하지 않는다).
+세는 동안 따로 차례를 넘기지 않는다 — 인터프리터가 5ms 마다 GIL 을 넘겨 같은 프로세스의 이벤트 루프 지연은 측정상 ≤30ms(§5).
 """
 
 import heapq
-import time
-from collections.abc import Callable, Iterable
-from itertools import islice
+from collections.abc import Iterable
 from typing import Any, NamedTuple
 from urllib.parse import parse_qs
 
@@ -37,7 +36,6 @@ PATH_LIMIT = 100
 REFERRER_LIMIT = 100
 UTM_LIMIT = 50
 RECENT_5XX = 20
-YIELD_EVERY = 5_000  # 줄마다 — 공개 응답(같은 프로세스의 /api/landing·WS 허브)에 GIL 차례를 넘긴다
 APP_PATH = "/app/"
 TABS = ("spread", "history", "gap", "pp", "health", "flow")  # 대시보드 탭 id(002)
 DEFAULT_TAB = "spread"
@@ -110,20 +108,11 @@ class FileTally:
         self._refs: dict[str, tuple[Ref, bool]] = {}
         self._day = _NO_DAY  # 마지막 줄의 KST 날·짝 기록·열쇠
 
-    def read(
-        self, handle: Iterable[str], pause: Callable[[float], None] = time.sleep
-    ) -> None:
-        lines_in, line = iter(handle), self.line
+    def read(self, handle: Iterable[str]) -> None:
+        line = self.line
         try:
-            while True:
-                n = 0
-                for raw in islice(lines_in, YIELD_EVERY):
-                    line(raw)
-                    n += 1
-                if n < YIELD_EVERY:
-                    break
-                # 0초 잠들기 — GIL 을 놓아 같은 프로세스의 이벤트 루프가 차례를 얻는다
-                pause(0)
+            for raw in handle:
+                line(raw)
         finally:
             # 깨진 회전 파일(읽다 예외)도 이 결과째 캐시된다 — UA·출처 원문 메모와 열쇠는 늘 여기서 버린다
             self._kinds.clear()
