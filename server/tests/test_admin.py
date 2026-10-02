@@ -556,6 +556,27 @@ def test_screen_chart_empty_words_differ_from_the_alarm_state_name() -> None:
     assert "INSUFFICIENT_DATA: ['dim', '데이터 부족']" in js
 
 
+def _js_function(js: str, name: str) -> str:
+    """`function 이름(…) {` 부터 맨 앞 칸의 `}` 까지 — 파일의 함수는 맨 위 수준에만 있다."""
+    found = re.search(rf"\nfunction {name}\([^)]*\) \{{\n(.*?)\n\}}\n", js, flags=re.S)
+    assert found, name
+    return found.group(1)
+
+
+def test_screen_body_elapsed_words_are_retold_after_every_paint() -> None:
+    """036 §3.3 — 본문 안 경과 글자는 시각을 data-at 에 둔 span 이고, 그리기 끝에 글자만 고친다(본문은 그대로)."""
+    js = _text("web/admin/admin.js")
+    assert "span.dataset.at = String(ms)" in _js_function(js, "agoSpan")
+    retick = _js_function(js, "retick")
+    assert "document.querySelectorAll('span[data-at]')" in retick
+    assert "span.textContent = ago(Number(span.dataset.at))" in retick
+    assert _js_function(js, "paint").rstrip().endswith("retick();")
+    # 값이 바뀔 때만 다시 그리는 본문의 경과는 모두 그 span 으로
+    for name in ("alarmRow", "fillCanary"):
+        body = _js_function(js, name)
+        assert "agoSpan(" in body and "ago(" not in body.replace("agoSpan(", ""), name
+
+
 def test_screen_page_has_no_inline_script_or_style() -> None:
     html = _text("web/admin/index.html")
     scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, flags=re.S)

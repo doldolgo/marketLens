@@ -63,6 +63,7 @@
 - 느린 값의 신선도는 서버 캐시가 정한다. 화면은 부분마다 머리에 `fetchedAt` 경과("4분 전 값")를 늘 적고, 경과가 응답에 온 그 부분의 `refreshSec` × 3 을 넘으면 주의색으로 칠한다(`refreshSec` 0 인 `slack` 은 보지 않는다). 상수를 복사해 두지 않는다 — 서버 주기가 바뀌어도 화면을 고치지 않게.
 - 브라우저에 쌓는 값은 없다. 추이는 전부 피드가 준 점으로 그린다 — 며칠 열어 둬도 메모리가 늘지 않게.
 - 다시 그리기: 머리의 경과·절 요약·개요는 묶음이 끝날 때마다, 칸의 본문(목록·표·차트)은 그 칸의 값이 바뀌었을 때만 — 빠른 묶음이 느린 칸의 목록 안 스크롤·초점·펼침·툴팁을 날리지 않게. 알림 목록은 필터를 바꿀 때만 맨 위로.
+- 본문 안 경과 글자("n분 전" — 경보 행의 바뀐 지·canary 최근 실행)는 묶음이 끝날 때마다 그 글자만 고친다 — 본문을 다시 만들지 않으면서 개요 칸·절 요약과 같은 경과를 보인다.
 
 ### 3.4 절별 내용
 **개요** — 타일 일곱: 종합·수집기·api·지금 접속·경보·canary·이번 달 비용. 타일을 누르면 그 절로 간다.
@@ -147,7 +148,7 @@
 ## 4. 검증
 **PR 안 — 실행 세션(완료 조건)**. 시작 전에 main 에 034·035 가 있는지 본다(없으면 멈추고 묻는다).
 - 정적 단언(`server/tests/test_admin.py` — 029 의 화면 단언은 유지하고 아래를 더한다):
-  - `admin.js`: `X-Requested-With`·`visibilityState`·`createElementNS`·`refreshSec` 가 있다 / `fetch(` 는 1회 / `location.replace(`·`history.replaceState(` 각 1회, 주소 `/` 고정(029) / 10초·60초 주기 상수 / 금지: `localStorage`·`sessionStorage`·`indexedDB`·`document.cookie`·`innerHTML`·`outerHTML`·`insertAdjacentHTML`·`document.write`·`eval(`·`new Function`·`window.open`·`location.pathname`·`location.href`·`.style`·`setAttribute('style'`·`.href`·`setAttribute('href'`·`setAttribute('src'`·`.src`·`setAttributeNS`·`xlink:href`·`new XMLHttpRequest`·`sendBeacon`·`new WebSocket`·`EventSource` / SVG 속성 허용 목록이 §3.6 그대로이고 `svg()` 가 그 밖을 던진다·글자 그대로 부르는 SVG 요소와 속성 키가 목록 안 / 파일 안의 `http://`·`https://` 는 SVG 이름공간 하나뿐.
+  - `admin.js`: `X-Requested-With`·`visibilityState`·`createElementNS`·`refreshSec` 가 있다 / `fetch(` 는 1회 / `location.replace(`·`history.replaceState(` 각 1회, 주소 `/` 고정(029) / 10초·60초 주기 상수 / 본문 안 경과 글자는 시각을 data 속성에 둔 span 이고 그리기 끝에 글자만 고치는 함수가 돈다 / 금지: `localStorage`·`sessionStorage`·`indexedDB`·`document.cookie`·`innerHTML`·`outerHTML`·`insertAdjacentHTML`·`document.write`·`eval(`·`new Function`·`window.open`·`location.pathname`·`location.href`·`.style`·`setAttribute('style'`·`.href`·`setAttribute('href'`·`setAttribute('src'`·`.src`·`setAttributeNS`·`xlink:href`·`new XMLHttpRequest`·`sendBeacon`·`new WebSocket`·`EventSource` / SVG 속성 허용 목록이 §3.6 그대로이고 `svg()` 가 그 밖을 던진다·글자 그대로 부르는 SVG 요소와 속성 키가 목록 안 / 파일 안의 `http://`·`https://` 는 SVG 이름공간 하나뿐.
   - `index.html`: 인라인 스크립트 본문·`style=`·`<form`·`target=` 없음(029) / 절 id 일곱이 §3.1 순서, 머리의 이동 링크 일곱 / 토큰칸·API 문서·ReDoc·로그아웃 링크(029) / 외부 링크(`//` 로 시작하는 것 포함, 따옴표 꼴 무관)는 전부 `https://` 이고 `rel="noreferrer"`, 호스트는 AWS 콘솔(`*.console.aws.amazon.com`)·`clarity.microsoft.com`·`dash.cloudflare.com`·`one.dash.cloudflare.com`·`github.com` 안이고 Cloudflare 링크는 경로가 `/` / 12자리 숫자·이메일 모양·`[0-9a-f]{32,}`·`cloudflareaccess.com`·`/projects/view/` 없음.
   - `admin.css`: `@import`·`url(` 없음 / `--color-bg`·`--color-surface`·`--color-ok`·`--color-warn`·`--color-up` 값이 `docs/design/theme.css` 와 같다 / 640px 미디어 쿼리.
   - 033 의 관리자 단언(`web/admin/*` 에 `clarity.js`·`clarity.ms` 없음)은 그대로 통과한다.
