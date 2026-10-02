@@ -37,6 +37,9 @@ ASN_URL = "https://download.db-ip.com/free/dbip-asn-lite-{month}.csv.gz"
 FILE_LIMIT_SEC = 60.0  # 파일마다 받기·풀기·적재 합
 MAX_BYTES = 20_000_000  # 받은 압축 바이트 — 2026-10 판은 4.5MB·7.0MB
 READ_TIMEOUT_SEC = 10.0  # 한 번 기다림 — 멈춘 연결이 60초 검사를 오래 비켜 가지 않게
+# 글자 읽기 단위(기본 8KB). 풀기는 부를 때마다 GIL 을 놓았다 다시 잡는데, 같은 프로세스에 CPU 를 쓰는 스레드가 있으면 다시
+# 잡을 때마다 전환 간격(5ms)을 기다린다 — 8KB 면 두 파일에 ≈7,400번이라 적재가 ≈40초로 늘었다(1MB 면 ≈60번·≈3초)
+TEXT_CHUNK = 1 << 20
 RETRY_SEC = 3_600.0  # 판이 없을 때·옛 판인데 404 밖 실패
 MONTH_RETRY_SEC = 86_400.0  # 옛 판일 때 — 성공·404 뒤
 PART = "geo"
@@ -219,6 +222,7 @@ class GeoLoader:
                     gzip.GzipFile(fileobj=body) as gz,
                     io.TextIOWrapper(gz, encoding="utf-8", newline="") as text,
                 ):
+                    text._CHUNK_SIZE = TEXT_CHUNK  # type: ignore[attr-defined]
                     return reader(csv.reader(text), check)
         except Failed:
             raise

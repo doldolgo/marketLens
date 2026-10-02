@@ -1,4 +1,4 @@
-"""DB-IP 확인 — 행 수·순서·겹침·나라 값·열 수·AS 번호·깨진 gzip 은 `bad_data`, 흘려 읽기 메모리 (스펙 039 §3.3·§4 '확인'·'흘려 읽기')."""
+"""DB-IP 확인 — 행 수·순서·겹침·나라 값·열 수·AS 번호·깨진 gzip 은 `bad_data`, 흘려 읽기 메모리·읽기 단위 (스펙 039 §3.3·§4 '확인'·'흘려 읽기')."""
 
 import gzip
 import tracemalloc
@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from app.features.admin.geo_fetch import GeoLoader
+from app.features.admin.geo_fetch import TEXT_CHUNK, GeoLoader
 from app.features.admin.tests.access_fakes import AFTER
 from app.features.admin.tests.geo_fakes import (
     FILL,
@@ -151,3 +151,24 @@ def test_loading_300k_country_rows_stays_under_8mb() -> None:
         tracemalloc.stop()
     assert loader.table is not None and len(loader.table.country) == 300_000
     assert peak <= 8 * 1024 * 1024, peak
+
+
+def test_the_text_reader_asks_for_1mb_at_a_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 풀기는 부를 때마다 GIL 을 놓았다 다시 잡는다 — 같은 프로세스에 CPU 를 쓰는 스레드가 있으면 그때마다 전환 간격을
+    # 기다리므로 부르는 수가 적어야 한다. 한 번에 풀리는 양은 받은 조각(여기선 64KB 압축)이 정해 1MB 보다 작다.
+    # 기본 8KB 단위면 이 본문(풀면 ≈12MB)에 ≈1,500번이다
+    big = gz(fill_rows(300_000, ["US"], start=1 << 24) + ipv6_rows(["JP"], 100_000))
+    calls: list[int] = []
+    real = gzip.GzipFile.read1
+
+    def counted(self: gzip.GzipFile, size: int = -1) -> bytes:
+        calls.append(size)
+        return real(self, size)
+
+    monkeypatch.setattr(gzip.GzipFile, "read1", counted)
+    loader = load(big)
+    assert loader.table is not None and len(loader.table.country) == 300_000
+    assert set(calls) == {TEXT_CHUNK}
+    assert len(calls) * 64 * 1024 <= len(gzip.decompress(big)), len(calls)
