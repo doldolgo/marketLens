@@ -403,12 +403,13 @@ def test_root_path_only_on_collector_and_public_api_docs_stay_closed() -> None:
 SCREEN = ROOT / "web/admin"
 # 036 §3.1 — 한 페이지 절 일곱, 이 순서
 SECTIONS = ["overview", "collect", "infra", "alerts", "traffic", "cost", "tools"]
-# 036 §3.8 — 밖으로 나가는 링크의 호스트(고정 https 주소뿐)
+# 036 §3.8 — 밖으로 나가는 링크의 호스트(고정 https 주소뿐). db-ip.com 은 DB-IP CC BY 표시(042 §3.4 ③ 바닥)
 EXTERNAL_HOSTS = {
     "clarity.microsoft.com",
     "dash.cloudflare.com",
     "one.dash.cloudflare.com",
     "github.com",
+    "db-ip.com",
 }
 # 036 §4 — 화면 스크립트에 없어야 하는 것: 브라우저 저장소·HTML 해석·코드 실행·새 창·주소 읽기·style 속성·링크 쓰기·
 # fetch 밖의 요청 길(헤더를 붙이는 한 함수를 우회한다)
