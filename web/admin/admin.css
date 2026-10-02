@@ -71,9 +71,10 @@ html { scroll-padding-top: 112px; }
 body {
   margin: 0; background: var(--color-bg); color: var(--color-text);
   font-family: var(--font-body); font-size: 14px; line-height: 1.5; font-weight: 400;
-  /* break-word — 긴 낱말은 넘칠 때만 끊는다. anywhere 와 달리 칸의 최소 폭을 한 글자로 줄이지 않아
+  /* keep-all — 한국어는 낱말 단위로 줄을 바꾼다(음절 중간에서 끊지 않게 — 랜딩·처리방침·404·동의 띠와 같다).
+     break-word — 칸보다 긴 낱말만 넘칠 때 끊는다. anywhere 와 달리 칸의 최소 폭을 한 글자로 줄이지 않아
      격자·표 칸이 찌그러지지 않는다(표는 카드 안에서 가로로 스크롤한다) */
-  font-variant-numeric: tabular-nums; overflow-wrap: break-word;
+  font-variant-numeric: tabular-nums; word-break: keep-all; overflow-wrap: break-word;
 }
 h1, h2, h3 {
   font-family: var(--font-heading); font-weight: var(--font-heading-weight);

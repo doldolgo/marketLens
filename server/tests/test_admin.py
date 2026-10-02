@@ -632,3 +632,8 @@ def test_screen_styles_copy_theme_tokens_without_outside_resources() -> None:
     for token in TOKENS:
         assert ours[token] == theme[token], token
     assert "@media (max-width: 640px)" in css
+    # 한국어는 낱말 단위로 줄을 바꾸고, 칸보다 긴 낱말만 넘칠 때 끊는다 (§3.7)
+    body = re.search(r"\nbody \{([^}]*)\}", re.sub(r"/\*.*?\*/", "", css, flags=re.S))
+    assert body, "body 규칙"
+    assert "word-break: keep-all;" in body.group(1)
+    assert "overflow-wrap: break-word;" in body.group(1)
