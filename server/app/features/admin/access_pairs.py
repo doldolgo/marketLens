@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any, NamedTuple
 
 from app.features.admin.access_traits import Traits
+from app.features.admin.geo_kinds import NET_TELECOM_ALL, TELECOM, TELECOM_KR
 from app.features.admin.geo_table import IPV6
 
 KST_SEC = 9 * 3600
@@ -120,12 +121,14 @@ def _rows(table: dict[str, list[int]]) -> list[list[Any]]:
 
 class GeoCounts(NamedTuple):
     """창의 나라·망 종류별 날마다 센 방문자(039) — 이름 → [confirmed, shaped], IPv6 짝은 shaped 수만.
-    `peaks` 는 나라 → 창 안 KST 하루 가운데 그 나라의 짝(shaped)이 가장 많았던 날의 수 — 적은 나라 묶기의 기준."""
+    `peaks` 는 나라 → 창 안 KST 하루 가운데 그 나라의 짝(shaped)이 가장 많았던 날의 수 — 적은 나라 묶기의 기준.
+    `net_peaks` 는 망 종류마다 같은 하루 최대, `NET_TELECOM_ALL` 은 telecom·telecom_kr 을 합친 하루 최대(접을 때 쓴다)."""
 
     countries: dict[str, list[int]]
     networks: dict[str, list[int]]
     ipv6: int
     peaks: dict[str, int]
+    net_peaks: dict[str, int]
 
 
 def visitors(
@@ -146,6 +149,7 @@ def visitors(
     countries: dict[str, list[int]] = {}
     networks: dict[str, list[int]] = {}
     peaks: dict[str, int] = {}
+    net_peaks: dict[str, int] = {}
     capped = False
     day_rows = []
     for day in range(kst_day(since_ts), kst_day(end_ts) + 1, DAY_SEC):
@@ -161,6 +165,7 @@ def visitors(
         day_countries: dict[
             str, int
         ] = {}  # 그날 나라마다 짝 수 — 날을 넘어 같은 짝인지 알 수 없다
+        day_networks: dict[str, int] = {}
         for pair in merged.values():
             if pair.flags or not (pair.pages | pair.js) & mask:
                 continue  # 그날 탐색·운영자 흔적이 있거나 창 안에 페이지·JS 신호가 없다
@@ -184,9 +189,16 @@ def visitors(
                     row[0] += confirmed
                     row[1] += 1
                 day_countries[pair.country] = day_countries.get(pair.country, 0) + 1
+                day_networks[pair.net] = day_networks.get(pair.net, 0) + 1
         for name, n in day_countries.items():
             if n > peaks.get(name, 0):
                 peaks[name] = n
+        day_networks[NET_TELECOM_ALL] = day_networks.get(TELECOM, 0) + day_networks.get(
+            TELECOM_KR, 0
+        )
+        for name, n in day_networks.items():
+            if n > net_peaks.get(name, 0):
+                net_peaks[name] = n
         day_rows.append(
             {
                 "ts": day,
@@ -208,7 +220,7 @@ def visitors(
         "days": day_rows,
         **{key: _rows(table) for key, table in tables.items()},
     }
-    return values, ws_pairs, GeoCounts(countries, networks, ipv6, peaks)
+    return values, ws_pairs, GeoCounts(countries, networks, ipv6, peaks, net_peaks)
 
 
 def before_gate() -> dict[str, Any]:

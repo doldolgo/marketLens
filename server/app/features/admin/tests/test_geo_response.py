@@ -1,4 +1,4 @@
-"""`/admin/access` 의 `geo` — 적은 나라 묶기(창 안 KST 하루 최대 짝 수)·국내 통신사 칸·모름·망 종류 정렬·셈·IPv6·두 파일·게이트 걸침 (스펙 039 §3.5·§3.6·§4 '응답')."""
+"""`/admin/access` 의 `geo` — 적은 나라·망 종류 묶기(창 안 KST 하루 최대 짝 수)·국내 통신사 칸·모름·망 종류 정렬·셈·IPv6·두 파일·게이트 걸침 (스펙 039 §3.5·§3.6·§4 '응답')."""
 
 import json
 from pathlib import Path
@@ -121,7 +121,7 @@ async def test_a_country_with_under_three_pairs_on_its_day_is_other(
 async def test_one_pair_every_day_for_30_days_is_other_but_three_on_one_day_is_named(
     tmp_path: Path,
 ) -> None:
-    # 짝 열쇠가 날마다 바뀌어 같은 사람인지 알 수 없다 — 한 짝이 날마다 오면 합 30 이어도 하루 1 이라 (기타)
+    # 짝 열쇠가 날마다 바뀌어 같은 사람인지 알 수 없다 — 한 짝이 날마다 오면 합 30 이어도 하루 1 이라 (기타)(망 종류도)
     alone = [
         line(LATE - HOUR - d * DAY, "/", ua=f"{CHROME} alone", ip=DE_TELECOM)
         for d in range(30)
@@ -142,7 +142,7 @@ async def test_one_pair_every_day_for_30_days_is_other_but_three_on_one_day_is_n
         43,
     )
     assert g["countries"] == [["FR", 0, 13], ["(기타)", 0, 30]]
-    assert g["networks"] == [["telecom", 0, 30], ["other", 0, 13]]
+    assert g["networks"] == [["other", 0, 13], ["(기타)", 0, 30]]  # telecom 하루 1
 
 
 async def test_a_24h_window_judges_yesterday_and_today_apart(tmp_path: Path) -> None:
@@ -171,14 +171,14 @@ async def test_25_countries_keep_20_rows_and_sum_the_rest(tmp_path: Path) -> Non
             2,
             0,
             [["FR", 0, 3], ["(기타)", 0, 2]],
-            [["other", 0, 3], ["telecom", 0, 2]],
+            [["other", 0, 3], ["(기타)", 0, 2]],
         ),
         (
             2,
             2,
             0,
             [["FR", 0, 3], ["(기타)", 0, 4]],
-            [["telecom", 0, 4], ["other", 0, 3]],
+            [["other", 0, 3], ["(기타)", 0, 4]],
         ),
         (
             0,
@@ -204,11 +204,91 @@ async def test_telecom_kr_folds_into_telecom_when_kr_is_hidden(
     countries: list,
     networks: list,
 ) -> None:
-    # 어제 둘·오늘 둘(같은 짝)은 하루 2 라 KR 이 숨고 국내 통신사 칸도 통신사 칸에 든다
+    # 어제 둘·오늘 둘(같은 짝)은 하루 2 라 KR 이 숨고 국내 통신사 칸도 통신사 칸에 든다 — 접은 통신사 칸도 하루 2 라 (기타)
     lines = visits(KR_TELECOM, yesterday, t0=YESTERDAY)
     lines += visits(KR_TELECOM, shaped, confirmed) + visits("10.0.2.0", 3)
     g = (await geo(tmp_path, by_time(lines), dict([place(2, "FR")])))["geo"]
     assert (g["countries"], g["networks"]) == (countries, networks)
+
+
+US_CLOUD, US_PLAIN = place(7, "US", 16509), place(8, "US")  # cloud · other
+
+
+async def test_a_network_kind_from_one_pair_every_day_for_30_days_is_other(
+    tmp_path: Path,
+) -> None:
+    # 망 종류도 나라처럼 하루로 잰다 — cloud 짝 하나가 30일 내내 와도 하루 1 이라 (기타). 나라 US 는 다른 날 하루 넷이라 이름
+    alone = [
+        line(LATE - HOUR - d * DAY, "/", ua=f"{CHROME} alone", ip="10.0.7.0")
+        for d in range(30)
+    ]
+    crowd = visits("10.0.8.0", 3, t0=LATE - HOUR - 5 * DAY)
+    body = await geo(
+        tmp_path,
+        by_time(alone + crowd),
+        dict([US_CLOUD, US_PLAIN]),
+        now=LATE,
+        window="30d",
+    )
+    g = body["geo"]
+    assert g["countries"] == [["US", 0, 33]]
+    assert g["networks"] == [["other", 0, 3], ["(기타)", 0, 30]]
+    assert "cloud" not in [row[0] for row in g["networks"]]
+
+
+async def test_a_network_kind_with_three_pairs_on_one_day_is_named(
+    tmp_path: Path,
+) -> None:
+    # cloud — 어느 하루 서로 다른 셋, 다른 열흘은 그 가운데 한 짝만 → 이름·합 13. 같은 창에서 하루 하나뿐인 other 는 (기타)
+    crowd = visits("10.0.7.0", 3, t0=LATE - HOUR - 5 * DAY)
+    crowd += [
+        line(LATE - 2 * HOUR - d * DAY, "/", ua=f"{CHROME} 10.0.7.0-0", ip="10.0.7.0")
+        for d in range(10, 20)
+    ]
+    lone = visits("10.0.8.0", 1, t0=LATE - HOUR - 3 * DAY)
+    body = await geo(
+        tmp_path,
+        by_time(crowd + lone),
+        dict([US_CLOUD, US_PLAIN]),
+        now=LATE,
+        window="30d",
+    )
+    g = body["geo"]
+    assert g["countries"] == [["US", 0, 14]]
+    assert g["networks"] == [["cloud", 0, 13], ["(기타)", 0, 1]]
+
+
+@pytest.mark.parametrize(
+    ("kr_t0", "networks"),
+    [
+        # 오늘 telecom 2 + telecom_kr 1 = 하루 3 → 접은 telecom 이 이름
+        (T0, [["telecom", 0, 3], ["(기타)", 0, 1]]),
+        # telecom_kr 은 어제 1·telecom 은 오늘 2 — 창 합은 3 이어도 하루 최대 2 라 (기타)
+        (YESTERDAY, [["(기타)", 0, 4]]),
+    ],
+    ids=["same_day", "split_days"],
+)
+async def test_folded_telecom_is_judged_by_its_day_sum_with_telecom_kr(
+    tmp_path: Path, kr_t0: float, networks: list
+) -> None:
+    # KR 짝 하나라 KR 이 숨어 telecom_kr 이 telecom 에 접힌다 — 접은 칸은 그날 telecom + telecom_kr 의 합으로 잰다
+    lines = visits(DE_TELECOM, 2) + visits(KR_TELECOM, 1, t0=kr_t0)
+    lines += visits("10.0.7.0", 1)  # cloud 하나 — 하루 1 이라 (기타)
+    g = (await geo(tmp_path, by_time(lines), dict([US_CLOUD])))["geo"]
+    assert (g["countries"], g["networks"]) == ([["(기타)", 0, 4]], networks)
+
+
+async def test_hidden_network_kinds_are_one_other_row_at_the_end(
+    tmp_path: Path,
+) -> None:
+    # cloud 2(confirmed 1)·other 2(confirmed 2)·unknown 2 — 모두 하루 2 라 끝의 (기타) 한 행, 이름 행보다 커도 끝
+    lines = visits(DE_TELECOM, 3) + visits("10.0.7.0", 2, 1)
+    lines += visits("10.0.2.0", 2, 2) + visits("10.0.6.0", 2)  # FR other · 두 자료 밖
+    places = dict([US_CLOUD, place(2, "FR")])
+    g = (await geo(tmp_path, by_time(lines), places))["geo"]
+    assert g["networks"] == [["telecom", 0, 3], ["(기타)", 3, 6]]
+    assert [row[0] for row in g["networks"]].count("(기타)") == 1
+    assert g["countries"] == [["DE", 0, 3], ["(기타)", 3, 6]]
 
 
 async def test_unknown_country_and_out_of_range_are_other(tmp_path: Path) -> None:

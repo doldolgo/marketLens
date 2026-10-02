@@ -4,13 +4,13 @@
 그 나라의 짝(shaped)이 3 에 못 미친 나라는 이름으로 내지 않고 `(기타)` 에 합친다 — 짝 열쇠가 날마다 바뀌어 날을 넘어
 같은 사람인지 알 수 없으므로, 창 합으로 재면 한 사람이 사흘 와도 나라가 드러난다. 판정은 모양(상한)의 하루 최대 하나라
 한 나라가 confirmed·shaped 가운데 한 값에서만 보이는 일이 없다. 그 창에서 KR 이 이름으로 남지 않으면 `telecom_kr` 을
-`telecom` 에 합친다 — 숨긴 나라를 망 종류로 비켜 보지 않게.
+`telecom` 에 합친다 — 숨긴 나라를 망 종류로 비켜 보지 않게. 망 종류 행도 같은 기준(하루 최대 짝 3)으로 `(기타)` 에 합친다.
 응답에는 나라 두 글자·종류 이름·수만 있다(IP·AS 번호·조직 이름 없음).
 """
 
 from typing import Any
 
-from app.features.admin.geo_kinds import TELECOM, TELECOM_KR
+from app.features.admin.geo_kinds import NET_TELECOM_ALL, TELECOM, TELECOM_KR
 from app.features.admin.geo_table import OTHER_COUNTRY, GeoTable
 
 K = 3  # 어느 하루에도 짝이 이 수보다 적었던 나라는 이름으로 내지 않는다
@@ -50,8 +50,13 @@ def countries_rows(table: Table, peaks: dict[str, int]) -> list[list[Any]]:
     return named
 
 
-def networks_rows(table: Table, kr_named: bool) -> list[list[Any]]:
+def networks_rows(
+    table: Table, kr_named: bool, peaks: dict[str, int]
+) -> list[list[Any]]:
+    """망 종류 행 — KR 이 이름으로 남지 않으면 telecom_kr 을 telecom 에 접고, 그 뒤 어느 하루에도 짝이 3 에 못 미친
+    종류는 끝의 `(기타)` 하나에 합친다(나라와 같은 기준 — 망 종류 한 행으로 한 사람이 드러나지 않게)."""
     nets = {name: list(v) for name, v in table.items()}
+    peak = dict(peaks)
     kr = nets.pop(TELECOM_KR, None)
     if kr is not None:
         if kr_named:
@@ -60,7 +65,18 @@ def networks_rows(table: Table, kr_named: bool) -> list[list[Any]]:
             row = nets.setdefault(TELECOM, [0, 0])
             row[0] += kr[0]
             row[1] += kr[1]
-    return _sorted(nets)
+            peak[TELECOM] = peaks.get(NET_TELECOM_ALL, 0)
+    rest_c = rest_s = 0
+    shown: Table = {}
+    for name, (c, s) in nets.items():
+        if peak.get(name, 0) >= K:
+            shown[name] = [c, s]
+        else:
+            rest_c, rest_s = rest_c + c, rest_s + s
+    rows = _sorted(shown)
+    if rest_s:
+        rows.append([OTHER_COUNTRY, rest_c, rest_s])
+    return rows
 
 
 def ok(
@@ -69,6 +85,7 @@ def ok(
     networks: Table,
     ipv6: int,
     peaks: dict[str, int],
+    net_peaks: dict[str, int],
     since_ts: int,
 ) -> dict[str, Any]:
     rows = countries_rows(countries, peaks)
@@ -80,6 +97,6 @@ def ok(
         "loadedAt": table.loaded_at,
         "sinceTs": since_ts,
         "countries": rows,
-        "networks": networks_rows(networks, kr_named),
+        "networks": networks_rows(networks, kr_named, net_peaks),
         "ipv6": ipv6,
     }
