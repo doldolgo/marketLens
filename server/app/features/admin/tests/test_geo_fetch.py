@@ -13,12 +13,7 @@ import httpx
 import pytest
 
 from app.core.config import USER_AGENT
-from app.features.admin.geo_fetch import (
-    MAX_BYTES,
-    MONTH_RETRY_SEC,
-    RETRY_SEC,
-    GeoLoader,
-)
+from app.features.admin.geo_fetch import MAX_BYTES, GeoLoader
 from app.features.admin.tests.access_fakes import AFTER, Feeds, line, write
 from app.features.admin.tests.geo_fakes import (
     MONTH,
@@ -33,6 +28,8 @@ from app.features.admin.tests.geo_fakes import (
 # 2026-10-31T16:00Z = KST 11-01 01:00 — 달은 UTC 로 센다
 EDGE = datetime(2026, 10, 31, 16, tzinfo=UTC).timestamp()
 SEPT = "2026-09"
+SIX_HOURS = 6 * 3600  # 이번 달이 실패한 시도 뒤
+ONE_DAY = 86_400  # 이번 달을 올린 시도 뒤
 
 
 def hang(request: httpx.Request) -> httpx.Response:
@@ -123,10 +120,10 @@ def test_any_failure_of_this_month_without_a_table_falls_back_to_last_month(
     # 지난달을 올렸어도 이번 달의 실패를 한 줄 남긴다
     assert warns == [("geo", failure.removeprefix("asn "))]
     dbip.serve()  # 이번 달 판이 생겼다 — 이번 달은 실패한 시도에서 6시간 뒤에 다시
-    clock.t = RETRY_SEC - 1
+    clock.t = SIX_HOURS - 1
     loader.ensure()
     assert dbip.count("country") == 1 and loader.table.month == SEPT
-    clock.t = RETRY_SEC
+    clock.t = SIX_HOURS
     loader.ensure()
     assert dbip.count("country") == 2 and loader.table.month == MONTH
 
@@ -137,11 +134,10 @@ def test_two_months_404_is_an_error_and_retried_six_hours_later() -> None:
     loader.ensure()
     assert dbip.urls == [url("country"), url("country", SEPT)]
     assert loader.waiting() == ("error", "http_404") and warns == [("geo", "http_404")]
-    assert RETRY_SEC == 6 * 3600
-    clock.t = RETRY_SEC - 1
+    clock.t = SIX_HOURS - 1
     loader.ensure()
     assert dbip.count("country") == 1  # 6시간 안 — 부르지 않는다
-    clock.t = RETRY_SEC
+    clock.t = SIX_HOURS
     loader.ensure()
     assert dbip.count("country") == 2
 
@@ -153,11 +149,11 @@ def test_after_loading_this_month_the_next_month_waits_a_day() -> None:
     loader, clock, _ = make(dbip, datetime(2026, 10, 31, 23, tzinfo=UTC).timestamp())
     loader.ensure()
     assert loader.table is not None and loader.table.month == MONTH
-    for t in (1800, MONTH_RETRY_SEC - 1):  # 11-01 00:30Z 부터
+    for t in (1800, ONE_DAY - 1):  # 11-01 00:30Z 부터
         clock.t = t
         loader.ensure()
     assert dbip.count("country", "2026-11") == 0
-    clock.t = MONTH_RETRY_SEC
+    clock.t = ONE_DAY
     loader.ensure()
     assert dbip.count("country", "2026-11") == 1 and loader.table.month == "2026-11"
 

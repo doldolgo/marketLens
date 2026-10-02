@@ -9,7 +9,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.features.admin.geo_fetch import RETRY_SEC
 from app.features.admin.tests.access_fakes import (
     AFTER,
     CHROME,
@@ -67,7 +66,7 @@ async def test_a_failed_new_month_keeps_the_old_table_and_waits_six_hours(
     dbip = DbIp().serve()
     f = await loaded(tmp_path, dbip)
     dbip.files[url("country", NOV)] = failure
-    wait = int(RETRY_SEC)
+    wait = 6 * HOUR
     f.t = TO_NOV
     geo = (await f.get("30d"))["geo"]
     assert (geo["state"], geo["code"], geo["month"]) == ("ok", None, MONTH)
