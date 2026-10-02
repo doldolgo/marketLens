@@ -224,6 +224,18 @@
 
       <section id="alerts" aria-labelledby="h-alerts">
         <div class="sec-head"><h2 id="h-alerts">알림</h2><p class="sec-sum" id="s-alerts">…</p></div>
+        <details class="explain">
+          <summary>이 절 읽는 법<span class="tail">· 최근 7일 · 60초마다</span></summary>
+          <dl>
+            <dt>읽는 값</dt><dd>앱 두 역할(수집기·api)이 보낸 Slack 알림 기록과 CloudWatch 경보 상태 변경을 시각 순으로 합친 최근 7일·200건. 수집기가 모아 주고 화면은 60초마다 부른다.</dd>
+            <dt>판정</dt><dd>판정에 넣지 않는다. 전송 실패가 있으면 절 요약만 주의색이다.</dd>
+            <dt>머리 표시</dt><dd>🔴 거래소 수집 실패 구간이 60초를 넘었다 · 🟢 그 구간의 복구 또는 앱 기동 · ⚠️ 앱 ERROR 로그(처리 안 된 500 포함).</dd>
+            <dt>10분 억제</dt><dd>같은 알림 키는 10분에 한 번만 보내고, 보내기 대기열이 넘치면 새 알림을 버린다. 보내지 않은 알림은 이 기록에도 없다 — Slack 행에 마우스를 올리면 그 알림 키가 보인다.</dd>
+            <dt>전송 실패</dt><dd>Slack 이 받지 않은 알림. 기록에는 있지만 Slack 채널에는 없다.</dd>
+            <dt>경보 행</dt><dd>CloudWatch 경보가 이전 상태에서 새 상태로 바뀐 기록과 그 사유. 이름 뒤 흐린 글자는 인프라 절과 같은 경보 꼬리 이름표다.</dd>
+            <dt>없는 것</dt><dd>예산 알림, Amazon Q 가 Slack 에 올린 경보 글, 외부 uptime 감시 알림은 이 기록에 없다. 이 수집기에 Slack 웹훅이 없으면 Slack 쪽은 '연결 안 됨' 이다.</dd>
+          </dl>
+        </details>
         <div class="card">
           <div class="card-head">
             <div class="chips" role="group" aria-label="알림 출처">
@@ -241,6 +253,18 @@
 
       <section id="traffic" aria-labelledby="h-traffic">
         <div class="sec-head"><h2 id="h-traffic">접속</h2><p class="sec-sum" id="s-traffic">…</p></div>
+        <details class="explain">
+          <summary>이 절 읽는 법<span class="tail">· 실시간 10초 · 서버 기록 60초</span></summary>
+          <dl>
+            <dt>읽는 값</dt><dd><b>실시간</b> = api 의 대시보드 연결 수(10초)와 그 CloudWatch 24시간 선, <b>서버 기록</b> = api 가 caddy 접속 기록을 센 요약(60초), <b>Clarity</b> = 화면 분석에 동의한 방문자를 Microsoft 가 센 값(Clarity 칸에 적힌 간격). 셋은 세는 대상이 달라 숫자가 서로 맞지 않는 것이 정상이다.</dd>
+            <dt>판정</dt><dd>판정에 넣지 않는다. 장애색은 5xx 에만 쓴다.</dd>
+            <dt>창</dt><dd>서버 기록은 최근 24시간(지금이 든 시간을 끝으로 한 시간 칸 24개)이고 시각은 이 브라우저 시간대다. Clarity 는 부른 때 직전 하루를 UTC 기준으로 센 값이다.</dd>
+            <dt>남기는 것</dt><dd>요약에는 IP·User-Agent 원문이 없다(caddy 기록의 IP 도 앞부분만 남는다). api 메모리에서 세고 따로 저장하지 않아, api 를 다시 시작하면 기록 파일을 처음부터 다시 읽어 센다.</dd>
+            <dt>빠지는 요청</dt><dd>랜딩·수집 상태·기록 탭의 폴링, uptime 감시·canary, 도메인이 아닌 IP 로 들어온 요청은 caddy 가 처음부터 기록하지 않는다. 이 관리자 화면도 caddy 를 지나지 않아 기록에 없다.</dd>
+            <dt>서버 기록과 Clarity</dt><dd>Clarity 는 동의한 방문자만 세므로 서버 기록보다 훨씬 적은 것이 정상이다. 서버 기록에는 봇도 섞인다.</dd>
+            <dt>대시보드 탭</dt><dd>실시간 스프레드 <code>spread</code> · 기록/통계 <code>history</code> · 선물–현물 갭 <code>gap</code> · 선선갭 <code>pp</code> · 수집 상태 <code>health</code> · 입출금 레이더 <code>flow</code>. tab 이 없는 /app/ 은 spread, 목록 밖 값은 (기타)로 세고, 들어온 뒤 바꾼 탭은 서버 기록에 없다.</dd>
+          </dl>
+        </details>
         <div class="stack">
           <div class="grid-wide traffic-top">
             <div class="card">
@@ -248,14 +272,46 @@
               <p><span class="big" id="ws-now">…</span></p>
               <p class="muted small">열린 대시보드 수 — 사람 수가 아니다</p>
               <div id="b-ws24"></div>
+              <details class="terms">
+                <summary>이 칸 뜻</summary>
+                <dl>
+                  <dt>지금 접속</dt><dd>api 가 지금 들고 있는 대시보드 WebSocket 연결 수(10초마다). 연결 수 — 사람 수가 아니다: 탭마다 하나라 탭 둘이면 2 이고 숨긴 탭도 센다.</dd>
+                  <dt>WebSocket 접속 수 선</dt><dd>api 가 10초마다 보내는 연결 수를 CloudWatch 가 5분마다 가장 큰 값으로 모은 24시간 선. 굵은 값은 24시간 최고이고, 작은 '마지막 5분 구간' 값은 몇 분 늦다.</dd>
+                </dl>
+              </details>
             </div>
             <div class="card">
               <div class="card-head"><span class="card-kicker">서버 기록 · 24시간</span><span class="meta" id="m-access"></span></div>
               <p class="muted small" id="access-sub"></p>
               <div id="b-access"></div>
+              <details class="terms">
+                <summary>이 칸 뜻</summary>
+                <dl>
+                  <dt>총 요청 <code>requests</code></dt><dd>창 안 caddy 기록의 모든 줄 — 화면 주소·그림·스크립트 파일·봇 스캔·끝난 WebSocket 연결이 한 줄씩 든다.</dd>
+                  <dt>페이지 <code>pages</code></dt><dd>화면 주소(/·/app/·/privacy 처럼 마지막 조각에 점이 없는 주소)를 GET 으로 연 요청. 그림·스크립트 파일은 빠지고 봇은 섞여 있어 사람 수가 아니다.</dd>
+                  <dt>5xx</dt><dd>서버 오류(상태 5xx)로 답한 요청 수. 판정에는 넣지 않지만 이 절에서 장애색으로 칠하고, 어느 경로였는지는 아래 '최근 5xx' 에서 본다.</dd>
+                  <dt>시간대별 막대</dt><dd>막대 하나가 한 시간이고 높이는 그 시간의 요청 수(가장 많은 시간이 꽉 참), 겹친 장애색은 5xx 다. 막대에 마우스를 올리면 그 시간의 페이지·5xx 수도 보인다.</dd>
+                  <dt>상태 코드</dt><dd>응답을 2xx·3xx·4xx·5xx 로 나눈 수와 비율.</dd>
+                  <dt>WebSocket 연결 · 지속 시간</dt><dd>창 안에서 끝난 대시보드 연결 수와 열려 있던 시간의 구간별 수 — 지금 열린 연결은 아직 끝나지 않아 빠진다. 지속 시간은 연결이 열려 있던 시간이지 머문 시간이 아니다(숨긴 탭도 열려 있다).</dd>
+                  <dt>읽지 못한 줄 <code>skipped</code></dt><dd>JSON 이 아니거나 필요한 필드가 빠진 줄 수에, 깨진 회전 파일 하나마다 1 을 더한 값.</dd>
+                  <dt>기록 시작</dt><dd>창 안에서 읽은 가장 이른 줄이 창 시작보다 늦을 때 그 시각. 그 앞에는 요청이 없었거나 기록 파일이 남아 있지 않다.</dd>
+                </dl>
+              </details>
             </div>
           </div>
           <div class="grid grid3" id="access-tables"></div>
+          <details class="terms">
+            <summary>이 칸 뜻</summary>
+            <dl>
+              <dt>경로 <code>paths</code></dt><dd>페이지 요청의 주소(쿼리를 뗀 것).</dd>
+              <dt>탭 <code>tabs</code></dt><dd>대시보드(/app/) 페이지 요청의 tab 값을 한국어 탭 이름으로 적는다 — 마우스를 올리면 원래 id 가 보인다. 들어온 첫 탭만 세고, 들어온 뒤 바꾼 탭은 없다.</dd>
+              <dt>외부 출처 <code>referrers</code></dt><dd>다른 사이트의 링크로 들어왔을 때 그 사이트의 주소(스킴·호스트만)이고, 누를 수 없는 글자다. 출처를 보내지 않은 방문(주소창에 직접 침·앱에서 엶 등)은 세지 않는다.</dd>
+              <dt>utm_source <code>utmSources</code></dt><dd>페이지 주소에 붙은 utm_source 값(소문자) — 우리가 뿌린 링크가 몇 번 열렸나.</dd>
+              <dt>기기 <code>devices</code></dt><dd>요청이 밝힌 User-Agent 글자로 가른 기기 종류.</dd>
+              <dt>브라우저 <code>browsers</code></dt><dd>요청이 밝힌 User-Agent 글자로 가른 브라우저 종류.</dd>
+              <dt>수 · 막대 · %</dt><dd>표마다 수가 많은 위 10개를 적고, 막대와 % 는 그 수의 비율이다.</dd>
+            </dl>
+          </details>
           <details class="fold" id="r5xx" hidden>
             <summary id="r5xx-sum">최근 5xx</summary>
             <div class="scroll"><table class="table">
@@ -271,12 +327,31 @@
               <summary id="clarity-more-sum">받은 지표</summary>
               <div id="clarity-metrics" class="metric-list"></div>
             </details>
+            <details class="terms">
+              <summary>이 칸 뜻</summary>
+              <dl>
+                <dt>세션 <code>sessions</code></dt><dd>Clarity 가 센 세션 수. 화면 분석에 동의한 방문자만 든다.</dd>
+                <dt>봇 세션 <code>botSessions</code></dt><dd>Clarity 가 봇으로 가려낸 세션 수. 세션 수에 들어 있는지는 확인하지 못했다.</dd>
+                <dt>사용자 <code>users</code></dt><dd>Clarity 가 가른 서로 다른 사용자 수(동의한 방문자만). 가르는 규칙은 Clarity 의 것이라 사람 수와 같다고 보지 않는다.</dd>
+                <dt>세션당 페이지 <code>pagesPerSession</code></dt><dd>Clarity 가 준 PagesPerSessionPercentage 값을 소수 2자리로 적었다. 이름에 Percentage 가 붙어 있어 평균인지 비율인지는 세션이 있는 응답을 보기 전이라 모른다.</dd>
+                <dt>받은 지표</dt><dd>Clarity 가 준 지표 이름·행 키를 고치지 않고 적은 것(지표마다 20행). 주소 값은 쿼리를 뗐다.</dd>
+                <dt>다음 조회</dt><dd>Clarity 는 하루에 부를 수 있는 횟수가 정해져 있어 적힌 간격으로만 부르고, 실패하면 마지막으로 받은 값을 그대로 둔다.</dd>
+              </dl>
+            </details>
           </div>
         </div>
       </section>
 
       <section id="cost" aria-labelledby="h-cost">
         <div class="sec-head"><h2 id="h-cost">비용</h2><p class="sec-sum" id="s-cost">…</p></div>
+        <details class="explain">
+          <summary>이 절 읽는 법<span class="tail">· AWS Budgets 6시간</span></summary>
+          <dl>
+            <dt>읽는 값</dt><dd>수집기가 AWS Budgets 의 비용 예산 전부를 6시간마다 새로 읽고, 화면은 60초마다 부른다.</dd>
+            <dt>판정</dt><dd>판정에 넣지 않는다. 월 예산의 실제가 한도의 85% 이상이거나 예측이 한도를 넘으면 주의색, 100% 이상이면 장애색으로 이 절과 개요 칸에만 보인다.</dd>
+            <dt>없는 것</dt><dd>서비스별 내역은 조직 SCP 가 Cost Explorer 를 막아 여기 없다 — 결제 콘솔에서 본다.</dd>
+          </dl>
+        </details>
         <div class="card">
           <div class="card-head"><span class="card-kicker">AWS 비용 예산</span><span class="meta" id="m-budget"></span></div>
           <div id="b-budget"></div>
@@ -284,11 +359,30 @@
             <li>서비스별 내역은 조직 SCP 가 Cost Explorer 를 막아 여기 없다 — 결제 콘솔에서 본다</li>
             <li>AWS 계정 종료 예정 2026-12</li>
           </ul>
+          <details class="terms">
+            <summary>이 칸 뜻</summary>
+            <dl>
+              <dt>막대</dt><dd>이번 달 실제 사용액. 한도의 85% 이상이면 주의색, 100% 이상이면 장애색이다.</dd>
+              <dt>점선</dt><dd>한도 × 이번 달(UTC 달)이 지난 비율 — 한도를 고르게 썼다면 지금 있을 자리다. 막대가 점선을 넘으면 한도보다 빠르게 쓰고 있다.</dd>
+              <dt>세로선</dt><dd>한도의 85%·100% 자리 — 예산 알림이 나가는 기준이다.</dd>
+              <dt>예측</dt><dd>AWS 가 낸 이번 달 말 예상 사용액. AWS 가 하루 몇 번만 갱신하고, 한도를 넘으면 주의색이다.</dd>
+              <dt>월 단위가 아닌 예산</dt><dd>분기·연 예산은 막대 없이 이름·실제·한도만 적고, 개요 칸·절 요약은 월 예산만 본다.</dd>
+            </dl>
+          </details>
         </div>
       </section>
 
       <section id="tools" aria-labelledby="h-tools">
         <div class="sec-head"><h2 id="h-tools">도구</h2><p class="sec-sum">콘솔과 문서 — 읽기 전용 화면이라 바꾸는 일은 각 콘솔에서 한다</p></div>
+        <details class="explain">
+          <summary>이 절 읽는 법</summary>
+          <dl>
+            <dt>읽는 값</dt><dd>이 화면에 고정해 둔 주소다 — 읽는 피드가 없다.</dd>
+            <dt>판정</dt><dd>판정에 넣지 않는다.</dd>
+            <dt>링크</dt><dd>레포가 공개라 주소에 계정·프로젝트 ID 를 넣지 않았다 — Cloudflare 는 대시보드 첫 화면만 연다. 모두 같은 탭으로 연다.</dd>
+            <dt>바꾸는 일</dt><dd>이 화면은 즉시 갱신 하나만 빼고 읽기 전용이다. 설정은 각 콘솔에서 바꾼다.</dd>
+          </dl>
+        </details>
         <div class="links">
           <div class="card"><span class="card-kicker">앱</span><ul>
             <li><a href="/api/docs">API 문서</a></li>
