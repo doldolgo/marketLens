@@ -6,12 +6,12 @@
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
 
 ## 1. 목적
-관리자 접속 요약(038)에 "방문자가 어느 나라, 어떤 망(국내 통신사·해외 통신사·데이터센터·그 밖)에서 왔나" 를 더한다. 서버 기록의 가린 IP(/24)를 공개 자료 DB-IP Lite(나라·ASN)로 api 메모리 안에서 찾고, 나라·망 종류별 방문자-일 수만 답한다. 데이터센터에서 온 브라우저 모양 짝은 위장 봇을 가르는 셋째 신호가 된다(038). 처리방침 v2 시행일(게이트) 뒤 KST 날만 센다.
+관리자 접속 요약(038)에 "방문자가 어느 나라, 어떤 망(국내 통신사·해외 통신사·데이터센터·그 밖)에서 왔나" 를 더한다. 서버 기록의 가린 IP(/24)를 공개 자료 DB-IP Lite(나라·ASN)로 api 메모리 안에서 찾고, 나라·망 종류별 날마다 센 방문자 수만 답한다. 데이터센터에서 온 브라우저 모양 짝은 위장 봇을 가르는 셋째 신호가 된다(038). 처리방침 v2 시행일(게이트) 뒤 KST 날만 센다 — 038 이 그 전 날의 줄로는 짝을 만들지 않는다.
 
 ## 2. 범위
 - 만드는 것: api 관리자 기능 폴더(`admin`) 안 — DB-IP 두 파일 받기·IPv4 구간 적재·조회, 망 종류 판정 표, 038 짝 기록의 나라·망 종류 칸, `/admin/access` 응답의 `geo` 하위 부분, 테스트(가짜 CSV.gz·httpx MockTransport).
 - 하지 않는 것: 시도·도시(City Lite — 풀면 660MB, 위치정보법 해석 위험이 더 크다). IPv6 찾기(지금 0줄 — 수만 센다, §3.8). 자료를 디스크·Redis·레포·이미지에 두기(§3.2). MMDB(라이브러리가 필요하다). IP·ASN 번호·조직 이름을 응답·로그에 싣기. 화면(042). 처리방침 문장(037). 새 env·새 라이브러리(httpx·표준 라이브러리만).
-- 처리방침: 037 이 2절 서버 접속 기록 문단에 적는 사실 — IP 앞부분으로 공개 자료 DB-IP Lite(나라·ASN)를 서버 메모리에 올려 나라·망 종류를 추정한다, 방문자 정보는 밖으로 보내지 않는다, 시행일 전 기록에는 쓰지 않는다 — 을 이 스펙이 지킨다. DB-IP 로 가는 요청은 월판 파일 주소 둘뿐이라 방문자 정보가 없다.
+- 처리방침: 037 이 2절 서버 접속 기록 문단에 적는 사실 — IP 앞부분으로 공개 자료 DB-IP Lite(나라·ASN)를 서버 메모리에 올려 나라·망 종류를 추정한다, 방문자 정보는 밖으로 보내지 않는다, 시행일 전 기록에는 쓰지 않는다 — 을 이 스펙이 지킨다. 게이트 전에는 DB-IP 를 받지도, IP 로 찾지도 않는다. DB-IP 로 가는 요청은 월판 파일 주소 둘뿐이라 방문자 정보가 없다.
 - 바꾸는 기존 것: 038 §3(짝 기록에 나라·망 종류, 파일 캐시를 다시 만드는 때, 응답에 `geo`), 027 §2(하지 않는 것 문장), 036 §3.2(접속 피드 복사 한 줄).
 - 담당: 021 은 hereokay 담당 — 고치지 않고 §6 제안을 PR 본문에 적는다. 027·036·038 은 이 레포 주인 담당이라 고친다. compose·nginx·Caddyfile 은 그대로다(serve 는 이미 바깥 https 를 부른다 — Clarity·Let's Encrypt).
 
@@ -20,9 +20,10 @@
 ### 3.1 읽는 계약 (037·038·035 복사)
 - 게이트: `server/app/core/config.py` 의 `PRIVACY_V2_EFFECTIVE = "YYYY-MM-DD"`(037, KST 날짜). 게이트 시각 = 그날 00:00 Asia/Seoul(= 전날 15:00Z)이고 응답 `gateAt`(ms)에 늘 실린다. "게이트 뒤 KST 날" = KST 날짜가 그 값 이상인 날.
 - 짝(038) = (가린 IP — IPv4 /24·IPv6 /48, UA 원문). 메모리에서는 BLAKE2b(8바이트, 열쇠 = 프로세스마다 무작위 16바이트에 KST 날짜를 섞은 날마다 다른 값)로만 든다. 짝 기록은 (파일, KST 날)마다 사람 브라우저 모양 짝만, 상한 1,000(넘으면 `capped`)이고, 같은 날을 여러 파일이 나누면 해시로 합친다.
-- 방문자-일·`confirmed`(JS 신호 줄을 남긴 짝 — 하한)·`shaped`(브라우저 모양 — 상한, confirmed 포함): 038 `visitors` 와 같은 정의·같은 창 자르기.
+- 짝 게이트(038 §3.2): 짝을 쓰는 처리는 KST 날짜가 게이트 이상인 줄에만 한다. 게이트 전 날의 줄은 해시하지도 짝 기록에 넣지도 않고 줄 단위 집계에만 든다. 게이트 전 `visitors` 는 `unconfigured`·`before_gate`(값 null), 게이트 뒤 `visitors.sinceTs` = max(`startTs`, 게이트 초).
+- 날마다 센 방문자(KST 날마다 따로 센 짝 수의 합 — 24시간 창은 오늘·어제(KST)를 따로 세어 더한 수라 사람 수가 아니다)·`confirmed`(JS 신호 줄을 남긴 짝 — 하한)·`shaped`(브라우저 모양 — 상한, confirmed 포함): 038 `visitors` 와 같은 정의·같은 창 자르기.
 - 파일 캐시(038): 회전 파일마다 확장자 뗀 이름이 키, `access.log` 는 갱신마다 다시 읽는다. 재시작이면 처음부터.
-- 부분 공통(035 §3.1): 하위 부분도 `{state, code, …}` 이고 `ok` 가 아니면 값 키는 null, 오류 문장 없음. 실패는 `marketlens.admin` WARNING 부분마다 10분 1줄(ERROR 없음).
+- 부분 공통(035 §3.1): `{state, code, …}`, `ok` 가 아니면 값 키는 null, 오류 문장 없음. 실패는 `marketlens.admin` WARNING 부분마다 10분 1줄(ERROR 없음). 하위 부분(038 §3.6 이 정한 꼴 — 바깥 부분 안에서 자기 상태를 갖고 바깥 부분을 error 로 만들지 않는다)도 같다.
 
 ### 3.2 자료 — DB-IP Lite 두 파일
 - 외부 계약(DB-IP 내려받기 페이지, 2026-10-02 조사):
@@ -61,16 +62,15 @@
 
 ### 3.5 짝 기록에 붙이기 (038 §3 에 더함)
 - 파싱 중 게이트 뒤 KST 날의 짝을 처음 기록할 때, IPv4 를 다시 /24 로 자른 값(x.y.z.0)으로 두 표를 찾아 나라 번호·망 종류를 짝 기록에 둔다. IP 는 조회에만 쓰고 짝 기록·캐시 어디에도 남기지 않는다.
-- 게이트 전 날의 짝, 판이 없을 때 파싱한 짝: 나라·망 종류 null(찾지 않는다).
+- 판이 없을 때 파싱한 짝: 나라·망 종류 null(찾지 않는다). 게이트 전 날의 줄은 짝이 없어(038 §3.2) 찾을 일도 없다 — 그 IP 로는 조회하지 않는다.
 - IPv6 짝: 찾지 않고 IPv6 라는 표시만 둔다. 가린 IP 를 IPv4·IPv6 어느 쪽으로도 풀 수 없는 짝은 나라 `(기타)`·망 `unknown` 으로 센다(IP 칸이 없는 줄은 038 대로 짝을 만들지 않는다).
 - 판이 바뀌면(처음 올림 포함) 회전 파일 캐시를 버리고 다시 만든다 — 짝 기록이 파싱 때 나라·망 종류를 붙이기 때문이다(IP 를 메모리에 남기지 않는 대가). 판이 바뀐 뒤 첫 접속 갱신이 038 의 3초 기다림·`pending` 규칙 안에서 다시 채운다.
 
 ### 3.6 응답 — `/admin/access` 의 `geo` (038 응답에 더하는 키)
-접속 부분이 `ok` 면 `geo` 는 아래 하위 부분이고, 접속 부분이 `ok` 가 아니면 다른 값 키처럼 null 이다. `geo` 의 상태는 접속 부분을 error 로 만들지 않는다.
+접속 부분이 `ok` 면 `geo` 는 하위 부분 `{state, code}` + 아래 값 키 여섯이고, 접속 부분이 `ok` 가 아니면 다른 값 키처럼 null 이다. `geo` 의 상태는 접속 부분을 error 로 만들지 않는다.
 
 | 키 | 형 |
 |---|---|
-| state·code | 부분 |
 | month | 글자 |
 | loadedAt | ms |
 | sinceTs | 초 |
@@ -79,20 +79,20 @@
 | ipv6 | 수 |
 
 - `state`: `ok`(판이 올라 있음 — 옛 판 포함) / `pending`(첫 판을 받는 중, code null) / `error`(올린 판 없음 — code `http_<n>`·`timeout`·`bad_data`·연결 실패는 예외 이름) / `unconfigured`(code `before_gate` — 게이트 전). `ok` 가 아니면 값 키 여섯이 모두 null.
-- `month`: 쓰는 판 `"YYYY-MM"`. `loadedAt`: 그 판을 갈아 끼운 시각. `sinceTs`: max(`startTs`, 게이트 초) — 나라·망 종류를 세기 시작한 때.
-- `countries`: `[[ISO 두 글자, confirmed, shaped], …]` — 창과 겹치고 게이트 뒤인 KST 날의 방문자-일(038 과 같은 셈). shaped 내림차순, 같으면 글자순. shaped 3 이상이고 confirmed 가 0 이거나 3 이상인 앞 20행만 이름으로 두고, 나머지 행·그 조건에 못 미친 행·모름 값·구간 밖은 합쳐 끝에 `["(기타)", c, s]`(합이 0 이면 뺀다). k=3 — 적은 수의 나라는 이름으로 내지 않는다(실제 사람 한두 명인 confirmed 칸 포함). 창끼리·갱신끼리 값을 빼 보는 것까지 막지는 않는다.
-- `networks`: `[[telecom_kr|telecom|cloud|other|unknown, confirmed, shaped], …]` — 같은 셈·같은 정렬, 0 행은 뺀다. 범주가 굵어 숨기지 않는다.
-- `ipv6`: IPv6 라 찾지 않은 방문자-일(shaped). countries·networks 에는 들지 않는다. `capped`(038) 면 기록된 짝만 센다.
-- 게이트 전 모양: `{state:"unconfigured", code:"before_gate", month:null, loadedAt:null, sinceTs:null, countries:null, networks:null, ipv6:null}`이고 DB-IP 호출은 0 이다.
+- `month`: 쓰는 판 `"YYYY-MM"`. `loadedAt`: 그 판을 갈아 끼운 시각. `sinceTs`: max(`startTs`, 게이트 초) — 나라·망 종류를 세기 시작한 때(= `visitors.sinceTs`).
+- `countries`: `[[ISO 두 글자, confirmed, shaped], …]` — 날마다 센 방문자(038 `visitors` 와 같은 셈 — 창과 겹치고 게이트 뒤인 KST 날만). shaped 내림차순, 같으면 글자순. shaped 3 이상이고 confirmed 가 0 이거나 3 이상인 앞 20행만 이름으로 두고, 나머지 행·그 조건에 못 미친 행·모름 값·구간 밖은 합쳐 끝에 `["(기타)", c, s]`(합이 0 이면 뺀다). k=3 — 적은 수의 나라는 이름으로 내지 않는다(실제 사람 한두 명인 confirmed 칸 포함). 창끼리·갱신끼리 값을 빼 보는 것까지 막지는 않는다.
+- `networks`: `[[telecom_kr|telecom|cloud|other|unknown, confirmed, shaped], …]` — 같은 셈·같은 정렬, 0 행은 뺀다. 범주가 굵어 숨기지 않는다. 다만 `telecom_kr` 은 나라 KR 을 말하므로, 그 창의 `countries` 에서 KR 이 이름으로 남지 않으면(`(기타)` 로 합쳐졌으면) `telecom_kr` 을 `telecom` 에 합쳐 싣는다 — k=3 숨김을 망 종류로 비켜 가지 않게.
+- `ipv6`: IPv6 라 찾지 않은 날마다 센 방문자(shaped). countries·networks 에는 들지 않는다. `capped`(038) 면 기록된 짝만 센다.
+- 게이트 전 모양: `{state:"unconfigured", code:"before_gate", month:null, loadedAt:null, sinceTs:null, countries:null, networks:null, ipv6:null}`이고 DB-IP 호출·조회는 0 이다. 038 의 `visitors` 와 같은 때 같은 상태다.
 - 응답·로그 어디에도 IP·ASN 번호·조직 이름이 없다.
 
 ### 3.7 부담·받아들인 위험 (조사 2026-10-02)
 - 적재: 합성 IPv4 40만 구간을 serve(t4g.micro)에서 표준 라이브러리로 올리면 ≈1.9초·유지 3.7MB, 로컬 Mac 은 ≈0.3초(serve 가 ≈6배 느리다). 두 파일이면 serve ≈4초로 짐작한다. 조회는 1만 건 21ms.
-- GIL: serve api 는 uvicorn 워커 하나다. 적재와 다시 만드는 파일 캐시(지금 ≈0.4초, 하루 50MiB 상한까지 차면 수십 초)가 공개 `/api/landing`·WS 허브와 GIL 을 나눠 쓴다. 관리자 화면을 열었을 때만, 달에 한 번과 재시작 뒤 한 번 일어나며 그동안 공개 응답이 잠깐 느려질 수 있다.
+- GIL: serve api 는 uvicorn 워커 하나다. 게이트 뒤 재시작(배포) 뒤 첫 화면에서 038 첫 채움(지금 ≈0.4초, 최악 — 압축 10MB 상한 ≈6초) → DB-IP 받기·적재(serve ≈4초) → 판이 올라 038 캐시를 한 번 더 채움(≈0.4~6초)이 이어지고, 040 페이지 묶기(≈0.3초)가 겹칠 수 있다. 합친 최악 ≈10~16초 동안 공개 `/api/landing`·WS 허브와 GIL 을 나눠 쓴다 — 두 번 채움은 IP 를 메모리에 남기지 않으려는 대가로 받아들인다(§3.5). 관리자 화면을 열었을 때만, 재시작 뒤와 달에 한 번 일어나며 그동안 공개 응답이 느려질 수 있다.
 - 메모리: 판 ≈8MB(갈아 끼우는 동안 두 판 ≈16MB). api 에는 mem_limit 이 없고 serve available 은 ≈360~420MB 다.
 - 바깥 의존: download.db-ip.com 의 가용성·자동 받기 허용 여부는 모른다. 실패하면 `geo` 만 `error`(1시간 뒤 다시)이고 나머지 요약은 그대로다.
 - 정확도: /24 는 인터넷 경로를 알릴 수 있는 가장 작은 단위다(RFC 7454 — 그보다 잘게는 대개 받아 주지 않는다). 그래서 /24 로 찾은 ASN 은 원 IP 로 찾은 값과 사실상 같다. 나라는 Lite 정확도 지수 81 이고, /24 로 가린 오차와 x.y.z.0 하나로 찾는 오차(한 /24 안에 구간이 둘)는 재지 못했다.
-- 위치정보법: 가린 IP 로 나라를 추정하는 것(메모리 안에서는 짝-날마다 나라·망 종류를 붙이고, 밖으로는 집계만 낸다)은 해석이 갈린다(사용자 결정 2026-10-02 로 진행). 게이트 전 기록에는 쓰지 않는다(037).
+- 위치정보법: 가린 IP 로 나라를 추정하는 것(메모리 안에서는 그날의 짝마다 나라·망 종류를 붙이고, 밖으로는 집계만 낸다)은 해석이 갈린다(사용자 결정 2026-10-02 로 진행). 게이트 전 기록에는 쓰지 않는다(037).
 
 ### 3.8 엣지
 - 게이트를 지나는 순간: 다음 접속 갱신이 받기를 띄운다(그 전까지 `before_gate`).
@@ -100,17 +100,17 @@
 - 이번 달 판이 아직 없다(달 첫날 게시 전): 올린 판이 없으면 지난달을 받고, 있으면 옛 판 그대로 24시간 뒤 다시.
 - 두 달 다 404·5xx·시간 초과·잘린 gzip·틀린 열: 올린 판이 없으면 `error`, 있으면 `ok` 그대로. 둘 다 WARNING.
 - 재시작(배포): 표·판·시도 기록이 사라진다 — 게이트 뒤 첫 화면이 다시 받는다.
-- 24시간 창이 게이트를 걸친다: 게이트 전 날의 짝은 countries·networks 에 들지 않고 `sinceTs` = 게이트.
+- 24시간 창이 게이트를 걸친다: 게이트 전 날의 줄은 짝이 없어(038) countries·networks·ipv6 에 들지 않고 `sinceTs` = 게이트 = `visitors.sinceTs`.
 - IPv6 가 늘어남: `geo.ipv6` 가 shaped 의 1% 를 넘으면 IPv6 상위 64비트 표(array `Q`)를 더한다(후속 — status 빚). caddy 가 /48 로 가려 그보다 잘게는 어차피 못 찾는다.
 
 ## 4. 검증
 **PR 안 — 실행 세션(완료 조건)**. 시작 전에 038 브랜치 위이고 그 아래에 037(브랜치 또는 main)이 있는지 본다(아니면 멈추고 묻는다). 이 스펙이 허락하는 바깥 호출은 처음에 실제 두 파일을 한 번 받는 것뿐이다(§3.2 — scratchpad 에만 두고 커밋하지 않는다). 테스트는 네트워크 없음 — DB-IP 는 httpx MockTransport(테스트가 만든 가짜 CSV.gz — IPv4 1만 행 이상·IPv6 몇 행·따옴표와 쉼표 든 조직 이름), 시계는 주입, 접속 로그는 테스트가 만든 파일. 가짜 주입이 빠져 실제 transport 가 쓰이면 테스트가 실패하게 한다.
-- 게이트: 게이트 전 → `geo` 가 게이트 전 모양 그대로·호출 0(`window=7d` 를 청해도) / `PRIVACY_V2_EFFECTIVE="2026-10-12"` 면 `gateAt` = 2026-10-11T15:00Z(ms) / 게이트 뒤 첫 요청 → `geo` `pending`·나머지 `ok`, 받기가 끝난 뒤 다음 갱신 → `ok`·`month` `2026-10`.
+- 게이트: 게이트 전 → `geo` 가 게이트 전 모양 그대로·호출 0·조회 0(`window=7d` 를 청해도 — 받기·조회 함수를 감시) / `PRIVACY_V2_EFFECTIVE="2026-10-12"` 면 `gateAt` = 2026-10-11T15:00Z(ms) / 게이트 뒤 첫 요청 → `geo` `pending`·나머지 `ok`, 받기가 끝난 뒤 다음 갱신 → `ok`·`month` `2026-10`.
 - 받기: 요청 주소가 정확히 두 주소이고 달은 UTC(2026-10-31T16:00Z = KST 11-01 이면 `2026-10`)·GET·공통 User-Agent / 302 → `error`·`http_302`·따라가지 않음 / 이번 달 404 → 지난달 둘 / 두 달 404 → `error`·`http_404`, 1시간 안 다시 부르기 0·1시간 뒤 1회 / ASN 만 실패 → 갈아 끼우지 않음 / 시간 초과(가짜 시계 61초) → `timeout` / 압축 20MB 넘는 본문 → `bad_data`, 20MB + 한 조각보다 더 읽지 않음 / 받는 중 두 번째 갱신 → 파일마다 호출 1 / 가짜 받기를 멈춰 둔 동안 `/admin/access` 가 3초 안에 답한다(`pending`).
 - 확인: IPv4 9,999행(+IPv6 1만 행) / IPv4 200만 1행 / 시작 감소·겹침 / 시작 > 끝 / 나라 `kr`·세 글자 / 서로 다른 나라 256개 / 열 수 틀림 / AS 번호 음수·글자 / 잘린 gzip → 모두 `bad_data`.
 - 다시 받기: 2026-10 판을 올린 뒤 같은 달 며칠 → 호출 0 / 시계를 11-02 로 → 11월 묶음 1회, 500 이면 `ok`·`month` `2026-10`·1시간 안 0·1시간 뒤 1회, 404 면 24시간 뒤 / 성공하면 `month` `2026-11` 이고 **캐시된 회전 파일의 짝도 새 판으로 센다**(가짜 두 판이 같은 /24 를 JP·KR 로 다르게 둔다 — 다시 만들기 확인).
 - 망 종류: 표 ASN 스물셋이 정해진 종류 / "Example Hosting LLC"·"Foo Datacenters"·"Data Center Bar"·"Acme Servers" → cloud, "Deutsche Telekom AG"·"X Telecommunications"·"Y Broadband"·"Z Communications Inc"·"T-Mobile US" → telecom, "Colombia Movil"·"Dispatch Inc"·"Colorado State University"·"VPSX Ltd" → other / 같은 /24 가 KR + 4766 → `telecom_kr`, KR + 16509 → `cloud`, DE + telecom → `telecom` / ASN 자료 밖 → `unknown`.
-- 응답: shaped 2 인 나라 → `(기타)`, 3 이면 이름, shaped 5·confirmed 1 이면 `(기타)`·confirmed 3 이면 이름 / 나라 25개 → 20행 + `(기타)`(합이 맞다) / 모름 값·구간 밖 → `(기타)` / networks 에 0 행 없음·정렬 / confirmed·shaped 가 038 정의대로(JS 신호 짝은 둘 다, 없는 짝은 shaped 만) / IPv6 짝 → `ipv6` 만 / 같은 짝이 같은 날 두 파일 → 한 번 / 24시간 창이 게이트를 걸치면 게이트 전 날 짝은 빠지고 `sinceTs` = 게이트 / 접속 `unconfigured` → `geo` null·호출 0 / 마지막 마디가 0 이 아닌 IPv4 줄 → /24 로 찾는다 / IPv4·IPv6 로 풀 수 없는 IP 글자 → `(기타)`·`unknown`.
+- 응답: shaped 2 인 나라 → `(기타)`, 3 이면 이름, shaped 5·confirmed 1 이면 `(기타)`·confirmed 3 이면 이름 / 나라 25개 → 20행 + `(기타)`(합이 맞다) / KR shaped 2(국내 통신사 짝) → `countries` 에 KR 없음·`networks` 에 `telecom_kr` 없이 `telecom` 에 듦, KR shaped 3·confirmed 0 이면 `telecom_kr` 행 / 모름 값·구간 밖 → `(기타)` / networks 에 0 행 없음·정렬 / confirmed·shaped 가 038 정의대로(JS 신호 짝은 둘 다, 없는 짝은 shaped 만) / IPv6 짝 → `ipv6` 만 / 같은 짝이 같은 날 두 파일 → 한 번 / 24시간 창이 게이트를 걸치면 게이트 앞 줄의 IP 로는 조회하지 않고(같은 IP·UA 가 뒤에도 오면 게이트 뒤 날로만 1) `sinceTs` = 게이트 = `visitors.sinceTs` / 접속 `unconfigured` → `geo` null·호출 0 / 마지막 마디가 0 이 아닌 IPv4 줄 → /24 로 찾는다 / IPv4·IPv6 로 풀 수 없는 IP 글자 → `(기타)`·`unknown`.
 - 새지 않음: 응답 바이트와 캡처한 로그에 가짜 조직 이름·ASN 번호·IP 주소 글자가 없다.
 - 흘려 읽기: 합성 나라 30만 IPv4 행 gz(풀면 ≈11MB)를 올리는 동안 tracemalloc 최고 ≤ 8MB.
 - 성능(로컬, 숫자는 §5): 처음에 받은 실제 두 파일로 ① 두 파일 적재 합 ≤ 1.0초(serve 짐작 ×6 을 함께 적는다) ② 유지 메모리(tracemalloc) ≤ 10MB ③ 조회 1만 건 ≤ 50ms ④ 적재 중 이벤트 루프 지연(10ms 잠들기가 넘친 시간) 최댓값 ≤ 50ms. ①·③·④ 는 tracemalloc 없이 재고 ② 는 따로 잰다(tracemalloc 이 적재를 ≈6배 늦춘다). 넘으면 멈추고 묻는다.
@@ -126,13 +126,13 @@
 
 ## 6. 갱신할 문서
 **이 PR 이 고치는 문서**
-- `docs/context/status.md` — admin 행 server 칸(038 이 고친 접속 요약 문장) 끝에 "· 나라·망 종류(039 — 게이트 뒤 DB-IP Lite 두 파일의 IPv4 를 api 메모리에, 월판 저절로, `geo` 하위 부분)", 비고에 "039 운영 확인 대기(게이트 뒤)". 알려진 빚에 `(039) IPv6 는 나라·망 종류를 찾지 않는다 — geo.ipv6 가 shaped 의 1% 를 넘으면 상위 64비트 표를 더한다`, `(039) api 재시작 뒤 첫 접속 요약마다 DB-IP 두 파일을 다시 받아 serve 에서 수 초 적재한다 — 그동안 공개 응답과 GIL 을 나눠 쓴다`, `(039) /24 로 찾은 나라의 오차는 재지 않았다(Lite 정확도 지수 81)`, `(039) 021 제안 반영 대기`.
+- `docs/context/status.md` — admin 행 server 칸(038 이 고친 접속 요약 문장) 끝에 "· 나라·망 종류(039 — 게이트 뒤 DB-IP Lite 두 파일의 IPv4 를 api 메모리에, 월판 저절로, `geo` 하위 부분)", 비고에 "039 운영 확인 대기(게이트 뒤)". 알려진 빚에 `(039) IPv6 는 나라·망 종류를 찾지 않는다 — geo.ipv6 가 shaped 의 1% 를 넘으면 상위 64비트 표를 더한다`, `(039) api 재시작 뒤 첫 접속 요약마다 DB-IP 두 파일을 다시 받아 serve 에서 수 초 적재하고 038 캐시를 한 번 더 채운다 — 합친 최악 ≈10~16초 동안 공개 응답과 GIL 을 나눠 쓴다(관리자 화면을 열 때만)`, `(039) /24 로 찾은 나라의 오차는 재지 않았다(Lite 정확도 지수 81)`, `(039) 021 제안 반영 대기`.
 - `CLAUDE.md` — 스펙 인덱스 039 행 상태 → DONE.
 - `docs/context/architecture.md` — '런타임 구성' server 문장의 api 쪽 괄호("api 는 017 구독 태스크 1개 … + `STATSD_ADDR` 가 있으면 027 게이지 태스크") 끝에 "+ DB-IP 받기 데몬 스레드 1개(039 — 게이트 뒤 접속 요약이 판을 필요로 할 때만 뜨고 끝나면 사라진다)" — 034 데몬 스레드는 collector 역할 목록에 있으니 그 옆에 넣지 않는다. '배포 토폴로지' serve 줄의 "api 가 `logs/caddy` 를 읽기 전용으로 읽는다(035)" 뒤에 "— 게이트 뒤 매달 download.db-ip.com 에서 DB-IP Lite 두 파일을 받아 메모리에만 둔다(039)". '현재 구조' admin 항목 끝에 039 모듈(받기·적재·확인·조회·망 종류 표)과 테스트 파일.
 - `docs/context/product.md` — 용어 절에 "**망 종류(접속)**: 관리자 접속 요약에서 방문자 IP 앞부분이 속한 인터넷 망 — 국내 통신사·해외 통신사·데이터센터·그 밖·모름(039). 입출금의 망(블록체인 네트워크)과 다르다." 기능 목록 admin 행의 "접속 요약(최근 30일까지 — 방문자 종류·확인된 방문자·유입 채널)"(038 이 고친 글) → "접속 요약(최근 30일까지 — 방문자 종류·확인된 방문자·유입 채널·나라·망 종류)".
 - `docs/specs/038-access-v2.md` — §2 하지 않는 것의 "나라·망 종류(039 — 이 스펙의 응답에는 `geo` 가 없다)" → "나라·망 종류의 판정·받기(039 — 응답 `geo` 행)". §3 짝 기록 문단에 "게이트 뒤 KST 날의 짝에는 나라 번호·망 종류를 붙인다(039 — IP 는 남기지 않는다)", 파일 캐시 문단에 "DB-IP 판이 바뀌면(처음 올림 포함) 회전 파일 캐시를 다시 만든다(039)", 응답 키 표에 `geo` 행(039 — 나라·망 종류 하위 부분).
 - `docs/specs/027-observability.md` — §2 하지 않는 것 "서버 기록의 국가·도시 해석 — IP 뒷자리를 지운 채 저장한다." → "서버 기록의 시도·도시 해석 — IP 뒷자리를 지운 채 저장한다. 나라·망 종류는 관리자 접속 요약이 메모리에서만 추정한다(039)."
-- `docs/specs/036-admin-v2.md` — §3.2 접속 피드 복사 끝에 한 줄: "`geo`(039 하위 부분) `{state, code, month, loadedAt, sinceTs, countries, networks, ipv6}` — 게이트 전 `unconfigured`·`before_gate`, `countries` 는 `[[ISO 두 글자, confirmed, shaped]]` 20행 + `(기타)`(shaped<3 이거나 confirmed 1~2 인 행 합침), `networks` 는 `telecom_kr`·`telecom`·`cloud`·`other`·`unknown`. 이 화면은 아직 그리지 않는다(042)."
+- `docs/specs/036-admin-v2.md` — §3.2 접속 피드 복사 끝에 한 줄: "`geo`(039 하위 부분) `{state, code, month, loadedAt, sinceTs, countries, networks, ipv6}` — 게이트 전 `unconfigured`·`before_gate`(`visitors` 와 같은 짝 게이트), `countries` 는 `[[ISO 두 글자, confirmed, shaped]]` 20행 + `(기타)`(shaped<3 이거나 confirmed 1~2 인 행 합침), `networks` 는 `telecom_kr`·`telecom`·`cloud`·`other`·`unknown`(KR 이 `(기타)` 에 합쳐진 창에서는 `telecom_kr` 이 `telecom` 에 든다). 이 화면은 아직 그리지 않는다(042)."
 
 **담당자에게 제안 — 이 PR 에서 고치지 않는다(PR 본문에 그대로 적는다)**
 - 021 — §3.1 serve 설명에 "api 가 매달 download.db-ip.com 에서 공개 자료(DB-IP Lite 두 파일)를 받는다(039)".
