@@ -6,7 +6,7 @@
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
 
 ## 1. 목적
-운영자가 `admin.kimptrack.com` 한 페이지를 위에서 아래로 읽으며 "지금 괜찮은가 → 어디가 문제인가 → 누가 얼마나 쓰는가 → 돈은 얼마나 나가는가" 를 안다. 029 의 앱 안쪽 상태(헬스·거래소 수집 상태·접속 수·즉시 갱신)에 034·035 가 모은 CloudWatch 경보·지표·canary·예산, Slack·경보 알림 기록, 서버 접속 요약, Clarity 요약을 더해 AWS·Clarity·Cloudflare·Slack 콘솔을 돌지 않게 한다. AWS 계정은 2026년 12월에 끝난다 — AWS·Clarity 가 없거나 막혀도 그 칸만 "연결 안 됨"·"권한 없음" 이고 나머지는 그대로 동작한다.
+운영자가 `admin.kimptrack.com` 한 페이지를 위에서 아래로 읽으며 "지금 괜찮은가 → 어디가 문제인가 → 누가 얼마나 쓰는가 → 돈은 얼마나 나가는가" 를 안다. 029 의 앱 안쪽 상태(헬스·거래소 수집 상태·접속 수·즉시 갱신)에 034·035 가 모은 CloudWatch 경보·지표·canary·예산, Slack·경보 알림 기록, 서버 접속 요약, Clarity 요약을 더해 AWS·Clarity·Cloudflare·Slack 콘솔을 돌지 않게 한다. AWS·Clarity 가 없거나 막혀도 그 칸만 "연결 안 됨"·"권한 없음" 이고 나머지는 그대로 동작한다.
 
 ## 2. 범위
 - 만드는 것: `web/admin/` 세 파일(`index.html`·`admin.js`·`admin.css`) 전면 재작성, `server/tests/test_admin.py` 의 화면 정적 단언 확장.
@@ -45,17 +45,17 @@
 | `/api/admin/aws` | 034 |
 | `/api/admin/alerts` | 034 |
 | `/svc/api/admin/access` | 038 |
-| `/svc/api/admin/clarity` | 035 |
+| `/svc/api/admin/clarity` | 040 |
 
-- 공통: 늘 200 JSON, 키 camelCase. **시각 단위** — `…At`(`fetchedAt`·`changedAt`·`lastRunAt`·`nextAt`·알림 `at`)은 epoch **ms**, `…Ts`(`startTs`·`endTs`·`firstTs`)와 점·시간 칸·`recent5xx` 의 `ts` 는 epoch **초**다. 차트 가로축은 `ts × 1000` 으로 ms 에 맞춘다. 응답은 **부분**들이고 부분은 `{state, code, fetchedAt, refreshSec, …값 키}` 다. `state` 는 `ok`·`unconfigured`·`denied`·`error`·`pending`(첫 조회가 3초 안에 안 끝남), `code` 는 `ok` 면 null·아니면 짧은 사유(AWS 오류 코드·`no_credentials`·`http_<상태>`·`timeout`·`redis`·`no_file`·`partial` — 오류 문장·ARN 없음), `fetchedAt` 은 값을 만든 시각(없으면 null), `refreshSec` 는 서버 갱신 주기. `ok` 가 아니면 값 키는 null — 예외는 Clarity(값 = 마지막 성공, 7일 뒤 null).
+- 공통: 늘 200 JSON, 키 camelCase. **시각 단위** — `…At`(`fetchedAt`·`changedAt`·`lastRunAt`·`nextAt`·알림 `at`)은 epoch **ms**, `…Ts`(`startTs`·`endTs`·`firstTs`)와 점·시간 칸·`recent5xx` 의 `ts` 는 epoch **초**다. 차트 가로축은 `ts × 1000` 으로 ms 에 맞춘다. 응답은 **부분**들이고 부분은 `{state, code, fetchedAt, refreshSec, …값 키}` 다. `state` 는 `ok`·`unconfigured`·`denied`·`error`·`pending`(첫 조회가 3초 안에 안 끝남), `code` 는 `ok` 면 null·아니면 짧은 사유(AWS 오류 코드·`no_credentials`·`http_<상태>`·`timeout`·`redis`·`no_file`·`partial`·`bad_data` — 오류 문장·ARN 없음), `fetchedAt` 은 값을 만든 시각(없으면 null), `refreshSec` 는 서버 갱신 주기. `ok` 가 아니면 값 키는 null — 예외는 Clarity(값 = 마지막 성공, 7일 뒤 null).
 - `/api/admin/aws` = 부분 넷 `{alarms, metrics, canary, budget}`:
   - `alarms`(60초): `items[{name, state, changedAt, reason}]`(이름 순, `state` 는 `OK`·`ALARM`·`INSUFFICIENT_DATA`, `reason` 200자)·`counts{ok, alarm, insufficientData}`.
   - `metrics`(300초): `startTs`·`endTs`·`periodSec`(300)·`boxes[{box, instanceId, mem, disk, cpu, credit, swap}]`(collect·data·serve 순, 경보가 없는 박스는 빠진다)·`wsClients`·`canary{runs, errors, durationMs}`. 시계열은 모두 `[[ts, 값|null], …]` 288점(5분 구간 시작), 전부 비면 null. `mem` = 메모리 가용률 최솟값, `disk` = 디스크 사용률 최댓값, `cpu` = CPU 평균, `swap` = 스왑 사용률 최댓값(%, 027 설정상 data 만 — collect·serve 는 null), `credit` = CPU 크레딧 잔고 최솟값(t4g 만 — collect c7g 는 null). `canary` 의 `runs`·`errors` 는 5분 합, `durationMs` 는 최댓값.
   - `canary`(60초): `lastRunAt`·`durationMs`·`ok`·`lines[]`(300자·20줄 — "N단계 통과 (ms)" 또는 실패 메시지). 11분 안에 끝난 실행이 없으면 `lastRunAt`·`durationMs`·`ok` null·빈 `lines`(state `ok`).
   - `budget`(6시간): `items[{name, unit, limit, actual, forecast, timeUnit}]` — 비용 예산 전부(`timeUnit` 은 `MONTHLY` 등), 금액 소수 둘째 자리, `forecast` 없으면 null.
-- `/api/admin/alerts` = `{items, slack, alarms}` — `slack`·`alarms` 는 상태만 있는 부분(`slack` 은 `refreshSec` 0), `items` 는 늘 목록(성공한 쪽만). 항목 `{at, source, text, role, key, delivered, alarm, fromState, toState}`(해당 없는 키 null), 최근 7일·최신순·200건. `source: "slack"` 은 025 알림 — `role` `collector`·`api`, `text` 는 🔴·🟢·⚠️ 머리 그대로, `delivered` 는 Slack 이 받았는지(전송 실패도 기록된다, 억제된 알림은 없다). `source: "alarm"` 은 경보 상태 변경 — `alarm`·`fromState`·`toState`·`text`(사유). ARN·12자리 숫자는 `[가림]` 으로 와 있다.
+- `/api/admin/alerts` = `{items, slack, alarms}` — `slack`·`alarms` 는 상태만 있는 부분(`slack` 은 `refreshSec` 0), `items` 는 늘 목록(성공한 쪽만). 항목 `{at, source, text, role, key, delivered, alarm, fromState, toState}`(해당 없는 키 null), 최근 7일·최신순·200건. `source: "slack"` 은 025 알림 — `role` `collector`·`api`, `text` 는 🔴·🟢·⚠️ 머리 그대로, `delivered` 는 Slack 이 받았는지(전송 실패도 기록된다, 10분 억제로 보내지 않은 알림은 기록에도 없다). `source: "alarm"` 은 경보 상태 변경 — `alarm`·`fromState`·`toState`·`text`(사유). ARN·12자리 숫자는 `[가림]` 으로 와 있다.
 - `/svc/api/admin/access` = 부분 하나(60초, 038) — 인자 없이 부르면 24시간 창. `window`·`windows`·`gateAt`(늘 실림)·`startTs`·`endTs`·`firstTs`·`totals{requests, pages, humanPages, jsViews, probes, ws, skipped}`·`hourly[{ts, requests, pages, humanPages, jsViews, errors, wsErrors}]`(`errors` = `/api/ws/spreads` 밖 5xx)·`status{"2xx","3xx","4xx","5xx","ws5xx"}`·`recent5xx[{ts, path, status}]` 20줄(WS 경로 뺌)·`ws{count, pairs, errors, durations}`·`classes`(종류 여덟 `{requests, pages}`)·`visitors`(하위 부분 — 날마다 센 방문자 `state`·`code`·`sinceTs`·`confirmed`·`shaped`·`returning`·`capped`·`days`·`channels`·`devices`·`os`·`browsers`·`inApp`, 처리방침 v2 시행일 전 `unconfigured`·`before_gate`·값 null — 그때 `ws.pairs` 도 null)·상위 목록 여섯(사람 브라우저 모양 페이지 줄만 — `devices` 는 `mobile`·`tablet`·`desktop`). IP·UA 원문·짝 값 없음, 폴링·canary 제외.
-- `/svc/api/admin/clarity` = 부분 하나(10800초) + `nextAt`·`numOfDays`(1)·`traffic{sessions, botSessions, users, pagesPerSession}`(없으면 null)·`metrics[{name, rows}]`(Clarity 가 준 지표 이름·행 키 그대로, 행 20개, 주소는 쿼리를 뗐다). Traffic 밖 행 모양은 1차 문서에 없어 035 가 정규화하지 않았다. 값은 UTC 기준이다.
+- `/svc/api/admin/clarity` = 부분 하나(14400초, 040) + `nextAt`·`numOfDays`(1)·`traffic{sessions, botSessions, users, pagesPerSession}`·`summary{scrollDepth, totalSec, activeSec, signals}`(signals 키 여섯 `deadClick`·`rageClick`·`excessiveScroll`·`quickback`·`scriptError`·`errorClick`, 값 `{sessions, sessionPct, pageViews, count}`)·`countries[[이름, 세션]]`(20행, 못 알아보면 null)·`metrics[{name, rows}]`(받은 이름·키 그대로, 행 20개, 주소는 쿼리를 떼되 대시보드 주소는 `?tab=<id>` 만)·`pages`(하위 부분 `{state, code, fetchedAt, refreshSec 43200, nextAt, numOfDays 3, rowsIn, rowLimitHit, groups}` — `groups[{page, device, sessions, scrollDepth, totalSec, activeSec, deadClickPct, rageClickPct, excessiveScrollPct, quickbackPct, scriptErrorPct, errorClickPct}]` 40개 이하, 주소 없음). 못 알아본 칸은 null. 창은 부른 때 직전 24시간(기본)·72시간(`pages`)이고 시간대가 없다(Clarity 문서는 결과를 UTC 로 적는다).
 
 ### 3.3 갱신 주기
 - 빠른 묶음(경로 넷) 10초, 느린 묶음(피드 넷) 60초 — 둘 다 **보이는 동안만**(`visibilityState`). 두 묶음은 따로 돈다 — 느린 쪽이 늦어도 빠른 쪽 주기를 막지 않는다. 같은 묶음은 앞선 호출이 끝나기 전에 다시 부르지 않는다.
@@ -66,38 +66,40 @@
 - 본문 안 경과 글자("n분 전" — 경보 행의 바뀐 지·canary 최근 실행)는 묶음이 끝날 때마다 그 글자만 고친다 — 본문을 다시 만들지 않으면서 개요 칸·절 요약과 같은 경과를 보인다. 글자가 달라졌을 때만 쓴다 — 같은 글자를 다시 쓰면 텍스트 노드가 바뀌어 그 안에 걸친 글자 선택이 풀린다.
 
 ### 3.4 절별 내용
+설명 — 절마다 머리 줄 바로 아래 접힌 '이 절 읽는 법'(개요는 칸 여섯 아래), 덩어리 끝 '이 칸 뜻', 행 안 한국어 이름표(실패 종류·경보 꼬리·탭), 타일 부제. 자리·문구 규칙·항목은 041 이고 042·043 도 같은 틀을 쓴다.
+
 **개요** — 타일 일곱: 종합·수집기·api·지금 접속·경보·canary·이번 달 비용. 타일을 누르면 그 절로 간다.
 - 종합 판정(위에서부터 먼저 맞는 것):
   - 알 수 없음: 수집기 또는 api `/health` 호출 자체가 실패(403·JSON 아님·만료).
   - 장애: 수집기 또는 api 상태가 `ok` 아님, Redis·Influx 중 `down`, `ALARM` 경보 1개 이상, 거래소 하나라도 `down`.
   - 주의: 거래소 `stale`, canary 최근 실행 실패(`ok` false), `alarms`·`canary` 부분의 `error`.
-  - 정상: 그 밖. `unconfigured`·`denied`·`pending` 과 그 밖 부분(`metrics`·`budget`·알림 `slack`·접속·Clarity)의 `error` 는 판정에 넣지 않는다 — 그 칸에만 보인다. AWS 가 끝나거나 AWS 밖으로 옮겨도(`unconfigured`) 개요가 늘 주의가 되지 않게.
+  - 정상: 그 밖. `unconfigured`·`denied`·`pending` 과 그 밖 부분(`metrics`·`budget`·알림 `slack`·접속·Clarity)의 `error` 는 판정에 넣지 않는다 — 그 칸에만 보인다. AWS 자격이 없거나 AWS 밖으로 옮겨도(`unconfigured`) 개요가 늘 주의가 되지 않게.
 - 종합 타일 아래에 사유를 최대 셋 한 줄로("경보 ALARM collect-memory · bybit 끊김" — `ALARM` 경보는 둘까지 이름, 셋 이상이면 "경보 3개 ALARM"). 판정 재료를 못 읽었으면(`/health/collect`·`/admin/status` 호출 실패) 판정은 그대로 두고 사유에 "거래소 상태 모름"·"Redis·Influx 상태 모름". 다른 타일 값: 수집기(상태·마지막 틱 n초 전), api(상태·Redis·Influx), 지금 접속(`wsConnections`), 경보(`ALARM` 수 / 전체), canary(통과·실패·n분 전), 비용(월 예산 중 한도 대비 실제 비율이 가장 큰 것의 실제 / 한도).
 
 **수집** — 029 화면에서 옮기고 넓힌다.
-- 요약 줄: 전체 1시간 성공률·마켓 수 합·수집기 시작 시각(`serverStartedAt`)·두 역할 버전.
-- 거래소 표: 거래소·상태 배지·열린 실패 구간(`kind · n회 · n분째`)·마지막 성공(n초 전)·1시간 성공률·마켓 수·마지막 오류(시각·kind·HTTP(있을 때)·`message` 앞 300자 한 줄, 전체는 `title` — 열린 구간이 없는 거래소는 흐림).
-- 실패 구간 24시간 타임라인: 거래소 다섯 줄, `outages` 를 막대로(진행 중은 지금까지), `banned`·`rate_limit` 은 장애색·꽉 찬 높이, 그 밖은 주의색·낮은 막대(색만으로 가르지 않는다), 1분 미만도 최소 폭, 막대마다 `HH:mm–HH:mm · kind · ×count`, 아래에 최신 다섯 구간을 같은 글자로(휴대폰은 `title` 을 못 본다). 구간이 없으면 "최근 24시간 실패 없음". 011 의 수집 상태 탭과 같은 색 규칙이다.
+- 요약 줄: 전체 1시간 성공률·마켓 수 합·수집기 시작 시각(`serverStartedAt`). 1시간 성공률은 소수 1자리(011 의 서버 정밀도).
+- 거래소 표: 거래소·상태 배지·열린 실패 구간(실패 종류 이름표 · n회 · n분째)·마지막 성공(n초 전)·1시간 성공률·마켓 수·마지막 오류(시각·실패 종류 이름표·HTTP(있을 때)·`message` 앞 300자 한 줄, 전체는 `title` — 열린 구간이 없는 거래소는 흐림).
+- 실패 구간 24시간 타임라인: 거래소 다섯 줄, `outages` 를 막대로(진행 중은 지금까지), `banned`·`rate_limit` 은 장애색·꽉 찬 높이, 그 밖은 주의색·낮은 막대(색만으로 가르지 않는다), 1분 미만도 최소 폭, 막대마다 `HH:mm–HH:mm · 실패 종류 이름표 · ×count`, 아래에 최신 다섯 구간을 같은 글자로(휴대폰은 `title` 을 못 본다). 구간이 없으면 "최근 24시간 실패 없음". 011 의 수집 상태 탭과 같은 색 규칙이다.
 - 즉시 갱신: 029 그대로 — 토큰칸(`type=password`·자동완성 끔)·버튼·결과(HTTP 상태·`totalSaved`·`failures` 의 거래소·`errorCode`·`warnings`).
 
 **인프라** — `metrics`·`alarms`·`canary`. 순서는 경보·canary → 박스 카드. 세 부분이 같은 이유로 비면(연결 안 됨·권한 없음·같은 호출 실패) 절 전체를 카드 하나로 접는다.
 - 박스 카드 셋(collect 수집기 / data Influx·Redis / serve caddy·web·api, `instanceId` 는 `title`): 메모리 가용률·디스크 사용률·CPU 사용률 선 차트와 각각 지금 값·24시간 최저(메모리)·최고(디스크·CPU). 기준선은 027 경보 임계(메모리 10%·디스크 80%). 값 색: 메모리 10% 미만 장애·20% 미만 주의, 디스크 80% 초과 장애·70% 초과 주의(주의 기준은 기본값 — 사람 확인), CPU 는 색 없음. t4g 박스(data·serve)는 크레딧 잔고 선과 지금·24시간 최저 — 027 잔고 경보 임계(최대 적립의 30% — data 173·serve 86) 미만이면 장애색. 카드 머리에 지금 값 중 가장 나쁜 주의·장애 배지, 축 글자는 카드 맨 아래 한 번. 스왑은 값이 있는 박스만(지금은 data) — serve 스왑은 027 에이전트가 모으지 않아 카드에 "스왑 지표 없음" 한 줄.
-- 경보 표: 이름(`marketlens-` 접두를 뗀다, 그 아래 둘째 줄에 사유 앞 160자·전체 `title`)·상태 배지·바뀐 지(n분 전). 정렬 `ALARM` → `INSUFFICIENT_DATA` → `OK`, 같으면 이름순. `OK` 행은 접힌 묶음("정상 n개") 안에 두고, 다시 그려도 펼침 상태를 유지한다.
+- 경보 표: 이름(`marketlens-` 접두를 뗀다, 이름 뒤에 경보 꼬리 이름표(041) — title 은 전체 이름과 조건, 그 아래 둘째 줄에 사유 앞 160자·전체 `title`)·상태 배지·바뀐 지(n분 전). 정렬 `ALARM` → `INSUFFICIENT_DATA` → `OK`, 같으면 이름순. `OK` 행은 접힌 묶음("정상 n개") 안에 두고, 다시 그려도 펼침 상태를 유지한다.
 - canary 카드: 최근 실행(통과·실패·n분 전), 24시간 실행·오류 수(`metrics.canary` 합), 실행 시간(ms) 선 차트, 최근 실행 로그 줄(고정폭 글꼴, 최대 10줄).
 
 **알림** — 알림 기록.
 - 필터 버튼 셋: 전체·앱(Slack)·경보(CloudWatch). 고른 값은 JS 변수에만 둔다.
-- 행: 시각(오늘이면 `HH:mm:ss`, 아니면 `MM-DD HH:mm`)·출처 배지(`collector`·`api`·`경보`)·글. Slack 글은 🔴 로 시작하면 장애색, 🟢 정상색, ⚠️ 주의색, 그 밖 기본색. `delivered` 가 false 면 "전송 실패" 배지(주의색 — Slack 에는 없는 알림이다). 경보 행의 글은 `<이름> <이전> → <새>`, 새 상태 `ALARM` 장애색·`OK` 정상색·`INSUFFICIENT_DATA` 흐림. `key` 는 `title`.
-- 머리 줄 "n건 · 보낸 Slack 알림(전송 실패 포함)과 경보 상태 변경 — 억제된 알림은 없다". 최신순, 목록 높이 상한을 넘으면 목록 안에서 스크롤.
+- 행: 시각(오늘이면 `HH:mm:ss`, 아니면 `MM-DD HH:mm`)·출처 배지(`collector`·`api`·`경보`)·글. Slack 글은 🔴 로 시작하면 장애색, 🟢 정상색, ⚠️ 주의색, 그 밖 기본색. `delivered` 가 false 면 "전송 실패" 배지(주의색 — Slack 에는 없는 알림이다). 경보 행의 글은 `<이름> <꼬리 이름표> <이전> → <새>`, 새 상태 `ALARM` 장애색·`OK` 정상색·`INSUFFICIENT_DATA` 흐림. `key` 는 `title`.
+- 머리 줄 "n건 · 보낸 Slack 알림(전송 실패 포함)과 경보 상태 변경 — 10분 억제로 보내지 않은 알림은 기록에도 없다". 최신순, 목록 높이 상한을 넘으면 목록 안에서 스크롤.
 
 **접속** — 세 덩어리.
 - 실시간: 지금 WebSocket 접속 수(빠른 묶음 `wsConnections`) 큰 숫자 + 24시간 `wsClients` 선. 부제 "열린 대시보드 수 — 사람 수가 아니다".
-- 서버 기록 24시간(접속 요약): 총 요청·페이지·시간대별 막대 24개(5xx 는 장애색으로 겹침 — 최고 n/시간과 5xx 가 난 시간은 글자로도)·상태 코드 대분류, WebSocket 연결 수·지속 시간 구간 막대(구간 이름 아래 수), 표 여섯(경로·탭·외부 출처·`utm_source`·기기·브라우저 — 이름·수·비율 막대(비율 = 수 ÷ `totals.humanPages`), 상위 10), 최근 5xx 표(시각·경로·상태, 20행). `firstTs` 가 `startTs` 보다 늦으면 부제에 "기록 시작 HH:mm". 부제 "폴링·canary 제외, IP 없음 · 읽지 못한 줄 n"(`skipped`).
-- Clarity(Clarity 요약): 타일 넷(세션·봇 세션·사용자·세션당 페이지)과 "받은 지표" 목록 — 지표마다 이름 한 줄과 행마다 `키:값 · 키:값` 글자 한 줄(20행, 한 줄 200자에서 자르고 전체는 `title`). 부제 "최근 1일 · UTC 기준 — Clarity 가 준 값". 스크롤 깊이·참여 시간·dead·rage click 같은 정규화 타일은 세션이 있는 응답을 보고 035 가 키를 정한 뒤 두 스펙을 함께 고칠 때 더한다(첫 응답은 세션 0 — 이름·키는 035 §7).
+- 서버 기록 24시간(접속 요약): 총 요청·페이지·시간대별 막대 24개(5xx 는 장애색으로 겹침 — 최고 n/시간과 5xx 가 난 시간은 글자로도)·상태 코드 대분류, WebSocket 연결 수·지속 시간 구간 막대(구간 이름 아래 수), 표 여섯(경로·탭(한국어 탭 이름 — 002, title 은 id)·외부 출처·`utm_source`·기기·브라우저 — 이름·수·비율 막대(비율 = 수 ÷ `totals.humanPages`), 상위 10), 최근 5xx 표(시각·경로·상태, 20행). `firstTs` 가 `startTs` 보다 늦으면 부제에 "기록 시작 HH:mm". 부제 "폴링·canary 제외, IP 없음 · 읽지 못한 줄 n"(`skipped`). 총 요청·페이지 타일은 부제 한 줄(041).
+- Clarity(Clarity 요약): 타일 넷(세션·봇 세션·사용자·세션당 페이지)과 "받은 지표" 목록 — 지표마다 이름 한 줄과 행마다 `키:값 · 키:값` 글자 한 줄(20행, 한 줄 200자에서 자르고 전체는 `title`). 부제 "최근 1일 · UTC 기준 — Clarity 가 준 값". 정규화 값(`summary`·`countries`·`pages`)은 040 응답에 있다 — 그리는 것은 043. 타일 넷은 부제 한 줄(041).
 
 **비용** — `budget`.
 - 월 단위(`timeUnit` `MONTHLY`) 비용 예산 전부를 한 줄씩: 이름·실제·한도·예측(달러 소수 2자리), 가로 막대 하나(실제 사용액, 85%·100% 표시선 — 027 예산 알림 기준)와 이번 달이 지난 비율 표시선(한도 × 지난 비율 자리 — 실제 막대가 넘으면 한도보다 빠르게 쓰는 중). 예측이 한도를 넘으면 주의색. 월 단위가 아닌 예산은 막대 없이 이름·실제·한도만. 예산이 0개면 "예산 없음".
-- 고정 문구 둘: "서비스별 내역은 조직 SCP 가 Cost Explorer 를 막아 여기 없다 — 결제 콘솔에서 본다", "AWS 계정 종료 예정 2026-12"(날짜는 사람 확인).
+- 고정 문구 하나: "서비스별 내역은 조직 SCP 가 Cost Explorer 를 막아 여기 없다 — 결제 콘솔에서 본다".
 
 **도구** — 링크 묶음. 앱: API 문서 `/api/docs`·ReDoc `/api/redoc`(029). AWS 서울: CloudWatch 경보, CloudWatch 지표(네임스페이스 `MarketLens`), Lambda `marketlens-smoke`, 로그 그룹 `/aws/lambda/marketlens-smoke`, 예산(결제 콘솔). Clarity: 프로젝트 목록 `https://clarity.microsoft.com/projects`. Cloudflare: 루트 둘만 — `https://one.dash.cloudflare.com/`(Zero Trust)·`https://dash.cloudflare.com/`(DNS). GitHub: 레포 Actions. 로그아웃은 머리에 있다.
 
@@ -113,7 +115,7 @@
 | `error` | 불러오지못함 |
 
 - 부분의 상태는 그 부분 칸에만 보인다 — AWS 예산만 `denied` 면 비용 절과 비용 타일만 "권한 없음" 이고 경보·지표는 그대로다.
-- `unconfigured`: 흐린 배지 "연결 안 됨" + 한 줄 원인(AWS "AWS 자격 없음 또는 계정 종료", 접속 "로그 파일 없음", Clarity "토큰 없음 또는 033 전"). `denied`: 흐린 배지 "권한 없음" + "IAM 정책 또는 조직 SCP — 콘솔에서 본다". `pending`: `…` 와 "첫 조회 중", 판정 제외. 배지 옆에 `code` 를 작게 적는다.
+- `unconfigured`: 흐린 배지 "연결 안 됨" + 한 줄 원인(AWS "AWS 자격 없음", 접속 "로그 파일 없음", Clarity "토큰 없음 또는 033 전"). `denied`: 흐린 배지 "권한 없음" + "IAM 정책 또는 조직 SCP — 콘솔에서 본다". `pending`: `…` 와 "첫 조회 중", 판정 제외. 배지 옆에 `code` 를 작게 적는다.
 - 값 규칙: **값이 null 이면 칸을 비운다.** `error` 인데 값이 있으면(Clarity — 마지막 성공 값) 값을 그대로 보이고 장애색 배지 "불러오지 못함 · 마지막 성공 n시간 전" 을 단다. `error` 에 값이 없으면 장애색 "불러오지 못함" 과 빈칸.
 - HTTP 수준 실패(403·JSON 아닌 응답·만료 신호)는 029 규칙 그대로 — 그 호출이 채우는 칸을 모두 비우고 사유("권한·설정 오류 (403)"·"응답 오류 (HTTP n)"·"로그인 만료·연결 끊김")를 적는다. 직전 값이 정상으로 읽히지 않게.
 - 값은 왔는데 목록이 0개면 "지난 24시간 기록 없음" 처럼 그 칸의 빈 문구. 차트는 값 있는 점이 2개 미만이면 차트 대신 "값 없음"(0개)·"값 1개뿐"(1개) — 경보 상태 `INSUFFICIENT_DATA` 의 "데이터 부족"(AWS 한국어 이름)과 겹치지 않게.
@@ -140,14 +142,14 @@
 
 ### 3.9 엣지
 - 034·035 전 배포(피드 경로 없음): 느린 묶음이 404 → 인프라·알림·접속(서버 기록·Clarity)·비용이 "응답 오류 (HTTP 404)", 빠른 묶음·즉시 갱신은 그대로 — 그래서 두 스펙 머지가 시작 조건이다.
-- AWS 계정 종료(2026-12)·AWS 밖으로 옮김: AWS 요약 네 부분과 알림의 `alarms` 가 `unconfigured`(자격 없음)가 되고, 인프라·비용 절과 개요의 경보·canary·비용 타일·접속의 24시간 선만 "연결 안 됨" 이다. 종합 판정은 §3.4 대로 앱 쪽 값과 `alarms`·`canary` 의 `error` 로만 한다 — `unconfigured` 는 판정 밖이다. AWS 링크는 남는다 — 이전이 정해지면 사람이 이 스펙을 고친다.
+- AWS 자격이 없거나 AWS 밖으로 옮김: AWS 요약 네 부분과 알림의 `alarms` 가 `unconfigured`(자격 없음)가 되고, 인프라·비용 절과 개요의 경보·canary·비용 타일·접속의 24시간 선만 "연결 안 됨" 이다. 종합 판정은 §3.4 대로 앱 쪽 값과 `alarms`·`canary` 의 `error` 로만 한다 — `unconfigured` 는 판정 밖이다. AWS 링크는 남는다 — 옮길 곳이 정해지면 사람이 이 스펙을 고친다.
 - Clarity 하루 호출 한도(프로젝트당 10회 — 035): 실패해도 마지막 성공 값과 "마지막 성공 n시간 전" 배지가 보이고, 판정은 바뀌지 않는다.
 - 브라우저 시계가 서버보다 빠름: 경과가 음수면 0초(029 와 같다). 시각은 브라우저 시간대.
 - 긴 목록: 피드 상한을 믿지 않고 화면도 자른다 — 알림 200행, 표 10행, 최근 5xx 20행, canary 로그 10줄, Clarity 지표마다 20행.
 
 ## 4. 검증
 **PR 안 — 실행 세션(완료 조건)**. 시작 전에 main 에 034·035 가 있는지 본다(없으면 멈추고 묻는다).
-- 정적 단언(`server/tests/test_admin.py` — 029 의 화면 단언은 유지하고 아래를 더한다):
+- 정적 단언(`server/tests/test_admin.py` — 029 의 화면 단언은 유지하고 아래를 더한다 — 설명·이름표·문구 고침 단언은 041 §4 가 더한다):
   - `admin.js`: `X-Requested-With`·`visibilityState`·`createElementNS`·`refreshSec` 가 있다 / `fetch(` 는 1회 / `location.replace(`·`history.replaceState(` 각 1회, 주소 `/` 고정(029) / 10초·60초 주기 상수 / 본문 안 경과 글자는 시각을 data 속성에 둔 span 이고 그리기 끝에 글자만 고치는 함수가 돈다(글자가 다를 때만 쓴다) / 금지: `localStorage`·`sessionStorage`·`indexedDB`·`document.cookie`·`innerHTML`·`outerHTML`·`insertAdjacentHTML`·`document.write`·`eval(`·`new Function`·`window.open`·`location.pathname`·`location.href`·`.style`·`setAttribute('style'`·`.href`·`setAttribute('href'`·`setAttribute('src'`·`.src`·`setAttributeNS`·`xlink:href`·`new XMLHttpRequest`·`sendBeacon`·`new WebSocket`·`EventSource` / SVG 속성 허용 목록이 §3.6 그대로이고 `svg()` 가 그 밖을 던진다·글자 그대로 부르는 SVG 요소와 속성 키가 목록 안 / 파일 안의 `http://`·`https://` 는 SVG 이름공간 하나뿐.
   - `index.html`: 인라인 스크립트 본문·`style=`·`<form`·`target=` 없음(029) / 절 id 일곱이 §3.1 순서, 머리의 이동 링크 일곱 / 토큰칸·API 문서·ReDoc·로그아웃 링크(029) / 외부 링크(`//` 로 시작하는 것 포함, 따옴표 꼴 무관)는 전부 `https://` 이고 `rel="noreferrer"`, 호스트는 AWS 콘솔(`*.console.aws.amazon.com`)·`clarity.microsoft.com`·`dash.cloudflare.com`·`one.dash.cloudflare.com`·`github.com` 안이고 Cloudflare 링크는 경로가 `/` / 12자리 숫자·이메일 모양·`[0-9a-f]{32,}`·`cloudflareaccess.com`·`/projects/view/` 없음.
   - `admin.css`: `@import`·`url(` 없음 / `--color-bg`·`--color-surface`·`--color-ok`·`--color-warn`·`--color-up` 값이 `docs/design/theme.css` 와 같다 / 640px 미디어 쿼리 / `body` 에 `word-break: keep-all`·`overflow-wrap: break-word`.

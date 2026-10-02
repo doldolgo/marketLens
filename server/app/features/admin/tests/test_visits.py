@@ -191,8 +191,9 @@ def test_http_clarity_answers_one_part_without_the_token(api: TestClient) -> Non
     body = resp.json()
     assert list(body)[:4] == PART_KEYS
     assert (body["state"], body["traffic"], body["metrics"]) == ("ok", None, [])
-    assert len(calls) == 1 and TOKEN not in resp.text
-    assert api.get("/admin/clarity").json()["state"] == "ok" and len(calls) == 1
+    assert body["pages"]["state"] == "ok"  # 기본 뒤 묶음 호출도 한 번(040)
+    assert len(calls) == 2 and TOKEN not in resp.text
+    assert api.get("/admin/clarity").json()["state"] == "ok" and len(calls) == 2
 
 
 def test_handler_exceptions_become_error_parts_not_500(
@@ -245,7 +246,7 @@ def test_http_clarity_with_nan_infinity_and_surrogates_stays_200(
 def test_http_unwritable_record_in_redis_is_an_error_part_not_500(
     api: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # 손으로 넣은 기록 — 짝 없는 서로게이트는 응답으로 쓸 수 없다. 3시간 안이라 부르지도 않는다
+    # 손으로 넣은 기록 — 짝 없는 서로게이트는 응답으로 쓸 수 없다. 4시간 안이라 부르지도 않는다
     now_ms = int(time.time() * 1000)
     record = (
         f'{{"attemptAt":{now_ms},"state":"ok","code":null,"successAt":{now_ms},'
@@ -253,6 +254,11 @@ def test_http_unwritable_record_in_redis_is_an_error_part_not_500(
     )
     server = fakeredis.FakeServer()
     fakeredis.FakeRedis(server=server).set("admin:clarity", record)
+    # 묶음 기록도 12시간 안 — 040 의 묶음 호출이 생기지 않게
+    fakeredis.FakeRedis(server=server).set(
+        "admin:clarity:pages",
+        f'{{"attemptAt":{now_ms},"state":"ok","code":null,"successAt":null,"values":null}}',
+    )
     api.app.state.spreads_bus = RedisBus(fakeredis.aioredis.FakeRedis(server=server))
     calls: list[httpx.Request] = []
 
