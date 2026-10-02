@@ -359,7 +359,7 @@ function stats(points) {
 // 24시간 선 — 가로는 ts×1000 을 창에, null 에서 끊고(보간 없음) 비율은 0~100 고정·그 밖은 0~최댓값, 기준선은 점선
 function line(points, o) {
   const s = stats(points);
-  if (s.count < 2) return el('p', 'empty', '데이터 부족');
+  if (s.count < 2) return el('p', 'empty', s.count ? '값 1개뿐' : '값 없음');
   const W = 288;
   const H = 48;
   const top = o.fixed100 ? 100 : Math.max(s.max, o.ref ?? 0) * 1.1 || 1;
@@ -1102,7 +1102,7 @@ function fillAccess(node, a) {
     tip: `${hm(h.ts * 1000)} · 요청 ${int(h.requests)} · 페이지 ${int(h.pages)} · 5xx ${int(h.errors)}`,
   }));
   const peak = Math.max(0, ...bars.map((b) => b.value));
-  const chart = hourly.length ? columns(bars, `시간대별 요청 24시간 — 최고 ${int(peak)}, 5xx 는 겹쳐 표시`, 'tall') : el('p', 'empty', '데이터 부족');
+  const chart = hourly.length ? columns(bars, `시간대별 요청 24시간 — 최고 ${int(peak)}, 5xx 는 겹쳐 표시`, 'tall') : el('p', 'empty', '값 없음');
   // 막대 값은 title 에만 있으면 휴대폰에서 못 본다 — 최고 값과 5xx 가 난 시간을 글자로
   const hourHead = el('p', 'summary-row');
   hourHead.append(el('span', null, `시간대별 요청 · 최고 ${int(peak)}/시간`));

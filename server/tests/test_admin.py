@@ -548,6 +548,14 @@ def test_screen_script_has_two_polling_bundles_and_no_outside_address() -> None:
         assert f"'{path}'" in js, path
 
 
+def test_screen_chart_empty_words_differ_from_the_alarm_state_name() -> None:
+    """036 §3.5 — 점 2개 미만 차트는 "값 없음"·"값 1개뿐", "데이터 부족" 은 경보 INSUFFICIENT_DATA 만."""
+    js = _text("web/admin/admin.js")
+    assert "s.count ? '값 1개뿐' : '값 없음'" in js
+    assert "el('p', 'empty', '데이터 부족')" not in js
+    assert "INSUFFICIENT_DATA: ['dim', '데이터 부족']" in js
+
+
 def test_screen_page_has_no_inline_script_or_style() -> None:
     html = _text("web/admin/index.html")
     scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, flags=re.S)
