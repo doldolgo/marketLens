@@ -1411,6 +1411,242 @@ function sentence(node, segs) {
   node.replaceChildren(...segs.map((s) => (typeof s === 'string' ? clean(s) : el('b', null, s.b))));
 }
 
+// --- 서버 기록 덩어리의 조각 (042 §3.4·§3.7·§3.9) ------------------------------------------------------
+
+const opened = new Set(); // 연 접힘('n개 더'·덩어리 안 접힘) — 60초마다 다시 그려도 열린 채(036 '정상 n개' 와 같다)
+
+function fold(key, summary, cls) {
+  const box = el('details', cls);
+  box.open = opened.has(key);
+  box.addEventListener('toggle', () => (box.open ? opened.add(key) : opened.delete(key)));
+  box.append(summary instanceof Node ? summary : clip(el('summary'), summary, 90));
+  return box;
+}
+
+// 막대 행 — 이름·막대·값(같은 DOM 을 CSS 가 넓으면 한 줄, 480px 이하는 '이름 … 값' 아래 막대로). 이름은 줄을 바꾸고
+// 자르지 않되 방문자 글자는 60자에서 자르고 전체는 title(§3.10). title 은 원래 키(이름표가 있으면)
+function barRow(item, chart, value) {
+  const row = el('div', `brow${item.zero ? ' zero' : ''}`);
+  const name = clip(el('span', 'brow-name'), item.label, 60);
+  if (item.iso) name.append(el('span', 'iso', item.iso));
+  if (item.title) name.title = clean(item.title);
+  const val = el('span', 'brow-val');
+  val.append(...value);
+  row.append(name, chart, val);
+  return row;
+}
+
+// 겹친 두 막대 — 같은 눈금, 바깥 rect 브라우저 모양·안쪽 얇은 rect 확인. 값은 늘 'a / b'(a 굵게, §3.7)
+function pairBar(c, s, top) {
+  const x = (v) => ((Math.min(v, top) / top) * 100).toFixed(2);
+  const root = frame(100, 10, 'pair', '확인과 브라우저 모양 막대');
+  root.append(svg('rect', { x: 0, y: 0, width: 100, height: 10 }, 'track'), svg('rect', { x: 0, y: 0, width: x(s), height: 10 }, 'shaped'));
+  root.append(svg('rect', { x: 0, y: 3, width: x(c), height: 4 }, 'confirmed'));
+  return tip(root, `확인 ${int(c)} / 브라우저 모양 ${int(s)}`);
+}
+const pairValue = (c, s) => [el('b', null, int(c)), ` / ${int(s)}`];
+
+function oneBar(frac, cls) {
+  const f = Math.min(1, Math.max(0, frac));
+  const root = frame(100, 10, 'pair', `비율 ${(f * 100).toFixed(1)}%`);
+  root.append(svg('rect', { x: 0, y: 0, width: 100, height: 10 }, 'track'), svg('rect', { x: 0, y: 0, width: (f * 100).toFixed(2), height: 10 }, cls));
+  return tip(root, `${(f * 100).toFixed(1)}%`);
+}
+
+// 긴 목록 — 위 5행만 펴고 나머지는 'n개 더 — 이름, 이름…' 접힘(§3.9)
+function longList(key, items, make) {
+  if (!items.length) return [el('p', 'empty', '기록 없음')];
+  const out = items.slice(0, 5).map(make);
+  const rest = items.slice(5);
+  if (rest.length) {
+    const more = fold(key, `${rest.length}개 더 — ${rest.map((it) => clean(it.label)).join(', ')}`, 'more');
+    more.append(...rest.map(make));
+    out.push(more);
+  }
+  return out;
+}
+
+// 이름 → { label, title, iso } — 이름표가 있으면 한국어 이름과 title 에 원래 키, 나라는 지역 이름 + ISO 작게
+const labeled = (table) => (key) => (own(table, key) ? { label: table[key], title: key } : { label: clean(key) });
+const country = (key) => {
+  const name = countryName(key);
+  return name ? { label: name, iso: key, title: key } : { label: clean(key) };
+};
+
+// 확인·모양 짝 목록([[이름, c, s]]) — 겹친 두 막대
+function pairList(key, rows, name) {
+  const top = Math.max(1, ...rows.map((r) => r[2]));
+  const items = rows.map(([k, c, s]) => ({ ...name(k), c, s }));
+  return longList(key, items, (it) => barRow(it, pairBar(it.c, it.s, top), pairValue(it.c, it.s)));
+}
+
+// 페이지 줄 목록([[이름, 수]]) — 한 막대 + %(분모 = 사람 모양 페이지 또는 그 목록의 합)
+function shareList(key, rows, name, denom) {
+  const items = rows.map(([k, v]) => ({ ...name(k), v }));
+  return longList(key, items, (it) => {
+    const r = share(it.v, denom);
+    return barRow(it, oneBar(r, 'shaped'), [el('b', null, int(it.v)), ` · ${Math.round(r * 100)}%`]);
+  });
+}
+
+function column(title, sub, content) {
+  const col = el('div', 'col');
+  const top = el('div', 'col-head');
+  top.append(el('b', null, title), el('span', null, sub));
+  col.append(top, ...content);
+  return col;
+}
+
+function keys(pairs) {
+  const row = el('div', 'keys');
+  row.append(...pairs.map(([cls, text]) => el('span', `key${cls ? ` ${cls}` : ''}`, text)));
+  return row;
+}
+
+// 짝 단위 칸이 비었을 때 — 시행 전이면 시행일 빈 상태(036 §3.5 의 before_gate 예외), 아니면 036 상태 글
+function pairNote(f, part, tail = '') {
+  if (f.pre || part?.code === 'before_gate') return el('p', 'state-msg', `처리방침 개정 시행(${f.D} 00:00) 뒤부터 센다${tail}`);
+  return stateMsg(isObj(part) ? part : BAD_SHAPE, CAUSE.access);
+}
+const DBIP_TAIL = '. 그 전에는 DB-IP 자료를 받지도 않는다';
+
+// geo 상태 한 줄(§3.8) — 받는 중·실패·지난달 판. ok 이고 이번 달 판이면 null
+function geoNote(f) {
+  const g = f.geo;
+  if (!g || f.pre || g.code === 'before_gate') return pairNote(f, g, DBIP_TAIL);
+  if (g.state === 'pending') return el('p', 'state-msg', '자료 받는 중 — 다음 갱신(60초)에 찬다');
+  if (g.state !== 'ok') return marked('warn', `받지 못함(${clean(g.code ?? g.state)}) — 1시간 뒤 다시`);
+  return oldMonth(f) ? marked('warn', `지난달 판 ${clean(g.month)} 으로 셈`) : null;
+}
+// 지난달 판 — month 가 응답 endTs 의 UTC 달보다 이르다(브라우저 시계를 쓰지 않는다)
+const oldMonth = (f) => typeof f.geo?.month === 'string' && f.geo.month < new Date(n0(f.a.endTs) * 1000).toISOString().slice(0, 7);
+
+// ① 몇 명
+function q1(f) {
+  const { T, vis: v } = f;
+  const out = [];
+  if (v?.capped) out.push(marked('warn', '짝 기록이 1,000에 닿은 날이 있다 — 방문자 수가 실제보다 적다'));
+  const range = el('div', 'stat');
+  range.append(el('span', 'stat-label', f.span ? '확인 ~ 브라우저 모양 · 하루 평균' : '확인 ~ 브라우저 모양'));
+  const big = el('span', 'range-num');
+  const [c, s, r] = v ? [n0(v.confirmed), n0(v.shaped), n0(v.returning)] : [0, 0, 0];
+  const fmt = (x) => (f.span ? perDay(f.a, v, x) ?? '–' : int(x));
+  if (v) big.append(el('b', null, fmt(c)), ` ~ ${fmt(s)}`);
+  else big.textContent = '—';
+  range.append(big, el('span', 'stat-sub', !v ? '방문자(날마다 셈)' : f.span ? '명/일' : '방문자(날마다 셈)'));
+  const tiles = el('div', 'tiles');
+  tiles.append(
+    range,
+    stat('다시 온', v ? int(r) : '—', null, v ? (c > 0 ? `확인의 ${pct(r, c)}%` : '확인 0') : f.pre ? '시행 뒤부터' : ''),
+    stat('스크립트가 돈 페이지', int(T.jsViews), null, `사람 모양 페이지 ${int(n0(T.humanPages))} 중`),
+    stat('사람 모양 페이지', int(T.humanPages), null, '위장 봇 섞임'),
+  );
+  out.push(tiles);
+  if (!v) return [...out, pairNote(f, f.a.visitors)];
+  const band = frame(100, 12, 'lohi', '하한–상한 띠 — 확인과 브라우저 모양');
+  band.append(svg('rect', { x: 0, y: 0, width: 100, height: 12 }, s > 0 ? 'shaped' : 'track'));
+  band.append(svg('rect', { x: 0, y: 0, width: (share(Math.min(c, s), s) * 100).toFixed(2), height: 12 }, 'confirmed'));
+  const ends = el('div', 'ends');
+  const low = el('span', null, '적어도 이만큼은 사람 — 확인 ');
+  low.append(el('b', null, fmt(c)));
+  ends.append(low, el('span', null, `많아야 이만큼 — 브라우저 모양 ${fmt(s)}`));
+  out.push(tip(band, `확인 ${fmt(c)} / 브라우저 모양 ${fmt(s)}`), ends);
+  return out;
+}
+
+function step(label, value, sub) {
+  const box = el('div', 'step');
+  box.append(el('span', 'step-label', label), el('span', 'step-val', value));
+  if (sub) box.append(el('span', 'step-sub', sub));
+  return box;
+}
+
+function clue(value, label, sub) {
+  const row = el('div', 'clue');
+  row.append(el('span', 'clue-val', value), el('span', null, label));
+  if (sub instanceof Node) {
+    sub.classList.add('clue-sub');
+    row.append(sub);
+  } else if (sub) row.append(el('span', 'clue-sub', sub));
+  return row;
+}
+
+// ② 누가
+function q2(f) {
+  const { T, vis: v } = f;
+  const [req, pages, hp, js] = [n0(T.requests), n0(T.pages), n0(T.humanPages), n0(T.jsViews)];
+  const ofPrev = (x, prev) => (prev > 0 ? `앞 칸의 ${pct(x, prev)}%` : '');
+  const funnel = el('div', 'funnel');
+  const c = v ? n0(v.confirmed) : 0;
+  funnel.append(
+    step('모든 요청', int(req)),
+    step('페이지', int(pages), ofPrev(pages, req)),
+    step('사람 모양 페이지', int(hp), ofPrev(hp, pages)),
+    step('스크립트가 돈 페이지', int(js), ofPrev(js, hp)),
+    step('확인 방문자(날마다 셈)', v ? int(c) : '—', v ? (c > 0 ? `1명이 평균 ${AVG.format(js / c)}쪽` : '') : '시행 뒤부터'),
+  );
+  const classes = isObj(f.a.classes) ? f.a.classes : {};
+  const kinds = CLASSES.map((k) => {
+    const [r, p] = [n0(classes[k]?.requests), n0(classes[k]?.pages)];
+    return barRow({ label: CLASS_NAME[k], title: k, zero: !r && !p }, oneBar(share(r, req), k === 'browser' ? 'confirmed' : 'bot'), [`${int(r)} · ${int(p)}`]);
+  });
+  const probes = n0(T.probes);
+  kinds.push(el('p', 'muted small', req > 0 ? `탐색 경로 ${int(probes)}줄(요청의 ${pct(probes, req)}%)` : `탐색 경로 ${int(probes)}줄`));
+  const g = f.geo;
+  const cloud = g?.state === 'ok' ? rows3(g.networks).find((r) => r[0] === 'cloud') ?? ['cloud', 0, 0] : null;
+  const gateSub = pairNote(f, f.a.visitors);
+  const clues = [
+    clue(v ? int(n0(v.shaped) - c) : '—', '스크립트가 한 번도 돌지 않은 브라우저 모양', v ? '날마다 셈' : gateSub),
+    clue(cloud ? int(cloud[2]) : '—', '데이터센터·클라우드 망의 브라우저 모양', cloud ? (oldMonth(f) ? geoNote(f) : `그중 확인 ${int(cloud[1])}`) : geoNote(f)),
+    clue(int(n0(classes.operator?.requests)), '운영자 흔적 요청', '방문자에서 뺐다'),
+  ];
+  const cols = el('div', 'cols2');
+  cols.append(column('종류 여덟', '요청 비율 · 요청 · 페이지', kinds), column('위장 봇 단서', '사람 수에서 덜어 볼 것', clues));
+  return [funnel, cols];
+}
+
+// ③ 어디서
+function q3(f) {
+  const { vis: v, geo: g } = f;
+  const geoOk = g?.state === 'ok' && !f.pre;
+  const note = geoNote(f);
+  const geoCol = (key, rows, name) => [...(note ? [note] : []), ...(geoOk ? pairList(key, rows, name) : [])];
+  const nets = geoOk ? rows3(g.networks) : [];
+  const hasKr = nets.some((r) => r[0] === 'telecom_kr');
+  // 망은 다섯 고정 순서(모르는 키는 뒤), 국내 통신사 행이 없는 창의 telecom 은 '통신사'
+  const ordered = [...NETS.flatMap((k) => nets.filter((r) => r[0] === k)), ...nets.filter((r) => !NETS.includes(r[0]))];
+  const netName = (k) => (k === 'telecom' && !hasKr ? { label: '통신사', title: k } : labeled(NET_NAME)(k));
+  const pairsOr = (key, rows, name) => (v ? pairList(key, rows, name) : [pairNote(f, f.a.visitors)]);
+  const hp = n0(f.T.humanPages);
+  const top = el('div', 'cols3');
+  top.append(
+    column('나라', geoOk ? `IPv6 ${int(g.ipv6)} 따로` : '', geoCol('q3-countries', rows3(g?.countries), country)),
+    column('망 종류', '', geoCol('q3-nets', ordered, netName)),
+    column('들어온 길', '그날 첫 페이지', pairsOr('q3-channels', rows3(v?.channels), labeled(CHANNEL_NAME))),
+  );
+  const second = el('div', 'cols3');
+  second.append(
+    column('앱 안 브라우저', '', pairsOr('q3-apps', rows3(v?.inApp), labeled(APP_NAME))),
+    column('외부 출처', '페이지 줄 기준', shareList('q3-refs', rows2(f.a.referrers), (k) => ({ label: clean(k) }), hp)),
+    column('utm', '페이지 줄 기준', shareList('q3-utm', rows2(f.a.utmSources), (k) => ({ label: clean(k) }), hp)),
+  );
+  return [keys([['', '확인(하한)'], ['shaped', '브라우저 모양(상한)']]), top, second];
+}
+
+// ③ 바닥의 geo 상태 배지 — DB-IP 링크는 index.html 에 고정(상태와 무관하게 늘 보인다)
+function geoBadge(f) {
+  const g = f.geo;
+  if (!g || f.pre || g.code === 'before_gate') return [badge('dim', '나라·망 자료 — 시행 뒤부터')];
+  if (g.state === 'pending') return [badge('wait', '자료 받는 중')];
+  if (g.state !== 'ok') return [badge('warn', `받지 못함(${clean(g.code ?? g.state)})`)];
+  const since = n0(g.sinceTs) * 1000;
+  const tone = oldMonth(f) ? 'warn' : 'ok';
+  const tag = el('span', `tag t-${tone}`);
+  // 올린 때의 경과는 data-at 글자 — 본문을 다시 그리지 않아도 그리기 끝(retick)마다 고친다
+  tag.append(el('span', 'mk', GLYPH[tone]), `${tone === 'warn' ? '지난달 판 · ' : ''}자료 ${clean(g.month)} 판 · `, agoSpan(g.loadedAt), ` 올림 · ${md(since)} ${hm(since)} 부터 셈 · IPv6 ${int(g.ipv6)}`);
+  return [tag];
+}
+
 // [응답 키, 표 이름, 이름표 함수(있으면 한국어 이름을 적고 원래 글자는 title)]
 const TOP_TABLES = [
   ['paths', '경로'],
