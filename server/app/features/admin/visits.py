@@ -1,12 +1,12 @@
-"""api 관리자 피드 — `/admin/access`·`/admin/clarity` 의 부분 상태와 갱신 (스펙 035 §3.1~§3.3).
+"""api 관리자 피드 — `/admin/access`·`/admin/clarity` 의 부분 상태와 갱신 (스펙 035 §3.1~§3.3·040 §3.2).
 
 공통 규칙은 034 와 같은 문장이다(`parts.py`). 접속 요약은 60초 캐시 한 칸이고 파일 읽기는 `asyncio.to_thread`
-(기본 실행기 — api 에는 수집 쓰기가 없다). Clarity 는 요청마다 Redis `admin:clarity` 를 읽어 마지막 시도에서 3시간이
-지났을 때만 부른다 — 기록이 Redis 에 있어 재시작이 하루 한도를 쓰지 않고, 키를 지우면 다음 요청이 바로 부른다(런북).
+(기본 실행기 — api 에는 수집 쓰기가 없다). Clarity 는 요청마다 Redis 기록을 읽어 때를 정한다(`clarity_schedule.py`) —
+기록이 Redis 에 있어 재시작이 하루 한도를 쓰지 않고, 키를 지우면 다음 요청이 바로 부른다(런북).
 읽기·부르기는 한 번에 하나이고 3초까지 기다린 뒤 늦으면 직전 결과(없으면 pending)를 답한다. 요청이 없으면 아무것도
 읽거나 부르지 않는다. 처리기 안 예외도 500 이 아니라 그 부분 `error` 와 WARNING 1줄(부분마다 10분에 1줄)이다 —
 라우터가 응답을 JSON 으로 쓰다 실패하지 않게, 쓸 수 없는 값(NaN·짝 없는 서로게이트)이 든 답도 여기서 `error` 로 바꾼다.
-JSON 풀기·쓰기(`admin:clarity`)는 파일 읽기와 같이 `asyncio.to_thread` 에서 한다.
+JSON 풀기·쓰기는 파일 읽기와 같이 `asyncio.to_thread` 에서 한다.
 """
 
 import asyncio
@@ -24,6 +24,7 @@ from app.features.admin.clarity import (
     fetch,
     load_record,
 )
+from app.features.admin.clarity_schedule import ClarityKind
 from app.features.admin.clarity_values import parse_base
 from app.features.admin.parts import (
     UNCONFIGURED,
@@ -39,7 +40,7 @@ CLARITY_REFRESH_SEC = (
     10_800  # 시도 사이 최소 3시간 — 하루 10회 한도와 신선도의 교환 (§3.4)
 )
 CLARITY_KEYS = ("nextAt", "numOfDays", "traffic", "summary", "countries", "metrics")
-GAP_MS = CLARITY_REFRESH_SEC * 1000
+BASE_PARAMS = {"numOfDays": "1"}
 
 
 class VisitFeeds:
@@ -62,9 +63,13 @@ class VisitFeeds:
         self._access = Slot(ACCESS_REFRESH_SEC, mono, wait_sec)
         # 주기 0 — Clarity 의 캐시는 Redis 기록이고, 이 칸은 한 번에 하나·3초 기다림·직전 결과만 맡는다
         self._clarity = Slot(0, mono, wait_sec)
-        self._record = Record()  # 마지막으로 본 기록 — Redis 에 못 닿을 때 값을 잇는다
-        self._unsaved_at: int | None = (
-            None  # 불렀는데 Redis 에 못 쓴 시각 — 3시간 동안 다시 부르지 않는다
+        self._base = ClarityKind(
+            name="clarity",
+            refresh_sec=CLARITY_REFRESH_SEC,
+            params=BASE_PARAMS,
+            parse=parse_base,
+            load=lambda bus: bus.clarity_load(),
+            save=lambda bus, data: bus.clarity_save(data),
         )
         self._warn = Warner(mono)
 
@@ -102,75 +107,86 @@ class VisitFeeds:
                 result = await self._clarity.get(lambda: self._refresh_clarity(bus))
             except Exception as exc:
                 result = self._failed("clarity", exc)
-        values = result.values or {}
-        # 값은 state 와 무관하게 마지막 성공 값이다(§3.3 — §3.1 의 예외). 경과는 fetchedAt 이 말한다
-        body = {
-            "state": result.state,
-            "code": result.code,
-            "fetchedAt": result.fetched_at,
-            "refreshSec": CLARITY_REFRESH_SEC,
-            **{k: values.get(k) for k in CLARITY_KEYS},
-        }
+        # 값은 state 와 무관하게 마지막 성공 값이다(035 §3.3 — §3.1 의 예외). 경과는 fetchedAt 이 말한다
+        body = _body(result, CLARITY_REFRESH_SEC, CLARITY_KEYS)
         return self._writable("clarity", body, CLARITY_KEYS)
 
     async def _refresh_clarity(self, bus: ClarityStore | None) -> Result:
         now_ms = int(self._clock() * 1000)
-        try:
-            return await self._clarity_step(bus, now_ms)
-        except Exception as exc:
-            self._warn("clarity", type(exc).__name__)
-            return self._from_record(self._record, now_ms, "error", type(exc).__name__)
-
-    async def _clarity_step(self, bus: ClarityStore | None, now_ms: int) -> Result:
-        try:
-            if bus is None:
-                raise ConnectionError("no bus")  # lifespan 전 — Redis 자리가 없다
-            text = await bus.clarity_load()
-        except Exception:
-            # 시도 시각을 모르면 부르지 않는다 — 한도를 지킨다
+        texts: list[str | None] | None = None
+        if bus is not None:  # None = lifespan 전 — Redis 자리가 없다
+            try:
+                texts = [await self._base.load(bus)]
+            except Exception:
+                texts = None
+        if bus is None or texts is None:
+            # 시도 시각을 모르면 부르지 않는다 — 한도를 지킨다. 원인 하나라 줄도 하나
             self._warn("clarity", "redis")
-            return self._from_record(self._record, now_ms, "error", "redis")
-        record = await asyncio.to_thread(load_record, text)
-        if self._unsaved_at is not None and (record.attempt_at or 0) < self._unsaved_at:
-            record = self._record  # Redis 에 못 쓴 마지막 시도가 더 늦다
-        if record.attempt_at is not None and now_ms - record.attempt_at < GAP_MS:
-            self._record = record
-            return self._from_record(record, now_ms)
+            return self._base.part(now_ms, ("error", "redis"))
+        try:
+            stored = await asyncio.to_thread(lambda: [load_record(t) for t in texts])
+        except Exception as exc:
+            code = type(exc).__name__
+            self._warn("clarity", code)
+            return self._base.part(now_ms, ("error", code))
+        faults: dict[str, tuple[str, str | None]] = {}
+        await self._step(self._base, stored[0], bus, now_ms, True, faults)
+        return self._base.part(now_ms, faults.get("clarity"))
+
+    async def _step(
+        self,
+        kind: ClarityKind,
+        stored: Record,
+        bus: ClarityStore,
+        now_ms: int,
+        allowed: bool,
+        faults: dict[str, tuple[str, str | None]],
+    ) -> None:
+        """한 종류 — 때가 됐고 미루지 않으면 부르고, 간격을 따르는 동안 다시 쓸 기록이면 Redis 에 다시 쓴다."""
+        try:
+            due, direct = kind.settle(stored, now_ms)
+            if due and allowed:
+                if direct:
+                    kind.direct_at = now_ms
+                await self._call(kind, bus, now_ms)
+            elif not due and kind.dirty:
+                await self._save(kind, bus)
+        except Exception as exc:
+            code = type(exc).__name__
+            self._warn(kind.name, code)
+            faults[kind.name] = ("error", code)
+
+    async def _call(self, kind: ClarityKind, bus: ClarityStore, now_ms: int) -> None:
         state, code, values = await fetch(
-            self._token or "",
-            self._transport,
-            params={"numOfDays": "1"},
-            parse=parse_base,
+            self._token or "", self._transport, params=kind.params, parse=kind.parse
         )
-        kept = record.fresh(now_ms)
+        kept = kind.record.fresh(now_ms) if kind.record is not None else None
         if state == "ok":
             record = Record(now_ms, state, code, now_ms, values)
         else:
-            self._warn("clarity", code)
-            record = Record(now_ms, state, code, kept.success_at, kept.values)
-        self._record = record
-        try:
-            await bus.clarity_save(await asyncio.to_thread(record.dump))
-            self._unsaved_at = None
-        except Exception:
-            self._unsaved_at = now_ms
-            self._warn("clarity", "redis")
-        return self._from_record(record, now_ms)
+            self._warn(kind.name, code)
+            record = Record(
+                now_ms,
+                state,
+                code,
+                kept.success_at if kept else None,
+                kept.values if kept else None,
+            )
+        kind.record, kind.saved, kind.dirty = record, False, True
+        await self._save(kind, bus)
 
-    def _from_record(
-        self,
-        record: Record,
-        now_ms: int,
-        state: str | None = None,
-        code: str | None = None,
-    ) -> Result:
-        """기록 → 부분. 값은 마지막 성공에서 7일 안일 때만, `nextAt` = 마지막 시도 + 3시간."""
-        kept = record.fresh(now_ms)
-        values = dict(kept.values or {})
-        values["nextAt"] = None if kept.attempt_at is None else kept.attempt_at + GAP_MS
-        if state is None:
-            state, code = kept.state or "error", kept.code
-        return Result(state, code, kept.success_at, values)
+    async def _save(self, kind: ClarityKind, bus: ClarityStore) -> None:
+        """기억한 기록을 Redis 에 — 실패하면 쓰이지 않은 채로 두고(다음 요청이 다시 쓴다) WARNING."""
+        record = kind.record
+        if record is None:
+            return
+        try:
+            await kind.save(bus, await asyncio.to_thread(record.dump))
+        except Exception:
+            self._warn(kind.name, "redis")
+            return
+        if kind.record is record:
+            kind.saved, kind.dirty = True, False
 
     # --- 공통 ---
 
@@ -196,3 +212,15 @@ class VisitFeeds:
                 **dict.fromkeys(keys),
             }
         return body
+
+
+def _body(result: Result, refresh_sec: int, keys: tuple[str, ...]) -> dict[str, Any]:
+    """부분 → 응답 모양 `{state, code, fetchedAt, refreshSec, …값 키}` — 값은 state 와 무관하게 기억한 값."""
+    values = result.values or {}
+    return {
+        "state": result.state,
+        "code": result.code,
+        "fetchedAt": result.fetched_at,
+        "refreshSec": refresh_sec,
+        **{k: values.get(k) for k in keys},
+    }
