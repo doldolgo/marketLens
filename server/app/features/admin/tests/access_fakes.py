@@ -132,12 +132,17 @@ class Timer:
         self.cancelled = True
 
 
+def parked(job: Any) -> None:
+    """DB-IP 받기를 띄우지 않는다 — 판이 없는 채 받는 중(`geo` pending)으로 남는다(039 를 보지 않는 테스트)."""
+
+
 class Feeds:
-    """시계(초)·mono·타이머를 손으로 움직이는 VisitFeeds."""
+    """시계(초)·mono·타이머를 손으로 움직이는 VisitFeeds. DB-IP 받기는 주입하지 않으면 띄우지 않는다."""
 
     def __init__(self, directory: Path | None, t0: float, **kw: Any) -> None:
         self.t = 0.0
         self.timers: list[Timer] = []
+        kw.setdefault("geo_start", parked)
         self.feeds = VisitFeeds(
             access_dir=None if directory is None else str(directory),
             clarity_token=None,

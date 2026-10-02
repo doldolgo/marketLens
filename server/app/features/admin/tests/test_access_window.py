@@ -23,6 +23,7 @@ from app.features.admin.tests.access_fakes import (
     START_TS,
     Feeds,
     line,
+    parked,
     rotated,
     watch_opens,
     write,
@@ -77,7 +78,8 @@ async def test_gate_at_is_midnight_kst_of_the_one_constant(
 ) -> None:
     monkeypatch.setattr(config, "PRIVACY_V2_EFFECTIVE", "2026-10-12")
     write(tmp_path, "access.log", [line(NOW, "/")])
-    feeds = VisitFeeds(access_dir=str(tmp_path), clarity_token=None)
+    # 실제 시계 — 게이트를 지난 날 돌아도 DB-IP 받기는 띄우지 않는다(039)
+    feeds = VisitFeeds(access_dir=str(tmp_path), clarity_token=None, geo_start=parked)
     assert (await feeds.access())["gateAt"] == 1_791_730_800_000  # 2026-10-11T15:00Z
 
 

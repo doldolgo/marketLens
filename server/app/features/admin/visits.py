@@ -5,6 +5,8 @@
 파일 캐시·짝 기록·열쇠·창 칸을 통째로 버린다(038 §3.3). Clarity 는 호출이 둘이다 — 기본 요약(4시간)과 페이지×기기 묶음(12시간,
 하위 부분 `pages`). 요청마다 Redis 기록 둘을 읽어 때를 정하고(`clarity_schedule.py`), 한 갱신 안에서 기본 → 묶음
 순서로 하나씩 부른다 — Clarity 호출이 동시에 둘 나가지 않는다. 기본이 401·403·429 면 묶음은 미룬다.
+접속 갱신이 게이트 뒤 ok 이면 DB-IP 판(039)이 필요한지 보고 받기를 띄운다 — 갱신은 받기를 기다리지 않고, 판이 없는
+동안 하위 부분 `geo` 는 받는 중 `pending`·실패 `error` 다. 판은 갱신을 시작할 때 하나 집어 그 회차 끝까지 쓴다.
 읽기·부르기는 한 번에 하나이고 3초까지 기다린 뒤 늦으면 직전 결과(없으면 pending)를 답한다. 요청이 없으면 아무것도
 읽거나 부르지 않는다. 처리기 안 예외도 500 이 아니라 그 부분 `error` 와 WARNING 1줄(부분마다 10분에 1줄, 예외 이름만 —
 문장에 가린 IP·UA 가 실릴 수 있다)이다 — 라우터가 응답을 JSON 으로 쓰다 실패하지 않게, 쓸 수 없는 값(NaN·짝 없는
@@ -41,6 +43,7 @@ from app.features.admin.clarity import (
 from app.features.admin.clarity_pages import parse_pages
 from app.features.admin.clarity_schedule import ClarityKind
 from app.features.admin.clarity_values import parse_base
+from app.features.admin.geo_fetch import GeoLoader
 from app.features.admin.parts import (
     UNCONFIGURED,
     WAIT_SEC,
@@ -78,6 +81,8 @@ class VisitFeeds:
         privacy_effective: str | None = None,
         urandom: Callable[[int], bytes] = os.urandom,
         schedule: Callable[[float, Callable[[], None]], Any] | None = None,
+        geo_transport: httpx.BaseTransport | None = None,
+        geo_start: Callable[[Callable[[], None]], Any] | None = None,
     ) -> None:
         self._dir = access_dir or None
         self._token = clarity_token or None
@@ -110,6 +115,14 @@ class VisitFeeds:
             save=lambda bus, data: bus.clarity_pages_save(data),
         )
         self._warn = Warner(mono)
+        # 039 — DB-IP 판. 1시간 비움(§3.3)과 무관하게 프로세스에 남는다(방문자 정보가 아닌 공개 자료)
+        self.geo = GeoLoader(
+            clock=clock,
+            mono=mono,
+            warn=self._warn,
+            transport=geo_transport,
+            start=geo_start,
+        )
 
     # --- /admin/access ---
 
@@ -142,14 +155,20 @@ class VisitFeeds:
 
     async def _load_access(self, log: AccessLog, name: str) -> Result:
         now = self._clock()
+        table = self.geo.table
         try:
-            values, broken = await asyncio.to_thread(log.summary, name, now)
+            values, broken = await asyncio.to_thread(log.summary, name, now, table)
         except NoLogFile:
             return Result("unconfigured", "no_file")
         except Exception as exc:
             return self._failed("access", exc)
         if broken:  # 깨진 회전 파일 — 그 파일만 건너뛰고 WARNING 1줄
             self._warn("access", broken[0])
+        if now >= self._gate:
+            self.geo.ensure()  # 판이 없거나 낡았으면 받기를 띄운다 — 기다리지 않는다
+            geo = values["geo"]
+            if table is None:
+                geo["state"], geo["code"] = self.geo.waiting()
         return Result("ok", None, int(now * 1000), values)
 
     # --- /admin/clarity ---
