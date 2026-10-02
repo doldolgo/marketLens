@@ -256,7 +256,7 @@ async def test_a_list_without_any_metric_is_error_and_keeps_the_last_success(
     ok = await w.get()
     w.advance(3)
     body = await w.get()
-    assert (body["state"], body["code"]) == ("error", "ValueError")
+    assert (body["state"], body["code"]) == ("error", "bad_data")  # 040 §3.5
     assert body["fetchedAt"] == ok["fetchedAt"] and body["traffic"] == ok["traffic"]
     assert w.stored()["values"]["traffic"] == ok["traffic"]
     w.advance(3)

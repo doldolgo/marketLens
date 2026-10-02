@@ -18,13 +18,13 @@ import httpx
 
 from app.features.admin.access import VALUE_KEYS, NoLogFile, summarize
 from app.features.admin.clarity import (
-    GAP_MS,
     ClarityStore,
     Record,
     check_json,
     fetch,
     load_record,
 )
+from app.features.admin.clarity_values import parse_base
 from app.features.admin.parts import (
     UNCONFIGURED,
     WAIT_SEC,
@@ -39,6 +39,7 @@ CLARITY_REFRESH_SEC = (
     10_800  # 시도 사이 최소 3시간 — 하루 10회 한도와 신선도의 교환 (§3.4)
 )
 CLARITY_KEYS = ("nextAt", "numOfDays", "traffic", "metrics")
+GAP_MS = CLARITY_REFRESH_SEC * 1000
 
 
 class VisitFeeds:
@@ -135,7 +136,12 @@ class VisitFeeds:
         if record.attempt_at is not None and now_ms - record.attempt_at < GAP_MS:
             self._record = record
             return self._from_record(record, now_ms)
-        state, code, values = await fetch(self._token or "", self._transport)
+        state, code, values = await fetch(
+            self._token or "",
+            self._transport,
+            params={"numOfDays": "1"},
+            parse=parse_base,
+        )
         kept = record.fresh(now_ms)
         if state == "ok":
             record = Record(now_ms, state, code, now_ms, values)

@@ -1,13 +1,15 @@
-"""Clarity 요약 — Data Export API 호출·응답 줄이기·마지막 시도 기록 (스펙 035 §3.3).
+"""Clarity Data Export — 호출 하나·기록·이름 비교·주소 줄이기 (스펙 035 §3.3·040 §3.1~§3.3).
 
-외부 계약(Microsoft Learn "Clarity Data Export API", 2026-10-01 확인): `GET …/project-live-insights?numOfDays=1`,
-헤더 `Authorization: Bearer <토큰>`, 응답 `[{metricName, information: [행…]}]`, **프로젝트당 하루 10회**(넘으면 429).
-그래서 시도 사이를 3시간(성공·실패 모두) 띄우고, 마지막 시도 시각·결과·마지막 성공 값을 Redis `admin:clarity` 에 둔다 —
-api 재시작(배포)이 한도를 쓰지 않게. 주소 값은 쿼리·해시를 떼고(`Referrer URL` 은 출처로) 저장·응답한다.
-지표 이름은 정규화해 비교한다 — 실제 응답은 `ReferrerUrl`·`PopularPages` 처럼 CamelCase 이고 문서는 `Referrer URL` 이다.
+외부 계약(Microsoft Learn "Clarity Data Export API", 2025-12-05 갱신): `GET …/project-live-insights`, 인자 `numOfDays`
+1~3·`dimension1`~`3`, 헤더 `Authorization: Bearer <토큰>`, 응답 `[{metricName, information: [행…]}]`(지표마다 1,000행까지),
+**프로젝트당 하루 10회**(넘으면 429). 호출은 둘이다 — 기본 요약(차원 없음)과 페이지×기기 묶음(`URL`·`Device`, 72시간).
+일정·한도 지키기는 `visits.py`, 값 만들기는 `clarity_values.py`(기본)·`clarity_pages.py`(묶음)가 한다.
+기록은 Redis 에 `{attemptAt, state, code, successAt, values}` 로 둔다 — api 재시작(배포)이 한도를 쓰지 않게.
+주소 값은 쿼리·해시를 떼고(출처 지표는 출처로) 저장·응답한다.
+지표 이름·행 키는 정규화해 비교한다 — 실제 응답은 `ReferrerUrl`·`ScrollDepth` 처럼 CamelCase 이고 문서는 띄어 쓴다.
 출처 지표는 이름에 `referr`·`referer` 가 들면 — 철자가 또 바뀌어도 경로가 남지 않는 쪽(닫힌 쪽)으로.
 JSON 은 다시 쓸 수 있는 값만 남긴다 — 표준 밖 `NaN`·`Infinity`·넘치는 실수는 null, 짝 없는 서로게이트는 `?`.
-응답 JSON 풀기·줄이기는 `asyncio.to_thread`(기본 실행기)에서 한다.
+응답 JSON 풀기·만들기는 `asyncio.to_thread`(기본 실행기)에서 한다.
 토큰은 헤더에만 싣는다 — 로그·Redis·응답·예외 code 어디에도 없다.
 """
 
@@ -16,7 +18,9 @@ import json
 import math
 import re
 import unicodedata
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Protocol
 
 import httpx
@@ -24,24 +28,13 @@ import httpx
 from app.core.config import USER_AGENT
 
 EXPORT_URL = "https://www.clarity.ms/export-data/api/v1/project-live-insights"
-NUM_OF_DAYS = 1
 TIMEOUT_SEC = 10.0  # 재시도 없음
-GAP_MS = 3 * 3600 * 1000  # 어떤 24시간에도 8회 이하 — 사람이 손으로 부를 2회가 남는다
 KEEP_MS = 7 * 86_400 * 1000  # 마지막 성공 값은 7일 뒤 버린다
 ROW_LIMIT = 20
 TEXT_LIMIT = 200
-# 이름에 따라 다르게 다루는 지표 둘 — 정규화한 이름(`metric_key`)으로 비교한다
-TRAFFIC = "traffic"  # 실제·문서 모두 `Traffic` — 정확 일치
 # 출처 지표 — 실제 `ReferrerUrl`(2026-10-02 첫 응답), 문서 `Referrer URL`. 조각 포함으로 고른다:
 # `Referrer`·`Referer Url`·`Referring URL`·`Referral…` 처럼 철자가 바뀌어도 출처로 줄인다(잘못 맞으면 경로만 잃는다)
 REFERRER_PARTS = ("referr", "referer")
-# 문서가 행 모양을 적은 지표는 Traffic 하나 — 응답 키 → (값 키, 정수 여부)
-TRAFFIC_KEYS = (
-    ("sessions", "totalSessionCount", True),
-    ("botSessions", "totalBotSessionCount", True),
-    ("users", "distantUserCount", True),
-    ("pagesPerSession", "PagesPerSessionPercentage", False),
-)
 _NOT_ALNUM = re.compile(r"[^a-z0-9]")
 _AUTHORITY_END = re.compile(r"[/?#]")
 # 주소 꼴 — `<스킴>://`(대소문자 무관) 또는 스킴 없는 `호스트.이름` 바로 뒤에 `/`·`?`·`#`
@@ -51,9 +44,10 @@ _HOST_LIKE = re.compile(
 )
 
 
+@lru_cache(maxsize=4096)
 def metric_key(name: str) -> str:
-    """지표 이름 비교용 — NFKC(전각 → 반각) 뒤 소문자로 바꾸고 영문자·숫자만 남긴다.
-    `ReferrerUrl`·`Referrer URL` → `referrerurl`."""
+    """지표 이름·행 키 비교용 — NFKC(전각 → 반각) 뒤 소문자로 바꾸고 영문자·숫자만 남긴다.
+    `ReferrerUrl`·`Referrer URL` → `referrerurl`. 행 키는 몇 가지가 수천 행에 되풀이되어 결과를 기억해 둔다."""
     return _NOT_ALNUM.sub("", unicodedata.normalize("NFKC", name).lower())
 
 
@@ -77,17 +71,65 @@ def check_json(value: Any) -> None:
     json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
+def read_number(value: Any) -> float | None:
+    """숫자나 숫자 글자(`"120"`) → 유한한 수. 참거짓·그 밖 글자·NaN·무한은 None (040 §3.3 '수 읽기')."""
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        return None
+    try:
+        number = float(value)
+    except ValueError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def read_int(value: Any) -> int | None:
+    """정수 칸 — 정수일 때만(`"3"`·`3.0` 은 3, `2.5` 는 None)."""
+    number = read_number(value)
+    return int(number) if number is not None and number.is_integer() else None
+
+
+def pick(row: Mapping[str, Any], names: frozenset[str]) -> dict[str, Any]:
+    """행에서 정규화한 키가 `names` 안인 값만 — 같은 이름이 둘이면 앞의 것."""
+    out: dict[str, Any] = {}
+    for key, value in row.items():
+        name = metric_key(key) if isinstance(key, str) else ""
+        if name in names and name not in out:
+            out[name] = value
+    return out
+
+
+def metric_items(payload: Any) -> list[tuple[str, str, list[Any]]]:
+    """응답 → `(받은 이름, 정규화한 이름, 행 목록)`. 목록이 아니거나, 비지 않았는데
+    `{metricName: 글자, information: 목록}` 이 하나도 없으면 ValueError — 받은 자료가 틀림(`bad_data`)."""
+    if not isinstance(payload, list):
+        raise ValueError("응답이 목록이 아니다")
+    items = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        name, rows = item.get("metricName"), item.get("information")
+        if isinstance(name, str) and isinstance(rows, list):
+            items.append((name, metric_key(name), rows))
+    if payload and not items:
+        raise ValueError("지표가 하나도 없다")  # 빈 목록(자료 없음)만 성공이다
+    return items
+
+
 class ClarityStore(Protocol):
-    """core `RedisBus` 의 `admin:clarity` 읽기·쓰기 (035 §3.3)."""
+    """core `RedisBus` 의 `admin:clarity`(기본)·`admin:clarity:pages`(묶음) 읽기·쓰기 (035 §3.3·040 §3.2)."""
 
     async def clarity_load(self) -> str | None: ...
 
     async def clarity_save(self, data: str) -> None: ...
 
+    async def clarity_pages_load(self) -> str | None: ...
+
+    async def clarity_pages_save(self, data: str) -> None: ...
+
 
 @dataclass(frozen=True)
 class Record:
-    """`admin:clarity` 한 값 — 마지막 시도(시각·결과)와 마지막 성공(시각·값). 시각은 epoch ms."""
+    """기록 한 값(`admin:clarity`·`admin:clarity:pages`) — 마지막 시도(시각·결과)와 마지막 성공(시각·값). 시각은 epoch ms."""
 
     attempt_at: int | None = None
     state: str | None = None
@@ -148,9 +190,14 @@ def load_record(text: str | None) -> Record:
 
 
 async def fetch(
-    token: str, transport: httpx.AsyncBaseTransport | None = None
+    token: str,
+    transport: httpx.AsyncBaseTransport | None,
+    *,
+    params: Mapping[str, str],
+    parse: Callable[[bytes], dict[str, Any]],
 ) -> tuple[str, str | None, dict[str, Any] | None]:
-    """한 번 부른다 → (state, code, 값). 401·403 은 denied, 429·5xx·그 밖은 error. 오류 문장은 버린다."""
+    """한 번 부른다 → (state, code, 값). 401·403 은 denied, 429·5xx·그 밖은 error, 받은 자료가 틀리면 `bad_data`.
+    오류 문장은 버린다. 리다이렉트는 따르지 않는다(httpx 기본)."""
     try:
         async with httpx.AsyncClient(
             transport=transport, timeout=TIMEOUT_SEC
@@ -158,7 +205,7 @@ async def fetch(
             resp = await asyncio.wait_for(
                 client.get(
                     EXPORT_URL,
-                    params={"numOfDays": str(NUM_OF_DAYS)},
+                    params=dict(params),
                     headers={
                         "Authorization": f"Bearer {token}",
                         "User-Agent": USER_AGENT,
@@ -175,86 +222,37 @@ async def fetch(
     if resp.status_code != 200:
         return "error", f"http_{resp.status_code}", None
     try:
-        # 1,000행 상한이라 수백 KB — 풀기·줄이기는 기본 실행기에서 (§3.1)
-        return "ok", None, await asyncio.to_thread(parse, resp.content)
+        # 기본 수백 KB·묶음 ≈3MB — 풀기·만들기는 기본 실행기에서 (§3.1)
+        values = await asyncio.to_thread(_parse_checked, parse, resp.content)
+    except (ValueError, TypeError, RecursionError):
+        return "error", "bad_data", None  # JSON 이 아님·모양 틀림·다시 쓸 수 없는 값
     except Exception as exc:
         return "error", type(exc).__name__, None
+    return "ok", None, values
 
 
-def parse(content: bytes) -> dict[str, Any]:
-    """응답 바이트 → 값. 줄인 값이 다시 JSON 으로 쓸 수 없으면 ValueError — 실패로 세고 마지막 성공 값을 둔다."""
-    values = shape(loads(content))
-    check_json(values)
+def _parse_checked(
+    parse: Callable[[bytes], dict[str, Any]], content: bytes
+) -> dict[str, Any]:
+    values = parse(content)
+    check_json(
+        values
+    )  # 다시 JSON 으로 쓸 수 없으면 ValueError — 실패로 세고 마지막 성공 값을 둔다
     return values
 
 
-def shape(payload: Any) -> dict[str, Any]:
-    """응답 → 값 `{numOfDays, traffic, metrics}`. Traffic 밖 지표는 받은 이름·키 그대로(행 20개, 주소 줄인 뒤).
-    Traffic·출처 지표는 정규화한 이름으로 고른다(실제 CamelCase·문서 철자 둘 다, 출처는 조각 포함).
-    목록이 아니거나, 비지 않았는데 `{metricName: 문자열, information: 목록}` 이 하나도 없으면 ValueError."""
-    if not isinstance(payload, list):
-        raise ValueError("응답이 목록이 아니다")
-    traffic: dict[str, Any] | None = None
-    seen_traffic = False
-    metrics: list[dict[str, Any]] = []
-    for item in payload:
-        if not isinstance(item, dict):
-            continue
-        name, rows = item.get("metricName"), item.get("information")
-        if not isinstance(name, str) or not isinstance(rows, list):
-            continue
-        key = metric_key(name)
-        if key == TRAFFIC:
-            if not seen_traffic:
-                seen_traffic = True
-                first = rows[0] if rows and isinstance(rows[0], dict) else None
-                traffic = None if first is None else _traffic(first)
-            continue
-        referrer = is_referrer(key)
-        metrics.append(
-            {
-                "name": _utf8(name)[:TEXT_LIMIT],
-                "rows": [_reduce(row, referrer) for row in rows[:ROW_LIMIT]],
-            }
-        )
-    if payload and not seen_traffic and not metrics:
-        raise ValueError("지표가 하나도 없다")  # 빈 목록(자료 없음)만 성공이다
-    return {"numOfDays": NUM_OF_DAYS, "traffic": traffic, "metrics": metrics}
-
-
-def _traffic(row: dict[str, Any]) -> dict[str, Any]:
-    """`Traffic` 첫 행 → 숫자(문자열 숫자도). 없거나 숫자가 아니면 그 칸만 null."""
-    out: dict[str, Any] = {}
-    for key, source, integer in TRAFFIC_KEYS:
-        number = _number(row.get(source))
-        if integer and number is not None:
-            out[key] = int(number) if number.is_integer() else None
-        else:
-            out[key] = number
-    return out
-
-
-def _number(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, str | int | float):
-        return None
-    try:
-        number = float(value)
-    except ValueError:
-        return None
-    return number if math.isfinite(number) else None
-
-
-def _reduce(value: Any, referrer: bool) -> Any:
-    """주소 줄이기 — 문자열은 `_reduce_text`, 유한하지 않은 실수는 null. 목록·객체는 안까지(객체 키도) 같은 규칙."""
+def reduce_value(value: Any, referrer: bool) -> Any:
+    """주소 줄이기 — 문자열은 `_reduce_text`, 유한하지 않은 실수는 null. 목록·객체는 안까지(객체 키도) 같은 규칙.
+    출처 지표(`referrer`)면 주소를 출처로."""
     if isinstance(value, str):
         return _reduce_text(value, referrer)
     if isinstance(value, float) and not math.isfinite(value):
         return None
     if isinstance(value, list):
-        return [_reduce(v, referrer) for v in value]
+        return [reduce_value(v, referrer) for v in value]
     if isinstance(value, dict):
         return {
-            _reduce_text(str(k), referrer): _reduce(v, referrer)
+            _reduce_text(str(k), referrer): reduce_value(v, referrer)
             for k, v in value.items()
         }
     return value
@@ -263,7 +261,7 @@ def _reduce(value: Any, referrer: bool) -> Any:
 def _reduce_text(value: str, referrer: bool) -> str:
     """주소 꼴(`<스킴>://`·`/`·스킴 없는 `호스트.이름/…`)은 앞뒤 공백·쿼리·해시·사용자 정보를 떼고
     (`Referrer URL` 은 출처로), 그 밖은 200자에서 자른다."""
-    text = _utf8(value)
+    text = utf8(value)
     s = text.strip()
     if _SCHEME.match(s):
         scheme, authority, rest = _split(s)
@@ -278,7 +276,7 @@ def _reduce_text(value: str, referrer: bool) -> str:
     return text[:TEXT_LIMIT]
 
 
-def _utf8(text: str) -> str:
+def utf8(text: str) -> str:
     """짝 없는 서로게이트(이모지 중간에서 잘린 제목 등) → `?` — UTF-8 로 쓸 수 있게."""
     try:
         text.encode("utf-8")
