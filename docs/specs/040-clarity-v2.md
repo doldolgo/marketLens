@@ -38,7 +38,7 @@
 - 순서: 한 갱신 안에서 기본(때가 됐으면) → 페이지(때가 됐으면)를 하나씩 부른다 — Clarity 호출이 동시에 둘 나가지 않는다. 두 호출은 기록·state·값을 따로 갖는다. 페이지가 늦거나 실패해도 기본의 값·state·간격은 그대로다.
 - 페이지를 미루는 때: 기본의 마지막 시도가 `denied`(401·403)이거나 `http_429` 면 페이지는 부르지 않고 시도로도 적지 않는다 — 토큰과 하루 한도는 둘이 같이 쓴다. 기본이 그 밖의 결과를 얻은 갱신에서 부른다.
 - 기록 — Redis 문자열 JSON `{attemptAt, state, code, successAt, values}`(035 와 같은 모양, 시각 ms, 만료 없음). 기본 `admin:clarity` 의 값은 `numOfDays`·`traffic`·`summary`·`countries`·`metrics` 다 — 035 의 옛 기록(`summary`·`countries` 없음)은 그 키를 null 로 읽고 다음 성공이 덮는다. 페이지 `admin:clarity:pages` 의 값은 `numOfDays`·`rowsIn`·`rowLimitHit`·`groups` 이고 주소는 없다.
-  - 요청마다 둘을 읽어 때를 정한다 — 그래서 api 재시작(배포)이 한도를 쓰지 않고, 키를 지우면 재시작 없이 바로 부른다. 값은 마지막 성공에서 7일이 지나면 버린다(요청 때 — 시도 시각·결과는 남긴다).
+  - 요청마다 둘을 읽어 때를 정한다 — 그래서 api 재시작(배포)이 한도를 쓰지 않고, 키를 지우면 재시작 없이 바로 부른다. 값은 마지막 성공에서 7일이 지나면 버린다(요청 때 — 시도 시각·결과는 남긴다). 부르지 않는 요청(간격 안·미룸)이라도 Redis 에 있는 기록의 값이 7일 지났으면 값을 뺀 기록으로 다시 쓴다 — 시도로 세지 않고, 지운 키는 되살리지 않는다(바로 부르기).
 - core 공개 계약: `RedisBus.clarity_load() -> str | None`·`clarity_save(data: str) -> None`(035 그대로)과 `RedisBus.clarity_pages_load() -> str | None`·`clarity_pages_save(data: str) -> None`(같은 꼴, 키 `admin:clarity:pages`, 만료 없음).
 - **한도 지키기 — Redis 기록과 어긋날 때**(api 는 uvicorn 워커 하나라 프로세스가 하나다):
   - 프로세스는 종류마다 마지막 기록을 메모리에도 두고, 그 기록을 Redis 에 썼는지 표시한다. 때는 Redis 기록과 메모리 기록 가운데 마지막 시도가 늦은 쪽으로 정한다. 메모리 쪽이 늦거나 아직 쓰이지 않았으면(부른 뒤 Redis 쓰기가 실패했다) Redis 에 다시 쓴다 — 035 의 '못 쓴 시각을 메모리에 둔다' 를 넓힌 것이다.
@@ -232,7 +232,7 @@ pytest -q app/features/admin/tests/test_clarity_{values,schedule,defer,pages,lea
   - 페이지 종류: 호스트 뒤 빈 경로(`https://kimptrack.com`·`kimptrack.com?x`)는 `/` 로 보아 `landing`. `?TAB=gap` 은 키가 글자 그대로 `tab` 이 아니므로 '탭 없음' → `app:spread`(§3.3 의 키 비교와 같게).
   - 묶음 칸 `sessions` 는 Traffic 행의 `totalsessioncount` 중 정수로 읽히는 것만 더한다(하나도 없으면 null). 같은 (주소, 기기) 글자의 Traffic 행이 둘이면 그 합을 가중치로. `rowsIn` 은 `{metricName: 글자, information: 목록}` 꼴 지표의 행만 세고, `url`·`device` 를 함께 가진 행 찾기는 묶지 않는 지표까지 모든 행에서 본다.
   - Redis 읽기 실패·기록 풀기 예외는 원인이 하나라 WARNING 을 `clarity` 한 줄로만 남긴다(두 부분 모두 `error`) — 035 테스트의 '한 줄' 단언 그대로. 묶음 호출·묶음 기록 쓰기·묶음 처리 예외는 `clarity.pages`.
-  - 묶음이 때가 됐는데 미뤄진 갱신에서는 메모리 기록을 Redis 에 다시 쓰지 않는다 — 사람이 지운 키를 되살려 '바로 부르기' 를 잃지 않게. 간격 안이라 부르지 않을 때만 다시 쓴다. 바로 부르기 시각은 실제로 부른 때만 적는다.
+  - 묶음이 때가 됐는데 미뤄진 갱신에서는 메모리 기록을 Redis 에 다시 쓰지 않는다 — 사람이 지운 키를 되살려 '바로 부르기' 를 잃지 않게. 간격 안이라 부르지 않을 때만 다시 쓴다. 단 키가 있고 값이 7일 지났으면 미룬 갱신에서도 값을 뺀 기록으로 다시 쓴다(§3.2 — 검토 반영). 바로 부르기 시각은 실제로 부른 때(보낸 시각)만 적는다.
   - `pending`: 갱신 하나가 3초 안에 안 끝나면(기본이 끝나고 묶음을 기다리는 중 포함) 직전 결과, 없으면 바깥·`pages` 둘 다 `pending` — 갱신 중간 값을 따로 내지 않는다(§3.1 갱신 규칙 그대로).
   - `bad_data` 로 바꾸는 예외는 풀기·만들기의 ValueError(JSON 아님·UTF-8 아님·다시 쓸 수 없는 값 포함)·TypeError·RecursionError, 그 밖 예외는 035 처럼 예외 이름.
   - JSON 으로 못 쓰는 값이 든 답(손으로 넣은 기록 등): `pages` 만 못 쓰면 `pages` 만 `error`·예외 이름(값 null), 바깥이 못 쓰면 바깥 값 키만 null 이고 `pages` 는 그대로 객체.

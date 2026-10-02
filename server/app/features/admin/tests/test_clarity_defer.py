@@ -129,3 +129,41 @@ async def test_an_old_035_record_answers_without_summary_and_countries() -> None
     assert body["traffic"] == old["values"]["traffic"]
     assert body["metrics"] == old["values"]["metrics"]
     assert body["nextAt"] == now_ms + 3 * HOUR_MS
+
+
+async def test_a_long_deferral_still_drops_week_old_pages_values_from_redis() -> None:
+    """기본 401 이 8일 이어져 묶음을 계속 미뤄도, Redis 묶음 기록의 값은 마지막 성공에서 7일 뒤 버린다 —
+    시도로 세지 않고(시도 시각·결과 그대로), 사람이 지운 키는 되살리지 않는다."""
+    w = World(Clarity((200, EXPORT), (401, {})))
+    await w.get()
+    attempt = w.stored_pages()["attemptAt"]
+    for _ in range(8 * 24):
+        w.advance(1)
+        body = await w.get()
+    stored = w.stored_pages()
+    assert stored["values"] is None and stored["successAt"] is None
+    assert (stored["attemptAt"], stored["state"]) == (attempt, "ok")
+    assert w.clarity.count("pages") == 1 and body["pages"]["groups"] is None
+    gone = World(Clarity((200, EXPORT), (401, {})))
+    await gone.get()
+    for hour in range(8 * 24):
+        if hour == 48:
+            gone.forget("admin:clarity:pages")
+        gone.advance(1)
+        await gone.get()
+    assert gone.stored_pages() is None and gone.clarity.count("pages") == 1
+
+
+async def test_week_old_values_leave_redis_on_requests_between_calls_too() -> None:
+    """간격 안이라 부르지 않는 요청에서도 — 다음 시도(12시간 뒤)를 기다리지 않는다."""
+    w = World(Clarity(pages=((200, PAGES_EXPORT), (500, {}))))
+    await w.get()
+    w.advance(7 * 24)  # 마지막 성공에서 정확히 7일 — 이번 시도(실패)는 값을 남긴다
+    await w.get()
+    assert w.stored_pages()["values"] is not None
+    w.advance(1)
+    body = await w.get()
+    assert w.clarity.count("pages") == 2  # 간격 안 — 부르지 않는다
+    stored = w.stored_pages()
+    assert stored["values"] is None and stored["successAt"] is None
+    assert stored["code"] == "http_500" and body["pages"]["groups"] is None

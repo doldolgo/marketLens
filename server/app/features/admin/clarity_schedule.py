@@ -73,6 +73,18 @@ class ClarityKind:
         )
         return due, False
 
+    def expire(self, now_ms: int) -> bool:
+        """마지막 성공에서 7일 지난 값을 메모리 기록에서 버린다 → 버렸으면 True(Redis 에도 다시 쓸 것).
+        시도 시각·결과는 그대로라 시도로 세지 않는다."""
+        record = self.record
+        if record is None or record.success_at is None:
+            return False
+        kept = record.fresh(now_ms)
+        if kept is record:
+            return False
+        self.record = kept
+        return True
+
     def blocks_pages(self) -> bool:
         """기본의 마지막 시도가 401·403·429 면 묶음 호출을 미룬다 — 토큰과 하루 한도를 둘이 같이 쓴다."""
         record = self.record

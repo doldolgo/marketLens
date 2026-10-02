@@ -171,12 +171,16 @@ class VisitFeeds:
         allowed: bool,
         faults: dict[str, tuple[str, str | None]],
     ) -> None:
-        """한 종류 — 때가 됐고 미루지 않으면 부르고, 간격을 따르는 동안 다시 쓸 기록이면 Redis 에 다시 쓴다."""
+        """한 종류 — 때가 됐고 미루지 않으면 부르고, 간격을 따르는 동안 다시 쓸 기록이면 Redis 에 다시 쓴다.
+        부르지 않는 요청(간격 안·미룸)이라도 Redis 에 있는 기록의 값이 7일 지났으면 값을 뺀 기록으로 다시 쓴다 —
+        미룸이 길어져도(토큰 만료를 아무도 안 바꿈) Redis 에 7일 넘은 값이 남지 않게. 지운 키는 되살리지 않는다."""
         try:
             due, direct = kind.settle(stored, now_ms)
             if due and allowed:
                 await self._call(kind, bus, direct)
-            elif not due and kind.dirty:
+                return
+            expired = kind.expire(now_ms) and stored.attempt_at is not None
+            if expired or (not due and kind.dirty):
                 await self._save(kind, bus)
         except Exception as exc:
             code = type(exc).__name__
