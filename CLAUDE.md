@@ -121,6 +121,7 @@ marketlens/
 | 034 | monitoring-ops | DONE | 수집기 관리자 피드 — `/admin/aws`(경보·24시간 지표·canary·예산)·`/admin/alerts`(보낸 Slack 알림 `alerts:log` + 경보 이력 7일), 부분별 state(자격 없음 = 연결 안 됨)·요청 있을 때만·전용 스레드·ARN 가림, IAM 읽기 정책 런북 (BE·인프라) |
 | 035 | monitoring-visits | DONE | api 관리자 피드 — `/admin/access`(caddy 로그 24시간 요약·탭별 진입·최근 5xx)·`/admin/clarity`(Data Export 3시간 간격·Redis 캐시·주소 쿼리 뗌), 토큰 런북. 032·033·034 뒤 (BE·인프라) |
 | 036 | admin-v2 | DONE | 관리자 화면 v2 — 한 페이지 개요·수집·인프라·알림·접속·비용·도구, 빠른 10초·느린 60초(보이는 동안만), 부분별 상태 칸·SVG 직접·빌드 없음. 034·035 뒤 (web) |
+| 037 | privacy-v2 | TODO | 처리방침 v2 — 서버 접속 기록 문단(접속 요약 최근 30일까지·IP 앞부분으로 나라·망 종류 추정(DB-IP Lite)·하루 한 번 세는 되돌릴 수 없는 값, 시행일 전 기록에는 쓰지 않음)·CloudWatch '보낸 때부터 90일', 맨 위 변경 안내·12절 대조표·이전 판 `privacy-20261001.html`(정적·noindex), 시행일 한 곳 `core/config.py` `PRIVACY_V2_EFFECTIVE`(PR 올린 날 + 10일, 머지 마감 시행일 − 8 의 18:00 KST)·test_privacy 대조. 서버 동작·Clarity 동의 판은 그대로 (web) |
 
 실행 순서 = 번호 순. 034·035 는 한 설계를 둘로 나눈 짝 스펙이다(034 → 035). 031 은 032~036 의 계약에 기대지 않아 그 앞뒤 어디서 해도 된다. 지금 IN_PROGRESS 인 것: 없음.
 상태: TODO(내용은 확정, 아직 구현 전) → IN_PROGRESS(구현 중) → DONE(구현·검증 끝).
