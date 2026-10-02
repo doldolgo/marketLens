@@ -86,6 +86,45 @@ async def test_seventy_two_hours_of_minute_requests_stay_within_the_daily_split(
     assert len(base) == 18 and len(pages) == 6  # 4시간·12시간마다 빠짐없이
 
 
+async def test_attempts_are_timed_when_sent_so_a_slow_summary_never_fits_three_pages_a_day() -> (
+    None
+):
+    """시도 시각 = 보낸 때(§3.2). 첫 기본이 10초 걸리면 묶음은 10초에 나간다 — 갱신 시작을 적으면 요청이
+    정확히 4시간마다 올 때 다음 묶음이 보낸 때로부터 12시간보다 10초 일찍 나가 어떤 24시간에 3회가 든다."""
+    w = World(Clarity())
+    w.clarity.takes["base"] = 10
+    await w.get()
+    w.clarity.takes["base"] = 0
+    assert w.stored()["attemptAt"] == int(NOW * 1000)
+    assert w.stored_pages()["attemptAt"] == int((NOW + 10) * 1000)
+    for k in range(1, 19):  # 72시간 — 기본의 때에 맞춰 온다
+        w.t = k * 4 * 3600
+        await w.get()
+    base, pages = times(w.clarity, "base"), times(w.clarity, "pages")
+    assert min(b - a for a, b in zip(pages, pages[1:], strict=False)) >= 12 * 3600
+    assert most_in_a_day(pages) <= 2 and most_in_a_day(base + pages) <= 8
+
+
+async def test_a_direct_call_is_timed_when_sent_too() -> None:
+    """바로 부르기의 24시간도 보낸 때부터 — 첫 바로 부르기의 묶음이 10초 늦게 나갔으면 24시간 뒤 갱신 시작에는
+    아직 바로 부르지 않는다."""
+    w = World(Clarity())
+    await w.get()
+    w.advance(1)
+    w.forget("admin:clarity", "admin:clarity:pages")
+    w.clarity.takes["base"] = 10
+    await w.get()  # 둘 다 바로 부르기 — 묶음은 1시간 10초에 나간다
+    w.clarity.takes["base"] = 0
+    w.t = 3600 + 12 * 3600 + 10  # 묶음의 때 — 기본 → 묶음
+    await w.get()
+    assert times(w.clarity, "pages") == [0, 3610, 46810]
+    w.t = 3600 + 24 * 3600  # 바로 부른 묶음을 보낸 때로부터 24시간 − 10초
+    w.forget("admin:clarity:pages")
+    await w.get()
+    assert times(w.clarity, "pages") == [0, 3610, 46810]  # 부르지 않고 기록을 되살린다
+    assert w.stored_pages()["attemptAt"] == int((NOW + 46810) * 1000)
+
+
 async def test_deleting_both_keys_every_hour_never_passes_ten_a_day() -> None:
     w = World(Clarity())
     await w.get()

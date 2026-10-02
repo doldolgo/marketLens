@@ -175,9 +175,7 @@ class VisitFeeds:
         try:
             due, direct = kind.settle(stored, now_ms)
             if due and allowed:
-                if direct:
-                    kind.direct_at = now_ms
-                await self._call(kind, bus, now_ms)
+                await self._call(kind, bus, direct)
             elif not due and kind.dirty:
                 await self._save(kind, bus)
         except Exception as exc:
@@ -185,17 +183,22 @@ class VisitFeeds:
             self._warn(kind.name, code)
             faults[kind.name] = ("error", code)
 
-    async def _call(self, kind: ClarityKind, bus: ClarityStore, now_ms: int) -> None:
+    async def _call(self, kind: ClarityKind, bus: ClarityStore, direct: bool) -> None:
+        # 시도 시각 = 보내는 때 — 갱신 시작이 아니다. 묶음은 기본(제한 10초) 뒤에 나가므로 시작 시각을 적으면
+        # 다음 묶음이 보낸 때로부터 12시간보다 일찍 나가 어떤 24시간에 3회가 들 수 있다 (§3.2)
+        sent_ms = int(self._clock() * 1000)
+        if direct:
+            kind.direct_at = sent_ms
         state, code, values = await fetch(
             self._token or "", self._transport, params=kind.params, parse=kind.parse
         )
-        kept = kind.record.fresh(now_ms) if kind.record is not None else None
+        kept = kind.record.fresh(sent_ms) if kind.record is not None else None
         if state == "ok":
-            record = Record(now_ms, state, code, now_ms, values)
+            record = Record(sent_ms, state, code, sent_ms, values)
         else:
             self._warn(kind.name, code)
             record = Record(
-                now_ms,
+                sent_ms,
                 state,
                 code,
                 kept.success_at if kept else None,

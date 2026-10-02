@@ -34,7 +34,7 @@
 | 페이지 | 43200 |
 
 - 기본 = `numOfDays=1`, 차원 없음 → `traffic`·`summary`·`countries`·`metrics`. 페이지 = `numOfDays=3`·`dimension1=URL`·`dimension2=Device` → `pages`. 페이지는 동의한 방문자만이라 표본이 작아 72시간을 쓴다.
-- 간격은 시도 사이다(성공·실패 모두 센다). 어떤 24시간에도 기본 6 + 페이지 2 = 8회 이하라 사람 몫 2회가 남는다.
+- 간격은 시도 사이다(성공·실패 모두 센다). 시도 시각은 그 호출을 보낸 때다 — 갱신을 시작한 때가 아니다(페이지는 기본 뒤에 나가므로 시작 시각을 적으면 다음 페이지가 12시간보다 일찍 나간다). 그래서 보낸 시각으로 어떤 24시간에도 기본 6 + 페이지 2 = 8회 이하라 사람 몫 2회가 남는다.
 - 순서: 한 갱신 안에서 기본(때가 됐으면) → 페이지(때가 됐으면)를 하나씩 부른다 — Clarity 호출이 동시에 둘 나가지 않는다. 두 호출은 기록·state·값을 따로 갖는다. 페이지가 늦거나 실패해도 기본의 값·state·간격은 그대로다.
 - 페이지를 미루는 때: 기본의 마지막 시도가 `denied`(401·403)이거나 `http_429` 면 페이지는 부르지 않고 시도로도 적지 않는다 — 토큰과 하루 한도는 둘이 같이 쓴다. 기본이 그 밖의 결과를 얻은 갱신에서 부른다.
 - 기록 — Redis 문자열 JSON `{attemptAt, state, code, successAt, values}`(035 와 같은 모양, 시각 ms, 만료 없음). 기본 `admin:clarity` 의 값은 `numOfDays`·`traffic`·`summary`·`countries`·`metrics` 다 — 035 의 옛 기록(`summary`·`countries` 없음)은 그 키를 null 로 읽고 다음 성공이 덮는다. 페이지 `admin:clarity:pages` 의 값은 `numOfDays`·`rowsIn`·`rowLimitHit`·`groups` 이고 주소는 없다.

@@ -243,7 +243,10 @@ class Clarity:
         self.calls: list[tuple[float, str]] = []  # (부른 시각 — World 시계 초, 종류)
         self.gate: asyncio.Event | None = None
         self.delay = {"base": 0.0, "pages": 0.0}  # 실제 초 — 느린 호출 흉내
+        # 가짜 시계 초 — 호출이 걸리는 동안 World 시계를 민다(보낸 시각은 그 앞에 적는다)
+        self.takes = {"base": 0, "pages": 0}
         self.clock: Callable[[], float] = lambda: 0.0
+        self.spend: Callable[[int], None] = lambda sec: None
         self.active = 0
         self.max_active = 0
 
@@ -260,7 +263,8 @@ class Clarity:
     async def handle(self, request: httpx.Request) -> httpx.Response:
         kind = self.kind(request)
         self.requests.append(request)
-        self.calls.append((self.clock(), kind))
+        self.calls.append((self.clock(), kind))  # 보낸 시각
+        self.spend(self.takes[kind])
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:
@@ -325,6 +329,7 @@ class World:
         self.broken: set[str] = set()  # "read"·"write" — 그쪽 Redis 명령이 실패한다
         self.feeds = self.new_app()
         clarity.clock = lambda: self.t
+        clarity.spend = lambda sec: self.advance(sec=sec)
 
     def new_app(self) -> VisitFeeds:
         """같은 Redis 에 새로 뜬 api — 재시작(배포) 흉내."""
