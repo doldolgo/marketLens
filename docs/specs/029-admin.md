@@ -23,6 +23,7 @@
 | 경로 | 가는곳 |
 |---|---|
 | `/` | 화면 |
+| `= /favicon.ico` | 204 |
 | `/api/…` | 백엔드 |
 | `= /svc/api/health` | api |
 | `= /svc/api/admin/status` | api |
@@ -32,6 +33,7 @@
 | `= /api/admin/alerts` | 수집기 |
 
 - `/` 는 관리자 화면 파일(`/usr/share/nginx/admin`, 공개 root 밖 — 공개 `location /`·`/app/` 로 받아 갈 수 없다).
+- `= /favicon.ico` 는 본문 없는 204 이고 기록하지 않는다 — 브라우저가 스스로 부르는 아이콘 요청이 화면 root 에서 404·error 로그 한 줄·접속 기록 한 줄이 되지 않게. 화면은 이미지 파일을 쓰지 않고(036 §3.8) CSP `default-src 'self'` 라 `data:` 아이콘도 못 쓴다. 헤더는 server 수준 것(`X-Frame-Options`)을 상속한다 — 자기 `add_header` 를 두지 않는다.
 - `/api/…` 는 **028 이전의 전체 분기** 그대로다: api 로 `/api/history/{premium,streaks,candles}`·`= /api/spreads`·`= /api/landing`·`/api/ws/`, 나머지는 전부 수집기(`${COLLECT_HOST}:8000`). 공개(028 허용 목록)와 다르게 허용 목록이 없다 — 로그인한 사람만 온다(030). 접두 제거·헤더 4개는 공개와 같다.
 - `/svc/api/health` 는 api 의 `/health`, `/svc/api/admin/status` 는 api 의 `/admin/status`, `/svc/api/admin/access`·`/svc/api/admin/clarity` 는 api 의 `/admin/access`·`/admin/clarity`(035) 로(경로를 통째로 바꾼다). 035 의 둘은 첫 줄이 교차 사이트 검사이고 헤더는 server 수준 것을 상속한다.
 - `= /api/admin/aws`·`= /api/admin/alerts` 는 수집기로(접두 제거) — `/api/…` 분기와 같은 곳이지만 화면의 폴링을 기록에서 빼려고 따로 둔다(034). 헤더는 server 수준 것을 상속한다. 관리자 피드는 034·035.
@@ -43,7 +45,7 @@
 - **교차 사이트 차단**: 백엔드로 넘기는 경로(`/api/…`·`/svc/…`)는 요청 헤더 `Sec-Fetch-Site` 가 `same-origin`·`none`·빈 값일 때만 통과, `same-site`·`cross-site` 는 403 `{"error":{"code":"forbidden","message":"Forbidden","detail":null}}`(JSON). 예외는 `/`·`= /api/docs`·`= /api/redoc`(로그인 뒤 돌아오는 이동이 same-origin 이 아니다). `kimptrack.com` 과 `admin.kimptrack.com` 은 같은 사이트라 쿠키 SameSite 로는 서로의 요청을 못 막는다.
 - **넘기지 않는 헤더**: 백엔드로 넘길 때 `Cookie`·`Cf-Access-Jwt-Assertion` 을 비운다(백엔드는 쓰지 않는다 — 사설망 평문으로 흘리지 않는다). `X-Refresh-Token` 은 그대로.
 - **응답 헤더**: 모든 프록시 응답(수집기·api 둘 다 — 같은 앱이라 CORS `*` 를 붙인다)에서 `Access-Control-Allow-Origin` 을 지운다. 모든 응답(오류 포함)에 `X-Frame-Options: DENY`. `/`(화면)에는 CSP `default-src 'self'; frame-ancestors 'none'` — 화면은 인라인 스크립트·스타일을 쓰지 않는다. 화면(`/`)은 `Cache-Control: no-store`(공개 `index.html` 과 같은 이유 — 배포가 화면과 API 계약을 함께 바꾼다). nginx 버전 숨김. location 에 `add_header` 를 따로 두면 server 수준 헤더가 상속되지 않으므로 그 location 에 같은 줄을 반복한다.
-- **접속 기록**: 요청마다 JSON 한 줄 — `time`·`email`(`Cf-Access-Authenticated-User-Email`)·`ip`(`Cf-Connecting-Ip`)·`method`·`uri`(경로와 쿼리)·`status`·`rt`(처리 초)·`ray`(`Cf-Ray`)·`sfs`(`Sec-Fetch-Site` — 이 헤더가 실제로 도착하는지 보려고). 따옴표·역슬래시·제어문자는 이스케이프하지만 UTF-8 은 보장되지 않는다(0x80 이상 바이트를 그대로 쓴다) — 읽는 도구는 관대하게 푼다(`errors='replace'`). 컨테이너 `/var/log/nginx-admin/access.log`(이미지가 디렉터리를 만든다 — 바인드가 없어도 기동한다), compose web 에 `./logs/admin:/var/log/nginx-admin` 바인드(git 무시). `/var/log/nginx` 를 통째로 바인드하지 않는다 — 이미지의 stdout·stderr 링크가 가려진다. 화면의 10초 폴링(`/svc/…`·`= /api/health`·`= /api/health/collect`)과 관리자 피드(`= /api/admin/aws`·`= /api/admin/alerts`(034), `= /svc/api/admin/access`·`= /svc/api/admin/clarity`(035))는 기록하지 않는다. 회전은 030 런북(호스트 logrotate, copytruncate). 이 기록은 개인정보(이메일·IP)다 — 항목·보존(90일)은 032 처리방침에 있다.
+- **접속 기록**: 요청마다 JSON 한 줄 — `time`·`email`(`Cf-Access-Authenticated-User-Email`)·`ip`(`Cf-Connecting-Ip`)·`method`·`uri`(경로와 쿼리)·`status`·`rt`(처리 초)·`ray`(`Cf-Ray`)·`sfs`(`Sec-Fetch-Site` — 이 헤더가 실제로 도착하는지 보려고). 따옴표·역슬래시·제어문자는 이스케이프하지만 UTF-8 은 보장되지 않는다(0x80 이상 바이트를 그대로 쓴다) — 읽는 도구는 관대하게 푼다(`errors='replace'`). 컨테이너 `/var/log/nginx-admin/access.log`(이미지가 디렉터리를 만든다 — 바인드가 없어도 기동한다), compose web 에 `./logs/admin:/var/log/nginx-admin` 바인드(git 무시). `/var/log/nginx` 를 통째로 바인드하지 않는다 — 이미지의 stdout·stderr 링크가 가려진다. 화면의 10초 폴링(`/svc/…`·`= /api/health`·`= /api/health/collect`)과 관리자 피드(`= /api/admin/aws`·`= /api/admin/alerts`(034), `= /svc/api/admin/access`·`= /svc/api/admin/clarity`(035)), 브라우저의 아이콘 요청(`= /favicon.ico`)은 기록하지 않는다. 회전은 030 런북(호스트 logrotate, copytruncate). 이 기록은 개인정보(이메일·IP)다 — 항목·보존(90일)은 032 처리방침에 있다.
 
 ### 3.3 관리자 화면
 - 화면 파일 셋(`index.html`·`admin.js`·`admin.css`)이 보이는 것·주기·차트·보안 계약은 036(§3.8 이 이 절의 규칙을 이어받는다).
@@ -74,7 +76,7 @@
 **PR 안 — 실행 세션(완료 조건)**. 시작 전에 main 에 028 이 있는지 본다(없으면 멈추고 묻는다).
 - compose: web 에 `./logs/admin:/var/log/nginx-admin` / 어떤 서비스도 8081 을 게시하지 않는다 / `server` 에만 `UVICORN_ROOT_PATH=/api` / 그러면 공개 server 의 `location /api/` 에 `proxy_pass` 가 없다(028 가드) / `.gitignore` 에 `logs/`. 기존 계약(컨테이너 수·로그 상한·profile) 그대로.
 - web 이미지: 관리자 템플릿이 nginx templates 로 복사되고, 화면 파일은 `/usr/share/nginx/admin` 에 있고 공개 root 에 없다, `/var/log/nginx-admin` 이 있다.
-- `web/nginx-admin.conf`: listen 8081 뿐 / `absolute_redirect off` / 업스트림 `api`·`${COLLECT_HOST}` 뿐 / `Sec-Fetch-Site` 검사와 예외 셋 / 모든 프록시 location 에서 `Cookie`·`Cf-Access-Jwt-Assertion` 비움·ACAO 지움 / `X-Frame-Options DENY always`·화면 CSP / JSON 접속 기록 경로와 폴링 제외. 공개 `web/nginx.conf` 는 028 계약 그대로(단언은 `listen 80` 블록만). Caddyfile(027 뒤 `caddy/Caddyfile`)에 `8081`·`admin` 이 없다.
+- `web/nginx-admin.conf`: listen 8081 뿐 / `absolute_redirect off` / 업스트림 `api`·`${COLLECT_HOST}` 뿐 / `Sec-Fetch-Site` 검사와 예외 셋 / 모든 프록시 location 에서 `Cookie`·`Cf-Access-Jwt-Assertion` 비움·ACAO 지움 / `X-Frame-Options DENY always`·화면 CSP / JSON 접속 기록 경로와 폴링 제외 / `= /favicon.ico` 는 204·기록 끔·자기 헤더 없음. 공개 `web/nginx.conf` 는 028 계약 그대로(단언은 `listen 80` 블록만). Caddyfile(027 뒤 `caddy/Caddyfile`)에 `8081`·`admin` 이 없다.
 - 화면 정적 단언: `admin.js` 에 `X-Requested-With`·`visibilityState` 가 있고 `localStorage`·`sessionStorage`·`innerHTML`·`window.open`·`location.pathname` 이 없다(새로고침 주소 `/` 고정), `index.html` 에 인라인 `<script>` 본문·`style=` 이 없다. (036 §4 가 넓힌다)
 - `GET /admin/status`: api 역할에만(`tests/test_role.py` 라우트 집합, collector ⊇ api 단언은 이 경로 예외) / 접속 2개면 2, 허브 없으면 0 / Redis 예외면 `redis: "down"` / Influx 없음이면 `influx: "down"` / Influx 가 2초 넘게 걸리면 `"down"`, 그동안 두 번째 요청은 새 ping 을 띄우지 않고 `"down"` / Redis·Influx 둘 다 멈춤 → 둘 다 down, 3초 안. `RedisBus.ping` 은 fakeredis 로.
 - 로컬 Docker: web 이미지에서 `nginx -t` 통과. 028 과 같은 에코 서버 둘(망 별칭 `api`·`server`)로 — 같은 망에서 `web:8081/` 이 화면, `/api/docs`·`/api/premium` 이 수집기 에코로, `/api/history/streaks` 가 api 에코로, `/svc/api/admin/status` 가 api `/admin/status` 로 도착 / 도착한 요청에 `Cookie`·`Cf-Access-Jwt-Assertion` 이 없다 / `Sec-Fetch-Site: cross-site` 는 403 JSON(`/api/openapi.json`·`/api/docs/oauth2-redirect` 포함), `same-origin`·없음은 통과, `/api/docs` 는 cross-site 여도 통과 / 공개 포트로 `Host: admin.kimptrack.com` 은 공개 server 응답 / 기록 파일에 JSON 한 줄, 폴링 경로는 없음. `UVICORN_ROOT_PATH=/api` 로 띄운 수집기의 `/docs` 가 `/api/openapi.json` 을 부른다. 브라우저로 화면을 열어(8081 을 잠시 로컬에만 게시한 테스트 compose) 오류 `message` 에 `<img src=x onerror=alert(1)>` 를 넣은 가짜 응답이 글자로 보이는지.

@@ -42,6 +42,8 @@ POLLING = (
     | FEEDS
     | API_FEEDS
 )
+# 브라우저가 스스로 부르는 아이콘 — 본문 없는 204, 기록하지 않는다 (§3.1·§3.2)
+FAVICON = ("=", "/favicon.ico")
 BASE_HEADERS = [
     ["Host", "$http_host"],
     ["X-Real-IP", "$remote_addr"],
@@ -302,7 +304,18 @@ def test_access_log_is_one_json_line_per_request_without_polling() -> None:
     off = {
         k for k, c in _locations(server).items() if _args(c, "access_log") == [["off"]]
     }
-    assert off == POLLING
+    assert off == POLLING | {FAVICON}
+
+
+def test_favicon_is_an_empty_204_that_inherits_server_headers() -> None:
+    """브라우저의 아이콘 요청이 화면 root 의 404·error 로그 줄이 되지 않게 — 본문 없는 204, 기록 끔, 자기 헤더 없음."""
+    locations = _locations(_admin_server())
+    assert _admin_route("/favicon.ico") == FAVICON
+    assert locations[FAVICON] == [
+        (["access_log", "off"], None),
+        (["return", "204"], None),
+    ]
+    assert XFO in _effective(locations[FAVICON], "add_header")
 
 
 # --- web 이미지·compose·caddy (§3.1·§3.2·§3.5) ------------------------------------------
