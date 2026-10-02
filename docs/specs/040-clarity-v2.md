@@ -44,7 +44,7 @@
   - 프로세스는 종류마다 마지막 기록을 메모리에도 두고, 그 기록을 Redis 에 썼는지 표시한다. 때는 Redis 기록과 메모리 기록 가운데 마지막 시도가 늦은 쪽으로 정한다. 메모리 쪽이 늦거나 아직 쓰이지 않았으면(부른 뒤 Redis 쓰기가 실패했다) Redis 에 다시 쓴다 — 035 의 '못 쓴 시각을 메모리에 둔다' 를 넓힌 것이다.
   - Redis 에 기록이 없거나 읽은 값이 JSON·모양이 틀리면 메모리 기록으로 때를 본다. 메모리에 간격 안 시도가 있고 그 기록이 Redis 에 쓰인 것이면(쓴 뒤 키가 사라졌다 — 사람이 지웠거나 잃었다: data 박스를 다시 만듦·FLUSH) 그 종류를 곧바로 부르되(바로 부르기) 이 프로세스에서 종류마다 24시간에 한 번뿐이다. 그 기록이 아직 쓰이지 않았거나 이미 24시간 안에 바로 불렀으면 메모리 기록을 Redis 에 다시 쓰고 간격을 따른다. 그래서 키를 몇 번 지우거나 잃어도 한 프로세스의 어떤 24시간에도 기본 7 + 페이지 3 = 10회를 넘지 않는다.
   - Redis 를 읽지 못하면 부르지 않는다 — 두 부분 `error`·`redis`, 값은 메모리의 마지막 기록(035 그대로).
-  - 남는 위험: 기록을 잃은 채 api 가 다시 뜨면 메모리도 비어 둘을 곧바로 부른다(첫 설치와 같다). 그런 재시작이 하루에 여러 번이면 한도를 넘을 수 있다 — 그날 호출이 429 로 끝나고 간격대로 다시 부를 뿐이다. Redis 는 AOF 라 다시 떠도 기록이 남는다(db.md).
+  - 남는 위험: 기록을 잃은 채 api 가 다시 뜨면 메모리도 비어 둘을 곧바로 부른다(첫 설치와 같다). 바로 부르기의 '24시간에 한 번' 도 프로세스의 기억이라 다시 뜨면 풀린다 — 다시 뜬 뒤 키가 없어 부른 첫 호출은 그날의 바로 부르기로 세지 않는다(같은 날 지움·다시 만들기·지움이 겹치면 10회를 넘을 수 있다 — 런북 6절이 그날 바로 부르기를 했으면 다시 만든 뒤 지우지 말라고 적는다). 그런 재시작이 하루에 여러 번이면 한도를 넘을 수 있다 — 그날 호출이 429 로 끝나고 간격대로 다시 부를 뿐이다. Redis 는 AOF 라 다시 떠도 기록이 남는다(db.md).
 
 ### 3.3 기본 응답 — 정규화
 - `traffic` = `{sessions, botSessions, users, pagesPerSession}` — `traffic` 지표 첫 행(035 그대로).
@@ -169,6 +169,14 @@ pytest -q app/features/admin/tests/test_clarity_{values,schedule,defer,pages,lea
 #   첫 실행 16.5 ms · 중앙값 15.7 ms(최소 15.5·최대 19.0) — serve ×6 ≈ 94 ms (상한 0.2초)
 #   tracemalloc 최고 10.9 MB (상한 32MB) · 칸 20개 · rowsIn 16000 · rowLimitHit true · 기록 5.4 KB
 #   (같은 스크립트를 기기와 주소 종류가 겹친 첫 판으로 돌렸을 때 중앙값 23.5 ms·10.9 MB)
+
+# 검토 반영 뒤 (2026-10-02) — 같은 명령. 새 테스트 5개(보낸 시각 둘·7일 Redis 둘·주소 꼴 나라 이름)
+cd server && ruff check . && ruff format --check . && pytest -q
+#   All checks passed! · 295 files already formatted · 1337 passed, 6 failed(같은 test_gauge.py UDP bind — 샌드박스)
+cd web && npm run lint && npm run build   # oxlint 종료 0 · ✓ built — index 253.01 kB(gzip 78.58 kB)
+# 새 테스트는 고치기 전 코드에서 실패함을 확인했다(보낸 시각 둘·7일 둘·나라 이름 하나). 지적의 재현(scratchpad, 레포 밖)을 고친 뒤
+# 다시 돌려 막힘을 확인 — 묶음 보낸 시각 [10, 57600, 100800…]s(24시간에 최대 2), 나라 이름에서 주소 행이 빠지고 표시 글자가
+# 응답·Redis 에 없음, 기본 401 9일 뒤 Redis 묶음 기록 values·successAt null. 토큰 없음 테스트는 Redis 읽기를 넣은 돌연변이로 실패를 확인
 ```
 
 ## 6. 갱신할 문서
@@ -177,8 +185,8 @@ pytest -q app/features/admin/tests/test_clarity_{values,schedule,defer,pages,lea
   - admin 행 server 칸의 "`/admin/clarity`(3시간 간격·Redis 캐시·주소 쿼리 뗌·7일 뒤 버림)" → "`/admin/clarity`(기본 4시간·페이지×기기 12시간(직전 72시간)을 따로 — 040, Redis 기록 둘·주소 쿼리 뗌(대시보드는 탭 id 만)·정규화 summary·countries·pages.groups·7일 뒤 버림)". 비고 끝에 "· 040 운영 확인 대기(세션이 있는 응답의 차원 키·값 꼴)".
   - 알려진 빚 `(035) Clarity 응답의 Traffic 밖 행 모양은 1차 문서에 없다 …` 줄 → `(040) Clarity 정규화는 세션 0 첫 응답(2026-10-02)의 키와 문서에 기댄다 — 값 꼴·차원 행 키·Country 행 키·totalTime 단위(초 짐작)와 세션당 평균인지 합인지·스크롤 깊이 정의는 세션이 있는 응답 뒤 040 §7 에서 확인. 못 알아본 칸은 null 이고 받은 그대로(metrics)를 남긴다`.
   - `(036) Clarity 칸은 traffic 타일과 받은 지표 목록뿐 — 정규화 타일은 …` 줄 → `(036) Clarity 칸은 traffic 타일과 받은 지표 목록뿐 — 정규화 값(summary·countries·pages)은 040 응답에 있고 그리는 것은 043`.
-  - `(035) Clarity 값의 7일 버림은 요청 때 한다 …` 줄의 "Redis `admin:clarity` 에" → "Redis `admin:clarity`·`admin:clarity:pages` 에".
-  - 더함: `(040) Redis 의 Clarity 기록을 잃은 채 api 가 하루에 여러 번 다시 뜨면 하루 한도(10회)를 넘을 수 있다 — 그날 호출만 429 로 끝난다(받아들인 위험)`.
+  - `(035) Clarity 값의 7일 버림은 요청 때 한다 …` 줄의 "Redis `admin:clarity` 에" → "Redis `admin:clarity`·`admin:clarity:pages` 에", "다음 시도가 덮거나" → "다음 요청이 값을 뺀 기록으로 다시 쓰거나 — 부르지 않는 요청도, 040 —".
+  - 더함: `(040) Redis 의 Clarity 기록을 잃은 채 api 가 하루에 여러 번 다시 뜨거나, 바로 부르기(키 지움)를 한 날 api 를 다시 만들고 또 지우면(24시간 한 번 가드는 프로세스 기억) 하루 한도(10회)를 넘을 수 있다 — 그날 호출만 429 로 끝난다(받아들인 위험, 런북 clarity.md 6절)`.
 - `CLAUDE.md` — 스펙 인덱스 040 행 상태 → DONE. 035 행 범위의 "`/admin/clarity`(Data Export 3시간 간격·Redis 캐시·주소 쿼리 뗌)" → "`/admin/clarity`(Data Export·Redis 캐시 — 간격·정규화·페이지×기기 묶음은 040)". 실행 세션은 인덱스의 상태만 고치지만(CLAUDE.md §5), 040 뒤 035 행 범위가 거짓이 되므로 설계 세션이 허락한 예외다.
 - `docs/context/architecture.md`:
   - '핵심 설계 결정' 의 Redis 문장 괄호 "035 의 `/admin/clarity` 는 `admin:clarity` 읽기·쓰기" → "035·040 의 `/admin/clarity` 는 `admin:clarity`·`admin:clarity:pages` 읽기·쓰기".
@@ -192,13 +200,13 @@ pytest -q app/features/admin/tests/test_clarity_{values,schedule,defer,pages,lea
   - 읽고 쓰는 쪽 문단의 "`admin:clarity` 는 api 의 `/admin/clarity` 만 읽고 쓴다(035)" → "`admin:clarity`·`admin:clarity:pages` 는 api 의 `/admin/clarity` 만 읽고 쓴다(035·040)".
 - `docs/runbooks/clarity.md`:
   - 제목의 "(스펙 033·035, 사람용)" → "(스펙 033·035·040, 사람용)".
-  - 5절 5단계 "옛 기록을 지운다(6절 '교체'·'바로 부르기')" → "옛 집계를 지운다 — `DEL admin:clarity admin:clarity:pages`(api 를 다시 만든 뒤라 둘 다 곧바로 부른다 — 그날 한도를 2회 더 쓴다)".
+  - 5절 5단계 "옛 기록을 지운다(6절 '교체'·'바로 부르기')" → "옛 집계를 지운다 — `DEL admin:clarity admin:clarity:pages`(api 를 다시 만든 뒤라 둘 다 곧바로 부른다 — 그날 한도를 2회 더 쓴다. 옛 집계는 지워야 하므로 그날 이미 바로 부르기를 했어도 지운다 — 한도를 넘으면 그날 호출만 429 로 끝나고 간격대로 다시 부른다)".
   - 6절 첫 문단 "(`project-live-insights`, 최근 24시간)" → "(`project-live-insights` — 기본 요약은 부른 때 직전 24시간, 페이지×기기 묶음은 직전 72시간)".
   - '한도' 줄 → "프로젝트당 하루 10회(넘으면 429). api 는 기본 호출을 4시간, 페이지×기기 호출을 12시간 띄운다(성공·실패 모두 센다 — 어떤 24시간에도 6 + 2 = 8회라 사람 몫 2회가 남는다). 둘이 같이 때가 되면 기본 먼저, 기본이 401·403·429 면 페이지는 미룬다. 마지막 시도·결과·마지막 성공 값은 Redis `admin:clarity`(기본)·`admin:clarity:pages`(페이지 — 주소 없이 묶은 수만)에 있어 api 를 다시 띄워도(배포) 한도를 쓰지 않는다. 관리자 페이지를 열 때만 부른다."
-  - 5단계 '확인' 끝에 "`pages.state` 도 `ok` 인지 본다(첫 요청은 `pending` — 60초 뒤). 동의한 세션이 생긴 뒤 처음 본 응답으로 040 §4 '배포 뒤' 확인을 한다."
+  - 5단계 '확인' 의 "정규화 키는 세션이 있는 응답을 본 뒤 035·036 에 함께 더한다." → "`pages.state` 도 `ok` 인지 본다(첫 요청은 `pending` — 60초 뒤). 정규화 키(`summary`·`countries`·`pages.groups`)는 동의한 세션이 생긴 뒤 처음 본 응답으로 040 §4 '배포 뒤' 대로 확인하고 040 §7 에 적는다."
   - '상태 읽기' 끝에 "`pages` 는 따로 읽는다 — 기본과 같은 `denied`·`http_429` 면 기본 때문에 미룬 것이고, `error`·`bad_data` 면 차원 키가 040 의 짐작과 달라 묶지 못했다(040 을 고친다)."
-  - '바로 부르기' 줄 → "(토큰을 바꿨거나 간격을 기다리지 않을 때) 키 **하나만**, **하루 한 번** 지운다 — 기본 요약은 data 박스에서 `docker exec marketlens-redis redis-cli DEL admin:clarity`, 페이지×기기 묶음은 `… DEL admin:clarity:pages`. 다음 관리자 페이지 요청이 곧바로 부른다(하루 10회 중 1회). api 는 키마다 24시간에 한 번만 곧바로 부르고, 그 안에 다시 지우면 기록을 되살리고 간격을 따른다 — 둘 다 지우면 사람 몫 2회를 다 쓴다."
-  - '교체' 끝 "3시간 간격은 Redis 값이라 교체해도 유지된다" → "두 간격은 Redis 값이라 교체해도 유지된다".
+  - '바로 부르기' 줄 → "(토큰을 바꿨거나 간격을 기다리지 않을 때) 키 **하나만**, **하루 한 번** 지운다 — 기본 요약은 data 박스에서 `docker exec marketlens-redis redis-cli DEL admin:clarity`, 페이지×기기 묶음은 `… DEL admin:clarity:pages`. 다음 관리자 페이지 요청이 곧바로 부른다(하루 10회 중 1회). api 는 키마다 24시간에 한 번만 곧바로 부르고, 그 안에 다시 지우면 기록을 되살리고 간격을 따른다 — 둘 다 지우면 사람 몫 2회를 다 쓴다." 뒤에 그 가드가 api 프로세스 하나의 기억이라 다시 만들면 풀리고, 그날 바로 부르기를 했으면 다시 만든 뒤 지우지 않고 `nextAt` 을 기다린다는 문장.
+  - '교체' 끝 "→ 바로 확인하려면 '바로 부르기'. 3시간 간격은 Redis 값이라 교체해도 유지된다" → "→ 바로 확인하려면 '바로 부르기'(그날 이미 했으면 하지 않는다 — 다시 만든 api 는 그 기억이 없다). 두 간격은 Redis 값이라 교체해도 유지된다".
   - '끄기' 의 "남은 집계(최대 7일치 숫자와 쿼리를 뗀 페이지 주소·출처)는 data 박스에서 `DEL admin:clarity` 로 지운다" → "남은 집계(최대 7일치 숫자와 쿼리를 뗀 페이지 주소·출처, 페이지 종류×기기 묶음)는 data 박스에서 `DEL admin:clarity admin:clarity:pages` 로 지운다".
 - `docs/specs/035-monitoring-visits.md`:
   - §2 처리방침 줄 "Clarity 에서는 집계 숫자와 쿼리를 뗀 페이지 주소·출처만 받아 7일 뒤 버린다(§3.3)" → "Clarity 에서는 집계 숫자(페이지 종류×기기 묶음 포함)와 쿼리를 뗀 페이지 주소(대시보드 주소는 허용된 탭 id 하나만 남긴다)·출처만 받아 7일 뒤 버린다(§3.3·040)".
@@ -238,6 +246,12 @@ pytest -q app/features/admin/tests/test_clarity_{values,schedule,defer,pages,lea
   - JSON 으로 못 쓰는 값이 든 답(손으로 넣은 기록 등): `pages` 만 못 쓰면 `pages` 만 `error`·예외 이름(값 null), 바깥이 못 쓰면 바깥 값 키만 null 이고 `pages` 는 그대로 객체.
   - 테스트의 '느린 가짜 기본(5초)' 은 실제 0.5초 지연 + 기다림 0.1초로 흉내 냈다(같은 비율 — 테스트 시간). '72시간 60초마다'·'매시간 두 키 지움' 은 4,320·4,200 요청을 그대로 돈다(약 5초).
 - 실행 중 함께 고친 스펙 절: §4 '주소(`metrics`)' 의 "035·036b … 그대로 통과" 에 `tab=history` 가 든 두 행의 기대값이 §3.3 규칙대로 바뀐다는 말을 더했다(035 `test_addresses_lose_query_and_hash_and_referrers_become_origins`·036b `test_named_metrics_match_in_real_camel_case_and_documented_spelling` 의 대시보드 행 — 나머지 단언은 그대로). §4 '035 회귀' 에 묶음 호출이 더해져 바뀐 것(호출 수는 기본만 세기·HTTP 테스트의 호출 2회·`test_http_unwritable_record_in_redis_is_an_error_part_not_500` 에 12시간 안 묶음 기록·`SaveFails` 가짜에 묶음 메서드·응답 dict 에 더한 키)을 더했다.
+- 검토 반영(2026-10-02):
+  - 시도 시각은 보낸 때다(§3.2) — 갱신 시작을 적어 기본이 늦은 갱신의 묶음이 다음 번에 12시간보다 일찍 나가던 것을 고쳤다. 바로 부르기 시각도 같다. 가짜 Data Export 에 호출이 가짜 시계를 미는 `takes` 를 더했다.
+  - 부르지 않는 요청(간격 안·미룸)이라도 Redis 에 있는 기록의 값이 7일 지났으면 값을 뺀 기록으로 다시 쓴다(§3.2) — 기본 401 이 이어지면 묶음 기록의 값이 Redis 에 7일 넘게 남던 것. 지운 키는 되살리지 않는다.
+  - 주소 꼴 글자는 나라 이름이 아니다(§3.3) — 아는 키·하나뿐인 글자 값의 주소가 쿼리째 `countries`·Redis 에 실리던 것.
+  - 바로 부르기의 하루 한 번은 api 프로세스의 기억이라 다시 만들면 풀린다 — §3.2 '남는 위험'·런북 6절('바로 부르기'·'교체')·5절 5단계·status 빚 줄에 적었다(코드 변경 없음).
+  - 테스트 단언 강화 — 토큰 없음은 Clarity 기록 읽기·쓰기 0 을 센다, 느린 기본은 뒤의 갱신이 끝난 뒤 요청 하나로 둘 다 값. 라우터 docstring(OpenAPI 설명)을 4시간·12시간·`pages` 로, 런북 5단계의 옛 '정규화 키는 035·036 에' 문장을 040 §4 '배포 뒤' 로 바꿨다.
 - 남은 빚:
   - §4 '배포 뒤' 확인 전부 — 세션이 있는 응답의 차원 행 키 철자·값 꼴·`Country` 행 키·`totalTime` 단위와 평균/합·스크롤 깊이 정의·`PopularPages` 주소에 `?tab` 이 실리는지(status "040 운영 확인 대기").
   - 미뤄진 묶음에 기록이 있으면 그 기록의 state(예: `ok`)와 지난 `nextAt` 이 그대로 보인다 — '미뤘다' 표시는 기록이 없을 때만(§3.5 그대로). 화면(043)이 `nextAt` 이 지났는데 바깥이 `denied`·`http_429` 인 것으로 읽어야 한다.

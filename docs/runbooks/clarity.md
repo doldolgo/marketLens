@@ -37,7 +37,7 @@ Clarity 는 한 사람분만 지울 수 없다. 철회한 방문자가 이미 �
 2. 새 Clarity 프로젝트를 만들고 2절의 설정(쿠키·봇·가림·IP 차단·팀)을 그대로 한다.
 3. `clarity.js` 의 `CLARITY_ID` 를 새 ID 로 바꾸는 PR 을 머지·배포한다. 안내 판은 올리지 않는다(받는 자·항목·목적·보유 기간이 같다).
 4. 배포 뒤(3절 1·2번으로 새 ID 의 태그가 나가는지 확인) 옛 프로젝트를 지운다 — 그 프로젝트의 모든 방문자 녹화·히트맵이 함께 사라지고 되돌릴 수 없다. 남길 숫자가 있으면 개인정보 없는 집계만 지우기 전에 따로 적는다.
-5. 035 의 Data Export 토큰이 있으면 새 프로젝트에서 다시 만들어 바꾸고 옛 집계를 지운다 — `DEL admin:clarity admin:clarity:pages`(api 를 다시 만든 뒤라 둘 다 곧바로 부른다 — 그날 한도를 2회 더 쓴다).
+5. 035 의 Data Export 토큰이 있으면 새 프로젝트에서 다시 만들어 바꾸고 옛 집계를 지운다 — `DEL admin:clarity admin:clarity:pages`(api 를 다시 만든 뒤라 둘 다 곧바로 부른다 — 그날 한도를 2회 더 쓴다. 옛 집계는 지워야 하므로 그날 이미 바로 부르기를 했어도 지운다 — 한도를 넘으면 그날 호출만 429 로 끝나고 간격대로 다시 부른다).
 6. 요청자에게 결과를 지체 없이 알린다. Microsoft 가 자기 목적에 쓰는 정보는 이것으로 지워지지 않으며 Microsoft 개인정보 문의로 따로 요청할 수 있다고 함께 적는다. 주고받은 메일은 문의 메일로 보관한다(032 — 답변을 마친 날부터 1년).
 
 ## 6. Data Export 토큰(035)
@@ -47,8 +47,8 @@ Clarity 는 한 사람분만 지울 수 없다. 철회한 방문자가 이미 �
 2. 발급: Clarity 프로젝트 → Settings → Data Export → 새 토큰(프로젝트 관리자만 만들 수 있다). 이름은 용도를 알게(예: 관리자 요약).
 3. 넣기: serve 박스의 `server/.env` 에 `CLARITY_API_TOKEN=<토큰>` 한 줄을 편집기로 넣는다(셸 기록에 남기지 않게). collect 의 `server/.env` 에는 넣지 않는다 — api 만 쓴다.
 4. api 다시 만들기(serve): `docker compose --profile serve --env-file .env --env-file server/.env up -d --force-recreate api`.
-5. 확인: 관리자 페이지(036 전이면 serve 에서 `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/clarity`)의 `state` 가 `ok`, `traffic.sessions`·`botSessions` 가 숫자 — 세션이 0 이면 `users`·`pagesPerSession` 은 null 일 수 있다(2026-10-02 첫 응답). 첫 응답(세션 0)의 `metrics[].name` 목록과 행의 **키 이름**(값은 옮기지 않는다)은 035 §7 에 옮겨 두었다 — 이름이 그 목록과 다르면 035 §7 에 옮긴다. 정규화 키는 세션이 있는 응답을 본 뒤 035·036 에 함께 더한다. `pages.state` 도 `ok` 인지 본다(첫 요청은 `pending` — 60초 뒤). 동의한 세션이 생긴 뒤 처음 본 응답으로 040 §4 '배포 뒤' 확인을 한다.
+5. 확인: 관리자 페이지(036 전이면 serve 에서 `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/clarity`)의 `state` 가 `ok`, `traffic.sessions`·`botSessions` 가 숫자 — 세션이 0 이면 `users`·`pagesPerSession` 은 null 일 수 있다(2026-10-02 첫 응답). 첫 응답(세션 0)의 `metrics[].name` 목록과 행의 **키 이름**(값은 옮기지 않는다)은 035 §7 에 옮겨 두었다 — 이름이 그 목록과 다르면 035 §7 에 옮긴다. `pages.state` 도 `ok` 인지 본다(첫 요청은 `pending` — 60초 뒤). 정규화 키(`summary`·`countries`·`pages.groups`)는 동의한 세션이 생긴 뒤 처음 본 응답으로 040 §4 '배포 뒤' 대로 확인하고 040 §7 에 적는다.
 - **상태 읽기**: `denied`·`http_401` = 토큰이 없거나 틀리거나 만료(교체), `denied`·`http_403` = 권한 없음, `error`·`http_429` = 오늘 한도를 다 썼다(값은 마지막 성공 그대로, `nextAt` 에 다시 부르는 시각), `error`·`redis` = data 박스 Redis 에 못 닿아 부르지 않았다. 값은 마지막 성공에서 7일이 지나면 비고 `fetchedAt` 이 경과를 말한다. `pages` 는 따로 읽는다 — 기본과 같은 `denied`·`http_429` 면 기본 때문에 미룬 것이고, `error`·`bad_data` 면 차원 키가 040 의 짐작과 달라 묶지 못했다(040 을 고친다).
-- **바로 부르기**(토큰을 바꿨거나 간격을 기다리지 않을 때) 키 **하나만**, **하루 한 번** 지운다 — 기본 요약은 data 박스에서 `docker exec marketlens-redis redis-cli DEL admin:clarity`, 페이지×기기 묶음은 `… DEL admin:clarity:pages`. 다음 관리자 페이지 요청이 곧바로 부른다(하루 10회 중 1회). api 는 키마다 24시간에 한 번만 곧바로 부르고, 그 안에 다시 지우면 기록을 되살리고 간격을 따른다 — 둘 다 지우면 사람 몫 2회를 다 쓴다.
-- **교체**(관리자 이탈 — Clarity 권장 — 또는 유출 의심): 새 토큰 발급(2) → serve `server/.env` 값 교체(3) → api 다시 만들기(4) → Data Export 화면에서 옛 토큰 삭제 → 바로 확인하려면 '바로 부르기'. 두 간격은 Redis 값이라 교체해도 유지된다.
+- **바로 부르기**(토큰을 바꿨거나 간격을 기다리지 않을 때) 키 **하나만**, **하루 한 번** 지운다 — 기본 요약은 data 박스에서 `docker exec marketlens-redis redis-cli DEL admin:clarity`, 페이지×기기 묶음은 `… DEL admin:clarity:pages`. 다음 관리자 페이지 요청이 곧바로 부른다(하루 10회 중 1회). api 는 키마다 24시간에 한 번만 곧바로 부르고, 그 안에 다시 지우면 기록을 되살리고 간격을 따른다 — 둘 다 지우면 사람 몫 2회를 다 쓴다. 이 '24시간에 한 번' 은 api 프로세스 하나의 기억이라 api 를 다시 만들면(교체·끄기·배포) 풀린다 — 다시 만든 api 는 그날 한 바로 부르기를 모르고, 첫 요청 전에 지운 키로 부른 호출은 바로 부르기로 세지도 않는다(그 뒤 한 번 더 지우면 또 곧바로 부른다). 그날 이미 바로 부르기를 했으면 api 를 다시 만든 뒤에는 지우지 말고 `nextAt` 을 기다린다(지우면 그날 10회를 넘어 429 로 끝날 수 있다).
+- **교체**(관리자 이탈 — Clarity 권장 — 또는 유출 의심): 새 토큰 발급(2) → serve `server/.env` 값 교체(3) → api 다시 만들기(4) → Data Export 화면에서 옛 토큰 삭제 → 바로 확인하려면 '바로 부르기'(그날 이미 했으면 하지 않는다 — 다시 만든 api 는 그 기억이 없다). 두 간격은 Redis 값이라 교체해도 유지된다.
 - **끄기**: serve `server/.env` 에서 `CLARITY_API_TOKEN` 줄을 지우고 api 다시 만들기 → '연결 안 됨'. 남은 집계(최대 7일치 숫자와 쿼리를 뗀 페이지 주소·출처, 페이지 종류×기기 묶음)는 data 박스에서 `DEL admin:clarity admin:clarity:pages` 로 지운다 — 토큰이 없으면 api 가 그 키를 읽지도 지우지도 않는다.
