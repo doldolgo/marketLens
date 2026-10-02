@@ -25,7 +25,7 @@
 
 - api 에 두는 이유: 접속 로그가 serve 박스에 있고 Clarity 토큰을 serve 에 둔다. collector 역할에서는 404 이고, OpenAPI 는 api 스키마에만 두 경로가 있다.
 - 관리자 nginx(029, :8081)에 정확 일치 둘: `= /svc/api/admin/access`·`= /svc/api/admin/clarity` → api 의 `/admin/access`·`/admin/clarity`(경로를 통째로 바꾼다 — 029 의 `= /svc/api/admin/status` 와 같은 모양). 첫 줄은 029 의 교차 사이트 검사(`Sec-Fetch-Site` 가 same-origin·none·빈 값만 통과, 나머지 403 JSON)이고, 화면이 폴링하므로 접속 기록을 남기지 않는다(`access_log off`). server 수준 헤더(`Cookie`·`Cf-Access-Jwt-Assertion` 비움·ACAO 지움·`X-Frame-Options`)는 상속한다 — 자기 `proxy_set_header`·`add_header` 를 두지 않는다. 공개 nginx(028)는 바꾸지 않는다 — 공개 server 에는 `/svc/` 분기가 없어 두 경로는 `location /`(`try_files $uri =404`)의 정적 404 다.
-- 응답은 항상 200 JSON(상태 응답 — `{"error":…}` 형식 아님), 키 camelCase, `…At` 은 epoch ms, `…Ts` 와 점·시간 칸의 `ts` 는 epoch 초(product.md 시각 단위). 응답은 **부분** 하나이고, 부분은 `{state, code, fetchedAt, refreshSec, …값 키}` 객체다.
+- 응답은 항상 200 JSON(상태 응답 — `{"error":…}` 형식 아님), 키 camelCase, `…At` 은 epoch ms, `…Ts` 와 점·시간 칸의 `ts` 는 epoch 초(product.md 시각 단위). 응답은 **부분** 하나이고(`/admin/clarity` 는 040 부터 하위 부분 `pages` 를 더 싣는다), 부분은 `{state, code, fetchedAt, refreshSec, …값 키}` 객체다.
 
 | state | 뜻 |
 |---|---|
@@ -35,7 +35,7 @@
 | `error` | 실패 |
 | `pending` | 첫조회중 |
 
-- `code`: `ok` 면 null, 아니면 짧은 사유 — `http_<상태>`·예외 이름·`timeout`·`redis`·`no_file`. **오류 문장은 싣지 않는다.**
+- `code`: `ok` 면 null, 아니면 짧은 사유 — `http_<상태>`·예외 이름·`timeout`·`redis`·`no_file`·`bad_data`(040 — 응답 모양 틀림). **오류 문장은 싣지 않는다.**
 - `fetchedAt` = 그 부분의 값을 만든 시각(못 만들었으면 null), `refreshSec` = 갱신 주기(화면이 신선도 판정에 쓴다). `ok` 가 아니면 값 키는 모두 null 이다 — 직전 값을 정상처럼 보이지 않게(029 §3.3 원칙). 예외는 Clarity(§3.3).
 - 갱신(022 랜딩의 3초 규칙과 같은 모양): 요청이 왔을 때 그 부분이 비었거나 `refreshSec` 가 지났으면 갱신을 하나만 띄우고 3초까지 기다린다. 끝나면 새 값, 아니면 직전 결과(없으면 `pending`)를 답하고 갱신은 뒤에서 마저 돈다. 그동안 온 요청은 같은 갱신을 기다린다. **요청이 없으면 아무것도 부르지 않는다** — 페이지를 안 보면 파일 읽기·Clarity 호출 0.
 - 스레드: 파일 읽기·JSON 풀기(Clarity 응답·`admin:clarity`)는 `asyncio.to_thread`(기본 실행기)에서 한다 — api 에는 수집 쓰기가 없어 기본 실행기로 충분하다.
