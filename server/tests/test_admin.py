@@ -439,9 +439,12 @@ SCRIPT_BANNED = (
     "sendBeacon",
     "new WebSocket",
     "EventSource",
-    # 042 §4 — 서버 기록 창을 주소에 싣지 않는다
+    # 042 §4 — 서버 기록 창을 주소에 싣지 않는다(주소를 바꾸는 다른 길도)
     "location.hash",
     "pushState",
+    "location.assign",
+    "location.search =",
+    "location =",
 )
 # 036 §3.6·§3.8 — svg() 가 받는 속성 이름은 기하·이름표뿐(href·style·on… 은 svg() 가 던진다)
 SVG_ATTRS = {
@@ -955,7 +958,7 @@ const find = (n, cls) => (typeof n === 'string' ? [] : [...(n.className === cls 
 const tiles = (n) => find(n, 'stat').map((t) => [text(t.kids[0]), ...find(t, 'stat-sub').map(text)])
 const now = Date.now()
 const sec = Math.floor(now / 1000)
-const access = { state: 'ok', startTs: sec - 86400, firstTs: sec - 3600, totals: { requests: 100, pages: 40, ws: 2, skipped: 1 },
+const access = { state: 'ok', windows: ['24h'], gateAt: Date.UTC(2026, 9, 10, 15), startTs: sec - 86400, firstTs: sec - 3600, totals: { requests: 100, pages: 40, ws: 2, skipped: 1 },
   hourly: [{ ts: sec - 3600, requests: 60, pages: 25, errors: 1 }, { ts: sec, requests: 40, pages: 15, errors: 0 }],
   status: { '2xx': 80, '3xx': 10, '4xx': 7, '5xx': 1 }, ws: { count: 2, durations: { lt10s: 1, ge1h: 1 } },
   paths: [['/', 30]], tabs: tabs.map((t, i) => [t, i + 1]), referrers: [], utmSources: [['x', 2]], devices: [['desktop', 30]],
@@ -1004,14 +1007,14 @@ ALARM_NAMES = [
 ODD = ["zzz", "constructor", "__proto__"]
 KINDS = [*KIND_NAMES, *ODD]
 TABS = [*TAB_NAMES, "(기타)", "constructor"]
-# 041 §3.1·§7 타일 부제 — [이름, 부제]. 서버 기록 덩어리의 타일은 042 §3.4 ①·⑥ (시행 전 — 응답에 windows 없음)
+# 041 §3.1·§7 타일 부제 — [이름, 부제]. 서버 기록 덩어리의 타일은 042 §3.4 ①·⑥ (시행 전 — windows ["24h"]·시행일 10-11)
 ACCESS_TILES = [
     ("확인 ~ 브라우저 모양", "방문자(날마다 셈)"),
     ("다시 온", "시행 뒤부터"),
     ("스크립트가 돈 페이지", "사람 모양 페이지 0 중"),
     ("사람 모양 페이지", "위장 봇 섞임"),
     ("끝난 연결", "연결 수 — 사람 수가 아니다"),
-    ("연결한 방문자", "시행(– 00:00) 뒤부터"),
+    ("연결한 방문자", "시행(10-11 00:00) 뒤부터"),
     ("재접속 실패", "대시보드 WebSocket 5xx"),
 ]
 CLARITY_TILES = [
@@ -1150,6 +1153,9 @@ def test_traffic_window_is_one_query_with_three_window_words() -> None:
     ) == (WINDOWS)
     for banned in ("location.hash", "pushState", "localStorage", "sessionStorage"):
         assert banned not in js, banned
+    # 주소는 만료 표시(RELOAD_MARK)를 볼 때만 읽는다 — 주소로 창을 고르지 않는다(§2)
+    assert js.count("location.search") == 2
+    assert js.count("new URLSearchParams(location.search).has(RELOAD_MARK)") == 2
 
 
 def test_traffic_window_buttons_and_block_order_in_the_page() -> None:
@@ -1205,8 +1211,95 @@ def test_traffic_words_name_daily_counted_visitors() -> None:
             assert word not in text, (name, word)
 
 
+# 042 §3.6 이름표 일곱(계약 복사) — 행에는 한국어 이름, 원래 키는 title 과 '이 칸 뜻' 에만
+TRAFFIC_NAMES = {
+    "CLASS_NAME": {
+        "browser": "사람 브라우저 모양",
+        "search": "검색엔진",
+        "ai": "AI 수집기",
+        "preview": "링크 미리보기",
+        "tool": "자동화 도구",
+        "scanner": "스캐너",
+        "operator": "운영자 흔적",
+        "unknown": "이름 없음",
+    },
+    "CHANNEL_NAME": {
+        "direct": "직접",
+        "search": "검색",
+        "inapp": "앱 안 브라우저",
+        "social": "소셜·커뮤니티",
+        "ai": "AI 답변",
+        "referral": "다른 사이트 링크",
+        "campaign": "캠페인(utm)",
+        "internal": "사이트 안 이동",
+        "unknown": "첫 페이지 기록 없음",
+    },
+    "NET_NAME": {
+        "telecom_kr": "국내 통신사",
+        "telecom": "해외 통신사",
+        "cloud": "데이터센터·클라우드",
+        "other": "기업·학교·기관",
+        "unknown": "자료에 없음",
+    },
+    "APP_NAME": {
+        "kakaotalk": "카카오톡",
+        "naver": "네이버 앱",
+        "instagram": "인스타그램",
+        "facebook": "페이스북",
+        "line": "라인",
+        "daum": "다음 앱",
+        "band": "밴드",
+        "other": "그 밖 앱",
+    },
+    "DEVICE_NAME": {"mobile": "휴대폰", "tablet": "태블릿", "desktop": "데스크톱"},
+    "OS_NAME": {
+        "ios": "iOS",
+        "android": "Android",
+        "windows": "Windows",
+        "macos": "macOS",
+        "linux": "Linux",
+        "chromeos": "ChromeOS",
+        "other": "그 밖",
+    },
+    "BROWSER_NAME": {
+        "chrome": "Chrome",
+        "safari": "Safari",
+        "samsung": "삼성 인터넷",
+        "whale": "웨일",
+        "edge": "Edge",
+        "firefox": "Firefox",
+        "opera": "Opera",
+        "inapp": "앱 안 브라우저",
+        "other": "그 밖",
+    },
+}
+
+
+def test_traffic_name_tables_match_the_spec_and_every_key_is_explained() -> None:
+    """042 §3.6·041 §3.1 — 이름표 일곱(한 줄 객체)의 키·이름이 §3.6 과 같고, 키는 모두 접속 절 '이 칸 뜻' dl 안에
+    `<code>키</code>` 로 있다(행에는 쓰지 않아 휴대폰에서 원래 키를 보는 곳은 그 dl 뿐이다)."""
+    js = _text("web/admin/admin.js")
+    body = _section_bodies(_text("web/admin/index.html"))["traffic"]
+    explained = "".join(
+        re.findall(r"<dl>(.*?)</dl>", "".join(_folded(body, TERMS)), flags=re.S)
+    )
+    for name, expected in TRAFFIC_NAMES.items():
+        found = re.search(rf"\nconst {name} = \{{ (.*?) \}};\n", js)
+        assert found, name
+        assert dict(re.findall(r"(\w+): '([^']*)'", found.group(1))) == expected, name
+        for key in expected:
+            assert f"<code>{key}</code>" in explained, (name, key)
+
+
 def _css_rule(css: str, selector: str) -> str:
     found = re.findall(rf"(?m)^{re.escape(selector)}[^{{]*\{{([^}}]*)\}}", css)
+    assert len(found) == 1, selector
+    return found[0]
+
+
+def _css_exact(css: str, selector: str) -> str:
+    """맨 앞 칸에서 `선택자 {` 로 시작하는 규칙 하나(뒤에 다른 글자가 붙은 선택자는 다른 규칙)."""
+    found = re.findall(rf"(?m)^{re.escape(selector)} \{{([^}}]*)\}}", css)
     assert len(found) == 1, selector
     return found[0]
 
@@ -1232,3 +1325,17 @@ def test_traffic_colors_use_the_spec_tokens_and_narrow_rows_stack() -> None:
     ]
     narrow = re.search(r"@media \(max-width: 480px\) \{(.*?)\n\}", css, flags=re.S)
     assert narrow and ".brow" in narrow.group(1) and "'bar bar'" in narrow.group(1)
+    # §3.9 — 행이 든 열이 340px 이하여도 두 줄, ③·⑤ 3열과 ① 범위 타일은 960px 이하에서 한 줄을 다 쓴다
+    tight = re.search(r"@container \(max-width: 340px\) \{(.*?)\n\}", css, flags=re.S)
+    assert tight and ".brow" in tight.group(1) and "'bar bar'" in tight.group(1)
+    assert "container-type: inline-size" in _css_exact(css, ".col")
+    mid = re.search(r"@media \(max-width: 960px\) \{(.*?)\n\}", css, flags=re.S)
+    assert mid and ".cols3 { grid-template-columns: minmax(0, 1fr); }" in mid.group(1)
+    assert ".tiles > :has(> .range-num) { grid-column: 1 / -1; }" in mid.group(1)
+    # 가로 넘침 0 — geo 배지·범위 숫자는 줄을 바꾸고, 답 줄의 값은 바로 뒤 글자와 붙어 있다
+    assert "white-space: normal" in _css_exact(css, ".geo-foot .tag")
+    assert "nowrap" not in _css_exact(css, ".range-num")
+    assert "white-space: nowrap" in _css_exact(css, ".answer .nb")
+    # §3.7 — ⑥ 의 응답·지속 막대는 회색(장애색은 5xx 만), 시행 전 덩어리는 범례처럼 테두리
+    assert "var(--color-neutral-600)" in _css_exact(css, ".q .chart .fill")
+    assert "stroke: var(--color-neutral-700)" in _css_exact(css, ".chart .pre")

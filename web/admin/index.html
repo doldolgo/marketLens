@@ -315,7 +315,7 @@
                 <summary>이 칸 뜻</summary>
                 <dl>
                   <dt>걸러 내기 줄</dt><dd>모든 요청에서 확인 방문자까지 좁혀 가는 다섯 칸이고, 칸 아래 % 는 앞 칸 대비 남은 비율이다. 마지막 칸만 방문자(날마다 셈)라 '1명이 평균 n쪽' 은 스크립트가 돈 페이지 ÷ 확인이다.</dd>
-                  <dt>종류 여덟 <code>classes</code></dt><dd>요청이 밝힌 User-Agent 로 가른 종류 — 사람 브라우저 모양 <code>browser</code> · 검색엔진 <code>search</code> · AI 수집기 <code>ai</code> · 링크 미리보기 <code>preview</code> · 자동화 도구 <code>tool</code> · 스캐너 <code>scanner</code> · 운영자 흔적 <code>operator</code> · 이름 없음 <code>unknown</code>. 막대는 모든 요청 대비 비율이고 값은 '요청 · 페이지' 다.</dd>
+                  <dt>종류 여덟 <code>classes</code></dt><dd>줄마다 하나로 가른 종류(운영자 흔적은 출처로, 나머지는 User-Agent 로 — 탐색 경로 줄은 브라우저 이름을 달아도 스캐너) — 사람 브라우저 모양 <code>browser</code> · 검색엔진 <code>search</code> · AI 수집기 <code>ai</code> · 링크 미리보기 <code>preview</code> · 자동화 도구 <code>tool</code> · 스캐너 <code>scanner</code> · 운영자 흔적 <code>operator</code> · 이름 없음 <code>unknown</code>. 막대는 모든 요청 대비 비율이고 값은 '요청 · 페이지' 다.</dd>
                   <dt>탐색 경로 <code>probes</code></dt><dd>없는 관리 페이지(wp-·.env·/admin 등)를 찔러 보는 요청 줄. 브라우저 이름을 달아도 스캐너로 센다.</dd>
                   <dt>운영자 흔적 <code>operator</code></dt><dd>출처가 localhost·사설 IP·IP 글자 그대로·Clarity 대시보드인 요청이고, 그날 그 짝은 방문자에서 뺐다. 운영자 IP 를 적어 두지 않아 보통 브라우저로 연 운영자 방문은 거르지 못한다.</dd>
                   <dt>위장 봇 단서</dt><dd>브라우저 이름을 달았지만 사람으로 보기 어려운 세 갈래 — 스크립트가 한 번도 돌지 않은 브라우저 모양(모양 − 확인), 데이터센터·클라우드 망의 브라우저 모양, 운영자 흔적 요청. 종류를 따로 만들지 않고 이 수로 드러낸다.</dd>
@@ -361,7 +361,7 @@
                 <dl>
                   <dt>많이 연 경로 <code>paths</code></dt><dd>사람 모양 페이지 줄의 주소(쿼리를 뗀 것). 막대·% 는 사람 모양 페이지 대비다.</dd>
                   <dt>대시보드 진입 탭 <code>tabs</code></dt><dd>실시간 스프레드 <code>spread</code> · 기록/통계 <code>history</code> · 선물–현물 갭 <code>gap</code> · 선선갭 <code>pp</code> · 수집 상태 <code>health</code> · 입출금 레이더 <code>flow</code>. tab 이 없는 /app/ 은 spread, 목록 밖은 (기타)이고 들어온 뒤 바꾼 탭은 없다 — % 는 탭 합 대비다.</dd>
-                  <dt>기기와 OS·브라우저 <code>devices</code>·<code>os</code>·<code>browsers</code></dt><dd>User-Agent 글자로 가른 기기(휴대폰·태블릿·데스크톱)·OS·브라우저. 방문자 기준(확인 / 모양)과 페이지 줄 기준(사람 모양 페이지 대비)을 따로 접어 둔다.</dd>
+                  <dt>기기와 OS·브라우저 <code>devices</code>·<code>os</code>·<code>browsers</code></dt><dd>User-Agent 글자로 가른 기기(휴대폰 <code>mobile</code> · 태블릿 <code>tablet</code> · 데스크톱 <code>desktop</code>)·OS(iOS <code>ios</code> · Android <code>android</code> · Windows <code>windows</code> · macOS <code>macos</code> · Linux <code>linux</code> · ChromeOS <code>chromeos</code> · 그 밖 <code>other</code>)·브라우저(Chrome <code>chrome</code> · Safari <code>safari</code> · 삼성 인터넷 <code>samsung</code> · 웨일 <code>whale</code> · Edge <code>edge</code> · Firefox <code>firefox</code> · Opera <code>opera</code> · 앱 안 브라우저 <code>inapp</code> · 그 밖 <code>other</code>). 방문자 기준(확인 / 모양)과 페이지 줄 기준(사람 모양 페이지 대비)을 따로 접어 둔다.</dd>
                 </dl>
               </details>
             </div>
@@ -369,7 +369,7 @@
               <div class="q-head"><span class="card-kicker">6 · 문제</span><h3>오류·연결에 문제는 없었나</h3><span class="meta" id="m-q6"></span></div>
               <p class="answer" id="a-q6"></p>
               <div class="q-body" id="b-q6"></div>
-              <details class="fold" id="r5xx" hidden>
+              <details class="more" id="r5xx" hidden>
                 <summary id="r5xx-sum">최근 5xx</summary>
                 <div class="scroll"><table class="table">
                   <thead><tr><th>시각</th><th>경로</th><th class="num">상태</th></tr></thead>
@@ -381,7 +381,7 @@
                 <dl>
                   <dt>5xx <code>status</code></dt><dd>서버 오류로 답한 요청(대시보드 재접속 실패 제외) — 장애색은 이것에만 쓴다. 어느 경로였는지는 '최근 5xx' 에서 본다.</dd>
                   <dt>대시보드 재접속 실패 <code>ws5xx</code></dt><dd>대시보드 WebSocket(/api/ws/spreads)에 5xx 로 답한 요청 — 배포 때 몇 건은 정상이다. 시간 막대에서는 막대에 마우스를 올려야 보인다.</dd>
-                  <dt>4xx와 탐색 <code>4xx</code>·<code>probes</code></dt><dd>4xx 는 없는 주소·잘못된 요청이고 대부분 탐색 경로 요청이다. 탐색 경로 줄은 종류와 무관하게 센다.</dd>
+                  <dt>4xx와 탐색 <code>4xx</code>·<code>probes</code></dt><dd>4xx 는 없는 주소·잘못된 요청에 답한 수다. 탐색 경로 줄은 응답 코드·종류와 무관하게 따로 센다(② 탐색 경로 줄과 같은 수).</dd>
                   <dt>대시보드 연결 <code>ws</code></dt><dd>끝난 연결은 창 안에서 끝난 대시보드 연결 수(사람 수가 아니다), 연결한 방문자는 그 연결을 연 방문자(날마다 셈)다. 지속 시간은 연결이 열려 있던 시간이지 머문 시간이 아니다(숨긴 탭도 열려 있다).</dd>
                 </dl>
               </details>
