@@ -285,6 +285,34 @@ class Clarity:
         return httpx.MockTransport(self.handle)
 
 
+class FlakyBus(RedisBus):
+    """fakeredis 위의 버스 — Clarity 기록 읽기만·쓰기만 실패하게 바꿀 수 있다."""
+
+    def __init__(self, world: "World") -> None:
+        super().__init__(fakeredis.aioredis.FakeRedis(server=world.server))
+        self._world = world
+
+    def _check(self, kind: str) -> None:
+        if kind in self._world.broken:
+            raise ConnectionError(f"redis {kind} down")
+
+    async def clarity_load(self) -> str | None:
+        self._check("read")
+        return await super().clarity_load()
+
+    async def clarity_pages_load(self) -> str | None:
+        self._check("read")
+        return await super().clarity_pages_load()
+
+    async def clarity_save(self, data: str) -> None:
+        self._check("write")
+        await super().clarity_save(data)
+
+    async def clarity_pages_save(self, data: str) -> None:
+        self._check("write")
+        await super().clarity_pages_save(data)
+
+
 class World:
     def __init__(
         self, clarity: Clarity, *, token: str | None = TOKEN, wait: float = 2.0
@@ -294,6 +322,7 @@ class World:
         self.server = fakeredis.FakeServer()
         self.token = token
         self.wait = wait
+        self.broken: set[str] = set()  # "read"·"write" — 그쪽 Redis 명령이 실패한다
         self.feeds = self.new_app()
         clarity.clock = lambda: self.t
 
@@ -310,7 +339,7 @@ class World:
 
     @property
     def bus(self) -> RedisBus:
-        return RedisBus(fakeredis.aioredis.FakeRedis(server=self.server))
+        return FlakyBus(self)
 
     def stored(self, key: str = "admin:clarity") -> dict[str, Any] | None:
         raw = fakeredis.FakeRedis(server=self.server).get(key)
@@ -318,6 +347,9 @@ class World:
 
     def stored_pages(self) -> dict[str, Any] | None:
         return self.stored("admin:clarity:pages")
+
+    def seed(self, key: str, text: str) -> None:
+        fakeredis.FakeRedis(server=self.server).set(key, text)
 
     def forget(self, *keys: str) -> None:
         """런북의 키 지우기·기록 잃음 흉내."""
