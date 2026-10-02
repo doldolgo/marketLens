@@ -1,6 +1,6 @@
 # 042 — admin-traffic
 
-상태: IN_PROGRESS | 의존: **038·039·041** — `feat/039-access-geo` 위에 `feat/042-admin-traffic` 을 쌓고, 041 이 main 에 머지된 뒤 main 을 받는다(PR base 는 늘 main, 039·041 보다 먼저 머지하지 않는다). main 에는 fix/036-admin-followup 이 있어야 한다. 계약을 쓰는 스펙(쓰는 계약은 §3.1 에 복사했다): 038(접속 응답·창·짝 게이트), 039(`geo`·DB-IP 표시 의무), 036(화면 규칙·주기·보안), 041(절 머리 설명·이름표), 002(탭 이름), 037(시행일). 043(Clarity 덩어리)은 이 스펙이 main 에 머지된 뒤 시작한다 — 같은 세 파일을 고치므로 나란히 가지 않고, 덩어리 머리·강도 클래스는 이 스펙이 만든다.
+상태: DONE | 의존: **038·039·041** — `feat/039-access-geo` 위에 `feat/042-admin-traffic` 을 쌓고, 041 이 main 에 머지된 뒤 main 을 받는다(PR base 는 늘 main, 039·041 보다 먼저 머지하지 않는다). main 에는 fix/036-admin-followup 이 있어야 한다. 계약을 쓰는 스펙(쓰는 계약은 §3.1 에 복사했다): 038(접속 응답·창·짝 게이트), 039(`geo`·DB-IP 표시 의무), 036(화면 규칙·주기·보안), 041(절 머리 설명·이름표), 002(탭 이름), 037(시행일). 043(Clarity 덩어리)은 이 스펙이 main 에 머지된 뒤 시작한다 — 같은 세 파일을 고치므로 나란히 가지 않고, 덩어리 머리·강도 클래스는 이 스펙이 만든다.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -143,7 +143,15 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 의존 — 039 위(b6e3219 가 조상), main 에 041(#99), 038 짝 게이트 판(시행 전 visitors before_gate·sinceTs — access_pairs.before_gate)
+git merge-base --is-ancestor b6e3219 HEAD && git log --oneline --first-parent 24b2238^2 | grep '#99'
+cd server && ruff check . && ruff format --check . && pytest -q
+#   1554 passed · 1 skipped(test_geo_perf — DBIP_DIR 없음) · 6 failed = spreads/test_gauge.py UDP bind PermissionError(샌드박스)
+#   그중 tests/test_admin.py 47 passed, tests/test_admin_traffic.py 7 passed(node v26 — 답 틀 열 경우·창 부르기 넷·강도)
+cd web && npm run lint && npm run build     # oxlint 통과 · 빌드 통과 · dist 에 admin 없음
+node --check web/admin/admin.js
+#   커밋 11개 각 diff 83~293줄, 커밋마다 test_admin.py(뒤 두 커밋은 test_admin_traffic.py 도) 초록
+# 설계 세션 확인(브라우저 — 폭·창 바꿈·빈 상태·XSS·대비·사진): 실행 세션 샌드박스 밖 — 아직 안 했다(설계 세션이 여기 적는다)
 ```
 
 ## 6. 갱신할 문서
@@ -173,5 +181,19 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-- 남은 빚:
+  - `web/admin/index.html` — `#traffic`: 041 설명(서버 기록 쪽 고쳐 씀) → 실시간 카드(036 그대로) → 묶음(창 줄 + 덩어리 카드 여섯 `card q` — `q-head`·`a-qN`·`b-qN`·'이 칸 뜻') → Clarity 카드. ③ 바닥 `geo-foot`(`#geo-state` + DB-IP 고정 링크), ⑥ 에 036 의 최근 5xx 접힘.
+  - `web/admin/admin.css` — 창 줄·`q-head`·`answer`·`tiles`·걸러 내기·막대 행 `brow`·`cols2`/`cols3`·열지도·시 눈금·범례·견본, SVG 클래스(`confirmed`·`shaped`·`returning`·`bot`·`pre`·`h0`~`h5`), 640px·480px. 036 의 `traffic-top`·`top-table` 지움.
+  - `web/admin/admin.js` — 요청: `load` 가 접속 경로에 `?window=` 를 붙이고 결과에 `asked`, `loadAccess`(떠 있는 호출 하나 + 끝나면 한 번 더)·`follow`(응답 창으로 되돌림)·`settle`(묶음 끝 공통). 창: `WINDOW_NAME`·`picked`·`drawWindowBar`·버튼. 답: 이름표 표 일곱·`facts`·`answer1`~`answer6`·`answers`(조각 목록, 값 자리 `{ b }`)·`sentence`·`heatGrid`·`heatLevel`. 덩어리: `q1`~`q6`·`fillTraffic`·`blankTraffic`·`trafficLead` 와 조각 함수(`barRow`·`pairBar`·`longList`·`fold`·`dayBars`·`heatmap`·`hourAxis` 등). 036 의 `fillAccess`·`topTable` 지움. 알림 칩은 `.chip[data-filter]` 만(창 버튼도 chip 모양).
+  - `server/tests/test_admin.py` — `EXTERNAL_HOSTS`·`SCRIPT_BANNED` 넓힘, 042 정적 단언 다섯, 041 node 하네스를 `fillTraffic` 으로. `server/tests/test_admin_traffic.py`(새 파일) — node 논리 확인.
+  - 분모 단언 꼴(`test_screen_page_line_lists_share_is_over_human_pages`): `q3`·`q5` 본문에 `const hp = n0(f.T.humanPages);` 와 `shareList('…', rows2(f.a.referrers|utmSources|paths), …, hp)` 가 하나씩, `totals.pages`·`T.pages` 없음, `answer5` 에 `pct(paths[0][1], hp)`.
+- 추측한 지점 (묻지 않고 정한 사소한 것):
+  - ① 24h 답은 본문 → 꼬리 → 평가 순. 시행 뒤 `visitors` 가 ok 가 아니면 ① 답은 비우고 본문이 036 상태 글.
+  - ⑤ 경로 절만 남으면 '…가장 많다.' 로 끝낸다. ④ `{h2}` 는 24 로 나눈 나머지(22시 시작이면 '22~1시').
+  - ③ '뿐 — 대부분 봇이다' 는 cloud 모양 > 0 일 때만(① 의 shaped > 0 과 같은 꼴). ② '자동 요청' 상위 둘은 요청 0 인 종류를 뺀다.
+  - 5행 + 'n개 더' 접기는 §3.9 의 여섯 밖 목록(경로·탭·기기·페이지 줄 목록)에도 같은 함수로 건다(6행 이상일 때만 접힌다).
+  - 접속 부분 `error` 의 덩어리 글은 '불러오지 못함 — <code>'. 페이지 줄 목록 막대는 브라우저 모양 색. 탭 행 title 은 늘 원래 값.
+  - 날 막대 이름표의 '부터 N일이 다 찬다' 날짜 = 시행일 + (N−1)시간의 KST 날짜. 덩어리 머리 meta 는 ②·⑥ 에도 '<창> · 날마다 센 방문자'.
+  - 041 설명의 '남기는 것' 은 '서버 기록' dt 로 합치고 '대시보드 탭' 은 ⑤ '이 칸 뜻' 으로 옮겼다. 041 하네스의 서버 기록 타일 단언은 ①·⑥ 타일로 바꿨다.
+  - node 논리 확인은 새 파일 `test_admin_traffic.py`(시간대 Asia/Seoul 고정) — 정적 단언은 `test_admin.py`.
+- 실행 중 함께 고친 스펙 절: 041 §3.3 '대시보드 탭' 항목(⑤ 로 옮김). 그 밖은 §6 그대로.
+- 남은 빚: 화면 확인(§4 설계 세션 — 폭·창 바꿈·빈 상태·XSS·대비·사진)은 아직이다 — 가짜 응답 생성기(게이트 전·뒤, geo 넷, 표본 적음·빈·capped·XSS·긴 목록, 접속 상태·지연)와 미리보기 사본 만들기는 레포 밖에 두고 설계 세션에 경로를 넘겼다. 768px 에서 ③ 3열의 막대 칸이 좁다(≈45px). `admin.js` 2,050줄. 덩어리 여섯은 응답이 바뀔 때(60초)마다 통째로 다시 그린다 — 접힘만 Set 으로 남는다.
