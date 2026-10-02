@@ -197,6 +197,8 @@ cd web && npm run lint && npm run build   # oxlint 경고·오류 0 · build ok
 #      50MiB access.log 의 60초 회차(창 셋, 통째로 다시 읽기 포함) 0.377초(serve ≈2.3초 — 화면을 띄워 두면 분마다)
 #   4. 10ms 잠들기 넘침 최댓값(새 코드, 파일마다 세 번 × 9회): 무리 8.0~16.9ms(한 번 28.9ms) · 모두 다름 12.2~19.1ms · 긴 UA 2.3ms
 #      고치기 전 코드와 번갈아 세 번 × 4회 — 0초 잠들기 있음 무리 7.5~17.6·모두 다름 11.0~20.9ms, 인자로 끔 8.0~19.9·13.0~21.9ms(차이 없음, switchinterval 5ms)
+# 설계 세션(2026-10-02, 샌드박스 밖, 병합 31431bb): nginx:1.27-alpine 에 nginx.conf·nginx-admin.conf 템플릿 + 경로를 그대로 돌려주는 가짜 백엔드 —
+#   /svc/api/admin/access → /admin/access · ?window=7d → /admin/access?window=7d · ?window=30d&x=1 → /admin/access?window=30d&x=1 (nginx -t 통과)
 ```
 
 ## 6. 갱신할 문서
