@@ -79,7 +79,8 @@ function ago(ms) {
 }
 
 // 본문 안 경과 글자 — 본문은 값이 바뀔 때만 다시 그려(§3.3) 그 안의 "n분 전" 이 그린 때에 멈춘다. 시각(ms)을
-// data-at 에 두고 그리기 끝(retick)에 글자만 고친다 — 본문 DOM·스크롤·초점·펼침은 그대로, 개요 칸과 같은 경과
+// data-at 에 두고 그리기 끝(retick)에 글자만 고친다 — 본문 DOM·스크롤·초점·펼침은 그대로, 개요 칸과 같은 경과.
+// 글자가 바뀔 때만 쓴다 — 같은 글자라도 textContent 를 쓰면 텍스트 노드가 새로 생겨 그 안의 글자 선택이 풀린다
 function agoSpan(ms) {
   const span = el('span', null, ago(ms));
   if (num(ms) !== null) span.dataset.at = String(ms);
@@ -87,7 +88,10 @@ function agoSpan(ms) {
 }
 
 function retick() {
-  for (const span of document.querySelectorAll('span[data-at]')) span.textContent = ago(Number(span.dataset.at));
+  for (const span of document.querySelectorAll('span[data-at]')) {
+    const text = ago(Number(span.dataset.at));
+    if (span.textContent !== text) span.textContent = text;
+  }
 }
 
 // 상태는 색 + 모양 + 글자 (§3.7)

@@ -63,7 +63,7 @@
 - 느린 값의 신선도는 서버 캐시가 정한다. 화면은 부분마다 머리에 `fetchedAt` 경과("4분 전 값")를 늘 적고, 경과가 응답에 온 그 부분의 `refreshSec` × 3 을 넘으면 주의색으로 칠한다(`refreshSec` 0 인 `slack` 은 보지 않는다). 상수를 복사해 두지 않는다 — 서버 주기가 바뀌어도 화면을 고치지 않게.
 - 브라우저에 쌓는 값은 없다. 추이는 전부 피드가 준 점으로 그린다 — 며칠 열어 둬도 메모리가 늘지 않게.
 - 다시 그리기: 머리의 경과·절 요약·개요는 묶음이 끝날 때마다, 칸의 본문(목록·표·차트)은 그 칸의 값이 바뀌었을 때만 — 빠른 묶음이 느린 칸의 목록 안 스크롤·초점·펼침·툴팁을 날리지 않게. 알림 목록은 필터를 바꿀 때만 맨 위로.
-- 본문 안 경과 글자("n분 전" — 경보 행의 바뀐 지·canary 최근 실행)는 묶음이 끝날 때마다 그 글자만 고친다 — 본문을 다시 만들지 않으면서 개요 칸·절 요약과 같은 경과를 보인다.
+- 본문 안 경과 글자("n분 전" — 경보 행의 바뀐 지·canary 최근 실행)는 묶음이 끝날 때마다 그 글자만 고친다 — 본문을 다시 만들지 않으면서 개요 칸·절 요약과 같은 경과를 보인다. 글자가 달라졌을 때만 쓴다 — 같은 글자를 다시 쓰면 텍스트 노드가 바뀌어 그 안에 걸친 글자 선택이 풀린다.
 
 ### 3.4 절별 내용
 **개요** — 타일 일곱: 종합·수집기·api·지금 접속·경보·canary·이번 달 비용. 타일을 누르면 그 절로 간다.
@@ -148,7 +148,7 @@
 ## 4. 검증
 **PR 안 — 실행 세션(완료 조건)**. 시작 전에 main 에 034·035 가 있는지 본다(없으면 멈추고 묻는다).
 - 정적 단언(`server/tests/test_admin.py` — 029 의 화면 단언은 유지하고 아래를 더한다):
-  - `admin.js`: `X-Requested-With`·`visibilityState`·`createElementNS`·`refreshSec` 가 있다 / `fetch(` 는 1회 / `location.replace(`·`history.replaceState(` 각 1회, 주소 `/` 고정(029) / 10초·60초 주기 상수 / 본문 안 경과 글자는 시각을 data 속성에 둔 span 이고 그리기 끝에 글자만 고치는 함수가 돈다 / 금지: `localStorage`·`sessionStorage`·`indexedDB`·`document.cookie`·`innerHTML`·`outerHTML`·`insertAdjacentHTML`·`document.write`·`eval(`·`new Function`·`window.open`·`location.pathname`·`location.href`·`.style`·`setAttribute('style'`·`.href`·`setAttribute('href'`·`setAttribute('src'`·`.src`·`setAttributeNS`·`xlink:href`·`new XMLHttpRequest`·`sendBeacon`·`new WebSocket`·`EventSource` / SVG 속성 허용 목록이 §3.6 그대로이고 `svg()` 가 그 밖을 던진다·글자 그대로 부르는 SVG 요소와 속성 키가 목록 안 / 파일 안의 `http://`·`https://` 는 SVG 이름공간 하나뿐.
+  - `admin.js`: `X-Requested-With`·`visibilityState`·`createElementNS`·`refreshSec` 가 있다 / `fetch(` 는 1회 / `location.replace(`·`history.replaceState(` 각 1회, 주소 `/` 고정(029) / 10초·60초 주기 상수 / 본문 안 경과 글자는 시각을 data 속성에 둔 span 이고 그리기 끝에 글자만 고치는 함수가 돈다(글자가 다를 때만 쓴다) / 금지: `localStorage`·`sessionStorage`·`indexedDB`·`document.cookie`·`innerHTML`·`outerHTML`·`insertAdjacentHTML`·`document.write`·`eval(`·`new Function`·`window.open`·`location.pathname`·`location.href`·`.style`·`setAttribute('style'`·`.href`·`setAttribute('href'`·`setAttribute('src'`·`.src`·`setAttributeNS`·`xlink:href`·`new XMLHttpRequest`·`sendBeacon`·`new WebSocket`·`EventSource` / SVG 속성 허용 목록이 §3.6 그대로이고 `svg()` 가 그 밖을 던진다·글자 그대로 부르는 SVG 요소와 속성 키가 목록 안 / 파일 안의 `http://`·`https://` 는 SVG 이름공간 하나뿐.
   - `index.html`: 인라인 스크립트 본문·`style=`·`<form`·`target=` 없음(029) / 절 id 일곱이 §3.1 순서, 머리의 이동 링크 일곱 / 토큰칸·API 문서·ReDoc·로그아웃 링크(029) / 외부 링크(`//` 로 시작하는 것 포함, 따옴표 꼴 무관)는 전부 `https://` 이고 `rel="noreferrer"`, 호스트는 AWS 콘솔(`*.console.aws.amazon.com`)·`clarity.microsoft.com`·`dash.cloudflare.com`·`one.dash.cloudflare.com`·`github.com` 안이고 Cloudflare 링크는 경로가 `/` / 12자리 숫자·이메일 모양·`[0-9a-f]{32,}`·`cloudflareaccess.com`·`/projects/view/` 없음.
   - `admin.css`: `@import`·`url(` 없음 / `--color-bg`·`--color-surface`·`--color-ok`·`--color-warn`·`--color-up` 값이 `docs/design/theme.css` 와 같다 / 640px 미디어 쿼리 / `body` 에 `word-break: keep-all`·`overflow-wrap: break-word`.
   - 033 의 관리자 단언(`web/admin/*` 에 `clarity.js`·`clarity.ms` 없음)은 그대로 통과한다.
@@ -241,6 +241,12 @@ chk.py favicon   # /favicon.ico 후속 전 404·콘솔 자원 오류 한 줄 →
 cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/pytest -q   # All checks passed! · 286 files · 1241 passed
 cd web && npm run lint && npm run build   # oxlint 종료 코드 0 · ✓ built · dist 에 admin* 0개
 docker rm -f fu036-web fu036-web-old fu036-server fu036-api && docker network rm fu036-net   # fu036 자원 0건
+
+# 검토 반영(같은 날) — 같은 구성(망 fu036apply-net, FREEZE, 127.0.0.1:19044 고친 것·19045 직전 커밋의 화면), <scratch>/followup/apply/sel.py
+sel.py   # 경보 행 '4분 전' 글자 선택 → 빠른 묶음 뒤: 전 '' 로 풀림·텍스트 노드 바뀜 / 후 그대로·같은 노드, 행을 끌어 경과 글자 가운데까지 고른 것도 유지
+         #   65초 뒤 분이 바뀌면 글자는 따라 바뀐다('6분 전'→'7분 전'·canary 본문 = 개요 칸) · CSP·Uncaught 0
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/pytest -q   # All checks passed! · 286 files · 1248 passed
+cd web && npm run lint && npm run build   # oxlint 종료 코드 0 · ✓ built · dist 에 admin* 0개 · node --check web/admin/admin.js 종료 코드 0
 ```
 
 ## 6. 갱신할 문서
@@ -277,6 +283,7 @@ docker rm -f fu036-web fu036-web-old fu036-server fu036-api && docker network rm
 - 실행 중 함께 고친 스펙 절: §3.2 canary — 끝난 실행이 없으면 `durationMs`·`ok` 도 null(034 코드·§7 이 진실). §3.8 표시 지우기 — "마지막 만료 신호(없으면 화면을 연 때) 뒤 여덟 경로가 모두 만료 신호 없이 끝났을 때만" 으로 문구를 좁혔다(§4 의 "전부 정상으로 돌리면 표시 지움" 과 같은 문서 안에서 맞도록 — 만료 신호마다 센 것을 처음부터). §6 대로 029 §2·§3.3·§4.
 - 배포 뒤 운영 확인(2026-10-02, 설계 세션 — 반박 검증까지): 관리자 여덟 경로 모두 200·계약 모양, `/admin/access` 를 caddy 로그로 따로 세어 정확히 일치, 배포된 화면 파일 sha256 이 main 과 같음, 관리자 접속 기록에 60초 폴링 경로 없음, 공개 쪽 `/api/admin/*` 404, 교차 사이트 403. collect 카드에 스왑 0% 줄이 보인다(피드가 collect 스왑을 0.0 시계열로 준다 — 034 §7).
 - 후속 PR(같은 날, 운영 확인에서 찾은 것): ① 차트 빈 칸 문구를 "값 없음"·"값 1개뿐" 으로(§3.5 — 경보 "데이터 부족" 과 겹침). ② 본문 안 경과 글자가 그린 때에 멈춰 개요 칸과 달랐다 — 시각을 `data-at` 에 둔 span 으로 만들고 그리기 끝에 글자만 고친다(§3.3·§4). ③ 360 폭에서 한국어가 음절 중간에서 줄바꿈 — `body` 에 `word-break: keep-all`(§3.7·§4). ④ 브라우저의 `/favicon.ico` 가 관리자 server 에서 404·error 로그·접속 기록 줄 — 204·기록 끔(029 §3.1·§3.2). ⑤ Clarity 지표 이름이 실제로는 CamelCase(`ReferrerUrl`)라 출처 줄이기가 빠졌다 — 정규화 비교(035 §3.3). 화면은 그대로다.
+- 후속 PR 검토 반영: 경과 글자를 묶음마다 같은 글자로 다시 써 그 안의 글자 선택이 10초마다 풀렸다 — 글자가 다를 때만 쓴다(§3.3·§4).
 - 남은 빚:
   - 배포 뒤 사람 확인은 끝났다(2026-10-02, 위). 도구 링크 중 CloudWatch 지표(`#metricsV2:graph=~();namespace=MarketLens`)·로그 그룹(`$252F` 인코딩) 주소 꼴을 콘솔에서 확인한 기록은 없다 — 남긴다.
   - 브라우저 확인은 Chromium(헤드리스 Chrome·Claude 브라우저 창) 한 종류(status 빚). 숨은 탭은 CDP 에서 `visibilityState` 를 바꿔 흉내 냈고, 실제 숨은 창(Claude 브라우저 창)에서도 요청 0 을 봤다.

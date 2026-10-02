@@ -582,7 +582,10 @@ def test_screen_body_elapsed_words_are_retold_after_every_paint() -> None:
     assert "span.dataset.at = String(ms)" in _js_function(js, "agoSpan")
     retick = _js_function(js, "retick")
     assert "document.querySelectorAll('span[data-at]')" in retick
-    assert "span.textContent = ago(Number(span.dataset.at))" in retick
+    # 글자가 바뀔 때만 쓴다 — 같은 글자를 다시 쓰면 텍스트 노드가 바뀌어 글자 선택이 풀린다
+    assert "const text = ago(Number(span.dataset.at));" in retick
+    assert "if (span.textContent !== text) span.textContent = text;" in retick
+    assert retick.count("span.textContent =") == 1
     assert _js_function(js, "paint").rstrip().endswith("retick();")
     # 값이 바뀔 때만 다시 그리는 본문의 경과는 모두 그 span 으로
     for name in ("alarmRow", "fillCanary"):
