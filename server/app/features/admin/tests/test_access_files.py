@@ -1,6 +1,7 @@
 """접속 요약 읽기 — 깨진 줄·시각이 아닌 ts·유한하지 않은 duration·5xx 밖 상태·회전 파일(깨진 gz 포함)·파일 없음·
 새지 않음·키 상한·메모리(긴 UA 포함) (스펙 035 §3.2·§3.4·§3.5·§4 → 038 §3.3·§3.6)."""
 
+import gzip
 import json
 import os
 import tracemalloc
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from app.features.admin.access_cache import AccessLog, NoLogFile
+from app.features.admin.access_cache import GZ_TEXT_CHUNK, AccessLog, NoLogFile
 from app.features.admin.tests.access_fakes import (
     CHROME,
     GATE,
@@ -208,6 +209,38 @@ def test_memory_stays_flat_with_long_distinct_user_agents(tmp_path: Path) -> Non
     assert body["totals"]["humanPages"] == 4_200
     assert dict(body["referrers"])["https://r0.example"] == 84
     # 메모가 원문을 담으면 4,096 × 4,000자 ≈16MB, 앞 1,024자면 ≈4MB
+    assert peak < 8 * 1024 * 1024, peak
+
+
+def test_a_rotated_gz_is_read_1mb_at_a_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """풀기는 부를 때마다 GIL 을 놓았다 다시 잡는다 — CPU 를 쓰는 스레드가 겹치면 그때마다 전환 간격을 기다리므로
+    회전 gz 는 1MB 씩 읽는다. 압축 안 된 `access.log` 는 기본 단위 그대로 (038 §3.7)."""
+    lines = [
+        line(at(i % 24, i % 3600), f"/p{i}", ua=f"{CHROME} {i}") for i in range(20_000)
+    ]
+    name = "access-2026-10-01T09-00-00.000-time.log.gz"
+    write(tmp_path, name, lines, mtime=at(23))
+    write(tmp_path, "access.log", [line(at(23), "/current")])
+    calls: list[int] = []
+    real = gzip.GzipFile.read1
+
+    def counted(self: gzip.GzipFile, size: int = -1) -> bytes:
+        calls.append(size)
+        return real(self, size)
+
+    monkeypatch.setattr(gzip.GzipFile, "read1", counted)
+    tracemalloc.start()
+    try:
+        body = summarize(str(tmp_path), NOW)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert body["totals"]["requests"] == 20_001
+    assert set(calls) == {GZ_TEXT_CHUNK}
+    raw = len(gzip.decompress((tmp_path / name).read_bytes()))
+    assert len(calls) <= raw // GZ_TEXT_CHUNK + 2, len(calls)  # 8KB 면 ≈900번
     assert peak < 8 * 1024 * 1024, peak
 
 

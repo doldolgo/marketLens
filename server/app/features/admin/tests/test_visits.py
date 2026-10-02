@@ -11,9 +11,10 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core import config
 from app.core.config import get_settings
 from app.core.redis_bus import RedisBus
-from app.features.admin import access_cache, visits
+from app.features.admin import access_cache, geo_fetch, visits
 from app.features.admin.access_cache import VALUE_KEYS, AccessLog
 from app.features.admin.tests.access_fakes import (
     EFFECTIVE,
@@ -23,6 +24,7 @@ from app.features.admin.tests.access_fakes import (
     NOW,
     at,
     line,
+    parked,
     write,
 )
 from app.features.admin.visits import VisitFeeds
@@ -143,11 +145,18 @@ async def test_broken_rotated_file_keeps_the_part_ok_with_one_warning(
 
 
 @pytest.fixture
-def api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[TestClient]:
+def api(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, request: pytest.FixtureRequest
+) -> Iterator[TestClient]:
     monkeypatch.setenv("ROLE", "api")
     monkeypatch.setenv("INFLUX_TOKEN", "")
     monkeypatch.setenv("ACCESS_LOG_DIR", str(tmp_path))
     monkeypatch.delenv("CLARITY_API_TOKEN", raising=False)
+    # 앱의 시계는 실제 시각 — 게이트를 지난 날(CI)에도 DB-IP 받기를 띄우지 않는다(039, 판 없이 `geo` pending)
+    monkeypatch.setattr(geo_fetch, "_daemon", parked)
+    effective = getattr(request, "param", None)  # 시행일을 바꿔 띄운 앱(간접 매개변수)
+    if effective is not None:
+        monkeypatch.setattr(config, "PRIVACY_V2_EFFECTIVE", effective)
     get_settings.cache_clear()
     app = create_app()  # lifespan 없음 — Redis 자리만 fakeredis 로 채운다
     app.state.spreads_bus = RedisBus(
@@ -157,6 +166,8 @@ def api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[TestClient]
     get_settings.cache_clear()
 
 
+# 실제 시행일 그대로와 이미 지난 시행일 — 실제 시계가 게이트를 지난 날에도 같은 답(039 `geo` 는 받기 없이 pending)
+@pytest.mark.parametrize("api", [None, "2026-10-01"], indirect=True)
 def test_http_access_reads_the_env_directory_and_leaks_no_ip_or_ua(
     api: TestClient, tmp_path: Path
 ) -> None:
@@ -172,6 +183,8 @@ def test_http_access_reads_the_env_directory_and_leaks_no_ip_or_ua(
     )
     body = resp.json()
     assert body["state"] == "ok" and body["tabs"] == [["history", 1]]
+    after = time.time() >= body["gateAt"] / 1000
+    assert body["geo"]["state"] == ("pending" if after else "unconfigured")
     for leak in (IP, IPHONE, "gclid"):
         assert leak not in resp.text, leak
 

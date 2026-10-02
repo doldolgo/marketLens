@@ -6,6 +6,8 @@
 60초가 지났거나 회전을 본 회차(새 회전 파일 키·바뀐 inode·줄어든 크기)에만 통째로 다시 읽는다 — 회전된 줄을 두 번 세지 않게.
 창은 늘 읽는 범위 전체를 채운 캐시에서 시 버킷을 더해 만든다.
 게이트(처리방침 v2 시행일 00:00 KST) 전에는 읽는 범위가 24시간 창과 같고 짝을 하나도 만들지 않는다.
+DB-IP 판(039)이 바뀌면(처음 올림 포함) 캐시를 통째로 다시 만든다 — 짝 기록의 나라·망 종류는 기록할 때 찾은 값이고 IP 는
+남기지 않으므로 새 판으로 다시 찾으려면 줄을 다시 읽어야 한다.
 동기 함수뿐이다 — api 가 `asyncio.to_thread` 에서 부르고, 캐시 만들기는 잠금 하나로 프로세스에서 한 번에 하나다.
 저장소(Redis·디스크)에는 아무것도 쓰지 않는다.
 """
@@ -21,9 +23,11 @@ from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from typing import IO, Any, NamedTuple
 
+from app.features.admin import geo_part
 from app.features.admin.access_classes import CLASSES
 from app.features.admin.access_hours import AT, COUNTS, LISTS, FileTally
 from app.features.admin.access_pairs import PairKeys, before_gate, visitors
+from app.features.admin.geo_table import GeoTable
 
 WINDOWS = {"24h": 24, "7d": 168, "30d": 720}  # 창 → 시 수
 DEFAULT_WINDOW = "24h"
@@ -34,6 +38,9 @@ ROTATED_PREFIX = "access-"
 BUDGET_BYTES = 100 * 1024 * 1024
 CURRENT_EVERY_SEC = 60.0
 TOP = 20
+# 회전 gz 의 글자 읽기 단위(기본 8KB). 풀기는 부를 때마다 GIL 을 놓았다 다시 잡아, 같은 프로세스에 CPU 를 쓰는 스레드가
+# 겹치면 다시 잡을 때마다 전환 간격(5ms)을 기다린다 — 50MiB 회전 파일이 8KB 면 ≈6,400번(039 의 DB-IP 읽기와 같은 까닭)
+GZ_TEXT_CHUNK = 1 << 20
 # 회전 파일이 깨졌을 때 나는 것 — 잘린 gz(EOFError)·틀린 머리·CRC(BadGzipFile ⊂ OSError)·압축 자료(zlib.error)·권한
 BROKEN = (EOFError, OSError, zlib.error)
 KST = timezone(timedelta(hours=9))
@@ -45,7 +52,7 @@ DURATION_KEYS = ("lt10s", "lt1m", "lt10m", "lt1h", "ge1h")
 WINDOW_KEYS = ("window", "windows", "gateAt")
 VALUE_KEYS = (
     *WINDOW_KEYS,
-    *"startTs endTs firstTs totals hourly status recent5xx ws classes visitors".split(),
+    *"startTs endTs firstTs totals hourly status recent5xx ws classes visitors geo".split(),
     *LISTS,
 )
 
@@ -67,6 +74,10 @@ class Current(NamedTuple):
     path: str
     ino: int
     size: int
+
+
+def _no_table() -> GeoTable | None:
+    return None
 
 
 def gate_ts(effective: str) -> int:
@@ -123,7 +134,10 @@ def raw_size(path: str, size: int) -> int | None:
 
 def open_log(path: str) -> IO[str]:
     if path.endswith(".gz"):
-        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
+        handle = gzip.open(path, "rt", encoding="utf-8", errors="replace")
+        handle._CHUNK_SIZE = GZ_TEXT_CHUNK  # type: ignore[attr-defined]
+        return handle
+    # 압축 안 된 파일은 기본 단위 그대로 — 읽기가 짧아 CPU 스레드와 겹쳐도 거의 늦지 않았다(038 §3.7)
     return open(path, encoding="utf-8", errors="replace")
 
 
@@ -149,15 +163,27 @@ class AccessLog:
         # 지금 `_current` 를 읽은 회차의 목록 값
         self._current_seen: Current | None = None
         self._stems: set[str] = set()  # 직전 회차 목록의 회전 파일 키
+        self._geo_version = 0  # 캐시를 만든 DB-IP 판 번호(0 = 판 없음)
 
-    def summary(self, name: str, now: float) -> tuple[dict[str, Any], list[str]]:
+    def summary(
+        self, name: str, now: float, geo: Callable[[], GeoTable | None] = _no_table
+    ) -> tuple[dict[str, Any], list[str]]:
         """창 하나의 값과 이번 회차에 깨진 것으로 본 회전 파일의 예외 이름들. 디렉터리·파일이 없으면 `NoLogFile`.
-        지금 고를 수 없는 창은 24시간이다(§3.1)."""
+        지금 고를 수 없는 창은 24시간이다(§3.1). `geo` 는 지금 올린 DB-IP 판(039, 없으면 None)을 돌려주고, 잠금 안에서
+        한 번 불러 그 판으로 이 회차를 센다 — 창 둘의 갱신이 갈아 끼우는 순간에 겹쳐도 판 번호가 줄지 않아, 먼저 띄운
+        갱신이 옛 판(또는 판 없음)으로 캐시를 다시 만들지 않는다."""
         with self._lock:
-            broken = self._sync(now)
-            return self._assemble(choose(name, now, self._gate), now), broken
+            table = geo()
+            broken = self._sync(now, table)
+            return self._assemble(choose(name, now, self._gate), now, table), broken
 
-    def _sync(self, now: float) -> list[str]:
+    def _sync(self, now: float, table: GeoTable | None) -> list[str]:
+        version = 0 if table is None else table.version
+        if version != self._geo_version:
+            # 판이 바뀌었다 — 옛 판으로 찾은 짝 기록을 버리고 이번 회차에 다시 읽는다(039 §3.5)
+            self._files.clear()
+            self._current = self._current_at = self._current_seen = None
+            self._geo_version = version
         start = read_start(now, self._gate)
         try:
             current, rotated = self._listing()
@@ -197,7 +223,7 @@ class AccessLog:
                 # 읽기 시작점이 파일 안으로 옮겨 오면 그 파일만 다시 — 앞 줄이 짝의 첫 페이지 줄에 남지 않게
                 if not entry.tally.earliest or entry.tally.earliest >= start:
                     continue
-            tally = FileTally(start, self._gate, self._keys)
+            tally = FileTally(start, self._gate, self._keys, table)
             try:
                 with open_log(path) as handle:
                     tally.read(handle)
@@ -223,7 +249,7 @@ class AccessLog:
             or current.ino != seen.ino
             or current.size < seen.size
         ):
-            tally = FileTally(start, self._gate, self._keys)
+            tally = FileTally(start, self._gate, self._keys, table)
             try:
                 with open_log(current.path) as handle:
                     tally.read(handle)  # 읽기 실패는 부분 전체의 error
@@ -265,7 +291,9 @@ class AccessLog:
             raise NoLogFile
         return current, rotated
 
-    def _assemble(self, name: str, now: float) -> dict[str, Any]:
+    def _assemble(
+        self, name: str, now: float, table: GeoTable | None
+    ) -> dict[str, Any]:
         gate = self._gate
         start, end = bounds(name, now, gate)
         last = hour_start(end)
@@ -291,8 +319,8 @@ class AccessLog:
                         row[i] += v
                 if hour.first is not None and (first is None or hour.first < first):
                     first = hour.first
-                for counter, table in zip(lists, hour.lists or (), strict=False):
-                    counter.update(table)
+                for counter, counted in zip(lists, hour.lists or (), strict=False):
+                    counter.update(counted)
             recent += [e for e in tally.recent if start <= e.ts < last + 3600]
         total = [0] * len(COUNTS)
         hourly = []
@@ -304,10 +332,16 @@ class AccessLog:
         totals = {k: total[AT[k]] for k in TOTAL_KEYS}
         totals["skipped"] += skipped
         if now < gate:
-            people, ws_pairs = before_gate(), None
+            people, ws_pairs, geo = before_gate(), None, geo_part.before_gate()
         else:
             since = max(start, gate)
-            people, ws_pairs = visitors((t.days for t, _ in files), since, end)
+            people, ws_pairs, counts = visitors((t.days for t, _ in files), since, end)
+            # 판이 없으면 pending — 부르는 쪽이 받기 상태(받는 중·실패)로 바꾼다
+            geo = (
+                geo_part.empty("pending", None)
+                if table is None
+                else geo_part.ok(table, *counts, since)
+            )
         return {
             **window_values(name, now, gate),
             "startTs": start,
@@ -334,6 +368,7 @@ class AccessLog:
                 for k in CLASSES
             },
             "visitors": people,
+            "geo": geo,
             **{key: _top(counter) for key, counter in zip(LISTS, lists, strict=True)},
         }
 

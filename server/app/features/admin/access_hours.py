@@ -3,6 +3,7 @@
 회전 파일은 압축이 끝나면 바뀌지 않아 파일마다 한 번 세어 메모리에 두고, 창은 시 버킷을 더해 만든다(`access_cache.py`).
 읽기 시작점 앞 줄은 JSON 을 풀기 전에 `ts` 만 보고 버린다. 시마다 목록 키는 목록마다 30까지(넘는 새 키는 `(기타)`)라
 메모리는 줄 수와 무관하다. 짝은 처리방침 v2 시행일(게이트) 뒤 줄에서만 만든다 — 게이트 앞 줄은 해시하지 않는다.
+게이트 뒤 날의 짝을 처음 기록할 때만 DB-IP 판(039)으로 그 IP 의 /24 를 찾아 나라·망 종류를 짝 기록에 둔다.
 UA 원문·IP 는 세는 동안의 지역 변수에만 있고 남기지 않는다(UA·출처 판정 메모도 파일 읽기가 끝나면 — 깨진 파일로
 예외가 나도 — 버린다. UA 메모의 키는 판정이 보는 앞 1,024자, 출처는 512자를 넘으면 메모하지 않는다).
 세는 동안 따로 차례를 넘기지 않는다 — 인터프리터가 5ms 마다 GIL 을 넘겨 같은 프로세스의 이벤트 루프 지연은 측정상 ≤30ms(§5).
@@ -29,6 +30,7 @@ from app.features.admin.access_pairs import (
     recorded,
 )
 from app.features.admin.access_traits import Traits
+from app.features.admin.geo_table import GeoTable, locate
 
 LIST_CAP = 30  # 시마다 목록마다 — 봇의 무작위 경로가 메모리를 키우지 않게
 OTHER = "(기타)"
@@ -91,10 +93,18 @@ class Error5xx(NamedTuple):
 class FileTally:
     """파일 하나의 세기. `read` 가 줄을 흘려 넣고, 결과는 창 조립이 읽기만 한다."""
 
-    def __init__(self, read_start: int, gate_ts: int, keys: PairKeys) -> None:
+    def __init__(
+        self,
+        read_start: int,
+        gate_ts: int,
+        keys: PairKeys,
+        table: GeoTable | None = None,
+    ) -> None:
         self.read_start = read_start
         self.gate_ts = gate_ts
         self.keys = keys
+        # 039 — 짝을 처음 기록할 때 나라·망 종류를 찾는 판(없으면 찾지 않는다). 읽는 동안만 쥔다
+        self.table = table
         self.hours: dict[int, Hour] = {}
         self.recent: list[Error5xx] = []  # 최소 힙 — 가장 늦은 20줄(WS 경로 뺌)
         self.days: dict[int, DayPairs] = {}  # KST 날 → 짝 기록(게이트 뒤만)
@@ -114,7 +124,9 @@ class FileTally:
             for raw in handle:
                 line(raw)
         finally:
-            # 깨진 회전 파일(읽다 예외)도 이 결과째 캐시된다 — UA·출처 원문 메모와 열쇠는 늘 여기서 버린다
+            # 깨진 회전 파일(읽다 예외)도 이 결과째 캐시된다 — UA·출처 원문 메모와 열쇠는 늘 여기서 버린다.
+            # 판도 놓는다 — 캐시된 세기가 옛 판을 쥐면 갈아 끼운 뒤에도 다음 갱신·1시간 비움까지 판 둘이 남는다
+            self.table = None
             self._kinds.clear()
             self._traits.clear()
             self._refs.clear()
@@ -280,7 +292,11 @@ class FileTally:
             if len(record.pairs) >= PAIR_CAP:
                 record.capped = True  # 넘는 짝은 기록하지 않는다 — 줄 세기는 그대로
                 return
-            pair = record.pairs[h] = PairDay(self._trait(judged))
+            if self.table is None:
+                pair = record.pairs[h] = PairDay(self._trait(judged))
+            else:
+                country, net = locate(self.table, rec[6])
+                pair = record.pairs[h] = PairDay(self._trait(judged), country, net)
         bit = 1 << ((its - day) // 3600)
         pair.flags |= flags
         if signal:

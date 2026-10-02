@@ -3,16 +3,19 @@
 짝은 메모리에서 BLAKE2b(8바이트) 값으로만 든다 — 열쇠는 처음 짝을 만들 때 만든 `os.urandom(16)` 에 그 줄의 KST
 날짜를 섞은 값이라, 같은 짝도 날이 다르면 다른 값(날을 넘어 이을 수 없다)이고 같은 날을 여러 파일이 나눠도 같은
 값이다(합칠 수 있다). 짝 값·IP·UA 원문은 응답·로그 어디에도 내지 않는다. 짝 하나가 그날 갖는 것은 KST 시 비트
-셋(페이지·JS 신호·101)·첫 페이지 줄의 시각과 채널·다시 온 여부·탐색/운영자 흔적·UA 로 정한 기기·OS·브라우저·인앱뿐이다.
+셋(페이지·JS 신호·101)·첫 페이지 줄의 시각과 채널·다시 온 여부·탐색/운영자 흔적·UA 로 정한 기기·OS·브라우저·인앱,
+그리고 DB-IP 판이 올라 있을 때 처음 기록하며 찾은 나라·망 종류(039 — IP 는 남기지 않는다)뿐이다.
 """
 
 import hashlib
 import os
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 from app.features.admin.access_traits import Traits
+from app.features.admin.geo_kinds import NET_TELECOM_ALL, TELECOM, TELECOM_KR
+from app.features.admin.geo_table import IPV6
 
 KST_SEC = 9 * 3600
 DAY_SEC = 86_400
@@ -62,14 +65,21 @@ class PairDay:
         "returning",
         "flags",
         "traits",
+        "country",
+        "net",
     )
 
-    def __init__(self, traits: Traits) -> None:
+    def __init__(
+        self, traits: Traits, country: str | None = None, net: str | None = None
+    ) -> None:
         self.pages = self.js = self.ws = self.flags = 0
         self.first: float | None = None  # 그날 첫 페이지 줄의 시각
         self.channel = "unknown"
         self.returning = False
         self.traits = traits
+        # 039 — 나라 두 글자 또는 `(기타)`·망 종류. 판 없이 기록한 짝은 둘 다 None, IPv6 는 망 칸만 `ipv6`
+        self.country = country
+        self.net = net
 
 
 class DayPairs:
@@ -85,7 +95,7 @@ class DayPairs:
 def _merge(a: PairDay, b: PairDay) -> PairDay:
     """같은 날을 두 파일이 나눔 — 시는 합집합, 첫 페이지 줄은 이른 쪽, 흔적은 하나라도 있으면. 캐시 기록은 바꾸지 않는다."""
     early = a if b.first is None or (a.first is not None and a.first <= b.first) else b
-    out = PairDay(a.traits)
+    out = PairDay(a.traits, a.country, a.net)  # 같은 짝 = 같은 /24·같은 판
     out.pages, out.js, out.ws = a.pages | b.pages, a.js | b.js, a.ws | b.ws
     out.flags = a.flags | b.flags
     out.first, out.channel, out.returning = early.first, early.channel, early.returning
@@ -109,10 +119,23 @@ def _rows(table: dict[str, list[int]]) -> list[list[Any]]:
     return rows
 
 
+class GeoCounts(NamedTuple):
+    """창의 나라·망 종류별 날마다 센 방문자(039) — 이름 → [confirmed, shaped], IPv6 짝은 shaped 수만.
+    `peaks` 는 나라 → 창 안 KST 하루 가운데 그 나라의 짝(shaped)이 가장 많았던 날의 수 — 적은 나라 묶기의 기준.
+    `net_peaks` 는 망 종류마다 같은 하루 최대, `NET_TELECOM_ALL` 은 telecom·telecom_kr 을 합친 하루 최대(접을 때 쓴다)."""
+
+    countries: dict[str, list[int]]
+    networks: dict[str, list[int]]
+    ipv6: int
+    peaks: dict[str, int]
+    net_peaks: dict[str, int]
+
+
 def visitors(
     files: Iterable[dict[int, DayPairs]], since_ts: int, end_ts: int
-) -> tuple[dict[str, Any], int]:
-    """창 [since_ts, end_ts] 의 날마다 센 방문자 — (visitors 값 키, ws.pairs). since_ts 는 시 경계이고 게이트 뒤다."""
+) -> tuple[dict[str, Any], int, GeoCounts]:
+    """창 [since_ts, end_ts] 의 날마다 센 방문자 — (visitors 값 키, ws.pairs, 나라·망 종류).
+    since_ts 는 시 경계이고 게이트 뒤다."""
     by_day: dict[int, list[DayPairs]] = {}
     for days in files:
         for day, record in days.items():
@@ -122,7 +145,11 @@ def visitors(
         k: {} for k in ("channels", "devices", "os", "browsers", "inApp")
     }
     total = [0, 0, 0]  # confirmed·shaped·returning
-    ws_pairs = 0
+    ws_pairs = ipv6 = 0
+    countries: dict[str, list[int]] = {}
+    networks: dict[str, list[int]] = {}
+    peaks: dict[str, int] = {}
+    net_peaks: dict[str, int] = {}
     capped = False
     day_rows = []
     for day in range(kst_day(since_ts), kst_day(end_ts) + 1, DAY_SEC):
@@ -135,6 +162,10 @@ def visitors(
                 merged[h] = pair if seen is None else _merge(seen, pair)
         mask = _day_mask(day, since_ts, end_hour)
         counts = [0, 0, 0]
+        day_countries: dict[
+            str, int
+        ] = {}  # 그날 나라마다 짝 수 — 날을 넘어 같은 짝인지 알 수 없다
+        day_networks: dict[str, int] = {}
         for pair in merged.values():
             if pair.flags or not (pair.pages | pair.js) & mask:
                 continue  # 그날 탐색·운영자 흔적이 있거나 창 안에 페이지·JS 신호가 없다
@@ -150,6 +181,24 @@ def visitors(
                     row = table.setdefault(name, [0, 0])
                     row[0] += confirmed
                     row[1] += 1
+            if pair.net == IPV6:
+                ipv6 += 1
+            elif pair.net is not None and pair.country is not None:
+                for table, name in ((countries, pair.country), (networks, pair.net)):
+                    row = table.setdefault(name, [0, 0])
+                    row[0] += confirmed
+                    row[1] += 1
+                day_countries[pair.country] = day_countries.get(pair.country, 0) + 1
+                day_networks[pair.net] = day_networks.get(pair.net, 0) + 1
+        for name, n in day_countries.items():
+            if n > peaks.get(name, 0):
+                peaks[name] = n
+        day_networks[NET_TELECOM_ALL] = day_networks.get(TELECOM, 0) + day_networks.get(
+            TELECOM_KR, 0
+        )
+        for name, n in day_networks.items():
+            if n > net_peaks.get(name, 0):
+                net_peaks[name] = n
         day_rows.append(
             {
                 "ts": day,
@@ -171,7 +220,7 @@ def visitors(
         "days": day_rows,
         **{key: _rows(table) for key, table in tables.items()},
     }
-    return values, ws_pairs
+    return values, ws_pairs, GeoCounts(countries, networks, ipv6, peaks, net_peaks)
 
 
 def before_gate() -> dict[str, Any]:
