@@ -390,6 +390,39 @@ details > summary:hover { color: var(--color-accent-300); }
 .links a { display: flex; align-items: center; min-height: 36px; text-decoration: none; color: var(--color-accent-300); }
 .links a:hover { text-decoration: underline; }
 
+/* ══ 설명 (041) — 절마다 접힌 '이 절 읽는 법', 덩어리 끝 접힌 '이 칸 뜻'. 둘 다 정적 HTML 이고 다시 그리는 칸 밖이라
+   묶음이 다시 그려도 펼침이 남는다. 글은 본문보다 작고 흐리게(neutral-400·500 — 바탕 셋에서 4.7:1 이상), 상태색 없이
+   강조는 <b> 만. 641px 이상은 dt·dd 두 열, 640px 이하는 dt 아래 dd ══ */
+.explain {
+  margin: -4px 0 14px; padding: 2px 14px; border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg));
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+.vitals + .explain { margin: 14px 0 0; }
+.explain[open] { padding-bottom: 12px; }
+.explain > summary, .terms > summary { flex-wrap: wrap; gap: 2px 8px; font-size: 12px; color: var(--color-neutral-400); }
+.explain .tail { color: var(--color-neutral-500); }
+.terms { box-shadow: 0 -1px 0 color-mix(in srgb, var(--color-text) 8%, transparent); }
+/* 카드 밖 덩어리(상위 표 여섯·박스)의 설명은 접힌 칸 모양으로 */
+:not(.card) > .terms { padding: 2px var(--space-6); border-radius: var(--radius-md); background: var(--color-surface); box-shadow: none; }
+:not(.card) > .terms[open] { padding-bottom: var(--space-4); }
+.grid + .terms { margin-top: 14px; }
+.explain dl, .terms dl {
+  display: grid; grid-template-columns: minmax(6em, 11em) minmax(0, 1fr); gap: 6px 18px;
+  margin: 4px 0 0; font-size: 12.5px; line-height: 1.55;
+}
+.explain dt, .terms dt { min-width: 0; color: var(--color-neutral-200); font-weight: 600; }
+.explain dd, .terms dd { min-width: 0; margin: 0; color: var(--color-neutral-400); }
+.explain b, .terms b { color: var(--color-neutral-200); font-weight: 600; }
+.explain code, .terms code { font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--color-neutral-500); }
+/* 타일 부제·경보 꼬리 이름표 — 값 옆의 흐린 한 줄 */
+.stat-sub, .alarm-tail { font-size: 11px; color: var(--color-neutral-500); }
+@media (max-width: 640px) {
+  .explain dl, .terms dl { grid-template-columns: minmax(0, 1fr); gap: 1px 0; }
+  .explain dd, .terms dd { margin-bottom: 7px; }
+  :not(.card) > .terms { padding: 2px var(--space-4); }
+}
+
 /* ══ 좁은 폭 — 한 줄 배치·좌우 16px·절 이동은 옆으로 미는 한 줄·표는 카드 안에서 가로 스크롤 (§3.7) ══ */
 @media (max-width: 960px) {
   .traffic-top { grid-template-columns: minmax(0, 1fr); }
