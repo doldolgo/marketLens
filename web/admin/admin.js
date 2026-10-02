@@ -1207,6 +1207,210 @@ for (const button of document.querySelectorAll('[data-window]')) {
   });
 }
 
+// 이름표(042 §3.6) — 행에는 한국어 이름, 원래 키는 title 과 '이 칸 뜻' 에만. 표에 없는 키는 원래 글자 그대로
+const CLASS_NAME = { browser: '사람 브라우저 모양', search: '검색엔진', ai: 'AI 수집기', preview: '링크 미리보기', tool: '자동화 도구', scanner: '스캐너', operator: '운영자 흔적', unknown: '이름 없음' };
+const CHANNEL_NAME = { direct: '직접', search: '검색', inapp: '앱 안 브라우저', social: '소셜·커뮤니티', ai: 'AI 답변', referral: '다른 사이트 링크', campaign: '캠페인(utm)', internal: '사이트 안 이동', unknown: '첫 페이지 기록 없음' };
+const NET_NAME = { telecom_kr: '국내 통신사', telecom: '해외 통신사', cloud: '데이터센터·클라우드', other: '기업·학교·기관', unknown: '자료에 없음' };
+const APP_NAME = { kakaotalk: '카카오톡', naver: '네이버 앱', instagram: '인스타그램', facebook: '페이스북', line: '라인', daum: '다음 앱', band: '밴드', other: '그 밖 앱' };
+const DEVICE_NAME = { mobile: '휴대폰', tablet: '태블릿', desktop: '데스크톱' };
+const OS_NAME = { ios: 'iOS', android: 'Android', windows: 'Windows', macos: 'macOS', linux: 'Linux', chromeos: 'ChromeOS', other: '그 밖' };
+const BROWSER_NAME = { chrome: 'Chrome', safari: 'Safari', samsung: '삼성 인터넷', whale: '웨일', edge: 'Edge', firefox: 'Firefox', opera: 'Opera', inapp: '앱 안 브라우저', other: '그 밖' };
+const CLASSES = Object.keys(CLASS_NAME);
+const NETS = Object.keys(NET_NAME);
+const WEEKDAY = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일'];
+const nameIn = (table) => (key) => own(table, key) ?? clean(key);
+// 나라 — ISO 두 글자를 브라우저의 한국어 지역 이름으로. 못 푸는 값(ZZ·(기타)·Intl 없음)은 null(글자 그대로 쓴다)
+const REGION = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['ko'], { type: 'region' }) : null;
+function countryName(code) {
+  if (!REGION || typeof code !== 'string' || !/^[A-Z]{2}$/.test(code) || code === 'ZZ') return null;
+  try {
+    const name = REGION.of(code);
+    return name && name !== code ? name : null;
+  } catch {
+    return null;
+  }
+}
+
+// [[이름, 확인, 모양]]·[[이름, 수]] — 모양이 아닌 행은 버리고 수는 숫자로
+const rows3 = (rows) => list(rows).filter((r) => Array.isArray(r)).map((r) => [r[0], n0(r[1]), n0(r[2])]);
+const rows2 = (rows) => list(rows).filter((r) => Array.isArray(r)).map((r) => [r[0], n0(r[1])]);
+const total = (rows, i) => rows.reduce((acc, r) => acc + r[i], 0);
+// 확인 내림차순(같으면 서버 순서), 확인 0 행 뺌 — 답 문장의 '상위'
+const byConfirmed = (rows) => rows.filter((r) => r[1] > 0).sort((x, y) => y[1] - x[1]);
+const pct = (n, d) => Math.round((n / d) * 100);
+const AVG = new Intl.NumberFormat('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const visOf = (a) => (isObj(a.visitors) && a.visitors.state === 'ok' ? a.visitors : null);
+// 하루 평균 — 합 ÷ ((endTs − sinceTs) ÷ 86,400), 소수 1자리. 날수가 0 이면 null
+function perDay(a, v, value) {
+  const days = (n0(a.endTs) - n0(v.sinceTs)) / 86_400;
+  return days > 0 ? AVG.format(n0(value) / days) : null;
+}
+
+// 답 문장 틀(042 §3.5) — `{…}` 자리는 굵게. t`확인 ${a}` → ['확인 ', { b: 'a' }]
+const t = (strs, ...vals) => strs.flatMap((s, i) => (i < vals.length ? [s, { b: String(vals[i]) }] : [s])).filter((x) => x !== '');
+const joined = (rows) => rows.flatMap((row, i) => (i ? ['·', ...row] : row));
+
+// 답 하나 = 문장 조각 목록. 못 만드는 조각(분모 0·빈 목록)은 빼고, 다 빠지면 '기록 없음'. null = 답 대신 본문 상태 글
+function sentences(pieces) {
+  if (pieces === null) return [];
+  const kept = pieces.filter((p) => p && p.length);
+  return kept.length ? kept.flatMap((p, i) => (i ? [' ', ...p] : p)) : ['기록 없음'];
+}
+
+// 답 문장에 쓰는 값 — 갈래(전·24h·기간)와 시행일·기간 글자
+function facts(a) {
+  const pre = !list(a.windows).includes('7d');
+  const days = spanDays(a);
+  return {
+    a,
+    pre,
+    span: !pre && a.window !== '24h',
+    vis: visOf(a),
+    geo: isObj(a.geo) ? a.geo : null,
+    T: isObj(a.totals) ? a.totals : {},
+    S: isObj(a.status) ? a.status : {},
+    hourly: list(a.hourly).filter(isObj),
+    D: num(a.gateAt) === null ? '–' : kstMd(a.gateAt),
+    period: isCut(a) ? `개정 시행 뒤 센 ${days}일` : `최근 ${days}일`,
+  };
+}
+
+function answer1(f) {
+  const { T, vis: v } = f;
+  if (f.pre) return [t`방문자는 처리방침 개정 시행 ${f.D} 00:00 부터 센다.`, t`지금은 줄 수만 — 사람 모양 페이지 ${int(n0(T.humanPages))}, 그중 스크립트가 돈 페이지 ${int(n0(T.jsViews))}.`];
+  if (!v) return null;
+  const [c, s, r] = [n0(v.confirmed), n0(v.shaped), n0(v.returning)];
+  const out = [];
+  if (!f.span) {
+    out.push(t`확인 ${int(c)}, 브라우저 모양 ${int(s)}(날마다 센 방문자) — 오늘·어제(KST)를 따로 세어 더한 수라 사람 수가 아니다.`);
+    if (n0(v.sinceTs) > n0(f.a.startTs)) out.push(t`시행 ${f.D} 00:00 부터 센 값이다.`);
+  } else {
+    const [ac, as] = [perDay(f.a, v, c), perDay(f.a, v, s)];
+    if (ac !== null) out.push(t`${f.period} 동안 스크립트가 돈 방문자는 하루 평균 ${ac}명, 브라우저 모양까지 치면 ${as}명 — 실제 사람은 이 사이다.`);
+    if (c > 0) out.push(t`확인의 ${pct(r, c)}%는 다시 온 사람이다.`);
+  }
+  if (s > 0 && c <= s * 0.1) out.push(['브라우저 모양의 대부분은 봇이다.']);
+  return out;
+}
+
+function answer2(f) {
+  const req = n0(f.T.requests);
+  const classes = isObj(f.a.classes) ? f.a.classes : {};
+  const requests = (k) => n0(classes[k]?.requests);
+  const out = [];
+  if (req > 0) {
+    out.push(t`요청 ${int(req)}줄 가운데 사람 브라우저 모양은 ${pct(requests('browser'), req)}%다.`);
+    const bots = CLASSES.filter((k) => k !== 'browser' && requests(k) > 0).sort((x, y) => requests(y) - requests(x)).slice(0, 2);
+    if (bots.length) out.push(['자동 요청은 ', ...joined(bots.map((k) => t`${CLASS_NAME[k]}(${pct(requests(k), req)}%)`)), ' 순으로 많다.']);
+  }
+  const hp = n0(f.T.humanPages);
+  if (hp > 0) out.push(t`사람 모양 페이지 가운데 스크립트가 돈 것은 ${pct(n0(f.T.jsViews), hp)}%다.`);
+  return out;
+}
+
+function answer3(f) {
+  if (f.pre) return [t`나라·망 종류와 들어온 길은 처리방침 개정 시행 ${f.D} 00:00 부터 센다.`, ['지금은 외부 출처·utm 만 페이지 줄로 보인다.']];
+  const out = [];
+  const g = f.geo;
+  if (g?.state === 'ok') {
+    const nets = rows3(g.networks);
+    const kr = nets.find((r) => r[0] === 'telecom_kr');
+    if (kr && total(nets, 1) > 0) out.push(t`확인의 ${pct(kr[1], total(nets, 1))}%는 국내 통신사 망에서 왔다.`);
+    if (total(nets, 2) > 0) {
+      const [, cc, cs] = nets.find((r) => r[0] === 'cloud') ?? ['cloud', 0, 0];
+      const head = t`데이터센터·클라우드 망은 브라우저 모양의 ${pct(cs, total(nets, 2))}%이고 그중 확인은 ${int(cc)}`;
+      out.push([...head, cs > 0 && cc <= cs * 0.1 ? '뿐 — 대부분 봇이다.' : '다.']);
+    }
+  } else if (g?.state === 'pending') out.push(['나라·망 종류는 자료를 받는 중이다.']);
+  else if (g) out.push(t`나라·망 종류 자료를 받지 못했다(${clean(g.code ?? g.state)}).`);
+  if (f.vis) {
+    const channels = rows3(f.vis.channels);
+    const sum = total(channels, 1);
+    const top = byConfirmed(channels).slice(0, 3);
+    if (sum > 0) out.push(['들어온 길은 ', ...joined(top.map(([k, c]) => [...t`${nameIn(CHANNEL_NAME)(k)} ${pct(c, sum)}`, '%'])), ' 순이다.']);
+  }
+  return out;
+}
+
+// 요일×시간 — hourly.jsViews 를 이 브라우저 시간대의 (요일 월~일, 시 0~23) 칸에 더한다
+function heatGrid(hourly) {
+  const cells = WEEKDAY.map(() => new Array(24).fill(0));
+  for (const h of hourly) {
+    const d = new Date(n0(h.ts) * 1000);
+    cells[(d.getDay() + 6) % 7][d.getHours()] += n0(h.jsViews);
+  }
+  const hours = cells[0].map((_, i) => cells.reduce((acc, row) => acc + row[i], 0));
+  return { cells, hours, days: cells.map((row) => row.reduce((x, y) => x + y, 0)), max: Math.max(0, ...cells.flat()) };
+}
+// 강도 — 0 이면 h0, 아니면 ⌈값 ÷ 최댓값 × 5⌉ (정수로 곱한 뒤 나눠 부동소수 끝자리가 단계를 넘기지 않게)
+const heatLevel = (v, max) => (v > 0 && max > 0 ? `h${Math.min(5, Math.ceil((v * 5) / max))}` : 'h0');
+
+function answer4(f) {
+  const js = (h) => n0(h.jsViews);
+  if (!f.span) {
+    const J = f.hourly.reduce((acc, h) => acc + js(h), 0);
+    const P = f.hourly.reduce((acc, h) => acc + n0(h.humanPages), 0);
+    if (J === 0) return [['최근 24시간 동안 스크립트가 돈 페이지 보기가 없다.'], t`사람 모양 페이지 ${int(P)}회.`];
+    const best = f.hourly.reduce((x, h) => (js(h) > js(x) ? h : x));
+    return [t`최근 24시간 중 화면이 가장 많이 뜬 때는 ${new Date(n0(best.ts) * 1000).getHours()}시(${int(js(best))}회)다.`, t`스크립트가 돈 페이지 보기 ${int(J)}회, 사람 모양 페이지 ${int(P)}회.`];
+  }
+  const grid = heatGrid(f.hourly);
+  const out = [];
+  if (grid.hours.some((v) => v > 0)) {
+    const three = (h) => grid.hours[h] + grid.hours[(h + 1) % 24] + grid.hours[(h + 2) % 24];
+    const h1 = grid.hours.reduce((best, _, h) => (three(h) > three(best) ? h : best), 0);
+    out.push(t`화면이 실제로 뜬 페이지 보기는 ${h1}~${(h1 + 3) % 24}시에 가장 몰린다.`);
+  }
+  if (grid.max > 0) {
+    const d = grid.cells.findIndex((row) => row.includes(grid.max));
+    out.push(t`가장 많은 칸은 ${WEEKDAY[d]} ${grid.cells[d].indexOf(grid.max)}시(${int(grid.max)}회).`);
+  }
+  const today = kstDay(n0(f.a.endTs));
+  const days = f.vis ? list(f.vis.days).filter((d) => isObj(d) && d.ts !== today).map((d) => n0(d.confirmed)) : [];
+  if (days.length) out.push(t`날마다 확인 방문자는 ${int(Math.min(...days))}~${int(Math.max(...days))}명이다.`);
+  return out;
+}
+
+function answer5(f) {
+  const hp = n0(f.T.humanPages);
+  const paths = rows2(f.a.paths);
+  const tabs = rows2(f.a.tabs);
+  const tabSum = total(tabs, 1);
+  const first = [];
+  const t1 = tabSum > 0 && tabs.length ? tabs[0] : null;
+  if (hp > 0 && paths.length) {
+    const label = clean(paths[0][0]);
+    first.push(...t`사람 모양 페이지는 ${label.length > 60 ? `${label.slice(0, 60)}…` : label} 경로가 ${pct(paths[0][1], hp)}%로 가장 많`, t1 ? '고, ' : '다.');
+  }
+  if (t1) first.push(...t`대시보드는 ${tabName(t1[0])} 탭으로 들어온 경우가 ${pct(t1[1], tabSum)}%다.`);
+  const out = [first];
+  const device = nameIn(DEVICE_NAME);
+  if (!f.pre && f.vis) {
+    const devices = rows3(f.vis.devices);
+    const [d1] = byConfirmed(devices);
+    if (d1) out.push(t`기기는 ${device(d1[0])} ${pct(d1[1], total(devices, 1))}%(${'확인 방문자 기준'}).`);
+  } else if (f.pre) {
+    const [d1] = rows2(f.a.devices);
+    if (d1 && hp > 0) out.push(t`기기는 ${device(d1[0])} ${pct(d1[1], hp)}%(${'페이지 줄 기준'}).`);
+  }
+  return out;
+}
+
+function answer6(f) {
+  const [e, w, f4, pr] = [n0(f.S['5xx']), n0(f.S.ws5xx), n0(f.S['4xx']), n0(f.T.probes)];
+  const first = e === 0 ? ['서버 오류(5xx)는 없었고, '] : t`서버 오류(5xx)는 ${int(e)}건, `;
+  const ws = [...t`대시보드 재접속 실패는 ${int(w)}건`, ...(w > 0 ? ['(배포 때 몇 건은 정상)'] : []), '이다.'];
+  return [[...first, ...ws], t`4xx 는 ${int(f4)}건, 탐색 경로 요청은 ${int(pr)}줄이다.`];
+}
+
+// 덩어리 여섯의 답 — 조각 목록([글자 | { b }])
+const answers = (a) => [answer1, answer2, answer3, answer4, answer5, answer6].map((make) => sentences(make(facts(a))));
+const plain = (segs) => segs.map((s) => (typeof s === 'string' ? s : s.b)).join('');
+
+function sentence(node, segs) {
+  node.replaceChildren(...segs.map((s) => (typeof s === 'string' ? clean(s) : el('b', null, s.b))));
+}
+
 // [응답 키, 표 이름, 이름표 함수(있으면 한국어 이름을 적고 원래 글자는 title)]
 const TOP_TABLES = [
   ['paths', '경로'],
