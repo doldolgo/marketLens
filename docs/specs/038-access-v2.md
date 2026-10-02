@@ -33,15 +33,15 @@
 
 ### 3.3 읽기·캐시
 - 읽는 계약(027·035 복사): caddy 가 도메인 요청마다 JSON 한 줄을 `ACCESS_LOG_DIR`(serve 의 `logs/caddy`, api 에 읽기 전용)의 `access.log` 에 쓴다. 쓰는 필드 — `ts`(epoch 초 실수, 줄의 둘째 필드), `request.client_ip`(없으면 `request.remote_ip` — IPv4 /24·IPv6 /48 로 가려져 있다), `request.method`·`request.uri`(경로+쿼리, 검색어 키는 지워져 있다), `status`, `duration`(초), `referer`(출처 `스킴://호스트[:포트]` 또는 빈 값), `ua`. 폴링 다섯 경로와 canary 는 기록되지 않는다. `/api/ws/spreads` 는 연결이 끝날 때 101 한 줄. 하루 또는 50MiB 에서 회전해 gzip 된 회전 파일 `access-<UTC 시각>-<size|time>.log.gz` 를 같은 디렉터리에 90일·100개까지 둔다(압축 중엔 같은 이름 `.log` 가 잠깐 함께 있고 그때는 `.log` 하나만 읽는다). 회전 파일의 수정 시각은 마지막 줄 무렵이다.
-- 파일 고르기: `access.log` 와 수정 시각이 읽기 시작점 뒤인 회전 파일 — 그중 최신부터 압축 크기 합 10MB 까지. 넘는 오래된 파일은 읽지도 캐시하지도 않고 `firstTs` 가 늦어진다. 몰리는 날엔 50MiB 마다 회전해 파일이 100개까지 쌓일 수 있어 첫 채움을 묶으려는 것이다(지금 30일치는 ≈0.7MB, 50MiB 회전 파일 하나는 ≈3MB). 디렉터리·파일이 없으면 `unconfigured`·`no_file`, `access.log` 읽기 실패는 `error`.
+- 파일 고르기: `access.log` 와 수정 시각이 읽기 시작점 뒤인 회전 파일 — 회전 파일은 최신부터 압축 풀린 크기를 더해 100MiB(104,857,600바이트)를 넘는 첫 파일에서 멈춘다. `.gz` 는 gzip 꼬리의 ISIZE(마지막 4바이트)로, `.log`(압축 전·압축 중 — 그때는 `.log` 만 읽는다)는 파일 크기로 센다. 넘는 오래된 파일은 읽지도 캐시하지도 않고 `firstTs` 가 늦어진다. 몰리는 날엔 50MiB 마다 회전해 파일이 100개까지 쌓일 수 있어 첫 채움을 줄 수로 묶으려는 것이다(압축 크기로 세면 잘 눌리는 몰림이 빠져나간다 — 지금 하루 ≈400KB 라 30일 ≈12MB 로 늘 다 든다). 꼬리가 4바이트 미만이거나 ISIZE 가 100MiB 를 넘는 `.gz` 는 깨진 파일로 보고 0 으로 센다(50MiB 에서 회전하는 파일은 그럴 수 없고 잘린 gz 의 꼬리는 아무 값이다 — 읽으면 아래 깨진 회전 파일 규칙대로). 디렉터리·파일이 없으면 `unconfigured`·`no_file`, `access.log` 읽기 실패는 `error`.
 - **회전 파일 캐시** — 회전 파일은 압축이 끝나면 바뀌지 않으므로 파일마다 한 번 읽어 시(時) 버킷 집계·최근 5xx 20줄·짝 기록(§3.5 — 게이트 뒤 KST 날만)을 메모리에 둔다. 키는 확장자(`.log`·`.log.gz`)를 뗀 이름이다 — 압축 전후를 두 번 세지 않는다.
   - 읽은 때와 크기·수정 시각이 다르면 다시 만든다(압축이 끝나 `.log` 가 `.log.gz` 로 바뀔 때 한 번).
-  - 목록에서 사라지거나(보관 기간 삭제), 수정 시각이 읽기 시작점 앞이거나, 압축 10MB 밖으로 밀려나면 같은 회차에 버린다 — 요약이 원본보다 오래 남지 않게.
+  - 목록에서 사라지거나(보관 기간 삭제), 수정 시각이 읽기 시작점 앞이거나, 100MiB 밖으로 밀려나면 같은 회차에 버린다 — 요약이 원본보다 오래 남지 않게.
   - 읽기 시작점이 그 파일 안으로 옮겨 오면(시작점은 한 시간에 한 번 움직인다) 그 파일만 다시 만든다 — 시작점 앞 줄이 짝의 '그날 첫 페이지 줄' 에 남지 않게.
   - 깨진 회전 파일(잘린 gz·틀린 머리·권한)은 035 그대로 읽은 데까지 세고 `skipped` 에 1 을 더하며 WARNING — 그 결과도 캐시하고, 크기·수정 시각이 바뀌기 전엔 다시 읽지 않는다.
 - **`access.log`** 는 캐시하지 않고 통째로 다시 읽는다(이어 읽지 않는다 — 회전된 줄을 두 번 세지 않게). 마지막으로 읽은 지 60초가 지났을 때만 읽고, 그 안에 다른 창이 갱신하면 같은 결과를 나눠 쓴다.
 - 창은 늘 읽는 범위 전체를 채운 캐시에서 만든다 — 게이트 뒤면 24시간 창만 불러도 30일치 파일을 채운다. 어느 창이든 짝의 날 속성이 같은 줄에서 나오게 하려는 것이다. 첫 채움(재시작 뒤·게이트 뒤 처음·1시간 비움 뒤)이 3초를 넘기면 `pending` 이고 뒤에서 마저 돈다. 파일 캐시 만들기는 프로세스에서 한 번에 하나다 — 두 창이 같은 파일을 기다리면 한 번만 읽는다.
-- 줄은 035 처럼 흘려 읽고, 읽기 시작점 앞 줄은 JSON 을 풀기 전에 `ts` 만 보고 버린다. JSON 이 아니거나 필드가 빠진 줄은 `skipped`. 재시작하면 캐시·열쇠(§3.5)가 모두 사라지고 처음부터 읽는다. 저장소(Redis·디스크)에는 아무것도 쓰지 않는다.
+- 줄은 035 처럼 흘려 읽고, 읽기 시작점 앞 줄은 JSON 을 풀기 전에 `ts` 만 보고 버린다. JSON 이 아니거나 필드가 빠지거나 모양이 틀린 줄(`ts` 가 날짜로 바꿀 수 있는 0 이상의 수가 아님·`status` 가 정수가 아님·`duration` 이 유한한 수가 아님 — 실수로 바꿀 수 없는 큰 정수·NaN·무한)은 `skipped` — 한 줄이 요약 전체를 `error` 로 만들지 않는다. 재시작하면 캐시·열쇠(§3.5)가 모두 사라지고 처음부터 읽는다. 저장소(Redis·디스크)에는 아무것도 쓰지 않는다.
 - 마지막 접속 요청에서 1시간이 지나면 파일 캐시·짝 기록·열쇠를 통째로 버린다 — 화면을 오래 열지 않아도 요약이 창과 원본보다 오래 남지 않게(갱신 때마다 다시 거는 타이머 하나). 다음 요청은 첫 채움(3초 기다림·`pending`)으로 다시 채운다.
 
 ### 3.4 줄 분류
@@ -49,7 +49,7 @@
 - **JS 신호 줄** = GET `/clarity.js`·`/app/clarity.js` 의 200·304(033 뒤 no-cache·no-store 라 JS 가 돈 페이지 보기마다 한 줄 — 동의와 무관하게 받는 로더다) 또는 `/api/ws/spreads` 의 101. `/landing/*`·`/assets/*` 같은 하위 자원은 캐시 때문에 신호로 쓰지 않는다.
 - **탐색 줄** = 쿼리 뗀 경로(소문자)에 `wp-`·`wordpress`·`xmlrpc`·`.php`·`.env`·`.git`·`.aws`·`.ssh`·`cgi-bin`·`phpmyadmin`·`actuator`·`/admin`·`/login`·`/config`·`/vendor/`·`/boaform`·`/hnap1`·`/owa/`·`/autodiscover`·`/server-status`·`/solr`·`/console`·`.ini`·`.sql`·`.bak`·`/backup`·`/shell`·`/setup`·`/install`·`/debug`·`.ds_store` 중 하나가 든 줄. 우리 경로(`/`·`/app/`·`/privacy`·`/clarity.js`·`/app/clarity.js`·`/assets/`·`/landing/`·`/api/ws/spreads`·`/api/history/*`·`/robots.txt`·`/sitemap.xml`·`/favicon.ico`·`/fonts/`)와 `web/public` 아래 파일은 어느 낱말에도 걸리지 않는다.
 - **운영자 흔적** = `referer` 의 호스트가 `localhost`·`*.localhost`·`*.test`·`127.0.0.0/8`·`[::1]`·사설 IPv4(`10/8`·`172.16/12`·`192.168/16`)·그 밖의 IP 글자 그대로(탄력 IP 를 직접 연 출처)·`clarity.microsoft.com`(Clarity 대시보드가 녹화를 그리며 우리 자산을 부른다) 중 하나. 운영자 IP 는 설정·코드에 적지 않는다.
-- **종류** — 줄마다 하나, 위에서 먼저 맞은 것(UA 는 대소문자 무관 부분 일치):
+- **종류** — 줄마다 하나, 위에서 먼저 맞은 것(UA 는 앞 1,024자로 판정 — 대소문자 무관 부분 일치. 줄마다 다른 긴 UA 의 판정 비용을 묶는다):
   1. `operator` — 운영자 흔적 줄(UA 와 무관).
   2. `unknown` — UA 가 없거나 빈 값.
   3. `search` — `googlebot`·`google-site-verification`·`yeti`·`daumoa`·`bingbot`·`applebot`·`duckduckbot`·`baiduspider`·`yandex`.
@@ -62,7 +62,7 @@
 - 위장 봇은 종류를 따로 두지 않는다 — JS 신호 없는 브라우저 모양 짝(`shaped` − `confirmed`)과 탐색한 브라우저 줄(`scanner`·`probes`)로 드러난다. 짝 값(앞의 것과 039 의 망 종류 `cloud`)은 게이트 뒤에만 있고, 게이트 전에는 줄 단위 `scanner`·`probes` 로만 보인다.
 
 ### 3.5 날마다 센 방문자 (게이트 뒤 KST 날만 — §3.2 짝 게이트)
-- **짝** = (가린 IP, UA 원문). 메모리에서는 BLAKE2b(digest 8바이트)로 바꾼 값만 들고, 응답·로그·Redis 어디에도 내지 않는다. 열쇠는 그 줄의 KST 날마다 다르다 — 처음 짝을 만들 때(또는 §3.3 의 1시간 비움 뒤) 만든 `os.urandom(16)` 에 KST 날짜를 섞은 값이다. 같은 짝도 날이 다르면 다른 값이라 날을 넘어 이을 수 없고, 같은 날을 여러 파일이 나눠도 같은 값이라 합칠 수 있다. IP 가 없는 줄과 게이트 전 날의 줄은 짝을 만들지 않는다(종류·시간 칸에는 센다).
+- **짝** = (가린 IP, UA 원문 전체 — 판정의 1,024자와 무관). 메모리에서는 BLAKE2b(digest 8바이트)로 바꾼 값만 들고, 응답·로그·Redis 어디에도 내지 않는다. 열쇠는 그 줄의 KST 날마다 다르다 — 처음 짝을 만들 때(또는 §3.3 의 1시간 비움 뒤) 만든 `os.urandom(16)` 에 KST 날짜를 섞은 값이다. 같은 짝도 날이 다르면 다른 값이라 날을 넘어 이을 수 없고, 같은 날을 여러 파일이 나눠도 같은 값이라 합칠 수 있다. IP 가 없는 줄과 게이트 전 날의 줄은 짝을 만들지 않는다(종류·시간 칸에는 센다).
 - **짝 기록** — (파일, KST 날)마다, UA 가 §3.4-8 의 브라우저 모양인 줄(그날 빼려고 운영자 흔적·탐색 줄도)의 짝을 처음 나온 순서로 1,000개까지 둔다. 넘는 짝은 기록하지 않고 `capped` 를 세우며 줄 세기는 그대로다. 짝 하나가 그날 갖는 것: 페이지 줄·JS 신호 줄·101 줄이 있었던 KST 시, 그날 첫 페이지 줄의 시각과 그 줄로 정한 채널·다시 온 여부, 탐색 줄·운영자 흔적 줄이 있었는지, UA 로 정한 기기·OS·브라우저·인앱. IP 는 남기지 않는다.
 - 같은 날을 여러 파일이 나눠 가지면 해시로 합친다 — 시는 합집합, 첫 페이지 줄은 이른 쪽, 탐색·운영자는 하나라도 있으면.
 - 창 W 에서 세는 짝 — 그날 탐색 줄·운영자 흔적 줄이 없는 짝만:
@@ -81,7 +81,7 @@
   7. 출처 없음 + 인앱 UA → `inapp`
   8. 출처 없음 → `direct`
   9. 그날 페이지 줄이 없음(WS·clarity.js 만) → `unknown`
-- 인앱·기기·OS·브라우저의 UA 토큰은 적힌 대로 대소문자를 가린다(§3.4 종류와 다르다). **인앱**(위에서 먼저): `KAKAOTALK` → `kakaotalk`, `NAVER(inapp` → `naver`, `Instagram` → `instagram`, `FBAN`·`FBAV` → `facebook`, `Line/` → `line`, `DaumApps` → `daum`, `BAND` → `band`, Android 웹뷰 표시 `; wv)` → `other`.
+- 인앱·기기·OS·브라우저도 UA 앞 1,024자로 판정하되 토큰은 적힌 대로 대소문자를 가린다(§3.4 종류와 다르다). **인앱**(위에서 먼저): `KAKAOTALK` → `kakaotalk`, `NAVER(inapp` → `naver`, `Instagram` → `instagram`, `FBAN`·`FBAV` → `facebook`, `Line/` → `line`, `DaumApps` → `daum`, `BAND` → `band`, Android 웹뷰 표시 `; wv)` → `other`.
 - **기기**: `iPad` 또는 `Mobile` 없는 `Android` → `tablet`, `Mobi`·`iPhone`·`Android` → `mobile`, 그 밖 `desktop`(iPadOS 의 Mac UA 는 desktop — 한계). **OS**: `iPhone`·`iPad`·`iPod` → `ios`, `Android` → `android`, `Windows` → `windows`, `Mac OS X`·`Macintosh` → `macos`, `CrOS` → `chromeos`, `Linux` → `linux`, 그 밖 `other`. **브라우저**: 인앱 → `inapp`, `Whale/` → `whale`, `SamsungBrowser/` → `samsung`, `Edg` → `edge`, `OPR/`·`Opera` → `opera`, `Firefox`·`FxiOS` → `firefox`, `Chrome`·`CriOS` → `chrome`, `Safari` → `safari`, 그 밖 `other`.
 
 ### 3.6 응답 — 값 키 (036 화면이 읽는 키는 이름·모양 그대로, 더하기만)
@@ -121,8 +121,10 @@
 
 ### 3.7 부담 (serve t4g.micro — 2026-10-02 조사 실측)
 - 지금 양: 하루 ≈706줄·384KB(회전 gz ≈23KB). 종류·짝까지 가르는 세기의 줄당 비용 18.4µs(035 의 세기 15.2µs) → 30일 ≈21,000줄 첫 채움 ≈0.4초, 캐시가 찬 뒤 회차는 `access.log` 다시 읽기(≈13ms)와 창 합치기.
-- 최악: 회전은 하루 또는 50MiB 중 먼저 닿는 쪽이라, 몰리는 날엔 50MiB(≈95,000줄 — serve 한 파일 ≈2.4초, UA 가 수백 가지로 몰린 꼴. 모든 줄 UA 가 다른 극단은 ≈3.6초 — 회전 파일은 한 번 읽어 캐시하므로 처음 한 번뿐) 회전 파일이 여럿 생겨 100개까지 쌓인다. 그래서 캐시하는 회전 파일을 압축 10MB(§3.3 — 50MiB 파일 셋쯤, ≈30만 줄 ≈6초)에서 끊는다. 첫 채움 동안은 `pending`. 캐시가 없으면 60초마다 그만큼이라 캐시가 꼭 필요하다.
-- api 는 uvicorn 워커 하나라 to_thread 의 세기가 공개 `/api/landing`·WS 허브와 GIL 을 나눠 쓴다 — 관리자 화면을 열 때만 일어난다. 세기는 5,000줄마다 다른 스레드에 차례를 넘긴다(0초 잠들기) — 첫 채움 동안 공개 응답이 오래 기다리지 않게. 그래도 조금 늦을 수 있다(받아들인 위험).
+- 최악: 회전은 하루 또는 50MiB 중 먼저 닿는 쪽이라, 몰리는 날엔 50MiB(≈9만~9.5만 줄 — serve 한 파일 ≈2.3초, UA 가 수백 가지로 몰린 꼴) 회전 파일이 여럿 생겨 100개까지 쌓인다. 그래서 캐시하는 회전 파일을 압축 풀린 100MiB(§3.3 — 50MiB 파일 둘·≈19만 줄)에서 끊는다 — 첫 채움 serve ≈4.7초, 모든 줄 UA 가 다른 극단은 ≈7.2초(회전 파일은 한 번 읽어 캐시하므로 처음 한 번뿐). 첫 채움 동안은 `pending`. 캐시가 없으면 60초마다 그만큼이라 캐시가 꼭 필요하다. ISIZE 는 2^32 의 나머지라 4GiB 를 넘는 파일은 작게 세지만, caddy 가 50MiB 를 넘기 전에 회전하므로 그런 회전 파일은 없다.
+- 몰리는 날의 `access.log`: 캐시하지 않고 60초마다 통째로 다시 읽으므로(§3.3) 50MiB 까지 자란 `access.log` 는 관리자 화면을 띄워 두는 동안 serve 에서 분당 ≈2.3초를 쓰고, 첫 채움에도 그만큼 더해진다. 이어 읽기는 후속이다 — 지금 하루 ≈400KB 라 ≈13ms.
+- 긴 UA: 종류·특성 판정은 UA 앞 1,024자만 본다(§3.4·§3.5) — 줄마다 다른 3,000자 UA 로 찬 50MiB 파일(≈1.5만 줄)도 serve ≈4.6초다(자르기 전 ≈10.6초).
+- api 는 uvicorn 워커 하나라 to_thread 의 세기가 공개 `/api/landing`·WS 허브와 GIL 을 나눠 쓴다 — 관리자 화면을 열 때만 일어난다. 따로 차례를 넘기지 않는다 — 인터프리터가 5ms 마다 GIL 을 넘겨 루프 지연은 측정상 ≤30ms(대개 10~20ms, §5 — 5,000줄마다 0초 잠들기는 같은 측정에서 차이가 없었다). 그래도 조금 늦을 수 있다(받아들인 위험).
 - 메모리: 24시간 회전은 KST 자정과 맞지 않아 (파일, KST 날) 짝 기록이 날마다 둘이다. 시마다 목록(목록 6 × 키 31 × 720시) ≈13MB + 짝 기록 62 × 1,000 ≈16MB → 최악 ≈29MB(조사 로컬 tracemalloc, 창 조립 때의 잠깐 사본 뺌). api 에는 `mem_limit` 이 없고 serve 가용은 ≈360~420MB 다.
 
 ### 3.8 엣지
@@ -130,7 +132,7 @@
 - 도는 중 게이트를 지남 → 다음 갱신부터 `windows` 셋, 7일·30일 `startTs` = 게이트, `hourly` 는 게이트부터, `visitors` `ok`·`sinceTs` = 게이트(24시간 창은 게이트 앞 시간의 줄 단위 값을 품고 짝 값은 게이트부터). 기록이 창보다 짧으면(배포·게이트 직후) `firstTs` 가 `startTs` 보다 늦다.
 - 회전 중 읽기: 그 회차는 읽은 만큼, 다음 회차가 새 회전 파일(새 키)을 읽고 `access.log` 를 통째로 바꾼다 — 같은 줄을 두 번 세지 않는다.
 - 짝이 1,000 넘음(위장 브라우저 폭주) → 그 (파일, 날)의 새 짝은 기록하지 않고 `capped` true — 방문자 수는 하한이 된다.
-- 회전 파일이 압축 10MB 를 넘게 쌓임(몰리는 날) → 오래된 파일은 읽지 않아 `firstTs` 가 `startTs` 보다 늦다. 관리자 화면을 1시간 넘게 안 엶 → 캐시·열쇠가 비고 다음 요청이 다시 채운다(`pending` 일 수 있다).
+- 회전 파일이 압축 풀린 100MiB 를 넘게 쌓임(몰리는 날) → 오래된 파일은 읽지 않아 `firstTs` 가 `startTs` 보다 늦다. 잘린 회전 gz 는 ISIZE 자리가 아무 값이라 100MiB 를 넘으면 0 으로 세어(§3.3) 오래된 파일을 막지 않는다. 관리자 화면을 1시간 넘게 안 엶 → 캐시·열쇠가 비고 다음 요청이 다시 채운다(`pending` 일 수 있다).
 - 운영자가 보통 브라우저로 연 방문(출처 없음·자기 호스트) → 방문자로 센다(IP 목록이 없어 받아들인 한계). HeadlessChrome·curl 같은 운영 도구는 `tool` 이다.
 - 로그 디렉터리 없음 → `unconfigured`·`no_file`(값 키 null, `window`·`windows`·`gateAt` 은 실림). 접속 요약은 Redis 를 쓰지 않아 Redis 불달과 무관하다.
 
@@ -138,24 +140,24 @@
 **PR 안 — 실행 세션(완료 조건)**. 시작 전에 037 브랜치(또는 037 이 든 main) 위인지 본다 — 아니면 멈추고 묻는다. 네트워크 없음. 가짜 자료는 027 줄 모양을 만드는 도우미(035 의 `access_fakes.py` 를 넓힌다)로 테스트가 만든 디렉터리에 둔다 — 회전 파일 이름 `access-<UTC>-time.log.gz`, 수정 시각 = 마지막 줄 `ts`. 시계와 `PRIVACY_V2_EFFECTIVE` 는 테스트가 바꿔 끼운다.
 - 창·게이트: 인자 없음·`24h`·`7d`·`30d`·`7D`·`1y`·빈 값 → 게이트 전엔 모두 `window` 24h·`windows ["24h"]`, 게이트 뒤엔 `7d`·`30d` 만 그 창 / 상수 `"2026-10-12"` → `gateAt` = 2026-10-11T15:00Z(ms) / `startTs`·`hourly` 길이(24h 24, 게이트 이튿날 7d 는 게이트부터, 게이트 + 10일 7d 168, 게이트 + 40일 30d 720) / 시계를 게이트 앞→뒤로 옮기면 같은 앱이 셋을 연다 / 게이트 전: 24시간 창 밖 줄(같은 `access.log` 안)은 어느 값에도 없고 창 밖 회전 파일은 열지 않는다(여는 함수를 감시) / 게이트 뒤: 게이트 앞 줄은 7d·30d 의 어떤 값(`totals`·`hourly`·`visitors`·상위 목록)에도 없고 24h 창 안이면 든다 / `unconfigured`·`pending` 에도 `window`·`windows`·`gateAt` 이 있다.
 - 짝 게이트: 게이트 전 → `visitors` = `unconfigured`·`before_gate`·나머지 열한 키 null, `ws.pairs` null, 짝 해시 계산 0(해시 함수를 감시 — `window=7d` 를 청해도), `classes`·`totals`·`hourly`·`status`·상위 목록은 값이 있다 / 24h 창이 게이트를 걸침 → 게이트 앞 줄은 `totals`·`hourly`·`classes` 에 들고 `visitors`·`ws.pairs` 에는 없다(같은 IP·UA 가 게이트 앞뒤에 오면 게이트 뒤 날로만 1), `visitors.sinceTs` = 게이트 / 접속 `unconfigured` → `visitors` null.
-- 캐시: 둘째 회차에 회전 파일을 다시 열지 않음 / `access.log` 는 60초 지나서만 다시, 60초 안 다른 창 갱신은 다시 읽지 않음 / 사라진 파일의 수가 빠짐 / `.log`·`.log.gz` 짝과 `.log` → `.log.gz` 바뀜 → 두 번 세지 않음 / 크기 바뀐 회전 파일 다시 읽음 / 읽기 시작점이 파일 안으로 옮겨 오면 시작점 앞 줄이 채널·`returning`·`firstTs` 에 남지 않음 / 동시에 온 두 창 요청에 회전 파일을 한 번만 엶 / 느린 가짜 읽기로 첫 채움이 3초를 넘기면 `pending`, 끝난 뒤 다음 요청은 ok / 회전 파일 압축 합이 10MB 를 넘으면 오래된 파일은 열지 않고 캐시에서도 빠짐 / 요청 없이 시계를 1시간 넘기면 파일 캐시·짝 기록이 비고 열쇠가 바뀜.
-- 종류: 단계마다 대표 UA 하나 이상 — `Googlebot`·`Yeti`·`Daumoa`·`google-site-verification` / `GPTBot`·`ClaudeBot`·`Claude-User`·`Bytespider`(spider 보다 ai)·`meta-externalagent` / `kakaotalk-scrap`·`facebookexternalhit`·`Slackbot` / `curl`·`python-requests`·`Go-http-client`·`HeadlessChrome`·`Dalvik` / `zgrab`·`SemrushBot`·`https://` 로 시작하는 UA·`Mozlila`·토큰 없는 `Mozilla/5.0 (Windows NT 10.0; Win64; x64)` / Chrome·iPhone Safari·Whale·SamsungBrowser·KAKAOTALK·`NAVER(inapp`·`DaumApps`(search 에 안 걸림)·Instagram·FBAN 은 browser / 빈 UA·UA 키 없음 → unknown / 출처 `localhost` + curl → operator. `classes` 의 requests 합 = `totals.requests`, pages 합 = `totals.pages`.
+- 캐시: 둘째 회차에 회전 파일을 다시 열지 않음 / `access.log` 는 60초 지나서만 다시, 60초 안 다른 창 갱신은 다시 읽지 않음 / 사라진 파일의 수가 빠짐 / `.log`·`.log.gz` 짝과 `.log` → `.log.gz` 바뀜 → 두 번 세지 않음 / 크기 바뀐 회전 파일 다시 읽음 / 읽기 시작점이 파일 안으로 옮겨 오면 시작점 앞 줄이 채널·`returning`·`firstTs` 에 남지 않음 / 동시에 온 두 창 요청에 회전 파일을 한 번만 엶 / 느린 가짜 읽기로 첫 채움이 3초를 넘기면 `pending`, 끝난 뒤 다음 요청은 ok / 회전 파일의 압축 풀린 크기 합이 100MiB 를 넘으면 오래된 파일은 열지 않고 캐시에서도 빠짐(압축 크기 합은 예산 안인 잘 눌리는 파일로 — 압축 크기로 세지 않음) / 압축 전·압축 중 회전 `.log` 는 파일 크기로(덜 쓴 `.gz` 의 꼬리가 아니라) / `.gz` 는 ISIZE, 꼬리 4바이트 미만·ISIZE 100MiB 넘음은 0 / 요청 없이 시계를 1시간 넘기면 파일 캐시·짝 기록이 비고 열쇠가 바뀜.
+- 종류: 단계마다 대표 UA 하나 이상 — `Googlebot`·`Yeti`·`Daumoa`·`google-site-verification` / `GPTBot`·`ClaudeBot`·`Claude-User`·`Bytespider`(spider 보다 ai)·`meta-externalagent` / `kakaotalk-scrap`·`facebookexternalhit`·`Slackbot` / `curl`·`python-requests`·`Go-http-client`·`HeadlessChrome`·`Dalvik` / `zgrab`·`SemrushBot`·`https://` 로 시작하는 UA·`Mozlila`·토큰 없는 `Mozilla/5.0 (Windows NT 10.0; Win64; x64)` / Chrome·iPhone Safari·Whale·SamsungBrowser·KAKAOTALK·`NAVER(inapp`·`DaumApps`(search 에 안 걸림)·Instagram·FBAN 은 browser / 빈 UA·UA 키 없음 → unknown / 출처 `localhost` + curl → operator / 앞 1,024자 뒤의 `Googlebot` 은 browser, 안이면 search. `classes` 의 requests 합 = `totals.requests`, pages 합 = `totals.pages`.
 - 탐색: 낱말마다 걸리는 경로 하나 / 우리 경로 목록과 `web/public` 아래 모든 파일 경로가 안 걸림 / 브라우저 UA 의 `/wp-login.php` 줄 → `scanner`·`probes` +1, 그 짝은 그날 `visitors` 에서 빠지고 다른 날은 셈.
 - 운영자: 출처 `localhost`·`kimptrack.localhost`·`a.test`·`127.0.0.1`·`[::1]`·`10.1.2.3`·`172.20.0.1`·`192.168.0.1`·`203.0.113.7`(문서용 주소 — IP 글자 그대로인 출처)·`clarity.microsoft.com` → `operator`, 그 짝은 그날 방문자·채널에서 빠짐 / `example.com`·`localhost.example.com` 은 아님.
 - 페이지·신호: `/` 304 는 페이지 / 자산·`.php`·301 은 아님 / `jsViews` 는 브라우저 종류의 clarity.js 두 경로 200·304 만(WS 101·curl 의 clarity.js·clarity.js 404 는 아님).
 - 방문자(시계·줄 모두 게이트 뒤): 페이지만 → shaped 1·confirmed 0 / clarity.js 함께 → confirmed 1 / 하루 페이지 열 번 → 1 / 같은 짝 이틀 → 2·`days` 둘 / 같은 날을 두 파일이 나눔 → 1이고 채널은 이른 파일의 첫 페이지 줄 / 첫 페이지 `/` 304 → returning, `/` 200 뒤 304 → 아님, 첫 페이지 `/app/` → 아님 / 24시간 창 앞 시의 JS 신호만 있는 짝 → 그 창에서 confirmed 아님(7일 창은 셈) / `ws.pairs` / 1,001번째 짝 → `capped` true·`totals.requests` 는 다 셈 / IP 칸 없는 줄 → 짝 없음 / 열쇠를 고정하면 같은 짝도 다른 KST 날이면 해시가 다르고 같은 날 두 파일이면 같다.
 - 채널: 단계마다 하나 — `utm_source` + google 출처 → campaign, 자기 호스트 → internal, `chatgpt.com` → ai, `m.blog.naver.com` → social(search 보다 먼저), `m.search.naver.com`·`www.google.co.kr` → search, `example.com` → referral, 출처 없음 + KAKAOTALK → inapp, 출처 없음 → direct, 그날 WS 만 → unknown.
-- 기기·OS·브라우저·인앱: iPad → tablet·ios, `Mobile` 없는 Android → tablet, iPhone → mobile·ios, Mac → desktop·macos, CrOS → chromeos, Whale → whale, `Edg/` → edge, 인앱 → inapp, `; wv)` → 인앱 other / 목록 정렬·0 행 빠짐.
-- 5xx: `/api/ws/spreads` 502 → `ws5xx`·`hourly.wsErrors`·`ws.errors` 에만, `/` 500 → `"5xx"`·`errors`·`recent5xx`.
+- 기기·OS·브라우저·인앱: iPad → tablet·ios, `Mobile` 없는 Android → tablet, iPhone → mobile·ios, Mac → desktop·macos, CrOS → chromeos, Whale → whale, `Edg/` → edge, 인앱 → inapp, `; wv)` → 인앱 other / 목록 정렬·0 행 빠짐 / 앞 1,024자 뒤의 `KAKAOTALK` 은 인앱이 아니고, 그 뒤만 다른 두 UA 는 두 짝(짝은 UA 전체).
+- 5xx: `/api/ws/spreads` 502 → `ws5xx`·`hourly.wsErrors`·`ws.errors` 에만, `/` 500 → `"5xx"`·`errors`·`recent5xx` / 5xx 밖 상태(600·999·0·큰 정수)는 `requests` 에만.
 - 상위 목록: 봇·운영자·탐색 페이지 줄은 여섯 목록에 없음 / `tabs`·`utmSources`·`referrers` 의 035 규칙 그대로 / 한 시에 새 경로 31개째부터 `(기타)`.
 - 개인정보: 응답 바이트와 `caplog` 에 가린 IP·UA 원문·쿼리·짝 해시(테스트가 열쇠를 고정해 계산한 값)가 없다 / 파서에 문장에 가린 IP·UA 가 든 예외를 넣으면(3초 뒤 뒤에서 마저 도는 갱신 포함) `caplog` 와 025 Slack 가짜 받는 곳에 그 글자가 없고 ERROR 도 없다.
-- 035 회귀: 파일 없음 `unconfigured`·`no_file` / `access.log` 읽기 실패 `error` / 깨진 회전 gz 읽은 데까지·`skipped` +1 / 44MB 한 파일 흘려 읽기 tracemalloc 최고 8MB 이하(035 단언 유지). 035 테스트 중 이 스펙이 바꾼 동작(304·`devices` 이름·5xx·상위 목록·키 5,000)은 이 계약으로 고친다.
+- 035 회귀: 파일 없음 `unconfigured`·`no_file` / `access.log` 읽기 실패 `error` / 깨진 회전 gz 읽은 데까지·`skipped` +1 / `ts` 가 시각이 아니거나 `duration` 이 유한한 수가 아닌 줄(실수로 못 바꾸는 큰 정수·풀 수 없는 긴 정수·NaN·무한)은 그 줄만 `skipped` / 44MB 한 파일 흘려 읽기 tracemalloc 최고 8MB 이하(035 단언 유지). 035 테스트 중 이 스펙이 바꾼 동작(304·`devices` 이름·5xx·상위 목록·키 5,000)은 이 계약으로 고친다.
 - 화면: `test_admin.py` 정적 단언 — `admin.js` 의 상위 표 비율 분모가 `totals.humanPages` 다(단언 글자 꼴은 실행 세션이 정하고 §7 에 적는다. 042 가 화면을 다시 쓰며 이 단언을 자기 분모 단언으로 바꾼다).
 - 성능 — pytest 밖 임시 스크립트(레포에 넣지 않는다)로 재고, 로컬 값과 serve 환산(로컬 × 6 — 조사에서 잰 Mac 대 t4g.micro 비)을 §5 에 적는다. 넘으면 멈추고 묻는다.
   1. 지금 규모 30일(시계는 게이트 + 30일 뒤 — 짝 처리가 모든 날에 돈다. 하루 700줄 — 브라우저 모양 짝 150·그중 JS 신호 10, tool·scanner·탐색 줄 섞음, 회전 gz 30개 + `access.log`): 첫 채움 로컬 ≤ 0.1초(serve ≈0.6초 — §3.7 의 ≈0.4초), 채운 뒤 창 셋을 차례로 부른 한 회차 ≤ 0.05초.
-  2. 50MiB 회전 파일 하나(≈95,000줄, 무작위 경로, UA 는 수백 가지 무리에서 무작위 — 실제 몰림 꼴): 읽기 로컬 ≤ 0.4초(serve ≈2.4초). 모든 줄 UA 가 다른 극단도 재어 §5 에 참고로 적는다(한도 밖 — 설계 세션 결정 2026-10-02).
+  2. 50MiB 회전 파일 하나(≈95,000줄, 무작위 경로, UA 는 수백 가지 무리에서 무작위 — 실제 몰림 꼴): 읽기 로컬 ≤ 0.4초(serve ≈2.4초). 모든 줄 UA 가 다른 극단과 줄마다 다른 3,000자 UA 도 재어 §5 에 참고로 적는다(한도 밖 — 설계 세션 결정 2026-10-02). 회전 파일 50MiB 둘(= 100MiB)의 첫 채움과 50MiB `access.log` 의 60초 회차도 재어 §3.7·§5 에.
   3. 최악 30일(날마다 회전 파일 둘·시마다 목록마다 새 키 31·(파일, 날)마다 짝 1,000): 캐시 tracemalloc ≤ 40MB.
-  4. 2 의 읽기 동안 같은 이벤트 루프의 지연(10ms 잠들기가 넘친 시간) 최댓값 ≤ 100ms — 5,000줄마다 차례 넘기기의 효과를 같은 측정으로 본다.
+  4. 2 의 읽기 동안 같은 이벤트 루프의 지연(10ms 잠들기가 넘친 시간) 최댓값 ≤ 100ms — 따로 차례를 넘기지 않고 인터프리터가 5ms 마다 GIL 을 넘기는 것으로 충분한지 본다.
 - nginx: 설정은 고치지 않는다. 근거는 `test_admin.py` 의 기존 단언(`= /svc/api/admin/access` 의 rewrite 가 `^ /admin/access break` — 바꿀 글에 `?` 가 없어 nginx 가 원 인자를 붙인다)이고 그대로 통과한다. 실제 넘김(`/svc/api/admin/access?window=7d` → 백엔드 `/admin/access?window=7d`, 035 §5 의 방법)은 실행 세션의 샌드박스가 Docker 를 띄울 수 없어 설계 세션이 머지 전 로컬 Docker 로 한 번 보고 §5 에 적는다.
 - 기존 스펙 재검증: `cd server && ruff check . && ruff format --check . && pytest -q`, `cd web && npm run lint && npm run build`. 커밋마다 diff 300줄 이하(분류 표 → 파일 캐시 → 방문자 세기 → 응답·창 → 테스트 → 문서).
 
