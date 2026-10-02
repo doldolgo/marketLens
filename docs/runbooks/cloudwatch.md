@@ -266,7 +266,7 @@ grep -E '^pswp(in|out) ' /proc/vmstat; free -m; systemctl show amazon-cloudwatch
 
 ## 15. (032 처리방침(`https://kimptrack.com/privacy`) 게시 뒤) 로그 전송·지표 필터·5xx 경보
 **032 처리방침(`https://kimptrack.com/privacy`) 게시 전에는 하지 않는다** — 그때까지 접속 로그는 serve 박스 `~/marketlens/logs/caddy/` 에만 있다. 켜면 5-2 의 serve 두 단계가 이후 늘 쓰는 절차다.
-**게시 뒤에도 `logs/caddy/` 에 하루 회전 파일(`access-<날짜>…-time.log.gz`)이 생긴 것을 본 뒤에 한다** — 032 의 회전 설정은 배포의 `caddy reload` 로 들어가지 않고 serve 에서 caddy 를 다시 만든 뒤(`docker compose --profile serve --env-file .env --env-file server/.env up -d --force-recreate caddy`, 몇 초 끊김)에야 돈다(032 §4). 그 전의 `access.log` 에는 며칠치 줄이 쌓여 있고, 에이전트는 줄의 시각이 아니라 읽은 시각을 찍으므로(`serve-logs.json` 에 `timestamp_format` 없음) 그 줄이 읽은 날부터 90일 더 남을 수 있다.
+**게시 뒤에도 `logs/caddy/` 에 하루 회전 파일(`access-<날짜>…-time.log.gz`)이 생긴 것을 본 뒤에 한다** — 032 의 회전 설정은 배포의 `caddy reload` 로 들어가지 않고 serve 에서 caddy 를 다시 만든 뒤(`docker compose --profile serve --env-file .env --env-file server/.env up -d --force-recreate caddy`, 몇 초 끊김)에야 돈다(032 §4). 그 전의 `access.log` 에는 며칠치 줄이 쌓여 있고, 에이전트는 줄의 시각이 아니라 보낸 때(에이전트가 읽어 보내는 때)를 찍으므로(`serve-logs.json` 에 `timestamp_format` 없음) 그 줄이 보낸 날부터 90일 더 남을 수 있다 — 처리방침 v2(037)의 '보낸 때부터 90일' 과 같은 낱말.
 ```bash
 aws logs put-metric-filter --log-group-name /marketlens/serve/caddy --filter-name marketlens-http-5xx \
   --filter-pattern '{ ($.status >= 500) && ($.request.uri != "/api/ws/spreads") }' \
@@ -278,7 +278,7 @@ aws cloudwatch put-metric-alarm --alarm-name marketlens-http-5xx --namespace Mar
 WS 를 빼는 이유: serve 배포 때 열린 대시보드가 전부 재접속하며 502 를 낸다. 요청이 없으면 줄도 없으므로 데이터 없음은 정상이다.
 - 확인: `aws logs describe-log-groups --log-group-name-prefix /marketlens/serve/caddy --query 'logGroups[].[retentionInDays,logGroupClass]'` 가 `90 STANDARD`(IA 는 지표 필터가 안 되고 만든 뒤 못 바꾼다), 스트림 이름 = serve 인스턴스 ID, `aws logs tail /marketlens/serve/caddy --since 10m` 의 줄이 IP 끝 `.0`·헤더 없음·`s.q` 없음. 에이전트는 파일 위치를 기억해 caddy 재생성·회전 뒤에도 중복·누락 없이 이어 보낸다. 경보는 18개.
 - 되돌리기: 5-2 의 `fetch-config serve.json` 만 다시(로그 설정이 빠진다) → 지표 필터·경보 삭제. 로그 그룹을 지우려면 `aws logs delete-log-group`.
-- 2026-10-02 기록: 00:35Z 에 켰다. 위의 '하루 회전 파일을 본 뒤' 조건은 기다리지 않아(설계 세션 판단) 첫 `access.log`(09-29~, 1,927줄)가 읽은 시각으로 찍혔다 — 최대 3일 90일을 넘을 수 있다. 지표 필터·5xx 경보를 만들었고 경보 18개가 모두 OK. 자세한 것은 027 §7.
+- 2026-10-02 기록: 00:35Z 에 켰다. 위의 '하루 회전 파일을 본 뒤' 조건은 기다리지 않아(설계 세션 판단) 첫 `access.log`(09-29~, 1,927줄)가 보낸 때로 찍혔다 — 최대 3일 90일을 넘을 수 있다. 지표 필터·5xx 경보를 만들었고 경보 18개가 모두 OK. 자세한 것은 027 §7.
 
 Logs Insights 저장 쿼리 3개(로그 그룹 `/marketlens/serve/caddy`, `aws logs put-query-definition --name <이름> --log-group-names /marketlens/serve/caddy --query-string '<쿼리>'`):
 - `marketlens/경로별 요청 수`:
