@@ -37,7 +37,7 @@ async def get_admin_access(request: Request) -> JSONResponse:
 
 @router.get("/admin/clarity")
 async def get_admin_clarity(request: Request) -> JSONResponse:
-    """Clarity 요약 — 부분 하나, 3시간 간격·Redis 기록 (035 §3.3)."""
+    """Clarity 요약 — 기본 4시간·페이지×기기 12시간, 하위 부분 pages, Redis 기록 둘 (035 §3.3·040 §3.2·§3.5)."""
     state = request.app.state
     feeds: VisitFeeds = state.admin_visits
     return JSONResponse(await feeds.clarity(bus=getattr(state, "spreads_bus", None)))
