@@ -33,6 +33,12 @@ GC_THRESHOLDS: tuple[int, int, int] = (2000, 10, 10)
 # 1개라 그 CPU 를 틱·수신과 나눠 쓴다. 허브 프레임(017)·원문 객체(010)도 같은 이유로 6 이다.
 GZIP_LEVEL = 6
 
+# 처리방침 v2 가 시행되는 날(KST 날짜) — 스펙 037 §3.1. 접속 요약의 30일 창과 (가린 IP, 브라우저 정보) 짝을 쓰는 처리
+# (하루 한 번 세기·나라·망 종류)는 이 날 00:00 Asia/Seoul 부터의 기록에만 한다(038·039 의 날짜 게이트) — 개정 전 기록에
+# 새 목적을 붙이지 않으려는 것이다. 게이트가 여럿이라 한 곳에 두고, test_privacy 가 방침 HTML 의 시행일(<time>·이력)·
+# sitemap 과 묶는다. 다음 개정 때도 이 값은 그대로 둔다 — v2 기능이 열린 날이고, 새 판의 시행일은 HTML·sitemap·테스트만 바꾼다
+PRIVACY_V2_EFFECTIVE = "2026-10-11"
+
 
 class Settings(BaseSettings):
     """server/.env 의 문서화된 키(dev-setup.md). 전부 선택값이라 없어도 앱은 뜬다."""

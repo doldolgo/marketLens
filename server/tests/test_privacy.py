@@ -1,8 +1,9 @@
-"""개인정보 처리방침 계약 — nginx 위치 셋·privacy.html·링크·sitemap 을 파일로 읽어 단언한다 (스펙 032 §4).
+"""개인정보 처리방침 계약 — nginx 위치 셋·privacy.html·링크·sitemap 을 파일로 읽어 단언한다 (스펙 032 §4·037 §4).
 
 머지가 곧 게시다. 사람이 채울 자리표시자(`〔`)가 남았거나, 페이지가 외부 자원·서버 호출을 부르게 되거나, 033 과 함께 쓰는
-동의 계약(`kt.analytics` — 동의한 방문자만 분석, 기본 꺼짐)과 방침의 필수 안내가 빠지면 여기서 멈춘다. 실제로 브라우저에서
-CSP·버튼을 보는 검증은 스펙 §5 의 로컬 Docker·브라우저 명령이다.
+동의 계약(`kt.analytics` — 동의한 방문자만 분석, 기본 꺼짐)과 방침의 필수 안내가 빠지면 여기서 멈춘다. 개정(037)은 시행일 한 곳
+(`PRIVACY_V2_EFFECTIVE`)·페이지의 `<time>` 넷·sitemap·이력과, 바뀐 문장 대조표를 두 판(지금 판·이전 판 사본)의 본문과 맞대 본다.
+실제로 브라우저에서 CSP·버튼을 보는 검증은 스펙 §5 의 로컬 Docker·브라우저 명령이다.
 """
 
 import hashlib
@@ -11,11 +12,13 @@ import os
 import re
 import shutil
 import subprocess
+from datetime import date
 from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
 
+from app.core.config import PRIVACY_V2_EFFECTIVE
 from tests.test_deploy import (
     PUBLIC_API,
     ROOT,
@@ -27,7 +30,7 @@ from tests.test_deploy import (
 
 PUBLIC = ROOT / "web/public"
 CANONICAL = "https://kimptrack.com/privacy"
-EFFECTIVE = "2026-10-01"  # 시행일 — 페이지의 <time> 과 sitemap lastmod 가 같다
+EFFECTIVE = "2026-10-11"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1)
 CSP = (
     "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
     "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
@@ -289,6 +292,77 @@ CONSENT_CASES = [
 # fmt: on
 # §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(동의 상자의 국외 이전 칸과 같은 이름) + 근거
 TRANSFER_TERMS = CONSENT_CELLS[2][2] | {"근거"}
+# 037 §3.2-2 — 맨 위 변경 안내 상자가 말하는 것(시행 문장, 바뀌는 셋, 시행일 전 기록, 그 밖에 바뀐 문장, 다시 묻지 않음)
+CHANGE_NOTICE_SAYS = (
+    "그 전날까지는 이전 판",
+    "시행일 전의 기록에는 쓰지 않습니다",
+    "최근 30일까지",
+    "망 종류",
+    "DB-IP Lite",
+    "되돌릴 수 없는 값",
+    "다시 온",
+    "자동 요청(봇)",
+    "보낸 때부터",
+    "다시 묻지 않습니다",
+)
+# 037 §3.2-2 — 상자의 번호 목록 셋, 항목마다 그 항목만의 낱말(① 30일 요약 ② 나라·망 종류 ③ 하루 한 번 세는 값)
+CHANGE_NOTICE_ITEMS = (
+    ("24시간에서", "최근 30일까지"),
+    ("DB-IP Lite", "망 종류"),
+    ("하루에 한 번", "되돌릴 수 없는 값"),
+)
+# 037 §3.2-6 — 이력의 v2 항목 설명(다음 판에서도 남는다)
+V2_HISTORY_SAYS = (
+    "최근 30일까지",
+    "나라와 망 종류",
+    "하루 한 번 세는 값",
+    "보낸 때부터",
+)
+# 037 §3.2 — 본문 절(변경 안내·대조표 밖)마다 v2 의 사실. 12절은 시행 문장과 이력(CloudWatch 사실 줄)
+V2_FACTS = {
+    "glance": ("걸리는 때는",),
+    "s1": ("자동 요청(봇)", "망(국내 통신사·데이터센터 등)"),
+    "s2": (
+        "최근 30일까지",
+        "서버 메모리에서만",
+        "다시 시작하면 사라집니다",
+        "DB-IP Lite",
+        "밖으로 보내지 않습니다",
+        "망 종류만",
+        "되돌릴 수 없는 값",
+        "날마다",
+        "운영체제",
+        "스크립트",
+        "다시 온",
+        "시행일 전",
+        "24시간 요약에만",
+        "24시간을 넘는",
+        "보낸 때부터 90일",
+    ),
+    "s3": ("며칠 걸릴 수 있습니다",),
+    "s12": (
+        "그 전날까지는 이전 판",
+        "늘거나 새로 생기면",
+        "7일 전까지",
+        "줄이거나 멈추는",
+        "보낸 시각으로 찍혀",
+        "최대 3일",
+        "줄마다 골라 지울 수 없어",
+    ),
+}
+# 방문자가 읽는 글에 쓰지 않는 낱말(037 §3.2-4 — 평이한 말로)
+PLAIN_ONLY = ("열쇠", "해시")
+DIFF_TABLE = r'<table class="tbl diff">.*?</table>'
+# 037 §3.3 — 이전 판 사본은 얼려 둔 파일이다. 사본마다 보이는 글(<body> 의 태그 뗀 글자)의 sha256 — 사본을 새로 둘 때 더하고
+# 그 뒤로는 고치지 않는다(소개 문단·12절·동의 절 아래 줄처럼 대조 범위 밖의 글자도 여기서 멈춘다)
+ARCHIVED_TEXT = {
+    "privacy-20261001.html": "40976545d4ba5b8241e2107245a54d733767b0d40c81ca8ccc351fb6ebd795e3",
+}
+# 037 §3.3 — 사본의 동의 절 상자 아래 한 줄(그 판의 세 칸은 읽기만, 고르는 곳은 지금 판)
+ARCHIVED_CONSENT_LINE = (
+    "<p>화면 분석 동의·철회는 지금 판의 “화면 분석 동의 관리”"
+    '(<a class="link" href="/privacy#consent">/privacy#consent</a>)에서 고릅니다.</p>'
+)
 
 
 class _Page(HTMLParser):
@@ -369,13 +443,80 @@ def _consent_box(html: str) -> tuple[str, list[str]]:
     return box, re.findall(r'<div class="cell">(.*?)</div>', box, flags=re.S)
 
 
-def _notice_digest(html: str) -> str:
-    """세 칸의 체크 글자와 알릴 사항(태그 뗀 글자)의 sha256 — 판에 묶인 글자 (§3.3)."""
+def _digest(cells: list[tuple[str, str]]) -> str:
+    """(칸 이름, 알릴 사항) 셋의 태그 뗀 글자의 sha256 — 판에 묶인 글자 (§3.3)."""
     lines = []
-    for cell in _consent_box(html)[1]:
-        lines.append(_text(re.search(r"<span>(.*?)</span></label>", cell).group(1)))
-        lines += [f"{_text(dt)}: {_text(dd)}" for dt, dd in _notes(cell).items()]
+    for label, notes in cells:
+        lines.append(_text(label))
+        lines += [f"{_text(dt)}: {_text(dd)}" for dt, dd in _notes(notes).items()]
     return hashlib.sha256("\n".join(lines).encode()).hexdigest()
+
+
+def _notice_digest(html: str) -> str:
+    """지금 판의 세 칸 — 체크 글자와 그 아래 알릴 사항."""
+    cells = _consent_box(html)[1]
+    return _digest(
+        [(re.search(r"<span>(.*?)</span></label>", c).group(1), c) for c in cells]
+    )
+
+
+def _archived_notice_digest(html: str) -> str:
+    """이전 판 사본의 동의 절 — 입력칸 없이 칸 이름(h3)과 알릴 사항(dl)만 남은 정적 글 (037 §3.3)."""
+    section = _section(html, "consent-title")
+    return _digest(re.findall(r"<h3>(.*?)</h3>\s*(<dl[^>]*>.*?</dl>)", section, re.S))
+
+
+def _korean(day: str) -> str:
+    """'2026-10-11' → '2026년 10월 11일' — 페이지의 날짜 글자(앞 0 없음)."""
+    d = date.fromisoformat(day)
+    return f"{d.year}년 {d.month}월 {d.day}일"
+
+
+def _without_diff(html: str) -> str:
+    """12절 대조표를 뺀 글 — 두 판의 문장이 함께 있는 곳은 대조표뿐이다 (037 §4)."""
+    return re.sub(DIFF_TABLE, "", html, flags=re.S)
+
+
+def _body(html: str) -> str:
+    """방문자가 보는 글 — <body> 안에서 스크립트를 뺀 것."""
+    body = html[html.index("<body>") : html.index("</body>")]
+    return re.sub(r"<script>.*?</script>", "", body, flags=re.S)
+
+
+def _body_sections(html: str) -> str:
+    """소개 문단·한눈에 보기·1~11절의 태그 뗀 글자 — 대조표로 두 판을 맞대 보는 범위 (037 §4)."""
+    lead = re.search(r'<p class="lead">(.*?)</p>', html, flags=re.S)
+    assert lead, "소개 문단이 없다"
+    labels = ["glance", *(f"s{n}" for n in range(1, 12))]
+    return " ".join(
+        [_text(lead.group(1)), *(_text(_section(html, label)) for label in labels)]
+    )
+
+
+def _change_notice(html: str) -> str:
+    found = re.search(
+        r'<aside class="notice" id="changes"[^>]*>(.*?)</aside>', html, re.S
+    )
+    assert found, "변경 안내 상자가 없다 (037 §3.2-2)"
+    return found.group(1)
+
+
+def _history(html: str) -> list[str]:
+    """12절 변경 이력의 항목(최신 위)."""
+    found = re.search(r'<ul class="history">(.*?)</ul>', _section(html, "s12"), re.S)
+    assert found, "12절에 변경 이력이 없다"
+    return re.findall(r"<li>(.*?)</li>", found.group(1), flags=re.S)
+
+
+def _diff_rows(html: str) -> list[list[str]]:
+    """12절 대조표의 행 — [절, 이전 판, 이 판, 바뀐 점] 의 태그 뗀 글자 (037 §3.2-6)."""
+    table = re.search(DIFF_TABLE, _section(html, "s12"), flags=re.S)
+    assert table, "12절에 대조표가 없다"
+    body = table.group(0)[table.group(0).index("<tbody>") :]
+    return [
+        [_text(cell) for cell in re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", row, re.S)]
+        for row in re.findall(r"<tr>(.*?)</tr>", body, flags=re.S)
+    ]
 
 
 def _run_consent_script(cases: list[dict]) -> list[dict]:
@@ -698,12 +839,146 @@ def test_every_overseas_recipient_lists_the_five_items() -> None:
 
 
 def test_archived_versions_are_static_and_external_free() -> None:
-    """이전 판 privacy-<시행일>.html 은 location / 로 CSP 없이 나간다 — 스크립트 없는 정적 사본 (§3.6)."""
-    for path in sorted(PUBLIC.glob("privacy-*.html")):
+    """이전 판 privacy-<시행일>.html 은 location / 로 CSP 없이 나간다 — 스크립트 없는 정적 사본이고, 검색에는 지금 판만
+    나오며, 그 판에서 방문자가 무엇에 동의했는지(세 칸의 알릴 사항)를 입력칸 없이 보여 준다 (032 §3.6·037 §3.3)."""
+    now, _ = _read(PUBLIC / "privacy.html")
+    linked = re.findall(r'href="/(privacy-\d{8}\.html)"', now)
+    assert linked, "지금 판이 이전 판으로 잇지 않는다"
+    paths = sorted(PUBLIC.glob("privacy-*.html"))
+    # 이력의 옛 판마다 사본이 있고, 사본마다 이력에서 잇고, 얼려 둔 글자의 값이 있다
+    assert {path.name for path in paths} == set(linked) == set(ARCHIVED_TEXT)
+    for path in paths:
         html, page = _read(path)
         assert re.fullmatch(r"privacy-\d{8}\.html", path.name), path.name
         assert "〔" not in html and "<script" not in html, path.name
         _assert_no_external_resources(path.name, page)
+        stamp = path.name[len("privacy-") : -len(".html")]
+        day = f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:]}"
+        assert page.times and set(page.times) == {day}, path.name
+        assert page.titles == [f"개인정보 처리방침({_korean(day)} 판) — KimpTrack"]
+        assert f"{_korean(day)} 시행 판의 사본입니다" in html, path.name
+        assert '<meta name="robots" content="noindex" />' in html, path.name
+        assert not [link for link in page.links if link.get("rel") == "canonical"]
+        assert 'href="/privacy"' in html, path.name
+        # 동의 절 상자(세 칸의 알릴 사항 — 그 안에도 /privacy#consent 가 있다) 뒤의 한 줄
+        consent = _section(html, "consent-title")
+        assert ARCHIVED_CONSENT_LINE in consent[consent.rindex("</div>") :], path.name
+        assert "<input" not in html and "<button" not in html, path.name
+        text = hashlib.sha256(_text(_body(html)).encode()).hexdigest()
+        assert text == ARCHIVED_TEXT[path.name], (
+            f"{path.name} 의 글자가 얼려 둔 때와 다르다 — 사본은 고치지 않는다(지금 값 {text})"
+        )
+        # 그 판이 시행될 때의 안내 판 — 세 칸의 글자가 그 판의 해시와 같다
+        version = max(v for v in NOTICE_DIGESTS if v <= day)
+        assert _archived_notice_digest(html) == NOTICE_DIGESTS[version], path.name
+
+
+# --- 처리방침 v2 — 시행일·변경 안내·대조표 (037 §3) ----------------------------------
+
+
+def test_v2_effective_constant_is_a_date_after_the_first_version() -> None:
+    """038·039 의 날짜 게이트가 읽는 시행일 한 곳 (037 §3.1)."""
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", PRIVACY_V2_EFFECTIVE)
+    assert date.fromisoformat(PRIVACY_V2_EFFECTIVE) > date(2026, 10, 1)
+
+
+def test_effective_date_ties_the_four_times_and_the_history() -> None:
+    """시행일은 머리·변경 안내·12절 시행 문장·이력 첫 항목의 <time> 넷과 sitemap(아래)에 같고, 한 곳만 고치면 멈춘다 (037 §3.1)."""
+    html, _ = _read(PUBLIC / "privacy.html")
+    assert EFFECTIVE >= PRIVACY_V2_EFFECTIVE
+    times = re.findall(r'<time datetime="([^"]*)">([^<]*)</time>', html)
+    assert times == [(EFFECTIVE, _korean(EFFECTIVE))] * 4
+    tag = f'<time datetime="{EFFECTIVE}">'
+    assert f'<p class="meta">시행일 {tag}' in html
+    assert tag in _change_notice(html)
+    rule = re.search(r"<p>(.*?)</p>", _section(html, "s12"), flags=re.S).group(1)
+    assert tag in rule and "부터 시행" in rule
+    items = _history(html)
+    assert items[0].startswith(tag)
+    # v2 가 열린 날의 항목은 다음 판에서도 이력에 남는다 — 038·039 의 게이트가 그날을 읽는다
+    v2 = f"{_korean(PRIVACY_V2_EFFECTIVE)} — "
+    opened = [item for item in items if _text(item).startswith(v2)]
+    assert len(opened) == 1
+    # 그 항목의 설명(아래 사실 문단 앞) — 무엇이 바뀌었는지 (037 §3.2-6)
+    headline = _text(opened[0].split("<p>")[0])
+    for word in V2_HISTORY_SAYS:
+        assert word in headline, word
+    # 지금 판을 뺀 항목마다 그 판의 사본 링크
+    for item in items[1:]:
+        y, m, d = re.match(r"(\d{4})년 (\d{1,2})월 (\d{1,2})일", _text(item)).groups()
+        assert f'href="/privacy-{y}{int(m):02d}{int(d):02d}.html"' in item, item
+
+
+def test_change_notice_comes_first_and_names_what_changes() -> None:
+    """맨 위 변경 안내 — 머리 시행일 줄 바로 아래, 소개 문단 앞 (037 §3.2-2)."""
+    html, page = _read(PUBLIC / "privacy.html")
+    assert "변경 안내" in page.h2
+    start = html.index('id="changes"')
+    assert html.index('<p class="meta">시행일') < start < html.index('<p class="lead">')
+    notice = _change_notice(html)
+    for href in ('href="/privacy-20261001.html"', 'href="#s12"'):
+        assert href in notice, href
+    for word in CHANGE_NOTICE_SAYS:
+        assert word in _text(notice), word
+    # 바뀌는 것은 번호 목록 셋이고, '시행일 전 기록에는 쓰지 않는다' 는 목록 바로 뒤에서 그 셋을 가리킨다
+    listed = re.findall(r"<ol>(.*?)</ol>", notice, flags=re.S)
+    assert len(listed) == 1
+    items = re.findall(r"<li>(.*?)</li>", listed[0], flags=re.S)
+    assert len(items) == len(CHANGE_NOTICE_ITEMS)
+    for item, words in zip(items, CHANGE_NOTICE_ITEMS, strict=True):
+        for word in words:
+            assert word in _text(item), word
+    assert re.search(
+        r"</ol>\s*<p>위 세 가지는 시행일 전의 기록에는 쓰지 않습니다\.", notice
+    )
+    assert notice.index("그 전날까지는 이전 판") < notice.index("<ol>")
+
+
+def test_body_sections_state_the_v2_facts() -> None:
+    """본문 절마다 v2 의 사실 — 변경 안내·대조표가 아닌 곳에서. 지난 판 문장은 대조표에만 남는다 (037 §3.2)."""
+    html, _ = _read(PUBLIC / "privacy.html")
+    for label, words in V2_FACTS.items():
+        text = _text(_without_diff(_section(html, label)))
+        for word in words:
+            assert word in text, (label, word)
+    outside = _without_diff(html)
+    assert outside.count("24시간 요약") == 1
+    assert "24시간 요약에만" in _section(html, "s2")
+    assert "90일이 지나면 지웁니다" not in outside
+    visible = _text(_body(html))
+    for word in PLAIN_ONLY:
+        assert word not in visible, word
+
+
+def test_diff_table_rows_match_both_versions() -> None:
+    """대조표의 '이전 판' 은 사본 본문에, '이 판' 은 지금 판 본문(대조표 밖)에 그대로 있고, 지금 판의 소개 문단·
+    한눈에 보기·1~11절에서 행마다 '이 판' 을 '이전 판' 으로 되돌리면 사본과 같다 — 바뀐 문장을 빠짐없이 싣는다 (037 §3.2-6)."""
+    html, _ = _read(PUBLIC / "privacy.html")
+    archived, _ = _read(PUBLIC / "privacy-20261001.html")
+    rows = _diff_rows(html)
+    assert rows and all(len(row) == 4 for row in rows), rows
+    now = _text(_without_diff(_body(html)))
+    before = _text(_body(archived))
+    restored = _body_sections(html)
+    for section, old, new, why in rows:
+        assert old and old in before, (section, old)
+        assert new and new in now, (section, new)
+        assert why, section
+        if section.startswith("12절"):
+            continue  # 12절(변경 규칙)은 시행 문장·이력도 판마다 달라 되돌려 맞대는 범위 밖이다 — 전후 글자만 본다
+        assert new in restored, (section, new)
+        restored = restored.replace(new, old)
+    assert restored == _body_sections(archived)
+    purpose = [row for row in rows if row[0].startswith("1절")]
+    assert len(purpose) == 1
+    assert "풀어 적" in purpose[0][3] and "시행일 전" in purpose[0][3]
+    assert "새 목적" not in purpose[0][3]  # 2절 처리 근거(이용 통계)와 어긋나지 않게
+    rules = [row for row in rows if row[0].startswith("12절")]
+    assert (
+        len(rules) == 1
+        and "7일 전" in rules[0][2]
+        and "시행일 전에 이 페이지에 알리고" in rules[0][1]
+    )
 
 
 # --- 링크·sitemap (§3.2) ------------------------------------------------------------
