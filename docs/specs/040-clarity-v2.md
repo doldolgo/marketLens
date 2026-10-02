@@ -252,6 +252,7 @@ cd web && npm run lint && npm run build   # oxlint 종료 0 · ✓ built — ind
   - 주소 꼴 글자는 나라 이름이 아니다(§3.3) — 아는 키·하나뿐인 글자 값의 주소가 쿼리째 `countries`·Redis 에 실리던 것.
   - 바로 부르기의 하루 한 번은 api 프로세스의 기억이라 다시 만들면 풀린다 — §3.2 '남는 위험'·런북 6절('바로 부르기'·'교체')·5절 5단계·status 빚 줄에 적었다(코드 변경 없음).
   - 테스트 단언 강화 — 토큰 없음은 Clarity 기록 읽기·쓰기 0 을 센다, 느린 기본은 뒤의 갱신이 끝난 뒤 요청 하나로 둘 다 값. 라우터 docstring(OpenAPI 설명)을 4시간·12시간·`pages` 로, 런북 5단계의 옛 '정규화 키는 035·036 에' 문장을 040 §4 '배포 뒤' 로 바꿨다.
+- 운영 관측(2026-10-02 18:40 KST, 035 코드·첫 동의 세션 1 — 설계 세션이 키 이름과 값 꼴만 봄): 목록형 지표 `Browser`·`Device`·`OS`·`Country`·`PageTitle`·`ReferrerUrl` 의 행은 `{name: 글자, sessionsCount: 정수}`(`ReferrerUrl` 의 `name` 은 출처가 없으면 null), `PopularPages` 는 `{url: 글자, visitsCount: 정수}`, `ScrollDepth` 의 `averageScrollDepth`·`EngagementTime` 의 `totalTime`·`activeTime` 은 정수, 불만 신호 여섯의 다섯 키는 모두 정수다 — 040 의 `countries`(`name` 키)·수 읽기와 맞는다. 035 코드에서는 Traffic 의 `users`·`pagesPerSession` 이 세션 1 에도 null 이었다 — 원본이 글자 숫자(문서 예시 `distantUserCount` 꼴)라 035 의 정수 확인에 걸린 것으로 보며, 040 의 수 읽기(글자 숫자 받음)로 풀리는지 배포 뒤 본다(§4 '배포 뒤').
 - 남은 빚:
   - §4 '배포 뒤' 확인 전부 — 세션이 있는 응답의 차원 행 키 철자·값 꼴·`Country` 행 키·`totalTime` 단위와 평균/합·스크롤 깊이 정의·`PopularPages` 주소에 `?tab` 이 실리는지(status "040 운영 확인 대기").
   - 미뤄진 묶음에 기록이 있으면 그 기록의 state(예: `ok`)와 지난 `nextAt` 이 그대로 보인다 — '미뤘다' 표시는 기록이 없을 때만(§3.5 그대로). 화면(043)이 `nextAt` 이 지났는데 바깥이 `denied`·`http_429` 인 것으로 읽어야 한다.
