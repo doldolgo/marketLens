@@ -297,6 +297,7 @@ class FlakyBus(RedisBus):
         self._world = world
 
     def _check(self, kind: str) -> None:
+        self._world.redis_calls.append(kind)
         if kind in self._world.broken:
             raise ConnectionError(f"redis {kind} down")
 
@@ -327,6 +328,8 @@ class World:
         self.token = token
         self.wait = wait
         self.broken: set[str] = set()  # "read"·"write" — 그쪽 Redis 명령이 실패한다
+        # 피드가 Clarity 기록에 닿은 차례("read"·"write") — 토큰이 없으면 비어 있어야 한다
+        self.redis_calls: list[str] = []
         self.feeds = self.new_app()
         clarity.clock = lambda: self.t
         clarity.spend = lambda sec: self.advance(sec=sec)

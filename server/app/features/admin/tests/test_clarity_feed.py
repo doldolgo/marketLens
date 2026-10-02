@@ -46,7 +46,7 @@ async def test_without_token_is_unconfigured_and_calls_nothing() -> None:
             "groups": None,
         },
     }
-    assert w.clarity.requests == [] and w.stored() is None
+    assert w.clarity.requests == [] and w.redis_calls == [] and w.stored() is None
 
 
 async def test_first_request_calls_once_with_bearer_and_one_day() -> None:

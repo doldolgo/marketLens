@@ -3,6 +3,7 @@
 기본이 401·403·429 면 묶음은 미루고 시도로도 적지 않는다. 두 기록은 state·값·간격을 따로 갖는다.
 """
 
+import asyncio
 import json
 
 from app.features.admin.tests.clarity_fakes import (
@@ -57,17 +58,17 @@ async def test_other_summary_failures_still_call_the_pages() -> None:
 
 
 async def test_a_slow_summary_answers_pending_then_both_values() -> None:
+    """느린 기본(실제 0.5초, 기다림 0.1초)이 뒤에서 끝난 뒤 바로 다음 요청 하나에 둘 다 값이다."""
     clarity = Clarity()
     clarity.delay["base"] = 0.5
     w = World(clarity, wait=0.1)
     body = await w.get()
     assert body["state"] == body["pages"]["state"] == "pending"
     assert body["traffic"] is None and body["pages"]["groups"] is None
-    for _ in range(50):
-        w.advance(sec=1)
-        body = await w.get()
-        if body["pages"]["state"] != "pending":
-            break
+    # 뒤에서 마저 도는 갱신(기본 → 묶음)이 끝날 때까지 — 요청을 되풀이하지 않는다
+    await asyncio.sleep(clarity.delay["base"] + 0.4)
+    w.advance(sec=1)
+    body = await w.get()
     assert body["state"] == body["pages"]["state"] == "ok"
     assert body["traffic"] is not None and body["pages"]["groups"]
     assert clarity.count("base") == clarity.count("pages") == 1
