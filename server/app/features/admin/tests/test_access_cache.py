@@ -1,10 +1,9 @@
 """회전 파일별 메모리 캐시 — 다시 열지 않음·access.log 60초·60초 안 회전·사라짐·압축 짝·크기 바뀜·시작점 이동·
-한 번에 하나·첫 채움 pending·압축 10MB·1시간 비움 (스펙 038 §3.3·§3.8·§4)."""
+한 번에 하나·첫 채움 pending·압축 풀린 100MiB·1시간 비움 (스펙 038 §3.3·§3.8·§4)."""
 
 import asyncio
 import gzip
 import os
-import random
 import time
 from collections import Counter
 from datetime import UTC, datetime
@@ -14,7 +13,7 @@ from typing import Any
 import pytest
 
 from app.features.admin import access_cache, access_hours
-from app.features.admin.access_cache import read_start
+from app.features.admin.access_cache import raw_size, read_start
 from app.features.admin.access_pairs import pair_hash
 from app.features.admin.tests.access_fakes import (
     AFTER,
@@ -177,28 +176,66 @@ async def test_a_slow_first_fill_is_pending_then_ok(
     assert (body["state"], body["totals"]["requests"]) == ("ok", 1)
 
 
-def _noisy(directory: Path, ts: float, n: int) -> Path:
-    rng = random.Random(ts)
-    return rotated(
-        directory, [line(ts + i, f"/{rng.getrandbits(64):x}") for i in range(n)]
-    )
+def _same(directory: Path, ts: float, *, gz: bool = True) -> Path:
+    """잘 눌리는 회전 파일 — 같은 줄 200개(압축 풀린 크기 ≈ 압축 크기의 수십 배)."""
+    return rotated(directory, [line(ts + i, "/same") for i in range(200)], gz=gz)
 
 
-async def test_rotated_files_past_the_compressed_budget_are_neither_read_nor_kept(
+def _raw(path: Path) -> int:
+    if path.name.endswith(".gz"):
+        with gzip.open(path, "rb") as f:
+            return len(f.read())
+    return path.stat().st_size
+
+
+async def test_rotated_files_past_the_uncompressed_budget_are_neither_read_nor_kept(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, opened: Counter[str]
 ) -> None:
-    assert access_cache.BUDGET_BYTES == 10_000_000
-    oldest = _noisy(tmp_path, T0 - 3 * HOUR, 200)
-    middle = _noisy(tmp_path, T0 - 2 * HOUR, 200)
-    size = middle.stat().st_size
-    monkeypatch.setattr(access_cache, "BUDGET_BYTES", 2 * size + size // 2)
+    assert access_cache.BUDGET_BYTES == 104_857_600
+    oldest = _same(tmp_path, T0 - 3 * HOUR)
+    middle = _same(tmp_path, T0 - 2 * HOUR)
+    raw = _raw(middle)
+    monkeypatch.setattr(access_cache, "BUDGET_BYTES", 2 * raw + raw // 2)
     f = Feeds(tmp_path, AFTER)
     assert (await f.get())["totals"]["requests"] == 400
-    newest = _noisy(tmp_path, T0 - HOUR, 200)
+    newest = _same(tmp_path, T0 - HOUR)
+    # 압축 크기로 세면 셋 다 들어간다 — 잘 눌리는 몰림도 줄 수로 묶는다
+    assert sum(p.stat().st_size for p in (oldest, middle, newest)) < raw
     f.t = 61
     body = await f.get()
     assert body["totals"]["requests"] == 400 and body["firstTs"] == int(T0 - 2 * HOUR)
     assert opened == {oldest.name: 1, middle.name: 1, newest.name: 1}
+
+
+async def test_a_plain_rotated_log_counts_its_size_even_while_compressing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, opened: Counter[str]
+) -> None:
+    oldest = _same(tmp_path, T0 - 3 * HOUR)
+    _same(tmp_path, T0 - 2 * HOUR)
+    plain = _same(tmp_path, T0 - HOUR, gz=False)
+    # 압축 중 — 덜 쓴 gz 의 꼬리(ISIZE 0)가 아니라 `.log` 의 크기로 센다
+    (tmp_path / (plain.name + ".gz")).write_bytes(b"\x1f\x8b\x08\x00\x00\x00\x00\x00")
+    raw = _raw(plain)
+    monkeypatch.setattr(access_cache, "BUDGET_BYTES", 2 * raw + raw // 2)
+    body = await Feeds(tmp_path, AFTER).get()
+    assert body["totals"]["requests"] == 400 and body["firstTs"] == int(T0 - 2 * HOUR)
+    assert oldest.name not in opened and opened[plain.name] == 1
+
+
+def test_raw_size_reads_the_gzip_tail_and_calls_a_bad_tail_broken(
+    tmp_path: Path,
+) -> None:
+    gz = _same(tmp_path, T0)
+    assert raw_size(str(gz), gz.stat().st_size) == _raw(gz) > gz.stat().st_size
+    plain = _same(tmp_path, T0 + HOUR, gz=False)
+    assert raw_size(str(plain), plain.stat().st_size) == plain.stat().st_size
+    # 꼬리 4바이트 미만·ISIZE 가 100MiB 넘음(잘린 gz 의 아무 값) → 깨진 파일로 0
+    short = tmp_path / "access-a-time.log.gz"
+    short.write_bytes(b"\x1f\x8b")
+    huge = tmp_path / "access-b-time.log.gz"
+    huge.write_bytes(b"\x1f\x8b" + (104_857_601).to_bytes(4, "little"))
+    assert raw_size(str(short), 2) == raw_size(str(huge), 6) == 0
+    assert raw_size(str(tmp_path / "access-gone-time.log.gz"), 99) is None
 
 
 async def test_an_hour_without_requests_drops_caches_pairs_and_the_key(

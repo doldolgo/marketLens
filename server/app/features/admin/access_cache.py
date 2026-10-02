@@ -29,8 +29,9 @@ WINDOWS = {"24h": 24, "7d": 168, "30d": 720}  # 창 → 시 수
 DEFAULT_WINDOW = "24h"
 LOG_NAME = "access.log"
 ROTATED_PREFIX = "access-"
-# 캐시하는 회전 파일의 압축 크기 합 — 몰리는 날(50MiB 회전이 여럿) 첫 채움을 묶는다(§3.7)
-BUDGET_BYTES = 10_000_000
+# 캐시하는 회전 파일의 압축 풀린 크기 합 — 몰리는 날(50MiB 회전이 여럿) 첫 채움을 줄 수로 묶는다(§3.3·§3.7).
+# 압축 크기로 세면 잘 눌리는 몰림이 빠져나간다
+BUDGET_BYTES = 100 * 1024 * 1024
 CURRENT_EVERY_SEC = 60.0
 TOP = 20
 # 회전 파일이 깨졌을 때 나는 것 — 잘린 gz(EOFError)·틀린 머리·CRC(BadGzipFile ⊂ OSError)·압축 자료(zlib.error)·권한
@@ -56,6 +57,7 @@ class NoLogFile(Exception):
 class Entry(NamedTuple):
     size: int
     mtime: float
+    raw: int  # 예산에 센 압축 풀린 크기
     tally: FileTally
 
 
@@ -98,6 +100,25 @@ def read_start(now: float, gate: int) -> int:
     """이 앞 줄은 어떤 값에도 들지 않는다 — 게이트 전에는 24시간 창 시작, 뒤에는 30일 창(게이트로 자름)까지."""
     day = bounds(DEFAULT_WINDOW, now, gate)[0]
     return min(day, max(hour_start(now) - (WINDOWS["30d"] - 1) * 3600, gate))
+
+
+def raw_size(path: str, size: int) -> int | None:
+    """회전 파일의 압축 풀린 크기 — `.log` 는 파일 크기, `.gz` 는 gzip 꼬리의 ISIZE(마지막 4바이트, 2^32 나머지 —
+    50MiB 에서 회전하므로 넘칠 일이 없다). 꼬리가 4바이트 미만이거나 ISIZE 가 예산보다 크면 깨진 파일이라(잘린 gz 의 꼬리는
+    아무 값이다) 0 — 읽으면 읽은 데까지 세고 `skipped` 에 1 을 더한다. 파일이 사라졌으면 None."""
+    if not path.endswith(".gz"):
+        return size
+    if size < 4:
+        return 0
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(-4, os.SEEK_END)
+            isize = int.from_bytes(handle.read(4), "little")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return 0  # 권한 등 — 읽기도 실패해 깨진 회전 파일로 센다
+    return 0 if isize > BUDGET_BYTES else isize
 
 
 def open_log(path: str) -> IO[str]:
@@ -148,24 +169,29 @@ class AccessLog:
         # 새 회전 파일 키가 나타났다 = 회전 — 그 줄은 이번 회차에 회전 파일로 센다
         rotated_now = not rotated.keys() <= self._stems
         self._stems = set(rotated)
-        chosen: dict[str, tuple[str, int, float]] = {}
+        chosen: dict[str, tuple[str, int, float, int]] = {}
         spent = 0
         for stem, (path, size, mtime) in sorted(
             rotated.items(), key=lambda kv: kv[1][2], reverse=True
         ):
             if mtime < start:
                 break  # 이 뒤는 더 오래됐다
-            # 압축 중인 `.log` 는 잠깐뿐이라 0 — 다음 회차가 `.gz` 의 크기로 센다
-            cost = size if path.endswith(".gz") else 0
+            entry = self._files.get(stem)
+            if entry is not None and (entry.size, entry.mtime) == (size, mtime):
+                cost = entry.raw  # 바뀌지 않은 파일 — 꼬리를 다시 읽지 않는다
+            else:
+                cost = raw_size(path, size)
+                if cost is None:
+                    continue  # 목록을 본 뒤 압축·보관 삭제로 사라졌다
             if spent + cost > BUDGET_BYTES:
                 break
             spent += cost
-            chosen[stem] = (path, size, mtime)
-        # 보관 삭제·시작점 앞·10MB 밖 — 같은 회차에 버려 요약이 원본보다 오래 남지 않게
+            chosen[stem] = (path, size, mtime, cost)
+        # 보관 삭제·시작점 앞·100MiB 밖 — 같은 회차에 버려 요약이 원본보다 오래 남지 않게
         for stem in [s for s in self._files if s not in chosen]:
             del self._files[stem]
         broken: list[str] = []
-        for stem, (path, size, mtime) in chosen.items():
+        for stem, (path, size, mtime, cost) in chosen.items():
             entry = self._files.get(stem)
             if entry is not None and (entry.size, entry.mtime) == (size, mtime):
                 # 읽기 시작점이 파일 안으로 옮겨 오면 그 파일만 다시 — 앞 줄이 짝의 첫 페이지 줄에 남지 않게
@@ -181,7 +207,7 @@ class AccessLog:
             except BROKEN as exc:
                 tally.broken = 1  # 읽은 줄은 두고 파일 하나를 1로 센다 — 크기·시각이 바뀌기 전엔 다시 읽지 않는다
                 broken.append(type(exc).__name__)
-            self._files[stem] = Entry(size, mtime, tally)
+            self._files[stem] = Entry(size, mtime, cost, tally)
         mono = self._mono()
         seen = self._current_seen
         if current is None:
