@@ -439,6 +439,9 @@ SCRIPT_BANNED = (
     "sendBeacon",
     "new WebSocket",
     "EventSource",
+    # 042 §4 — 서버 기록 창을 주소에 싣지 않는다
+    "location.hash",
+    "pushState",
 )
 # 036 §3.6·§3.8 — svg() 가 받는 속성 이름은 기하·이름표뿐(href·style·on… 은 svg() 가 던진다)
 SVG_ATTRS = {
@@ -592,12 +595,22 @@ def _js_function(js: str, name: str) -> str:
     return found.group(1)
 
 
-def test_screen_top_table_share_is_over_human_pages() -> None:
-    """038 §3.6 — 상위 표 여섯은 사람 브라우저 모양 페이지 줄만 세므로 비율 분모도 `totals.humanPages` 다(042 가 바꾼다)."""
-    body = _js_function(_text("web/admin/admin.js"), "fillAccess")
-    assert "const pages = num(totals.humanPages) ?? 0;" in body
-    assert "topTable(a[k], label, pages, named)" in body
-    assert "num(totals.pages) ?? 0" not in body
+def test_screen_page_line_lists_share_is_over_human_pages() -> None:
+    """042 §4 분모 — 경로(⑤)·외부 출처·utm(③)의 % 는 사람 브라우저 모양 페이지 줄 `totals.humanPages` 로 나눈다(038 §3.6 —
+    상위 목록은 그 줄만 센다). 답 문장 ⑤ 의 경로 % 도 같은 분모다."""
+    js = _text("web/admin/admin.js")
+    for name, keys in (("q3", ("referrers", "utmSources")), ("q5", ("paths",))):
+        body = _js_function(js, name)
+        assert "const hp = n0(f.T.humanPages);" in body, name
+        for key in keys:
+            found = re.findall(
+                rf"shareList\('[\w-]+', rows2\(f\.a\.{key}\), .*?, hp\)", body
+            )
+            assert len(found) == 1, (name, key)
+        assert "totals.pages" not in body and "T.pages" not in body, name
+    answer = _js_function(js, "answer5")
+    assert "const hp = n0(f.T.humanPages);" in answer
+    assert "pct(paths[0][1], hp)" in answer
 
 
 def test_screen_body_elapsed_words_are_retold_after_every_paint() -> None:
@@ -931,7 +944,7 @@ const fetch = (...a) => { calls.push('fetch'); return new Promise(() => {}) }
 const location = { search: '', replace() { calls.push('replace') } }
 const history = { replaceState() { calls.push('replaceState') } }
 const api = new Function('document', 'fetch', 'location', 'history', 'Node',
-  script + '\n;return { kindName, alarmTail, tabName, pctFmt, exchangeRow, timeline, alarmRow, alertRow, fillAccess, fillClarity, drawCollect, got, P }')(
+  script + '\n;return { kindName, alarmTail, tabName, pctFmt, exchangeRow, timeline, alarmRow, alertRow, fillTraffic, fillClarity, drawCollect, got, P }')(
   document, fetch, location, history, Node)
 const text = (n) => (typeof n === 'string' ? n : n.textContent + n.kids.map(text).join(''))
 const titles = (n) => (typeof n === 'string' ? [] : [
@@ -947,8 +960,7 @@ const access = { state: 'ok', startTs: sec - 86400, firstTs: sec - 3600, totals:
   status: { '2xx': 80, '3xx': 10, '4xx': 7, '5xx': 1 }, ws: { count: 2, durations: { lt10s: 1, ge1h: 1 } },
   paths: [['/', 30]], tabs: tabs.map((t, i) => [t, i + 1]), referrers: [], utmSources: [['x', 2]], devices: [['desktop', 30]],
   browsers: [['chrome', 20]], recent5xx: [{ ts: sec - 60, path: '/', status: 502 }] }
-const accessBox = new Node('div')
-api.fillAccess(accessBox, access)
+api.fillTraffic(access)
 const clarityBox = new Node('div')
 api.fillClarity(clarityBox, { state: 'ok', refreshSec: 10800, nextAt: now + 60000, metrics: [],
   traffic: { sessions: 3, botSessions: 1, users: 2, pagesPerSession: 1.5 } })
@@ -968,8 +980,8 @@ process.stdout.write(JSON.stringify({
   timeline: show(api.timeline(outages)),
   alarmRows: alarms.map((name) => show(api.alarmRow({ name, state: 'ALARM', changedAt: now, reason: 'r' }))),
   alertRows: alarms.map((alarm) => show(api.alertRow({ source: 'alarm', alarm, fromState: 'OK', toState: 'ALARM', at: now }))),
-  accessTiles: tiles(accessBox),
-  accessTables: byId.get('access-tables').kids.map((card) => ({ kicker: text(card.kids[0]), ...show(card) })),
+  accessTiles: [1, 6].flatMap((q) => tiles(byId.get(`b-q${q}`))),
+  tabsBlock: show(byId.get('b-q5')),
   clarityTiles: tiles(clarityBox),
   collect: { sum: text(byId.get('collect-sum')), head: text(byId.get('s-collect')) },
   calls,
@@ -992,11 +1004,15 @@ ALARM_NAMES = [
 ODD = ["zzz", "constructor", "__proto__"]
 KINDS = [*KIND_NAMES, *ODD]
 TABS = [*TAB_NAMES, "(기타)", "constructor"]
-# 041 §3.1·§7 타일 부제 — [이름, 부제] (5xx 는 부제 없음)
+# 041 §3.1·§7 타일 부제 — [이름, 부제]. 서버 기록 덩어리의 타일은 042 §3.4 ①·⑥ (시행 전 — 응답에 windows 없음)
 ACCESS_TILES = [
-    ("총 요청", "파일·봇·스캔까지 기록된 모든 줄"),
-    ("페이지", "화면 주소 요청 · 봇 섞임"),
-    ("5xx",),
+    ("확인 ~ 브라우저 모양", "방문자(날마다 셈)"),
+    ("다시 온", "시행 뒤부터"),
+    ("스크립트가 돈 페이지", "사람 모양 페이지 0 중"),
+    ("사람 모양 페이지", "위장 봇 섞임"),
+    ("끝난 연결", "연결 수 — 사람 수가 아니다"),
+    ("연결한 방문자", "시행(– 00:00) 뒤부터"),
+    ("재접속 실패", "대시보드 WebSocket 5xx"),
 ]
 CLARITY_TILES = [
     ("세션", "동의한 방문자만"),
@@ -1095,18 +1111,10 @@ def test_alarm_rows_show_tail_labels_and_conditions_in_title(
 def test_tab_table_and_tiles_show_names_and_subtitles(
     admin_js: dict[str, Any],
 ) -> None:
-    """041 §3.4·§3.1 — 접속을 실제로 채우면 탭 표는 한국어 탭 이름(title 은 id, (기타)는 그대로), 서버 기록 둘·
-    Clarity 넷 타일은 값 아래 부제 한 줄이다(5xx 는 부제 없음)."""
-    tables = admin_js["accessTables"]
-    assert [t["kicker"] for t in tables] == [
-        "경로",
-        "탭",
-        "외부 출처",
-        "utm_source",
-        "기기",
-        "브라우저",
-    ]
-    table = tables[1]
+    """041 §3.4·§3.1 — 접속을 실제로 채우면 ⑤ 대시보드 진입 탭은 한국어 탭 이름(title 은 id, (기타)는 그대로), 서버
+    기록 덩어리(042 ①·⑥)와 Clarity 넷 타일은 값 아래 부제 한 줄이다."""
+    table = admin_js["tabsBlock"]
+    assert "대시보드 진입 탭" in table["text"]
     for tab in TABS:
         assert admin_js["tabs"][tab] in table["text"], tab
         assert tab in table["titles"], tab
