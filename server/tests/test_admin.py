@@ -1,4 +1,5 @@
-"""관리자 server 설정 계약 — nginx-admin.conf·web 이미지·compose (스펙 029 §3.1·§3.2·§3.5·§4, 034·035 의 피드 넷).
+"""관리자 server 설정 계약 — nginx-admin.conf·web 이미지·compose (스펙 029 §3.1·§3.2·§3.5·§4, 034·035 의 피드 넷)
+와 관리자 화면 정적 단언(036 §4, 설명·이름표·문구는 041 §4).
 
 test_deploy.py 와 같은 방식이다: Docker 없는 CI 에서 설정 파일을 읽어 단언한다. 실제로 nginx 를 띄워
 분기·403·기록을 보는 검증은 029 §5 의 로컬 Docker 명령이다. 문법은 여기서 못 잡는다 — nginx-admin.conf 를
@@ -6,7 +7,14 @@ test_deploy.py 와 같은 방식이다: Docker 없는 CI 에서 설정 파일을
 """
 
 import json
+import os
 import re
+import shutil
+import subprocess
+from html.parser import HTMLParser
+from typing import Any
+
+import pytest
 
 from tests.test_deploy import (
     API,
@@ -660,3 +668,449 @@ def test_screen_styles_copy_theme_tokens_without_outside_resources() -> None:
     assert body, "body 규칙"
     assert "word-break: keep-all;" in body.group(1)
     assert "overflow-wrap: break-word;" in body.group(1)
+
+
+# --- 설명·이름표·문구 고침 (041 §4) ----------------------------------------------------------
+
+EXPLAIN = '<details class="explain">'
+TERMS = '<details class="terms">'
+SCREEN_FILES = ("admin.css", "admin.js", "index.html")
+# 041 §3.4 — 실패 종류(011 유형 칩)·경보 꼬리(027 경보 이름)·대시보드 탭(002) 이름표
+KIND_NAMES = {
+    "timeout": "타임아웃",
+    "network": "연결 실패",
+    "rate_limit": "rate limit",
+    "banned": "차단",
+    "unavailable": "거래소 오류",
+    "bad_request": "요청 오류",
+    "bad_response": "응답 오류",
+    "stale_stream": "스트림 정체",
+}
+ALARM_TAIL_NAMES = {
+    "status-instance": "인스턴스 상태검사",
+    "status-system": "시스템 상태검사",
+    "credit-balance": "CPU 크레딧 잔고",
+    "credit-surplus": "잉여 크레딧 과금",
+    "memory": "메모리",
+    "disk": "디스크",
+    "canary": "바깥 점검",
+    "http-5xx": "사이트 5xx",
+}
+# 041 §3.4 경보 꼬리의 울리는 조건(계약 복사 — 끝 마침표·백틱만 뺐다)
+ALARM_TAIL_CONDITIONS = {
+    "status-instance": "60초 3점 연속 실패면 AWS 가 재부팅",
+    "status-system": "60초 2점 연속 실패면 AWS 가 복구(recover)",
+    "credit-balance": "5분 3점 연속 최대 적립의 30%(data 173·serve 86) 미만",
+    "credit-surplus": "5분 1점 0 초과(unlimited 과금 시작)",
+    "memory": "가용률 10% 미만 5분 연속(collect 는 5분 1점), 데이터 없음도 울린다",
+    "disk": "사용률 80% 초과 5분 1점, 데이터 없음도 울린다",
+    "canary": "Lambda 실패가 5분 2점 연속(10분), 데이터 없음도 울린다",
+    "http-5xx": "5분 합 10 이상(/api/ws/spreads 는 세지 않는다), 데이터 없음은 정상",
+}
+TAB_NAMES = {
+    "spread": "실시간 스프레드",
+    "history": "기록/통계",
+    "gap": "선물–현물 갭",
+    "pp": "선선갭",
+    "health": "수집 상태",
+    "flow": "입출금 레이더",
+}
+
+
+def _section_bodies(html: str) -> dict[str, str]:
+    return dict(
+        re.findall(r'<section id="([\w-]+)"[^>]*>(.*?)</section>', html, flags=re.S)
+    )
+
+
+def _folded(html: str, opening: str) -> list[str]:
+    """`opening` 으로 여는 설명 details 의 안 — 설명 안에는 details 가 없다."""
+    return re.findall(re.escape(opening) + r"(.*?)</details>", html, flags=re.S)
+
+
+def _plain(fragment: str) -> str:
+    return re.sub(r"<[^>]+>", "", fragment).strip()
+
+
+def _dl(block: str) -> tuple[list[str], list[str]]:
+    """설명 details 하나 → dl 하나의 (dt 글자들, dd 글자들)."""
+    assert block.count("<dl") == 1, block[:80]
+    (dl,) = re.findall(r"<dl>(.*?)</dl>", block, flags=re.S)
+    dts = [_plain(x) for x in re.findall(r"<dt>(.*?)</dt>", dl, flags=re.S)]
+    dds = [_plain(x) for x in re.findall(r"<dd>(.*?)</dd>", dl, flags=re.S)]
+    return dts, dds
+
+
+def _summary(block: str) -> str:
+    found = re.search(r"<summary>(.*?)</summary>", block, flags=re.S)
+    assert found, block[:80]
+    return _plain(found.group(1))
+
+
+def test_every_section_has_one_folded_explain_right_under_its_head() -> None:
+    """041 §3.1 — 절 일곱마다 접힌 '이 절 읽는 법' 하나, 머리 줄 바로 다음(개요는 칸 여섯 다음이고 절의 끝)."""
+    html = _text("web/admin/index.html")
+    # 설명 details 는 글자 그대로 — open 같은 다른 속성이 없다
+    for tag in re.findall(r"<details\b[^>]*>", html):
+        if "explain" in tag or "terms" in tag:
+            assert tag in (EXPLAIN, TERMS), tag
+    bodies = _section_bodies(html)
+    assert list(bodies) == SECTIONS
+    no_div = r"(?:(?!</div>).)*</div>\s*"
+    for sid, body in bodies.items():
+        assert body.count(EXPLAIN) == 1, sid
+        if sid == "overview":
+            tail = re.escape(EXPLAIN) + r"(?:(?!</details>).)*</details>\s*$"
+            assert re.search(r'<div class="vitals">' + no_div + tail, body, flags=re.S)
+        else:
+            head = r'<div class="sec-head">' + no_div + re.escape(EXPLAIN)
+            assert re.search(head, body, flags=re.S), sid
+        (block,) = _folded(body, EXPLAIN)
+        assert _summary(block).startswith("이 절 읽는 법"), sid
+        dts, dds = _dl(block)
+        assert len(dts) == len(dds) >= 3, sid
+        assert dts[:2] == ["읽는 값", "판정"], sid
+
+
+def test_block_terms_are_folded_lists_in_collect_infra_traffic_and_cost() -> None:
+    """041 §3.1 — 덩어리 끝 '이 칸 뜻' 은 dl 하나·dt 수 = dd 수 ≥ 2. 수는 고정하지 않는다(042·043 이 바꾼다)."""
+    html = _text("web/admin/index.html")
+    blocks = _folded(html, TERMS)
+    assert blocks
+    for block in blocks:
+        assert _summary(block) == "이 칸 뜻"
+        dts, dds = _dl(block)
+        assert len(dts) == len(dds) >= 2, dts
+    with_terms = {sid for sid, body in _section_bodies(html).items() if TERMS in body}
+    assert {"collect", "infra", "traffic", "cost"} <= with_terms
+
+
+class _Ancestors(HTMLParser):
+    """설명 details 마다 조상 가운데 id 를 가진 요소의 id — 빈 요소(input·meta 등)는 쌓지 않는다."""
+
+    VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[tuple[str, str | None]] = []
+        self.found: list[list[str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        found = dict(attrs)
+        if tag == "details" and found.get("class") in ("explain", "terms"):
+            self.found.append([i for _, i in self.stack if i])
+        if tag not in self.VOID:
+            self.stack.append((tag, found.get("id")))
+
+    def handle_endtag(self, tag: str) -> None:
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                return
+
+
+def test_explanations_sit_outside_every_redrawn_box() -> None:
+    """041 §3.1 — admin.js 가 내용을 바꾸는 칸은 모두 id 를 가진다. 설명의 id 있는 조상은 그 절과 `infra-parts`
+    (admin.js 가 hidden 만 바꾼다)뿐이라 다시 그리기가 닿지 않는다. admin.js 는 설명을 만들지도 건드리지도 않는다."""
+    html = _text("web/admin/index.html")
+    parser = _Ancestors()
+    parser.feed(html)
+    parser.close()
+    assert parser.stack == []
+    assert len(parser.found) == html.count(EXPLAIN) + html.count(TERMS)
+    for ids in parser.found:
+        assert ids[0] in SECTIONS and set(ids[1:]) <= {"infra-parts"}, ids
+    js = _text("web/admin/admin.js")
+    assert "explain" not in js and "terms" not in js
+
+
+def _js_table(js: str, name: str) -> dict[str, list[str]]:
+    """admin.js 의 `const 이름 = { 키: '글', … };`(값은 글 하나 또는 글 둘의 배열) → 키 → 글 목록."""
+    block = re.search(rf"\nconst {name} = \{{\n(.*?)\n\}};\n", js, flags=re.S)
+    assert block, name
+    table: dict[str, list[str]] = {}
+    for line in block.group(1).splitlines():
+        row = re.fullmatch(
+            r"  '?([\w-]+)'?: (?:'([^']*)'|\['([^']*)', '([^']*)'\]),", line
+        )
+        assert row, line
+        table[row[1]] = [v for v in row.groups()[1:] if v is not None]
+    return table
+
+
+def test_name_tables_match_the_spec_and_every_key_is_explained() -> None:
+    """041 §3.4 — 이름표 표 셋의 키·한국어 이름, 그리고 키 스물둘이 모두 설명 dl 안에 원래 id 로 있다."""
+    js = _text("web/admin/admin.js")
+    kinds = _js_table(js, "KIND_NAME")
+    assert {k: v[0] for k, v in kinds.items()} == KIND_NAMES
+    tails = _js_table(js, "ALARM_TAIL")
+    assert {k: v[0] for k, v in tails.items()} == ALARM_TAIL_NAMES
+    assert {k: v[1] for k, v in tails.items()} == ALARM_TAIL_CONDITIONS
+    tabs = _js_table(js, "TAB_NAME")
+    assert {k: v[0] for k, v in tabs.items()} == TAB_NAMES
+    html = _text("web/admin/index.html")
+    folded = "".join(_folded(html, EXPLAIN) + _folded(html, TERMS))
+    explained = "".join(re.findall(r"<dl>(.*?)</dl>", folded, flags=re.S))
+    for key in [*KIND_NAMES, *ALARM_TAIL_NAMES, *TAB_NAMES]:
+        assert f"<code>{key}</code>" in explained, key
+
+
+def test_misleading_words_are_fixed() -> None:
+    """041 §3.5 — 억제 문구·성공률 소수 1자리·버전 칸 지움·AWS 계정 종료 문구 지움(동작은 같다)."""
+    js = _text("web/admin/admin.js")
+    assert "10분 억제로 보내지 않은 알림은 기록에도 없다" in js
+    assert "억제된 알림은 없다" not in js
+    assert "successRate1h.toFixed(2)" not in js
+    assert "'버전'" not in js and not re.search(r"\.version\b", js)
+    assert "\n  aws: 'AWS 자격 없음',\n" in js
+    for name in SCREEN_FILES:
+        text = _text(f"web/admin/{name}")
+        for word in ("계정 종료", "AWS 종료", "종료 예정", "방문자-일", "visitor-day"):
+            assert word not in text, (name, word)
+    notes = re.search(
+        r'<ul class="notes">(.*?)</ul>', _text("web/admin/index.html"), flags=re.S
+    )
+    assert notes and notes.group(1).count("<li>") == 1  # SCP 글 하나
+
+
+def test_overview_tiles_stay_plain_links_and_there_is_no_popover() -> None:
+    """041 §2 — 개요 칸(링크) 안에는 span 셋뿐(누르는 요소를 넣지 않는다), 칸 위에 뜨는 풍선 없음."""
+    html = _text("web/admin/index.html")
+    tiles = re.findall(r'<a class="vital"[^>]*>(.*?)</a>', html, flags=re.S)
+    assert len(tiles) == 6
+    span = r'<span class="[\w-]+"(?: id="[\w-]+")?>[^<]*</span>'
+    for inner in tiles:
+        assert re.fullmatch(f"(?:{span}){{3}}", inner), inner
+    for name in SCREEN_FILES:
+        assert "popover" not in _text(f"web/admin/{name}").lower(), name
+
+
+def test_explanation_text_has_no_links_media_scripts_or_addresses() -> None:
+    """041 §3.2 — 설명 글 안에는 링크·이미지·스크립트·SVG·style·스킴 주소가 없다(12자리 숫자·이메일은 036 단언)."""
+    html = _text("web/admin/index.html")
+    for block in _folded(html, EXPLAIN) + _folded(html, TERMS):
+        for banned in ("<a", "<img", "<script", "<svg", "style=", "://"):
+            assert banned not in block, (banned, _summary(block))
+
+
+# admin.js 를 가짜 document 와 싣고(보이지 않는 탭 — 묶음이 돌지 않아 요청 0) 이름표 찾기·행 글자 만들기만 부른다.
+# 그리기 전체·펼침 유지·폭은 설계 세션이 브라우저로 본다(041 §4).
+ADMIN_HARNESS = r"""
+const [script, kinds, alarms, tabs] = JSON.parse(require('fs').readFileSync(0, 'utf8'))
+class Node {
+  constructor(tag) { Object.assign(this, { tag, kids: [], dataset: {}, attrs: {}, textContent: '', title: '', className: '', hidden: false }) }
+  get classList() { return { add() {}, remove() {} } }
+  get lastChild() { return this.kids[this.kids.length - 1] }
+  append(...k) { this.kids.push(...k) }
+  prepend(...k) { this.kids.unshift(...k) }
+  replaceChildren(...k) { this.kids = k }
+  setAttribute(k, v) { this.attrs[k] = String(v) }
+  addEventListener() {}
+}
+const byId = new Map()
+const calls = []
+const document = {
+  visibilityState: 'hidden',
+  getElementById: (id) => byId.get(id) || byId.set(id, new Node('div')).get(id),
+  createElement: (tag) => new Node(tag),
+  createElementNS: (ns, tag) => new Node(tag),
+  createDocumentFragment: () => new Node('#fragment'),
+  querySelectorAll: () => [],
+  addEventListener() {},
+}
+const fetch = (...a) => { calls.push('fetch'); return new Promise(() => {}) }
+const location = { search: '', replace() { calls.push('replace') } }
+const history = { replaceState() { calls.push('replaceState') } }
+const api = new Function('document', 'fetch', 'location', 'history', 'Node',
+  script + '\n;return { kindName, alarmTail, tabName, pctFmt, exchangeRow, timeline, alarmRow, alertRow, fillAccess, fillClarity, drawCollect, got, P }')(
+  document, fetch, location, history, Node)
+const text = (n) => (typeof n === 'string' ? n : n.textContent + n.kids.map(text).join(''))
+const titles = (n) => (typeof n === 'string' ? [] : [
+  ...(n.title ? [n.title] : []), ...(n.tag === 'title' ? [n.textContent] : []), ...n.kids.flatMap(titles)])
+const show = (n) => ({ text: text(n), titles: titles(n) })
+const find = (n, cls) => (typeof n === 'string' ? [] : [...(n.className === cls ? [n] : []), ...n.kids.flatMap((k) => find(k, cls))])
+// 타일마다 [이름, 부제…] — 부제가 없으면 이름만
+const tiles = (n) => find(n, 'stat').map((t) => [text(t.kids[0]), ...find(t, 'stat-sub').map(text)])
+const now = Date.now()
+const sec = Math.floor(now / 1000)
+const access = { state: 'ok', startTs: sec - 86400, firstTs: sec - 3600, totals: { requests: 100, pages: 40, ws: 2, skipped: 1 },
+  hourly: [{ ts: sec - 3600, requests: 60, pages: 25, errors: 1 }, { ts: sec, requests: 40, pages: 15, errors: 0 }],
+  status: { '2xx': 80, '3xx': 10, '4xx': 7, '5xx': 1 }, ws: { count: 2, durations: { lt10s: 1, ge1h: 1 } },
+  paths: [['/', 30]], tabs: tabs.map((t, i) => [t, i + 1]), referrers: [], utmSources: [['x', 2]], devices: [['desktop', 30]],
+  browsers: [['chrome', 20]], recent5xx: [{ ts: sec - 60, path: '/', status: 502 }] }
+const accessBox = new Node('div')
+api.fillAccess(accessBox, access)
+const clarityBox = new Node('div')
+api.fillClarity(clarityBox, { state: 'ok', refreshSec: 10800, nextAt: now + 60000, metrics: [],
+  traffic: { sessions: 3, botSessions: 1, users: 2, pagesPerSession: 1.5 } })
+// 수집 요약 줄·절 요약 — 성공률 99.8 과 앱 버전(그리지 않는다)
+api.got.set(api.P.collect, { text: 'collect', body: { fetchedAt: now, successRate1h: 99.8, serverStartedAt: now - 3600000,
+  version: '0.1.0', outages: [], exchanges: [{ exchange: 'upbit', state: 'ok', lastSuccessAt: now, successRate1h: 99.8, markets: 255 }] } })
+api.drawCollect()
+const exchange = (kind) => ({ exchange: 'upbit', state: 'ok', lastSuccessAt: now, successRate1h: 97.5, markets: 255,
+  openOutage: { kind, count: 3, startedAt: now - 120000 }, lastError: { at: now, kind, statusCode: 418, message: 'm' } })
+const outages = kinds.map((kind, i) => ({ exchange: 'bybit', kind, startedAt: now - (i + 2) * 60000, endedAt: now - 60000, count: i + 1 }))
+process.stdout.write(JSON.stringify({
+  kinds: Object.fromEntries(kinds.map((k) => [k, api.kindName(k)])),
+  alarms: Object.fromEntries(alarms.map((a) => [a, api.alarmTail(a) ?? null])),
+  tabs: Object.fromEntries(tabs.map((t) => [t, api.tabName(t)])),
+  rates: [99.8, 97.5, null].map(api.pctFmt),
+  rows: kinds.map((k) => show(api.exchangeRow(exchange(k)))),
+  timeline: show(api.timeline(outages)),
+  alarmRows: alarms.map((name) => show(api.alarmRow({ name, state: 'ALARM', changedAt: now, reason: 'r' }))),
+  alertRows: alarms.map((alarm) => show(api.alertRow({ source: 'alarm', alarm, fromState: 'OK', toState: 'ALARM', at: now }))),
+  accessTiles: tiles(accessBox),
+  accessTables: byId.get('access-tables').kids.map((card) => ({ kicker: text(card.kids[0]), ...show(card) })),
+  clarityTiles: tiles(clarityBox),
+  collect: { sum: text(byId.get('collect-sum')), head: text(byId.get('s-collect')) },
+  calls,
+}))
+"""
+
+# §4 설계 세션 확인 5 의 이름 아홉 — 꼬리 여덟 순서 + 이름표가 없는 foo
+ALARM_NAMES = [
+    "marketlens-collect-status-instance",
+    "marketlens-serve-status-system",
+    "marketlens-data-credit-balance",
+    "marketlens-data-credit-surplus",
+    "marketlens-serve-memory",
+    "marketlens-data-disk",
+    "marketlens-canary",
+    "marketlens-http-5xx",
+    "marketlens-foo",
+]
+# 표에 없는 값 — Object 의 것을 집지 않고 원래 글자로
+ODD = ["zzz", "constructor", "__proto__"]
+KINDS = [*KIND_NAMES, *ODD]
+TABS = [*TAB_NAMES, "(기타)", "constructor"]
+# 041 §3.1·§7 타일 부제 — [이름, 부제] (5xx 는 부제 없음)
+ACCESS_TILES = [
+    ("총 요청", "파일·봇·스캔까지 기록된 모든 줄"),
+    ("페이지", "화면 주소 요청 · 봇 섞임"),
+    ("5xx",),
+]
+CLARITY_TILES = [
+    ("세션", "동의한 방문자만"),
+    ("봇 세션", "Clarity 가 봇으로 본 세션"),
+    ("사용자", "동의한 방문자 · Clarity 기준"),
+    ("세션당 페이지", "Clarity 값 그대로"),
+]
+
+
+@pytest.fixture(scope="module")
+def admin_js() -> dict[str, Any]:
+    node = shutil.which("node")
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("node 가 없다 — CI 러너(ubuntu-latest)에는 있어야 한다")
+        pytest.skip("node 가 없어 admin.js 를 돌리지 못한다")
+    done = subprocess.run(
+        [node, "-e", ADMIN_HARNESS],
+        input=json.dumps([_text("web/admin/admin.js"), KINDS, ALARM_NAMES, TABS]),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+def test_labels_fall_back_to_the_raw_text_for_unknown_values(
+    admin_js: dict[str, Any],
+) -> None:
+    """041 §3.4·§3.6 — 표에 없는 값(constructor·__proto__ 포함)은 원래 글자, 성공률은 소수 1자리. 요청 0."""
+    assert admin_js["kinds"] == {**KIND_NAMES, **{k: k for k in ODD}}
+    assert admin_js["tabs"] == {
+        **TAB_NAMES,
+        "(기타)": "(기타)",
+        "constructor": "constructor",
+    }
+    alarms = dict(admin_js["alarms"])
+    assert alarms.pop("marketlens-foo") is None
+    expected = dict(zip(ALARM_NAMES, ALARM_TAIL_NAMES.values(), strict=False))
+    assert {name: tail[0] for name, tail in alarms.items()} == expected
+    assert admin_js["rates"] == ["99.8%", "97.5%", "–"]
+    assert admin_js["calls"] == []
+
+
+def test_collect_rows_show_kind_labels_and_keep_the_raw_id_in_title(
+    admin_js: dict[str, Any],
+) -> None:
+    """041 §3.4 — 거래소 표(열린 구간·마지막 오류)·타임라인 막대 title·아래 다섯 줄에 이름표, title 은 원래 id."""
+    for kind, row in zip(KINDS, admin_js["rows"], strict=True):
+        label = admin_js["kinds"][kind]
+        assert f"{label} · 3회 · 2분째" in row["text"], kind
+        assert f"{label} · HTTP 418 · m" in row["text"], kind
+        assert "97.5%" in row["text"]
+        assert kind in row["titles"] and f"{kind} — m" in row["titles"], kind
+    timeline = admin_js["timeline"]
+    for i, kind in enumerate(KINDS):
+        label = admin_js["kinds"][kind]
+        assert any(t.endswith(f" · {label} · ×{i + 1}") for t in timeline["titles"]), (
+            kind
+        )
+    for i, kind in enumerate(KINDS[:5]):  # 아래 다섯 줄 = 시작이 가장 늦은 다섯
+        assert f"{admin_js['kinds'][kind]} · ×{i + 1}" in timeline["text"], kind
+        assert kind in timeline["titles"], kind
+
+
+def test_alarm_rows_show_tail_labels_and_conditions_in_title(
+    admin_js: dict[str, Any],
+) -> None:
+    """041 §3.4 — 경보 표·알림 경보 행의 이름 뒤 꼬리 이름표, 이름의 title 은 '전체 이름 — 조건'. foo 는 이름표 없음."""
+    keys = dict(zip(ALARM_NAMES, ALARM_TAIL_NAMES, strict=False))  # foo 는 꼬리 없음
+    rows = zip(ALARM_NAMES, admin_js["alarmRows"], admin_js["alertRows"], strict=True)
+    for name, row, alert in rows:
+        short = name.removeprefix("marketlens-")
+        tail = admin_js["alarms"][name]
+        if name not in keys:
+            assert tail is None
+            assert row["titles"] == [name] and alert["titles"] == [name]
+            assert not any(
+                label in row["text"]
+                for label in ALARM_TAIL_NAMES.values()
+                if label != "canary"
+            )
+            assert f"{short} OK → " in alert["text"]
+            continue
+        label = ALARM_TAIL_NAMES[keys[name]]
+        condition = ALARM_TAIL_CONDITIONS[keys[name]]
+        assert tail == [label, condition], name
+        assert f"{short} {label}" in row["text"], name
+        assert row["titles"] == [f"{name} — {condition}"], name
+        assert f"{short} {label} OK → " in alert["text"], name
+        assert alert["titles"] == [f"{name} — {condition}"], name
+
+
+def test_tab_table_and_tiles_show_names_and_subtitles(
+    admin_js: dict[str, Any],
+) -> None:
+    """041 §3.4·§3.1 — 접속을 실제로 채우면 탭 표는 한국어 탭 이름(title 은 id, (기타)는 그대로), 서버 기록 둘·
+    Clarity 넷 타일은 값 아래 부제 한 줄이다(5xx 는 부제 없음)."""
+    tables = admin_js["accessTables"]
+    assert [t["kicker"] for t in tables] == [
+        "경로",
+        "탭",
+        "외부 출처",
+        "utm_source",
+        "기기",
+        "브라우저",
+    ]
+    table = tables[1]
+    for tab in TABS:
+        assert admin_js["tabs"][tab] in table["text"], tab
+        assert tab in table["titles"], tab
+    assert admin_js["accessTiles"] == [[label, *sub] for label, *sub in ACCESS_TILES]
+    assert admin_js["clarityTiles"] == [list(t) for t in CLARITY_TILES]
+
+
+def test_collect_summary_shows_one_decimal_rate_and_no_version(
+    admin_js: dict[str, Any],
+) -> None:
+    """041 §3.5 — 수집 요약 줄·절 요약의 1시간 성공률은 소수 1자리, 버전 칸은 없다(응답에 version 이 있어도)."""
+    collect = admin_js["collect"]
+    assert "전체 1시간 99.8%" in collect["sum"], collect
+    assert collect["head"].endswith(" · 1시간 99.8%"), collect
+    for text in collect.values():
+        assert "버전" not in text and "0.1.0" not in text, text

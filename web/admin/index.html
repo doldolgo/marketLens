@@ -52,10 +52,38 @@
           <a class="vital" href="#infra"><span class="vital-label">canary</span><span class="vital-value" id="v-canary">…</span><span class="vital-sub" id="v-canary-s"></span></a>
           <a class="vital" href="#cost"><span class="vital-label">이번 달 비용</span><span class="vital-value" id="v-cost">…</span><span class="vital-sub" id="v-cost-s"></span></a>
         </div>
+        <details class="explain">
+          <summary>이 절 읽는 법<span class="tail">· 10초마다 · 경보·canary 60초</span></summary>
+          <dl>
+            <dt>읽는 값</dt><dd>수집기·api 헬스, api 상태(연결 수·Redis·Influx), 거래소 수집 상태를 10초마다 읽고 CloudWatch 경보·canary 를 60초마다 읽는다. 이 탭이 보이는 동안만 부른다.</dd>
+            <dt>판정</dt><dd>일곱 재료(수집기·api·Redis·Influx, 거래소, CloudWatch 경보·canary)만 보고 위에서부터 <b>알 수 없음</b>(헬스 호출 실패) → <b>장애</b>(수집기·api 상태가 ok 아님, Redis·Influx down, ALARM 경보, 거래소 끊김) → <b>주의</b>(거래소 지연, canary 실패, 수집기가 경보·canary 를 읽지 못함) → <b>정상</b> 이다. 띠의 판정 재료 일곱 가운데 흐린 ○ 는 판정에 넣지 않은 재료(연결 안 됨, 권한 없음, 이 화면이 그 값을 부르지 못함)이고, 지표·알림·접속·비용은 처음부터 판정 밖이다.</dd>
+            <dt>사유 줄</dt><dd>판정을 만든 까닭을 셋까지 적는다 — ALARM 경보는 둘까지 이름, 셋 이상이면 수. '상태 모름' 은 그 재료를 읽지 못했다는 뜻이고 판정은 바꾸지 않는다.</dd>
+            <dt>수집기</dt><dd>수집기 헬스와 마지막 틱이 지난 시간. 첫 틱 전은 starting, 30초 넘게 틱이 없으면 stale 이고 둘 다 장애다.</dd>
+            <dt>api</dt><dd>api 헬스 — Redis 에 남는 수집기 심장박동으로 같은 판정을 하고, Redis 에 못 닿으면 redis_down 이다. 아래 줄은 api 가 본 Redis·Influx 연결이고, 헬스가 정상이어도 하나가 down 이면 '저장소 끊김' 이다.</dd>
+            <dt>지금 접속</dt><dd>api 가 지금 들고 있는 대시보드 연결 수. 연결 수 — 사람 수가 아니다(탭마다 하나라 탭 둘이면 2, 숨긴 탭도 센다).</dd>
+            <dt>경보</dt><dd>CloudWatch 경보 가운데 ALARM 인 수 / 전체 수와 데이터 부족 수. 어느 경보인지는 인프라 절에서 본다.</dd>
+            <dt>canary</dt><dd>밖에서 사이트를 5분마다 점검하는 Lambda 의 최근 실행(11분 안에 끝난 것) — 통과·실패와 걸린 시간. 실패는 주의이고, 두 번(10분) 이어 실패하면 canary 경보가 울린다.</dd>
+            <dt>이번 달 비용</dt><dd>월 예산 가운데 한도 대비 실제가 가장 큰 것의 실제 사용액과 비율. 85% 이상이거나 AWS 예측이 한도를 넘으면 주의색, 100% 이상이면 장애색이지만 판정에는 넣지 않는다.</dd>
+            <dt>n분 전 값 · 오래됨</dt><dd>칸 머리의 경과는 그 값을 서버가 만든 뒤 지난 시간이다. 서버 갱신 주기의 세 배를 넘으면 '오래됨' 으로 칠한다.</dd>
+            <dt>상태 배지</dt><dd><b>연결 안 됨</b> = 그 기능이 이 서버에 켜져 있지 않다(자격·파일·토큰 없음), <b>권한 없음</b> = IAM 정책이나 조직 SCP 가 막았다, <b>불러오지 못함</b> = 부르다 실패했다, <b>첫 조회 중</b> = 서버가 아직 첫 값을 만드는 중이다. 배지 옆 작은 고정폭 글자는 서버가 준 짧은 사유다.</dd>
+            <dt>모양</dt><dd>● 정상 · ▲ 주의 · ✕ 장애 · ○ 판정 밖 · ? 알 수 없음 · … 기다림. 색만 보지 않도록 모양과 글자를 함께 붙인다.</dd>
+            <dt>시각</dt><dd>화면의 시각은 모두 이 브라우저의 시간대다. Clarity 가 준 값만 UTC 기준으로 센 값이다.</dd>
+            <dt>값 없음 · 값 1개뿐</dt><dd>차트에 값 있는 점이 0개·1개라 선을 긋지 못했다는 뜻이다. 경보 상태의 '데이터 부족' 과는 다르다.</dd>
+            <dt>마지막 갱신</dt><dd>머리의 시각은 이 화면이 마지막으로 값을 받아 온 때다. 탭이 숨으면 부르지 않아 멈춘다.</dd>
+          </dl>
+        </details>
       </section>
 
       <section id="collect" aria-labelledby="h-collect">
         <div class="sec-head"><h2 id="h-collect">수집</h2><p class="sec-sum" id="s-collect">…</p></div>
+        <details class="explain">
+          <summary>이 절 읽는 법<span class="tail">· 수집기 10초마다</span></summary>
+          <dl>
+            <dt>읽는 값</dt><dd>수집기의 수집 상태(거래소 다섯의 상태·최근 24시간 실패 구간)를 10초마다 읽는다. 수집기 메모리의 값이고, 수집기를 다시 시작하면 24시간 이력은 Influx 에서 되읽는다.</dd>
+            <dt>판정</dt><dd>거래소 하나라도 끊김이면 장애, 지연이면 주의로 개요 판정에 든다. 실패 구간·성공률은 판정에 넣지 않는다.</dd>
+            <dt>즉시 갱신</dt><dd>수집기에 마켓 목록·구독·입출금 상태를 지금 다시 읽힌다. 시세는 원래 실시간 스트림이라 평소엔 누를 일이 없는 진단용이고, 토큰은 입력칸에만 있고 저장하지 않는다.</dd>
+          </dl>
+        </details>
         <div class="stack">
           <div class="card">
             <div class="card-head"><span class="card-kicker">거래소 다섯</span><span class="meta" id="m-collect"></span></div>
@@ -64,10 +92,39 @@
               <thead><tr><th>거래소</th><th>상태</th><th>열린 실패 구간</th><th class="num">마지막 성공</th><th class="num">1시간 성공률</th><th class="num">마켓</th><th>마지막 오류</th></tr></thead>
               <tbody id="exchanges"></tbody>
             </table></div>
+            <details class="terms">
+              <summary>이 칸 뜻</summary>
+              <dl>
+                <dt>상태</dt><dd>마지막 성공 뒤 5초 미만이면 수집 중, 60초 미만이면 지연, 그 밖은 끊김이다. 수집기가 뜬 뒤 한 번도 성공하지 못했어도 끊김이다.</dd>
+                <dt>마지막 성공</dt><dd>수집기가 그 거래소를 마지막으로 정상 판정한 때. 1초마다 판정하고, 스트림이 연결돼 있고 30초 안에 시세가 왔으면 정상이다.</dd>
+                <dt>열린 실패 구간</dt><dd>지금 이어지는 실패 — 실패 종류 · n회(실패로 판정된 초의 수) · 이어진 시간이고, 60초를 넘으면 Slack 알림이 나간다. 연속 성공 3번이면 닫히고, 실패 종류가 바뀌면 그때 닫고 새 구간을 열어 n회·시간을 처음부터 센다(수가 줄어도 복구가 아니다).</dd>
+                <dt>1시간 성공률</dt><dd>(1 − 최근 1시간과 겹친 실패 구간의 초 ÷ 3,600) × 100 을 소수 1자리로 적는다 — 한 곳이 36초 끊기면 99.0% 다. 99% 를 넘으면 정상 범위이고, 요약 줄의 '전체 1시간' 은 다섯 곳의 평균이다.</dd>
+                <dt>마켓</dt><dd>그 거래소에서 지금 수집기 메모리에 든 마켓 수. 요약 줄의 '마켓' 은 다섯 곳의 합이다.</dd>
+                <dt>마지막 오류</dt><dd>24시간 안 가장 최근 실패 구간의 마지막 실패 — 시각 · 실패 종류 · HTTP 상태 · 오류 글 앞부분(전체는 마우스를 올리면). 오류 글은 거래소가 준 응답 본문이 있으면 그 글, 없으면 수집기가 적은 글이고, 흐린 글이면 그 구간은 이미 끝났다.</dd>
+                <dt>수집기 시작</dt><dd>수집기 프로세스가 마지막으로 뜬 시각. 배포하지 않았는데 바뀌었으면 수집기가 다시 시작된 것이다.</dd>
+                <dt>타임아웃 <code>timeout</code></dt><dd>연결이나 호출이 제한 시간 안에 답하지 않았다.</dd>
+                <dt>연결 실패 <code>network</code></dt><dd>연결을 맺지 못했거나 연결이 끊겼다(DNS·연결 거부 등).</dd>
+                <dt>rate limit <code>rate_limit</code></dt><dd>거래소의 호출 한도를 넘었다(429 등).</dd>
+                <dt>차단 <code>banned</code></dt><dd>거래소가 우리 IP 를 막았다(업비트 418 등).</dd>
+                <dt>거래소 오류 <code>unavailable</code></dt><dd>거래소가 5xx 로 답했다(장애·점검).</dd>
+                <dt>요청 오류 <code>bad_request</code></dt><dd>거래소가 우리 요청(구독 등)을 거부했다.</dd>
+                <dt>응답 오류 <code>bad_response</code></dt><dd>받은 응답을 읽지 못했다 — JSON 이 아니거나 모양이 예상과 다르다.</dd>
+                <dt>스트림 정체 <code>stale_stream</code></dt><dd>연결은 살아 있는데 30초 넘게 시세가 오지 않았다.</dd>
+              </dl>
+            </details>
           </div>
           <div class="card">
             <div class="card-head"><span class="card-kicker">실패 구간 · 최근 24시간</span><span class="meta small"><span class="t-bad">■ 차단·rate limit</span><span class="t-warn">▬ 그 밖</span></span></div>
             <div id="timeline"></div>
+            <details class="terms">
+              <summary>이 칸 뜻</summary>
+              <dl>
+                <dt>막대</dt><dd>거래소마다 한 줄, 막대 하나가 실패 구간 하나다(진행 중은 지금까지). 마우스를 올리면 시각·실패 종류·횟수가 보인다.</dd>
+                <dt>높이·색</dt><dd>차단·rate limit 은 꽉 찬 높이의 장애색, 그 밖은 낮은 주의색 막대다. 색만으로 가르지 않게 높이도 다르다.</dd>
+                <dt>최소 폭</dt><dd>약 6분보다 짧은 구간은 모두 같은 최소 폭(약 6분)으로 그린다 — 짧은 구간의 막대는 실제보다 넓다.</dd>
+                <dt>아래 다섯 줄</dt><dd>시작이 가장 늦은 구간 다섯 — 시작 시각 · 거래소 · 끝(또는 진행 중) · 실패 종류 · 횟수. 휴대폰은 막대에 뜨는 글을 못 봐서 글자로도 적었다.</dd>
+              </dl>
+            </details>
           </div>
           <details class="fold" id="refresh-fold">
             <summary>즉시 갱신 — 마켓 목록·구독·입출금을 지금 다시 읽힌다</summary>
@@ -90,7 +147,17 @@
 
       <section id="infra" aria-labelledby="h-infra">
         <div class="sec-head"><h2 id="h-infra">인프라</h2><p class="sec-sum" id="s-infra">…</p></div>
-        <!-- 지표·경보·canary 가 같은 이유로 비면(AWS 종료 뒤 등) 카드 하나로 접는다 -->
+        <details class="explain">
+          <summary>이 절 읽는 법<span class="tail">· CloudWatch 경보·canary 60초 · 지표 5분</span></summary>
+          <dl>
+            <dt>읽는 값</dt><dd>수집기가 AWS 서울의 CloudWatch 를 읽어 준 값이다 — 경보·canary 는 60초, 박스 지표는 5분마다 서버가 새로 읽고 화면은 60초마다 부른다. 지표는 지난 24시간을 5분 구간으로 나눈 점이다.</dd>
+            <dt>판정</dt><dd>경보 하나라도 ALARM 이면 장애, canary 최근 실행 실패와 수집기가 CloudWatch 의 경보·canary 를 읽지 못한 것(읽기 오류)은 주의로 개요 판정에 든다. 이 화면이 피드를 부르지 못한 것(호출 실패)과 박스 지표는 판정 밖이다 — 메모리·디스크·크레딧이 경보 기준을 넘으면 그 경보가 ALARM 이 되어 판정에 든다.</dd>
+            <dt>연결 안 됨</dt><dd>수집기가 AWS 자격을 얻지 못했다(AWS 밖 호스트·로컬 포함). 이 절·비용 절, 개요의 경보·canary·비용 칸, 접속 절의 24시간 선, 알림 절의 경보 이력(경보 행)이 비고 판정에서 빠진다.</dd>
+            <dt>권한 없음</dt><dd>IAM 정책이나 조직 SCP 가 그 읽기를 막았다. 그 부분만 비고, 값은 AWS 콘솔에서 본다.</dd>
+            <dt>카드 하나로 접힘</dt><dd>경보·지표·canary 세 부분이 같은 이유(연결 안 됨·권한 없음·같은 호출 실패)로 비면 절을 카드 하나로 접는다. 그때는 아래 카드와 그 '이 칸 뜻' 도 함께 숨는다.</dd>
+          </dl>
+        </details>
+        <!-- 지표·경보·canary 가 같은 이유로 비면(AWS 자격이 없을 때 등) 카드 하나로 접는다 -->
         <div class="card" id="infra-fold" hidden>
           <div class="card-head"><span class="card-kicker">AWS 지표·경보·canary</span><span class="meta" id="m-infra-fold"></span></div>
           <div id="b-infra-fold"></div>
@@ -101,21 +168,74 @@
               <div class="card-head"><h3>경보</h3><span class="meta" id="m-alarms"></span></div>
               <div id="b-alarms"></div>
               <details id="alarms-ok"><summary id="alarms-ok-sum">정상 0개</summary><div class="scroll"><table class="table"><tbody id="alarms-ok-rows"></tbody></table></div></details>
+              <details class="terms">
+                <summary>이 칸 뜻</summary>
+                <dl>
+                  <dt>이름</dt><dd>앞의 marketlens- 를 뗀 경보 이름과 흐린 꼬리 이름표. 이름에 마우스를 올리면 전체 이름과 울리는 조건이 보인다.</dd>
+                  <dt>인스턴스 상태검사 <code>status-instance</code></dt><dd>EC2 인스턴스 상태검사가 60초 3점 연속 실패하면 울리고, AWS 가 그 박스를 재부팅한다.</dd>
+                  <dt>시스템 상태검사 <code>status-system</code></dt><dd>EC2 시스템 상태검사가 60초 2점 연속 실패하면 울리고, AWS 가 그 박스를 복구(recover)한다.</dd>
+                  <dt>CPU 크레딧 잔고 <code>credit-balance</code></dt><dd>잔고가 최대 적립의 30%(data 173·serve 86) 밑으로 5분 3점 연속이면 울린다.</dd>
+                  <dt>잉여 크레딧 과금 <code>credit-surplus</code></dt><dd>잉여 크레딧 과금이 5분 1점이라도 0 을 넘으면 울린다 — unlimited 과금이 시작됐다는 뜻이다.</dd>
+                  <dt>메모리 <code>memory</code></dt><dd>메모리 가용률 10% 미만이 5분 이어지면 울린다(collect 는 5분 1점). 지표가 들어오지 않아도 울린다.</dd>
+                  <dt>디스크 <code>disk</code></dt><dd>디스크 사용률이 5분 1점이라도 80% 를 넘으면 울린다. 지표가 들어오지 않아도 울린다.</dd>
+                  <dt>canary <code>canary</code></dt><dd>canary Lambda 실패가 5분 2점 연속(10분)이면 울린다. 실행이 멈춰 점이 없어도 울린다.</dd>
+                  <dt>사이트 5xx <code>http-5xx</code></dt><dd>사이트의 5xx 응답이 5분 합 10 이상이면 울린다(/api/ws/spreads 는 세지 않는다). 점이 없으면 정상이다.</dd>
+                  <dt>상태</dt><dd>ALARM = 조건을 넘었다, OK = 정상, 데이터 부족 = 평가할 지표 점이 들어오지 않았다. 메모리·디스크·canary 경보는 점이 없으면 데이터 부족이 아니라 ALARM 이 된다.</dd>
+                  <dt>사유</dt><dd>AWS 가 적은 마지막 상태 변경의 까닭(앞 160자, 전체는 마우스를 올리면).</dd>
+                  <dt>바뀐 지</dt><dd>그 상태가 된 뒤 지난 시간.</dd>
+                  <dt>정상 n개</dt><dd>OK 경보는 이 접힌 묶음 안에 둔다. 펼쳐 두면 다시 그려도 그대로다.</dd>
+                </dl>
+              </details>
             </div>
             <div class="card">
               <div class="card-head"><h3>canary</h3><span class="meta" id="m-canary"></span></div>
               <div id="b-canary"></div>
+              <details class="terms">
+                <summary>이 칸 뜻</summary>
+                <dl>
+                  <dt>네 단계</dt><dd>Lambda 가 5분마다 사이트를 밖에서 차례로 점검한다 — 첫 화면, /api/health, 최근 15분 1분 봉, 대시보드 WebSocket 표. 하나라도 실패하면 그 실행은 실패다.</dd>
+                  <dt>최근 실행</dt><dd>최근 11분 안에 끝난 실행 가운데 가장 늦은 것의 통과·실패, 지난 시간, 걸린 시간. 끝난 실행이 없으면 그렇게 적고, 일정이 멈췄으면 10분쯤 뒤 canary 경보가 울린다.</dd>
+                  <dt>24시간 실행·오류</dt><dd>CloudWatch 의 Lambda 실행 수·오류 수를 24시간 더한 값. 5분마다 돌아 실행 288 안팎·오류 0 이 정상이다.</dd>
+                  <dt>실행 시간</dt><dd>실행 한 번이 걸린 시간의 5분 최댓값. 굵은 값은 24시간 최고이고, 작은 '마지막 5분 구간' 값은 몇 분 늦다.</dd>
+                  <dt>로그 줄</dt><dd>최근 실행이 남긴 단계별 결과 — 'N단계 통과 (ms)' 또는 실패 글, 10줄까지.</dd>
+                </dl>
+              </details>
             </div>
           </div>
           <div>
             <div class="card-head"><span class="card-kicker">박스 · 24시간</span><span class="meta" id="m-metrics"></span></div>
             <div class="grid" id="b-metrics"></div>
+            <details class="terms">
+              <summary>이 칸 뜻</summary>
+              <dl>
+                <dt>박스 셋</dt><dd>collect(c7g — 수집기), data(t4g — Influx·Redis), serve(t4g — caddy·web·api). 메모리 경보가 있는 박스만 나오고, 이름에 마우스를 올리면 인스턴스 ID 가 보인다.</dd>
+                <dt>메모리 가용률</dt><dd>CloudWatch 에이전트가 잰 가용 메모리 비율의 5분 최솟값. 20% 이상이 정상이고 20% 미만 주의·10% 미만 장애다(점선 = 경보 기준 10%).</dd>
+                <dt>디스크 사용률</dt><dd>루트 디스크 사용률의 5분 최댓값. 70% 이하가 정상이고 70% 초과 주의·80% 초과 장애다(점선 = 경보 기준 80%).</dd>
+                <dt>CPU 사용률</dt><dd>EC2 CPU 사용률의 5분 평균. 색을 칠하지 않는다 — collect 는 수집기가 늘 높게 쓴다.</dd>
+                <dt>CPU 크레딧 잔고</dt><dd>t4g 박스(data·serve)가 기준보다 CPU 를 더 쓸 때 꺼내 쓰는 적립의 5분 최솟값. data 173·serve 86 이상이 정상이고 그 밑이면 장애색이다(점선 = 경보 기준).</dd>
+                <dt>스왑 사용률</dt><dd>값이 오는 박스만 5분 최댓값을 선으로 그린다(경보 없음). serve 는 스왑이 있지만 에이전트가 모으지 않아 '스왑 지표 없음' 이다.</dd>
+                <dt>지금 값</dt><dd>굵은 값은 마지막 5분 구간의 값이라 몇 분 늦다. 옆 작은 글은 24시간 최저(메모리·크레딧) 또는 최고(디스크·CPU·스왑)다.</dd>
+                <dt>머리 배지</dt><dd>카드 안 지금 값 가운데 가장 나쁜 주의·장애 값.</dd>
+              </dl>
+            </details>
           </div>
         </div>
       </section>
 
       <section id="alerts" aria-labelledby="h-alerts">
         <div class="sec-head"><h2 id="h-alerts">알림</h2><p class="sec-sum" id="s-alerts">…</p></div>
+        <details class="explain">
+          <summary>이 절 읽는 법<span class="tail">· 최근 7일 · 60초마다</span></summary>
+          <dl>
+            <dt>읽는 값</dt><dd>앱 두 역할(수집기·api)이 보낸 Slack 알림 기록과 CloudWatch 경보 상태 변경을 시각 순으로 합친 최근 7일·200건. 수집기가 모아 주고 화면은 60초마다 부른다.</dd>
+            <dt>판정</dt><dd>판정에 넣지 않는다. 전송 실패가 있으면 절 요약만 주의색이다.</dd>
+            <dt>머리 표시</dt><dd>🔴 거래소 수집 실패 구간이 60초를 넘었다 · 🟢 그 구간의 복구 또는 앱 기동 · ⚠️ 앱 ERROR 로그(처리 안 된 500 포함).</dd>
+            <dt>10분 억제</dt><dd>같은 알림 키(Slack 행에 마우스를 올리면 보인다)는 10분에 한 번만 보내고, 보내기 대기열이 넘치면 새 알림을 버린다 — 보내지 않은 알림은 이 기록에도 없다. 보낸 알림도 Redis 에 2초 안에 쓰지 못했거나 기동 중 기록을 붙이기 전이면 빠진다 — data 박스 장애처럼 알림이 몰리는 때라, 그 시간대 기록이 비어도 알림이 없었다는 뜻은 아니다.</dd>
+            <dt>전송 실패</dt><dd>Slack 이 받지 않은 알림. 기록에는 있지만 Slack 채널에는 없다.</dd>
+            <dt>경보 행</dt><dd>CloudWatch 경보가 이전 상태에서 새 상태로 바뀐 기록과 그 사유. 이름 뒤 흐린 글자는 인프라 절과 같은 경보 꼬리 이름표다.</dd>
+            <dt>없는 것</dt><dd>예산 알림, Amazon Q 가 Slack 에 올린 경보 글, 외부 uptime 감시 알림은 이 기록에 없다. 이 수집기에 Slack 웹훅이 없으면 Slack 쪽은 '연결 안 됨' 이다.</dd>
+          </dl>
+        </details>
         <div class="card">
           <div class="card-head">
             <div class="chips" role="group" aria-label="알림 출처">
@@ -133,6 +253,18 @@
 
       <section id="traffic" aria-labelledby="h-traffic">
         <div class="sec-head"><h2 id="h-traffic">접속</h2><p class="sec-sum" id="s-traffic">…</p></div>
+        <details class="explain">
+          <summary>이 절 읽는 법<span class="tail">· 실시간 10초 · 서버 기록 60초</span></summary>
+          <dl>
+            <dt>읽는 값</dt><dd><b>실시간</b> = api 의 대시보드 연결 수(10초)와 그 CloudWatch 24시간 선, <b>서버 기록</b> = api 가 caddy 접속 기록을 센 요약(60초), <b>Clarity</b> = 화면 분석에 동의한 방문자를 Microsoft 가 센 값(Clarity 칸에 적힌 간격). 셋은 세는 대상이 달라 숫자가 서로 맞지 않는 것이 정상이다.</dd>
+            <dt>판정</dt><dd>판정에 넣지 않는다. 장애색은 5xx 에만 쓴다.</dd>
+            <dt>창</dt><dd>서버 기록은 최근 24시간(지금이 든 시간을 끝으로 한 시간 칸 24개)이고 시각은 이 브라우저 시간대다. Clarity 는 부른 때 직전 하루를 UTC 기준으로 센 값이다.</dd>
+            <dt>남기는 것</dt><dd>요약에는 IP·User-Agent 원문이 없다(caddy 기록의 IP 도 앞부분만 남는다). api 메모리에서 세고 따로 저장하지 않아, api 를 다시 시작하면 기록 파일을 처음부터 다시 읽어 센다.</dd>
+            <dt>빠지는 요청</dt><dd>랜딩·수집 상태·기록 탭의 폴링, uptime 감시·canary, 도메인이 아닌 IP 로 들어온 요청은 caddy 가 처음부터 기록하지 않는다. 이 관리자 화면도 caddy 를 지나지 않아 기록에 없다.</dd>
+            <dt>서버 기록과 Clarity</dt><dd>Clarity 는 동의한 방문자만 세므로 서버 기록보다 훨씬 적은 것이 정상이다. 서버 기록에는 봇도 섞인다.</dd>
+            <dt>대시보드 탭</dt><dd>실시간 스프레드 <code>spread</code> · 기록/통계 <code>history</code> · 선물–현물 갭 <code>gap</code> · 선선갭 <code>pp</code> · 수집 상태 <code>health</code> · 입출금 레이더 <code>flow</code>. tab 이 없는 /app/ 은 spread, 목록 밖 값은 (기타)로 세고, 들어온 뒤 바꾼 탭은 서버 기록에 없다.</dd>
+          </dl>
+        </details>
         <div class="stack">
           <div class="grid-wide traffic-top">
             <div class="card">
@@ -140,14 +272,46 @@
               <p><span class="big" id="ws-now">…</span></p>
               <p class="muted small">열린 대시보드 수 — 사람 수가 아니다</p>
               <div id="b-ws24"></div>
+              <details class="terms">
+                <summary>이 칸 뜻</summary>
+                <dl>
+                  <dt>지금 접속</dt><dd>api 가 지금 들고 있는 대시보드 WebSocket 연결 수(10초마다). 연결 수 — 사람 수가 아니다: 탭마다 하나라 탭 둘이면 2 이고 숨긴 탭도 센다.</dd>
+                  <dt>WebSocket 접속 수 선</dt><dd>api 가 10초마다 보내는 연결 수를 CloudWatch 가 5분마다 가장 큰 값으로 모은 24시간 선. 굵은 값은 24시간 최고이고, 작은 '마지막 5분 구간' 값은 몇 분 늦다.</dd>
+                </dl>
+              </details>
             </div>
             <div class="card">
               <div class="card-head"><span class="card-kicker">서버 기록 · 24시간</span><span class="meta" id="m-access"></span></div>
               <p class="muted small" id="access-sub"></p>
               <div id="b-access"></div>
+              <details class="terms">
+                <summary>이 칸 뜻</summary>
+                <dl>
+                  <dt>총 요청 <code>requests</code></dt><dd>창 안에서 읽은 caddy 기록 줄 전부(읽지 못한 줄은 빼고) — 화면 주소·그림·스크립트 파일·봇 스캔·끝난 WebSocket 연결이 한 줄씩 든다. 폴링·canary 처럼 caddy 가 처음부터 기록하지 않는 요청은 들지 않는다.</dd>
+                  <dt>페이지 <code>pages</code></dt><dd>화면 주소(/·/app/·/privacy 처럼 마지막 조각에 점이 없는 주소)를 GET 으로 열어 오류·리다이렉트가 아닌 응답을 받은 요청. 그림·스크립트 파일과 없는 주소를 노린 스캔·리다이렉트는 빠지고, 봇은 섞여 있어 사람 수가 아니다.</dd>
+                  <dt>5xx</dt><dd>서버 오류(상태 5xx)로 답한 요청 수. 판정에는 넣지 않지만 이 절에서 장애색으로 칠하고, 어느 경로였는지는 아래 '최근 5xx' 에서 본다.</dd>
+                  <dt>시간대별 막대</dt><dd>막대 하나가 한 시간이고 높이는 그 시간의 요청 수(가장 많은 시간이 꽉 참), 겹친 장애색은 5xx 다. 막대에 마우스를 올리면 그 시간의 페이지·5xx 수도 보인다.</dd>
+                  <dt>상태 코드</dt><dd>응답을 2xx·3xx·4xx·5xx 로 나눈 수와 총 요청 대비 비율. 끝난 WebSocket 연결(101) 같은 줄은 넷 밖이라 넷을 더해도 100% 가 되지 않는다.</dd>
+                  <dt>WebSocket 연결 · 지속 시간</dt><dd>창 안에서 끝난 대시보드 연결 수와 열려 있던 시간의 구간별 수 — 지금 열린 연결은 아직 끝나지 않아 빠진다. 지속 시간은 연결이 열려 있던 시간이지 머문 시간이 아니다(숨긴 탭도 열려 있다).</dd>
+                  <dt>읽지 못한 줄 <code>skipped</code></dt><dd>JSON 이 아니거나 필요한 필드가 빠진 줄 수에, 깨진 회전 파일 하나마다 1 을 더한 값.</dd>
+                  <dt>기록 시작</dt><dd>창 안에서 읽은 가장 이른 줄이 창 시작보다 늦을 때 그 시각. 그 앞에는 요청이 없었거나 기록 파일이 남아 있지 않다.</dd>
+                </dl>
+              </details>
             </div>
           </div>
           <div class="grid grid3" id="access-tables"></div>
+          <details class="terms">
+            <summary>이 칸 뜻</summary>
+            <dl>
+              <dt>경로 <code>paths</code></dt><dd>페이지 요청의 주소(쿼리를 뗀 것).</dd>
+              <dt>탭 <code>tabs</code></dt><dd>대시보드(/app/) 페이지 요청의 tab 값을 한국어 탭 이름으로 적는다 — 마우스를 올리면 원래 id 가 보인다. 들어온 첫 탭만 세고, 들어온 뒤 바꾼 탭은 없다.</dd>
+              <dt>외부 출처 <code>referrers</code></dt><dd>다른 사이트의 링크로 들어왔을 때 그 사이트의 주소(스킴·호스트만)이고, 누를 수 없는 글자다. 출처를 보내지 않은 방문(주소창에 직접 침·앱에서 엶 등)은 세지 않는다.</dd>
+              <dt>utm_source <code>utmSources</code></dt><dd>페이지 주소에 붙은 utm_source 값(소문자) — 우리가 뿌린 링크가 몇 번 열렸나.</dd>
+              <dt>기기 <code>devices</code></dt><dd>요청이 밝힌 User-Agent 글자로 가른 기기 종류.</dd>
+              <dt>브라우저 <code>browsers</code></dt><dd>요청이 밝힌 User-Agent 글자로 가른 브라우저 종류.</dd>
+              <dt>수 · 막대 · %</dt><dd>표마다 수가 많은 위 10개를 적는다. 막대와 % 는 여섯 표가 같은 분모로 나눈 비율이라, 일부 페이지만 세는 표(탭은 /app/ 만, 외부 출처는 출처가 있는 방문만, utm_source 는 그 값이 붙은 주소만)는 % 를 더해도 100% 가 되지 않는다.</dd>
+            </dl>
+          </details>
           <details class="fold" id="r5xx" hidden>
             <summary id="r5xx-sum">최근 5xx</summary>
             <div class="scroll"><table class="table">
@@ -163,24 +327,61 @@
               <summary id="clarity-more-sum">받은 지표</summary>
               <div id="clarity-metrics" class="metric-list"></div>
             </details>
+            <details class="terms">
+              <summary>이 칸 뜻</summary>
+              <dl>
+                <dt>세션 <code>sessions</code></dt><dd>Clarity 가 센 세션 수. 화면 분석에 동의한 방문자만 든다.</dd>
+                <dt>봇 세션 <code>botSessions</code></dt><dd>Clarity 가 봇으로 가려낸 세션 수. 세션 수에 들어 있는지는 확인하지 못했다.</dd>
+                <dt>사용자 <code>users</code></dt><dd>Clarity 가 가른 서로 다른 사용자 수(동의한 방문자만). 가르는 규칙은 Clarity 의 것이라 사람 수와 같다고 보지 않는다.</dd>
+                <dt>세션당 페이지 <code>pagesPerSession</code></dt><dd>Clarity 가 준 PagesPerSessionPercentage 값을 소수 2자리로 적었다. 이름에 Percentage 가 붙어 있어 평균인지 비율인지는 세션이 있는 응답을 보기 전이라 모른다.</dd>
+                <dt>받은 지표</dt><dd>Clarity 가 준 지표 이름·행 키를 고치지 않고 적은 것(지표마다 20행). 주소 값은 쿼리를 뗐다.</dd>
+                <dt>다음 조회</dt><dd>Clarity 는 하루에 부를 수 있는 횟수가 정해져 있어 적힌 간격으로만 부르고, 실패하면 마지막으로 받은 값을 그대로 둔다.</dd>
+              </dl>
+            </details>
           </div>
         </div>
       </section>
 
       <section id="cost" aria-labelledby="h-cost">
         <div class="sec-head"><h2 id="h-cost">비용</h2><p class="sec-sum" id="s-cost">…</p></div>
+        <details class="explain">
+          <summary>이 절 읽는 법<span class="tail">· AWS Budgets 6시간</span></summary>
+          <dl>
+            <dt>읽는 값</dt><dd>수집기가 AWS Budgets 의 비용 예산 전부를 6시간마다 새로 읽고, 화면은 60초마다 부른다.</dd>
+            <dt>판정</dt><dd>판정에 넣지 않는다. 월 예산의 실제가 한도의 85% 이상이거나 예측이 한도를 넘으면 주의색, 100% 이상이면 장애색으로 이 절과 개요 칸에만 보인다.</dd>
+            <dt>없는 것</dt><dd>서비스별 내역은 조직 SCP 가 Cost Explorer 를 막아 여기 없다 — 결제 콘솔에서 본다.</dd>
+          </dl>
+        </details>
         <div class="card">
           <div class="card-head"><span class="card-kicker">AWS 비용 예산</span><span class="meta" id="m-budget"></span></div>
           <div id="b-budget"></div>
           <ul class="notes">
             <li>서비스별 내역은 조직 SCP 가 Cost Explorer 를 막아 여기 없다 — 결제 콘솔에서 본다</li>
-            <li>AWS 계정 종료 예정 2026-12</li>
           </ul>
+          <details class="terms">
+            <summary>이 칸 뜻</summary>
+            <dl>
+              <dt>막대</dt><dd>이번 달 실제 사용액. 한도의 85% 이상이면 주의색, 100% 이상이면 장애색이다.</dd>
+              <dt>점선</dt><dd>한도 × 이번 달(UTC 달)이 지난 비율 — 한도를 고르게 썼다면 지금 있을 자리다. 막대가 점선을 넘으면 한도보다 빠르게 쓰고 있다.</dd>
+              <dt>세로선</dt><dd>한도의 85%·100% 자리 — 예산 알림이 나가는 기준이다.</dd>
+              <dt>예측</dt><dd>AWS 가 낸 이번 달 말 예상 사용액. AWS 가 하루 몇 번만 갱신하고, 한도를 넘으면 주의색이다.</dd>
+              <dt>월 단위가 아닌 예산</dt><dd>분기·연 예산은 막대 없이 이름·실제·한도만 적고, 개요 칸·절 요약은 월 예산만 본다.</dd>
+            </dl>
+          </details>
         </div>
       </section>
 
       <section id="tools" aria-labelledby="h-tools">
         <div class="sec-head"><h2 id="h-tools">도구</h2><p class="sec-sum">콘솔과 문서 — 읽기 전용 화면이라 바꾸는 일은 각 콘솔에서 한다</p></div>
+        <details class="explain">
+          <summary>이 절 읽는 법</summary>
+          <dl>
+            <dt>읽는 값</dt><dd>이 화면에 고정해 둔 주소다 — 읽는 피드가 없다.</dd>
+            <dt>판정</dt><dd>판정에 넣지 않는다.</dd>
+            <dt>링크</dt><dd>레포가 공개라 주소에 계정·프로젝트 ID 를 넣지 않았다 — Cloudflare 는 대시보드 첫 화면만 연다. 모두 같은 탭으로 연다.</dd>
+            <dt>바꾸는 일</dt><dd>이 화면은 즉시 갱신 하나만 빼고 읽기 전용이다. 설정은 각 콘솔에서 바꾼다.</dd>
+          </dl>
+        </details>
         <div class="links">
           <div class="card"><span class="card-kicker">앱</span><ul>
             <li><a href="/api/docs">API 문서</a></li>

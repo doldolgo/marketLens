@@ -6,7 +6,7 @@
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
 
 ## 1. 목적
-관리자 페이지(036)가 한 화면에 모을 운영 정보 중 수집기가 만드는 두 가지를 준다 — CloudWatch 경보·24시간 지표·canary·예산(AWS 요약), 그리고 025 가 Slack 으로 보낸 알림에 경보 상태 변경을 합친 알림 기록. 지금은 AWS 콘솔과 Slack 을 따로 열어야 하고, 보낸 알림은 어디에도 남지 않는다. AWS 계정은 2026년 12월에 끝나고 조직 SCP 가 일부 API 를 막는다 — 설정·자격증명·권한이 없으면 그 부분만 상태로 답하고 나머지는 그대로 동작한다.
+관리자 페이지(036)가 한 화면에 모을 운영 정보 중 수집기가 만드는 두 가지를 준다 — CloudWatch 경보·24시간 지표·canary·예산(AWS 요약), 그리고 025 가 Slack 으로 보낸 알림에 경보 상태 변경을 합친 알림 기록. 지금은 AWS 콘솔과 Slack 을 따로 열어야 하고, 보낸 알림은 어디에도 남지 않는다. 조직 SCP 가 일부 API 를 막는다 — 설정·자격증명·권한이 없으면 그 부분만 상태로 답하고 나머지는 그대로 동작한다.
 
 ## 2. 범위
 - 만드는 것: 수집기 역할의 관리자 피드 두 경로(기능 폴더 `admin` 에 collector 라우터), 025 알림기의 기록 자리와 core `RedisBus` 공개 메서드 둘, 관리자 nginx 정확 일치 location 둘, compose(server env 하나), 런북 절(IAM 읽기 정책), 계약 테스트.
@@ -54,7 +54,7 @@
 - 응답 = 부분 넷 `{alarms, metrics, canary, budget}`.
 - 설정: env `ADMIN_AWS_REGION` — 비면 네 부분 모두 `unconfigured`(code null)이고 AWS 를 부르지 않는다(로컬·테스트 기본). compose 가 `server` 에만 `ap-northeast-2` 를 준다. 자격증명은 SDK 기본 탐색(env 에 키를 두지 않는다 — 010)이고, 못 찾으면 1분 동안 다시 찾지 않는다 — 밖으로 나가는 망은 있는데 메타데이터 끝점이 답하지 않는 호스트(로컬 compose)는 조회 한 번이 약 2초라 부분마다 찾으면 첫 요청이 3초를 넘는다. 클라이언트는 첫 요청 때 만든다(기동에 넣지 않는다). 호출마다 연결 2초·읽기 5초, 재시도 없음. 예산은 전역 끝점(`budgets.amazonaws.com`).
 - 오류 분류(한 부분의 실패는 다른 부분에 번지지 않는다):
-  - `unconfigured` — 자격증명을 얻지 못하거나 쓸 수 없음: botocore `NoCredentialsError`·`CredentialRetrievalError`(code `no_credentials`), AWS 코드 `InvalidClientTokenId`·`UnrecognizedClientException`·`ExpiredToken`·`ExpiredTokenException`(code 는 그 코드 — 마지막은 JSON 프로토콜 서비스(Logs·Budgets)의 만료). AWS 밖 호스트나 계정 종료 뒤가 이렇다 — compose 의 `ADMIN_AWS_REGION` 을 고치지 않아도 "연결 안 됨" 으로 보이게.
+  - `unconfigured` — 자격증명을 얻지 못하거나 쓸 수 없음: botocore `NoCredentialsError`·`CredentialRetrievalError`(code `no_credentials`), AWS 코드 `InvalidClientTokenId`·`UnrecognizedClientException`·`ExpiredToken`·`ExpiredTokenException`(code 는 그 코드 — 마지막은 JSON 프로토콜 서비스(Logs·Budgets)의 만료). AWS 밖 호스트나 자격이 없어진 뒤가 이렇다 — compose 의 `ADMIN_AWS_REGION` 을 고치지 않아도 "연결 안 됨" 으로 보이게.
   - `denied` — `AccessDenied`·`AccessDeniedException`·`UnauthorizedOperation`(SCP 명시 거부도 같은 코드).
   - `error` — 네트워크·시간 초과·그 밖.
 - **alarms** — `DescribeAlarms`(`AlarmNamePrefix` `marketlens-`, 지표 경보). `items` = 이름 순 `{name, state, changedAt, reason}` — `state` 는 `OK`·`ALARM`·`INSUFFICIENT_DATA`, `changedAt` 은 상태가 바뀐 시각(`StateTransitionedTimestamp`), `reason` 은 `StateReason` 앞 200자. `counts` = `{ok, alarm, insufficientData}`. 027 기준 17개(로그 전송 뒤 18).
@@ -82,7 +82,7 @@
 - AWS 요금: `GetMetricData` 는 무료 한도 없이 지표 1,000개당 $0.01(CloudWatch 문서) — 17지표·5분 주기라 페이지를 하루 종일 열어 두면 월 약 $1.5, 하루 1시간이면 $0.1 아래. `DescribeAlarms`·`DescribeAlarmHistory`·`ListMetrics` 는 월 100만 요청 무료 한도 안으로 본다(027 에이전트 전송과 같이 센다 — 추정). `FilterLogEvents`·Budgets 조회는 가격표에서 요청 요금을 찾지 못했다(예산은 하루 4회 이하). 첫 달 청구로 사람이 확인.
 
 ### 3.5 엣지
-- AWS 계정 종료(2026-12)·AWS 밖 호스트: 자격증명을 못 얻어 AWS 네 부분과 알림 기록의 `alarms` 가 `unconfigured`(`no_credentials`). `slack` 은 그대로.
+- AWS 자격이 없음·AWS 밖 호스트: 자격증명을 못 얻어 AWS 네 부분과 알림 기록의 `alarms` 가 `unconfigured`(`no_credentials`). `slack` 은 그대로.
 - SCP 가 한 API 만 막음(예: Budgets): 그 부분만 `denied`, WARNING 10분 1줄, Slack 알림 없음.
 - AWS 가 느림·막힘: 전용 스레드 하나라 부분 갱신이 차례로 밀리고, 요청은 3초 뒤 직전 결과나 `pending` 을 받는다. 수집(틱·쓰기)은 영향이 없다.
 - 수집기 재시작(배포): 캐시가 비어 첫 요청이 3초 안에 못 채우면 `pending`, 다음 폴링에 채워진다. `alerts:log` 는 Redis 라 남는다.
