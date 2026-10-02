@@ -4,6 +4,8 @@
 헤더 `Authorization: Bearer <토큰>`, 응답 `[{metricName, information: [행…]}]`, **프로젝트당 하루 10회**(넘으면 429).
 그래서 시도 사이를 3시간(성공·실패 모두) 띄우고, 마지막 시도 시각·결과·마지막 성공 값을 Redis `admin:clarity` 에 둔다 —
 api 재시작(배포)이 한도를 쓰지 않게. 주소 값은 쿼리·해시를 떼고(`Referrer URL` 은 출처로) 저장·응답한다.
+지표 이름은 정규화해 비교한다 — 실제 응답은 `ReferrerUrl`·`PopularPages` 처럼 CamelCase 이고 문서는 `Referrer URL` 이다.
+출처 지표는 이름에 `referr`·`referer` 가 들면 — 철자가 또 바뀌어도 경로가 남지 않는 쪽(닫힌 쪽)으로.
 JSON 은 다시 쓸 수 있는 값만 남긴다 — 표준 밖 `NaN`·`Infinity`·넘치는 실수는 null, 짝 없는 서로게이트는 `?`.
 응답 JSON 풀기·줄이기는 `asyncio.to_thread`(기본 실행기)에서 한다.
 토큰은 헤더에만 싣는다 — 로그·Redis·응답·예외 code 어디에도 없다.
@@ -13,6 +15,7 @@ import asyncio
 import json
 import math
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -27,8 +30,11 @@ GAP_MS = 3 * 3600 * 1000  # 어떤 24시간에도 8회 이하 — 사람이 손�
 KEEP_MS = 7 * 86_400 * 1000  # 마지막 성공 값은 7일 뒤 버린다
 ROW_LIMIT = 20
 TEXT_LIMIT = 200
-TRAFFIC = "Traffic"
-REFERRER = "Referrer URL"
+# 이름에 따라 다르게 다루는 지표 둘 — 정규화한 이름(`metric_key`)으로 비교한다
+TRAFFIC = "traffic"  # 실제·문서 모두 `Traffic` — 정확 일치
+# 출처 지표 — 실제 `ReferrerUrl`(2026-10-02 첫 응답), 문서 `Referrer URL`. 조각 포함으로 고른다:
+# `Referrer`·`Referer Url`·`Referring URL`·`Referral…` 처럼 철자가 바뀌어도 출처로 줄인다(잘못 맞으면 경로만 잃는다)
+REFERRER_PARTS = ("referr", "referer")
 # 문서가 행 모양을 적은 지표는 Traffic 하나 — 응답 키 → (값 키, 정수 여부)
 TRAFFIC_KEYS = (
     ("sessions", "totalSessionCount", True),
@@ -36,12 +42,24 @@ TRAFFIC_KEYS = (
     ("users", "distantUserCount", True),
     ("pagesPerSession", "PagesPerSessionPercentage", False),
 )
+_NOT_ALNUM = re.compile(r"[^a-z0-9]")
 _AUTHORITY_END = re.compile(r"[/?#]")
 # 주소 꼴 — `<스킴>://`(대소문자 무관) 또는 스킴 없는 `호스트.이름` 바로 뒤에 `/`·`?`·`#`
 _SCHEME = re.compile(r"[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 _HOST_LIKE = re.compile(
     r"(?:[a-z0-9-]+\.)+[a-z]{2,}(?::[0-9]+)?(?=[/?#])", re.IGNORECASE
 )
+
+
+def metric_key(name: str) -> str:
+    """지표 이름 비교용 — NFKC(전각 → 반각) 뒤 소문자로 바꾸고 영문자·숫자만 남긴다.
+    `ReferrerUrl`·`Referrer URL` → `referrerurl`."""
+    return _NOT_ALNUM.sub("", unicodedata.normalize("NFKC", name).lower())
+
+
+def is_referrer(key: str) -> bool:
+    """정규화한 이름이 출처 지표인지 — `referr`·`referer` 조각이 들어 있으면."""
+    return any(part in key for part in REFERRER_PARTS)
 
 
 def loads(raw: str | bytes) -> Any:
@@ -172,6 +190,7 @@ def parse(content: bytes) -> dict[str, Any]:
 
 def shape(payload: Any) -> dict[str, Any]:
     """응답 → 값 `{numOfDays, traffic, metrics}`. Traffic 밖 지표는 받은 이름·키 그대로(행 20개, 주소 줄인 뒤).
+    Traffic·출처 지표는 정규화한 이름으로 고른다(실제 CamelCase·문서 철자 둘 다, 출처는 조각 포함).
     목록이 아니거나, 비지 않았는데 `{metricName: 문자열, information: 목록}` 이 하나도 없으면 ValueError."""
     if not isinstance(payload, list):
         raise ValueError("응답이 목록이 아니다")
@@ -184,13 +203,14 @@ def shape(payload: Any) -> dict[str, Any]:
         name, rows = item.get("metricName"), item.get("information")
         if not isinstance(name, str) or not isinstance(rows, list):
             continue
-        if name == TRAFFIC:
+        key = metric_key(name)
+        if key == TRAFFIC:
             if not seen_traffic:
                 seen_traffic = True
                 first = rows[0] if rows and isinstance(rows[0], dict) else None
                 traffic = None if first is None else _traffic(first)
             continue
-        referrer = name == REFERRER
+        referrer = is_referrer(key)
         metrics.append(
             {
                 "name": _utf8(name)[:TEXT_LIMIT],

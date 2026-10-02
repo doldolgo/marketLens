@@ -278,6 +278,7 @@ aws cloudwatch put-metric-alarm --alarm-name marketlens-http-5xx --namespace Mar
 WS 를 빼는 이유: serve 배포 때 열린 대시보드가 전부 재접속하며 502 를 낸다. 요청이 없으면 줄도 없으므로 데이터 없음은 정상이다.
 - 확인: `aws logs describe-log-groups --log-group-name-prefix /marketlens/serve/caddy --query 'logGroups[].[retentionInDays,logGroupClass]'` 가 `90 STANDARD`(IA 는 지표 필터가 안 되고 만든 뒤 못 바꾼다), 스트림 이름 = serve 인스턴스 ID, `aws logs tail /marketlens/serve/caddy --since 10m` 의 줄이 IP 끝 `.0`·헤더 없음·`s.q` 없음. 에이전트는 파일 위치를 기억해 caddy 재생성·회전 뒤에도 중복·누락 없이 이어 보낸다. 경보는 18개.
 - 되돌리기: 5-2 의 `fetch-config serve.json` 만 다시(로그 설정이 빠진다) → 지표 필터·경보 삭제. 로그 그룹을 지우려면 `aws logs delete-log-group`.
+- 2026-10-02 기록: 00:35Z 에 켰다. 위의 '하루 회전 파일을 본 뒤' 조건은 기다리지 않아(설계 세션 판단) 첫 `access.log`(09-29~, 1,927줄)가 읽은 시각으로 찍혔다 — 최대 3일 90일을 넘을 수 있다. 지표 필터·5xx 경보를 만들었고 경보 18개가 모두 OK. 자세한 것은 027 §7.
 
 Logs Insights 저장 쿼리 3개(로그 그룹 `/marketlens/serve/caddy`, `aws logs put-query-definition --name <이름> --log-group-names /marketlens/serve/caddy --query-string '<쿼리>'`):
 - `marketlens/경로별 요청 수`:

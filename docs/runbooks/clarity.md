@@ -47,7 +47,7 @@ Clarity 는 한 사람분만 지울 수 없다. 철회한 방문자가 이미 �
 2. 발급: Clarity 프로젝트 → Settings → Data Export → 새 토큰(프로젝트 관리자만 만들 수 있다). 이름은 용도를 알게(예: 관리자 요약).
 3. 넣기: serve 박스의 `server/.env` 에 `CLARITY_API_TOKEN=<토큰>` 한 줄을 편집기로 넣는다(셸 기록에 남기지 않게). collect 의 `server/.env` 에는 넣지 않는다 — api 만 쓴다.
 4. api 다시 만들기(serve): `docker compose --profile serve --env-file .env --env-file server/.env up -d --force-recreate api`.
-5. 확인: 관리자 페이지(036 전이면 serve 에서 `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/clarity`)의 `state` 가 `ok`, `traffic` 이 숫자. 첫 응답의 `metrics[].name` 목록과 행의 **키 이름**(값은 옮기지 않는다)을 035 §7 에 옮긴다 — 그때 정규화 키를 035·036 에 함께 더한다.
+5. 확인: 관리자 페이지(036 전이면 serve 에서 `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/clarity`)의 `state` 가 `ok`, `traffic.sessions`·`botSessions` 가 숫자 — 세션이 0 이면 `users`·`pagesPerSession` 은 null 일 수 있다(2026-10-02 첫 응답). 첫 응답(세션 0)의 `metrics[].name` 목록과 행의 **키 이름**(값은 옮기지 않는다)은 035 §7 에 옮겨 두었다 — 이름이 그 목록과 다르면 035 §7 에 옮긴다. 정규화 키는 세션이 있는 응답을 본 뒤 035·036 에 함께 더한다.
 - **상태 읽기**: `denied`·`http_401` = 토큰이 없거나 틀리거나 만료(교체), `denied`·`http_403` = 권한 없음, `error`·`http_429` = 오늘 한도를 다 썼다(값은 마지막 성공 그대로, `nextAt` 에 다시 부르는 시각), `error`·`redis` = data 박스 Redis 에 못 닿아 부르지 않았다. 값은 마지막 성공에서 7일이 지나면 비고 `fetchedAt` 이 경과를 말한다.
 - **바로 부르기**(토큰을 바꿨거나 3시간을 기다리지 않을 때): data 박스에서 `docker exec marketlens-redis redis-cli DEL admin:clarity` → 다음 관리자 페이지 요청이 곧바로 부른다. 하루 10회 중 1회를 쓴다.
 - **교체**(관리자 이탈 — Clarity 권장 — 또는 유출 의심): 새 토큰 발급(2) → serve `server/.env` 값 교체(3) → api 다시 만들기(4) → Data Export 화면에서 옛 토큰 삭제 → 바로 확인하려면 '바로 부르기'. 3시간 간격은 Redis 값이라 교체해도 유지된다.
