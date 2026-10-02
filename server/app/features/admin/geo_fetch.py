@@ -4,7 +4,9 @@
 가는 요청은 이 두 주소뿐이라 방문자 정보가 없다. 처리방침 v2 시행일(게이트) 뒤 접속 갱신이 ok 일 때만 부른다(`visits.py`).
 받기·적재는 이벤트 루프 밖의 데몬 스레드 하나에서 한 번에 하나만 돈다 — 기본 실행기(to_thread)는 앱 종료 때 끝까지
 기다리므로 따로 띄우고, 끝나면 스레드도 사라진다. 본문은 흘려 받으며 gunzip·CSV 로 한 줄씩 읽고 파일을 쓰지 않는다.
-두 파일은 같은 달 한 묶음이다 — 둘 다 확인을 통과해야 갈아 끼우고, 그 전까지 조회는 옛 판으로 한다.
+두 파일은 같은 달 한 묶음이다 — 둘 다 확인을 통과해야 갈아 끼우고, 그 전까지 조회는 옛 판으로 한다. 판이 없을 때 이번 달
+묶음이 어떤 이유로든 실패하면 같은 시도에서 지난달 묶음을 받는다. 이번 달이 실패한 시도 뒤에는 6시간, 이번 달을 올린 시도
+뒤에는(달이 바뀌어야 뜻이 있다) 24시간 뒤에 이번 달을 다시 받는다.
 판·시도 시각·결과는 프로세스 메모리에만 둔다. 예외는 종류 이름만 남긴다(문장·traceback 없음).
 """
 
@@ -40,8 +42,10 @@ READ_TIMEOUT_SEC = 10.0  # 한 번 기다림 — 멈춘 연결이 60초 검사�
 # 글자 읽기 단위(기본 8KB). 풀기는 부를 때마다 GIL 을 놓았다 다시 잡는데, 같은 프로세스에 CPU 를 쓰는 스레드가 있으면 다시
 # 잡을 때마다 전환 간격(5ms)을 기다린다 — 8KB 면 두 파일에 ≈7,400번이라 적재가 ≈40초로 늘었다(1MB 면 ≈60번·≈3초)
 TEXT_CHUNK = 1 << 20
-RETRY_SEC = 3_600.0  # 판이 없을 때·옛 판인데 404 밖 실패
-MONTH_RETRY_SEC = 86_400.0  # 옛 판일 때 — 성공·404 뒤
+# 이번 달 묶음이 실패한 시도 뒤(지난달을 올렸든, 옛 판을 두든, 판이 없든) — 달 첫날 게시 전 404·바깥 장애는 대개 몇
+# 시간이라 적재(serve ≈4초 GIL)와 실패를 1시간마다 되풀이하지 않게
+RETRY_SEC = 21_600.0
+MONTH_RETRY_SEC = 86_400.0  # 이번 달 묶음을 올린 시도 뒤 — 그 뒤 달이 바뀌었을 때
 PART = "geo"
 
 
@@ -51,6 +55,10 @@ class Failed(Exception):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+def _code(exc: Exception) -> str:
+    return exc.code if isinstance(exc, Failed) else type(exc).__name__
 
 
 def utc_month(ts: float) -> str:
@@ -122,7 +130,9 @@ class GeoLoader:
         self._version = 0
         self._running = False
         self._attempt: float | None = None  # 마지막 시도 시작(mono)
-        self._code: str | None = None  # 마지막 시도의 실패 code — 성공이면 None
+        self._wait = RETRY_SEC  # 마지막 시도 뒤 이번 달을 다시 받기까지
+        # 판이 없을 때 error 의 code — 마지막 시도에서 이번 달 묶음의 실패. 판을 올렸으면(지난달 포함) None
+        self._code: str | None = None
 
     def ensure(self) -> None:
         """게이트 뒤 접속 갱신이 ok 일 때(루프 스레드) — 때가 됐고 도는 받기가 없으면 하나 띄운다. 기다리지 않는다."""
@@ -134,7 +144,7 @@ class GeoLoader:
             fallback = self.table is None
         try:
             self._start(lambda: self._run(month, fallback))
-        except Exception as exc:  # 스레드를 못 띄움 — 1시간 뒤 다시
+        except Exception as exc:  # 스레드를 못 띄움 — 6시간 뒤 다시
             self._finish(None, type(exc).__name__)
 
     def _due(self, month: str, mono: float) -> bool:
@@ -143,10 +153,7 @@ class GeoLoader:
             return False  # 이번 달 판
         if self._attempt is None:
             return True
-        wait = RETRY_SEC
-        if table is not None and (self._code is None or self._code == "http_404"):
-            wait = MONTH_RETRY_SEC
-        return mono - self._attempt >= wait
+        return mono - self._attempt >= self._wait
 
     def waiting(self) -> tuple[str, str | None]:
         """판이 없을 때의 (state, code) — 받는 중·막 올림은 `pending`, 마지막 시도가 실패면 `error`."""
@@ -158,24 +165,24 @@ class GeoLoader:
     def _run(self, month: str, fallback: bool) -> None:
         began = time.perf_counter()
         table: GeoTable | None = None
-        code: str | None = None
+        missed: str | None = None  # 이번 달 묶음의 실패 code
         try:
             try:
                 country, asn = self._bundle(month)
-            except Failed as exc:
-                # 이번 달 둘 중 하나라도 404 이고 올린 판이 없으면 지난달 묶음
-                if exc.code != "http_404" or not fallback:
+            except Exception as exc:
+                # 올린 판이 없으면 이번 달이 어떤 이유로 실패했든 지난달 묶음
+                missed = _code(exc)
+                if not fallback:
                     raise
                 month = previous_month(month)
                 country, asn = self._bundle(month)
             with self._lock:
                 version = self._version + 1
             table = GeoTable(month, int(self._clock() * 1000), version, country, asn)
-        except Failed as exc:
-            code = exc.code
         except Exception as exc:
-            code = type(exc).__name__
-        self._finish(table, code)
+            # 지난달 받기도 실패했어도 code 는 이번 달의 실패다
+            missed = missed or _code(exc)
+        self._finish(table, missed)
         if table is not None:
             logger.info(
                 "DB-IP %s 판 올림 — 나라 %d·ASN %d 구간, %.2f초",
@@ -185,15 +192,17 @@ class GeoLoader:
                 time.perf_counter() - began,
             )
 
-    def _finish(self, table: GeoTable | None, code: str | None) -> None:
+    def _finish(self, table: GeoTable | None, missed: str | None) -> None:
+        """시도 하나의 끝 — `missed` 는 이번 달 묶음의 실패 code(올렸으면 None). 시도마다 WARNING 은 많아야 한 줄."""
         with self._lock:
             if table is not None:
                 self._version = table.version
                 self.table = table  # 다 올린 뒤 한 번에 — 그 전까지 조회는 옛 판
-            self._code = code
+            self._code = None if table is not None else missed
+            self._wait = MONTH_RETRY_SEC if missed is None else RETRY_SEC
             self._running = False
-        if code is not None:
-            self._warn(PART, code)
+        if missed is not None:
+            self._warn(PART, missed)
 
     def _bundle(self, month: str) -> tuple[Ranges, Ranges]:
         country = self._file(COUNTRY_URL.format(month=month), read_country)
