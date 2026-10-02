@@ -3,6 +3,8 @@
 # job 3개를 needs 로 이었다 — 한 박스가 실패하면 뒤 박스는 돌지 않고, Actions 화면에서 어느 박스가 죽었는지 바로 보인다.
 # Secrets: EC2_HOST_DATA·EC2_HOST_COLLECT·EC2_HOST_SERVE(박스별 공인 IP) + 공용 EC2_USER·EC2_SSH_KEY. 옛 EC2_HOST 는 안 쓴다.
 # 각 박스 스크립트는 같은 뼈대(가드 → 미러 동기화 → 자기 profile 만 up --build → prune)이고 가드 키만 다르다.
+# prune 은 이미지와 빌드 캐시 둘 다 — image prune 만으로는 빌드 캐시가 배포마다 쌓여 serve(8GB)가
+# 2026-10-02 연속 배포 셋 뒤 디스크 경보(80%)를 넘었다. 지금 이미지가 쓰는 캐시는 남아 다음 빌드도 캐시를 탄다.
 # serve 만 up 뒤에 caddy 다시 읽기(027)와 관리자 터널(030 — 토큰 파일이 있을 때만 profile tunnel)이 붙는다.
 # 가드는 값을 출력하지 않는다: 존재·비어있지 않음만 `grep -q '^KEY=.'` 로 본다.
 name: Deploy
@@ -44,6 +46,7 @@ jobs:
             # data 박스는 redis·influxdb 만. 이미지는 공식 이미지라 --build 는 아무것도 안 하지만 뼈대를 같게 둔다.
             docker compose --profile data --env-file .env --env-file server/.env up -d --build
             docker image prune -f
+            docker builder prune -f
 
   collect:
     needs: data
@@ -77,6 +80,7 @@ jobs:
             docker compose --profile collect --env-file .env --env-file server/.env up -d --build
             # 오래된 레이어가 EC2 디스크를 채우지 않게
             docker image prune -f
+            docker builder prune -f
 
   serve:
     needs: collect
@@ -120,3 +124,4 @@ jobs:
               echo "tunnel 건너뜀 — secrets/cloudflared-token 이 없거나 비었다"
             fi
             docker image prune -f
+            docker builder prune -f

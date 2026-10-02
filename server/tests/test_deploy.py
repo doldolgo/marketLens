@@ -815,7 +815,11 @@ def test_deploy_script_per_box_guards_env_then_mirrors_main_then_builds_own_prof
             i_file < min(i_guards)
             and max(i_guards) < i_fetch < i_reset < i_up < i_prune
         ), box
-        assert i_prune == len(script) - 1, box
+        # prune 은 이미지 다음 빌드 캐시 — 둘 다 마지막 (image prune 만이면 빌드 캐시가 배포마다 쌓인다)
+        assert script[i_prune:] == [
+            "docker image prune -f",
+            "docker builder prune -f",
+        ], box
         # 자기 가드 키만 — 다른 박스의 키를 요구하면 그 박스에서 배포가 헛되이 막힌다
         for other_box, guards in GUARDS.items():
             for g in guards:
