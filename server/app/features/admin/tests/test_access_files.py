@@ -1,4 +1,5 @@
-"""접속 요약 읽기 — 깨진 줄·회전 파일(깨진 gz 포함)·파일 없음·새지 않음·키 상한·메모리 (스펙 035 §3.2·§3.4·§3.5·§4)."""
+"""접속 요약 읽기 — 깨진 줄·시각이 아닌 ts·유한하지 않은 duration·5xx 밖 상태·회전 파일(깨진 gz 포함)·파일 없음·
+새지 않음·키 상한·메모리(긴 UA 포함) (스펙 035 §3.2·§3.4·§3.5·§4 → 038 §3.3·§3.6)."""
 
 import json
 import os
@@ -7,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from app.features.admin.access import NoLogFile, summarize
+from app.features.admin.access_cache import AccessLog, NoLogFile
 from app.features.admin.tests.access_fakes import (
     CHROME,
+    GATE,
     GOOGLEBOT,
     IP,
     IPHONE,
@@ -17,13 +19,25 @@ from app.features.admin.tests.access_fakes import (
     START_TS,
     at,
     line,
+    summary,
     write,
 )
+
+BAD_TS = ("NaN", "Infinity", "-Infinity", "1e999", "1e300", "300000000000", "-5")
+# 실수로 바꿀 수 없는 큰 정수(OverflowError)·풀 수 없는 긴 정수(ValueError)·NaN·무한
+BAD_DURATION = ("1" + "0" * 400, "9" * 5_000, "NaN", "Infinity", "-Infinity", "1e999")
 
 
 def run(tmp_path: Path, lines: list[str]) -> dict:
     write(tmp_path, "access.log", lines)
-    return summarize(str(tmp_path), NOW)
+    return summary(tmp_path, NOW)
+
+
+def summarize(directory: str | None, now: float, on_broken: list | None = None) -> dict:
+    values, broken = AccessLog(directory, GATE).summary("24h", now)
+    if on_broken is not None:
+        on_broken += broken
+    return values
 
 
 def test_broken_lines_are_skipped_and_blank_lines_ignored(tmp_path: Path) -> None:
@@ -42,7 +56,15 @@ def test_broken_lines_are_skipped_and_blank_lines_ignored(tmp_path: Path) -> Non
             "[]",
         ],
     )
-    assert body["totals"] == {"requests": 1, "pages": 1, "ws": 0, "skipped": 5}
+    assert body["totals"] == {
+        "requests": 1,
+        "pages": 1,
+        "humanPages": 1,
+        "jsViews": 0,
+        "probes": 0,
+        "ws": 0,
+        "skipped": 5,
+    }
 
 
 def test_rotated_files_in_the_window_are_read_and_older_ones_are_not(
@@ -125,16 +147,16 @@ def test_result_has_no_ip_user_agent_or_query(tmp_path: Path) -> None:
         assert banned not in raw, banned
 
 
-def test_key_kinds_are_capped_at_5000_and_the_rest_count_as_other(
+def test_key_kinds_are_capped_at_30_per_hour_and_the_rest_count_as_other(
     tmp_path: Path,
 ) -> None:
     lines = [line(at(12), f"/?utm_source=s{i}") for i in range(5_002)]
     lines += [line(at(12), f"/scan/{i}") for i in range(5_003)]
     body = run(tmp_path, lines)
-    # 경로는 `/` 다음 /scan/ 4,999 종류까지 — 그 뒤 넷은 (기타). 이미 있는 키는 상한 뒤에도 제 칸에 센다
-    assert body["paths"][:2] == [["/", 5_002], ["(기타)", 4]]
+    # 경로는 `/` 다음 /scan/ 29 종류까지 — 그 뒤는 (기타). 이미 있는 키는 상한 뒤에도 제 칸에 센다(038 — 시마다 30)
+    assert body["paths"][:2] == [["/", 5_002], ["(기타)", 5_003 - 29]]
     assert len(body["paths"]) == 20
-    assert body["utmSources"][0] == ["(기타)", 2]
+    assert body["utmSources"][0] == ["(기타)", 5_002 - 30]
     assert body["totals"]["pages"] == 10_005
 
 
@@ -163,6 +185,72 @@ def test_memory_stays_flat_while_streaming_a_large_log(tmp_path: Path) -> None:
     assert peak < 8 * 1024 * 1024, peak  # 파일(40MB 넘음)을 통째로 올리지 않는다
 
 
+def test_memory_stays_flat_with_long_distinct_user_agents(tmp_path: Path) -> None:
+    """긴 UA·출처(헤더 상한 ≈1MB 안)가 줄마다 달라도 판정 메모가 원문을 붙들지 않는다 — 키는 UA 앞 1,024자·출처는
+    512자까지만 (038 §3.4)."""
+    tail = "0123456789" * 300
+    lines = [
+        line(
+            at(i % 24, i % 3600),
+            "/",
+            ua=f"{CHROME} {i:06d} {tail}",
+            referer=f"https://r{i % 50}.example/{i:06d}{tail[:1000]}",
+        )
+        for i in range(4_200)
+    ]
+    write(tmp_path, "access.log", lines)
+    tracemalloc.start()
+    try:
+        body = summarize(str(tmp_path), NOW)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert body["totals"]["humanPages"] == 4_200
+    assert dict(body["referrers"])["https://r0.example"] == 84
+    # 메모가 원문을 담으면 4,096 × 4,000자 ≈16MB, 앞 1,024자면 ≈4MB
+    assert peak < 8 * 1024 * 1024, peak
+
+
+def test_a_line_whose_ts_is_not_a_time_is_skipped(tmp_path: Path) -> None:
+    # NaN·무한·날짜로 바꿀 수 없는 먼 미래(손상·손으로 고친 줄) — 요약 전체가 아니라 그 줄만 skipped (038 §3.3)
+    good = line(at(10), "/")
+    bad = [good.replace(f'"ts":{at(10)}', f'"ts":{v}', 1) for v in BAD_TS]
+    assert all(b != good for b in bad)
+    write(
+        tmp_path,
+        "access-2026-10-01T09-00-00.000-time.log.gz",
+        [good, *bad, good],
+        mtime=at(11),
+    )
+    write(tmp_path, "access.log", [good])
+    body = summarize(str(tmp_path), NOW)
+    assert body["totals"]["requests"] == 3
+    assert body["totals"]["skipped"] == len(BAD_TS)
+
+
+def test_a_line_whose_duration_is_not_a_finite_number_is_skipped(
+    tmp_path: Path,
+) -> None:
+    # 한 줄이 float 바꾸기에서 요약 전체를 error 로 만들지 않는다 — 그 줄만 skipped (038 §3.3)
+    good = line(at(10), "/api/ws/spreads", status=101, duration=5)
+    bad = [good.replace('"duration":5', f'"duration":{v}', 1) for v in BAD_DURATION]
+    assert all(b != good for b in bad)
+    body = run(tmp_path, [good, *bad])
+    assert (body["totals"]["requests"], body["totals"]["skipped"]) == (1, 6)
+    assert body["ws"]["durations"]["lt10s"] == 1 and body["ws"]["count"] == 1
+
+
+def test_a_status_outside_5xx_is_not_an_error(tmp_path: Path) -> None:
+    huge = 10**30
+    body = run(
+        tmp_path,
+        [line(at(10), "/x", status=s) for s in (599, 600, 999, huge, 0, 101)],
+    )
+    assert body["totals"]["requests"] == 6 and body["status"]["5xx"] == 1
+    assert [e["status"] for e in body["recent5xx"]] == [599]
+    assert sum(h["errors"] for h in body["hourly"]) == 1
+
+
 def test_a_broken_rotated_file_is_skipped_and_the_rest_counted(
     tmp_path: Path,
 ) -> None:
@@ -181,8 +269,8 @@ def test_a_broken_rotated_file_is_skipped_and_the_rest_counted(
     os.utime(bad, (at(5), at(5)))
     write(tmp_path, "access.log", [line(at(20), "/current")])
     broken: list[str] = []
-    body = summarize(str(tmp_path), NOW, broken.append)
-    assert broken == ["EOFError", "BadGzipFile"]
+    body = summarize(str(tmp_path), NOW, broken)
+    assert sorted(broken) == ["BadGzipFile", "EOFError"]
     assert body["totals"]["skipped"] == 2
     rotated = dict(body["paths"])["/rotated"]
     assert 0 < rotated < 2_000 and dict(body["paths"])["/current"] == 1
@@ -192,5 +280,5 @@ def test_a_current_log_read_failure_still_fails(tmp_path: Path) -> None:
     (tmp_path / "access.log").mkdir()  # 지금 파일을 못 읽음 — 부분 전체의 error
     broken: list[str] = []
     with pytest.raises(IsADirectoryError):
-        summarize(str(tmp_path), NOW, broken.append)
+        summarize(str(tmp_path), NOW, broken)
     assert broken == []

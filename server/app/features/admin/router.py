@@ -29,10 +29,10 @@ async def get_admin_status(request: Request) -> AdminStatusOut:
 
 
 @router.get("/admin/access")
-async def get_admin_access(request: Request) -> JSONResponse:
-    """caddy 접속 로그 24시간 요약 — 부분 하나 (035 §3.2)."""
+async def get_admin_access(request: Request, window: str | None = None) -> JSONResponse:
+    """caddy 접속 로그 요약 — 부분 하나, `window` 24h·7d·30d(목록 밖·지금 고를 수 없는 창은 24h — 038 §3.1)."""
     feeds: VisitFeeds = request.app.state.admin_visits
-    return JSONResponse(await feeds.access())
+    return JSONResponse(await feeds.access(window))
 
 
 @router.get("/admin/clarity")

@@ -591,6 +591,14 @@ def _js_function(js: str, name: str) -> str:
     return found.group(1)
 
 
+def test_screen_top_table_share_is_over_human_pages() -> None:
+    """038 §3.6 — 상위 표 여섯은 사람 브라우저 모양 페이지 줄만 세므로 비율 분모도 `totals.humanPages` 다(042 가 바꾼다)."""
+    body = _js_function(_text("web/admin/admin.js"), "fillAccess")
+    assert "const pages = num(totals.humanPages) ?? 0;" in body
+    assert "topTable(a[k], label, pages, named)" in body
+    assert "num(totals.pages) ?? 0" not in body
+
+
 def test_screen_body_elapsed_words_are_retold_after_every_paint() -> None:
     """036 §3.3 — 본문 안 경과 글자는 시각을 data-at 에 둔 span 이고, 그리기 끝에 글자만 고친다(본문은 그대로)."""
     js = _text("web/admin/admin.js")

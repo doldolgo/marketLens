@@ -94,7 +94,7 @@ curl -s localhost:8000/admin/aws
 ROLE=api uvicorn app.main:app --port 8001   # 다른 셸 — api 역할로 띄운다(8000 은 위의 수집기·vite 프록시)
 curl -s localhost:8001/admin/access
 ```
-035 — api 역할에만 있다(collector 404, `/admin/clarity` 도 같다). 로컬(`ACCESS_LOG_DIR` 없음)은 `state: "unconfigured"`·`code: "no_file"`, `/admin/clarity` 는 토큰이 없으면 `unconfigured`·`code: null` 이고(`pages` 도 `unconfigured`, `refreshSec` 14400) Redis·Clarity 를 부르지 않는다. 로그를 세어 보려면 `ACCESS_LOG_DIR=<caddy 로그 디렉터리>` 를 주고 띄운다. docker 통합 기동에서는 `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/access`(api 는 `./logs/caddy` 를 읽는다 — 로컬은 catch-all 만이라 거의 비어 있다, 027).
+035 — api 역할에만 있다(collector 404, `/admin/clarity` 도 같다). 로컬(`ACCESS_LOG_DIR` 없음)은 `state: "unconfigured"`·`code: "no_file"`(`?window=30d` 도 같다 — 로컬은 `unconfigured` 이고 `window`·`windows`·`gateAt` 은 실린다, 038), `/admin/clarity` 는 토큰이 없으면 `unconfigured`·`code: null` 이고(`pages` 도 `unconfigured`, `refreshSec` 14400) Redis·Clarity 를 부르지 않는다. 로그를 세어 보려면 `ACCESS_LOG_DIR=<caddy 로그 디렉터리>` 를 주고 띄운다. docker 통합 기동에서는 `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/access`(api 는 `./logs/caddy` 를 읽는다 — 로컬은 catch-all 만이라 거의 비어 있다, 027).
 ```bash
 curl -s localhost:8000/spreads | head -c 600
 ```

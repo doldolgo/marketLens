@@ -44,7 +44,7 @@
 |---|---|
 | `/api/admin/aws` | 034 |
 | `/api/admin/alerts` | 034 |
-| `/svc/api/admin/access` | 035 |
+| `/svc/api/admin/access` | 038 |
 | `/svc/api/admin/clarity` | 040 |
 
 - 공통: 늘 200 JSON, 키 camelCase. **시각 단위** — `…At`(`fetchedAt`·`changedAt`·`lastRunAt`·`nextAt`·알림 `at`)은 epoch **ms**, `…Ts`(`startTs`·`endTs`·`firstTs`)와 점·시간 칸·`recent5xx` 의 `ts` 는 epoch **초**다. 차트 가로축은 `ts × 1000` 으로 ms 에 맞춘다. 응답은 **부분**들이고 부분은 `{state, code, fetchedAt, refreshSec, …값 키}` 다. `state` 는 `ok`·`unconfigured`·`denied`·`error`·`pending`(첫 조회가 3초 안에 안 끝남), `code` 는 `ok` 면 null·아니면 짧은 사유(AWS 오류 코드·`no_credentials`·`http_<상태>`·`timeout`·`redis`·`no_file`·`partial`·`bad_data` — 오류 문장·ARN 없음), `fetchedAt` 은 값을 만든 시각(없으면 null), `refreshSec` 는 서버 갱신 주기. `ok` 가 아니면 값 키는 null — 예외는 Clarity(값 = 마지막 성공, 7일 뒤 null).
@@ -54,7 +54,7 @@
   - `canary`(60초): `lastRunAt`·`durationMs`·`ok`·`lines[]`(300자·20줄 — "N단계 통과 (ms)" 또는 실패 메시지). 11분 안에 끝난 실행이 없으면 `lastRunAt`·`durationMs`·`ok` null·빈 `lines`(state `ok`).
   - `budget`(6시간): `items[{name, unit, limit, actual, forecast, timeUnit}]` — 비용 예산 전부(`timeUnit` 은 `MONTHLY` 등), 금액 소수 둘째 자리, `forecast` 없으면 null.
 - `/api/admin/alerts` = `{items, slack, alarms}` — `slack`·`alarms` 는 상태만 있는 부분(`slack` 은 `refreshSec` 0), `items` 는 늘 목록(성공한 쪽만). 항목 `{at, source, text, role, key, delivered, alarm, fromState, toState}`(해당 없는 키 null), 최근 7일·최신순·200건. `source: "slack"` 은 025 알림 — `role` `collector`·`api`, `text` 는 🔴·🟢·⚠️ 머리 그대로, `delivered` 는 Slack 이 받았는지(전송 실패도 기록된다, 10분 억제로 보내지 않은 알림은 기록에도 없다). `source: "alarm"` 은 경보 상태 변경 — `alarm`·`fromState`·`toState`·`text`(사유). ARN·12자리 숫자는 `[가림]` 으로 와 있다.
-- `/svc/api/admin/access` = 부분 하나(60초): `startTs`·`endTs`·`firstTs`(읽은 가장 이른 줄, 없으면 null)·`totals{requests, pages, ws, skipped}`·`hourly[{ts, requests, pages, errors}]` 24개(`errors` = 5xx)·상위 목록 여섯 `paths`·`tabs`·`referrers`·`utmSources`·`devices`·`browsers`(각 `[[이름, 수], …]` 20개까지 — `tabs` 는 탭 id 여섯과 `(기타)`, `devices` 는 `bot`·`mobile`·`desktop`·`unknown`)·`status{"2xx","3xx","4xx","5xx"}`·`recent5xx[{ts, path, status}]` 20줄(경로는 쿼리 없음)·`ws{count, durations{lt10s, lt1m, lt10m, lt1h, ge1h}}`. IP·UA 원문 없음, 폴링·canary 제외.
+- `/svc/api/admin/access` = 부분 하나(60초, 038) — 인자 없이 부르면 24시간 창. `window`·`windows`·`gateAt`(늘 실림)·`startTs`·`endTs`·`firstTs`·`totals{requests, pages, humanPages, jsViews, probes, ws, skipped}`·`hourly[{ts, requests, pages, humanPages, jsViews, errors, wsErrors}]`(`errors` = `/api/ws/spreads` 밖 5xx)·`status{"2xx","3xx","4xx","5xx","ws5xx"}`·`recent5xx[{ts, path, status}]` 20줄(WS 경로 뺌)·`ws{count, pairs, errors, durations}`·`classes`(종류 여덟 `{requests, pages}`)·`visitors`(하위 부분 — 날마다 센 방문자 `state`·`code`·`sinceTs`·`confirmed`·`shaped`·`returning`·`capped`·`days`·`channels`·`devices`·`os`·`browsers`·`inApp`, 처리방침 v2 시행일 전 `unconfigured`·`before_gate`·값 null — 그때 `ws.pairs` 도 null)·상위 목록 여섯(사람 브라우저 모양 페이지 줄만 — `devices` 는 `mobile`·`tablet`·`desktop`). IP·UA 원문·짝 값 없음, 폴링·canary 제외.
 - `/svc/api/admin/clarity` = 부분 하나(14400초, 040) + `nextAt`·`numOfDays`(1)·`traffic{sessions, botSessions, users, pagesPerSession}`·`summary{scrollDepth, totalSec, activeSec, signals}`(signals 키 여섯 `deadClick`·`rageClick`·`excessiveScroll`·`quickback`·`scriptError`·`errorClick`, 값 `{sessions, sessionPct, pageViews, count}`)·`countries[[이름, 세션]]`(20행, 못 알아보면 null)·`metrics[{name, rows}]`(받은 이름·키 그대로, 행 20개, 주소는 쿼리를 떼되 대시보드 주소는 `?tab=<id>` 만)·`pages`(하위 부분 `{state, code, fetchedAt, refreshSec 43200, nextAt, numOfDays 3, rowsIn, rowLimitHit, groups}` — `groups[{page, device, sessions, scrollDepth, totalSec, activeSec, deadClickPct, rageClickPct, excessiveScrollPct, quickbackPct, scriptErrorPct, errorClickPct}]` 40개 이하, 주소 없음). 못 알아본 칸은 null. 창은 부른 때 직전 24시간(기본)·72시간(`pages`)이고 시간대가 없다(Clarity 문서는 결과를 UTC 로 적는다).
 
 ### 3.3 갱신 주기
@@ -94,7 +94,7 @@
 
 **접속** — 세 덩어리.
 - 실시간: 지금 WebSocket 접속 수(빠른 묶음 `wsConnections`) 큰 숫자 + 24시간 `wsClients` 선. 부제 "열린 대시보드 수 — 사람 수가 아니다".
-- 서버 기록 24시간(접속 요약): 총 요청·페이지·시간대별 막대 24개(5xx 는 장애색으로 겹침 — 최고 n/시간과 5xx 가 난 시간은 글자로도)·상태 코드 대분류, WebSocket 연결 수·지속 시간 구간 막대(구간 이름 아래 수), 표 여섯(경로·탭(한국어 탭 이름 — 002, title 은 id)·외부 출처·`utm_source`·기기·브라우저 — 이름·수·비율 막대, 상위 10), 최근 5xx 표(시각·경로·상태, 20행). `firstTs` 가 `startTs` 보다 늦으면 부제에 "기록 시작 HH:mm". 부제 "폴링·canary 제외, IP 없음 · 읽지 못한 줄 n"(`skipped`). 총 요청·페이지 타일은 부제 한 줄(041).
+- 서버 기록 24시간(접속 요약): 총 요청·페이지·시간대별 막대 24개(5xx 는 장애색으로 겹침 — 최고 n/시간과 5xx 가 난 시간은 글자로도)·상태 코드 대분류, WebSocket 연결 수·지속 시간 구간 막대(구간 이름 아래 수), 표 여섯(경로·탭(한국어 탭 이름 — 002, title 은 id)·외부 출처·`utm_source`·기기·브라우저 — 이름·수·비율 막대(비율 = 수 ÷ `totals.humanPages`), 상위 10), 최근 5xx 표(시각·경로·상태, 20행). `firstTs` 가 `startTs` 보다 늦으면 부제에 "기록 시작 HH:mm". 부제 "폴링·canary 제외, IP 없음 · 읽지 못한 줄 n"(`skipped`). 총 요청·페이지 타일은 부제 한 줄(041).
 - Clarity(Clarity 요약): 타일 넷(세션·봇 세션·사용자·세션당 페이지)과 "받은 지표" 목록 — 지표마다 이름 한 줄과 행마다 `키:값 · 키:값` 글자 한 줄(20행, 한 줄 200자에서 자르고 전체는 `title`). 부제 "최근 1일 · UTC 기준 — Clarity 가 준 값". 정규화 값(`summary`·`countries`·`pages`)은 040 응답에 있다 — 그리는 것은 043. 타일 넷은 부제 한 줄(041).
 
 **비용** — `budget`.

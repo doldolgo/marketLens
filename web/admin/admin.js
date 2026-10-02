@@ -1219,7 +1219,7 @@ function fillAccess(node, a) {
   // 눈금은 막대 24개가 덮는 구간(첫 칸 시작 ~ 마지막 칸 끝)을 5등분 — 마지막 칸이 지금 시각을 품는다
   const hourAxis = hourly.length ? ticks(hourly[0].ts * 1000, (hourly[0].ts + hourly.length * 3600) * 1000) : el('span');
   node.replaceChildren(stats, hourHead, chart, hourAxis, codes, wsHead, columns(wsBars, `WebSocket 지속 시간 구간 — 연결 ${int(ws.count)}`), labels);
-  const pages = num(totals.pages) ?? 0;
+  const pages = num(totals.humanPages) ?? 0;
   $('access-tables').replaceChildren(...TOP_TABLES.map(([k, label, named]) => topTable(a[k], label, pages, named)));
   const recent = list(a.recent5xx).filter(isObj).slice(0, 20);
   $('r5xx').hidden = false;

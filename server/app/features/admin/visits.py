@@ -1,23 +1,36 @@
-"""api 관리자 피드 — `/admin/access`·`/admin/clarity` 의 부분 상태와 갱신 (스펙 035 §3.1~§3.2·040 §3.2·§3.5).
+"""api 관리자 피드 — `/admin/access`·`/admin/clarity` 의 부분 상태와 갱신 (스펙 035 §3.1~§3.2·038 §3.1~§3.3·040 §3.2·§3.5).
 
-공통 규칙은 034 와 같은 문장이다(`parts.py`). 접속 요약은 60초 캐시 한 칸이고 파일 읽기는 `asyncio.to_thread`
-(기본 실행기 — api 에는 수집 쓰기가 없다). Clarity 는 호출이 둘이다 — 기본 요약(4시간)과 페이지×기기 묶음(12시간,
+공통 규칙은 034 와 같은 문장이다(`parts.py`). 접속 요약은 창(24h·7d·30d)마다 따로 60초 칸이고, 파일 캐시는 창 셋이
+나눠 쓰며 파일 읽기는 `asyncio.to_thread`(기본 실행기 — api 에는 수집 쓰기가 없다). 마지막 접속 요청에서 1시간이 지나면
+파일 캐시·짝 기록·열쇠·창 칸을 통째로 버린다(038 §3.3). Clarity 는 호출이 둘이다 — 기본 요약(4시간)과 페이지×기기 묶음(12시간,
 하위 부분 `pages`). 요청마다 Redis 기록 둘을 읽어 때를 정하고(`clarity_schedule.py`), 한 갱신 안에서 기본 → 묶음
 순서로 하나씩 부른다 — Clarity 호출이 동시에 둘 나가지 않는다. 기본이 401·403·429 면 묶음은 미룬다.
 읽기·부르기는 한 번에 하나이고 3초까지 기다린 뒤 늦으면 직전 결과(없으면 pending)를 답한다. 요청이 없으면 아무것도
-읽거나 부르지 않는다. 처리기 안 예외도 500 이 아니라 그 부분 `error` 와 WARNING 1줄(부분마다 10분에 1줄)이다 —
-라우터가 응답을 JSON 으로 쓰다 실패하지 않게, 쓸 수 없는 값(NaN·짝 없는 서로게이트)이 든 답도 여기서 `error` 로 바꾼다
-(`pages` 는 따로 — 바깥을 바꾸지 않는다). JSON 풀기·쓰기는 파일 읽기와 같이 `asyncio.to_thread` 에서 한다.
+읽거나 부르지 않는다. 처리기 안 예외도 500 이 아니라 그 부분 `error` 와 WARNING 1줄(부분마다 10분에 1줄, 예외 이름만 —
+문장에 가린 IP·UA 가 실릴 수 있다)이다 — 라우터가 응답을 JSON 으로 쓰다 실패하지 않게, 쓸 수 없는 값(NaN·짝 없는
+서로게이트)이 든 답도 여기서 `error` 로 바꾼다(`pages` 는 따로 — 바깥을 바꾸지 않는다). JSON 풀기·쓰기는 파일 읽기와 같이
+`asyncio.to_thread` 에서 한다.
 """
 
 import asyncio
+import os
 import time
 from collections.abc import Callable
 from typing import Any
 
 import httpx
 
-from app.features.admin.access import VALUE_KEYS, NoLogFile, summarize
+from app.core import config
+from app.features.admin.access_cache import (
+    VALUE_KEYS,
+    WINDOW_KEYS,
+    WINDOWS,
+    AccessLog,
+    NoLogFile,
+    choose,
+    gate_ts,
+    window_values,
+)
 from app.features.admin.clarity import (
     ClarityStore,
     Record,
@@ -38,6 +51,8 @@ from app.features.admin.parts import (
 )
 
 ACCESS_REFRESH_SEC = 60
+# 마지막 접속 요청에서 이만큼 지나면 캐시·짝 기록·열쇠를 버린다(038 §3.3)
+ACCESS_IDLE_SEC = 3600.0
 # 시도 사이 — 어떤 24시간에도 기본 6 + 묶음 2 = 8회라 하루 10회 한도에서 사람 몫 2회가 남는다 (040 §3.2)
 CLARITY_REFRESH_SEC = 14_400
 PAGES_REFRESH_SEC = 43_200
@@ -60,12 +75,22 @@ class VisitFeeds:
         clock: Callable[[], float] = time.time,
         mono: Callable[[], float] = time.monotonic,
         wait_sec: float = WAIT_SEC,
+        privacy_effective: str | None = None,
+        urandom: Callable[[int], bytes] = os.urandom,
+        schedule: Callable[[float, Callable[[], None]], Any] | None = None,
     ) -> None:
         self._dir = access_dir or None
         self._token = clarity_token or None
         self._transport = transport
         self._clock = clock
-        self._access = Slot(ACCESS_REFRESH_SEC, mono, wait_sec)
+        self._mono = mono
+        self._wait = wait_sec
+        # 시행일 한 곳(037) — 테스트가 바꿔 끼운다
+        self._gate = gate_ts(privacy_effective or config.PRIVACY_V2_EFFECTIVE)
+        self._urandom = urandom
+        self._schedule = schedule or _call_later
+        self._idle: Any = None
+        self._log, self._access = self._fresh_access()
         # 주기 0 — Clarity 의 캐시는 Redis 기록이고, 이 칸은 한 번에 하나·3초 기다림·직전 결과만 맡는다
         self._clarity = Slot(0, mono, wait_sec)
         self._base = ClarityKind(
@@ -88,25 +113,42 @@ class VisitFeeds:
 
     # --- /admin/access ---
 
-    async def access(self) -> dict[str, Any]:
+    def _fresh_access(self) -> tuple[AccessLog, dict[str, Slot]]:
+        log = AccessLog(self._dir, self._gate, urandom=self._urandom, mono=self._mono)
+        return log, {
+            name: Slot(ACCESS_REFRESH_SEC, self._mono, self._wait) for name in WINDOWS
+        }
+
+    def _drop_access(self) -> None:
+        """1시간 안 부르지 않음 — 요약이 창과 원본보다 오래 남지 않게 통째로 버린다. 다음 요청은 첫 채움부터."""
+        self._idle = None
+        self._log, self._access = self._fresh_access()
+
+    async def access(self, window: str | None = None) -> dict[str, Any]:
+        now = self._clock()
+        name = choose(window, now, self._gate)
+        if self._idle is not None:
+            self._idle.cancel()
+        self._idle = self._schedule(ACCESS_IDLE_SEC, self._drop_access)
+        log = self._log
         try:
-            result = await self._access.get(self._load_access)
+            result = await self._access[name].get(lambda: self._load_access(log, name))
         except Exception as exc:
             result = self._failed("access", exc)
-        return self._writable(
-            "access", render(result, ACCESS_REFRESH_SEC, VALUE_KEYS), VALUE_KEYS
-        )
+        body = render(result, ACCESS_REFRESH_SEC, VALUE_KEYS)
+        if result.state != "ok" or not result.values:
+            body.update(window_values(name, now, self._gate))
+        return self._writable("access", body, VALUE_KEYS, keep=WINDOW_KEYS)
 
-    async def _load_access(self) -> Result:
+    async def _load_access(self, log: AccessLog, name: str) -> Result:
         now = self._clock()
-        broken: list[str] = []  # 깨진 회전 파일 — 그 파일만 건너뛰고 WARNING 1줄
         try:
-            values = await asyncio.to_thread(summarize, self._dir, now, broken.append)
+            values, broken = await asyncio.to_thread(log.summary, name, now)
         except NoLogFile:
             return Result("unconfigured", "no_file")
         except Exception as exc:
             return self._failed("access", exc)
-        if broken:
+        if broken:  # 깨진 회전 파일 — 그 파일만 건너뛰고 WARNING 1줄
             self._warn("access", broken[0])
         return Result("ok", None, int(now * 1000), values)
 
@@ -243,9 +285,13 @@ class VisitFeeds:
         return Result("error", code)
 
     def _writable(
-        self, name: str, body: dict[str, Any], keys: tuple[str, ...]
+        self,
+        name: str,
+        body: dict[str, Any],
+        keys: tuple[str, ...],
+        keep: tuple[str, ...] = (),
     ) -> dict[str, Any]:
-        """라우터가 JSON 으로 쓸 수 있는 답인지 — 아니면 그 부분 `error`·예외 이름, 값 키는 모두 null."""
+        """라우터가 JSON 으로 쓸 수 있는 답인지 — 아니면 그 부분 `error`·예외 이름, 값 키는 `keep` 밖 모두 null."""
         try:
             check_json(body)
         except (TypeError, ValueError) as exc:
@@ -257,8 +303,13 @@ class VisitFeeds:
                 "fetchedAt": None,
                 "refreshSec": body["refreshSec"],
                 **dict.fromkeys(keys),
+                **{k: body[k] for k in keep},
             }
         return body
+
+
+def _call_later(delay: float, callback: Callable[[], None]) -> asyncio.TimerHandle:
+    return asyncio.get_running_loop().call_later(delay, callback)
 
 
 def _body(result: Result, refresh_sec: int, keys: tuple[str, ...]) -> dict[str, Any]:

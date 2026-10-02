@@ -1,4 +1,4 @@
-"""api 피드 HTTP·공통 규칙 — 항상 200·부분 하나·unconfigured·60초 캐시·처리기 예외·JSON 으로 못 쓰는 값도 200·WARNING 만 (스펙 035 §3.1·§3.2·§4)."""
+"""api 피드 HTTP·공통 규칙 — 항상 200·부분 하나·unconfigured·60초 캐시·처리기 예외·JSON 으로 못 쓰는 값도 200·WARNING 만 (스펙 035 §3.1·§3.2·§4·038 §3.1)."""
 
 import logging
 import os
@@ -13,9 +13,18 @@ from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
 from app.core.redis_bus import RedisBus
-from app.features.admin import visits
-from app.features.admin.access import VALUE_KEYS
-from app.features.admin.tests.access_fakes import IP, IPHONE, NOW, at, line, write
+from app.features.admin import access_cache, visits
+from app.features.admin.access_cache import VALUE_KEYS, AccessLog
+from app.features.admin.tests.access_fakes import (
+    EFFECTIVE,
+    GATE,
+    IP,
+    IPHONE,
+    NOW,
+    at,
+    line,
+    write,
+)
 from app.features.admin.visits import VisitFeeds
 from app.main import create_app
 
@@ -33,6 +42,7 @@ class Clock:
             clarity_token=None,
             clock=lambda: NOW + self.t,
             mono=lambda: self.t,
+            privacy_effective=EFFECTIVE,
         )
 
 
@@ -49,6 +59,10 @@ async def test_access_without_log_files_is_unconfigured_no_file(
         "fetchedAt": None,
         "refreshSec": 60,
         **dict.fromkeys(VALUE_KEYS),
+        # 창 셋은 상태와 무관하게 늘 실린다(038 §3.1)
+        "window": "24h",
+        "windows": ["24h"],
+        "gateAt": GATE * 1000,
     }
 
 
@@ -75,10 +89,11 @@ async def test_access_is_cached_for_its_60_second_period(tmp_path: Path) -> None
 async def test_read_failure_is_error_with_one_warning_and_no_error_log(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    def denied(directory: str | None, now: float, *_: object) -> dict:
-        raise PermissionError("/var/log/caddy/access.log 203.0.113.0")
+    def denied(path: str) -> object:
+        raise PermissionError(f"{path} 203.0.113.0")
 
-    monkeypatch.setattr(visits, "summarize", denied)
+    monkeypatch.setattr(access_cache, "open_log", denied)
+    write(tmp_path, "access.log", [line(at(1))])
     caplog.set_level(logging.INFO)
     clock = Clock()
     feeds = clock.feeds(str(tmp_path))
@@ -110,8 +125,16 @@ async def test_broken_rotated_file_keeps_the_part_ok_with_one_warning(
     feeds = clock.feeds(str(tmp_path))
     body = await feeds.access()
     assert (body["state"], body["code"]) == ("ok", None)
-    assert body["totals"] == {"requests": 1, "pages": 1, "ws": 0, "skipped": 1}
-    clock.t = 61  # 다음 회차도 같은 파일 — 10분 안이라 줄은 하나
+    assert body["totals"] == {
+        "requests": 1,
+        "pages": 1,
+        "humanPages": 1,
+        "jsViews": 0,
+        "probes": 0,
+        "ws": 0,
+        "skipped": 1,
+    }
+    clock.t = 61  # 다음 회차도 같은 파일 — 다시 읽지 않고, 10분 안이라 줄은 하나
     assert (await feeds.access())["state"] == "ok"
     records = [r for r in caplog.records if r.name == "marketlens.admin"]
     assert [(r.levelname, r.getMessage()) for r in records] == [
@@ -179,7 +202,7 @@ def test_handler_exceptions_become_error_parts_not_500(
     def boom(*args: object) -> object:
         raise TypeError("arn:aws:iam::123456789012:x secret")
 
-    monkeypatch.setattr(visits, "summarize", boom)
+    monkeypatch.setattr(AccessLog, "summary", boom)
     monkeypatch.setattr(visits, "load_record", boom)
     api.app.state.admin_visits = VisitFeeds(access_dir="/nowhere", clarity_token=TOKEN)
     caplog.set_level(logging.INFO)
