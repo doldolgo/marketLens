@@ -89,7 +89,7 @@
 ### 3.7 부담·받아들인 위험 (조사 2026-10-02)
 - 적재: 합성 IPv4 40만 구간을 serve(t4g.micro)에서 표준 라이브러리로 올리면 ≈1.9초·유지 3.7MB, 로컬 Mac 은 ≈0.3초(serve 가 ≈6배 느리다). 두 파일이면 serve ≈4초로 짐작한다. 조회는 1만 건 21ms.
 - GIL: serve api 는 uvicorn 워커 하나다. 게이트 뒤 재시작(배포) 뒤 첫 화면에서 038 첫 채움(지금 ≈0.4초, 최악 — 압축 10MB 상한 ≈6초) → DB-IP 받기·적재(serve ≈4초) → 판이 올라 038 캐시를 한 번 더 채움(≈0.4~6초)이 이어지고, 040 페이지 묶기(≈0.3초)가 겹칠 수 있다. 합친 최악 ≈10~16초 동안 공개 `/api/landing`·WS 허브와 GIL 을 나눠 쓴다 — 두 번 채움은 IP 를 메모리에 남기지 않으려는 대가로 받아들인다(§3.5). 관리자 화면을 열었을 때만, 재시작 뒤와 달에 한 번 일어나며 그동안 공개 응답이 느려질 수 있다.
-- 메모리: 판 ≈8MB(갈아 끼우는 동안 두 판 ≈16MB). api 에는 mem_limit 이 없고 serve available 은 ≈360~420MB 다.
+- 메모리: 판 하나 유지 ≈7MB. 적재 중 최고는 AS 번호 메모·풀기 버퍼가 더해 ≈15MB 이고, 달마다 새 판을 받는 동안은 옛 판을 둔 채 적재해 일시 최고 ≈22MB 다(tracemalloc). 갈아 끼우면 옛 판은 곧바로 풀린다 — 접속 캐시는 판을 줄을 읽는 동안만 쥔다. api 에는 mem_limit 이 없고 serve available 은 ≈360~420MB 다.
 - 바깥 의존: download.db-ip.com 의 가용성·자동 받기 허용 여부는 모른다. 실패하면 `geo` 만 `error`(1시간 뒤 다시)이고 나머지 요약은 그대로다.
 - 정확도: /24 는 인터넷 경로를 알릴 수 있는 가장 작은 단위다(RFC 7454 — 그보다 잘게는 대개 받아 주지 않는다). 그래서 /24 로 찾은 ASN 은 원 IP 로 찾은 값과 사실상 같다. 나라는 Lite 정확도 지수 81 이고, /24 로 가린 오차와 x.y.z.0 하나로 찾는 오차(한 /24 안에 구간이 둘)는 재지 못했다.
 - 위치정보법: 가린 IP 로 나라를 추정하는 것(메모리 안에서는 그날의 짝마다 나라·망 종류를 붙이고, 밖으로는 집계만 낸다)은 해석이 갈린다(사용자 결정 2026-10-02 로 진행). 게이트 전 기록에는 쓰지 않는다(037).
@@ -126,16 +126,18 @@ cd server
 .venv/bin/ruff check . && .venv/bin/ruff format --check .
 # All checks passed! · 316 files already formatted
 .venv/bin/pytest -q -p no:cacheprovider
-# 1538 passed, 1 skipped, 6 failed — 실패 6건은 spreads/tests/test_gauge.py 의 UDP bind PermissionError(샌드박스)뿐, 그것을 뺀 나머지 전부 통과
+# 1542 passed, 1 skipped, 6 failed — 실패 6건은 spreads/tests/test_gauge.py 의 UDP bind PermissionError(샌드박스)뿐, 그것을 뺀 나머지 전부 통과
 .venv/bin/pytest -q -p no:cacheprovider app/features/admin
-# 400 passed, 1 skipped(test_geo_perf — DBIP_DIR 없음) — 039 테스트 79 + 038·040 등 기존(응답 키 집합은 VALUE_KEYS 로 보므로 geo 가 저절로 든다)
+# 404 passed, 1 skipped(test_geo_perf — DBIP_DIR 없음) — 039 테스트 82 + 038·040 등 기존(응답 키 집합은 VALUE_KEYS 로 보므로 geo 가 저절로 든다)
 DBIP_DIR=<설계 세션이 받은 scratchpad/dbip> .venv/bin/pytest -q -s -p no:cacheprovider app/features/admin/tests/test_geo_perf.py
-# ① 두 파일 적재 0.698초(중앙값 5회, serve ×6 짐작 4.2초) · 구간 나라 362,122·ASN 402,389
-# ② 유지 메모리 7.01MB  ③ 조회 1만 건 7.8ms  ④ 적재 중 루프 지연 최댓값 10.5ms(3회) — 1 passed
+# ① 두 파일 적재 0.683초(중앙값 5회, serve ×6 짐작 4.1초) · 구간 나라 362,122·ASN 402,389
+# ② 유지 메모리 7.01MB  ③ 조회 1만 건 7.5ms  ④ 적재 중 루프 지연 최댓값 6.9ms(3회)
+# ⑤ CPU 스레드 하나와 겹친 적재 3.28초(혼자의 10배 안) — 1 passed
 cd ../web && npm run lint && npm run build
 # oxlint 0 · built in 509ms(첫 화면 JS 253.01kB, gzip 78.58kB — 변화 없음)
 ```
-- 성능 ①~④ 는 기준(1.0초·10MB·50ms·50ms) 안이다. tracemalloc 으로 잰 적재 중 최고는 13.0MB(나라 판 + ASN 배열 + AS 번호 메모 — 끝나면 버린다).
+- 성능 ①~④ 는 기준(1.0초·10MB·50ms·50ms) 안이다. tracemalloc 으로 잰 적재 중 최고는 14.9MB(나라 판 + ASN 배열 + AS 번호 메모 + 1MB 읽기 단위 — 끝나면 버린다), 옛 판(7.0MB)을 둔 채 새 판을 올리는 동안의 최고는 21.9MB.
+- 검토 반영(같은 날): ⑤ 를 더했다 — 글자 읽기 단위가 기본 8KB 일 때 같은 측정이 40.5초(혼자의 58배)였다. 게이트를 2026-10-01 로 옮긴 pytest 플러그인으로 server 전체를 다시 돌려 받기 스레드 띄우기 0(실패는 그 상수와 날짜를 맞춰 보는 test_privacy 2건뿐 — 실제 시계가 게이트를 지난 CI 흉내).
 - 시행일 전후는 시계 주입으로 둘 다 돌렸다 — 오늘(2026-10-02)은 게이트 전이라 실제 시계로 띄운 api 는 DB-IP 를 받지 않는다.
 
 ## 6. 갱신할 문서
@@ -154,7 +156,7 @@ cd ../web && npm run lint && npm run build
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
   - server `app/features/admin/`: `geo_fetch.py`(`GeoLoader` — 받기 띄우기·데몬 스레드·흘려 받기·지난달·다시 받는 때·갈아 끼우기), `geo_table.py`(행 확인·IPv4 구간을 `array` 셋에·/24 조회 `locate`), `geo_kinds.py`(망 종류 표·낱말 규칙 `network_kind`), `geo_part.py`(`geo` 하위 부분 — k=3 묶기·20행·`telecom_kr` 접기). 고친 것: `access_cache.py`(회차마다 판을 받아 판 번호가 바뀌면 파일 캐시를 통째로 다시, 값 키 `geo`), `access_hours.py`(짝을 처음 기록할 때 찾기), `access_pairs.py`(짝의 나라·망 종류 칸, `visitors` 가 `GeoCounts` 도), `visits.py`(게이트 뒤 ok 갱신마다 `ensure`, 판이 없으면 `pending`·`error`).
-  - 테스트 `app/features/admin/tests/`: `geo_fakes.py`(가짜 나라·ASN CSV.gz — IPv4 1만 행·IPv6·따옴표와 쉼표 든 이름, MockTransport, 그 자리 띄우기·쥐고 있다 돌리기), `test_geo_fetch.py`·`test_geo_checks.py`·`test_geo_refetch.py`·`test_geo_kinds.py`·`test_geo_response.py`·`test_geo_gate.py`·`test_geo_leaks.py`·`test_geo_perf.py`(`DBIP_DIR` 이 있을 때만). 고친 것: `conftest.py`(동기 transport·주입하지 않은 받기 스레드도 실패로), `access_fakes.py`(`Feeds` 는 받기를 띄우지 않는 `parked` 가 기본), `test_access_window.py`(실제 시계 테스트에 `parked` — 게이트 지난 날 CI 에서도 받지 않게).
+  - 테스트 `app/features/admin/tests/`: `geo_fakes.py`(가짜 나라·ASN CSV.gz — IPv4 1만 행·IPv6·따옴표와 쉼표 든 이름, MockTransport, 그 자리 띄우기·쥐고 있다 돌리기), `test_geo_fetch.py`·`test_geo_checks.py`·`test_geo_refetch.py`·`test_geo_kinds.py`·`test_geo_response.py`·`test_geo_gate.py`·`test_geo_leaks.py`·`test_geo_perf.py`(`DBIP_DIR` 이 있을 때만). 고친 것: `conftest.py`(동기 transport·주입하지 않은 받기 스레드도 실패로), `access_fakes.py`(`Feeds` 는 받기를 띄우지 않는 `parked` 가 기본), `test_access_window.py`·`test_visits.py`(실제 시계로 띄운 피드·앱에 `parked` — 게이트 지난 날 CI 에서도 받지 않게. `test_visits` 의 HTTP 테스트는 지난 시행일로 띄운 앱으로도 돈다).
   - 문서: `docs/context/status.md`·`architecture.md`·`product.md`, `CLAUDE.md` 인덱스, 스펙 027·036·038(§6 대로)·039.
 - DB-IP 첫 실제 받기(설계 세션, 2026-10-02 04:18Z — 실행 세션은 db-ip.com 을 부르지 않고 그 파일로 확인했다):
   - 두 주소 모두 HTTP 200·`application/octet-stream`·3xx 없음 — `https://download.db-ip.com/free/dbip-country-lite-2026-10.csv.gz` 4,491,785B(sha256 `097426b8…0273af80`)·`…/dbip-asn-lite-2026-10.csv.gz` 7,015,072B(sha256 `ed175994…5a959af3`). 짐작한 ASN 주소 꼴이 맞았다.
@@ -174,10 +176,14 @@ cd ../web && npm run lint && npm run build
   - 짝의 나라 칸은 나라 번호 대신 판의 이름 목록에 있는 두 글자 문자열의 참조로 둔다(짝마다 칸 둘의 참조만 는다).
   - 열 수는 IPv4 행만 본다(IPv6 행은 바로 건너뛴다). 빈 행은 열 수 틀림이다.
   - 테스트: 받기·확인·다시 받기의 시도 수는 `GeoLoader` 를 직접(그 자리 띄우기)와 피드로, 응답·게이트·새지 않음은 `/admin/access`(피드·HTTP)로 본다. 실제 파일 성능은 `DBIP_DIR` 이 있을 때만 도는 `test_geo_perf.py` 로 남겼다(CI 는 건너뛴다).
+  - 판은 갱신을 띄울 때가 아니라 접속 캐시 잠금 안에서 집는다 — 창 둘의 갱신이 갈아 끼우는 순간에 겹쳐도 판 번호가 줄지 않아, 먼저 뜬 갱신이 판 없이 캐시를 한 번 더 만들지 않는다. 파일 세기는 판을 줄을 읽는 동안만 쥔다 — 갈아 끼운 뒤 옛 판이 다음 갱신·1시간 비움까지 남지 않게(검토 반영).
+  - 글자 읽기 단위 1MB(`TextIOWrapper` 기본 8KB 대신) — 풀기는 부를 때마다 GIL 을 놓았다 다시 잡아, 같은 프로세스에 CPU 를 쓰는 스레드(038 요약·040 묶기)가 겹치면 그때마다 전환 간격을 기다린다. 8KB 면 두 파일에 ≈7,400번이라 겹친 적재가 40초(60초 시한 가까이)였다. 적재 중 최고 +1.9MB(검토 반영).
+  - AS 번호 메모를 정수 열쇠·배열로 바꿔 적재 중 최고를 줄이는 길은 하지 않았다 — 줄마다 정수 풀기·확인이 늘고, 줄일 것은 달에 한 번 잠깐인 ≈22MB 다.
 - 실행 중 함께 고친 스펙 절: 039 본문은 그대로다. §6 대로 027 §2·036 §3.2·038 §2·§3.3(파일 캐시)·§3.5(짝 기록)·§3.6(응답 키 표·`geo` 문장)을 고쳤다.
 - 남은 빚:
   - status.md 의 (039) 넷 — IPv6 미조회·재시작 뒤 다시 받기와 두 번 채움(GIL)·/24 나라 오차 미측정·021 제안 대기.
   - 021 제안(PR 본문에 그대로): §3.1 serve 설명에 "api 가 매달 download.db-ip.com 에서 공개 자료(DB-IP Lite 두 파일)를 받는다(039)".
+  - 038 에 옮길 것(PR 본문에 그대로): `access_cache.open_log` 의 회전 파일 gzip 읽기도 `TextIOWrapper` 기본 8KB 단위다 — 실제 DB-IP 나라 파일을 같은 꼴로 읽으면 CPU 스레드와 겹쳐 0.06초 → 13.7초였다(합성 접속 로그는 압축이 24배라 0.6초로 작았다). 실제 caddy 로그의 압축률에서 재 보고 039 처럼 단위를 키울지 038 에서 정한다.
   - 038 의 `test_access_files.py::test_memory_stays_flat_with_long_distinct_user_agents` 가 이 작업 중 한 번 tracemalloc 최고 9.2MB(기준 8MB)로 실패했고, 이어 돌린 아홉 번은 모두 통과했다 — 재현하지 못했다(GC 시점 흔들림으로 짐작).
   - 로컬에서 `ACCESS_LOG_DIR` 을 주고 게이트 뒤 시계로 api 를 띄우면 첫 접속 요약이 실제 download.db-ip.com 을 부른다 — dev-setup.md 에는 적지 않았다(§6 목록 밖).
   - 브라우저·docker 확인은 하지 않았다(샌드박스 — 설계 세션 몫). 배포 뒤 운영 확인은 §4 그대로 status 비고 "039 운영 확인 대기".
