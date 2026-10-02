@@ -686,7 +686,7 @@ ALARM_TAIL_NAMES = {
     "credit-surplus": "잉여 크레딧 과금",
     "memory": "메모리",
     "disk": "디스크",
-    "canary": "canary",
+    "canary": "바깥 점검",
     "http-5xx": "사이트 5xx",
 }
 # 041 §3.4 경보 꼬리의 울리는 조건(계약 복사 — 끝 마침표·백틱만 뺐다)
