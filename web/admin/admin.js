@@ -1,4 +1,4 @@
-// KimpTrack 관리자 화면 v2 스크립트 (스펙 036). 빌드 없음 — oxlint·vite 대상이 아니다(landing.html 과 같다).
+// KimpTrack 관리자 화면 v2 스크립트 (스펙 036 — 접속 절의 서버 기록은 042). 빌드 없음 — oxlint·vite 대상이 아니다(landing.html 과 같다).
 // 한 파일이다(§2 — 나누면 로드 순서·전역 이름이 계약이 된다). 순서: 공통 도구 → 요청·세션·주기 → 부분 상태·차트
 // → 개요·수집 → 인프라 → 알림·접속 → 비용·그리기·시작.
 // 보안(§3.8): 서버·방문자가 정한 글자는 textContent 로만 넣고 title 말고는 어떤 속성에도 쓰지 않는다 — 링크가 되지 않게.
@@ -24,6 +24,9 @@ const P = {
 const FAST = [P.collector, P.api, P.status, P.collect];
 const SLOW = [P.aws, P.alerts, P.access, P.clarity];
 const HEALTH = new Set([P.collector, P.api]); // 025 — 503 도 상태 응답이다(본문을 그린다)
+// 서버 기록 창(042 §3.2) — 버튼의 data-window 글자. 고른 창은 이 변수에만 둔다(주소·브라우저 저장소 없음 — 새로고침하면 24시간)
+const WINDOW_NAME = { '24h': '24시간', '7d': '7일', '30d': '30일' };
+const WINDOW_HOURS = { '24h': 24, '7d': 168, '30d': 720 };
 
 class Expired extends Error {}
 
@@ -31,6 +34,8 @@ const got = new Map(); // 경로 → { body } | { why } — 마지막 호출 결
 const okSince = new Set(); // 마지막 만료 신호 뒤 만료 신호 없이 끝난 경로
 let reloading = false;
 let alertFilter = 'all'; // 알림 필터 — JS 변수에만 (§3.4)
+let picked = '24h'; // 고른 서버 기록 창 (042 §3.2)
+const acc = { flight: null, again: false }; // 떠 있는 접속 호출 하나와 '끝나면 한 번 더'
 
 // --- 공통 도구 ---------------------------------------------------------------------------------
 
@@ -134,27 +139,30 @@ async function call(path, init = {}) {
   return { status: resp.status, body: isObj(body) ? body : null, text };
 }
 
-// 직전 결과와 같으면 직전 객체를 그대로 둔다 — 그 값으로 그린 본문을 다시 그리지 않게(아래 redraw)
+// 직전 결과와 같으면 직전 객체를 그대로 둔다 — 그 값으로 그린 본문을 다시 그리지 않게(아래 redraw).
+// 접속 결과는 요청한 창(asked)이 같을 때만 같은 것이다
 function keep(path, next) {
   const prev = got.get(path);
-  const same = prev && (next.why ? prev.why === next.why : prev.text === next.text);
+  const same = prev && prev.asked === next.asked && (next.why ? prev.why === next.why : prev.text === next.text);
   if (!same) got.set(path, next);
 }
 
 // 경로 하나를 부르고 결과를 got 에 둔다. 403·JSON 아님·예상 밖 상태(피드 경로가 없는 404 등)는 사유만 남긴다 —
 // 그 경로가 채우는 칸은 비우고 사유를 적는다(직전 값이 정상으로 읽히지 않게). 돌려주는 값 = 만료 신호였는가
 async function load(path) {
+  // 접속 경로는 늘 고른 창을 붙인다 — 결과에 요청한 창을 남겨, 고른 창으로 요청한 응답만 그린다(042 §3.2)
+  const asked = path === P.access ? picked : undefined;
   try {
-    const { status, body, text } = await call(path);
+    const { status, body, text } = await call(asked ? `${path}?window=${asked}` : path);
     const fine = status === 200 || (status === 503 && HEALTH.has(path));
-    if (status === 403) keep(path, { why: '권한·설정 오류 (403)' });
-    else if (body === null || !fine) keep(path, { why: `응답 오류 (HTTP ${status})` });
-    else keep(path, { body, text });
+    if (status === 403) keep(path, { why: '권한·설정 오류 (403)', asked });
+    else if (body === null || !fine) keep(path, { why: `응답 오류 (HTTP ${status})`, asked });
+    else keep(path, { body, text, asked });
     okSince.add(path);
     return false;
   } catch (err) {
     const gone = err instanceof Expired;
-    keep(path, { why: gone ? '로그인 만료·연결 끊김' : '불러오지 못함' });
+    keep(path, { why: gone ? '로그인 만료·연결 끊김' : '불러오지 못함', asked });
     if (!gone) okSince.add(path);
     return gone;
   }
@@ -193,21 +201,54 @@ function alive() {
 const fast = { paths: FAST, every: FAST_MS, busy: false, timer: 0, started: 0 };
 const slow = { paths: SLOW, every: SLOW_MS, busy: false, timer: 0, started: 0 };
 
+// 호출 묶음 하나가 끝난 뒤 — 만료 신호면 새로고침 한 번, 여덟 경로가 모두 신호 없이 끝났으면 표시 지우기, 그리고 그리기
+function settle(signals) {
+  if (signals.some(Boolean)) {
+    okSince.clear();
+    expired();
+  } else if (okSince.size === FAST.length + SLOW.length) {
+    alive();
+  }
+  $('updated').textContent = clock(Date.now());
+  paint();
+}
+
+// 접속 경로 호출(042 §3.2) — 느린 묶음과 창 버튼이 함께 쓴다. 떠 있으면 겹쳐 부르지 않고 끝난 뒤 한 번 더 부른다
+// (그사이 여러 번 눌러도 다음 호출은 하나 — 그때 고른 창). 돌려주는 값 = 만료 신호였는가
+function loadAccess() {
+  if (acc.flight) {
+    acc.again = true;
+    return acc.flight;
+  }
+  acc.flight = (async () => {
+    let gone = false;
+    do {
+      acc.again = false;
+      gone = (await load(P.access)) || gone;
+      follow();
+    } while (acc.again && !reloading);
+    acc.flight = null;
+    return gone;
+  })();
+  return acc.flight;
+}
+
+// 응답 창이 요청한 창과 다르면(서버가 24시간으로 답했다) 고른 창을 응답 창으로 되돌린다 — 그사이 다른 창을 고르지 않았을 때만
+function follow() {
+  const entry = got.get(P.access);
+  const answered = entry?.body?.window;
+  if (entry?.asked !== picked || answered === picked || !own(WINDOW_NAME, answered)) return;
+  picked = answered;
+  entry.asked = answered;
+}
+
 async function run(loop) {
   clearTimeout(loop.timer);
   if (loop.busy || reloading || document.visibilityState !== 'visible') return;
   loop.busy = true;
   loop.started = Date.now();
   try {
-    const signals = await Promise.all(loop.paths.map(load));
-    if (signals.some(Boolean)) {
-      okSince.clear();
-      expired();
-    } else if (okSince.size === FAST.length + SLOW.length) {
-      alive();
-    }
-    $('updated').textContent = clock(Date.now());
-    paint();
+    settle(await Promise.all(loop.paths.map((path) => (path === P.access ? loadAccess() : load(path)))));
   } finally {
     loop.busy = false;
     schedule(loop);
@@ -1081,15 +1122,15 @@ function drawAlerts() {
   $('s-alerts').replaceChildren(marked(failed ? 'warn' : 'ok', text));
 }
 
-for (const chip of document.querySelectorAll('.chip')) {
+for (const chip of document.querySelectorAll('.chip[data-filter]')) {
   chip.addEventListener('click', () => {
     alertFilter = chip.dataset.filter;
-    for (const other of document.querySelectorAll('.chip')) other.setAttribute('aria-pressed', String(other === chip));
+    for (const other of document.querySelectorAll('.chip[data-filter]')) other.setAttribute('aria-pressed', String(other === chip));
     drawAlerts();
   });
 }
 
-// --- 접속 (§3.4) — 실시간·서버 기록 24시간·Clarity ---------------------------------------------------
+// --- 접속 (§3.4) — 실시간·서버 기록(042 — 창 줄과 질문 여섯 덩어리)·Clarity ------------------------------
 
 // 대시보드 탭 이름표 — 002 의 탭 id·이름(041 §3.4). `(기타)` 와 표에 없는 값은 원래 글자 그대로
 const TAB_NAME = {
@@ -1101,15 +1142,6 @@ const TAB_NAME = {
   flow: '입출금 레이더',
 };
 const tabName = (id) => own(TAB_NAME, id) ?? clean(id);
-// [응답 키, 표 이름, 이름표 함수(있으면 한국어 이름을 적고 원래 글자는 title)]
-const TOP_TABLES = [
-  ['paths', '경로'],
-  ['tabs', '탭', tabName],
-  ['referrers', '외부 출처'],
-  ['utmSources', 'utm_source'],
-  ['devices', '기기'],
-  ['browsers', '브라우저'],
-];
 const WS_BUCKETS = [
   ['lt10s', '10초 미만'],
   ['lt1m', '1분 미만'],
@@ -1118,6 +1150,8 @@ const WS_BUCKETS = [
   ['ge1h', '1시간 이상'],
 ];
 const share = (n, total) => (total > 0 ? n / total : 0);
+const n0 = (v) => num(v) ?? 0;
+const QS = [1, 2, 3, 4, 5, 6];
 
 // 타일 — 이름·값, sub 는 값 아래 흐린 한 줄(무엇을 센 수인지 — 사람 수로 읽히거나 봇이 섞이는 타일, 041 §3.1)
 function stat(label, value, tone, sub) {
@@ -1128,6 +1162,60 @@ function stat(label, value, tone, sub) {
   return box;
 }
 
+// 시행일·KST 날 — 화면의 시행일 글자는 늘 gateAt 의 KST 날짜다(§3.2). 날 막대도 KST 날로 자른다(§3.4 ④)
+const KST_SEC = 32_400;
+const kstDay = (sec) => Math.floor((sec + KST_SEC) / 86_400) * 86_400 - KST_SEC;
+function kstMd(ms) {
+  const d = new Date(ms + KST_SEC * 1000);
+  return `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+const hourStart = (sec) => sec - (sec % 3600);
+// 7일·30일 창의 시작이 시행일로 잘렸는가 — 자르기 전 시작 = endTs 가 든 시의 시작 − (N−1)시간
+const naturalStart = (a) => hourStart(n0(a.endTs)) - ((WINDOW_HOURS[a.window] ?? 24) - 1) * 3600;
+const isCut = (a) => a.window !== '24h' && n0(a.startTs) > naturalStart(a);
+const spanDays = (a) => Math.ceil((n0(a.endTs) - n0(a.startTs)) / 86_400);
+
+// 창 버튼 — 응답 windows 에 든 창만 연다(없거나 호출 실패면 24시간만). 고른 버튼은 aria-pressed
+function drawWindowBar(entry, part, current) {
+  const body = entry && !entry.why ? entry.body : null;
+  const open = Array.isArray(body?.windows) ? body.windows : ['24h'];
+  for (const button of document.querySelectorAll('[data-window]')) {
+    button.disabled = !open.includes(button.dataset.window);
+    button.setAttribute('aria-pressed', String(button.dataset.window === picked));
+  }
+  const gate = num(body?.gateAt);
+  $('window-note').textContent = gate !== null && !open.includes('7d') ? `7일·30일은 처리방침 개정 시행 ${kstMd(gate)} 부터` : '';
+  const meta = $('m-window');
+  if (!current) return meta.replaceChildren(badge('wait', `${WINDOW_NAME[picked]} 불러오는 중`));
+  if (!usable(part)) return meta.replaceChildren(...head(part));
+  const startMs = n0(part.startTs) * 1000;
+  const range = isCut(part) ? `${kstMd(n0(part.gateAt))} 00:00 시행부터 센 ${spanDays(part)}일` : `${md(startMs)} ${hm(startMs)} ~ 지금`;
+  const tail = [`읽지 못한 줄 ${int(part.totals?.skipped)}`];
+  if (num(part.firstTs) !== null && part.firstTs > n0(part.startTs)) tail.push(`기록 시작 ${md(part.firstTs * 1000)} ${hm(part.firstTs * 1000)}`);
+  meta.replaceChildren(el('span', null, `${range} · ${SLOW_MS / 1000}초마다 ·`), age(part), el('span', null, `· ${tail.join(' · ')}`));
+}
+
+// 창 버튼(042 §3.2) — 바꾸는 순간 덩어리를 '불러오는 중' 으로 비우고 접속 경로 하나만 곧바로 부른다.
+// 같은 요청 함수(헤더·만료 판정·여덟 경로 셈)를 지나고, 느린 묶음의 다음 시각은 건드리지 않는다
+for (const button of document.querySelectorAll('[data-window]')) {
+  button.addEventListener('click', () => {
+    const next = button.dataset.window;
+    if (next === picked || !own(WINDOW_NAME, next) || reloading) return;
+    picked = next;
+    paint();
+    loadAccess().then((gone) => settle([gone]));
+  });
+}
+
+// [응답 키, 표 이름, 이름표 함수(있으면 한국어 이름을 적고 원래 글자는 title)]
+const TOP_TABLES = [
+  ['paths', '경로'],
+  ['tabs', '탭', tabName],
+  ['referrers', '외부 출처'],
+  ['utmSources', 'utm_source'],
+  ['devices', '기기'],
+  ['browsers', '브라우저'],
+];
 // 상위 목록 표 — 이름(방문자가 정한 글자 — 글자로만)·수·페이지 대비 비율(막대와 % 를 한 줄에), 상위 10.
 // named 가 있으면(탭) 이름표를 적고 원래 글자는 title
 function topTable(rows, label, pages, named) {
@@ -1286,6 +1374,9 @@ function drawTraffic() {
     // 굵은 오른쪽 값은 '지금' 처럼 읽히니 24시간 최고로 — 지금 수는 위의 큰 숫자(빠른 묶음)다
     node.replaceChildren(metricRow('serve', 'WebSocket 접속 수 · CloudWatch 5분 최댓값', m.wsClients, { ...where, extreme: 'max', peak: true }));
   });
+  const entry = got.get(P.access);
+  const current = entry !== undefined && entry.asked === picked;
+  drawWindowBar(entry, current ? partOf(P.access) : undefined, current);
   const access = partOf(P.access);
   if (!region('access', access, CAUSE.access, fillAccess)) {
     $('access-sub').textContent = '';
