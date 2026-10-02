@@ -181,6 +181,9 @@ cd web && npm run lint && npm run build   # oxlint 경고·오류 0 · build ok
 #   4. 2 의 읽기 동안 같은 루프의 10ms 잠들기 넘침 최댓값: 무리 7.6~13.4ms · 모두 다름 10.7~17.4ms(한도 100ms)
 # nginx — 설정 안 고침. test_admin.py 의 `= /svc/api/admin/access` rewrite(^ /admin/access break) 단언 그대로 통과.
 #   실제 넘김(/svc/api/admin/access?window=7d → /admin/access?window=7d)은 샌드박스가 Docker 를 못 띄워 설계 세션 몫
+# 검토 반영(2026-10-02) 뒤 다시 — ruff check·format --check 통과 · pytest 1347 passed · 6 failed(같은 test_gauge UDP bind) · web lint·build ok
+#   새 테스트 다섯은 고치기 전 커밋(git archive HEAD)에서 실패 확인 — 긴 UA 최고 19.2MB · 회전 뒤 40줄(20) · 깨진 gz 메모 남음 · ts NaN 요약 전체 error
+#   성능 1·3·4 는 위와 같은 범위, 2(무리)는 고치기 전·뒤를 번갈아 재어 최솟값 0.401~0.406초 → 0.399~0.400초(오늘 기계 — 차이 없음)
 ```
 
 ## 6. 갱신할 문서
@@ -213,7 +216,7 @@ cd web && npm run lint && npm run build   # oxlint 경고·오류 0 · build ok
   - 문서: context 넷(status·architecture·product·dev-setup), 스펙 027·035·036, `CLAUDE.md` 인덱스(035 행 범위·038 상태).
 - 추측한 지점 (묻지 않고 정한 사소한 것):
   - 압축 10MB(10,000,000바이트)는 최신부터 더해 넘는 첫 파일에서 멈춘다. 압축 중인 회전 `.log` 는 0 으로 센다 — 잠깐뿐이고 다음 회차가 `.gz` 크기로 센다(압축 전 크기로 세면 그 몇 초 동안 오래된 파일이 밀려났다 다시 읽힌다).
-  - `access.log` 는 60초 규칙에 더해 읽기 시작점이 바뀌었을 때도 다시 읽는다 — 시작점 앞 줄이 짝의 첫 페이지 줄에 남지 않게(시작점은 한 시간에 한 번 움직인다).
+  - `access.log` 는 60초 규칙에 더해 읽기 시작점이 바뀌었을 때(시작점 앞 줄이 짝의 첫 페이지 줄에 남지 않게 — 시작점은 한 시간에 한 번 움직인다)와 회전을 본 회차(새 회전 파일 키가 목록에 나타남·`access.log` inode 바뀜·크기 줄어듦)에도 다시 읽는다 — 회전 직후 60초 안 다른 창 갱신이 옛 `access.log` 결과와 새 회전 파일을 함께 세지 않게(§3.8).
   - 1시간 비움 타이머는 접속 요청마다 다시 건다('마지막 접속 요청' — 60초 칸 안의 요청 포함). 비울 때 창 칸 셋도 새로 만들어 다음 요청이 첫 채움(`pending`)을 본다. 원본 파일이 모두 사라진 회차(`no_file`)에도 캐시를 비운다.
   - 짝 기록 대상은 UA 만으로 정한 종류가 `browser` 인 줄(§3.4 의 2~8 — 운영자·탐색 덮어쓰기 전). HeadlessChrome 처럼 브라우저 토큰이 있어도 앞 종류에 걸리면 짝이 아니다. 빈 UA 만 `unknown`(공백뿐인 UA 는 scanner).
   - 열쇠 = `os.urandom(16)` 뒤에 그 줄의 KST 날짜 글자(`YYYY-MM-DD`)를 붙인 BLAKE2b `key`, 해시 입력 = `IP\0UA`(UTF-8 — 짝 없는 서로게이트도 바이트로).
@@ -221,10 +224,13 @@ cd web && npm run lint && npm run build   # oxlint 경고·오류 0 · build ok
   - JS 신호의 101 은 메서드를 보지 않는다(035 의 WS 세기와 같다). 시마다 목록 30 = 진짜 키 30 + `(기타)`.
   - `skipped` 의 '창과 겹친 파일' = 회전 파일은 수정 시각 ≥ `startTs`, `access.log` 는 늘.
   - 지금 고를 수 없는 창은 캐시(`AccessLog.summary`) 안에서도 24h 로 바꾼다 — 라우터·피드와 같은 함수.
+  - `ts` 가 0 이상 9999-12-30T00:00Z 미만의 수가 아니면(NaN·무한·음수·먼 미래 — 손상·손으로 고친 줄) `ts` 없는 줄로 `skipped` — 한 줄이 `int()`·KST 날짜 바꾸기에서 요약 전체를 `error` 로 만들지 않게(§3.3).
   - 화면 단언 꼴: `test_admin.py::test_screen_top_table_share_is_over_human_pages` — `fillAccess` 본문에 `const pages = num(totals.humanPages) ?? 0;`·`topTable(a[k], label, pages)` 가 있고 `num(totals.pages) ?? 0` 이 없다.
-  - 성능 때문에 줄마다 도는 판정(페이지·JS 신호·종류 덮어쓰기)은 `access_hours.py` 에 풀어 썼고, UA 종류 3~7 의 낱말은 정규식 대신 부분 문자열로 찾는다(정규식 대안 ≈3.8µs → ≈1.6µs/UA). UA·출처·특성 판정 메모(4,096)는 그 파일을 읽는 동안만 두고 버린다. 줄 풀기는 `raw_decode` 로 평범한 튜플(json.loads 와 같이 뒤에 공백 밖 글자가 있으면 `skipped`).
+  - 성능 때문에 줄마다 도는 판정(페이지·JS 신호·종류 덮어쓰기)은 `access_hours.py` 에 풀어 썼고, UA 종류 3~7 의 낱말은 정규식 대신 부분 문자열로 찾는다(정규식 대안 ≈3.8µs → ≈1.6µs/UA). UA·출처·특성 판정 메모(4,096 — 512자 넘는 글자는 넣지 않는다)는 그 파일을 읽는 동안만 두고 버린다(깨진 파일로 예외가 나도 — 결과째 캐시되므로). 줄 풀기는 `raw_decode` 로 평범한 튜플(json.loads 와 같이 뒤에 공백 밖 글자가 있으면 `skipped`).
 - 실행 중 함께 고친 스펙 절: 없음(027·035·036 은 §6 대로).
+- 검토 반영(2026-10-02): 깨진 회전 파일도 판정 메모·날 열쇠를 버림(UA·출처 원문이 캐시에 남던 것), 회전 직후 60초 안 다른 창이 같은 줄을 두 번 세던 것, 긴 UA 가 판정 메모를 파일 크기만큼 키우던 것(44MB·UA ≈1만 자 최고 42MB → 0.3MB), `ts` NaN·무한 줄 하나가 요약 전체를 error 로 만들던 것 — 테스트 다섯(`test_access_privacy`·`test_access_cache`·`test_access_files`).
 - 남은 빚:
   - §4 성능 2 는 설계 세션이 (가)로 정했다(2026-10-02): 기준 파일은 UA 를 수백 가지 무리에서 고른 꼴(실제 몰림 — 판정 메모가 맞는다), 모든 줄 UA 가 다른 극단(로컬 0.61초·serve ≈3.6초)은 참고 값(§3.7·§5) — 회전 파일은 한 번 읽어 캐시하므로 극단도 처음 한 번뿐이다.
   - 실제 nginx 넘김(Docker)·브라우저 확인은 설계 세션 몫(샌드박스). 운영 확인은 §4 '배포 뒤'.
   - status 빚 넷(§6).
+  - 긴 UA 판정 비용(검토 2026-10-02 — 사람 결정): 종류 낱말 찾기가 UA 길이에 비례해(≈300자 ≈26µs, 3,000자 ≈210µs) 긴 UA 가 줄마다 다른 50MiB 회전 파일은 로컬 ≈3.3초(serve ≈20초 — §5 의 극단 ≈3.6초 밖)다. 판정을 UA 앞 512자로 자르면 줄지만 §3.4·§3.5 동작(그 뒤 토큰)이 바뀐다. 처음 한 번 뒤엔 캐시된다.
