@@ -119,11 +119,13 @@ def _rows(table: dict[str, list[int]]) -> list[list[Any]]:
 
 
 class GeoCounts(NamedTuple):
-    """창의 나라·망 종류별 날마다 센 방문자(039) — 이름 → [confirmed, shaped], IPv6 짝은 shaped 수만."""
+    """창의 나라·망 종류별 날마다 센 방문자(039) — 이름 → [confirmed, shaped], IPv6 짝은 shaped 수만.
+    `peaks` 는 나라 → 창 안 KST 하루 가운데 그 나라의 짝(shaped)이 가장 많았던 날의 수 — 적은 나라 묶기의 기준."""
 
     countries: dict[str, list[int]]
     networks: dict[str, list[int]]
     ipv6: int
+    peaks: dict[str, int]
 
 
 def visitors(
@@ -143,6 +145,7 @@ def visitors(
     ws_pairs = ipv6 = 0
     countries: dict[str, list[int]] = {}
     networks: dict[str, list[int]] = {}
+    peaks: dict[str, int] = {}
     capped = False
     day_rows = []
     for day in range(kst_day(since_ts), kst_day(end_ts) + 1, DAY_SEC):
@@ -155,6 +158,9 @@ def visitors(
                 merged[h] = pair if seen is None else _merge(seen, pair)
         mask = _day_mask(day, since_ts, end_hour)
         counts = [0, 0, 0]
+        day_countries: dict[
+            str, int
+        ] = {}  # 그날 나라마다 짝 수 — 날을 넘어 같은 짝인지 알 수 없다
         for pair in merged.values():
             if pair.flags or not (pair.pages | pair.js) & mask:
                 continue  # 그날 탐색·운영자 흔적이 있거나 창 안에 페이지·JS 신호가 없다
@@ -177,6 +183,10 @@ def visitors(
                     row = table.setdefault(name, [0, 0])
                     row[0] += confirmed
                     row[1] += 1
+                day_countries[pair.country] = day_countries.get(pair.country, 0) + 1
+        for name, n in day_countries.items():
+            if n > peaks.get(name, 0):
+                peaks[name] = n
         day_rows.append(
             {
                 "ts": day,
@@ -198,7 +208,7 @@ def visitors(
         "days": day_rows,
         **{key: _rows(table) for key, table in tables.items()},
     }
-    return values, ws_pairs, GeoCounts(countries, networks, ipv6)
+    return values, ws_pairs, GeoCounts(countries, networks, ipv6, peaks)
 
 
 def before_gate() -> dict[str, Any]:

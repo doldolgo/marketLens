@@ -1,14 +1,17 @@
-"""`/admin/access` 의 `geo` — 적은 나라 묶기·국내 통신사 칸·모름·망 종류 정렬·셈·IPv6·두 파일·게이트 걸침 (스펙 039 §3.5·§3.6·§4 '응답')."""
+"""`/admin/access` 의 `geo` — 적은 나라 묶기(창 안 KST 하루 최대 짝 수)·국내 통신사 칸·모름·망 종류 정렬·셈·IPv6·두 파일·게이트 걸침 (스펙 039 §3.5·§3.6·§4 '응답')."""
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from app.features.admin import access_hours
+from app.features.admin.geo_fetch import utc_month
 from app.features.admin.tests.access_fakes import (
     AFTER,
     CHROME,
+    DAY,
     GATE,
     HOUR,
     Feeds,
@@ -19,13 +22,14 @@ from app.features.admin.tests.access_fakes import (
 from app.features.admin.tests.geo_fakes import (
     DE_TELECOM,
     KR_TELECOM,
-    MONTH,
     PLACES,
     DbIp,
     inline,
 )
 
 T0 = AFTER - 2 * HOUR  # 오늘(KST) 08:30
+YESTERDAY = AFTER - 20 * HOUR  # 어제(KST) 14:30 — 24시간 창 안
+LATE = GATE + 31 * DAY + 10 * HOUR + 1800  # 30일 창이 게이트 뒤로 꽉 찬다(2026-11-11)
 PLAIN = "Plain Org"
 Places = dict[str, tuple[str, int | None, str]]
 
@@ -36,15 +40,22 @@ def place(
     return f"10.0.{i}.0", (cc, asn, PLAIN)
 
 
-def visits(ip: str, shaped: int, confirmed: int = 0, *, tag: str = "") -> list[str]:
-    """그 IP 에서 서로 다른 UA 짝 `shaped` 개 — 앞의 `confirmed` 개는 clarity.js 도 받았다(JS 신호)."""
+def visits(
+    ip: str, shaped: int, confirmed: int = 0, *, tag: str = "", t0: float = T0
+) -> list[str]:
+    """그 IP 에서 서로 다른 UA 짝 `shaped` 개(`t0` 의 KST 하루) — 앞의 `confirmed` 개는 clarity.js 도 받았다(JS 신호).
+    같은 `tag` 면 다른 날에도 같은 짝이다."""
     lines = []
     for i in range(shaped):
         ua = f"{CHROME} {tag}{ip}-{i}"
-        lines.append(line(T0 + i, "/", ua=ua, ip=ip))
+        lines.append(line(t0 + i, "/", ua=ua, ip=ip))
         if i < confirmed:
-            lines.append(line(T0 + i + 0.5, "/clarity.js", ua=ua, ip=ip))
+            lines.append(line(t0 + i + 0.5, "/clarity.js", ua=ua, ip=ip))
     return lines
+
+
+def by_time(lines: list[str]) -> list[str]:
+    return sorted(lines, key=lambda ln: json.loads(ln)["ts"])
 
 
 async def geo(
@@ -57,7 +68,7 @@ async def geo(
 ) -> dict[str, Any]:
     """판을 먼저 올린 피드로 한 번 — 응답 전체."""
     write(tmp_path, "access.log", lines)
-    dbip = DbIp().serve(MONTH, {**PLACES, **(places or {})})
+    dbip = DbIp().serve(utc_month(now), {**PLACES, **(places or {})})
     f = Feeds(tmp_path, now, geo_transport=dbip.transport, geo_start=inline)
     f.feeds.geo.ensure()
     body = await f.get(window)
@@ -73,7 +84,11 @@ async def test_the_ok_part_has_its_eight_keys_and_the_visitors_since(
     assert (
         list(g) == "state code month loadedAt sinceTs countries networks ipv6".split()
     )
-    assert (g["code"], g["month"], g["loadedAt"]) == (None, MONTH, int(AFTER * 1000))
+    assert (g["code"], g["month"], g["loadedAt"]) == (
+        None,
+        "2026-10",
+        int(AFTER * 1000),
+    )
     assert g["sinceTs"] == body["visitors"]["sinceTs"] == body["startTs"]
     assert (g["countries"], g["networks"], g["ipv6"]) == (
         [["DE", 0, 3]],
@@ -82,9 +97,10 @@ async def test_the_ok_part_has_its_eight_keys_and_the_visitors_since(
     )
 
 
-async def test_countries_under_three_or_with_one_or_two_confirmed_are_other(
+async def test_a_country_with_under_three_pairs_on_its_day_is_other(
     tmp_path: Path,
 ) -> None:
+    # 판정은 모양(상한)의 하루 최대 하나 — confirmed 가 1·2 여도 그날 짝이 셋이면 이름으로 둔다
     places = dict(
         [place(1, "JP"), place(2, "FR"), place(3, "IT"), place(4, "ES"), place(5, "NL")]
     )
@@ -95,10 +111,46 @@ async def test_countries_under_three_or_with_one_or_two_confirmed_are_other(
     g = (await geo(tmp_path, lines, places))["geo"]
     assert g["countries"] == [
         ["ES", 3, 5],
+        ["IT", 1, 5],
         ["NL", 0, 4],
         ["FR", 0, 3],
-        ["(기타)", 1, 7],  # JP 2 + IT 5(confirmed 1)
+        ["(기타)", 0, 2],  # JP
     ]
+
+
+async def test_one_pair_every_day_for_30_days_is_other_but_three_on_one_day_is_named(
+    tmp_path: Path,
+) -> None:
+    # 짝 열쇠가 날마다 바뀌어 같은 사람인지 알 수 없다 — 한 짝이 날마다 오면 합 30 이어도 하루 1 이라 (기타)
+    alone = [
+        line(LATE - HOUR - d * DAY, "/", ua=f"{CHROME} alone", ip=DE_TELECOM)
+        for d in range(30)
+    ]
+    # FR — 어느 하루 셋, 다른 열흘은 그 가운데 한 짝만
+    crowd = visits("10.0.2.0", 3, t0=LATE - HOUR - 5 * DAY)
+    crowd += [
+        line(LATE - 2 * HOUR - d * DAY, "/", ua=f"{CHROME} 10.0.2.0-0", ip="10.0.2.0")
+        for d in range(10, 20)
+    ]
+    body = await geo(
+        tmp_path, by_time(alone + crowd), dict([place(2, "FR")]), now=LATE, window="30d"
+    )
+    g = body["geo"]
+    assert (body["window"], g["month"], body["visitors"]["shaped"]) == (
+        "30d",
+        "2026-11",
+        43,
+    )
+    assert g["countries"] == [["FR", 0, 13], ["(기타)", 0, 30]]
+    assert g["networks"] == [["telecom", 0, 30], ["other", 0, 13]]
+
+
+async def test_a_24h_window_judges_yesterday_and_today_apart(tmp_path: Path) -> None:
+    # 24시간 창은 KST 어제·오늘 둘 — 같은 둘이 어제·오늘 오면 합 4 여도 하루 2 라 (기타), 오늘 셋이면 이름
+    lines = visits(DE_TELECOM, 2, t0=YESTERDAY) + visits(DE_TELECOM, 2)
+    lines += visits("10.0.2.0", 3)
+    g = (await geo(tmp_path, by_time(lines), dict([place(2, "FR")])))["geo"]
+    assert g["countries"] == [["FR", 0, 3], ["(기타)", 0, 4]]
 
 
 async def test_25_countries_keep_20_rows_and_sum_the_rest(tmp_path: Path) -> None:
@@ -112,18 +164,50 @@ async def test_25_countries_keep_20_rows_and_sum_the_rest(tmp_path: Path) -> Non
 
 
 @pytest.mark.parametrize(
-    ("shaped", "confirmed", "countries", "networks"),
+    ("yesterday", "shaped", "confirmed", "countries", "networks"),
     [
-        (2, 0, [["FR", 0, 3], ["(기타)", 0, 2]], [["other", 0, 3], ["telecom", 0, 2]]),
-        (3, 1, [["FR", 0, 3], ["(기타)", 1, 3]], [["other", 0, 3], ["telecom", 1, 3]]),
-        (3, 0, [["FR", 0, 3], ["KR", 0, 3]], [["other", 0, 3], ["telecom_kr", 0, 3]]),
+        (
+            0,
+            2,
+            0,
+            [["FR", 0, 3], ["(기타)", 0, 2]],
+            [["other", 0, 3], ["telecom", 0, 2]],
+        ),
+        (
+            2,
+            2,
+            0,
+            [["FR", 0, 3], ["(기타)", 0, 4]],
+            [["telecom", 0, 4], ["other", 0, 3]],
+        ),
+        (
+            0,
+            3,
+            1,
+            [["FR", 0, 3], ["KR", 1, 3]],
+            [["other", 0, 3], ["telecom_kr", 1, 3]],
+        ),
+        (
+            0,
+            3,
+            0,
+            [["FR", 0, 3], ["KR", 0, 3]],
+            [["other", 0, 3], ["telecom_kr", 0, 3]],
+        ),
     ],
 )
 async def test_telecom_kr_folds_into_telecom_when_kr_is_hidden(
-    tmp_path: Path, shaped: int, confirmed: int, countries: list, networks: list
+    tmp_path: Path,
+    yesterday: int,
+    shaped: int,
+    confirmed: int,
+    countries: list,
+    networks: list,
 ) -> None:
-    lines = visits(KR_TELECOM, shaped, confirmed) + visits("10.0.2.0", 3)
-    g = (await geo(tmp_path, lines, dict([place(2, "FR")])))["geo"]
+    # 어제 둘·오늘 둘(같은 짝)은 하루 2 라 KR 이 숨고 국내 통신사 칸도 통신사 칸에 든다
+    lines = visits(KR_TELECOM, yesterday, t0=YESTERDAY)
+    lines += visits(KR_TELECOM, shaped, confirmed) + visits("10.0.2.0", 3)
+    g = (await geo(tmp_path, by_time(lines), dict([place(2, "FR")])))["geo"]
     assert (g["countries"], g["networks"]) == (countries, networks)
 
 
