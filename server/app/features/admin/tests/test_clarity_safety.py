@@ -41,7 +41,7 @@ async def test_token_never_reaches_logs_redis_or_response(
     caplog.set_level(logging.DEBUG)
     w = World(Clarity((200, EXPORT), (401, {"token": TOKEN})))
     first = await w.get()
-    w.advance(3)
+    w.advance(4)
     second = await w.get()
     raw = fakeredis.FakeRedis(server=w.server).get("admin:clarity").decode()
     for text in (json.dumps(first), json.dumps(second), raw, caplog.text):
@@ -74,7 +74,7 @@ async def test_unreachable_redis_means_no_call_and_error_redis(
     assert "10.0.0.5" not in caplog.text
 
 
-async def test_failed_save_still_blocks_calls_for_three_hours() -> None:
+async def test_failed_save_still_blocks_calls_for_four_hours() -> None:
     class SaveFails:
         async def clarity_load(self) -> str | None:
             return None
@@ -82,15 +82,18 @@ async def test_failed_save_still_blocks_calls_for_three_hours() -> None:
         async def clarity_save(self, data: str) -> None:
             raise ConnectionError("down")
 
+        clarity_pages_load = clarity_load
+        clarity_pages_save = clarity_save
+
     w = World(Clarity())
     store = SaveFails()
     assert (await w.feeds.clarity(bus=store))["state"] == "ok"
     w.advance(1)
     body = await w.feeds.clarity(bus=store)
-    assert body["state"] == "ok" and len(w.clarity.requests) == 1
-    w.advance(2)
+    assert body["state"] == "ok" and w.clarity.count("base") == 1
+    w.advance(3)
     await w.feeds.clarity(bus=store)
-    assert len(w.clarity.requests) == 2
+    assert w.clarity.count("base") == 2
 
 
 async def test_deleting_the_key_calls_on_the_next_request() -> None:
@@ -99,7 +102,7 @@ async def test_deleting_the_key_calls_on_the_next_request() -> None:
     fakeredis.FakeRedis(server=w.server).delete("admin:clarity")  # 런북 — 바로 부르기
     w.advance(sec=60)
     await w.get()
-    assert len(w.clarity.requests) == 2
+    assert w.clarity.count("base") == 2
 
 
 async def test_every_address_form_loses_query_hash_and_user_info() -> None:
@@ -256,11 +259,11 @@ async def test_a_list_without_any_metric_is_error_and_keeps_the_last_success(
 ) -> None:
     w = World(Clarity((200, EXPORT), (200, junk), (200, [])))
     ok = await w.get()
-    w.advance(3)
+    w.advance(4)
     body = await w.get()
     assert (body["state"], body["code"]) == ("error", "bad_data")  # 040 §3.5
     assert body["fetchedAt"] == ok["fetchedAt"] and body["traffic"] == ok["traffic"]
     assert w.stored()["values"]["traffic"] == ok["traffic"]
-    w.advance(3)
+    w.advance(4)
     empty = await w.get()  # 빈 목록 = 자료 없음 — 성공이다
     assert (empty["state"], empty["traffic"], empty["metrics"]) == ("ok", None, [])

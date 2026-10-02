@@ -1,12 +1,13 @@
-"""api 관리자 피드 — `/admin/access`·`/admin/clarity` 의 부분 상태와 갱신 (스펙 035 §3.1~§3.3·040 §3.2).
+"""api 관리자 피드 — `/admin/access`·`/admin/clarity` 의 부분 상태와 갱신 (스펙 035 §3.1~§3.2·040 §3.2·§3.5).
 
 공통 규칙은 034 와 같은 문장이다(`parts.py`). 접속 요약은 60초 캐시 한 칸이고 파일 읽기는 `asyncio.to_thread`
-(기본 실행기 — api 에는 수집 쓰기가 없다). Clarity 는 요청마다 Redis 기록을 읽어 때를 정한다(`clarity_schedule.py`) —
-기록이 Redis 에 있어 재시작이 하루 한도를 쓰지 않고, 키를 지우면 다음 요청이 바로 부른다(런북).
+(기본 실행기 — api 에는 수집 쓰기가 없다). Clarity 는 호출이 둘이다 — 기본 요약(4시간)과 페이지×기기 묶음(12시간,
+하위 부분 `pages`). 요청마다 Redis 기록 둘을 읽어 때를 정하고(`clarity_schedule.py`), 한 갱신 안에서 기본 → 묶음
+순서로 하나씩 부른다 — Clarity 호출이 동시에 둘 나가지 않는다. 기본이 401·403·429 면 묶음은 미룬다.
 읽기·부르기는 한 번에 하나이고 3초까지 기다린 뒤 늦으면 직전 결과(없으면 pending)를 답한다. 요청이 없으면 아무것도
 읽거나 부르지 않는다. 처리기 안 예외도 500 이 아니라 그 부분 `error` 와 WARNING 1줄(부분마다 10분에 1줄)이다 —
-라우터가 응답을 JSON 으로 쓰다 실패하지 않게, 쓸 수 없는 값(NaN·짝 없는 서로게이트)이 든 답도 여기서 `error` 로 바꾼다.
-JSON 풀기·쓰기는 파일 읽기와 같이 `asyncio.to_thread` 에서 한다.
+라우터가 응답을 JSON 으로 쓰다 실패하지 않게, 쓸 수 없는 값(NaN·짝 없는 서로게이트)이 든 답도 여기서 `error` 로 바꾼다
+(`pages` 는 따로 — 바깥을 바꾸지 않는다). JSON 풀기·쓰기는 파일 읽기와 같이 `asyncio.to_thread` 에서 한다.
 """
 
 import asyncio
@@ -24,6 +25,7 @@ from app.features.admin.clarity import (
     fetch,
     load_record,
 )
+from app.features.admin.clarity_pages import parse_pages
 from app.features.admin.clarity_schedule import ClarityKind
 from app.features.admin.clarity_values import parse_base
 from app.features.admin.parts import (
@@ -36,11 +38,14 @@ from app.features.admin.parts import (
 )
 
 ACCESS_REFRESH_SEC = 60
-CLARITY_REFRESH_SEC = (
-    10_800  # 시도 사이 최소 3시간 — 하루 10회 한도와 신선도의 교환 (§3.4)
-)
+# 시도 사이 — 어떤 24시간에도 기본 6 + 묶음 2 = 8회라 하루 10회 한도에서 사람 몫 2회가 남는다 (040 §3.2)
+CLARITY_REFRESH_SEC = 14_400
+PAGES_REFRESH_SEC = 43_200
 CLARITY_KEYS = ("nextAt", "numOfDays", "traffic", "summary", "countries", "metrics")
+PAGES_KEYS = ("nextAt", "numOfDays", "rowsIn", "rowLimitHit", "groups")
 BASE_PARAMS = {"numOfDays": "1"}
+# 동의한 방문자만이라 표본이 작아 72시간 — 차원은 둘(주소·기기)
+PAGES_PARAMS = {"numOfDays": "3", "dimension1": "URL", "dimension2": "Device"}
 
 
 class VisitFeeds:
@@ -70,6 +75,14 @@ class VisitFeeds:
             parse=parse_base,
             load=lambda bus: bus.clarity_load(),
             save=lambda bus, data: bus.clarity_save(data),
+        )
+        self._pages = ClarityKind(
+            name="clarity.pages",
+            refresh_sec=PAGES_REFRESH_SEC,
+            params=PAGES_PARAMS,
+            parse=parse_pages,
+            load=lambda bus: bus.clarity_pages_load(),
+            save=lambda bus, data: bus.clarity_pages_save(data),
         )
         self._warn = Warner(mono)
 
@@ -101,37 +114,53 @@ class VisitFeeds:
 
     async def clarity(self, *, bus: ClarityStore | None) -> dict[str, Any]:
         if self._token is None:
-            result = UNCONFIGURED  # 토큰 없음 — Redis 도 Clarity 도 부르지 않는다
+            outer = inner = (
+                UNCONFIGURED  # 토큰 없음 — Redis 도 Clarity 도 부르지 않는다
+            )
         else:
             try:
                 result = await self._clarity.get(lambda: self._refresh_clarity(bus))
             except Exception as exc:
                 result = self._failed("clarity", exc)
+            parts = result.values or {}
+            outer = parts.get("outer", result)  # pending·처리기 예외면 둘이 같은 상태
+            inner = parts.get("pages", result)
         # 값은 state 와 무관하게 마지막 성공 값이다(035 §3.3 — §3.1 의 예외). 경과는 fetchedAt 이 말한다
-        body = _body(result, CLARITY_REFRESH_SEC, CLARITY_KEYS)
-        return self._writable("clarity", body, CLARITY_KEYS)
+        pages = self._writable(
+            "clarity.pages", _body(inner, PAGES_REFRESH_SEC, PAGES_KEYS), PAGES_KEYS
+        )
+        body = self._writable(
+            "clarity", _body(outer, CLARITY_REFRESH_SEC, CLARITY_KEYS), CLARITY_KEYS
+        )
+        return {**body, "pages": pages}
 
     async def _refresh_clarity(self, bus: ClarityStore | None) -> Result:
         now_ms = int(self._clock() * 1000)
         texts: list[str | None] | None = None
         if bus is not None:  # None = lifespan 전 — Redis 자리가 없다
             try:
-                texts = [await self._base.load(bus)]
+                texts = [await kind.load(bus) for kind in (self._base, self._pages)]
             except Exception:
                 texts = None
         if bus is None or texts is None:
             # 시도 시각을 모르면 부르지 않는다 — 한도를 지킨다. 원인 하나라 줄도 하나
             self._warn("clarity", "redis")
-            return self._base.part(now_ms, ("error", "redis"))
+            return self._clarity_parts(now_ms, ("error", "redis"))
         try:
             stored = await asyncio.to_thread(lambda: [load_record(t) for t in texts])
         except Exception as exc:
             code = type(exc).__name__
             self._warn("clarity", code)
-            return self._base.part(now_ms, ("error", code))
+            return self._clarity_parts(now_ms, ("error", code))
         faults: dict[str, tuple[str, str | None]] = {}
         await self._step(self._base, stored[0], bus, now_ms, True, faults)
-        return self._base.part(now_ms, faults.get("clarity"))
+        blocked = self._base.blocks_pages()
+        await self._step(self._pages, stored[1], bus, now_ms, not blocked, faults)
+        base = self._base.record
+        if blocked and base is not None and self._pages.record is None:
+            # 기록이 없고 미뤘다 — 기본의 state·code 를 그대로 보인다
+            faults.setdefault("clarity.pages", (base.state or "error", base.code))
+        return self._clarity_parts(now_ms, None, faults)
 
     async def _step(
         self,
@@ -187,6 +216,17 @@ class VisitFeeds:
             return
         if kind.record is record:
             kind.saved, kind.dirty = True, False
+
+    def _clarity_parts(
+        self,
+        now_ms: int,
+        fault: tuple[str, str | None] | None,
+        faults: dict[str, tuple[str, str | None]] | None = None,
+    ) -> Result:
+        faults = faults or {}
+        outer = self._base.part(now_ms, fault or faults.get("clarity"))
+        inner = self._pages.part(now_ms, fault or faults.get("clarity.pages"))
+        return Result("ok", values={"outer": outer, "pages": inner})
 
     # --- 공통 ---
 
