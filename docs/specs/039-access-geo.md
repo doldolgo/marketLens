@@ -1,6 +1,6 @@
 # 039 — access-geo
 
-상태: TODO | 의존: **038 access-v2 위에 쌓는다**(`feat/038-access-v2` 위의 `feat/039-access-geo`, 038 머지 뒤 main 으로 옮긴다 — PR base 는 늘 main). 그 아래에 037 privacy-v2(상수 `PRIVACY_V2_EFFECTIVE`·처리방침 문장)가 브랜치나 main 으로 있어야 시작한다 — 머지는 037·038 보다 먼저 하지 않는다. 계약을 쓰는 스펙: 038(짝·짝 기록·파일 캐시·`visitors`·창·게이트), 035(부분 공통 규칙·3초 기다림·WARNING), 037(게이트 상수·처리방침 문장), 027(caddy 의 IP 가림). 나라·망 종류를 그리는 화면과 DB-IP 링크는 042.
+상태: DONE | 의존: **038 access-v2 위에 쌓는다**(`feat/038-access-v2` 위의 `feat/039-access-geo`, 038 머지 뒤 main 으로 옮긴다 — PR base 는 늘 main). 그 아래에 037 privacy-v2(상수 `PRIVACY_V2_EFFECTIVE`·처리방침 문장)가 브랜치나 main 으로 있어야 시작한다 — 머지는 037·038 보다 먼저 하지 않는다. 계약을 쓰는 스펙: 038(짝·짝 기록·파일 캐시·`visitors`·창·게이트), 035(부분 공통 규칙·3초 기다림·WARNING), 037(게이트 상수·처리방침 문장), 027(caddy 의 IP 가림). 나라·망 종류를 그리는 화면과 DB-IP 링크는 042.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -120,9 +120,23 @@
 **배포 뒤 — 운영 확인(완료 조건 아님, status.md 비고 "039 운영 확인 대기")**: 게이트 뒤 관리자 로그인 → `/svc/api/admin/access?window=7d` 의 `geo` 가 `pending` 뒤 `ok`·`month` / api 로그에 적재 INFO 1줄(걸린 초)·WARNING 0 / api 컨테이너 메모리 증가 ≈10MB 안 / 첫 받기 동안 canary 가 통과.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
+2026-10-02 로컬 Mac(샌드박스 — Docker·포트 bind 막힘). 시작 전 확인: `git merge-base --is-ancestor origin/feat/038-access-v2 HEAD` 참, 037 은 main(#97)으로 들어 있다.
 ```bash
-(실행 후 기록)
+cd server
+.venv/bin/ruff check . && .venv/bin/ruff format --check .
+# All checks passed! · 316 files already formatted
+.venv/bin/pytest -q -p no:cacheprovider
+# 1538 passed, 1 skipped, 6 failed — 실패 6건은 spreads/tests/test_gauge.py 의 UDP bind PermissionError(샌드박스)뿐, 그것을 뺀 나머지 전부 통과
+.venv/bin/pytest -q -p no:cacheprovider app/features/admin
+# 400 passed, 1 skipped(test_geo_perf — DBIP_DIR 없음) — 039 테스트 79 + 038·040 등 기존(응답 키 집합은 VALUE_KEYS 로 보므로 geo 가 저절로 든다)
+DBIP_DIR=<설계 세션이 받은 scratchpad/dbip> .venv/bin/pytest -q -s -p no:cacheprovider app/features/admin/tests/test_geo_perf.py
+# ① 두 파일 적재 0.698초(중앙값 5회, serve ×6 짐작 4.2초) · 구간 나라 362,122·ASN 402,389
+# ② 유지 메모리 7.01MB  ③ 조회 1만 건 7.8ms  ④ 적재 중 루프 지연 최댓값 10.5ms(3회) — 1 passed
+cd ../web && npm run lint && npm run build
+# oxlint 0 · built in 509ms(첫 화면 JS 253.01kB, gzip 78.58kB — 변화 없음)
 ```
+- 성능 ①~④ 는 기준(1.0초·10MB·50ms·50ms) 안이다. tracemalloc 으로 잰 적재 중 최고는 13.0MB(나라 판 + ASN 배열 + AS 번호 메모 — 끝나면 버린다).
+- 시행일 전후는 시계 주입으로 둘 다 돌렸다 — 오늘(2026-10-02)은 게이트 전이라 실제 시계로 띄운 api 는 DB-IP 를 받지 않는다.
 
 ## 6. 갱신할 문서
 **이 PR 이 고치는 문서**
@@ -139,5 +153,31 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - server `app/features/admin/`: `geo_fetch.py`(`GeoLoader` — 받기 띄우기·데몬 스레드·흘려 받기·지난달·다시 받는 때·갈아 끼우기), `geo_table.py`(행 확인·IPv4 구간을 `array` 셋에·/24 조회 `locate`), `geo_kinds.py`(망 종류 표·낱말 규칙 `network_kind`), `geo_part.py`(`geo` 하위 부분 — k=3 묶기·20행·`telecom_kr` 접기). 고친 것: `access_cache.py`(회차마다 판을 받아 판 번호가 바뀌면 파일 캐시를 통째로 다시, 값 키 `geo`), `access_hours.py`(짝을 처음 기록할 때 찾기), `access_pairs.py`(짝의 나라·망 종류 칸, `visitors` 가 `GeoCounts` 도), `visits.py`(게이트 뒤 ok 갱신마다 `ensure`, 판이 없으면 `pending`·`error`).
+  - 테스트 `app/features/admin/tests/`: `geo_fakes.py`(가짜 나라·ASN CSV.gz — IPv4 1만 행·IPv6·따옴표와 쉼표 든 이름, MockTransport, 그 자리 띄우기·쥐고 있다 돌리기), `test_geo_fetch.py`·`test_geo_checks.py`·`test_geo_refetch.py`·`test_geo_kinds.py`·`test_geo_response.py`·`test_geo_gate.py`·`test_geo_leaks.py`·`test_geo_perf.py`(`DBIP_DIR` 이 있을 때만). 고친 것: `conftest.py`(동기 transport·주입하지 않은 받기 스레드도 실패로), `access_fakes.py`(`Feeds` 는 받기를 띄우지 않는 `parked` 가 기본), `test_access_window.py`(실제 시계 테스트에 `parked` — 게이트 지난 날 CI 에서도 받지 않게).
+  - 문서: `docs/context/status.md`·`architecture.md`·`product.md`, `CLAUDE.md` 인덱스, 스펙 027·036·038(§6 대로)·039.
+- DB-IP 첫 실제 받기(설계 세션, 2026-10-02 04:18Z — 실행 세션은 db-ip.com 을 부르지 않고 그 파일로 확인했다):
+  - 두 주소 모두 HTTP 200·`application/octet-stream`·3xx 없음 — `https://download.db-ip.com/free/dbip-country-lite-2026-10.csv.gz` 4,491,785B(sha256 `097426b8…0273af80`)·`…/dbip-asn-lite-2026-10.csv.gz` 7,015,072B(sha256 `ed175994…5a959af3`). 짐작한 ASN 주소 꼴이 맞았다.
+  - 열은 짐작대로 — 나라 3(`0.0.0.0,0.255.255.255,ZZ`), ASN 4(`1.0.0.0,1.0.0.255,13335,"Cloudflare, Inc."` — 따옴표 안 쉼표), 머리 줄 없음.
+  - 행: 나라 710,834(IPv4 362,122·IPv6 348,712), ASN 477,362(IPv4 402,389·IPv6 74,973). 두 파일 모두 IPv4 가 앞이고 시작 오름차순·겹침 0(실행 세션이 다시 셌다).
+  - 모름 값 `ZZ`(IPv4 14구간), 나라 값 246가지. 나라 IPv4 는 주소 전체를 빈틈없이 덮고, ASN 은 빈 구간이 80,680개(→ `unknown`). /24 경계에 맞지 않는 나라 IPv4 구간 49,917 — x.y.z.0 이 든 구간(그 /24 의 첫 구간)의 나라를 쓴다.
+  - AS 번호 79,109가지이고 (AS 번호, 조직 이름) 짝도 79,109 — 번호 하나에 이름 하나. 판정 결과 other 68,472·telecom 9,203·cloud 1,434.
+- 추측한 지점 (묻지 않고 정한 사소한 것):
+  - 압축 상한 20MB = 20,000,000바이트.
+  - 다시 받는 때(1시간·24시간)는 단조 시계로 재고, 달만 벽시계(UTC)로 정한다.
+  - httpx 한 번 기다림(연결·읽기) 10초 — 멈춘 연결이 60초 검사를 오래 비켜 가지 않게(넘으면 `timeout`). 60초 검사는 받은 조각마다와 6만여 행마다 본다.
+  - 요청 머리에 `Accept-Encoding: identity` — 받은 바이트가 곧 파일 바이트라야 20MB 상한이 그 뜻이고, 이미 gz 인 파일을 다시 풀 일이 없다. 본문은 `iter_raw` 로 받는다.
+  - 망 종류 판정은 AS 번호마다 한 번(메모는 적재 동안만) — 한 판 안에서 AS 번호 하나에 조직 이름이 하나라고 본다(2026-10 판이 그렇다). 이름까지 열쇠로 들면 적재 중 최고 메모리가 ≈20MB 로 는다.
+  - 낱말 규칙은 낱말로 나눠 비교하는 대신 종류마다 정규식 하나로 본다(앞이 영숫자가 아닌 자리에서 시작, 네 글자 이하는 뒤도 영숫자가 아님, `data center` 는 data + 영숫자 아닌 글자들 + center). 2026-10 판 79,109 이름 모두 나눠 비교한 결과와 같았고 ≈0.21초 → ≈0.09초.
+  - 판이 없을 때의 상태: 받는 중 `pending`, 마지막 시도가 실패면 `error`(1시간 뒤 다시 받는 동안은 다시 `pending`), 막 올렸지만 그 회차가 판 없이 셌으면 `pending`(다음 갱신이 `ok`).
+  - 판(공개 자료)은 038 의 1시간 비움과 무관하게 프로세스에 남는다 — 방문자 정보가 아니고, 비우면 다음 화면이 다시 받는다. 비운 뒤 새 캐시는 첫 회차에 지금 판으로 맞춘다.
+  - 짝의 나라 칸은 나라 번호 대신 판의 이름 목록에 있는 두 글자 문자열의 참조로 둔다(짝마다 칸 둘의 참조만 는다).
+  - 열 수는 IPv4 행만 본다(IPv6 행은 바로 건너뛴다). 빈 행은 열 수 틀림이다.
+  - 테스트: 받기·확인·다시 받기의 시도 수는 `GeoLoader` 를 직접(그 자리 띄우기)와 피드로, 응답·게이트·새지 않음은 `/admin/access`(피드·HTTP)로 본다. 실제 파일 성능은 `DBIP_DIR` 이 있을 때만 도는 `test_geo_perf.py` 로 남겼다(CI 는 건너뛴다).
+- 실행 중 함께 고친 스펙 절: 039 본문은 그대로다. §6 대로 027 §2·036 §3.2·038 §2·§3.3(파일 캐시)·§3.5(짝 기록)·§3.6(응답 키 표·`geo` 문장)을 고쳤다.
 - 남은 빚:
+  - status.md 의 (039) 넷 — IPv6 미조회·재시작 뒤 다시 받기와 두 번 채움(GIL)·/24 나라 오차 미측정·021 제안 대기.
+  - 021 제안(PR 본문에 그대로): §3.1 serve 설명에 "api 가 매달 download.db-ip.com 에서 공개 자료(DB-IP Lite 두 파일)를 받는다(039)".
+  - 038 의 `test_access_files.py::test_memory_stays_flat_with_long_distinct_user_agents` 가 이 작업 중 한 번 tracemalloc 최고 9.2MB(기준 8MB)로 실패했고, 이어 돌린 아홉 번은 모두 통과했다 — 재현하지 못했다(GC 시점 흔들림으로 짐작).
+  - 로컬에서 `ACCESS_LOG_DIR` 을 주고 게이트 뒤 시계로 api 를 띄우면 첫 접속 요약이 실제 download.db-ip.com 을 부른다 — dev-setup.md 에는 적지 않았다(§6 목록 밖).
+  - 브라우저·docker 확인은 하지 않았다(샌드박스 — 설계 세션 몫). 배포 뒤 운영 확인은 §4 그대로 status 비고 "039 운영 확인 대기".
