@@ -4,28 +4,29 @@
 요청이 왔을 때 비었거나 주기가 지났으면 갱신을 하나만 띄우고 3초까지 기다린 뒤, 늦으면 직전 결과(없으면 pending)를
 답하고 갱신은 뒤에서 마저 돈다. 실패도 주기만큼 캐시한다. 요청이 없으면 아무것도 부르지 않는다.
 AWS 호출은 전용 실행기(데몬 스레드 1개)에서 한 번에 하나씩 — 기본 실행기(`asyncio.to_thread`)는 수집 쓰기가 쓴다(§3.1).
-실패는 `marketlens.admin` 에 WARNING 으로 부분 이름과 code 만, 부분마다 10분에 1줄. ERROR 로 남기지 않는다 —
-025 로그 핸들러가 `marketlens.*` 의 ERROR 를 예외 문장과 함께 Slack 으로 보낸다.
+실패는 `marketlens.admin` 에 WARNING 으로 부분 이름과 code 만, 부분마다 10분에 1줄(공통 규칙은 `parts.py` — 035 와 나눠 쓴다).
 """
 
 import asyncio
 import json
-import logging
 import queue
 import threading
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from concurrent.futures import Executor, Future
-from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app.core.redact import redact
 from app.features.admin.aws import AwsReader, classify, client_factory
+from app.features.admin.parts import (
+    UNCONFIGURED,
+    WAIT_SEC,
+    Result,
+    Slot,
+    Warner,
+    render,
+)
 
-logger = logging.getLogger("marketlens.admin")
-
-WAIT_SEC = 3.0
-WARN_EVERY_SEC = 600.0
 ALERTS_WINDOW_MS = 7 * 86_400 * 1000
 ALERTS_LIMIT = 200
 # 부분 → (주기 초, 값 키). 주기는 요금과 신선도의 교환 — 사람 확인 대상의 기본값 (§3.1)
@@ -53,30 +54,6 @@ class AlertLog(Protocol):
     """core `RedisBus.alert_log_recent` 시그니처 — 최신순 JSON 줄."""
 
     async def alert_log_recent(self, limit: int) -> list[str]: ...
-
-
-@dataclass(frozen=True)
-class Result:
-    state: str
-    code: str | None = None
-    fetched_at: int | None = None  # ms — ok 일 때만
-    values: dict[str, Any] | None = None  # ok 일 때만
-
-
-PENDING = Result("pending")
-UNCONFIGURED = Result("unconfigured")
-
-
-def render(result: Result, refresh_sec: int, keys: tuple[str, ...]) -> dict[str, Any]:
-    """ok 가 아니면 값 키는 모두 null — 직전 값을 정상처럼 보이지 않게 (029 §3.3 원칙)."""
-    values = result.values if result.state == "ok" and result.values else {}
-    return {
-        "state": result.state,
-        "code": result.code,
-        "fetchedAt": result.fetched_at,
-        "refreshSec": refresh_sec,
-        **{k: values.get(k) for k in keys},
-    }
 
 
 class _DaemonWorker(Executor):
@@ -139,44 +116,6 @@ class _DaemonWorker(Executor):
             self._thread.join()
 
 
-class _Slot:
-    """부분 하나의 캐시 — 결과(실패 포함)를 주기 동안 들고, 갱신은 한 번에 하나(같은 태스크를 같이 기다린다)."""
-
-    def __init__(
-        self, refresh_sec: int, mono: Callable[[], float], wait_sec: float
-    ) -> None:
-        self._refresh = refresh_sec
-        self._mono = mono
-        self._wait = wait_sec
-        self._result: Result | None = None
-        self._stored = 0.0
-        self._task: asyncio.Task[Result] | None = None
-
-    async def get(self, load: Callable[[], Awaitable[Result]]) -> Result:
-        if self._result is not None and self._mono() - self._stored < self._refresh:
-            return self._result
-        if self._task is None:
-            self._task = asyncio.create_task(self._fill(load))
-        try:
-            # shield — 기다림이 끝나거나 요청이 끊겨도 갱신은 끝까지 돌아 캐시를 채운다
-            return await asyncio.wait_for(asyncio.shield(self._task), self._wait)
-        except TimeoutError:
-            return self._result or PENDING
-
-    async def _fill(self, load: Callable[[], Awaitable[Result]]) -> Result:
-        try:
-            try:
-                result = await load()
-            except Exception as exc:
-                state, code = classify(exc)
-                result = Result(state, code)
-            self._result = result
-            self._stored = self._mono()
-            return result
-        finally:
-            self._task = None
-
-
 class AdminFeeds:
     """수집기 앱 하나에 하나(`app.state.admin_feeds`). AWS 설정·시계·기다림·클라이언트는 테스트가 바꿀 수 있게 주입한다."""
 
@@ -205,11 +144,11 @@ class AdminFeeds:
         # 스레드는 첫 제출 때 생긴다 — 설정이 없거나 페이지를 안 보면 스레드도 없다
         self._executor = _DaemonWorker("admin-aws")
         self._slots = {
-            name: _Slot(refresh, mono, wait_sec)
+            name: Slot(refresh, mono, wait_sec, classify)
             for name, (refresh, _) in AWS_PARTS.items()
         }
-        self._history = _Slot(HISTORY_REFRESH_SEC, mono, wait_sec)
-        self._warned: dict[str, float] = {}
+        self._history = Slot(HISTORY_REFRESH_SEC, mono, wait_sec, classify)
+        self._warn = Warner(mono)
 
     # --- /admin/aws ---
 
@@ -277,7 +216,7 @@ class AdminFeeds:
     # --- 공통 ---
 
     async def _aws_part(
-        self, name: str, slot: _Slot, read: Callable[[], dict[str, Any]]
+        self, name: str, slot: Slot, read: Callable[[], dict[str, Any]]
     ) -> Result:
         if self._region is None:
             return UNCONFIGURED  # 설정 없음 — AWS 를 부르지 않는다(로컬·테스트 기본)
@@ -307,14 +246,6 @@ class AdminFeeds:
                 self._clients.clear()
             return Result(state, code)
         return Result("ok", None, int(self._clock() * 1000), values)
-
-    def _warn(self, name: str, code: str | None) -> None:
-        now = self._mono()
-        last = self._warned.get(name)
-        if last is not None and now - last < WARN_EVERY_SEC:
-            return
-        self._warned[name] = now
-        logger.warning("관리자 피드 %s 실패 — %s", name, code)
 
     def close(self) -> None:
         """수집기 종료 때 — 대기 중인 읽기는 버리고 도는 읽기는 기다리지 않는다(데몬 스레드라 프로세스 종료도 안 기다린다)."""

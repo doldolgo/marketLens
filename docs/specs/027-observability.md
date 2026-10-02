@@ -56,6 +56,7 @@
 - caddy 기본 로거(오류 줄 — 예: 업스트림 502)는 IP 두 필드를 지우고(032), 쿼리 세 키·헤더 지우기는 접속 로그와 같게 건다. docker 로그에 원 IP 가 남지 않게 — docker 로그는 크기로만 회전해 방문이 적으면 90일보다 오래 남는다.
 - 기록하지 않는 요청: 경로 `/api/health`·`/api/health/collect`(수집 상태 탭 5초 폴링)·`/api/landing`(랜딩 10초 폴링)·`/api/history/events`·`/api/history/candles`(기록 탭이 보이는 동안 60초마다 부른다 — 013 §3.5·014 §3.7), `User-Agent` 에 `KimpTrack-Canary` 가 든 요청(§3.5). 폴링·감시가 방문 기록을 덮기 때문이다. 이 경로들의 5xx 는 5xx 경보에 안 잡힌다. canary 2~4단계가 같은 백엔드(수집기·api·Influx)를 보지만 `/api/health/collect`·`/api/history/events`·`/api/landing` 자체의 5xx 는 감시하지 않는다.
 - 도메인 블록의 모든 응답에 `Referrer-Policy: strict-origin` 을 붙인다. 브라우저 기본값은 같은 출처 요청에 전체 URL 을 `Referer` 로 보낸다.
+- api 가 이 디렉터리를 읽기 전용으로 읽어 관리자 페이지에 24시간 요약을 준다(035) — 새 저장은 없다.
 
 ### 3.3 WebSocket 접속 수
 - 접속 수 = 017 허브가 들고 있는 열린 `/ws/spreads` 연결 수(`waiting` 중 포함). 열린 `/app/` 페이지 수이지 사람 수가 아니다 — 숨겨진 탭·부하 시험 연결이 섞인다.

@@ -1,4 +1,4 @@
-"""관리자 server 설정 계약 — nginx-admin.conf·web 이미지·compose (스펙 029 §3.1·§3.2·§3.5·§4).
+"""관리자 server 설정 계약 — nginx-admin.conf·web 이미지·compose (스펙 029 §3.1·§3.2·§3.5·§4, 034·035 의 피드 넷).
 
 test_deploy.py 와 같은 방식이다: Docker 없는 CI 에서 설정 파일을 읽어 단언한다. 실제로 nginx 를 띄워
 분기·403·기록을 보는 검증은 029 §5 의 로컬 Docker 명령이다. 문법은 여기서 못 잡는다 — nginx-admin.conf 를
@@ -29,14 +29,19 @@ FORBIDDEN = '{"error":{"code":"forbidden","message":"Forbidden","detail":null}}'
 SFS_CHECK = (["if", "($admin_sfs_ok", "=", "0)"], [(["return", "403"], None)])
 # 교차 사이트 검사 예외 — 화면(/)과 문서 두 쪽 (§3.2)
 SFS_EXEMPT = {("=", "/api/docs"), ("=", "/api/redoc")}
-# 화면의 10초 폴링 — 기록하지 않는다 (§3.2). 034 의 수집기 관리자 피드 둘도 화면의 폴링이다
+# 화면의 10초 폴링 — 기록하지 않는다 (§3.2). 034 의 수집기 관리자 피드 둘·035 의 api 피드 둘도 화면의 폴링이다
 FEEDS = {("=", "/api/admin/aws"), ("=", "/api/admin/alerts")}
-POLLING = {
-    ("=", "/api/health"),
-    ("=", "/api/health/collect"),
-    ("=", "/svc/api/health"),
-    ("=", "/svc/api/admin/status"),
-} | FEEDS
+API_FEEDS = {("=", "/svc/api/admin/access"), ("=", "/svc/api/admin/clarity")}
+POLLING = (
+    {
+        ("=", "/api/health"),
+        ("=", "/api/health/collect"),
+        ("=", "/svc/api/health"),
+        ("=", "/svc/api/admin/status"),
+    }
+    | FEEDS
+    | API_FEEDS
+)
 BASE_HEADERS = [
     ["Host", "$http_host"],
     ["X-Real-IP", "$remote_addr"],
@@ -140,6 +145,8 @@ def test_admin_routes_every_api_path_like_before_the_allowlist() -> None:
         "/svc/api/admin/status": (API, "/admin/status"),
         "/api/admin/aws": (COLLECTOR, "/admin/aws"),
         "/api/admin/alerts": (COLLECTOR, "/admin/alerts"),
+        "/svc/api/admin/access": (API, "/admin/access"),
+        "/svc/api/admin/clarity": (API, "/admin/clarity"),
     }
     for path, target in expected.items():
         assert _forward(path) == target, path
@@ -166,6 +173,31 @@ def test_monitoring_feeds_are_exact_collector_locations_that_inherit_server_head
         assert not _args(children, "proxy_set_header"), key
         assert not _args(children, "add_header"), key
         assert not _args(children, "proxy_hide_header"), key
+
+
+def test_api_feeds_are_exact_api_locations_that_inherit_server_headers() -> None:
+    """035 §3.1 — 정확 일치 둘이 api 의 경로로(통째로 바꿈), 첫 줄 교차 사이트 검사, 기록 끔, 자기 헤더 없음."""
+    locations = _locations(_admin_server())
+    for key in API_FEEDS:
+        children = locations[key]
+        assert children[0] == SFS_CHECK, key
+        assert _args(children, "access_log") == [["off"]], key
+        assert _args(children, "proxy_pass") == [[API]], key
+        assert _args(children, "rewrite") == [
+            ["^", key[1].removeprefix("/svc/api"), "break"]
+        ], key
+        assert not _args(children, "proxy_set_header"), key
+        assert not _args(children, "add_header"), key
+        assert not _args(children, "proxy_hide_header"), key
+
+
+def test_public_server_has_no_svc_branch_so_api_feeds_are_static_404() -> None:
+    """공개 nginx(028)는 그대로 — `/svc/` 위치가 없어 두 경로는 `location /` 의 정적 파일 찾기(없으면 404)다."""
+    public = _locations(_public_server())
+    assert not [k for k in public if k[-1].startswith("/svc")]
+    for path in ("/svc/api/admin/access", "/svc/api/admin/clarity"):
+        assert _route(path) == ("/",), path
+        assert not _args(public[("/",)], "proxy_pass")
 
 
 def test_admin_ws_location_upgrades_and_repeats_the_base_headers() -> None:
@@ -308,6 +340,26 @@ def test_admin_aws_region_only_on_the_collector_service() -> None:
         if name != "server":
             assert "ADMIN_AWS_REGION" not in (svc.get("environment") or {}), name
     assert "ADMIN_AWS_REGION" not in _text("server/.env.example")
+
+
+def test_api_reads_caddy_logs_read_only_and_only_api_gets_the_dir() -> None:
+    """035 §3.2 — api 에 caddy 로그 읽기 전용 바인드·`ACCESS_LOG_DIR`. 다른 서비스엔 없다(caddy 는 027 의 쓰기 바인드 그대로)."""
+    services = _yaml("docker-compose.yml")["services"]
+    api = services["api"]
+    assert api["volumes"] == ["./logs/caddy:/var/log/caddy:ro"]
+    assert api["environment"]["ACCESS_LOG_DIR"] == "/var/log/caddy"
+    for name, svc in services.items():
+        if name != "api":
+            assert "ACCESS_LOG_DIR" not in (svc.get("environment") or {}), name
+        if name not in ("api", "caddy"):
+            assert not any("logs/caddy" in str(v) for v in svc.get("volumes", [])), name
+    assert "./logs/caddy:/var/log/caddy" in services["caddy"]["volumes"]
+    example = _text("server/.env.example")
+    assert "ACCESS_LOG_DIR" not in example
+    # 토큰은 사람이 serve 의 server/.env 에 넣는다 — 예시에는 주석 처리한 빈 키만
+    assert [ln for ln in example.splitlines() if "CLARITY_API_TOKEN" in ln] == [
+        "# CLARITY_API_TOKEN="
+    ]
 
 
 def test_root_path_only_on_collector_and_public_api_docs_stay_closed() -> None:

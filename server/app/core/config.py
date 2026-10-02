@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     statsd_addr: str | None = None
     # 관리자 AWS 요약의 리전(034) — compose 가 server 에만 준다(server/.env 에 두지 않는다). 비면 AWS 를 부르지 않는다
     admin_aws_region: str | None = None
+    # 접속 요약이 읽는 caddy 로그 디렉터리(035) — compose 가 api 에만 준다(server/.env 에 두지 않는다). 비면 unconfigured
+    access_log_dir: str | None = None
+    # Clarity Data Export 토큰(035) — 사람이 serve 의 server/.env 에 넣는 비밀. 비면 Clarity 부분은 unconfigured·호출 0
+    clarity_api_token: str | None = None
 
     @field_validator("s3_region", mode="before")
     @classmethod

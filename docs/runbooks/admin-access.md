@@ -3,6 +3,7 @@
 `https://admin.kimptrack.com` → Cloudflare 엣지 → Access 로그인(이메일 일회용 코드) → Tunnel → serve 박스 `marketlens-cloudflared` → `http://web:8081`(029 관리자 server). serve 는 밖으로만 연결하고 인바운드 포트를 열지 않는다.
 레포에 있는 것은 compose 서비스(`cloudflared`, profile `tunnel`)와 배포 줄뿐이다. **Cloudflare 설정(앱·정책·그룹·라우트·AUD)은 대시보드에만 있다** — 이 문서가 그 기록이고, 바꾸면 여기도 고친다.
 레포는 공개다. **이메일 주소·팀 이름·AUD·토큰 값은 여기에 적지 않는다** — 자리표시자(`<…>`)와 "어디서 보는지"만 적는다. 단계마다 **확인** 이 끝나야 다음으로 간다.
+관리자 페이지의 Clarity 요약 토큰(`CLARITY_API_TOKEN`)은 이 문서가 아니라 `clarity.md` 의 Data Export 토큰 절(035)이다.
 
 ## 기록 — 대시보드에만 있는 상태
 대시보드 메뉴 이름은 바뀔 수 있다. 아래 "보는 곳" 은 2026-09 기준이다.

@@ -68,6 +68,7 @@ from app.features.admin.feeds import AdminFeeds
 from app.features.admin.router import collector_router as admin_collector_router
 from app.features.admin.router import router as admin_router
 from app.features.admin.service import AdminStatusService
+from app.features.admin.visits import VisitFeeds
 from app.features.analysis.router import router as analysis_router
 from app.features.health.router import router as health_router
 from app.features.history.cache import HistoryCache
@@ -514,7 +515,7 @@ def create_app() -> FastAPI:
         )
 
     # api 역할은 Influx 만 읽는 네 경로 + 017 의 /ws/spreads + 018 의 GET /spreads(Redis 읽기)
-    # + 022 의 GET /landing(Redis·Influx 읽기) + 029 의 GET /admin/status — /history/events 는 진행 중
+    # + 022 의 GET /landing(Redis·Influx 읽기) + 029 의 GET /admin/status·035 의 /admin/access·clarity — /history/events 는 진행 중
     # 사건을 메모리에서 읽으므로 제외 (016 §3.1, 018 §3.4)
     app.include_router(history_router)
     app.include_router(spreads_ws_router)
@@ -523,6 +524,12 @@ def create_app() -> FastAPI:
     if api_only:
         # 029 — 관리자 상태(WS 접속 수·Redis·Influx). 앞선 Influx ping 을 기억하는 자리라 앱마다 하나
         app.state.admin = AdminStatusService()
+        # 035 — 관리자 피드 둘(접속 요약·Clarity). 접속 로그가 serve 박스에 있고 토큰을 serve 에 둔다.
+        # 요청이 있을 때만 읽고 부른다 — 기동에 태스크를 더하지 않는다
+        app.state.admin_visits = VisitFeeds(
+            access_dir=settings.access_log_dir,
+            clarity_token=settings.clarity_api_token,
+        )
         app.include_router(admin_router)
     else:
         app.include_router(spreads_refresh_router)

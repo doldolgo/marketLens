@@ -73,6 +73,12 @@ services:
       # 027 — WS 접속 수 게이지(10초마다 UDP 1줄)를 serve 호스트의 CloudWatch Agent(StatsD :8125)로.
       # 에이전트가 없으면 UDP 가 버려질 뿐이다. collector(server)에는 주지 않는다 — 늘 0 이라 api 값을 덮는다.
       STATSD_ADDR: host.docker.internal:8125
+      # 035 — 관리자 접속 요약이 읽는 caddy 로그 디렉터리(아래 바인드). server/.env 에 두지 않는다 — 비면 그 부분은 unconfigured
+      ACCESS_LOG_DIR: /var/log/caddy
+    volumes:
+      # 035 — caddy 접속 로그(027, 회전 파일 포함 — 032)를 읽기 전용으로. 요약은 메모리에서만 세고 새로 저장하지 않는다.
+      # 받아들인 위험: 인터넷 요청을 받는 api 가 디렉터리 전체(90일)를 읽을 수 있다 — 요약 전용 출력은 두지 않았다
+      - ./logs/caddy:/var/log/caddy:ro
     extra_hosts:
       # 027 — 위 이름을 호스트 게이트웨이(docker0)로. 에이전트는 호스트에 설치돼 있다(컨테이너 아님)
       - "host.docker.internal:host-gateway"
