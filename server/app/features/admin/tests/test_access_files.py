@@ -1,4 +1,4 @@
-"""접속 요약 읽기 — 깨진 줄·회전 파일(깨진 gz 포함)·파일 없음·새지 않음·키 상한·메모리 (스펙 035 §3.2·§3.4·§3.5·§4)."""
+"""접속 요약 읽기 — 깨진 줄·회전 파일(깨진 gz 포함)·파일 없음·새지 않음·키 상한·메모리 (스펙 035 §3.2·§3.4·§3.5·§4 → 038 §3.3·§3.6)."""
 
 import json
 import os
@@ -7,9 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from app.features.admin.access import NoLogFile, summarize
+from app.features.admin.access_cache import AccessLog, NoLogFile
 from app.features.admin.tests.access_fakes import (
     CHROME,
+    GATE,
     GOOGLEBOT,
     IP,
     IPHONE,
@@ -17,13 +18,21 @@ from app.features.admin.tests.access_fakes import (
     START_TS,
     at,
     line,
+    summary,
     write,
 )
 
 
 def run(tmp_path: Path, lines: list[str]) -> dict:
     write(tmp_path, "access.log", lines)
-    return summarize(str(tmp_path), NOW)
+    return summary(tmp_path, NOW)
+
+
+def summarize(directory: str | None, now: float, on_broken: list | None = None) -> dict:
+    values, broken = AccessLog(directory, GATE).summary("24h", now)
+    if on_broken is not None:
+        on_broken += broken
+    return values
 
 
 def test_broken_lines_are_skipped_and_blank_lines_ignored(tmp_path: Path) -> None:
@@ -42,7 +51,15 @@ def test_broken_lines_are_skipped_and_blank_lines_ignored(tmp_path: Path) -> Non
             "[]",
         ],
     )
-    assert body["totals"] == {"requests": 1, "pages": 1, "ws": 0, "skipped": 5}
+    assert body["totals"] == {
+        "requests": 1,
+        "pages": 1,
+        "humanPages": 1,
+        "jsViews": 0,
+        "probes": 0,
+        "ws": 0,
+        "skipped": 5,
+    }
 
 
 def test_rotated_files_in_the_window_are_read_and_older_ones_are_not(
@@ -125,16 +142,16 @@ def test_result_has_no_ip_user_agent_or_query(tmp_path: Path) -> None:
         assert banned not in raw, banned
 
 
-def test_key_kinds_are_capped_at_5000_and_the_rest_count_as_other(
+def test_key_kinds_are_capped_at_30_per_hour_and_the_rest_count_as_other(
     tmp_path: Path,
 ) -> None:
     lines = [line(at(12), f"/?utm_source=s{i}") for i in range(5_002)]
     lines += [line(at(12), f"/scan/{i}") for i in range(5_003)]
     body = run(tmp_path, lines)
-    # 경로는 `/` 다음 /scan/ 4,999 종류까지 — 그 뒤 넷은 (기타). 이미 있는 키는 상한 뒤에도 제 칸에 센다
-    assert body["paths"][:2] == [["/", 5_002], ["(기타)", 4]]
+    # 경로는 `/` 다음 /scan/ 29 종류까지 — 그 뒤는 (기타). 이미 있는 키는 상한 뒤에도 제 칸에 센다(038 — 시마다 30)
+    assert body["paths"][:2] == [["/", 5_002], ["(기타)", 5_003 - 29]]
     assert len(body["paths"]) == 20
-    assert body["utmSources"][0] == ["(기타)", 2]
+    assert body["utmSources"][0] == ["(기타)", 5_002 - 30]
     assert body["totals"]["pages"] == 10_005
 
 
@@ -181,8 +198,8 @@ def test_a_broken_rotated_file_is_skipped_and_the_rest_counted(
     os.utime(bad, (at(5), at(5)))
     write(tmp_path, "access.log", [line(at(20), "/current")])
     broken: list[str] = []
-    body = summarize(str(tmp_path), NOW, broken.append)
-    assert broken == ["EOFError", "BadGzipFile"]
+    body = summarize(str(tmp_path), NOW, broken)
+    assert sorted(broken) == ["BadGzipFile", "EOFError"]
     assert body["totals"]["skipped"] == 2
     rotated = dict(body["paths"])["/rotated"]
     assert 0 < rotated < 2_000 and dict(body["paths"])["/current"] == 1
@@ -192,5 +209,5 @@ def test_a_current_log_read_failure_still_fails(tmp_path: Path) -> None:
     (tmp_path / "access.log").mkdir()  # 지금 파일을 못 읽음 — 부분 전체의 error
     broken: list[str] = []
     with pytest.raises(IsADirectoryError):
-        summarize(str(tmp_path), NOW, broken.append)
+        summarize(str(tmp_path), NOW, broken)
     assert broken == []
