@@ -266,7 +266,7 @@ grep -E '^pswp(in|out) ' /proc/vmstat; free -m; systemctl show amazon-cloudwatch
 
 ## 15. (032 처리방침(`https://kimptrack.com/privacy`) 게시 뒤) 로그 전송·지표 필터·5xx 경보
 **032 처리방침(`https://kimptrack.com/privacy`) 게시 전에는 하지 않는다** — 그때까지 접속 로그는 serve 박스 `~/marketlens/logs/caddy/` 에만 있다. 켜면 5-2 의 serve 두 단계가 이후 늘 쓰는 절차다.
-**게시 뒤에도 `logs/caddy/` 에 하루 회전 파일(`access-<날짜>…-time.log.gz`)이 생긴 것을 본 뒤에 한다** — 032 의 회전 설정은 배포의 `caddy reload` 로 들어가지 않고 serve 에서 caddy 를 다시 만든 뒤(`docker compose --profile serve --env-file .env --env-file server/.env up -d --force-recreate caddy`, 몇 초 끊김)에야 돈다(032 §4). 그 전의 `access.log` 에는 며칠치 줄이 쌓여 있고, 에이전트는 줄의 시각이 아니라 읽은 시각을 찍으므로(`serve-logs.json` 에 `timestamp_format` 없음) 그 줄이 읽은 날부터 90일 더 남을 수 있다.
+**게시 뒤에도 `logs/caddy/` 에 하루 회전 파일(`access-<날짜>…-time.log.gz`)이 생긴 것을 본 뒤에 한다** — 032 의 회전 설정은 배포의 `caddy reload` 로 들어가지 않고 serve 에서 caddy 를 다시 만든 뒤(`docker compose --profile serve --env-file .env --env-file server/.env up -d --force-recreate caddy`, 몇 초 끊김)에야 돈다(032 §4). 그 전의 `access.log` 에는 며칠치 줄이 쌓여 있고, 에이전트는 줄의 시각이 아니라 보낸 때(에이전트가 읽어 보내는 때)를 찍으므로(`serve-logs.json` 에 `timestamp_format` 없음) 그 줄이 보낸 날부터 90일 더 남을 수 있다 — 처리방침 v2(037)의 '보낸 때부터 90일' 과 같은 낱말.
 ```bash
 aws logs put-metric-filter --log-group-name /marketlens/serve/caddy --filter-name marketlens-http-5xx \
   --filter-pattern '{ ($.status >= 500) && ($.request.uri != "/api/ws/spreads") }' \
