@@ -7,8 +7,14 @@ test_deploy.py 와 같은 방식이다: Docker 없는 CI 에서 설정 파일을
 """
 
 import json
+import os
 import re
+import shutil
+import subprocess
 from html.parser import HTMLParser
+from typing import Any
+
+import pytest
 
 from tests.test_deploy import (
     API,
@@ -867,3 +873,168 @@ def test_explanation_text_has_no_links_media_scripts_or_addresses() -> None:
     for block in _folded(html, EXPLAIN) + _folded(html, TERMS):
         for banned in ("<a", "<img", "<script", "<svg", "style=", "://"):
             assert banned not in block, (banned, _summary(block))
+
+
+# admin.js 를 가짜 document 와 싣고(보이지 않는 탭 — 묶음이 돌지 않아 요청 0) 이름표 찾기·행 글자 만들기만 부른다.
+# 그리기 전체·펼침 유지·폭은 설계 세션이 브라우저로 본다(041 §4).
+ADMIN_HARNESS = r"""
+const [script, kinds, alarms, tabs] = JSON.parse(require('fs').readFileSync(0, 'utf8'))
+class Node {
+  constructor(tag) { Object.assign(this, { tag, kids: [], dataset: {}, attrs: {}, textContent: '', title: '', className: '', hidden: false }) }
+  get classList() { return { add() {}, remove() {} } }
+  get lastChild() { return this.kids[this.kids.length - 1] }
+  append(...k) { this.kids.push(...k) }
+  prepend(...k) { this.kids.unshift(...k) }
+  replaceChildren(...k) { this.kids = k }
+  setAttribute(k, v) { this.attrs[k] = String(v) }
+  addEventListener() {}
+}
+const byId = new Map()
+const calls = []
+const document = {
+  visibilityState: 'hidden',
+  getElementById: (id) => byId.get(id) || byId.set(id, new Node('div')).get(id),
+  createElement: (tag) => new Node(tag),
+  createElementNS: (ns, tag) => new Node(tag),
+  createDocumentFragment: () => new Node('#fragment'),
+  querySelectorAll: () => [],
+  addEventListener() {},
+}
+const fetch = (...a) => { calls.push('fetch'); return new Promise(() => {}) }
+const location = { search: '', replace() { calls.push('replace') } }
+const history = { replaceState() { calls.push('replaceState') } }
+const api = new Function('document', 'fetch', 'location', 'history', 'Node',
+  script + '\n;return { kindName, alarmTail, tabName, pctFmt, exchangeRow, timeline, alarmRow, alertRow, topTable, stat }')(
+  document, fetch, location, history, Node)
+const text = (n) => (typeof n === 'string' ? n : n.textContent + n.kids.map(text).join(''))
+const titles = (n) => (typeof n === 'string' ? [] : [
+  ...(n.title ? [n.title] : []), ...(n.tag === 'title' ? [n.textContent] : []), ...n.kids.flatMap(titles)])
+const show = (n) => ({ text: text(n), titles: titles(n) })
+const now = Date.now()
+const exchange = (kind) => ({ exchange: 'upbit', state: 'ok', lastSuccessAt: now, successRate1h: 97.5, markets: 255,
+  openOutage: { kind, count: 3, startedAt: now - 120000 }, lastError: { at: now, kind, statusCode: 418, message: 'm' } })
+const outages = kinds.map((kind, i) => ({ exchange: 'bybit', kind, startedAt: now - (i + 2) * 60000, endedAt: now - 60000, count: i + 1 }))
+process.stdout.write(JSON.stringify({
+  kinds: Object.fromEntries(kinds.map((k) => [k, api.kindName(k)])),
+  alarms: Object.fromEntries(alarms.map((a) => [a, api.alarmTail(a) ?? null])),
+  tabs: Object.fromEntries(tabs.map((t) => [t, api.tabName(t)])),
+  rates: [99.8, 97.5, null].map(api.pctFmt),
+  rows: kinds.map((k) => show(api.exchangeRow(exchange(k)))),
+  timeline: show(api.timeline(outages)),
+  alarmRows: alarms.map((name) => show(api.alarmRow({ name, state: 'ALARM', changedAt: now, reason: 'r' }))),
+  alertRows: alarms.map((alarm) => show(api.alertRow({ source: 'alarm', alarm, fromState: 'OK', toState: 'ALARM', at: now }))),
+  tabTable: show(api.topTable(tabs.map((t, i) => [t, i + 1]), '탭', 40, api.tabName)),
+  tile: show(api.stat('세션', '3', null, '동의한 방문자만')),
+  calls,
+}))
+"""
+
+# §4 설계 세션 확인 5 의 이름 아홉 — 꼬리 여덟 순서 + 이름표가 없는 foo
+ALARM_NAMES = [
+    "marketlens-collect-status-instance",
+    "marketlens-serve-status-system",
+    "marketlens-data-credit-balance",
+    "marketlens-data-credit-surplus",
+    "marketlens-serve-memory",
+    "marketlens-data-disk",
+    "marketlens-canary",
+    "marketlens-http-5xx",
+    "marketlens-foo",
+]
+# 표에 없는 값 — Object 의 것을 집지 않고 원래 글자로
+ODD = ["zzz", "constructor", "__proto__"]
+KINDS = [*KIND_NAMES, *ODD]
+TABS = [*TAB_NAMES, "(기타)", "constructor"]
+
+
+@pytest.fixture(scope="module")
+def admin_js() -> dict[str, Any]:
+    node = shutil.which("node")
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("node 가 없다 — CI 러너(ubuntu-latest)에는 있어야 한다")
+        pytest.skip("node 가 없어 admin.js 를 돌리지 못한다")
+    done = subprocess.run(
+        [node, "-e", ADMIN_HARNESS],
+        input=json.dumps([_text("web/admin/admin.js"), KINDS, ALARM_NAMES, TABS]),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+def test_labels_fall_back_to_the_raw_text_for_unknown_values(
+    admin_js: dict[str, Any],
+) -> None:
+    """041 §3.4·§3.6 — 표에 없는 값(constructor·__proto__ 포함)은 원래 글자, 성공률은 소수 1자리. 요청 0."""
+    assert admin_js["kinds"] == {**KIND_NAMES, **{k: k for k in ODD}}
+    assert admin_js["tabs"] == {
+        **TAB_NAMES,
+        "(기타)": "(기타)",
+        "constructor": "constructor",
+    }
+    alarms = dict(admin_js["alarms"])
+    assert alarms.pop("marketlens-foo") is None
+    expected = dict(zip(ALARM_NAMES, ALARM_TAIL_NAMES.values(), strict=False))
+    assert {name: tail[0] for name, tail in alarms.items()} == expected
+    assert admin_js["rates"] == ["99.8%", "97.5%", "–"]
+    assert admin_js["calls"] == []
+
+
+def test_collect_rows_show_kind_labels_and_keep_the_raw_id_in_title(
+    admin_js: dict[str, Any],
+) -> None:
+    """041 §3.4 — 거래소 표(열린 구간·마지막 오류)·타임라인 막대 title·아래 다섯 줄에 이름표, title 은 원래 id."""
+    for kind, row in zip(KINDS, admin_js["rows"], strict=True):
+        label = admin_js["kinds"][kind]
+        assert f"{label} · 3회 · 2분째" in row["text"], kind
+        assert f"{label} · HTTP 418 · m" in row["text"], kind
+        assert "97.5%" in row["text"]
+        assert kind in row["titles"] and f"{kind} — m" in row["titles"], kind
+    timeline = admin_js["timeline"]
+    for i, kind in enumerate(KINDS):
+        label = admin_js["kinds"][kind]
+        assert any(t.endswith(f" · {label} · ×{i + 1}") for t in timeline["titles"]), (
+            kind
+        )
+    for i, kind in enumerate(KINDS[:5]):  # 아래 다섯 줄 = 시작이 가장 늦은 다섯
+        assert f"{admin_js['kinds'][kind]} · ×{i + 1}" in timeline["text"], kind
+        assert kind in timeline["titles"], kind
+
+
+def test_alarm_rows_show_tail_labels_and_conditions_in_title(
+    admin_js: dict[str, Any],
+) -> None:
+    """041 §3.4 — 경보 표·알림 경보 행의 이름 뒤 꼬리 이름표, 이름의 title 은 '전체 이름 — 조건'. foo 는 이름표 없음."""
+    rows = zip(ALARM_NAMES, admin_js["alarmRows"], admin_js["alertRows"], strict=True)
+    for name, row, alert in rows:
+        short = name.removeprefix("marketlens-")
+        tail = admin_js["alarms"][name]
+        if tail is None:
+            assert row["titles"] == [name] and alert["titles"] == [name]
+            assert not any(
+                label in row["text"]
+                for label in ALARM_TAIL_NAMES.values()
+                if label != "canary"
+            )
+            assert f"{short} OK → " in alert["text"]
+            continue
+        label, condition = tail
+        assert f"{short} {label}" in row["text"], name
+        assert row["titles"] == [f"{name} — {condition}"], name
+        assert f"{short} {label} OK → " in alert["text"], name
+        assert alert["titles"] == [f"{name} — {condition}"], name
+
+
+def test_tab_table_and_tiles_show_names_and_subtitles(
+    admin_js: dict[str, Any],
+) -> None:
+    """041 §3.4·§3.1 — 접속 탭 표는 한국어 탭 이름(title 은 id, (기타)는 그대로), 타일은 값 아래 부제 한 줄."""
+    table = admin_js["tabTable"]
+    for tab in TABS:
+        assert admin_js["tabs"][tab] in table["text"], tab
+        assert tab in table["titles"], tab
+    assert admin_js["tile"]["text"] == "세션3동의한 방문자만"
