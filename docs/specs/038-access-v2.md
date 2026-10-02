@@ -1,6 +1,6 @@
 # 038 — access-v2
 
-상태: TODO | 의존: **037 privacy-v2**(상수 `PRIVACY_V2_EFFECTIVE`) — `feat/037-privacy-v2` 위에 쌓고 037 머지 뒤 main 으로 옮긴다(PR base 는 늘 main, 037 보다 먼저 머지하지 않는다). main 에는 fix/036-admin-followup 이 있어야 한다. 계약을 쓰는 스펙(쓰는 계약은 §3 에 복사했다): 035(읽는 계약·부분 공통 규칙·파일 고르기 — 접속 요약의 창·집계·응답은 이 스펙이 넘겨받는다), 027(caddy 줄 모양·IP 가림), 029(관리자 nginx), 036(화면이 읽는 키), 002(탭 id), 033(clarity.js 캐시 규칙), 037(처리방침 문장·시행일). 뒤에 쌓는 스펙: 039(짝 기록에 나라·망 종류, 응답에 `geo`), 042(창 고르기 화면).
+상태: IN_PROGRESS(§4 성능 2 판단 대기 — §7) | 의존: **037 privacy-v2**(상수 `PRIVACY_V2_EFFECTIVE`) — `feat/037-privacy-v2` 위에 쌓고 037 머지 뒤 main 으로 옮긴다(PR base 는 늘 main, 037 보다 먼저 머지하지 않는다). main 에는 fix/036-admin-followup 이 있어야 한다. 계약을 쓰는 스펙(쓰는 계약은 §3 에 복사했다): 035(읽는 계약·부분 공통 규칙·파일 고르기 — 접속 요약의 창·집계·응답은 이 스펙이 넘겨받는다), 027(caddy 줄 모양·IP 가림), 029(관리자 nginx), 036(화면이 읽는 키), 002(탭 id), 033(clarity.js 캐시 규칙), 037(처리방침 문장·시행일). 뒤에 쌓는 스펙: 039(짝 기록에 나라·망 종류, 응답에 `geo`), 042(창 고르기 화면).
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -163,7 +163,24 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+git log --oneline -1 ced71a0   # 의존 확인 — 037 브랜치 위(PRIVACY_V2_EFFECTIVE = "2026-10-11")
+cd server && uv venv -p 3.12 .venv && uv pip install -p .venv -e ".[dev]"   # 추적 중인 egg-info 변경은 git checkout 으로 되돌림
+cd web && npm ci
+cd server && ruff check . && ruff format --check . && pytest -q
+#   1342 passed · 6 failed — 6건 모두 app/features/spreads/tests/test_gauge.py 의 UDP bind PermissionError(샌드박스), 그 밖 실패 0
+cd server && pytest -q app/features/admin tests/test_admin.py tests/test_role.py   # 252 passed
+cd web && npm run lint && npm run build   # oxlint 경고·오류 0 · build ok
+# 커밋마다 — git archive <커밋> server 를 레포 밖에 풀어 같은 venv 로 ruff check·pytest(그 커밋 안의 app 을 읽는지 확인)
+# 성능(§4) — 레포 밖 임시 스크립트, 로컬 macOS 26.6 arm64·Python 3.12.13, 여러 번 중 최솟값, serve 환산 = 로컬 × 6
+#   1. 지금 규모 30일(시계 = 게이트 + 31일, 하루 700줄 — 브라우저 모양 짝 150·그중 JS 신호 10, 도구·스캐너·탐색 섞음, 회전 gz 30 + access.log)
+#      첫 채움 0.094초(serve ≈0.56초) · 채운 뒤 창 셋 한 회차(access.log 다시 읽기 포함) 0.0083초(serve ≈0.05초) — requests 20,987·shaped 4,497·confirmed 300
+#   2. 50MiB 회전 파일 하나(무작위 경로·IP, 실제 줄처럼 tls 필드 포함)
+#      UA 를 310개 무리(브라우저 250·도구/봇 60)에서 무작위로: 90,175줄·gz 3.5MB → 0.391~0.399초(serve ≈2.35~2.39초) — 한도 0.4초 안
+#      모든 줄 UA 가 다름(절반 브라우저 모양): 95,624줄·gz 4.0MB → 0.607~0.609초(serve ≈3.64초) — 한도를 넘는다(§7 질문)
+#   3. 최악 30일(날마다 회전 파일 둘·시마다 목록마다 새 키 31·(파일, 날)마다 짝 1,000 — 파일 60): 캐시 tracemalloc 남은 23.8MB·최고 25.7MB(한도 40MB)
+#   4. 2 의 읽기 동안 같은 루프의 10ms 잠들기 넘침 최댓값: 무리 7.6~13.4ms · 모두 다름 10.7~17.4ms(한도 100ms)
+# nginx — 설정 안 고침. test_admin.py 의 `= /svc/api/admin/access` rewrite(^ /admin/access break) 단언 그대로 통과.
+#   실제 넘김(/svc/api/admin/access?window=7d → /admin/access?window=7d)은 샌드박스가 Docker 를 못 띄워 설계 세션 몫
 ```
 
 ## 6. 갱신할 문서
@@ -190,5 +207,29 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
+  - server `app/features/admin/`: `access_cache.py`(창·게이트·파일 고르기·회전 파일 캐시·`access.log` 60초·창 조립), `access_hours.py`(파일 하나의 세기 — 시 버킷·최근 5xx·짝 기록), `access_classes.py`(줄 풀기·탐색·운영자 흔적·종류), `access_traits.py`(채널·인앱·기기·OS·브라우저), `access_pairs.py`(열쇠·BLAKE2b·짝 기록·날마다 센 방문자), `visits.py`(창마다 칸·1시간 비움·늘 싣는 셋), `router.py`(`window` 인자). 지움: 035 의 `access.py`·`access_tally.py`.
+  - 테스트: `tests/access_fakes.py`(넓힘), 새 `test_access_classes.py`·`test_access_visitors.py`·`test_access_window.py`·`test_access_cache.py`·`test_access_privacy.py`, 035 계약을 이 규칙으로 고친 `test_access_summary.py`·`test_access_files.py`·`test_visits.py`, `server/tests/test_admin.py`(분모 단언).
+  - web: `web/admin/admin.js` 한 줄(상위 표 비율 분모 `totals.humanPages`).
+  - 문서: context 넷(status·architecture·product·dev-setup), 스펙 027·035·036, `CLAUDE.md` 인덱스(035 행 범위·038 상태).
+- 추측한 지점 (묻지 않고 정한 사소한 것):
+  - 압축 10MB(10,000,000바이트)는 최신부터 더해 넘는 첫 파일에서 멈춘다. 압축 중인 회전 `.log` 는 0 으로 센다 — 잠깐뿐이고 다음 회차가 `.gz` 크기로 센다(압축 전 크기로 세면 그 몇 초 동안 오래된 파일이 밀려났다 다시 읽힌다).
+  - `access.log` 는 60초 규칙에 더해 읽기 시작점이 바뀌었을 때도 다시 읽는다 — 시작점 앞 줄이 짝의 첫 페이지 줄에 남지 않게(시작점은 한 시간에 한 번 움직인다).
+  - 1시간 비움 타이머는 접속 요청마다 다시 건다('마지막 접속 요청' — 60초 칸 안의 요청 포함). 비울 때 창 칸 셋도 새로 만들어 다음 요청이 첫 채움(`pending`)을 본다. 원본 파일이 모두 사라진 회차(`no_file`)에도 캐시를 비운다.
+  - 짝 기록 대상은 UA 만으로 정한 종류가 `browser` 인 줄(§3.4 의 2~8 — 운영자·탐색 덮어쓰기 전). HeadlessChrome 처럼 브라우저 토큰이 있어도 앞 종류에 걸리면 짝이 아니다. 빈 UA 만 `unknown`(공백뿐인 UA 는 scanner).
+  - 열쇠 = `os.urandom(16)` 뒤에 그 줄의 KST 날짜 글자(`YYYY-MM-DD`)를 붙인 BLAKE2b `key`, 해시 입력 = `IP\0UA`(UTF-8 — 짝 없는 서로게이트도 바이트로).
+  - 채널 `campaign` 은 쿼리에 `utm_source` 키가 있으면(빈 값 포함). `utmSources` 목록은 035 대로 빈 값을 세지 않는다. 출처가 http(s) 가 아니거나 모양이 아니면 '출처 없음'. `<끝>` = 그 마디 뒤가 한 마디, 또는 `co`·`com`·`ne`·`or`·`net`·`org`·`ac`·`go`·`gov`·`edu` + 나라 두 글자(`www.google.co.kr` 는 search, `mail.google.com` 도 search).
+  - JS 신호의 101 은 메서드를 보지 않는다(035 의 WS 세기와 같다). 시마다 목록 30 = 진짜 키 30 + `(기타)`.
+  - `skipped` 의 '창과 겹친 파일' = 회전 파일은 수정 시각 ≥ `startTs`, `access.log` 는 늘.
+  - 지금 고를 수 없는 창은 캐시(`AccessLog.summary`) 안에서도 24h 로 바꾼다 — 라우터·피드와 같은 함수.
+  - 화면 단언 꼴: `test_admin.py::test_screen_top_table_share_is_over_human_pages` — `fillAccess` 본문에 `const pages = num(totals.humanPages) ?? 0;`·`topTable(a[k], label, pages)` 가 있고 `num(totals.pages) ?? 0` 이 없다.
+  - 성능 때문에 줄마다 도는 판정(페이지·JS 신호·종류 덮어쓰기)은 `access_hours.py` 에 풀어 썼고, UA 종류 3~7 의 낱말은 정규식 대신 부분 문자열로 찾는다(정규식 대안 ≈3.8µs → ≈1.6µs/UA). UA·출처·특성 판정 메모(4,096)는 그 파일을 읽는 동안만 두고 버린다. 줄 풀기는 `raw_decode` 로 평범한 튜플(json.loads 와 같이 뒤에 공백 밖 글자가 있으면 `skipped`).
+- 실행 중 함께 고친 스펙 절: 없음(027·035·036 은 §6 대로).
 - 남은 빚:
+  - §4 성능 2 판단 대기(아래 질문). 판단 전까지 이 스펙은 IN_PROGRESS 다 — 코드·테스트·문서는 다 들어 있고 남은 것은 상태 표시와 (고르는 길에 따라) §3.7·§4 문장이다.
+  - 실제 nginx 넘김(Docker)·브라우저 확인은 설계 세션 몫(샌드박스). 운영 확인은 §4 '배포 뒤'.
+  - status 빚 넷(§6).
+- 질문 — §4 성능 2 의 '무작위 UA' 를 어떻게 읽을까(넘으면 묻는다는 조건):
+  - (가) UA 를 무리에서 무작위로 고른 파일을 기준으로 — 지금 0.39~0.40초로 한도 안. 모든 줄 UA 가 다른 극단(0.61초·serve ≈3.6초)은 §3.7 에 참고 값으로 적는다. 코드 그대로. 실제 몰림(봇 몇 종·브라우저 버전 수백)과 닮았지만, 한도에 거의 붙어 있다.
+  - (나) 모든 줄 UA 가 다름을 기준으로 한도를 0.65초(serve ≈3.9초)로 올리고 §3.7 의 '≈1.8초'·첫 채움 최악 '≈6초' 를 '≈3.6초'·'≈11초' 로 고친다. 코드 그대로. 가장 나쁜 경우를 문서가 그대로 말하지만, 그만큼 공개 응답과 GIL 을 오래 나눠 쓴다.
+  - (다) (나)처럼 파일 하나 한도를 올리되, 첫 채움 최악은 지금 문서 값(≈6초)에 묶이게 캐시 상한을 압축 10MB → 5MB 로 줄인다. 공개 응답과 GIL 을 나눠 쓰는 시간은 지금 문서 값 그대로지만, 몰리는 날 30일 창의 오래된 기록이 더 일찍 빠진다(`firstTs` 가 늦어진다) — 동작 변경. 파일 하나를 읽는 시간 자체는 순수 파이썬에서 더 줄일 길이 없다(UA 마다 낱말 59개 찾기 ≈1.6µs·JSON 풀기 ≈1.5µs 가 바닥).
+  - 추천: (가) — 극단 값도 §3.7·§5 에 함께 적는다.
