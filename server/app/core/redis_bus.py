@@ -16,10 +16,14 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
   `/admin/alerts` 가 읽는다 (034 §3.3)
 - 키 `admin:clarity` — Clarity 기본 요약의 마지막 시도·결과·마지막 성공 값 JSON, 만료 없음. api 의 `/admin/clarity` 가 읽고 쓴다 (035 §3.3·040 §3.2)
 - 키 `admin:clarity:pages` — Clarity 페이지×기기 묶음의 같은 모양 JSON(주소 없음), 만료 없음. 같은 api 경로가 읽고 쓴다 (040 §3.2)
+- 키 `flow:eth:last_block` — 이더리움 감지기가 마지막으로 처리한 블록 번호 문자열, 만료 없음. 수집이 블록마다 쓰고
+  연결(재연결) 직후 공백 재생의 시작점으로 읽는다 (050 §3.4)
+- 집합 `flow:eth:deposit_addrs`·`flow:eth:hot_wallets`·`flow:eth:internal` — 씨앗에 더한 업비트 주소(소문자), 만료 없음.
+  수집이 블록마다 자가 확장으로 더하고 기동 때 씨앗에 합친다 (050 §3.2)
 """
 
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 import redis.asyncio as aioredis
 from redis.asyncio.retry import Retry
@@ -48,6 +52,11 @@ ALERT_LOG_MAX = 1000
 CLARITY_KEY = "admin:clarity"
 # 040 — 페이지×기기 묶음 호출의 기록. 기본 기록과 따로 둬 두 간격·결과·값이 서로를 덮지 않는다
 CLARITY_PAGES_KEY = "admin:clarity:pages"
+# 050 — 이더리움 감지기. 마지막 처리 블록(재생 시작점)과 씨앗에 더한 주소 집합 셋 — 전부 만료 없음
+FLOW_LAST_BLOCK_KEY = "flow:eth:last_block"
+FLOW_DEPOSIT_ADDRS_KEY = "flow:eth:deposit_addrs"
+FLOW_HOT_WALLETS_KEY = "flow:eth:hot_wallets"
+FLOW_INTERNAL_KEY = "flow:eth:internal"
 
 
 class RedisUnavailableError(Exception):
@@ -197,6 +206,32 @@ class RedisBus:
     async def clarity_pages_save(self, data: str) -> None:
         """`SET admin:clarity:pages <JSON>` — 만료 없음 (040 §3.2). 실패는 예외."""
         await self._client.set(CLARITY_PAGES_KEY, data)
+
+    async def flow_last_block_load(self) -> int | None:
+        """`GET flow:eth:last_block` — 연결 직후 공백 재생의 시작점 (050 §3.4). 없으면 None(첫 기동 = head 부터). 실패는 예외."""
+        value = await self._client.get(FLOW_LAST_BLOCK_KEY)
+        if value is None:
+            return None
+        return int(_text(value))
+
+    async def flow_last_block_save(self, block: int) -> None:
+        """`SET flow:eth:last_block <번호>` — 감지기가 블록마다, 만료 없음 (050 §3.4). 실패는 예외."""
+        await self._client.set(FLOW_LAST_BLOCK_KEY, str(block))
+
+    async def flow_set_load(self, key: str) -> set[str]:
+        """`SMEMBERS <집합 키>` — 기동 때 씨앗에 합칠 추가 주소 (050 §3.2). 없으면 빈 집합. 실패는 예외.
+
+        키는 `FLOW_DEPOSIT_ADDRS_KEY`·`FLOW_HOT_WALLETS_KEY`·`FLOW_INTERNAL_KEY` 셋 중 하나다.
+        """
+        values = await self._client.smembers(key)
+        return {_text(v) for v in values}
+
+    async def flow_set_add(self, key: str, addrs: Iterable[str]) -> None:
+        """`SADD <집합 키> …` — 자가 확장으로 새로 안 주소를 즉시, 만료 없음 (050 §3.2). 빈 목록은 명령하지 않는다. 실패는 예외."""
+        members = list(addrs)
+        if not members:
+            return
+        await self._client.sadd(key, *members)
 
     async def subscribe(self) -> Subscription:
         """채널 구독 연결을 새로 연다 — 여기서 실제 연결이 일어나므로 실패는 예외."""
