@@ -4,7 +4,7 @@
 
 type ClarityCall = (...args: unknown[]) => void
 
-/** clarity.js 가 문서 중간에(띠의 저장·다른 탭의 동의로) 대기열을 만든 직후 window 에 한 번 보내는 이벤트. */
+/** clarity.js 가 문서 중간에(동의 창의 저장·다른 탭의 동의로) 대기열을 만든 직후 window 에 한 번 보내는 이벤트. */
 export const CLARITY_READY = 'kt:clarity'
 
 function clarity(): ClarityCall | null {

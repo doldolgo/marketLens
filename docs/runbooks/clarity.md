@@ -1,6 +1,6 @@
 # Microsoft Clarity — 대시보드 설정·켜고 끄기·삭제 요청·Data Export 토큰 (스펙 033·035·040, 사람용)
 
-랜딩(`/`)과 대시보드(`/app/`)의 화면 이용을 Microsoft Clarity 로 본다. **동의 방식**이다 — 화면 아래 동의 안내 띠나 처리방침의 동의 관리(`/privacy#consent`)에서 수집·이용·Microsoft 제공·미국 이전 세 칸에 모두 동의해 저장한 방문자만 Clarity 태그를 받는다. 설정은 레포의 `web/public/clarity.js` 머리 세 값(프로젝트 ID·켤 페이지·안내 판)이 전부이고, 나머지는 Clarity 대시보드에서 사람이 한다.
+랜딩(`/`)과 대시보드(`/app/`)의 화면 이용을 Microsoft Clarity 로 본다. **동의 방식**이다 — 처음 들어온 방문자에게 뜨는 동의 창(모달)이나 처리방침의 동의 관리(`/privacy#consent`)에서 수집·이용·Microsoft 제공·미국 이전 세 칸에 모두 동의해 저장한 방문자만 Clarity 태그를 받는다. 설정은 레포의 `web/public/clarity.js` 머리 세 값(프로젝트 ID·켤 페이지·안내 판)이 전부이고, 나머지는 Clarity 대시보드에서 사람이 한다.
 
 ## 1. 켜는 순서
 1. 032 처리방침이 게시돼 있다 — `https://kimptrack.com/privacy` 가 열리고 '화면 분석 동의 관리' 절이 있다. 032 §7 의 법률 확인을 끝냈다.
@@ -18,17 +18,17 @@
 - Data Export API 토큰은 6절(035).
 
 ## 3. 확인 (배포 뒤)
-1. 새 크롬 프로필로 `https://kimptrack.com` — 화면 아래에 띠가 뜨고, 개발자 도구 네트워크에 `clarity.ms` 요청이 0건이다.
-2. 띠의 세 칸을 모두 체크하고 [선택한 대로 저장] — `www.clarity.ms/tag/…`·`scripts.clarity.ms`·`*.clarity.ms/collect` 요청이 생기고 `c.clarity.ms` 는 0건, 쿠키는 `_clck`·`_clsk` 둘(도메인 `.kimptrack.com`). 콘솔에서 `clarity('metadata', (m) => console.log(m), false, true, true)` 의 동의 상태가 ad DENIED·analytics GRANTED.
+1. 새 크롬 프로필로 `https://kimptrack.com` — 화면 가운데에 동의 창이 뜨고(뒤 페이지는 어둡게 덮여 눌리지 않는다), 개발자 도구 네트워크에 `clarity.ms` 요청이 0건이다.
+2. 동의 창의 세 칸을 모두 체크하고 [선택한 대로 저장] — `www.clarity.ms/tag/…`·`scripts.clarity.ms`·`*.clarity.ms/collect` 요청이 생기고 `c.clarity.ms` 는 0건, 쿠키는 `_clck`·`_clsk` 둘(도메인 `.kimptrack.com`). 콘솔에서 `clarity('metadata', (m) => console.log(m), false, true, true)` 의 동의 상태가 ad DENIED·analytics GRANTED.
 3. 2시간 안에 Clarity 녹화 목록에 그 세션이 보인다 — 숫자는 보이고 입력칸은 가려져 있다. 대시보드에서 탭을 두 번 바꾸면 같은 세션에 페이지가 셋이고 태그 `tab` 이 붙는다. 필터를 여러 번 바꿔도 페이지가 늘지 않는다. 이벤트 `tab_<id>`·`pivot_history` 가 보인다.
-4. GPC 를 보내는 브라우저(Brave)·[모두 거부]·`www.kimptrack.com` 에서는 `clarity.ms` 요청이 0건이다(GPC·거부는 띠도 없다).
-5. 실제 휴대폰에서 띠가 화면 절반을 넘지 않고, 띠 밖 페이지를 스크롤·누를 수 있다. VoiceOver 로 띠의 세 칸을 체크하고 '내용 보기'를 펼치고 버튼을 누를 수 있다.
-6. 같은 기기에서 스프레드 탭 60초 Performance 기록(동의·거부 각각)의 스크립트 시간과 1시간 전송량을 033 §7 에 적는다. 동의 쪽이 1.5배를 넘으면 `PAGES` 에서 `"app"` 을 빼는 PR 을 낸다(기준값은 사람이 정한다). 띠가 대시보드 부하를 늘리지 않는지도 잰다 — 띠 있음(값 없음)·없음(`denied`) 각 3회, 스프레드 탭 30초 Performance 기록의 스크립트 시간 중앙값을 033 §7 에 적는다(차이 5% 안이 목표).
+4. GPC 를 보내는 브라우저(Brave)·[모두 거부]·`www.kimptrack.com` 에서는 `clarity.ms` 요청이 0건이다(GPC·거부는 동의 창도 없다).
+5. 실제 휴대폰에서 접힌 동의 창이 한 화면 안이고, 고른 뒤 페이지를 스크롤·누를 수 있다. VoiceOver 로 동의 창을 '화면 분석 동의' 대화상자로 듣고 세 칸을 체크하고 '내용 보기'를 펼치고 버튼을 누를 수 있다.
+6. 같은 기기에서 스프레드 탭 60초 Performance 기록(동의·거부 각각)의 스크립트 시간과 1시간 전송량을 033 §7 에 적는다. 동의 쪽이 1.5배를 넘으면 `PAGES` 에서 `"app"` 을 빼는 PR 을 낸다(기준값은 사람이 정한다). 동의 창이 대시보드 부하를 늘리지 않는지도 잰다 — 동의 창 있음(값 없음)·없음(`denied`) 각 3회, 스프레드 탭 30초 Performance 기록의 스크립트 시간 중앙값을 033 §7 에 적는다(차이 5% 안이 목표).
 
 ## 4. 끄기·되돌리기
-- 전부 끄기: `clarity.js` 의 `CLARITY_ID` 를 `""` 로 바꾸는 PR. 배포 뒤 다음 페이지 로드부터 띠도 태그도 없다(`/clarity.js` 는 nginx 가 매번 다시 확인하게 한다 — `no-cache`, 대시보드의 `/app/clarity.js` 는 `no-store`).
+- 전부 끄기: `clarity.js` 의 `CLARITY_ID` 를 `""` 로 바꾸는 PR. 배포 뒤 다음 페이지 로드부터 동의 창도 태그도 없다(`/clarity.js` 는 nginx 가 매번 다시 확인하게 한다 — `no-cache`, 대시보드의 `/app/clarity.js` 는 `no-store`).
 - 대시보드만 끄기: `PAGES` 에서 `"app"` 을 뺀다.
-- 받는 자·항목·목적·보유 기간이 바뀌면: 같은 PR 에서 032 방침의 알릴 사항과 안내 판 세 곳(`clarity.js` 의 `NOTICE_VERSION`·`privacy.html` 스크립트의 `VERSION`·방침의 보이는 판 글자)을 함께 올린다. 예전 판의 동의는 '정하지 않음' 이 되어 띠가 다시 묻는다. 문장만 다듬으면 판을 올리지 않는다.
+- 받는 자·항목·목적·보유 기간이 바뀌면: 같은 PR 에서 032 방침의 알릴 사항과 안내 판 세 곳(`clarity.js` 의 `NOTICE_VERSION`·`privacy.html` 스크립트의 `VERSION`·방침의 보이는 판 글자)을 함께 올린다. 예전 판의 동의는 '정하지 않음' 이 되어 동의 창이 다시 묻는다. 문장만 다듬으면 판을 올리지 않는다.
 - Clarity 프로젝트 삭제는 끄는 방법으로 쓰지 않는다 — 데이터가 전부 사라지고 되돌릴 수 없다. 삭제 요청(5절)에만 쓴다.
 
 ## 5. 삭제 요청 — 프로젝트 기록 통째 삭제

@@ -75,7 +75,7 @@
     .notice p, .notice ol { margin-top: 12px; color: var(--n300); }
     .notice ol { padding-left: 1.4em; }
     .notice li + li { margin-top: 6px; }
-    /* 동의 세 칸 — 칸마다 체크 상자와 그 동의의 알릴 사항(033 띠와 같은 글자) */
+    /* 동의 세 칸 — 칸마다 체크 상자와 그 동의의 알릴 사항(033 동의 창과 같은 글자) */
     .cell { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--divider); }
     .pick { display: flex; align-items: flex-start; gap: 10px; font-weight: 700; color: var(--text); cursor: pointer; }
     .pick input { flex: none; width: 20px; height: 20px; margin: 4px 0 0; accent-color: var(--accent); cursor: pointer; }
@@ -87,9 +87,9 @@
     .state { margin-top: 0 !important; font-size: 15px; color: var(--n400) !important; }
     .state strong { font-size: 17px; }
     /* 동의를 받을 때 눈에 띄게 적는 중요한 내용(법 제22조 제2항·시행령 제17조 제3항 — 보유 기간, 받는 자와 그 목적·보유 기간):
-       다른 내용보다 20% 크게·굵게·밑줄. 033 띠도 같은 표시 */
+       다른 내용보다 20% 크게·굵게·밑줄. 033 동의 창도 같은 표시 */
     .key { font-size: 1.2em; font-weight: 700; color: var(--text); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 4px; }
-    /* [선택한 대로 저장]·[모두 거부]는 세 칸 뒤, 같은 칸 너비 — 글자 길이를 따르지 않는다(033 띠의 두 버튼도 같은 해석) */
+    /* [선택한 대로 저장]·[모두 거부]는 세 칸 뒤, 같은 칸 너비 — 글자 길이를 따르지 않는다(033 동의 창의 두 버튼도 같은 해석) */
     .actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 12px; max-width: 384px; margin-top: 16px; }
 
     /* 두 칸 정의 목록 — 받는 곳마다 한 묶음. 좁은 화면에서는 한 칸 */
@@ -465,7 +465,7 @@
   </footer>
 
   <script>
-    // 분석 동의 저장값 — 이 페이지의 동의 관리와 033(Clarity)의 동의 안내 띠가 쓰고 033 이 읽는다 (스펙 032 §3.3).
+    // 분석 동의 저장값 — 이 페이지의 동의 관리와 033(Clarity)의 동의 창이 쓰고 033 이 읽는다 (스펙 032 §3.3).
     // granted 이고 판이 지금 판이며 GPC 가 아닐 때만 분석한다 — 값이 없거나 판이 다르면 정하지 않은 것이고 꺼져 있다.
     // 동의는 세 칸(수집·이용 · 제3자 제공 · 국외 이전)으로 나눠 받고, 셋 다일 때만 granted 다. 요청을 만들지 않는다.
     (() => {
@@ -542,7 +542,7 @@
       })
       $('an-deny').addEventListener('click', refuse)
       $('an-withdraw').addEventListener('click', refuse)
-      // 다른 탭(033 의 띠 포함)에서 고른 값도 곧바로 보인다
+      // 다른 탭(033 의 동의 창 포함)에서 고른 값도 곧바로 보인다
       window.addEventListener('storage', (e) => {
         if (e.key === KEY || e.key === VKEY || e.key === null) render()
       })

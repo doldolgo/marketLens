@@ -34,7 +34,7 @@ MS_INQUIRY = "https://go.microsoft.com/fwlink/?linkid=2126612"
 MUST = (
     "consentv2", "ad_Storage", "analytics_Storage", '"granted"', '"denied"', "globalPrivacyControl",
     "kt.analytics", "kt.analytics.v", "_clck", "_clsk", "_cltk", "DOMContentLoaded", TAG, "storage",
-    "location.reload", "region", "aria-label", "checkbox", "label", "/privacy#consent", "_blank",
+    "location.reload", "dialog", "aria-modal", "inert", "aria-label", "checkbox", "label", "/privacy#consent", "_blank",
     "noopener", "kt:clarity", "선택한 대로 저장", "모두 거부", "<details>", "<summary", "내용 보기",
     "저장 규칙", "data-nosnippet", "pageshow", "persisted", "stopImmediatePropagation",
 )  # fmt: skip
@@ -235,7 +235,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
   const cookies = [], head = [], body = [], doc = {}, win = {}, capture = {}, fired = []
   let reloads = 0, stopped = 0
   const el = (tag) => ({
-    tag, attrs: {}, kids: {}, on: {}, anchors: [], checked: false,
+    tag, attrs: {}, kids: {}, on: {}, anchors: [], checked: false, focused: 0, focus() { this.focused++ },
     setAttribute(k, v) { this.attrs[k] = v },
     set innerHTML(h) { this.html = h; this.anchors = (h.match(/<a /g) || []).map(() => ({ target: '', rel: '' })) },
     querySelector(sel) { return this.kids[sel] || (this.kids[sel] = el('stub')) },
@@ -248,12 +248,14 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     readyState: c.defer ? 'interactive' : 'loading', currentScript: c.defer ? { defer: true } : null, createElement: el,
     set cookie(line) { cookies.push(line) },
     head: { appendChild: (e) => head.push(e) },
-    body: { get firstChild() { return body[0] || null }, insertBefore: (e) => body.unshift(e) },
+    body: { get firstChild() { return body[0] || null }, get children() { return body }, insertBefore: (e) => body.unshift(e) },
+    // 'bar' 면 스크롤 막대가 있는 문서(창 폭 > 문서 폭)
+    documentElement: { style: { overflow: '', scrollbarGutter: '' }, clientWidth: c.bar ? 1425 : 1440 },
     getElementById: (id) => head.concat(body).find((e) => e.id === id) || null,
     addEventListener: (t, fn) => { doc[t] = fn },
   }
   const window = {
-    localStorage, sessionStorage: { removeItem: (k) => session.delete(k) },
+    innerWidth: 1440, localStorage, sessionStorage: { removeItem: (k) => session.delete(k) },
     addEventListener: (t, fn, opt) => { win[t] = fn; capture[t] = opt === true || !!(opt && opt.capture) },
     dispatchEvent: (e) => fired.push(e.type),
   }
@@ -261,6 +263,9 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
   class Event { constructor(type) { this.type = type } }
   new Function('window', 'document', 'navigator', 'location', 'Event', script)(
     window, document, c.gpc ? { globalPrivacyControl: true } : {}, location, Event)
+  // 동의 창 뒤의 페이지 — 창보다 먼저 body 에 있던 형제 둘(랜딩의 header·main, 대시보드의 #root 자리)
+  const page = [el('header'), el('main')]
+  body.push(...page)
   const strip = () => body.find((e) => e.id === 'kt-consent')
   const snap = () => ({
     stored: data.get('kt.analytics') ?? null, v: data.get('kt.analytics.v') ?? null,
@@ -268,6 +273,8 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     queue: window.clarity ? window.clarity.q.map((a) => Array.from(a)) : null,
     tags: head.filter((e) => e.tag === 'script').map((e) => [e.src, e.async]),
     style: head.filter((e) => e.tag === 'style').length, fired, reloads, stopped, capture,
+    inert: page.map((e) => !!e.inert), html: { ...document.documentElement.style },
+    focused: strip() ? strip().querySelector('.kt-c-body').focused : 0,
     forgot: cookies.length > 0 && !session.has('_cltk'), cookies, listens: 'storage' in win || 'pageshow' in win,
   })
   const first = JSON.parse(JSON.stringify(snap()))
@@ -338,8 +345,8 @@ def test_other_hosts_pages_do_nothing_at_all() -> None:
 
 
 @with_id
-def test_undecided_visitor_gets_the_strip_after_the_document_is_parsed() -> None:
-    """없음·그 밖의 값·예전 판·판 없는 granted = 정하지 않음 — 남은 저장값을 지우고 DOMContentLoaded 뒤 띠 (§3.2·§3.3)."""
+def test_undecided_visitor_gets_the_modal_after_the_document_is_parsed() -> None:
+    """없음·그 밖의 값·예전 판·판 없는 granted = 정하지 않음 — 남은 저장값을 지우고 DOMContentLoaded 뒤 동의 창 (§3.2·§3.3)."""
     for ls in (
         {},
         {"kt.analytics": "off"},
@@ -352,8 +359,20 @@ def test_undecided_visitor_gets_the_strip_after_the_document_is_parsed() -> None
         assert (
             strip
             and strip["first"]
-            and strip["role"] == "region"
+            and strip["role"] == "dialog"
+            and strip["aria-modal"] == "true"
             and strip["aria-label"] == "화면 분석 동의"
+        ), ls
+        # 모달 — 뒤 페이지의 형제 요소는 모두 inert, 문서 스크롤은 멈추고, 초점은 창 안 글 영역으로 한 번
+        assert got["first"]["inert"] == [False, False], ls
+        assert (
+            got["last"]["inert"],
+            got["last"]["html"]["overflow"],
+            got["last"]["focused"],
+        ) == (
+            [True, True],
+            "hidden",
+            1,
         ), ls
         assert (
             "data-nosnippet" in strip
@@ -364,6 +383,11 @@ def test_undecided_visitor_gets_the_strip_after_the_document_is_parsed() -> None
         assert set(strip["links"]) == {"|"}, ls
     links = _one(path="/app/", steps=["ready"])["last"]["strip"]["links"]
     assert len(links) == 6 and set(links) == {"_blank|noopener"}
+    # 스크롤 막대가 있던 문서는 그 자리를 남긴다(막대가 사라져 페이지가 옆으로 밀리지 않게), 없던 문서는 건드리지 않는다
+    assert (
+        _one(bar=True, steps=["ready"])["last"]["html"]["scrollbarGutter"] == "stable"
+    )
+    assert _one(steps=["ready"])["last"]["html"]["scrollbarGutter"] == ""
 
 
 @with_id
@@ -417,6 +441,10 @@ def test_strip_buttons_write_the_choice() -> None:
         None,
         0,
     )
+    # 닫으면 뒤 페이지가 돌아온다 — 어느 버튼이든, 저장에 실패해도
+    for got in (agree, partial, deny, broken):
+        assert got["last"]["inert"] == [False, False]
+        assert got["last"]["html"] == {"overflow": "", "scrollbarGutter": ""}
     assert (last["queue"], last["tags"], last["fired"]) == (
         [CONSENT],
         TAG_ID,
