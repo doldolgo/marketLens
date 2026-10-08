@@ -123,6 +123,7 @@ const EX_NAMES: Record<string, string> = {
   binance: 'Binance',
   bybit: 'Bybit',
   bitget: 'Bitget',
+  okx: 'OKX',
   binance_perp: 'Binance perp',
   bybit_perp: 'Bybit perp',
   bitget_perp: 'Bitget perp',

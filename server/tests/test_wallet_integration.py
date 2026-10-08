@@ -50,7 +50,7 @@ NOW = datetime.now(UTC)
 
 
 def wallet_client(responses: list[httpx.Response]) -> httpx.AsyncClient:
-    """빗썸·비트겟(public) 입출금 URL 만 응답한다 — 키 없는 업비트·바이낸스·바이빗은 호출 자체가 없어야 한다."""
+    """빗썸·비트겟(public) 입출금 URL 만 응답한다 — 키 없는 업비트·바이낸스·바이빗·OKX 는 호출 자체가 없어야 한다."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.bithumb.com" and "assetsstatus" in request.url.path:
@@ -106,7 +106,7 @@ async def test_keyless_startup_spreads_and_refresh_contract() -> None:
     tick = ticks.tick(1_787_000_000)
 
     # 실패 상태 거래소는 틱의 dwFailed 로 — 009 가 dw_fail 점을 쓴다 (§3.5)
-    assert tick.dw_failed == ("upbit", "binance", "bybit")
+    assert tick.dw_failed == ("upbit", "binance", "bybit", "okx")
 
     # /spreads — 모든 행에 5키, 값은 true/false/null 뿐, netDom 은 문자열 또는 null (§4)
     rows = spreads_json(store)["rows"]
@@ -123,7 +123,7 @@ async def test_keyless_startup_spreads_and_refresh_contract() -> None:
     # 키 없는 업비트 행은 전부 unknown
     assert all(r["depDom"] is None for r in rows if r["dom"] == "upbit")
 
-    # /refresh — 빗썸 true, 업비트·바이낸스·바이빗 false + 입출금 경고 3줄 (§4·019)
+    # /refresh — 빗썸·비트겟 true, 업비트·바이낸스·바이빗·OKX false + 입출금 경고 4줄 (§4·019·045)
     result = await collect.refresh_now()
     body = make_client(store, collector=FakeCollector(result)).post("/refresh").json()
     available = {s["exchange"]: s["walletStatusAvailable"] for s in body["snapshots"]}
@@ -133,15 +133,17 @@ async def test_keyless_startup_spreads_and_refresh_contract() -> None:
         "binance": False,
         "bybit": False,
         "bitget": True,  # public (020)
+        "okx": False,  # 키 3개 없음 (045)
         "binance_perp": False,  # perp 에는 입출금이 없다 (046)
         "bybit_perp": False,
         "bitget_perp": False,
     }
     dw_warnings = [w for w in body["warnings"] if "입출금 상태 조회 실패" in w]
-    assert len(dw_warnings) == 3
+    assert len(dw_warnings) == 4
     assert dw_warnings[0].startswith("upbit ")
     assert dw_warnings[1].startswith("binance ")
     assert dw_warnings[2].startswith("bybit ")
+    assert dw_warnings[3].startswith("okx ")
     # 트리거는 입출금을 즉시 다시 조회한다 — 빗썸 항목의 calls 에 그 1회 (§3.5)
     calls = {s["exchange"]: s["calls"] for s in body["snapshots"]}
     assert calls["bithumb"] == 1 and calls["bitget"] == 1

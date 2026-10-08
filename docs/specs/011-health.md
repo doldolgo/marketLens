@@ -20,7 +20,7 @@
 ## 3. 동작
 
 ### 3.1 읽는 계약 (복사)
-- 001·020: 틱은 1초 주기, 거래소 5곳(`upbit`·`bithumb`·`binance`·`bybit`·`bitget`) + perp 원천(046 §3.8 — `binance_perp`·`bybit_perp`·`bitget_perp`, 현물 전부 뒤). 매 틱 거래소마다 판정한다 — 성공 = 스트림 연결 + 마지막 시세 메시지 30초 이내, 실패 = 미연결(그 연결 오류의 kind) 또는 30초 무수신(`stale_stream`). 실패에는 `kind`·`message`·`status_code`(핸드셰이크의 HTTP 상태, 없으면 null)·`url`(WebSocket URL)·`body`(핸드셰이크 거부 응답 본문 앞 500자, 없으면 null)·`retry_after_sec` 가 실린다. 스트림이 끊겨도 행은 그대로 남는다(행은 메시지로만 바뀐다). 실패 예외는 `ExchangeError` 공통 부모에 `exchange`·`url`·`message`·`status_code`·`body`(앞 500자) 를 가진다. 타임아웃은 `exchange_timeout`, 그 외는 `exchange_api_error`.
+- 001·045: 틱은 1초 주기, 거래소 6곳(`upbit`·`bithumb`·`binance`·`bybit`·`bitget`·`okx`) + perp 원천(046 §3.8 — `binance_perp`·`bybit_perp`·`bitget_perp`, 현물 전부 뒤). 매 틱 거래소마다 판정한다 — 성공 = 스트림 연결 + 마지막 시세 메시지 30초 이내, 실패 = 미연결(그 연결 오류의 kind) 또는 30초 무수신(`stale_stream`). 실패에는 `kind`·`message`·`status_code`(핸드셰이크의 HTTP 상태, 없으면 null)·`url`(WebSocket URL)·`body`(핸드셰이크 거부 응답 본문 앞 500자, 없으면 null)·`retry_after_sec` 가 실린다. 스트림이 끊겨도 행은 그대로 남는다(행은 메시지로만 바뀐다). 실패 예외는 `ExchangeError` 공통 부모에 `exchange`·`url`·`message`·`status_code`·`body`(앞 500자) 를 가진다. 타임아웃은 `exchange_timeout`, 그 외는 `exchange_api_error`.
 - 002: 셸은 1.5초 tick 으로 `now` 를 갱신하고, 탭은 언마운트하지 않고 숨긴다. 경과 표기 `N초 전`/`N분 전`/`N시간 전`. 상태색 정상 초록·지연 주황·끊김 빨강.
 - 003: FE 폴링은 기능 폴더 안의 훅 하나(`setInterval` + 즉시 1회, 재진입 방지, 실패는 무시하고 직전 데이터 유지). 거래소 표시명 `upbit→업비트` `bithumb→빗썸` `binance→Binance`.
 - 005: Influx org·bucket `marketlens`, `INFLUX_TOKEN` 없으면 Influx 비활성. 같은 tag set + 같은 time 은 덮어쓴다. Influx 가 닿지 않아도 앱은 뜬다.
@@ -48,6 +48,7 @@
 - **바이낸스**: 429 → `rate_limit`, 418 → `banned`(IP 밴, 2분~3일 누진), 둘 다 `Retry-After` 초를 `retry_after_sec` 에. 403 → `banned`(WAF — "rate limit violation or a security block"). 5xx → `unavailable`. 그 외 4xx → `bad_request`. 에러 본문 `{"code":-1003,"msg":…}`.
 - **바이빗**(019 §3.8, 공식 문서 2026-09-14 확인): 403 → `banned`("access too frequent", 10분 이상 자동 해제). 429 → `rate_limit`. 5xx → `unavailable`. 그 외 4xx → `bad_request`. `Retry-After` 는 문서에 없어 `retry_after_sec` 는 null. HTTP 200 + `retCode != 0` 도 실패 — `retCode 10006`("Too many visits!") → `rate_limit`, 그 밖은 `bad_response`(`status_code` 200, 원문 body). 구독 응답 `success:false` → `bad_request`.
 - **비트겟**(020 §3.8, 공식 문서 2026-09-15 확인): 403 → `banned`(반복 초과 시 IP 차단, 해제 시간은 문서에 없다). 429 → `rate_limit`. 5xx → `unavailable`. 그 외 4xx → `bad_request`. `Retry-After` 는 문서에 없어 `retry_after_sec` 는 null. HTTP 200 + `code != "00000"` 도 실패 — 한도 초과를 본문 code 로 알리는 경우는 문서에 없어 전부 `bad_response`(`status_code` 200, 원문 body). 구독 응답 `event:"error"` → `bad_request`(message 에 `code`·`msg`).
+- **OKX**(045 §3.8, 공식 문서 2026-10-08 확인): 429 → `rate_limit`. **HTTP 200 + 봉투 `code == "50011"`("Rate limit reached") 도 `rate_limit`** — 문서가 같은 코드를 200·429 양쪽에 둔다. 403 → `banned`. 5xx → `unavailable`. 그 외 4xx → `bad_request`. HTTP 200 + `code != "0"`(50011 제외) → `bad_response`(`status_code` 200, 원문 body). `Retry-After` 는 문서에 없어 `retry_after_sec` 는 null. WebSocket `event:"error"` → `bad_request`.
 - 공통(REST): httpx 타임아웃 → `timeout`. 그 외 httpx 전송 예외(DNS·연결 거부) → `network`. JSON 파싱 실패·예상 밖 모양 → `bad_response`.
 - **WebSocket 공통**: 연결 실패(DNS·거부·TLS) → `network`. 핸드셰이크 타임아웃(5초) → `timeout`. 핸드셰이크가 HTTP 상태로 거부되면 그 상태를 위 거래소 규칙으로 분류한다(업비트 초당 5회·빗썸 초당 10회 초과의 429 → `rate_limit`, 빗썸 10분 차단·바이낸스 418/403 → `banned`). 구독 요청에 에러 응답(`{"error":{"name":…}}`) → `bad_request`. 시세 프레임 디코드 실패는 그 프레임을 버릴 뿐이고, 유효한 시세 프레임이 30초 동안 없으면 `stale_stream`.
 - **`stale_stream`** 은 HTTP 응답이 아니라 상시 연결이 조용히 멈춘 상태다 — 구독 중인데 30초 동안 시세 프레임이 없으면 그 틱의 그 거래소가 이 종류로 실패한다. `url` 은 WebSocket URL, `status_code` 는 null. 바이낸스는 샤드 단위로 판정하고 message 에 샤드 번호가 실린다(012 §3.5). 행은 그대로 남는다 — 001 은 행을 메시지로만 바꾼다.
@@ -91,8 +92,8 @@
   ]
 }
 ```
-- `exchanges` 는 001·020 의 거래소 5곳 고정 순서(`upbit`, `bithumb`, `binance`, `bybit`, `bitget`) 뒤에 perp 원천 3개(`binance_perp`, `bybit_perp`, `bitget_perp` — 046 §3.8, 표시명 `Binance perp` 등). `state`: 마지막 성공 후 경과 `< 5초` → `ok`, `5초 이상 60초 미만` → `stale`, `60초 이상` 또는 기동 후 성공 0회 → `down`. `markets` = 메모리 스냅샷의 그 거래소 행 수(perp 원천은 우주 안 심볼 수 — 046 §3.8). `openOutage` = 진행 중 구간(모양은 `outages` 항목과 같음), 없으면 null. `lastError` = 가장 최근 구간의 최신 실패(진행 중이면 그것), 24시간 안에 없으면 null.
-- `successRate1h` = `(1 − 최근 3600초 창과 겹치는 구간들의 겹친 초 합 / 3600) × 100`, 소수 1자리. 거래소별로 계산하고 최상위는 `exchanges` 전체(현물 5 + perp 3) 평균. 틱이 1초 고정이라 지속 초 ≈ 실패 틱 수다. 기동 후 1시간 미만이어도 창은 그대로 3600초다 — 꺼져 있던 시간은 복원된 진행 중 구간(§3.4)과 겹치는 만큼만 실패로 센다.
+- `exchanges` 는 001·045 의 거래소 6곳 고정 순서(`upbit`, `bithumb`, `binance`, `bybit`, `bitget`, `okx`) 뒤에 perp 원천 3개(`binance_perp`, `bybit_perp`, `bitget_perp` — 046 §3.8, 표시명 `Binance perp` 등). `state`: 마지막 성공 후 경과 `< 5초` → `ok`, `5초 이상 60초 미만` → `stale`, `60초 이상` 또는 기동 후 성공 0회 → `down`. `markets` = 메모리 스냅샷의 그 거래소 행 수(perp 원천은 우주 안 심볼 수 — 046 §3.8). `openOutage` = 진행 중 구간(모양은 `outages` 항목과 같음), 없으면 null. `lastError` = 가장 최근 구간의 최신 실패(진행 중이면 그것), 24시간 안에 없으면 null.
+- `successRate1h` = `(1 − 최근 3600초 창과 겹치는 구간들의 겹친 초 합 / 3600) × 100`, 소수 1자리. 거래소별로 계산하고 최상위는 `exchanges` 전체(현물 6 + perp 3) 평균. 틱이 1초 고정이라 지속 초 ≈ 실패 틱 수다. 기동 후 1시간 미만이어도 창은 그대로 3600초다 — 꺼져 있던 시간은 복원된 진행 중 구간(§3.4)과 겹치는 만큼만 실패로 센다.
 - `outages` = 메모리의 24시간 구간 전부(진행 중 포함), `startedAt` 내림차순. 시각은 전부 epoch ms.
 
 ### 3.6 FE — 폴링과 피드
@@ -125,14 +126,14 @@ BE(네트워크 없음, 커넥터·Influx 는 fake):
 - 24시간 지난 닫힌 구간은 목록에서 빠지고, 진행 중 구간은 남는다.
 - 구간 열림·닫힘에 Influx 쓰기가 각 1회씩 호출되고, 연속 실패 중에는 호출되지 않는다. 쓰기 예외는 삼켜진다. 닫힘 쓰기에 `ended_ts`·`last_failed_ts`·최종 `count` 가 실린다.
 - 기동 시 fake Influx 의 24시간 점이 메모리로 복원되고 `ended_ts` 없는 점은 진행 중이 된다. Influx 없음/예외/3초 초과면 빈 목록으로 기동한다. 복원 조회는 HTTP 타임아웃 3초로 불린다(`tests/test_outages.py`). 기동 전에 시작한 복원된 진행 중 구간은 `started_at` 부터 now 까지 성공률 창과 겹치고(꺼져 있던 시간 포함), 기동 후 닫히면 `endedAt` 은 기동 후의 첫 성공 틱이다. 같은 거래소에 진행 중 점이 둘이면 최신만 진행 중이고 옛 점은 `ended_at = last_failed_at` 으로 닫혀 그 닫힘 점(`ended_ts`)이 Influx 에 쓰인다.
-- `GET /health/collect`: 거래소 5곳 + perp 원천 3개 고정 순서, `state` 경계(4.9초 ok · 5초 stale · 60초 down · 성공 0회 down), `successRate1h` 가 창과 겹친 초로 계산되고 창 밖 구간은 무시된다, `outages` 내림차순, 진행 중 구간이 `openOutage` 와 `outages` 양쪽에 있다.
+- `GET /health/collect`: 거래소 6곳 + perp 원천 3개 고정 순서, `state` 경계(4.9초 ok · 5초 stale · 60초 down · 성공 0회 down), `successRate1h` 가 창과 겹친 초로 계산되고 창 밖 구간은 무시된다, `outages` 내림차순, 진행 중 구간이 `openOutage` 와 `outages` 양쪽에 있다.
 - `GET /health` 는 여전히 `{"status":"ok","version":…}` 이다. `POST /refresh` 응답 키는 바뀌지 않는다.
 - 수집 상태 탭의 유형 칩 라벨에 `stale_stream`(`스트림 정체`)이 있다 — FE `OutageKind` 유니온에 값이 있어야 빌드된다.
 - ruff·pytest 통과. web `npm run lint && npm run build` 통과.
 
 수동(실서버):
-- 서버 기동 → `curl -s localhost:8000/health/collect | head -c 400` 에 거래소 5곳·`state: ok`.
-- 탭: 카드 5장 `● 수집 중`, 타임라인 빈 트랙, 로그에 `서버 시작` 1행. KPI `5곳 중 5곳 정상`.
+- 서버 기동 → `curl -s localhost:8000/health/collect | head -c 400` 에 거래소 6곳·`state: ok`.
+- 탭: 카드 6장 `● 수집 중`, 타임라인 빈 트랙, 로그에 `서버 시작` 1행. KPI `6곳 중 6곳 정상`.
 - `/etc/hosts` 로 `api.bithumb.com` 을 막고 30초 → 빗썸 카드 `✕ 끊김` + `진행 중 · ×N회`, 로그에 `연결 실패` 1행(행 수가 늘지 않아야 한다), 타임라인 막대가 자란다. 복구 → 구간이 닫히고 지속 시간이 찍힌다. 서버 재기동 → 그 구간이 그대로 보인다.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)

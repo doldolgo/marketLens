@@ -17,6 +17,7 @@ from app.core.streams.binance import BinanceStream
 from app.core.streams.bitget import BitgetStream
 from app.core.streams.bithumb import BithumbStream
 from app.core.streams.bybit import BybitStream
+from app.core.streams.okx import OkxStream
 from app.core.streams.upbit import UpbitStream
 from app.core.tick_store import TickRelay
 from app.core.ticks import TickLoop
@@ -46,7 +47,14 @@ def test_streams_start_before_restores_and_the_tick_loop_after_them(
         monkeypatch.setattr(cls, "restore", wrapped)
 
     mark_start(UniverseRefresher, "universe")
-    for cls in (UpbitStream, BithumbStream, BinanceStream, BybitStream, BitgetStream):
+    for cls in (
+        UpbitStream,
+        BithumbStream,
+        BinanceStream,
+        BybitStream,
+        BitgetStream,
+        OkxStream,
+    ):
         mark_start(cls, "stream")
     mark_restore(OutageTracker, "outages")
     mark_restore(PremiumEventDetector, "events")
@@ -74,7 +82,7 @@ def test_streams_start_before_restores_and_the_tick_loop_after_them(
 
     with TestClient(app):
         pass
-    assert order == ["universe"] + ["stream"] * 5 + [
+    assert order == ["universe"] + ["stream"] * 6 + [
         "outages",
         "events",
         "candles",

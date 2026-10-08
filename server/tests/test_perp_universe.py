@@ -178,6 +178,7 @@ async def test_refresh_trigger_fetches_perp_lists_and_reports_perp_rows() -> Non
         "binance",
         "bybit",
         "bitget",
+        "okx",
         "binance_perp",
         "bybit_perp",
         "bitget_perp",

@@ -146,7 +146,7 @@
 
   <main class="wrap doc">
     <h1>김프 히스토리 — 지난 김프·역프 사건 기록</h1>
-    <p class="lead">KimpTrack 김프 히스토리는 업비트·빗썸과 바이낸스·바이비트·비트겟 사이에서 김프(김치프리미엄)나 역프가 1% 이상 벌어져 1분 넘게 이어진 구간을 사건으로 남깁니다. 어느 코인이, 어느 경로로, 얼마나, 얼마 동안 벌어졌고 그때 입출금이 열려 있었는지를 돌아볼 수 있습니다. 가입 없이 무료입니다.</p>
+    <p class="lead">KimpTrack 김프 히스토리는 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX 사이에서 김프(김치프리미엄)나 역프가 1% 이상 벌어져 1분 넘게 이어진 구간을 사건으로 남깁니다. 어느 코인이, 어느 경로로, 얼마나, 얼마 동안 벌어졌고 그때 입출금이 열려 있었는지를 돌아볼 수 있습니다. 가입 없이 무료입니다.</p>
     <div class="cta">
       <a class="btn btn-lg" href="/app/?tab=history">김프 히스토리 열기</a>
       <a class="link" href="/kimp-chart">김프 차트 보는 법</a>
@@ -219,7 +219,7 @@
     // 지난 7일 사건 — GET /api/landing 의 events 만 쓴다(랜딩 022 와 같은 계약). 보이는 동안 10초 폴링, 숨으면 멈춘다.
     (() => {
       const POLL_MS = 10000
-      const NAMES = { upbit: '업비트', bithumb: '빗썸', binance: 'Binance', bybit: 'Bybit', bitget: 'Bitget' }
+      const NAMES = { upbit: '업비트', bithumb: '빗썸', binance: 'Binance', bybit: 'Bybit', bitget: 'Bitget', okx: 'OKX' }
       const $ = (id) => document.getElementById(id)
       const sum = $('ev-sum')
       const table = $('ev-table')
