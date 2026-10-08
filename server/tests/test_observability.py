@@ -237,6 +237,12 @@ PUBLIC_LOCATIONS = {("=", path) for path in PUBLIC_API} | {
     ("=", "/privacy"),
     ("=", "/privacy.html"),
     ("=", "/app/privacy.html"),
+    ("=", "/kimp-chart"),  # 044
+    ("=", "/kimp-chart.html"),
+    ("=", "/app/kimp-chart.html"),
+    ("=", "/kimp-history"),
+    ("=", "/kimp-history.html"),
+    ("=", "/app/kimp-history.html"),
     ("=", "/clarity.js"),
     ("/app/assets/",),
     ("=", "/app/index.html"),
