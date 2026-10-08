@@ -98,6 +98,8 @@
   // 하나라도 걸리면 부르지 않는 조건의 앞 셋(§3.2) — ID·호스트·페이지. 여기서 빠진 문서는 듣지도 않는다(storage·pageshow)
   const page = location.pathname === "/" ? "landing" : location.pathname.indexOf("/app/") === 0 ? "app" : ""
   if (!CLARITY_ID || location.hostname !== HOST || PAGES.indexOf(page) < 0) return
+  // 053 — 관리자 덮어 보기로 틀 안에 뜬 페이지(attention.js 와 같은 조건)는 Clarity 도 동의 창도 없다
+  if (new URLSearchParams(location.search).get("kt-overlay") === "1" && window.top !== window) return
 
   let loaded = false // 이 문서에서 Clarity 를 불렀다 — 두 번 부르지 않는다
   let modal = null
