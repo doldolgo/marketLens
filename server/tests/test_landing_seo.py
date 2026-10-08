@@ -21,7 +21,7 @@ DESCRIPTION = (
 )
 H1 = "실시간 김프·역프, 실제로 옮길 수 있는지까지"
 MODIFIED = "2026-10-09"
-OG_IMAGE = "https://kimptrack.com/landing/og-v2.png"
+OG_IMAGE = "https://kimptrack.com/landing/og-v3.png"
 
 
 class _Page(HTMLParser):
@@ -224,7 +224,7 @@ def test_png_images_have_the_declared_size() -> None:
         assert head[:8] == b"\x89PNG\r\n\x1a\n", rel
         return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
 
-    assert size("landing/og-v2.png") == (1200, 630)
+    assert size("landing/og-v3.png") == (1200, 630)
     assert size("logo-512.png") == (512, 512)
     assert size("icon-192.png") == (192, 192)
     assert size("apple-touch-icon.png") == (180, 180)

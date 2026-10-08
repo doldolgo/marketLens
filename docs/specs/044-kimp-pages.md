@@ -29,7 +29,7 @@
 
 ### 3.2 공통 — 검색 구성
 - `lang="ko"`, `<title>`·`og:title` 은 **검색어가 앞, 브랜드가 뒤**(022 §3.6 과 같은 결정), 60자 이내. `description`·`og:description` 은 검색어를 담은 한 문장 110자 이내. '김프가'(경쟁 사이트 이름)와 수익을 약속하는 말(이득·이익·수익·차익·무위험)은 제목·설명에 쓰지 않는다 — 본문에서는 "수익이 난다는 뜻이 아닙니다" 처럼 부정하는 자리에만.
-- `<meta name="robots" content="index, follow, max-image-preview:large">`, canonical·`og:url` 은 `https://kimptrack.com/<slug>`, 아이콘은 처리방침과 같은 상대 경로 두 줄(`/favicon.ico`·`/apple-touch-icon.png` — CSP `img-src 'self'` 가 어느 호스트에서나 통하게), `og:image` 는 랜딩의 `og-v2.png`(페이지 전용 그림은 만들지 않는다).
+- `<meta name="robots" content="index, follow, max-image-preview:large">`, canonical·`og:url` 은 `https://kimptrack.com/<slug>`, 아이콘은 처리방침과 같은 상대 경로 두 줄(`/favicon.ico`·`/apple-touch-icon.png` — CSP `img-src 'self'` 가 어느 호스트에서나 통하게), `og:image` 는 랜딩의 `og-v3.png`(페이지 전용 그림은 만들지 않는다).
 - JSON-LD 한 블록 — `WebPage`(url, name = title, description = description, inLanguage ko-KR, `isPartOf` = 랜딩의 `#website`, `primaryImageOfPage` = `landing/history.png` 2040×1230, `dateModified`). 평점·리뷰 없음.
 - h1 하나(검색어로 시작), h2 셋 이상. 글꼴은 시스템 글꼴(랜딩의 서브셋 글꼴은 이 페이지 글자를 담지 않는다), 색 값은 랜딩과 같은 토큰. 외부 자원은 하나도 부르지 않는다.
 - 바닥 — 바로 가기(첫 화면·실시간 김프 표·다른 검색어 페이지·`/#kimp`·개인정보 처리방침), 참고값 안내 한 줄(랜딩과 같은 문장), "설명을 마지막으로 고친 날" `<time>`. 두 페이지의 `<time>`·`WebPage.dateModified`·sitemap `lastmod` 가 같은 날짜다 — 설명 글을 실제로 고칠 때만 올린다.
