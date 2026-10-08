@@ -11,7 +11,7 @@
 ## 2. 범위
 - 만드는 것: 이더리움 전송 감지기(core — 수집 프로세스 안의 상시 태스크, 별도 프로세스 없음), Influx measurement `chain_flow`, `GET /flow/netflow`·`GET /flow/recent`(`server/app/features/flow/`), 입출금 레이더 탭 실데이터 화면(`web/src/features/flow/`), 씨앗 데이터(`server/app/data/upbit_eth/`, gzip CSV 넷), 테스트. 라이브러리 추가 없음(`websockets`·`httpx`).
 - 하지 않는 것: ETH 네이티브 전송(ETH 핫월렛 미추출), 다른 네트워크(Solana·Arbitrum·Tron…), 빗썸, 멤풀(블록 담기기 전), 상대 주소의 entity 라벨, 기동 이전 과거 백필, 011 실패 구간 통합, Slack 알림.
-- 바꾸는 기존 것: 1. 002 §3.10 mock(`shared/mock.ts`·`feed.ts`·`types.ts` 의 flow 부분) 삭제. 2. `core/influx.py` 줄 쓰기에 정밀도 인자(초·나노초). 3. Redis 키 넷. 4. nginx·공개 허용 목록(028)에 경로 둘. 5. `.env.example`·dev-setup 에 키 둘.
+- 바꾸는 기존 것: 1. 002 §3.10 mock(`shared/mock.ts`·`feed.ts`·`types.ts` 의 flow 부분) 삭제. 2. `core/influx.py` 줄 쓰기에 정밀도 인자(초·나노초). 3. Redis 키 넷. 4. nginx·공개 허용 목록(028)·caddy 기록 제외 목록(027)에 경로 둘. 5. `.env.example`·dev-setup 에 키 둘.
 
 ## 3. 동작
 
@@ -46,13 +46,14 @@
 - **출금** = from 이 핫월렛이고 to 가 입금주소∪핫월렛∪내부 **밖**. 상대 = to, 주소 = from.
 - sweep(from 이 입금주소)과 내부 이동은 집합 갱신에만 쓰고 저장하지 않는다. 금액 0 도 저장하지 않는다(진짜 USDT 에 금액 0 `transferFrom` 으로 주소를 오염시키는 스캠이 있다).
 - 금액 = data ÷ 10^decimals. 시각 = 블록 시각(초, newHeads 가 준다 — 로그엔 블록 번호뿐이라 번호→시각 표를 들고, 없으면 HTTP 로 블록 하나를 읽는다). 블록 번호·log index 도 남긴다.
+- 블록 처리는 **head 를 받고 1.5초 뒤 1회**(가스 지갑 확장 → 그 블록 로그 판정 → 쓰기 1회 → 마지막 블록 저장) — 로그는 head **뒤에** 온다(2026-10-08 publicnode 실측, 블록당 200~400건이 head 뒤 약 1초 안에). 그 뒤 늦게 온 로그는 한 건씩 쓴다(수를 세어 100건마다 로그 1줄). 소켓 수신 루프는 I/O 를 하지 않는다 — 받은 프레임을 쌓기만 하고 처리는 다른 태스크가 한다(수신이 막히면 newHeads 무수신으로 오판한다).
 - 리오그: 구독이 `removed: true` 로 되돌린 로그는 같은 점에 `removed` 를 참으로 덮어쓴다. 확정 = `head − block ≥ 2`. 화면은 그 전을 "확정 전"으로 표시한다.
-- 지연 목표 약 2초(2026-10-08 publicnode 실측 블록 시각 대비 1.5~3.5초). 입금 판정은 2026-10-08 에 1시간(블록 26137380~26137677) 605건을 독립 인덱스와 건별 대조해 누락·오탐 0 이었다.
+- 지연 목표 약 4초 = 소켓 수신(블록 시각 대비 1.5~3.5초, 2026-10-08 publicnode 실측) + 1.5초 + HTTP 블록 1회. 입금 판정은 2026-10-08 에 1시간(블록 26137380~26137677) 605건을 독립 인덱스와 건별 대조해 누락·오탐 0 이었다.
 
 ### 3.4 연결·공백 복구·외부 의존
-- env `ETH_WS_URL`(wss)·`ETH_HTTP_URL`(https). **둘 다 있어야** 감지기를 켠다. 하나라도 없으면 기동 때 경고 1줄, 감지기 없이 뜬다(API 는 Influx 의 기존 점을 그대로 준다). 기본값은 공개 노드 `wss://ethereum-rpc.publicnode.com`·`https://ethereum-rpc.publicnode.com` — 키 없음, 무료, rate limit 미공개. Ankr 은 이 플랜에서 WS 401 이라 쓰지 않는다.
+- env `ETH_WS_URL`(wss)·`ETH_HTTP_URL`(https). **둘 다 있어야** 감지기를 켠다. 하나라도 없으면 기동 때 경고 1줄, 감지기 없이 뜬다(API 는 Influx 의 기존 점을 그대로 준다). WS 는 공개 노드 `wss://ethereum-rpc.publicnode.com`(키 없음·무료, rate limit 미공개). HTTP 는 Ankr `https://rpc.ankr.com/eth/<키>`(키는 사람이 `server/.env` 에) — publicnode HTTP 는 `eth_getLogs` 를 거부하고(403 `Request blocked`, 2026-10-08 실측) Ankr 은 이 플랜에서 WS 가 401 이라, 둘을 섞어 쓴다.
 - 재연결: 끊김·열기 실패·**30초 newHeads 무수신**이면 닫고 1초부터 2배·최대 30초 백오프(다른 커넥터와 숫자만 같고 코드는 공유하지 않는다). 첫 데이터 프레임에 백오프 초기화. 상태 전환마다 WARNING 1줄.
-- 마지막 처리 블록을 Redis `flow:eth:last_block` 에 블록마다 쓴다. 연결(재연결 포함) 직후 `head − last ≤ 7,200`(약 1일)이면 HTTP `eth_getLogs` 로 **20블록씩** 공백을 재생한다(100블록은 응답 상한 1만 건을 넘긴다 — 2026-10-08 Ankr 실측, publicnode 도 같은 묶음). 재생은 같은 판정·저장 규칙이고 같은 점 덮어쓰기라 중복이 안전하다. 넘으면 경고 1줄 후 head 부터. 키가 없으면(첫 기동) head 부터. 재생 중 실시간 로그는 큐에 두었다가 재생 뒤 순서대로 처리한다.
+- 마지막 처리 블록을 Redis `flow:eth:last_block` 에 블록마다 쓴다. 연결(재연결 포함) 직후 `head − last ≤ 7,200`(약 1일)이면 HTTP `eth_getLogs` 로 **20블록씩** 공백을 재생한다(100블록은 응답 상한 1만 건을 넘긴다 — 2026-10-08 Ankr 실측, publicnode 도 같은 묶음). 재생은 같은 판정·저장 규칙이고 같은 점 덮어쓰기라 중복이 안전하다. 넘으면 경고 1줄 후 head 부터. 키가 없으면(첫 기동) head 부터. 재생 중 실시간 로그는 큐에 두었다가 재생 뒤 순서대로 처리한다. 재생의 HTTP 호출이 상태 오류(403·429 등)로 실패하면 소켓을 다시 열지 않고 경고 1줄 후 head 부터 간다(네트워크 오류는 재연결).
 - 블록마다 HTTP `eth_getBlockByNumber(번호, true)` 1회 — 가스 지갑 수신자(§3.2 자가 확장 1). 실패하면 그 블록의 확장만 건너뛰고 경고 없이 다음 블록(입출금 판정엔 영향 없다).
 - 부하: 블록당 소켓 프레임 수십~수백 건 + HTTP 1회, 메모리 집합 약 33,000 주소. 수집 박스(c7g.medium)에 측정 가능한 부하가 아니다.
 
@@ -98,6 +99,8 @@
 - 쓰기 실패는 다음 블록 회차에 재시도되고 상한 10,000 을 넘기면 오래된 것부터 버린다.
 - 연결 직후 공백이 7,200 블록 이하면 20블록씩 재생하고, 넘으면 head 부터, 키 없으면 head 부터.
 - 30초 newHeads 무수신이면 재연결하고 백오프가 1·2·4…30 초로 는다.
+- head 뒤에 온 로그가 그 블록의 쓰기 1회에 같이 들어가고, HTTP 블록 조회가 느려도 수신 루프의 head 기록은 늦지 않는다.
+- 블록 처리 뒤 늦게 온 로그는 한 건 쓰고 늦은 수가 는다. 재생의 HTTP 상태 오류는 재연결 없이 head 부터.
 - env 둘 중 하나가 없으면 감지기가 켜지지 않고 `/flow/netflow` 의 `feed.connected` 가 false·`lastBlock` null.
 - `/flow/netflow` 가 창 안 점을 코인별로 합산하고 `|netKrw|` 내림차순·null 뒤로 정렬한다, 현재가 없는 코인은 `netKrw` null.
 - `/flow/recent` 가 `limit`·`dir`·`symbol` 을 적용하고 범위 밖은 400, Influx 불통은 503.
@@ -114,7 +117,7 @@
 - `docs/context/status.md` — 행 추가 `| flow-eth | server: 이더리움 ERC-20 Transfer WS 구독(publicnode)→업비트 입금주소·핫월렛 집합 대조→Influx chain_flow(ns)·Redis 집합 자가 확장·공백 재생 7,200블록, /flow/netflow·/flow/recent | web: 입출금 레이더 탭 실데이터(순유입 표·최근 전송 표·5초 폴링) | ETH 네트워크·업비트 한정 |`. web-shell 행의 "mock 탭 3종(gap·pp·flow)" → "mock 탭 2종(gap·pp)". 알려진 빚에 `- (050) ETH 네이티브·다른 네트워크·빗썸 미지원, 신규 주소 첫 입금 누락, 모르는 본지갑 이동이 출금으로 보임(internal 씨앗에 사람이 추가)`. **항상 포함.**
 - `CLAUDE.md` — 스펙 인덱스에 050 행, 상태 DONE. **항상 포함.**
 - `docs/context/architecture.md` — "현재 구조" 절에 flow-eth 항목(감지기는 core — 수집 수명주기가 띄우는 상시 태스크, 집합 셋·확장 규칙, Influx ns 쓰기·Redis 집합, 기능 폴더 flow 의 API 둘). "데이터 흐름 (BE)" 그림에 `ETH 노드 WS → 감지기 → chain_flow` 가지 추가.
-- `docs/context/dev-setup.md` — env 표에 `ETH_WS_URL`·`ETH_HTTP_URL` 두 줄(기본 publicnode, 둘 다 있어야 감지기 켬).
+- `docs/context/dev-setup.md` — env 표에 `ETH_WS_URL`·`ETH_HTTP_URL` 두 줄(WS publicnode·HTTP Ankr, 둘 다 있어야 감지기 켬).
 - `server/.env.example` — 같은 두 키와 설명 3줄.
 - `docs/context/product.md` — 용어 절에 `입금주소`(업비트가 유저마다 준 ETH 네트워크 공용 수신 주소)·`핫월렛`(입금을 모으고 출금을 내보내는 업비트 코인별 지갑)·`sweep`(입금주소→핫월렛 이동, 집계 제외)·`순유입`(창 안 입금 수량 − 출금 수량). 기능 목록의 입출금 레이더 행을 실데이터 설명으로.
 - `docs/context/db.md` — measurement 절에 `chain_flow` 한 줄(§3.5 그대로), Redis 절에 `flow:eth:last_block`(문자열, 만료 없음)·`flow:eth:deposit_addrs`·`flow:eth:hot_wallets`·`flow:eth:internal`(집합, 만료 없음 — 씨앗에 더한 주소) 네 줄, 쓰는 쪽·읽는 쪽에 감지기·`/flow/*` 한 줄씩, 시각 단위 절에 "chain_flow 만 나노초".

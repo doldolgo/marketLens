@@ -119,6 +119,7 @@ def live_status(**kw: object) -> FlowStatus:
         hot_wallets=951,
         internal=6,
         contracts=206,
+        late_logs=0,
     )
     base.update(kw)
     return FlowStatus(**base)  # type: ignore[arg-type]

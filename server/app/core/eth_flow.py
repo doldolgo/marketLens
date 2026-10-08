@@ -43,6 +43,9 @@ REPLAY_MAX_BLOCKS = 7_200
 REPLAY_CHUNK = 20
 HEADS_SILENCE_SEC = 30.0  # 이만큼 newHeads 가 없으면 닫고 재연결 (§3.4)
 HEADS_CHECK_SEC = 5.0  # 무수신 감시 주기 — 감지는 30~35초 사이
+# 블록 N 의 로그는 head N 뒤 약 1초 안에 온다(2026-10-08 publicnode 실측) — head 를 받고 이만큼 기다린 뒤 블록을 한 회차로 처리
+BLOCK_SETTLE_SEC = 1.5
+LATE_LOG_EVERY = 100  # 처리가 끝난 블록에 뒤늦게 온 로그 — 이만큼마다 INFO 1줄
 BACKOFF_START = 1.0
 BACKOFF_MAX = 30.0
 PENDING_LIMIT = 10_000  # 미전송 점 상한 — 넘치면 오래된 것부터 버린다 (§3.5)
@@ -111,6 +114,7 @@ class FlowStatus:
     hot_wallets: int
     internal: int
     contracts: int
+    late_logs: int  # 처리가 끝난 블록에 뒤늦게 와 따로 쓴 로그 수(API 에 싣지 않는다)
 
 
 class FlowWriter(Protocol):
@@ -201,11 +205,10 @@ class EthFlowDetector:
         self._block_ts: dict[int, int] = {}
         self._buffered_logs: dict[
             int, list[dict[str, Any]]
-        ] = {}  # 시각을 아직 모르는 블록의 로그
-        self._replaying = False
-        self._replay_frames: list[
-            tuple[str, dict[str, Any]]
-        ] = []  # 재생 중 받은 실시간 프레임
+        ] = {}  # 아직 처리하지 않은 블록의 로그 — 펌프가 바로 넣는다
+        # 펌프 → 작업자: ("head", newHeads result) 와 ("late", 되돌림·처리 끝난 블록의 로그). 펌프는 I/O 를 하지 않는다
+        self._queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
+        self._late_logs = 0
         self._pending: list[str] = []  # 이번 블록 회차에 쓸 줄
         self._unsent: list[
             str
@@ -253,6 +256,7 @@ class EthFlowDetector:
             hot_wallets=len(self._hot),
             internal=len(self._internal),
             contracts=len(self._contracts),
+            late_logs=self._late_logs,
         )
 
     # --- 연결 (§3.4) ---
@@ -297,7 +301,11 @@ class EthFlowDetector:
         return await open_socket(self._ws_url)
 
     async def _session(self, ws: Any) -> None:
-        """구독 둘 → 공백 재생(실시간 프레임은 펌프가 큐에) → 큐 소화 → 펌프·무수신 감시 중 먼저 끝나는 쪽까지."""
+        """구독 둘 → 공백 재생(그동안 펌프가 받은 head·로그는 큐·버퍼에 쌓인다) → 작업자 시작 → 펌프·감시·작업자 중 먼저 끝나는 쪽까지.
+
+        펌프는 수신·분류만 하고(I/O 없음) 작업자가 HTTP·Influx·Redis 를 한다 — 블록당 로그 수백 건을 수신 루프 안에서
+        쓰면 head 를 30초 넘게 못 읽어 무수신으로 끊긴다(2026-10-08 실측).
+        """
         await ws.send(
             json.dumps(
                 {
@@ -324,28 +332,22 @@ class EthFlowDetector:
                 }
             )
         )
-        self._replaying = True
-        self._replay_frames = []
-        pump = asyncio.create_task(self._pump(ws))
-        watchdog = asyncio.create_task(self._watch_heads())
+        self._queue = asyncio.Queue()  # 지난 세션의 head 는 재생이 덮는다 — 새로 시작
+        tasks = [
+            asyncio.create_task(self._pump(ws)),
+            asyncio.create_task(self._watch_heads()),
+        ]
         try:
             await self._replay()
-            # 소화하는 동안 펌프가 더 쌓을 수 있다 — 빌 때까지 돌고, 빈 것을 본 뒤엔 await 없이 바로 플래그를 내린다
-            while self._replay_frames:
-                kind, result = self._replay_frames.pop(0)
-                await self._handle(kind, result)
-            self._replaying = False
-            done, _ = await asyncio.wait(
-                {pump, watchdog}, return_when=asyncio.FIRST_COMPLETED
-            )
+            tasks.append(asyncio.create_task(self._work()))
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for finished in done:
-                finished.result()  # 펌프의 끊김·세션 오류는 여기서 예외로
+                finished.result()  # 펌프의 끊김·작업자의 블록 읽기 실패는 여기서 예외로
             raise _HeadsSilent(
                 f"{HEADS_SILENCE_SEC:.0f}초 안에 newHeads 가 없어 끊었다"
             )
         finally:
-            self._replaying = False
-            for task in (pump, watchdog):
+            for task in tasks:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
@@ -384,31 +386,79 @@ class EthFlowDetector:
             if not isinstance(result, dict):
                 continue
             if "topics" in result:
-                kind = "log"
+                self._route_log(result)
             elif "number" in result and "timestamp" in result:
-                kind = "head"
                 now = self._clock()
                 self._silence_from = now
                 self._last_head_at = now
                 self._backoff = BACKOFF_START  # 첫 데이터 프레임에 초기화 (§3.4)
-            else:
-                continue
-            if self._replaying:
-                self._replay_frames.append((kind, result))
-                continue
-            await self._handle(kind, result)
+                number = _hex_int(result["number"])
+                self._remember_ts(number, _hex_int(result["timestamp"]))
+                if self._head is None or number > self._head:
+                    self._head = number
+                self._queue.put_nowait(("head", result))
 
-    async def _handle(self, kind: str, result: dict[str, Any]) -> None:
-        if kind == "head":
-            await self._on_head(result)
-        else:
-            await self._on_log(result)
+    def _route_log(self, log: dict[str, Any]) -> None:
+        """아직 처리하지 않은 블록의 로그는 버퍼에(그 블록 회차가 쓴다), 되돌림·처리 끝난 블록의 로그는 작업자 큐에."""
+        number = _hex_int(log["blockNumber"])
+        if not log.get("removed") and (
+            self._last_block is None or number > self._last_block
+        ):
+            self._buffered_logs.setdefault(number, []).append(log)
+            return
+        self._queue.put_nowait(("late", log))
+
+    async def _work(self) -> None:
+        """작업자 — head 하나를 받으면 로그가 따라오길 기다렸다(BLOCK_SETTLE_SEC) 밀린 블록을 전부 한 회차씩 처리한다.
+
+        기다리는 동안 큐에 더 들어온 head 는 다시 기다리지 않고 같은 묶음에 넣는다. 그 사이 들어온 늦은 로그는 묶음 뒤에.
+        """
+        while True:
+            kind, item = await self._queue.get()
+            if kind == "late":
+                await self._on_log(item)
+                continue
+            target = _hex_int(item["number"])
+            if self._last_block is not None and target <= self._last_block:
+                continue  # 재생이 이미 덮은 블록
+            await self._sleep(BLOCK_SETTLE_SEC)
+            late: list[dict[str, Any]] = []
+            while True:
+                try:
+                    kind, item = self._queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if kind == "head":
+                    target = max(target, _hex_int(item["number"]))
+                else:
+                    late.append(item)
+            if self._last_block is None:
+                self._last_block = (
+                    target - 1
+                )  # 재생이 head 를 못 정한 기동(HTTP 거부) — 첫 head 부터
+            # 놓친 newHeads 가 있어도 블록은 빠짐없이 — 시각은 HTTP 블록에서
+            for block in range(self._last_block + 1, target + 1):
+                await self._process_block(block)
+            for log in late:
+                await self._on_log(log)
 
     # --- 공백 재생 (§3.4) ---
 
     async def _replay(self) -> None:
-        """연결 직후 — `head − last ≤ 7,200` 이면 20블록씩 eth_getLogs 로 재생, 넘거나 키가 없으면 head 부터."""
-        head = _hex_int(await self._rpc("eth_blockNumber", []))
+        """연결 직후 — `head − last ≤ 7,200` 이면 20블록씩 eth_getLogs 로 재생, 넘거나 키가 없으면 head 부터.
+
+        HTTP 상태 오류(403·429 — publicnode 는 eth_getLogs 를 막는다, 2026-10-08 실측)는 소켓과 무관하다 — 경고 1줄 후
+        head 부터 시작하고 재연결하지 않는다. 네트워크 오류는 예외 그대로 → 세션 실패 → 백오프 재연결.
+        """
+        try:
+            head = _hex_int(await self._rpc("eth_blockNumber", []))
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "ETH 공백 재생 불가(HTTP %d) — 첫 head 부터 시작한다",
+                exc.response.status_code,
+            )
+            self._last_block = None
+            return
         if self._head is None or head > self._head:
             self._head = head
         last = self._last_block
@@ -429,17 +479,31 @@ class EthFlowDetector:
         logger.info("ETH 공백 재생 %d → %d (%d 블록)", last + 1, head, head - last)
         for start in range(last + 1, head + 1, REPLAY_CHUNK):
             end = min(start + REPLAY_CHUNK - 1, head)
-            logs = await self._rpc(
-                "eth_getLogs",
-                [
-                    {
-                        "fromBlock": hex(start),
-                        "toBlock": hex(end),
-                        "address": sorted(self._contracts),
-                        "topics": [TRANSFER_TOPIC],
-                    }
-                ],
-            )
+            try:
+                logs = await self._rpc(
+                    "eth_getLogs",
+                    [
+                        {
+                            "fromBlock": hex(start),
+                            "toBlock": hex(end),
+                            "address": sorted(self._contracts),
+                            "topics": [TRANSFER_TOPIC],
+                        }
+                    ],
+                )
+            except httpx.HTTPStatusError as exc:
+                logger.warning(
+                    "ETH 공백 재생 중단(HTTP %d, 블록 %d~%d) — head %d 부터 시작한다",
+                    exc.response.status_code,
+                    start,
+                    end,
+                    head,
+                )
+                self._buffered_logs = {
+                    k: v for k, v in self._buffered_logs.items() if k > head
+                }
+                self._last_block = head
+                return
             for log in logs or []:
                 if isinstance(log, dict) and not log.get("removed"):
                     self._buffered_logs.setdefault(
@@ -449,17 +513,6 @@ class EthFlowDetector:
                 await self._process_block(number)
 
     # --- 블록 (§3.2~3.3) ---
-
-    async def _on_head(self, head: dict[str, Any]) -> None:
-        number = _hex_int(head["number"])
-        self._remember_ts(number, _hex_int(head["timestamp"]))
-        if self._head is None or number > self._head:
-            self._head = number
-        if self._last_block is None:
-            self._last_block = number - 1
-        # 놓친 newHeads 가 있어도 블록은 빠짐없이 — 시각은 HTTP 블록에서
-        for block in range(self._last_block + 1, number + 1):
-            await self._process_block(block)
 
     async def _process_block(self, number: int) -> None:
         """블록 1개 — HTTP 블록 1회(가스 지갑 수신자·시각) → 그 블록 로그 판정 → 쓰기 1회 → 마지막 블록 저장."""
@@ -484,15 +537,15 @@ class EthFlowDetector:
         await self._save_last_block(number)
 
     async def _on_log(self, log: dict[str, Any]) -> None:
+        """작업자 — 리오그 되돌림, 또는 이미 처리한 블록에 늦게 온 로그 1건을 따로 쓴다. 시각은 표, 없으면 HTTP 블록 하나 (§3.3)."""
         number = _hex_int(log["blockNumber"])
-        if not log.get("removed") and (
-            self._last_block is None or number > self._last_block
-        ):
-            self._buffered_logs.setdefault(number, []).append(
-                log
-            )  # 그 블록의 newHeads 가 처리한다
-            return
-        # 리오그 되돌림, 또는 이미 처리한 블록에 늦게 온 로그 — 시각 표, 없으면 HTTP 블록 하나 (§3.3)
+        if not log.get("removed"):
+            self._late_logs += 1
+            if self._late_logs % LATE_LOG_EVERY == 0:
+                logger.info(
+                    "ETH 늦은 로그 누적 %d건 — 블록 처리 뒤에 온 로그는 건마다 따로 쓴다",
+                    self._late_logs,
+                )
         ts = self._block_ts.get(number)
         if ts is None:
             block = await self._fetch_block(number)

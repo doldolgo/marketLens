@@ -27,6 +27,7 @@ from tests.eth_flow_fakes import (
     USDT,
     WS_URL,
     FakeNode,
+    FlowSleeps,
     build,
     gas_tx,
     head_frame,
@@ -524,3 +525,128 @@ async def test_http_url_is_used_for_rpc_and_subscriptions_are_two() -> None:
     assert subs[1]["params"] == ["newHeads"]
     assert det.status().contracts == 2
     assert HTTP_URL.startswith("https://")
+
+
+# ── 펌프·작업자 분리 (2026-10-08 실측 — 로그는 head 뒤에 온다) ────────────────
+
+
+async def _until_block(det: EthFlowDetector, block: int) -> None:
+    await asyncio.wait_for(_written_blocks(det, block), 2.0)
+
+
+async def test_logs_arriving_after_their_head_go_into_the_block_single_write_round() -> (
+    None
+):
+    sock = GatedSocket()
+    node = node_with(B, B + 1)
+    sleeps = FlowSleeps(gate_settle=True)
+    det, connector, node, writer, sleeps, _ = build([sock], node=node, sleeps=sleeps)
+    await det.start()
+    await until(sock.subscribed)
+    sock.push(head_frame(B + 1, T0 + 12))
+    await until(sock.delivered)
+    sock.push(
+        log_frame(
+            sender=OUTSIDER, receiver=DEPOSIT_A, amount=10**18, block=B + 1, log_index=1
+        )
+    )
+    sock.push(
+        log_frame(
+            sender=OUTSIDER,
+            receiver=DEPOSIT_B,
+            amount=2 * 10**18,
+            block=B + 1,
+            log_index=2,
+        )
+    )
+    await until(sock.delivered)
+    await asyncio.sleep(0.01)
+    assert writer.calls == []  # 정착 대기 중 — 아직 쓰지 않았다
+    sleeps.release_settle()
+    await _until_block(det, B + 1)
+    assert len(writer.calls) == 1  # 블록 하나 = 쓰기 1회
+    assert [p["log_index"] for p in writer.points()] == [1, 2]
+    assert det.status().late_logs == 0
+    await det.aclose()
+
+
+async def test_slow_block_fetch_does_not_stall_head_bookkeeping() -> None:
+    sock = GatedSocket()
+    node = node_with(B, B + 1, B + 2)
+    node.block_gate = asyncio.Event()
+    det, connector, node, writer, sleeps, clock = build([sock], node=node)
+    await det.start()
+    await until(sock.subscribed)
+    sock.push(head_frame(B + 1, T0 + 12))
+    await until(sock.delivered)
+    await asyncio.sleep(0.01)
+    assert node.block_calls == [B + 1]  # 작업자가 HTTP 에 걸려 있다
+    clock.now += int(HEADS_SILENCE_SEC * 1000) - 1000
+    sock.push(head_frame(B + 2, T0 + 24))  # 펌프는 그래도 head 를 읽는다
+    await until(sock.delivered)
+    clock.now += 5_000
+    sleeps.release_check()  # 마지막 head 로부터 5초 — 무수신이 아니다
+    await asyncio.sleep(0.01)
+    assert connector.urls == [WS_URL] and det.status().connected
+    node.block_gate.set()
+    await _until_block(det, B + 2)
+    assert det.status().last_block == B + 2 and sleeps.backoffs() == []
+    await det.aclose()
+
+
+async def test_late_log_after_block_processed_writes_once_and_counts(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(eth_flow, "LATE_LOG_EVERY", 1)
+    sock = GatedSocket()
+    node = node_with(B, B + 1)
+    det, connector, node, writer, _, _ = build([sock], node=node)
+    with caplog.at_level(logging.INFO, logger="marketlens.eth_flow"):
+        await det.start()
+        await until(sock.subscribed)
+        sock.push(head_frame(B + 1, T0 + 12))
+        await _until_block(det, B + 1)
+        assert writer.calls == []  # 로그 없는 블록은 쓰기 요청이 없다
+        sock.push(
+            log_frame(
+                sender=OUTSIDER,
+                receiver=DEPOSIT_A,
+                amount=10**18,
+                block=B + 1,
+                log_index=3,
+            )
+        )
+        await until(sock.delivered)
+        for _ in range(20):
+            await asyncio.sleep(0)
+    assert (
+        len(writer.calls) == 1 and writer.points()[0]["ts_ns"] == (T0 + 12) * 10**9 + 3
+    )
+    assert det.status().late_logs == 1
+    assert any("늦은 로그 누적 1건" in r.getMessage() for r in caplog.records)
+    await det.aclose()
+
+
+async def test_http_status_error_in_replay_skips_to_head_without_reconnect(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    bus, raw = make_bus()
+    raw.set(FLOW_LAST_BLOCK_KEY, str(B))
+    node = node_with(B + 10, B + 11)
+    node.get_logs_status = 403
+    sock = FakeSocket(
+        [
+            head_frame(B + 11, T0 + 12),
+            log_frame(sender=OUTSIDER, receiver=DEPOSIT_A, amount=10**18, block=B + 11),
+        ]
+    )
+    det, connector, node, writer, sleeps, _ = build([sock], node=node, bus=bus)
+    with caplog.at_level(logging.WARNING, logger="marketlens.eth_flow"):
+        await run_until_exhausted(det, connector)
+    assert node.get_logs_calls == [(B + 1, B + 10)]  # 첫 묶음에서 거부 → 중단
+    assert sum("재생 중단(HTTP 403" in r.getMessage() for r in caplog.records) == 1
+    assert sleeps.backoffs() == [
+        1.0
+    ]  # 소켓이 다 준 뒤의 정상 재연결 1회뿐 — 재생 실패로는 끊지 않았다
+    assert [p["block"] for p in writer.points()] == [B + 11]
+    assert det.status().last_block == B + 11

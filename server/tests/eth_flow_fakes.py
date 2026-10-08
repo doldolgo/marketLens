@@ -9,6 +9,7 @@ import fakeredis
 import httpx
 
 from app.core.eth_flow import (
+    BLOCK_SETTLE_SEC,
     GAS_WALLET,
     HEADS_CHECK_SEC,
     TRANSFER_TOPIC,
@@ -110,6 +111,12 @@ class FakeNode:
             dict[str, Any]
         ] = []  # eth_getLogs 가 블록 범위로 거르는 전체 로그
         self.block_failures: set[int] = set()  # 이 블록의 eth_getBlockByNumber 는 실패
+        self.get_logs_status: int | None = (
+            None  # 있으면 eth_getLogs 가 이 HTTP 상태로 거부(publicnode 403)
+        )
+        self.block_gate: asyncio.Event | None = (
+            None  # 있으면 블록 읽기가 set 될 때까지 멈춘다(느린 HTTP)
+        )
         self.get_logs_calls: list[tuple[int, int]] = []
         self.block_calls: list[int] = []
         self.client = httpx.AsyncClient(transport=httpx.MockTransport(self._handle))
@@ -123,7 +130,7 @@ class FakeNode:
             "transactions": txs or [],
         }
 
-    def _handle(self, request: httpx.Request) -> httpx.Response:
+    async def _handle(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
         method, params = body["method"], body["params"]
         if method == "eth_blockNumber":
@@ -133,6 +140,15 @@ class FakeNode:
         if method == "eth_getLogs":
             lo, hi = int(params[0]["fromBlock"], 16), int(params[0]["toBlock"], 16)
             self.get_logs_calls.append((lo, hi))
+            if self.get_logs_status is not None:
+                return httpx.Response(
+                    self.get_logs_status,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "error": {"code": -32602, "message": "Request blocked"},
+                    },
+                )
             found = [lg for lg in self.logs if lo <= int(lg["blockNumber"], 16) <= hi]
             return httpx.Response(
                 200, json={"jsonrpc": "2.0", "id": 1, "result": found}
@@ -140,10 +156,13 @@ class FakeNode:
         if method == "eth_getBlockByNumber":
             number = int(params[0], 16)
             self.block_calls.append(number)
+            if self.block_gate is not None:
+                await self.block_gate.wait()
             if number in self.block_failures:
                 return httpx.Response(503, text="down")
             return httpx.Response(
-                200, json={"jsonrpc": "2.0", "id": 1, "result": self.blocks.get(number)}
+                200,
+                json={"jsonrpc": "2.0", "id": 1, "result": self.blocks.get(number)},
             )
         return httpx.Response(
             200, json={"jsonrpc": "2.0", "id": 1, "error": {"code": -32601}}
@@ -194,25 +213,36 @@ class FakeWriter:
 
 
 class FlowSleeps(Sleeps):
-    """무수신 감시 주기(5초)만 표로 막는다 — 가짜 sleep 이 즉시 돌아오면 감시 루프가 폭주한다. 백오프는 즉시."""
+    """무수신 감시 주기(5초)만 표로 막는다 — 가짜 sleep 이 즉시 돌아오면 감시 루프가 폭주한다. 백오프는 즉시.
 
-    def __init__(self) -> None:
+    `gate_settle` 이면 블록 정착 대기(1.5초)도 표로 막는다 — head 뒤에 오는 로그가 같은 회차에 드는지 볼 때.
+    """
+
+    def __init__(self, gate_settle: bool = False) -> None:
         super().__init__()
         self._check = asyncio.Semaphore(0)
+        self._settle = asyncio.Semaphore(0)
+        self._gate_settle = gate_settle
 
     def release_check(self, n: int = 1) -> None:
         for _ in range(n):
             self._check.release()
 
+    def release_settle(self, n: int = 1) -> None:
+        for _ in range(n):
+            self._settle.release()
+
     async def __call__(self, seconds: float) -> None:
         self.values.append(seconds)
         if seconds == HEADS_CHECK_SEC:
             await self._check.acquire()
+        elif seconds == BLOCK_SETTLE_SEC and self._gate_settle:
+            await self._settle.acquire()
         else:
             await asyncio.sleep(0)
 
     def backoffs(self) -> list[float]:
-        return [v for v in self.values if v != HEADS_CHECK_SEC]
+        return [v for v in self.values if v not in (HEADS_CHECK_SEC, BLOCK_SETTLE_SEC)]
 
 
 def make_bus() -> tuple[RedisBus, fakeredis.FakeRedis]:
@@ -228,11 +258,12 @@ def build(
     node: FakeNode | None = None,
     bus: RedisBus | None = None,
     writer: FakeWriter | None = None,
+    sleeps: FlowSleeps | None = None,
 ) -> tuple[EthFlowDetector, FakeConnector, FakeNode, FakeWriter, FlowSleeps, Clock]:
     node = node if node is not None else FakeNode()
     writer = writer if writer is not None else FakeWriter()
     connector = FakeConnector(outcomes)
-    sleeps = FlowSleeps()
+    sleeps = sleeps if sleeps is not None else FlowSleeps()
     clock = Clock(T0 * 1000)
     detector = EthFlowDetector(
         ws_url=WS_URL,
