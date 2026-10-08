@@ -67,6 +67,6 @@ export interface RecentRow {
 export interface RecentResponse {
   asOf: number
   /** 서버가 아는 최신 블록 번호. */
-  head: number
+  head: number | null
   rows: RecentRow[]
 }
