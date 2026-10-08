@@ -17,6 +17,10 @@ USER_AGENT = f"marketlens-server/{APP_VERSION}"
 # 거래소 6곳 고정 순서 — 스펙 001 §3.3·045 §2. 국내 둘은 KRW, 바이낸스·바이빗·비트겟·OKX 는 USDT 마켓
 EXCHANGES = ("upbit", "bithumb", "binance", "bybit", "bitget", "okx")
 DOMESTIC_EXCHANGES = ("upbit", "bithumb")
+# perp 원천 고정 순서 — 스펙 046 §3.1. 모든 목록·판정·카드에서 현물 거래소 전부 뒤에 이 순서로 온다 (047 뒤 hyperliquid_perp)
+PERP_SOURCES = ("binance_perp", "bybit_perp", "bitget_perp")
+# 틱 판정·/health/collect·/refresh 가 도는 전체 목록 — 현물 5곳 뒤 perp 원천 3개 (046 §3.8)
+COLLECT_SOURCES = EXCHANGES + PERP_SOURCES
 
 # 거래소 REST(마켓 목록) 타임아웃(초)·WebSocket 핸드셰이크 타임아웃(초) — 스펙 001 §3.1
 EXCHANGE_TIMEOUT_TOTAL = 3.0

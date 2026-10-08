@@ -29,7 +29,7 @@
 - 외부 계약(DB-IP 내려받기 페이지, 2026-10-02 조사):
   - 'IP to Country Lite' — `https://download.db-ip.com/free/dbip-country-lite-YYYY-MM.csv.gz`(주소 확인함). 2026-10 판 gz 4,491,785B·풀면 29.8MB·710,834행(IPv4+IPv6), 정확도 지수 81. 열(짐작) `시작 IP,끝 IP,나라 두 글자`, 머리 줄 없음.
   - 'IP to ASN Lite' — `https://download.db-ip.com/free/dbip-asn-lite-YYYY-MM.csv.gz`(같은 꼴로 짐작 — 확인 못 함). 477,362행·풀면 29.0MB. 열(짐작) `시작 IP,끝 IP,AS 번호,AS 조직`(조직 이름에는 따옴표 안 쉼표가 있을 수 있다).
-  - 둘 다 계정·키 없음, 매월 새 판(2026-10 판은 10-01 06:29Z 게시), CC BY 4.0 — 결과를 보이는 페이지에 `IP Geolocation by DB-IP` → `https://db-ip.com` 링크를 달아야 한다. 지금 화면(036)은 `geo` 를 그리지 않으므로 링크는 그리는 042 가 단다.
+  - 둘 다 계정·키 없음, 매월 새 판(2026-10 판은 10-01 06:29Z 게시), CC BY 4.0 — 결과를 보이는 페이지에 `IP Geolocation by DB-IP` → `https://db-ip.com` 링크를 달아야 한다. 링크는 관리자 화면 `index.html` 에 고정했다(042 — 접속 절 ③ 바닥).
   - **설계 세션이 처음에 한 번 실제로 받아** scratchpad 에 두고 실행 프롬프트로 경로를 넘긴다(실행 세션의 샌드박스는 바깥 호출이 막힐 수 있다 — 이 스펙이 허락하는 유일한 바깥 호출이고 커밋하지 않는다). 실행 세션은 그 파일로 확인한다. 두 주소의 상태·크기·열·IPv4 행 수·모름 값(`ZZ` 등)을 §7 에 적는다. 주소·열이 짐작과 다르거나 3xx 면 멈추고 묻는다.
 - 왜 실행 중 메모리로만 두나(길 비교):
   - (a) 이미지 빌드 때 받기 — serve·collect 가 같은 server 이미지를 배포마다 다시 만들고 `builder prune` 한다. 매번 다시 받고, collect 이미지에도 들어가고, 판을 바꾸려면 커밋이 필요하다.

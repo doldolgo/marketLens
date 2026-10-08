@@ -119,7 +119,7 @@
 - 상위 목록 여섯 `paths`·`tabs`·`referrers`·`utmSources`·`devices`·`browsers` — 035 모양 `[[이름, 수], …]`(수 내림차순·같으면 이름순 20개) 그대로이되 **종류 `browser` 의 페이지 줄만** 센다. `paths` 쿼리 뺀 경로 100자, `tabs` 경로가 정확히 `/app/` 인 페이지의 `tab`(허용 여섯 `spread`·`history`·`gap`·`pp`·`health`·`flow`, 키 없으면 `spread`, 빈 값·그 밖 `(기타)`), `referrers` 출처를 `스킴://호스트[:포트]` 로 다시 만든 http(s) 만·자기 호스트 뺌·100자, `utmSources` 소문자 50자(빈 값 안 셈), `devices` `mobile`·`tablet`·`desktop`, `browsers` §3.5 이름.
 - 상한: 시마다 목록 키는 목록마다 30 — 이미 있는 키는 세고 새 키가 넘치면 `(기타)`(035 의 창마다 5,000 을 바꾼다 — 봇의 무작위 경로가 메모리를 키우지 않게). 창의 상위 목록은 시마다 센 것을 더해 고르므로 꼬리는 근사값이다.
 - IP·UA 원문·쿼리·짝 값은 응답에 없다. `geo` = 039 의 나라·망 종류 하위 부분(같은 짝 게이트 — 게이트 전 `before_gate`).
-- 036 화면과의 관계: 인자 없는 호출은 24시간 창이라 036 화면이 그대로 돈다(`visitors`·`ws.pairs` 는 읽지 않아 게이트 전 null 이어도 같다). 이름은 같고 뜻이 바뀌는 것 — `pages`(304 포함), `status["5xx"]`·`hourly.errors`·`recent5xx`(WS 경로 뺌), 상위 목록(사람 브라우저 모양만), `devices` 이름(`bot`·`unknown` 없음, `tablet` 있음). 그래서 `admin.js` 의 상위 표 비율 분모를 `totals.pages` → `totals.humanPages` 로 한 줄 고친다. 036 화면은 `ws5xx`·`wsErrors`·`ws.errors` 를 그리지 않으므로 042 전까지 배포 때의 WS 502 는 화면에 없다 — 응답 `status.ws5xx` 나 serve 의 caddy 로그로 본다(받아들인 공백, CloudWatch 5xx 경보도 WS 를 뺀다).
+- 관리자 화면(042)과의 관계: 화면은 창을 늘 `?window=` 로 부르고 `visitors`·`ws.pairs`·`geo` 를 그린다. 이름은 같고 뜻이 바뀐 키 — `pages`(304 포함), `status["5xx"]`·`hourly.errors`·`recent5xx`(WS 경로 뺌), 상위 목록(사람 브라우저 모양만 — % 분모는 `totals.humanPages`), `devices` 이름(`bot`·`unknown` 없음, `tablet` 있음) — 은 042 가 이 뜻으로 그린다. `ws5xx`·`ws.errors` 는 ⑥ 에 따로, `wsErrors` 는 시간 막대 title 에 보인다(CloudWatch 5xx 경보도 WS 를 뺀다).
 
 ### 3.7 부담 (serve t4g.micro — 2026-10-02 조사 실측)
 - 지금 양: 하루 ≈706줄·384KB(회전 gz ≈23KB). 종류·짝까지 가르는 세기의 줄당 비용 18.4µs(035 의 세기 15.2µs) → 30일 ≈21,000줄 첫 채움 ≈0.4초, 캐시가 찬 뒤 회차는 `access.log` 다시 읽기(≈13ms)와 창 합치기.

@@ -11,9 +11,10 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from app.core.config import DOMESTIC_EXCHANGES, EXCHANGES
+from app.core.config import DOMESTIC_EXCHANGES, EXCHANGES, PERP_SOURCES
 from app.core.contracts import StreamJudge, WalletStatusProvider
 from app.core.live_store import LiveStore
+from app.core.perp_universe import PerpUniverse
 from app.core.universe import UniverseRefresher
 
 
@@ -40,9 +41,11 @@ class CollectService:
         streams: Sequence[StreamJudge],
         client: httpx.AsyncClient,
         wallet: WalletStatusProvider | None = None,
+        perps: PerpUniverse | None = None,
     ) -> None:
         self._store = store
         self._universe = universe
+        self._perps = perps  # 046 — 트리거는 perp 목록도 그 자리에서 한 번 더 받는다
         self._streams = list(streams)
         self._client = client
         self._wallet = wallet
@@ -55,12 +58,20 @@ class CollectService:
     async def _run(self) -> RefreshSummary:
         started = time.monotonic()
         fetched_at = int(time.time() * 1000)
+        # perp 목록을 먼저 — 뒤이은 우주 확정(apply)이 새 목록으로 perp 우주를 잡는다 (046 §3.2)
+        perp_outcome = await self._perps.refresh() if self._perps is not None else None
         outcome = await self._universe.refresh()
         calls = dict(outcome.calls)
         failures = [
             {"exchange": exc.exchange, "error_code": exc.code, "message": str(exc)}
             for exc in outcome.failures
         ]
+        if perp_outcome is not None:
+            calls.update(perp_outcome.calls)
+            failures.extend(
+                {"exchange": exc.exchange, "error_code": exc.code, "message": str(exc)}
+                for exc in perp_outcome.failures
+            )
         warnings: list[str] = []
         available: dict[str, bool] = {}
         if self._wallet is not None:
@@ -94,8 +105,12 @@ class CollectService:
                 + ", ".join(missing_rate)
                 + " (해당 국내 거래소의 김프 계산은 빠진다)."
             )
+        # 현물 5곳 뒤 perp 원천 3개 — snapshots[] 도 같은 순서 (046 §3.8)
+        saved = {ex: len(self._store.get_all(exchange=ex)) for ex in EXCHANGES}
+        for src in PERP_SOURCES:
+            saved[src] = len(self._store.perp_rows(src))
         return RefreshSummary(
-            saved={ex: len(self._store.get_all(exchange=ex)) for ex in EXCHANGES},
+            saved=saved,
             calls=calls,
             rates_observed=rates_observed,
             failures=failures,
