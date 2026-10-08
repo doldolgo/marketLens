@@ -6,7 +6,7 @@ uvicorn 워커 1개 + 단일 이벤트 루프 전제라 잠금이 없다. 쓰기
 
 from datetime import datetime
 
-from app.core.models import Rate, Row, StreamState, Tick
+from app.core.models import PerpRow, Rate, Row, StreamState, Tick
 
 SparkKey = tuple[str, str, str]  # (dom, fx, base)
 _NO_SPARK: list[
@@ -25,6 +25,8 @@ class LiveStore:
         self._spark: dict[SparkKey, list[float]] = {}  # 009 가 게시한다
         # 같은 게시의 조합별 JSON 조각 — 017 게시기가 표 JSON 의 spark 자리에 끼운다
         self._spark_json: dict[SparkKey, str] = {}
+        # perp 행 맵(046 §3.1) — 원천 id → (base 대문자 → PerpRow). 현물 행 맵과 분리돼 (exchange, base) 조회에 섞이지 않는다
+        self._perp: dict[str, dict[str, PerpRow]] = {}
 
     # --- 쓰기 (수집 경로만 부른다) ---
 
@@ -53,6 +55,24 @@ class LiveStore:
         allowed = {b.upper() for b in bases}
         removed = 0
         for table in self._snapshots.values():
+            for key in [k for k in table if k not in allowed]:
+                del table[key]
+                removed += 1
+        return removed
+
+    # --- perp 행 (046 §3.1) — 쓰기는 행 1개 단위와 우주 밖 일괄 삭제뿐, 필드 갱신은 행 객체 제자리에서 ---
+
+    def put_perp_row(self, row: PerpRow) -> None:
+        self._perp.setdefault(row.source, {})[row.base.upper()] = row
+
+    def remove_perp_row(self, source: str, base: str) -> None:
+        self._perp.get(source, {}).pop(base.upper(), None)
+
+    def retain_perp_bases(self, bases: set[str]) -> int:
+        """perp 우주(046 §3.2) 밖 base 의 perp 행을 전부 지운다. 지운 행 수를 돌려준다."""
+        allowed = {b.upper() for b in bases}
+        removed = 0
+        for table in self._perp.values():
             for key in [k for k in table if k not in allowed]:
                 del table[key]
                 removed += 1
@@ -107,6 +127,18 @@ class LiveStore:
 
     def get(self, exchange: str, base: str) -> Row | None:
         return self._snapshots.get(exchange, {}).get(base.upper())
+
+    def perp_row(self, source: str, base: str) -> PerpRow | None:
+        return self._perp.get(source, {}).get(base.upper())
+
+    def perp_rows(self, source: str | None = None) -> list[PerpRow]:
+        """perp 행 전체 또는 원천 하나의 행 — 현물 get_all 과 같은 꼴, 섞이지 않는다."""
+        out: list[PerpRow] = []
+        for src, table in self._perp.items():
+            if source is not None and src != source:
+                continue
+            out.extend(table.values())
+        return out
 
     def get_rate(self, exchange: str) -> Rate | None:
         return self._rates.get(exchange)

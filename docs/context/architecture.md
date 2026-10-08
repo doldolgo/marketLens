@@ -4,7 +4,7 @@
 
 ## 핵심 설계 결정
 - **실시간 시세의 기준은 `live_store`(LiveStore)다.** 실시간 조회 API 는 메모리만 읽고(스프레드 표 푸시는 api 가 Redis 구독으로 — 017), `/history/*` 와 랜딩 요약 `/landing`(022 — 1분 봉 1시간·사건 7일) 만 InfluxDB 를 조회한다. HTTP 조회 경로에 S3 호출은 없다. Redis 를 HTTP 가 만지는 곳은 `GET /spreads`(키 `spreads:latest` 읽기·`spreads:want` 쓰기, 018)와 `GET /landing`(`spreads:latest` 읽기만, 022) 둘이고(029 의 관리자 상태 `GET /admin/status` 는 Redis·Influx 에 ping 만, 034 의 `/admin/alerts` 는 `alerts:log` 읽기, 035·040 의 `/admin/clarity` 는 `admin:clarity`·`admin:clarity:pages` 읽기·쓰기) 그 밖은 WebSocket 푸시의 구독뿐이다.
-- **거래소 시세는 WebSocket 상시 연결로만 받는다.** 업비트·빗썸은 호가·현재가 스트림(001), 바이낸스는 depth20·miniTicker 스트림(012), 바이빗은 orderbook.200 스냅샷+델타·publicTrade 스트림(019), 비트겟은 books15 스냅샷·trade 스트림(020), OKX 는 books5 스냅샷·trades 스트림(045). REST 는 "지금 어떤 코인이 있는가"(마켓·심볼 목록, **매초**)와 입출금 상태(60초)에만 쓴다 — 목록이 바뀐 초에 구독을 더하고 지운다. 여섯 거래소 모두 SSE 는 제공하지 않는다 — 선택지는 WebSocket 뿐이다.
+- **거래소 시세는 WebSocket 상시 연결로만 받는다.** 업비트·빗썸은 호가·현재가 스트림(001), 바이낸스는 depth20·miniTicker 스트림(012), 바이빗은 orderbook.200 스냅샷+델타·publicTrade 스트림(019), 비트겟은 books15 스냅샷·trade 스트림(020), OKX 는 books5 스냅샷·trades 스트림(045). perp 는 바이낸스 depth5@500ms(`/public`)+!markPrice@arr@1s(`/market`) 스트림(046)이고, **바이빗·비트겟 perp 만 예외로 REST 전체 티커를 매초 1회 받는다**(046 — 심볼별 WebSocket 티커가 초당 약 8,400 프레임이라 수집기 CPU 를 두 배로 만들었고, 갭 표는 1초 틱이라 1초 지연이 손해가 아니다, 2026-10-08 결정). REST 는 그 밖에 "지금 어떤 코인이 있는가"(마켓·심볼 목록, **매초**)와 입출금 상태(60초), perp 목록·펀딩 주기(10초·60초)에 쓴다 — 목록이 바뀐 초에 구독을 더하고 지운다. 여섯 거래소 모두 SSE 는 제공하지 않는다 — 선택지는 WebSocket 뿐이다.
 - **저장은 세 계층을 순서대로 흐른다(009).** LiveStore 는 최신 시세와 **최신 틱 1장**을 들고, 새 틱이 만들어지는 순간 직전 틱이 Redis 로 인계된다. Redis 는 Influx 로 아직 옮기지 못한 틱만 들고(원문이 아니라 Influx 가 저장할 모양 그대로), 60초마다 전량이 Influx 로 옮겨진 뒤 비워진다.
 - **원문은 S3 에 남긴다(010).** 거래소가 준 WebSocket 프레임·REST 응답 본문을 가공하지 않은 텍스트 그대로 원문 싱크에 넘기고, 거래소별로 **분마다 객체 1개**를 S3 `raw/` 에 쌓는다. 시세 프레임은 심볼·종류마다, 매초 오는 마켓·심볼 목록 응답은 거래소마다 그 분의 마지막 1건만 남기고(용량 — 하루 0.3~0.5GB), 입출금·핸드셰이크 거부 본문 같은 나머지 응답은 전량 남긴다. 쓰는 필드가 바뀌어도 재수집 없이 분 단위로 재생하기 위한 저장소다.
 - **시세 커넥터는 공통 인터페이스를 구현하고 코드를 공유하지 않는다.** 거래소별 메시지 형식·quirk 는 각 커넥터 안에서만 흡수한다. 새 거래소 추가는 커넥터 하나 추가다.
@@ -41,7 +41,10 @@ flowchart TB
         BY[바이빗 WS<br/>3샤드]
         BG[비트겟 WS<br/>3샤드]
         OK[OKX WS<br/>3샤드]
-        REST[REST<br/>마켓 목록 매초 · 입출금 60초]
+        BNP[Binance perp WS<br/>3샤드+펀딩]
+        BYP[Bybit perp REST<br/>전체 티커 매초]
+        BGP[Bitget perp REST<br/>전체 티커 매초]
+        REST[REST<br/>마켓 목록 매초 · 입출금 60초 · perp 목록 10초]
     end
 
     %% ── 010 원문 싱크 ──
@@ -49,13 +52,16 @@ flowchart TB
     SRC -. 모든 프레임·응답 본문 .-> S3
 
     %% ── LiveStore ──
-    LS[LiveStore<br/>최신 시세 · 스트림 상태 · 틱 슬롯 · spark]
+    LS[LiveStore<br/>최신 시세 · perp 행 맵 · 스트림 상태 · 틱 슬롯 · spark]
     UP --> LS
     BT -- "메시지마다 (exchange, base) 행 교체<br/>KRW-USDT → USDT 시세" --> LS
     BN --> LS
     BY --> LS
     BG --> LS
     OK --> LS
+    BNP -- "perp 행 (source, base) 제자리 갱신" --> LS
+    BYP --> LS
+    BGP --> LS
     API[실시간 조회 API] -- 읽기 --> LS
 
     %% ── 009 틱 → Redis → Influx ──
@@ -130,7 +136,7 @@ flowchart TB
     classDef spec017 stroke:#d35400,stroke-width:2px
 ```
 - 테두리 색 = 스펙 번호: 주황 010(원문 싱크) · 파랑 009(틱 저장) · 초록 005(history) · 빨강 011(health) · 보라 013(premium-events) · 청록 014(premium-1m) · 갈색 017(spreads-push). 점선은 부수 흐름.
-- 행은 거래소 단위 통째 교체가 아니라 **메시지 단위**로 바뀐다. 상장·상폐는 매초 갱신되는 **마켓 우주**(국내 KRW ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟 ∪ OKX) USDT)가 반영한다 — 우주 밖 행은 없다.
+- 행은 거래소 단위 통째 교체가 아니라 **메시지 단위**로 바뀐다. 상장·상폐는 매초 갱신되는 **마켓 우주**(국내 KRW ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟 ∪ OKX) USDT)가 반영한다 — 우주 밖 행은 없다. perp 행(046)은 현물 행 맵과 분리된 `(source, base)` 맵에 살고, **perp 우주** = {원천 2곳 이상에 있는 base} ∪ (김프 우주 ∩ {1곳 이상}) 를 김프 우주와 같이 매초 다시 확정한다(목록은 10초).
 - 스트림이 끊기면 행은 남고 그 거래소의 `last_message_at` 이 멈춘다. `/spreads` 의 `age`·`status` 는 행이 아니라 **거래소 스트림의 마지막 수신 시각** 기준이다(조용한 코인의 호가는 안 바뀌어도 현재값이다). 단 행 자체(`updated_at`)가 **300초** 이상 안 바뀌면 `age` 는 그 행의 실제 경과 초라 stale 로 보인다(거래 정지·심볼 장애 — 스트림은 살아 있는데 그 코인 프레임만 안 오는 상태).
 - 입출금 상태 API 는 틱 루프가 60초 주기로만 조회해 캐시하고, 행이 새 메시지로 교체돼도 그 3필드는 물려받는다. 키가 없으면 `null`(모름). 망 판정은 core 공용 함수 하나로 `/spreads` 행과 틱이 같이 한다(024) — 틱의 입출금 4상태는 006 판정값이고 망 이름 2개(국내·해외 표시명)를 함께 싣는다. 빗썸은 키가 필요 없다.
 - `GET /health` 와 틱 루프는 기능 폴더가 아니라 앱 진입점 소관이다. `/health` 는 025 이후 마지막 틱이 30초 안에 있었는지를 답한다(200 ok / 503). 밖에서는 `/api/health`(collector)만 열고, api·Redis·Influx 는 canary 가 본다(027). 관리자 페이지(029, :8081)는 두 역할의 `/health` 와 api 의 `/admin/status`(WS 접속 수·Redis·Influx·버전)를 함께 보고, 034·035 피드 넷으로 경보·지표·canary·예산·알림 기록·접속 요약·Clarity 를 더한다(036). 상세는 `/health/collect`(011).
@@ -159,7 +165,7 @@ flowchart TB
 ## core 가 제공하는 계약 (기능·스펙이 공유하는 Protocol)
 - 원문 싱크 `record(exchange, source, received_at_ms, payload, key=None)` — 동기·무예외(010 구현, 수신 경로가 호출). 받은 문자열을 참조로만 붙이고 줄 조립·JSON 검사는 창을 닫을 때 한다. `key` 는 시세 프레임이면 `"<종류>:<원본 심볼>"`(`orderbook:KRW-BTC`·`depth20:BTCUSDT`), 매초 오는 마켓 목록 응답은 `markets:all`(업비트·빗썸)·`symbols:all`(바이낸스), 그 밖(입출금 REST 본문·핸드셰이크 거부·비시세 프레임·디코드 실패)은 None — 010 이 `key` 있는 줄을 분당 마지막 1건으로 솎는 데 쓴다.
 - 틱 인계 `handoff(tick)` — 동기·무예외(009 구현, 틱 루프가 호출).
-- 판정 결과 전달 — 틱 루프가 이력 추적기에 거래소별 성공/실패를 넘긴다(011 구현).
+- 판정 결과 전달 — 틱 루프가 이력 추적기에 거래소별 성공/실패를 넘긴다(011 구현). perp 원천은 046 §3.8 — 현물 거래소 전부 뒤에 같은 추적기로.
 - 사건 감지 `observe(tick)` — 틱 루프가 매초 현재 틱을 넘긴다(013 구현, 동기·예외 없음).
 - 입출금 조회기 `refresh_if_due(client, force=False)` / `apply` / `failed` / `warnings` / `availability`(006 구현, 틱 루프가 호출 — `force` 는 `/refresh` 트리거가 쓴다).
 - 해외 USDT 현물 심볼 집합 `id` / `refresh(client) -> int` / `bases() -> set[str]` / `set_universe(bases)`(012·019·020 커넥터가 각각 구현, 마켓 우주가 **목록**으로 받아 합집합을 만들고 확정될 때마다 각 커넥터에 `set_universe` 로 우주 전체를 넘긴다 — 자기 맵에 없는 base 는 커넥터가 무시한다). 커넥터를 꽂지 않는 테스트에는 빈 집합을 주는 기본 구현.
@@ -212,6 +218,7 @@ EC2 3대(021), 같은 VPC·서브넷, 박스끼리는 사설 IP 로만 통신한
 - **bybit (019)**: `core/streams/bybit.py`(`BybitStream` 하나 — 012 와 같은 샤드 3개·`shard_of`·재조정 루프 구조를 코드 공유 없이 다시 쓴다. 다른 점: 심볼마다 로컬 북 `_Book`(스냅샷 교체·델타 삽입/교체/삭제, 소켓이 바뀌면 비움)에서 매 메시지 행을 다시 만들고, 샤드마다 JSON ping 태스크(20초 ping·20초 안에 pong 없으면 소켓을 닫아 `timeout` 으로 재연결), 구독 요청은 args 10개·0.1초 간격, instruments-info(`retCode`≠0 은 실패, 꼬리 `time` 만 다르면 파싱 생략) 로 `ForeignSymbolSource` 구현, 시세 프레임은 집계 `last_message_at` 만 올린다). `features/wallet_status/bybit.py`(`fetch_bybit` — 헤더 HMAC, `chains[]` → 망). 배선: `main.py` 가 `UniverseRefresher(foreigns=[binance, bybit])` 와 `streams` 4개, `WalletStatusService` 바이빗 키. `/history/*` 의 `fx` 는 `Literal["binance", "bybit"]`. 테스트는 `server/tests/test_stream_bybit.py`(`BybitSleeps` — 핑 주기를 표로 막는다)·`features/wallet_status/tests/test_bybit.py`.
 - **bitget (020)**: `core/streams/bitget.py`(`BitgetStream` 하나 — 012·019 와 같은 샤드 3개·`shard_of`·재조정 루프 구조를 코드 공유 없이 다시 쓴다. 다른 점: 심볼마다 로컬 북 `_Book` 이 마지막 `seq` 를 들고 역행 update 를 버리며, 샤드마다 문자열 ping 태스크(30초 `ping`·30초 안에 `pong` 없으면 소켓을 닫아 `timeout` 으로 재연결), 구독 요청은 `{instType, channel, instId}` 객체 args 50개·0.2초 간격, 소켓마다 1시간 창의 요청 시각 deque 로 예산을 세어 192회부터 경고 1줄(소진 중 한 번)·재조정 연기, symbols(`code != "00000"` 은 실패, `requestTime` 만 다르면 파싱 생략) 로 `ForeignSymbolSource` 구현, base 별 마지막 체결 ts 로 과거 체결 무시, 정렬돼 온 books15 스냅샷은 북·정렬 없이 받은 목록 그대로 행으로(update 가 오면 그때 북으로 편다), 시세 프레임은 집계 `last_message_at` 만 올린다). `features/wallet_status/bitget.py`(`fetch_bitget` — 인증 없음, `chains[]` 의 문자열 `"true"` → 망). 배선: `main.py` 가 `UniverseRefresher(foreigns=[binance, bybit, bitget])` 와 `streams` 5개, `WalletStatusService` 가 조회기 5종. `/history/*` 의 `fx` 는 `Literal["binance", "bybit", "bitget"]`. 테스트는 `server/tests/test_stream_bitget.py`(`BitgetSleeps` — 핑·백오프 상한이 둘 다 30초라 표로 막는 값을 테스트가 고른다)·`features/wallet_status/tests/test_bitget.py`.
 - **okx (045)**: `core/streams/okx.py`(`OkxStream` 하나 — 012·019·020 과 같은 샤드 3개·`shard_of`·재조정 루프 구조를 코드 공유 없이 다시 쓴다. 다른 점: `books5` 는 스냅샷만 와서 로컬 북이 없고 심볼마다 마지막 호가 시각만 들어 더 오래된 스냅샷을 버린다(`seqId` 는 쓰지 않는다, asks·bids 둘 다 빈 메시지는 무시), 구독 인자는 `{channel, instId}`(`instType` 없음), 핑은 샤드마다 5초 간격으로 조용한 시간을 보다가 마지막 수신(시세·응답·pong 무엇이든)에서 20초가 지나면 문자열 `ping`·10초 안에 `pong` 이 없으면 닫아 재연결(`timeout`), `event:"notice"` 는 경고 1줄, 구독·해지 요청은 소켓별 1시간 창 480회의 80%(384회)에서 재조정 연기, instruments 는 본문 전체 바이트로 직전 응답과 비교해 같으면 파싱 생략, HTTP 200 + `code 50011` 은 `rate_limit`·그 밖 `code != "0"` 은 `bad_response`), `features/wallet_status/okx.py`(`fetch_okx` — 키 3개가 전부 있을 때만 호출, `OK-ACCESS-KEY/SIGN/TIMESTAMP/PASSPHRASE` 헤더 4개, 서명 = Base64(HMAC-SHA256(secret, timestamp + "GET" + 경로)), `(ccy, chain)` 행을 코인으로 합치고 `chain` 의 `<ccy>-` 접두를 뗀 이름이 네트워크 `name`·대문자 공백 제거가 `code`, `canDep`·`canWd` 는 JSON boolean 그대로).
+- **perp-collect (046)**: `core/perp.py`(`split_multiplier` — 배수 접두·접미 정규화, `perp_universe` — 2곳 이상 ∪ 김프∩1곳, `PerpSink` — 메시지 → perp 행 규칙·우주 필터·호가 넷 합쳐 검사·순서 뒤바뀜 방어·펀딩 보류·주기 반영, 현물 `QuoteSink` 와 같은 자리), `core/models.py`(`PerpRow` — 제자리 갱신), `core/live_store.py`(perp 맵 `put_perp_row`·`perp_row`·`perp_rows`·`remove_perp_row`·`retain_perp_bases` — 현물 맵과 분리), `core/perp_universe.py`(`PerpUniverse` — 10초 목록 회차·60초 로그 억제, `apply` 는 `UniverseRefresher._apply` 끝에서 매초), `core/config.py`(`PERP_SOURCES`·`COLLECT_SOURCES`), `core/streams/binance_perp.py`(`BinancePerpStream` — 호가 샤드 3 + 펀딩 샤드 3 번, exchangeInfo 10초·fundingInfo 60초, `/public/ws`·`/market/ws` 빈 연결 + SUBSCRIBE 50개·0.2초), `core/streams/bybit_perp.py`·`core/streams/bitget_perp.py`(`BybitPerpStream`·`BitgetPerpStream` — 소켓 없음, 목록 10초 + 전체 티커 REST 매초 `poll`, 상태는 "마지막 회차 성공" 뜻, 비트겟 `next_funding_ms` 는 주기의 다음 배수). `features/health/service.py` 는 `COLLECT_SOURCES` 순서로 돌고 perp 의 `markets` 는 스트림 상태의 `subscribed`. `collect.py` 의 트리거는 perp 목록을 먼저 받고 현물 우주를 받는다(그 끝의 apply 가 새 목록으로 perp 우주를 잡는다). web 은 `shared/format.ts` 표시명 3개·`admin.js` 목록 3개뿐.
 - **landing (022)**: `features/landing/` — `service.py`(순수 계산 `build_live`(표 → 옮길 수 있는 방향 후보·코인당 1개 상위 5·`over1`(원값 = 순값 + 차감폭 ≥ 1.0 — 013 진입과 같은 값)·호가 깊이 예시 `depthGap` — 원값 1.0·차감폭 0.1 이상 중 차감폭 최대)·`build_trail`(1분 봉 종가 → 점)·`build_events`(core `EventSummary` → 응답 — 방향별·진행 중 수와 끝난 순 5는 요약 조회가 고른다, 진행 중 판정 시각은 지금 − `MAX_GAP_SEC`), `LandingService` — 부분마다 캐시 한 칸(`_Slot`: 결과·null 을 ttl 동안, 비었거나 만료되면 키마다 조회 태스크 하나 — 그동안 온 요청은 같은 태스크를 기다리고, 태스크는 끝나는 순간 캐시를 채워 그때부터 ttl, trail 은 경로가 키). Influx 부분(trail·events)은 3초까지만 기다리고 늦으면 같은 키의 직전 값(없으면 null), 조회는 뒤에서 마저 돈다 — live 는 끝까지 기다린다, events 와 live→trail 을 함께 기다림, Influx 조회는 스레드) · `router.py`(`GET /landing`, 항상 200·`Cache-Control: no-store`) · `models.py`. core 는 `RedisBus.latest()`(`spreads:latest` GET 만)·`InfluxClient.query_candles`·`query_event_summary`·`core.premium_events.MAX_GAP_SEC` 를 쓴다. `main.py` 가 앱마다 `LandingService` 하나를 `app.state.landing` 에 두고 두 역할 모두 라우터를 포함한다. web `public/landing.html` 은 번들 밖 한 파일(HTML·CSS·스크립트, 토큰 값 복사). 테스트는 `features/landing/tests/`(`helpers.py` 의 FakeBus·FakeInflux(`gate` 로 느린 조회)·손으로 돌리는 시계, 3초 규칙은 대기 상한을 0.2초로 줄여 한 루프에서 — `test_influx_wait.py`)·`tests/test_role.py`·`test_deploy.py`. 검색 구성: 글꼴 서브셋은 `web/scripts/subset-landing-font.py`(글자 목록 `landing-font-glyphs.txt`, 파일 이름에 내용 해시), 검색·미리보기 계약 테스트는 `server/tests/test_landing_seo.py`.
 - **api-allowlist (028)**: `web/nginx.conf` 공개 server(`listen 80`) — 정확 일치 location 여섯(수집기 셋은 `${COLLECT_HOST}`, api 셋은 서비스명, 모양은 접두 제거 rewrite + URI 없는 `proxy_pass` 하나, `= /api/ws/spreads` 만 업그레이드 헤더), 그 밖의 `= /api`·`/api/` 는 `types {}`·`default_type application/json` + 앱 404 와 같은 JSON 을 `return 404`, 정규식 location 없음, `server_tokens off`. 앱 코드 변경 없음(API 문서는 앱에서 켠 채). 계약은 `tests/test_deploy.py` — `listen 80` server 블록을 작은 토큰 파서로 읽어 허용 여섯·JSON 404(앱 404 본문과 비교)·정규식 없음·버전 숨김을 단언하고, 웹(`${API_BASE}` 뒤 리터럴·`public/*.html` 의 `fetch`/`new WebSocket`)·canary(`ops/canary/`, 없으면 빈 집합)·uptime 런북 URL 의 호출 경로가 허용 목록의 부분집합인지 대조한다.
 - **observability (027)**: `features/spreads/gauge.py`(`WsClientsGauge` — 허브의 `connections` 를 기동 즉시·10초마다 `marketlens.ws_clients:<n>|g` UDP 한 줄로, 이름은 스레드에서 풀고 실패하면 다음 회차, 전송·풀기 실패 WARNING 10분 1줄 / `start_ws_gauge` — `STATSD_ADDR` 가 비면 None, `host:port` 가 아니면 WARNING 뒤 None), `main.py` 의 `_api_lifespan` 만 띄운다(collector 는 안 띄운다), `core/config.py` 의 `statsd_addr`. 앱 밖: `caddy/Caddyfile`(조각 `access_log` — 파일 0644·하루 또는 50MiB 회전·100개·90일(032)·헤더 삭제·`ua`·출처만 `referer`(`map` 정규식)·IP /24·/48·검색어 세 키 삭제·폴링 다섯 경로와 canary UA 제외, 기본 로거는 IP 두 필드 삭제(032)·나머지 같은 지우기, 도메인 블록 `Referrer-Policy`), `ops/cloudwatch/`(에이전트 지표 파일 셋 + `serve-logs.json`), `ops/canary/index.mjs`(Lambda `nodejs22.x` handler 이자 로컬 node 스크립트 — fetch·내장 WebSocket 네 단계, EventBridge Scheduler 가 5분마다 부른다), 런북 `cloudwatch.md`. 라이브러리 추가 없음. 계약은 `tests/test_observability.py`(Caddyfile 을 작은 줄 파서로 읽어 조각·기본 로거·import 위치를 단언, compose·배포 reload·nginx 접속 로그 끔·에이전트 JSON·canary 경로와 UA)·`features/spreads/tests/test_gauge.py`(가짜 UDP 수신기).

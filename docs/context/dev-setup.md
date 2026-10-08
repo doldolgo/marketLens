@@ -140,7 +140,7 @@ docker compose -f docker-compose.dev.yml exec redis redis-cli XLEN ticks
 ```bash
 curl -s localhost:8000/health/collect | head -c 400
 ```
-`exchanges` 에 거래소 6곳(`upbit`·`bithumb`·`binance`·`bybit`·`bitget`·`okx` 순), 기동 몇 초 뒤 각 `state: "ok"` 면 정상 (011·045).
+`exchanges` 에 현물 6곳(`upbit`·`bithumb`·`binance`·`bybit`·`bitget`·`okx` 순) + perp 원천 3개(`binance_perp`·`bybit_perp`·`bitget_perp` 순), 기동 몇 초 뒤 각 `state: "ok"` 면 정상 (011·045·046). perp 원천의 `markets` 는 우주 안 심볼 수 — 기동 10초 뒤 각 500~720 이면 정상(바이낸스는 WebSocket 샤드 3개 + 펀딩 연결, 바이빗·비트겟은 REST 전체 티커 매초 — 로그에 `perp 샤드 N 연결 실패`·`티커 조회 실패` 경고가 없어야 한다).
 ```bash
 curl -s "localhost:8000/orderbook/binance?symbol=BTC/USDT&depth=20" | head -c 400
 ```

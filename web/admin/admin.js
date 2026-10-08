@@ -588,7 +588,8 @@ function drawOverview() {
 
 // --- 수집 (§3.4) -------------------------------------------------------------------------------
 
-const EXCHANGES = ['upbit', 'bithumb', 'binance', 'bybit', 'bitget', 'okx'];
+// 현물 6곳 뒤 perp 원천 3개 — /health/collect 의 exchanges 순서와 같다(046 §3.8)
+const EXCHANGES = ['upbit', 'bithumb', 'binance', 'bybit', 'bitget', 'okx', 'binance_perp', 'bybit_perp', 'bitget_perp'];
 const EX_STATE = { ok: ['ok', '수집 중'], stale: ['warn', '지연'], down: ['bad', '끊김'] };
 const kindTone = (kind) => (kind === 'banned' || kind === 'rate_limit' ? 'bad' : 'warn');
 // 실패 종류 이름표 — 공개 수집 상태 탭(011)의 유형 칩 라벨과 같다(041 §3.4). 표에 없는 값은 원래 글자 그대로

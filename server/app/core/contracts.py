@@ -144,6 +144,11 @@ class ForeignSymbolSource(Protocol):
         ...
 
 
+# perp 원천(046 §3.2)도 같은 네 면을 구현한다 — id / refresh(목록·펀딩 주기) / bases(정규화한 base) / set_universe(perp 우주 전체).
+# 모양이 같아 계약을 따로 두지 않는다. 우주를 넘기는 쪽이 다를 뿐이다(현물은 UniverseRefresher, perp 는 PerpUniverse).
+PerpSymbolSource = ForeignSymbolSource
+
+
 class NoForeignSymbols:
     """해외 커넥터를 꽂지 않을 때(테스트)의 구현 — 심볼이 없어 우주가 비고 행이 저장되지 않는다."""
 
