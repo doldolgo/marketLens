@@ -5,7 +5,7 @@
 프로세스 역할은 ROLE(016) — collector(기본) 는 아래 전체, api 는 Influx 조회 전용(`_api_lifespan`).
 시작 순서(collector): 010 원문 아카이브(S3_BUCKET 있을 때) → Influx·Redis 연결 확인 → 마켓 우주·스트림 기동(국내 2 +
 해외 3곳 샤드) → 011 이력 복원 → 013 사건 복원 → 014 봉 버킷·롤업 기준점 → 009 spark 복원 → 틱 루프 → 009 인계
-보내기 태스크·017 게시기·허브·flusher → GC 정리(001 §3.1 — 두 역할 모두 yield 직전).
+보내기 태스크·017 게시기·허브·flusher → 050 이더리움 감지기(env 둘 다 있을 때) → GC 정리(001 §3.1 — 두 역할 모두 yield 직전).
 스트림을 복원보다 먼저 여는 것은 스트림 준비(목록 REST·WS 연결·스냅샷)가 거의 네트워크 대기라 복원 시간 뒤에
 줄 세울 이유가 없어서다(2026-09-28). 틱은 복원이 다 끝난 뒤에야 만들어진다 — 사건·봉·spark 가 복원 전 상태를 만지지 않는다.
 어느 것이 실패해도 앱은 뜬다.
@@ -42,6 +42,7 @@ from app.core.config import (
 from app.core.contracts import noop_record
 from app.core.day_open import DayOpenBook
 from app.core.errors import ExchangeError
+from app.core.eth_flow import EthFlowDetector, load_seeds
 from app.core.heartbeat import HeartbeatSink
 from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
@@ -70,6 +71,7 @@ from app.features.admin.router import router as admin_router
 from app.features.admin.service import AdminStatusService
 from app.features.admin.visits import VisitFeeds
 from app.features.analysis.router import router as analysis_router
+from app.features.flow.router import router as flow_router
 from app.features.health.router import router as health_router
 from app.features.history.cache import HistoryCache
 from app.features.history.gate import HeavyGate
@@ -308,6 +310,24 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         flusher = Flusher(stream=tick_stream, writer=influx)
         flusher.start()
 
+    # 5. 050 — 이더리움 ERC-20 입출금 감지기. Influx·Redis 가 준비된 뒤, ETH_WS_URL·ETH_HTTP_URL 둘 다 있을 때만.
+    # 씨앗 읽기 실패는 기동 실패다(감지기 없이 뜨면 거짓 0 이 쌓인다 — 050 §3.2). Redis 추가분은 start 가 합친다
+    eth_flow: EthFlowDetector | None = None
+    if settings.eth_ws_url and settings.eth_http_url:
+        eth_flow = EthFlowDetector(
+            ws_url=settings.eth_ws_url,
+            http_url=settings.eth_http_url,
+            seeds=load_seeds(),
+            writer=influx,
+            bus=bus,
+        )
+        await eth_flow.start()
+    else:
+        logger.warning(
+            "ETH_WS_URL·ETH_HTTP_URL 이 둘 다 있어야 이더리움 입출금 감지기를 켠다 — 감지기 없이 뜬다 (/flow/* 는 Influx 의 기존 점만)"
+        )
+    app.state.eth_flow = eth_flow
+
     app.state.live_store = store
     app.state.collector = CollectService(
         store=store, universe=universe, streams=streams, client=client, wallet=wallet
@@ -328,6 +348,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await flusher.aclose()
         await universe.aclose()
         await asyncio.gather(*(s.aclose() for s in streams))
+        if eth_flow is not None:
+            await eth_flow.aclose()  # 050 — 태스크 취소·소켓 닫기(2초 상한)
         if archive is not None:
             # 스트림이 닫힌 뒤 — 마지막 프레임까지 담아 5초 안에서 올린다 (010 §3.6)
             await archive.aclose()
@@ -536,6 +558,8 @@ def create_app() -> FastAPI:
         app.include_router(analysis_router)
         app.include_router(history_events_router)
         app.include_router(health_router)
+        # 050 — 입출금 레이더 둘. 감지기 상태·업비트 현재가가 수집기 메모리라 수집기다
+        app.include_router(flow_router)
         # 034 — 관리자 피드 둘(AWS 요약·알림 기록). 자격증명이 collect 박스 역할에만 있어 수집기에 둔다.
         # 부분별 캐시·전용 스레드 자리라 앱마다 하나 — 스레드는 첫 AWS 호출 때 생긴다
         app.state.admin_feeds = AdminFeeds(region=settings.admin_aws_region)

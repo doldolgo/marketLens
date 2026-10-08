@@ -28,6 +28,8 @@ NOLOG_PATHS = {
     "/api/landing",
     "/api/history/events",
     "/api/history/candles",
+    "/api/flow/netflow",
+    "/api/flow/recent",
 }
 CANARY_UA = "KimpTrack-Canary/1"
 
