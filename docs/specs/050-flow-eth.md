@@ -1,6 +1,6 @@
 # 050 — flow-eth
 
-상태: TODO | 의존: 002(web-shell — flow 탭 골격·URL 키 `f.`), 005(history — Influx 클라이언트), 009(tick-store — Redis), 001(collect — 업비트 현재가), 028(access-guard — 공개 경로 허용 목록)
+상태: DONE | 의존: 002(web-shell — flow 탭 골격·URL 키 `f.`), 005(history — Influx 클라이언트), 009(tick-store — Redis), 001(collect — 업비트 현재가), 028(access-guard — 공개 경로 허용 목록)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -110,7 +110,12 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/pytest -q   # 1616 passed, 1 skipped
+cd web && npm run lint && npm run build
+# 스모크(2026-10-08, 로컬 dev compose + 수집기 :8037, ETH_WS_URL=publicnode·ETH_HTTP_URL=Ankr): 기동 직후 72블록 공백 재생,
+# 150초 안에 입금·출금 양쪽 감지(ERA·ONDO·SAND…), 가스 지갑 확장으로 입금주소 32,027→32,029·sweep 으로 핫월렛 950→951,
+# /flow/netflow?window=1h·6h 코인별 합산·netKrw 환산, /flow/recent confirmed 가 2블록 뒤 true, window=2h·limit=0 은 400, 경고 로그 0줄
+curl -s "http://localhost:8037/flow/netflow?window=1h"; curl -s "http://localhost:8037/flow/recent?limit=8"
 ```
 
 ## 6. 갱신할 문서
@@ -124,6 +129,6 @@
 - `docs/specs/002-web-shell.md` — §3.10 제목 뒤에 `(050 이 실데이터로 교체 — 이 절은 2026-10-08 까지의 mock 기록)` 한 줄.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-- 남은 빚:
+- 만든 것: `server/app/core/eth_flow.py`(감지기), `server/app/data/upbit_eth/*.csv.gz`(씨앗 넷), `server/app/features/flow/`(models·service·router·tests), `server/tests/eth_flow_fakes.py`·`test_eth_flow.py`·`test_chain_flow_lines.py`, `web/src/features/flow/{types,api,Tab}.tsx`. 고친 것: `core/influx.py`(precision·chain_flow 줄·조회 둘)·`core/redis_bus.py`·`core/config.py`·`main.py`·`.env.example`·`web/nginx.conf`·`caddy/Caddyfile`·`tests/test_deploy.py`·`tests/test_observability.py`·`web/src/App.tsx`·`shared/{types,mock,feed,rand,config}.ts`.
+- 추측한 지점: 구독 프레임은 id 가 아니라 모양(`topics` = 로그, `number`+`timestamp` = head)으로 가른다 / 무수신 검사 5초 주기(감지 30~35초) / 재생도 블록마다 HTTP 블록 1회(가스 확장·시각) / 시각을 모르는 블록의 HTTP 실패는 세션을 끊고 재생으로 메운다(시각을 알면 확장만 건너뜀) / 가스 수신자가 핫월렛·내부면 더하지 않고 `value > 0` 만 / 규칙 순서 sweep → 핫월렛 출금·내부 → 입금 / 금액 0 은 집합 갱신 전에 버림 / `removed` 로그는 집합을 안 건드림 / Redis 읽기 실패는 씨앗만으로 기동·쓰기 실패는 건마다 경고 1줄 / 블록→시각 표 256블록 / Influx 토큰 없으면 점 버림 / `/flow/recent` `head` 는 소켓 최신 블록(감지기 꺼짐이면 null·`confirmed` false) / `/flow/*` 는 수집기 전용 / `netKrw`·`krw` 반올림 없음, 창 `[now − window, now + 1)` / `symbol` 영숫자 1~20자·`limit` 비정수는 400 / Redis 집합은 키 상수 넷 + `flow_set_load/add(key)` / 첫 기동은 메모리 `last_block = head`, Redis 는 다음 블록부터 / 정착 대기 1.5초는 묶음당 1회(대기 중 온 head 는 같은 묶음) / `eth_blockNumber` 상태 오류면 첫 WS head − 1 부터, `eth_getLogs` 상태 오류면 head 로 / 늦은 로그 수는 API 미노출. web: 폴링 훅은 기능 폴더 안 `usePolled`(히스토리 `usePollRound` 와 같은 동작, 다시 켜면 곧바로 1회) / 첫 응답 전 표는 `조회 중…` / 네트워크 실패 `(HTTP 0)` / 최근 표의 코인·방향은 서버 쿼리, 순유입 표의 코인은 화면 필터 / 검색은 Enter 때 trim·대문자 / 0건 칸 `–`·순유입 양수 `+` / 시각 `fmtTime`(초 없음) / lazy 로드 안 함. 함께 고친 절: §2(caddy 기록 제외)·§3.3(정착 1.5초·수신 루프 I/O 없음·지연 약 4초)·§3.4(HTTP = Ankr, 재생 HTTP 상태 오류)·§3.6(`feed.contracts`)·§3.8(푸터 `feed.contracts`). 커밋 300줄 규칙은 새 파일(감지기 650줄·탭 재작성 545줄·테스트)에서 넘겼다 — 한 파일을 나눌 수 없어 파일 단위로 커밋.
+- 남은 빚: §3.2 한계 둘(status.md 알려진 빚), `_process_block` 의 블록 읽기가 시각을 모르는 채 실패하면 재연결 반복 가능(Ankr 로는 미관측), 상대 주소 라벨 없음, ETH 네이티브·다른 네트워크·빗썸.
