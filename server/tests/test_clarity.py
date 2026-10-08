@@ -19,6 +19,7 @@ from tests.test_privacy import (
     NOTICE,
     OLD,
     SHARED_SENTENCES,
+    _cell_notes,
     _consent_box,
     _notes,
     _text,
@@ -73,6 +74,14 @@ def test_settings_are_one_id_a_page_list_and_the_notice_version() -> None:
     assert pages and set(pages) <= {"landing", "app"}
     # 032 동의 관리 스크립트의 판과 같다 — 다르면 한쪽의 동의가 다른 쪽에서 '정하지 않음' 이다
     assert json.loads(_const("NOTICE_VERSION")) == NOTICE
+    # 방침의 보이는 판 글자도, 052 의 attention.js 가 생기면 그 판도 같다 — 동의 하나로 Clarity·영역 통계가 함께 돈다 (051 §3.2)
+    assert f'<code id="an-version">{NOTICE}</code>' in PRIVACY
+    attention = WEB / "public/attention.js"
+    if attention.exists():
+        found = re.search(
+            r"const NOTICE_VERSION = (.+)\n", attention.read_text("utf-8")
+        )
+        assert found and json.loads(found.group(1)) == NOTICE
 
 
 def test_an_id_needs_the_published_consent_policy() -> None:
@@ -121,6 +130,8 @@ def test_strip_text_is_the_policy_consent_box_text() -> None:
     html = JS.split("const HTML = `", 1)[1].split("`", 1)[0]
     first = re.search(r'<div class="kt-c-body"[^>]*>\s*<p>(.*?)</p>', html, flags=re.S)
     assert first and _text(first.group(1)) == f"{head} {age}"
+    # 051 §3.3-4 — 영역 통계는 띠가 없는 페이지에서도 저장된 동의로 돈다(모든 페이지)
+    assert "화면 영역" in first.group(1) and "모든 페이지" in first.group(1)
     rules = re.search(
         r"<details><summary>저장 규칙</summary><p>(.*?)</p></details>", html, flags=re.S
     )
@@ -139,6 +150,8 @@ def test_strip_text_is_the_policy_consent_box_text() -> None:
         )
         notes = _notes(mine)
         assert list(notes.items()) == list(_notes(theirs).items()), label
+        # 칸 끝 한 줄(051 — 수집·이용 칸의 국내 보관)도 같은 글자
+        assert _cell_notes(mine) == _cell_notes(theirs), label
         assert set(notes) == terms
         for term, value in notes.items():
             key = re.fullmatch(r'<strong class="key">.*</strong>', value, flags=re.S)
