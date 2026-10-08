@@ -51,6 +51,9 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 | BINANCE_SECRET_KEY | 없음 |
 | BYBIT_API_KEY | 없음 |
 | BYBIT_SECRET_KEY | 없음 |
+| OKX_API_KEY | 없음 |
+| OKX_SECRET_KEY | 없음 |
+| OKX_PASSPHRASE | 없음 |
 | S3_BUCKET | 없음 |
 | S3_REGION | `ap-northeast-2` |
 | SLACK_WEBHOOK_URL | 없음 |
@@ -137,7 +140,7 @@ docker compose -f docker-compose.dev.yml exec redis redis-cli XLEN ticks
 ```bash
 curl -s localhost:8000/health/collect | head -c 400
 ```
-`exchanges` 에 거래소 5곳(`upbit`·`bithumb`·`binance`·`bybit`·`bitget` 순), 기동 몇 초 뒤 각 `state: "ok"` 면 정상 (011·020).
+`exchanges` 에 거래소 6곳(`upbit`·`bithumb`·`binance`·`bybit`·`bitget`·`okx` 순), 기동 몇 초 뒤 각 `state: "ok"` 면 정상 (011·045).
 ```bash
 curl -s "localhost:8000/orderbook/binance?symbol=BTC/USDT&depth=20" | head -c 400
 ```
@@ -150,6 +153,10 @@ curl -s "localhost:8000/orderbook/bybit?symbol=BTC/USDT&depth=20"
 curl -s "localhost:8000/orderbook/bitget?symbol=BTC/USDT&depth=20"
 ```
 비트겟도 같다(020) — 기동 10초 뒤 `asks` 20단계, 로그에 `비트겟 샤드 N` 연결 실패 경고 없음, `/spreads` 에 `fx:"bitget"` 행이고 그 행의 `depFx/wdFx` 는 키 없이도 null 이 아니다(입출금이 공개 API).
+```bash
+curl -s "localhost:8000/orderbook/okx?symbol=BTC/USDT&depth=20"
+```
+OKX 도 같다(045) — `books5` 라 `depth=20` 을 줘도 `asks` 5단계, 로그에 `OKX 샤드 N` 연결 실패 경고 없음, `/spreads` 에 `fx:"okx"` 행. 그 행의 `depFx/wdFx` 는 `OKX_API_KEY`·`OKX_SECRET_KEY`·`OKX_PASSPHRASE` 셋을 넣었을 때만 null 이 아니다(입출금이 인증 API, 읽기 권한).
 
 ## 로컬 메모 (개인)
 - `:8000` 은 이 머신에서 소마 캘린더가 점유할 수 있다. `lsof -i :8000` 으로 확인 후 정리하거나, `--port 8020` 으로 띄우고 curl 포트도 8020 으로 맞춘다.

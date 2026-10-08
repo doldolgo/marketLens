@@ -6,7 +6,7 @@
   <!-- 스펙 044 — 검색어 "김프 차트" 를 받는 정적 한 페이지(번들 밖, privacy.html 과 같은 방식). 외부 자원·서버 호출 없음 — nginx 의 CSP 가 지킨다.
        실시간 값은 넣지 않는다(검색 결과에 '지금 값' 으로 남지 않게). 차트 자체는 대시보드 기록 탭(/app/?tab=history)이 그린다 -->
   <title>김프 차트 - 실시간·과거 김치프리미엄 봉 차트 | KimpTrack</title>
-  <meta name="description" content="김프 차트를 1분·1시간·일봉으로 봅니다. 업비트·빗썸과 바이낸스·바이비트·비트겟 조합마다 김치프리미엄·역프 봉과 입출금 상태를 함께 기록합니다." />
+  <meta name="description" content="김프 차트를 1분·1시간·일봉으로 봅니다. 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX 조합마다 김치프리미엄·역프 봉과 입출금 상태를 함께 기록합니다." />
   <meta name="robots" content="index, follow, max-image-preview:large" />
   <link rel="canonical" href="https://kimptrack.com/kimp-chart" />
   <link rel="icon" href="/favicon.ico" sizes="any" />
@@ -15,7 +15,7 @@
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="KimpTrack" />
   <meta property="og:title" content="김프 차트 - 실시간·과거 김치프리미엄 봉 차트 | KimpTrack" />
-  <meta property="og:description" content="김프 차트를 1분·1시간·일봉으로 봅니다. 업비트·빗썸과 바이낸스·바이비트·비트겟 조합마다 김치프리미엄·역프 봉과 입출금 상태를 함께 기록합니다." />
+  <meta property="og:description" content="김프 차트를 1분·1시간·일봉으로 봅니다. 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX 조합마다 김치프리미엄·역프 봉과 입출금 상태를 함께 기록합니다." />
   <meta property="og:url" content="https://kimptrack.com/kimp-chart" />
   <meta property="og:image" content="https://kimptrack.com/landing/og-v2.png" />
   <meta property="og:image:type" content="image/png" />
@@ -31,7 +31,7 @@
     "@id": "https://kimptrack.com/kimp-chart#webpage",
     "url": "https://kimptrack.com/kimp-chart",
     "name": "김프 차트 - 실시간·과거 김치프리미엄 봉 차트 | KimpTrack",
-    "description": "김프 차트를 1분·1시간·일봉으로 봅니다. 업비트·빗썸과 바이낸스·바이비트·비트겟 조합마다 김치프리미엄·역프 봉과 입출금 상태를 함께 기록합니다.",
+    "description": "김프 차트를 1분·1시간·일봉으로 봅니다. 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX 조합마다 김치프리미엄·역프 봉과 입출금 상태를 함께 기록합니다.",
     "inLanguage": "ko-KR",
     "isPartOf": { "@id": "https://kimptrack.com/#website" },
     "primaryImageOfPage": { "@type": "ImageObject", "url": "https://kimptrack.com/landing/history.png", "width": 2040, "height": 1230 },
@@ -120,7 +120,7 @@
 
   <main class="wrap doc">
     <h1>김프 차트 — 실시간·과거 김치프리미엄 봉 차트</h1>
-    <p class="lead">KimpTrack 김프 차트는 업비트·빗썸과 바이낸스·바이비트·비트겟을 잇는 조합마다 김프(김치프리미엄)와 역프를 1분에 한 점씩 기록해 봉 차트로 보여 줍니다. 코인 하나를 고르면 해외 거래소마다 카드가 하나씩 쌓이고, 각 카드 아래에는 그 시각에 입출금이 열려 있었는지가 띠로 붙습니다. 가입 없이 무료입니다.</p>
+    <p class="lead">KimpTrack 김프 차트는 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX을 잇는 조합마다 김프(김치프리미엄)와 역프를 1분에 한 점씩 기록해 봉 차트로 보여 줍니다. 코인 하나를 고르면 해외 거래소마다 카드가 하나씩 쌓이고, 각 카드 아래에는 그 시각에 입출금이 열려 있었는지가 띠로 붙습니다. 가입 없이 무료입니다.</p>
     <div class="cta">
       <a class="btn btn-lg" href="/app/?tab=history">김프 차트 열기</a>
       <a class="link" href="/kimp-history">김프 히스토리(지난 사건 기록) 보기</a>
@@ -130,7 +130,7 @@
       <h2 id="what-title">김프 차트에서 볼 수 있는 것</h2>
       <ul>
         <li><strong>봉 종류 8개</strong> — 1분·3분·5분·15분·30분·1시간·4시간·1일. 봉은 한국 시간 벽시계에 맞춰 자릅니다(일봉은 한국 시간 자정 기준).</li>
-        <li><strong>해외 거래소별 카드</strong> — 바이낸스·바이비트·비트겟 가운데 고른 수만큼 차트가 세로로 쌓입니다. 한 카드 안에서 국내 거래소 하나는 캔들로, 둘을 고르면 업비트·빗썸이 선 두 개로 겹칩니다.</li>
+        <li><strong>해외 거래소별 카드</strong> — 바이낸스·바이비트·비트겟·OKX 가운데 고른 수만큼 차트가 세로로 쌓입니다. 한 카드 안에서 국내 거래소 하나는 캔들로, 둘을 고르면 업비트·빗썸이 선 두 개로 겹칩니다.</li>
         <li><strong>김프와 역프 따로</strong> — 방향을 고르면 그 방향의 봉만 그립니다. 역프는 국내에서 사서 해외에서 팔 때 기준으로 양수입니다.</li>
         <li><strong>입출금 띠</strong> — 카드마다 거래소별로 입금 줄과 출금 줄이 붙습니다. 그 시각에 막혀 있던 구간은 색이 달라, 차트 위의 큰 김프가 실제로 옮길 수 있었던 값인지 바로 구분됩니다.</li>
         <li><strong>시간축·십자선 연동</strong> — 카드 하나를 드래그하거나 확대하면 다른 카드도 같은 구간을 보여 주고, 십자선도 함께 움직입니다.</li>

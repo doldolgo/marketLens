@@ -9,8 +9,8 @@ from app.features.health.models import (
     OutageOut,
 )
 
-# 001·020 의 거래소 5곳 고정 순서
-EXCHANGES = ("upbit", "bithumb", "binance", "bybit", "bitget")
+# 001·045 의 거래소 6곳 고정 순서
+EXCHANGES = ("upbit", "bithumb", "binance", "bybit", "bitget", "okx")
 
 # state 경계(ms): 마지막 성공 후 경과 < 5초 ok, < 60초 stale, 그 외 down
 STALE_MS = 5_000

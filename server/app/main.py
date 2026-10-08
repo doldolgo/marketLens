@@ -61,6 +61,7 @@ from app.core.streams.binance import BinanceStream
 from app.core.streams.bitget import BitgetStream
 from app.core.streams.bithumb import BithumbStream
 from app.core.streams.bybit import BybitStream
+from app.core.streams.okx import OkxStream
 from app.core.streams.upbit import UpbitStream
 from app.core.tick_store import Flusher, TickRelay
 from app.core.ticks import TickLoop
@@ -207,6 +208,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         binance_secret_key=settings.binance_secret_key,
         bybit_api_key=settings.bybit_api_key,
         bybit_secret_key=settings.bybit_secret_key,
+        okx_api_key=settings.okx_api_key,
+        okx_secret_key=settings.okx_secret_key,
+        okx_passphrase=settings.okx_passphrase,
         record=record,
     )
 
@@ -236,7 +240,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     hub = SpreadsHub(bus=bus)
 
     # 1. 마켓 우주(매초) → 스트림 기동 — 복원보다 먼저(001 §3.6 앱 시작 순서). 목록을 못 받은 거래소는 다음 초에 다시.
-    # 해외 커넥터(012 바이낸스·019 바이빗·020 비트겟)가 심볼 집합 계약도 맡는다 — 우주가 확정되면 각자 자기 심볼만 구독한다.
+    # 해외 커넥터(012 바이낸스·019 바이빗·020 비트겟·045 OKX)가 심볼 집합 계약도 맡는다 — 우주가 확정되면 각자 자기 심볼만 구독한다.
     # 틱 루프가 아직 없으므로 스트림은 LiveStore 행·원문만 채운다(판정·사건·봉은 틱이 만든다).
     app.state.started_at = int(time.time() * 1000)
     upbit = UpbitStream(store=store, sink=sink, record=record)
@@ -244,11 +248,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     binance = BinanceStream(store=store, sink=sink, record=record)
     bybit = BybitStream(store=store, sink=sink, record=record)
     bitget = BitgetStream(store=store, sink=sink, record=record)
-    streams = [upbit, bithumb, binance, bybit, bitget]
+    okx = OkxStream(store=store, sink=sink, record=record)
+    streams = [upbit, bithumb, binance, bybit, bitget, okx]
     universe = UniverseRefresher(
         sink=sink,
         streams=[upbit, bithumb],
-        foreigns=[binance, bybit, bitget],
+        foreigns=[binance, bybit, bitget, okx],
         client=client,
     )
     universe.start()
