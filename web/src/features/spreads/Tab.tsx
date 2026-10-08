@@ -180,7 +180,7 @@ export default function SpreadsTab({ feed, onPick }: Props) {
   return (
     <>
       {/* 필터바 — 2행은 flexBasis 100% 로 같은 바 안에서 줄을 바꾼다 */}
-      <div style={bar}>
+      <div data-area="filters" style={bar}>
         <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={searchInput} />
         <span style={label}>기준 국내 거래소</span>
         <Seg opts={[['all', '모두'], ['업비트', '업비트'], ['빗썸', '빗썸']].map(([id, l]) => segOpt(l, domFilter === id, () => setDomFilter(id as DomFilter)))} />
@@ -215,7 +215,7 @@ export default function SpreadsTab({ feed, onPick }: Props) {
         </div>
       </div>
 
-      <TableFrame minWidth={1040}>
+      <TableFrame minWidth={1040} area="table">
         <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} />
         {feed.spreads.length === 0 && <Empty>백엔드에서 스프레드를 받는 중입니다…</Empty>}
         {feed.spreads.length > 0 && coins.length === 0 && <Empty>조건에 맞는 코인이 없습니다. 필터를 넓혀 보세요.</Empty>}

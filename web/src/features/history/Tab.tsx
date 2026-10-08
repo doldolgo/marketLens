@@ -213,8 +213,9 @@ export default function HistoryTab({ now, selSym, onSelect, spreads, active }: {
       {/* 폭 92% 가운데 정렬 — 양옆에 여백을 조금 둬 차트 카드가 화면 끝까지 꽉 차지 않게. 필터바·표도 같이 좁혀 줄을 맞춘다 */}
       <div style={{ width: '92%', margin: '0 auto', padding: 'var(--space-6) 0', display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
 
-        {/* 방향 서브탭 + 표 필터바 (§3.5) — 아래 표·우측 column 에만 걸린다. 차트 설정은 맨 아래 차트 툴바에 따로 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+        {/* 방향 서브탭 + 표 필터바 (§3.5) — 아래 표·우측 column 에만 걸린다. 차트 설정은 맨 아래 차트 툴바에 따로.
+            data-area 는 052 화면 영역 이용 통계의 영역(필터 둘·표·요약·로그·차트) */}
+        <div data-area="filters" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
           <Seg opts={dirOpts} pad="6px 16px" />
           {group('기간', <Seg opts={PERS.map((p) => seg(PER_LABEL[p], per === p, () => setPer(p)))} />)}
           {group('국내', <Seg opts={[
@@ -241,7 +242,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads, active }: {
         <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 'var(--space-4)', alignItems: 'start' }}>
 
           {/* 좌: 티커별 사건 표 */}
-          <div style={{ ...card, padding: 'var(--space-4) 0' }}>
+          <div data-area="table" style={{ ...card, padding: 'var(--space-4) 0' }}>
             <div style={{ ...kicker, padding: '0 var(--space-6) var(--space-2)' }}>티커별 {DIR_LABEL[dir]} 사건 · {PER_LABEL[per]} — 열 클릭으로 정렬</div>
             <div style={{ overflowX: 'auto' }}>
               <div style={{ minWidth: 800 }}>
@@ -290,7 +291,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads, active }: {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
             {/* 우: 선택 심볼 요약 + 타임라인 1줄 */}
-            <div style={{ ...card, padding: 'var(--space-6)' }}>
+            <div data-area="summary" style={{ ...card, padding: 'var(--space-6)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
                 <span style={{ fontFamily: 'var(--font-heading)', fontSize: 22, fontWeight: 500 }}>{selSym}</span>
                 <StatusPill since={sum.ongoingSince} nowSec={nowSec} />
@@ -333,7 +334,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads, active }: {
             </div>
 
             {/* 우: 사건 로그 — 최근 20건 */}
-            <div style={{ ...card, padding: 'var(--space-2) 0' }}>
+            <div data-area="list" style={{ ...card, padding: 'var(--space-2) 0' }}>
               <div style={{ ...kicker, padding: 'var(--space-4) var(--space-6) var(--space-2)' }}>사건 로그 · {selSym} 최근 20건</div>
               <div style={{ display: 'grid', gridTemplateColumns: LOG_GRID, padding: '0 var(--space-6)', borderBottom: '1px solid var(--color-neutral-800)', fontSize: 10.5, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--color-neutral-600)' }}>
                 <span style={{ padding: '6px 8px 6px 0' }}>거래소</span>
@@ -369,7 +370,7 @@ export default function HistoryTab({ now, selSym, onSelect, spreads, active }: {
           doms={chartDoms} onDoms={setChartDoms}
           loading={candlesLoading} errorStatus={candlesError} />
         {/* 카드 사이는 다른 블록보다 넓게 — 카드가 붙어 있으면 한 덩어리로 보여 답답하다 */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
+        <div data-area="chart" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
           {shownFxs.map((fx) => {
             const open = cards.find((c) => c.fx === fx)
             // 접힌 카드의 series 는 헤더의 국내 목록용 빈 봉

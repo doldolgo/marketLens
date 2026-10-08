@@ -188,7 +188,7 @@ export default function FlowTab({ active }: { active: boolean }) {
   return (
     <>
       {/* 바 1: 창 · 방향 · 코인 검색 · 우측 오류 문구 + 피드 상태 */}
-      <div style={bar}>
+      <div data-area="filters" style={bar}>
         <Seg opts={WINDOWS.map(([id, l]) => segOpt(l, win === id, () => setWin(id)))} />
         <Seg opts={DIRS.map(([id, l]) => segOpt(l, dir === id, () => setDir(id)))} />
         <input className="input" placeholder="코인 심볼 입력 후 Enter" value={q}
@@ -205,8 +205,8 @@ export default function FlowTab({ active }: { active: boolean }) {
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
         <div style={{ maxWidth: 1240, margin: '0 auto', padding: 'var(--space-4) var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
 
-          {/* 순유입 표 */}
-          <div style={{ ...card, padding: '0 0 var(--space-2)' }}>
+          {/* 순유입 표 — data-area 는 052 화면 영역 이용 통계의 영역 */}
+          <div data-area="table" style={{ ...card, padding: '0 0 var(--space-2)' }}>
             <TableTitle>{`코인별 순유입 · 최근 ${winLabel(win)} · ${netRows.length}종`}</TableTitle>
             <div style={{ overflowX: 'auto' }}>
               <div style={{ minWidth: NET_MIN }}>
@@ -226,7 +226,7 @@ export default function FlowTab({ active }: { active: boolean }) {
           </div>
 
           {/* 최근 전송 표 */}
-          <div style={{ ...card, padding: '0 0 var(--space-2)' }}>
+          <div data-area="table-2" style={{ ...card, padding: '0 0 var(--space-2)' }}>
             <TableTitle>최근 전송 · 24시간 안 최신순 · 최대 100행</TableTitle>
             <div style={{ overflowX: 'auto' }}>
               <div style={{ minWidth: RECENT_MIN }}>

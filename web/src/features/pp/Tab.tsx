@@ -93,7 +93,7 @@ export default function PpTab({ feed }: { feed: Feed }) {
 
   return (
     <>
-      <div style={bar}>
+      <div data-area="filters" style={bar}>
         <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={searchInput} />
         <NumField label="가격갭 임계값" value={thrP} step={0.1} onChange={setThrP} />
         <NumField label="펀딩갭 임계값 · 연" value={thrF} step={5} onChange={setThrF} />
@@ -102,7 +102,7 @@ export default function PpTab({ feed }: { feed: Feed }) {
         <span style={count}>{rows.length} / {all.length} 코인 표시</span>
       </div>
 
-      <TableFrame minWidth={760}>
+      <TableFrame minWidth={760} area="table">
         <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={mul} onSort={clickSort} />
         {rows.map((r) => {
           const p = r.pair

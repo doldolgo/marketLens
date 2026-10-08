@@ -116,7 +116,7 @@ export default function GapTab({ feed, now }: { feed: Feed; now: number }) {
 
   return (
     <>
-      <div style={bar}>
+      <div data-area="filters" style={bar}>
         <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={searchInput} />
         <span style={label}>기준 보기</span>
         <Seg pad="4px 10px" opts={[['entry', '진입 기준'], ['exit', '정리 기준']].map(([id, l]) => segOpt(l, mode === id, () => switchMode(id as Mode)))} />
@@ -126,7 +126,7 @@ export default function GapTab({ feed, now }: { feed: Feed; now: number }) {
         <span style={count}>{rows.length} / {all.length} 코인 표시</span>
       </div>
 
-      <TableFrame minWidth={760}>
+      <TableFrame minWidth={760} area="table">
         <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={mul} onSort={clickSort} />
         {rows.map((r) => {
           const c = combo(r)
