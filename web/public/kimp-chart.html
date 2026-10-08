@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- 스펙 044 — 검색어 "김프 차트" 를 받는 정적 한 페이지(번들 밖, privacy.html 과 같은 방식). 외부 자원·서버 호출 없음 — nginx 의 CSP 가 지킨다.
+       실시간 값은 넣지 않는다(검색 결과에 '지금 값' 으로 남지 않게). 차트 자체는 대시보드 기록 탭(/app/?tab=history)이 그린다 -->
+  <title>김프 차트 - 실시간·과거 김치프리미엄 봉 차트 | KimpTrack</title>
+  <meta name="description" content="김프 차트를 1분·1시간·일봉으로 봅니다. 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX 조합마다 김치프리미엄·역프 봉과 입출금 상태를 함께 기록합니다." />
+  <meta name="robots" content="index, follow, max-image-preview:large" />
+  <link rel="canonical" href="https://kimptrack.com/kimp-chart" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="theme-color" content="#161826" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="KimpTrack" />
+  <meta property="og:title" content="김프 차트 - 실시간·과거 김치프리미엄 봉 차트 | KimpTrack" />
+  <meta property="og:description" content="김프 차트를 1분·1시간·일봉으로 봅니다. 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX 조합마다 김치프리미엄·역프 봉과 입출금 상태를 함께 기록합니다." />
+  <meta property="og:url" content="https://kimptrack.com/kimp-chart" />
+  <meta property="og:image" content="https://kimptrack.com/landing/og-v2.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="KimpTrack — 실시간 김프·역프, 실제로 옮길 수 있는지까지" />
+  <meta property="og:locale" content="ko_KR" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "@id": "https://kimptrack.com/kimp-chart#webpage",
+    "url": "https://kimptrack.com/kimp-chart",
+    "name": "김프 차트 - 실시간·과거 김치프리미엄 봉 차트 | KimpTrack",
+    "description": "김프 차트를 1분·1시간·일봉으로 봅니다. 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX 조합마다 김치프리미엄·역프 봉과 입출금 상태를 함께 기록합니다.",
+    "inLanguage": "ko-KR",
+    "isPartOf": { "@id": "https://kimptrack.com/#website" },
+    "primaryImageOfPage": { "@type": "ImageObject", "url": "https://kimptrack.com/landing/history.png", "width": 2040, "height": 1230 },
+    "dateModified": "2026-10-08"
+  }
+  </script>
+  <style>
+    /* 색 값은 랜딩(landing.html)과 같은 docs/design/theme.css 토큰 복사본. 글꼴은 시스템 글꼴만(랜딩의 서브셋 글꼴은 이 페이지 글자를 담지 않는다) */
+    :root {
+      color-scheme: dark;
+      --bg: #161826;
+      --surface: #232532;
+      --text: #e9e9ed;
+      --n100: #f3f5fe;
+      --n300: #cfd3e5;
+      --n400: #b2b6ca;
+      --n500: #9397ab;
+      --n600: #75798c;
+      --n800: #3a3d4a;
+      --accent: #9184d9;
+      --divider: rgba(233, 233, 237, 0.16);
+      --r-md: 8px;
+      --font: -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-padding-top: 24px; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 17px; line-height: 1.7; word-break: keep-all; overflow-wrap: anywhere; -webkit-font-smoothing: antialiased; }
+    h1, h2, h3, p, ul, ol, dl, dd, figure { margin: 0; }
+    h1, h2, h3 { font-weight: 700; text-wrap: balance; }
+    a { color: inherit; text-decoration: none; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+    img { display: block; max-width: 100%; height: auto; }
+    .wrap { width: min(1120px, 100% - 64px); margin-inline: auto; }
+    .link { color: var(--n100); text-decoration: underline; text-decoration-color: var(--n600); text-underline-offset: 4px; }
+    .link:hover { text-decoration-color: var(--n100); }
+
+    .bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 72px; }
+    .mark { display: inline-flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+    .mark svg { flex: none; color: var(--accent); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 16px; border: 1px solid var(--accent); border-radius: var(--r-md); background: none; color: var(--n100); font-size: 15px; font-weight: 600; white-space: nowrap; }
+    .btn:hover { background: rgba(145, 132, 217, 0.12); }
+    .btn-lg { height: 48px; padding: 0 22px; font-size: 16px; }
+
+    .doc { padding-block: 48px 96px; }
+    h1 { font-size: 36px; line-height: 1.25; letter-spacing: -0.03em; }
+    .lead { margin-top: 24px; max-width: 34em; color: var(--n300); }
+    .cta { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; margin-top: 28px; }
+    section { margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--divider); }
+    section > * { max-width: 34em; }
+    section > .shot, section > .grid { max-width: none; }
+    h2 { font-size: 24px; line-height: 1.4; letter-spacing: -0.02em; }
+    h3 { margin-top: 28px; font-size: 17px; line-height: 1.5; }
+    section p, section ul, section ol, section dl { margin-top: 12px; color: var(--n300); }
+    section ul, section ol { padding-left: 1.3em; }
+    section li + li { margin-top: 6px; }
+    dt { margin-top: 20px; font-weight: 700; color: var(--text); }
+    dd { margin-top: 4px; }
+    .shot { margin-top: 28px; }
+    .shot img { border: 1px solid var(--n800); border-radius: var(--r-md); }
+    .shot figcaption { margin-top: 12px; font-size: 13px; line-height: 1.6; color: var(--n400); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 20px; }
+    .grid a { display: block; padding: 14px 16px; border: 1px solid var(--divider); border-radius: var(--r-md); background: var(--surface); color: var(--n100); font-weight: 600; }
+    .grid a:hover { border-color: var(--accent); }
+    .grid small { display: block; margin-top: 2px; font-size: 13px; font-weight: 400; color: var(--n400); }
+
+    .foot { padding-block: 32px 48px; border-top: 1px solid var(--divider); font-size: 13px; color: var(--n500); }
+    .foot-nav { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-bottom: 16px; font-size: 14px; }
+    .foot-nav a { color: var(--n300); }
+    .foot-nav a:hover { color: var(--n100); }
+    @media (max-width: 719px) {
+      .wrap { width: min(1120px, 100% - 32px); }
+      h1 { font-size: 30px; }
+      h2 { font-size: 21px; }
+      .doc { padding-block: 32px 72px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="wrap bar">
+    <a class="mark" href="/" aria-label="KimpTrack 첫 화면">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><circle cx="5" cy="15" r="3" fill="currentColor"/><circle cx="17" cy="7" r="3" fill="currentColor"/><path d="M7.5 13 14.5 9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      KimpTrack
+    </a>
+    <a class="btn" href="/app/?tab=history">김프 차트 열기</a>
+  </header>
+
+  <main class="wrap doc">
+    <h1>김프 차트 — 실시간·과거 김치프리미엄 봉 차트</h1>
+    <p class="lead">KimpTrack 김프 차트는 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX을 잇는 조합마다 김프(김치프리미엄)와 역프를 1분에 한 점씩 기록해 봉 차트로 보여 줍니다. 코인 하나를 고르면 해외 거래소마다 카드가 하나씩 쌓이고, 각 카드 아래에는 그 시각에 입출금이 열려 있었는지가 띠로 붙습니다. 가입 없이 무료입니다.</p>
+    <div class="cta">
+      <a class="btn btn-lg" href="/app/?tab=history">김프 차트 열기</a>
+      <a class="link" href="/kimp-history">김프 히스토리(지난 사건 기록) 보기</a>
+    </div>
+
+    <section aria-labelledby="what-title">
+      <h2 id="what-title">김프 차트에서 볼 수 있는 것</h2>
+      <ul>
+        <li><strong>봉 종류 8개</strong> — 1분·3분·5분·15분·30분·1시간·4시간·1일. 봉은 한국 시간 벽시계에 맞춰 자릅니다(일봉은 한국 시간 자정 기준).</li>
+        <li><strong>해외 거래소별 카드</strong> — 바이낸스·바이비트·비트겟·OKX 가운데 고른 수만큼 차트가 세로로 쌓입니다. 한 카드 안에서 국내 거래소 하나는 캔들로, 둘을 고르면 업비트·빗썸이 선 두 개로 겹칩니다.</li>
+        <li><strong>김프와 역프 따로</strong> — 방향을 고르면 그 방향의 봉만 그립니다. 역프는 국내에서 사서 해외에서 팔 때 기준으로 양수입니다.</li>
+        <li><strong>입출금 띠</strong> — 카드마다 거래소별로 입금 줄과 출금 줄이 붙습니다. 그 시각에 막혀 있던 구간은 색이 달라, 차트 위의 큰 김프가 실제로 옮길 수 있었던 값인지 바로 구분됩니다.</li>
+        <li><strong>시간축·십자선 연동</strong> — 카드 하나를 드래그하거나 확대하면 다른 카드도 같은 구간을 보여 주고, 십자선도 함께 움직입니다.</li>
+        <li><strong>사건 음영</strong> — 1% 이상 벌어져 1분 넘게 이어진 구간은 차트 아래에 따로 표시됩니다. 사건 목록은 <a class="link" href="/kimp-history">김프 히스토리</a>에서 봅니다.</li>
+      </ul>
+      <figure class="shot">
+        <picture>
+          <source type="image/webp" srcset="landing/history-1020.webp 1020w, landing/history-2040.webp 2040w" sizes="(max-width: 719px) calc(100vw - 32px), 1120px" />
+          <img src="landing/history.png" width="2040" height="1230" loading="lazy" decoding="async" alt="비트코인 김프를 1분 봉 차트로 그리고 거래소별 입출금 띠를 함께 보여 주는 KimpTrack 김프 차트 화면" />
+        </picture>
+        <figcaption>비트코인(BTC) 김프 차트 — 해외 거래소별 카드와 그 아래 입출금 띠.</figcaption>
+      </figure>
+    </section>
+
+    <section aria-labelledby="read-title">
+      <h2 id="read-title">김프 차트 읽는 법</h2>
+      <dl>
+        <dt>봉 하나의 뜻</dt>
+        <dd>1분 봉 하나는 그 1분 동안 매초 계산한 김프의 시가·고가·저가·종가입니다. 값은 맨 위 호가로 계산한 원값이라, $1,000어치를 실제로 체결할 때의 순값보다 큽니다. 실시간 김프 표의 순값과 차트의 원값은 그래서 다릅니다.</dd>
+        <dt>환율</dt>
+        <dd>은행 환율이 아니라 업비트·빗썸의 USDT(테더) 원화 호가로 환산합니다. 테더 김프가 오르내리면 다른 사이트의 김프 차트와 값이 달라질 수 있습니다.</dd>
+        <dt>입출금 띠가 막힘일 때</dt>
+        <dd>그 구간의 김프는 보는 값일 뿐 옮길 수 없었던 값입니다. 상장 직후나 네트워크 점검 때 김프가 크게 벌어지는 이유가 대개 여기에 있습니다.</dd>
+        <dt>어디까지 거슬러 볼 수 있나</dt>
+        <dd>1분 봉은 7일, 5분 봉은 30일, 1시간 봉은 90일, 4시간 봉은 1년, 일봉은 기간 제한 없이 남깁니다. 2026년 9월부터 기록을 시작했습니다.</dd>
+      </dl>
+    </section>
+
+    <section aria-labelledby="coins-title">
+      <h2 id="coins-title">코인별 김프 차트 바로 가기</h2>
+      <p>자주 찾는 코인입니다. 차트에서 다른 코인·국내 거래소·해외 거래소·봉 종류를 바꿀 수 있습니다.</p>
+      <div class="grid">
+        <a href="/app/?tab=history&amp;sym=BTC">비트코인 김프 차트<small>BTC</small></a>
+        <a href="/app/?tab=history&amp;sym=ETH">이더리움 김프 차트<small>ETH</small></a>
+        <a href="/app/?tab=history&amp;sym=XRP">리플 김프 차트<small>XRP</small></a>
+        <a href="/app/?tab=history&amp;sym=SOL">솔라나 김프 차트<small>SOL</small></a>
+        <a href="/app/?tab=history&amp;sym=DOGE">도지코인 김프 차트<small>DOGE</small></a>
+        <a href="/app/?tab=history">전체 코인 김프 차트<small>약 400개</small></a>
+      </div>
+    </section>
+
+    <section aria-labelledby="faq-title">
+      <h2 id="faq-title">자주 묻는 질문</h2>
+      <h3>김프 차트는 실시간인가요?</h3>
+      <p>네. 1분마다 새 봉이 더해지고 지난 봉은 그대로 남습니다. 실시간 숫자만 보려면 <a class="link" href="/app/">실시간 김프 표</a>가 더 빠릅니다.</p>
+      <h3>김프 차트와 코인 가격 차트는 어떻게 다른가요?</h3>
+      <p>가격이 아니라 국내 가격이 해외 가격보다 몇 % 비싼지(김프)를 그립니다. 코인 가격이 오르든 내리든 두 거래소의 차이가 그대로면 김프 차트는 평평합니다.</p>
+      <h3>거래소 앱이나 트레이딩뷰에 김프 차트가 있나요?</h3>
+      <p>거래소 앱은 자기 거래소 가격만 보여 주고, 트레이딩뷰에는 두 가격을 나눈 수식 차트를 직접 만들어야 합니다. KimpTrack은 환율을 USDT 호가로 맞추고 입출금 상태까지 같은 화면에 두는 점이 다릅니다.</p>
+      <h3>수수료와 전송 시간도 들어 있나요?</h3>
+      <p>아니요. 거래·출금 수수료와 전송 시간, 그 사이의 가격 변화는 빠져 있습니다. 차트의 김프만큼 수익이 난다는 뜻이 아닙니다.</p>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    <nav class="foot-nav" aria-label="바로 가기">
+      <a href="/">첫 화면</a>
+      <a href="/app/">실시간 김프 표</a>
+      <a href="/kimp-history">김프 히스토리</a>
+      <a href="/#kimp">김프·역프란</a>
+      <a href="/privacy">개인정보 처리방침</a>
+    </nav>
+    <p>KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다.</p>
+    <p>설명을 마지막으로 고친 날 <time datetime="2026-10-08">2026년 10월 8일</time></p>
+  </footer>
+</body>
+</html>

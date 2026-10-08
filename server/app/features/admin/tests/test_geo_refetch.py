@@ -1,4 +1,4 @@
-"""DB-IP 다시 받기 — 같은 달 0회·새 달 1회·500 은 1시간·404 는 24시간·성공하면 캐시된 회전 파일도 새 판으로,
+"""DB-IP 다시 받기 — 같은 달 0회·새 달 1회·실패(500·404·시간 초과)는 6시간 뒤·성공하면 캐시된 회전 파일도 새 판으로,
 갈아 끼우는 순간에 겹친 창 둘도 한 번만 다시 만들고 캐시는 옛 판을 쥐지 않는다 (스펙 039 §3.3·§3.5·§4 '다시 받기')."""
 
 import asyncio
@@ -6,6 +6,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import pytest
 
 from app.features.admin.tests.access_fakes import (
@@ -54,13 +55,18 @@ async def test_the_same_month_is_not_fetched_again(tmp_path: Path) -> None:
     assert (dbip.count("country"), dbip.count("asn")) == (1, 1)
 
 
-@pytest.mark.parametrize(("status", "wait"), [(500, HOUR), (404, DAY)])
-async def test_a_failed_new_month_keeps_the_old_table_and_waits(
-    tmp_path: Path, status: int, wait: int
+def hang(request: httpx.Request) -> httpx.Response:
+    raise httpx.ReadTimeout("slow", request=request)
+
+
+@pytest.mark.parametrize("failure", [500, 404, hang])
+async def test_a_failed_new_month_keeps_the_old_table_and_waits_six_hours(
+    tmp_path: Path, failure: object
 ) -> None:
     dbip = DbIp().serve()
     f = await loaded(tmp_path, dbip)
-    dbip.files[url("country", NOV)] = status
+    dbip.files[url("country", NOV)] = failure
+    wait = 6 * HOUR
     f.t = TO_NOV
     geo = (await f.get("30d"))["geo"]
     assert (geo["state"], geo["code"], geo["month"]) == ("ok", None, MONTH)

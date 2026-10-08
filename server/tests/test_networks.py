@@ -388,3 +388,20 @@ def test_wallet_fields_unknown_without_foreign_networks_uses_foreign_coin_values
     dom = _Row(None, None, [net("ETH", "Ethereum", wd=False)])
     fx = _Row(False, True, [])
     assert wallet_fields(dom, fx) == ("Ethereum", None, True, False, False, True)
+
+
+def test_okx_chain_names_match_domestic_networks() -> None:
+    """OKX `chain` 은 `<ccy>-<이름>` — 뗀 이름이 006 정규화·별칭으로 국내 기준 네트워크와 짝이 맞는다 (045 §3.6)."""
+    pairs = [
+        (net("BTC", "Bitcoin"), net("BITCOIN", "Bitcoin")),
+        (net("ETH", "Ethereum"), net("ERC20", "ERC20")),
+        (net("ETH", "ETH"), net("ERC20", "ERC20")),
+        (net("TRX", "Tron"), net("TRC20", "TRC20")),
+        (net("ARBITRUM", "Arbitrum One"), net("ARBITRUMONE", "Arbitrum One")),
+        (net("ARB_ETH", "ARB_ETH"), net("ARBITRUMONE", "Arbitrum One")),
+        (net("SOL", "Solana"), net("SOLANA", "Solana")),
+    ]
+    for dom, okx in pairs:
+        verdict, matched = match_network(dom, [okx, net("BEP20", "BSC")])
+        assert verdict == "matched", (dom, okx)
+        assert matched is okx

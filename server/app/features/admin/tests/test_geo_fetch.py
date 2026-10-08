@@ -1,4 +1,5 @@
-"""DB-IP 받기 — 두 주소·UTC 달·리다이렉트·지난달·다시 부르기·시한·바이트 상한·한 번에 하나 (스펙 039 §3.3·§4 '받기')."""
+"""DB-IP 받기 — 두 주소·UTC 달·리다이렉트·어떤 실패든 지난달·다시 부르기(6시간·24시간)·시한·바이트 상한·한 번에 하나
+(스펙 039 §3.3·§4 '받기')."""
 
 import asyncio
 import threading
@@ -26,6 +27,17 @@ from app.features.admin.tests.geo_fakes import (
 
 # 2026-10-31T16:00Z = KST 11-01 01:00 — 달은 UTC 로 센다
 EDGE = datetime(2026, 10, 31, 16, tzinfo=UTC).timestamp()
+SEPT = "2026-09"
+SIX_HOURS = 6 * 3600  # 이번 달이 실패한 시도 뒤
+ONE_DAY = 86_400  # 이번 달을 올린 시도 뒤
+
+
+def hang(request: httpx.Request) -> httpx.Response:
+    raise httpx.ReadTimeout("slow", request=request)
+
+
+def refuse(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("no route", request=request)
 
 
 class Clock:
@@ -66,42 +78,84 @@ def test_fetches_the_two_urls_of_the_utc_month_with_get_and_the_app_agent() -> N
     assert loader.table.loaded_at == int(EDGE * 1000) and warns == []
 
 
-def test_a_redirect_is_an_error_and_is_not_followed() -> None:
+def test_a_redirect_is_not_followed_and_names_the_error() -> None:
     dbip = DbIp().serve()
+    elsewhere = "https://download.db-ip.com/free/elsewhere.csv.gz"
     dbip.files[url("country")] = lambda r: httpx.Response(
-        302, headers={"location": url("country", "2026-09")}
+        302, headers={"location": elsewhere}
     )
     loader, _, warns = make(dbip)
     loader.ensure()
-    assert dbip.urls == [url("country")]
+    # 따라가지 않는다 — 판이 없으니 지난달 묶음으로 가고, 지난달도 없으면 code 는 이번 달의 실패
+    assert dbip.urls == [url("country"), url("country", SEPT)]
     assert loader.table is None and loader.waiting() == ("error", "http_302")
     assert warns == [("geo", "http_302")]
 
 
-@pytest.mark.parametrize("missing", ["country", "asn"])
-def test_this_month_404_without_a_table_falls_back_to_last_month(missing: str) -> None:
-    dbip = DbIp().serve("2026-09")
-    if missing == "asn":
+# 이번 달이 어떤 이유로 실패하든 — 나라 404·ASN 404·5xx·깨진 gzip·시간 초과·연결 실패
+FAILURES = {
+    "http_404": None,
+    "asn http_404": None,
+    "http_500": 500,
+    "bad_data": b"not gzip at all",
+    "timeout": hang,
+    "ConnectError": refuse,
+}
+
+
+@pytest.mark.parametrize("failure", list(FAILURES))
+def test_any_failure_of_this_month_without_a_table_falls_back_to_last_month(
+    failure: str,
+) -> None:
+    dbip = DbIp().serve(SEPT)
+    if failure == "asn http_404":
         dbip.files[url("country")] = bundle()[0]
-    loader, _, _ = make(dbip)
+    elif FAILURES[failure] is not None:
+        dbip.files[url("country")] = FAILURES[failure]
+    loader, clock, warns = make(dbip)
     loader.ensure()
-    tried = [url("country")] + ([url("asn")] if missing == "asn" else [])
-    assert dbip.urls == tried + [url("country", "2026-09"), url("asn", "2026-09")]
-    assert loader.table is not None and loader.table.month == "2026-09"
+    tried = [url("country")] + ([url("asn")] if failure == "asn http_404" else [])
+    assert dbip.urls == tried + [url("country", SEPT), url("asn", SEPT)]
+    assert loader.table is not None and loader.table.month == SEPT
+    # 지난달을 올렸어도 이번 달의 실패를 한 줄 남긴다
+    assert warns == [("geo", failure.removeprefix("asn "))]
+    dbip.serve()  # 이번 달 판이 생겼다 — 이번 달은 실패한 시도에서 6시간 뒤에 다시
+    clock.t = SIX_HOURS - 1
+    loader.ensure()
+    assert dbip.count("country") == 1 and loader.table.month == SEPT
+    clock.t = SIX_HOURS
+    loader.ensure()
+    assert dbip.count("country") == 2 and loader.table.month == MONTH
 
 
-def test_two_months_404_is_an_error_and_retried_once_an_hour_later() -> None:
+def test_two_months_404_is_an_error_and_retried_six_hours_later() -> None:
     dbip = DbIp()
     loader, clock, warns = make(dbip)
     loader.ensure()
-    assert dbip.urls == [url("country"), url("country", "2026-09")]
+    assert dbip.urls == [url("country"), url("country", SEPT)]
     assert loader.waiting() == ("error", "http_404") and warns == [("geo", "http_404")]
-    clock.t = 3599
+    clock.t = SIX_HOURS - 1
     loader.ensure()
-    assert dbip.count("country") == 1  # 1시간 안 — 부르지 않는다
-    clock.t = 3600
+    assert dbip.count("country") == 1  # 6시간 안 — 부르지 않는다
+    clock.t = SIX_HOURS
     loader.ensure()
     assert dbip.count("country") == 2
+
+
+def test_after_loading_this_month_the_next_month_waits_a_day() -> None:
+    # 10월 판을 10-31 23:00Z 에 올렸다 — 11월이 돼도 그 시도에서 24시간 뒤에야 11월을 받는다
+    dbip = DbIp().serve()
+    dbip.serve("2026-11")
+    loader, clock, _ = make(dbip, datetime(2026, 10, 31, 23, tzinfo=UTC).timestamp())
+    loader.ensure()
+    assert loader.table is not None and loader.table.month == MONTH
+    for t in (1800, ONE_DAY - 1):  # 11-01 00:30Z 부터
+        clock.t = t
+        loader.ensure()
+    assert dbip.count("country", "2026-11") == 0
+    clock.t = ONE_DAY
+    loader.ensure()
+    assert dbip.count("country", "2026-11") == 1 and loader.table.month == "2026-11"
 
 
 def test_an_asn_failure_keeps_the_old_table_and_loads_nothing_without_one() -> None:
@@ -139,12 +193,6 @@ def test_a_file_over_60_seconds_is_a_timeout() -> None:
 
 
 def test_a_read_timeout_and_a_connection_failure_name_their_codes() -> None:
-    def hang(request: httpx.Request) -> httpx.Response:
-        raise httpx.ReadTimeout("slow", request=request)
-
-    def refuse(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("no route", request=request)
-
     for handler, code in ((hang, "timeout"), (refuse, "ConnectError")):
         dbip = DbIp()
         dbip.files[url("country")] = handler

@@ -38,6 +38,9 @@ ROTATED_PREFIX = "access-"
 BUDGET_BYTES = 100 * 1024 * 1024
 CURRENT_EVERY_SEC = 60.0
 TOP = 20
+# 회전 gz 의 글자 읽기 단위(기본 8KB). 풀기는 부를 때마다 GIL 을 놓았다 다시 잡아, 같은 프로세스에 CPU 를 쓰는 스레드가
+# 겹치면 다시 잡을 때마다 전환 간격(5ms)을 기다린다 — 50MiB 회전 파일이 8KB 면 ≈6,400번(039 의 DB-IP 읽기와 같은 까닭)
+GZ_TEXT_CHUNK = 1 << 20
 # 회전 파일이 깨졌을 때 나는 것 — 잘린 gz(EOFError)·틀린 머리·CRC(BadGzipFile ⊂ OSError)·압축 자료(zlib.error)·권한
 BROKEN = (EOFError, OSError, zlib.error)
 KST = timezone(timedelta(hours=9))
@@ -131,7 +134,10 @@ def raw_size(path: str, size: int) -> int | None:
 
 def open_log(path: str) -> IO[str]:
     if path.endswith(".gz"):
-        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
+        handle = gzip.open(path, "rt", encoding="utf-8", errors="replace")
+        handle._CHUNK_SIZE = GZ_TEXT_CHUNK  # type: ignore[attr-defined]
+        return handle
+    # 압축 안 된 파일은 기본 단위 그대로 — 읽기가 짧아 CPU 스레드와 겹쳐도 거의 늦지 않았다(038 §3.7)
     return open(path, encoding="utf-8", errors="replace")
 
 

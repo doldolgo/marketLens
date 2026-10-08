@@ -8,6 +8,7 @@ DB-IP ASN 자료를 올릴 때 행마다 한 번 부른다. 위에서 먼저 맞
 import re
 
 TELECOM_KR = "telecom_kr"
+NET_TELECOM_ALL = "telecom+telecom_kr"  # 하루 최대 짝 수를 셀 때만 쓰는 열쇠 — telecom_kr 을 telecom 에 접을 때의 기준 (039 §3.6)
 TELECOM = "telecom"
 CLOUD = "cloud"
 OTHER = "other"

@@ -629,7 +629,7 @@ function drawOverview() {
 
 // --- 수집 (§3.4) -------------------------------------------------------------------------------
 
-const EXCHANGES = ['upbit', 'bithumb', 'binance', 'bybit', 'bitget'];
+const EXCHANGES = ['upbit', 'bithumb', 'binance', 'bybit', 'bitget', 'okx'];
 const EX_STATE = { ok: ['ok', '수집 중'], stale: ['warn', '지연'], down: ['bad', '끊김'] };
 const kindTone = (kind) => (kind === 'banned' || kind === 'rate_limit' ? 'bad' : 'warn');
 // 실패 종류 이름표 — 공개 수집 상태 탭(011)의 유형 칩 라벨과 같다(041 §3.4). 표에 없는 값은 원래 글자 그대로

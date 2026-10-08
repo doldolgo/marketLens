@@ -21,6 +21,7 @@ from app.features.wallet_status.bitget import fetch_bitget
 from app.features.wallet_status.bithumb import fetch_bithumb
 from app.features.wallet_status.bybit import fetch_bybit
 from app.features.wallet_status.models import CoinStatus, WalletStatusError
+from app.features.wallet_status.okx import fetch_okx
 from app.features.wallet_status.upbit import fetch_upbit
 
 logger = logging.getLogger("marketlens.wallet_status")
@@ -29,7 +30,7 @@ logger = logging.getLogger("marketlens.wallet_status")
 WALLET_REFRESH_INTERVAL = 60.0
 
 # 경고·실패 목록의 순서 고정 — 사이클마다 순서가 바뀌면 비교가 성가시다
-_EXCHANGES = ("upbit", "bithumb", "binance", "bybit", "bitget")
+_EXCHANGES = ("upbit", "bithumb", "binance", "bybit", "bitget", "okx")
 
 # 모름인 행에 거는 빈 망 목록 — 모든 행이 이 한 객체를 나눠 쓴다(누구도 고치지 않는다, §3.5).
 # 행마다 새 빈 목록을 걸면 틱·표의 망 판정 메모(core)가 매초 빗나간다
@@ -55,6 +56,9 @@ class WalletStatusService:
         binance_secret_key: str | None,
         bybit_api_key: str | None = None,
         bybit_secret_key: str | None = None,
+        okx_api_key: str | None = None,
+        okx_secret_key: str | None = None,
+        okx_passphrase: str | None = None,
         interval: float = WALLET_REFRESH_INTERVAL,
         record: RawRecorder = noop_record,  # 010 원문 싱크 — 주입하지 않으면 무동작 (§3.5)
     ) -> None:
@@ -64,6 +68,9 @@ class WalletStatusService:
         self._binance_secret_key = binance_secret_key
         self._bybit_api_key = bybit_api_key
         self._bybit_secret_key = bybit_secret_key
+        self._okx_api_key = okx_api_key
+        self._okx_secret_key = okx_secret_key
+        self._okx_passphrase = okx_passphrase
         self._interval = interval
         self._record = record
         self._last_at: float | None = None
@@ -74,7 +81,7 @@ class WalletStatusService:
     async def refresh_if_due(
         self, client: httpx.AsyncClient, *, force: bool = False
     ) -> dict[str, int] | None:
-        """60초가 지났으면 다섯 거래소를 병렬 조회하고 거래소별 호출 수를 돌려준다.
+        """60초가 지났으면 여섯 거래소를 병렬 조회하고 거래소별 호출 수를 돌려준다.
 
         캐시가 유효한 틱은 None. 기동 첫 틱은 캐시가 비어 즉시 호출한다. `force` 는
         001 의 즉시 갱신 트리거(`/refresh`)가 주기와 무관하게 조회시키는 길이다.
@@ -118,6 +125,16 @@ class WalletStatusService:
                 ),
             ),
             self._fetch_one("bitget", fetch_bitget(client, record=self._record)),
+            self._fetch_one(
+                "okx",
+                fetch_okx(
+                    client,
+                    api_key=self._okx_api_key,
+                    secret_key=self._okx_secret_key,
+                    passphrase=self._okx_passphrase,
+                    record=self._record,
+                ),
+            ),
         )
         return {ex: n for ex, n in zip(_EXCHANGES, calls, strict=True) if n > 0}
 

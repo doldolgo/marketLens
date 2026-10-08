@@ -14,8 +14,8 @@ APP_NAME = "MarketLens Backend"
 APP_VERSION = "0.1.0"
 USER_AGENT = f"marketlens-server/{APP_VERSION}"
 
-# 거래소 5곳 고정 순서 — 스펙 001 §3.3·020 §2. 국내 둘은 KRW, 바이낸스·바이빗·비트겟은 USDT 마켓
-EXCHANGES = ("upbit", "bithumb", "binance", "bybit", "bitget")
+# 거래소 6곳 고정 순서 — 스펙 001 §3.3·045 §2. 국내 둘은 KRW, 바이낸스·바이빗·비트겟·OKX 는 USDT 마켓
+EXCHANGES = ("upbit", "bithumb", "binance", "bybit", "bitget", "okx")
 DOMESTIC_EXCHANGES = ("upbit", "bithumb")
 
 # 거래소 REST(마켓 목록) 타임아웃(초)·WebSocket 핸드셰이크 타임아웃(초) — 스펙 001 §3.1
@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     binance_secret_key: str | None = None
     bybit_api_key: str | None = None
     bybit_secret_key: str | None = None
+    # OKX 입출금 조회(045) — 인증 엔드포인트라 셋이 전부 있어야 조회한다(읽기 권한)
+    okx_api_key: str | None = None
+    okx_secret_key: str | None = None
+    okx_passphrase: str | None = None
     # Slack Incoming Webhook(025). 없으면 알림 기능 전체가 꺼진다 — 로컬·테스트 기본
     slack_webhook_url: str | None = None
     # StatsD 수신 주소 `host:port`(027) — api 역할만 WS 접속 수 게이지를 보낸다. 비면 끔(로컬·테스트 기본)

@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- 스펙 044 — 검색어 "김프 히스토리" 를 받는 정적 한 페이지(번들 밖, privacy.html 과 같은 방식). 외부 자원 없음, 서버 호출은
+       GET /api/landing 하나(지난 7일 사건 — 랜딩과 같은 계약·10초 폴링) — nginx 의 CSP(connect-src 'self')가 지킨다.
+       실시간 값이 들어가는 자리는 data-nosnippet 으로 검색 결과에 '지금 값' 으로 남지 않게 한다 -->
+  <title>김프 히스토리 - 지난 김프·역프 사건 기록 | KimpTrack</title>
+  <meta name="description" content="김프 히스토리로 지난 7일 김치프리미엄·역프 사건을 봅니다. 1% 이상 벌어져 1분 넘게 이어진 구간을 코인·거래소 경로·입출금 상태와 함께 기록합니다." />
+  <meta name="robots" content="index, follow, max-image-preview:large" />
+  <link rel="canonical" href="https://kimptrack.com/kimp-history" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="theme-color" content="#161826" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="KimpTrack" />
+  <meta property="og:title" content="김프 히스토리 - 지난 김프·역프 사건 기록 | KimpTrack" />
+  <meta property="og:description" content="김프 히스토리로 지난 7일 김치프리미엄·역프 사건을 봅니다. 1% 이상 벌어져 1분 넘게 이어진 구간을 코인·거래소 경로·입출금 상태와 함께 기록합니다." />
+  <meta property="og:url" content="https://kimptrack.com/kimp-history" />
+  <meta property="og:image" content="https://kimptrack.com/landing/og-v2.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="KimpTrack — 실시간 김프·역프, 실제로 옮길 수 있는지까지" />
+  <meta property="og:locale" content="ko_KR" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "@id": "https://kimptrack.com/kimp-history#webpage",
+    "url": "https://kimptrack.com/kimp-history",
+    "name": "김프 히스토리 - 지난 김프·역프 사건 기록 | KimpTrack",
+    "description": "김프 히스토리로 지난 7일 김치프리미엄·역프 사건을 봅니다. 1% 이상 벌어져 1분 넘게 이어진 구간을 코인·거래소 경로·입출금 상태와 함께 기록합니다.",
+    "inLanguage": "ko-KR",
+    "isPartOf": { "@id": "https://kimptrack.com/#website" },
+    "primaryImageOfPage": { "@type": "ImageObject", "url": "https://kimptrack.com/landing/history.png", "width": 2040, "height": 1230 },
+    "dateModified": "2026-10-08"
+  }
+  </script>
+  <style>
+    /* 색 값은 랜딩(landing.html)과 같은 docs/design/theme.css 토큰 복사본. 글꼴은 시스템 글꼴만 */
+    :root {
+      color-scheme: dark;
+      --bg: #161826;
+      --surface: #232532;
+      --text: #e9e9ed;
+      --n100: #f3f5fe;
+      --n300: #cfd3e5;
+      --n400: #b2b6ca;
+      --n500: #9397ab;
+      --n600: #75798c;
+      --n800: #3a3d4a;
+      --accent: #9184d9;
+      --up: #e8716f;
+      --down: #5fa8e8;
+      --divider: rgba(233, 233, 237, 0.16);
+      --r-md: 8px;
+      --font: -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-padding-top: 24px; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 17px; line-height: 1.7; word-break: keep-all; overflow-wrap: anywhere; -webkit-font-smoothing: antialiased; }
+    h1, h2, h3, p, ul, ol, dl, dd, figure { margin: 0; }
+    h1, h2, h3 { font-weight: 700; text-wrap: balance; }
+    a { color: inherit; text-decoration: none; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+    [hidden] { display: none !important; }
+    .wrap { width: min(1120px, 100% - 64px); margin-inline: auto; }
+    .link { color: var(--n100); text-decoration: underline; text-decoration-color: var(--n600); text-underline-offset: 4px; }
+    .link:hover { text-decoration-color: var(--n100); }
+    .up { color: var(--up); }
+    .down { color: var(--down); }
+    .flat { color: var(--n400); }
+
+    .bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 72px; }
+    .mark { display: inline-flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+    .mark svg { flex: none; color: var(--accent); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 16px; border: 1px solid var(--accent); border-radius: var(--r-md); background: none; color: var(--n100); font-size: 15px; font-weight: 600; white-space: nowrap; }
+    .btn:hover { background: rgba(145, 132, 217, 0.12); }
+    .btn-lg { height: 48px; padding: 0 22px; font-size: 16px; }
+
+    .doc { padding-block: 48px 96px; }
+    h1 { font-size: 36px; line-height: 1.25; letter-spacing: -0.03em; }
+    .lead { margin-top: 24px; max-width: 34em; color: var(--n300); }
+    .cta { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; margin-top: 28px; }
+    section { margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--divider); }
+    section > * { max-width: 34em; }
+    section > .live { max-width: 48em; }
+    h2 { font-size: 24px; line-height: 1.4; letter-spacing: -0.02em; }
+    h3 { margin-top: 28px; font-size: 17px; line-height: 1.5; }
+    section p, section ul, section ol, section dl { margin-top: 12px; color: var(--n300); }
+    section ul, section ol { padding-left: 1.3em; }
+    section li + li { margin-top: 6px; }
+    dt { margin-top: 20px; font-weight: 700; color: var(--text); }
+    dd { margin-top: 4px; }
+
+    /* 사건 표 — 랜딩의 .tbl.ev 와 같은 모양 */
+    .live { margin-top: 20px; }
+    .tbl { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 15px; line-height: 1.5; }
+    .tbl th { padding: 0 14px 10px 0; border-bottom: 1px solid var(--divider); text-align: left; font-size: 13px; font-weight: 500; color: var(--n500); white-space: nowrap; }
+    .tbl td { padding: 12px 14px 12px 0; border-bottom: 1px solid var(--divider); vertical-align: baseline; }
+    .tbl th:last-child, .tbl td:last-child { padding-right: 0; }
+    .ev .num { text-align: right; }
+    .ev .c-sym, .ev .c-max, .ev .c-end { white-space: nowrap; }
+    .ev .c-sym a { font-weight: 650; color: var(--n100); }
+    .ev .c-route, .ev .c-dir, .ev .c-dur, .ev .c-end { color: var(--n300); }
+    .ev tbody tr { cursor: pointer; }
+    .ev tbody tr:hover { background: rgba(233, 233, 237, 0.03); }
+    .msg { margin-top: 12px; font-size: 15px; color: var(--n400); }
+    .more { margin-top: 20px; }
+
+    .foot { padding-block: 32px 48px; border-top: 1px solid var(--divider); font-size: 13px; color: var(--n500); }
+    .foot-nav { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-bottom: 16px; font-size: 14px; }
+    .foot-nav a { color: var(--n300); }
+    .foot-nav a:hover { color: var(--n100); }
+    @media (max-width: 719px) {
+      .wrap { width: min(1120px, 100% - 32px); }
+      h1 { font-size: 30px; }
+      h2 { font-size: 21px; }
+      .doc { padding-block: 32px 72px; }
+      .ev thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+      .ev, .ev tbody { display: block; }
+      .ev tr { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; padding-block: 12px; border-bottom: 1px solid var(--divider); }
+      .ev tr::after { content: ""; order: 3; flex-basis: 100%; }
+      .ev td { padding: 0; border: 0; }
+      .ev .c-sym { order: 1; flex: 1 1 auto; }
+      .ev .c-max { order: 2; }
+      .ev .c-route { order: 4; }
+      .ev .c-dir { order: 5; }
+      .ev .c-dur { order: 6; }
+      .ev .c-end { order: 7; }
+      .ev .c-route, .ev .c-dir, .ev .c-dur, .ev .c-end { font-size: 13px; color: var(--n400); }
+    }
+  </style>
+</head>
+<body>
+  <header class="wrap bar">
+    <a class="mark" href="/" aria-label="KimpTrack 첫 화면">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><circle cx="5" cy="15" r="3" fill="currentColor"/><circle cx="17" cy="7" r="3" fill="currentColor"/><path d="M7.5 13 14.5 9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      KimpTrack
+    </a>
+    <a class="btn" href="/app/?tab=history">김프 히스토리 열기</a>
+  </header>
+
+  <main class="wrap doc">
+    <h1>김프 히스토리 — 지난 김프·역프 사건 기록</h1>
+    <p class="lead">KimpTrack 김프 히스토리는 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX 사이에서 김프(김치프리미엄)나 역프가 1% 이상 벌어져 1분 넘게 이어진 구간을 사건으로 남깁니다. 어느 코인이, 어느 경로로, 얼마나, 얼마 동안 벌어졌고 그때 입출금이 열려 있었는지를 돌아볼 수 있습니다. 가입 없이 무료입니다.</p>
+    <div class="cta">
+      <a class="btn btn-lg" href="/app/?tab=history">김프 히스토리 열기</a>
+      <a class="link" href="/kimp-chart">김프 차트 보는 법</a>
+    </div>
+
+    <section aria-labelledby="live-title">
+      <h2 id="live-title">지난 7일 김프·역프 사건</h2>
+      <p>맨 위 호가로 1% 이상 벌어져 1분 넘게 이어진 구간입니다. 최근에 끝난 사건부터 보여 주며, 코인을 누르면 그 사건의 차트가 열립니다.</p>
+      <div class="live" data-nosnippet>
+        <p class="msg" id="ev-sum"></p>
+        <table class="tbl ev" id="ev-table" hidden>
+          <thead>
+            <tr><th scope="col">코인</th><th scope="col">경로</th><th scope="col">방향</th><th scope="col" class="num">최고</th><th scope="col" class="num">지속</th><th scope="col" class="num">끝난 시각</th></tr>
+          </thead>
+          <tbody id="ev-rows"></tbody>
+        </table>
+        <noscript><p class="msg">사건 표는 자바스크립트가 켜져 있을 때 채워집니다.</p></noscript>
+      </div>
+      <p class="more"><a class="link" href="/app/?tab=history">전체 사건과 기간 선택은 대시보드 기록 탭에서</a></p>
+    </section>
+
+    <section aria-labelledby="what-title">
+      <h2 id="what-title">김프 히스토리에 남는 것</h2>
+      <dl>
+        <dt>사건의 기준</dt>
+        <dd>맨 위 호가로 계산한 김프 또는 역프가 1.0% 이상으로 올라가면 사건이 시작되고, 0.5% 이하로 내려오면 끝납니다. 1분을 넘긴 것만 남깁니다. 값은 원값이라 $1,000어치를 실제로 체결할 때의 순값보다 큽니다.</dd>
+        <dt>사건마다 남는 항목</dt>
+        <dd>코인, 국내 거래소와 해외 거래소, 방향(김프·역프), 최고 %, 시작·끝 시각, 지속 시간, 그리고 그때의 입출금 상태와 네트워크 이름입니다. 입출금이 막혀 있던 사건은 옮길 수 없었던 김프였다는 뜻입니다.</dd>
+        <dt>기간과 필터</dt>
+        <dd>대시보드 기록 탭에서는 1시간·4시간·8시간·12시간·24시간·3일 가운데 기간을 고르고, 코인·방향·국내 거래소·해외 거래소로 거릅니다. 구간 안에서 시작한 사건만 셉니다.</dd>
+        <dt>과거 김프 기록</dt>
+        <dd>사건과 별개로 봉 차트가 1분 봉 7일, 1시간 봉 90일, 일봉은 제한 없이 남습니다. 특정 날짜의 김프가 어땠는지는 <a class="link" href="/kimp-chart">김프 차트</a>에서 봉 종류를 바꿔 봅니다.</dd>
+      </dl>
+    </section>
+
+    <section aria-labelledby="how-title">
+      <h2 id="how-title">김프 히스토리 보는 법</h2>
+      <ol>
+        <li>대시보드 기록 탭을 엽니다. 처음에는 전 코인의 사건 표가 최근 순으로 나옵니다.</li>
+        <li>기간을 고르고, 김프만 또는 역프만 보려면 방향을 고릅니다.</li>
+        <li>사건을 누르면 그 코인의 차트가 그 경로·방향으로 열리고, 사건 구간이 차트 아래에 표시됩니다.</li>
+        <li>차트의 입출금 띠로 그때 실제로 옮길 수 있었는지 확인합니다.</li>
+      </ol>
+    </section>
+
+    <section aria-labelledby="faq-title">
+      <h2 id="faq-title">자주 묻는 질문</h2>
+      <h3>김프 히스토리는 얼마나 과거까지 볼 수 있나요?</h3>
+      <p>사건 기록은 2026년 9월 기록을 시작한 뒤로 지우지 않고 남깁니다. 대시보드의 기간 선택은 최장 3일이고, 더 오래된 기록은 봉 차트(1시간 봉 90일·일봉 무제한)로 봅니다.</p>
+      <h3>왜 사건의 최고 %가 실시간 김프 표보다 큰가요?</h3>
+      <p>사건은 맨 위 호가로 계산한 원값이고, 실시간 김프 표는 $1,000어치를 호가창에 체결한 평균 단가로 계산한 순값이기 때문입니다. 호가가 얇은 코인일수록 두 값의 차이가 큽니다.</p>
+      <h3>사건이 많으면 돈을 벌 수 있다는 뜻인가요?</h3>
+      <p>아니요. 수수료와 전송 시간, 그 사이의 가격 변화는 빠져 있고, 입출금이 막혀 있던 사건은 옮길 수도 없었습니다. 어느 코인과 경로에서 김프가 자주 벌어졌는지 돌아보는 자료입니다.</p>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    <nav class="foot-nav" aria-label="바로 가기">
+      <a href="/">첫 화면</a>
+      <a href="/app/">실시간 김프 표</a>
+      <a href="/kimp-chart">김프 차트</a>
+      <a href="/#kimp">김프·역프란</a>
+      <a href="/privacy">개인정보 처리방침</a>
+    </nav>
+    <p>KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다.</p>
+    <p>설명을 마지막으로 고친 날 <time datetime="2026-10-08">2026년 10월 8일</time></p>
+  </footer>
+
+  <script>
+    // 지난 7일 사건 — GET /api/landing 의 events 만 쓴다(랜딩 022 와 같은 계약). 보이는 동안 10초 폴링, 숨으면 멈춘다.
+    (() => {
+      const POLL_MS = 10000
+      const NAMES = { upbit: '업비트', bithumb: '빗썸', binance: 'Binance', bybit: 'Bybit', bitget: 'Bitget', okx: 'OKX' }
+      const $ = (id) => document.getElementById(id)
+      const sum = $('ev-sum')
+      const table = $('ev-table')
+      const rows = $('ev-rows')
+      const fmtPct = (v) => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`
+      const fmtCount = (v) => v.toLocaleString('ko-KR')
+      const fmtDur = (sec) => {
+        const min = sec / 60
+        if (min < 60) return `${Math.round(min)}분`
+        if (min < 60 * 24) return `${(min / 60).toFixed(1)}시간`
+        return `${(min / 60 / 24).toFixed(1)}일`
+      }
+      const pad2 = (n) => String(n).padStart(2, '0')
+      // 끝난 시각은 보는 사람의 시간대와 무관하게 KST
+      const fmtKst = (ts) => {
+        const d = new Date((ts + 9 * 3600) * 1000)
+        return `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일 ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`
+      }
+      const exName = (id) => NAMES[id] ?? id
+      const dirName = (dir) => (dir === 'kimp' ? '김프' : '역프')
+      const sign = (v) => {
+        if (v > 0) return 'up'
+        if (v < 0) return 'down'
+        return 'flat'
+      }
+      const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+      const historyLink = (r) => '/app/?tab=history&sym=' + encodeURIComponent(r.sym) + '&h.dir=' + encodeURIComponent(r.dir)
+        + '&h.dom=' + encodeURIComponent(r.dom) + '&h.fx=' + encodeURIComponent(r.fx)
+
+      let lastHtml = ''
+      function render(ev) {
+        if (!ev) {
+          sum.textContent = '사건 기록을 불러오지 못했습니다.'
+          table.hidden = true
+          return
+        }
+        sum.textContent = `지난 7일 동안 ${fmtCount(ev.count)}건(김프 ${fmtCount(ev.kimp)}건, 역프 ${fmtCount(ev.reverse)}건)이 있었고, 지금 ${fmtCount(ev.open)}건이 진행 중입니다.`
+        table.hidden = ev.top.length === 0
+        const html = ev.top.map((e) => {
+          return `<tr><td class="c-sym"><a href="${esc(historyLink(e))}">${esc(e.sym)}</a></td>`
+            + `<td class="c-route">${esc(exName(e.dom))} · ${esc(exName(e.fx))}</td>`
+            + `<td class="c-dir">${dirName(e.dir)}</td>`
+            + `<td class="num c-max ${sign(e.maxPercent)}">${fmtPct(e.maxPercent)}</td>`
+            + `<td class="num c-dur">${fmtDur(e.durationSeconds)}</td><td class="num c-end">${fmtKst(e.endTs)}</td></tr>`
+        }).join('')
+        // 같은 글이면 DOM 을 건드리지 않는다 — 포커스·스크린리더가 튀지 않게
+        if (html !== lastHtml) {
+          rows.innerHTML = html
+          lastHtml = html
+        }
+      }
+
+      let timer = 0
+      let inflight = false
+      function schedule() {
+        clearTimeout(timer)
+        if (!document.hidden) timer = setTimeout(load, POLL_MS)
+      }
+      async function load() {
+        if (inflight) return
+        inflight = true
+        clearTimeout(timer)
+        try {
+          const res = await fetch('/api/landing', { cache: 'no-store', headers: { Accept: 'application/json' } })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const body = await res.json()
+          render(body && body.events)
+        } catch {
+          // 첫 실패면 안내 한 줄, 그 뒤의 실패는 직전 표를 둔다
+          if (!lastHtml) render(null)
+        } finally {
+          inflight = false
+          schedule()
+        }
+      }
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          clearTimeout(timer)
+        } else {
+          load()
+        }
+      })
+      // 행 전체를 링크로 — 키보드는 코인 칸의 링크를 쓴다
+      rows.addEventListener('click', (e) => {
+        if (e.target.closest('a')) return
+        const link = e.target.closest('tr')?.querySelector('a')
+        if (link) link.click()
+      })
+      window.addEventListener('pageshow', (e) => {
+        if (e.persisted) load()
+      })
+      load()
+    })()
+  </script>
+</body>
+</html>

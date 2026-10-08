@@ -112,8 +112,8 @@ async def test_crossing_the_gate_starts_the_fetch_on_the_next_refresh(
     f.t = 120
     geo = (await f.get())["geo"]
     assert (geo["state"], geo["sinceTs"]) == ("ok", GATE)
-    # 한 명 — KR 이 이름으로 남지 않아 국내 통신사 칸도 통신사 칸에 든다
+    # 한 명 — KR 이 이름으로 남지 않아 국내 통신사 칸도 통신사 칸에 들고, 그 칸도 하루 1 이라 (기타)
     assert (geo["countries"], geo["networks"]) == (
         [["(기타)", 0, 1]],
-        [["telecom", 0, 1]],
+        [["(기타)", 0, 1]],
     )
