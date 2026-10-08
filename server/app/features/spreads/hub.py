@@ -9,6 +9,8 @@ snapshot 도 표 1장당 한 번만 압축해 둔다(2026-09-28) — 배포 직�
 접속자마다 보내기 대기열·보내기 태스크가 따로 있어 느린 한 명이 나머지를 막지 않는다.
 채널은 첫 접속자가 붙을 때 구독하고 마지막 접속자가 떠난 뒤 30초가 지나면 닫는다(2026-09-28) — 접속자가
 없는 허브(배포의 `server` 컨테이너, 아무도 안 보는 api)가 매초 790KB 를 받아 버리지 않게.
+허브는 표 id 하나로 매개변수화된다(048 §3.4) — 채널 `<id>`·시작 키 `<id>:latest`·행 키 함수만 다르고 나머지 규칙은
+같다. 인스턴스와 구독 연결은 표마다 하나(`spreads`·`gap`)이고 `spreads:want` 갱신은 spreads 허브만 한다.
 """
 
 import asyncio
@@ -17,10 +19,11 @@ import gzip
 import json
 import logging
 import time
+from collections.abc import Callable
 
 from fastapi import WebSocket
 
-from app.core.redis_bus import RedisBus
+from app.core.redis_bus import CHANNEL, GAP_CHANNEL, RedisBus
 
 logger = logging.getLogger("marketlens.spreads_hub")
 
@@ -45,33 +48,47 @@ def pack(text: str) -> bytes:
 
 HEARTBEAT = pack('{"type":"heartbeat"}')
 WAITING = pack('{"type":"waiting"}')
-META_KEYS = ("notional", "rate", "warnings", "dataReceivedAt", "fetchedAt")
 
 
 # --- diff 순수 함수 (§3.2) ---
+
+RowKey = Callable[[dict], str]
 
 
 def row_key(row: dict) -> str:
     return f"{row['sym']}|{row['dom']}|{row['fx']}"
 
 
-def index_rows(table: dict) -> dict[str, dict]:
+def gap_row_key(row: dict) -> str:
+    """048 §3.4 — 현선갭 행의 키 `sym|spot|perp`."""
+    return f"{row['sym']}|{row['spot']}|{row['perp']}"
+
+
+# 표 id → 행 키 함수. 허브가 다루는 표는 이 둘뿐이다 (048 §3.4 — 049 가 `pp` 를 더한다)
+ROW_KEYS: dict[str, RowKey] = {CHANNEL: row_key, GAP_CHANNEL: gap_row_key}
+
+
+def index_rows(table: dict, key: RowKey = row_key) -> dict[str, dict]:
     """키 → `age` 를 뺀 행. `age` 만 다른 행을 "안 바뀜" 으로 보기 위한 비교 형태."""
-    return {
-        row_key(r): {k: v for k, v in r.items() if k != "age"} for r in table["rows"]
-    }
+    return {key(r): {k: v for k, v in r.items() if k != "age"} for r in table["rows"]}
 
 
 def make_snapshot(table: dict) -> str:
     return _dumps({"type": "snapshot", **table})
 
 
-def make_delta(prev: dict[str, dict], table: dict) -> tuple[str, dict[str, dict]]:
-    """직전 인덱스와 새 표 → (delta 메시지, 새 인덱스). 바뀐 행은 현재 `age` 를 그대로 싣는다."""
-    cur = index_rows(table)
-    changed = [r for r in table["rows"] if prev.get(row_key(r)) != cur[row_key(r)]]
+def make_delta(
+    prev: dict[str, dict], table: dict, key: RowKey = row_key
+) -> tuple[str, dict[str, dict]]:
+    """직전 인덱스와 새 표 → (delta 메시지, 새 인덱스). 바뀐 행은 현재 `age` 를 그대로 싣는다.
+
+    메타는 `rows` 를 뺀 최상위 전부 — spreads 는 notional·rate·warnings·시각 둘, gap 은 warnings·시각 둘(048 §3.4).
+    표마다 키 목록을 따로 들지 않아도 두 표의 바이트가 각각 그대로다.
+    """
+    cur = index_rows(table, key)
+    changed = [r for r in table["rows"] if prev.get(key(r)) != cur[key(r)]]
     removed = [k for k in prev if k not in cur]
-    delta = {"type": "delta", **{k: table[k] for k in META_KEYS}}
+    delta = {"type": "delta", **{k: v for k, v in table.items() if k != "rows"}}
     delta["rows"] = changed
     delta["removed"] = removed
     return _dumps(delta), cur
@@ -137,8 +154,14 @@ class Connection:
 
 
 class SpreadsHub:
-    def __init__(self, *, bus: RedisBus) -> None:
+    """표 1장의 구독·diff·브로드캐스트 허브 — `table` 은 표 id(`spreads` 기본, 048 은 `gap`)."""
+
+    def __init__(self, *, bus: RedisBus, table: str = CHANNEL) -> None:
         self._bus = bus
+        self._table_id = table
+        self._key = ROW_KEYS[table]
+        # `spreads:want`(018) 는 spreads 표에만 있는 흔적 — 다른 표의 접속으로 갱신되면 안 된다 (048 §3.4)
+        self._wants = table == CHANNEL
         self._conns: set[Connection] = set()
         self._table: dict | None = None  # 직전 표 — 접속자가 있을 때만
         self._index: dict[str, dict] | None = None
@@ -156,6 +179,10 @@ class SpreadsHub:
     @property
     def connections(self) -> int:
         return len(self._conns)
+
+    @property
+    def table_id(self) -> str:
+        return self._table_id
 
     async def attach(self, ws: WebSocket) -> Connection:
         """접속 등록 → 첫 접속자면 `spreads:latest` 로 시작 표 → snapshot 또는 waiting."""
@@ -201,10 +228,10 @@ class SpreadsHub:
         if self._index is None:
             # waiting 중이던 접속자들의 첫 표 — 이 프레임이 곧 이 표의 snapshot 이라 그대로 캐시로 둔다
             frame = pack(make_snapshot(table))
-            self._index = index_rows(table)
+            self._index = index_rows(table, self._key)
             self._snap = frame
         else:
-            message, self._index = make_delta(self._index, table)
+            message, self._index = make_delta(self._index, table, self._key)
             frame = pack(message)
             self._snap = None  # 새 표 — 다음 접속자가 한 번 만든다
         self._table = table
@@ -213,18 +240,20 @@ class SpreadsHub:
 
     async def _load_latest(self) -> None:
         try:
-            text = await self._bus.latest()
+            text = await self._bus.latest(self._table_id)
         except Exception as exc:
-            logger.warning("spreads:latest 읽기 실패 — waiting 으로 시작: %r", exc)
+            logger.warning(
+                "%s:latest 읽기 실패 — waiting 으로 시작: %r", self._table_id, exc
+            )
             return
         if text is None or not self._conns:
             return  # 읽는 사이 전원이 떠났으면 상태를 들지 않는다 — 0명은 상태가 없다
         self._table = json.loads(text)
-        self._index = index_rows(self._table)
+        self._index = index_rows(self._table, self._key)
         self._snap = None
 
     async def _refresh_want(self) -> None:
-        if not self._conns:
+        if not self._wants or not self._conns:
             return
         try:
             await self._bus.want()
@@ -232,7 +261,7 @@ class SpreadsHub:
             logger.warning("spreads:want 갱신 실패: %r", exc)
 
     def start(self) -> None:
-        self._task = asyncio.create_task(self.run(), name="spreads_hub")
+        self._task = asyncio.create_task(self.run(), name=f"{self._table_id}_hub")
 
     async def run(self) -> None:
         """구독 태스크 하나 — 접속자가 생기면 구독해 채널 수신 + 5초마다 want 갱신, 0명 30초면 구독을 닫고
@@ -241,7 +270,7 @@ class SpreadsHub:
         while True:
             await self._wanted.wait()
             try:
-                sub = await self._bus.subscribe()
+                sub = await self._bus.subscribe(self._table_id)
             except Exception as exc:
                 logger.warning(
                     "Redis 구독 연결 실패 — %.0f초 뒤 재시도: %r", backoff, exc
