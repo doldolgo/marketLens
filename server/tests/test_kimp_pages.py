@@ -82,7 +82,7 @@ def test_each_page_has_search_metadata_and_one_h1_with_the_keyword() -> None:
         assert page.meta["og:title"] == [spec["title"]], slug
         assert page.meta["og:description"] == [description], slug
         assert page.meta["og:url"] == [url], slug
-        assert page.meta["og:image"] == [f"{SITE}landing/og-v2.png"], slug
+        assert page.meta["og:image"] == [f"{SITE}landing/og-v3.png"], slug
         canonical = [
             link["href"] for link in page.links if link.get("rel") == "canonical"
         ]
