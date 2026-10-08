@@ -579,8 +579,18 @@ def test_screen_script_sends_xhr_header_polls_while_visible_and_never_parses_htm
     assert "'X-Requested-With': 'XMLHttpRequest'" in js
     for needed in ("visibilityState", "createElementNS", "refreshSec"):
         assert needed in js, needed
+    # 053 — 화면 이용 절의 틀 둘만 예외: 틀 주소(`aimFrame` — SITE_ORIGIN 으로 만든 주소나 about:blank)와 틀 폭 맞추기
+    # (`fitFrame` — CSS 변수 --fit 하나). 그 밖은 036 금지 그대로
+    aim, fit = _js_function(js, "aimFrame"), _js_function(js, "fitFrame")
+    assert aim.count(".src") == 1 and "$('scr-frame').src = want;" in aim
+    assert "url && scr.inView" in aim and "'about:blank'" in aim
+    assert "aimFrame(feed || waiting ? frameUrl(page) : null)" in js
+    assert js.count("aimFrame(") == 2
+    assert re.search(r"const frameUrl = \(page\) => `\$\{SITE_ORIGIN\}", js)
+    assert fit.count(".style") == 1 and "stage.style.setProperty('--fit', " in fit
+    rest = js.replace(aim, "").replace(fit, "")
     for banned in SCRIPT_BANNED:
-        assert banned not in js, banned
+        assert banned not in rest, banned
     # SVG 속성은 허용 목록 하나를 지난다 — 목록이 기하·이름표 밖으로 늘지 않게
     allow = re.search(r"const SVG_ATTRS = new Set\(\[([^\]]*)\]\);", js)
     assert allow, "svg() 의 속성 허용 목록"
@@ -614,7 +624,12 @@ def test_screen_script_has_two_polling_bundles_and_no_outside_address() -> None:
     js = _text("web/admin/admin.js")
     assert re.search(r"\bFAST_MS = 10_000;", js)
     assert re.search(r"\bSLOW_MS = 60_000;", js)
-    assert re.findall(r"https?://[^\s'\"`]*", js) == ["http://www.w3.org/2000/svg"]
+    # 053 — 화면 이용 절이 틀로 띄우는 공개 사이트 출처 상수 하나가 더해진다
+    assert re.findall(r"https?://[^\s'\"`]*", js) == [
+        "http://www.w3.org/2000/svg",
+        "https://kimptrack.com",
+    ]
+    assert js.count("const SITE_ORIGIN = 'https://kimptrack.com';") == 1
     # 피드 넷과 029 의 네 경로 — 같은 출처 상대 경로
     for path in (
         "/api/health",
@@ -999,9 +1014,12 @@ const document = {
 const fetch = (...a) => { calls.push('fetch'); return new Promise(() => {}) }
 const location = { search: '', replace() { calls.push('replace') } }
 const history = { replaceState() { calls.push('replaceState') } }
-const api = new Function('document', 'fetch', 'location', 'history', 'Node',
+// 053 — 화면 이용 절이 듣는 window·IntersectionObserver(여기서는 듣기만 받는다)
+const window = { addEventListener() {} }
+class IntersectionObserver { observe() {} }
+const api = new Function('document', 'fetch', 'location', 'history', 'Node', 'window', 'IntersectionObserver',
   script + '\n;return { kindName, alarmTail, tabName, pctFmt, exchangeRow, timeline, alarmRow, alertRow, fillTraffic, fillClarity, drawCollect, got, P }')(
-  document, fetch, location, history, Node)
+  document, fetch, location, history, Node, window, IntersectionObserver)
 const text = (n) => (typeof n === 'string' ? n : n.textContent + n.kids.map(text).join(''))
 const titles = (n) => (typeof n === 'string' ? [] : [
   ...(n.title ? [n.title] : []), ...(n.tag === 'title' ? [n.textContent] : []), ...n.kids.flatMap(titles)])

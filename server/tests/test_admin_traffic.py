@@ -71,9 +71,12 @@ function screen(respond) {
   }
   const location = { search: '', replace: (to) => s.replaced.push(to) }
   const history = { replaceState() {} }
-  const api = new Function('document', 'fetch', 'location', 'history', 'setTimeout', 'clearTimeout', 'Node',
+  // 053 — 화면 이용 절이 window(메시지·크기)와 IntersectionObserver(절이 보이는지)를 듣는다. 여기서는 듣기만 받는다
+  const window = { addEventListener() {} }
+  class IntersectionObserver { observe() {} }
+  const api = new Function('document', 'fetch', 'location', 'history', 'setTimeout', 'clearTimeout', 'Node', 'window', 'IntersectionObserver',
     script + '\n;return { answers, plain, heatLevel, sentence, fillTraffic }')(
-    document, fetch, location, history, () => ++s.timers, () => {}, Node)
+    document, fetch, location, history, () => ++s.timers, () => {}, Node, window, IntersectionObserver)
   const click = (w) => buttons.find((b) => b.dataset.window === w).listeners.click.forEach((fn) => fn())
   const text = (id) => byId.get(id).textContent
   const pressed = () => buttons.filter((b) => b.attrs['aria-pressed'] === 'true').map((b) => b.dataset.window)

@@ -448,8 +448,8 @@
     const onMessage = (event) => {
       if (event.origin !== ADMIN_ORIGIN || event.source !== window.parent) return
       const d = event.data
-      if (!d || d.v !== 1) return
-      if (d.type === "kt-attention" && Array.isArray(d.areas)) {
+      if (!d || typeof d !== "object") return
+      if (d.type === "kt-attention" && d.v === 1 && Array.isArray(d.areas)) {
         const next = new Map()
         for (const a of d.areas.slice(0, MAX_AREAS)) {
           const v = entry(a)
