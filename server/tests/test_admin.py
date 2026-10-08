@@ -268,6 +268,41 @@ def test_every_proxy_clears_cookie_and_access_jwt_and_hides_cors() -> None:
         assert ["Access-Control-Allow-Origin"] in hidden, key
 
 
+# 053 §3.7 — 공개 페이지는 자기 출처와 관리자 화면의 덮어 보기 틀 안에서만. 랜딩·대시보드(index.html 을 주는 location)는
+# 이 지시어 하나짜리 CSP, 세 정적 페이지는 052 문자열 끝의 frame-ancestors 만 이 값이다
+FRAME_ANCESTORS = "frame-ancestors 'self' https://admin.kimptrack.com"
+FRAMED_ONLY = {("=", "/"), ("=", "/index.html"), ("=", "/app/index.html"), ("/app/",)}
+FRAMED_STATIC = {("=", "/privacy"), ("=", "/kimp-chart"), ("=", "/kimp-history")}
+
+
+def test_public_pages_can_be_framed_only_by_the_admin_overlay() -> None:
+    public = _locations(_public_server())
+    for key in FRAMED_ONLY | FRAMED_STATIC:
+        csps = [
+            h
+            for h in _args(public[key], "add_header")
+            if h[0] == "Content-Security-Policy"
+        ]
+        assert len(csps) == 1, key
+        _, value, always = csps[0]
+        assert always == "always", key
+        found = [d.strip() for d in value.split(";") if "frame-ancestors" in d]
+        assert found == [FRAME_ANCESTORS], key
+        if key in FRAMED_ONLY:
+            assert value == FRAME_ANCESTORS, key
+    # 대시보드 주소(/app/·?tab=)는 index.html 을 주는 location 으로 간다
+    assert _route("/app/") == ("/app/",)
+    # X-Frame-Options 는 두지 않는다 — CSP 와 다르면 브라우저가 관리자 틀을 막는다(공개 nginx·caddy 어디에도)
+    for key, children in public.items():
+        names = [h[0].lower() for h in _args(children, "add_header")]
+        assert "x-frame-options" not in names, key
+    assert "x-frame-options" not in [
+        h[0].lower() for h in _args(_public_server(), "add_header")
+    ]
+    caddy = re.sub(r"#[^\n]*", "", _text("caddy/Caddyfile"))
+    assert "x-frame-options" not in caddy.lower()
+
+
 def test_frames_denied_on_every_response_and_csp_on_the_screen() -> None:
     server = _admin_server()
     assert XFO in _args(server, "add_header")
@@ -276,7 +311,7 @@ def test_frames_denied_on_every_response_and_csp_on_the_screen() -> None:
     screen = _args(_locations(server)[("/",)], "add_header")
     csp = [
         "Content-Security-Policy",
-        "default-src 'self'; frame-ancestors 'none'",
+        "default-src 'self'; frame-src https://kimptrack.com; frame-ancestors 'none'",
         "always",
     ]
     assert csp in screen
