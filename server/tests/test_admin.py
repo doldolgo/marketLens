@@ -445,8 +445,17 @@ def test_root_path_only_on_collector_and_public_api_docs_stay_closed() -> None:
 # --- 관리자 화면 정적 단언 (029 §3.3 → 036 §3.8·§4) -------------------------------------------
 
 SCREEN = ROOT / "web/admin"
-# 036 §3.1 — 한 페이지 절 일곱, 이 순서
-SECTIONS = ["overview", "collect", "infra", "alerts", "traffic", "cost", "tools"]
+# 036 §3.1 — 한 페이지 절 여덟, 이 순서(화면 이용 `screens` 는 053 — 접속 다음·비용 앞)
+SECTIONS = [
+    "overview",
+    "collect",
+    "infra",
+    "alerts",
+    "traffic",
+    "screens",
+    "cost",
+    "tools",
+]
 # 036 §3.8 — 밖으로 나가는 링크의 호스트(고정 https 주소뿐). db-ip.com 은 DB-IP CC BY 표시(042 §3.4 ③ 바닥)
 EXTERNAL_HOSTS = {
     "clarity.microsoft.com",
@@ -689,7 +698,7 @@ def test_screen_page_has_no_inline_script_or_style() -> None:
     assert not re.search(r"\btarget\s*=", html, flags=re.I)  # 같은 탭 이동
 
 
-def test_screen_page_has_seven_sections_in_order_and_jump_links() -> None:
+def test_screen_page_has_eight_sections_in_order_and_jump_links() -> None:
     html = _text("web/admin/index.html")
     assert re.findall(r'<section id="([\w-]+)"', html) == SECTIONS
     nav = re.search(r'<nav class="jump"[^>]*>(.*?)</nav>', html, flags=re.S)
