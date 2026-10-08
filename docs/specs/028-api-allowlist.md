@@ -20,7 +20,7 @@
 ## 3. 동작
 
 ### 3.1 공개 허용 목록
-공개 server 의 `/api` 는 아래 아홉 경로만 백엔드로 넘긴다(여섯으로 시작해 050 이 둘, 052 가 하나를 더했다). 전부 **정확 일치**다(끝에 `/` 가 붙거나 하위 경로면 404). 매칭은 경로만 보고 쿼리스트링은 그대로 따라간다. 넘길 때 `/api` 접두를 뗀다 — 모양은 018·022 와 같은 "접두 제거 rewrite + URI 없는 `proxy_pass`" 하나로 고정한다. 헤더 4개(`Host`·`X-Real-IP`·`X-Forwarded-For`·`X-Forwarded-Proto`)는 지금과 같다.
+공개 server 의 `/api` 는 아래 열 경로만 백엔드로 넘긴다(여섯으로 시작해 048 이 하나, 050 이 둘, 052 가 하나를 더했다 — 049 뒤 열하나). 전부 **정확 일치**다(끝에 `/` 가 붙거나 하위 경로면 404). 매칭은 경로만 보고 쿼리스트링은 그대로 따라간다. 넘길 때 `/api` 접두를 뗀다 — 모양은 018·022 와 같은 "접두 제거 rewrite + URI 없는 `proxy_pass`" 하나로 고정한다. 헤더 4개(`Host`·`X-Real-IP`·`X-Forwarded-For`·`X-Forwarded-Proto`)는 지금과 같다.
 
 | 경로 | 가는곳 |
 |---|---|
@@ -32,10 +32,11 @@
 | `/api/history/candles` | api |
 | `/api/landing` | api |
 | `/api/ws/spreads` | api |
+| `/api/ws/gap` | api |
 | `/api/attention` | api |
 
-- `/api/ws/spreads` 는 WebSocket 업그레이드 헤더(`Upgrade`·`Connection`, HTTP/1.1)를 지금처럼 붙인다. 접두 location `/api/ws/` 는 없앤다 — 접두면 api 에 새 `/ws/*` 가 생길 때 자동 공개되고, `/api/ws` 가 nginx 의 자동 301 을 받는다.
-- 누가 쓰나: 대시보드 — `/api/health/collect`(수집 상태 탭 5초), `/api/history/events`·`/api/history/candles`(기록 탭), `/api/ws/spreads`(스프레드 탭), `/api/flow/netflow`·`/api/flow/recent`(입출금 레이더 탭, 050). 랜딩 — `/api/landing`. 모든 화면의 `attention.js`(052) — `/api/attention`. 감시 — uptime(025)은 `/api/health`, canary(027)는 `/api/health`·`/api/history/candles`·`/api/ws/spreads`.
+- `/api/ws/spreads`·`/api/ws/gap`(048) 은 WebSocket 업그레이드 헤더(`Upgrade`·`Connection`, HTTP/1.1)를 지금처럼 붙인다. 접두 location `/api/ws/` 는 없앤다 — 접두면 api 에 새 `/ws/*` 가 생길 때 자동 공개되고, `/api/ws` 가 nginx 의 자동 301 을 받는다.
+- 누가 쓰나: 대시보드 — `/api/health/collect`(수집 상태 탭 5초), `/api/history/events`·`/api/history/candles`(기록 탭), `/api/ws/spreads`(스프레드 탭), `/api/ws/gap`(갭 탭, 048), `/api/flow/netflow`·`/api/flow/recent`(입출금 레이더 탭, 050). 랜딩 — `/api/landing`. 모든 화면의 `attention.js`(052) — `/api/attention`. 감시 — uptime(025)은 `/api/health`, canary(027)는 `/api/health`·`/api/history/candles`·`/api/ws/spreads`.
 - `/api/attention`(052)은 **POST 만** 넘긴다 — location 첫 줄이 `if ($request_method != POST) { return 405; }`(location 안 `return` 만 쓰는 if), `client_max_body_size 4k`(넘으면 nginx 기본 413), 헤더 4개에 더해 `X-Client-IP $http_x_forwarded_for`(caddy 에 trusted_proxies 가 없어 caddy 가 넣은 값이 방문자 IP 하나다 — api 가 IP 10분 제한에만 쓴다).
 - 공개 server 에는 `/api` 에 걸리는 **정규식 location 을 두지 않는다** — 정규식은 접두 location(아래 404)보다 먼저 이겨 허용 목록을 우회한다(예: 남겨 둔 `~ ^/api/history/(premium|…)` 가 `premium` 을 api 로 넘긴다).
 
@@ -66,14 +67,14 @@
 ## 4. 검증
 **PR 안 — 실행 세션(완료 조건)**. 단언은 `listen 80` server 블록 안만 본다 — 029 가 같은 파일에 관리자 server 를 더해도 그대로다.
 - nginx 계약(`server/tests/test_deploy.py`):
-  - 백엔드로 넘기는 location 이 §3.1 표 아홉과 정확히 같다(전부 `=`, 가는 곳 포함). 각 location 이 접두 제거 rewrite + URI 없는 `proxy_pass` 모양이다. `/api/ws/spreads` 에 업그레이드 헤더.
+  - 백엔드로 넘기는 location 이 §3.1 표 열과 정확히 같다(전부 `=`, 가는 곳 포함). 각 location 이 접두 제거 rewrite + URI 없는 `proxy_pass` 모양이다. `/api/ws/spreads` 에 업그레이드 헤더.
   - `location /api/` 와 `location = /api` 는 404 만 답하고 `proxy_pass` 가 없다. 본문이 §3.2 JSON 이고 MIME 추정이 꺼져 있다.
   - `/api` 에 걸리는 정규식 location 이 없다. 접두 location `/api/ws/` 가 없다.
   - nginx 버전 숨김 설정이 있다.
   - 호출 경로 대조: (1) `web/src/**/*.ts(x)` 에서 `${API_BASE}` 바로 뒤의 리터럴 `/…` 를 `?`·백틱·`$`·따옴표 전까지 뽑아 `/api` 를 붙인다 — `${API_BASE}` 뒤가 리터럴 `/` 로 시작하지 않는 곳이 있으면 실패. (2) `web/public/*.html`·`web/public/*.js` 는 `fetch(`·`new WebSocket(`·`sendBeacon(` 인자의 따옴표 안 `/api/…` 만(주석 제외 — `.js` 는 052 의 attention.js 부터). (3) `ops/canary/`(027)의 요청 경로와 `docs/runbooks/uptime-monitor.md` 의 모니터 URL 경로. `ops/canary/` 가 아직 없으면(027 구현 전) 그 출처는 빈 집합이고, 생기면 테스트 수정 없이 대조에 들어간다. 셋의 합집합이 허용 목록의 부분집합이다.
   - 기존 테스트 고칠 것: `_nginx_api_block` 과 016 정규식 단언 → "정규식 location 없음" 단언 하나. `location = /api { return 404; }` 문자열 단언 → JSON 404 단언. `location /api/` 의 `proxy_pass http://${COLLECT_HOST}:8000/;` 단언 → 수집기로 가는 정확 일치 셋이 `${COLLECT_HOST}` 를 쓴다. spreads 테스트(`…_subpaths_to_server`)는 "`/api/spreads` 는 공개에 없다" 로. api `proxy_pass` 개수는 새 모양에 맞춘 값으로. 나머지(`try_files`·캐시 헤더·`COLLECT_HOST` 한 변수 치환)는 그대로.
 - 로컬 Docker: `docker network create` → server 이미지의 python 으로 받은 요청 줄을 stdout 에 찍는 에코 서버 둘(망 별칭 `api`·`server`, web 보다 먼저) → 같은 망에 web 이미지(`COLLECT_HOST=server`, `NGINX_ENVSUBST_FILTER=^COLLECT_HOST$`). 요청은 `curl --path-as-is` 로 보내고 도착 여부는 에코 서버의 `docker logs` 로 본다.
-  - 허용 여섯(`/api/ws/spreads` 는 업그레이드 헤더)이 맞는 에코 서버에 접두가 떼진 경로·쿼리 그대로 도착한다.
+  - 허용 목록(`/api/ws/spreads`·`/api/ws/gap` 은 업그레이드 헤더)이 맞는 에코 서버에 접두가 떼진 경로·쿼리 그대로 도착한다.
   - 닫힌 경로 — `/api/docs`·`/api/redoc`·`/api/openapi.json`·`/api/docs.html`·`/api/x.js`·`/api/premium`·`/api/premium/scan`·`/api/matrix`·`/api/arbitrage`·`/api/orderbook/upbit`·`/api/slippage/upbit`·`GET`·`POST /api/refresh`·`/api/history/premium`·`/api/history/streaks`·`/api/history/streaks/bulk`·`/api/spreads`·`/api/ws`·`/api/ws/other`·`/api`·`/api/nope` — 가 404 JSON(`Content-Type: application/json`)이고 에코 서버에 도착 0건.
   - §3.3 의 변형 경로와 끝에 `/` 가 붙은 허용 경로가 404, 도착 0건. `Server` 헤더에 버전이 없다.
 - 기존 스펙 재검증: `cd server && ruff check . && ruff format --check . && pytest -q`, `cd web && npm run lint && npm run build`.

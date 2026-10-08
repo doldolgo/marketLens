@@ -87,7 +87,7 @@ marketlens/
 | 번호 | 이름 | 상태 | 범위 |
 |---|---|---|---|
 | 001 | collect | DONE | 업비트·빗썸 WebSocket 실시간 수집 → 메모리, 마켓 우주, USDT 시세, 1초 틱, 원문 싱크·인계·판정 계약, `/health` |
-| 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·mock 탭(갭/선선갭/입출금레이더) |
+| 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·mock 탭(선선갭) |
 | 003 | spreads | DONE | 김프 표 — `/spreads`(Redis 표 반환, 018) `/refresh`(즉시 갱신 트리거) + 스프레드 탭 |
 | 004 | analysis | DONE | 단일 종목 분석 — premium·scan·matrix·orderbook·slippage·arbitrage (BE 전용) |
 | 005 | history | DONE | Influx `premium` 점 규칙·`/history/*`(창 기본이자 상한 — streaks 7일·premium 1주·bulk 1시간)·백필 + 기록 탭 사건 로그 실데이터 (쓰기는 009) |
@@ -132,7 +132,7 @@ marketlens/
 | 045 | okx | TODO | OKX USDT 현물 추가 — WS 3샤드 books5(100ms 스냅샷, 5단계, 로컬 북 없음)+trades, instruments 매초, 입출금(인증 — 키·시크릿·패스프레이즈), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟 ∪ OKX), `/history/*` `fx=okx`, web 표시명·기록 탭 OKX 실데이터·정적 페이지 문구 |
 | 046 | perp-collect | DONE | 해외 USDT 무기한 선물(perp) 호가·펀딩 수집 — 원천 `binance_perp`(depth5@500ms `/public` + `!markPrice@arr@1s` `/market` 3샤드)·`bybit_perp`·`bitget_perp`(REST 전체 티커 매초 1회 — 2026-10-08 결정), 목록 10초·펀딩 주기(fundingInfo 60초 / fundingInterval / fundInterval), perp 우주 = 2곳 이상 ∪ (김프 우주 ∩ 1곳 이상) 매초, 배수 심볼 정규화(`1000PEPE`·`SHIB1000`·`1M…`·`k…`), perp 행 맵(현물과 분리), `/health/collect` 원천 추가 (BE) |
 | 047 | perp-hyperliquid | TODO | Hyperliquid perp 원천 `hyperliquid_perp` — `/info` `meta` 10초(isDelisted 제외)·코인마다 `bbo`+`activeAssetCtx` 3샤드·구독 전 코인 검증(없는 코인은 소켓이 말없이 닫힌다)·`{"method":"ping"}` 30초·펀딩 시간당(주기 1, 다음 정시 계산)·구독 1,000 한도. 046 위 (BE) |
-| 048 | gap | TODO | 현선갭 — 틱마다 (해외 현물 × perp 원천 × 김프∩perp 우주) 표, 최우선 호가 `entry`(현물 ask 매수·perp bid 숏)·`exit`, 펀딩 3값, 11키, Redis `gap`·허브 `/ws/gap`(017 허브를 표 id 로 일반화), nginx 허용 +1, 갭 탭 mock → 실데이터(탭이 보일 때만 구독, 코인별 entry 최대·exit 최소). 046 위 (BE·web) |
+| 048 | gap | DONE | 현선갭 — 틱마다 (해외 현물 × perp 원천 × 김프∩perp 우주) 표, 최우선 호가 `entry`(현물 ask 매수·perp bid 숏)·`exit`, 펀딩 3값, 11키, Redis `gap`·허브 `/ws/gap`(017 허브를 표 id 로 일반화), nginx 허용 +1, 갭 탭 mock → 실데이터(탭이 보일 때만 구독, 코인별 entry 최대·exit 최소). 046 위 (BE·web) |
 | 049 | pp | TODO | 선선갭 — 틱마다 (perp 원천 쌍 × perp 우주 전체) 표, 양방향 `longA`·`longB`(싼 쪽 ask 롱·비싼 쪽 bid 숏), 양쪽 펀딩 3값씩, 13키, Redis `pp`·허브 `/ws/pp`, nginx 허용 +1, 선선갭 탭 mock → 실데이터(방향별 가격갭·시간당 펀딩갭 = 숏 − 롱, 거래소별 주기 상수 폐지). 048 위 (BE·web) |
 | 050 | flow-eth | DONE | 업비트 이더리움 ERC-20 입출금 레이더 — 공개 노드 WS Transfer 로그 구독(약 2초)·입금주소 32,027·핫월렛 950·내부 집합 대조(가스 지갑·sweep 으로 자가 확장, Redis 집합)·Influx `chain_flow`(ns)·공백 재생 7,200블록, `/flow/netflow`·`/flow/recent`, 입출금 레이더 탭 실데이터(002 mock 교체). ETH 네트워크·업비트 한정 (BE·web) |
 | 051 | privacy-v3 | DONE | 처리방침 v3 — 화면 영역 이용 통계(KimpTrack 서버가 동의한 방문자의 화면·기기·영역별 보인 시간·1초 이상 보임·클릭 수를 하루 합계로 90일, IP 는 메모리 10분 남용 막기만)·동의 안내 판 올림(예전 동의자에게 다시 묻기, 세 칸 모두 동의일 때 Clarity 와 함께)·이전 판 `privacy-20261011.html`, 시행일 한 곳 `PRIVACY_V3_EFFECTIVE`(037 규칙 — 10-11 뒤 PR) (web·BE) |
