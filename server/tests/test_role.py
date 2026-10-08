@@ -1,6 +1,6 @@
 """프로세스 역할 계약 — ROLE=api 앱은 Influx 조회 경로 + /ws/spreads + GET /spreads(Redis 읽기)
-+ GET /landing(022) + GET /admin/status(029) + 관리자 피드 둘(035) 만 서빙하고 백그라운드 태스크는 017 의
-구독 태스크 하나다(스펙 016 §3.1·§4, 017 §4, 018 §3.4·§4, 029 §4, 035 §4).
++ GET /landing(022) + GET /admin/status(029) + 관리자 피드 둘(035) + 화면 영역 통계 둘(052) 만 서빙하고 백그라운드
+태스크는 017 의 구독 태스크와 052 의 10초 묶음 쓰기 태스크다(스펙 016 §3.1·§4, 017 §4, 018 §3.4·§4, 029 §4, 035 §4, 052 §3.5).
 
 collector(기본) 의 전체 동작은 기존 테스트가 그대로 지킨다 — 여기서는 라우트 집합만 본다.
 """
@@ -19,7 +19,7 @@ from app.core.config import get_settings
 from app.core.redis_bus import RedisBus
 from app.main import create_app
 
-# api 역할이 답하는 열 경로 (016 §3.1 + 018 §3.4 + 022 §3.2 + 029 §3.4 + 035 §3.1) — 그 외는 전부 404
+# api 역할이 답하는 열두 경로 (016 §3.1 + 018 §3.4 + 022 §3.2 + 029 §3.4 + 035 §3.1 + 052 §3.4·§3.6) — 그 외는 전부 404
 API_ROUTES = {
     "/health",
     "/history/premium",
@@ -31,9 +31,17 @@ API_ROUTES = {
     "/admin/status",
     "/admin/access",
     "/admin/clarity",
+    "/attention",
+    "/admin/attention",
 }
-# 029·035 — api 에만 있는 경로. collector ⊇ api 단언의 예외
-API_ONLY = {"/admin/status", "/admin/access", "/admin/clarity"}
+# 029·035·052 — api 에만 있는 경로. collector ⊇ api 단언의 예외
+API_ONLY = {
+    "/admin/status",
+    "/admin/access",
+    "/admin/clarity",
+    "/attention",
+    "/admin/attention",
+}
 # 034 — 수집기에만 있는 관리자 피드 둘(자격증명이 collect 박스 역할에만 있다)
 COLLECTOR_ADMIN = {"/admin/aws", "/admin/alerts"}
 
@@ -147,8 +155,11 @@ async def test_api_role_starts_with_only_the_spreads_hub_task_and_no_s3_exchange
     # lifespan 을 이 루프에서 직접 돌린다 — 안에서 만든 태스크가 있으면 여기서 보인다
     async with app.router.lifespan_context(app):
         others = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        # 017 — Redis 구독 태스크 하나뿐 (스트림·flusher·쓰기 태스크 없음)
-        assert [t.get_name() for t in others] == ["spreads_hub"]
+        # 017 — Redis 구독 태스크 + 052 의 화면 영역 통계 10초 묶음 쓰기 (스트림·flusher·Influx 쓰기 태스크 없음)
+        assert sorted(t.get_name() for t in others) == [
+            "attention_flush",
+            "spreads_hub",
+        ]
         assert app.state.influx is None  # 토큰 없음
     # S3·거래소 줄이 찍히면 역할 분기가 샌 것이다 (016 §3.5). Redis 줄은 017 구독이 남길 수 있다
     for banned in (
