@@ -3,6 +3,8 @@
 import asyncio
 import json
 import re
+import time
+from collections.abc import Callable
 from typing import Any
 
 import fakeredis
@@ -277,6 +279,26 @@ def build(
         http=node.client,
     )
     return detector, connector, node, writer, sleeps, clock
+
+
+async def wait_until(cond: Callable[[], bool], timeout: float = 5.0) -> None:
+    """`cond` 가 참이 될 때까지 짧게 양보하며 기다린다 — 루프 회전 수에 기대지 않는다(느린 CI 러너)."""
+    deadline = time.monotonic() + timeout
+    while not cond():
+        if time.monotonic() > deadline:
+            raise TimeoutError("조건이 제때 참이 되지 않았다 (테스트)")
+        await asyncio.sleep(0.001)
+
+
+async def run_until(
+    detector: EthFlowDetector, cond: Callable[[], bool], timeout: float = 5.0
+) -> None:
+    """start → 조건이 참이 될 때까지(소켓은 열어 둔 채) → aclose. 작업자가 큐를 다 소화한 뒤에만 단언하게."""
+    await detector.start()
+    try:
+        await wait_until(cond, timeout)
+    finally:
+        await detector.aclose()
 
 
 async def run_until_exhausted(

@@ -1,12 +1,15 @@
-"""이더리움 ERC-20 입출금 감지기 — 판정 규칙·자가 확장·리오그·나노초 시각·쓰기 재시도·공백 재생·재연결 (스펙 050 §4). 네트워크 없음."""
+"""이더리움 ERC-20 입출금 감지기 — 판정 규칙·자가 확장·리오그·나노초 시각·쓰기 재시도·공백 재생·재연결 (스펙 050 §4). 네트워크 없음.
 
-import asyncio
+작업자(블록 처리·쓰기)는 펌프와 다른 태스크라 "몇 번 양보하면 끝났겠지" 로 단언하지 않는다 — 소켓을 열어 둔 채
+`wait_until` 로 마지막 블록·쓰기 횟수·버퍼 같은 조건을 기다리고, 프레임 순서가 중요한 곳은 정착 대기를 표로 막는다.
+"""
+
 import logging
 
 import pytest
 
 from app.core import eth_flow
-from app.core.eth_flow import HEADS_SILENCE_SEC, EthFlowDetector
+from app.core.eth_flow import HEADS_CHECK_SEC, HEADS_SILENCE_SEC, EthFlowDetector
 from app.core.redis_bus import (
     FLOW_DEPOSIT_ADDRS_KEY,
     FLOW_HOT_WALLETS_KEY,
@@ -34,8 +37,10 @@ from tests.eth_flow_fakes import (
     log_frame,
     log_result,
     make_bus,
+    run_until,
     run_until_exhausted,
     sub_ack,
+    wait_until,
 )
 from tests.stream_fakes import FakeSocket, GatedSocket, until
 
@@ -47,6 +52,29 @@ def node_with(head: int, *blocks: int) -> FakeNode:
     for n in blocks:
         node.put_block(n, T0 + (n - head) * 12)
     return node
+
+
+def at_block(det: EthFlowDetector, block: int):  # noqa: ANN201 — 조건 함수
+    """마지막 처리 블록이 `block` 에 닿았는가 — 그 블록의 로그 판정·쓰기 회차가 끝난 뒤에만 참이다."""
+    return lambda: det.status().last_block == block
+
+
+def buffered(det: EthFlowDetector, block: int, count: int):  # noqa: ANN201 — 조건 함수
+    """펌프가 그 블록의 로그 `count` 건을 버퍼에 넣었는가(정착 대기를 풀기 전 확인용)."""
+    return lambda: len(det._buffered_logs.get(block, [])) == count
+
+
+async def gated(
+    node: FakeNode,
+) -> tuple[EthFlowDetector, GatedSocket, FakeNode, object, FlowSleeps, object]:
+    """정착 대기를 표로 막는 감지기 + 열린 소켓 — 프레임을 밀어 넣고 버퍼를 확인한 뒤 `release_settle` 로 블록을 처리시킨다."""
+    sock = GatedSocket()
+    det, _, node, writer, sleeps, clock = build(
+        [sock], node=node, sleeps=FlowSleeps(gate_settle=True)
+    )
+    await det.start()
+    await until(sock.subscribed)
+    return det, sock, node, writer, sleeps, clock
 
 
 # ── 판정 규칙 (§3.3) ─────────────────────────────────────────────────────────
@@ -66,10 +94,11 @@ async def test_transfer_to_deposit_address_is_stored_as_in() -> None:
                 log_index=7,
             ),
             head_frame(B + 1, T0 + 12),
-        ]
+        ],
+        hold=True,
     )
-    det, connector, node, writer, _, _ = build([sock], node=node)
-    await run_until_exhausted(det, connector)
+    det, _, node, writer, _, _ = build([sock], node=node)
+    await run_until(det, at_block(det, B + 1))
     (p,) = writer.points()
     assert (p["dir"], p["symbol"], p["addr"], p["counterparty"]) == (
         "in",
@@ -114,20 +143,20 @@ async def test_hot_wallet_to_outside_is_out_and_to_own_addresses_grows_internal(
                 log_index=4,
             ),
             head_frame(B + 1, T0 + 12),
-        ]
+        ],
+        hold=True,
     )
-    det, connector, node, writer, _, _ = build([sock], node=node)
-    await run_until_exhausted(det, connector)
+    det, _, node, writer, _, _ = build([sock], node=node)
+    await run_until(det, at_block(det, B + 1))
     (p,) = writer.points()
     assert (p["dir"], p["addr"], p["counterparty"]) == ("out", HOT_A, OUTSIDER)
-    status = det.status()
     assert (
-        status.internal == 1 + 2
+        det.status().internal == 1 + 2
     )  # HOT_B·DEPOSIT_B 가 내부에 더해졌다(INTERNAL_A 는 이미)
 
 
 async def test_sweep_from_deposit_address_adds_hot_wallet_without_storing() -> None:
-    node = node_with(B, B + 1)
+    node = node_with(B, B + 1, B + 2)
     sock = FakeSocket(
         [
             log_frame(sender=DEPOSIT_A, receiver=NEWCOMER, amount=10**18, block=B + 1),
@@ -135,11 +164,11 @@ async def test_sweep_from_deposit_address_adds_hot_wallet_without_storing() -> N
             # 새 핫월렛에서 밖으로 — 바로 출금으로 잡힌다
             log_frame(sender=NEWCOMER, receiver=OUTSIDER, amount=10**18, block=B + 2),
             head_frame(B + 2, T0 + 24),
-        ]
+        ],
+        hold=True,
     )
-    node.put_block(B + 2, T0 + 24)
-    det, connector, node, writer, _, _ = build([sock], node=node)
-    await run_until_exhausted(det, connector)
+    det, _, node, writer, _, _ = build([sock], node=node)
+    await run_until(det, at_block(det, B + 2))
     (p,) = writer.points()
     assert (p["dir"], p["addr"], p["block"]) == ("out", NEWCOMER, B + 2)
     assert det.status().hot_wallets == 3
@@ -151,8 +180,11 @@ async def test_gas_wallet_receivers_become_deposit_addresses_and_land_in_redis()
     bus, raw = make_bus()
     node = node_with(B)
     node.put_block(
-        B + 1, T0 + 12, txs=[gas_tx(NEWCOMER), gas_tx(HOT_A), gas_tx(OUTSIDER, value=0)]
+        B + 1,
+        T0 + 12,
+        txs=[gas_tx(NEWCOMER), gas_tx(HOT_A), gas_tx(OUTSIDER, value=0)],
     )
+    node.put_block(B + 2, T0 + 24)
     sock = FakeSocket(
         [
             head_frame(B + 1, T0 + 12),
@@ -165,17 +197,16 @@ async def test_gas_wallet_receivers_become_deposit_addresses_and_land_in_redis()
                 block=B + 2,
             ),
             head_frame(B + 2, T0 + 24),
-        ]
+        ],
+        hold=True,
     )
-    node.put_block(B + 2, T0 + 24)
-    det, connector, node, writer, _, _ = build([sock], node=node, bus=bus)
-    await run_until_exhausted(det, connector)
+    det, _, node, writer, _, _ = build([sock], node=node, bus=bus)
+    # Redis 의 마지막 블록 저장이 블록 회차의 맨 끝이다 — 그것이 보이면 집합 추가·쓰기도 끝났다
+    await run_until(det, lambda: raw.get(FLOW_LAST_BLOCK_KEY) == str(B + 2).encode())
     assert det.status().deposit_addrs == 3  # 핫월렛·금액 0 수신자는 더하지 않는다
     assert {m.decode() for m in raw.smembers(FLOW_DEPOSIT_ADDRS_KEY)} == {NEWCOMER}
-    assert (
-        raw.smembers(FLOW_HOT_WALLETS_KEY) == set()
-        and raw.smembers(FLOW_INTERNAL_KEY) == set()
-    )
+    assert raw.smembers(FLOW_HOT_WALLETS_KEY) == set()
+    assert raw.smembers(FLOW_INTERNAL_KEY) == set()
     (p,) = writer.points()
     assert (p["dir"], p["symbol"], p["amount"], p["addr"]) == (
         "in",
@@ -183,7 +214,6 @@ async def test_gas_wallet_receivers_become_deposit_addresses_and_land_in_redis()
         1.0,
         NEWCOMER,
     )
-    assert raw.get(FLOW_LAST_BLOCK_KEY) == str(B + 2).encode()
     assert node.block_calls == [B + 1, B + 2]  # 블록마다 HTTP 1회
 
 
@@ -195,10 +225,11 @@ async def test_redis_additions_merge_into_seeds_on_start() -> None:
         [
             log_frame(sender=NEWCOMER, receiver=OUTSIDER, amount=10**18, block=B + 1),
             head_frame(B + 1, T0 + 12),
-        ]
+        ],
+        hold=True,
     )
-    det, connector, node, writer, _, _ = build([sock], node=node, bus=bus)
-    await run_until_exhausted(det, connector)
+    det, _, node, writer, _, _ = build([sock], node=node, bus=bus)
+    await run_until(det, at_block(det, B + 1))
     assert det.status().hot_wallets == 3
     assert [p["dir"] for p in writer.points()] == ["out"]
 
@@ -222,10 +253,11 @@ async def test_logs_with_fewer_than_three_topics_or_zero_amount_are_dropped() ->
                 sender=DEPOSIT_A, receiver=NEWCOMER, amount=0, block=B + 1, log_index=2
             ),
             head_frame(B + 1, T0 + 12),
-        ]
+        ],
+        hold=True,
     )
-    det, connector, node, writer, _, _ = build([sock], node=node)
-    await run_until_exhausted(det, connector)
+    det, _, node, writer, _, _ = build([sock], node=node)
+    await run_until(det, at_block(det, B + 1))
     assert writer.points() == []
     assert det.status().hot_wallets == 2
 
@@ -250,14 +282,18 @@ async def test_removed_log_overwrites_the_same_point_with_removed_true() -> None
                 log_index=3,
                 removed=True,
             ),
-        ]
+        ],
+        hold=True,
     )
-    det, connector, node, writer, _, _ = build([sock], node=node)
-    await run_until_exhausted(det, connector)
-    first, second = writer.points()
+    det, _, node, writer, _, _ = build([sock], node=node)
+    # 블록 회차 1회 + 되돌림(늦은 경로) 1회 = 쓰기 2회
+    await run_until(det, lambda: len(writer.calls) == 2)
+    points = writer.points()
+    assert len(points) == 2
+    first, second = points[0], points[1]
     assert first["removed"] is False and second["removed"] is True
-    same = ("dir", "symbol", "exchange", "network", "ts_ns")
-    assert [first[k] for k in same] == [second[k] for k in same]  # 같은 유일키
+    for key in ("dir", "symbol", "exchange", "network", "ts_ns", "block", "log_index"):
+        assert first[key] == second[key], key  # 같은 유일키
 
 
 async def test_time_is_block_ts_nanoseconds_plus_log_index_so_same_block_points_differ() -> (
@@ -281,32 +317,29 @@ async def test_time_is_block_ts_nanoseconds_plus_log_index_so_same_block_points_
                 log_index=9,
             ),
             head_frame(B + 1, T0 + 12),
-        ]
+        ],
+        hold=True,
     )
-    det, connector, node, writer, _, _ = build([sock], node=node)
-    await run_until_exhausted(det, connector)
+    det, _, node, writer, _, _ = build([sock], node=node)
+    await run_until(det, at_block(det, B + 1))
     a, b = writer.points()
     assert a["ts_ns"] == (T0 + 12) * 10**9 + 4 and b["ts_ns"] == (T0 + 12) * 10**9 + 9
     assert len(writer.calls) == 1  # 블록 단위로 묶어 쓰기 1회
 
 
 async def test_late_log_after_its_head_uses_the_block_time_table() -> None:
-    node = node_with(B, B + 1)
-    sock = FakeSocket(
-        [
-            head_frame(B + 1, T0 + 12),
-            log_frame(
-                sender=OUTSIDER,
-                receiver=DEPOSIT_A,
-                amount=10**18,
-                block=B + 1,
-                log_index=2,
-            ),
-        ]
+    det, sock, node, writer, sleeps, _ = await gated(node_with(B, B + 1))
+    sock.push(head_frame(B + 1, T0 + 12))
+    sock.push(
+        log_frame(
+            sender=OUTSIDER, receiver=DEPOSIT_A, amount=10**18, block=B + 1, log_index=2
+        )
     )
-    det, connector, node, writer, _, _ = build([sock], node=node)
-    await run_until_exhausted(det, connector)
-    (p,) = writer.points()
+    await wait_until(buffered(det, B + 1, 1))
+    sleeps.release_settle()
+    await wait_until(at_block(det, B + 1))
+    await det.aclose()
+    (p,) = writer.points()  # type: ignore[attr-defined]
     assert p["ts_ns"] == (T0 + 12) * 10**9 + 2
     assert node.block_calls == [B + 1]  # 시각 표에 있어 HTTP 를 더 부르지 않는다
 
@@ -315,39 +348,38 @@ async def test_late_log_after_its_head_uses_the_block_time_table() -> None:
 
 
 async def test_write_failure_is_retried_with_the_next_block_round() -> None:
-    node = node_with(B, B + 1, B + 2)
-    sock = FakeSocket(
-        [
-            log_frame(sender=OUTSIDER, receiver=DEPOSIT_A, amount=10**18, block=B + 1),
-            head_frame(B + 1, T0 + 12),
-            log_frame(sender=OUTSIDER, receiver=DEPOSIT_A, amount=10**18, block=B + 2),
-            head_frame(B + 2, T0 + 24),
-        ]
+    det, sock, node, writer, sleeps, _ = await gated(node_with(B, B + 1, B + 2))
+    writer.fail = True  # type: ignore[attr-defined]
+    sock.push(
+        log_frame(sender=OUTSIDER, receiver=DEPOSIT_A, amount=10**18, block=B + 1)
     )
-    det, connector, node, writer, _, _ = build([sock], node=node)
-    writer.fail = True
-    await det.start()
-    await asyncio.wait_for(_written_blocks(det, B + 1), 2.0)
-    writer.fail = False
-    await asyncio.wait_for(connector.exhausted.wait(), 2.0)
+    sock.push(head_frame(B + 1, T0 + 12))
+    await wait_until(buffered(det, B + 1, 1))
+    sleeps.release_settle()
+    await wait_until(at_block(det, B + 1))  # 쓰기 실패 — 미전송에 남는다
+    assert writer.calls == []  # type: ignore[attr-defined]
+    writer.fail = False  # type: ignore[attr-defined]
+    sock.push(
+        log_frame(sender=OUTSIDER, receiver=DEPOSIT_A, amount=10**18, block=B + 2)
+    )
+    sock.push(head_frame(B + 2, T0 + 24))
+    await wait_until(buffered(det, B + 2, 1))
+    sleeps.release_settle()
+    await wait_until(at_block(det, B + 2))
     await det.aclose()
-    assert len(writer.calls) == 1
-    assert [p["block"] for p in writer.points()] == [B + 1, B + 2]
-
-
-async def _written_blocks(det: EthFlowDetector, block: int) -> None:
-    while det.status().last_block is None or det.status().last_block < block:
-        await asyncio.sleep(0)
+    assert len(writer.calls) == 1  # type: ignore[attr-defined]
+    assert [p["block"] for p in writer.points()] == [B + 1, B + 2]  # type: ignore[attr-defined]
 
 
 async def test_unsent_points_are_capped_dropping_the_oldest(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setattr(eth_flow, "PENDING_LIMIT", 3)
-    node = node_with(B, B + 1, B + 2)
-    sock = FakeSocket(
-        [
-            *[
+    det, sock, node, writer, sleeps, _ = await gated(node_with(B, B + 1, B + 2))
+    writer.fail = True  # type: ignore[attr-defined]
+    with caplog.at_level(logging.WARNING, logger="marketlens.eth_flow"):
+        for i in range(5):
+            sock.push(
                 log_frame(
                     sender=OUTSIDER,
                     receiver=DEPOSIT_A,
@@ -355,21 +387,19 @@ async def test_unsent_points_are_capped_dropping_the_oldest(
                     block=B + 1,
                     log_index=i,
                 )
-                for i in range(5)
-            ],
-            head_frame(B + 1, T0 + 12),
-            head_frame(B + 2, T0 + 24),
-        ]
-    )
-    det, connector, node, writer, _, _ = build([sock], node=node)
-    writer.fail = True
-    with caplog.at_level(logging.WARNING, logger="marketlens.eth_flow"):
-        await det.start()
-        await asyncio.wait_for(_written_blocks(det, B + 1), 2.0)
-        writer.fail = False
-        await asyncio.wait_for(connector.exhausted.wait(), 2.0)
+            )
+        sock.push(head_frame(B + 1, T0 + 12))
+        await wait_until(buffered(det, B + 1, 5))
+        sleeps.release_settle()
+        await wait_until(
+            at_block(det, B + 1)
+        )  # 5점 쓰기 실패 → 상한 3 — 오래된 2점 버림
+        writer.fail = False  # type: ignore[attr-defined]
+        sock.push(head_frame(B + 2, T0 + 24))
+        sleeps.release_settle()
+        await wait_until(at_block(det, B + 2))
         await det.aclose()
-    assert [p["amount"] for p in writer.points()] == [3.0, 4.0, 5.0]
+    assert [p["amount"] for p in writer.points()] == [3.0, 4.0, 5.0]  # type: ignore[attr-defined]
     assert any("오래된 2점 버림" in r.getMessage() for r in caplog.records)
 
 
@@ -391,14 +421,14 @@ async def test_gap_within_limit_is_replayed_in_chunks_of_twenty() -> None:
             log_index=5,
         )
     )
-    sock = FakeSocket([sub_ack(1), sub_ack(2)])
-    det, connector, node, writer, _, _ = build([sock], node=node, bus=bus)
-    await run_until_exhausted(det, connector)
+    sock = FakeSocket([sub_ack(1), sub_ack(2)], hold=True)
+    det, _, node, writer, _, _ = build([sock], node=node, bus=bus)
+    # 재생은 세션이 작업자보다 먼저 직접 돈다 — 마지막 블록의 Redis 저장이 재생의 끝이다
+    await run_until(det, lambda: raw.get(FLOW_LAST_BLOCK_KEY) == str(B + 50).encode())
     assert node.get_logs_calls == [(B + 1, B + 20), (B + 21, B + 40), (B + 41, B + 50)]
     (p,) = writer.points()
     assert (p["block"], p["ts_ns"]) == (B + 30, (T0 + 30) * 10**9 + 5)
     assert det.status().last_block == B + 50
-    assert raw.get(FLOW_LAST_BLOCK_KEY) == str(B + 50).encode()
 
 
 async def test_gap_over_limit_starts_from_head_with_one_warning(
@@ -407,12 +437,11 @@ async def test_gap_over_limit_starts_from_head_with_one_warning(
     bus, raw = make_bus()
     raw.set(FLOW_LAST_BLOCK_KEY, str(B))
     node = FakeNode(head=B + 7_201)
-    sock = FakeSocket([])
-    det, connector, node, writer, _, _ = build([sock], node=node, bus=bus)
+    sock = FakeSocket([], hold=True)
+    det, _, node, writer, _, _ = build([sock], node=node, bus=bus)
     with caplog.at_level(logging.WARNING, logger="marketlens.eth_flow"):
-        await run_until_exhausted(det, connector)
+        await run_until(det, lambda: det.status().last_block == B + 7_201)
     assert node.get_logs_calls == [] and node.block_calls == []
-    assert det.status().last_block == B + 7_201
     assert sum("재생 상한" in r.getMessage() for r in caplog.records) == 1
 
 
@@ -423,10 +452,11 @@ async def test_without_last_block_key_starts_from_head() -> None:
         [
             log_frame(sender=OUTSIDER, receiver=DEPOSIT_A, amount=10**18, block=B + 1),
             head_frame(B + 1, T0 + 12),
-        ]
+        ],
+        hold=True,
     )
-    det, connector, node, writer, _, _ = build([sock], node=node, bus=bus)
-    await run_until_exhausted(det, connector)
+    det, _, node, writer, _, _ = build([sock], node=node, bus=bus)
+    await run_until(det, at_block(det, B + 1))
     assert node.get_logs_calls == []
     assert [p["block"] for p in writer.points()] == [B + 1]
 
@@ -446,32 +476,34 @@ async def test_live_frames_during_replay_are_queued_then_processed_in_order() ->
                 sender=OUTSIDER, receiver=DEPOSIT_A, amount=3 * 10**18, block=B + 3
             ),
             head_frame(B + 3, T0 + 3),
-        ]
+        ],
+        hold=True,
     )
-    det, connector, node, writer, _, _ = build([sock], node=node, bus=bus)
-    await run_until_exhausted(det, connector)
+    det, _, node, writer, _, _ = build([sock], node=node, bus=bus)
+    await run_until(det, at_block(det, B + 3))
     assert [p["block"] for p in writer.points()] == [B + 1, B + 3]
-    assert det.status().last_block == B + 3
 
 
 # ── 재연결 (§3.4) ───────────────────────────────────────────────────────────
 
 
+def checks_slept(sleeps: FlowSleeps, n: int):  # noqa: ANN201 — 조건 함수
+    """무수신 감시가 n 번째 대기에 들어갔는가 — 직전 검사에서 '아직 아니다' 로 판단했다는 뜻."""
+    return lambda: sleeps.values.count(HEADS_CHECK_SEC) == n
+
+
 async def test_silent_heads_for_thirty_seconds_reconnects() -> None:
     first, second = GatedSocket(), GatedSocket()
-    node = FakeNode(head=B)
+    node = node_with(B, B + 1)
     det, connector, node, writer, sleeps, clock = build([first, second], node=node)
     await det.start()
     await until(first.subscribed)
     first.push(head_frame(B + 1, T0))
-    node.put_block(B + 1, T0)
-    await until(first.delivered)
-    await asyncio.sleep(0.01)
-    assert det.status().connected
+    await wait_until(lambda: det.status().connected)
     clock.now += int(HEADS_SILENCE_SEC * 1000) - 1
     sleeps.release_check()
-    await asyncio.sleep(0.01)
-    assert connector.urls == [WS_URL]  # 29.999초 — 아직
+    await wait_until(checks_slept(sleeps, 2))  # 29.999초 — 검사가 그냥 지나갔다
+    assert connector.urls == [WS_URL]
     clock.now += 1
     sleeps.release_check()
     await until(second.subscribed)
@@ -492,7 +524,7 @@ async def test_backoff_doubles_from_one_to_thirty_seconds_and_resets_on_first_he
     ]
     det, connector, node, writer, sleeps, clock = build(outcomes, node=node)
     await run_until_exhausted(det, connector)
-    # 첫 newHeads 가 백오프를 1초로 되돌린다 — 그 뒤 끊김은 1초, 다음 실패는 2초
+    # 첫 newHeads 가 백오프를 1초로 되돌린다(펌프가 그 자리에서) — 그 뒤 끊김은 1초, 다음 실패는 2초
     assert sleeps.backoffs() == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0, 1.0, 2.0]
     assert connector.urls == [WS_URL] * 10  # 9 결과 + 영원히 기다리는 10번째 시도
 
@@ -504,12 +536,12 @@ async def test_block_fetch_failure_only_skips_extension_when_time_is_known() -> 
         [
             log_frame(sender=OUTSIDER, receiver=DEPOSIT_A, amount=10**18, block=B + 1),
             head_frame(B + 1, T0 + 12),
-        ]
+        ],
+        hold=True,
     )
-    det, connector, node, writer, _, _ = build([sock], node=node)
-    await run_until_exhausted(det, connector)
+    det, _, node, writer, _, _ = build([sock], node=node)
+    await run_until(det, at_block(det, B + 1))
     assert [p["block"] for p in writer.points()] == [B + 1]
-    assert det.status().last_block == B + 1
 
 
 async def test_http_url_is_used_for_rpc_and_subscriptions_are_two() -> None:
@@ -530,21 +562,11 @@ async def test_http_url_is_used_for_rpc_and_subscriptions_are_two() -> None:
 # ── 펌프·작업자 분리 (2026-10-08 실측 — 로그는 head 뒤에 온다) ────────────────
 
 
-async def _until_block(det: EthFlowDetector, block: int) -> None:
-    await asyncio.wait_for(_written_blocks(det, block), 2.0)
-
-
 async def test_logs_arriving_after_their_head_go_into_the_block_single_write_round() -> (
     None
 ):
-    sock = GatedSocket()
-    node = node_with(B, B + 1)
-    sleeps = FlowSleeps(gate_settle=True)
-    det, connector, node, writer, sleeps, _ = build([sock], node=node, sleeps=sleeps)
-    await det.start()
-    await until(sock.subscribed)
+    det, sock, node, writer, sleeps, _ = await gated(node_with(B, B + 1))
     sock.push(head_frame(B + 1, T0 + 12))
-    await until(sock.delivered)
     sock.push(
         log_frame(
             sender=OUTSIDER, receiver=DEPOSIT_A, amount=10**18, block=B + 1, log_index=1
@@ -559,18 +581,19 @@ async def test_logs_arriving_after_their_head_go_into_the_block_single_write_rou
             log_index=2,
         )
     )
-    await until(sock.delivered)
-    await asyncio.sleep(0.01)
-    assert writer.calls == []  # 정착 대기 중 — 아직 쓰지 않았다
+    await wait_until(buffered(det, B + 1, 2))
+    assert writer.calls == []  # type: ignore[attr-defined] — 정착 대기 중, 아직 쓰지 않았다
     sleeps.release_settle()
-    await _until_block(det, B + 1)
-    assert len(writer.calls) == 1  # 블록 하나 = 쓰기 1회
-    assert [p["log_index"] for p in writer.points()] == [1, 2]
-    assert det.status().late_logs == 0
+    await wait_until(at_block(det, B + 1))
     await det.aclose()
+    assert len(writer.calls) == 1  # type: ignore[attr-defined] — 블록 하나 = 쓰기 1회
+    assert [p["log_index"] for p in writer.points()] == [1, 2]  # type: ignore[attr-defined]
+    assert det.status().late_logs == 0
 
 
 async def test_slow_block_fetch_does_not_stall_head_bookkeeping() -> None:
+    import asyncio
+
     sock = GatedSocket()
     node = node_with(B, B + 1, B + 2)
     node.block_gate = asyncio.Event()
@@ -578,19 +601,19 @@ async def test_slow_block_fetch_does_not_stall_head_bookkeeping() -> None:
     await det.start()
     await until(sock.subscribed)
     sock.push(head_frame(B + 1, T0 + 12))
-    await until(sock.delivered)
-    await asyncio.sleep(0.01)
-    assert node.block_calls == [B + 1]  # 작업자가 HTTP 에 걸려 있다
+    await wait_until(lambda: node.block_calls == [B + 1])  # 작업자가 HTTP 에 걸려 있다
     clock.now += int(HEADS_SILENCE_SEC * 1000) - 1000
     sock.push(head_frame(B + 2, T0 + 24))  # 펌프는 그래도 head 를 읽는다
     await until(sock.delivered)
     clock.now += 5_000
-    sleeps.release_check()  # 마지막 head 로부터 5초 — 무수신이 아니다
-    await asyncio.sleep(0.01)
+    sleeps.release_check()
+    await wait_until(
+        checks_slept(sleeps, 2)
+    )  # 마지막 head 로부터 5초 — 무수신이 아니다
     assert connector.urls == [WS_URL] and det.status().connected
     node.block_gate.set()
-    await _until_block(det, B + 2)
-    assert det.status().last_block == B + 2 and sleeps.backoffs() == []
+    await wait_until(at_block(det, B + 2))
+    assert sleeps.backoffs() == []
     await det.aclose()
 
 
@@ -605,7 +628,7 @@ async def test_late_log_after_block_processed_writes_once_and_counts(
         await det.start()
         await until(sock.subscribed)
         sock.push(head_frame(B + 1, T0 + 12))
-        await _until_block(det, B + 1)
+        await wait_until(at_block(det, B + 1))
         assert writer.calls == []  # 로그 없는 블록은 쓰기 요청이 없다
         sock.push(
             log_frame(
@@ -616,12 +639,8 @@ async def test_late_log_after_block_processed_writes_once_and_counts(
                 log_index=3,
             )
         )
-        await until(sock.delivered)
-        for _ in range(20):
-            await asyncio.sleep(0)
-    assert (
-        len(writer.calls) == 1 and writer.points()[0]["ts_ns"] == (T0 + 12) * 10**9 + 3
-    )
+        await wait_until(lambda: len(writer.calls) == 1)
+    assert writer.points()[0]["ts_ns"] == (T0 + 12) * 10**9 + 3
     assert det.status().late_logs == 1
     assert any("늦은 로그 누적 1건" in r.getMessage() for r in caplog.records)
     await det.aclose()
@@ -638,15 +657,16 @@ async def test_http_status_error_in_replay_skips_to_head_without_reconnect(
         [
             head_frame(B + 11, T0 + 12),
             log_frame(sender=OUTSIDER, receiver=DEPOSIT_A, amount=10**18, block=B + 11),
-        ]
+        ],
+        hold=True,
     )
     det, connector, node, writer, sleeps, _ = build([sock], node=node, bus=bus)
     with caplog.at_level(logging.WARNING, logger="marketlens.eth_flow"):
-        await run_until_exhausted(det, connector)
+        await run_until(det, lambda: len(writer.calls) == 1)
     assert node.get_logs_calls == [(B + 1, B + 10)]  # 첫 묶음에서 거부 → 중단
     assert sum("재생 중단(HTTP 403" in r.getMessage() for r in caplog.records) == 1
-    assert sleeps.backoffs() == [
-        1.0
-    ]  # 소켓이 다 준 뒤의 정상 재연결 1회뿐 — 재생 실패로는 끊지 않았다
+    assert (
+        connector.urls == [WS_URL] and sleeps.backoffs() == []
+    )  # 재생 실패로는 끊지 않았다
     assert [p["block"] for p in writer.points()] == [B + 11]
     assert det.status().last_block == B + 11
