@@ -104,7 +104,7 @@ export default function App() {
     clarityNext.current = null
     if (tab === 'history') clarityTag('sym', selSym)
   }, [tab, selSym])
-  // clarity.js 가 문서 중간에(띠의 저장·다른 탭의 동의로) 대기열을 만들면 지금 보이는 화면의 태그를 한 번 둔다
+  // clarity.js 가 문서 중간에(동의 창의 저장·다른 탭의 동의로) 대기열을 만들면 지금 보이는 화면의 태그를 한 번 둔다
   useEffect(() => {
     const onReady = () => {
       clarityTag('tab', tab)
@@ -168,7 +168,7 @@ export default function App() {
           style={{ marginLeft: 'auto', color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
           개인정보 처리방침
         </a>
-        {/* 033 — 동의 안내 띠는 한 번 고르면 다시 뜨지 않으므로 바꾸러 가는 길을 늘 둔다(철회가 동의보다 어렵지 않게). 방침과 같은 모양·새 탭 */}
+        {/* 033 — 동의 창은 한 번 고르면 다시 뜨지 않으므로 바꾸러 가는 길을 늘 둔다(철회가 동의보다 어렵지 않게). 방침과 같은 모양·새 탭 */}
         <a href="/privacy#consent" target="_blank" rel="noopener" className="hv-txt"
           style={{ color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
           화면 분석 설정

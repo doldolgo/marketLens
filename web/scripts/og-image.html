@@ -1,0 +1,49 @@
+<!doctype html>
+<!-- 랜딩 미리보기 그림(og:image) 원본 — 1200×630 으로 찍어 web/public/landing/og-vN.png 로 둔다 (스펙 022 §3.6).
+     찍기: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --hide-scrollbars \
+             --window-size=1200,630 --screenshot=og.png web/scripts/og-image.html
+     글자·거래소를 바꾸면 파일 이름의 N 을 올리고 head 의 og:image 주소들(랜딩·대시보드 셸·검색어 페이지 둘)과 테스트를 함께 고친다 —
+     카카오·텔레그램은 같은 주소의 그림을 다시 받지 않는다. 실시간 값은 넣지 않는다(미리보기는 오래 남는다). -->
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @font-face {
+      font-family: "Pretendard Variable";
+      font-weight: 45 920;
+      src: url("https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/woff2/PretendardVariable.woff2") format("woff2");
+    }
+    * { box-sizing: border-box; margin: 0; }
+    html, body { width: 1200px; height: 630px; overflow: hidden; }
+    body {
+      position: relative;
+      background: #161826;
+      color: #e9e9ed;
+      font-family: "Pretendard Variable", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .mark { position: absolute; left: 88px; top: 71px; display: flex; align-items: center; gap: 16px; font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
+    .mark svg { color: #9184d9; }
+    h1 { position: absolute; left: 87px; top: 197px; font-size: 78px; font-weight: 700; line-height: 94px; letter-spacing: -0.03em; }
+    .sub { position: absolute; left: 89px; top: 410px; font-size: 27.5px; font-weight: 500; color: #b2b6ca; letter-spacing: -0.01em; }
+    .route { position: absolute; left: 89px; right: 89px; top: 518px; display: flex; align-items: center; gap: 20px; font-size: 30.5px; font-weight: 700; color: #cfd3e5; letter-spacing: -0.01em; white-space: nowrap; }
+    .line { position: relative; flex: 1; height: 3px; background: #9184d9; }
+    .line::before, .line::after { content: ""; position: absolute; top: -5.5px; width: 14px; height: 14px; border-radius: 50%; background: #9184d9; }
+    .line::before { left: -7px; }
+    .line::after { right: -7px; }
+  </style>
+</head>
+<body>
+  <div class="mark">
+    <svg width="32" height="15" viewBox="0 0 22 10" aria-hidden="true"><circle cx="4" cy="5" r="3.5" fill="currentColor" /><rect x="5" y="4" width="12" height="2" fill="currentColor" /><circle cx="18" cy="5" r="3.5" fill="currentColor" /></svg>
+    KimpTrack
+  </div>
+  <h1>실시간 김프·역프,<br />실제로 옮길 수 있는지까지</h1>
+  <p class="sub">$1,000 체결 단가 · 경로마다 출금·입금 확인</p>
+  <div class="route">
+    <span>업비트 · 빗썸</span>
+    <span class="line"></span>
+    <span id="fx">Binance · Bybit · Bitget · OKX</span>
+  </div>
+</body>
+</html>
