@@ -14,13 +14,13 @@ PUBLIC = ROOT / "web/public"
 SITE = "https://kimptrack.com/"
 
 # 스펙 022 §3.6 — 글자 그대로
-TITLE = "KimpTrack - 실시간 김프(김치 프리미엄)·역프"
+TITLE = "김프(김치프리미엄)·역프 실시간 확인 | KimpTrack"
 DESCRIPTION = (
-    "업비트·빗썸과 바이낸스·바이비트·비트겟 사이 김치 프리미엄을 매초 계산하고, "
-    "경로마다 입출금이 열렸는지 함께 보여 주는 무료 서비스입니다."
+    "김프 사이트 KimpTrack은 업비트·빗썸과 바이낸스·바이비트·비트겟의 "
+    "김치프리미엄과 역프를 매초 계산하고 입출금 상태까지 보여 줍니다."
 )
 H1 = "실시간 김프·역프, 실제로 옮길 수 있는지까지"
-MODIFIED = "2026-10-01"
+MODIFIED = "2026-10-08"
 OG_IMAGE = "https://kimptrack.com/landing/og-v2.png"
 
 
@@ -115,8 +115,8 @@ def test_title_and_description_follow_the_naver_limits() -> None:
     assert len(DESCRIPTION) <= 80
     assert TITLE.count("김프") == 1
     assert (
-        "김프" not in DESCRIPTION
-    )  # 제목과 설명이 핵심어를 나눠 싣는다(설명은 김치 프리미엄)
+        DESCRIPTION.count("김프") == 1
+    )  # 설명은 "김프 사이트" 한 번(검색 상위 사이트들의 공통 구절), 나머지는 김치프리미엄
     for text in (TITLE, DESCRIPTION, H1):
         assert "김프가" not in text
         # 수익을 약속하는 말은 쓰지 않는다 — 수수료·전송 시간을 뺀 참고값이다
@@ -141,7 +141,7 @@ def test_one_h1_and_section_headings() -> None:
     assert page.headings["h2"] == [
         "표시된 김프와 실제로 먹을 수 있는 김프는 다릅니다",
         "지난 7일 김프·역프 사건",
-        "김프(김치 프리미엄)와 역프란",
+        "김프(김치프리미엄)와 역프란",
         "KimpTrack이 김프를 계산하는 방법",
         "자주 묻는 질문",
     ]
