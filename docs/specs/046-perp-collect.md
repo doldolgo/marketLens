@@ -1,6 +1,6 @@
 # 046 — perp-collect
 
-상태: IN_PROGRESS | 의존: 001(collect — 마켓 우주·원문 싱크·틱 판정·커넥터 공통 규칙), 011(health — 실패 분류·구간 추적·수집 상태 탭), 012·019·020(binance-stream·bybit·bitget — 샤드·재조정·핑·정체 판정의 원형), 010(raw-archive — 원문 키 규칙)
+상태: DONE | 의존: 001(collect — 마켓 우주·원문 싱크·틱 판정·커넥터 공통 규칙), 011(health — 실패 분류·구간 추적·수집 상태 탭), 012·019·020(binance-stream·bybit·bitget — 샤드·재조정·핑·정체 판정의 원형), 010(raw-archive — 원문 키 규칙)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -79,8 +79,23 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# server (워크트리 marketlens-spec-046, uv venv 3.12, 2026-10-08)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q
+# → All checks passed! / 1680 passed, 1 skipped (perp 신규 — test_perp 24·test_perp_universe 6·binance_perp 32·bybit_perp 19·bitget_perp 19, health 8원천 순서·perp markets, 트리거 snapshots 8)
+cd web && npm run lint && npm run build          # oxlint 0건 · vite 빌드 통과 (index 253KB, Tab 211KB)
+# 실기동 (이 망에서 거래소 3곳 REST·WS 모두 열림) — 포트 8020, Redis·Influx 없이
+cd server && .venv/bin/uvicorn app.main:app --port 8020
+curl -s localhost:8020/health/collect           # 기동 40초 뒤 8원천 전부 ok, 로그에 샤드 연결 실패·티커 조회 실패 경고 0
+#   markets: upbit 257 bithumb 402 binance 290 bybit 269 bitget 304 | binance_perp 499 bybit_perp 712 bitget_perp 680
+curl -s -X POST localhost:8020/refresh          # snapshots 8항목, perp saved 499/712/680, calls 1/1/1, failures []
 ```
+실측(2026-10-08 로컬 M4, 현물 5 + perp 3 켠 수집기 vs main 의 현물만 수집기를 같은 시각에 나란히 — ps 3초 간격 12회):
+- perp 우주 721 base(2곳 이상 공통 721, 1곳 이상 979 — 김프 우주 ∩ 1곳은 전부 2곳 이상에 포함됐다). 원천별 반영 심볼 바이낸스 499·바이빗 712·비트겟 680. 배수 심볼 바이낸스 12·바이빗 17·비트겟 8.
+- 목록 본문·파싱: exchangeInfo 1,121KB·6.3ms, fundingInfo 134KB·0.5ms, instruments-info 818KB·3.9ms, contracts 617KB·7.3ms(json.loads 만). 전체 티커: 바이빗 669KB·왕복 0.45초, 비트겟 412KB·0.12초.
+- 프레임/초(실 구독 크기로 10초 측정): 바이낸스 호가 샤드 172심볼 252 프레임·92KB/초(3샤드 합 약 750), 펀딩 연결 2.2 프레임·163KB/초(한 프레임 약 76KB). **처음 설계였던 심볼별 WebSocket 티커는 바이빗 샤드당 233심볼 487 프레임/초, 비트겟 234심볼 2,314 프레임·1,301KB/초** — 그래서 §1 의 REST 전환 결정.
+- 수집기 CPU(M4, 1코어 기준 %): 현물만 18~49 → 현물+perp(WS 티커) 27~60(+15~25%p) → 현물+perp(REST 티커) 27~50(현물만과 나란히 잰 12회에서 **+0~10%p, 중앙값 +2~5%p**). RSS +15~20MB(약 115 → 135MB).
+- 틱 단계 60초 요약(합계 p50/p95/max ms): 현물만 77/96/123, 현물+perp(REST) 74/93/111 — 같다. 단계 배분만 달라졌다(현물만은 `인계` 57ms·`틱` 4.6ms, perp 는 `틱` 46ms·`인계` 4.5ms — GC 전체 수집이 어느 단계에 걸리느냐 차이로 보이며 합계는 같다). EC2 c7g 값은 배포 뒤 이 로그로 본다(§6 빚).
+- 바이낸스 `wss://fstream.binance.com/public/ws`·`/market/ws` 빈 연결 + SUBSCRIBE: 둘 다 수락, 응답 `{"result":null,"id":1}`, 프레임은 래핑 없이 온다(`/stream?streams=` 대안 불필요). 경로 없는 `/ws` 도 아직 받는다.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — 행 추가 `| perp-collect | server: perp 원천 3개(binance_perp depth5@500ms+!markPrice@arr@1s 두 경로 3샤드 / bybit_perp·bitget_perp REST 전체 티커 매초 1회)·10초 목록·매초 perp 우주(2곳 이상 ∪ 김프∩1곳)·배수 정규화·펀딩 주기(fundingInfo 60초 / fundingInterval / fundInterval)·`/health/collect` 원천 3개 | web: 수집 상태 탭 카드 | 호가 1단계뿐, 바이빗·비트겟 호가는 최대 1초 늦음 |`. collect 행 비고에 "perp 는 046". 알려진 빚: "(046) collect 박스 CPU — 바이낸스 depth5 가 초당 약 750 프레임이라 1 vCPU 수집기의 여유를 EC2 에서 다시 잰다(§5 로컬 실측). 넘치면 선택지 = perp 수집을 별도 프로세스·박스로(021 의 분리와 같은 방식)", "(046) 바이빗·비트겟 perp 호가는 REST 1초 폴링이라 최대 1초 늦고 체결 단위 변화는 안 보인다 — 갭 표(048·049)는 1초 틱이라 충분하다는 결정(2026-10-08)", "(046) 바이낸스 fundingInfo 에 없는 심볼의 주기 8시간은 가정이다(문서에 기본값 명문 없음)", "(046) perp 호가는 1단계뿐 — 깊이·슬리피지는 없다", "(046) 비트겟 토큰화 주식·외환 perp 는 거르지 않는다 — 다른 원천에도 있으면 우주에 든다". 019·020 의 "EC2 실측 대기" 항목처럼 "(046) EC2 실측 대기: …" 1줄. **항상 포함.**
@@ -92,6 +107,7 @@
 - 스펙(같은 PR 에서): `001-collect.md` §3.6-5 판정 문장에 "perp 원천(046)도 같은 추적기로" 한 구절, `011-health.md` §3.1 "거래소 5곳(…)" 뒤에 "+ perp 원천(046 §3.8)"·§3.8 의 거래소 카드 수·"거래소 5트랙" → "`exchanges` 길이만큼", `036-admin-v2.md` 수집 카드 수 문장.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것 (파일 목록):
-- 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:
-- 남은 빚:
+- 만든 것 (파일 목록): `server/app/core/perp.py`(split_multiplier·perp_universe·PerpSink), `core/perp_universe.py`(PerpUniverse), `core/models.py`(PerpRow), `core/live_store.py`(perp 맵 5메서드), `core/contracts.py`(PerpSymbolSource = ForeignSymbolSource 별칭), `core/config.py`(PERP_SOURCES·COLLECT_SOURCES), `core/universe.py`(perps 훅), `core/collect.py`(perp 목록 먼저·saved 8), `core/streams/binance_perp.py`·`bybit_perp.py`·`bitget_perp.py`, `features/health/service.py`(COLLECT_SOURCES·perp markets), `main.py`(배선·종료), 테스트 `tests/test_perp.py`·`test_perp_universe.py`·`test_stream_binance_perp.py`·`test_stream_bybit_perp.py`·`test_stream_bitget_perp.py` + 기존 6개 갱신(8원천 순서), web `src/shared/format.ts`(표시명 3)·`src/features/health/Tab.tsx`(주석)·`admin/admin.js`(목록 3).
+- 추측한 지점 (묻지 않고 정한 사소한 것): ① PerpSink 의 `quote` 에서 None = "이 메시지에 안 왔다"(delta), 스냅샷에 빠진 호가 필드는 커넥터가 NaN 으로 넘겨 무효 처리 — §3.4 "없거나" 와 "온 필드만" 을 양립시키는 규약(§3.4 에 한 줄 적음). ② 펀딩 보류는 (원천, base) 당 부분 필드 사전이고 보류끼리는 합친다, 마크가는 보류 때 이미 배수로 나눈다. ③ 바이낸스 펀딩 연결은 호가 샤드 배정이 하나도 없으면(우주 확정 전) 판정에서 제외 — 우주가 비었는데 펀딩 연결만으로 원천이 ok/실패가 되지 않게(§3.8 에 적음). ④ 바이낸스 구독 거부(`code`/`msg`)는 현물 012 와 같이 재연결(백오프), 폴링 원천엔 거부 개념이 없다. ⑤ 폴링 원천의 실패 로그 억제는 원인(kind)별 60초 — 001 §3.2 와 같은 규칙. ⑥ 비트겟 티커의 `symbolType` 은 REST 전체 티커 응답에 없어 보지 않는다(목록에서 `perpetual` 만 맵에 든다). ⑦ `markets` 는 스펙대로 반영 심볼 수(폴링 원천은 우주 안 심볼 수) — 행 수가 아니다. ⑧ PerpSymbolSource 는 모양이 같아 새 Protocol 을 만들지 않고 ForeignSymbolSource 별칭으로 뒀다.
+- 실행 중 함께 고친 스펙 절: §1·§2·§3.1·§3.2(규모 실측)·§3.6·§3.7·§3.8·§4·§6 — 바이빗·비트겟을 심볼별 WebSocket 티커에서 **REST 전체 티커 매초 폴링**으로(2026-10-08 사람 결정, 실측 §5). architecture.md 의 "시세는 WebSocket 만" 원칙에 이 예외를 적었다.
+- 남은 빚: status.md 의 (046) 항목 6개 — collect 박스 CPU EC2 실측, 바이빗·비트겟 1초 지연, 바이낸스 fundingInfo 기본 8h 가정, 호가 1단계, 비트겟 토큰화 주식·다음 정산 계산 가정, EC2 실측 대기(원문 객체 크기·샤드 끊김). 추가로 `server/marketlens_server.egg-info/` 가 git 에 추적돼 있어 editable 재설치 때마다 바뀐다(001 빚에 이미 있음 — 이 PR 에서는 되돌려 커밋하지 않았다).

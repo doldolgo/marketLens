@@ -20,7 +20,7 @@
 ## 3. 동작
 
 ### 3.1 읽는 계약 (복사)
-- 001·020: 틱은 1초 주기, 거래소 5곳(`upbit`·`bithumb`·`binance`·`bybit`·`bitget`). 매 틱 거래소마다 판정한다 — 성공 = 스트림 연결 + 마지막 시세 메시지 30초 이내, 실패 = 미연결(그 연결 오류의 kind) 또는 30초 무수신(`stale_stream`). 실패에는 `kind`·`message`·`status_code`(핸드셰이크의 HTTP 상태, 없으면 null)·`url`(WebSocket URL)·`body`(핸드셰이크 거부 응답 본문 앞 500자, 없으면 null)·`retry_after_sec` 가 실린다. 스트림이 끊겨도 행은 그대로 남는다(행은 메시지로만 바뀐다). 실패 예외는 `ExchangeError` 공통 부모에 `exchange`·`url`·`message`·`status_code`·`body`(앞 500자) 를 가진다. 타임아웃은 `exchange_timeout`, 그 외는 `exchange_api_error`.
+- 001·020: 틱은 1초 주기, 거래소 5곳(`upbit`·`bithumb`·`binance`·`bybit`·`bitget`) + perp 원천(046 §3.8 — `binance_perp`·`bybit_perp`·`bitget_perp`, 현물 전부 뒤). 매 틱 거래소마다 판정한다 — 성공 = 스트림 연결 + 마지막 시세 메시지 30초 이내, 실패 = 미연결(그 연결 오류의 kind) 또는 30초 무수신(`stale_stream`). 실패에는 `kind`·`message`·`status_code`(핸드셰이크의 HTTP 상태, 없으면 null)·`url`(WebSocket URL)·`body`(핸드셰이크 거부 응답 본문 앞 500자, 없으면 null)·`retry_after_sec` 가 실린다. 스트림이 끊겨도 행은 그대로 남는다(행은 메시지로만 바뀐다). 실패 예외는 `ExchangeError` 공통 부모에 `exchange`·`url`·`message`·`status_code`·`body`(앞 500자) 를 가진다. 타임아웃은 `exchange_timeout`, 그 외는 `exchange_api_error`.
 - 002: 셸은 1.5초 tick 으로 `now` 를 갱신하고, 탭은 언마운트하지 않고 숨긴다. 경과 표기 `N초 전`/`N분 전`/`N시간 전`. 상태색 정상 초록·지연 주황·끊김 빨강.
 - 003: FE 폴링은 기능 폴더 안의 훅 하나(`setInterval` + 즉시 1회, 재진입 방지, 실패는 무시하고 직전 데이터 유지). 거래소 표시명 `upbit→업비트` `bithumb→빗썸` `binance→Binance`.
 - 005: Influx org·bucket `marketlens`, `INFLUX_TOKEN` 없으면 Influx 비활성. 같은 tag set + 같은 time 은 덮어쓴다. Influx 가 닿지 않아도 앱은 뜬다.
@@ -91,8 +91,8 @@
   ]
 }
 ```
-- `exchanges` 는 001·020 의 거래소 5곳 고정 순서(`upbit`, `bithumb`, `binance`, `bybit`, `bitget`). `state`: 마지막 성공 후 경과 `< 5초` → `ok`, `5초 이상 60초 미만` → `stale`, `60초 이상` 또는 기동 후 성공 0회 → `down`. `markets` = 메모리 스냅샷의 그 거래소 행 수. `openOutage` = 진행 중 구간(모양은 `outages` 항목과 같음), 없으면 null. `lastError` = 가장 최근 구간의 최신 실패(진행 중이면 그것), 24시간 안에 없으면 null.
-- `successRate1h` = `(1 − 최근 3600초 창과 겹치는 구간들의 겹친 초 합 / 3600) × 100`, 소수 1자리. 거래소별로 계산하고 최상위는 5곳 평균. 틱이 1초 고정이라 지속 초 ≈ 실패 틱 수다. 기동 후 1시간 미만이어도 창은 그대로 3600초다 — 꺼져 있던 시간은 복원된 진행 중 구간(§3.4)과 겹치는 만큼만 실패로 센다.
+- `exchanges` 는 001·020 의 거래소 5곳 고정 순서(`upbit`, `bithumb`, `binance`, `bybit`, `bitget`) 뒤에 perp 원천 3개(`binance_perp`, `bybit_perp`, `bitget_perp` — 046 §3.8, 표시명 `Binance perp` 등). `state`: 마지막 성공 후 경과 `< 5초` → `ok`, `5초 이상 60초 미만` → `stale`, `60초 이상` 또는 기동 후 성공 0회 → `down`. `markets` = 메모리 스냅샷의 그 거래소 행 수(perp 원천은 우주 안 심볼 수 — 046 §3.8). `openOutage` = 진행 중 구간(모양은 `outages` 항목과 같음), 없으면 null. `lastError` = 가장 최근 구간의 최신 실패(진행 중이면 그것), 24시간 안에 없으면 null.
+- `successRate1h` = `(1 − 최근 3600초 창과 겹치는 구간들의 겹친 초 합 / 3600) × 100`, 소수 1자리. 거래소별로 계산하고 최상위는 `exchanges` 전체(현물 5 + perp 3) 평균. 틱이 1초 고정이라 지속 초 ≈ 실패 틱 수다. 기동 후 1시간 미만이어도 창은 그대로 3600초다 — 꺼져 있던 시간은 복원된 진행 중 구간(§3.4)과 겹치는 만큼만 실패로 센다.
 - `outages` = 메모리의 24시간 구간 전부(진행 중 포함), `startedAt` 내림차순. 시각은 전부 epoch ms.
 
 ### 3.6 FE — 폴링과 피드
@@ -106,8 +106,8 @@
 ### 3.8 FE — 수집 상태 탭 (002 §3.9 대체)
 세로 카드 5개. `health` 가 null 이면 본문 가운데 `수집 상태 조회 전` 한 줄.
 1. **요약**. 상태 원(down 있으면 빨강, stale 있으면 주황, 아니면 초록) + 문구 `정상` / `일부 지연 — N곳` / `장애 — {이름들} 끊김`. `총 수집 마켓` = `markets` 합. `최근 1시간 수집 성공률` = 최상위 `successRate1h`(`99` 초과 기본색, 아니면 주황). `HH:mm:ss 기준` = `fetchedAt`. 우측 흐리게 `HH:mm 서버 시작` = `serverStartedAt`.
-2. **거래소 카드 3장(3열)**. 상단 상태색 테두리. 이름 + `● 수집 중` / `◌ 지연` / `✕ 끊김`. `마지막 수신` 경과 표기(ok 아니면 주황, 성공 0회면 `–`). `수집 마켓 N`. `성공률 1h`(`99` 이하 주황). `최근 에러` = `lastError` 의 `HH:mm:ss · {유형 라벨} · HTTP {statusCode}`(statusCode null 이면 생략), 없으면 `–`. 진행 중 구간이 있으면 빨강으로 `진행 중 · ×{count}회`.
-3. **타임라인 `실패 구간 · 최근 24시간`**. 거래소 5트랙. 막대 = 구간(`startedAt`~`endedAt`, 진행 중이면 `now` 까지), 색은 `banned`·`rate_limit` 빨강, 그 외 주황. 1분 미만 구간도 최소 2px. 호버 `HH:mm – HH:mm · {유형 라벨} · HTTP {statusCode} · ×{count}회`. 축 눈금 5개 — 24시간 창(`now − 24h` ~ `now`)을 5등분한 1/5·2/5·3/5·4/5 지점에 그 지점 시각의 `HH:00`(분은 버림), 우측 끝에 `지금`. 좌측 끝에 `serverStartedAt` 위치 세로 점선(24시간 안이면).
+2. **거래소 카드(3열 격자, `exchanges` 길이만큼 — 줄이 늘어난다)**. 상단 상태색 테두리. 이름 + `● 수집 중` / `◌ 지연` / `✕ 끊김`. `마지막 수신` 경과 표기(ok 아니면 주황, 성공 0회면 `–`). `수집 마켓 N`. `성공률 1h`(`99` 이하 주황). `최근 에러` = `lastError` 의 `HH:mm:ss · {유형 라벨} · HTTP {statusCode}`(statusCode null 이면 생략), 없으면 `–`. 진행 중 구간이 있으면 빨강으로 `진행 중 · ×{count}회`.
+3. **타임라인 `실패 구간 · 최근 24시간`**. `exchanges` 길이만큼 트랙. 막대 = 구간(`startedAt`~`endedAt`, 진행 중이면 `now` 까지), 색은 `banned`·`rate_limit` 빨강, 그 외 주황. 1분 미만 구간도 최소 2px. 호버 `HH:mm – HH:mm · {유형 라벨} · HTTP {statusCode} · ×{count}회`. 축 눈금 5개 — 24시간 창(`now − 24h` ~ `now`)을 5등분한 1/5·2/5·3/5·4/5 지점에 그 지점 시각의 `HH:00`(분은 버림), 우측 끝에 `지금`. 좌측 끝에 `serverStartedAt` 위치 세로 점선(24시간 안이면).
 4. **로그 `최근 실패 구간`**. 열 `시각 거래소 유형 내용`, `startedAt` 내림차순 최대 50행. 유형 칩 라벨: `timeout` 타임아웃, `network` 연결 실패, `rate_limit` rate limit, `banned` 차단, `unavailable` 거래소 오류, `bad_request` 요청 오류, `bad_response` 응답 오류, `stale_stream` 스트림 정체. 칩 색은 `banned`·`rate_limit` 빨강, 그 외 주황. 내용 = `HTTP {statusCode} · {message 앞 120자}` + ` · ×{count}회 · {지속}`(지속 = `endedAt − startedAt` 경과 표기, 진행 중이면 `진행 중`). `retryAfterSec` 있으면 ` · Retry-After {n}s`. 맨 끝(가장 오래된 쪽)에 회색 칩 `서버 시작` 행 1개 = `serverStartedAt`, 내용 `이력 복원 후 수집 시작`. 구간이 없으면 `최근 24시간 실패 없음`.
 
 ## 4. 검증
@@ -125,7 +125,7 @@ BE(네트워크 없음, 커넥터·Influx 는 fake):
 - 24시간 지난 닫힌 구간은 목록에서 빠지고, 진행 중 구간은 남는다.
 - 구간 열림·닫힘에 Influx 쓰기가 각 1회씩 호출되고, 연속 실패 중에는 호출되지 않는다. 쓰기 예외는 삼켜진다. 닫힘 쓰기에 `ended_ts`·`last_failed_ts`·최종 `count` 가 실린다.
 - 기동 시 fake Influx 의 24시간 점이 메모리로 복원되고 `ended_ts` 없는 점은 진행 중이 된다. Influx 없음/예외/3초 초과면 빈 목록으로 기동한다. 복원 조회는 HTTP 타임아웃 3초로 불린다(`tests/test_outages.py`). 기동 전에 시작한 복원된 진행 중 구간은 `started_at` 부터 now 까지 성공률 창과 겹치고(꺼져 있던 시간 포함), 기동 후 닫히면 `endedAt` 은 기동 후의 첫 성공 틱이다. 같은 거래소에 진행 중 점이 둘이면 최신만 진행 중이고 옛 점은 `ended_at = last_failed_at` 으로 닫혀 그 닫힘 점(`ended_ts`)이 Influx 에 쓰인다.
-- `GET /health/collect`: 거래소 5곳 고정 순서, `state` 경계(4.9초 ok · 5초 stale · 60초 down · 성공 0회 down), `successRate1h` 가 창과 겹친 초로 계산되고 창 밖 구간은 무시된다, `outages` 내림차순, 진행 중 구간이 `openOutage` 와 `outages` 양쪽에 있다.
+- `GET /health/collect`: 거래소 5곳 + perp 원천 3개 고정 순서, `state` 경계(4.9초 ok · 5초 stale · 60초 down · 성공 0회 down), `successRate1h` 가 창과 겹친 초로 계산되고 창 밖 구간은 무시된다, `outages` 내림차순, 진행 중 구간이 `openOutage` 와 `outages` 양쪽에 있다.
 - `GET /health` 는 여전히 `{"status":"ok","version":…}` 이다. `POST /refresh` 응답 키는 바뀌지 않는다.
 - 수집 상태 탭의 유형 칩 라벨에 `stale_stream`(`스트림 정체`)이 있다 — FE `OutageKind` 유니온에 값이 있어야 빌드된다.
 - ruff·pytest 통과. web `npm run lint && npm run build` 통과.
