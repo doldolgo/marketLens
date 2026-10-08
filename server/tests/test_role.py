@@ -108,7 +108,7 @@ def test_api_role_serves_only_influx_routes_and_404s_the_rest(set_role) -> None:
         assert resp.status_code == 200 and resp.json()["state"] == "unconfigured", path
     assert _paths(client.app) == API_ROUTES
     # WebSocket 경로는 OpenAPI 에 안 실린다 — 라우트 표에서 본다 (017 §3.3)
-    assert _ws_paths(client.app) == {"/ws/spreads"}
+    assert _ws_paths(client.app) == {"/ws/spreads", "/ws/gap"}  # 017·048
 
 
 def _ws_paths(app) -> set[str]:  # noqa: ANN001 — FastAPI 앱
@@ -155,9 +155,10 @@ async def test_api_role_starts_with_only_the_spreads_hub_task_and_no_s3_exchange
     # lifespan 을 이 루프에서 직접 돌린다 — 안에서 만든 태스크가 있으면 여기서 보인다
     async with app.router.lifespan_context(app):
         others = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        # 017 — Redis 구독 태스크 + 052 의 화면 영역 통계 10초 묶음 쓰기 (스트림·flusher·Influx 쓰기 태스크 없음)
+        # 017·048 — 표마다 Redis 구독 태스크 하나씩(spreads·gap) + 052 의 화면 영역 통계 10초 묶음 쓰기 (스트림·flusher·Influx 쓰기 태스크 없음)
         assert sorted(t.get_name() for t in others) == [
             "attention_flush",
+            "gap_hub",
             "spreads_hub",
         ]
         assert app.state.influx is None  # 토큰 없음
@@ -192,7 +193,10 @@ def test_collector_is_default_and_keeps_full_route_set(set_role) -> None:  # noq
     for path in COLLECTOR_ADMIN:
         assert client.get(path).status_code == 200, path
     assert any(p.startswith("/orderbook") for p in paths)
-    assert _ws_paths(app) == {"/ws/spreads"}  # 두 역할 모두 (017 §3.2)
+    assert _ws_paths(app) == {
+        "/ws/spreads",
+        "/ws/gap",
+    }  # 두 역할 모두 (017 §3.2·048 §3.4)
 
 
 def test_unknown_role_fails_when_settings_are_read_before_app_object(set_role) -> None:  # noqa: ANN001

@@ -91,5 +91,6 @@ def test_streams_start_before_restores_and_the_tick_loop_after_them(
         "handoff",
         "publisher",
         "hub",
+        "hub",  # 048 — 현선갭 허브(같은 클래스)가 spreads 허브 다음에 뜬다
         "final",  # 종료 — 사건 사본 저장·미전송 쓰기 1회(013 §3.3)
     ]
