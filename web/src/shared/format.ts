@@ -117,7 +117,7 @@ export function pctColor(v: number, digits = 2): string {
 }
 
 /** 거래소 id → 표시명 (003 §3.4). 모르는 id 는 그대로. spreads·health 가 같이 쓴다. */
-const EX_NAMES: Record<string, string> = { upbit: '업비트', bithumb: '빗썸', binance: 'Binance', bybit: 'Bybit', bitget: 'Bitget' }
+const EX_NAMES: Record<string, string> = { upbit: '업비트', bithumb: '빗썸', binance: 'Binance', bybit: 'Bybit', bitget: 'Bitget', okx: 'OKX' }
 
 export function exName(id: string): string {
   return EX_NAMES[id] ?? id
