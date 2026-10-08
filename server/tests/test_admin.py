@@ -403,12 +403,13 @@ def test_root_path_only_on_collector_and_public_api_docs_stay_closed() -> None:
 SCREEN = ROOT / "web/admin"
 # 036 §3.1 — 한 페이지 절 일곱, 이 순서
 SECTIONS = ["overview", "collect", "infra", "alerts", "traffic", "cost", "tools"]
-# 036 §3.8 — 밖으로 나가는 링크의 호스트(고정 https 주소뿐)
+# 036 §3.8 — 밖으로 나가는 링크의 호스트(고정 https 주소뿐). db-ip.com 은 DB-IP CC BY 표시(042 §3.4 ③ 바닥)
 EXTERNAL_HOSTS = {
     "clarity.microsoft.com",
     "dash.cloudflare.com",
     "one.dash.cloudflare.com",
     "github.com",
+    "db-ip.com",
 }
 # 036 §4 — 화면 스크립트에 없어야 하는 것: 브라우저 저장소·HTML 해석·코드 실행·새 창·주소 읽기·style 속성·링크 쓰기·
 # fetch 밖의 요청 길(헤더를 붙이는 한 함수를 우회한다)
@@ -438,6 +439,12 @@ SCRIPT_BANNED = (
     "sendBeacon",
     "new WebSocket",
     "EventSource",
+    # 042 §4 — 서버 기록 창을 주소에 싣지 않는다(주소를 바꾸는 다른 길도)
+    "location.hash",
+    "pushState",
+    "location.assign",
+    "location.search =",
+    "location =",
 )
 # 036 §3.6·§3.8 — svg() 가 받는 속성 이름은 기하·이름표뿐(href·style·on… 은 svg() 가 던진다)
 SVG_ATTRS = {
@@ -591,12 +598,22 @@ def _js_function(js: str, name: str) -> str:
     return found.group(1)
 
 
-def test_screen_top_table_share_is_over_human_pages() -> None:
-    """038 §3.6 — 상위 표 여섯은 사람 브라우저 모양 페이지 줄만 세므로 비율 분모도 `totals.humanPages` 다(042 가 바꾼다)."""
-    body = _js_function(_text("web/admin/admin.js"), "fillAccess")
-    assert "const pages = num(totals.humanPages) ?? 0;" in body
-    assert "topTable(a[k], label, pages, named)" in body
-    assert "num(totals.pages) ?? 0" not in body
+def test_screen_page_line_lists_share_is_over_human_pages() -> None:
+    """042 §4 분모 — 경로(⑤)·외부 출처·utm(③)의 % 는 사람 브라우저 모양 페이지 줄 `totals.humanPages` 로 나눈다(038 §3.6 —
+    상위 목록은 그 줄만 센다). 답 문장 ⑤ 의 경로 % 도 같은 분모다."""
+    js = _text("web/admin/admin.js")
+    for name, keys in (("q3", ("referrers", "utmSources")), ("q5", ("paths",))):
+        body = _js_function(js, name)
+        assert "const hp = n0(f.T.humanPages);" in body, name
+        for key in keys:
+            found = re.findall(
+                rf"shareList\('[\w-]+', rows2\(f\.a\.{key}\), .*?, hp\)", body
+            )
+            assert len(found) == 1, (name, key)
+        assert "totals.pages" not in body and "T.pages" not in body, name
+    answer = _js_function(js, "answer5")
+    assert "const hp = n0(f.T.humanPages);" in answer
+    assert "pct(paths[0][1], hp)" in answer
 
 
 def test_screen_body_elapsed_words_are_retold_after_every_paint() -> None:
@@ -930,7 +947,7 @@ const fetch = (...a) => { calls.push('fetch'); return new Promise(() => {}) }
 const location = { search: '', replace() { calls.push('replace') } }
 const history = { replaceState() { calls.push('replaceState') } }
 const api = new Function('document', 'fetch', 'location', 'history', 'Node',
-  script + '\n;return { kindName, alarmTail, tabName, pctFmt, exchangeRow, timeline, alarmRow, alertRow, fillAccess, fillClarity, drawCollect, got, P }')(
+  script + '\n;return { kindName, alarmTail, tabName, pctFmt, exchangeRow, timeline, alarmRow, alertRow, fillTraffic, fillClarity, drawCollect, got, P }')(
   document, fetch, location, history, Node)
 const text = (n) => (typeof n === 'string' ? n : n.textContent + n.kids.map(text).join(''))
 const titles = (n) => (typeof n === 'string' ? [] : [
@@ -941,13 +958,12 @@ const find = (n, cls) => (typeof n === 'string' ? [] : [...(n.className === cls 
 const tiles = (n) => find(n, 'stat').map((t) => [text(t.kids[0]), ...find(t, 'stat-sub').map(text)])
 const now = Date.now()
 const sec = Math.floor(now / 1000)
-const access = { state: 'ok', startTs: sec - 86400, firstTs: sec - 3600, totals: { requests: 100, pages: 40, ws: 2, skipped: 1 },
+const access = { state: 'ok', windows: ['24h'], gateAt: Date.UTC(2026, 9, 10, 15), startTs: sec - 86400, firstTs: sec - 3600, totals: { requests: 100, pages: 40, ws: 2, skipped: 1 },
   hourly: [{ ts: sec - 3600, requests: 60, pages: 25, errors: 1 }, { ts: sec, requests: 40, pages: 15, errors: 0 }],
   status: { '2xx': 80, '3xx': 10, '4xx': 7, '5xx': 1 }, ws: { count: 2, durations: { lt10s: 1, ge1h: 1 } },
   paths: [['/', 30]], tabs: tabs.map((t, i) => [t, i + 1]), referrers: [], utmSources: [['x', 2]], devices: [['desktop', 30]],
   browsers: [['chrome', 20]], recent5xx: [{ ts: sec - 60, path: '/', status: 502 }] }
-const accessBox = new Node('div')
-api.fillAccess(accessBox, access)
+api.fillTraffic(access)
 const clarityBox = new Node('div')
 api.fillClarity(clarityBox, { state: 'ok', refreshSec: 10800, nextAt: now + 60000, metrics: [],
   traffic: { sessions: 3, botSessions: 1, users: 2, pagesPerSession: 1.5 } })
@@ -967,8 +983,8 @@ process.stdout.write(JSON.stringify({
   timeline: show(api.timeline(outages)),
   alarmRows: alarms.map((name) => show(api.alarmRow({ name, state: 'ALARM', changedAt: now, reason: 'r' }))),
   alertRows: alarms.map((alarm) => show(api.alertRow({ source: 'alarm', alarm, fromState: 'OK', toState: 'ALARM', at: now }))),
-  accessTiles: tiles(accessBox),
-  accessTables: byId.get('access-tables').kids.map((card) => ({ kicker: text(card.kids[0]), ...show(card) })),
+  accessTiles: [1, 6].flatMap((q) => tiles(byId.get(`b-q${q}`))),
+  tabsBlock: show(byId.get('b-q5')),
   clarityTiles: tiles(clarityBox),
   collect: { sum: text(byId.get('collect-sum')), head: text(byId.get('s-collect')) },
   calls,
@@ -991,11 +1007,15 @@ ALARM_NAMES = [
 ODD = ["zzz", "constructor", "__proto__"]
 KINDS = [*KIND_NAMES, *ODD]
 TABS = [*TAB_NAMES, "(기타)", "constructor"]
-# 041 §3.1·§7 타일 부제 — [이름, 부제] (5xx 는 부제 없음)
+# 041 §3.1·§7 타일 부제 — [이름, 부제]. 서버 기록 덩어리의 타일은 042 §3.4 ①·⑥ (시행 전 — windows ["24h"]·시행일 10-11)
 ACCESS_TILES = [
-    ("총 요청", "파일·봇·스캔까지 기록된 모든 줄"),
-    ("페이지", "화면 주소 요청 · 봇 섞임"),
-    ("5xx",),
+    ("확인 ~ 브라우저 모양", "방문자(날마다 셈)"),
+    ("다시 온", "시행 뒤부터"),
+    ("스크립트가 돈 페이지", "사람 모양 페이지 0 중"),
+    ("사람 모양 페이지", "위장 봇 섞임"),
+    ("끝난 연결", "연결 수 — 사람 수가 아니다"),
+    ("연결한 방문자", "시행(10-11 00:00) 뒤부터"),
+    ("재접속 실패", "대시보드 WebSocket 5xx"),
 ]
 CLARITY_TILES = [
     ("세션", "동의한 방문자만"),
@@ -1094,18 +1114,10 @@ def test_alarm_rows_show_tail_labels_and_conditions_in_title(
 def test_tab_table_and_tiles_show_names_and_subtitles(
     admin_js: dict[str, Any],
 ) -> None:
-    """041 §3.4·§3.1 — 접속을 실제로 채우면 탭 표는 한국어 탭 이름(title 은 id, (기타)는 그대로), 서버 기록 둘·
-    Clarity 넷 타일은 값 아래 부제 한 줄이다(5xx 는 부제 없음)."""
-    tables = admin_js["accessTables"]
-    assert [t["kicker"] for t in tables] == [
-        "경로",
-        "탭",
-        "외부 출처",
-        "utm_source",
-        "기기",
-        "브라우저",
-    ]
-    table = tables[1]
+    """041 §3.4·§3.1 — 접속을 실제로 채우면 ⑤ 대시보드 진입 탭은 한국어 탭 이름(title 은 id, (기타)는 그대로), 서버
+    기록 덩어리(042 ①·⑥)와 Clarity 넷 타일은 값 아래 부제 한 줄이다."""
+    table = admin_js["tabsBlock"]
+    assert "대시보드 진입 탭" in table["text"]
     for tab in TABS:
         assert admin_js["tabs"][tab] in table["text"], tab
         assert tab in table["titles"], tab
@@ -1122,3 +1134,208 @@ def test_collect_summary_shows_one_decimal_rate_and_no_version(
     assert collect["head"].endswith(" · 1시간 99.8%"), collect
     for text in collect.values():
         assert "버전" not in text and "0.1.0" not in text, text
+
+
+# --- 접속 절 v3 — 창 줄·질문 여섯 덩어리 (042 §4 정적 단언) -----------------------------------------
+
+WINDOWS = ["24h", "7d", "30d"]
+DBIP = '<a href="https://db-ip.com" rel="noreferrer">IP Geolocation by DB-IP</a>'
+
+
+def test_traffic_window_is_one_query_with_three_window_words() -> None:
+    """042 §3.2 — `?window=` 는 창을 붙이는 한 곳뿐이고 창 글자는 24h·7d·30d 셋, 창은 주소·저장소에 싣지 않는다."""
+    js = _text("web/admin/admin.js")
+    assert js.count("?window=") == 1
+    assert "`${path}?window=${asked}`" in js
+    assert set(re.findall(r"'(\d+[a-z])'", js)) == set(WINDOWS)
+    assert _object_keys(
+        re.search(r"const WINDOW_NAME = \{([^}]*)\};", js).group(1)
+    ) == (WINDOWS)
+    for banned in ("location.hash", "pushState", "localStorage", "sessionStorage"):
+        assert banned not in js, banned
+    # 주소는 만료 표시(RELOAD_MARK)를 볼 때만 읽는다 — 주소로 창을 고르지 않는다(§2)
+    assert js.count("location.search") == 2
+    assert js.count("new URLSearchParams(location.search).has(RELOAD_MARK)") == 2
+
+
+def test_traffic_window_buttons_and_block_order_in_the_page() -> None:
+    """042 §4 — 창 버튼 셋(type=button·data-window 순서·7d·30d disabled), `#traffic` 안 순서 — 041 설명 → 실시간 →
+    창 줄 → 답 줄 여섯 → Clarity 카드, 답 줄과 다음 덩어리 사이에 본문 하나·'이 칸 뜻' 하나."""
+    html = _text("web/admin/index.html")
+    body = _section_bodies(html)["traffic"]
+    buttons = re.findall(r"<button\b[^>]*\bdata-window=[^>]*>", body)
+    assert [re.search(r'data-window="([^"]+)"', b).group(1) for b in buttons] == (
+        WINDOWS
+    )
+    for button, window in zip(buttons, WINDOWS, strict=True):
+        assert 'type="button"' in button, button
+        assert (" disabled" in button) == (window != "24h"), button
+    marks = [EXPLAIN, 'id="b-ws24"', 'class="window-bar"']
+    marks += [f'id="a-q{n}"' for n in range(1, 7)] + ['id="m-clarity"']
+    at = [body.index(m) for m in marks]
+    assert at == sorted(at) and all(body.count(m) == 1 for m in marks)
+    for n in range(1, 7):
+        start = body.index(f'id="a-q{n}"')
+        end = body.index(f'id="a-q{n + 1}"' if n < 6 else 'id="m-clarity"')
+        between = body[start:end]
+        assert re.findall(r'id="b-q\d"', between) == [f'id="b-q{n}"'], n
+        assert between.count(TERMS) == 1, n
+        assert between.index(f'id="b-q{n}"') < between.index(TERMS), n
+        assert f'<p class="answer" id="a-q{n}"></p>' in body, n
+        assert body.index(f'id="m-q{n}"') < start, n
+    # 묶음·덩어리 카드에는 id 가 없다(041 — 설명의 id 가진 조상은 section 뿐)
+    for card in re.findall(r'<div class="card q"[^>]*>', body):
+        assert "id=" not in card, card
+
+
+def test_traffic_dbip_attribution_is_one_fixed_link_outside_the_terms() -> None:
+    """039 §3.2·042 §3.4 ③ — DB-IP CC BY 표시는 index.html 의 고정 링크 하나(③ 바닥 — 설명 dl 밖)."""
+    html = _text("web/admin/index.html")
+    assert html.count("db-ip.com") == 1 and html.count(DBIP) == 1
+    dbip = [a for a in _anchors(html) if "db-ip" in a["href"]]
+    assert dbip == [{"href": "https://db-ip.com", "rel": "noreferrer"}]
+    for block in _folded(html, TERMS):
+        assert "db-ip.com" not in block
+    body = _section_bodies(html)["traffic"]
+    assert body.index('id="b-q3"') < body.index(DBIP) < body.index('id="a-q4"')
+
+
+def test_traffic_words_name_daily_counted_visitors() -> None:
+    """042 §3.1 — 화면 낱말은 '날마다 센 방문자'(방문자-일 아님), 24시간 값은 사람 수가 아니라고 적는다."""
+    js = _text("web/admin/admin.js")
+    assert "날마다 센 방문자" in js
+    assert "오늘·어제(KST)를 따로 세어 더한 수" in js
+    for name in SCREEN_FILES:
+        text = _text(f"web/admin/{name}")
+        for word in ("방문자-일", "visitor-day", "visitor day"):
+            assert word not in text, (name, word)
+
+
+# 042 §3.6 이름표 일곱(계약 복사) — 행에는 한국어 이름, 원래 키는 title 과 '이 칸 뜻' 에만
+TRAFFIC_NAMES = {
+    "CLASS_NAME": {
+        "browser": "사람 브라우저 모양",
+        "search": "검색엔진",
+        "ai": "AI 수집기",
+        "preview": "링크 미리보기",
+        "tool": "자동화 도구",
+        "scanner": "스캐너",
+        "operator": "운영자 흔적",
+        "unknown": "이름 없음",
+    },
+    "CHANNEL_NAME": {
+        "direct": "직접",
+        "search": "검색",
+        "inapp": "앱 안 브라우저",
+        "social": "소셜·커뮤니티",
+        "ai": "AI 답변",
+        "referral": "다른 사이트 링크",
+        "campaign": "캠페인(utm)",
+        "internal": "사이트 안 이동",
+        "unknown": "첫 페이지 기록 없음",
+    },
+    "NET_NAME": {
+        "telecom_kr": "국내 통신사",
+        "telecom": "해외 통신사",
+        "cloud": "데이터센터·클라우드",
+        "other": "기업·학교·기관",
+        "unknown": "자료에 없음",
+    },
+    "APP_NAME": {
+        "kakaotalk": "카카오톡",
+        "naver": "네이버 앱",
+        "instagram": "인스타그램",
+        "facebook": "페이스북",
+        "line": "라인",
+        "daum": "다음 앱",
+        "band": "밴드",
+        "other": "그 밖 앱",
+    },
+    "DEVICE_NAME": {"mobile": "휴대폰", "tablet": "태블릿", "desktop": "데스크톱"},
+    "OS_NAME": {
+        "ios": "iOS",
+        "android": "Android",
+        "windows": "Windows",
+        "macos": "macOS",
+        "linux": "Linux",
+        "chromeos": "ChromeOS",
+        "other": "그 밖",
+    },
+    "BROWSER_NAME": {
+        "chrome": "Chrome",
+        "safari": "Safari",
+        "samsung": "삼성 인터넷",
+        "whale": "웨일",
+        "edge": "Edge",
+        "firefox": "Firefox",
+        "opera": "Opera",
+        "inapp": "앱 안 브라우저",
+        "other": "그 밖",
+    },
+}
+
+
+def test_traffic_name_tables_match_the_spec_and_every_key_is_explained() -> None:
+    """042 §3.6·041 §3.1 — 이름표 일곱(한 줄 객체)의 키·이름이 §3.6 과 같고, 키는 모두 접속 절 '이 칸 뜻' dl 안에
+    `<code>키</code>` 로 있다(행에는 쓰지 않아 휴대폰에서 원래 키를 보는 곳은 그 dl 뿐이다)."""
+    js = _text("web/admin/admin.js")
+    body = _section_bodies(_text("web/admin/index.html"))["traffic"]
+    explained = "".join(
+        re.findall(r"<dl>(.*?)</dl>", "".join(_folded(body, TERMS)), flags=re.S)
+    )
+    for name, expected in TRAFFIC_NAMES.items():
+        found = re.search(rf"\nconst {name} = \{{ (.*?) \}};\n", js)
+        assert found, name
+        assert dict(re.findall(r"(\w+): '([^']*)'", found.group(1))) == expected, name
+        for key in expected:
+            assert f"<code>{key}</code>" in explained, (name, key)
+
+
+def _css_rule(css: str, selector: str) -> str:
+    found = re.findall(rf"(?m)^{re.escape(selector)}[^{{]*\{{([^}}]*)\}}", css)
+    assert len(found) == 1, selector
+    return found[0]
+
+
+def _css_exact(css: str, selector: str) -> str:
+    """맨 앞 칸에서 `선택자 {` 로 시작하는 규칙 하나(뒤에 다른 글자가 붙은 선택자는 다른 규칙)."""
+    found = re.findall(rf"(?m)^{re.escape(selector)} \{{([^}}]*)\}}", css)
+    assert len(found) == 1, selector
+    return found[0]
+
+
+def test_traffic_colors_use_the_spec_tokens_and_narrow_rows_stack() -> None:
+    """042 §3.7·§3.9 — 확인 accent-400·모양 neutral-700·다시 온 accent-600·봇 neutral-600, 강도 h1~h5 = accent
+    700·600·500·400·200(h0 은 막대 바탕), 480px 이하는 막대 행이 두 줄."""
+    css = re.sub(r"/\*.*?\*/", "", _text("web/admin/admin.css"), flags=re.S)
+    for selector, token in (
+        (".chart .confirmed", "--color-accent-400"),
+        (".chart .shaped", "--color-neutral-700"),
+        (".chart .returning", "--color-accent-600"),
+        (".chart .bot", "--color-neutral-600"),
+        (".chart .h0", "--color-neutral-900"),
+    ):
+        assert f"var({token})" in _css_rule(css, selector), selector
+    steps = [
+        re.search(r"fill: var\((--color-accent-\d+)\)", _css_rule(css, f".chart .h{i}"))
+        for i in range(1, 6)
+    ]
+    assert [m.group(1) for m in steps] == [
+        f"--color-accent-{n}" for n in (700, 600, 500, 400, 200)
+    ]
+    narrow = re.search(r"@media \(max-width: 480px\) \{(.*?)\n\}", css, flags=re.S)
+    assert narrow and ".brow" in narrow.group(1) and "'bar bar'" in narrow.group(1)
+    # §3.9 — 행이 든 열이 340px 이하여도 두 줄, ③·⑤ 3열과 ① 범위 타일은 960px 이하에서 한 줄을 다 쓴다
+    tight = re.search(r"@container \(max-width: 340px\) \{(.*?)\n\}", css, flags=re.S)
+    assert tight and ".brow" in tight.group(1) and "'bar bar'" in tight.group(1)
+    assert "container-type: inline-size" in _css_exact(css, ".col")
+    mid = re.search(r"@media \(max-width: 960px\) \{(.*?)\n\}", css, flags=re.S)
+    assert mid and ".cols3 { grid-template-columns: minmax(0, 1fr); }" in mid.group(1)
+    assert ".tiles > :has(> .range-num) { grid-column: 1 / -1; }" in mid.group(1)
+    # 가로 넘침 0 — geo 배지·범위 숫자는 줄을 바꾸고, 답 줄의 값은 바로 뒤 글자와 붙어 있다
+    assert "white-space: normal" in _css_exact(css, ".geo-foot .tag")
+    assert "nowrap" not in _css_exact(css, ".range-num")
+    assert "white-space: nowrap" in _css_exact(css, ".answer .nb")
+    # §3.7 — ⑥ 의 응답·지속 막대는 회색(장애색은 5xx 만), 시행 전 덩어리는 범례처럼 테두리
+    assert "var(--color-neutral-600)" in _css_exact(css, ".q .chart .fill")
+    assert "stroke: var(--color-neutral-700)" in _css_exact(css, ".chart .pre")

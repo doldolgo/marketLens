@@ -1,4 +1,4 @@
-// KimpTrack 관리자 화면 v2 스크립트 (스펙 036). 빌드 없음 — oxlint·vite 대상이 아니다(landing.html 과 같다).
+// KimpTrack 관리자 화면 v2 스크립트 (스펙 036 — 접속 절의 서버 기록은 042). 빌드 없음 — oxlint·vite 대상이 아니다(landing.html 과 같다).
 // 한 파일이다(§2 — 나누면 로드 순서·전역 이름이 계약이 된다). 순서: 공통 도구 → 요청·세션·주기 → 부분 상태·차트
 // → 개요·수집 → 인프라 → 알림·접속 → 비용·그리기·시작.
 // 보안(§3.8): 서버·방문자가 정한 글자는 textContent 로만 넣고 title 말고는 어떤 속성에도 쓰지 않는다 — 링크가 되지 않게.
@@ -24,6 +24,9 @@ const P = {
 const FAST = [P.collector, P.api, P.status, P.collect];
 const SLOW = [P.aws, P.alerts, P.access, P.clarity];
 const HEALTH = new Set([P.collector, P.api]); // 025 — 503 도 상태 응답이다(본문을 그린다)
+// 서버 기록 창(042 §3.2) — 버튼의 data-window 글자. 고른 창은 이 변수에만 둔다(주소·브라우저 저장소 없음 — 새로고침하면 24시간)
+const WINDOW_NAME = { '24h': '24시간', '7d': '7일', '30d': '30일' };
+const WINDOW_HOURS = { '24h': 24, '7d': 168, '30d': 720 };
 
 class Expired extends Error {}
 
@@ -31,6 +34,8 @@ const got = new Map(); // 경로 → { body } | { why } — 마지막 호출 결
 const okSince = new Set(); // 마지막 만료 신호 뒤 만료 신호 없이 끝난 경로
 let reloading = false;
 let alertFilter = 'all'; // 알림 필터 — JS 변수에만 (§3.4)
+let picked = '24h'; // 고른 서버 기록 창 (042 §3.2)
+const acc = { flight: null, again: false }; // 떠 있는 접속 호출 하나와 '끝나면 한 번 더'
 
 // --- 공통 도구 ---------------------------------------------------------------------------------
 
@@ -134,27 +139,30 @@ async function call(path, init = {}) {
   return { status: resp.status, body: isObj(body) ? body : null, text };
 }
 
-// 직전 결과와 같으면 직전 객체를 그대로 둔다 — 그 값으로 그린 본문을 다시 그리지 않게(아래 redraw)
+// 직전 결과와 같으면 직전 객체를 그대로 둔다 — 그 값으로 그린 본문을 다시 그리지 않게(아래 redraw).
+// 접속 결과는 요청한 창(asked)이 같을 때만 같은 것이다
 function keep(path, next) {
   const prev = got.get(path);
-  const same = prev && (next.why ? prev.why === next.why : prev.text === next.text);
+  const same = prev && prev.asked === next.asked && (next.why ? prev.why === next.why : prev.text === next.text);
   if (!same) got.set(path, next);
 }
 
 // 경로 하나를 부르고 결과를 got 에 둔다. 403·JSON 아님·예상 밖 상태(피드 경로가 없는 404 등)는 사유만 남긴다 —
 // 그 경로가 채우는 칸은 비우고 사유를 적는다(직전 값이 정상으로 읽히지 않게). 돌려주는 값 = 만료 신호였는가
 async function load(path) {
+  // 접속 경로는 늘 고른 창을 붙인다 — 결과에 요청한 창을 남겨, 고른 창으로 요청한 응답만 그린다(042 §3.2)
+  const asked = path === P.access ? picked : undefined;
   try {
-    const { status, body, text } = await call(path);
+    const { status, body, text } = await call(asked ? `${path}?window=${asked}` : path);
     const fine = status === 200 || (status === 503 && HEALTH.has(path));
-    if (status === 403) keep(path, { why: '권한·설정 오류 (403)' });
-    else if (body === null || !fine) keep(path, { why: `응답 오류 (HTTP ${status})` });
-    else keep(path, { body, text });
+    if (status === 403) keep(path, { why: '권한·설정 오류 (403)', asked });
+    else if (body === null || !fine) keep(path, { why: `응답 오류 (HTTP ${status})`, asked });
+    else keep(path, { body, text, asked });
     okSince.add(path);
     return false;
   } catch (err) {
     const gone = err instanceof Expired;
-    keep(path, { why: gone ? '로그인 만료·연결 끊김' : '불러오지 못함' });
+    keep(path, { why: gone ? '로그인 만료·연결 끊김' : '불러오지 못함', asked });
     if (!gone) okSince.add(path);
     return gone;
   }
@@ -193,21 +201,54 @@ function alive() {
 const fast = { paths: FAST, every: FAST_MS, busy: false, timer: 0, started: 0 };
 const slow = { paths: SLOW, every: SLOW_MS, busy: false, timer: 0, started: 0 };
 
+// 호출 묶음 하나가 끝난 뒤 — 만료 신호면 새로고침 한 번, 여덟 경로가 모두 신호 없이 끝났으면 표시 지우기, 그리고 그리기
+function settle(signals) {
+  if (signals.some(Boolean)) {
+    okSince.clear();
+    expired();
+  } else if (okSince.size === FAST.length + SLOW.length) {
+    alive();
+  }
+  $('updated').textContent = clock(Date.now());
+  paint();
+}
+
+// 접속 경로 호출(042 §3.2) — 느린 묶음과 창 버튼이 함께 쓴다. 떠 있으면 겹쳐 부르지 않고 끝난 뒤 한 번 더 부른다
+// (그사이 여러 번 눌러도 다음 호출은 하나 — 그때 고른 창). 돌려주는 값 = 만료 신호였는가
+function loadAccess() {
+  if (acc.flight) {
+    acc.again = true;
+    return acc.flight;
+  }
+  acc.flight = (async () => {
+    let gone = false;
+    do {
+      acc.again = false;
+      gone = (await load(P.access)) || gone;
+      follow();
+    } while (acc.again && !reloading);
+    acc.flight = null;
+    return gone;
+  })();
+  return acc.flight;
+}
+
+// 응답 창이 요청한 창과 다르면(서버가 24시간으로 답했다) 고른 창을 응답 창으로 되돌린다 — 그사이 다른 창을 고르지 않았을 때만
+function follow() {
+  const entry = got.get(P.access);
+  const answered = entry?.body?.window;
+  if (entry?.asked !== picked || answered === picked || !own(WINDOW_NAME, answered)) return;
+  picked = answered;
+  entry.asked = answered;
+}
+
 async function run(loop) {
   clearTimeout(loop.timer);
   if (loop.busy || reloading || document.visibilityState !== 'visible') return;
   loop.busy = true;
   loop.started = Date.now();
   try {
-    const signals = await Promise.all(loop.paths.map(load));
-    if (signals.some(Boolean)) {
-      okSince.clear();
-      expired();
-    } else if (okSince.size === FAST.length + SLOW.length) {
-      alive();
-    }
-    $('updated').textContent = clock(Date.now());
-    paint();
+    settle(await Promise.all(loop.paths.map((path) => (path === P.access ? loadAccess() : load(path)))));
   } finally {
     loop.busy = false;
     schedule(loop);
@@ -1082,15 +1123,15 @@ function drawAlerts() {
   $('s-alerts').replaceChildren(marked(failed ? 'warn' : 'ok', text));
 }
 
-for (const chip of document.querySelectorAll('.chip')) {
+for (const chip of document.querySelectorAll('.chip[data-filter]')) {
   chip.addEventListener('click', () => {
     alertFilter = chip.dataset.filter;
-    for (const other of document.querySelectorAll('.chip')) other.setAttribute('aria-pressed', String(other === chip));
+    for (const other of document.querySelectorAll('.chip[data-filter]')) other.setAttribute('aria-pressed', String(other === chip));
     drawAlerts();
   });
 }
 
-// --- 접속 (§3.4) — 실시간·서버 기록 24시간·Clarity ---------------------------------------------------
+// --- 접속 (§3.4) — 실시간·서버 기록(042 — 창 줄과 질문 여섯 덩어리)·Clarity ------------------------------
 
 // 대시보드 탭 이름표 — 002 의 탭 id·이름(041 §3.4). `(기타)` 와 표에 없는 값은 원래 글자 그대로
 const TAB_NAME = {
@@ -1102,15 +1143,6 @@ const TAB_NAME = {
   flow: '입출금 레이더',
 };
 const tabName = (id) => own(TAB_NAME, id) ?? clean(id);
-// [응답 키, 표 이름, 이름표 함수(있으면 한국어 이름을 적고 원래 글자는 title)]
-const TOP_TABLES = [
-  ['paths', '경로'],
-  ['tabs', '탭', tabName],
-  ['referrers', '외부 출처'],
-  ['utmSources', 'utm_source'],
-  ['devices', '기기'],
-  ['browsers', '브라우저'],
-];
 const WS_BUCKETS = [
   ['lt10s', '10초 미만'],
   ['lt1m', '1분 미만'],
@@ -1119,6 +1151,8 @@ const WS_BUCKETS = [
   ['ge1h', '1시간 이상'],
 ];
 const share = (n, total) => (total > 0 ? n / total : 0);
+const n0 = (v) => num(v) ?? 0;
+const QS = [1, 2, 3, 4, 5, 6];
 
 // 타일 — 이름·값, sub 는 값 아래 흐린 한 줄(무엇을 센 수인지 — 사람 수로 읽히거나 봇이 섞이는 타일, 041 §3.1)
 function stat(label, value, tone, sub) {
@@ -1129,84 +1163,689 @@ function stat(label, value, tone, sub) {
   return box;
 }
 
-// 상위 목록 표 — 이름(방문자가 정한 글자 — 글자로만)·수·페이지 대비 비율(막대와 % 를 한 줄에), 상위 10.
-// named 가 있으면(탭) 이름표를 적고 원래 글자는 title
-function topTable(rows, label, pages, named) {
-  const card = el('div', 'card');
-  card.append(el('span', 'card-kicker', label));
-  const top = list(rows).filter((r) => Array.isArray(r)).slice(0, 10);
-  if (!top.length) {
-    card.append(el('p', 'empty', '지난 24시간 기록 없음'));
-    return card;
+// 시행일·KST 날 — 화면의 시행일 글자는 늘 gateAt 의 KST 날짜다(§3.2). 날 막대도 KST 날로 자른다(§3.4 ④)
+const KST_SEC = 32_400;
+const kstDay = (sec) => Math.floor((sec + KST_SEC) / 86_400) * 86_400 - KST_SEC;
+function kstMd(ms) {
+  const d = new Date(ms + KST_SEC * 1000);
+  return `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+const hourStart = (sec) => sec - (sec % 3600);
+// 응답이 답한 창 — 서버 값이라 own() 으로 찾고, 목록 밖이면 고른 창('constructor' 같은 이름이 Object 의 것을 집지 않게)
+const winOf = (a) => (own(WINDOW_NAME, a.window) ? a.window : picked);
+// 7일·30일 창의 시작이 시행일로 잘렸는가 — 자르기 전 시작 = endTs 가 든 시의 시작 − (N−1)시간
+const naturalStart = (a) => hourStart(n0(a.endTs)) - (WINDOW_HOURS[winOf(a)] - 1) * 3600;
+const isCut = (a) => winOf(a) !== '24h' && n0(a.startTs) > naturalStart(a);
+const spanDays = (a) => Math.ceil((n0(a.endTs) - n0(a.startTs)) / 86_400);
+
+// 창 버튼 — 응답 windows 에 든 창만 연다(없거나 호출 실패면 24시간만). 고른 버튼은 aria-pressed
+function drawWindowBar(entry, part, current) {
+  const body = entry && !entry.why ? entry.body : null;
+  const open = Array.isArray(body?.windows) ? body.windows : ['24h'];
+  for (const button of document.querySelectorAll('[data-window]')) {
+    button.disabled = !open.includes(button.dataset.window);
+    button.setAttribute('aria-pressed', String(button.dataset.window === picked));
   }
-  const table = el('table', 'table top-table');
+  const gate = num(body?.gateAt);
+  $('window-note').textContent = gate !== null && !open.includes('7d') ? `7일·30일은 처리방침 개정 시행 ${kstMd(gate)} 부터` : '';
+  const meta = $('m-window');
+  if (!current) return meta.replaceChildren(badge('wait', `${WINDOW_NAME[picked]} 불러오는 중`));
+  if (!usable(part)) return meta.replaceChildren(...head(part));
+  const startMs = n0(part.startTs) * 1000;
+  const range = isCut(part) ? `${kstMd(n0(part.gateAt))} 00:00 시행부터 센 ${spanDays(part)}일` : `${md(startMs)} ${hm(startMs)} ~ 지금`;
+  const tail = [`읽지 못한 줄 ${int(part.totals?.skipped)}`];
+  if (num(part.firstTs) !== null && part.firstTs > n0(part.startTs)) tail.push(`기록 시작 ${md(part.firstTs * 1000)} ${hm(part.firstTs * 1000)}`);
+  // 한 줄 글(flex 칸으로 나누지 않는다) — '·' 앞은 줄 안 바꿈 공백이라 줄 머리에 오지 않는다
+  const sep = '\u00a0· ';
+  const line = el('span', null, `${range}${sep}${SLOW_MS / 1000}초마다${sep}`);
+  line.append(age(part), sep + tail.join(sep));
+  meta.replaceChildren(line);
+}
+
+// 창 버튼(042 §3.2) — 바꾸는 순간 덩어리를 '불러오는 중' 으로 비우고 접속 경로 하나만 곧바로 부른다.
+// 같은 요청 함수(헤더·만료 판정·여덟 경로 셈)를 지나고, 느린 묶음의 다음 시각은 건드리지 않는다
+for (const button of document.querySelectorAll('[data-window]')) {
+  button.addEventListener('click', () => {
+    const next = button.dataset.window;
+    if (next === picked || !own(WINDOW_NAME, next) || reloading) return;
+    picked = next;
+    paint();
+    loadAccess().then((gone) => settle([gone]));
+  });
+}
+
+// 이름표(042 §3.6) — 행에는 한국어 이름, 원래 키는 title 과 '이 칸 뜻' 에만. 표에 없는 키는 원래 글자 그대로
+const CLASS_NAME = { browser: '사람 브라우저 모양', search: '검색엔진', ai: 'AI 수집기', preview: '링크 미리보기', tool: '자동화 도구', scanner: '스캐너', operator: '운영자 흔적', unknown: '이름 없음' };
+const CHANNEL_NAME = { direct: '직접', search: '검색', inapp: '앱 안 브라우저', social: '소셜·커뮤니티', ai: 'AI 답변', referral: '다른 사이트 링크', campaign: '캠페인(utm)', internal: '사이트 안 이동', unknown: '첫 페이지 기록 없음' };
+const NET_NAME = { telecom_kr: '국내 통신사', telecom: '해외 통신사', cloud: '데이터센터·클라우드', other: '기업·학교·기관', unknown: '자료에 없음' };
+const APP_NAME = { kakaotalk: '카카오톡', naver: '네이버 앱', instagram: '인스타그램', facebook: '페이스북', line: '라인', daum: '다음 앱', band: '밴드', other: '그 밖 앱' };
+const DEVICE_NAME = { mobile: '휴대폰', tablet: '태블릿', desktop: '데스크톱' };
+const OS_NAME = { ios: 'iOS', android: 'Android', windows: 'Windows', macos: 'macOS', linux: 'Linux', chromeos: 'ChromeOS', other: '그 밖' };
+const BROWSER_NAME = { chrome: 'Chrome', safari: 'Safari', samsung: '삼성 인터넷', whale: '웨일', edge: 'Edge', firefox: 'Firefox', opera: 'Opera', inapp: '앱 안 브라우저', other: '그 밖' };
+const CLASSES = Object.keys(CLASS_NAME);
+const NETS = Object.keys(NET_NAME);
+const WEEKDAY = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일'];
+const nameIn = (table) => (key) => own(table, key) ?? clean(key);
+// 나라 — ISO 두 글자를 브라우저의 한국어 지역 이름으로. 못 푸는 값(ZZ·(기타)·Intl 없음)은 null(글자 그대로 쓴다)
+const REGION = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['ko'], { type: 'region' }) : null;
+function countryName(code) {
+  if (!REGION || typeof code !== 'string' || !/^[A-Z]{2}$/.test(code) || code === 'ZZ') return null;
+  try {
+    const name = REGION.of(code);
+    return name && name !== code ? name : null;
+  } catch {
+    return null;
+  }
+}
+
+// [[이름, 확인, 모양]]·[[이름, 수]] — 모양이 아닌 행은 버리고 수는 숫자로. 피드 상한(상위 목록 20·나라 20 + (기타))을
+// 믿지 않고 화면도 앞 21행에서 자른다(036 §3.9)
+const LIST_MAX = 21;
+const rowsOf = (v) => list(v).filter((r) => Array.isArray(r)).slice(0, LIST_MAX);
+const rows3 = (v) => rowsOf(v).map((r) => [r[0], n0(r[1]), n0(r[2])]);
+const rows2 = (v) => rowsOf(v).map((r) => [r[0], n0(r[1])]);
+const total = (rows, i) => rows.reduce((acc, r) => acc + r[i], 0);
+// 확인 내림차순(같으면 서버 순서), 확인 0 행 뺌 — 답 문장의 '상위'
+const byConfirmed = (rows) => rows.filter((r) => r[1] > 0).sort((x, y) => y[1] - x[1]);
+const pct = (n, d) => Math.round((n / d) * 100);
+const AVG = new Intl.NumberFormat('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const visOf = (a) => (isObj(a.visitors) && a.visitors.state === 'ok' ? a.visitors : null);
+// 하루 평균 — 합 ÷ ((endTs − sinceTs) ÷ 86,400), 소수 1자리. 날수가 0 이면 null
+function perDay(a, v, value) {
+  const days = (n0(a.endTs) - n0(v.sinceTs)) / 86_400;
+  return days > 0 ? AVG.format(n0(value) / days) : null;
+}
+
+// 답 문장 틀(042 §3.5) — `{…}` 자리는 굵게. t`확인 ${a}` → ['확인 ', { b: 'a' }]
+const t = (strs, ...vals) => strs.flatMap((s, i) => (i < vals.length ? [s, { b: String(vals[i]) }] : [s])).filter((x) => x !== '');
+const joined = (rows) => rows.flatMap((row, i) => (i ? ['·', ...row] : row));
+
+// 답 하나 = 문장 조각 목록. 못 만드는 조각(분모 0·빈 목록)은 빼고, 다 빠지면 '기록 없음'. null = 답 대신 본문 상태 글
+function sentences(pieces) {
+  if (pieces === null) return [];
+  const kept = pieces.filter((p) => p && p.length);
+  return kept.length ? kept.flatMap((p, i) => (i ? [' ', ...p] : p)) : ['기록 없음'];
+}
+
+// 답 문장에 쓰는 값 — 갈래(전·24h·기간)와 시행일·기간 글자
+function facts(a) {
+  const pre = !list(a.windows).includes('7d');
+  const days = spanDays(a);
+  return {
+    a,
+    pre,
+    span: !pre && winOf(a) !== '24h',
+    vis: visOf(a),
+    geo: isObj(a.geo) ? a.geo : null,
+    T: isObj(a.totals) ? a.totals : {},
+    S: isObj(a.status) ? a.status : {},
+    hourly: list(a.hourly).filter(isObj),
+    D: num(a.gateAt) === null ? '–' : kstMd(a.gateAt),
+    period: isCut(a) ? `개정 시행 뒤 센 ${days}일` : `최근 ${days}일`,
+  };
+}
+
+function answer1(f) {
+  const { T, vis: v } = f;
+  if (f.pre) return [t`방문자는 처리방침 개정 시행 ${f.D} 00:00 부터 센다.`, t`지금은 줄 수만 — 사람 모양 페이지 ${int(n0(T.humanPages))}, 그중 스크립트가 돈 페이지 ${int(n0(T.jsViews))}.`];
+  if (!v) return null;
+  const [c, s, r] = [n0(v.confirmed), n0(v.shaped), n0(v.returning)];
+  const out = [];
+  if (!f.span) {
+    out.push(t`확인 ${int(c)}, 브라우저 모양 ${int(s)}(날마다 센 방문자) — 오늘·어제(KST)를 따로 세어 더한 수라 사람 수가 아니다.`);
+    if (n0(v.sinceTs) > n0(f.a.startTs)) out.push(t`시행 ${f.D} 00:00 부터 센 값이다.`);
+  } else {
+    const [ac, as] = [perDay(f.a, v, c), perDay(f.a, v, s)];
+    if (ac !== null) out.push(t`${f.period} 동안 스크립트가 돈 방문자는 하루 평균 ${ac}명, 브라우저 모양까지 치면 ${as}명 — 실제 사람은 이 사이다.`);
+    if (c > 0) out.push(t`확인의 ${pct(r, c)}%는 다시 온 사람이다.`);
+  }
+  if (s > 0 && c <= s * 0.1) out.push(['브라우저 모양의 대부분은 봇이다.']);
+  return out;
+}
+
+function answer2(f) {
+  const req = n0(f.T.requests);
+  const classes = isObj(f.a.classes) ? f.a.classes : {};
+  const requests = (k) => n0(classes[k]?.requests);
+  const out = [];
+  if (req > 0) {
+    out.push(t`요청 ${int(req)}줄 가운데 사람 브라우저 모양은 ${pct(requests('browser'), req)}%다.`);
+    const bots = CLASSES.filter((k) => k !== 'browser' && requests(k) > 0).sort((x, y) => requests(y) - requests(x)).slice(0, 2);
+    if (bots.length) out.push(['자동 요청은 ', ...joined(bots.map((k) => t`${CLASS_NAME[k]}(${pct(requests(k), req)}%)`)), ' 순으로 많다.']);
+  }
+  const hp = n0(f.T.humanPages);
+  if (hp > 0) out.push(t`사람 모양 페이지 가운데 스크립트가 돈 것은 ${pct(n0(f.T.jsViews), hp)}%다.`);
+  return out;
+}
+
+function answer3(f) {
+  if (f.pre) return [t`나라·망 종류와 들어온 길은 처리방침 개정 시행 ${f.D} 00:00 부터 센다.`, ['지금은 외부 출처·utm 만 페이지 줄로 보인다.']];
+  const out = [];
+  const g = f.geo;
+  if (g?.state === 'ok') {
+    const nets = rows3(g.networks);
+    const kr = nets.find((r) => r[0] === 'telecom_kr');
+    if (kr && total(nets, 1) > 0) out.push(t`확인의 ${pct(kr[1], total(nets, 1))}%는 국내 통신사 망에서 왔다.`);
+    if (total(nets, 2) > 0) {
+      const [, cc, cs] = nets.find((r) => r[0] === 'cloud') ?? ['cloud', 0, 0];
+      const head = t`데이터센터·클라우드 망은 브라우저 모양의 ${pct(cs, total(nets, 2))}%이고 그중 확인은 ${int(cc)}`;
+      out.push([...head, cs > 0 && cc <= cs * 0.1 ? '뿐 — 대부분 봇이다.' : '다.']);
+    }
+  } else if (g?.state === 'pending') out.push(['나라·망 종류는 자료를 받는 중이다.']);
+  else if (g) out.push(t`나라·망 종류 자료를 받지 못했다(${clean(g.code ?? g.state)}).`);
+  if (f.vis) {
+    const channels = rows3(f.vis.channels);
+    const sum = total(channels, 1);
+    const top = byConfirmed(channels).slice(0, 3);
+    if (sum > 0) out.push(['들어온 길은 ', ...joined(top.map(([k, c]) => [...t`${nameIn(CHANNEL_NAME)(k)} ${pct(c, sum)}`, '%'])), ' 순이다.']);
+  }
+  return out;
+}
+
+// 요일×시간 — hourly.jsViews 를 이 브라우저 시간대의 (요일 월~일, 시 0~23) 칸에 더한다
+function heatGrid(hourly) {
+  const cells = WEEKDAY.map(() => new Array(24).fill(0));
+  for (const h of hourly) {
+    const d = new Date(n0(h.ts) * 1000);
+    cells[(d.getDay() + 6) % 7][d.getHours()] += n0(h.jsViews);
+  }
+  const hours = cells[0].map((_, i) => cells.reduce((acc, row) => acc + row[i], 0));
+  return { cells, hours, days: cells.map((row) => row.reduce((x, y) => x + y, 0)), max: Math.max(0, ...cells.flat()) };
+}
+// 강도 — 0 이면 h0, 아니면 ⌈값 ÷ 최댓값 × 5⌉ (정수로 곱한 뒤 나눠 부동소수 끝자리가 단계를 넘기지 않게)
+const heatLevel = (v, max) => (v > 0 && max > 0 ? `h${Math.min(5, Math.ceil((v * 5) / max))}` : 'h0');
+
+function answer4(f) {
+  const js = (h) => n0(h.jsViews);
+  if (!f.span) {
+    const J = f.hourly.reduce((acc, h) => acc + js(h), 0);
+    const P = f.hourly.reduce((acc, h) => acc + n0(h.humanPages), 0);
+    if (J === 0) return [['최근 24시간 동안 스크립트가 돈 페이지 보기가 없다.'], t`사람 모양 페이지 ${int(P)}회.`];
+    const best = f.hourly.reduce((x, h) => (js(h) > js(x) ? h : x));
+    return [t`최근 24시간 중 화면이 가장 많이 뜬 때는 ${new Date(n0(best.ts) * 1000).getHours()}시(${int(js(best))}회)다.`, t`스크립트가 돈 페이지 보기 ${int(J)}회, 사람 모양 페이지 ${int(P)}회.`];
+  }
+  const grid = heatGrid(f.hourly);
+  const out = [];
+  if (grid.hours.some((v) => v > 0)) {
+    const three = (h) => grid.hours[h] + grid.hours[(h + 1) % 24] + grid.hours[(h + 2) % 24];
+    const h1 = grid.hours.reduce((best, _, h) => (three(h) > three(best) ? h : best), 0);
+    // {h2} = {h1}+3 — 24 를 넘을 때만(자정을 넘김) 24 를 뺀다: 21 → '21~24시', 22 → '22~1시'
+    out.push(t`화면이 실제로 뜬 페이지 보기는 ${h1}~${h1 + 3 > 24 ? h1 - 21 : h1 + 3}시에 가장 몰린다.`);
+  }
+  if (grid.max > 0) {
+    const d = grid.cells.findIndex((row) => row.includes(grid.max));
+    out.push(t`가장 많은 칸은 ${WEEKDAY[d]} ${grid.cells[d].indexOf(grid.max)}시(${int(grid.max)}회).`);
+  }
+  const today = kstDay(n0(f.a.endTs));
+  const days = f.vis ? list(f.vis.days).filter((d) => isObj(d) && d.ts !== today).map((d) => n0(d.confirmed)) : [];
+  if (days.length) out.push(t`날마다 확인 방문자는 ${int(Math.min(...days))}~${int(Math.max(...days))}명이다.`);
+  return out;
+}
+
+function answer5(f) {
+  const hp = n0(f.T.humanPages);
+  const paths = rows2(f.a.paths);
+  const tabs = rows2(f.a.tabs);
+  const tabSum = total(tabs, 1);
+  const first = [];
+  const t1 = tabSum > 0 && tabs.length ? tabs[0] : null;
+  if (hp > 0 && paths.length) {
+    // 방문자가 정한 경로 — 60자에서 자르고 전체는 그 b 의 title(§3.10)
+    const label = clean(paths[0][0]);
+    const u1 = label.length > 60 ? { b: `${label.slice(0, 60)}…`, title: label } : { b: label };
+    first.push('사람 모양 페이지는 ', u1, ...t` 경로가 ${pct(paths[0][1], hp)}%로 가장 많`, t1 ? '고, ' : '다.');
+  }
+  if (t1) first.push(...t`대시보드는 ${tabName(t1[0])} 탭으로 들어온 경우가 ${pct(t1[1], tabSum)}%다.`);
+  const out = [first];
+  const device = nameIn(DEVICE_NAME);
+  if (!f.pre && f.vis) {
+    const devices = rows3(f.vis.devices);
+    const [d1] = byConfirmed(devices);
+    if (d1) out.push(t`기기는 ${device(d1[0])} ${pct(d1[1], total(devices, 1))}%(${'확인 방문자 기준'}).`);
+  } else if (f.pre) {
+    const [d1] = rows2(f.a.devices);
+    if (d1 && hp > 0) out.push(t`기기는 ${device(d1[0])} ${pct(d1[1], hp)}%(${'페이지 줄 기준'}).`);
+  }
+  return out;
+}
+
+function answer6(f) {
+  const [e, w, f4, pr] = [n0(f.S['5xx']), n0(f.S.ws5xx), n0(f.S['4xx']), n0(f.T.probes)];
+  const first = e === 0 ? ['서버 오류(5xx)는 없었고, '] : t`서버 오류(5xx)는 ${int(e)}건, `;
+  const ws = [...t`대시보드 재접속 실패는 ${int(w)}건`, ...(w > 0 ? ['(배포 때 몇 건은 정상)'] : []), '이다.'];
+  return [[...first, ...ws], t`4xx 는 ${int(f4)}건, 탐색 경로 요청은 ${int(pr)}줄이다.`];
+}
+
+// 덩어리 여섯의 답 — 조각 목록([글자 | { b }])
+const answers = (a) => [answer1, answer2, answer3, answer4, answer5, answer6].map((make) => sentences(make(facts(a))));
+const plain = (segs) => segs.map((s) => (typeof s === 'string' ? s : s.b)).join('');
+
+// 값 자리(b)는 바로 뒤 글자(공백 전까지 — '%다.'·'줄')와 한 덩어리로 줄을 바꾸지 않는다(좁은 폭에서 '41%' / '다.'·
+// '10-' / '05' 로 갈리지 않게). 20자를 넘는 값(경로)은 그 안에서도 줄을 바꾸고, 자른 값의 전체는 그 b 의 title(§3.10)
+function sentence(node, segs) {
+  const kids = [];
+  let glue = null; // 직전 값을 품은 줄 안 바꿈 span
+  for (const s of segs) {
+    if (typeof s !== 'string') {
+      const b = el('b', null, s.b);
+      if (s.title) b.title = clean(s.title);
+      glue = s.b.length > 20 ? null : el('span', 'nb');
+      if (glue) glue.append(b);
+      kids.push(glue ?? b);
+      continue;
+    }
+    const text = clean(s);
+    const cut = glue ? text.search(/\s|$/) : 0;
+    if (cut) glue.append(text.slice(0, cut));
+    if (cut < text.length) kids.push(text.slice(cut));
+    glue = null;
+  }
+  node.replaceChildren(...kids);
+}
+
+// --- 서버 기록 덩어리의 조각 (042 §3.4·§3.7·§3.9) ------------------------------------------------------
+
+const opened = new Set(); // 연 접힘('n개 더'·덩어리 안 접힘) — 60초마다 다시 그려도 열린 채(036 '정상 n개' 와 같다)
+
+function fold(key, summary, cls) {
+  const box = el('details', cls);
+  box.open = opened.has(key);
+  box.addEventListener('toggle', () => (box.open ? opened.add(key) : opened.delete(key)));
+  box.append(summary instanceof Node ? summary : clip(el('summary'), summary, 90));
+  return box;
+}
+
+// 막대 행 — 이름·막대·값(같은 DOM 을 CSS 가 넓으면 한 줄, 480px 이하는 '이름 … 값' 아래 막대로). 이름은 줄을 바꾸고
+// 자르지 않되 방문자 글자는 60자에서 자르고 전체는 title(§3.10). title 은 원래 키(이름표가 있으면)
+function barRow(item, chart, value) {
+  const row = el('div', `brow${item.zero ? ' zero' : ''}`);
+  const name = clip(el('span', 'brow-name'), item.label, 60);
+  if (item.iso) name.append(el('span', 'iso', item.iso));
+  if (item.title) name.title = clean(item.title);
+  const val = el('span', 'brow-val');
+  val.append(...value);
+  row.append(name, chart, val);
+  return row;
+}
+
+// 겹친 두 막대 — 같은 눈금, 바깥 rect 브라우저 모양·안쪽 얇은 rect 확인. 값은 늘 'a / b'(a 굵게, §3.7)
+function pairBar(c, s, top) {
+  const x = (v) => ((Math.min(v, top) / top) * 100).toFixed(2);
+  const root = frame(100, 10, 'pair', '확인과 브라우저 모양 막대');
+  root.append(svg('rect', { x: 0, y: 0, width: 100, height: 10 }, 'track'), svg('rect', { x: 0, y: 0, width: x(s), height: 10 }, 'shaped'));
+  root.append(svg('rect', { x: 0, y: 3, width: x(c), height: 4 }, 'confirmed'));
+  return tip(root, `확인 ${int(c)} / 브라우저 모양 ${int(s)}`);
+}
+const pairValue = (c, s) => [el('b', null, int(c)), ` / ${int(s)}`];
+
+function oneBar(frac, cls) {
+  const f = Math.min(1, Math.max(0, frac));
+  const root = frame(100, 10, 'pair', `비율 ${(f * 100).toFixed(1)}%`);
+  root.append(svg('rect', { x: 0, y: 0, width: 100, height: 10 }, 'track'), svg('rect', { x: 0, y: 0, width: (f * 100).toFixed(2), height: 10 }, cls));
+  return tip(root, `${(f * 100).toFixed(1)}%`);
+}
+
+// 긴 목록 — 위 5행만 펴고 나머지는 'n개 더 — 이름, 이름…' 접힘(§3.9)
+function longList(key, items, make) {
+  if (!items.length) return [el('p', 'empty', '기록 없음')];
+  const out = items.slice(0, 5).map(make);
+  const rest = items.slice(5);
+  if (rest.length) {
+    const more = fold(key, `${rest.length}개 더 — ${rest.map((it) => clean(it.label)).join(', ')}`, 'more');
+    more.append(...rest.map(make));
+    out.push(more);
+  }
+  return out;
+}
+
+// 이름 → { label, title, iso } — 이름표가 있으면 한국어 이름과 title 에 원래 키, 나라는 지역 이름 + ISO 작게
+const labeled = (table) => (key) => (own(table, key) ? { label: table[key], title: key } : { label: clean(key) });
+const country = (key) => {
+  const name = countryName(key);
+  return name ? { label: name, iso: key, title: key } : { label: clean(key) };
+};
+
+// 확인·모양 짝 목록([[이름, c, s]]) — 겹친 두 막대
+function pairList(key, rows, name) {
+  const top = Math.max(1, ...rows.map((r) => r[2]));
+  const items = rows.map(([k, c, s]) => ({ ...name(k), c, s }));
+  return longList(key, items, (it) => barRow(it, pairBar(it.c, it.s, top), pairValue(it.c, it.s)));
+}
+
+// 페이지 줄 목록([[이름, 수]]) — 한 막대 + %(분모 = 사람 모양 페이지 또는 그 목록의 합)
+function shareList(key, rows, name, denom) {
+  const items = rows.map(([k, v]) => ({ ...name(k), v }));
+  return longList(key, items, (it) => {
+    const r = share(it.v, denom);
+    return barRow(it, oneBar(r, 'shaped'), [el('b', null, int(it.v)), ` · ${Math.round(r * 100)}%`]);
+  });
+}
+
+function column(title, sub, content) {
+  const col = el('div', 'col');
+  const top = el('div', 'col-head');
+  top.append(el('b', null, title), el('span', null, sub));
+  col.append(top, ...content);
+  return col;
+}
+
+function keys(pairs) {
+  const row = el('div', 'keys');
+  row.append(...pairs.map(([cls, text]) => el('span', `key${cls ? ` ${cls}` : ''}`, text)));
+  return row;
+}
+
+// 짝 단위 칸이 비었을 때 — 시행 전이면 시행일 빈 상태(036 §3.5 의 before_gate 예외), 아니면 036 상태 글
+function pairNote(f, part, tail = '') {
+  if (f.pre || part?.code === 'before_gate') return el('p', 'state-msg', `처리방침 개정 시행(${f.D} 00:00) 뒤부터 센다${tail}`);
+  return stateMsg(isObj(part) ? part : BAD_SHAPE, CAUSE.access);
+}
+const DBIP_TAIL = '. 그 전에는 DB-IP 자료를 받지도 않는다';
+
+// geo 상태 한 줄(§3.8) — 받는 중·실패·지난달 판. ok 이고 이번 달 판이면 null
+function geoNote(f) {
+  const g = f.geo;
+  if (!g || f.pre || g.code === 'before_gate') return pairNote(f, g, DBIP_TAIL);
+  if (g.state === 'pending') return el('p', 'state-msg', '자료 받는 중 — 다음 갱신(60초)에 찬다');
+  if (g.state !== 'ok') return marked('warn', `받지 못함(${clean(g.code ?? g.state)}) — 1시간 뒤 다시`);
+  return oldMonth(f) ? marked('warn', `지난달 판 ${clean(g.month)} 으로 셈`) : null;
+}
+// 지난달 판 — month 가 응답 endTs 의 UTC 달보다 이르다(브라우저 시계를 쓰지 않는다)
+const oldMonth = (f) => typeof f.geo?.month === 'string' && f.geo.month < new Date(n0(f.a.endTs) * 1000).toISOString().slice(0, 7);
+
+// ① 몇 명
+function q1(f) {
+  const { T, vis: v } = f;
+  const out = [];
+  if (v?.capped) out.push(marked('warn', '짝 기록이 1,000에 닿은 날이 있다 — 방문자 수가 실제보다 적다'));
+  const range = el('div', 'stat');
+  range.append(el('span', 'stat-label', f.span ? '확인 ~ 브라우저 모양 · 하루 평균' : '확인 ~ 브라우저 모양'));
+  const big = el('span', 'range-num');
+  const [c, s, r] = v ? [n0(v.confirmed), n0(v.shaped), n0(v.returning)] : [0, 0, 0];
+  const fmt = (x) => (f.span ? perDay(f.a, v, x) ?? '–' : int(x));
+  if (v) big.append(el('b', null, fmt(c)), `\u00a0~ ${fmt(s)}`); // '~' 앞은 줄 안 바꿈 — 좁으면 '~' 뒤에서 나뉜다
+  else big.textContent = '—';
+  range.append(big, el('span', 'stat-sub', !v ? '방문자(날마다 셈)' : f.span ? '명/일' : '방문자(날마다 셈)'));
+  const tiles = el('div', 'tiles');
+  tiles.append(
+    range,
+    stat('다시 온', v ? int(r) : '—', null, v ? (c > 0 ? `확인의 ${pct(r, c)}%` : '확인 0') : f.pre ? '시행 뒤부터' : ''),
+    stat('스크립트가 돈 페이지', int(T.jsViews), null, `사람 모양 페이지 ${int(n0(T.humanPages))} 중`),
+    stat('사람 모양 페이지', int(T.humanPages), null, '위장 봇 섞임'),
+  );
+  out.push(tiles);
+  if (!v) return [...out, pairNote(f, f.a.visitors)];
+  const band = frame(100, 12, 'lohi', '하한–상한 띠 — 확인과 브라우저 모양');
+  band.append(svg('rect', { x: 0, y: 0, width: 100, height: 12 }, s > 0 ? 'shaped' : 'track'));
+  band.append(svg('rect', { x: 0, y: 0, width: (share(Math.min(c, s), s) * 100).toFixed(2), height: 12 }, 'confirmed'));
+  const ends = el('div', 'ends');
+  const low = el('span', null, '적어도 이만큼은 사람 — 확인 ');
+  low.append(el('b', null, fmt(c)));
+  ends.append(low, el('span', null, `많아야 이만큼 — 브라우저 모양 ${fmt(s)}`));
+  out.push(tip(band, `확인 ${fmt(c)} / 브라우저 모양 ${fmt(s)}`), ends);
+  return out;
+}
+
+function step(label, value, sub) {
+  const box = el('div', 'step');
+  box.append(el('span', 'step-label', label), el('span', 'step-val', value));
+  if (sub) box.append(el('span', 'step-sub', sub));
+  return box;
+}
+
+function clue(value, label, sub) {
+  const row = el('div', 'clue');
+  row.append(el('span', 'clue-val', value), el('span', null, label));
+  if (sub instanceof Node) {
+    sub.classList.add('clue-sub');
+    row.append(sub);
+  } else if (sub) row.append(el('span', 'clue-sub', sub));
+  return row;
+}
+
+// ② 누가
+function q2(f) {
+  const { T, vis: v } = f;
+  const [req, pages, hp, js] = [n0(T.requests), n0(T.pages), n0(T.humanPages), n0(T.jsViews)];
+  const ofPrev = (x, prev) => (prev > 0 ? `앞 칸의 ${pct(x, prev)}%` : '');
+  const funnel = el('div', 'funnel');
+  const c = v ? n0(v.confirmed) : 0;
+  funnel.append(
+    step('모든 요청', int(req)),
+    step('페이지', int(pages), ofPrev(pages, req)),
+    step('사람 모양 페이지', int(hp), ofPrev(hp, pages)),
+    step('스크립트가 돈 페이지', int(js), ofPrev(js, hp)),
+    step('확인 방문자(날마다 셈)', v ? int(c) : '—', v ? (c > 0 ? `1명이 평균 ${AVG.format(js / c)}쪽` : '') : '시행 뒤부터'),
+  );
+  const classes = isObj(f.a.classes) ? f.a.classes : {};
+  const kinds = CLASSES.map((k) => {
+    const [r, p] = [n0(classes[k]?.requests), n0(classes[k]?.pages)];
+    return barRow({ label: CLASS_NAME[k], title: k, zero: !r && !p }, oneBar(share(r, req), k === 'browser' ? 'confirmed' : 'bot'), [`${int(r)} · ${int(p)}`]);
+  });
+  const probes = n0(T.probes);
+  kinds.push(el('p', 'muted small', req > 0 ? `탐색 경로 ${int(probes)}줄(요청의 ${pct(probes, req)}%)` : `탐색 경로 ${int(probes)}줄`));
+  const g = f.geo;
+  const cloud = g?.state === 'ok' ? rows3(g.networks).find((r) => r[0] === 'cloud') ?? ['cloud', 0, 0] : null;
+  const gateSub = pairNote(f, f.a.visitors);
+  // cloud 줄 — 확인 수에 geo 상태 글(지난달 판 ▲ 등)을 덧붙인다(§3.4 ②·§3.8)
+  let cloudSub = geoNote(f);
+  if (cloud) {
+    const both = el('span', null, `그중 확인 ${int(cloud[1])}`);
+    if (cloudSub) both.append(' · ', cloudSub);
+    cloudSub = both;
+  }
+  const clues = [
+    clue(v ? int(n0(v.shaped) - c) : '—', '스크립트가 한 번도 돌지 않은 브라우저 모양', v ? '날마다 셈' : gateSub),
+    clue(cloud ? int(cloud[2]) : '—', '데이터센터·클라우드 망의 브라우저 모양', cloudSub),
+    clue(int(n0(classes.operator?.requests)), '운영자 흔적 요청', '방문자에서 뺐다'),
+  ];
+  const cols = el('div', 'cols2');
+  cols.append(column('종류 여덟', '요청 비율 · 요청 · 페이지', kinds), column('위장 봇 단서', '사람 수에서 덜어 볼 것', clues));
+  return [funnel, cols];
+}
+
+// ③ 어디서
+function q3(f) {
+  const { vis: v, geo: g } = f;
+  const geoOk = g?.state === 'ok' && !f.pre;
+  // 상태 글은 칸마다 새로 만든다 — 노드 하나를 두 칸에 붙이면 나중 칸으로 옮겨 가 나라 칸이 빈다(§3.8 — 나라·망 칸에 같은 글)
+  const geoCol = (key, rows, name) => {
+    const note = geoNote(f);
+    return [...(note ? [note] : []), ...(geoOk ? pairList(key, rows, name) : [])];
+  };
+  const nets = geoOk ? rows3(g.networks) : [];
+  const hasKr = nets.some((r) => r[0] === 'telecom_kr');
+  // 망은 다섯 고정 순서(모르는 키는 뒤), 국내 통신사 행이 없는 창의 telecom 은 '통신사'
+  const ordered = [...NETS.flatMap((k) => nets.filter((r) => r[0] === k)), ...nets.filter((r) => !NETS.includes(r[0]))];
+  const netName = (k) => (k === 'telecom' && !hasKr ? { label: '통신사', title: k } : labeled(NET_NAME)(k));
+  const pairsOr = (key, rows, name) => (v ? pairList(key, rows, name) : [pairNote(f, f.a.visitors)]);
+  const hp = n0(f.T.humanPages);
+  const top = el('div', 'cols3');
+  top.append(
+    column('나라', geoOk ? `IPv6 ${int(g.ipv6)} 따로` : '', geoCol('q3-countries', rows3(g?.countries), country)),
+    column('망 종류', '', geoCol('q3-nets', ordered, netName)),
+    column('들어온 길', '그날 첫 페이지', pairsOr('q3-channels', rows3(v?.channels), labeled(CHANNEL_NAME))),
+  );
+  const second = el('div', 'cols3');
+  second.append(
+    column('앱 안 브라우저', '', pairsOr('q3-apps', rows3(v?.inApp), labeled(APP_NAME))),
+    column('외부 출처', '페이지 줄 기준', shareList('q3-refs', rows2(f.a.referrers), (k) => ({ label: clean(k) }), hp)),
+    column('utm', '페이지 줄 기준', shareList('q3-utm', rows2(f.a.utmSources), (k) => ({ label: clean(k) }), hp)),
+  );
+  return [keys([['', '확인(하한)'], ['shaped', '브라우저 모양(상한)']]), top, second];
+}
+
+// ③ 바닥의 geo 상태 배지 — DB-IP 링크는 index.html 에 고정(상태와 무관하게 늘 보인다)
+function geoBadge(f) {
+  const g = f.geo;
+  if (!g || f.pre || g.code === 'before_gate') return [badge('dim', '나라·망 자료 — 시행 뒤부터')];
+  if (g.state === 'pending') return [badge('wait', '자료 받는 중')];
+  if (g.state !== 'ok') return [badge('warn', `받지 못함(${clean(g.code ?? g.state)})`)];
+  const since = n0(g.sinceTs) * 1000;
+  const tone = oldMonth(f) ? 'warn' : 'ok';
+  const tag = el('span', `tag t-${tone}`);
+  // 올린 때의 경과는 data-at 글자 — 본문을 다시 그리지 않아도 그리기 끝(retick)마다 고친다
+  tag.append(el('span', 'mk', GLYPH[tone]), `${tone === 'warn' ? '지난달 판 · ' : ''}자료 ${clean(g.month)} 판 · `, agoSpan(g.loadedAt), ` 올림 · ${md(since)} ${hm(since)} 부터 셈 · IPv6 ${int(g.ipv6)}`);
+  return [tag];
+}
+
+// 시 눈금 — 24칸 격자에 정시(0·6·12·18시) 글자만, 마지막 칸은 끝 글자(§3.4 ④ — 5등분 HH:mm 을 쓰지 않는다).
+// 끝 글자 앞 두 칸의 정시는 비운다 — 좁은 폭에서 오른쪽 끝 '지금' 과 겹치지 않게
+function hourAxis(hours, last) {
+  const row = el('div', 'hours');
+  const end = hours.length - 1;
+  row.append(...hours.map((h, i) => el('span', null, i === end ? last : h % 6 === 0 && i < end - 2 ? `${h}시` : '')));
+  return row;
+}
+
+// 24시간 시간 막대 — 회색 = 사람 모양 페이지, 그 안 진한 막대 = 스크립트가 돈 페이지, 빨강 = 5xx 겹침(최소 높이).
+// 대시보드 재접속 실패는 title 에만
+function hourBars(hourly) {
+  const H = 60;
+  const top = Math.max(1, ...hourly.map((h) => Math.max(n0(h.humanPages), n0(h.jsViews), n0(h.errors))));
+  const root = frame(hourly.length * 10, H, 'tall', `시간 막대 24시간 — 한 시간 최고 ${int(top)}`);
+  root.append(svg('line', { x1: 0, x2: hourly.length * 10, y1: H, y2: H }, 'floor'));
+  hourly.forEach((h, i) => {
+    const g = svg('g');
+    const bar = (v, x, w, cls, min = 0) => v > 0 && g.append(svg('rect', { x: i * 10 + x, y: H - Math.max(min, (v / top) * H), width: w, height: Math.max(min, (v / top) * H) }, cls));
+    bar(n0(h.humanPages), 1, 8, 'shaped');
+    bar(n0(h.jsViews), 3, 4, 'confirmed');
+    bar(n0(h.errors), 1, 8, 'err', 1.5);
+    g.append(svg('rect', { x: i * 10, y: 0, width: 10, height: H }, 'hit'));
+    const at = n0(h.ts) * 1000;
+    root.append(tip(g, `${md(at)} ${hm(at)} · 사람 모양 페이지 ${int(h.humanPages)} · 스크립트가 돈 페이지 ${int(h.jsViews)} · 5xx ${int(h.errors)} · 대시보드 재접속 실패 ${int(h.wsErrors)}`));
+  });
+  return root;
+}
+
+// 7일·30일 날 막대 — 칸은 시행일로 자르기 전 창이 덮는 KST 날 전부, 시행 전 날들은 회색 덩어리 하나(§3.8)
+function dayBars(f) {
+  const v = f.vis;
+  const win = winOf(f.a);
+  const N = WINDOW_HOURS[win];
+  const gateDay = kstDay(n0(f.a.gateAt) / 1000);
+  const cols = [];
+  for (let d = kstDay(naturalStart(f.a)); d <= kstDay(n0(f.a.endTs)); d += 86_400) cols.push(d);
+  const before = cols.filter((d) => d < gateDay).length;
+  const byDay = new Map(list(v.days).filter(isObj).map((d) => [d.ts, d]));
+  const W = cols.length * 10;
+  const H = 60;
+  const top = Math.max(1, ...[...byDay.values()].map((d) => n0(d.confirmed)));
+  const topS = Math.max(1, ...[...byDay.values()].map((d) => n0(d.shaped)));
+  const days = frame(W, H, 'days', `날 막대 — 확인 방문자 최고 ${int(top)}`);
+  const strip = frame(W, 16, 'strip', `브라우저 모양 얇은 줄 — 최고 ${int(topS)}`);
+  days.append(svg('line', { x1: 0, x2: W, y1: H, y2: H }, 'floor'));
+  if (before) {
+    const label = `개정 전 ${before}일 — 세지 않음`;
+    days.append(tip(svg('rect', { x: 0, y: 0, width: before * 10, height: H }, 'pre'), label));
+    strip.append(tip(svg('rect', { x: 0, y: 0, width: before * 10, height: 16 }, 'pre'), label));
+  }
+  cols.forEach((ts, i) => {
+    const d = byDay.get(ts);
+    if (i < before || !d) return;
+    const [c, r, s] = [n0(d.confirmed), n0(d.returning), n0(d.shaped)];
+    const g = svg('g');
+    if (c > 0) g.append(svg('rect', { x: i * 10 + 1, y: H - (c / top) * H, width: 8, height: (c / top) * H }, 'confirmed'));
+    if (r > 0) g.append(svg('rect', { x: i * 10 + 1, y: H - (r / top) * H, width: 8, height: (r / top) * H }, 'returning'));
+    g.append(svg('rect', { x: i * 10, y: 0, width: 10, height: H }, 'hit'));
+    days.append(tip(g, `${kstMd(ts * 1000)} · 확인 ${int(c)} · 다시 온 ${int(r)} · 브라우저 모양 ${int(s)}`));
+    if (s > 0) strip.append(tip(svg('rect', { x: i * 10 + 1, y: 16 - (s / topS) * 16, width: 8, height: (s / topS) * 16 }, 'shaped'), `${kstMd(ts * 1000)} · 브라우저 모양 ${int(s)}`));
+  });
+  const full = kstMd(n0(f.a.gateAt) + (N - 1) * 3_600_000);
+  const out = [];
+  if (before >= 8) out.push(el('p', 'pre-label', `개정 전 ${before}일 — 세지 않음 · ${full} 부터 ${WINDOW_NAME[win]}이 다 찬다`));
+  const legend = [['', '확인'], ['returning', '다시 온(아랫부분)'], ['shaped', '브라우저 모양(아래 줄)']];
+  if (before && before < 8) legend.push(['pre', `개정 전 ${before}일 — 세지 않음`]);
+  out.push(days, axis(`${kstMd(cols[0] * 1000)} (KST)`, kstMd(cols[cols.length - 1] * 1000)), strip, el('p', 'muted small', `브라우저 모양 · 눈금 따로 · 최고 ${int(topS)}`), keys(legend));
+  return out;
+}
+
+// 요일×시간 열지도 — 칸 7×24(rect + 강도 클래스), 오른쪽 요일 합(HTML), 아래 시간 합 막대와 단계 견본
+function heatmap(f) {
+  const grid = heatGrid(f.hourly);
+  const map = frame(240, 126, 'heatmap', `요일×시간 — 스크립트가 돈 페이지 보기, 가장 많은 칸 ${int(grid.max)}`);
+  grid.cells.forEach((row, d) => row.forEach((v, h) => map.append(tip(svg('rect', { x: h * 10 + 0.5, y: d * 18 + 1, width: 9, height: 16 }, heatLevel(v, grid.max)), `${WEEKDAY[d]} ${h}시 · ${int(v)}회`))));
+  const topH = Math.max(1, ...grid.hours);
+  const sums = frame(240, 24, 'hoursum', `시간 합 — 최고 ${int(Math.max(...grid.hours))}`);
+  grid.hours.forEach((v, h) => v > 0 && sums.append(tip(svg('rect', { x: h * 10 + 1, y: 24 - (v / topH) * 24, width: 8, height: (v / topH) * 24 }, 'confirmed'), `${h}시 합 ${int(v)}`)));
+  const names = el('div', 'heat-rows');
+  names.append(...WEEKDAY.map((w) => el('span', null, w.slice(0, 1))));
+  const rowSums = el('div', 'heat-rows sums');
+  rowSums.append(...grid.days.map((v) => el('span', null, int(v))));
+  const heat = el('div', 'heat');
+  heat.append(names, map, rowSums, el('span'), sums, el('span'), el('span'), hourAxis([...Array(24).keys()], '24시'), el('span'));
+  const scale = el('div', 'scale');
+  scale.append('적음 ', ...[1, 2, 3, 4, 5].map((i) => el('span', `sw h${i}`)), ` 많음(최고 ${int(grid.max)})`);
+  return [el('p', 'muted small', '요일×시간 — 스크립트가 돈 페이지 보기 · 이 브라우저 시간대 · 오른쪽 요일 합 · 아래 시간 합'), heat, scale];
+}
+
+// ④ 언제
+function q4(f) {
+  if (!f.span) {
+    const out = [];
+    if (f.hourly.length) out.push(hourBars(f.hourly), hourAxis(f.hourly.map((h) => new Date(n0(h.ts) * 1000).getHours()), '지금'));
+    else out.push(el('p', 'empty', '기록 없음'));
+    out.push(keys([['shaped', '사람 모양 페이지'], ['', '스크립트가 돈 페이지'], ['err', '5xx']]), el('p', 'muted small', '요일×시간 열지도와 날 막대는 7일·30일 창에서'));
+    return out;
+  }
+  return [...(f.vis ? dayBars(f) : [pairNote(f, f.a.visitors)]), ...heatmap(f)];
+}
+
+// ⑤ 무엇을
+function q5(f) {
+  const { vis: v } = f;
+  const hp = n0(f.T.humanPages);
+  const tabs = rows2(f.a.tabs);
+  const pairsOr = (key, rows, name) => (v ? pairList(key, rows, name) : [pairNote(f, f.a.visitors)]);
+  const top = el('div', 'cols3');
+  top.append(
+    column('많이 연 경로', '사람 모양 페이지 줄', shareList('q5-paths', rows2(f.a.paths), (k) => ({ label: clean(k) }), hp)),
+    column('대시보드 진입 탭', '탭 합 기준', shareList('q5-tabs', tabs, (k) => ({ label: tabName(k), title: k }), total(tabs, 1))),
+    column('기기', '방문자 기준', pairsOr('q5-devices', rows3(v?.devices), labeled(DEVICE_NAME))),
+  );
+  const byVisitor = fold('q5-os', 'OS·브라우저 — 방문자 기준', 'more');
+  const vcols = el('div', 'cols2');
+  vcols.append(column('OS', '확인 / 모양', pairsOr('q5-os-rows', rows3(v?.os), labeled(OS_NAME))), column('브라우저', '확인 / 모양', pairsOr('q5-br-rows', rows3(v?.browsers), labeled(BROWSER_NAME))));
+  byVisitor.append(vcols);
+  const byLine = fold('q5-lines', '기기·브라우저 — 페이지 줄 기준', 'more');
+  const lcols = el('div', 'cols2');
+  lcols.append(
+    column('기기', '사람 모양 페이지 대비', shareList('q5-dev-lines', rows2(f.a.devices), labeled(DEVICE_NAME), hp)),
+    column('브라우저', '사람 모양 페이지 대비', shareList('q5-br-lines', rows2(f.a.browsers), labeled(BROWSER_NAME), hp)),
+  );
+  byLine.append(lcols);
+  return [keys([['', '확인(하한)'], ['shaped', '브라우저 모양(상한)']]), top, byVisitor, byLine];
+}
+
+// ⑥ 문제
+function q6(f) {
+  const { S, T } = f;
+  const req = n0(T.requests);
+  const table = el('table', 'table');
   const tbody = el('tbody');
-  for (const [name, n] of top) {
+  for (const [key, label] of [['2xx', '2xx'], ['3xx', '3xx'], ['4xx', '4xx'], ['5xx', '5xx'], ['ws5xx', '대시보드 재접속 실패']]) {
     const tr = el('tr');
-    const first = clip(cell(tr, ''), named ? named(name) : name, 60);
-    if (named) first.title = clean(name);
+    const n = n0(S[key]);
+    const tone = key === '5xx' && n ? 'bad' : null;
+    const name = cell(tr, tone ? marked(tone, label) : label);
+    name.title = key;
+    cell(tr, ratio(share(n, req), tone, `${label} 요청 대비`), 'share-bar');
     cell(tr, int(n), 'num');
-    const r = share(num(n) ?? 0, pages);
-    cell(tr, ratio(r, null, `페이지의 ${(r * 100).toFixed(1)}%`), 'share-bar');
-    cell(tr, `${(r * 100).toFixed(1)}%`, 'num');
+    cell(tr, `${(share(n, req) * 100).toFixed(1)}%`, 'num');
     tbody.append(tr);
   }
   table.append(tbody);
   const wrap = el('div', 'scroll');
   wrap.append(table);
-  card.append(wrap);
-  return card;
-}
-
-// 5xx 는 수치·표·막대·절 요약이 같은 장애색(§3.4 — 시간대별 막대의 5xx 겹침이 장애색이다)
-const fiveTone = (n) => (n ? 'bad' : null);
-
-function fillAccess(node, a) {
-  const totals = isObj(a.totals) ? a.totals : {};
-  const sub = [`폴링·canary 제외, IP 없음 · 읽지 못한 줄 ${int(totals.skipped)}`];
-  if (num(a.firstTs) !== null && num(a.startTs) !== null && a.firstTs > a.startTs) sub.push(`기록 시작 ${hm(a.firstTs * 1000)}`);
-  $('access-sub').textContent = sub.join(' · ');
-  const status = isObj(a.status) ? a.status : {};
-  const fives = num(status['5xx']) ?? 0;
-  const stats = el('div', 'stats');
-  stats.append(
-    stat('총 요청', int(totals.requests), null, '파일·봇·스캔까지 기록된 모든 줄'),
-    stat('페이지', int(totals.pages), null, '화면 주소 요청 · 봇 섞임'),
-    stat('5xx', int(fives), fiveTone(fives)),
+  const ws = isObj(f.a.ws) ? f.a.ws : {};
+  const tiles = el('div', 'tiles');
+  tiles.append(
+    stat('끝난 연결', int(ws.count), null, '연결 수 — 사람 수가 아니다'),
+    stat('연결한 방문자', f.vis && num(ws.pairs) !== null ? int(ws.pairs) : '—', null, f.vis ? '날마다 셈' : f.pre ? `시행(${f.D} 00:00) 뒤부터` : ''),
+    stat('재접속 실패', int(ws.errors), null, '대시보드 WebSocket 5xx'),
   );
-  const hourly = list(a.hourly).filter(isObj);
-  const bars = hourly.map((h) => ({
-    value: num(h.requests) ?? 0,
-    over: num(h.errors) ?? 0,
-    tip: `${hm(h.ts * 1000)} · 요청 ${int(h.requests)} · 페이지 ${int(h.pages)} · 5xx ${int(h.errors)}`,
-  }));
-  const peak = Math.max(0, ...bars.map((b) => b.value));
-  const chart = hourly.length ? columns(bars, `시간대별 요청 24시간 — 최고 ${int(peak)}, 5xx 는 겹쳐 표시`, 'tall') : el('p', 'empty', '값 없음');
-  // 막대 값은 title 에만 있으면 휴대폰에서 못 본다 — 최고 값과 5xx 가 난 시간을 글자로
-  const hourHead = el('p', 'summary-row');
-  hourHead.append(el('span', null, `시간대별 요청 · 최고 ${int(peak)}/시간`));
-  const errHours = hourly.filter((h) => num(h.errors) > 0);
-  if (errHours.length) {
-    const list5 = errHours.slice(-6).map((h) => `${hm(h.ts * 1000).slice(0, 2)}시 ${int(h.errors)}`);
-    hourHead.append(marked('bad', `5xx ${list5.join(' · ')}${errHours.length > 6 ? ` 외 ${errHours.length - 6}` : ''}`));
-  }
-  const codes = el('table', 'table');
-  const tbody = el('tbody');
-  for (const key of ['2xx', '3xx', '4xx', '5xx']) {
-    const tr = el('tr');
-    const n = num(status[key]) ?? 0;
-    const tone = key === '5xx' ? fiveTone(n) : null;
-    cell(tr, tone ? marked(tone, key) : key);
-    cell(tr, int(n), 'num');
-    const r = share(n, num(totals.requests) ?? 0);
-    cell(tr, ratio(r, tone, `${key} 요청의 ${(r * 100).toFixed(1)}%`), 'share-bar');
-    cell(tr, `${(r * 100).toFixed(1)}%`, 'num');
-    tbody.append(tr);
-  }
-  codes.append(tbody);
-  const ws = isObj(a.ws) ? a.ws : {};
   const durations = isObj(ws.durations) ? ws.durations : {};
-  const wsBars = WS_BUCKETS.map(([k, label]) => ({ value: num(durations[k]) ?? 0, over: 0, tip: `${label} · ${int(durations[k])}` }));
+  const lasting = fold('q6-durations', '지속 시간 — 머문 시간이 아니다', 'more');
   const labels = el('div', 'cols5');
   labels.append(
     ...WS_BUCKETS.map(([k, label]) => {
@@ -1215,16 +1854,15 @@ function fillAccess(node, a) {
       return span;
     }),
   );
-  const wsHead = el('p', 'summary-row');
-  wsHead.append(el('span', null, `WebSocket 연결 ${int(ws.count)} · 지속 시간`));
-  // 눈금은 막대 24개가 덮는 구간(첫 칸 시작 ~ 마지막 칸 끝)을 5등분 — 마지막 칸이 지금 시각을 품는다
-  const hourAxis = hourly.length ? ticks(hourly[0].ts * 1000, (hourly[0].ts + hourly.length * 3600) * 1000) : el('span');
-  node.replaceChildren(stats, hourHead, chart, hourAxis, codes, wsHead, columns(wsBars, `WebSocket 지속 시간 구간 — 연결 ${int(ws.count)}`), labels);
-  const pages = num(totals.humanPages) ?? 0;
-  $('access-tables').replaceChildren(...TOP_TABLES.map(([k, label, named]) => topTable(a[k], label, pages, named)));
+  lasting.append(columns(WS_BUCKETS.map(([k, label]) => ({ value: n0(durations[k]), over: 0, tip: `${label} · ${int(durations[k])}` })), `대시보드 연결 지속 시간 구간 — 끝난 연결 ${int(ws.count)}`), labels);
+  return [wrap, el('p', 'muted small', `탐색 경로 ${int(T.probes)}줄`), el('p', 'muted small', '대시보드 연결'), tiles, lasting];
+}
+
+// 최근 5xx(036 의 접힘을 ⑥ 으로 옮김) — 정적 details 라 펼침이 남는다
+function recent5xx(a) {
   const recent = list(a.recent5xx).filter(isObj).slice(0, 20);
   $('r5xx').hidden = false;
-  $('r5xx-sum').textContent = recent.length ? `최근 5xx ${recent.length}건` : '최근 5xx 없음';
+  $('r5xx-sum').textContent = `${recent.length ? `최근 5xx ${recent.length}건` : '최근 5xx 없음'} — 대시보드 재접속 실패 제외`;
   $('r5xx-rows').replaceChildren(
     ...recent.map((r) => {
       const tr = el('tr');
@@ -1234,6 +1872,42 @@ function fillAccess(node, a) {
       return tr;
     }),
   );
+}
+
+// 덩어리 머리 meta — 늘 창(시행 뒤 '날마다 센 방문자', 시행 전 '줄 수')
+const qMeta = (a) => `${WINDOW_NAME[winOf(a)]} · ${list(a.windows).includes('7d') ? '날마다 센 방문자' : '줄 수'}`;
+const BLOCKS = [q1, q2, q3, q4, q5, q6];
+
+function fillTraffic(a) {
+  const f = facts(a);
+  const said = answers(a);
+  for (const q of QS) {
+    $(`m-q${q}`).textContent = qMeta(a);
+    sentence($(`a-q${q}`), said[q - 1]);
+    $(`b-q${q}`).replaceChildren(...BLOCKS[q - 1](f));
+  }
+  $('geo-state').replaceChildren(...geoBadge(f));
+  recent5xx(a);
+}
+
+// 덩어리 여섯을 상태 글로 — 고른 창을 불러오는 중(part 없음)이거나 접속 부분을 못 그릴 때(036 §3.5)
+function blankTraffic(part) {
+  for (const q of QS) {
+    $(`m-q${q}`).textContent = WINDOW_NAME[picked];
+    $(`a-q${q}`).replaceChildren();
+    const msg = part === undefined ? el('p', 'state-msg', `… ${WINDOW_NAME[picked]} 불러오는 중`) : part.state === 'error' ? el('p', 'state-msg', `불러오지 못함${part.code ? ` — ${clean(part.code)}` : ''}`) : stateMsg(part, CAUSE.access);
+    $(`b-q${q}`).replaceChildren(msg);
+  }
+  $('geo-state').replaceChildren();
+  $('r5xx').hidden = true;
+}
+
+// 절 요약 앞 조각(§3.3) — 7일·30일 '확인 방문자 하루 a명', 24시간(시행 뒤) '24시간 확인 a', 시행 전 '24시간 스크립트가 돈 페이지 j'
+function trafficLead(a) {
+  const v = visOf(a);
+  if (!list(a.windows).includes('7d')) return `24시간 스크립트가 돈 페이지 ${int(a.totals?.jsViews)}`;
+  if (winOf(a) === '24h') return `24시간 확인 ${v ? int(v.confirmed) : '–'}`;
+  return `확인 방문자 하루 ${v ? perDay(a, v, v.confirmed) ?? '–' : '–'}명`;
 }
 
 // Clarity 행 — 키·값을 글자 한 줄로(받은 이름·키 그대로 — 035 가 정규화하지 않았다)
@@ -1287,28 +1961,24 @@ function drawTraffic() {
     // 굵은 오른쪽 값은 '지금' 처럼 읽히니 24시간 최고로 — 지금 수는 위의 큰 숫자(빠른 묶음)다
     node.replaceChildren(metricRow('serve', 'WebSocket 접속 수 · CloudWatch 5분 최댓값', m.wsClients, { ...where, extreme: 'max', peak: true }));
   });
-  const access = partOf(P.access);
-  if (!region('access', access, CAUSE.access, fillAccess)) {
-    $('access-sub').textContent = '';
-    $('access-tables').replaceChildren();
-    $('r5xx').hidden = true;
-  }
+  // 서버 기록(042) — 고른 창으로 요청한 응답만 그린다(다른 창의 값을 새 창 이름 아래 두지 않는다)
+  const entry = got.get(P.access);
+  const current = entry !== undefined && entry.asked === picked;
+  const access = current ? partOf(P.access) : undefined;
+  drawWindowBar(entry, access, current);
+  const ok = usable(access);
+  redraw('traffic', [access ?? picked], () => (ok ? fillTraffic(access) : blankTraffic(access)));
   const clarity = partOf(P.clarity);
   if (!region('clarity', clarity, CAUSE.clarity, fillClarity, 'numOfDays')) $('clarity-more').hidden = true;
-  const bits = [`지금 ${st?.body ? int(st.body.wsConnections) : '–'} 접속`];
-  let tone = 'ok';
-  let fives = 0;
-  if (usable(access)) {
-    fives = num(access.status?.['5xx']) ?? 0;
-    bits.push(`24시간 페이지 ${int(access.totals?.pages)}`);
-  } else {
-    const [t, w] = softWord(access);
-    tone = t;
-    bits.push(`서버 기록 ${w}`);
+  const now = `지금 ${st?.body ? int(st.body.wsConnections) : '–'} 접속`;
+  if (!ok) {
+    const [tone, word] = softWord(access);
+    return $('s-traffic').replaceChildren(marked(st ? tone : 'wait', `${now} · 서버 기록 ${word}`));
   }
-  // 5xx 는 판정 밖이라 줄 전체를 칠하지 않고 그 조각만 같은 장애색으로(수치·표와 같게)
-  const parts = [marked(st ? tone : 'wait', bits.join(' · '))];
-  if (fives) parts.push(marked(fiveTone(fives), `5xx ${int(fives)}`));
+  // 5xx 는 판정 밖이라 줄 전체를 칠하지 않고 그 조각만 장애색으로(수치·표와 같게)
+  const parts = [marked(st ? 'ok' : 'wait', `${trafficLead(access)} · ${now}`)];
+  const fives = n0(access.status?.['5xx']);
+  if (fives) parts.push(marked('bad', `5xx ${int(fives)}`));
   $('s-traffic').replaceChildren(...parts);
 }
 
