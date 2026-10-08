@@ -66,11 +66,11 @@
 - 응답(camelCase):
 ```json
 {"window":"1h","asOf":1759924800,
- "feed":{"connected":true,"lastBlock":26147699,"lagSec":3,"depositAddrs":32031,"hotWallets":951},
+ "feed":{"connected":true,"lastBlock":26147699,"lagSec":3,"depositAddrs":32031,"hotWallets":951,"contracts":206},
  "rows":[{"symbol":"SAND","inCount":3,"inAmount":323679.07,"outCount":1,"outAmount":12000.0,
           "netAmount":311679.07,"netKrw":145000000,"lastTs":1759924631}]}
 ```
-  `feed.connected` 는 소켓이 열려 있고 30초 안에 newHeads 를 받았는가, `lagSec` = 지금 − 마지막 블록 시각, `depositAddrs`·`hotWallets` 는 집합 크기(씨앗 + 확장). 감지기가 꺼져 있으면 `feed` 는 `connected:false`·`lastBlock:null`·`lagSec:null`·집합 크기 0.
+  `feed.connected` 는 소켓이 열려 있고 30초 안에 newHeads 를 받았는가, `lagSec` = 지금 − 마지막 블록 시각, `depositAddrs`·`hotWallets` 는 집합 크기(씨앗 + 확장), `contracts` 는 구독하는 컨트랙트 수(씨앗 행 수). 감지기가 꺼져 있으면 `feed` 는 `connected:false`·`lastBlock:null`·`lagSec:null`·집합·컨트랙트 수 0.
 - `netKrw` = `netAmount` × 업비트 KRW 현재가(§3.1), 현재가 없으면 null. 정렬 `|netKrw|` 내림차순, null 은 뒤에서 `|netAmount|` 내림차순. `lastTs` = 그 코인의 마지막 전송 블록 시각(초).
 - 503 `storage_unavailable`(Influx 불통·토큰 없음).
 
@@ -85,7 +85,7 @@
 - 순유입 표(위): 열 `코인 | 입금 | 출금 | 순유입 | 원화 | 최근`. 입금·출금 칸 = `건수 · 수량`. 순유입 양수 accent, 음수 회색, 원화 null 은 `–` 흐리게. 코인 클릭 → 검색값으로 쓴다. 빈 결과 `이 창에 업비트 ERC-20 입출금 없음`.
 - 최근 전송 표(아래): 열 `시각 | 방향 | 코인 | 수량 | 원화 | 주소 | 상대 | tx`. 방향 칩 입금=accent·출금=회색, 원화 ≥ 1억 accent 굵게, 주소·상대는 `앞6…뒤4`(hover 로 전체), tx 는 `https://etherscan.io/tx/{hash}` 새 창, 확정 전 행은 `확정 전` 칩(neutral). 100행. 빈 결과 `해당 조건의 전송 없음`.
 - 조회: 탭이 보이는 동안 두 경로를 **5초마다**(상수 `FLOW_POLL_MS`, `shared/config.ts`) 다시 부른다 — 013 과 같이 다른 탭·가려진 브라우저 탭에서는 멈춘다. 실패하면 직전 표를 유지하고 바 1 우측에 `불러오지 못했습니다 (HTTP n)`.
-- 푸터: 좌 `업비트 · 이더리움 네트워크 ERC-20 {컨트랙트 수}종 · 블록 2개 확정 전은 '확정 전'`, 우 `입금주소 {depositAddrs} · 핫월렛 {hotWallets} · 자동 확장`. mock 경고 문구는 없앤다.
+- 푸터: 좌 `업비트 · 이더리움 네트워크 ERC-20 {feed.contracts}종 · 블록 2개 확정 전은 '확정 전'`, 우 `입금주소 {depositAddrs} · 핫월렛 {hotWallets} · 자동 확장`. mock 경고 문구는 없앤다.
 
 ## 4. 검증
 - to 가 입금주소인 전송은 `in`, 상대 = from, 주소 = to 로 저장된다.
