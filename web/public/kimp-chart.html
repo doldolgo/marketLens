@@ -12,6 +12,8 @@
   <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <meta name="theme-color" content="#161826" />
+  <!-- 052 — 화면 영역 이용 통계(동의한 방문자만). 같은 출처 스크립트는 이 하나뿐이다(CSP script-src 'self') -->
+  <script defer src="/attention.js"></script>
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="KimpTrack" />
   <meta property="og:title" content="김프 차트 - 실시간·과거 김치프리미엄 봉 차트 | KimpTrack" />
@@ -110,7 +112,7 @@
   </style>
 </head>
 <body>
-  <header class="wrap bar">
+  <header class="wrap bar" data-area="top">
     <a class="mark" href="/" aria-label="KimpTrack 첫 화면">
       <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><circle cx="5" cy="15" r="3" fill="currentColor"/><circle cx="17" cy="7" r="3" fill="currentColor"/><path d="M7.5 13 14.5 9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       KimpTrack
@@ -126,7 +128,7 @@
       <a class="link" href="/kimp-history">김프 히스토리(지난 사건 기록) 보기</a>
     </div>
 
-    <section aria-labelledby="what-title">
+    <section aria-labelledby="what-title" data-area="what">
       <h2 id="what-title">김프 차트에서 볼 수 있는 것</h2>
       <ul>
         <li><strong>봉 종류 8개</strong> — 1분·3분·5분·15분·30분·1시간·4시간·1일. 봉은 한국 시간 벽시계에 맞춰 자릅니다(일봉은 한국 시간 자정 기준).</li>
@@ -145,7 +147,7 @@
       </figure>
     </section>
 
-    <section aria-labelledby="read-title">
+    <section aria-labelledby="read-title" data-area="read">
       <h2 id="read-title">김프 차트 읽는 법</h2>
       <dl>
         <dt>봉 하나의 뜻</dt>
@@ -159,7 +161,7 @@
       </dl>
     </section>
 
-    <section aria-labelledby="coins-title">
+    <section aria-labelledby="coins-title" data-area="coins">
       <h2 id="coins-title">코인별 김프 차트 바로 가기</h2>
       <p>자주 찾는 코인입니다. 차트에서 다른 코인·국내 거래소·해외 거래소·봉 종류를 바꿀 수 있습니다.</p>
       <div class="grid">
@@ -172,7 +174,7 @@
       </div>
     </section>
 
-    <section aria-labelledby="faq-title">
+    <section aria-labelledby="faq-title" data-area="faq">
       <h2 id="faq-title">자주 묻는 질문</h2>
       <h3>김프 차트는 실시간인가요?</h3>
       <p>네. 1분마다 새 봉이 더해지고 지난 봉은 그대로 남습니다. 실시간 숫자만 보려면 <a class="link" href="/app/">실시간 김프 표</a>가 더 빠릅니다.</p>
@@ -185,7 +187,7 @@
     </section>
   </main>
 
-  <footer class="wrap foot">
+  <footer class="wrap foot" data-area="foot">
     <nav class="foot-nav" aria-label="바로 가기">
       <a href="/">첫 화면</a>
       <a href="/app/">실시간 김프 표</a>

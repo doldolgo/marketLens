@@ -2,7 +2,7 @@
 
 /health 와 틱 루프는 기능 폴더가 아니라 여기(시스템) 소관이다.
 메모리가 진실이므로 uvicorn 워커는 1개여야 한다 — 워커가 둘이면 서로 다른 메모리를 본다.
-프로세스 역할은 ROLE(016) — collector(기본) 는 아래 전체, api 는 Influx 조회 전용(`_api_lifespan`).
+프로세스 역할은 ROLE(016) — collector(기본) 는 아래 전체, api 는 Influx 조회·표 구독·화면 영역 통계(`_api_lifespan`).
 시작 순서(collector): 010 원문 아카이브(S3_BUCKET 있을 때) → Influx·Redis 연결 확인 → 마켓 우주·스트림 기동(국내 2 +
 해외 3곳 샤드) → 011 이력 복원 → 013 사건 복원 → 014 봉 버킷·롤업 기준점 → 009 spark 복원 → 틱 루프 → 009 인계
 보내기 태스크·017 게시기·허브·flusher → 050 이더리움 감지기(env 둘 다 있을 때) → GC 정리(001 §3.1 — 두 역할 모두 yield 직전).
@@ -77,6 +77,8 @@ from app.features.admin.router import router as admin_router
 from app.features.admin.service import AdminStatusService
 from app.features.admin.visits import VisitFeeds
 from app.features.analysis.router import router as analysis_router
+from app.features.attention.router import router as attention_router
+from app.features.attention.service import AttentionService
 from app.features.flow.router import router as flow_router
 from app.features.health.router import router as health_router
 from app.features.history.cache import HistoryCache
@@ -125,11 +127,12 @@ def _settle_gc() -> None:
 
 @asynccontextmanager
 async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """api 역할(016 §3.1) — Influx 클라이언트 생성·ping + 017 의 스프레드 표 구독 허브뿐이다.
+    """api 역할(016 §3.1) — Influx 클라이언트 생성·ping + 017 의 스프레드 표 구독 허브 + 052 화면 영역 통계 쓰기.
 
     거래소·S3 에 연결하지 않고 기동 복원도 없다 — 하나라도 하면 collector 와 같은 measurement 를
-    중복으로 쓰거나(collect_fail·premium_event·롤업) 거래소를 이중 구독한다. Redis 는 구독 목적으로만
-    쓰고(스트림 `ticks` 는 안 읽는다) 백그라운드 태스크는 그 구독 태스크 + 알림(025)·게이지(027) 각각 설정이 있을 때만.
+    중복으로 쓰거나(collect_fail·premium_event·롤업) 거래소를 이중 구독한다. Redis 는 표 구독과 키 읽기, 그리고 052 의
+    화면 영역 통계 해시(`attn:d:*`) 쓰기에 쓴다(스트림 `ticks` 는 안 읽는다). 백그라운드 태스크는 그 구독 태스크 + 052 의
+    10초 묶음 쓰기 태스크(끌 때 한 번 더 보낸다) + 알림(025)·게이지(027) 각각 설정이 있을 때만.
     """
     _start_notifier(app)
     influx = await _open_influx(app.state.settings)
@@ -140,6 +143,9 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
     hub.start()
     app.state.spreads_hub = hub
     app.state.spreads_bus = bus  # 018 — GET /spreads 가 요청마다 latest 읽기·want 쓰기
+    # 052 — 받은 비콘의 하루 합계를 10초마다 같은 버스로
+    attention: AttentionService = app.state.attention
+    attention.start(bus)
 
     def ws_connections() -> int:
         return hub.connections
@@ -154,6 +160,7 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if gauge is not None:
             await gauge.aclose()
+        await attention.aclose()
         await hub.aclose()
         await bus.aclose()
         if influx is not None:
@@ -578,7 +585,8 @@ def create_app() -> FastAPI:
         )
 
     # api 역할은 Influx 만 읽는 네 경로 + 017 의 /ws/spreads + 018 의 GET /spreads(Redis 읽기)
-    # + 022 의 GET /landing(Redis·Influx 읽기) + 029 의 GET /admin/status·035 의 /admin/access·clarity — /history/events 는 진행 중
+    # + 022 의 GET /landing(Redis·Influx 읽기) + 029 의 GET /admin/status·035 의 /admin/access·clarity
+    # + 052 의 POST /attention·GET /admin/attention — /history/events 는 진행 중
     # 사건을 메모리에서 읽으므로 제외 (016 §3.1, 018 §3.4)
     app.include_router(history_router)
     app.include_router(spreads_ws_router)
@@ -594,6 +602,9 @@ def create_app() -> FastAPI:
             clarity_token=settings.clarity_api_token,
         )
         app.include_router(admin_router)
+        # 052 — 화면 영역 이용 통계(받기·관리자 피드). 메모리 합계·IP 셈 표·피드 캐시 자리라 앱마다 하나
+        app.state.attention = AttentionService()
+        app.include_router(attention_router)
     else:
         app.include_router(spreads_refresh_router)
         app.include_router(analysis_router)

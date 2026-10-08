@@ -123,10 +123,11 @@ export function Pill({ tone, children, style }: { tone: PillTone; children: Reac
 
 // ── grid 표 (§3.2) ───────────────────────────────────────────────────────
 /** 표 바깥 프레임 — 가운데 정렬, 최대 1080, 좌우 선, 자체 스크롤. */
-export function TableFrame({ minWidth, children }: { minWidth: number; children: ReactNode }) {
+export function TableFrame({ minWidth, area, children }: { minWidth: number; area?: string; children: ReactNode }) {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center', padding: '0 var(--space-6)' }}>
-      <div style={{ minWidth, maxWidth: 1080, flex: 1, overflow: 'auto', borderLeft: '1px solid var(--color-divider)', borderRight: '1px solid var(--color-divider)' }}>
+      {/* area — 052 화면 영역 이용 통계의 영역 id(data-area). 표 상자 자체에 단다 */}
+      <div data-area={area} style={{ minWidth, maxWidth: 1080, flex: 1, overflow: 'auto', borderLeft: '1px solid var(--color-divider)', borderRight: '1px solid var(--color-divider)' }}>
         {children}
       </div>
     </div>

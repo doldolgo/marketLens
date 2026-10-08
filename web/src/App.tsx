@@ -104,6 +104,13 @@ export default function App() {
     clarityNext.current = null
     if (tab === 'history') clarityTag('sym', selSym)
   }, [tab, selSym])
+  // 052 — 사용자가 탭을 바꾼 뒤 attention.js 에 알린다(구간을 끊고 새 탭으로). 첫 그리기에는 내지 않는다
+  const attentionTabRef = useRef(tab)
+  useEffect(() => {
+    if (attentionTabRef.current === tab) return
+    attentionTabRef.current = tab
+    window.dispatchEvent(new CustomEvent('kt:tab', { detail: tab }))
+  }, [tab])
   // clarity.js 가 문서 중간에(동의 창의 저장·다른 탭의 동의로) 대기열을 만들면 지금 보이는 화면의 태그를 한 번 둔다
   useEffect(() => {
     const onReady = () => {
@@ -142,15 +149,15 @@ export default function App() {
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'var(--font-body)', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
 
-      {/* 헤더: 타이틀 + LIVE + 탭 + 시계 */}
+      {/* 헤더: 타이틀 + LIVE + 탭 + 시계. data-area 는 052 화면 영역 이용 통계의 영역(로고·상태 덩어리와 탭 묶음 — 줄 전체에 달면 둘을 품는다) */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-8)', padding: '0 var(--space-6)', borderBottom: '1px solid var(--color-divider)', height: 52, flex: 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>
+        <div data-area="header" style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>
           <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 600, fontSize: 16, letterSpacing: '-0.01em' }}>Kimp<span style={{ color: 'var(--color-accent)' }}>Track</span></span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--color-neutral-500)' }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-ok)', animation: 'tr-pulse 1.6s ease-in-out infinite' }} />실시간 수집 중
           </span>
         </div>
-        <div style={{ display: 'flex', gap: 'var(--space-2)', alignSelf: 'stretch', alignItems: 'stretch' }}>
+        <div data-area="tabs" style={{ display: 'flex', gap: 'var(--space-2)', alignSelf: 'stretch', alignItems: 'stretch' }}>
           {TABS.map(([id, text]) => (
             <button key={id} onClick={() => pickTab(id)} className="hv-txt"
               style={{
@@ -179,7 +186,7 @@ export default function App() {
       </div>
 
       {/* KPI 스트립 — 카드가 아닌 flex 스트립, 블록 사이 세로 그라디언트 선 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-8)', padding: 'var(--space-4) var(--space-6)', borderBottom: '1px solid var(--color-divider)', flex: 'none', overflowX: 'auto' }}>
+      <div data-area="kpi" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-8)', padding: 'var(--space-4) var(--space-6)', borderBottom: '1px solid var(--color-divider)', flex: 'none', overflowX: 'auto' }}>
         <div style={{ flex: 'none' }}>
           <div style={{ ...kicker, marginBottom: 2 }}>USDT/KRW 암묵환율</div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>

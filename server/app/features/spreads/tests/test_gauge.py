@@ -178,10 +178,14 @@ def test_api_app_reports_open_connections(api_env) -> None:  # noqa: ANN001
 async def test_api_lifespan_has_gauge_task_only_with_statsd_addr(api_env) -> None:  # noqa: ANN001
     sock, port = _udp()
     try:
+        # attention_flush — 052 의 화면 영역 통계 10초 묶음 쓰기(api 역할이면 늘 있다)
         for statsd, expected in (
-            (None, ["spreads_hub"]),
-            ("", ["spreads_hub"]),
-            (f"127.0.0.1:{port}", ["spreads_hub", "ws_clients_gauge"]),
+            (None, ["attention_flush", "spreads_hub"]),
+            ("", ["attention_flush", "spreads_hub"]),
+            (
+                f"127.0.0.1:{port}",
+                ["attention_flush", "spreads_hub", "ws_clients_gauge"],
+            ),
         ):
             api_env("api", statsd)
             app = create_app()

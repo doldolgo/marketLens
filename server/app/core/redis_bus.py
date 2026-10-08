@@ -20,10 +20,12 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
   연결(재연결) 직후 공백 재생의 시작점으로 읽는다 (050 §3.4)
 - 집합 `flow:eth:deposit_addrs`·`flow:eth:hot_wallets`·`flow:eth:internal` — 씨앗에 더한 업비트 주소(소문자), 만료 없음.
   수집이 블록마다 자가 확장으로 더하고 기동 때 씨앗에 합친다 (050 §3.2)
+- 해시 `attn:d:<YYYYMMDD>` — 화면 영역 이용 통계의 KST 하루 합계, 필드 `<page>|<device>|<area>|<ms|clicks|seen>`·페이지뷰
+  `<page>|<device>||pv`, 값은 정수 합, EXPIREAT 그날 끝 + 90일. api 가 10초 묶음으로 더하고 api 의 `/admin/attention` 이 읽는다 (052 §3.5)
 """
 
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 
 import redis.asyncio as aioredis
 from redis.asyncio.retry import Retry
@@ -57,6 +59,8 @@ FLOW_LAST_BLOCK_KEY = "flow:eth:last_block"
 FLOW_DEPOSIT_ADDRS_KEY = "flow:eth:deposit_addrs"
 FLOW_HOT_WALLETS_KEY = "flow:eth:hot_wallets"
 FLOW_INTERNAL_KEY = "flow:eth:internal"
+# 052 — 화면 영역 이용 통계 하루 합계 해시 `attn:d:<YYYYMMDD>`(KST 날짜)
+ATTENTION_PREFIX = "attn:d:"
 
 
 class RedisUnavailableError(Exception):
@@ -232,6 +236,35 @@ class RedisBus:
         if not members:
             return
         await self._client.sadd(key, *members)
+
+    async def attention_add(
+        self, day: str, counts: Mapping[str, int], expire_at: int
+    ) -> None:
+        """`HINCRBY attn:d:<day>` 묶음 + `EXPIREAT <expire_at>` 를 한 파이프라인으로 (052 §3.5). 빈 묶음은 명령하지 않는다. 실패는 예외.
+
+        expire_at 은 epoch 초 — 그 KST 날의 끝 + 90일. 쓸 때마다 같은 값이라 몇 번 써도 만료가 밀리지 않는다.
+        """
+        if not counts:
+            return
+        key = ATTENTION_PREFIX + day
+        async with self._client.pipeline(transaction=False) as pipe:
+            for field, n in counts.items():
+                pipe.hincrby(key, field, n)
+            pipe.expireat(key, expire_at)
+            await pipe.execute()
+
+    async def attention_days(self, days: Sequence[str]) -> dict[str, dict[str, int]]:
+        """`HGETALL attn:d:<day>` 를 날마다 한 파이프라인으로 — 관리자 피드의 창 (052 §3.6). 키 없는 날은 빈 dict. 실패는 예외."""
+        if not days:
+            return {}
+        async with self._client.pipeline(transaction=False) as pipe:
+            for day in days:
+                pipe.hgetall(ATTENTION_PREFIX + day)
+            found = await pipe.execute()
+        return {
+            day: {_text(k): int(_text(v)) for k, v in raw.items()}
+            for day, raw in zip(days, found, strict=True)
+        }
 
     async def subscribe(self) -> Subscription:
         """채널 구독 연결을 새로 연다 — 여기서 실제 연결이 일어나므로 실패는 예외."""

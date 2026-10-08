@@ -1,6 +1,6 @@
 # 052 — attention
 
-상태: TODO | 의존: **051 privacy-v3**(상수 `PRIVACY_V3_EFFECTIVE`·동의 안내 판 D). 053 admin-attention 이 이 스펙의 관리자 피드와 `attention.js` 를 쓴다.
+상태: DONE | 의존: **051 privacy-v3**(상수 `PRIVACY_V3_EFFECTIVE`·동의 안내 판 D). 053 admin-attention 이 이 스펙의 관리자 피드와 `attention.js` 를 쓴다.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -29,7 +29,7 @@
 - 싣는 곳: 랜딩·대시보드는 clarity.js 바로 다음 `<script defer src="/attention.js">`(대시보드는 vite base 로 `/app/attention.js` 가 된다 — clarity.js 와 같다), 처리방침·검색어 페이지 둘은 `<head>` 에 같은 줄 하나(이 셋은 clarity.js 를 싣지 않는다 — 그대로). 공개 nginx: `location = /attention.js` 를 clarity.js 의 location 과 같은 꼴(no-cache)로, `/app/attention.js` 는 기존 `location /app/` 그대로.
 - 정적 페이지 CSP(032·044): 세 페이지 CSP 의 `script-src` 에 `'self'`, `connect-src 'self'`(없으면 더함 — 비콘은 connect-src 를 따른다). 053 이 같은 문자열의 `frame-ancestors` 를 바꾼다.
 - **구간(한 번 본 화면)**: 페이지를 연 때(또는 동의가 켜진 때) 시작, 대시보드 탭이 바뀌면 끝내고 새 탭 이름으로 새 구간. App.tsx 는 사용자가 탭을 바꾼 뒤(첫 그리기에는 내지 않는다) `window` 에 `kt:tab` 이벤트(`detail` = 탭 id)를 낸다. 이 스크립트는 그 이벤트만 듣고, 지금과 같은 id 면 무시한다(history 를 덮어쓰지 않는다).
-- **보임**: 영역마다 IntersectionObserver(문턱 0)로 화면 근처에 들어온 영역만 고르고, 그 영역들은 스크롤·크기 바뀜·DOM 바뀜 때(애니메이션 프레임당 한 번) `getBoundingClientRect` 로 다시 잰다. 보이는 높이 ≥ min(영역 높이 × 0.5, 화면 높이 × 0.5) 이고 ≥ 40px 이면 '보임'(긴 표·긴 절도 화면 절반을 채우면 보임). 늦게 생기는 영역(대시보드 lazy 탭)은 MutationObserver 로 잡는다(1초에 한 번까지).
+- **보임**: 영역마다 IntersectionObserver(문턱 0)로 화면 근처에 들어온 영역만 고르고, 그 영역들은 스크롤·크기 바뀜·DOM 바뀜 때(애니메이션 프레임당 한 번) `getBoundingClientRect` 로 다시 잰다. 보이는 높이 ≥ min(영역 높이 × 0.5, 화면 높이 × 0.5) 이고 ≥ min(40px, 영역 높이) 이면 '보임'(긴 표·긴 절도 화면 절반을 채우면 보임, 40px 보다 낮은 영역 — 대시보드 `header` 등 — 은 통째로 보이면 보임). 늦게 생기는 영역(대시보드 lazy 탭)은 MutationObserver 로 잡는다(1초에 한 번까지).
 - **보인 시간**: 보임이면서 문서가 보이는 동안(`visibilityState` visible)이면서 마지막 입력(페이지 연 때·포인터 움직임·누름·휠·스크롤·키·터치) 뒤 5분 안일 때만 쌓는다.
 - **클릭**: 문서 `click`(캡처)에서 대상의 가장 가까운 `[data-area]` 하나에 1. 영역 밖 클릭은 버린다.
 - 상한은 **구간 전체**(여러 번 보내도 합)에서 영역당 시간 600,000ms·클릭 50. '1초 이상 보임'(seen)은 구간에서 영역의 누적 시간이 1,000ms 를 넘은 첫 순간 1(구간당 한 번).
@@ -73,8 +73,19 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 2026-10-09, worktree marketLens-exec-052 (feat/052-attention). uv 는 샌드박스 밖에서, 의존성은 editable + dev
+cd server && uv pip install --python .venv/bin/python -e ".[dev]"
+cd server && uv run ruff check .                 # All checks passed!
+cd server && uv run ruff format --check .        # 356 files already formatted
+cd server && uv run pytest -q                    # 1867 passed, 1 skipped (test_geo_perf — DBIP_DIR 없음, 052 와 무관)
+#   새 테스트: app/features/attention/tests/ (받기·10초 묶음·피드 30개) · tests/test_attention.py(계약 12개)
+#   · tests/test_attention_js.py + test_attention_js_send.py(attention.js 를 node v18.12.0 으로 14개 — 건너뜀 없음)
+#   node 테스트가 정말 잡는지: MIN_PX 30·IDLE 15분·pv 늘 1·철회 판정 끔·찾기 1초 제한 끔·클릭 상한 60 으로 바꾸면 각각 실패(되돌림)
+cd web && npm ci && npm run lint                 # node v26.4.0 (/opt/homebrew/bin) · oxlint 1.80.0 — 찾은 것 없음(exit 0)
+cd web && npm run build                          # tsc -b && vite build 성공 · dist/index.html 에 /app/clarity.js 바로 뒤 /app/attention.js
+node --check web/public/attention.js             # exit 0
 ```
+- 하지 않은 것(설계 세션 몫 — 실행 세션은 브라우저·Docker 를 쓰지 않았다): §4 마지막 줄의 로컬 Docker·헤드리스 Chrome 확인, `nginx -t`(web 이미지 — nginx.conf·nginx-admin.conf 를 고쳤다), `caddy validate`(Caddyfile 을 고쳤다). 두 결과는 PR 본문 테스트 칸에 적는다(027·029 빚).
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — 새 행 `| attention | server: POST /attention(동의 비콘 → Redis 하루 합계 90일)·GET /admin/attention(1·7·30·90일) | web: public/attention.js(영역별 보인 시간·seen·클릭, 숨길 때 보냄)·모든 화면 data-area | D 전 버림 |`.
@@ -90,6 +101,41 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-- 붙인 영역 목록(화면마다 id):
-- 추측한 지점 / 실행 중 함께 고친 스펙 절:
+  - server 새 기능 폴더 `server/app/features/attention/` — `models.py`(화면 이름 `PAGES`·기기·영역 id 꼴·상한·`Beacon`), `kst.py`(시행일 게이트·KST 날짜·해시 이름·만료 시각), `service.py`(검사·IP 10분 제한·메모리 합·10초 묶음 쓰기), `feed.py`(관리자 피드·60초 캐시), `router.py`(`POST /attention`·`GET /admin/attention`), `tests/`(conftest·test_receive·test_flush·test_feed).
+  - server 고친 것: `app/core/redis_bus.py`(`attention_add`·`attention_days`, 키 `attn:d:` 설명), `app/main.py`(api 역할에만 서비스·라우터, `_api_lifespan` 이 버스로 띄우고 끌 때 한 번 더 보냄·설명 글).
+  - server 테스트: 새 `tests/test_attention.py`·`tests/test_attention_js.py`·`tests/test_attention_js_send.py`, 고친 `tests/test_role.py`(api 경로 열둘·태스크 둘)·`tests/test_deploy.py`(`PUBLIC_API` 에 `/api/attention`, 호출 경로 대조를 `public/*.js`·`sendBeacon(` 까지)·`tests/test_observability.py`(기록 제외·공개 location 에 `/attention.js`)·`tests/test_admin.py`(관리자 피드 셋)·`tests/test_privacy.py`·`tests/test_kimp_pages.py`(CSP 한 문자열·파일 스크립트는 `/attention.js` 하나)·`app/features/spreads/tests/test_gauge.py`(api lifespan 태스크에 `attention_flush`).
+  - web: 새 `web/public/attention.js`. `web/index.html`(clarity.js 바로 뒤), `web/public/landing.html`(clarity.js 바로 뒤 + 영역), `privacy.html`·`kimp-chart.html`·`kimp-history.html`(`<head>` 한 줄 + 영역), `web/src/App.tsx`(영역 셋 + `kt:tab`), `web/src/shared/ui.tsx`(`TableFrame` 의 선택 속성 `area`), `web/src/features/{spreads,gap,pp,health,flow}/Tab.tsx`·`history/Tab.tsx`·`history/Chart.tsx`(속성만).
+  - 인프라: `web/nginx.conf`(`= /api/attention`·`= /attention.js`·정적 페이지 셋 CSP), `web/nginx-admin.conf`(`= /svc/api/admin/attention`), `caddy/Caddyfile`(기록 제외 `/api/attention`).
+  - 문서: context 다섯(status·architecture·db·product·dev-setup), 스펙 027·028·029·032, CLAUDE.md 인덱스.
+- 붙인 영역 목록(화면마다 id — 문서 순서, `tests/test_attention.py` 가 같은 목록을 묶는다):
+  - `landing`: `top`(머리 막대) · `hero`(첫 화면 글·실시간 카드) · `analyze` · `events` · `kimp` · `method` · `faq` · `foot`
+  - `privacy`: `top` · `changes`(변경 안내) · `glance` · `consent` · `s1` · `s2` · `s3` · `s4` · `s5` · `s6` · `s7` · `s8` · `s9` · `s10` · `s11` · `s12` · `foot` (제목 h1·소개 문단은 영역 밖)
+  - `kimp-chart`: `top` · `what`(볼 수 있는 것) · `read`(읽는 법) · `coins`(코인별 바로 가기) · `faq` · `foot`
+  - `kimp-history`: `top` · `live`(지난 7일 사건 표) · `what`(남는 것) · `how`(보는 법) · `faq` · `foot`
+  - 대시보드 공통(모든 `app-*`): `header`(로고·'실시간 수집 중' 덩어리) · `tabs`(탭 단추 묶음) · `kpi`(KPI 줄). 처리방침 링크·시계·셸 푸터는 영역 밖.
+  - `app-spread`: `filters`(필터 바 두 줄) · `table`(김프 표 상자)
+  - `app-history`: `filters`(방향·기간·거래소·검색 줄) · `table`(티커별 사건 표) · `summary`(선택 심볼 요약·타임라인) · `list`(사건 로그) · `filters-2`(차트 툴바 — 봉 종류·국내·해외) · `chart`(거래소별 봉 차트 카드 묶음)
+  - `app-gap`: `filters` · `table`
+  - `app-pp`: `filters` · `table`
+  - `app-health`: `summary`(요약 카드) · `cards`(거래소·perp 원천 카드 격자) · `chart`(실패 구간 타임라인) · `list`(최근 실패 구간 로그) — 첫 응답 전 화면에는 영역이 없다
+  - `app-flow`: `filters`(창·방향·검색 바) · `table`(코인별 순유입) · `table-2`(최근 전송). 전용 푸터는 영역 밖.
+- 추측한 지점 / 실행 중 함께 고친 스펙 절 (사람이 없는 실행이라 가장 보수적인 쪽을 골랐다 — 각 줄 끝은 버린 대안):
+  - 비콘은 키 다섯(`v`·`page`·`device`·`pv`·`a`) 그대로만 받는다 — 키를 더하면 400. 정수 칸의 `true`·`1.0` 도 400, 깊게 중첩된 JSON(파이썬 재귀 한도)도 400. (버림: 모르는 키 무시 — 공개 경로라 엄격하게.)
+  - ① 은 '헤더가 있고 `same-origin` 이 아니면' 그대로라 `none`(주소창 입력 등)도 403. 403 은 몸통을 읽기 전에 정하고, 앱도 몸통을 4,096 + 1바이트까지만 읽고 413(배포에선 nginx 가 먼저 자른다).
+  - 0 인 값은 HINCRBY 하지 않는다(필드를 만들지 않는다). seen 은 구간 누적이 1,000ms '이상'(≥)이 된 첫 순간 — §3.2 의 '넘은' 과 '1초 이상 보임'(051 방침 문구) 중 방침 쪽.
+  - 묶음의 2만 필드 검사는 보내기가 실패한 회차에만 한다(§3.5 문장 그대로). Redis 쓰기·읽기 실패는 예외 종류를 가리지 않고 잡는다 — 기능 폴더가 redis 를 import 하지 않게.
+  - 관리자 피드: `before_gate` 일 때도 §3.6 의 자르기를 그대로 적용해 `from` = 시행일·`to` = 오늘(from > to). (버림: from=to=오늘, null.) 60초 캐시는 `error` 결과도 담는다(§3.6 '같은 days 결과'). (버림: error 는 캐시하지 않기 — 장애 중 Redis 를 덜 두드리는 쪽.) 행 순서는 `PAGES` 순 × 기기(mobile → pc), 같은 ms 영역은 id 순. Redis 에 있는 목록 밖 화면·기기·꼴이 다른 필드는 버린다. lifespan 전(버스 없음)도 `error`/`redis`. `days` 는 글자가 정확히 `1`·`7`·`30`·`90` 일 때만(`7d`·`14` → 7).
+  - 화면 이름 상수 `PAGES` 는 `features/attention/models.py`, attention.js 는 같은 목록을 복사하고 테스트가 App.tsx 의 `TabId` 와 셋을 묶는다.
+  - attention.js: 첫 보냄은 영역이 비어도 `pv:1` 로 보낸다(§3.3 '`a` 가 비고 pv 가 0 이면 보내지 않는다' 그대로) — §4 의 '빈 구간 안 보냄' 은 pv 를 보낸 뒤 새 몫이 없는 보냄으로 읽었다. 철회를 보고 멈춘 문서는 다시 동의해도 새로고침 전까지 세지 않는다('멈춘다'). 다시 보인 문서는 입력이 와야 쌓는다(입력 목록에 '보이기' 가 없다). `kt:tab` 의 `detail` 이 `TabId` 밖이면 무시. 보임은 세로만 본다(IntersectionObserver `rootMargin` 0 — 화면에 닿은 요소가 '근처'). 영역 40개 상한은 문서에서 처음 찾은 서로 다른 id 40개 — 대시보드는 탭을 모두 마운트해 지금 22개. 클릭은 세는 id 일 때만. 4,096바이트를 줄이는 코드는 두지 않았다 — id 32자 × 40개 × 값 상한이라 최악 ≈2.2KB(테스트가 최악을 본다). 시계는 `Date.now()`.
+  - 랜딩은 clarity.js 와 같이 상대 주소 `attention.js`(dev 서버 `/app/landing.html` 에서도 같은 파일 — 022 규칙), 처리방침·검색어 페이지와 대시보드 원본은 `/attention.js`.
+  - `TableFrame`(shared/ui)에 선택 속성 `area` 하나를 더해 표 상자 자체에 `data-area` 를 단다 — 배치·동작 변화 없음. (버림: 감싸는 div — 배치가 바뀐다, 탭마다 TableFrame 복사.)
+  - 영역 고르기: 대시보드 셸 푸터·입출금 레이더 전용 푸터·처리방침 링크·시계는 영역에 넣지 않았다(§3.1 의 공통 셋만). 기록 탭의 차트 툴바는 두 번째 필터 줄이라 `filters-2`. 검색어 페이지는 절에 `id` 를 새로 붙이지 않고 h2 id 에서 `-title` 을 뗀 이름을 `data-area` 로만 단다. 검색어 페이지의 `dateModified`·sitemap `lastmod` 는 그대로(글은 안 바뀌었다).
+  - 함께 고친 스펙 절: 028 §3.1(허용 표에 050 의 flow 두 줄도 — 문서가 코드보다 뒤져 있었다, 개수 '아홉', 누가 쓰나, `/api/attention` POST 만 문장)·§4(아홉, 호출 경로 대조 범위 `public/*.js`·`sendBeacon(`). 027 §3.2 기록하지 않는 요청(050 의 flow 둘도 함께 — 같은 이유)·'허용 목록에서 WS 를 뺀 것' 문장. 029 §3.1 표·문장·§3.2 기록하지 않는 목록. 032 §3.1 CSP·'스크립트는 파일 안' 의 `/attention.js` 예외·절마다 `data-area`. 다른 기능의 테스트 둘(017·027 의 `test_gauge.py` api 태스크 목록, 016 의 `test_role.py`)은 api lifespan 에 태스크가 하나 늘어 기대값만 고쳤다. architecture.md 의 observability '폴링 다섯 경로' 문장도 같은 이유로 고쳤다.
+  - 044 스펙 문서(CSP·스크립트)와 002·022·017·048·049·050 문서는 고치지 않았다 — 담당자 제안(§6).
 - 남은 빚:
+  - 브라우저·Docker 확인 전부(§4 마지막 줄 — 설계 세션), `nginx -t`·`caddy validate` 미실행(PR 본문에 적을 것).
+  - 시행일(2026-10-18) 전에는 받은 비콘을 모두 버린다 — 로컬에서 Redis 필드가 느는 것을 보려면 커밋하지 않는 시험 사본에서 `PRIVACY_V3_EFFECTIVE` 를 오늘 이전으로 바꿔 api 를 띄운다.
+  - 대시보드(JSX) 영역의 품음·겹침은 계약 테스트가 파일 단위 목록·꼴·개수만 본다 — 실제 DOM 의 품음은 브라우저 확인.
+  - 처리방침·검색어 페이지에서 동의를 바꾸면 그 문서의 attention.js 는 새로고침 전까지 모른다(방침 동의 관리가 `kt:clarity` 를 내지 않는다) — 철회는 보내기 직전 판정이라 곧바로 멈춘다.
+  - 비콘은 숨길 때·pagehide·탭 바뀜에만 간다 — 브라우저가 그 전에 죽으면 그 구간은 빈다(하한).
+  - 담당자 제안(PR 본문): 002·017·048·049·050(대시보드 탭)·022(랜딩)·044(검색어 페이지 — 스크립트 예외·CSP 도) — "`data-area` 속성을 붙였다(동작 변화 없음). 덩어리를 바꾸면 영역 id 도 함께, 053 이름표도."

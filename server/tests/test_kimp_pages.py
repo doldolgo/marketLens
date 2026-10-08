@@ -8,17 +8,12 @@ import re
 
 from tests.test_deploy import _args, _locations, _public_server, _route
 from tests.test_landing_seo import PUBLIC, SITE, _page
-from tests.test_privacy import _assert_no_external_resources, _read
+from tests.test_privacy import CSP, _assert_no_external_resources, _read
 
 MODIFIED = "2026-10-08"
-CSP_STATIC = (
-    "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
-    "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-)
-CSP_LIVE = (
-    "default-src 'none'; connect-src 'self'; img-src 'self'; style-src 'unsafe-inline'; "
-    "script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-)
+# 052 — 두 페이지 모두 privacy 와 같은 문자열(같은 출처 /attention.js 하나와 그 비콘). kimp-history 의 /api/landing 도
+# 같은 connect-src 'self' 로 부른다
+CSP_STATIC = CSP_LIVE = CSP
 PAGES = {
     "kimp-chart": {
         "title": "김프 차트 - 실시간·과거 김치프리미엄 봉 차트 | KimpTrack",

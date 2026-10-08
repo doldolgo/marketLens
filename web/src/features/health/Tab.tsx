@@ -72,7 +72,7 @@ function Timeline({ data, now }: { data: HealthData; now: number }) {
   const winStart = now - DAY_MS
   const pct = (t: number) => `${(Math.min(Math.max(t, winStart), now) - winStart) / DAY_MS * 100}%`
   return (
-    <div style={cardStyle}>
+    <div data-area="chart" style={cardStyle}>
       <div style={{ ...kicker, marginBottom: 10 }}>실패 구간 · 최근 24시간</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {data.exchanges.map((ex) => (
@@ -162,7 +162,7 @@ const logRowStyle = {
 function Log({ data }: { data: HealthData }) {
   const rows = data.outages.slice(0, LOG_MAX) // 이미 startedAt 내림차순
   return (
-    <div style={cardStyle}>
+    <div data-area="list" style={cardStyle}>
       <div style={{ ...kicker, marginBottom: 10 }}>최근 실패 구간</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {rows.length === 0 && <div style={{ fontSize: 12, color: 'var(--color-neutral-500)', padding: '3px 6px' }}>최근 24시간 실패 없음</div>}
@@ -212,8 +212,8 @@ export default function HealthTab({ feed, now }: { feed: Feed; now: number }) {
   return (
     <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 1200, margin: '0 auto' }}>
-        {/* 1. 요약 */}
-        <div style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap' }}>
+        {/* 1. 요약 — data-area 는 052 화면 영역 이용 통계의 영역 */}
+        <div data-area="summary" style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ width: 12, height: 12, borderRadius: '50%', background: circle, flex: 'none' }} />
             <span style={{ fontSize: 15, fontWeight: 600 }}>{phrase}</span>
@@ -235,7 +235,7 @@ export default function HealthTab({ feed, now }: { feed: Feed; now: number }) {
         </div>
 
         {/* 2. 거래소·perp 원천 카드 — exchanges 길이만큼, 3열 격자에 줄이 늘어난다 (046 §3.8) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        <div data-area="cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
           {data.exchanges.map((ex) => (
             <ExCard key={ex.exchange} ex={ex} now={now} />
           ))}

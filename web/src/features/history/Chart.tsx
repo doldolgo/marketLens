@@ -192,7 +192,8 @@ export function ChartToolbar(p: ToolbarProps) {
     color: p.interval === i ? 'var(--color-accent-300)' : 'var(--color-neutral-500)',
   }))
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-8)', flexWrap: 'wrap' }}>
+    // data-area — 052 화면 영역 이용 통계의 영역(기록 탭의 두 번째 필터 줄)
+    <div data-area="filters-2" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-8)', flexWrap: 'wrap' }}>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-4)' }}>
         <span style={{ fontFamily: 'var(--font-heading)', fontSize: 18, fontWeight: 500 }}>{p.sym}</span>
         <span style={{ fontSize: 12, color: dirColor(p.dir) }}>{DIR_LABEL[p.dir]} {INTERVAL_LABEL[p.interval]}봉</span>
