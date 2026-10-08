@@ -116,7 +116,7 @@
     lastAt = t
   }
 
-  // 보임(§3.2) — 보이는 높이 ≥ min(영역 높이 × 0.5, 화면 높이 × 0.5) 이고 ≥ 40px
+  // 보임(§3.2) — 보이는 높이 ≥ min(영역 높이 × 0.5, 화면 높이 × 0.5) 이고 ≥ min(40px, 영역 높이)
   const measure = () => {
     frame = 0
     if (!seg) return
@@ -130,7 +130,7 @@
       }
       const r = el.getBoundingClientRect()
       const shown = Math.min(r.bottom, h) - Math.max(r.top, 0)
-      if (shown >= MIN_PX && shown >= Math.min(r.height * 0.5, h * 0.5)) next.add(watched.get(el))
+      if (r.height > 0 && shown >= Math.min(MIN_PX, r.height) && shown >= Math.min(r.height * 0.5, h * 0.5)) next.add(watched.get(el))
     }
     visible = next
   }

@@ -208,18 +208,19 @@ def test_without_consent_only_two_listeners_and_kt_clarity_turns_it_on() -> None
 
 
 def test_visibility_rule_half_of_the_area_or_half_of_the_screen_and_40px() -> None:
-    # 화면 높이 800 — 작은 영역은 자기 높이의 절반, 큰 영역은 화면 절반(400), 그리고 40px 이상
+    # 화면 높이 800 — 작은 영역은 자기 높이의 절반, 큰 영역은 화면 절반(400), 그리고 min(40px, 영역 높이) 이상
     areas = [
         ["half", 750, 100],  # 50px 보임 = 100 의 절반 → 보임
         ["under", 751, 100],  # 49px → 안 보임
         ["tall", 400, 3000],  # 400px 보임 = 화면 절반 → 보임
         ["tall-short", 401, 3000],  # 399px → 안 보임
-        ["tiny", 0, 30],  # 다 보여도 30px → 안 보임
+        ["tiny", 0, 30],  # 30px 영역이 다 보임 → 보임(40px 보다 낮은 영역은 통째로)
+        ["tiny-cut", 785, 30],  # 30px 영역 가운데 15px → 안 보임
         ["forty", 100, 40],  # 40px → 보임
         ["low", 761, 60],  # 39px(절반 30 은 넘지만 40 미만) → 안 보임
     ]
     got = _one(ls=ON, areas=areas, steps=["t:1500", "hide"])
-    assert set(_bodies(got)[0]["a"]) == {"half", "tall", "forty"}
+    assert set(_bodies(got)[0]["a"]) == {"half", "tall", "tiny", "forty"}
     # 스크롤로 3,000px 영역이 화면을 다 채워도 보임, 화면 밖으로 나가면 안 보임
     got = _one(
         ls=ON,

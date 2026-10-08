@@ -29,7 +29,7 @@
 - 싣는 곳: 랜딩·대시보드는 clarity.js 바로 다음 `<script defer src="/attention.js">`(대시보드는 vite base 로 `/app/attention.js` 가 된다 — clarity.js 와 같다), 처리방침·검색어 페이지 둘은 `<head>` 에 같은 줄 하나(이 셋은 clarity.js 를 싣지 않는다 — 그대로). 공개 nginx: `location = /attention.js` 를 clarity.js 의 location 과 같은 꼴(no-cache)로, `/app/attention.js` 는 기존 `location /app/` 그대로.
 - 정적 페이지 CSP(032·044): 세 페이지 CSP 의 `script-src` 에 `'self'`, `connect-src 'self'`(없으면 더함 — 비콘은 connect-src 를 따른다). 053 이 같은 문자열의 `frame-ancestors` 를 바꾼다.
 - **구간(한 번 본 화면)**: 페이지를 연 때(또는 동의가 켜진 때) 시작, 대시보드 탭이 바뀌면 끝내고 새 탭 이름으로 새 구간. App.tsx 는 사용자가 탭을 바꾼 뒤(첫 그리기에는 내지 않는다) `window` 에 `kt:tab` 이벤트(`detail` = 탭 id)를 낸다. 이 스크립트는 그 이벤트만 듣고, 지금과 같은 id 면 무시한다(history 를 덮어쓰지 않는다).
-- **보임**: 영역마다 IntersectionObserver(문턱 0)로 화면 근처에 들어온 영역만 고르고, 그 영역들은 스크롤·크기 바뀜·DOM 바뀜 때(애니메이션 프레임당 한 번) `getBoundingClientRect` 로 다시 잰다. 보이는 높이 ≥ min(영역 높이 × 0.5, 화면 높이 × 0.5) 이고 ≥ 40px 이면 '보임'(긴 표·긴 절도 화면 절반을 채우면 보임). 늦게 생기는 영역(대시보드 lazy 탭)은 MutationObserver 로 잡는다(1초에 한 번까지).
+- **보임**: 영역마다 IntersectionObserver(문턱 0)로 화면 근처에 들어온 영역만 고르고, 그 영역들은 스크롤·크기 바뀜·DOM 바뀜 때(애니메이션 프레임당 한 번) `getBoundingClientRect` 로 다시 잰다. 보이는 높이 ≥ min(영역 높이 × 0.5, 화면 높이 × 0.5) 이고 ≥ min(40px, 영역 높이) 이면 '보임'(긴 표·긴 절도 화면 절반을 채우면 보임, 40px 보다 낮은 영역 — 대시보드 `header` 등 — 은 통째로 보이면 보임). 늦게 생기는 영역(대시보드 lazy 탭)은 MutationObserver 로 잡는다(1초에 한 번까지).
 - **보인 시간**: 보임이면서 문서가 보이는 동안(`visibilityState` visible)이면서 마지막 입력(페이지 연 때·포인터 움직임·누름·휠·스크롤·키·터치) 뒤 5분 안일 때만 쌓는다.
 - **클릭**: 문서 `click`(캡처)에서 대상의 가장 가까운 `[data-area]` 하나에 1. 영역 밖 클릭은 버린다.
 - 상한은 **구간 전체**(여러 번 보내도 합)에서 영역당 시간 600,000ms·클릭 50. '1초 이상 보임'(seen)은 구간에서 영역의 누적 시간이 1,000ms 를 넘은 첫 순간 1(구간당 한 번).
