@@ -114,6 +114,9 @@ async def test_trigger_reports_calls_saved_failures_and_warnings() -> None:
         "bybit": 0,
         "bitget": 0,
         "okx": 0,
+        "binance_perp": 0,
+        "bybit_perp": 0,
+        "bitget_perp": 0,
     }
     assert result.rates_observed == ["upbit"]
     assert result.failures == [

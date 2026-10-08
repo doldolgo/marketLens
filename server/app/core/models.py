@@ -111,3 +111,29 @@ class Tick:
     ts: int  # epoch 초
     rows: tuple[TickRow, ...]
     dw_failed: tuple[str, ...]  # 그 초에 입출금 조회가 실패 상태인 거래소 id
+
+
+@dataclass
+class PerpRow:
+    """perp 행 = (source, base) 당 1개 — 스펙 046 §3.1. 메시지마다 제자리에서 필드만 바뀐다(새 객체 없음, §3.4).
+
+    가격은 원본 ÷ multiplier, 잔량은 원본 × multiplier — 1코인 단위라 현물 행과 바로 비교된다.
+    첫 유효 호가(넷 다 > 0·유한)에서 만들어지고, 그 전에 온 펀딩은 PerpSink 가 보류한다.
+    """
+
+    source: str  # binance_perp·bybit_perp·bitget_perp(·hyperliquid_perp)
+    base: str  # 배수 접두·접미를 뗀 코인 이름 (1000PEPE → PEPE)
+    native_symbol: str  # 거래소 원본 심볼 (1000PEPEUSDT)
+    multiplier: int  # 1·1000·10000·1000000
+    bid: float
+    ask: float
+    bid_size: float
+    ask_size: float
+    quote_ts: int  # 호가의 거래소 시각 epoch ms
+    mark: float | None = None  # 마크가 ÷ multiplier
+    funding_rate: float | None = None  # 한 주기의 비율(소수 — 0.0001 이 0.01%)
+    next_funding_ms: int | None = None  # 다음 정산 epoch ms
+    funding_interval_h: int | None = None  # 정산 주기(정수 시간 1·2·4·8)
+    updated_at: datetime | None = (
+        None  # 어느 메시지든 마지막으로 반영된 시각, tz-aware UTC
+    )

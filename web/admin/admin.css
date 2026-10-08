@@ -195,7 +195,6 @@ section:first-child { padding-top: 8px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
 .grid3 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); align-items: start; }
 .grid-wide { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
-.traffic-top { grid-template-columns: minmax(280px, 1fr) minmax(0, 1.7fr); align-items: start; }
 .stack { display: flex; flex-direction: column; gap: 14px; }
 .span-all { grid-column: 1 / -1; }
 .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
@@ -369,11 +368,100 @@ details > summary:hover { color: var(--color-accent-300); }
 .cols5 b { display: block; font-size: 13px; font-weight: 600; color: var(--color-text); }
 /* 비율 막대는 % 왼쪽 칸에 한 줄로 — 행 높이를 줄인다 */
 .share-bar { width: 28%; min-width: 48px; vertical-align: middle; }
-.top-table td:first-child { max-width: 240px; }
 .clarity-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .metric-list { display: flex; flex-direction: column; gap: 14px; margin-top: 8px; }
 .metric-list h4 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
 .metric-list ol { margin: 0; padding-left: 20px; font-size: 12px; color: var(--color-neutral-300); }
+
+/* ══ 접속 서버 기록 v3 (042) — 창 줄과 질문 여섯 덩어리. 색은 뜻에만: 확인(하한) accent-400·브라우저 모양(상한)
+   neutral-700·다시 온 accent-600·봇 종류 neutral-600, 상태색은 상태(5xx ✕·주의 ▲)에만. 열지도 강도 h1~h5 는
+   accent 700→200(밝을수록 많다 — 043 의 랜딩 도달 단계도 같은 클래스), h0 과 시행 전 덩어리는 막대 바탕색 ══ */
+.window-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.chip:disabled { color: var(--color-neutral-600); cursor: not-allowed; }
+.chip:disabled:hover { color: var(--color-neutral-600); }
+.q-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.q-head h3 { font-size: 16px; }
+.q-head .meta { margin-left: auto; }
+.answer { font-size: 15px; line-height: 1.6; color: var(--color-neutral-200); }
+.answer b { color: var(--color-text); font-weight: 650; }
+/* 값과 바로 뒤 글자('41%다.'·'10-05 00:00')는 줄을 나누지 않는다 — 20자 넘는 값(경로)은 span 밖이라 나뉜다 */
+.answer .nb { white-space: nowrap; }
+.q-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.q-body > *, .cols2 > *, .cols3 > *, .col > * { min-width: 0; }
+.cols2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 28px; align-items: start; }
+.cols3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 28px; align-items: start; }
+.col { display: flex; flex-direction: column; gap: 6px; container-type: inline-size; }
+.col-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; font-size: 12px; color: var(--color-neutral-400); }
+.col-head b { color: var(--color-neutral-200); font-weight: 600; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 24px; align-items: start; }
+/* 범위 숫자는 '~' 뒤에서만 줄을 바꾼다(앞은 줄 안 바꿈 공백) — 칸보다 길어도 옆 타일을 덮지 않게 */
+.range-num { font-size: 30px; font-weight: 650; line-height: 1.1; letter-spacing: -0.02em; }
+.range-num b { color: var(--color-accent-300); font-weight: 650; }
+.ends { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; font-size: 12px; color: var(--color-neutral-400); }
+.ends b { color: var(--color-text); }
+.keys { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 12px; color: var(--color-neutral-400); }
+.key { display: inline-flex; align-items: center; gap: 6px; }
+.key::before { content: ''; width: 10px; height: 10px; border-radius: 2px; background: var(--color-accent-400); }
+.key.shaped::before { background: var(--color-neutral-700); }
+.key.returning::before { background: var(--color-accent-600); }
+.key.pre::before { background: var(--color-neutral-900); box-shadow: inset 0 0 0 1px var(--color-neutral-700); }
+.key.err::before { background: var(--tone-bad); }
+/* 걸러 내기 줄 — 칸 다섯(HTML), 둘째부터 앞 칸 대비 % */
+.funnel { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.step { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--color-text) 4%, transparent); }
+.step-label { font-size: 12px; color: var(--color-neutral-400); }
+.step-val { font-size: 18px; font-weight: 600; }
+.step-sub { font-size: 11px; color: var(--color-neutral-500); }
+/* 막대 행 — 넓으면 이름|막대|값 한 줄, 480px 이하는 '이름 … 값' 아래 막대(DOM 같음). 이름은 자르지 않는다 */
+/* 값 칸은 바닥 폭 7.5em — 목록 안 막대의 길이(눈금)가 값 글자 길이에 따라 행마다 달라지지 않게 */
+.brow { display: grid; grid-template-columns: minmax(6em, 11em) minmax(0, 1fr) minmax(7.5em, auto); grid-template-areas: 'name bar val'; gap: 2px 10px; align-items: center; font-size: 13px; }
+.brow-name { grid-area: name; min-width: 0; }
+.brow-val { grid-area: val; text-align: right; white-space: nowrap; color: var(--color-neutral-300); }
+.brow-val b { color: var(--color-text); font-weight: 600; }
+.brow > .chart { grid-area: bar; }
+.brow.zero { color: var(--color-neutral-500); }
+.brow.zero .brow-val { color: var(--color-neutral-500); }
+.iso { margin-left: 5px; font-family: var(--font-mono); font-size: 10px; color: var(--color-neutral-500); }
+.more > summary { min-height: 32px; font-size: 12px; }
+.clue { display: grid; grid-template-columns: 4.5em minmax(0, 1fr); gap: 0 12px; align-items: baseline; }
+.clue-val { font-size: 18px; font-weight: 600; text-align: right; }
+.clue-sub { grid-column: 2; font-size: 12px; color: var(--color-neutral-500); }
+.geo-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 12px; color: var(--color-neutral-400); }
+/* geo 배지는 길다(판·올린 때·센 때·IPv6) — 좁은 폭에서 줄을 바꿔 카드 밖으로 나가지 않게 */
+.geo-foot .tag { flex-wrap: wrap; white-space: normal; }
+/* 그림 — 겹친 두 막대·하한–상한 띠·시간 막대·날 막대·열지도 */
+.chart.pair { height: 10px; }
+.chart.lohi { height: 12px; }
+.chart.days { height: 72px; }
+.chart.strip { height: 18px; }
+.chart.heatmap { height: 126px; }
+.chart.hoursum { height: 24px; }
+.chart .confirmed { fill: var(--color-accent-400); }
+.chart .shaped { fill: var(--color-neutral-700); }
+.chart .returning { fill: var(--color-accent-600); }
+.chart .bot { fill: var(--color-neutral-600); }
+/* 시행 전 덩어리 — 바탕(neutral-900)이 카드와 대비가 낮아 범례 견본처럼 neutral-700 테두리를 두른다 */
+.chart .pre { fill: var(--color-neutral-900); stroke: var(--color-neutral-700); stroke-width: 1; vector-effect: non-scaling-stroke; }
+/* ⑥ 응답 표·지속 막대(036 ratio·columns 의 fill) — 뜻 없는 수량이라 회색, 장애색은 5xx 행에만 */
+.q .chart .fill { fill: var(--color-neutral-600); }
+.q .chart .fill.t-bad { fill: var(--tone-bad); }
+.chart .h0, .sw.h0 { fill: var(--color-neutral-900); background: var(--color-neutral-900); }
+.chart .h1, .sw.h1 { fill: var(--color-accent-700); background: var(--color-accent-700); }
+.chart .h2, .sw.h2 { fill: var(--color-accent-600); background: var(--color-accent-600); }
+.chart .h3, .sw.h3 { fill: var(--color-accent-500); background: var(--color-accent-500); }
+.chart .h4, .sw.h4 { fill: var(--color-accent-400); background: var(--color-accent-400); }
+.chart .h5, .sw.h5 { fill: var(--color-accent-200); background: var(--color-accent-200); }
+.sw { display: inline-block; width: 14px; height: 10px; border-radius: 2px; }
+.scale { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--color-neutral-500); }
+/* 시 눈금 — 24칸 격자에 정시 글자만, 마지막 칸('지금'·'24시')은 오른쪽 끝 */
+.hours { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); font-size: 11px; color: var(--color-neutral-500); margin-top: 2px; }
+.hours > span { white-space: nowrap; }
+.hours > span:last-child { justify-self: end; }
+.heat { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: start; }
+.heat-rows { display: flex; flex-direction: column; font-size: 11px; color: var(--color-neutral-400); }
+.heat-rows > span { height: 18px; line-height: 18px; white-space: nowrap; }
+.heat-rows.sums { text-align: right; }
+.pre-label { font-size: 12px; color: var(--color-neutral-400); }
 
 /* ══ 비용 ══ */
 /* 이름 칸에 바닥 폭 — 숫자 칸이 max-content 를 다 가져가 이름이 한 글자씩 쌓이지 않게 */
@@ -426,10 +514,13 @@ details > summary:hover { color: var(--color-accent-300); }
 
 /* ══ 좁은 폭 — 한 줄 배치·좌우 16px·절 이동은 옆으로 미는 한 줄·표는 카드 안에서 가로 스크롤 (§3.7) ══ */
 @media (max-width: 960px) {
-  .traffic-top { grid-template-columns: minmax(0, 1fr); }
   .vitals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .vital:nth-child(3n) { box-shadow: none; }
   .vital:nth-child(-n+3) { border-bottom: 1px solid var(--color-divider); }
+  /* ③·⑤ 3열은 열마다 ≈200px 라 막대 칸이 0 에 가깝다 — 960px 이하에서 1열(② 2열은 640px 이하),
+     ① 범위 숫자 타일은 4열 칸(≈130~200px)에 들지 않아 한 줄을 다 쓴다 */
+  .cols3 { grid-template-columns: minmax(0, 1fr); }
+  .tiles > :has(> .range-num) { grid-column: 1 / -1; }
 }
 @media (max-width: 640px) {
   :root { --gutter: 16px; }
@@ -461,6 +552,17 @@ details > summary:hover { color: var(--color-accent-300); }
   .refresh { grid-template-columns: minmax(0, 1fr); }
   .big { font-size: 36px; }
   .fold { padding: 4px var(--space-4); }
+  .tiles, .funnel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cols2 { grid-template-columns: minmax(0, 1fr); }
+  .range-num { font-size: 26px; }
+}
+@media (max-width: 480px) {
+  .brow { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'name val' 'bar bar'; }
+}
+/* 넓은 화면이라도 행이 든 열이 340px 이하면(1024px 의 3열·768px 의 2열) 이름·값 + 11em·7.5em 이 막대 칸을 다 먹는다 —
+   480px 이하와 같은 두 줄로 */
+@container (max-width: 340px) {
+  .brow { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'name val' 'bar bar'; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 .band-checks > .t-ok { color: var(--color-neutral-300); }

@@ -234,7 +234,7 @@ export default function HealthTab({ feed, now }: { feed: Feed; now: number }) {
           </span>
         </div>
 
-        {/* 2. 거래소 카드 3장 (3열) */}
+        {/* 2. 거래소·perp 원천 카드 — exchanges 길이만큼, 3열 격자에 줄이 늘어난다 (046 §3.8) */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
           {data.exchanges.map((ex) => (
             <ExCard key={ex.exchange} ex={ex} now={now} />
