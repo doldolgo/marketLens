@@ -122,3 +122,25 @@ def test_bitget_is_in_the_registry() -> None:
     assert res.status_code == 200
     body = res.json()
     assert (body["exchange"], body["asks"][0]["price"]) == ("bitget", 67_000.0)
+
+
+def test_okx_is_in_the_registry_and_gives_at_most_five_levels() -> None:
+    # 045 — OKX 행도 /orderbook/{exchange} 로 본다 (표시명 OKX). books5 라 depth=20 을 줘도 5단계뿐
+    store = LiveStore()
+    store.put_row(
+        make_row(
+            "okx",
+            "BTC",
+            quote="USDT",
+            asks=[[67_000.0 + i, 1.0] for i in range(5)],
+            bids=[[66_900.0 - i, 1.0] for i in range(5)],
+        ),
+        datetime.now(tz=UTC),
+    )
+    res = make_client(store).get(
+        "/orderbook/okx", params={"symbol": "BTC/USDT", "depth": 20}
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert (body["exchange"], body["asks"][0]["price"]) == ("okx", 67_000.0)
+    assert len(body["asks"]) == 5 and len(body["bids"]) == 5

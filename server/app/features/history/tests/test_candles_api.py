@@ -177,7 +177,7 @@ def test_bad_params_422() -> None:
     client = make_client(FakeInfluxReader())
     assert (
         get(client, base="BTC", fx="mexc").status_code == 422
-    )  # fx 는 binance·bybit·bitget 뿐 (020)
+    )  # fx 는 binance·bybit·bitget·okx 뿐 (045)
     assert get(client, base="BTC", res="3m").status_code == 422
     assert get(client, base="BTC", dir="up").status_code == 422
     assert get(client, base="BTC", dom="binance").status_code == 422
@@ -203,3 +203,8 @@ def test_fx_accepts_bybit() -> None:
 def test_fx_accepts_bitget() -> None:
     res = get(make_client(FakeInfluxReader()), base="BTC", fx="bitget")
     assert res.status_code == 200 and res.json()["fx"] == "bitget"  # 020
+
+
+def test_fx_accepts_okx() -> None:
+    res = get(make_client(FakeInfluxReader()), base="BTC", fx="okx")
+    assert res.status_code == 200 and res.json()["fx"] == "okx"  # 045
