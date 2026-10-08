@@ -139,7 +139,7 @@ def test_one_h1_and_section_headings() -> None:
     page = _landing()
     assert page.headings["h1"] == [H1]
     assert page.headings["h2"] == [
-        "표시된 김프와 실제로 먹을 수 있는 김프는 다릅니다",
+        "김프 히스토리로 분석하세요",
         "지난 7일 김프·역프 사건",
         "김프(김치프리미엄)와 역프란",
         "KimpTrack이 김프를 계산하는 방법",
@@ -233,7 +233,7 @@ def test_png_images_have_the_declared_size() -> None:
 def test_live_regions_are_kept_out_of_snippets() -> None:
     """매초 바뀌는 값이 검색 결과·AI 답변에 '지금 값'처럼 남지 않게 — data-nosnippet 은 HTML 에 처음부터 있다."""
     html = (PUBLIC / "landing.html").read_text("utf-8")
-    for el_id in ("why-depth", "why-rate", "why-open", "events-sum", "events-table"):
+    for el_id in ("events-sum", "events-table"):
         tag = re.search(rf'<(\w+) id="{el_id}"[^>]*>', html)
         assert tag and "data-nosnippet" in tag.group(0), el_id
         assert tag.group(1) in ("span", "div", "section"), (
