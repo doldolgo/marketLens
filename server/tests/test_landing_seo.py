@@ -194,7 +194,12 @@ def test_modified_date_is_the_same_everywhere() -> None:
     sitemap = (PUBLIC / "sitemap.xml").read_text("utf-8")
     # 두 줄 — 랜딩과 처리방침(032, lastmod 는 방침 시행일 — test_privacy.py). /app/ 은 넣지 않는다
     urls = dict(re.findall(r"<loc>([^<]+)</loc><lastmod>([^<]+)</lastmod>", sitemap))
-    assert list(urls) == [SITE, SITE + "privacy"]
+    assert list(urls) == [
+        SITE,
+        SITE + "kimp-chart",
+        SITE + "kimp-history",
+        SITE + "privacy",
+    ]  # 044 검색어 페이지 둘은 랜딩과 처리방침 사이
     assert sitemap.count("<url>") == len(urls)
     assert urls[SITE] == MODIFIED
 
