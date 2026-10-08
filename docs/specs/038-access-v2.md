@@ -49,7 +49,7 @@
 - **페이지 줄** = GET·상태 200 또는 304·쿼리 뗀 경로의 마지막 조각에 점이 없음(`/`·`/app/`·`/privacy` — 자산·`.php`·301 제외). 035 와 달리 304 를 넣는다 — `/` 는 no-cache 라 다시 온 브라우저가 304 를 받는다.
 - **JS 신호 줄** = GET `/clarity.js`·`/app/clarity.js` 의 200·304(033 뒤 no-cache·no-store 라 JS 가 돈 페이지 보기마다 한 줄 — 동의와 무관하게 받는 로더다) 또는 `/api/ws/spreads` 의 101. `/landing/*`·`/assets/*` 같은 하위 자원은 캐시 때문에 신호로 쓰지 않는다.
 - **탐색 줄** = 쿼리 뗀 경로(소문자)에 `wp-`·`wordpress`·`xmlrpc`·`.php`·`.env`·`.git`·`.aws`·`.ssh`·`cgi-bin`·`phpmyadmin`·`actuator`·`/admin`·`/login`·`/config`·`/vendor/`·`/boaform`·`/hnap1`·`/owa/`·`/autodiscover`·`/server-status`·`/solr`·`/console`·`.ini`·`.sql`·`.bak`·`/backup`·`/shell`·`/setup`·`/install`·`/debug`·`.ds_store` 중 하나가 든 줄. 우리 경로(`/`·`/app/`·`/privacy`·`/clarity.js`·`/app/clarity.js`·`/assets/`·`/landing/`·`/api/ws/spreads`·`/api/history/*`·`/robots.txt`·`/sitemap.xml`·`/favicon.ico`·`/fonts/`)와 `web/public` 아래 파일은 어느 낱말에도 걸리지 않는다.
-- **운영자 흔적** = `referer` 의 호스트가 `localhost`·`*.localhost`·`*.test`·`127.0.0.0/8`·`[::1]`·사설 IPv4(`10/8`·`172.16/12`·`192.168/16`)·그 밖의 IP 글자 그대로(탄력 IP 를 직접 연 출처)·`clarity.microsoft.com`(Clarity 대시보드가 녹화를 그리며 우리 자산을 부른다) 중 하나. 운영자 IP 는 설정·코드에 적지 않는다.
+- **운영자 흔적** = `referer` 의 호스트가 `localhost`·`*.localhost`·`*.test`·`127.0.0.0/8`·`[::1]`·사설 IPv4(`10/8`·`172.16/12`·`192.168/16`)·그 밖의 IP 글자 그대로(탄력 IP 를 직접 연 출처)·`clarity.microsoft.com`(Clarity 대시보드가 녹화를 그리며 우리 자산을 부른다)·`admin.kimptrack.com`(관리자 덮어 보기 — 053, 틀이 `strict-origin` 이라 문서 요청의 출처가 이 호스트) 중 하나. 운영자 IP 는 설정·코드에 적지 않는다.
 - **종류** — 줄마다 하나, 위에서 먼저 맞은 것(UA 는 앞 1,024자로 판정 — 대소문자 무관 부분 일치. 줄마다 다른 긴 UA 의 판정 비용을 묶는다):
   1. `operator` — 운영자 흔적 줄(UA 와 무관).
   2. `unknown` — UA 가 없거나 빈 값.

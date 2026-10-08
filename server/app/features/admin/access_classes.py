@@ -152,10 +152,13 @@ def referrer(referer: str) -> tuple[str, str] | None:
 
 
 def is_operator(host: str) -> bool:
-    """운영자 흔적 출처 — 로컬·`.test`·IP 글자 그대로(루프백·사설·탄력 IP 를 직접 연 출처)·Clarity 대시보드."""
-    if host in ("localhost", "clarity.microsoft.com") or host.endswith(
-        (".localhost", ".test")
-    ):
+    """운영자 흔적 출처 — 로컬·`.test`·IP 글자 그대로(루프백·사설·탄력 IP 를 직접 연 출처)·Clarity 대시보드·관리자 화면
+    (053 덮어 보기가 공개 페이지를 틀로 띄운다 — 틀은 `strict-origin` 이라 문서 요청의 출처가 admin.kimptrack.com)."""
+    if host in (
+        "localhost",
+        "clarity.microsoft.com",
+        "admin.kimptrack.com",
+    ) or host.endswith((".localhost", ".test")):
         return True
     if not (host[0].isdigit() or ":" in host):
         return False  # IP 글자일 수 없다 — 대부분의 출처는 여기서 끝난다

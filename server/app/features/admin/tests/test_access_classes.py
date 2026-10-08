@@ -199,6 +199,7 @@ OPERATOR = [
     "http://192.168.0.1",
     "http://203.0.113.7",
     "https://clarity.microsoft.com",
+    "https://admin.kimptrack.com",  # 053 — 관리자 덮어 보기 틀(strict-origin)
 ]
 
 
@@ -210,7 +211,7 @@ def test_operator_referrers_whatever_the_user_agent(tmp_path: Path) -> None:
     ]
     write(tmp_path, "access.log", lines)
     body = summary(tmp_path, AFTER)
-    assert body["classes"]["operator"] == {"requests": 10, "pages": 10}
+    assert body["classes"]["operator"] == {"requests": 11, "pages": 11}
     assert body["classes"]["browser"] == {"requests": 2, "pages": 2}
     # CHROME 짝은 운영자 흔적이 있어 그날 빠지고, 남은 iPhone 짝의 채널은 referral
     assert body["visitors"]["shaped"] == 1 and body["visitors"]["channels"] == [
@@ -220,6 +221,26 @@ def test_operator_referrers_whatever_the_user_agent(tmp_path: Path) -> None:
         ["https://example.com", 1],
         ["https://localhost.example.com", 1],
     ]
+
+
+def test_admin_overlay_frame_is_an_operator_trace_and_drops_that_pair(
+    tmp_path: Path,
+) -> None:
+    """053 §3.4 — 관리자 덮어 보기 틀이 연 문서(출처 admin.kimptrack.com, strict-origin)는 operator 이고, 같은 짝의
+    그 뒤 요청(출처 kimptrack.com — 페이지가 부르는 스크립트)이 있어도 그 짝은 그날 방문에서 빠진다. 다른 IP 의 짝은 남는다."""
+    write(
+        tmp_path,
+        "access.log",
+        [
+            line(AFTER - 300, "/app/", referer="https://admin.kimptrack.com"),
+            line(AFTER - 299, "/app/clarity.js", referer="https://kimptrack.com"),
+            line(AFTER - 200, "/", ip="198.51.100.9"),
+        ],
+    )
+    body = summary(tmp_path, AFTER)
+    assert body["classes"]["operator"] == {"requests": 1, "pages": 1}
+    assert body["classes"]["browser"] == {"requests": 2, "pages": 1}
+    assert (body["visitors"]["shaped"], body["visitors"]["confirmed"]) == (1, 0)
 
 
 def test_pages_include_304_and_js_views_are_browser_clarity_loads(
