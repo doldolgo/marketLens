@@ -244,3 +244,86 @@ def test_messages_from_another_origin_or_window_are_ignored() -> None:
     )
     assert got["layer"] is None and got["scrolled"] == []
 
+
+def test_boxes_cover_each_sized_area_with_level_font_sizes() -> None:
+    """§3.4 — 값이 오면 맨 위 고정·누름 통과 층에 크기 있는 영역마다 상자 하나(그 자리), 꼬리표 글씨는 단계 0~5 에
+    12·12·14·16·19·22px, 꼬리표 글은 '#순위 · 평균 n초 · 도달 n% · 클릭 n'. 값이 없는 영역은 '기록 없음'·점선."""
+    levels = [0, 1, 2, 3, 4, 5]
+    areas = [[f"a{n}", 0, 100 * n, 400, 80] for n in levels]
+    msgs = _values(*(_value(f"a{n}", n, 6 - n) for n in levels[1:]))
+    got = _one(areas=[*areas, ["table", 0, 0, 0, 0]], steps=[msgs, "flush"])
+    assert got["layer"] == {
+        "label": "최근 7일 · 랜딩 · PC",
+        "fixed": "fixed",
+        "pass": "none",
+        "z": "2147483647",
+    }
+    boxes = got["boxes"]
+    assert [b["id"] for b in boxes] == [f"a{n}" for n in levels]
+    sizes = [12, 12, 14, 16, 19, 22]
+    for n, b in zip(levels, boxes, strict=True):
+        assert f" {sizes[n]}px/" in b["font"], (n, b["font"])
+        assert f"kt-ov-l{n}" in b["cls"]
+        assert (b["left"], b["top"], b["width"], b["height"]) == (
+            "0px",
+            f"{100 * n}px",
+            "400px",
+            "80px",
+        )
+    assert boxes[0]["tag"] == "기록 없음"
+    assert boxes[0]["border"].startswith("2px dashed") and boxes[0]["fill"] == "transparent"
+    assert boxes[5]["tag"] == "#1 · 평균 3.2초 · 도달 64% · 클릭 12.5"
+    assert boxes[5]["border"].startswith("4px solid") and boxes[5]["fill"].endswith(",.5)")
+    assert boxes[1]["fill"].endswith(",.18)")
+    # 값이 오기 전에는 그리지 않는다
+    assert _one(areas=areas, steps=["flush"])["layer"] is None
+
+
+def test_low_reach_hatches_small_samples_say_so_and_tags_follow_the_scroll() -> None:
+    """§3.4 — 거의 안 닿음은 빗금, 표본 적음은 꼬리표 끝 '· 표본 적음'(기록 없음에도), 위로 스크롤된 상자의 꼬리표는
+    화면 맨 위에 붙는다. 스크롤마다 다시 놓는다."""
+    got = _one(
+        areas=AREAS,
+        steps=[
+            _values(
+                _value("hero", 3, 1, low=True, small=True),
+                _value("top", 0, None, small=True),
+            ),
+            "flush",
+            "scroll|100",
+            "flush",
+        ],
+    )
+    top, hero = got["boxes"]
+    assert hero["hatch"].startswith("repeating-linear-gradient(") and "kt-ov-low" in hero["cls"]
+    assert top["hatch"] == "none"
+    assert hero["tag"].endswith(" · 표본 적음")
+    assert top["tag"] == "기록 없음 · 표본 적음"
+    assert (hero["top"], hero["tagTop"]) == ("-40px", "40px")
+    assert (top["top"], top["tagTop"]) == ("-100px", "100px")
+
+
+def test_focus_scrolls_to_the_area_and_thickens_its_border_for_two_seconds() -> None:
+    """§3.4 — focus 를 받으면 그 영역을 가운데로 scrollIntoView, 상자 테두리 2초 굵게. 없는 영역이면 아무것도."""
+    focus = {"type": "kt-attention-focus", "v": 1, "id": "hero"}
+    got = _one(
+        areas=AREAS,
+        steps=[VALUES, _msg(focus), _msg({**focus, "id": "nope"}), "flush"],
+    )
+    assert got["scrolled"] == [["hero", {"block": "center"}]]
+    hero = next(b for b in got["boxes"] if b["id"] == "hero")
+    assert hero["borderWidth"] == "6px"
+    later = _one(areas=AREAS, steps=[VALUES, _msg(focus), "t|2000", "timers", "flush"])
+    assert all(b["borderWidth"] is None for b in later["boxes"])
+
+
+def test_bad_entries_are_dropped_and_their_areas_show_no_record() -> None:
+    """받은 값은 꼴을 검사한다 — 단계 밖·순위 꼴·수 아님은 버리고 그 영역은 '기록 없음'."""
+    got = _one(
+        areas=AREAS,
+        steps=[
+            _values(_value("hero", 7, 1), _value("top", 2, "1")),
+            "flush",
+        ],
+    )
+    assert [b["tag"] for b in got["boxes"]] == ["기록 없음", "기록 없음"]
