@@ -43,7 +43,8 @@ _ALIASES = {
     "trc20": "tron",
     "cap20": "chiliz",
     "arbitrumone": "arbitrum",
-    # avalanche 로 풀지 않는다 — 이름이 AVAX 뿐인 국내 망은 C-Chain 인지 몰라 접두사 규칙으로 unknown 에 둔다
+    # avalanche 로 풀지 않는다 — 이름이 AVAX 뿐인 국내 망은 아래 AVAX 토큰 규칙으로만 C-Chain 이 되고,
+    # AVAX 코인 자체는 C-Chain 인지 X-Chain 인지 몰라 그 규칙을 쓰지 않는다
     "avaxc": "avalanchec",
 }
 
@@ -62,8 +63,8 @@ _EQUIV_CLASSES: tuple[tuple[frozenset[str], ...], ...] = (
     (frozenset({"bsc"}), frozenset({"bnb", "smart"})),
     # 업비트·바이낸스 "Avalanche C-Chain" ↔ 비트겟 "AVAXC-Chain"(별칭)
     (frozenset({"avalanche", "c"}), frozenset({"avalanchec"}), frozenset({"cavax"})),
-    # 업비트·바이낸스 "NEO N3" ↔ 비트겟 "NEO3"
-    (frozenset({"neo", "n3"}), frozenset({"neo3"})),
+    # 업비트·바이낸스 "NEO N3" ↔ 비트겟 "NEO3" ↔ OKX "N3"
+    (frozenset({"neo", "n3"}), frozenset({"neo3"}), frozenset({"n3"})),
     # 약칭 ↔ 풀네임 — 국내(주로 빗썸)는 코드를 그대로 이름으로 주고 해외는 체인 이름을 준다 (S3 원문 2026-09-27)
     (frozenset({"allo"}), frozenset({"allora"})),
     (frozenset({"apt"}), frozenset({"aptos"})),
@@ -75,7 +76,12 @@ _EQUIV_CLASSES: tuple[tuple[frozenset[str], ...], ...] = (
     (frozenset({"core"}), frozenset({"coredao"})),
     (frozenset({"near"}), frozenset({"nearprotocol"})),
     (frozenset({"ont"}), frozenset({"ontology"})),
-    (frozenset({"stellar"}), frozenset({"stellarlumens"}), frozenset({"xlm"})),
+    (
+        frozenset({"stellar"}),
+        frozenset({"stellarlumens"}),
+        frozenset({"xlm"}),
+        frozenset({"stellar", "lumens"}),
+    ),
     (
         frozenset({"zksync", "era"}),
         frozenset({"zksyncera"}),
@@ -118,11 +124,52 @@ _EQUIV_CLASSES: tuple[tuple[frozenset[str], ...], ...] = (
     (frozenset({"taiko", "ethereum"}), frozenset({"taiko"})),
     (frozenset({"merl", "bitcoin"}), frozenset({"merlin"})),
     (frozenset({"stable", "usdt"}), frozenset({"stable"})),
+    # 2026-10-09 unknown 46쌍 대조 — 같은 체인인데 이름만 다른 쌍 (주로 빗썸 코드 ↔ OKX 체인 이름)
+    (frozenset({"algo"}), frozenset({"algorand"})),
+    (frozenset({"bch"}), frozenset({"bitcoincash"})),
+    (frozenset({"bera"}), frozenset({"berachain"})),
+    (frozenset({"doge"}), frozenset({"dogecoin"})),
+    (frozenset({"etc"}), frozenset({"ethereum", "classic"})),
+    (frozenset({"fil"}), frozenset({"filecoin"})),
+    (frozenset({"ron"}), frozenset({"ronin"})),
+    (frozenset({"zil"}), frozenset({"zilliqa"})),
+    # 업비트 "Cosmos Hub" ↔ OKX "Cosmos"
+    (frozenset({"cosmos", "hub"}), frozenset({"cosmos"})),
+    # 업비트 "Conflux eSpace" ↔ OKX "CFX_EVM" — Conflux Core("Conflux")와는 다른 망이라 묶지 않는다
+    (frozenset({"conflux", "espace"}), frozenset({"cfx", "evm"})),
 )
 # 토큰 집합 → 묶음 번호 (조회용)
 _EQUIV_INDEX: dict[frozenset[str], int] = {
     tokens: i for i, cls in enumerate(_EQUIV_CLASSES) for tokens in cls
 }
+
+# 빗썸 L2 코드 `<체인>_ETH`·`_BTC`·`_USDT` 의 토큰 집합 {체인, 모체인} — 동일 체인 표의 L2 묶음에 든 것만.
+# 규칙 4 는 이 집합의 모체인 토큰만으로 생긴 겹침을 보지 않는다 — BASE_ETH 와 ERC20 은 다른 망이다 (§3.6-4, 2026-10-09).
+# 표 밖의 `<체인>_ETH`(WLD_ETH·ZRC_ETH·MTL_ETH)는 그 체인이 무엇인지 몰라 여기 넣지 않는다
+_PARENT_TOKENS = frozenset({"ethereum", "bitcoin", "usdt"})
+_L2_CODES: frozenset[frozenset[str]] = frozenset(
+    frozenset(tokens)
+    for tokens in (
+        {"base", "ethereum"},
+        {"arbitrum", "ethereum"},
+        {"optimism", "ethereum"},
+        {"zk", "ethereum"},
+        {"manta", "ethereum"},
+        {"mega", "ethereum"},
+        {"scroll", "ethereum"},
+        {"blast", "ethereum"},
+        {"taiko", "ethereum"},
+        {"merl", "bitcoin"},
+        {"stable", "usdt"},
+    )
+)
+
+# AVAX 토큰 규칙 (§3.6, 2026-10-09) — 이름이 AVAX 뿐인 국내 망(빗썸 `AVAX`)은 코인이 AVAX 가 아니면 C-Chain 으로 본다.
+# 거래소가 다루는 Avalanche 위 토큰(JOE·NXPC)은 C-Chain 에 있다. AVAX 코인 자체는 X-Chain 일 수 있어 이 규칙을 쓰지 않는다.
+# 규칙 1(코드 일치)은 이 규칙보다 먼저다 — 바이낸스 `AVAX "Avalanche"`·바이빗 `XAVAX "AVAX"`(둘 다 X-Chain)가
+# AVAX 코인과 규칙 1·2 로 맞는 것은 남은 빚이다 (§7)
+_AVAX_BARE = frozenset({"avalanche"})
+_AVAX_C_CHAIN = frozenset({"avalanche", "c"})
 
 _PAREN_RE = re.compile(r"\([^)]*\)")
 _SPLIT_RE = re.compile(r"[^0-9a-z]+")
@@ -145,9 +192,12 @@ def normalize_name(name: str) -> frozenset[str]:
 
 
 def match_network(
-    dom: Network, foreign: list[Network]
+    dom: Network, foreign: list[Network], base: str | None = None
 ) -> tuple[Verdict, Network | None]:
-    """국내 망 1개 vs 해외 망 목록 판정 — 순서대로 첫 히트 (스펙 006 §3.6)."""
+    """국내 망 1개 vs 해외 망 목록 판정 — 순서대로 첫 히트 (스펙 006 §3.6).
+
+    `base` 는 코인 심볼이다 — AVAX 토큰 규칙만 쓴다. 모르면(None) 그 규칙을 건너뛴다.
+    """
     # 0. 해외 망 목록이 비면 unknown — 정보 없음 ≠ 그 망 없음
     if not foreign:
         return "unknown", None
@@ -163,6 +213,9 @@ def match_network(
     # 아무 망이나 맞다는 뜻이 되고, absent 라고 말할 근거도 없으니 unknown (§3.6-2)
     if not dom_tokens:
         return "unknown", None
+    # AVAX 토큰 규칙 — 이름이 AVAX 뿐인 국내 망에 AVAX 가 아닌 코인이면 C-Chain 으로 본다
+    if dom_tokens == _AVAX_BARE and base is not None and base.upper() != "AVAX":
+        dom_tokens = _AVAX_C_CHAIN
     foreign_tokens = [(f, normalize_name(f.name)) for f in foreign]
 
     # 2. 토큰 집합 완전 일치
@@ -180,11 +233,13 @@ def match_network(
         if dom_class is not None and _EQUIV_INDEX.get(ft) == dom_class:
             return "matched", f
 
-    # 4. 못 찾음 — 토큰이 하나라도 겹치거나 길이 3+ 토큰의 접두사 관계(enj↔enjin)면 unknown
+    # 4. 못 찾음 — 토큰이 하나라도 겹치거나 길이 3+ 토큰의 접두사 관계(enj↔enjin)면 unknown.
+    #    빗썸 L2 코드는 모체인 토큰을 빼고 본다 — 모체인만 겹치면 다른 망(absent)이다
+    probe = dom_tokens - _PARENT_TOKENS if dom_tokens in _L2_CODES else dom_tokens
     for _, ft in foreign_tokens:
-        if dom_tokens & ft:
+        if probe & ft:
             return "unknown", None
-        for a in dom_tokens:
+        for a in probe:
             for b in ft:
                 if len(a) >= 3 and len(b) >= 3 and (a.startswith(b) or b.startswith(a)):
                     return "unknown", None
@@ -192,14 +247,16 @@ def match_network(
 
 
 def pick_domestic(
-    dom_networks: list[Network], foreign_networks: list[Network]
+    dom_networks: list[Network],
+    foreign_networks: list[Network],
+    base: str | None = None,
 ) -> tuple[Network, Verdict, Network | None]:
     """국내 망이 여럿일 때 tie-break — 스펙 006 §3.6 마지막.
 
-    (고른 국내 망, 판정, matched 면 맞춘 해외 망) 을 돌려준다.
+    (고른 국내 망, 판정, matched 면 맞춘 해외 망) 을 돌려준다. `base`(코인 심볼)는 `match_network` 로 넘긴다.
     호출 전제: dom_networks 는 비어 있지 않다 (§3.7-1 이 빈 경우를 먼저 처리한다).
     """
-    judged = [(dn, *match_network(dn, foreign_networks)) for dn in dom_networks]
+    judged = [(dn, *match_network(dn, foreign_networks, base)) for dn in dom_networks]
     # 1. matched 이고 국내 입금 ok + 해외 출금 ok (해외→국내로 실제 옮길 수 있는 길)인 첫 망
     for dn, verdict, fn in judged:
         if verdict == "matched" and dn.dep and fn is not None and fn.wd:
@@ -216,8 +273,12 @@ def pick_domestic(
 
 
 class WalletRow(Protocol):
-    """판정이 읽는 행의 일부 — core.models.Row 가 만족한다. models 가 이 모듈을 import 하므로 역참조는 Protocol 로."""
+    """판정이 읽는 행의 일부 — core.models.Row 가 만족한다. models 가 이 모듈을 import 하므로 역참조는 Protocol 로.
 
+    `base`(코인 심볼)는 국내 행의 것만 읽는다 — §3.6 AVAX 토큰 규칙.
+    """
+
+    base: str
     deposit_enabled: bool | None
     withdrawal_enabled: bool | None
     networks: list[Network]
@@ -250,7 +311,9 @@ def wallet_fields(dom_row: WalletRow, fx_row: WalletRow) -> WalletFields:
             fx_row.withdrawal_enabled,
         )
     # 2. 국내 망·판정·해외 망을 고른다 (§3.6 tie-break)
-    dom_net, verdict, fx_net = pick_domestic(dom_row.networks, fx_row.networks)
+    dom_net, verdict, fx_net = pick_domestic(
+        dom_row.networks, fx_row.networks, dom_row.base
+    )
     net_fx: str | None = None
     dep_fx: bool | None
     wd_fx: bool | None

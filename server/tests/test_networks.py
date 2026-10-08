@@ -327,16 +327,191 @@ def test_sol_vs_bitget_bep20_only_is_still_absent() -> None:
     assert match_network(net("SOL", "SOL"), [net("BEP20", "BEP20")])[0] == "absent"
 
 
+# 2026-10-09 unknown 46쌍 대조 — 같은 체인인데 이름만 다른 쌍을 동일 체인 표에 (§3.6-3)
+@pytest.mark.parametrize(
+    ("dom", "fx"),
+    [
+        (("ALGO", "ALGO"), ("ALGORAND", "Algorand")),
+        (("BCH", "BCH"), ("BITCOINCASH", "BitcoinCash")),
+        (("BERA", "BERA"), ("BERACHAIN", "Berachain")),
+        (("DOGE", "DOGE"), ("DOGECOIN", "Dogecoin")),
+        (("ETC", "ETC"), ("ETHEREUMCLASSIC", "Ethereum Classic")),
+        (("FIL", "FIL"), ("FILECOIN", "Filecoin")),
+        (("RON", "RON"), ("RONIN", "Ronin")),
+        (("ZIL", "ZIL"), ("ZILLIQA", "Zilliqa")),
+        (("XLM", "Stellar Network"), ("STELLARLUMENS", "Stellar Lumens")),
+        (("XLM", "XLM"), ("STELLARLUMENS", "Stellar Lumens")),
+        (("ATOM", "Cosmos Hub"), ("COSMOS", "Cosmos")),
+        (("NEO", "NEO N3"), ("N3", "N3")),
+        (("CFX", "Conflux eSpace"), ("CFX_EVM", "CFX_EVM")),
+    ],
+)
+def test_equivalence_table_pairs_confirmed_2026_10_09(
+    dom: tuple[str, str], fx: tuple[str, str]
+) -> None:
+    verdict, matched = match_network(net(*dom), [net(*fx)])
+    assert verdict == "matched"
+    assert matched is not None and matched.code == fx[0]
+
+
+def test_okx_lists_pick_the_same_chain_among_lookalikes() -> None:
+    # OKX 원문 순서 그대로 — 접두사가 겹치는 OKTC 망·FEVM 이 앞에 있어도 같은 체인을 고른다
+    cases = [
+        (
+            net("BCH", "BCH"),
+            [net("BCHK-OKTC", "BCHK-OKTC"), net("BITCOINCASH", "BitcoinCash")],
+            "BITCOINCASH",
+        ),
+        (
+            net("FIL", "FIL"),
+            [
+                net("FEVM", "FEVM"),
+                net("FILECOIN", "Filecoin"),
+                net("FILK-OKTC", "FILK-OKTC"),
+            ],
+            "FILECOIN",
+        ),
+        (
+            net("ETC", "ETC"),
+            [net("ETHEREUMCLASSIC", "Ethereum Classic"), net("ETCK-OKTC", "ETCK-OKTC")],
+            "ETHEREUMCLASSIC",
+        ),
+        (
+            net("CFX", "Conflux eSpace"),
+            [net("CFX_EVM", "CFX_EVM"), net("CONFLUX", "Conflux")],
+            "CFX_EVM",
+        ),
+    ]
+    for dom, foreign, expected in cases:
+        verdict, matched = match_network(dom, foreign)
+        assert verdict == "matched", dom
+        assert matched is not None and matched.code == expected
+
+
+def test_conflux_espace_is_not_conflux_core() -> None:
+    # eSpace(EVM)는 Conflux Core 와 다른 망 — 겹침 규칙대로 unknown 에 둔다
+    verdict, _ = match_network(
+        net("CFX", "Conflux eSpace"), [net("CONFLUX", "Conflux")]
+    )
+    assert verdict == "unknown"
+
+
+def test_bithumb_bare_cfx_stays_unknown_against_okx() -> None:
+    # 빗썸 CFX 는 Core 인지 eSpace 인지 모른다 — 표에 넣지 않았다
+    foreign = [net("CFX_EVM", "CFX_EVM"), net("CONFLUX", "Conflux")]
+    assert match_network(net("CFX", "CFX"), foreign)[0] == "unknown"
+
+
+# 빗썸 L2 코드 — 모체인 토큰만 겹치면 다른 망 (§3.6-4, 2026-10-09)
+@pytest.mark.parametrize(
+    ("dom_code", "fx"),
+    [
+        ("BASE_ETH", ("ERC20", "ERC20")),  # 비트겟·OKX (EDGE·PROMPT)
+        ("BASE_ETH", ("ETH", "Ethereum")),  # 바이빗 (EDGE)
+        ("BASE_ETH", ("ETH", "Ethereum (ERC20)")),  # 바이낸스 (TOWNS)
+        ("TAIKO_ETH", ("ERC20", "ERC20")),  # 비트겟 (TAIKO)
+        ("ARB_ETH", ("ETH", "Ethereum (ERC20)")),
+        ("MERL_BTC", ("BTC", "Bitcoin")),
+        ("ZK_ETH", ("ERC20", "ERC20")),
+    ],
+)
+def test_bithumb_l2_code_vs_parent_chain_only_is_absent(
+    dom_code: str, fx: tuple[str, str]
+) -> None:
+    verdict, matched = match_network(net(dom_code, dom_code), [net(*fx)])
+    assert verdict == "absent"
+    assert matched is None
+
+
+def test_bithumb_base_eth_still_matches_base_next_to_ethereum() -> None:
+    foreign = [net("ERC20", "ERC20"), net("BASE", "Base")]
+    verdict, matched = match_network(net("BASE_ETH", "BASE_ETH"), foreign)
+    assert verdict == "matched"
+    assert matched is foreign[1]
+
+
+def test_bithumb_l2_chain_token_overlap_is_still_unknown() -> None:
+    # 모체인만 뺀다 — 체인 토큰이 겹치면 여전히 모른다
+    verdict, _ = match_network(
+        net("BASE_ETH", "BASE_ETH"), [net("BASESEPOLIA", "Base Sepolia")]
+    )
+    assert verdict == "unknown"
+
+
+def test_eth_suffixed_code_outside_the_table_stays_unknown() -> None:
+    # 표 밖의 `<체인>_ETH` 는 L2 인지 ERC20 인지 몰라 모체인 겹침을 그대로 본다
+    for code in ("WLD_ETH", "MTL_ETH", "ZRC_ETH"):
+        assert match_network(net(code, code), [net("ERC20", "ERC20")])[0] == "unknown"
+
+
+# AVAX 토큰 규칙 — 이름이 AVAX 뿐인 국내 망 + AVAX 가 아닌 코인 = C-Chain (§3.6, 2026-10-09)
+@pytest.mark.parametrize(
+    ("base", "foreign"),
+    [
+        ("JOE", [("AVAXC", "AVAX C-Chain"), ("ARBITRUM", "Arbitrum One")]),  # 바이낸스
+        ("JOE", [("AVAXC-CHAIN", "AVAXC-Chain")]),  # 비트겟
+        ("JOE", [("AVALANCHEC-CHAIN", "Avalanche C-Chain")]),  # OKX
+        ("NXPC", [("AVAXC", "AVAX C-Chain"), ("BSC", "BNB Smart Chain (BEP20)")]),
+        ("NXPC", [("CAVAX", "CAVAX")]),  # 바이빗
+    ],
+)
+def test_bare_avax_network_of_a_token_is_c_chain(
+    base: str, foreign: list[tuple[str, str]]
+) -> None:
+    fx = [net(*f) for f in foreign]
+    verdict, matched = match_network(net("AVAX", "AVAX"), fx, base)
+    assert verdict == "matched"
+    assert matched is fx[0]
+
+
+@pytest.mark.parametrize(
+    ("foreign", "expected"),
+    [
+        ([("AVAXX-CHAIN", "AVAXX-Chain")], "absent"),  # 비트겟 — 겹침·접두사 없음
+        ([("AVALANCHEX-CHAIN", "Avalanche X-Chain")], "unknown"),  # OKX
+        ([("XAVAX", "AVAX")], "unknown"),  # 바이빗 X-Chain 표시명
+    ],
+)
+def test_bare_avax_network_of_a_token_does_not_match_x_chain_names(
+    foreign: list[tuple[str, str]], expected: str
+) -> None:
+    # 규칙은 C-Chain 쪽으로만 맞춘다 — 해외에 X-Chain 이름만 있으면 matched 가 아니다
+    verdict, matched = match_network(
+        net("AVAX", "AVAX"), [net(*f) for f in foreign], "JOE"
+    )
+    assert verdict == expected
+    assert matched is None
+
+
+def test_bare_avax_network_of_avax_itself_stays_unknown() -> None:
+    # AVAX 코인은 C-Chain·X-Chain 둘 다 — 이름만으로는 어느 쪽인지 모른다
+    bitget = [net("AVAXX-CHAIN", "AVAXX-Chain"), net("AVAXC-CHAIN", "AVAXC-Chain")]
+    okx = [
+        net("AVALANCHEX-CHAIN", "Avalanche X-Chain"),
+        net("AVALANCHEC-CHAIN", "Avalanche C-Chain"),
+    ]
+    for foreign in (bitget, okx):
+        assert match_network(net("AVAX", "AVAX"), foreign, "AVAX")[0] == "unknown"
+
+
+def test_pick_domestic_passes_the_coin_to_the_avax_rule() -> None:
+    foreign = [net("AVAXC-CHAIN", "AVAXC-Chain")]
+    chosen, verdict, matched = pick_domestic([net("AVAX", "AVAX")], foreign, "JOE")
+    assert verdict == "matched" and matched is foreign[0]
+    assert pick_domestic([net("AVAX", "AVAX")], foreign)[1] == "unknown"
+
+
 # --- 행 판정 6값 — 006 §3.7 다섯 경우 + 해외 망 이름 (024 §3.2·§4) ---
 
 
 @dataclass
 class _Row:
-    """판정 입력 — core.models.Row 중 wallet_fields 가 읽는 세 값."""
+    """판정 입력 — core.models.Row 중 wallet_fields 가 읽는 네 값 (코인은 AVAX 토큰 규칙만 본다)."""
 
     deposit_enabled: bool | None
     withdrawal_enabled: bool | None
     networks: list[Network]
+    base: str = "TEST"
 
 
 def test_wallet_fields_case1_no_domestic_networks_uses_coin_values() -> None:
@@ -376,9 +551,30 @@ def test_wallet_fields_absent_blocks_foreign_and_has_no_foreign_name() -> None:
 
 
 def test_wallet_fields_unknown_with_foreign_networks_is_null_null() -> None:
-    dom = _Row(True, True, [net("AVAX", "AVAX")])
+    dom = _Row(True, True, [net("AVAX", "AVAX")], base="AVAX")
     fx = _Row(True, True, [net("AVAXC", "AVAX C-Chain")])
     assert wallet_fields(dom, fx) == ("AVAX", None, True, True, None, None)
+
+
+def test_wallet_fields_reads_the_domestic_coin_for_the_avax_token_rule() -> None:
+    # 빗썸 JOE `AVAX` — 행의 코인이 AVAX 가 아니라 C-Chain 으로 맞는다
+    dom = _Row(True, True, [net("AVAX", "AVAX")], base="JOE")
+    fx = _Row(True, True, [net("AVAXC", "AVAX C-Chain", wd=False)], base="JOE")
+    assert wallet_fields(dom, fx) == (
+        "AVAX",
+        "AVAX C-Chain",
+        True,
+        True,
+        True,
+        False,
+    )
+
+
+def test_wallet_fields_l2_code_vs_parent_chain_only_blocks_foreign() -> None:
+    # 빗썸 EDGE `BASE_ETH` vs 바이빗 ERC20 만 — 다른 망이라 옮길 길 없음
+    dom = _Row(True, True, [net("BASE_ETH", "BASE_ETH")], base="EDGE")
+    fx = _Row(True, True, [net("ETH", "Ethereum")], base="EDGE")
+    assert wallet_fields(dom, fx) == ("BASE_ETH", None, True, True, False, False)
 
 
 def test_wallet_fields_unknown_without_foreign_networks_uses_foreign_coin_values() -> (
