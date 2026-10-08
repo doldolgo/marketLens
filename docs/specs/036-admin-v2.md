@@ -25,11 +25,12 @@
 | `infra` | 인프라 |
 | `alerts` | 알림 |
 | `traffic` | 접속 |
+| `screens` | 화면 이용 |
 | `cost` | 비용 |
 | `tools` | 도구 |
 
 - 절은 이 순서로 한 페이지에 쌓는다(탭 전환 없음 — 스크롤과 절 이동 링크).
-- 머리(화면 위에 붙어 있음): `KimpTrack 관리자`, 종합 배지(§3.4 개요와 같은 값), `마지막 갱신 HH:MM:SS`, 절 이동 링크 일곱(`#id`), 로그아웃. 로그인 만료 알림 줄(029)은 머리 바로 아래.
+- 머리(화면 위에 붙어 있음): `KimpTrack 관리자`, 종합 배지(§3.4 개요와 같은 값), `마지막 갱신 HH:MM:SS`, 절 이동 링크 여덟(`#id` — 화면 이용은 '화면', 053), 로그아웃. 로그인 만료 알림 줄(029)은 머리 바로 아래.
 
 ### 3.2 읽는 값
 **빠른 묶음 — 029 그대로(복사)**
@@ -124,7 +125,7 @@
 - `unconfigured` 이고 code 가 `before_gate` 인 하위 부분(`visitors`·`geo`)은 '연결 안 됨' 대신 시행일 빈 상태 글(042 §3.8).
 
 ### 3.6 차트
-- 외부 라이브러리 없이 SVG 요소를 DOM 으로 만든다. 모양은 기하 속성(`viewBox`·`points`·`d`·`x`·`y`·`width`·`height`)으로만, 색·선 굵기는 CSS 클래스(토큰)로 준다. `style` 속성·`element.style`·`cssText` 는 쓰지 않는다 — CSP 가 `style` 속성과 `cssText` 를 막는다(MDN style-src, 2026-10-01 확인). `element.style.속성` 은 허용되지만 한 규칙으로 둔다.
+- 외부 라이브러리 없이 SVG 요소를 DOM 으로 만든다. 모양은 기하 속성(`viewBox`·`points`·`d`·`x`·`y`·`width`·`height`)으로만, 색·선 굵기는 CSS 클래스(토큰)로 준다. `style` 속성·`element.style`·`cssText` 는 쓰지 않는다 — CSP 가 `style` 속성과 `cssText` 를 막는다(MDN style-src, 2026-10-01 확인). `element.style.속성` 은 허용되지만 한 규칙으로 둔다. 예외는 053 화면 이용 절의 틀 폭 하나 — CSS 변수 `--fit` 을 `style.setProperty` 로 쓰는 한 곳(칸 폭은 실행 때만 안다)이고, 틀 주소(`src`)도 그 절의 한 곳에서만 공개 사이트 출처 상수로 만든 주소나 `about:blank` 를 쓴다.
 - 네 종류 + 접속 절의 겹친 두 막대·하한–상한 띠·날 막대·요일×시간 열지도(042 — rect + 클래스): 선(24시간 추이), 세로 막대(시간대별 요청·지속 시간 구간), 가로 막대(표의 비율·예산), 타임라인(실패 구간).
 - 선: 가로는 칸 폭을 따라 늘고 선 굵기는 그대로다(`non-scaling-stroke`). null 점에서 선을 끊는다 — 보간하지 않아 빈 구간이 비어 보인다. 비율 지표는 세로 0~100 고정, 개수·ms·크레딧은 0~최댓값. 기준선은 점선. 축 대신 글자로 "24시간 전·지금" 과 최저·최고·지금 값. 타임라인은 창을 5등분한 눈금(`HH:mm`)과 "지금", 접속 시간 막대는 정시(0·6·12·18시) 눈금과 "지금", 날 막대는 KST 날(042).
 - SVG 속성은 허용 목록(기하·`role`·`aria-label`)만 — 그 밖의 이름(`href`·`style`·`on…`)은 만들다 멈춘다. 그림 요소는 `svg`·`g`·`line`·`rect`·`path`·`title` 뿐.
@@ -137,7 +138,7 @@
 - 폭: 본문 최대 1200px, 카드 격자는 칸 폭 260px 이상으로 자동 줄바꿈. 640px 이하는 한 줄 배치·좌우 여백 16px·머리의 절 이동은 옆으로 미는 한 줄·표는 카드 안에서 가로 스크롤. **페이지 전체 가로 스크롤 없음**(360px 에서도). 한국어는 낱말 단위로 줄을 바꾸고(`word-break: keep-all` — 랜딩·처리방침·404·동의 띠와 같다) 칸보다 긴 낱말만 넘칠 때 끊는다(`overflow-wrap: break-word`). 누르는 곳은 36px 이상. 어두운 테마 하나(`color-scheme: dark`).
 
 ### 3.8 보안 계약 (029 에서 옮김 + 더함)
-- 029 그대로: 비밀값 없음. 서버·방문자가 정하는 글자는 `textContent` 로만 넣는다(HTML 해석 금지). 즉시 갱신 토큰은 입력칸과 JS 변수에만(`localStorage`·`sessionStorage`·IndexedDB·쿠키 금지, `form` 없음). 모든 요청은 한 함수를 지나 `X-Requested-With: XMLHttpRequest` 를 붙이고 같은 출처 상대 경로(`/api/…`·`/svc/…`)만 부른다. 링크는 같은 탭(`target`·`window.open` 없음). CSP 는 029 그대로(`default-src 'self'; frame-ancestors 'none'`).
+- 029 그대로: 비밀값 없음. 서버·방문자가 정하는 글자는 `textContent` 로만 넣는다(HTML 해석 금지). 즉시 갱신 토큰은 입력칸과 JS 변수에만(`localStorage`·`sessionStorage`·IndexedDB·쿠키 금지, `form` 없음). 모든 요청은 한 함수를 지나 `X-Requested-With: XMLHttpRequest` 를 붙이고 같은 출처 상대 경로(`/api/…`·`/svc/…`)만 부른다. 링크는 같은 탭(`target`·`window.open` 없음). CSP 는 029 그대로(`default-src 'self'; frame-src https://kimptrack.com; frame-ancestors 'none'` — `frame-src` 는 053 의 틀 하나).
 - 세션 판별(029 그대로): (1) 401 + 앱 JSON(`detail`)은 토큰 오류 — 새로고침하지 않는다. (2) 401 인데 JSON 이 아니거나 fetch 자체가 실패하면 로그인 만료 신호 — 표시 `?relogin=1` 이 없으면 `/?relogin=1` 로 한 번 새로고침, 있으면 알림 줄만. 주소는 `/` 로 고정한다. (3) 403 은 "권한·설정 오류".
 - **표시 지우기(바뀜)**: 마지막 만료 신호(없으면 이 화면을 연 때) 뒤 여덟 경로(빠른 넷·느린 넷)가 모두 한 번 이상 만료 신호 없이 끝났을 때만 지운다 — 만료 신호가 오면 센 것을 처음부터 다시 센다. 묶음이 둘이라, 한 묶음만 보고 지우면 다른 묶음에만 있는 만료가 60초마다 새로고침을 되풀이한다. 즉시 갱신 버튼은 지우지 않는다(029).
 - **더함**: 방문자가 정하는 값(경로·탭·외부 출처·`utm_source`·기기·브라우저 이름·Clarity 행)과 서버 글(경보 사유·Slack 글·canary 로그·거래소 오류)은 `title` 말고는 어떤 속성(특히 `href`·`src`)에도 쓰지 않는다 — 방문자가 정한 출처나 Clarity 주소가 누를 수 있는 링크가 되면 운영자를 낚는 길이 된다. 보이는 글자에서 양방향 제어문자(U+202A–U+202E·U+2066–U+2069)를 뺀다. 길면 자르고 전체는 `title`.
@@ -153,8 +154,8 @@
 ## 4. 검증
 **PR 안 — 실행 세션(완료 조건)**. 시작 전에 main 에 034·035 가 있는지 본다(없으면 멈추고 묻는다).
 - 정적 단언(`server/tests/test_admin.py` — 029 의 화면 단언은 유지하고 아래를 더한다 — 설명·이름표·문구 고침 단언은 041 §4 가 더한다)(042 §4 가 넓힌다):
-  - `admin.js`: `X-Requested-With`·`visibilityState`·`createElementNS`·`refreshSec` 가 있다 / `fetch(` 는 1회 / `location.replace(`·`history.replaceState(` 각 1회, 주소 `/` 고정(029) / 10초·60초 주기 상수 / 본문 안 경과 글자는 시각을 data 속성에 둔 span 이고 그리기 끝에 글자만 고치는 함수가 돈다(글자가 다를 때만 쓴다) / 금지: `localStorage`·`sessionStorage`·`indexedDB`·`document.cookie`·`innerHTML`·`outerHTML`·`insertAdjacentHTML`·`document.write`·`eval(`·`new Function`·`window.open`·`location.pathname`·`location.href`·`.style`·`setAttribute('style'`·`.href`·`setAttribute('href'`·`setAttribute('src'`·`.src`·`setAttributeNS`·`xlink:href`·`new XMLHttpRequest`·`sendBeacon`·`new WebSocket`·`EventSource` / SVG 속성 허용 목록이 §3.6 그대로이고 `svg()` 가 그 밖을 던진다·글자 그대로 부르는 SVG 요소와 속성 키가 목록 안 / 파일 안의 `http://`·`https://` 는 SVG 이름공간 하나뿐.
-  - `index.html`: 인라인 스크립트 본문·`style=`·`<form`·`target=` 없음(029) / 절 id 일곱이 §3.1 순서, 머리의 이동 링크 일곱 / 토큰칸·API 문서·ReDoc·로그아웃 링크(029) / 외부 링크(`//` 로 시작하는 것 포함, 따옴표 꼴 무관)는 전부 `https://` 이고 `rel="noreferrer"`, 호스트는 AWS 콘솔(`*.console.aws.amazon.com`)·`clarity.microsoft.com`·`dash.cloudflare.com`·`one.dash.cloudflare.com`·`github.com` 안이고 Cloudflare 링크는 경로가 `/` / 12자리 숫자·이메일 모양·`[0-9a-f]{32,}`·`cloudflareaccess.com`·`/projects/view/` 없음.
+  - `admin.js`: `X-Requested-With`·`visibilityState`·`createElementNS`·`refreshSec` 가 있다 / `fetch(` 는 1회 / `location.replace(`·`history.replaceState(` 각 1회, 주소 `/` 고정(029) / 10초·60초 주기 상수 / 본문 안 경과 글자는 시각을 data 속성에 둔 span 이고 그리기 끝에 글자만 고치는 함수가 돈다(글자가 다를 때만 쓴다) / 금지: `localStorage`·`sessionStorage`·`indexedDB`·`document.cookie`·`innerHTML`·`outerHTML`·`insertAdjacentHTML`·`document.write`·`eval(`·`new Function`·`window.open`·`location.pathname`·`location.href`·`.style`·`setAttribute('style'`·`.href`·`setAttribute('href'`·`setAttribute('src'`·`.src`·`setAttributeNS`·`xlink:href`·`new XMLHttpRequest`·`sendBeacon`·`new WebSocket`·`EventSource` / SVG 속성 허용 목록이 §3.6 그대로이고 `svg()` 가 그 밖을 던진다·글자 그대로 부르는 SVG 요소와 속성 키가 목록 안 / 파일 안의 `http://`·`https://` 는 SVG 이름공간과 053 의 공개 사이트 출처 상수(`SITE_ORIGIN`) 둘뿐 / `.style`·`.src` 금지의 예외는 053 의 `fitFrame`(`--fit` 한 줄)·`aimFrame`(틀 주소 한 줄) 두 함수 안뿐.
+  - `index.html`: 인라인 스크립트 본문·`style=`·`<form`·`target=` 없음(029) / 절 id 여덟이 §3.1 순서, 머리의 이동 링크 여덟 / 토큰칸·API 문서·ReDoc·로그아웃 링크(029) / 외부 링크(`//` 로 시작하는 것 포함, 따옴표 꼴 무관)는 전부 `https://` 이고 `rel="noreferrer"`, 호스트는 AWS 콘솔(`*.console.aws.amazon.com`)·`clarity.microsoft.com`·`dash.cloudflare.com`·`one.dash.cloudflare.com`·`github.com` 안이고 Cloudflare 링크는 경로가 `/` / 12자리 숫자·이메일 모양·`[0-9a-f]{32,}`·`cloudflareaccess.com`·`/projects/view/` 없음.
   - `admin.css`: `@import`·`url(` 없음 / `--color-bg`·`--color-surface`·`--color-ok`·`--color-warn`·`--color-up` 값이 `docs/design/theme.css` 와 같다 / 640px 미디어 쿼리 / `body` 에 `word-break: keep-all`·`overflow-wrap: break-word`.
   - 033 의 관리자 단언(`web/admin/*` 에 `clarity.js`·`clarity.ms` 없음)은 그대로 통과한다.
 - 브라우저(Chromium, 029 §5 처럼 127.0.0.1 에만 게시한 테스트 compose + 가짜 백엔드 — 피드 넷을 `ok`·`unconfigured`·`denied`·`error`·`pending`·빈 목록·오래된 `fetchedAt`·null 섞인 점으로 바꿔 줄 수 있게):
