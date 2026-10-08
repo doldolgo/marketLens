@@ -250,8 +250,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 046 — perp 원천 3개는 현물 뒤 고정 순서(config.PERP_SOURCES). 행은 별도 맵·별도 싱크, 우주는 김프 우주를 따라 매초
     perp_sink = PerpSink(store)
     binance_perp = BinancePerpStream(store=store, sink=perp_sink, record=record)
-    bybit_perp = BybitPerpStream(store=store, sink=perp_sink, record=record)
-    bitget_perp = BitgetPerpStream(store=store, sink=perp_sink, record=record)
+    # 바이빗·비트겟은 WebSocket 없이 전체 티커 REST 를 매초 — 앱 공용 클라이언트(타임아웃 3초)로 (046 §3.6·3.7)
+    bybit_perp = BybitPerpStream(
+        store=store, sink=perp_sink, client=client, record=record
+    )
+    bitget_perp = BitgetPerpStream(
+        store=store, sink=perp_sink, client=client, record=record
+    )
     streams = [
         upbit,
         bithumb,
