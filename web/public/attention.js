@@ -5,7 +5,7 @@
 ;(() => {
   // 지금 안내 판 — clarity.js 의 NOTICE_VERSION 과 같은 값(server/tests/test_clarity.py·test_attention.py 가 묶는다).
   // 판을 올리는 PR 은 이 값도 함께 올린다 — 예전 판의 granted 는 동의가 아니다
-  const NOTICE_VERSION = "2026-10-18"
+  const NOTICE_VERSION = "2026-10-09"
 
   const HOST = "kimptrack.com" // www 는 apex 로 301 이고 저장값이 출처마다 따로라 이 호스트 하나만
   const KEY = "kt.analytics"

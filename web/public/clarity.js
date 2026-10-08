@@ -9,8 +9,8 @@
   const PAGES = ["landing", "app"]
   // 지금 안내 판 — privacy.html 동의 스크립트의 VERSION 과 같다(테스트가 본다). 받는 자·항목·목적·보유 기간이 바뀌면 그 PR 이
   // 세 곳(이 값·privacy.html 스크립트·방침의 보이는 판 글자 — 052 의 attention.js 가 있으면 넷)을 함께 올린다 — 예전 판의 granted 는
-  // '정하지 않음' 이라 동의 창이 다시 묻는다. 2026-10-18 판(051): 같은 동의로 KimpTrack 서버의 화면 영역 이용 통계(052)도 함께 돈다
-  const NOTICE_VERSION = "2026-10-18"
+  // '정하지 않음' 이라 동의 창이 다시 묻는다. 2026-10-09 판(051): 같은 동의로 KimpTrack 서버의 화면 영역 이용 통계(052)도 함께 돈다
+  const NOTICE_VERSION = "2026-10-09"
 
   const HOST = "kimptrack.com" // www 는 apex 로 301 이고 저장값이 출처마다 따로라 이 호스트 하나만
   const KEY = "kt.analytics"
