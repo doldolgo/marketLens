@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- 검색·미리보기 문구는 스펙 022 §3.6 글자 그대로. 네이버는 메인 제목·설명을 자주 바꾸면 불이익을 준다 — 고치기 전에 스펙부터 -->
-  <title>김프(김치프리미엄)·역프 실시간 확인 | KimpTrack</title>
-  <meta name="description" content="김프 사이트 KimpTrack은 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX의 김치프리미엄과 역프를 매초 계산해 입출금 상태까지 보여 줍니다." />
+  <title>김프(김치프리미엄)·역프 실시간, 입출금 확인 | KimpTrack</title>
+  <meta name="description" content="김프 사이트 KimpTrack은 국내외 6개 거래소의 김치프리미엄·역프를 매초 계산하고, 입출금이 열렸는지와 지난 기록까지 보여 줍니다." />
   <meta name="robots" content="index, follow, max-image-preview:large" />
   <link rel="canonical" href="https://kimptrack.com/" />
   <!-- 아이콘은 절대 주소 — 네이버는 상대 경로를 읽지 않고, 구글은 SVG 파비콘을 쓰지 않는다. rel 마다 하나만 둔다 -->
@@ -14,8 +14,8 @@
   <meta name="theme-color" content="#161826" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="KimpTrack" />
-  <meta property="og:title" content="김프(김치프리미엄)·역프 실시간 확인 | KimpTrack" />
-  <meta property="og:description" content="김프 사이트 KimpTrack은 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX의 김치프리미엄과 역프를 매초 계산해 입출금 상태까지 보여 줍니다." />
+  <meta property="og:title" content="김프(김치프리미엄)·역프 실시간, 입출금 확인 | KimpTrack" />
+  <meta property="og:description" content="김프 사이트 KimpTrack은 국내외 6개 거래소의 김치프리미엄·역프를 매초 계산하고, 입출금이 열렸는지와 지난 기록까지 보여 줍니다." />
   <meta property="og:url" content="https://kimptrack.com/" />
   <meta property="og:image" content="https://kimptrack.com/landing/og-v2.png" />
   <meta property="og:image:type" content="image/png" />
@@ -50,13 +50,13 @@
         "@type": "WebPage",
         "@id": "https://kimptrack.com/#webpage",
         "url": "https://kimptrack.com/",
-        "name": "김프(김치프리미엄)·역프 실시간 확인 | KimpTrack",
-        "description": "김프 사이트 KimpTrack은 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX의 김치프리미엄과 역프를 매초 계산해 입출금 상태까지 보여 줍니다.",
+        "name": "김프(김치프리미엄)·역프 실시간, 입출금 확인 | KimpTrack",
+        "description": "김프 사이트 KimpTrack은 국내외 6개 거래소의 김치프리미엄·역프를 매초 계산하고, 입출금이 열렸는지와 지난 기록까지 보여 줍니다.",
         "inLanguage": "ko-KR",
         "isPartOf": { "@id": "https://kimptrack.com/#website" },
         "about": { "@id": "https://kimptrack.com/#webapp" },
         "primaryImageOfPage": { "@type": "ImageObject", "url": "https://kimptrack.com/landing/og-v2.png", "width": 1200, "height": 630 },
-        "dateModified": "2026-10-08"
+        "dateModified": "2026-10-09"
       },
       {
         "@type": "WebApplication",
@@ -76,13 +76,13 @@
   </script>
   <!-- 글꼴 — Pretendard 를 이 페이지 글자만 남겨 자른 파일 하나를 같은 출처에서 받는다(OFL 이라 이름을 바꿨다: KimpTrack Sans).
        글자를 고치면 web/scripts/subset-landing-font.py 로 다시 만든다 — 빠진 글자는 시스템 글꼴로 보인다 (스펙 022 §3.4) -->
-  <link rel="preload" href="landing/fonts/kimptrack-sans-6ea5a2b0.woff2" as="font" type="font/woff2" crossorigin />
-  <!-- 033 — 화면 분석(Clarity) 동의 안내 띠·불러올지 판단. 띠도 이 파일이 그린다(시스템 글꼴 — 이 페이지의 서브셋 글꼴을 쓰지 않는다) -->
+  <link rel="preload" href="landing/fonts/kimptrack-sans-8f1c14d0.woff2" as="font" type="font/woff2" crossorigin />
+  <!-- 033 — 화면 분석(Clarity) 동의 창(모달)·불러올지 판단. 동의 창도 이 파일이 그린다(시스템 글꼴 — 이 페이지의 서브셋 글꼴을 쓰지 않는다) -->
   <script defer src="clarity.js"></script>
   <style>
     @font-face {
       font-family: "KimpTrack Sans";
-      src: url("landing/fonts/kimptrack-sans-6ea5a2b0.woff2") format("woff2");
+      src: url("landing/fonts/kimptrack-sans-8f1c14d0.woff2") format("woff2");
       font-weight: 400 700;
       font-style: normal;
       font-display: swap;
@@ -272,7 +272,7 @@
     .foot-nav a:hover { color: var(--n100); }
     /* 032 — 방침 링크는 바닥에서 가장 밝고 굵게(작성지침: 다른 고지와 구분해 보이게) */
     .foot-nav .foot-privacy { color: var(--n100); font-weight: 700; }
-    .foot .notice { max-width: 56em; color: var(--n400); }
+    .foot .notice { color: var(--n400); }
 
     /* 960px 미만 — 한 단(글 → 카드 → 다음 경로) */
     @media (max-width: 959px) {
@@ -517,7 +517,6 @@
     </nav>
     <p class="notice">KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다.</p>
     <p>운영 고원규·이진중 · 문의 <a class="link" href="mailto:joseph13ko15@gmail.com">joseph13ko15@gmail.com</a>, <a class="link" href="mailto:untilduck@gmail.com">untilduck@gmail.com</a></p>
-    <p>설명을 마지막으로 고친 날 <time datetime="2026-10-08">2026년 10월 8일</time></p>
   </footer>
 
   <script>
