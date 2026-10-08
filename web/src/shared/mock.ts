@@ -20,8 +20,8 @@ export const COINS: ReadonlyArray<readonly [string, number]> = [
   ['ONDO', 1.42], ['PEPE', 0.0000162], ['WLD', 3.86], ['TIA', 6.18],
 ]
 
-/** 해외 거래소 6곳. */
-export const FX_EXS = ['Binance', 'Bybit', 'Bitget', 'MEXC', 'Gate.io', 'Hyperliquid'] as const
+/** 해외 거래소 7곳 — 스프레드 표의 "비교 해외 거래소" 체크박스 목록이기도 하다(이 목록 밖 이름은 URL 필터에서 버린다). OKX 는 045. */
+export const FX_EXS = ['Binance', 'Bybit', 'Bitget', 'OKX', 'MEXC', 'Gate.io', 'Hyperliquid'] as const
 
 /** 국내 거래소 표시명. */
 export const DOM_EXS = ['업비트', '빗썸'] as const
