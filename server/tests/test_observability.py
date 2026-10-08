@@ -30,6 +30,7 @@ NOLOG_PATHS = {
     "/api/history/candles",
     "/api/flow/netflow",
     "/api/flow/recent",
+    "/api/attention",  # 052 — 화면 영역 통계 비콘
 }
 CANARY_UA = "KimpTrack-Canary/1"
 
@@ -246,6 +247,7 @@ PUBLIC_LOCATIONS = {("=", path) for path in PUBLIC_API} | {
     ("=", "/kimp-history.html"),
     ("=", "/app/kimp-history.html"),
     ("=", "/clarity.js"),
+    ("=", "/attention.js"),  # 052
     ("/app/assets/",),
     ("=", "/app/index.html"),
     ("/app/",),

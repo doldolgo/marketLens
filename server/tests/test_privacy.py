@@ -32,9 +32,10 @@ from tests.test_deploy import (
 PUBLIC = ROOT / "web/public"
 CANONICAL = "https://kimptrack.com/privacy"
 EFFECTIVE = "2026-10-18"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1)
+# 052 — 같은 출처 스크립트 /attention.js 하나('self')와 그 비콘(connect-src 'self'). 세 정적 페이지가 같은 문자열이다
 CSP = (
-    "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
-    "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    "default-src 'none'; connect-src 'self'; img-src 'self'; style-src 'unsafe-inline'; "
+    "script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 # §3.4 — 법 제30조 제1항·시행령 제31조 제1항 순서. 해당 없는 절(민감정보·가명정보 등)은 두지 않는다
 SECTIONS = [
@@ -682,8 +683,8 @@ def test_page_loads_nothing_external_and_scripts_make_no_requests() -> None:
     styles = "".join(re.findall(r"<style\b.*?</style>", html, flags=re.S))
     assert "@import" not in styles and "url(" not in styles
     assert page.scripts, "동의 관리 버튼 스크립트가 없다"
-    # 인라인만 — CSP 의 script-src 가 'unsafe-inline' 뿐이라 같은 출처 파일도 막힌다
-    assert not [src for tag, src in page.srcs if tag == "script"]
+    # 인라인만 — 같은 출처 파일은 052 의 /attention.js 하나뿐(CSP 'self' 는 그 하나를 위해 연다)
+    assert [src for tag, src in page.srcs if tag == "script"] == ["/attention.js"]
     for body in page.scripts:
         for call in NO_CALLS:
             assert call not in body, call

@@ -39,7 +39,11 @@ SFS_CHECK = (["if", "($admin_sfs_ok", "=", "0)"], [(["return", "403"], None)])
 SFS_EXEMPT = {("=", "/api/docs"), ("=", "/api/redoc")}
 # 화면의 10초 폴링 — 기록하지 않는다 (§3.2). 034 의 수집기 관리자 피드 둘·035 의 api 피드 둘도 화면의 폴링이다
 FEEDS = {("=", "/api/admin/aws"), ("=", "/api/admin/alerts")}
-API_FEEDS = {("=", "/svc/api/admin/access"), ("=", "/svc/api/admin/clarity")}
+API_FEEDS = {
+    ("=", "/svc/api/admin/access"),
+    ("=", "/svc/api/admin/clarity"),
+    ("=", "/svc/api/admin/attention"),  # 052 — 화면 영역 이용 통계
+}
 POLLING = (
     {
         ("=", "/api/health"),
@@ -157,6 +161,7 @@ def test_admin_routes_every_api_path_like_before_the_allowlist() -> None:
         "/api/admin/alerts": (COLLECTOR, "/admin/alerts"),
         "/svc/api/admin/access": (API, "/admin/access"),
         "/svc/api/admin/clarity": (API, "/admin/clarity"),
+        "/svc/api/admin/attention": (API, "/admin/attention"),
     }
     for path, target in expected.items():
         assert _forward(path) == target, path
@@ -205,7 +210,11 @@ def test_public_server_has_no_svc_branch_so_api_feeds_are_static_404() -> None:
     """공개 nginx(028)는 그대로 — `/svc/` 위치가 없어 두 경로는 `location /` 의 정적 파일 찾기(없으면 404)다."""
     public = _locations(_public_server())
     assert not [k for k in public if k[-1].startswith("/svc")]
-    for path in ("/svc/api/admin/access", "/svc/api/admin/clarity"):
+    for path in (
+        "/svc/api/admin/access",
+        "/svc/api/admin/clarity",
+        "/svc/api/admin/attention",
+    ):
         assert _route(path) == ("/",), path
         assert not _args(public[("/",)], "proxy_pass")
 

@@ -383,6 +383,8 @@ PUBLIC_API = {
     "/api/history/candles": API,
     "/api/landing": API,
     "/api/ws/spreads": API,
+    # 052 — 화면 영역 이용 통계 비콘(POST 만 — 그 밖의 메서드는 nginx 405)
+    "/api/attention": API,
 }
 PROXY_HEADERS = (
     ["Host", "$http_host"],
@@ -587,11 +589,16 @@ def _web_src_paths() -> set[str]:
 
 
 def _public_html_paths() -> set[str]:
-    """(2) 정적 페이지(랜딩)의 `fetch(`·`new WebSocket(` 첫 인자 따옴표 안 `/api/…` (주석 제외)."""
-    call = re.compile(r"\b(?:fetch|new\s+WebSocket)\(\s*['\"`](/api/" + _TAIL + ")")
+    """(2) 정적 페이지·정적 스크립트(랜딩·검색어 페이지·attention.js — 052)의 `fetch(`·`new WebSocket(`·`sendBeacon(`
+    첫 인자 따옴표 안 `/api/…` (주석 제외)."""
+    call = re.compile(
+        r"\b(?:fetch|new\s+WebSocket|sendBeacon)\(\s*['\"`](/api/" + _TAIL + ")"
+    )
     paths: set[str] = set()
-    for file in sorted((ROOT / "web/public").glob("*.html")):
-        paths |= set(call.findall(_strip_comments(file.read_text("utf-8"), ".html")))
+    public = ROOT / "web/public"
+    for file in sorted([*public.glob("*.html"), *public.glob("*.js")]):
+        text = _strip_comments(file.read_text("utf-8"), file.suffix)
+        paths |= set(call.findall(text))
     return paths
 
 
