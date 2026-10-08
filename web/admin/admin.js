@@ -1,4 +1,4 @@
-// KimpTrack 관리자 화면 v2 스크립트 (스펙 036 — 접속 절의 서버 기록은 042). 빌드 없음 — oxlint·vite 대상이 아니다(landing.html 과 같다).
+// KimpTrack 관리자 화면 v2 스크립트 (스펙 036 — 접속 절의 서버 기록은 042, 화면 이용 절은 053). 빌드 없음 — oxlint·vite 대상이 아니다(landing.html 과 같다).
 // 한 파일이다(§2 — 나누면 로드 순서·전역 이름이 계약이 된다). 순서: 공통 도구 → 요청·세션·주기 → 부분 상태·차트
 // → 개요·수집 → 인프라 → 알림·접속 → 비용·그리기·시작.
 // 보안(§3.8): 서버·방문자가 정한 글자는 textContent 로만 넣고 title 말고는 어떤 속성에도 쓰지 않는다 — 링크가 되지 않게.
@@ -20,6 +20,7 @@ const P = {
   alerts: '/api/admin/alerts',
   access: '/svc/api/admin/access',
   clarity: '/svc/api/admin/clarity',
+  attention: '/svc/api/admin/attention', // 053 — 화면 이용 절이 보이는 동안만(두 묶음 밖)
 };
 const FAST = [P.collector, P.api, P.status, P.collect];
 const SLOW = [P.aws, P.alerts, P.access, P.clarity];
@@ -35,7 +36,9 @@ const okSince = new Set(); // 마지막 만료 신호 뒤 만료 신호 없이 �
 let reloading = false;
 let alertFilter = 'all'; // 알림 필터 — JS 변수에만 (§3.4)
 let picked = '24h'; // 고른 서버 기록 창 (042 §3.2)
-const acc = { flight: null, again: false }; // 떠 있는 접속 호출 하나와 '끝나면 한 번 더'
+// 떠 있는 호출 하나와 '끝나면 한 번 더' — 접속(042 창)·화면 이용(053 기간)이 고른 값으로 부르는 두 경로
+const acc = { path: P.access, flight: null, again: false, after: () => follow() };
+const att = { path: P.attention, flight: null, again: false, after: null, started: 0, timer: 0 };
 
 // --- 공통 도구 ---------------------------------------------------------------------------------
 
@@ -150,10 +153,12 @@ function keep(path, next) {
 // 경로 하나를 부르고 결과를 got 에 둔다. 403·JSON 아님·예상 밖 상태(피드 경로가 없는 404 등)는 사유만 남긴다 —
 // 그 경로가 채우는 칸은 비우고 사유를 적는다(직전 값이 정상으로 읽히지 않게). 돌려주는 값 = 만료 신호였는가
 async function load(path) {
-  // 접속 경로는 늘 고른 창을 붙인다 — 결과에 요청한 창을 남겨, 고른 창으로 요청한 응답만 그린다(042 §3.2)
-  const asked = path === P.access ? picked : undefined;
+  // 접속 경로는 늘 고른 창(042 §3.2), 화면 이용 경로는 고른 기간(053 §3.2)을 붙인다 — 결과에 요청한 값을 남겨,
+  // 고른 값으로 요청한 응답만 그린다
+  const asked = path === P.access ? picked : path === P.attention ? scr.days : undefined;
+  const url = path === P.access ? `${path}?window=${asked}` : path === P.attention ? `${path}?days=${asked}` : path;
   try {
-    const { status, body, text } = await call(asked ? `${path}?window=${asked}` : path);
+    const { status, body, text } = await call(url);
     const fine = status === 200 || (status === 503 && HEALTH.has(path));
     if (status === 403) keep(path, { why: '권한·설정 오류 (403)', asked });
     else if (body === null || !fine) keep(path, { why: `응답 오류 (HTTP ${status})`, asked });
@@ -206,31 +211,32 @@ function settle(signals) {
   if (signals.some(Boolean)) {
     okSince.clear();
     expired();
-  } else if (okSince.size === FAST.length + SLOW.length) {
+  } else if (FAST.concat(SLOW).every((path) => okSince.has(path))) {
     alive();
   }
   $('updated').textContent = clock(Date.now());
   paint();
 }
 
-// 접속 경로 호출(042 §3.2) — 느린 묶음과 창 버튼이 함께 쓴다. 떠 있으면 겹쳐 부르지 않고 끝난 뒤 한 번 더 부른다
-// (그사이 여러 번 눌러도 다음 호출은 하나 — 그때 고른 창). 돌려주는 값 = 만료 신호였는가
-function loadAccess() {
-  if (acc.flight) {
-    acc.again = true;
-    return acc.flight;
+// 고른 값으로 부르는 경로 호출(042 §3.2·053 §3.2) — 접속은 느린 묶음과 창 버튼이, 화면 이용은 5분 주기와 기간 고르기가
+// 함께 쓴다. 떠 있으면 겹쳐 부르지 않고 끝난 뒤 한 번 더 부른다(그사이 여러 번 바꿔도 다음 호출은 하나 — 그때 고른 값).
+// 돌려주는 값 = 만료 신호였는가
+function loadLatest(box) {
+  if (box.flight) {
+    box.again = true;
+    return box.flight;
   }
-  acc.flight = (async () => {
+  box.flight = (async () => {
     let gone = false;
     do {
-      acc.again = false;
-      gone = (await load(P.access)) || gone;
-      follow();
-    } while (acc.again && !reloading);
-    acc.flight = null;
+      box.again = false;
+      gone = (await load(box.path)) || gone;
+      if (box.after) box.after();
+    } while (box.again && !reloading);
+    box.flight = null;
     return gone;
   })();
-  return acc.flight;
+  return box.flight;
 }
 
 // 응답 창이 요청한 창과 다르면(서버가 24시간으로 답했다) 고른 창을 응답 창으로 되돌린다 — 그사이 다른 창을 고르지 않았을 때만
@@ -248,7 +254,7 @@ async function run(loop) {
   loop.busy = true;
   loop.started = Date.now();
   try {
-    settle(await Promise.all(loop.paths.map((path) => (path === P.access ? loadAccess() : load(path)))));
+    settle(await Promise.all(loop.paths.map((path) => (path === P.access ? loadLatest(acc) : load(path)))));
   } finally {
     loop.busy = false;
     schedule(loop);
@@ -1210,7 +1216,7 @@ for (const button of document.querySelectorAll('[data-window]')) {
     if (next === picked || !own(WINDOW_NAME, next) || reloading) return;
     picked = next;
     paint();
-    loadAccess().then((gone) => settle([gone]));
+    loadLatest(acc).then((gone) => settle([gone]));
   });
 }
 
