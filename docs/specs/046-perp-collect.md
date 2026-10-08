@@ -11,14 +11,14 @@
 
 ## 2. 범위
 - 만드는 것: perp 티커 폴링 원천 3개(매초 REST·실패 분류·정체 판정), perp 심볼 목록·펀딩 주기 REST 조회, perp 행 저장소(LiveStore 안의 별도 맵)와 **perp 우주**, 배수 심볼 정규화 공개 함수, 테스트. 라이브러리 추가 없음.
-- 바꾸는 기존 것: 거래소 목록이 현물 5곳(045 뒤 6곳) 뒤에 perp 원천 3개(047 뒤 4개)를 더해 길어진다 — 틱 판정(011)·`/health/collect` 의 `exchanges[]`·`/refresh` 의 `snapshots[]`·관리자 화면(036) 수집 카드·수집 상태 탭(011 §3.8) 카드 수. 001 §3.6 틱 루프의 판정 단계가 perp 원천도 판정한다. 010 은 `raw/exchange=<원천 id>/…` 를 자동으로 갖는다. 025 Slack 알림도 거래소 문자열 키라 자동.
+- 바꾸는 기존 것: 거래소 목록이 현물 5곳(045 뒤 6곳) 뒤에 perp 원천 4개(Hyperliquid 는 047)를 더해 길어진다 — 틱 판정(011)·`/health/collect` 의 `exchanges[]`·`/refresh` 의 `snapshots[]`·관리자 화면(036) 수집 카드·수집 상태 탭(011 §3.8) 카드 수. 001 §3.6 틱 루프의 판정 단계가 perp 원천도 판정한다. 010 은 `raw/exchange=<원천 id>/…` 를 자동으로 갖는다. 025 Slack 알림도 거래소 문자열 키라 자동.
 - 하지 않는 것: 현물 우주·현물 행·김프 틱 행(`{dom, fx, base, fwd, rev}`)·spreads 표 — **전부 그대로**(perp 는 틱 행에 끼지 않는다). 펀딩 이력·갭 표(048·049). 입출금(perp 에 없다). USDC·코인 마진·기간물·토큰화 주식(바이낸스 `TRADIFI_PERPETUAL`)·HIP-3. 깊은 호가(1단계뿐 — 슬리피지 계산 없음). 004 분석 API. 백필.
 
 ## 3. 동작
 
 ### 3.1 perp 행 계약 (048·049 가 복사한다)
 행 = `(source, base)`:
-- `source` — 원천 id, 고정 순서 `binance_perp`·`bybit_perp`·`bitget_perp`·`hyperliquid_perp`(047). 표시명 `Binance`·`Bybit`·`Bitget`·`Hyperliquid`. 모든 목록·판정·카드에서 현물 거래소 전부 **뒤에** 이 순서로 온다.
+- `source` — 원천 id, 고정 순서 `binance_perp`·`bybit_perp`·`bitget_perp`·`hyperliquid_perp`. 표시명 `Binance`·`Bybit`·`Bitget`·`Hyperliquid`. 모든 목록·판정·카드에서 현물 거래소 전부 **뒤에** 이 순서로 온다.
 - `base` — 현물과 같은 코인 이름(배수 접두·접미를 뗀 것, §3.3). `native_symbol` — 원본 심볼(`1000PEPEUSDT`). `multiplier` — 1·1000·10000·1000000 중 하나.
 - `bid`·`ask`·`bid_size`·`ask_size` — 최우선 호가. **가격은 원본 ÷ multiplier, 잔량은 원본 × multiplier**(1코인 단위 — 현물 행과 바로 비교된다). 넷 다 > 0 이고 유한할 때만 갱신한다(§3.4).
 - `mark` — 마크가 ÷ multiplier(아직 없으면 null). `funding_rate` — 현재 펀딩률, **한 주기의 비율**(소수 — `0.0001` 이 0.01%, null 가능). `next_funding_ms` — 다음 정산 시각 epoch ms(null 가능). `funding_interval_h` — 정산 주기(정수 시간, 1·2·4·8, null 가능).
@@ -26,7 +26,7 @@
 원천별 **스트림 상태**는 001 §3.3 과 같은 모양 `{connected, last_message_at, last_error, subscribed, url, connected_since}`(폴링 원천의 뜻 — §3.6). 조회(전체·원천별·단건·원천 순서 목록)는 전부 동기이고 쓰기는 행 1개 단위와 우주 밖 행 일괄 삭제뿐이다. 현물 행 맵과 **분리**된 맵이다 — `(exchange, base)` 조회에 perp 행이 섞이지 않는다.
 
 ### 3.2 perp 우주
-- 매 **10초** 원천 3곳(047 뒤 4곳)의 목록을 REST 로 받는다(병렬·타임아웃 3초·실패는 직전 목록 유지·같은 원인 60초 1줄 — 001 §3.2 와 같다). 1초가 아닌 이유: perp 상장은 국내 상장 따리와 무관하고, 바이낸스 펀딩 주기 조회가 5분 500회 한도를 다른 호출과 나눠 쓴다. `/refresh` 는 이 목록도 그 자리에서 한 번 더 받는다.
+- 매 **10초** 원천 4곳의 목록을 REST 로 받는다(병렬·타임아웃 3초·실패는 직전 목록 유지·같은 원인 60초 1줄 — 001 §3.2 와 같다). 1초가 아닌 이유: perp 상장은 국내 상장 따리와 무관하고, 바이낸스 펀딩 주기 조회가 5분 500회 한도를 다른 호출과 나눠 쓴다. `/refresh` 는 이 목록도 그 자리에서 한 번 더 받는다.
 - 각 원천은 core 계약 하나를 구현한다 — `id` / `refresh(client) -> int`(목록·주기 갱신, 나간 호출 수) / `bases() -> set[str]`(정규화한 base) / `set_universe(bases)`(perp 우주 전체 — 자기 맵에 없는 base 는 무시, 매초 부르며 같으면 무동작). **본문이 직전과 같으면 파싱하지 않는다**(001 §3.2 결정 — 비교용 바이트는 바이낸스 `serverTime`·바이빗 꼬리 `time`·비트겟 `requestTime` 을 뺀 본문).
 - **perp 우주** = `{base : 원천 2곳 이상에 있다}` ∪ `(김프 우주 ∩ {base : 원천 1곳 이상에 있다})` (2026-10-08 사람 결정 — 선선갭은 쌍이 필요하고 현선갭은 국내 상장 코인의 현물 행이 있으면 된다). 김프 우주(001 §3.2)는 매초 확정되므로 perp 우주도 **매초** 다시 확정해 `set_universe` 를 넘긴다 — 목록이 10초마다 바뀌어도 우주 계산은 1초다. 현물 우주와 현물 구독은 이 스펙으로 바뀌지 않는다.
 - 저장 규칙: 우주 밖 base 의 perp 행은 넣지 않고, 빠진 base 는 그 초에 지운다. 한 원천에서 같은 base 로 정규화되는 심볼이 둘이면(`PEPEUSDT`·`1000PEPEUSDT`) multiplier 1 을, 없으면 목록 순서의 첫 것을 쓴다.
@@ -59,7 +59,7 @@
 
 ### 3.8 정체 판정·수집 상태 (매 틱)
 - 폴링 원천(세 곳 모두)은 샤드가 없다 — 첫 회차 결과 전 = 판정 없음, 마지막 회차가 실패 = 그 분류(`kind`·`status_code`, `url` = 실패한 티커 REST URL), 마지막 성공이 **30초** 넘게 전 = `stale_stream`(`"Bybit perp 티커 정체: 30초 이상 성공한 조회 없음"` — 바이낸스·비트겟도 같은 꼴), 그 밖 = 성공.
-- 001 §3.6-5 의 판정 단계가 현물 거래소 뒤에 perp 원천을 같은 추적기(011)로 판정한다 — `collect_fail` 의 `exchange` 태그 값은 원천 id. `/health/collect` 의 `exchanges[]` 는 현물 전부 뒤에 `binance_perp bybit_perp bitget_perp`(047 뒤 `hyperliquid_perp`) 순서, `markets` = 구독 심볼 수, 그 밖 필드는 011 그대로. `/refresh` 의 `snapshots[]` 도 같은 순서. 수집 상태 탭(011 §3.8)은 카드 수·타임라인 트랙 수가 `exchanges` 길이를 따른다(3열 격자는 그대로 — 줄이 늘어난다), 표시명은 `Binance perp`·`Bybit perp`·`Bitget perp`. 관리자 화면(036) 수집 카드도 같은 목록.
+- 001 §3.6-5 의 판정 단계가 현물 거래소 뒤에 perp 원천을 같은 추적기(011)로 판정한다 — `collect_fail` 의 `exchange` 태그 값은 원천 id. `/health/collect` 의 `exchanges[]` 는 현물 전부 뒤에 `binance_perp bybit_perp bitget_perp hyperliquid_perp` 순서, `markets` = 구독 심볼 수, 그 밖 필드는 011 그대로. `/refresh` 의 `snapshots[]` 도 같은 순서. 수집 상태 탭(011 §3.8)은 카드 수·타임라인 트랙 수가 `exchanges` 길이를 따른다(3열 격자는 그대로 — 줄이 늘어난다), 표시명은 `Binance perp`·`Bybit perp`·`Bitget perp`·`Hyperliquid`(047). 관리자 화면(036) 수집 카드도 같은 목록.
 
 ## 4. 검증
 네트워크 없음 — 가짜 소켓·가짜 REST·가짜 원문 싱크(001·012·019·020 의 fakes 재사용).
