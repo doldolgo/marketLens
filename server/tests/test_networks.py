@@ -494,6 +494,170 @@ def test_bare_avax_network_of_avax_itself_stays_unknown() -> None:
         assert match_network(net("AVAX", "AVAX"), foreign, "AVAX")[0] == "unknown"
 
 
+# 갈래 표 — Avalanche(C·X)·Conflux(Core·eSpace)는 거래소마다 같은 코드를 다른 갈래에 쓴다 (§3.6, 2026-10-09)
+
+_BINANCE_AVAX = [
+    ("BSC", "BNB Smart Chain (BEP20)"),
+    ("AVAX", "Avalanche"),  # X-Chain
+    ("AVAXC", "AVAX C-Chain"),
+]
+_BINANCE_CFX = [
+    ("BSC", "BNB Smart Chain (BEP20)"),
+    ("CFX", "CFX"),  # Core
+    ("CFXEVM", "CFX eSpace"),
+]
+_BYBIT_AVAX = [("CAVAX", "CAVAX"), ("XAVAX", "AVAX")]  # C-Chain, X-Chain
+
+
+def test_upbit_c_chain_picks_binance_c_chain_not_the_x_chain_code_match() -> None:
+    # 업비트 `AVAX` 는 C-Chain, 바이낸스 `AVAX "Avalanche"` 는 X-Chain — 코드가 같아도 이름으로 맞춘다
+    fx = [net(*f) for f in _BINANCE_AVAX]
+    verdict, matched = match_network(net("AVAX", "Avalanche C-Chain"), fx, "AVAX")
+    assert verdict == "matched"
+    assert matched is fx[2]
+
+
+def test_upbit_espace_picks_binance_espace_not_the_core_code_match() -> None:
+    fx = [net(*f) for f in _BINANCE_CFX]
+    verdict, matched = match_network(net("CFX", "Conflux eSpace"), fx, "CFX")
+    assert verdict == "matched"
+    assert matched is fx[2]
+
+
+def test_upbit_espace_vs_bitget_bare_cfx_is_unknown() -> None:
+    # 비트겟 `CFX` 는 갈래를 말하지 않는다(탐색기로는 Core) — 코드 일치만으로 eSpace 와 맞추지 않는다
+    verdict, matched = match_network(
+        net("CFX", "Conflux eSpace"), [net("CFX", "CFX")], "CFX"
+    )
+    assert verdict == "unknown"
+    assert matched is None
+
+
+@pytest.mark.parametrize(
+    ("dom", "base"),
+    [
+        (("AVAX", "Avalanche C-Chain"), "AVAX"),  # 업비트
+        (("AVAX", "Avalanche C-Chain"), None),
+        (("AVAX", "AVAX"), "JOE"),  # 빗썸 토큰의 AVAX 망 = C-Chain (AVAX 토큰 규칙)
+    ],
+)
+def test_c_chain_never_matches_x_chain_by_code_alone(
+    dom: tuple[str, str], base: str | None
+) -> None:
+    # 해외에 X-Chain `AVAX "Avalanche"` 하나뿐이면 코드가 같아도 unknown
+    verdict, matched = match_network(net(*dom), [net("AVAX", "Avalanche")], base)
+    assert verdict == "unknown"
+    assert matched is None
+
+
+@pytest.mark.parametrize(
+    "foreign", [_BINANCE_AVAX, _BYBIT_AVAX], ids=["binance", "bybit"]
+)
+@pytest.mark.parametrize("base", ["AVAX", None])
+def test_bithumb_bare_avax_of_avax_itself_with_two_chains_is_unknown(
+    foreign: list[tuple[str, str]], base: str | None
+) -> None:
+    # 빗썸 AVAX 코인의 `AVAX` 는 C·X 중 어느 쪽인지 모른다 — 해외가 둘 다 주면 코드·이름이 같은 X-Chain 과 맞추지 않는다
+    verdict, matched = match_network(
+        net("AVAX", "AVAX"), [net(*f) for f in foreign], base
+    )
+    assert verdict == "unknown"
+    assert matched is None
+
+
+def test_bithumb_bare_cfx_vs_binance_core_and_espace_is_unknown() -> None:
+    verdict, matched = match_network(
+        net("CFX", "CFX"), [net(*f) for f in _BINANCE_CFX], "CFX"
+    )
+    assert verdict == "unknown"
+    assert matched is None
+
+
+@pytest.mark.parametrize(
+    ("dom", "foreign", "expected"),
+    [
+        # 빗썸 맨 코드 = 해외 망 하나 — 흔한 경우는 코드 일치 그대로 (빗썸 CFX ↔ 비트겟 CFX 는 §7 빚)
+        (("CFX", "CFX"), [("CFX", "CFX")], "CFX"),
+        (("KAVA", "KAVA"), [("KAVA", "KAVA")], "KAVA"),
+        (("XRP", "XRP"), [("XRP", "XRP Ledger"), ("ETH", "Ethereum (ERC20)")], "XRP"),
+        # 갈래 표 밖 — 같은 토큰의 망이 여럿이어도 코드 일치 그대로 (SegWit·FEVM·EVM 갈래는 표에 없다)
+        (
+            ("BTC", "BTC"),
+            [
+                ("BSC", "BNB Smart Chain (BEP20)"),
+                ("BTC", "Bitcoin"),
+                ("SEGWITBTC", "BTC (SegWit)"),
+                ("LIGHTNING", "Lightning Network"),
+            ],
+            "BTC",
+        ),
+        (("FIL", "FIL"), [("FIL", "FIL"), ("FILEVM", "FILEVM")], "FIL"),
+        (("KAVA", "Kava"), [("KAVA", "KAVA"), ("KAVAEVM", "KAVAEVM")], "KAVA"),
+    ],
+)
+def test_bare_code_equal_to_a_foreign_network_still_matches(
+    dom: tuple[str, str], foreign: list[tuple[str, str]], expected: str
+) -> None:
+    verdict, matched = match_network(net(*dom), [net(*f) for f in foreign], dom[0])
+    assert verdict == "matched"
+    assert matched is not None and matched.code == expected
+
+
+@pytest.mark.parametrize(
+    ("dom", "fx"),
+    [
+        # 이름이 서로 달라도 코드 일치는 그대로 — 해외 이름이 코드뿐인 비트겟·바이빗 (2026-10-09 원문)
+        (("XTZ", "Tezos"), ("XTZ", "XTZ")),
+        (("ATOM", "Cosmos Hub"), ("ATOM", "ATOM")),
+        (("ICP", "Internet Computer Protocol"), ("ICP", "ICP")),
+        (("TAO", "TAO"), ("TAO", "Bittensor")),
+        # 흔한 망 — 갈래 표가 건드리지 않는다
+        (("BASE", "Base"), ("BASE", "Base")),
+        (("ETH", "ETH"), ("ERC20", "ERC20")),
+        (("ETH", "Ethereum"), ("ETH", "Ethereum (ERC20)")),
+        (("BSC", "BSC"), ("BEP20", "BEP20")),
+        (("BSC", "BNB Smart Chain"), ("BSC", "BNB Smart Chain (BEP20)")),
+        (("TRX", "TRX"), ("TRC20", "TRC20")),
+        (("TRX", "Tron"), ("TRX", "Tron (TRC20)")),
+    ],
+)
+def test_common_networks_still_match_after_family_rule(
+    dom: tuple[str, str], fx: tuple[str, str]
+) -> None:
+    verdict, matched = match_network(net(*dom), [net(*fx)], "TEST")
+    assert verdict == "matched"
+    assert matched is not None and matched.code == fx[0]
+
+
+def test_wallet_fields_upbit_espace_takes_binance_espace_withdrawal_stop() -> None:
+    # 실사례(2026-10-09 공개 목록) — 바이낸스 eSpace 출금이 막혀 있는데 Core 와 맞춰 출금 가능으로 보이던 행
+    dom = _Row(True, True, [net("CFX", "Conflux eSpace")], base="CFX")
+    fx = _Row(
+        True,
+        True,
+        [
+            net("BSC", "BNB Smart Chain (BEP20)"),
+            net("CFX", "CFX"),
+            net("CFXEVM", "CFX eSpace", wd=False),
+        ],
+        base="CFX",
+    )
+    assert wallet_fields(dom, fx) == (
+        "Conflux eSpace",
+        "CFX eSpace",
+        True,
+        True,
+        True,
+        False,
+    )
+
+
+def test_wallet_fields_bithumb_bare_avax_vs_binance_is_null_null() -> None:
+    dom = _Row(True, True, [net("AVAX", "AVAX")], base="AVAX")
+    fx = _Row(True, True, [net(*f) for f in _BINANCE_AVAX], base="AVAX")
+    assert wallet_fields(dom, fx) == ("AVAX", None, True, True, None, None)
+
+
 def test_pick_domestic_passes_the_coin_to_the_avax_rule() -> None:
     foreign = [net("AVAXC-CHAIN", "AVAXC-Chain")]
     chosen, verdict, matched = pick_domestic([net("AVAX", "AVAX")], foreign, "JOE")

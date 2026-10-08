@@ -135,8 +135,12 @@ _EQUIV_CLASSES: tuple[tuple[frozenset[str], ...], ...] = (
     (frozenset({"zil"}), frozenset({"zilliqa"})),
     # 업비트 "Cosmos Hub" ↔ OKX "Cosmos"
     (frozenset({"cosmos", "hub"}), frozenset({"cosmos"})),
-    # 업비트 "Conflux eSpace" ↔ OKX "CFX_EVM" — Conflux Core("Conflux")와는 다른 망이라 묶지 않는다
-    (frozenset({"conflux", "espace"}), frozenset({"cfx", "evm"})),
+    # 업비트 "Conflux eSpace" ↔ OKX "CFX_EVM" ↔ 바이낸스 "CFX eSpace" — Conflux Core("Conflux"·"CFX")와는 다른 망이라 묶지 않는다
+    (
+        frozenset({"conflux", "espace"}),
+        frozenset({"cfx", "evm"}),
+        frozenset({"cfx", "espace"}),
+    ),
 )
 # 토큰 집합 → 묶음 번호 (조회용)
 _EQUIV_INDEX: dict[frozenset[str], int] = {
@@ -165,11 +169,40 @@ _L2_CODES: frozenset[frozenset[str]] = frozenset(
 )
 
 # AVAX 토큰 규칙 (§3.6, 2026-10-09) — 이름이 AVAX 뿐인 국내 망(빗썸 `AVAX`)은 코인이 AVAX 가 아니면 C-Chain 으로 본다.
-# 거래소가 다루는 Avalanche 위 토큰(JOE·NXPC)은 C-Chain 에 있다. AVAX 코인 자체는 X-Chain 일 수 있어 이 규칙을 쓰지 않는다.
-# 규칙 1(코드 일치)은 이 규칙보다 먼저다 — 바이낸스 `AVAX "Avalanche"`·바이빗 `XAVAX "AVAX"`(둘 다 X-Chain)가
-# AVAX 코인과 규칙 1·2 로 맞는 것은 남은 빚이다 (§7)
+# 거래소가 다루는 Avalanche 위 토큰(JOE·NXPC)은 C-Chain 에 있다. AVAX 코인 자체는 X-Chain 일 수 있어 이 규칙을 쓰지 않는다
 _AVAX_BARE = frozenset({"avalanche"})
 _AVAX_C_CHAIN = frozenset({"avalanche", "c"})
+
+
+class _Family(NamedTuple):
+    """갈래 표의 한 줄 — 코드 하나를 여러 체인이 나눠 쓰는 코인 (§3.6, 2026-10-09)."""
+
+    tokens: frozenset[str]  # 이 토큰이 하나라도 든 망 이름 = 이 계열
+    # 갈래를 말하지 않는 이름 — 계열의 나머지 이름은 갈래를 못 박은 이름
+    bare: frozenset[frozenset[str]]
+
+
+# 갈래 표 — 거래소마다 같은 코드를 다른 갈래에 쓴다 (S3 원문·공개 목록 2026-10-09):
+# 업비트 `AVAX` = C-Chain 인데 바이낸스 `AVAX "Avalanche"`·바이빗 `XAVAX "AVAX"` = X-Chain,
+# 업비트 `CFX` = eSpace 인데 바이낸스·비트겟 `CFX` = Core. 그래서 이 계열에선 코드 일치를 믿지 않는다
+_FAMILIES: tuple[_Family, ...] = (
+    _Family(
+        frozenset({"avalanche", "avalanchec", "cavax"}),
+        frozenset({_AVAX_BARE}),
+    ),
+    _Family(
+        frozenset({"conflux", "cfx"}),
+        frozenset({frozenset({"conflux"}), frozenset({"cfx"})}),
+    ),
+)
+
+
+def _family(tokens: frozenset[str]) -> _Family | None:
+    for fam in _FAMILIES:
+        if tokens & fam.tokens:
+            return fam
+    return None
+
 
 _PAREN_RE = re.compile(r"\([^)]*\)")
 _SPLIT_RE = re.compile(r"[^0-9a-z]+")
@@ -202,20 +235,31 @@ def match_network(
     if not foreign:
         return "unknown", None
 
+    dom_tokens = normalize_name(dom.name)
+    # AVAX 토큰 규칙 — 이름이 AVAX 뿐인 국내 망에 AVAX 가 아닌 코인이면 C-Chain 으로 본다
+    if dom_tokens == _AVAX_BARE and base is not None and base.upper() != "AVAX":
+        dom_tokens = _AVAX_C_CHAIN
+
+    # 갈래 표 — 국내 망이 갈래를 나눠 쓰는 계열(Avalanche·Conflux)이면 코드 일치를 믿지 않는다
+    family = _family(dom_tokens)
+    # 갈래를 못 박은 이름(`Avalanche C-Chain`·`Conflux eSpace`)은 이름으로만 맞춘다
+    branch = family is not None and dom_tokens not in family.bare
+    if family is not None and not branch:
+        # 갈래를 말하지 않는 이름(빗썸 `AVAX`·`CFX`)인데 해외가 같은 계열 망을 둘 이상 주면 어느 쪽인지 모른다
+        same_family = sum(1 for f in foreign if normalize_name(f.name) & family.tokens)
+        if same_family >= 2:
+            return "unknown", None
+
     # 1. 코드 대문자 일치. 국내 코드가 비면 건너뛴다.
-    if dom.code:
+    if dom.code and not branch:
         for f in foreign:
             if f.code and f.code == dom.code:
                 return "matched", f
 
-    dom_tokens = normalize_name(dom.name)
     # 국내 이름이 전부 불용어(예 Mainnet)면 정보가 없다 — 빈 집합끼리의 "완전 일치"는
     # 아무 망이나 맞다는 뜻이 되고, absent 라고 말할 근거도 없으니 unknown (§3.6-2)
     if not dom_tokens:
         return "unknown", None
-    # AVAX 토큰 규칙 — 이름이 AVAX 뿐인 국내 망에 AVAX 가 아닌 코인이면 C-Chain 으로 본다
-    if dom_tokens == _AVAX_BARE and base is not None and base.upper() != "AVAX":
-        dom_tokens = _AVAX_C_CHAIN
     foreign_tokens = [(f, normalize_name(f.name)) for f in foreign]
 
     # 2. 토큰 집합 완전 일치
@@ -234,10 +278,13 @@ def match_network(
             return "matched", f
 
     # 4. 못 찾음 — 토큰이 하나라도 겹치거나 길이 3+ 토큰의 접두사 관계(enj↔enjin)면 unknown.
-    #    빗썸 L2 코드는 모체인 토큰을 빼고 본다 — 모체인만 겹치면 다른 망(absent)이다
+    #    빗썸 L2 코드는 모체인 토큰을 빼고 본다 — 모체인만 겹치면 다른 망(absent)이다.
+    #    갈래를 못 박은 국내 이름은 같은 계열 망이 하나라도 있으면 unknown (그 망이 어느 갈래인지 모른다)
     probe = dom_tokens - _PARENT_TOKENS if dom_tokens in _L2_CODES else dom_tokens
     for _, ft in foreign_tokens:
         if probe & ft:
+            return "unknown", None
+        if branch and family is not None and ft & family.tokens:
             return "unknown", None
         for a in probe:
             for b in ft:
