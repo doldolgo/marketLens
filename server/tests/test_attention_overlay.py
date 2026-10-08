@@ -196,7 +196,10 @@ def test_overlay_needs_both_the_flag_and_a_frame_and_never_counts() -> None:
 
 def test_presses_are_stopped_before_the_page_sees_them() -> None:
     """§3.4 — window 캡처 단계의 click·auxclick·submit·dblclick 이 기본 동작과 전파를 모두 막는다."""
-    got = _one(areas=AREAS, steps=["press|click", "press|auxclick", "press|submit", "press|dblclick"])
+    got = _one(
+        areas=AREAS,
+        steps=["press|click", "press|auxclick", "press|submit", "press|dblclick"],
+    )
     assert got["blocked"] == {
         name: [True, True] for name in ("click", "auxclick", "submit", "dblclick")
     }
@@ -220,7 +223,12 @@ def test_ready_names_the_sized_areas_and_is_sent_again_when_they_change() -> Non
     )
     assert [p["origin"] for p in got["posted"]] == [ADMIN, ADMIN]
     assert [p["data"] for p in got["posted"]] == [
-        {"type": "kt-attention-ready", "v": 1, "page": "app-history", "areas": ["top", "hero"]},
+        {
+            "type": "kt-attention-ready",
+            "v": 1,
+            "page": "app-history",
+            "areas": ["top", "hero"],
+        },
         {
             "type": "kt-attention-ready",
             "v": 1,
@@ -271,9 +279,14 @@ def test_boxes_cover_each_sized_area_with_level_font_sizes() -> None:
             "80px",
         )
     assert boxes[0]["tag"] == "기록 없음"
-    assert boxes[0]["border"].startswith("2px dashed") and boxes[0]["fill"] == "transparent"
+    assert (
+        boxes[0]["border"].startswith("2px dashed")
+        and boxes[0]["fill"] == "transparent"
+    )
     assert boxes[5]["tag"] == "#1 · 평균 3.2초 · 도달 64% · 클릭 12.5"
-    assert boxes[5]["border"].startswith("4px solid") and boxes[5]["fill"].endswith(",.5)")
+    assert boxes[5]["border"].startswith("4px solid") and boxes[5]["fill"].endswith(
+        ",.5)"
+    )
     assert boxes[1]["fill"].endswith(",.18)")
     # 값이 오기 전에는 그리지 않는다
     assert _one(areas=areas, steps=["flush"])["layer"] is None
@@ -295,7 +308,10 @@ def test_low_reach_hatches_small_samples_say_so_and_tags_follow_the_scroll() -> 
         ],
     )
     top, hero = got["boxes"]
-    assert hero["hatch"].startswith("repeating-linear-gradient(") and "kt-ov-low" in hero["cls"]
+    assert (
+        hero["hatch"].startswith("repeating-linear-gradient(")
+        and "kt-ov-low" in hero["cls"]
+    )
     assert top["hatch"] == "none"
     assert hero["tag"].endswith(" · 표본 적음")
     assert top["tag"] == "기록 없음 · 표본 적음"

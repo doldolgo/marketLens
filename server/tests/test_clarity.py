@@ -365,7 +365,9 @@ def test_admin_overlay_frame_gets_neither_clarity_nor_the_modal() -> None:
     없다(동의한 방문자도). 둘 중 하나만이면 평소대로 동의 창이 뜬다."""
     for ls in ({}, ON):
         for path in ("/", "/app/"):
-            got = _one(ls=ls, path=path, search="?kt-overlay=1", framed=True, steps=["ready"])["last"]
+            got = _one(
+                ls=ls, path=path, search="?kt-overlay=1", framed=True, steps=["ready"]
+            )["last"]
             assert (
                 got["strip"],
                 got["queue"],
