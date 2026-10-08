@@ -274,7 +274,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     tags: head.filter((e) => e.tag === 'script').map((e) => [e.src, e.async]),
     style: head.filter((e) => e.tag === 'style').length, fired, reloads, stopped, capture,
     inert: page.map((e) => !!e.inert), html: { ...document.documentElement.style },
-    focused: strip() ? strip().querySelector('.kt-c-body').focused : 0,
+    focused: strip() ? strip().querySelector('.kt-c-box').focused : 0,
     forgot: cookies.length > 0 && !session.has('_cltk'), cookies, listens: 'storage' in win || 'pageshow' in win,
   })
   const first = JSON.parse(JSON.stringify(snap()))
@@ -363,7 +363,7 @@ def test_undecided_visitor_gets_the_modal_after_the_document_is_parsed() -> None
             and strip["aria-modal"] == "true"
             and strip["aria-label"] == "화면 분석 동의"
         ), ls
-        # 모달 — 뒤 페이지의 형제 요소는 모두 inert, 문서 스크롤은 멈추고, 초점은 창 안 글 영역으로 한 번
+        # 모달 — 뒤 페이지의 형제 요소는 모두 inert, 문서 스크롤은 멈추고, 초점은 카드로 한 번
         assert got["first"]["inert"] == [False, False], ls
         assert (
             got["last"]["inert"],
