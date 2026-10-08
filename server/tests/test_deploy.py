@@ -378,6 +378,8 @@ PUBLIC_API = {
     "/api/health": COLLECTOR,
     "/api/health/collect": COLLECTOR,
     "/api/history/events": COLLECTOR,
+    "/api/flow/netflow": COLLECTOR,
+    "/api/flow/recent": COLLECTOR,
     "/api/history/candles": API,
     "/api/landing": API,
     "/api/ws/spreads": API,

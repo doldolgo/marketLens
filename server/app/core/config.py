@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     access_log_dir: str | None = None
     # Clarity Data Export 토큰(035) — 사람이 serve 의 server/.env 에 넣는 비밀. 비면 Clarity 부분은 unconfigured·호출 0
     clarity_api_token: str | None = None
+    # 이더리움 노드 주소 둘(050 §3.4) — WS 는 Transfer 로그·newHeads 구독, HTTP 는 공백 재생·블록 조회.
+    # **둘 다 있어야** 감지기를 켠다 — 하나라도 비면 기동 때 경고 1줄, 감지기 없이 뜬다(로컬·테스트 기본)
+    eth_ws_url: str | None = None
+    eth_http_url: str | None = None
 
     @field_validator("s3_region", mode="before")
     @classmethod

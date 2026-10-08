@@ -133,6 +133,7 @@ mock 데이터는 전부 문자열 시드 기반 결정론적 난수로 만든�
 011 §3.8 로 대체.
 
 ### 3.10 입출금 레이더 탭 (mock, 시현용)
+(050 이 실데이터로 교체 — 이 절은 2026-10-08 까지의 mock 기록)
 - 데이터: 주소 15개(id, 라벨, 취급 코인, 이용 거래소). 라벨 예: Wintermute, Jump Trading, Cumberland, GSR Markets, `Bybit 출금`, `Upbit 입금집계`, 개인지갑, Unknown. 거래소는 업비트·빗썸 + 해외 6곳.
 - 주소당 2~4행 → 약 40행. 행 = `{주소, 라벨, 축약(앞6…뒤4), 코인, 거래소, 방향, usd, 수량, 상태, age}`. 전체 age 오름차순.
   - 방향 in/out 비율 6:4. usd $25k~$17M(100달러 단위), 5.5% 는 usd 표시만 null(수량은 감춰진 금액으로 계산). 수량 = usd/코인 가격. age 9s~4.7h. 코인 가격표 9종(BTC ETH XRP SOL DOGE TRX ADA LINK AVAX, §3.6 기준가).

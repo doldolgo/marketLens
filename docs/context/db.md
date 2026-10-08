@@ -13,6 +13,7 @@
 - **dw_fail** — 입출금 조회 실패 관측. tag `exchange`, field `v`=1, time = 틱 시각. 한 점 = (exchange, time). 읽는 HTTP 엔드포인트 없음 — 사람이 Influx UI 에서 본다.
 - **collect_fail** — 수집 실패 구간 1건(스펙 011 §3.4). tag `exchange`(현물 `upbit`·`bithumb`·`binance`·`bybit`·`bitget` + perp 원천 `binance_perp`·`bybit_perp`·`bitget_perp`, 046)·`kind`, time = `started_at`(초), field `count`(int)·`last_failed_ts`(int 초)·`status_code`(int, 없으면 0)·`message`(string)·`url`(string)·`retry_after_sec`(int, 없으면 0)·`ended_ts`(int 초, 닫힐 때만). 한 점 = (exchange, kind, started_at). 열 때 쓰고 닫을 때 같은 키로 덮어써 필드를 합친다.
 - **premium_event** — 김프/역프 사건 1건(스펙 013 §3.3). tag `dom`·`fx`·`base`·`dir`(kimp|reverse), time = `start_ts`(초), field `end_ts`(int 초, **진행 중이면 0**)·`duration_seconds`(int, 진행 중 0)·`max_percent`(float)·`max_ts`(int 초)·`last_ts`(int 초)·`samples`(int)·`enter_percent`(float 1.0)·`exit_percent`(float 0.5)·`net_dom`·`net_fx`(string, `-` = 없음 — 옛 점의 빈 문자열도 없음으로 읽는다, 배포 전 점엔 없음 — 024). 한 점 = (dom, fx, base, dir, start_ts). 기준값을 점에 같이 남기는 것은 나중에 기준이 바뀌어도 과거 사건의 의미가 남게 하기 위해서다. 매초 쓰지 않는다 — 열린 지 60초를 넘긴 순간, 열린 채 60초마다, 닫힐 때 같은 키로 덮어쓴다.
+- **chain_flow** — 업비트 이더리움 ERC-20 입출금 전송 1건(스펙 050 §3.5). tag `exchange`(upbit)·`network`(eth)·`dir`(in|out)·`symbol`, time = **블록 시각 초 × 10⁹ + log index(나노초)** — 같은 블록·코인·방향에 전송 여러 건이라 초로는 겹친다, field `amount`(float)·`counterparty`(string)·`addr`(string — 입금이면 입금주소, 출금이면 핫월렛)·`tx_hash`(string)·`block`(int)·`log_index`(int)·`removed`(bool — 리오그로 되돌린 점, 조회는 뺀다). 유일키 = (tag 넷, time). 기본 버킷, 하루 약 6,000 점.
 
 - **candle** — 봉 1개(스펙 014 §3.4). 다섯 계층 버킷 `candles_1m`·`candles_5m`·`candles_1h`·`candles_4h`·`candles_1d` 모두 같은 모양. tag `dom`·`fx`·`base`, time = 창 시작(초, **KST 벽시계 정렬** `(ts + 32400) // W * W − 32400` — 4h·1d 가 UTC 정렬과 다르다). field `fwd_o fwd_h fwd_l fwd_c rev_o rev_h rev_l rev_c`(float %, 원값)·`krw`(float, 국내 종가 원)·`usdt`(float, 해외 종가)·`rate`(float, USDT 중간값 원)·`dom_dep dom_wd fx_dep fx_wd`(int: 1 가능·0 불가·−1 모름)·`blocked_fwd_sec blocked_rev_sec`(int, 창 길이 이하)·`samples`(int, 창에 든 틱 수)·`net_dom`·`net_fx`(string, `-` = 없음 — 옛 점의 빈 문자열도 없음으로 읽는다, 배포 전 점엔 없음 — 024). `dom_dep dom_wd fx_dep fx_wd` 는 006 §3.7 판정값이다. 유일키 = (버킷, dom, fx, base, 창 시작). 1m 하루 ≈ 70만 점.
 
@@ -30,6 +31,8 @@
 - 키 **`admin:clarity`**(035) — 문자열 JSON `{attemptAt, state, code, successAt, values}`(시각은 epoch ms — 마지막 Clarity Data Export 시도의 시각·결과(`state`·`code`)와 마지막 성공의 시각·값(`numOfDays`·`traffic`·`summary`·`countries`·`metrics`, 주소는 쿼리·해시를 뗀 뒤 — 대시보드 주소는 `?tab=<id>` 만, 040)), 만료 없음. 쓰는 쪽·읽는 쪽 모두 api 의 `/admin/clarity`(요청마다 읽고, 4시간이 지났을 때만 불러 쓴다 — 재시작이 하루 10회 한도를 쓰지 않게). 값은 마지막 성공에서 7일이 지나면 버린다(시도 시각·결과는 남긴다 — 버림은 요청 때). 지우면 다음 요청이 바로 부른다 — 프로세스마다 24시간에 한 번, 그 밖에는 api 가 메모리 기록으로 다시 쓴다(040, 런북 `clarity.md`). 토큰은 들어 있지 않다.
 - 키 **`admin:clarity:pages`**(040) — 같은 모양의 문자열 JSON, 값은 `numOfDays`(3)·`rowsIn`·`rowLimitHit`·`groups`(페이지 종류×기기 칸 40개 이하 — 주소 없음), 만료 없음. 쓰는 쪽·읽는 쪽 모두 api 의 `/admin/clarity`(마지막 시도에서 12시간 — 기본의 마지막 시도가 401·403·429 면 미룬다). 7일 버림·지우기는 `admin:clarity` 와 같다.
 - 키 **`collect:heartbeat`**(025) — 값 = 마지막 틱 시각(epoch ms 문자열), TTL 30초. 쓰는 쪽 수집(매 틱 끝, 직전 쓰기가 안 끝났으면 건너뜀), 읽는 쪽 api 의 `/health`. 만료 = 수집이 30초 넘게 틱을 못 만듦(또는 죽음).
+- 키 **`flow:eth:last_block`**(050) — 마지막으로 처리한 이더리움 블록 번호 문자열, 만료 없음. 쓰는 쪽 수집의 전송 감지기(블록마다), 읽는 쪽 같은 감지기의 (재)연결 직후 공백 재생(7,200블록까지)
+- 집합 **`flow:eth:deposit_addrs`**·**`flow:eth:hot_wallets`**·**`flow:eth:internal`**(050) — 씨앗 CSV 에 더한 주소(소문자), 만료 없음. 쓰는 쪽 감지기(가스 지갑 수신자·sweep 목적지·내부 이동 목적지를 발견 즉시), 읽는 쪽 감지기 기동 시 씨앗과 합침
 - env `REDIS_URL`(기본 `redis://localhost:6379/0`, compose 안에서는 `redis://redis:6379/0` — server·api 둘 다). Redis 가 없어도 앱은 뜬다 — 인계된 틱은 버려지고(경고 로그) 원문은 S3 에 있어 재생 가능하다.
 
 ## S3 원문 아카이브
@@ -44,7 +47,7 @@
 - 호가 자체는 어디에도 가공 저장하지 않는다 — 원문은 S3 에, 김프 원값은 Influx 에 있다. 재기동하면 스트림 스냅샷으로 수 초 안에 복구된다.
 
 ## 시각 단위
-- Influx time 은 ns 지만 기록 정밀도는 **초**. 틱 `ts` 는 epoch 초. API 응답의 `*Ts` 는 epoch 초, `fetchedAt`·`updatedAt` 은 epoch ms. 원문 아카이브 `receivedAt` 은 epoch ms(서버 시각 — 거래소 시각은 `raw` 안에 있다).
+- Influx time 은 ns 지만 기록 정밀도는 **초** — `chain_flow` 만 나노초(050 §3.5). 틱 `ts` 는 epoch 초. API 응답의 `*Ts` 는 epoch 초, `fetchedAt`·`updatedAt` 은 epoch ms. 원문 아카이브 `receivedAt` 은 epoch ms(서버 시각 — 거래소 시각은 `raw` 안에 있다).
 
 ## 보존
 - Influx bucket retention 은 **무제한**. `dw_fail` 의 "최근 24시간" 은 쿼리 range(-24h) 로 처리한다 — retention 을 걸면 `premium` 까지 지워진다. 봉 계층은 버킷 retention 이 유통기한이다(1m 7일·5m 30일·1h 90일·4h 365일·1d 무제한). 초 단위 `premium` 은 아직 무제한.
@@ -52,6 +55,7 @@
 
 ## 쓰는 쪽
 - 틱 루프(001, 매초): 틱 생성 → LiveStore 슬롯 → 직전 틱을 009 인계기로.
+- 전송 감지기(050, 블록마다 약 12초): 이더리움 WS 로그 → 판정 → `chain_flow` 줄을 블록 단위로 1회(ns). 실패는 미전송 목록(상한 10,000)에 두고 다음 블록 회차에 같이.
 - flusher(009, 60초): Redis 전량 → `premium`(조합별)·`dw_fail`(dwFailed) 줄을 5,000줄씩 → 성공 시 Redis 에서 삭제.
 - 백필 스크립트(005): 업비트 초봉 × 바이낸스 1초봉 → 과거 92일 `premium`. 기존 기록의 앞·뒤 빈 구간만 채운다.
 - 이력 추적기(011): 구간 열림·닫힘 시 `collect_fail` 1점, 매초 없음. 실패는 로그 후 무시.
@@ -62,6 +66,7 @@
 
 ## 읽는 쪽
 - `features/history` 의 `/history/premium`(1주만)·`/history/streaks`(창 7일 이하)·`/history/streaks/bulk`(창 1시간 이하)·`/history/events`(`premium_event` 닫힌 사건(응답 필드 7개만 pivot) + 메모리의 진행 중)·`/history/candles`(`res` 의 계층 버킷 하나, 요청당 1,440창 상한, 진행 중 창 없음) — 앞의 셋은 동시 1개(돌고 있으면 429)이고 셋 모두 `premium` 을 pivot 없이 (코인, 방향) 줄기로 흘려 읽는다(005 §3.4 — premium 은 두 줄기를 시각으로 잇는다), 사건·봉은 같은 조회 키를 공유 캐시로 한 번만 읽는다(사건 60초·64MB, 봉 청크 30초·끝난 청크 600초·256키·32MB, 2026-09-28) — 그리고 `features/landing` 의 `/landing`(022 — `candles_1m` 에서 1위 경로 1시간·`premium_event` 7일 요약(점을 올리지 않고 Flux 가 접은 수백 행), 둘 다 60초 캐시) 만. 다른 조회 API 는 DB 를 0회 접근한다(메모리가 진실). 저장소 불가 시 `/history/*` 는 503 `storage_unavailable`, `/landing` 은 200 에 그 부분만 null.
+- `features/flow` 의 `/flow/netflow`(창 1h·6h·24h 코인별 합산)·`/flow/recent`(24시간 안 최신 500행까지) — `chain_flow`, `removed` 제외(050).
 - 기동 시 1회: `collect_fail` 24시간 복원(011, 3초 상한), 열린 사건 복원(013 — Redis `premium_events:open` 먼저, 없거나 실패하면 `premium_event` 7일 안 `end_ts 0` 두 단계 조회(두 단계 모두 7일 창·CSV), 3초 상한 — 600초 넘게 못 본 사건은 `last_ts` 로 닫아 쓴다), spark 용 `premium` 최근 30분 1분 버킷 집계(009, 10초 상한·CSV), 롤업 따라잡기 기준점 — 계층마다 위 버킷 가장 늦은 점·아래 계층들 가장 오래된 점(014, 계층당 3초 상한). 복원 조회는 모두 HTTP 요청 타임아웃을 자기 상한과 같게 걸어 상한에서 끊긴다. 롤업 회차는 아래 계층 버킷을 창 단위로 읽는다.
 - Redis 스트림 `ticks` 는 flusher 만 읽는다. 키 `premium_events:open` 은 수집의 기동 복원만 읽는다. 채널 `spreads`·키 `spreads:latest` 는 api 의 구독 허브(채널은 접속자가 있을 때만)와 `GET /spreads`(두 역할, 018)·`GET /landing`(두 역할, 5초 캐시, 022)이, 키 `spreads:want` 는 api 만 쓰고 아무도 읽지 않는다(017, 2026-09-26). `collect:heartbeat` 는 collector 가 매초 쓰고 api 의 `/health` 가 읽는다(025). `alerts:log` 는 두 역할의 알림기가 쓰고 수집기 `/admin/alerts` 가 읽는다(034). `admin:clarity`·`admin:clarity:pages` 는 api 의 `/admin/clarity` 만 읽고 쓴다(035·040). S3 를 읽는 코드는 없다.
 

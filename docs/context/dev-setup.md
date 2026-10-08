@@ -59,6 +59,8 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 | SLACK_WEBHOOK_URL | 없음 |
 | STATSD_ADDR | 없음 |
 | CLARITY_API_TOKEN | 없음 |
+| ETH_WS_URL | 없음 |
+| ETH_HTTP_URL | 없음 |
 
 - `ROLE`: 프로세스 역할(016) — `collector`(전체 동작) | `api`(Influx 조회 + `/ws/spreads` + `GET /spreads` Redis 읽기, 백그라운드 태스크는 017 구독 태스크 + `SLACK_WEBHOOK_URL` 이 있으면 025 알림 태스크 + `STATSD_ADDR` 가 있으면 027 게이지 태스크(+ 접속마다 보내기 태스크)). 로컬은 비워 둔다. `api` 는 compose 의 `api` 서비스가 `environment` 로만 준다. 둘 밖의 값이면 설정을 읽는 순간 실패한다.
 - `INFLUX_URL`·`INFLUX_TOKEN`: InfluxDB 2.7 접속(org·bucket 은 `marketlens` 고정). 토큰이 없으면 flusher 비활성·`/history/*` 503 — 앱은 뜬다. 사람용 UI 는 `http://localhost:8086`(같은 토큰).
@@ -70,6 +72,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 - `SLACK_WEBHOOK_URL`: Slack Incoming Webhook(025). 있으면 기동·수집 실패 60초 구간 발생/복구·ERROR 로그·처리 안 된 500 이 채널로 간다(키별 10분 억제). 없으면 알림 기능 전체가 꺼진다 — 로컬은 비워 둔다. 두 박스(collect·serve)의 `server/.env` 에 같은 값을 넣는다.
 - `STATSD_ADDR`: StatsD 수신 주소 `host:port`(027). 있으면 api 역할이 WS 접속 수 게이지 `marketlens.ws_clients:<n>|g` 를 10초마다 UDP 로 보낸다(collector 는 안 보낸다). compose 가 api 에만 `host.docker.internal:8125`(serve 호스트의 CloudWatch Agent)를 준다. 비면 끔 — 로컬은 비워 둔다. `host:port` 가 아니면 WARNING 1줄 뒤 끈다.
 - `CLARITY_API_TOKEN`: Clarity Data Export 토큰(035). 사람이 serve 의 `server/.env` 에만 넣는다(api 만 쓴다 — collect 에는 넣지 않는다). 있으면 api 의 `/admin/clarity` 가 요청이 있을 때만, 기본 요약은 마지막 시도에서 4시간, 페이지×기기 묶음은 12시간이 지났으면 한 번씩 부른다(프로젝트당 하루 10회 한도 — 시도 기록은 Redis `admin:clarity`·`admin:clarity:pages`, 040). 비면 그 부분은 `unconfigured`·호출 0 — 로컬은 비워 둔다(넣으면 실제 Clarity 를 불러 한도를 쓴다). 값은 로그·Redis·응답에 남지 않는다. 발급·교체·바로 부르기는 `docs/runbooks/clarity.md` 의 'Data Export 토큰(035)'.
+- `ETH_WS_URL`·`ETH_HTTP_URL`: 이더리움 노드 WebSocket(wss)·HTTP(https) JSON-RPC 주소(050). **둘 다 있어야** 수집기가 업비트 입출금 감지기를 켠다 — 하나라도 비면 기동 때 경고 1줄, 감지기 없이 뜬다(`/flow/*` 는 Influx 의 기존 점만). WS 는 공개 노드 `wss://ethereum-rpc.publicnode.com`(키 없음·무료), HTTP 는 Ankr `https://rpc.ankr.com/eth/<키>`(publicnode HTTP 는 `eth_getLogs` 를 거부한다 — 2026-10-08 실측). collect 박스의 `server/.env` 에만 넣는다.
 - `UVICORN_ROOT_PATH`: `server/.env` 에 두지 않는다 — compose 가 `server`(collect)에만 `/api` 를 준다(029, api 에는 안 준다). 관리자 페이지의 API 문서가 `/api/openapi.json` 을 부르게 하는 값이고, 접두 없는 경로(`localhost:8000/health`)는 그대로 라우팅된다. 로컬 uvicorn 은 비워 둔다.
 - `ADMIN_AWS_REGION`: 같은 방식이다 — `server/.env` 에 두지 않고 compose 가 `server`(collect)에만 `ap-northeast-2` 를 준다(034). 수집기 관리자 피드(`/admin/aws`·`/admin/alerts` 의 경보 이력)가 CloudWatch·Logs·Budgets 를 읽는 리전이고, 자격증명은 collect 박스 역할이다. 비면 AWS 를 부르지 않고 그 부분은 `unconfigured` — 로컬 uvicorn 은 비워 둔다.
 - `ACCESS_LOG_DIR`: 같은 방식이다 — `server/.env` 에 두지 않고 compose 가 `api` 에만 `/var/log/caddy`(호스트 `./logs/caddy` 읽기 전용 바인드)를 준다(035). api 의 `/admin/access` 가 그 디렉터리의 caddy 접속 로그를 읽는다. 비면 `unconfigured`·`no_file` — 로컬 uvicorn 은 비워 두고, 볼 때만 로그 디렉터리를 준다.

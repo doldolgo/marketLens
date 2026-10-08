@@ -35,7 +35,7 @@ export interface SpreadRow {
   dayChg: number | null
 }
 
-// ── mock 탭용 데이터 모양 (§3.6~3.10) ──────────────────────────────────────
+// ── mock 탭용 데이터 모양 (§3.6~3.9) ──────────────────────────────────────
 
 /** 현물 항목 — off 는 기준가 대비 편차 %. */
 export interface SpotItem {
@@ -118,29 +118,6 @@ export interface HealthData {
   outages: HealthOutage[]
 }
 
-/** 입출금 레이더 주소. */
-export interface FlowAddr {
-  id: string
-  label: string
-  short: string
-  coins: string[]
-  exs: string[]
-}
-
-/** 입출금 레이더 행. */
-export interface FlowRow {
-  addr: string
-  label: string
-  short: string
-  sym: string
-  ex: string
-  dir: 'in' | 'out'
-  usd: number | null
-  qty: number
-  state: string
-  age: number
-}
-
 /** 셸이 모든 탭에 내려주는 공유 피드 하나. */
 export interface Feed {
   /** 이 스펙에서는 항상 빈 배열 — 003 이 채운다. */
@@ -150,8 +127,6 @@ export interface Feed {
   markets: MockMarket[]
   /** /health/collect 마지막 응답 — 첫 응답 전 null (011). */
   health: HealthData | null
-  flowAddrs: FlowAddr[]
-  flowRows: FlowRow[]
   /** spreads 행 + rate 통째 교체 — 017 구독이 snapshot·delta 마다 호출. 받은 배열을 그대로 쓴다. */
   replace(rows: SpreadRow[], rate: number): void
   /** 수집 상태 적용 — 011 이 5초 폴링으로 호출. */

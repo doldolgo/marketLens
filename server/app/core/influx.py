@@ -17,6 +17,7 @@ import threading
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Literal
 
 from influxdb_client import BucketRetentionRules, Dialect, InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
@@ -415,6 +416,70 @@ def candle_line(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ChainFlowRow:
+    """`chain_flow` 점 1개 — 업비트 이더리움 ERC-20 전송 1건(스펙 050 §3.5). 유일키 = (tag 넷, time).
+
+    `ts` 는 블록 시각(epoch 초)이고 점의 time 은 **나노초** `ts × 10⁹ + log_index` 다 — 같은 블록·코인·방향에 전송이
+    여러 건이라 초로는 겹친다. `addr` 는 입금이면 입금주소, 출금이면 핫월렛. `removed` 는 리오그로 되돌린 로그.
+    """
+
+    dir: str  # in | out
+    symbol: str
+    ts: int  # 블록 시각 epoch 초
+    log_index: int
+    amount: float
+    counterparty: str
+    addr: str
+    tx_hash: str
+    block: int
+    removed: bool = False
+    exchange: str = "upbit"
+    network: str = "eth"
+
+
+@dataclass(frozen=True, slots=True)
+class ChainFlowAgg:
+    """`query_chain_flow_netflow` 결과 1행 — 창 안 (symbol, dir) 의 건수·수량 합·마지막 블록 시각(초) (050 §3.6)."""
+
+    symbol: str
+    dir: str
+    count: int
+    amount: float
+    last_ts: int
+
+
+def chain_flow_ns(ts: int, log_index: int) -> int:
+    """`chain_flow` 점의 time(나노초) — 블록 시각 초 × 10⁹ + log index (050 §3.5)."""
+    return ts * 1_000_000_000 + log_index
+
+
+def chain_flow_line(row: ChainFlowRow) -> str:
+    """`chain_flow` 한 줄(7 필드, 나노초 시각) — `write_lines(…, precision="ns")` 로 쓴다 (050 §3.5).
+
+    리오그로 되돌린 로그는 같은 줄을 `removed=true` 로 다시 써 덮는다. 필드는 다른 줄 함수와 같이 이름순이고 bool 은
+    line protocol 의 `true`/`false` 다 — `InfluxPoint` 의 필드 형에 bool 이 없어 점 객체를 거치지 않는다.
+    """
+    head = _head(
+        "chain_flow",
+        {
+            "exchange": row.exchange,
+            "network": row.network,
+            "dir": row.dir,
+            "symbol": row.symbol,
+        },
+    )
+    if row.removed:
+        removed = "true"
+    else:
+        removed = "false"
+    return (
+        f"{head}addr={_field_literal(row.addr)},amount={float(row.amount)!r},block={int(row.block)}i,"
+        f"counterparty={_field_literal(row.counterparty)},log_index={int(row.log_index)}i,"
+        f"removed={removed},tx_hash={_field_literal(row.tx_hash)} {chain_flow_ns(row.ts, row.log_index)}"
+    )
+
+
 def _epoch(text: str) -> int:
     """CSV 의 RFC3339 시각 → epoch 초 — FluxRecord 의 `_time.timestamp()` 를 int 로 자른 것과 같다."""
     return int(datetime.fromisoformat(text).timestamp())
@@ -438,6 +503,16 @@ def _epoch_fast(text: str) -> int:
     return _epoch(text)
 
 
+def _epoch_seconds(text: str) -> int:
+    """나노초 점의 CSV 시각 `…T12:34:56.000000123Z` → epoch 초(소수부 버림) — 초 점의 모양이면 `_epoch_fast` 그대로.
+
+    `datetime.fromisoformat` 은 소수 6자리 뒤를 버려 나노초가 사라지므로 소수부는 보지 않는다 — log index 는 필드로 따로 읽는다.
+    """
+    if len(text) > 20 and text[19] == "." and text[-1] == "Z":
+        return _epoch_fast(text[:19] + "Z")
+    return _epoch_fast(text)
+
+
 def _cells(line: str) -> list[str]:
     """CSV 한 줄 → 칸. 따옴표가 든 줄만 csv 모듈로 — 이름에 쉼표가 오면 Influx 가 따옴표로 감싼다."""
     if '"' in line:
@@ -456,6 +531,18 @@ _EVENT_LIST_FIELDS = (
     "net_fx",
 )
 _EVENT_LIST_COLUMNS = ("dom", "fx", "base", "dir", "_time", *_EVENT_LIST_FIELDS)
+# `/flow/recent` 가 읽는 `chain_flow` 칸 — `removed` 는 Flux 가 거른 뒤라 싣지 않는다 (050 §3.7)
+_CHAIN_FLOW_COLUMNS = (
+    "_time",
+    "dir",
+    "symbol",
+    "amount",
+    "addr",
+    "counterparty",
+    "tx_hash",
+    "block",
+    "log_index",
+)
 
 # 요약 후보 한 건 — (끝난 시각, 시작 시각, dom, fx, base, dir)
 _Ended = tuple[int, int, str, str, str, str]
@@ -545,19 +632,29 @@ class InfluxClient:
         """점 목록을 쓰기 1번으로 보낸다 — 전부 성공 또는 예외(전부 없음). `bucket` 없으면 `marketlens`(014 계층 버킷만 지정)."""
         self.write_lines([to_line(p) for p in points], bucket)
 
-    def write_lines(self, lines: list[str], bucket: str | None = None) -> None:
+    def write_lines(
+        self,
+        lines: list[str],
+        bucket: str | None = None,
+        precision: Literal["s", "ns"] = "s",
+    ) -> None:
         """line protocol 줄 목록을 쓰기 1번으로 — 본문은 줄을 개행으로 이은 UTF-8 바이트(`write` 와 같은 본문).
 
         점 객체를 만들지 않는 경로(009 flusher·014 분 닫힘)가 쓴다. 빈 목록은 요청하지 않는다.
+        `precision` 은 줄 끝 시각의 단위다 — 기본 초이고, `chain_flow`(050 §3.5)만 나노초로 쓴다(기존 호출은 그대로).
         """
         if not lines:
             return
+        if precision == "ns":
+            write_precision = WritePrecision.NS
+        else:
+            write_precision = WritePrecision.S
         try:
             with self._inner().write_api(write_options=SYNCHRONOUS) as write_api:
                 write_api.write(
                     bucket=bucket or self.bucket,
                     record="\n".join(lines).encode(),
-                    write_precision=WritePrecision.S,
+                    write_precision=write_precision,
                 )
         except Exception as exc:
             raise InfluxUnavailableError(f"Influx 쓰기 실패: {exc}") from exc
@@ -1181,6 +1278,101 @@ from(bucket: "{_esc_flux(bucket)}")
         for record in self._records(flux, timeout_sec):
             return int(record.get_time().timestamp())
         return None
+
+    # --- 읽기 (chain_flow — /flow/netflow·/flow/recent. 스펙 050 §3.6~3.7) ---
+
+    def query_chain_flow_netflow(self, *, start: int, stop: int) -> list[ChainFlowAgg]:
+        """`start ≤ 블록 시각 < stop` 의 `chain_flow` 를 (symbol, dir) 마다 건수·수량 합·마지막 블록 시각으로 접는다 (050 §3.6).
+
+        `removed` 가 참인 점은 뺀다 — `amount`·`removed` 두 필드를 pivot 해 걸러낸 뒤 Flux 가 접으므로 점을 올리지 않는다.
+        순서는 정하지 않는다(응답 정렬은 호출자가 한다).
+        """
+        flux = f"""
+from(bucket: "{self.bucket}")
+  |> range(start: {_rfc3339(start)}, stop: {_rfc3339(stop)})
+  |> filter(fn: (r) => r._measurement == "chain_flow" and r.exchange == "upbit" and r.network == "eth" and (r._field == "amount" or r._field == "removed"))
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> filter(fn: (r) => r.removed == false)
+  |> group(columns: ["symbol", "dir"])
+  |> reduce(
+      fn: (r, accumulator) => ({{
+        count: accumulator.count + 1,
+        amount: accumulator.amount + r.amount,
+        last_ns: if int(v: r._time) > accumulator.last_ns then int(v: r._time) else accumulator.last_ns,
+      }}),
+      identity: {{count: 0, amount: 0.0, last_ns: 0}},
+  )
+  |> keep(columns: ["symbol", "dir", "count", "amount", "last_ns"])
+"""
+        rows: list[ChainFlowAgg] = []
+        for cols, cells in self._table_rows(flux):
+            rows.append(
+                ChainFlowAgg(
+                    symbol=cells[cols["symbol"]],
+                    dir=cells[cols["dir"]],
+                    count=int(cells[cols["count"]]),
+                    amount=float(cells[cols["amount"]]),
+                    last_ts=int(cells[cols["last_ns"]]) // 1_000_000_000,
+                )
+            )
+        return rows
+
+    def query_chain_flow_recent(
+        self,
+        *,
+        start: int,
+        stop: int,
+        limit: int,
+        dir: str | None = None,
+        symbol: str | None = None,
+    ) -> list[ChainFlowRow]:
+        """`start ≤ 블록 시각 < stop` 의 `chain_flow` 를 시각 내림차순(같은 블록은 log index 내림차순 — 나노초 time 이
+        그 순서다)으로 `limit` 개까지 (050 §3.7). `removed` 가 참인 점은 뺀다. `dir`·`symbol` 은 태그 필터."""
+        conds = [
+            'r._measurement == "chain_flow"',
+            'r.exchange == "upbit"',
+            'r.network == "eth"',
+        ]
+        if dir is not None:
+            conds.append(f'r.dir == "{_esc_flux(dir)}"')
+        if symbol is not None:
+            conds.append(f'r.symbol == "{_esc_flux(symbol)}"')
+        columns = ", ".join(f'"{c}"' for c in _CHAIN_FLOW_COLUMNS)
+        flux = f"""
+from(bucket: "{self.bucket}")
+  |> range(start: {_rfc3339(start)}, stop: {_rfc3339(stop)})
+  |> filter(fn: (r) => {" and ".join(conds)})
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> filter(fn: (r) => r.removed == false)
+  |> group()
+  |> sort(columns: ["_time"], desc: true)
+  |> limit(n: {int(limit)})
+  |> keep(columns: [{columns}])
+"""
+        rows: list[ChainFlowRow] = []
+        for cols, cells in self._table_rows(flux):
+            idx = [cols.get(c, -1) for c in _CHAIN_FLOW_COLUMNS]
+            if any(i < 0 for i in idx):
+                continue  # 반쪽 점은 싣지 않는다 — 전송 1건은 7 필드가 한 번에 쓰인다
+            t, d, sym, amount, addr, counterparty, tx_hash, block, log_index = (
+                cells[i] for i in idx
+            )
+            if not amount or not block or not log_index:
+                continue
+            rows.append(
+                ChainFlowRow(
+                    dir=d,
+                    symbol=sym,
+                    ts=_epoch_seconds(t),
+                    log_index=int(log_index),
+                    amount=float(amount),
+                    counterparty=counterparty,
+                    addr=addr,
+                    tx_hash=tx_hash,
+                    block=int(block),
+                )
+            )
+        return rows
 
     def _records(self, flux: str, timeout_sec: float | None = None):  # noqa: ANN202 — influxdb-client 내부 타입 비노출
         try:
