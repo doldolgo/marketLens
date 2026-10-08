@@ -1151,6 +1151,7 @@ def test_boot_with_every_connection_failing_keeps_health_200(
             "binance_perp",
             "bybit_perp",
             "bitget_perp",
+            "hyperliquid_perp",
         ]
         state = app.state.live_store.stream_state("bybit")
         assert state is not None and not state.connected
