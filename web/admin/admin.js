@@ -1982,6 +1982,118 @@ function drawTraffic() {
   $('s-traffic').replaceChildren(...parts);
 }
 
+// --- 화면 이용 (053) — 값 계산·이름표 ------------------------------------------------------------
+
+// 덮어 보기로 띄우는 공개 사이트 — 틀 주소·postMessage 대상·받는 메시지 출처가 모두 이 값이다(이 파일에 한 번).
+// 로컬 확인은 커밋하지 않는 시험 사본에서 바꾼다(053 §3.4 — attention.js 의 ADMIN_ORIGIN 과 짝)
+const SITE_ORIGIN = 'https://kimptrack.com';
+const SCREENS_MS = 300_000; // 절이 보이는 동안 5분마다
+const FRAME_WAIT_MS = 5_000; // 틀이 이 안에 준비 신호를 보내지 않으면 '페이지가 응답하지 않음'
+const SMALL_PV = 5; // 표본 적음 — 페이지뷰가 이보다 적다
+const LOW_REACH = 20; // 거의 안 닿음 — 도달률(%)이 이보다 낮다
+const AREA_ID = /^[a-z][a-z0-9-]{0,31}$/; // 052 영역 id 꼴
+const DAYS = [1, 7, 30, 90];
+const PERIOD_NAME = { 1: '오늘', 7: '최근 7일', 30: '최근 30일', 90: '최근 90일' };
+// 화면 이름(052 §3.1) → 고르기 이름. 이 순서가 고르기 순서이고, 기본 화면에서 pv 가 같으면 앞의 것
+const PAGE_NAME = {
+  landing: '랜딩',
+  'app-spread': '대시보드 스프레드',
+  'app-history': '대시보드 기록',
+  'app-gap': '대시보드 갭',
+  'app-pp': '대시보드 선선갭',
+  'app-health': '대시보드 수집 상태',
+  'app-flow': '대시보드 입출금 레이더',
+  privacy: '처리방침',
+  'kimp-chart': '김프 차트',
+  'kimp-history': '김프 기록',
+};
+const SCREEN_PAGES = Object.keys(PAGE_NAME);
+const STATIC_PATH = { landing: '/', privacy: '/privacy', 'kimp-chart': '/kimp-chart', 'kimp-history': '/kimp-history' };
+const DEVICE_SCREEN = { pc: 'PC', mobile: '휴대폰' };
+const FRAME_WIDTH = { pc: 1280, mobile: 390 }; // 틀 폭(높이는 admin.css — PC 800·휴대폰 844)
+// 영역 이름표(§3.5) — 052 §7 '붙인 영역 목록' 의 화면별 id 전부, 화면에 적힌 낱말로 짧게. 대시보드 공통 셋은 "app"(탭마다
+// 같다). 없는 id 는 id 그대로. JSON 꼴(큰따옴표)로 둔다 — server/tests/test_admin.py 가 읽어 052 의 영역을 모두 덮는지 본다
+const AREA_NAMES = {
+  "landing": { "top": "머리 막대", "hero": "첫 화면", "analyze": "히스토리 분석", "events": "지난 7일 사건", "kimp": "김프와 역프란", "method": "계산 방법", "faq": "자주 묻는 질문", "foot": "바닥" },
+  "privacy": { "top": "머리 막대", "changes": "변경 안내", "glance": "한눈에 보기", "consent": "화면 분석 동의 관리", "s1": "1. 처리 목적", "s2": "2. 항목과 보유 기간", "s3": "3. 파기", "s4": "4. 제3자 제공", "s5": "5. 처리 위탁", "s6": "6. 국외 이전", "s7": "7. 자동 수집 장치", "s8": "8. 정보주체의 권리", "s9": "9. 안전성 확보 조치", "s10": "10. 보호책임자", "s11": "11. 권익침해 구제", "s12": "12. 방침의 변경", "foot": "바닥" },
+  "kimp-chart": { "top": "머리 막대", "what": "볼 수 있는 것", "read": "읽는 법", "coins": "코인별 바로 가기", "faq": "자주 묻는 질문", "foot": "바닥" },
+  "kimp-history": { "top": "머리 막대", "live": "지난 7일 사건", "what": "남는 것", "how": "보는 법", "faq": "자주 묻는 질문", "foot": "바닥" },
+  "app": { "header": "로고·수집 상태", "tabs": "탭 단추", "kpi": "KPI 줄" },
+  "app-spread": { "filters": "필터 바", "table": "김프 표" },
+  "app-history": { "filters": "사건 필터", "table": "티커별 사건 표", "summary": "선택 심볼 요약", "list": "사건 로그", "filters-2": "차트 도구 줄", "chart": "봉 차트" },
+  "app-gap": { "filters": "필터 바", "table": "갭 표" },
+  "app-pp": { "filters": "필터 바", "table": "선선갭 표" },
+  "app-health": { "summary": "요약", "cards": "거래소 카드", "chart": "실패 구간 타임라인", "list": "최근 실패 구간" },
+  "app-flow": { "filters": "필터 바", "table": "코인별 순유입", "table-2": "최근 전송" }
+};
+
+function areaName(page, id) {
+  const mine = own(AREA_NAMES, page) || {};
+  const common = page.startsWith('app-') ? AREA_NAMES.app : {};
+  return own(mine, id) ?? own(common, id) ?? clean(id);
+}
+
+const rowOf = (rows, page, device) => list(rows).find((r) => isObj(r) && r.page === page && r.device === device);
+
+// 기본 화면(§3.2) — 고른 기간·기기에서 pv 가 가장 큰 화면(같으면 고르기 순서의 앞, 모두 0 이면 랜딩)
+function busiest(rows, device) {
+  let best = SCREEN_PAGES[0];
+  let most = 0;
+  for (const page of SCREEN_PAGES) {
+    const pv = n0(rowOf(rows, page, device)?.pv);
+    if (pv > most) [best, most] = [page, pv];
+  }
+  return best;
+}
+
+// 화면 하나 × 기기 하나의 값(§3.3). present = 페이지가 알린 영역 id 들(아직 모르면 null — 기록 있는 영역을 모두 페이지에
+// 있는 것으로 본다). ranked = 페이지에 있고 기록 있는 영역(평균 보인 시간 큰 순 — 순위·단계는 이것끼리), blank = 페이지에
+// 있는데 기록 없음(단계 0), away = 기록은 있는데 지금 페이지에 없음(목록 끝). 단계는 반올림 전 ms 로 정한다
+function screenValues(row, present) {
+  const pv = n0(row?.pv);
+  const data = list(row?.areas).filter((a) => isObj(a) && typeof a.id === 'string' && AREA_ID.test(a.id));
+  const here = present ? new Set(present) : null;
+  const value = (a) => ({
+    id: a.id,
+    ms: n0(a.ms),
+    t: pv ? Math.round(n0(a.ms) / pv / 100) / 10 : 0,
+    r: pv ? Math.min(100, Math.round((n0(a.seen) / pv) * 100)) : 0,
+    c: pv ? Math.round((n0(a.clicks) / pv) * 1000) / 10 : 0,
+  });
+  const on = data.filter((a) => !here || here.has(a.id)).map(value).sort((x, y) => y.ms - x.ms);
+  const top = on.length ? on[0].ms : 0;
+  const level = (ms) => (ms > 0 && top > 0 ? Math.min(5, Math.ceil((ms * 5) / top)) : 0);
+  const small = pv < SMALL_PV;
+  const mark = (a, rank, state) => ({ ...a, level: level(a.ms), rank, low: a.r < LOW_REACH, small, state });
+  const known = new Set(data.map((a) => a.id));
+  return {
+    pv,
+    small,
+    ranked: on.map((a, i) => mark(a, i + 1, 'ok')),
+    blank: here ? [...here].filter((id) => !known.has(id)).map((id) => ({ id, ms: 0, t: 0, r: 0, c: 0, level: 0, rank: null, low: false, small, state: 'none' })) : [],
+    away: here ? data.filter((a) => !here.has(a.id)).map((a) => mark(value(a), null, 'gone')) : [],
+  };
+}
+
+// 페이지로 넘기는 영역 값 — 지금 페이지에 있는 것만(기록 없음은 rank null·단계 0)
+const overlayAreas = (v) => v.ranked.concat(v.blank).map(({ id, level, rank, t, r, c, low, small }) => ({ id, level, rank, t, r, c, low, small }));
+
+// 답 문장(§3.5 — 042 의 답 줄 꼴, 값 자리는 굵게) — pv 0 · 보통 · 표본 적음(끝에 한 문장)
+function screenAnswer(v, page, device, days) {
+  if (!v.pv) return ['이 기간 이 화면·기기의 동의한 방문 기록이 없다.'];
+  const out = t`${PERIOD_NAME[days]} ${PAGE_NAME[page]} ${DEVICE_SCREEN[device]} — 페이지뷰 ${int(v.pv)}.`;
+  if (v.ranked.length) {
+    const most = v.ranked[0];
+    const least = v.ranked.reduce((lo, a) => (a.r <= lo.r ? a : lo));
+    out.push(' ', ...t`가장 오래 본 곳은 ${areaName(page, most.id)}(평균 ${AVG.format(most.t)}초), 가장 덜 닿은 곳은 ${areaName(page, least.id)}(도달 ${least.r}%).`);
+  } else out.push(' 영역 기록은 없다.');
+  if (v.small) out.push(' ', ...t`표본 적음 — 페이지뷰가 ${SMALL_PV}보다 적어 단계·순위가 흔들린다.`);
+  return out;
+}
+
+// 틀 주소 — 공개 사이트의 그 화면에 덮어 보기 표시. 대시보드는 탭을 쿼리로
+const frameUrl = (page) => `${SITE_ORIGIN}${page.startsWith('app-') ? `/app/?tab=${page.slice(4)}&` : `${STATIC_PATH[page]}?`}kt-overlay=1`;
+
 // --- 비용 (§3.4) -------------------------------------------------------------------------------
 
 const USD = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
