@@ -46,7 +46,7 @@ PRIVACY_V2_EFFECTIVE = "2026-10-11"
 # 처리방침 v3 가 시행되는 날(KST 날짜) — 스펙 051 §3.1. 뜻은 '화면 영역 이용 통계(052)를 받기 시작하는 날' 이다. 052 의 api 는
 # 이 날 00:00 Asia/Seoul 전에 온 영역 통계를 저장하지 않는다(날짜 게이트). test_privacy 가 방침 HTML 의 시행일(<time> 넷·이력)·
 # sitemap·동의 안내 판(이 날 판이 생겼다)과 묶는다. 다음 개정 때도 그대로 둔다 — v3 기능이 열린 날이다. 위 v2 상수도 그대로다
-PRIVACY_V3_EFFECTIVE = "2026-10-18"
+PRIVACY_V3_EFFECTIVE = "2026-10-09"
 
 
 class Settings(BaseSettings):

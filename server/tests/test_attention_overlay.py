@@ -16,7 +16,7 @@ from tests.test_deploy import ROOT
 
 JS = (ROOT / "web/public/attention.js").read_text("utf-8")
 ADMIN = "https://admin.kimptrack.com"
-ON = {"kt.analytics": "granted", "kt.analytics.v": "2026-10-18"}
+ON = {"kt.analytics": "granted", "kt.analytics.v": "2026-10-09"}
 
 HARNESS = r"""
 const [script, cases] = JSON.parse(require('fs').readFileSync(0, 'utf8'))

@@ -31,7 +31,7 @@ from tests.test_deploy import (
 
 PUBLIC = ROOT / "web/public"
 CANONICAL = "https://kimptrack.com/privacy"
-EFFECTIVE = "2026-10-18"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1)
+EFFECTIVE = "2026-10-09"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1)
 # 052 — 같은 출처 스크립트 /attention.js 하나('self')와 그 비콘(connect-src 'self'). 세 정적 페이지가 같은 문자열이다.
 # 053 — 틀에는 자기 출처와 관리자 화면(덮어 보기)만
 CSP = (
@@ -268,7 +268,7 @@ NOTICE = _notice_version()
 # 그 판의 값과 맞댄다). 문장만 다듬었으면 지금 판의 값만 고치고 PR 본문에 이유를 적는다
 NOTICE_DIGESTS = {
     "2026-10-01": "7ee34255a0120818e76ffc210a12eb5cd556773eb6b06462a62cebb4a4bc6bc1",
-    "2026-10-18": "a32da2cb07e8dd922855849ed03198d918a7c36891b7339a65d830941705cb9b",  # 051 — 화면 영역 이용 통계(KimpTrack 서버)
+    "2026-10-09": "a32da2cb07e8dd922855849ed03198d918a7c36891b7339a65d830941705cb9b",  # 051 — 화면 영역 이용 통계(KimpTrack 서버)
 }
 # 바로 앞 판 — 이 판의 동의로는 켜지 않고 다시 묻는다 (051 §4 — 2026-10-01 의 granted 는 '정하지 않음')
 OLD = max((v for v in NOTICE_DIGESTS if v < NOTICE), default="2026-09-01")
@@ -314,7 +314,7 @@ TRANSFER_TERMS = CONSENT_CELLS[2][2] | {"근거"}
 # 051 §3.3-2 — 맨 위 변경 안내 상자가 말하는 것(시행 문장, 바뀌는 것 — 2절 요약 한 줄, 다시 묻기). 이전 판 날짜는 아래 테스트가
 # PRIVACY_V2_EFFECTIVE 로 맞춘다
 CHANGE_NOTICE_SAYS = (
-    "그 전날까지는 이전 판",
+    "그 전날까지는 2026년 10월 1일 판",
     "화면 분석에 동의한 방문자",
     "KimpTrack 서버",
     "화면 영역 이용 통계",
@@ -356,7 +356,8 @@ V2_FACTS = {
     ),
     "s3": ("며칠 걸릴 수 있습니다",),
     "s12": (
-        "그 전날까지는 이전 판",
+        "그 전날까지는 2026년 10월 1일 판",
+        "새로 동의를 받아서만 하는 처리",
         "늘거나 새로 생기면",
         "7일 전까지",
         "줄이거나 멈추는",
@@ -415,6 +416,11 @@ DIFF_TABLE = r'<table class="tbl diff">.*?</table>'
 ARCHIVED_TEXT = {
     "privacy-20261001.html": "40976545d4ba5b8241e2107245a54d733767b0d40c81ca8ccc351fb6ebd795e3",
     "privacy-20261011.html": "a4d5b104cdb9af3c1a8e26c3499dd2907eaaf1f6af8c73a6bb2f586edace3099",
+}
+# 사본마다 그 판의 동의 안내 판 — 10월 11일 판은 시행 전에 바뀌어 안내 판을 올리지 않았다
+ARCHIVED_NOTICE = {
+    "privacy-20261001.html": "2026-10-01",
+    "privacy-20261011.html": "2026-10-01",
 }
 # 바로 앞 판의 사본 — 대조표가 맞대는 판(051 — 2026년 10월 11일 판)
 PREVIOUS = max(ARCHIVED_TEXT)
@@ -954,7 +960,8 @@ def test_archived_versions_are_static_and_external_free() -> None:
             f"{path.name} 의 글자가 얼려 둔 때와 다르다 — 사본은 고치지 않는다(지금 값 {text})"
         )
         # 그 판이 시행될 때의 안내 판 — 세 칸의 글자가 그 판의 해시와 같다
-        version = max(v for v in NOTICE_DIGESTS if v <= day)
+        # 10월 11일 판은 시행 전에 v3(10월 9일)으로 바뀌어, 그 사본의 동의 안내는 10월 1일 판이다(051 §3.1 사람 결정)
+        version = ARCHIVED_NOTICE[path.name]
         assert _archived_notice_digest(html) == NOTICE_DIGESTS[version], path.name
 
 
@@ -967,19 +974,18 @@ def test_v2_effective_constant_is_a_date_after_the_first_version() -> None:
     assert date.fromisoformat(PRIVACY_V2_EFFECTIVE) > date(2026, 10, 1)
 
 
-def test_v3_effective_constant_is_a_date_after_v2() -> None:
-    """052 의 날짜 게이트가 읽는 시행일 한 곳 — 지금 판의 시행일과 같다 (051 §3.1)."""
+def test_v3_effective_constant_is_a_date_after_the_first_version() -> None:
+    """052 의 날짜 게이트가 읽는 시행일 한 곳 — 지금 판의 시행일과 같다. 사람 결정(2026-10-09)으로 v2(10-11)보다 앞서
+    시행해 v2 는 시행 전에 바뀌었다 (051 §3.1)."""
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", PRIVACY_V3_EFFECTIVE)
-    assert date.fromisoformat(PRIVACY_V3_EFFECTIVE) > date.fromisoformat(
-        PRIVACY_V2_EFFECTIVE
-    )
+    assert date.fromisoformat(PRIVACY_V3_EFFECTIVE) > date(2026, 10, 1)
     assert EFFECTIVE == PRIVACY_V3_EFFECTIVE
 
 
 def test_effective_date_ties_the_four_times_and_the_history() -> None:
     """시행일은 머리·변경 안내·12절 시행 문장·이력 첫 항목의 <time> 넷과 sitemap(아래)에 같고, 한 곳만 고치면 멈춘다 (037 §3.1)."""
     html, _ = _read(PUBLIC / "privacy.html")
-    assert EFFECTIVE >= PRIVACY_V3_EFFECTIVE > PRIVACY_V2_EFFECTIVE
+    assert EFFECTIVE >= PRIVACY_V3_EFFECTIVE
     times = re.findall(r'<time datetime="([^"]*)">([^<]*)</time>', html)
     assert times == [(EFFECTIVE, _korean(EFFECTIVE))] * 4
     tag = f'<time datetime="{EFFECTIVE}">'
@@ -1022,12 +1028,13 @@ def test_change_notice_comes_first_and_names_what_changes() -> None:
     text = _text(notice)
     for word in CHANGE_NOTICE_SAYS:
         assert word in text, word
-    # 이전 판 = v2 — 그 날짜는 상수 한 곳에서
-    assert (
-        f"그 전날까지는 이전 판({_korean(PRIVACY_V2_EFFECTIVE)} 시행)을 따릅니다"
-        in text
+    # 시행 중이던 판 = 10월 1일 판, 10월 11일 판(v2)은 시행 전에 이 판으로 바뀌었다 — 그 날짜는 상수 한 곳에서
+    assert "그 전날까지는 2026년 10월 1일 판을 따릅니다" in text
+    assert f"{_korean(PRIVACY_V2_EFFECTIVE)} 판은 시행 전에 이 판으로 바뀌었고" in text
+    assert 'href="/privacy-20261001.html"' in notice
+    assert text.index("그 전날까지는 2026년 10월 1일 판") < text.index(
+        "화면 영역 이용 통계"
     )
-    assert text.index("그 전날까지는 이전 판") < text.index("화면 영역 이용 통계")
 
 
 def test_body_sections_state_the_v2_facts() -> None:
@@ -1038,7 +1045,7 @@ def test_body_sections_state_the_v2_facts() -> None:
         for word in words:
             assert word in text, (label, word)
     # (라) — v2 가 열린 날을 글자로(이 판의 시행일은 v3 이다, 051 §7)
-    assert f"{_korean(PRIVACY_V2_EFFECTIVE)}(이 쓰임새를 처음 시행한 날) 전" in _text(
+    assert f"{_korean(PRIVACY_V2_EFFECTIVE)}(이 쓰임새를 시작하는 날) 전" in _text(
         _section(html, "s2")
     )
     outside = _without_diff(html)

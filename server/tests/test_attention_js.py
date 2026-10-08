@@ -14,7 +14,7 @@ import pytest
 from tests.test_deploy import ROOT
 
 JS = (ROOT / "web/public/attention.js").read_text("utf-8")
-NOTICE = "2026-10-18"
+NOTICE = "2026-10-09"
 ON = {"kt.analytics": "granted", "kt.analytics.v": NOTICE}
 
 HARNESS = r"""
