@@ -1,5 +1,6 @@
 """수집 상태 조립 — 메모리(실패 이력·스냅샷)만 읽는 순수 계산 (스펙 011 §3.5)."""
 
+from app.core.config import COLLECT_SOURCES, PERP_SOURCES
 from app.core.live_store import LiveStore
 from app.core.outages import Outage, OutageTracker
 from app.features.health.models import (
@@ -9,8 +10,8 @@ from app.features.health.models import (
     OutageOut,
 )
 
-# 001·020 의 거래소 5곳 고정 순서
-EXCHANGES = ("upbit", "bithumb", "binance", "bybit", "bitget")
+# 현물 5곳(001·020) 뒤 perp 원천 3개(046 §3.8) 고정 순서
+EXCHANGES = COLLECT_SOURCES
 
 # state 경계(ms): 마지막 성공 후 경과 < 5초 ok, < 60초 stale, 그 외 down
 STALE_MS = 5_000
@@ -58,6 +59,14 @@ def _outage_out(o: Outage) -> OutageOut:
     )
 
 
+def _markets(store: LiveStore, ex: str) -> int:
+    """현물은 메모리 행 수, perp 원천은 구독 심볼 수 (046 §3.8)."""
+    if ex in PERP_SOURCES:
+        state = store.stream_state(ex)
+        return state.subscribed if state is not None else 0
+    return len(store.get_all(exchange=ex))
+
+
 def build_collect_health(
     store: LiveStore, tracker: OutageTracker, started_at: int, now_ms: int
 ) -> CollectHealthResponse:
@@ -75,7 +84,7 @@ def build_collect_health(
                 exchange=ex,
                 state=_state(tracker.last_success_at(ex), now_ms),
                 last_success_at=tracker.last_success_at(ex),
-                markets=len(store.get_all(exchange=ex)),
+                markets=_markets(store, ex),
                 success_rate_1h=rate,
                 open_outage=_outage_out(open_outage) if open_outage else None,
                 last_error=LastErrorOut(

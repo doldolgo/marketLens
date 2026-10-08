@@ -48,6 +48,8 @@ from app.core.live_store import LiveStore
 from app.core.networks import WalletMemo
 from app.core.notify import Notifier, SlackLogHandler
 from app.core.outages import OutageTracker
+from app.core.perp import PerpSink
+from app.core.perp_universe import PerpUniverse
 from app.core.premium_events import PremiumEventDetector
 from app.core.quotes import QuoteSink
 from app.core.raw_archive import RawArchive
@@ -57,9 +59,12 @@ from app.core.s3 import S3Uploader
 from app.core.serialization import camelize_json
 from app.core.spark import SparkBuffer, restore_spark
 from app.core.streams.binance import BinanceStream
+from app.core.streams.binance_perp import BinancePerpStream
 from app.core.streams.bitget import BitgetStream
+from app.core.streams.bitget_perp import BitgetPerpStream
 from app.core.streams.bithumb import BithumbStream
 from app.core.streams.bybit import BybitStream
+from app.core.streams.bybit_perp import BybitPerpStream
 from app.core.streams.upbit import UpbitStream
 from app.core.tick_store import Flusher, TickRelay
 from app.core.ticks import TickLoop
@@ -242,13 +247,32 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     binance = BinanceStream(store=store, sink=sink, record=record)
     bybit = BybitStream(store=store, sink=sink, record=record)
     bitget = BitgetStream(store=store, sink=sink, record=record)
-    streams = [upbit, bithumb, binance, bybit, bitget]
+    # 046 — perp 원천 3개는 현물 뒤 고정 순서(config.PERP_SOURCES). 행은 별도 맵·별도 싱크, 우주는 김프 우주를 따라 매초
+    perp_sink = PerpSink(store)
+    binance_perp = BinancePerpStream(store=store, sink=perp_sink, record=record)
+    bybit_perp = BybitPerpStream(store=store, sink=perp_sink, record=record)
+    bitget_perp = BitgetPerpStream(store=store, sink=perp_sink, record=record)
+    streams = [
+        upbit,
+        bithumb,
+        binance,
+        bybit,
+        bitget,
+        binance_perp,
+        bybit_perp,
+        bitget_perp,
+    ]
+    perps = PerpUniverse(
+        sink=perp_sink, sources=[binance_perp, bybit_perp, bitget_perp], client=client
+    )
     universe = UniverseRefresher(
         sink=sink,
         streams=[upbit, bithumb],
         foreigns=[binance, bybit, bitget],
         client=client,
+        perps=perps,
     )
+    perps.start()  # 10초 목록 — 우주 확정(매초)은 universe 가 부른다
     universe.start()
     for stream in streams:
         stream.start()
@@ -310,7 +334,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.live_store = store
     app.state.collector = CollectService(
-        store=store, universe=universe, streams=streams, client=client, wallet=wallet
+        store=store,
+        universe=universe,
+        streams=streams,
+        client=client,
+        wallet=wallet,
+        perps=perps,
     )
     _settle_gc()
     try:
@@ -327,6 +356,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if flusher is not None:
             await flusher.aclose()
         await universe.aclose()
+        await perps.aclose()
         await asyncio.gather(*(s.aclose() for s in streams))
         if archive is not None:
             # 스트림이 닫힌 뒤 — 마지막 프레임까지 담아 5초 안에서 올린다 (010 §3.6)

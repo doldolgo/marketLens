@@ -133,6 +133,9 @@ async def test_keyless_startup_spreads_and_refresh_contract() -> None:
         "binance": False,
         "bybit": False,
         "bitget": True,  # public (020)
+        "binance_perp": False,  # perp 에는 입출금이 없다 (046)
+        "bybit_perp": False,
+        "bitget_perp": False,
     }
     dw_warnings = [w for w in body["warnings"] if "입출금 상태 조회 실패" in w]
     assert len(dw_warnings) == 3
