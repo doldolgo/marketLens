@@ -35,8 +35,8 @@
 # 027 §3.2 — 접속 로그. 개인정보로 다룬다 — 한 줄에 남기는 것은 허용 목록이다.
 # 도메인 블록만 불러온다. http:// catch-all(탄력 IP 직접 접속·봇 스캔)은 기록하지 않는다.
 (access_log) {
-	# 폴링·감시가 방문 기록을 덮지 않게 — 수집 상태 탭 5초·랜딩 10초·기록 탭 60초·uptime·canary
-	@nolog path /api/health /api/health/collect /api/landing /api/history/events /api/history/candles
+	# 폴링·감시가 방문 기록을 덮지 않게 — 수집 상태 탭 5초·랜딩 10초·기록 탭 60초·입출금 레이더 5초(050)·uptime·canary
+	@nolog path /api/health /api/health/collect /api/landing /api/history/events /api/history/candles /api/flow/netflow /api/flow/recent
 	log_skip @nolog
 	@canary header User-Agent *KimpTrack-Canary*
 	log_skip @canary

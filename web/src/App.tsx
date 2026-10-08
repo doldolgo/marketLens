@@ -222,7 +222,7 @@ export default function App() {
       {wrap('gap', <GapTab feed={feed} now={now} />)}
       {wrap('pp', <PpTab feed={feed} />)}
       {wrap('health', <HealthTab feed={feed} now={now} />)}
-      {wrap('flow', <FlowTab feed={feed} now={now} />)}
+      {wrap('flow', <FlowTab active={tab === 'flow'} />)}
 
       {/* 푸터 — 입출금 레이더 탭은 FlowTab 이 자체 푸터를 그림 */}
       {tab !== 'flow' && (
