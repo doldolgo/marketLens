@@ -29,13 +29,14 @@
 | `= /svc/api/admin/status` | api |
 | `= /svc/api/admin/access` | api |
 | `= /svc/api/admin/clarity` | api |
+| `= /svc/api/admin/attention` | api |
 | `= /api/admin/aws` | 수집기 |
 | `= /api/admin/alerts` | 수집기 |
 
 - `/` 는 관리자 화면 파일(`/usr/share/nginx/admin`, 공개 root 밖 — 공개 `location /`·`/app/` 로 받아 갈 수 없다).
 - `= /favicon.ico` 는 본문 없는 204 이고 기록하지 않는다 — 브라우저가 스스로 부르는 아이콘 요청이 화면 root 에서 404·error 로그 한 줄·접속 기록 한 줄이 되지 않게. 화면은 이미지 파일을 쓰지 않고(036 §3.8) CSP `default-src 'self'` 라 `data:` 아이콘도 못 쓴다. 헤더는 server 수준 것(`X-Frame-Options`)을 상속한다 — 자기 `add_header` 를 두지 않는다.
 - `/api/…` 는 **028 이전의 전체 분기** 그대로다: api 로 `/api/history/{premium,streaks,candles}`·`= /api/spreads`·`= /api/landing`·`/api/ws/`, 나머지는 전부 수집기(`${COLLECT_HOST}:8000`). 공개(028 허용 목록)와 다르게 허용 목록이 없다 — 로그인한 사람만 온다(030). 접두 제거·헤더 4개는 공개와 같다.
-- `/svc/api/health` 는 api 의 `/health`, `/svc/api/admin/status` 는 api 의 `/admin/status`, `/svc/api/admin/access`·`/svc/api/admin/clarity` 는 api 의 `/admin/access`·`/admin/clarity`(035) 로(경로를 통째로 바꾼다). 035 의 둘은 첫 줄이 교차 사이트 검사이고 헤더는 server 수준 것을 상속한다.
+- `/svc/api/health` 는 api 의 `/health`, `/svc/api/admin/status` 는 api 의 `/admin/status`, `/svc/api/admin/access`·`/svc/api/admin/clarity` 는 api 의 `/admin/access`·`/admin/clarity`(035), `/svc/api/admin/attention` 은 api 의 `/admin/attention`(052) 으로(경로를 통째로 바꾼다). 035·052 의 셋은 첫 줄이 교차 사이트 검사이고 헤더는 server 수준 것을 상속한다.
 - `= /api/admin/aws`·`= /api/admin/alerts` 는 수집기로(접두 제거) — `/api/…` 분기와 같은 곳이지만 화면의 폴링을 기록에서 빼려고 따로 둔다(034). 헤더는 server 수준 것을 상속한다. 관리자 피드는 034·035.
 - 업스트림 이름은 `api` 와 `${COLLECT_HOST}` 둘만 쓴다 — 다른 이름을 못 풀면 nginx 기동이 실패해 공개 사이트까지 내려간다(두 server 가 프로세스 하나).
 - 읽기 제한은 nginx 기본 60초 그대로 — 60초 넘게 첫 바이트가 없는 조회(기간이 긴 history)는 504 다.
@@ -45,7 +46,7 @@
 - **교차 사이트 차단**: 백엔드로 넘기는 경로(`/api/…`·`/svc/…`)는 요청 헤더 `Sec-Fetch-Site` 가 `same-origin`·`none`·빈 값일 때만 통과, `same-site`·`cross-site` 는 403 `{"error":{"code":"forbidden","message":"Forbidden","detail":null}}`(JSON). 예외는 `/`·`= /api/docs`·`= /api/redoc`(로그인 뒤 돌아오는 이동이 same-origin 이 아니다). `kimptrack.com` 과 `admin.kimptrack.com` 은 같은 사이트라 쿠키 SameSite 로는 서로의 요청을 못 막는다.
 - **넘기지 않는 헤더**: 백엔드로 넘길 때 `Cookie`·`Cf-Access-Jwt-Assertion` 을 비운다(백엔드는 쓰지 않는다 — 사설망 평문으로 흘리지 않는다). `X-Refresh-Token` 은 그대로.
 - **응답 헤더**: 모든 프록시 응답(수집기·api 둘 다 — 같은 앱이라 CORS `*` 를 붙인다)에서 `Access-Control-Allow-Origin` 을 지운다. 모든 응답(오류 포함)에 `X-Frame-Options: DENY`. `/`(화면)에는 CSP `default-src 'self'; frame-ancestors 'none'` — 화면은 인라인 스크립트·스타일을 쓰지 않는다. 화면(`/`)은 `Cache-Control: no-store`(공개 `index.html` 과 같은 이유 — 배포가 화면과 API 계약을 함께 바꾼다). nginx 버전 숨김. location 에 `add_header` 를 따로 두면 server 수준 헤더가 상속되지 않으므로 그 location 에 같은 줄을 반복한다.
-- **접속 기록**: 요청마다 JSON 한 줄 — `time`·`email`(`Cf-Access-Authenticated-User-Email`)·`ip`(`Cf-Connecting-Ip`)·`method`·`uri`(경로와 쿼리)·`status`·`rt`(처리 초)·`ray`(`Cf-Ray`)·`sfs`(`Sec-Fetch-Site` — 이 헤더가 실제로 도착하는지 보려고). 따옴표·역슬래시·제어문자는 이스케이프하지만 UTF-8 은 보장되지 않는다(0x80 이상 바이트를 그대로 쓴다) — 읽는 도구는 관대하게 푼다(`errors='replace'`). 컨테이너 `/var/log/nginx-admin/access.log`(이미지가 디렉터리를 만든다 — 바인드가 없어도 기동한다), compose web 에 `./logs/admin:/var/log/nginx-admin` 바인드(git 무시). `/var/log/nginx` 를 통째로 바인드하지 않는다 — 이미지의 stdout·stderr 링크가 가려진다. 화면의 10초 폴링(`/svc/…`·`= /api/health`·`= /api/health/collect`)과 관리자 피드(`= /api/admin/aws`·`= /api/admin/alerts`(034), `= /svc/api/admin/access`·`= /svc/api/admin/clarity`(035)), 브라우저의 아이콘 요청(`= /favicon.ico`)은 기록하지 않는다. 회전은 030 런북(호스트 logrotate, copytruncate). 이 기록은 개인정보(이메일·IP)다 — 항목·보존(90일)은 032 처리방침에 있다.
+- **접속 기록**: 요청마다 JSON 한 줄 — `time`·`email`(`Cf-Access-Authenticated-User-Email`)·`ip`(`Cf-Connecting-Ip`)·`method`·`uri`(경로와 쿼리)·`status`·`rt`(처리 초)·`ray`(`Cf-Ray`)·`sfs`(`Sec-Fetch-Site` — 이 헤더가 실제로 도착하는지 보려고). 따옴표·역슬래시·제어문자는 이스케이프하지만 UTF-8 은 보장되지 않는다(0x80 이상 바이트를 그대로 쓴다) — 읽는 도구는 관대하게 푼다(`errors='replace'`). 컨테이너 `/var/log/nginx-admin/access.log`(이미지가 디렉터리를 만든다 — 바인드가 없어도 기동한다), compose web 에 `./logs/admin:/var/log/nginx-admin` 바인드(git 무시). `/var/log/nginx` 를 통째로 바인드하지 않는다 — 이미지의 stdout·stderr 링크가 가려진다. 화면의 10초 폴링(`/svc/…`·`= /api/health`·`= /api/health/collect`)과 관리자 피드(`= /api/admin/aws`·`= /api/admin/alerts`(034), `= /svc/api/admin/access`·`= /svc/api/admin/clarity`(035), `= /svc/api/admin/attention`(052)), 브라우저의 아이콘 요청(`= /favicon.ico`)은 기록하지 않는다. 회전은 030 런북(호스트 logrotate, copytruncate). 이 기록은 개인정보(이메일·IP)다 — 항목·보존(90일)은 032 처리방침에 있다.
 
 ### 3.3 관리자 화면
 - 화면 파일 셋(`index.html`·`admin.js`·`admin.css`)이 보이는 것·주기·차트·보안 계약은 036(§3.8 이 이 절의 규칙을 이어받는다).

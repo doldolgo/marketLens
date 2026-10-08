@@ -33,6 +33,7 @@
 - 키 **`collect:heartbeat`**(025) — 값 = 마지막 틱 시각(epoch ms 문자열), TTL 30초. 쓰는 쪽 수집(매 틱 끝, 직전 쓰기가 안 끝났으면 건너뜀), 읽는 쪽 api 의 `/health`. 만료 = 수집이 30초 넘게 틱을 못 만듦(또는 죽음).
 - 키 **`flow:eth:last_block`**(050) — 마지막으로 처리한 이더리움 블록 번호 문자열, 만료 없음. 쓰는 쪽 수집의 전송 감지기(블록마다), 읽는 쪽 같은 감지기의 (재)연결 직후 공백 재생(7,200블록까지)
 - 집합 **`flow:eth:deposit_addrs`**·**`flow:eth:hot_wallets`**·**`flow:eth:internal`**(050) — 씨앗 CSV 에 더한 주소(소문자), 만료 없음. 쓰는 쪽 감지기(가스 지갑 수신자·sweep 목적지·내부 이동 목적지를 발견 즉시), 읽는 쪽 감지기 기동 시 씨앗과 합침
+- 해시 **`attn:d:<YYYYMMDD>`**(052) — 화면 영역 이용 통계의 KST 하루 합계. 필드 `<page>|<device>|<area>|<m>`(`m` = `ms`·`clicks`·`seen`)와 페이지뷰 `<page>|<device>||pv`, 값은 정수 합(HINCRBY). 만료는 `EXPIREAT` 그 KST 날의 끝(다음 날 00:00 KST) + 90일 — 쓸 때마다 같은 값이라 밀리지 않고, 관리자 피드의 90일 창(오늘 포함)은 모두 살아 있다. 쓰는 쪽 api(받은 비콘을 메모리에 더해 두고 10초마다 날마다 한 파이프라인 HINCRBY 묶음 + EXPIREAT, 실패하면 메모리에 두고 다음 회차 — 쌓인 필드가 2만을 넘으면 버리고 WARNING, 끌 때 한 번 더), 읽는 쪽 api 의 `GET /admin/attention`(창 안 날마다 HGETALL 한 파이프라인, days 마다 60초 캐시). 하루 ≈900 필드(화면 10 × 기기 2 × 영역 ≈15 × 3 + pv) — 90일 ≈8만 필드·수 MB(noeviction). IP 는 Redis 에 없다(api 메모리의 10분 셈 표뿐).
 - env `REDIS_URL`(기본 `redis://localhost:6379/0`, compose 안에서는 `redis://redis:6379/0` — server·api 둘 다). Redis 가 없어도 앱은 뜬다 — 인계된 틱은 버려지고(경고 로그) 원문은 S3 에 있어 재생 가능하다.
 
 ## S3 원문 아카이브
