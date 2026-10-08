@@ -89,6 +89,7 @@
 #kt-consent button:hover{background:rgba(145,132,217,.12)}
 #kt-consent :focus-visible{outline:2px solid #9184d9;outline-offset:2px;border-radius:4px}
 #kt-consent .kt-c-body:focus-visible{outline-offset:-2px}
+#kt-consent .kt-c-box:focus{outline:none}
 @media (max-width:599px){#kt-consent .kt-c-body{padding:12px 14px 2px}#kt-consent .kt-c-actions{max-width:none;padding:8px 14px}#kt-consent details>dl,#kt-consent details>p{margin-left:0}#kt-consent dl{grid-template-columns:minmax(0,1fr);gap:0}#kt-consent dd+dt{margin-top:8px}}
 `
 
@@ -217,7 +218,8 @@
   }
 
   // 동의 창(§3.3) — <body> 의 첫 자식, #root 밖이라 React 트리를 다시 그리지 않는다. 모달이다 — 뒤 페이지의 형제 요소를 모두
-  // inert 로 막고(누르기·초점·스크린 리더) 문서 스크롤을 멈추고, 초점을 창 안 글 영역으로 옮긴다. 닫기(×)·Esc 는 없다 — 두 버튼
+  // inert 로 막고(누르기·초점·스크린 리더) 문서 스크롤을 멈추고, 초점을 카드(.kt-c-box, tabindex -1)로 옮긴다 — 스크립트가 옮긴
+  // 초점에도 크롬은 :focus-visible 테두리를 그리므로 카드는 테두리 없이 받고, 다음 Tab 부터 글 영역·칸·버튼에 테두리가 보인다. 닫기(×)·Esc 는 없다 — 두 버튼
   // 가운데 하나를 골라야 닫힌다. 대시보드에서는 창 안의 링크를 모두 새 탭으로 — 열어 둔 WebSocket 을 끊지 않게
   const openModal = () => {
     if (loaded || modal || judge() !== "undecided") return
@@ -231,7 +233,7 @@
     el.setAttribute("aria-modal", "true")
     el.setAttribute("aria-label", "화면 분석 동의")
     el.setAttribute("data-nosnippet", "")
-    el.innerHTML = '<div class="kt-c-box">' + HTML + "</div>"
+    el.innerHTML = '<div class="kt-c-box" tabindex="-1">' + HTML + "</div>"
     if (page === "app") {
       for (const a of el.querySelectorAll("a")) {
         a.target = "_blank"
@@ -252,7 +254,7 @@
     scrollWas = [root.overflow, root.scrollbarGutter]
     if (window.innerWidth > document.documentElement.clientWidth) root.scrollbarGutter = "stable"
     root.overflow = "hidden"
-    el.querySelector(".kt-c-body").focus({ preventScroll: true })
+    el.querySelector(".kt-c-box").focus({ preventScroll: true })
   }
 
   // 다른 탭 반영(§3.5) — 부른 문서는 켜는 값이 아니게 되면 곧바로 한 번 새로고침(숨은 탭도), 부르지 않은 문서는 켜는 값이 되면
