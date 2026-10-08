@@ -21,18 +21,3 @@ export function rng(seed: string): () => number {
 export function uniform(r: () => number, min: number, max: number): number {
   return min + r() * (max - min)
 }
-
-/** 배열에서 하나 뽑기. */
-export function pick<T>(r: () => number, arr: readonly T[]): T {
-  return arr[Math.floor(r() * arr.length)]
-}
-
-/** Fisher–Yates 셔플한 사본. */
-export function shuffled<T>(arr: readonly T[], r: () => number): T[] {
-  const out = [...arr]
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(r() * (i + 1))
-    ;[out[i], out[j]] = [out[j], out[i]]
-  }
-  return out
-}

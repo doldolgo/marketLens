@@ -19,6 +19,8 @@ export const HEALTH_POLL_MS = 5000
 export const HISTORY_EVENTS_POLL_MS = 60000
 /** 기록 탭 차트 최신 청크 재조회(ms) — 014 가 사용. 창이 닫힐 때마다 새 봉이 붙으면 되므로 사건 표와 같은 주기의 별도 상수. */
 export const HISTORY_CANDLES_POLL_MS = 60000
+/** 입출금 레이더 두 경로(/flow/netflow·/flow/recent) 재조회(ms) — 050 §3.8. 블록은 약 12초마다 생기고 감지 지연은 약 2초라 표는 5초면 충분하다. */
+export const FLOW_POLL_MS = 5000
 /** 색 규약 — 한국식: 빨강=상승, 파랑=하락 (§3.3). */
 export const COLOR_CONVENTION = '한국식'
 
