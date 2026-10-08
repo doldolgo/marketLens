@@ -130,6 +130,81 @@ async function run() {
       ans({ pv: 6, areas: [] }, 'privacy', 'pc', 90),
     ]
   }
+  // 2. 부르기 — 절이 보이기 전에는 0, 보이면 기간 7일 하나, 기간을 바꾸면 그 하나만 곧바로(다른 경로 0)
+  {
+    const v = screen((days) => ok(days, rows))
+    await flush()
+    const before = { att: v.attCalls().length, all: v.s.calls.length, frame: v.s.frames.slice() }
+    v.view(true)
+    await flush()
+    const seen = v.attCalls().slice()
+    const all = v.s.calls.length
+    v.pick('scr-days', '30')
+    await flush()
+    out.load = { before, seen, after: v.s.calls.slice(all), frames: v.s.frames.slice(), page: v.api.scr.page }
+    // 붙잡은 채 30 → 90 → 1 → 겹친 호출 0, 끝에 1 하나
+    v.s.hold = true
+    const mark = v.attCalls().length
+    v.pick('scr-days', '90')
+    v.pick('scr-days', '1')
+    await flush()
+    const loading = { calls: v.attCalls().slice(mark), block: v.text('b-screens') }
+    v.s.held.shift()()
+    await flush()
+    const after90 = { calls: v.attCalls().slice(mark), held: v.s.held.length }
+    v.s.held.shift()()
+    await flush()
+    out.overlap = { after90, loading, calls: v.attCalls().slice(mark), max: v.s.max, left: v.s.held.length, meta: v.text('a-screens') }
+    // 절이 화면 밖으로 → 틀 비움
+    v.view(false)
+    await flush()
+    out.leave = v.s.frames[v.s.frames.length - 1]
+  }
+  // 3. 틀 주고받기 — 기본 화면의 주소, 다른 출처·다른 창의 ready 무시, 맞는 ready 뒤 값 보내기, 행 누름 = focus
+  {
+    const v = screen((days) => ok(days, rows))
+    v.view(true)
+    await flush()
+    const ready = (page, areas) => ({ type: 'kt-attention-ready', v: 1, page, areas })
+    v.message('https://evil.example', v.frameWin, ready('app-history', ['table']))
+    v.message('https://kimptrack.com', {}, ready('app-history', ['table']))
+    v.message('https://kimptrack.com', v.frameWin, ready('landing', ['table']))  // 지금 화면이 아니다
+    const ignored = v.s.posted.length
+    v.message('https://kimptrack.com', v.frameWin, ready('app-history', ['filters', 'table', 'chart', 'BAD id']))
+    await flush()
+    const sent = v.s.posted.slice()
+    const trs = v.find(v.node('b-screens'), 'tr').filter((t) => t.listeners.click)
+    trs[0].fire('click')
+    const focus = v.s.posted[v.s.posted.length - 1]
+    const rowsText = v.find(v.node('b-screens'), 'tr').map((t) => t.textContent)
+    // 기기 바꾸기 → 같은 주소라도 다시 띄우고(ready 비움) 기본 화면은 휴대폰 pv 가 가장 큰 화면
+    v.devices[1].fire('click')
+    await flush()
+    out.frame = { first: v.s.frames.slice(), ignored, sent, focus, rowsText, options: v.options.map((o) => o.textContent),
+      pressed: v.devices.map((b) => b.attrs['aria-pressed']), fit: v.node('scr-stage').props['--fit'], answer: v.text('a-screens') }
+    // 5초 안에 ready 가 없으면 '페이지가 응답하지 않음'
+    v.s.timers.filter((x) => x.ms === 5000).pop().fn()
+    out.silent = { note: v.text('scr-note'), hidden: v.node('scr-note').hidden }
+    // 화면을 고르면 그 화면(고른 뒤에는 기본 화면을 따르지 않는다)
+    v.pick('scr-page', 'privacy')
+    await flush()
+    out.picked = v.s.frames[v.s.frames.length - 1]
+  }
+  // 4. 시행 전 — 틀 없음·D 글, 5. 실패에 직전 값이 있으면 그대로 그리고 머리에 '불러오지 못함'
+  {
+    const v = screen((days) => ({ state: 'before_gate', code: null, gateAt: Date.UTC(2026, 9, 17, 15), days, from: '2026-10-18', to: '2026-10-11', fetchedAt: NOW, rows: [] }))
+    v.view(true)
+    await flush()
+    out.gate = { block: v.text('b-screens'), stage: v.node('scr-stage').hidden, frames: v.s.frames.slice(), head: v.text('m-screens') }
+    let fail = false
+    const w = screen((days) => (fail ? { state: 'error', code: 'redis', gateAt: NOW, days, from: null, to: null, fetchedAt: NOW, rows: [] } : ok(days, rows)))
+    w.view(true)
+    await flush()
+    fail = true
+    w.s.timers.filter((x) => x.ms > 290000).pop().fn()  // 5분 주기(시작에서 잰 남은 시간)
+    await flush()
+    out.stale = { head: w.text('m-screens'), answer: w.text('a-screens'), sum: w.text('s-screens'), stage: w.node('scr-stage').hidden }
+  }
   return out
 }
 run().then((out) => process.stdout.write(JSON.stringify(out)), (err) => { console.error(err.stack); process.exit(1) })
@@ -246,3 +321,102 @@ def test_answer_has_three_branches(screens: dict[str, Any]) -> None:
         " faq(도달 0%). 표본 적음 — 페이지뷰가 5보다 적어 단계·순위가 흔들린다.",
         "최근 90일 처리방침 PC — 페이지뷰 6. 영역 기록은 없다.",
     ]
+
+
+def test_feed_is_called_only_while_visible_and_period_change_calls_it_alone(
+    screens: dict[str, Any],
+) -> None:
+    """§3.2 — 절이 보이기 전에는 부르지 않고 틀은 about:blank, 보이면 기간 7일 하나, 기간을 바꾸면 그 경로 하나만 곧바로."""
+    load = screens["load"]
+    assert load["before"]["att"] == 0 and load["before"]["all"] == 8
+    assert set(load["before"]["frame"]) <= {"about:blank"}
+    assert load["seen"] == ["/svc/api/admin/attention?days=7"]
+    assert load["after"] == ["/svc/api/admin/attention?days=30"]
+    assert load["frames"][-1] == f"{SITE}/app/?tab=history&kt-overlay=1"
+    assert load["page"] == "app-history"
+
+
+def test_period_changes_while_loading_make_one_more_call_for_the_last(
+    screens: dict[str, Any],
+) -> None:
+    """§3.2 — 떠 있으면 겹쳐 부르지 않고 끝난 뒤 한 번(마지막 기간), 그사이 덩어리는 불러오는 중."""
+    o = screens["overlap"]
+    assert o["loading"]["calls"] == ["/svc/api/admin/attention?days=90"]
+    assert o["after90"] == {
+        "calls": [
+            "/svc/api/admin/attention?days=90",
+            "/svc/api/admin/attention?days=1",
+        ],
+        "held": 1,
+    }
+    assert o["loading"]["block"] == "… 불러오는 중"
+    assert o["calls"] == [
+        "/svc/api/admin/attention?days=90",
+        "/svc/api/admin/attention?days=1",
+    ]
+    assert o["max"] == 1 and o["left"] == 0
+    assert o["meta"].startswith("오늘 대시보드 기록 PC — 페이지뷰 12.")
+    assert screens["leave"] == "about:blank"
+
+
+def test_frame_messages_check_origin_and_window_then_send_values_and_focus(
+    screens: dict[str, Any],
+) -> None:
+    """§3.4 — 다른 출처·다른 창·다른 화면의 ready 는 무시, 맞는 ready 뒤 값(대상 출처 https://kimptrack.com), 행 누름은
+    focus. 옵션은 이름 뒤 '(pv)', 기기 단추 aria-pressed, 휴대폰은 1배 이하로 줄인다."""
+    f = screens["frame"]
+    assert f["ignored"] == 0
+    assert [p["origin"] for p in f["sent"]] == [SITE]
+    msg = f["sent"][0]["data"]
+    assert (msg["type"], msg["v"], msg["label"]) == (
+        "kt-attention",
+        1,
+        "최근 7일 · 대시보드 기록 · PC",
+    )
+    assert [(a["id"], a["level"], a["rank"]) for a in msg["areas"]] == [
+        ("table", 5, 1),
+        ("filters", 1, 2),
+        ("chart", 0, None),
+    ]
+    assert f["focus"] == {
+        "data": {"type": "kt-attention-focus", "id": "table"},
+        "origin": SITE,
+    }
+    # 목록 — 순위 순, 기록 없음, 지금 화면에 없음은 끝
+    assert f["rowsText"][1].startswith("#1티커별 사건 표")
+    assert "기록 없음" in f["rowsText"][3]
+    assert f["rowsText"][4].startswith("–사건 로그지금 화면에 없음")
+    # 기본 화면(PC 기록 탭) → 휴대폰으로 바꾸면 휴대폰 기본 화면(랜딩)으로 다시 띄운다
+    assert f["first"] == [
+        f"{SITE}/app/?tab=history&kt-overlay=1",
+        f"{SITE}/?kt-overlay=1",
+    ]
+    assert f["options"][:3] == [
+        "랜딩 (3)",
+        "대시보드 스프레드 (0)",
+        "대시보드 기록 (0)",
+    ]
+    assert f["pressed"] == ["false", "true"]
+    assert f["fit"] == "1.0000"
+    assert f["answer"].startswith("최근 7일 랜딩 휴대폰 — 페이지뷰 3.")
+    assert screens["silent"] == {
+        "note": "페이지가 응답하지 않음 — 5초 안에 덮어 보기 준비 신호가 오지 않아 페이지만 보인다",
+        "hidden": False,
+    }
+    assert screens["picked"] == f"{SITE}/privacy?kt-overlay=1"
+
+
+def test_before_gate_and_failures_with_a_previous_value(
+    screens: dict[str, Any],
+) -> None:
+    """§3.6 — before_gate 는 'D 부터 모읍니다(처리방침 v3 시행일)'·틀 없음, 실패에 직전 값이 있으면 그대로 그리고 머리에
+    '불러오지 못함'."""
+    g = screens["gate"]
+    assert g["block"] == "2026-10-18 부터 모읍니다(처리방침 v3 시행일)"
+    assert g["stage"] is True and set(g["frames"]) <= {"about:blank"}
+    assert "시행 전" in g["head"]
+    s = screens["stale"]
+    assert s["head"].startswith("✕불러오지 못함 · 마지막 성공")
+    assert s["head"].endswith("redis")
+    assert s["answer"].startswith("최근 7일 대시보드 기록 PC — 페이지뷰 12.")
+    assert s["sum"].endswith("불러오지 못함") and s["stage"] is False
