@@ -32,10 +32,12 @@ from tests.test_deploy import (
 PUBLIC = ROOT / "web/public"
 CANONICAL = "https://kimptrack.com/privacy"
 EFFECTIVE = "2026-10-09"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1)
-# 052 — 같은 출처 스크립트 /attention.js 하나('self')와 그 비콘(connect-src 'self'). 세 정적 페이지가 같은 문자열이다
+# 052 — 같은 출처 스크립트 /attention.js 하나('self')와 그 비콘(connect-src 'self'). 세 정적 페이지가 같은 문자열이다.
+# 053 — 틀에는 자기 출처와 관리자 화면(덮어 보기)만
 CSP = (
     "default-src 'none'; connect-src 'self'; img-src 'self'; style-src 'unsafe-inline'; "
-    "script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    "script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; "
+    "frame-ancestors 'self' https://admin.kimptrack.com"
 )
 # §3.4 — 법 제30조 제1항·시행령 제31조 제1항 순서. 해당 없는 절(민감정보·가명정보 등)은 두지 않는다
 SECTIONS = [

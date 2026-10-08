@@ -1,7 +1,8 @@
 <!doctype html>
 <!-- KimpTrack 관리자 화면 v2 (스펙 036) — web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
      CSP 가 자기 출처만 허용하므로 인라인 스크립트·스타일을 쓰지 않는다(스크립트·스타일은 옆 파일).
-     한 페이지에 절 일곱(개요·수집·인프라·알림·접속·비용·도구), 값은 admin.js 가 글자(textContent)와 SVG 로 채운다.
+     한 페이지에 절 여덟(개요·수집·인프라·알림·접속·화면 이용·비용·도구), 값은 admin.js 가 글자(textContent)와 SVG 로 채운다.
+     화면 이용 절(053)의 틀은 공개 사이트(https 의 kimptrack.com) 하나만 띄운다 — CSP frame-src 가 그 출처 하나다.
      밖으로 나가는 링크는 이 파일의 고정 주소뿐이다 — 계정·영역 ID·팀 도메인·프로젝트 ID 를 넣지 않는다(레포 공개). -->
 <html lang="ko">
   <head>
@@ -23,6 +24,7 @@
           <a href="#infra">인프라</a>
           <a href="#alerts">알림</a>
           <a href="#traffic">접속</a>
+          <a href="#screens">화면</a>
           <a href="#cost">비용</a>
           <a href="#tools">도구</a>
         </nav>
@@ -317,7 +319,7 @@
                   <dt>걸러 내기 줄</dt><dd>모든 요청에서 확인 방문자까지 좁혀 가는 다섯 칸이고, 칸 아래 % 는 앞 칸 대비 남은 비율이다. 마지막 칸만 방문자(날마다 셈)라 '1명이 평균 n쪽' 은 스크립트가 돈 페이지 ÷ 확인이다.</dd>
                   <dt>종류 여덟 <code>classes</code></dt><dd>줄마다 하나로 가른 종류(운영자 흔적은 출처로, 나머지는 User-Agent 로 — 탐색 경로 줄은 브라우저 이름을 달아도 스캐너) — 사람 브라우저 모양 <code>browser</code> · 검색엔진 <code>search</code> · AI 수집기 <code>ai</code> · 링크 미리보기 <code>preview</code> · 자동화 도구 <code>tool</code> · 스캐너 <code>scanner</code> · 운영자 흔적 <code>operator</code> · 이름 없음 <code>unknown</code>. 막대는 모든 요청 대비 비율이고 값은 '요청 · 페이지' 다.</dd>
                   <dt>탐색 경로 <code>probes</code></dt><dd>없는 관리 페이지(wp-·.env·/admin 등)를 찔러 보는 요청 줄. 브라우저 이름을 달아도 스캐너로 센다.</dd>
-                  <dt>운영자 흔적 <code>operator</code></dt><dd>출처가 localhost·사설 IP·IP 글자 그대로·Clarity 대시보드인 요청이고, 그날 그 짝은 방문자에서 뺐다. 운영자 IP 를 적어 두지 않아 보통 브라우저로 연 운영자 방문은 거르지 못한다.</dd>
+                  <dt>운영자 흔적 <code>operator</code></dt><dd>출처가 localhost·사설 IP·IP 글자 그대로·Clarity 대시보드·이 관리자 화면(화면 이용 절의 덮어 보기)인 요청이고, 그날 그 짝은 방문자에서 뺐다. 운영자 IP 를 적어 두지 않아 보통 브라우저로 연 운영자 방문은 거르지 못한다.</dd>
                   <dt>위장 봇 단서</dt><dd>브라우저 이름을 달았지만 사람으로 보기 어려운 세 갈래 — 스크립트가 한 번도 돌지 않은 브라우저 모양(모양 − 확인), 데이터센터·클라우드 망의 브라우저 모양, 운영자 흔적 요청. 종류를 따로 만들지 않고 이 수로 드러낸다.</dd>
                 </dl>
               </details>
@@ -407,6 +409,71 @@
               </dl>
             </details>
           </div>
+        </div>
+      </section>
+
+      <section id="screens" aria-labelledby="h-screens">
+        <div class="sec-head"><h2 id="h-screens">화면 이용</h2><p class="sec-sum" id="s-screens">…</p></div>
+        <details class="explain">
+          <summary>이 절 읽는 법<span class="tail">· 보이는 동안 5분마다</span></summary>
+          <dl>
+            <dt>읽는 값</dt><dd>KimpTrack 서버가 화면마다 영역별로 보인 시간·1초 이상 보임·클릭 수를 하루(KST) 합계로 모은 값(api 피드). 이 절이 화면에 보이는 동안만 5분마다 부르고, 기간을 바꾸면 곧바로 부른다. <b>화면 분석에 동의한 방문자만</b> 센다.</dd>
+            <dt>판정</dt><dd>종합 판정에 들지 않는다.</dd>
+            <dt>보인 시간</dt><dd>영역이 화면 높이의 절반(작은 영역은 자기 높이의 절반) 넘게 보이고, 문서가 보이며, 마지막 입력 뒤 5분 안이었던 시간만 쌓는다.</dd>
+            <dt>하루 합계</dt><dd>날마다 합계만 남아 한 사람을 따라갈 수 없다 — 값은 페이지뷰로 나눈 평균이고 사람 수가 아니다.</dd>
+            <dt>시작</dt><dd>처리방침 v3 시행일(D) 전 날은 비어 있다.</dd>
+            <dt>실제 화면</dt><dd>왼쪽(좁은 화면은 위) 틀은 지금 배포된 실제 페이지에 값을 겹쳐 그린 것이다 — 페이지 안 누름은 막혀 화면은 위의 고르기로만 바뀌고, 목록 행을 누르면 그 영역으로 간다. 틀은 이 절이 보이는 동안만 띄운다(대시보드는 실시간 연결을 연다). 틀이 연 요청은 접속 요약에서 운영자 흔적으로 빠진다.</dd>
+          </dl>
+        </details>
+        <div class="card">
+          <div class="pick-bar">
+            <label class="pick">기간
+              <select id="scr-days" class="input">
+                <option value="1">오늘</option>
+                <option value="7" selected>7일</option>
+                <option value="30">30일</option>
+                <option value="90">90일</option>
+              </select>
+            </label>
+            <label class="pick">화면
+              <select id="scr-page" class="input">
+                <option value="landing">랜딩</option>
+                <option value="app-spread">대시보드 스프레드</option>
+                <option value="app-history">대시보드 기록</option>
+                <option value="app-gap">대시보드 갭</option>
+                <option value="app-pp">대시보드 선선갭</option>
+                <option value="app-health">대시보드 수집 상태</option>
+                <option value="app-flow">대시보드 입출금 레이더</option>
+                <option value="privacy">처리방침</option>
+                <option value="kimp-chart">김프 차트</option>
+                <option value="kimp-history">김프 기록</option>
+              </select>
+            </label>
+            <div class="chips" role="group" aria-label="기기">
+              <button type="button" class="chip" data-device="pc" aria-pressed="true">PC</button>
+              <button type="button" class="chip" data-device="mobile" aria-pressed="false">휴대폰</button>
+            </div>
+            <span class="meta" id="m-screens"></span>
+          </div>
+          <p class="answer" id="a-screens"></p>
+          <div class="scr-grid">
+            <div class="scr-stage pc" id="scr-stage">
+              <iframe id="scr-frame" title="실제 화면 덮어 보기" sandbox="allow-scripts allow-same-origin" referrerpolicy="strict-origin" loading="lazy"></iframe>
+              <p class="scr-note" id="scr-note" hidden></p>
+            </div>
+            <div class="scr-side" id="b-screens"></div>
+          </div>
+          <details class="terms">
+            <summary>이 칸 뜻</summary>
+            <dl>
+              <dt>평균 보인 시간</dt><dd>그 영역이 보인 시간의 합 ÷ 페이지뷰(초, 소수 1자리). 순위는 이 값이 큰 순이다.</dd>
+              <dt>도달률</dt><dd>그 영역이 1초 이상 보인 페이지뷰 ÷ 페이지뷰(%, 100 에서 멈춘다). 20% 미만은 '거의 안 닿음' — 덮어 보기에서 빗금.</dd>
+              <dt>100뷰당 클릭</dt><dd>그 영역 안 클릭 수 ÷ 페이지뷰 × 100(소수 1자리). 덮어 보기 꼬리표의 '클릭' 도 이 값이다.</dd>
+              <dt>단계</dt><dd>그 화면에서 평균 보인 시간이 가장 긴 영역 대비 몫을 다섯 단계로 나눈 것(몫 × 5 를 올림) — 색(옅은 파랑 → 노랑 → 주황 → 빨강)과 꼬리표 글씨(12~22px)가 함께 커진다. 기록이 없는 영역은 회색 점선(단계 0).</dd>
+              <dt>표본 적음</dt><dd>페이지뷰가 5 미만 — 단계·순위는 그리되 모든 표시에 '표본 적음' 을 붙인다.</dd>
+              <dt>지금 화면에 없음</dt><dd>기록은 있는데 지금 페이지에 없는 영역(화면이 바뀌었다) — 목록 끝에 회색으로.</dd>
+            </dl>
+          </details>
         </div>
       </section>
 

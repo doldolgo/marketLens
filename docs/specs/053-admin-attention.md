@@ -1,6 +1,6 @@
 # 053 — admin-attention
 
-상태: TODO | 의존: **052 attention·042 admin-traffic(PR #107) 이 main 에 머지된 뒤**(피드 `/admin/attention`·`attention.js`·`data-area`, 042 의 답 줄 `p.answer` 꼴·node 확인 방식 `test_admin_traffic.py`). 041 의 절 설명 틀·036 의 부분 상태 칸을 쓴다. 043 과 따로 간다(§2 바꾸는 것).
+상태: DONE | 의존: **052 attention·042 admin-traffic(PR #107) 이 main 에 머지된 뒤**(피드 `/admin/attention`·`attention.js`·`data-area`, 042 의 답 줄 `p.answer` 꼴·node 확인 방식 `test_admin_traffic.py`). 041 의 절 설명 틀·036 의 부분 상태 칸을 쓴다. 043 과 따로 간다(§2 바꾸는 것).
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -68,8 +68,15 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+cd server && uv run ruff check .             # All checks passed!
+cd server && uv run ruff format --check .    # 358 files already formatted
+cd server && uv run pytest -q                # 1889 passed, 1 skipped(test_geo_perf — DBIP_DIR 없음, 기존) — node 확인 넷 모두 돎:
+                                             #   test_admin_attention.py 8 · test_attention_overlay.py 8 · test_clarity.py(덮어 보기 1 더함) · test_admin_traffic.py
+node --check web/admin/admin.js web/public/attention.js web/public/clarity.js   # 셋 다 문법 통과
+cd web && npm ci && npm run lint && npm run build   # oxlint 경고·오류 0, vite build 통과(index 246.50 kB · gzip 77.09 kB)
 ```
+- §4 의 서버·node·nginx 계약 항목은 위 pytest 안에서 돈다: `test_admin.py`(절 여덟·nav·고르는 줄 셋·설명·`AREA_NAMES` 가 052 영역 전부·틀 속성·postMessage 대상 출처·공개 다섯 페이지 `frame-ancestors`·`X-Frame-Options` 없음·관리자 CSP), `test_admin_attention.py`(§3.3 계산·기본 화면·답 세 갈래·기간 바꿈만 부르기·떠 있으면 한 번·출처/창이 다른 메시지 무시·값과 focus 보내기·5초 무응답·before_gate·직전 값), `test_attention_overlay.py`(두 조건·세기 리스너 0·누름 넷·ready 다시·다른 출처·상자 수·단계별 글씨·빗금·표본 적음·focus), `test_clarity.py`(틀 안 `kt-overlay=1` 이면 Clarity·동의 창 없음), `test_access_classes.py`(admin 출처 = operator·짝 빠짐), `test_privacy.py`·`test_kimp_pages.py`(CSP 문자열).
+- 돌리지 않은 것: 브라우저·Docker(§4 마지막 줄 — 설계 세션), `nginx -t`(Docker 없음 — PR 본문에 적을 것).
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — admin 행 web 칸 끝에 "· 화면 이용 절(053 — 기간·화면·기기, 실제 페이지 위 영역 강도 덮어 보기·순위 목록)".
@@ -85,5 +92,30 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-- 추측한 지점 / 실행 중 함께 고친 스펙 절:
+  - web: `web/admin/index.html`(절 `#screens`·nav '화면'·고르는 줄·틀·'이 절 읽는 법'·'이 칸 뜻', 038 운영자 흔적 dd 에 관리자 화면), `web/admin/admin.css`(고르는 줄·틀 칸 `--fit`·목록·단계 색 lv0~lv5), `web/admin/admin.js`(값 계산 `screenValues`·기본 화면 `busiest`·답 `screenAnswer`·이름표 `AREA_NAMES`, 고른 값 `scr`, 접속 창과 같은 `loadLatest`, 틀 `aimFrame`·`fitFrame`·`onFrameMessage`, 목록·빈 칸·머리, 5분 주기·절 보임 `IntersectionObserver`), `web/public/attention.js`(덮어 보기 `overlay()` — 파일 끝, `ADMIN_ORIGIN`), `web/public/clarity.js`(덮어 보기 건너뛰기 한 줄), `web/nginx.conf`(다섯 페이지 `frame-ancestors`), `web/nginx-admin.conf`(`frame-src`).
+  - server: `app/features/admin/access_classes.py`(`is_operator` 에 `admin.kimptrack.com`).
+  - 테스트: 새 `tests/test_admin_attention.py`·`tests/test_attention_overlay.py`, 고친 `tests/test_admin.py`(절 여덟·053 정적 셋·nginx 셋·`.style`/`.src`/주소 예외)·`tests/test_admin_traffic.py`(가짜 `window`·`IntersectionObserver` 만)·`tests/test_attention.py`(덮어 보기 부분은 관리자 출처 하나·textContent 허용)·`tests/test_clarity.py`(틀·search 가짜 + 한 경우)·`tests/test_privacy.py`(CSP 문자열)·`app/features/admin/tests/test_access_classes.py`(operator 한 경우 + 전용 시험).
+  - 문서: context 셋(status·architecture·product), 스펙 029·032·036·038·041, CLAUDE.md 인덱스.
+- 추측한 지점 / 실행 중 함께 고친 스펙 절 (사람이 없는 실행이라 가장 보수적인 쪽을 골랐다 — 각 줄 끝은 버린 대안):
+  - 덮어 보기도 호스트가 `kimptrack.com` 일 때만 켠다(§3.4 의 '시험 사본에서 호스트 검사도 바꾼다' 를 그렇게 읽었다). (버림: 호스트 무관.)
+  - 화면 고르기의 '(n)' 은 고른 기간 × **고른 기기**의 pv — 기본 화면 규칙·틀이 보이는 값과 같게. (버림: 두 기기 합.)
+  - 기기 기본값은 PC. 화면을 한 번 고르면 새로고침 전까지 그 화면(기간·기기를 바꿔도), 고르기 전에는 기본 화면을 따른다. (버림: 바꿀 때마다 기본 화면으로.)
+  - 단계·순위는 지금 페이지에 있는(첫 ready 전에는 기록 있는) 영역끼리, 단계는 반올림 전 ms 로(⌈ms×5/최대⌉). 같은 ms 는 피드 순서(ms 큰 순·id 순). '지금 화면에 없음' 은 순위 없이 회색으로 끝에(단계는 같은 최대 대비, 5 에서 멈춤). t·c 는 소수 1자리 반올림, r 은 정수 반올림. (버림: 반올림한 t 로 단계.)
+  - 목록에 페이지에는 있는데 기록 없는 영역도 '기록 없음' 행으로 넣는다(순위 행 뒤·'지금 화면에 없음' 앞). (버림: 덮어 보기에만.)
+  - 답 문장의 '가장 덜 닿은 곳' 은 순위 있는 영역 중 도달률이 가장 낮은 곳(같으면 뒤 순위). 갈래: pv 0 / 보통 / pv 는 있는데 영역 기록 없음('영역 기록은 없다.') / 표본 적음은 끝에 '표본 적음 — 페이지뷰가 5보다 적어 단계·순위가 흔들린다.' 한 문장. {기간} 은 '오늘'·'최근 n일'.
+  - '표본 적음' 표시: 답 문장·목록 위 주의 한 줄·덮어 보기 꼬리표마다(기록 없음에도). 목록 행마다는 붙이지 않았다.
+  - 덮어 보기 꼬리표 '클릭 n' 의 n 은 100뷰당 클릭(소수 1자리) — §3.5 와 같은 값('이 칸 뜻' 에 적음). 꼬리표는 상자 안에서 잘리고(상자 `overflow: hidden`), 상자 위쪽이 화면 위로 나가면 화면 맨 위에 붙는다. 상자·꼬리표 모양은 CSSOM 속성으로만(`<style>`·`cssText` 없음 — CSP 무관). focus 의 '굵게' 는 테두리 6px.
+  - 받은 값은 꼴을 검사한다(단계 0~5 정수·순위 1 이상 정수 또는 null·수 셋) — 어긋나면 그 영역은 '기록 없음'. focus 메시지는 §3.4 글자 그대로 `{type, id}`(v 없음)라 페이지는 값 메시지에만 `v: 1` 을 본다.
+  - 틀: 값이 있을 때(ok, 또는 같은 기간의 직전 값이 있는 실패)만 띄운다 — 시행 전·값 없는 실패는 칸을 숨긴다. 기간을 바꿔 새 값을 기다리는 동안은 띄운 페이지를 그대로 둔다(다시 띄우지 않음). 같은 주소라도 기기가 바뀌면 다시 띄운다. 절이 처음 보이기 전에는 about:blank 이고 절 요약은 '보이면 부른다'. ready 는 지금 고른 화면의 것만, 영역 id 는 꼴 검사·중복 제거·40개까지.
+  - 부르기: 기간 바꿈 호출은 5분 주기의 다음 시각을 건드리지 않는다(042 와 같다). 화면 이용 경로는 036 의 '여덟 경로' 만료 표시 지우기 셈에 넣지 않는다(셈은 그대로 여덟 — `FAST`·`SLOW` 모두 성공 확인으로 바꿈).
+  - D 는 `gateAt` 의 KST 날짜를 `YYYY-MM-DD` 로.
+  - 공개 nginx `frame-ancestors` 는 `= /`·`= /app/index.html` 에 더해 `= /index.html`·`/app/` 접두에도 — nginx 가 어느 쪽으로 index.html 을 주어도 붙게. (버림: `= /app/index.html` 하나.)
+  - 036 의 `.style`·`.src` 금지: 예외를 `fitFrame`(CSS 변수 `--fit` 을 `style.setProperty` 한 줄)·`aimFrame`(틀 `src` 한 줄 — `SITE_ORIGIN` 으로 만든 주소나 about:blank) 두 함수로 묶고 정적 시험이 지킨다. (버림: 몫마다 CSS 클래스 — 칸 폭에 정확히 안 맞음, `contentWindow.location.replace` — 알아보기 어려움.)
+  - `AREA_NAMES` 는 화면별 표 + 대시보드 공통 `"app"`, JSON 꼴(시험이 읽는다). 이름은 화면의 제목·문구에서 짧게.
+  - 함께 고친 스펙 절: 029 §3.2 응답 헤더·§4 curl 줄(관리자 CSP), 032 §3.1(CSP `frame-ancestors`), 036 §3.1 표·머리 링크 여덟·§3.6 style 예외·§3.8 CSP·§4 정적 단언(절 여덟·주소 둘·예외 두 함수), 038 §3.4 운영자 흔적 출처, 041 §1·§3.1·§4(여덟 절). 다른 기능의 시험(041·042 의 node 가짜 문서)은 `window`·`IntersectionObserver` 가짜만 더했다.
+  - 022(랜딩, hereokay 작성)·044(hereokay) 스펙은 고치지 않았다 — 담당자 제안(PR 본문): "`frame-ancestors` 를 `'self' https://admin.kimptrack.com` 으로 바꿨다(관리자 덮어 보기). 랜딩(`= /`)은 이 지시어 하나짜리 CSP 가 새로 붙는다."
 - 남은 빚:
+  - 브라우저·Docker 확인 전부(§4 마지막 줄 — 설계 세션)와 `nginx -t`(PR 본문). 로컬 확인은 커밋하지 않는 시험 사본에서 `SITE_ORIGIN`·`ADMIN_ORIGIN`·attention.js 의 `HOST` 를 바꾼다.
+  - 같은 틀 창은 주소를 바꿔도 같은 창이라, 기기를 바꿔 다시 띄우는 짧은 틈에 앞 문서가 보낸 ready 가 받아질 수 있다(같은 화면이라 영역 모임은 같다).
+  - 시행일(2026-10-18) 전에는 피드가 `before_gate` 라 틀이 뜨지 않는다 — 설계 세션 확인은 가짜 피드로.
+  - 043 §3.4 랜딩 도달 추정 지우기는 설계 세션 몫(§2) — 이 세션은 043 을 건드리지 않았다.

@@ -512,6 +512,41 @@ details > summary:hover { color: var(--color-accent-300); }
   :not(.card) > .terms { padding: 2px var(--space-4); }
 }
 
+/* ══ 화면 이용 (053) — 고르는 줄·실제 페이지 틀(덮어 보기)·순위 목록. 틀은 PC 1280×800·휴대폰 390×844 로 놓고
+   --fit(admin.js 가 칸 폭 ÷ 틀 폭으로 정하는 값 하나 — 휴대폰은 1 이하)만큼 줄인다. 칸 높이도 같은 몫이다.
+   단계 색 lv1~lv5 는 덮어 보기(attention.js)의 상자 테두리와 같은 색 — 옅은 파랑 → 노랑 → 주황 → 빨강 ══ */
+.pick-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.pick { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-neutral-400); }
+.pick .input { min-height: 36px; max-width: 100%; }
+.pick-bar .meta { margin-left: auto; }
+.pick-bar + .answer { margin-top: 12px; }
+.scr-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; margin-top: 14px; }
+.scr-stage {
+  position: relative; overflow: hidden; width: 100%; height: calc(var(--fh) * var(--fit, 1));
+  border-radius: var(--radius-md); box-shadow: 0 0 0 1px var(--color-divider); background: var(--color-bg);
+}
+.scr-stage.pc { --fw: 1280px; --fh: 800px; }
+.scr-stage.mobile { --fw: 390px; --fh: 844px; max-width: 390px; }
+.scr-stage iframe { display: block; width: var(--fw); height: var(--fh); border: 0; transform: scale(var(--fit, 1)); transform-origin: 0 0; }
+.scr-note {
+  position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 8px 12px; border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-bg) 88%, transparent); color: var(--color-neutral-300); font-size: 13px;
+}
+.scr-side { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.scr-table td { vertical-align: middle; }
+.scr-table .rank { width: 3em; color: var(--color-neutral-400); }
+.scr-table .area { appearance: none; border: 0; padding: 0; background: none; color: var(--color-text); font: inherit; text-align: left; cursor: pointer; min-height: 28px; }
+.scr-table .area:hover { color: var(--color-accent-300); }
+.scr-table tr.gone td, .scr-table tr.gone .area { color: var(--color-neutral-500); cursor: default; }
+.scr-table .time { min-width: 8em; }
+.scr-table .time .chart { height: 8px; margin-bottom: 2px; }
+.scr-table .low-tag { display: block; font-size: 11px; color: var(--color-neutral-500); }
+.chart .lv0 { fill: var(--color-neutral-700); }
+.chart .lv1 { fill: #60a5fa; }
+.chart .lv2 { fill: #facc15; }
+.chart .lv3 { fill: #fb923c; }
+.chart .lv4 { fill: #ef4444; }
+.chart .lv5 { fill: #dc2626; }
 /* ══ 좁은 폭 — 한 줄 배치·좌우 16px·절 이동은 옆으로 미는 한 줄·표는 카드 안에서 가로 스크롤 (§3.7) ══ */
 @media (max-width: 960px) {
   .vitals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -521,6 +556,8 @@ details > summary:hover { color: var(--color-accent-300); }
      ① 범위 숫자 타일은 4열 칸(≈130~200px)에 들지 않아 한 줄을 다 쓴다 */
   .cols3 { grid-template-columns: minmax(0, 1fr); }
   .tiles > :has(> .range-num) { grid-column: 1 / -1; }
+  /* 화면 이용(053) — 틀 아래 목록 */
+  .scr-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
   :root { --gutter: 16px; }
@@ -555,6 +592,7 @@ details > summary:hover { color: var(--color-accent-300); }
   .tiles, .funnel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cols2 { grid-template-columns: minmax(0, 1fr); }
   .range-num { font-size: 26px; }
+  .pick-bar .meta { margin-left: 0; }
 }
 @media (max-width: 480px) {
   .brow { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'name val' 'bar bar'; }

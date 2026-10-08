@@ -97,9 +97,23 @@ def test_notice_version_is_the_clarity_one() -> None:
 
 
 def test_script_sends_nothing_but_the_beacon_and_keeps_no_visitor_state() -> None:
-    """좌표·글자·입력값·저장소 쓰기·쿠키·다른 주소 없음 (§2 하지 않는 것)."""
+    """좌표·글자·입력값·저장소 쓰기·쿠키·다른 주소 없음 (§2 하지 않는 것). 053 의 덮어 보기 부분(파일 끝)은 세지 않고
+    관리자 출처 하나와만 메시지를 주고받는다 — 꼬리표 글자를 textContent 로 쓰는 것 말고는 같은 금지를 따른다."""
     assert set(re.findall(r"[\"'](/api/[\w/-]*)", JS)) == {"/api/attention"}
-    assert not re.search(r"https?://", JS)
+    # 주소 글자는 덮어 보기의 관리자 출처 상수 하나뿐
+    assert re.findall(r"https?://[^\s\"']*", JS) == ["https://admin.kimptrack.com"]
+    assert JS.count('const ADMIN_ORIGIN = "https://admin.kimptrack.com"') == 1
+    marker = "// ── 덮어 보기 (053)"
+    assert JS.count(marker) == 1
+    counting, overlay = JS.split(marker)
+    for banned in ("setItem", "removeItem", "cookie", "sessionStorage", "innerHTML"):
+        assert banned not in overlay, banned
+    for banned in ("sendBeacon", "fetch(", ".value", "XMLHttpRequest", "clientX"):
+        assert banned not in overlay, banned
+    # 보내는 메시지는 부모 창의 관리자 출처로만 — '*' 없음
+    assert overlay.count("postMessage(") == 1
+    assert "window.parent.postMessage(" in overlay and "ADMIN_ORIGIN)" in overlay
+    assert "'*'" not in overlay and '"*"' not in overlay
     for banned in (
         "setItem",
         "removeItem",
@@ -119,7 +133,7 @@ def test_script_sends_nothing_but_the_beacon_and_keeps_no_visitor_state() -> Non
         "setInterval",
         "XMLHttpRequest",
     ):
-        assert banned not in JS, banned
+        assert banned not in counting, banned
 
 
 # --- nginx·caddy (§3.2·§3.4·§3.6) ----------------------------------------------------

@@ -16,6 +16,15 @@ from typing import Any
 
 import pytest
 
+from app.features.attention.models import PAGES
+from tests.test_attention import (
+    DASHBOARD_COMMON,
+    DASHBOARD_TABS,
+    STATIC_AREAS,
+    STATIC_PAGES,
+    _Areas,
+    _jsx_areas,
+)
 from tests.test_deploy import (
     API,
     COLLECTOR,
@@ -268,6 +277,41 @@ def test_every_proxy_clears_cookie_and_access_jwt_and_hides_cors() -> None:
         assert ["Access-Control-Allow-Origin"] in hidden, key
 
 
+# 053 §3.7 — 공개 페이지는 자기 출처와 관리자 화면의 덮어 보기 틀 안에서만. 랜딩·대시보드(index.html 을 주는 location)는
+# 이 지시어 하나짜리 CSP, 세 정적 페이지는 052 문자열 끝의 frame-ancestors 만 이 값이다
+FRAME_ANCESTORS = "frame-ancestors 'self' https://admin.kimptrack.com"
+FRAMED_ONLY = {("=", "/"), ("=", "/index.html"), ("=", "/app/index.html"), ("/app/",)}
+FRAMED_STATIC = {("=", "/privacy"), ("=", "/kimp-chart"), ("=", "/kimp-history")}
+
+
+def test_public_pages_can_be_framed_only_by_the_admin_overlay() -> None:
+    public = _locations(_public_server())
+    for key in FRAMED_ONLY | FRAMED_STATIC:
+        csps = [
+            h
+            for h in _args(public[key], "add_header")
+            if h[0] == "Content-Security-Policy"
+        ]
+        assert len(csps) == 1, key
+        _, value, always = csps[0]
+        assert always == "always", key
+        found = [d.strip() for d in value.split(";") if "frame-ancestors" in d]
+        assert found == [FRAME_ANCESTORS], key
+        if key in FRAMED_ONLY:
+            assert value == FRAME_ANCESTORS, key
+    # 대시보드 주소(/app/·?tab=)는 index.html 을 주는 location 으로 간다
+    assert _route("/app/") == ("/app/",)
+    # X-Frame-Options 는 두지 않는다 — CSP 와 다르면 브라우저가 관리자 틀을 막는다(공개 nginx·caddy 어디에도)
+    for key, children in public.items():
+        names = [h[0].lower() for h in _args(children, "add_header")]
+        assert "x-frame-options" not in names, key
+    assert "x-frame-options" not in [
+        h[0].lower() for h in _args(_public_server(), "add_header")
+    ]
+    caddy = re.sub(r"#[^\n]*", "", _text("caddy/Caddyfile"))
+    assert "x-frame-options" not in caddy.lower()
+
+
 def test_frames_denied_on_every_response_and_csp_on_the_screen() -> None:
     server = _admin_server()
     assert XFO in _args(server, "add_header")
@@ -276,7 +320,7 @@ def test_frames_denied_on_every_response_and_csp_on_the_screen() -> None:
     screen = _args(_locations(server)[("/",)], "add_header")
     csp = [
         "Content-Security-Policy",
-        "default-src 'self'; frame-ancestors 'none'",
+        "default-src 'self'; frame-src https://kimptrack.com; frame-ancestors 'none'",
         "always",
     ]
     assert csp in screen
@@ -410,8 +454,17 @@ def test_root_path_only_on_collector_and_public_api_docs_stay_closed() -> None:
 # --- 관리자 화면 정적 단언 (029 §3.3 → 036 §3.8·§4) -------------------------------------------
 
 SCREEN = ROOT / "web/admin"
-# 036 §3.1 — 한 페이지 절 일곱, 이 순서
-SECTIONS = ["overview", "collect", "infra", "alerts", "traffic", "cost", "tools"]
+# 036 §3.1 — 한 페이지 절 여덟, 이 순서(화면 이용 `screens` 는 053 — 접속 다음·비용 앞)
+SECTIONS = [
+    "overview",
+    "collect",
+    "infra",
+    "alerts",
+    "traffic",
+    "screens",
+    "cost",
+    "tools",
+]
 # 036 §3.8 — 밖으로 나가는 링크의 호스트(고정 https 주소뿐). db-ip.com 은 DB-IP CC BY 표시(042 §3.4 ③ 바닥)
 EXTERNAL_HOSTS = {
     "clarity.microsoft.com",
@@ -535,8 +588,18 @@ def test_screen_script_sends_xhr_header_polls_while_visible_and_never_parses_htm
     assert "'X-Requested-With': 'XMLHttpRequest'" in js
     for needed in ("visibilityState", "createElementNS", "refreshSec"):
         assert needed in js, needed
+    # 053 — 화면 이용 절의 틀 둘만 예외: 틀 주소(`aimFrame` — SITE_ORIGIN 으로 만든 주소나 about:blank)와 틀 폭 맞추기
+    # (`fitFrame` — CSS 변수 --fit 하나). 그 밖은 036 금지 그대로
+    aim, fit = _js_function(js, "aimFrame"), _js_function(js, "fitFrame")
+    assert aim.count(".src") == 1 and "$('scr-frame').src = want;" in aim
+    assert "url && scr.inView" in aim and "'about:blank'" in aim
+    assert "aimFrame(feed || waiting ? frameUrl(page) : null)" in js
+    assert js.count("aimFrame(") == 2
+    assert re.search(r"const frameUrl = \(page\) => `\$\{SITE_ORIGIN\}", js)
+    assert fit.count(".style") == 1 and "stage.style.setProperty('--fit', " in fit
+    rest = js.replace(aim, "").replace(fit, "")
     for banned in SCRIPT_BANNED:
-        assert banned not in js, banned
+        assert banned not in rest, banned
     # SVG 속성은 허용 목록 하나를 지난다 — 목록이 기하·이름표 밖으로 늘지 않게
     allow = re.search(r"const SVG_ATTRS = new Set\(\[([^\]]*)\]\);", js)
     assert allow, "svg() 의 속성 허용 목록"
@@ -570,7 +633,12 @@ def test_screen_script_has_two_polling_bundles_and_no_outside_address() -> None:
     js = _text("web/admin/admin.js")
     assert re.search(r"\bFAST_MS = 10_000;", js)
     assert re.search(r"\bSLOW_MS = 60_000;", js)
-    assert re.findall(r"https?://[^\s'\"`]*", js) == ["http://www.w3.org/2000/svg"]
+    # 053 — 화면 이용 절이 틀로 띄우는 공개 사이트 출처 상수 하나가 더해진다
+    assert re.findall(r"https?://[^\s'\"`]*", js) == [
+        "http://www.w3.org/2000/svg",
+        "https://kimptrack.com",
+    ]
+    assert js.count("const SITE_ORIGIN = 'https://kimptrack.com';") == 1
     # 피드 넷과 029 의 네 경로 — 같은 출처 상대 경로
     for path in (
         "/api/health",
@@ -654,7 +722,7 @@ def test_screen_page_has_no_inline_script_or_style() -> None:
     assert not re.search(r"\btarget\s*=", html, flags=re.I)  # 같은 탭 이동
 
 
-def test_screen_page_has_seven_sections_in_order_and_jump_links() -> None:
+def test_screen_page_has_eight_sections_in_order_and_jump_links() -> None:
     html = _text("web/admin/index.html")
     assert re.findall(r'<section id="([\w-]+)"', html) == SECTIONS
     nav = re.search(r'<nav class="jump"[^>]*>(.*?)</nav>', html, flags=re.S)
@@ -955,9 +1023,12 @@ const document = {
 const fetch = (...a) => { calls.push('fetch'); return new Promise(() => {}) }
 const location = { search: '', replace() { calls.push('replace') } }
 const history = { replaceState() { calls.push('replaceState') } }
-const api = new Function('document', 'fetch', 'location', 'history', 'Node',
+// 053 — 화면 이용 절이 듣는 window·IntersectionObserver(여기서는 듣기만 받는다)
+const window = { addEventListener() {} }
+class IntersectionObserver { observe() {} }
+const api = new Function('document', 'fetch', 'location', 'history', 'Node', 'window', 'IntersectionObserver',
   script + '\n;return { kindName, alarmTail, tabName, pctFmt, exchangeRow, timeline, alarmRow, alertRow, fillTraffic, fillClarity, drawCollect, got, P }')(
-  document, fetch, location, history, Node)
+  document, fetch, location, history, Node, window, IntersectionObserver)
 const text = (n) => (typeof n === 'string' ? n : n.textContent + n.kids.map(text).join(''))
 const titles = (n) => (typeof n === 'string' ? [] : [
   ...(n.title ? [n.title] : []), ...(n.tag === 'title' ? [n.textContent] : []), ...n.kids.flatMap(titles)])
@@ -1348,3 +1419,120 @@ def test_traffic_colors_use_the_spec_tokens_and_narrow_rows_stack() -> None:
     # §3.7 — ⑥ 의 응답·지속 막대는 회색(장애색은 5xx 만), 시행 전 덩어리는 범례처럼 테두리
     assert "var(--color-neutral-600)" in _css_exact(css, ".q .chart .fill")
     assert "stroke: var(--color-neutral-700)" in _css_exact(css, ".chart .pre")
+
+
+# --- 화면 이용 절 (053 §4) ----------------------------------------------------------------------
+
+SCREEN_PAGES = [
+    "landing",
+    "app-spread",
+    "app-history",
+    "app-gap",
+    "app-pp",
+    "app-health",
+    "app-flow",
+    "privacy",
+    "kimp-chart",
+    "kimp-history",
+]
+SCREEN_NAMES = [
+    "랜딩",
+    "대시보드 스프레드",
+    "대시보드 기록",
+    "대시보드 갭",
+    "대시보드 선선갭",
+    "대시보드 수집 상태",
+    "대시보드 입출금 레이더",
+    "처리방침",
+    "김프 차트",
+    "김프 기록",
+]
+
+
+def _select(body: str, sid: str) -> list[tuple[str, str]]:
+    found = re.search(rf'<select id="{sid}"[^>]*>(.*?)</select>', body, flags=re.S)
+    assert found, sid
+    return re.findall(r'<option value="([\w-]+)"[^>]*>([^<]*)</option>', found.group(1))
+
+
+def test_screens_section_has_the_pick_row_frame_and_explanations() -> None:
+    """§3.2 — 고르는 줄 셋(기간 오늘·7일·30일·90일 기본 7일, 화면 열(052 화면 이름 순서), 기기 단추 둘 aria-pressed),
+    041 꼴 '이 절 읽는 법'(동의한 방문자만·절반·5분 입력·하루 합계·D 전)·덩어리 끝 '이 칸 뜻'(정의 다섯), §3.4 틀 속성."""
+    html = _text("web/admin/index.html")
+    body = _section_bodies(html)["screens"]
+    assert _select(body, "scr-days") == [
+        ("1", "오늘"),
+        ("7", "7일"),
+        ("30", "30일"),
+        ("90", "90일"),
+    ]
+    assert '<option value="7" selected>' in body
+    assert _select(body, "scr-page") == list(
+        zip(SCREEN_PAGES, SCREEN_NAMES, strict=True)
+    )
+    assert SCREEN_PAGES == list(PAGES)
+    buttons = re.findall(r"<button\b[^>]*\bdata-device=[^>]*>[^<]*</button>", body)
+    assert [re.search(r'data-device="(\w+)"', b).group(1) for b in buttons] == [
+        "pc",
+        "mobile",
+    ]
+    assert ['aria-pressed="true"' in b for b in buttons] == [True, False]
+    assert all('type="button"' in b for b in buttons)
+    assert [_plain(b) for b in buttons] == ["PC", "휴대폰"]
+    (explain,) = _folded(body, EXPLAIN)
+    words = _plain(explain)
+    for needed in (
+        "동의한 방문자만",
+        "절반",
+        "5분",
+        "하루",
+        "따라갈 수 없다",
+        "(D) 전",
+    ):
+        assert needed in words, needed
+    (terms,) = _folded(body, TERMS)
+    dts, _ = _dl(terms)
+    for needed in ("평균 보인 시간", "도달률", "100뷰당 클릭", "단계", "표본 적음"):
+        assert needed in dts, needed
+    frames = re.findall(r"<iframe\b[^>]*>", body)
+    assert len(frames) == 1 and html.count("<iframe") == 1
+    frame = frames[0]
+    assert 'sandbox="allow-scripts allow-same-origin"' in frame
+    assert 'referrerpolicy="strict-origin"' in frame and 'loading="lazy"' in frame
+    assert " src=" not in frame  # 주소는 절이 보일 때 admin.js 가 정한다
+
+
+def test_area_names_cover_every_area_of_spec_052() -> None:
+    """§3.5 — `AREA_NAMES` 가 052 의 영역 id(정적 페이지 HTML·web/src 의 data-area) 전부를 화면마다 덮는다. 대시보드 공통
+    셋은 "app" 하나에, 탭 영역은 "app-<탭>" 에. 이름은 비지 않은 한국어 글자."""
+    js = _text("web/admin/admin.js")
+    block = re.search(r"\nconst AREA_NAMES = (\{\n.*?\n\});\n", js, flags=re.S)
+    assert block, "AREA_NAMES"
+    names = json.loads(block.group(1))
+    for page, file in STATIC_PAGES.items():
+        parser = _Areas()
+        parser.feed(_text(f"web/public/{file}"))
+        assert parser.areas == STATIC_AREAS[page], page  # 052 계약 테스트와 같은 목록
+        assert list(names[page]) == parser.areas, page
+    assert list(names["app"]) == _jsx_areas("App.tsx") == DASHBOARD_COMMON
+    for tab, (files, areas) in DASHBOARD_TABS.items():
+        found = [a for rel in files for a in _jsx_areas(rel)]
+        assert found == areas, tab
+        assert sorted(names[f"app-{tab}"]) == sorted(found), tab
+    assert set(names) == {*STATIC_PAGES, "app", *(f"app-{t}" for t in DASHBOARD_TABS)}
+    for page, table in names.items():
+        for area, name in table.items():
+            assert name.strip() and re.search(r"[가-힣]", name), (page, area)
+
+
+def test_frame_messages_go_only_to_the_public_site_origin() -> None:
+    """§3.4 — 틀로 보내는 postMessage 는 한 곳이고 대상 출처는 SITE_ORIGIN(글자 그대로 https://kimptrack.com), '*' 없음.
+    받는 메시지는 그 출처와 틀 창을 둘 다 본다."""
+    js = _text("web/admin/admin.js")
+    assert js.count("postMessage(") == 1
+    assert "win.postMessage(message, SITE_ORIGIN);" in js
+    assert "'*'" not in js and '"*"' not in js
+    handler = _js_function(js, "onFrameMessage")
+    assert "event.origin !== SITE_ORIGIN" in handler
+    assert "event.source !== win" in handler
+    assert "window.addEventListener('message', onFrameMessage);" in js

@@ -8,6 +8,9 @@
   const NOTICE_VERSION = "2026-10-09"
 
   const HOST = "kimptrack.com" // www 는 apex 로 301 이고 저장값이 출처마다 따로라 이 호스트 하나만
+  // 덮어 보기(053)로 이 페이지를 틀에 띄우는 관리자 화면의 출처 — 이 출처의 메시지만 받고 이 출처로만 보낸다.
+  // 로컬 확인은 커밋하지 않는 시험 사본에서 이 값과 위 HOST 를 바꾼다(033 §4 의 시험 사본과 같은 방식)
+  const ADMIN_ORIGIN = "https://admin.kimptrack.com"
   const KEY = "kt.analytics"
   const VKEY = "kt.analytics.v"
   const BEACON_URL = "/api/attention"
@@ -48,8 +51,12 @@
   } catch (e) {
     // 다른 출처의 틀 — 틀 안이다
   }
+  const overlayAsked = params.get("kt-overlay") === "1"
+  if (location.hostname !== HOST || !firstPage) return
+  // 덮어 보기(053) — 주소에 kt-overlay=1 이 있고 틀 안일 때만. 세지도 보내지도 않는다(아래 세기 코드에 닿지 않는다)
+  if (framed && overlayAsked) return overlay(firstPage)
   // 켜는 조건(§3.2) — 호스트·틀 밖·덮어 보기 아님·목록 안 화면. 하나라도 아니면 아무것도 하지 않는다
-  if (location.hostname !== HOST || framed || params.get("kt-overlay") === "1" || !firstPage) return
+  if (framed || overlayAsked) return
 
   // 동의 상태 '켬' — 지금 판의 granted 이고 GPC 가 아니다. 저장소를 읽다 예외면 끔
   const consented = () => {
@@ -290,5 +297,188 @@
     }
   } catch (e) {
     // 위와 같다
+  }
+
+  // ── 덮어 보기 (053) ─────────────────────────────────────────────────────────────────────────
+  // 관리자 화면이 이 페이지를 틀로 띄워 영역별 값을 postMessage 로 넘기면, 영역 위에 단계 색 상자와 꼬리표를 그린다.
+  // 누름은 막는다(링크·탭 단추가 화면을 바꾸지 않게 — 화면은 관리자 고르기로만 바뀐다). 휠·터치 스크롤은 그대로.
+  // 값이 오기 전에는 아무것도 그리지 않는다. 글자는 textContent 로만, 받은 값은 꼴을 검사한 수·id 만 쓴다
+  function overlay(page) {
+    const SIZES = [12, 12, 14, 16, 19, 22] // 꼬리표 글씨 — 단계 0~5(많이 본 곳이 크게)
+    // 단계 1~5 의 채움·테두리 — 옅은 파랑 → 노랑 → 주황 → 빨강, 불투명도 0.18~0.5, 테두리 2~4px. 단계 0 은 회색 점선만
+    const FILL = ["", "rgba(96,165,250,.18)", "rgba(250,204,21,.26)", "rgba(251,146,60,.34)", "rgba(239,68,68,.42)", "rgba(220,38,38,.5)"]
+    const LINE = ["2px dashed rgba(156,163,175,.9)", "2px solid #60a5fa", "2px solid #facc15", "3px solid #fb923c", "3px solid #ef4444", "4px solid #dc2626"]
+    const HATCH = "repeating-linear-gradient(45deg,rgba(107,114,128,.55) 0 2px,transparent 2px 8px)"
+    const FOCUS_MS = 2000
+    let values = null // id → 받은 값. null 이면 아직 값이 오지 않았다 — 그리지 않는다
+    let label = ""
+    let layer = null
+    let frame = 0
+    let scanTimer = 0
+    let scanAt = 0
+    let told = null // 마지막으로 알린 영역 id 들
+    let focusId = ""
+    let focusUntil = 0
+
+    const set = (el, props) => {
+      for (const k of Object.keys(props)) el.style[k] = props[k]
+    }
+
+    // 누름 막기 — window 캡처 단계에서 가장 먼저 받아 페이지의 처리기·기본 동작(링크 이동·제출)에 닿지 않게
+    const block = (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    for (const type of ["click", "auxclick", "submit", "dblclick"]) window.addEventListener(type, block, true)
+
+    // 지금 크기 있는 영역 — id 꼴이 맞는 것, 문서 순서, 같은 id 는 크기 있는 첫 요소(대시보드의 숨은 탭은 크기 0)
+    const sized = () => {
+      const out = new Map()
+      for (const el of document.querySelectorAll("[data-area]")) {
+        const id = el.getAttribute("data-area")
+        if (!AREA_ID.test(id) || out.has(id)) continue
+        const r = el.getBoundingClientRect()
+        if (r.width > 0 && r.height > 0) out.set(id, el)
+        if (out.size >= MAX_AREAS) break
+      }
+      return out
+    }
+
+    // 관리자에게 지금 영역 id 들을 알린다 — 처음 한 번, 그 뒤로는 모임이 바뀌었을 때만
+    const announce = () => {
+      const ids = Array.from(sized().keys())
+      const key = ids.join(" ")
+      if (key === told) return
+      told = key
+      window.parent.postMessage({ type: "kt-attention-ready", v: 1, page, areas: ids }, ADMIN_ORIGIN)
+    }
+
+    const tagText = (v) => {
+      const tail = v && v.small ? " · 표본 적음" : ""
+      if (!v || v.rank === null) return "기록 없음" + tail
+      return "#" + v.rank + " · 평균 " + v.t.toFixed(1) + "초 · 도달 " + v.r + "% · 클릭 " + v.c.toFixed(1) + tail
+    }
+
+    // 상자 하나 — 영역의 화면 위 자리에. 꼬리표는 상자 왼쪽 위(상자 위쪽이 화면 밖이면 화면 맨 위에 붙인다)
+    const box = (id, rect, now) => {
+      const v = values.get(id)
+      const level = v ? v.level : 0
+      const el = document.createElement("div")
+      el.className = "kt-ov-box kt-ov-l" + level + (v && v.low ? " kt-ov-low" : "")
+      el.setAttribute("data-kt-area", id)
+      set(el, {
+        position: "absolute",
+        boxSizing: "border-box",
+        left: rect.left + "px",
+        top: rect.top + "px",
+        width: rect.width + "px",
+        height: rect.height + "px",
+        border: LINE[level],
+        backgroundColor: level ? FILL[level] : "transparent",
+        backgroundImage: v && v.low ? HATCH : "none",
+        overflow: "hidden", // 꼬리표가 상자 밖(화면 맨 위에 붙인 자리)으로 나가지 않게
+      })
+      if (id === focusId && now < focusUntil) set(el, { borderWidth: "6px", borderStyle: "solid" })
+      const tag = document.createElement("span")
+      tag.className = "kt-ov-tag"
+      tag.textContent = tagText(v)
+      set(tag, {
+        position: "absolute",
+        left: "0",
+        top: Math.max(0, -rect.top) + "px",
+        maxWidth: "100%",
+        padding: "2px 6px",
+        background: "rgba(17,24,39,.88)",
+        color: "#f9fafb",
+        font: "600 " + SIZES[level] + "px/1.3 system-ui,-apple-system,sans-serif",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+      })
+      el.appendChild(tag)
+      return el
+    }
+
+    // 그리기 — 스크롤·크기·DOM 바뀜마다 프레임당 한 번. 층은 맨 위 고정·누름 통과
+    const draw = () => {
+      frame = 0
+      if (!values) return
+      if (!layer) {
+        layer = document.createElement("div")
+        layer.id = "kt-overlay"
+        set(layer, { position: "fixed", left: "0", top: "0", width: "100%", height: "100%", pointerEvents: "none", zIndex: "2147483647", overflow: "hidden" })
+        ;(document.body || document.documentElement).appendChild(layer)
+      }
+      if (label) layer.setAttribute("aria-label", label)
+      const now = Date.now()
+      const boxes = []
+      for (const [id, el] of sized()) boxes.push(box(id, el.getBoundingClientRect(), now))
+      layer.replaceChildren(...boxes)
+    }
+
+    const schedule = () => {
+      if (!frame) frame = window.requestAnimationFrame(guard(draw))
+    }
+
+    const onMutate = () => {
+      schedule()
+      if (scanTimer) return
+      scanTimer = window.setTimeout(
+        guard(() => {
+          scanTimer = 0
+          scanAt = Date.now()
+          announce()
+        }),
+        Math.max(0, scanAt + SCAN_MS - Date.now()),
+      )
+    }
+
+    const finite = (n) => typeof n === "number" && isFinite(n)
+    // 받은 값 한 줄 — 꼴이 맞는 것만(단계 0~5 정수·순위 1 이상 정수 또는 null·수 셋·참거짓 둘)
+    const entry = (a) => {
+      if (!a || typeof a.id !== "string" || !AREA_ID.test(a.id)) return null
+      const level = a.level
+      if (!Number.isInteger(level) || level < 0 || level > 5) return null
+      if (!(a.rank === null || (Number.isInteger(a.rank) && a.rank > 0))) return null
+      if (!finite(a.t) || !finite(a.r) || !finite(a.c)) return null
+      return { level, rank: a.rank, t: a.t, r: Math.round(a.r), c: a.c, low: a.low === true, small: a.small === true }
+    }
+
+    // 관리자 메시지 — 출처와 창(부모)을 모두 확인하고, 다르면 무시
+    const onMessage = (event) => {
+      if (event.origin !== ADMIN_ORIGIN || event.source !== window.parent) return
+      const d = event.data
+      if (!d || typeof d !== "object") return
+      if (d.type === "kt-attention" && d.v === 1 && Array.isArray(d.areas)) {
+        const next = new Map()
+        for (const a of d.areas.slice(0, MAX_AREAS)) {
+          const v = entry(a)
+          if (v) next.set(a.id, v)
+        }
+        values = next
+        label = typeof d.label === "string" ? d.label.slice(0, 200) : ""
+        schedule()
+      } else if (d.type === "kt-attention-focus" && typeof d.id === "string") {
+        const el = sized().get(d.id)
+        if (!el) return
+        el.scrollIntoView({ block: "center" })
+        focusId = d.id
+        focusUntil = Date.now() + FOCUS_MS
+        schedule()
+        window.setTimeout(guard(schedule), FOCUS_MS)
+      }
+    }
+
+    try {
+      window.addEventListener("message", guard(onMessage))
+      document.addEventListener("scroll", guard(schedule), { capture: true, passive: true })
+      window.addEventListener("resize", guard(schedule))
+      new window.MutationObserver(guard(onMutate)).observe(document.documentElement, { childList: true, subtree: true })
+      // defer 로 실려 문서는 이미 읽혔다 — 곧바로 한 번(대시보드는 React 가 뒤에 그려 모임이 바뀌면 다시 알린다)
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", guard(announce))
+      else announce()
+    } catch (e) {
+      // 덮어 보기만 없고 페이지는 그대로
+    }
   }
 })()

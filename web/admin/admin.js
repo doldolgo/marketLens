@@ -1,4 +1,4 @@
-// KimpTrack 관리자 화면 v2 스크립트 (스펙 036 — 접속 절의 서버 기록은 042). 빌드 없음 — oxlint·vite 대상이 아니다(landing.html 과 같다).
+// KimpTrack 관리자 화면 v2 스크립트 (스펙 036 — 접속 절의 서버 기록은 042, 화면 이용 절은 053). 빌드 없음 — oxlint·vite 대상이 아니다(landing.html 과 같다).
 // 한 파일이다(§2 — 나누면 로드 순서·전역 이름이 계약이 된다). 순서: 공통 도구 → 요청·세션·주기 → 부분 상태·차트
 // → 개요·수집 → 인프라 → 알림·접속 → 비용·그리기·시작.
 // 보안(§3.8): 서버·방문자가 정한 글자는 textContent 로만 넣고 title 말고는 어떤 속성에도 쓰지 않는다 — 링크가 되지 않게.
@@ -20,6 +20,7 @@ const P = {
   alerts: '/api/admin/alerts',
   access: '/svc/api/admin/access',
   clarity: '/svc/api/admin/clarity',
+  attention: '/svc/api/admin/attention', // 053 — 화면 이용 절이 보이는 동안만(두 묶음 밖)
 };
 const FAST = [P.collector, P.api, P.status, P.collect];
 const SLOW = [P.aws, P.alerts, P.access, P.clarity];
@@ -35,7 +36,9 @@ const okSince = new Set(); // 마지막 만료 신호 뒤 만료 신호 없이 �
 let reloading = false;
 let alertFilter = 'all'; // 알림 필터 — JS 변수에만 (§3.4)
 let picked = '24h'; // 고른 서버 기록 창 (042 §3.2)
-const acc = { flight: null, again: false }; // 떠 있는 접속 호출 하나와 '끝나면 한 번 더'
+// 떠 있는 호출 하나와 '끝나면 한 번 더' — 접속(042 창)·화면 이용(053 기간)이 고른 값으로 부르는 두 경로
+const acc = { path: P.access, flight: null, again: false, after: () => follow() };
+const att = { path: P.attention, flight: null, again: false, after: null, started: 0, timer: 0 };
 
 // --- 공통 도구 ---------------------------------------------------------------------------------
 
@@ -150,10 +153,12 @@ function keep(path, next) {
 // 경로 하나를 부르고 결과를 got 에 둔다. 403·JSON 아님·예상 밖 상태(피드 경로가 없는 404 등)는 사유만 남긴다 —
 // 그 경로가 채우는 칸은 비우고 사유를 적는다(직전 값이 정상으로 읽히지 않게). 돌려주는 값 = 만료 신호였는가
 async function load(path) {
-  // 접속 경로는 늘 고른 창을 붙인다 — 결과에 요청한 창을 남겨, 고른 창으로 요청한 응답만 그린다(042 §3.2)
-  const asked = path === P.access ? picked : undefined;
+  // 접속 경로는 늘 고른 창(042 §3.2), 화면 이용 경로는 고른 기간(053 §3.2)을 붙인다 — 결과에 요청한 값을 남겨,
+  // 고른 값으로 요청한 응답만 그린다
+  const asked = path === P.access ? picked : path === P.attention ? scr.days : undefined;
+  const url = path === P.access ? `${path}?window=${asked}` : path === P.attention ? `${path}?days=${asked}` : path;
   try {
-    const { status, body, text } = await call(asked ? `${path}?window=${asked}` : path);
+    const { status, body, text } = await call(url);
     const fine = status === 200 || (status === 503 && HEALTH.has(path));
     if (status === 403) keep(path, { why: '권한·설정 오류 (403)', asked });
     else if (body === null || !fine) keep(path, { why: `응답 오류 (HTTP ${status})`, asked });
@@ -206,31 +211,32 @@ function settle(signals) {
   if (signals.some(Boolean)) {
     okSince.clear();
     expired();
-  } else if (okSince.size === FAST.length + SLOW.length) {
+  } else if (FAST.concat(SLOW).every((path) => okSince.has(path))) {
     alive();
   }
   $('updated').textContent = clock(Date.now());
   paint();
 }
 
-// 접속 경로 호출(042 §3.2) — 느린 묶음과 창 버튼이 함께 쓴다. 떠 있으면 겹쳐 부르지 않고 끝난 뒤 한 번 더 부른다
-// (그사이 여러 번 눌러도 다음 호출은 하나 — 그때 고른 창). 돌려주는 값 = 만료 신호였는가
-function loadAccess() {
-  if (acc.flight) {
-    acc.again = true;
-    return acc.flight;
+// 고른 값으로 부르는 경로 호출(042 §3.2·053 §3.2) — 접속은 느린 묶음과 창 버튼이, 화면 이용은 5분 주기와 기간 고르기가
+// 함께 쓴다. 떠 있으면 겹쳐 부르지 않고 끝난 뒤 한 번 더 부른다(그사이 여러 번 바꿔도 다음 호출은 하나 — 그때 고른 값).
+// 돌려주는 값 = 만료 신호였는가
+function loadLatest(box) {
+  if (box.flight) {
+    box.again = true;
+    return box.flight;
   }
-  acc.flight = (async () => {
+  box.flight = (async () => {
     let gone = false;
     do {
-      acc.again = false;
-      gone = (await load(P.access)) || gone;
-      follow();
-    } while (acc.again && !reloading);
-    acc.flight = null;
+      box.again = false;
+      gone = (await load(box.path)) || gone;
+      if (box.after) box.after();
+    } while (box.again && !reloading);
+    box.flight = null;
     return gone;
   })();
-  return acc.flight;
+  return box.flight;
 }
 
 // 응답 창이 요청한 창과 다르면(서버가 24시간으로 답했다) 고른 창을 응답 창으로 되돌린다 — 그사이 다른 창을 고르지 않았을 때만
@@ -248,7 +254,7 @@ async function run(loop) {
   loop.busy = true;
   loop.started = Date.now();
   try {
-    settle(await Promise.all(loop.paths.map((path) => (path === P.access ? loadAccess() : load(path)))));
+    settle(await Promise.all(loop.paths.map((path) => (path === P.access ? loadLatest(acc) : load(path)))));
   } finally {
     loop.busy = false;
     schedule(loop);
@@ -262,7 +268,9 @@ function schedule(loop) {
 }
 
 // 숨었다가 보이면 빠른 묶음은 곧바로, 느린 묶음은 마지막 호출에서 60초가 지났을 때만 곧바로(아니면 남은 만큼 뒤)
+// 화면 이용(053)은 절이 보일 때만 — 숨으면 주기를 멈추고 틀을 비운다(screensWake)
 document.addEventListener('visibilitychange', () => {
+  screensWake();
   if (document.visibilityState !== 'visible') {
     clearTimeout(fast.timer);
     clearTimeout(slow.timer);
@@ -1210,7 +1218,7 @@ for (const button of document.querySelectorAll('[data-window]')) {
     if (next === picked || !own(WINDOW_NAME, next) || reloading) return;
     picked = next;
     paint();
-    loadAccess().then((gone) => settle([gone]));
+    loadLatest(acc).then((gone) => settle([gone]));
   });
 }
 
@@ -1982,6 +1990,356 @@ function drawTraffic() {
   $('s-traffic').replaceChildren(...parts);
 }
 
+// --- 화면 이용 (053) — 값 계산·이름표 ------------------------------------------------------------
+
+// 덮어 보기로 띄우는 공개 사이트 — 틀 주소·postMessage 대상·받는 메시지 출처가 모두 이 값이다(이 파일에 한 번).
+// 로컬 확인은 커밋하지 않는 시험 사본에서 바꾼다(053 §3.4 — attention.js 의 ADMIN_ORIGIN 과 짝)
+const SITE_ORIGIN = 'https://kimptrack.com';
+const SCREENS_MS = 300_000; // 절이 보이는 동안 5분마다
+const FRAME_WAIT_MS = 5_000; // 틀이 이 안에 준비 신호를 보내지 않으면 '페이지가 응답하지 않음'
+const SMALL_PV = 5; // 표본 적음 — 페이지뷰가 이보다 적다
+const LOW_REACH = 20; // 거의 안 닿음 — 도달률(%)이 이보다 낮다
+const AREA_ID = /^[a-z][a-z0-9-]{0,31}$/; // 052 영역 id 꼴
+const DAYS = [1, 7, 30, 90];
+const PERIOD_NAME = { 1: '오늘', 7: '최근 7일', 30: '최근 30일', 90: '최근 90일' };
+// 화면 이름(052 §3.1) → 고르기 이름. 이 순서가 고르기 순서이고, 기본 화면에서 pv 가 같으면 앞의 것
+const PAGE_NAME = {
+  landing: '랜딩',
+  'app-spread': '대시보드 스프레드',
+  'app-history': '대시보드 기록',
+  'app-gap': '대시보드 갭',
+  'app-pp': '대시보드 선선갭',
+  'app-health': '대시보드 수집 상태',
+  'app-flow': '대시보드 입출금 레이더',
+  privacy: '처리방침',
+  'kimp-chart': '김프 차트',
+  'kimp-history': '김프 기록',
+};
+const SCREEN_PAGES = Object.keys(PAGE_NAME);
+const STATIC_PATH = { landing: '/', privacy: '/privacy', 'kimp-chart': '/kimp-chart', 'kimp-history': '/kimp-history' };
+const DEVICE_SCREEN = { pc: 'PC', mobile: '휴대폰' };
+const FRAME_WIDTH = { pc: 1280, mobile: 390 }; // 틀 폭(높이는 admin.css — PC 800·휴대폰 844)
+// 영역 이름표(§3.5) — 052 §7 '붙인 영역 목록' 의 화면별 id 전부, 화면에 적힌 낱말로 짧게. 대시보드 공통 셋은 "app"(탭마다
+// 같다). 없는 id 는 id 그대로. JSON 꼴(큰따옴표)로 둔다 — server/tests/test_admin.py 가 읽어 052 의 영역을 모두 덮는지 본다
+const AREA_NAMES = {
+  "landing": { "top": "머리 막대", "hero": "첫 화면", "analyze": "히스토리 분석", "events": "지난 7일 사건", "kimp": "김프와 역프란", "method": "계산 방법", "faq": "자주 묻는 질문", "foot": "바닥" },
+  "privacy": { "top": "머리 막대", "changes": "변경 안내", "glance": "한눈에 보기", "consent": "화면 분석 동의 관리", "s1": "1. 처리 목적", "s2": "2. 항목과 보유 기간", "s3": "3. 파기", "s4": "4. 제3자 제공", "s5": "5. 처리 위탁", "s6": "6. 국외 이전", "s7": "7. 자동 수집 장치", "s8": "8. 정보주체의 권리", "s9": "9. 안전성 확보 조치", "s10": "10. 보호책임자", "s11": "11. 권익침해 구제", "s12": "12. 방침의 변경", "foot": "바닥" },
+  "kimp-chart": { "top": "머리 막대", "what": "볼 수 있는 것", "read": "읽는 법", "coins": "코인별 바로 가기", "faq": "자주 묻는 질문", "foot": "바닥" },
+  "kimp-history": { "top": "머리 막대", "live": "지난 7일 사건", "what": "남는 것", "how": "보는 법", "faq": "자주 묻는 질문", "foot": "바닥" },
+  "app": { "header": "로고·수집 상태", "tabs": "탭 단추", "kpi": "KPI 줄" },
+  "app-spread": { "filters": "필터 바", "table": "김프 표" },
+  "app-history": { "filters": "사건 필터", "table": "티커별 사건 표", "summary": "선택 심볼 요약", "list": "사건 로그", "filters-2": "차트 도구 줄", "chart": "봉 차트" },
+  "app-gap": { "filters": "필터 바", "table": "갭 표" },
+  "app-pp": { "filters": "필터 바", "table": "선선갭 표" },
+  "app-health": { "summary": "요약", "cards": "거래소 카드", "chart": "실패 구간 타임라인", "list": "최근 실패 구간" },
+  "app-flow": { "filters": "필터 바", "table": "코인별 순유입", "table-2": "최근 전송" }
+};
+
+function areaName(page, id) {
+  const mine = own(AREA_NAMES, page) || {};
+  const common = page.startsWith('app-') ? AREA_NAMES.app : {};
+  return own(mine, id) ?? own(common, id) ?? clean(id);
+}
+
+const rowOf = (rows, page, device) => list(rows).find((r) => isObj(r) && r.page === page && r.device === device);
+
+// 기본 화면(§3.2) — 고른 기간·기기에서 pv 가 가장 큰 화면(같으면 고르기 순서의 앞, 모두 0 이면 랜딩)
+function busiest(rows, device) {
+  let best = SCREEN_PAGES[0];
+  let most = 0;
+  for (const page of SCREEN_PAGES) {
+    const pv = n0(rowOf(rows, page, device)?.pv);
+    if (pv > most) [best, most] = [page, pv];
+  }
+  return best;
+}
+
+// 화면 하나 × 기기 하나의 값(§3.3). present = 페이지가 알린 영역 id 들(아직 모르면 null — 기록 있는 영역을 모두 페이지에
+// 있는 것으로 본다). ranked = 페이지에 있고 기록 있는 영역(평균 보인 시간 큰 순 — 순위·단계는 이것끼리), blank = 페이지에
+// 있는데 기록 없음(단계 0), away = 기록은 있는데 지금 페이지에 없음(목록 끝). 단계는 반올림 전 ms 로 정한다
+function screenValues(row, present) {
+  const pv = n0(row?.pv);
+  const data = list(row?.areas).filter((a) => isObj(a) && typeof a.id === 'string' && AREA_ID.test(a.id));
+  const here = present ? new Set(present) : null;
+  const value = (a) => ({
+    id: a.id,
+    ms: n0(a.ms),
+    t: pv ? Math.round(n0(a.ms) / pv / 100) / 10 : 0,
+    r: pv ? Math.min(100, Math.round((n0(a.seen) / pv) * 100)) : 0,
+    c: pv ? Math.round((n0(a.clicks) / pv) * 1000) / 10 : 0,
+  });
+  const on = data.filter((a) => !here || here.has(a.id)).map(value).sort((x, y) => y.ms - x.ms);
+  const top = on.length ? on[0].ms : 0;
+  const level = (ms) => (ms > 0 && top > 0 ? Math.min(5, Math.ceil((ms * 5) / top)) : 0);
+  const small = pv < SMALL_PV;
+  const mark = (a, rank, state) => ({ ...a, level: level(a.ms), rank, low: a.r < LOW_REACH, small, state });
+  const known = new Set(data.map((a) => a.id));
+  return {
+    pv,
+    small,
+    ranked: on.map((a, i) => mark(a, i + 1, 'ok')),
+    blank: here ? [...here].filter((id) => !known.has(id)).map((id) => ({ id, ms: 0, t: 0, r: 0, c: 0, level: 0, rank: null, low: false, small, state: 'none' })) : [],
+    away: here ? data.filter((a) => !here.has(a.id)).map((a) => mark(value(a), null, 'gone')) : [],
+  };
+}
+
+// 페이지로 넘기는 영역 값 — 지금 페이지에 있는 것만(기록 없음은 rank null·단계 0)
+const overlayAreas = (v) => v.ranked.concat(v.blank).map(({ id, level, rank, t, r, c, low, small }) => ({ id, level, rank, t, r, c, low, small }));
+
+// 답 문장(§3.5 — 042 의 답 줄 꼴, 값 자리는 굵게) — pv 0 · 보통 · 표본 적음(끝에 한 문장)
+function screenAnswer(v, page, device, days) {
+  if (!v.pv) return ['이 기간 이 화면·기기의 동의한 방문 기록이 없다.'];
+  const out = t`${PERIOD_NAME[days]} ${PAGE_NAME[page]} ${DEVICE_SCREEN[device]} — 페이지뷰 ${int(v.pv)}.`;
+  if (v.ranked.length) {
+    const most = v.ranked[0];
+    const least = v.ranked.reduce((lo, a) => (a.r <= lo.r ? a : lo));
+    out.push(' ', ...t`가장 오래 본 곳은 ${areaName(page, most.id)}(평균 ${AVG.format(most.t)}초), 가장 덜 닿은 곳은 ${areaName(page, least.id)}(도달 ${least.r}%).`);
+  } else out.push(' 영역 기록은 없다.');
+  if (v.small) out.push(' ', ...t`표본 적음 — 페이지뷰가 ${SMALL_PV}보다 적어 단계·순위가 흔들린다.`);
+  return out;
+}
+
+// 틀 주소 — 공개 사이트의 그 화면에 덮어 보기 표시. 대시보드는 탭을 쿼리로
+const frameUrl = (page) => `${SITE_ORIGIN}${page.startsWith('app-') ? `/app/?tab=${page.slice(4)}&` : `${STATIC_PATH[page]}?`}kt-overlay=1`;
+
+// --- 화면 이용 (053) — 고르기·틀·목록 -------------------------------------------------------------
+
+// 고른 값은 이 변수에만(주소·브라우저 저장소 없음). page 는 고른 화면(고르기 전에는 기본 화면을 따른다 — chosen),
+// inView = 절이 화면에 보인다, key = 지금 틀에 띄운 주소(+기기), ready = 그 틀이 알린 영역(없으면 null)
+const scr = { days: 7, page: SCREEN_PAGES[0], chosen: false, device: 'pc', inView: false, key: '', ready: null, wait: 0, silent: false, lastOk: null };
+const PAGE_OPTIONS = Array.from(document.querySelectorAll('#scr-page option'));
+const DEVICE_BUTTONS = Array.from(document.querySelectorAll('[data-device]'));
+
+// KST 날짜 YYYY-MM-DD (§3.6 — 시행일 D)
+function kstDate(ms) {
+  const d = new Date(ms + KST_SEC * 1000);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+// 틀로 보내기 — 대상 출처는 늘 공개 사이트 하나
+function post(message) {
+  const win = $('scr-frame').contentWindow;
+  if (win) win.postMessage(message, SITE_ORIGIN);
+}
+
+// 틀 폭 맞추기 — 칸 폭 ÷ 틀 폭(휴대폰은 1 이하). 화면 스크립트가 쓰는 style 은 이 CSS 변수 하나뿐(036 §3.6 의 예외 — 053)
+function fitFrame() {
+  const stage = $('scr-stage');
+  const fit = Math.min(1, stage.clientWidth / FRAME_WIDTH[scr.device]) || 1;
+  stage.style.setProperty('--fit', fit.toFixed(4));
+}
+
+// 틀 주소(§3.4) — 값이 있고 이 절과 탭이 보이는 동안만 그 화면, 아니면 about:blank(대시보드는 실시간 연결을 연다).
+// 주소나 기기가 바뀌면 다시 띄운다(페이지가 처음 폭으로 정하는 것이 있다). 주소는 frameUrl 이 SITE_ORIGIN 으로만 만든다
+function aimFrame(url) {
+  const stage = $('scr-stage');
+  stage.hidden = !url;
+  stage.className = `scr-stage ${scr.device}`;
+  fitFrame();
+  const want = url && scr.inView && document.visibilityState === 'visible' ? url : 'about:blank';
+  const key = want === 'about:blank' ? want : `${want}|${scr.device}`;
+  if (key !== scr.key) {
+    scr.key = key;
+    scr.ready = null;
+    scr.silent = false;
+    clearTimeout(scr.wait);
+    $('scr-frame').src = want;
+    if (want !== 'about:blank') {
+      scr.wait = setTimeout(() => {
+        scr.silent = scr.ready === null;
+        noteFrame();
+      }, FRAME_WAIT_MS);
+    }
+  }
+  noteFrame();
+}
+
+function noteFrame() {
+  const note = $('scr-note');
+  note.hidden = scr.key === 'about:blank' || scr.ready !== null;
+  note.textContent = scr.silent ? '페이지가 응답하지 않음 — 5초 안에 덮어 보기 준비 신호가 오지 않아 페이지만 보인다' : '페이지를 띄우는 중…';
+}
+
+// 틀의 준비 신호(§3.4) — 출처가 공개 사이트이고 창이 이 틀일 때만, 지금 고른 화면의 것만
+function onFrameMessage(event) {
+  const win = $('scr-frame').contentWindow;
+  if (event.origin !== SITE_ORIGIN || !win || event.source !== win) return;
+  const d = event.data;
+  if (!isObj(d) || d.type !== 'kt-attention-ready' || d.v !== 1 || d.page !== scr.page || scr.key === 'about:blank') return;
+  clearTimeout(scr.wait);
+  scr.silent = false;
+  const ids = list(d.areas).filter((id) => typeof id === 'string' && AREA_ID.test(id));
+  scr.ready = { page: d.page, areas: [...new Set(ids)].slice(0, 40) };
+  paint();
+}
+
+// 평균 보인 시간 막대 — 그 화면에서 가장 긴 영역 대비, 단계 색
+function levelBar(frac, level, label) {
+  const f = Math.min(1, Math.max(0, frac));
+  const root = frame(100, 8, '', label);
+  root.append(svg('rect', { x: 0, y: 0, width: 100, height: 8 }, 'track'), svg('rect', { x: 0, y: 0, width: (f * 100).toFixed(2), height: 8 }, `lv${level}`));
+  return tip(root, label);
+}
+
+// 목록 한 행 — 순위 · 영역 이름 · 평균 보인 시간(막대) · 도달률 · 100뷰당 클릭. 지금 페이지에 있는 행을 누르면 그 영역으로
+function screenRow(page, a, top) {
+  const gone = a.state === 'gone';
+  const tr = el('tr', gone ? 'gone' : null);
+  cell(tr, a.rank === null ? '–' : `#${a.rank}`, 'rank');
+  const name = el('button', 'area', areaName(page, a.id));
+  name.type = 'button';
+  name.title = a.id;
+  const td = cell(tr, name);
+  if (gone) {
+    name.disabled = true;
+    td.append(el('span', 'low-tag', '지금 화면에 없음'));
+  } else tr.addEventListener('click', () => post({ type: 'kt-attention-focus', id: a.id }));
+  const time = el('td', 'time');
+  const words = a.state === 'none' ? '기록 없음' : `평균 ${AVG.format(a.t)}초`;
+  time.append(levelBar(top ? a.ms / top : 0, a.level, `${words} · 단계 ${a.level}`), el('span', null, words));
+  tr.append(time);
+  const reach = cell(tr, a.state === 'none' ? '–' : `${a.r}%`, 'num');
+  if (a.low && a.state !== 'none') reach.append(el('span', 'low-tag', '거의 안 닿음'));
+  cell(tr, a.state === 'none' ? '–' : AVG.format(a.c), 'num');
+  return tr;
+}
+
+function screenList(v, page) {
+  if (!v.pv) return [el('p', 'empty', '기록 없음')];
+  const out = [];
+  if (v.small) out.push(marked('warn', `표본 적음 — 페이지뷰 ${int(v.pv)}(5 미만)이라 단계·순위가 흔들린다`));
+  const table = el('table', 'table scr-table');
+  const head = el('tr');
+  for (const [name, cls] of [['순위'], ['영역'], ['평균 보인 시간'], ['도달률', 'num'], ['100뷰당 클릭', 'num']]) head.append(el('th', cls, name));
+  const thead = el('thead');
+  thead.append(head);
+  const body = el('tbody');
+  const top = v.ranked.length ? v.ranked[0].ms : 0;
+  body.append(...v.ranked.concat(v.blank, v.away).map((a) => screenRow(page, a, top)));
+  table.append(thead, body);
+  const box = el('div', 'scroll');
+  box.append(table);
+  out.push(box);
+  return out;
+}
+
+// 값이 없을 때 본문(§3.6) — 시행 전·첫 조회 전·불러오지 못함(036 부분 상태 칸)
+function blankScreens(part) {
+  $('a-screens').replaceChildren();
+  let msg;
+  if (part?.state === 'before_gate') msg = el('p', 'state-msg', `${kstDate(n0(part.gateAt))} 부터 모읍니다(처리방침 v3 시행일)`);
+  else if (part === undefined && !att.flight) msg = el('p', 'state-msg', '이 절이 화면에 보이면 부른다');
+  else if (part?.state === 'error') msg = el('p', 'state-msg t-bad', `불러오지 못함${part.code ? ` — ${clean(part.code)}` : ''}`);
+  else msg = stateMsg(part, '');
+  $('b-screens').replaceChildren(msg);
+}
+
+// 머리 — 직전 값을 그리는 실패면 '불러오지 못함 · 마지막 성공', 시행 전, 그 밖은 036 부분 상태
+function screensHead(part, feed) {
+  if (feed && feed !== part) {
+    const out = [badge('bad', `불러오지 못함 · 마지막 성공 ${ago(feed.fetchedAt)}`)];
+    if (!part.why && part.code) out.push(el('span', 'code', part.code));
+    return out;
+  }
+  if (part?.state === 'before_gate') return [badge('dim', '시행 전')];
+  if (part === undefined && !att.flight) return [el('span', 'muted', '보이면 부른다')];
+  return head(part);
+}
+
+function drawScreens() {
+  const entry = got.get(P.attention);
+  const part = entry !== undefined && entry.asked === scr.days ? partOf(P.attention) : undefined;
+  if (part?.state === 'ok') scr.lastOk = { days: scr.days, part };
+  const failed = part !== undefined && (part.why !== undefined || part.state === 'error');
+  const feed = part?.state === 'ok' ? part : failed && scr.lastOk?.days === scr.days ? scr.lastOk.part : null;
+  const rows = feed ? list(feed.rows) : [];
+  if (feed && !scr.chosen) scr.page = busiest(rows, scr.device);
+  const page = scr.page;
+  $('scr-days').value = String(scr.days);
+  $('scr-page').value = page;
+  for (const opt of PAGE_OPTIONS) {
+    const name = own(PAGE_NAME, opt.value) ?? clean(opt.value);
+    opt.textContent = feed ? `${name} (${int(n0(rowOf(rows, opt.value, scr.device)?.pv))})` : name;
+  }
+  for (const b of DEVICE_BUTTONS) b.setAttribute('aria-pressed', String(b.dataset.device === scr.device));
+  $('m-screens').replaceChildren(...screensHead(part, feed));
+  // 틀 — 값이 있을 때, 그리고 기간을 바꿔 새 값을 기다리는 동안은 띄운 페이지를 그대로(다시 띄우지 않는다)
+  const waiting = part === undefined && scr.key !== '' && scr.key !== 'about:blank';
+  aimFrame(feed || waiting ? frameUrl(page) : null);
+  const ready = scr.ready && scr.ready.page === page ? scr.ready : null;
+  redraw('screens', [feed, page, scr.device, ready, part ?? Boolean(att.flight)], () => {
+    if (!feed) return blankScreens(part);
+    const v = screenValues(rowOf(rows, page, scr.device), ready ? ready.areas : null);
+    sentence($('a-screens'), screenAnswer(v, page, scr.device, scr.days));
+    $('b-screens').replaceChildren(...screenList(v, page));
+    const label = `${PERIOD_NAME[scr.days]} · ${PAGE_NAME[page]} · ${DEVICE_SCREEN[scr.device]}`;
+    if (ready) post({ type: 'kt-attention', v: 1, label, areas: overlayAreas(v) });
+  });
+  if (feed) {
+    const total = rows.reduce((acc, r) => acc + n0(r?.pv), 0);
+    const stale = feed !== part ? ' · 불러오지 못함' : '';
+    $('s-screens').replaceChildren(marked(stale ? 'warn' : 'ok', `${PERIOD_NAME[scr.days]} 동의한 페이지뷰 ${int(total)}${stale}`));
+  } else if (part?.state === 'before_gate') $('s-screens').replaceChildren(marked('dim', `${kstDate(n0(part.gateAt))} 부터 모은다`));
+  else if (part === undefined && !att.flight) $('s-screens').replaceChildren(marked('dim', '보이면 부른다'));
+  else $('s-screens').replaceChildren(marked(...softWord(part)));
+}
+
+// 부르기(§3.2) — 절이 보이고 탭이 보이는 동안만 5분마다. 기간을 바꾸면 곧바로 하나(떠 있으면 끝난 뒤 한 번 — 마지막 값)
+function runScreens() {
+  clearTimeout(att.timer);
+  if (reloading || !scr.inView || document.visibilityState !== 'visible') return;
+  att.started = Date.now();
+  loadLatest(att).then((gone) => {
+    settle([gone]);
+    scheduleScreens();
+  });
+}
+
+function scheduleScreens() {
+  clearTimeout(att.timer);
+  if (reloading || !scr.inView || document.visibilityState !== 'visible') return;
+  att.timer = setTimeout(runScreens, Math.max(0, SCREENS_MS - (Date.now() - att.started)));
+}
+
+// 절·탭이 보이거나 숨을 때 — 주기를 잇거나 멈추고, 틀 주소를 맞춘다(그리기가 aimFrame 을 부른다)
+function screensWake() {
+  clearTimeout(att.timer);
+  if (scr.inView && document.visibilityState === 'visible' && !reloading) {
+    if (Date.now() - att.started >= SCREENS_MS) runScreens();
+    else scheduleScreens();
+  }
+  paint();
+}
+
+$('scr-days').addEventListener('change', () => {
+  const next = Number($('scr-days').value);
+  if (!DAYS.includes(next) || next === scr.days || reloading) return;
+  scr.days = next;
+  paint();
+  loadLatest(att).then((gone) => settle([gone]));
+});
+$('scr-page').addEventListener('change', () => {
+  const next = $('scr-page').value;
+  if (!own(PAGE_NAME, next) || next === scr.page) return;
+  scr.page = next;
+  scr.chosen = true;
+  paint();
+});
+for (const button of DEVICE_BUTTONS) {
+  button.addEventListener('click', () => {
+    const next = button.dataset.device;
+    if (!own(DEVICE_SCREEN, next) || next === scr.device) return;
+    scr.device = next;
+    paint();
+  });
+}
+window.addEventListener('message', onFrameMessage);
+window.addEventListener('resize', fitFrame);
+new IntersectionObserver((entries) => {
+  scr.inView = entries[entries.length - 1].isIntersecting;
+  screensWake();
+}).observe($('screens'));
+
 // --- 비용 (§3.4) -------------------------------------------------------------------------------
 
 const USD = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -2075,6 +2433,7 @@ const SECTIONS = [
   ['infra', drawInfra],
   ['alerts', drawAlerts],
   ['traffic', drawTraffic],
+  ['screens', drawScreens],
   ['cost', drawCost],
 ];
 

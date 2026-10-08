@@ -45,7 +45,7 @@
 ### 3.2 관리자 server 의 보호 규칙
 - **교차 사이트 차단**: 백엔드로 넘기는 경로(`/api/…`·`/svc/…`)는 요청 헤더 `Sec-Fetch-Site` 가 `same-origin`·`none`·빈 값일 때만 통과, `same-site`·`cross-site` 는 403 `{"error":{"code":"forbidden","message":"Forbidden","detail":null}}`(JSON). 예외는 `/`·`= /api/docs`·`= /api/redoc`(로그인 뒤 돌아오는 이동이 same-origin 이 아니다). `kimptrack.com` 과 `admin.kimptrack.com` 은 같은 사이트라 쿠키 SameSite 로는 서로의 요청을 못 막는다.
 - **넘기지 않는 헤더**: 백엔드로 넘길 때 `Cookie`·`Cf-Access-Jwt-Assertion` 을 비운다(백엔드는 쓰지 않는다 — 사설망 평문으로 흘리지 않는다). `X-Refresh-Token` 은 그대로.
-- **응답 헤더**: 모든 프록시 응답(수집기·api 둘 다 — 같은 앱이라 CORS `*` 를 붙인다)에서 `Access-Control-Allow-Origin` 을 지운다. 모든 응답(오류 포함)에 `X-Frame-Options: DENY`. `/`(화면)에는 CSP `default-src 'self'; frame-ancestors 'none'` — 화면은 인라인 스크립트·스타일을 쓰지 않는다. 화면(`/`)은 `Cache-Control: no-store`(공개 `index.html` 과 같은 이유 — 배포가 화면과 API 계약을 함께 바꾼다). nginx 버전 숨김. location 에 `add_header` 를 따로 두면 server 수준 헤더가 상속되지 않으므로 그 location 에 같은 줄을 반복한다.
+- **응답 헤더**: 모든 프록시 응답(수집기·api 둘 다 — 같은 앱이라 CORS `*` 를 붙인다)에서 `Access-Control-Allow-Origin` 을 지운다. 모든 응답(오류 포함)에 `X-Frame-Options: DENY`. `/`(화면)에는 CSP `default-src 'self'; frame-src https://kimptrack.com; frame-ancestors 'none'` — 화면은 인라인 스크립트·스타일을 쓰지 않는다. `frame-src` 는 053 '화면 이용' 절이 공개 페이지를 틀로 띄우는 출처 하나다. 화면(`/`)은 `Cache-Control: no-store`(공개 `index.html` 과 같은 이유 — 배포가 화면과 API 계약을 함께 바꾼다). nginx 버전 숨김. location 에 `add_header` 를 따로 두면 server 수준 헤더가 상속되지 않으므로 그 location 에 같은 줄을 반복한다.
 - **접속 기록**: 요청마다 JSON 한 줄 — `time`·`email`(`Cf-Access-Authenticated-User-Email`)·`ip`(`Cf-Connecting-Ip`)·`method`·`uri`(경로와 쿼리)·`status`·`rt`(처리 초)·`ray`(`Cf-Ray`)·`sfs`(`Sec-Fetch-Site` — 이 헤더가 실제로 도착하는지 보려고). 따옴표·역슬래시·제어문자는 이스케이프하지만 UTF-8 은 보장되지 않는다(0x80 이상 바이트를 그대로 쓴다) — 읽는 도구는 관대하게 푼다(`errors='replace'`). 컨테이너 `/var/log/nginx-admin/access.log`(이미지가 디렉터리를 만든다 — 바인드가 없어도 기동한다), compose web 에 `./logs/admin:/var/log/nginx-admin` 바인드(git 무시). `/var/log/nginx` 를 통째로 바인드하지 않는다 — 이미지의 stdout·stderr 링크가 가려진다. 화면의 10초 폴링(`/svc/…`·`= /api/health`·`= /api/health/collect`)과 관리자 피드(`= /api/admin/aws`·`= /api/admin/alerts`(034), `= /svc/api/admin/access`·`= /svc/api/admin/clarity`(035), `= /svc/api/admin/attention`(052)), 브라우저의 아이콘 요청(`= /favicon.ico`)은 기록하지 않는다. 회전은 030 런북(호스트 logrotate, copytruncate). 이 기록은 개인정보(이메일·IP)다 — 항목·보존(90일)은 032 처리방침에 있다.
 
 ### 3.3 관리자 화면
@@ -102,7 +102,7 @@ docker run -d --name ml029-web --network ml029-net --network-alias web -e COLLEC
 docker exec ml029-web nginx -t        # syntax is ok · test is successful (바인드 없이 띄운 컨테이너도 같다)
 docker exec ml029-web ls /etc/nginx/conf.d /usr/share/nginx/admin   # admin.conf default.conf · admin.css admin.js index.html, html 아래 admin 0개
 # 아래는 같은 망의 curl 컨테이너에서
-curl -i web:8081/                     # 200 text/html · X-Frame-Options DENY · CSP default-src 'self'; frame-ancestors 'none'
+curl -i web:8081/                     # 200 text/html · X-Frame-Options DENY · CSP default-src 'self'; frame-src https://kimptrack.com; frame-ancestors 'none'
 curl web:8081/api/{docs,premium,history/events,refresh}             # 수집기 에코 /docs·/premium·/history/events·/refresh
 curl web:8081/api/{history/streaks,history/streaks/bulk,history/candles,spreads,landing,ws/spreads}   # api 에코
 curl web:8081/svc/api/admin/status · /svc/api/health                # api 에코 /admin/status · /health

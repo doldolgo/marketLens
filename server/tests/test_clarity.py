@@ -272,7 +272,9 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     addEventListener: (t, fn, opt) => { win[t] = fn; capture[t] = opt === true || !!(opt && opt.capture) },
     dispatchEvent: (e) => fired.push(e.type),
   }
-  const location = { hostname: c.host || 'kimptrack.com', pathname: c.path || '/', reload: () => reloads++ }
+  // 'framed' 면 틀 안(window.top 이 다른 창), search 는 053 덮어 보기 표시
+  window.top = c.framed ? {} : window
+  const location = { hostname: c.host || 'kimptrack.com', pathname: c.path || '/', search: c.search || '', reload: () => reloads++ }
   class Event { constructor(type) { this.type = type } }
   new Function('window', 'document', 'navigator', 'location', 'Event', script)(
     window, document, c.gpc ? { globalPrivacyControl: true } : {}, location, Event)
@@ -355,6 +357,27 @@ def test_other_hosts_pages_do_nothing_at_all() -> None:
             got["cookies"],
             got["listens"],
         ) == (None, None, [], [], False), case
+
+
+@with_id
+def test_admin_overlay_frame_gets_neither_clarity_nor_the_modal() -> None:
+    """053 §3.4 — `kt-overlay=1` 이고 틀 안이면(attention.js 덮어 보기와 같은 조건) 동의 창·대기열·태그·정리·듣기 모두
+    없다(동의한 방문자도). 둘 중 하나만이면 평소대로 동의 창이 뜬다."""
+    for ls in ({}, ON):
+        for path in ("/", "/app/"):
+            got = _one(
+                ls=ls, path=path, search="?kt-overlay=1", framed=True, steps=["ready"]
+            )["last"]
+            assert (
+                got["strip"],
+                got["queue"],
+                got["tags"],
+                got["cookies"],
+                got["listens"],
+                got["inert"],
+            ) == (None, None, [], [], False, [False, False]), (ls, path)
+    for case in ({"search": "?kt-overlay=1"}, {"framed": True}):
+        assert _one(**case, steps=["ready"])["last"]["strip"], case
 
 
 @with_id
