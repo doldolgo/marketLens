@@ -14,14 +14,14 @@ PUBLIC = ROOT / "web/public"
 SITE = "https://kimptrack.com/"
 
 # 스펙 022 §3.6 — 글자 그대로
-TITLE = "김프(김치프리미엄)·역프 실시간 확인 | KimpTrack"
+TITLE = "김프(김치프리미엄)·역프 실시간, 입출금 확인 | KimpTrack"
 DESCRIPTION = (
-    "김프 사이트 KimpTrack은 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX의 "
-    "김치프리미엄과 역프를 매초 계산해 입출금 상태까지 보여 줍니다."
+    "김프 사이트 KimpTrack은 국내외 6개 거래소의 김치프리미엄·역프를 매초 계산하고, "
+    "입출금이 열렸는지와 지난 기록까지 보여 줍니다."
 )
 H1 = "실시간 김프·역프, 실제로 옮길 수 있는지까지"
-MODIFIED = "2026-10-08"
-OG_IMAGE = "https://kimptrack.com/landing/og-v2.png"
+MODIFIED = "2026-10-09"
+OG_IMAGE = "https://kimptrack.com/landing/og-v3.png"
 
 
 class _Page(HTMLParser):
@@ -188,9 +188,9 @@ def test_structured_data_matches_what_the_page_shows() -> None:
 
 
 def test_modified_date_is_the_same_everywhere() -> None:
-    """설명을 고친 날 — 바닥의 <time>, WebPage.dateModified, sitemap lastmod 가 같다. 실시간 값이 바뀌어도 올리지 않는다."""
+    """설명을 고친 날 — WebPage.dateModified 와 sitemap lastmod 가 같다(화면에는 보이지 않는다). 실시간 값이 바뀌어도 올리지 않는다."""
     html = (PUBLIC / "landing.html").read_text("utf-8")
-    assert re.findall(r'<time datetime="([^"]+)">', html) == [MODIFIED]
+    assert "<time" not in html and "설명을 마지막으로 고친 날" not in html
     sitemap = (PUBLIC / "sitemap.xml").read_text("utf-8")
     # 두 줄 — 랜딩과 처리방침(032, lastmod 는 방침 시행일 — test_privacy.py). /app/ 은 넣지 않는다
     urls = dict(re.findall(r"<loc>([^<]+)</loc><lastmod>([^<]+)</lastmod>", sitemap))
@@ -224,7 +224,7 @@ def test_png_images_have_the_declared_size() -> None:
         assert head[:8] == b"\x89PNG\r\n\x1a\n", rel
         return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
 
-    assert size("landing/og-v2.png") == (1200, 630)
+    assert size("landing/og-v3.png") == (1200, 630)
     assert size("logo-512.png") == (512, 512)
     assert size("icon-192.png") == (192, 192)
     assert size("apple-touch-icon.png") == (180, 180)

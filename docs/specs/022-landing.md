@@ -11,7 +11,7 @@
 검색 엔진·메신저 미리보기가 자바스크립트 없이 본문을 읽도록 페이지는 **정적 HTML** 이고, 실데이터는 이 스펙이 만드는 가벼운 요약 API 하나로만 받는다(지금 `/api/spreads` 는 gzip 170KB 라 랜딩이 매번 받기엔 무겁다).
 
 ## 2. 범위
-- 만드는 것: server `features/landing/`(`GET /landing`), `web/public/landing.html`(HTML·CSS·스크립트 한 파일), `web/public/landing/`(`og-v2.png` 1200×630, `spreads.png`·`history.png` 와 WebP 두 크기, `fonts/kimptrack-sans.woff2`·`OFL.txt`), 아이콘(`favicon.ico`·`favicon.svg`·`icon-192.png`·`apple-touch-icon.png`·`logo-512.png`), `robots.txt`·`sitemap.xml`·`404.html`, `web/index.html`(대시보드 셸)의 head 메타, 글꼴 서브셋 스크립트 `web/scripts/subset-landing-font.py`, nginx 의 랜딩 경로 규칙, Caddyfile 의 www·catch-all(023 과 함께), 계약 테스트 `server/tests/test_landing_seo.py`.
+- 만드는 것: server `features/landing/`(`GET /landing`), `web/public/landing.html`(HTML·CSS·스크립트 한 파일), `web/public/landing/`(`og-v3.png` 1200×630, `spreads.png`·`history.png` 와 WebP 두 크기, `fonts/kimptrack-sans.woff2`·`OFL.txt`), 아이콘(`favicon.ico`·`favicon.svg`·`icon-192.png`·`apple-touch-icon.png`·`logo-512.png`), `robots.txt`·`sitemap.xml`·`404.html`, `web/index.html`(대시보드 셸)의 head 메타, 글꼴 서브셋 스크립트 `web/scripts/subset-landing-font.py`, nginx 의 랜딩 경로 규칙, Caddyfile 의 www·catch-all(023 과 함께), 계약 테스트 `server/tests/test_landing_seo.py`.
 - 하지 않는 것: 가입·로그인·방문 집계·다국어, 랜딩의 WebSocket, 대시보드 화면(`/app/` 본문) 변경, 코인별·경로별 색인 페이지, 서버가 실데이터를 HTML 에 미리 넣는 렌더링, FAQPage·HowTo·SearchAction 마크업(구글이 리치 결과를 없앴다), `meta keywords`, 검색엔진 계정 등록(사람 몫 — §3.6).
 - 바꾸는 기존 것: 016 §3.1·018 §3.4 의 "`api` 가 서빙하는 경로" 목록에 `/landing`. 023 §3.1 의 www·IP 평문 행. 랜딩은 `/api/spreads` 를 부르지 않는다.
 
@@ -112,7 +112,7 @@ KimpTrack                  김프·역프란  계산 방법  자주 묻는 질�
    4. 전달 — "실시간 김프 표에는 바뀐 값만 골라 곧바로 보냅니다."(이 랜딩은 10초 폴링이다)
    그 아래 소제목 "반영하지 않는 것" — "거래 수수료와 출금 수수료, 코인을 보내는 데 걸리는 시간과 그동안의 가격 변화, 출금 한도나 트래블룰 같은 거래소 정책은 계산에 넣지 않습니다. 실제로 옮기기 전에는 거래소에서 직접 확인해 주세요."
 7. **자주 묻는 질문**(h2, #faq) — 늘 펼친 h3 질문 + 답 10개(데스크톱 두 칸). 질문: 김프 사이트마다 숫자가 다른 이유 / 왜 $1,000 기준인가 / 환율은 무엇을 쓰나 / 옮길 수 없는 경로 판단 / 수수료·전송 시간 반영(아니요 — "표시된 김프만큼 수익이 난다는 뜻이 아닙니다") / 갱신 주기(매초 계산, 이 카드는 보이는 동안 10초) / 가입·비용(아니요, 실시간 김프 표는 PC 화면용) / 매수·매도 신호(아니요) / 역김프와 역프는 같은 말인가(네 — 역프·역김프·역프리미엄, 2026-10-08) / 김프 차트와 과거 기록(네 — 기록 탭 링크 + `/kimp-chart`·`/kimp-history` 안내 링크, 044). 답 문장은 `landing.html` 이 진실이고, 사실은 이 스펙의 다른 절과 같아야 한다.
-8. **바닥** — 바로 가기(실시간 김프 표·김프 기록과 차트·김프·역프란·계산 방법·자주 묻는 질문·김프 차트 — `/kimp-chart`·김프 히스토리 — `/kimp-history`(044)·개인정보 처리방침 — `/privacy`, 가장 밝고 굵게, 032 · 화면 분석 설정 — 방침 링크 뒤 마지막 칸, `/privacy#consent`, 같은 탭, 033), 참고값 안내 한 줄 "KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다.", "운영 고원규·이진중 · 문의 joseph13ko15@gmail.com, untilduck@gmail.com"(메일은 `mailto:` 링크 — 2026-10-01 사람이 준 값, 032 처리방침과 같은 운영 주체), "설명을 마지막으로 고친 날 {날짜}"(`<time>`, §3.6).
+8. **바닥** — 바로 가기(실시간 김프 표·김프 기록과 차트·김프·역프란·계산 방법·자주 묻는 질문·김프 차트 — `/kimp-chart`·김프 히스토리 — `/kimp-history`(044)·개인정보 처리방침 — `/privacy`, 가장 밝고 굵게, 032 · 화면 분석 설정 — 방침 링크 뒤 마지막 칸, `/privacy#consent`, 같은 탭, 033), 참고값 안내 "KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다."(최대 폭을 두지 않는다 — 넓은 화면에서 한 줄, 좁은 화면에서는 바닥 폭에서 줄을 바꾼다), "운영 고원규·이진중 · 문의 joseph13ko15@gmail.com, untilduck@gmail.com"(메일은 `mailto:` 링크 — 2026-10-01 사람이 준 값, 032 처리방침과 같은 운영 주체). 고친 날은 화면에 적지 않는다(사람 결정 2026-10-09 — §3.6).
 - 수익을 약속하는 말(이득·이익·수익·차익·무위험)은 제목·설명·h1 에 쓰지 않는다. 본문에서는 "수익이 난다는 뜻이 아닙니다" 처럼 부정하는 자리에만. 용어 풀이에서 '차익거래(아비트라지)·따리' 를 정의하는 것은 예외이되, 같은 풀이 안에 수수료·전송 시간이 빠져 있어 그만큼 남는다는 뜻이 아니라는 문장을 둔다(2026-10-08).
 
 ### 3.4 시각 규칙
@@ -132,21 +132,21 @@ KimpTrack                  김프·역프란  계산 방법  자주 묻는 질�
 - `top` 이 빈 배열이면 카드 안에 머리 "지금 가장 큰 경로" 와 "지금 옮길 수 있는 경로가 없습니다. 출금과 입금이 모두 열린 경로가 생기면 이 자리에 보여 줍니다." 만 두고 그다음 경로를 숨긴다. 부분 null 은 §3.3 규칙대로 그 구역만 숨긴다.
 - 자릿수는 대시보드 `web/src/shared/format.ts` 의 `fmtKrw`·`fmtUsdt`·`fmtPct` 규칙을 옮겨 쓴다.
 - 자바스크립트가 꺼져도 제목·정의 문단·섹션 글·비교 표·용어·계산 방법·질문과 답·그림은 HTML 에 있다. 실데이터 자리는 카드의 정적 설명과 `<noscript>` 한 줄.
-- `<head>` 에 `clarity.js`(033) 한 줄(`defer`, 상대 경로) — 동의 안내 띠도 이 파일이 그린다(시스템 글꼴 — 이 페이지 서브셋 글꼴을 쓰지 않는다, 아래 고정이라 카드 배치가 그대로), `<body>` 에 `data-clarity-unmask="true"`.
+- `<head>` 에 `clarity.js`(033) 한 줄(`defer`, 상대 경로) — 동의 창(모달)도 이 파일이 그린다(시스템 글꼴 — 이 페이지 서브셋 글꼴을 쓰지 않는다, 고정 위치라 카드 배치가 그대로), `<body>` 에 `data-clarity-unmask="true"`.
 
 ### 3.6 검색·미리보기·그림
 문구는 한 번 정하면 자주 바꾸지 않는다 — 네이버는 메인 제목·설명을 노출을 노려 자주 바꾸면 불이익을 준다. 아래 값은 `server/tests/test_landing_seo.py` 가 글자 그대로 본다.
-- `<title>`·`og:title` "김프(김치프리미엄)·역프 실시간 확인 | KimpTrack" — 검색어를 앞에, 브랜드는 뒤에(2026-10-08 — 네이버·구글 상위 김프 사이트가 전부 검색어 앞·브랜드 뒤라 따라간다. 검색엔진 등록 전이라 바꿔도 불이익이 없다), 40자 이내, '김프' 는 한 번(동명이의 GIMP·유튜버와 가르려고 괄호로 뜻을 붙인다), '김치프리미엄' 은 검색어 표기대로 붙여 쓴다(본문도 같다). 경쟁 사이트 이름('김프가')과 수익을 약속하는 말은 넣지 않는다.
-- `description`·`og:description` "김프 사이트 KimpTrack은 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX의 김치프리미엄과 역프를 매초 계산해 입출금 상태까지 보여 줍니다." — 80자 이내 한 문장, '김프 사이트' 구절을 한 번(2026-10-08 — 네이버 "김프 사이트" 상위가 전부 이 구절을 설명에 둔다), 정의 문단을 옮기지 않는다(본문 복사는 네이버 불이익). 서비스 전체가 '열린 경로만' 보여 준다고 쓰지 않는다(§3.3-2).
+- `<title>`·`og:title` "김프(김치프리미엄)·역프 실시간, 입출금 확인 | KimpTrack" — 검색어를 앞에, 브랜드는 뒤에(2026-10-08 — 네이버·구글 상위 김프 사이트가 전부 검색어 앞·브랜드 뒤라 따라간다), 차별점(입출금 확인)을 브랜드 앞에(사람 결정 2026-10-09 — 검색어만 있으면 결과 목록에서 다른 김프 사이트와 구별되지 않는다), 40자 이내, '김프' 는 한 번(동명이의 GIMP·유튜버와 가르려고 괄호로 뜻을 붙인다), '김치프리미엄' 은 검색어 표기대로 붙여 쓴다(본문도 같다). 경쟁 사이트 이름('김프가')과 수익을 약속하는 말은 넣지 않는다.
+- `description`·`og:description` "김프 사이트 KimpTrack은 국내외 6개 거래소의 김치프리미엄·역프를 매초 계산하고, 입출금이 열렸는지와 지난 기록까지 보여 줍니다." — 80자 이내 한 문장, '김프 사이트' 구절을 한 번(2026-10-08 — 네이버 "김프 사이트" 상위가 전부 이 구절을 설명에 둔다), 거래소 이름은 늘어놓지 않고 "국내외 6개 거래소"로 줄여 입출금·지난 기록 두 차별점에 자리를 준다(사람 결정 2026-10-09 — 거래소 이름은 본문·질문과 답에 있다), 정의 문단을 옮기지 않는다(본문 복사는 네이버 불이익). 서비스 전체가 '열린 경로만' 보여 준다고 쓰지 않는다(§3.3-2).
 - `<meta name="robots" content="index, follow, max-image-preview:large">`, canonical·`og:url` `https://kimptrack.com/`, `lang="ko"`, `og:site_name` KimpTrack, `og:locale ko_KR`, `twitter:card summary_large_image`.
-- `og:image` `https://kimptrack.com/landing/og-v2.png`(1200×630, `og:image:type`·`width`·`height`·`alt`) — 어두운 배경에 워드마크, h1 두 줄, "$1,000 체결 단가 · 경로마다 출금·입금 확인", 5개 거래소 이름. 실시간 값은 넣지 않는다(미리보기는 오래 남는다). 그림을 바꾸면 파일 이름을 바꾼다 — 카카오·텔레그램이 같은 주소의 그림을 다시 받지 않는다.
+- `og:image` `https://kimptrack.com/landing/og-v3.png`(1200×630, `og:image:type`·`width`·`height`·`alt`) — 어두운 배경에 워드마크, h1 두 줄, "$1,000 체결 단가 · 경로마다 출금·입금 확인", 6개 거래소 이름(국내 둘 — 선 — 해외 넷). 원본은 `web/scripts/og-image.html`(헤드리스 크롬으로 1200×630 을 찍는다 — 명령은 파일 머리 주석). 실시간 값은 넣지 않는다(미리보기는 오래 남는다). 그림을 바꾸면 파일 이름을 바꾼다 — 카카오·텔레그램이 같은 주소의 그림을 다시 받지 않는다.
 - 아이콘 — 워드마크(두 점과 선)를 어두운 둥근 사각형에 담은 한 모양. `favicon.ico`(16·32·48), `favicon.svg`(대시보드), `icon-192.png`, `apple-touch-icon.png`(180), `logo-512.png`(Organization 로고). 랜딩 head 에는 `rel=icon`(192 PNG)·`rel=apple-touch-icon` 하나씩, **절대 주소**(구글은 SVG 파비콘을 쓰지 않고 네이버는 상대 경로를 읽지 않는다). 주소는 바꾸지 않는다.
 - **구조화 데이터** — head 에 JSON-LD 한 블록(`@graph`, 절대 주소, 스크립트로 넣지 않는다): `WebSite`(name KimpTrack, alternateName ["김프트랙"], url, inLanguage ko-KR, publisher) · `Organization`(name, url, logo 512, email 두 개, member 고원규·이진중 — 바닥에 보이는 값과 같다) · `WebPage`(name = title, description = description, isPartOf, about, primaryImageOfPage = og 그림, dateModified) · `WebApplication`(name, url `/app/`, applicationCategory FinanceApplication, operatingSystem Web, isAccessibleForFree, offers 0 KRW, description, screenshot 두 장, publisher). 평점·리뷰는 넣지 않는다(지어낸 평점 금지) — 그래서 구글 리치 결과 테스트·Search Console 'Software apps' 에는 WebApplication 이 invalid 로 뜬다(의도 — 리치 결과 대상이 아닐 뿐 순위 불이익은 없고, 네이버 Software 는 평점 없이 받는다). 보이는 글과 같은 값만 쓴다.
-- **설명을 고친 날** — 바닥의 `<time datetime>`, `WebPage.dateModified`, `sitemap.xml` 의 `/` 줄 `lastmod` 가 같은 날짜다. 설명 글을 실제로 고칠 때만 올린다(실시간 값이 바뀌었다고 올리지 않는다).
+- **설명을 고친 날** — `WebPage.dateModified` 와 `sitemap.xml` 의 `/` 줄 `lastmod` 가 같은 날짜다. 화면(바닥)에는 적지 않는다(사람 결정 2026-10-09). 설명 글을 실제로 고칠 때만 올린다(실시간 값이 바뀌었다고 올리지 않는다).
 - **실시간 값은 스니펫에서 뺀다** — 경로 카드와 그다음 경로를 감싼 `div`, 사건 요약 `span`·표 `div` 에 `data-nosnippet` 을 HTML 에 처음부터 둔다(구글은 span·div·section 에서만 읽고, 스크립트로 붙인 속성은 믿지 않는다). 매초 바뀌는 값이 몇 주 뒤 검색 결과·AI 답변에 '지금 값' 처럼 남지 않게. 정의·방법·질문과 답은 스니펫에 열어 둔다.
 - `robots.txt` — 규칙 네 줄 `User-agent: *` / `Allow: /api/landing` / `Disallow: /api/` / `Sitemap: https://kimptrack.com/sitemap.xml`(주석 줄 — 다음 PIN — 은 더해도 된다). 더 긴 규칙이 이겨(RFC 9309) 검색 로봇은 랜딩을 그릴 때 실데이터를 받고, 그 밖의 API 는 막힌다. 학습용 봇도 막지 않는다(따로 정할 일).
 - `sitemap.xml` — `https://kimptrack.com/`, `https://kimptrack.com/kimp-chart`·`/kimp-history`(044 — `lastmod` 는 그 페이지를 고친 날), `https://kimptrack.com/privacy`(032 — `lastmod` 는 방침 시행일) 네 줄, 각각 `lastmod`. `/app/` 은 넣지 않는다.
-- **대시보드 셸**(`web/index.html`) — 정적 `<meta name="robots" content="noindex, follow">`(스크립트로 바꾸지 않는다 — 구글은 noindex 를 보면 렌더링 전에 건너뛴다), description, 공유 미리보기용 og(title "KimpTrack - 실시간 김프 표", 그림은 랜딩과 같은 `og-v2.png`, url `/app/`). `<title>KimpTrack</title>` 은 007 의 스모크 문자열이라 그대로.
+- **대시보드 셸**(`web/index.html`) — 정적 `<meta name="robots" content="noindex, follow">`(스크립트로 바꾸지 않는다 — 구글은 noindex 를 보면 렌더링 전에 건너뛴다), description, 공유 미리보기용 og(title "KimpTrack - 실시간 김프 표", 그림은 랜딩과 같은 `og-v3.png`, url `/app/`). `<title>KimpTrack</title>` 은 007 의 스모크 문자열이라 그대로.
 - **검색엔진 등록은 사람 몫** — 구글 Search Console 은 도메인 속성(Cloudflare DNS TXT), 네이버 서치어드바이저는 `https://kimptrack.com` 을 등록하고 소유 확인(메타 태그면 head 에 `naver-site-verification` 한 줄, HTML 파일이면 `web/public/` 에), 두 곳 모두 `sitemap.xml` 제출. 다음 웹마스터도구는 `robots.txt` 맨 위에 PIN 주석 줄. 문구·그림을 바꾼 뒤에는 카카오 공유 디버거로 OG 캐시를 지운다.
 - `spreads.png`·`history.png`: `https://kimptrack.com/app/` 실화면을 1360×820 @1.5x 로 찍는다(스프레드 탭 기본 화면, 기록 탭 `?tab=history&sym=BTC`). 다시 찍으면 WebP 두 크기(1020·2040)도 다시 만든다.
 
@@ -172,7 +172,7 @@ server — `features/landing/tests/`(Redis·Influx 는 fake):
 - 200·camelCase·`Cache-Control: no-store`, 두 역할 모두 `/landing` 이 있다
 - `server/tests/test_deploy.py` — nginx 에 `location = /api/landing` 이 api 로 간다, `/` 의 301 은 `$arg_tab` 일 때만, Caddyfile 은 apex 블록 + www(http·https) 301 블록 + catch-all
 - `server/tests/test_observability.py` — 공개 location 집합에 `= /landing.html`, catch-all 은 `X-Robots-Tag noindex` + `reverse_proxy`, www 블록은 `redir` 한 줄·접속 기록 없음
-- `server/tests/test_landing_seo.py` — §3.6 의 제목·설명·og·robots 메타·canonical 글자 그대로, 네이버 한도(제목 40·설명 80자, 제목·설명에 '김프' 한 번씩, '김프가'·수익 약속 없음), 설명 ≠ 정의 문단, h1 하나·h2 다섯, 페이지 안 앵커가 있는 섹션을 가리킴, JSON-LD 네 노드가 보이는 값과 같고 평점 없음·가리키는 파일이 있음, 고친 날이 바닥·dateModified·lastmod 에서 같음, 아이콘 절대 주소·rel 하나씩, PNG 크기, 실시간 자리 `data-nosnippet`·카드 정적 설명, 글꼴 서브셋이 페이지 글자를 모두 담음·외부 글꼴 없음, robots.txt 규칙 네 줄(주석 제외)·옛 링크 정규식(tab·s.* 는 옮기고 utm 등은 두기), 대시보드 셸 noindex·제목 스모크, 404.html noindex·링크, nginx 의 `/landing.html`·`/app/landing.html` 301·`/api/landing` noindex·랜딩 no-cache, 글꼴 주소 두 곳이 해시 이름 파일 하나를 가리킴
+- `server/tests/test_landing_seo.py` — §3.6 의 제목·설명·og·robots 메타·canonical 글자 그대로, 네이버 한도(제목 40·설명 80자, 제목·설명에 '김프' 한 번씩, '김프가'·수익 약속 없음), 설명 ≠ 정의 문단, h1 하나·h2 다섯, 페이지 안 앵커가 있는 섹션을 가리킴, JSON-LD 네 노드가 보이는 값과 같고 평점 없음·가리키는 파일이 있음, 고친 날이 dateModified·lastmod 에서 같고 바닥에 날짜 줄이 없음, 아이콘 절대 주소·rel 하나씩, PNG 크기, 실시간 자리 `data-nosnippet`·카드 정적 설명, 글꼴 서브셋이 페이지 글자를 모두 담음·외부 글꼴 없음, robots.txt 규칙 네 줄(주석 제외)·옛 링크 정규식(tab·s.* 는 옮기고 utm 등은 두기), 대시보드 셸 noindex·제목 스모크, 404.html noindex·링크, nginx 의 `/landing.html`·`/app/landing.html` 301·`/api/landing` noindex·랜딩 no-cache, 글꼴 주소 두 곳이 해시 이름 파일 하나를 가리킴
 
 수동:
 - 로컬 5컨테이너(dev-setup.md)에서 `curl /api/landing` 의 `top[0]` 이 같은 순간 `http://api:8000/spreads`(박스 안 — 공개에서는 028 이 닫는다) 에 §3.2 규칙을 적용해 고른 행과 같다
@@ -201,6 +201,13 @@ docker run --rm -v ./caddy:/etc/caddy:ro caddy:2-alpine caddy validate --config 
 # 브라우저(1440·390·320): h1 두 줄 — 1440 43.5px(둘째 줄 423/440px), 390 34.6px(336/350), 320 27.7px(269/280) · 가로 스크롤·넘치는 요소 없음
 #   글꼴은 KimpTrack Sans 하나(전송 58.2KB, 외부 요청 없음) · 카드 높이 값 온 뒤 557px(1440)·512px(390) → 최소 높이 480·400 · data-nosnippet 6곳
 #   헤드리스 Chrome 전체 화면으로 비교 표·용어·계산 방법·질문과 답·바닥 확인
+# 제목·설명·바닥 정리 (2026-10-09, 사람 결정) — 제목 37자·설명 76자, 바닥 날짜 줄 삭제, 참고값 안내 최대 폭(56em) 삭제, dateModified·lastmod 2026-10-09
+#   ruff check·format 통과 · pytest 1802 passed(test_landing_seo·test_clarity·test_privacy·test_kimp_pages 63 포함) — 실패 7 은 샌드박스가 소켓을 막은
+#   test_gauge·test_raw_archive(PermissionError, 이 변경과 무관) · oxlint 0 · vite build ✓ · 글꼴 kimptrack-sans-8f1c14d0.woff2 59,220B·글자 322개('렸' 더함)
+#   Browser pane(정적 서버 :8093, 1440×900): 참고값 안내 글 폭 730px — 예전 최대 폭 728px(56em×13px)에 2px 모자라 두 줄이던 것이 한 줄
+# 미리보기 그림 og-v3 (2026-10-09) — 해외 거래소에 OKX 를 더함. 원본이 레포에 없어 web/scripts/og-image.html 로 다시 짰다
+#   og-v2 와 같은 글로 찍어 줄마다 위치·폭을 맞춤(워드마크 88–301·h1 89–593/89–844·부제 90–559·거래소 줄 90–1110, 원본과 ±3px)
+#   헤드리스 크롬 1200×630 → og-v3.png 47KB · og-v2.png 지움 · 랜딩·대시보드 셸·검색어 페이지 둘의 og:image 와 JSON-LD 주소 교체
 ```
 - 요약 API(§3.2)의 서버 검증 기록은 2026-09-28 판 그대로다(코드가 바뀌지 않았다) — git 기록의 이 절 이전 판.
 - 커밋 전 검토(4개 관점 — 검색·문구와 사실·문서 일치·성능과 접근성 — 에 지적마다 반박 검증)에서 확인된 29건을 반영했다: 서비스 전체가 '열린 경로만' 보여 준다는 과장(h1·설명·정의·비교 표·og), 스프레드 탭 옛 링크(`/?s.…`), `/app/landing.html` 사본, 사건 경계(1% 이상·0.5% 이하), 역프 식, USDT 매수·매도 호가 방향, '최우선'→'맨 위' 호가, 원값 저장, 폴링 재그림, 낡은 값의 대비, 글꼴 기능·해시 이름·임시 폴더, 문서 줄들. `gzip_proxied` 는 007 PR(#82) 몫이라 여기서 고치지 않았다.

@@ -1,6 +1,6 @@
-// KimpTrack 화면 분석(Microsoft Clarity) — 설정 한 곳·동의 안내 띠·불러올지 판단 (스펙 033).
+// KimpTrack 화면 분석(Microsoft Clarity) — 설정 한 곳·동의 창(모달)·불러올지 판단 (스펙 033).
 // 동의 방식(032 §3.3 과 같은 값 계약): 수집·이용·Microsoft 제공·미국 이전 세 칸에 모두 동의해 저장한 방문자만 태그를 받는다.
-// 번들 밖 정적 파일이라 oxlint 대상이 아니다(node --check). 예외를 밖으로 던지지 않는다 — 실패하면 띠·Clarity 만 없고 페이지는 그대로다.
+// 번들 밖 정적 파일이라 oxlint 대상이 아니다(node --check). 예외를 밖으로 던지지 않는다 — 실패하면 동의 창·Clarity 만 없고 페이지는 그대로다.
 ;(() => {
   // ── 설정 한 곳 (§3.1) ──────────────────────────────────────────────────────────────
   // 프로젝트 ID(공개 값 — 페이지 소스에 그대로 보인다). 빈 문자열이면 아무것도 하지 않는다 — 끄기는 이 값을 비우는 PR
@@ -8,7 +8,7 @@
   // 켤 페이지 — 랜딩(/)과 대시보드(/app/). 대시보드만 끄려면 "app" 을 뺀다
   const PAGES = ["landing", "app"]
   // 지금 안내 판 — privacy.html 동의 스크립트의 VERSION 과 같다(테스트가 본다). 받는 자·항목·목적·보유 기간이 바뀌면 그 PR 이
-  // 세 곳(이 값·privacy.html 스크립트·방침의 보이는 판 글자)을 함께 올린다 — 예전 판의 granted 는 '정하지 않음' 이라 띠가 다시 묻는다
+  // 세 곳(이 값·privacy.html 스크립트·방침의 보이는 판 글자)을 함께 올린다 — 예전 판의 granted 는 '정하지 않음' 이라 동의 창이 다시 묻는다
   const NOTICE_VERSION = "2026-10-01"
 
   const HOST = "kimptrack.com" // www 는 apex 로 301 이고 저장값이 출처마다 따로라 이 호스트 하나만
@@ -16,9 +16,9 @@
   const VKEY = "kt.analytics.v"
   const BOXES = ["kt-c-collect", "kt-c-provide", "kt-c-transfer"]
 
-  // 띠 글자 — 032 방침 동의 상자와 같은 글자다(server/tests/test_clarity.py 가 privacy.html 에서 읽어 맞춘다).
-  // 처음엔 접힌 짧은 띠(§3.3): 머리 문장(나이 문장을 붙인다)·세 칸(체크 상자·칸 제목·'내용 보기')·방침 링크와 '저장 규칙'·버튼 줄.
-  // 알릴 사항 전문은 칸마다, 셋 모두 규칙은 '저장 규칙' 의 <details> 로 펼친다 — 모바일에서도 접힌 띠가 화면 절반 안에 들게
+  // 동의 창 글자 — 032 방침 동의 상자와 같은 글자다(server/tests/test_clarity.py 가 privacy.html 에서 읽어 맞춘다).
+  // 처음엔 접힌 짧은 창(§3.3): 머리 문장(나이 문장을 붙인다)·세 칸(체크 상자·칸 제목·'내용 보기')·방침 링크와 '저장 규칙'·버튼 줄.
+  // 알릴 사항 전문은 칸마다, 셋 모두 규칙은 '저장 규칙' 의 <details> 로 펼친다 — 모바일에서도 접힌 창이 한 화면에 들게
   const HTML = `<div class="kt-c-body" tabindex="0">
 <p>랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 동의하지 않아도 모든 기능을 그대로 씁니다. 만 14세 미만은 동의하지 마세요.</p>
 <div class="kt-c-cell">
@@ -58,11 +58,13 @@
 <div class="kt-c-actions"><button type="button" id="kt-c-save">선택한 대로 저장</button><button type="button" id="kt-c-deny">모두 거부</button></div>`
 
   // 색은 랜딩 토큰 복사(032 동의 상자와 같은 surface·accent), 글꼴은 시스템 글꼴(032 방침과 같은 목록) — 랜딩 서브셋 글꼴에 없는
-  // 글자가 섞이지 않고 대시보드의 웹 글꼴을 기다리지 않게. 아래 고정이라 페이지 배치(랜딩 카드·대시보드 표)를 바꾸지 않는다.
-  // 높이는 화면 절반까지 — 넘치면(내용 보기를 펼쳤을 때) 띠 안에서 스크롤하고 버튼 줄은 늘 보인다. 애니메이션 없음.
-  // 글자는 모두 15px 이상(§3.3) — 방침은 쿠키 이름(code)을 0.88em 으로 줄이지만 띠는 줄이지 않는다
+  // 글자가 섞이지 않고 대시보드의 웹 글꼴을 기다리지 않게. 화면 가운데 모달 — 어두운 배경이 페이지를 덮고 창은 최대 720px.
+  // 높이는 화면에서 위아래 16px 뺀 만큼까지 — 넘치면(내용 보기를 펼쳤을 때) 창 안에서 스크롤하고 버튼 줄은 늘 보인다.
+  // 배경을 흐리게(blur) 하지 않는다 — 뒤에서 대시보드 표가 매초 다시 그려진다. 애니메이션 없음.
+  // 글자는 모두 15px 이상(§3.3) — 방침은 쿠키 이름(code)을 0.88em 으로 줄이지만 동의 창은 줄이지 않는다
   const CSS = `
-#kt-consent{position:fixed;z-index:2147483000;left:16px;right:16px;bottom:16px;max-width:720px;max-height:50vh;max-height:50dvh;margin:0 auto;display:flex;flex-direction:column;border-radius:14px;background:#232532;box-shadow:0 0 0 1px #595d6c,0 18px 48px rgba(0,0,0,.55);color:#e9e9ed;font:400 15px/1.4 -apple-system,BlinkMacSystemFont,system-ui,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;letter-spacing:normal;text-align:left;word-break:keep-all;overflow-wrap:anywhere;font-variant-numeric:normal;-webkit-font-smoothing:antialiased}
+#kt-consent{position:fixed;z-index:2147483000;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(9,10,16,.72);overscroll-behavior:contain;color:#e9e9ed;font:400 15px/1.4 -apple-system,BlinkMacSystemFont,system-ui,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;letter-spacing:normal;text-align:left;word-break:keep-all;overflow-wrap:anywhere;font-variant-numeric:normal;-webkit-font-smoothing:antialiased}
+#kt-consent .kt-c-box{display:flex;flex-direction:column;width:100%;max-width:720px;max-height:100%;border-radius:14px;background:#232532;box-shadow:0 0 0 1px #595d6c,0 18px 48px rgba(0,0,0,.55)}
 #kt-consent *,#kt-consent *::before,#kt-consent *::after{box-sizing:border-box}
 #kt-consent .kt-c-body{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:14px 20px 2px}
 #kt-consent p,#kt-consent dl,#kt-consent dd{margin:0}
@@ -95,7 +97,9 @@
   if (!CLARITY_ID || location.hostname !== HOST || PAGES.indexOf(page) < 0) return
 
   let loaded = false // 이 문서에서 Clarity 를 불렀다 — 두 번 부르지 않는다
-  let strip = null
+  let modal = null
+  let blocked = [] // 동의 창이 inert 로 막은 형제 요소 — 닫을 때 되돌린다
+  let scrollWas = ["", ""] // 열기 전 <html> 의 overflow·scrollbar-gutter
   let reloading = false
 
   // 이벤트 처리기도 밖으로 던지지 않는다
@@ -103,7 +107,7 @@
     try {
       fn(event)
     } catch (e) {
-      // 띠·Clarity 만 없고 페이지는 그대로
+      // 동의 창·Clarity 만 없고 페이지는 그대로
     }
   }
 
@@ -147,7 +151,7 @@
 
   // 부른다(§3.4) — 표준 대기열 함수를 곧바로 만들고 첫 호출로 동의 신호(광고 저장 거부·분석 허용)를 넣는다.
   // 파일이 실행될 때 이미 켜는 값이면 태그는 DOMContentLoaded 뒤(셸의 첫 URL 정리가 끝난 뒤 첫 주소를 읽게),
-  // 띠의 저장·다른 탭의 동의로 부를 때(late)는 곧바로 넣고 셸이 지금 화면의 태그를 두게 kt:clarity 를 한 번 보낸다
+  // 동의 창의 저장·다른 탭의 동의로 부를 때(late)는 곧바로 넣고 셸이 지금 화면의 태그를 두게 kt:clarity 를 한 번 보낸다
   const load = (late) => {
     if (loaded) return
     loaded = true
@@ -168,32 +172,38 @@
     window.dispatchEvent(new Event("kt:clarity"))
   }
 
-  const removeStrip = () => {
-    if (!strip) return
-    strip.remove()
-    strip = null
+  // 닫을 때 뒤 페이지를 되돌린다 — 이 창이 막은 형제 요소의 inert 와 문서 스크롤
+  const closeModal = () => {
+    if (!modal) return
+    modal.remove()
+    modal = null
+    for (const sib of blocked) sib.inert = false
+    blocked = []
+    const root = document.documentElement.style
+    root.overflow = scrollWas[0]
+    root.scrollbarGutter = scrollWas[1]
     const style = document.getElementById("kt-consent-style")
     if (style) style.remove()
   }
 
-  // [모두 거부] — denied 를 쓰고 판을 지운 뒤 띠를 지운다. 아무것도 부르지 않는다(쓰기 예외여도 띠만 지운다)
+  // [모두 거부] — denied 를 쓰고 판을 지운 뒤 동의 창을 닫는다. 아무것도 부르지 않는다(쓰기 예외여도 창만 닫는다)
   const refuse = () => {
     try {
       window.localStorage.setItem(KEY, "denied")
     } catch (e) {
-      // 저장하지 못해도 띠는 지운다 — 값이 그대로면 다음 페이지에서 다시 묻는다
+      // 저장하지 못해도 창은 닫는다 — 값이 그대로면 다음 페이지에서 다시 묻는다
     }
     try {
       window.localStorage.removeItem(VKEY)
     } catch (e) {
       // 위와 같다
     }
-    removeStrip()
+    closeModal()
   }
 
   // [선택한 대로 저장] — 셋 다 체크해야 동의. 판을 먼저 써서 다른 탭이 granted 를 볼 때 판이 이미 맞게, 쓰기가 예외면 부르지 않는다
   const save = () => {
-    if (!BOXES.every((id) => strip.querySelector("#" + id).checked)) return refuse()
+    if (!BOXES.every((id) => modal.querySelector("#" + id).checked)) return refuse()
     let stored = false
     try {
       window.localStorage.setItem(VKEY, NOTICE_VERSION)
@@ -202,24 +212,26 @@
     } catch (e) {
       // 동의를 저장할 수 없으면 이어 갈 수 없다
     }
-    removeStrip()
+    closeModal()
     if (stored) load(true)
   }
 
-  // 띠(§3.3) — <body> 의 첫 자식(키보드·스크린 리더가 페이지보다 먼저 만난다), #root 밖이라 React 트리를 다시 그리지 않는다.
-  // 초점을 빼앗지 않는다. 대시보드에서는 띠 안의 링크를 모두 새 탭으로 — 열어 둔 WebSocket 을 끊지 않게
-  const showStrip = () => {
-    if (loaded || strip || judge() !== "undecided") return
+  // 동의 창(§3.3) — <body> 의 첫 자식, #root 밖이라 React 트리를 다시 그리지 않는다. 모달이다 — 뒤 페이지의 형제 요소를 모두
+  // inert 로 막고(누르기·초점·스크린 리더) 문서 스크롤을 멈추고, 초점을 창 안 글 영역으로 옮긴다. 닫기(×)·Esc 는 없다 — 두 버튼
+  // 가운데 하나를 골라야 닫힌다. 대시보드에서는 창 안의 링크를 모두 새 탭으로 — 열어 둔 WebSocket 을 끊지 않게
+  const openModal = () => {
+    if (loaded || modal || judge() !== "undecided") return
     const style = document.createElement("style")
     style.id = "kt-consent-style"
     style.textContent = CSS
     document.head.appendChild(style)
     const el = document.createElement("div")
     el.id = "kt-consent"
-    el.setAttribute("role", "region")
+    el.setAttribute("role", "dialog")
+    el.setAttribute("aria-modal", "true")
     el.setAttribute("aria-label", "화면 분석 동의")
     el.setAttribute("data-nosnippet", "")
-    el.innerHTML = HTML
+    el.innerHTML = '<div class="kt-c-box">' + HTML + "</div>"
     if (page === "app") {
       for (const a of el.querySelectorAll("a")) {
         a.target = "_blank"
@@ -229,11 +241,22 @@
     el.querySelector("#kt-c-save").addEventListener("click", guard(save))
     el.querySelector("#kt-c-deny").addEventListener("click", guard(refuse))
     document.body.insertBefore(el, document.body.firstChild)
-    strip = el
+    modal = el
+    for (const sib of Array.from(document.body.children)) {
+      if (sib === el || sib.inert) continue
+      sib.inert = true
+      blocked.push(sib)
+    }
+    // 스크롤 막대가 있던 문서는 그 자리를 남겨 둔다 — 막대가 사라지며 페이지가 옆으로 밀리지 않게
+    const root = document.documentElement.style
+    scrollWas = [root.overflow, root.scrollbarGutter]
+    if (window.innerWidth > document.documentElement.clientWidth) root.scrollbarGutter = "stable"
+    root.overflow = "hidden"
+    el.querySelector(".kt-c-body").focus({ preventScroll: true })
   }
 
   // 다른 탭 반영(§3.5) — 부른 문서는 켜는 값이 아니게 되면 곧바로 한 번 새로고침(숨은 탭도), 부르지 않은 문서는 켜는 값이 되면
-  // 띠를 지우고 그 자리에서 부른다(GPC 면 그대로), 띠가 떠 있는데 denied 가 되면 띠만 지운다
+  // 동의 창을 닫고 그 자리에서 부른다(GPC 면 그대로), 창이 떠 있는데 denied 가 되면 창만 닫는다
   const onStorage = (event) => {
     if (event.key !== KEY && event.key !== VKEY && event.key !== null) return
     const now = judge()
@@ -245,15 +268,15 @@
       return
     }
     if (now === "on") {
-      removeStrip()
+      closeModal()
       load(true)
-    } else if (now === "denied") removeStrip()
+    } else if (now === "denied") closeModal()
   }
 
   // 뒤로 가기 캐시(bfcache)에서 돌아온 문서(§3.5) — 캐시에 든 동안 바뀐 값의 storage 이벤트는 오지 않거나 복원 뒤에 늦게 온다
   // (브라우저마다 다르다). 같은 탭에서 랜딩 → 방침 [동의 철회] → 뒤로 가기면 Clarity 가 이 pageshow 로 녹화를 다시 시작하므로,
   // 부른 문서가 켜는 값이 아니면 capture 단계에서 Clarity 의 처리기(나중에 붙은 non-capture)를 막고 곧바로 한 번 새로고침한다.
-  // 부르지 않은 문서는 켜는 값이면 띠를 지우고 부르고, 띠 조건(정하지 않음)이 아니면 띠만 지운다
+  // 부르지 않은 문서는 켜는 값이면 동의 창을 닫고 부르고, 창 조건(정하지 않음)이 아니면 창만 닫는다
   const onPageShow = (event) => {
     if (!event.persisted) return
     const now = judge()
@@ -267,16 +290,16 @@
       return
     }
     if (now === "on") {
-      removeStrip()
+      closeModal()
       load(true)
-    } else if (now !== "undecided") removeStrip()
+    } else if (now !== "undecided") closeModal()
   }
 
   try {
     if (judge() === "on") load(false)
     else {
       forget()
-      whenReady(showStrip)
+      whenReady(openModal)
     }
     window.addEventListener("storage", guard(onStorage))
     window.addEventListener("pageshow", guard(onPageShow), true)
