@@ -13,13 +13,16 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import httpx
 
 from app.core.contracts import ForeignSymbolSource
 from app.core.errors import ExchangeApiError, ExchangeError
 from app.core.quotes import QuoteSink
+
+if TYPE_CHECKING:
+    from app.core.perp_universe import PerpUniverse
 
 logger = logging.getLogger("marketlens.universe")
 
@@ -56,10 +59,12 @@ class UniverseRefresher:
         client: httpx.AsyncClient,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         monotonic: Callable[[], float] = time.monotonic,
+        perps: "PerpUniverse | None" = None,
     ) -> None:
         self._sink = sink
         self._streams = list(streams)
         self._foreigns = list(foreigns)
+        self._perps = perps  # 046 — 김프 우주가 확정될 때마다 perp 우주도 매초 확정한다
         self._client = client
         self._sleep = sleep
         self._monotonic = monotonic
@@ -158,6 +163,8 @@ class UniverseRefresher:
         # 해외는 우주의 심볼만 구독한다 — 확정된 우주를 각 커넥터에 넘기면 자기 맵에 없는 base 는 무시하고 차이만 재조정한다 (012 §3.3·019 §3.3)
         for source in self._foreigns:
             source.set_universe(self.universe)
+        if self._perps is not None:
+            self._perps.apply(self.universe)
 
     def start(self) -> None:
         self._task = asyncio.create_task(self.run())
