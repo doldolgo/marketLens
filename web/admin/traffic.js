@@ -115,24 +115,18 @@ export function countryLabel(code) {
 
 // --- 창·큰 수 -----------------------------------------------------------------------------------
 
-const KST = 32_400_000;
-const kstMd = (ms) => {
-  const d = new Date(ms + KST);
-  return `${d.getUTCMonth() + 1}-${String(d.getUTCDate()).padStart(2, '0')}`;
-};
 const accessPart = (app) => partOf(app.current('access'));
 // 접속 요약이 ok 일 때 하위 부분(visitors·geo)의 상태 — 그 밖은 바깥 부분의 상태
 const subPart = (part, key) => (usable(part) ? partOf({ body: part }, key) : part);
 
+// 창 단추 — 셋 다 늘 열려 있고, 응답의 windows 에 없는 창만 끈다(응답이 없으면 끄지 않는다 — 사람 결정 2026-10-09)
 function drawWindow(app) {
   const body = app.entry('access')?.body;
-  const open = Array.isArray(body?.windows) ? body.windows : ['24h'];
+  const open = Array.isArray(body?.windows) ? body.windows : null;
   for (const button of document.querySelectorAll('[data-window]')) {
-    button.disabled = !open.includes(button.dataset.window);
+    button.disabled = open !== null && !open.includes(button.dataset.window);
     button.setAttribute('aria-pressed', String(button.dataset.window === app.picked.access));
   }
-  const gate = num(body?.gateAt);
-  put('window-note', gate !== null && !open.includes('7d') ? `7·30일은 ${kstMd(gate)} 부터` : '');
   tag('t-access', accessPart(app));
 }
 
@@ -378,7 +372,7 @@ function classesOption(a) {
   });
 }
 
-// 기기·OS·브라우저 — 방문자(브라우저 모양)로, 시행 전이면 기기·브라우저는 사람 모양 페이지 줄로(OS 는 없다)
+// 기기·OS·브라우저 — 방문자(브라우저 모양)로, 방문자 값이 없으면 기기·브라우저는 사람 모양 페이지 줄로(OS 는 없다)
 const WHO = [['devices', 'c-devices', 't-devices', DEVICE_NAME], ['os', 'c-os', 't-os', OS_NAME], ['browsers', 'c-browsers', 't-browsers', BROWSER_NAME]];
 function drawWho(app) {
   const part = accessPart(app);

@@ -867,3 +867,16 @@ def test_styles_and_chart_colors_follow_the_spec_tokens_and_layout() -> None:
         "'#7fdbca'",
         "'#f78c6c'",
     ]
+
+
+def test_no_server_log_gate_wording_on_any_page() -> None:
+    """사람 결정 2026-10-09(060 — 서버 기록 게이트를 첫 기록보다 앞으로) — 화면에 처리방침·시행일 문구가 없다. '처리방침' 은
+    흐름 그림의 페이지 이름 하나뿐이고, 창 단추는 HTML 에서 꺼 두지 않는다."""
+    for name in [*PAGES, *SCRIPTS]:
+        text = _text(f"web/admin/{name}")
+        for word in ("시행", "개정", "DB-IP 자료", "gateAt", "window-note"):
+            assert word not in text, (name, word)
+        assert text.count("처리방침") == (1 if name == "traffic.js" else 0), name
+    traffic = _text("web/admin/traffic.html")
+    buttons = re.findall(r"<button\b[^>]*\bdata-window=[^>]*>", traffic)
+    assert len(buttons) == 3 and not any("disabled" in b for b in buttons)

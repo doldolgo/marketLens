@@ -37,7 +37,7 @@ const kstDay = (sec) => Math.floor((sec + KST) / 86_400) * 86_400 - KST;
 
 // --- 계산(§4 node 시험 대상) -----------------------------------------------------------------------
 
-// 오늘(KST — 응답 endTs 가 든 날) 방문자 [확인, 브라우저 모양]. visitors 가 ok 가 아니면(시행 전 등) null
+// 오늘(KST — 응답 endTs 가 든 날) 방문자 [확인, 브라우저 모양]. visitors 가 ok 가 아니면 null
 export function todayVisitors(a) {
   const v = a?.visitors;
   if (!isObj(v) || v.state !== 'ok') return null;
@@ -106,7 +106,7 @@ function drawWs(app) {
 function drawVisit(app) {
   const access = app.current('access');
   const part = partOf(access);
-  // 접속 요약이 ok 면 방문자 하위 부분의 상태(시행 전 등)를 표로
+  // 접속 요약이 ok 면 방문자 하위 부분의 상태를 표로
   tag('t-visit', usable(part) ? partOf({ body: part }, 'visitors') : part);
   const today = usable(part) ? todayVisitors(part) : null;
   if (today) $('v-visit').replaceChildren(int(today[0]), el('small', null, ` ~ ${int(today[1])}`));

@@ -260,25 +260,38 @@ def test_traffic_window_button_calls_once_and_never_overlaps() -> None:
 TRAFFIC_FALLBACK = (
     RESPOND
     + r"""
-const v = setup({ respond, buttons: { window: ['24h', '7d', '30d'] } })
+// 응답 전에는 세 창이 다 열려 있다
+const v = setup({ respond, hold: (url) => url.startsWith('/svc/api/admin/access'), buttons: { window: ['24h', '7d', '30d'] } })
 await page('traffic.js')
 await flush()
+out.beforeAnswer = v.groups.window.map((b) => b.disabled)
+v.s.held.shift()()
+await flush()
+out.afterAnswer = v.groups.window.map((b) => b.disabled)
+// 서버가 다른 창(24시간)으로 답하면 고른 창을 응답 창으로
 input.answer = '24h'
 v.click('window', '7d')
 await flush()
+v.s.held.shift()()
+await flush()
 out.pressed = v.groups.window.filter((b) => b.attrs['aria-pressed'] === 'true').map((b) => b.dataset.window)
-out.disabled = v.groups.window.map((b) => b.disabled)
-out.note = v.text('window-note')
+out.visitorsTag = v.text('t-visitors')
+out.text = [...v.byId.values()].map((n) => n.textContent).join(' ')
 """
 )
 
 
 def test_traffic_server_answering_another_window_moves_the_pick_back() -> None:
-    """042 §3.2 — 응답 window 가 요청과 다르면 고른 창을 응답 창으로, 시행 전(windows 24h 하나)이면 7·30일 단추를 끈다."""
-    got = run_admin(TRAFFIC_FALLBACK, _payload(access=_access("24h", ["24h"])))
+    """042 §3.2 — 응답 window 가 요청과 다르면 고른 창을 응답 창으로. 창 단추는 응답 windows 에 없는 것만 끈다(응답 전엔
+    셋 다 열림). 사람 결정 2026-10-09 — 서버 기록 게이트 문구는 없고 before_gate 도 그냥 '연결 안 됨'."""
+    gated = _access("24h", ["24h"])
+    got = run_admin(TRAFFIC_FALLBACK, _payload(access=gated))
+    assert got["beforeAnswer"] == [False, False, False]
+    assert got["afterAnswer"] == [False, True, True]
     assert got["pressed"] == ["24h"]
-    assert got["disabled"] == [False, True, True]
-    assert got["note"].startswith("7·30일은 ") and got["note"].endswith(" 부터")
+    assert got["visitorsTag"] == "연결 안 됨"
+    for word in ("시행", "개정", "처리방침", "부터"):
+        assert word not in got["text"], word
 
 
 EXPIRY = (

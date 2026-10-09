@@ -326,17 +326,18 @@ export function usable(part, valueKey) {
   return part.state === 'error' && valueKey !== undefined && part[valueKey] != null;
 }
 
-// 표 = [색, 글, title] 또는 null(문제 없음 — 비운다). 오래됨 = fetchedAt 이 refreshSec 의 세 배를 넘음(036)
+// 표 = [색, 글, title] 또는 null(문제 없음 — 비운다). 오래됨 = fetchedAt 이 refreshSec 의 세 배를 넘음(036).
+// 서버 기록 게이트 문구는 쓰지 않는다(사람 결정 2026-10-09 — 060): before_gate 도 다른 '연결 안 됨' 과 같고 그 code 는 싣지 않는다
+const QUIET_CODES = new Set(['before_gate']);
 export function tagOf(part, now = Date.now()) {
   if (part === undefined) return ['wait', '불러오는 중', ''];
   if (part.why) return ['bad', '불러오지 못함', part.why];
-  const code = clean(part.code ?? '');
+  const code = QUIET_CODES.has(part.code) ? '' : clean(part.code ?? '');
   if (part.state === 'ok') {
     const old = num(part.refreshSec) > 0 && num(part.fetchedAt) !== null && now - part.fetchedAt > part.refreshSec * 3000;
     return old ? ['warn', '오래됨', `${ago(part.fetchedAt, now)} 값`] : null;
   }
   if (part.state === 'pending') return ['wait', '첫 조회 중', ''];
-  if (part.state === 'unconfigured' && code === 'before_gate') return ['dim', '시행 전', '처리방침 개정 시행일부터 센다'];
   if (part.state === 'unconfigured') return ['dim', '연결 안 됨', code];
   if (part.state === 'denied') return ['dim', '권한 없음', code];
   return ['bad', '불러오지 못함', code];
