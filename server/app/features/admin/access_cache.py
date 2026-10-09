@@ -297,7 +297,10 @@ class AccessLog:
         gate = self._gate
         start, end = bounds(name, now, gate)
         last = hour_start(end)
-        files = [(e.tally, e.mtime >= start) for e in self._files.values()]
+        # 줄 순서 — 회전 파일은 수정 시각(마지막 줄 무렵) 순, `access.log` 가 끝. 같은 짝의 같은 날을 합칠 때 같은 시각이면
+        # 앞 파일의 첫 페이지 줄·뒤 파일의 마지막 페이지 줄을 고른다(062)
+        ordered = sorted(self._files.values(), key=lambda e: e.mtime)
+        files = [(e.tally, e.mtime >= start) for e in ordered]
         if self._current is not None:
             files.append((self._current, True))
         rows: dict[int, list[int]] = {}
