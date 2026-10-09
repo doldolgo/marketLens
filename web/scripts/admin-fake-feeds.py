@@ -231,7 +231,7 @@ def access(window: str) -> dict:
     for t in range(start, now, 3600):
         pages = int(wave(t, 9, 7))
         hourly.append({"ts": t, "requests": pages * 6 + 20, "pages": pages + 4, "humanPages": pages, "jsViews": pages // 3,
-                       "errors": 2 if s == "problem" and t > now - 3600 else 0, "wsErrors": 1 if t == start else 0})
+                       "errors": 2 if s == "problem" and t > now - 3600 else 0, "wsErrors": 1 if s == "problem" and t > now - 7200 else 0})
     totals = {k: sum(h[k] for h in hourly) for k in ("requests", "pages", "humanPages", "jsViews")}
     totals |= {"probes": totals["requests"] // 9, "ws": 12, "skipped": 0}
     fives = 12 if s == "problem" else 0
@@ -241,9 +241,9 @@ def access(window: str) -> dict:
     top = lambda names: [[txt(n), max(1, req // (9 * (i + 1)))] for i, n in enumerate(names)]  # noqa: E731
     return part(60, window=window, windows=windows, gateAt=gate_ms, startTs=start, endTs=now, firstTs=start,
                 totals=totals, hourly=hourly,
-                status={"2xx": int(req * 0.8), "3xx": int(req * 0.06), "4xx": int(req * 0.13), "5xx": fives, "ws5xx": 1},
+                status={"2xx": int(req * 0.8), "3xx": int(req * 0.06), "4xx": int(req * 0.13), "5xx": fives, "ws5xx": 2 if s == "problem" else 0},
                 recent5xx=[{"ts": now - 60 * i, "path": txt("/api/history/events"), "status": 502} for i in range(fives)],
-                ws={"count": 12, "pairs": 5, "errors": 1, "durations": {"lt10s": 2, "lt1m": 3, "lt10m": 4, "lt1h": 2, "ge1h": 1}},
+                ws={"count": 12, "pairs": 5, "errors": 2 if s == "problem" else 0, "durations": {"lt10s": 2, "lt1m": 3, "lt10m": 4, "lt1h": 2, "ge1h": 1}},
                 classes={k: {"requests": int(req * a), "pages": int(totals["pages"] * b)} for k, (a, b) in classes.items()},
                 visitors=_visitors(start, now, s != "missing"),
                 geo={"state": "ok", "code": None, "month": time.strftime("%Y-%m"), "loadedAt": (now - 3600) * 1000, "sinceTs": start,
