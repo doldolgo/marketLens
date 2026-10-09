@@ -327,15 +327,16 @@ CONSENT_CASES = [
 # fmt: on
 # §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(동의 상자의 국외 이전 칸과 같은 이름) + 근거
 TRANSFER_TERMS = CONSENT_CELLS[2][2] | {"근거"}
-# 060 §3.3-2 — 맨 위 변경 안내 상자가 말하는 것(시행 문장, 바뀌는 것 셋 — 접속 기록 쓰임새의 날짜·화면 이용 통계의 2절 요약 한 줄·
-# 바꾸는 방법, 다시 묻기). 접속 기록 쓰임새의 날짜는 아래 테스트가 PRIVACY_V2_EFFECTIVE 로 맞춘다
+# 060 §3.3-2 — 맨 위 변경 안내 상자가 말하는 것(시행 문장, 바뀌는 것 셋 — 접속 기록 쓰임새(남은 기록 전체)·화면 이용 통계의
+# 2절 요약 한 줄·바꾸는 방법, 다시 묻기)
 CHANGE_NOTICE_SAYS = (
     "같은 날 먼저 게시한 판(2026년 10월 9일 판)을 바꿉니다",
     "바뀌는 것은 셋입니다",
     "30일 요약",
     "나라와 망 종류",
     "하루 한 번 세는 값",
-    "(전에는 10월 11일부터)",
+    "남아 있는 기록 전체(로그 보관 기간 안)",
+    "(전에는 2026년 10월 11일 기록부터)",
     "화면 이용 통계",
     "화면 요소",
     "마우스를 올려 둔 시간",
@@ -363,7 +364,7 @@ CHANGE_RULE = (
 EFFECTIVE_SENTENCE = (
     "부터 시행하며(이날 두 번째 판), 같은 날 먼저 게시한 판을 바꿉니다."
 )
-V4_HISTORY = "(두 번째 판) — 서버 접속 기록 쓰임새를 이날 기록부터·화면 이용 통계를 요소까지·바꾸는 방법"
+V4_HISTORY = "(두 번째 판) — 서버 접속 기록 쓰임새를 남은 기록 전체에·화면 이용 통계를 요소까지·바꾸는 방법"
 # 060 §7 — 2절 (다): 062 가 짝(하루 한 번 세는 값)에 붙이는 그날 첫·마지막 페이지 이름과 페이지 수. 게이트를 v4 시행일로
 # 당겨 이 처리도 그날 기록부터 돌므로 v4 가 함께 알린다
 ACCESS_FLOW_ITEMS = (
@@ -398,8 +399,6 @@ V2_FACTS = {
         "운영체제",
         "스크립트",
         "다시 온",
-        "24시간 요약에만",
-        "24시간을 넘는",
         "보낸 때부터 90일",
     ),
     "s3": ("며칠 걸릴 수 있습니다",),
@@ -460,6 +459,10 @@ IP_TEN_MINUTES = (
 )
 # 051 §3.3-10 — 대조표에서 새로 넣은 문장의 '이전 판' 칸
 ADDED = "(없음)"
+# 060 §3.3-5 — 대조표에서 지운 문장의 '이 판' 칸(새로 넣은 문장의 '(없음)' 과 짝)
+REMOVED = "(지움)"
+# 060 §3.1 — 접속 기록을 남기기 시작한 날(027 caddy 접속 로그). 게이트 상수는 이보다 앞서 게이트가 없는 것과 같다
+FIRST_LOG_DAY = "2026-09-29"
 # 방문자가 읽는 글에 쓰지 않는 낱말(037 §3.2-4 — 평이한 말로)
 PLAIN_ONLY = ("열쇠", "해시")
 DIFF_TABLE = r'<table class="tbl diff">.*?</table>'
@@ -1029,10 +1032,11 @@ def test_archived_versions_are_static_and_external_free() -> None:
 # --- 처리방침 v2 — 시행일·변경 안내·대조표 (037 §3) ----------------------------------
 
 
-def test_v2_effective_constant_is_a_date_after_the_first_version() -> None:
-    """038·039 의 날짜 게이트가 읽는 한 곳 — 접속 기록 쓰임새를 시작한 날 (037 §3.1·060 §3.1)."""
+def test_v2_gate_constant_is_before_the_first_log_line() -> None:
+    """038·039 의 날짜 게이트가 읽는 한 곳 — 게이트 없음: 첫 접속 기록보다 앞선 날이라 남아 있는 기록 전체를 쓴다
+    (037 §3.1·060 §3.1 — 사람 결정 2026-10-09)."""
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", PRIVACY_V2_EFFECTIVE)
-    assert date.fromisoformat(PRIVACY_V2_EFFECTIVE) > date(2026, 10, 1)
+    assert PRIVACY_V2_EFFECTIVE < FIRST_LOG_DAY
 
 
 def test_v3_effective_constant_is_a_date_after_the_first_version() -> None:
@@ -1043,12 +1047,12 @@ def test_v3_effective_constant_is_a_date_after_the_first_version() -> None:
     assert PRIVACY_V3_EFFECTIVE == "2026-10-09"
 
 
-def test_v4_constants_open_today_with_the_page() -> None:
-    """060 §3.1 — 사람 결정(2026-10-09): 접속 기록 쓰임새 게이트(`PRIVACY_V2_EFFECTIVE`)를 v4 시행일로 당기고, 요소별 통계(061)의
-    게이트 `PRIVACY_V4_EFFECTIVE` 를 둔다. 둘 다 지금 판의 시행일(페이지 <time> 넷·sitemap)과 같다."""
+def test_v4_constant_is_the_page_effective_date() -> None:
+    """060 §3.1 — 요소별 통계(061)의 게이트 `PRIVACY_V4_EFFECTIVE` 는 지금 판의 시행일(페이지 <time> 넷·sitemap)과 같다.
+    접속 기록 쓰임새에는 게이트가 없다(`PRIVACY_V2_EFFECTIVE` 가 첫 기록보다 앞 — 사람 결정 2026-10-09)."""
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", PRIVACY_V4_EFFECTIVE)
     assert PRIVACY_V4_EFFECTIVE == EFFECTIVE == "2026-10-09"
-    assert PRIVACY_V2_EFFECTIVE == PRIVACY_V4_EFFECTIVE
+    assert PRIVACY_V2_EFFECTIVE < FIRST_LOG_DAY < PRIVACY_V4_EFFECTIVE
 
 
 def test_effective_date_ties_the_four_times_and_the_history() -> None:
@@ -1117,9 +1121,9 @@ def test_change_notice_comes_first_and_names_what_changes() -> None:
     assert len(changes) == 3
     first, second, third = (_text(item) for item in changes)
     assert (
-        f"{_korean(PRIVACY_V2_EFFECTIVE)} 기록부터 씁니다(전에는 10월 11일부터)"
-        in first
-    )
+        "서버 접속 기록의 30일 요약·나라와 망 종류 추정·하루 한 번 세는 값을 남아 있는 기록 전체(로그 보관 기간 안)에 "
+        "씁니다(전에는 2026년 10월 11일 기록부터)."
+    ) in first
     assert "화면 이용 통계" in second and "(2절)" in second
     assert (
         "처음과 마지막에 연 페이지와 연 페이지 수" in first
@@ -1136,15 +1140,13 @@ def test_body_sections_state_the_v2_facts() -> None:
         text = _text(_without_diff(_section(html, label)))
         for word in words:
             assert word in text, (label, word)
-    # (라) — 접속 기록 쓰임새를 시작한 날을 글자로, 상수 한 곳과 같다(060 §3.3-5)
-    assert f"{_korean(PRIVACY_V2_EFFECTIVE)}(이 쓰임새를 시작한 날) 전" in _text(
-        _section(html, "s2")
-    )
+    # (라) — 시작 날짜 문장은 없다: 남아 있는 기록 전체를 쓴다(060 §3.1·§3.3-5 — 대조표의 이전 판 칸에만 남는다)
+    s2 = _text(_section(_without_diff(html), "s2"))
+    assert "(다)" in s2 and "(라)" not in s2
     # (다) — 062 가 짝에 붙이는 그날 첫·마지막 페이지 이름과 페이지 수(게이트를 당겨 v4 시행일부터 돈다 — 060 §7)
     assert ACCESS_FLOW_ITEMS in _text(_section(_without_diff(html), "s2"))
     outside = _without_diff(html)
-    assert outside.count("24시간 요약") == 1
-    assert "24시간 요약에만" in _section(html, "s2")
+    assert "24시간 요약" not in outside
     assert "90일이 지나면 지웁니다" not in outside
     visible = _text(_body(html))
     for word in PLAIN_ONLY:
@@ -1186,19 +1188,26 @@ def test_diff_table_rows_match_both_versions() -> None:
     consent = _text(_section(_without_diff(html), "consent-title"))
     before = _text(_body(archived))
     restored = _body_sections(html)
+    expected = _body_sections(archived)
     for section, old, new, why in rows:
-        assert new and new in now, (section, new)
         assert why, section
-        added = old == ADDED
+        added, removed = old == ADDED, new == REMOVED
+        assert not (added and removed), section
+        # 지운 문장(060 §3.3-5)은 지금 판 본문에 없고 사본에만 있다
+        assert (removed and old not in now) or (new and new in now), (section, new)
         assert added or old in before or old in PREVIOUS_CONSENT_TEXT, (section, old)
         if section.startswith("동의 관리"):
-            assert new in consent, (section, new)
+            assert removed or new in consent, (section, new)
             continue  # 동의 절은 사본과 모양이 달라 되돌려 맞대는 범위 밖이다
         if section.startswith("12절"):
             continue  # 12절은 시행 문장·이력도 판마다 달라 되돌려 맞대는 범위 밖이다 — 전후 글자만 본다
+        if removed:
+            assert old in expected, (section, old)
+            expected = expected.replace(old, "")  # 지운 문장은 사본 쪽에서 빼고 맞댄다
+            continue
         assert new in restored, (section, new)
         restored = restored.replace(new, "" if added else old)
-    assert " ".join(restored.split()) == _body_sections(archived)
+    assert " ".join(restored.split()) == " ".join(expected.split())
     # 060 §3.3 — 동의 상자의 바뀐 문장(질문·판)은 행이 있고, 바뀐 절마다 행이 있다. 새로 넣은 문장은 없다(모두 고친 문장)
     names = {row[0]: row for row in rows}
     assert len(names) == len(rows)
@@ -1221,6 +1230,8 @@ def test_diff_table_rows_match_both_versions() -> None:
         assert names[name][1] not in ("", ADDED), name
     for sentence in PREVIOUS_CONSENT_TEXT:
         assert [row for row in rows if row[1] == sentence], sentence
+    # (라)는 지운 문장 — 이 판 칸 '(지움)'(060 §3.3-5)
+    assert names["2절 서버 접속 기록 (라)"][2] == REMOVED
     # 12절 — 지운 약속은 이전 판 칸에만, 이 판 칸은 지금 규칙 그대로
     old_rule, new_rule = names["12절 변경"][1:3]
     assert "7일 전까지" in old_rule and new_rule == CHANGE_RULE
