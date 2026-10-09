@@ -12,9 +12,10 @@ import subprocess
 import pytest
 
 from tests.test_deploy import ROOT
+from tests.test_privacy import NOTICE, OLD
 
 JS = (ROOT / "web/public/attention.js").read_text("utf-8")
-NOTICE = "2026-10-09"
+# 지금 안내 판(NOTICE)과 바로 앞 판(OLD)은 방침 동의 스크립트·clarity.js 와 같은 값이다(060 §3.2 — 판은 NOTICE_DIGESTS 의 마지막 키)
 ON = {"kt.analytics": "granted", "kt.analytics.v": NOTICE}
 
 HARNESS = r"""
@@ -179,6 +180,7 @@ def test_without_consent_only_two_listeners_and_kt_clarity_turns_it_on() -> None
         {},
         {"ls": {"kt.analytics": "denied"}},
         {"ls": {**ON, "kt.analytics.v": "2026-10-01"}},  # 예전 판
+        {"ls": {**ON, "kt.analytics.v": OLD}},  # 바로 앞 판(060 — 2026-10-09)
         {"ls": ON, "gpc": True},
         {"ls": ON, "lsFail": True},
     ):

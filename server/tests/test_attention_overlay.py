@@ -13,10 +13,12 @@ from typing import Any
 import pytest
 
 from tests.test_deploy import ROOT
+from tests.test_privacy import NOTICE
 
 JS = (ROOT / "web/public/attention.js").read_text("utf-8")
 ADMIN = "https://admin.kimptrack.com"
-ON = {"kt.analytics": "granted", "kt.analytics.v": "2026-10-09"}
+# 지금 판에 동의한 브라우저 — 덮어 보기 모드는 동의해도 세지 않는다(060 — 판은 방침 동의 스크립트와 같은 값)
+ON = {"kt.analytics": "granted", "kt.analytics.v": NOTICE}
 
 HARNESS = r"""
 const [script, cases] = JSON.parse(require('fs').readFileSync(0, 'utf8'))

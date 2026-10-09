@@ -7,6 +7,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from datetime import UTC, datetime
@@ -106,7 +107,13 @@ async function run() {
     const [before, timers] = [v.s.calls.length, v.s.timers]
     v.click('7d')
     await flush()
-    out.click = { first: v.s.calls.slice(0, before), after: v.s.calls.slice(before), timers: v.s.timers - timers, pressed: v.pressed(), meta: v.text('m-q1') }
+    out.click = { first: v.s.calls.slice(0, before), after: v.s.calls.slice(before), timers: v.s.timers - timers, pressed: v.pressed(), meta: v.text('m-q1'), window: v.text('m-window'), note: v.text('window-note') }
+  }
+  // 1-전. 게이트 전 응답(windows 24h 만) — 닫힌 버튼 옆 안내 글(060 §3.5)
+  {
+    const v = screen((url) => (url.startsWith('/svc/api/admin/access') ? [200, { ...access(url)[1], windows: ['24h'] }] : [200, { status: 'ok' }]))
+    await flush()
+    out.preNote = v.text('window-note')
   }
   // 2. 접속 응답을 붙잡은 채 24h→7d→30d — 겹친 호출 0, 끝에 30d 한 번, 7d 응답은 그리지 않음
   {
@@ -250,7 +257,7 @@ CASES: list[tuple[dict, dict[int, str]]] = [
     (
         _case("30d", G, G + 6 * DAY, visitors=_vis(60, 600, 15, sinceTs=G)),
         {
-            0: "개정 시행 뒤 센 6일 동안 스크립트가 돈 방문자는 하루 평균 10.0명, 브라우저 모양까지 치면 100.0명"
+            0: "최근 6일 동안 스크립트가 돈 방문자는 하루 평균 10.0명, 브라우저 모양까지 치면 100.0명"
             " — 실제 사람은 이 사이다. 확인의 25%는 다시 온 사람이다. 브라우저 모양의 대부분은 봇이다.",
         },
     ),
@@ -258,7 +265,7 @@ CASES: list[tuple[dict, dict[int, str]]] = [
     (
         _case("30d", G, G + 6 * DAY, visitors=_vis(61, 600, 15, sinceTs=G)),
         {
-            0: "개정 시행 뒤 센 6일 동안 스크립트가 돈 방문자는 하루 평균 10.2명, 브라우저 모양까지 치면 100.0명"
+            0: "최근 6일 동안 스크립트가 돈 방문자는 하루 평균 10.2명, 브라우저 모양까지 치면 100.0명"
             " — 실제 사람은 이 사이다. 확인의 25%는 다시 온 사람이다.",
         },
     ),
@@ -276,7 +283,7 @@ CASES: list[tuple[dict, dict[int, str]]] = [
         ),
         {
             0: "확인 3, 브라우저 모양 40(날마다 센 방문자) — 오늘·어제(KST)를 따로 세어 더한 수라 사람 수가 아니다."
-            " 시행 10-11 00:00 부터 센 값이다. 브라우저 모양의 대부분은 봇이다.",
+            " 브라우저 모양의 대부분은 봇이다.",
             1: "요청 1,000줄 가운데 사람 브라우저 모양은 41%다. 자동 요청은 스캐너(22%)·자동화 도구(13%) 순으로"
             " 많다. 사람 모양 페이지 가운데 스크립트가 돈 것은 25%다.",
             2: "확인의 75%는 국내 통신사 망에서 왔다. 데이터센터·클라우드 망은 브라우저 모양의 33%이고 그중 확인은"
@@ -304,9 +311,9 @@ CASES: list[tuple[dict, dict[int, str]]] = [
             status={"5xx": 2, "ws5xx": 0, "4xx": 0},
         ),
         {
-            0: "방문자는 처리방침 개정 시행 10-11 00:00 부터 센다. 지금은 줄 수만 — 사람 모양 페이지 1,234,"
+            0: "방문자 수 자료 없음. 지금은 줄 수만 — 사람 모양 페이지 1,234,"
             " 그중 스크립트가 돈 페이지 56.",
-            2: "나라·망 종류와 들어온 길은 처리방침 개정 시행 10-11 00:00 부터 센다. 지금은 외부 출처·utm 만"
+            2: "나라·망 종류와 들어온 길은 자료 없음. 지금은 외부 출처·utm 만"
             " 페이지 줄로 보인다.",
             3: "최근 24시간 중 화면이 가장 많이 뜬 때는 2시(5회)다. 스크립트가 돈 페이지 보기 12회, 사람 모양"
             " 페이지 31회.",
@@ -461,6 +468,16 @@ DRAWS = [
     _case(
         "constructor", G, G + 6 * DAY, visitors=_vis(60, 600, 15, sinceTs=G, days=DAYS7)
     ),
+    # 5. 30일 창 시작이 게이트로 잘림 — 게이트 전 날들의 이름표는 '자료 없음'(060 §3.5 — 게이트가 없어 생기지 않는 길)
+    _case("30d", G, G + 6 * DAY, visitors=_vis(60, 600, 15, sinceTs=G, days=DAYS7)),
+    # 6. 게이트 전 응답(windows 24h 만·짝·나라 before_gate) — 빈 칸·타일 부제·나라·망 배지는 '자료 없음'(060 §3.5)
+    _case(
+        "24h",
+        G - 4 * DAY,
+        G - 3 * DAY,
+        **PRE,
+        totals={"humanPages": 10, "jsViews": 5},
+    ),
 ]
 
 
@@ -501,13 +518,13 @@ def test_answer_sentences_follow_the_templates(traffic: dict[str, Any]) -> None:
 def test_answer_values_are_bold_elements(traffic: dict[str, Any]) -> None:
     """§3.5 — `{…}` 자리는 b 요소다(글자는 textContent). §3.9 — 값은 바로 뒤 글자(공백 전까지)와 줄 안 바꿈 span 하나."""
     assert traffic["bold"] == [
-        ["b", "개정 시행 뒤 센 6일"],
+        ["b", "최근 6일"],
         ["b", "10.0"],
         ["b", "100.0"],
         ["b", "25"],
     ]
     assert traffic["glue"] == [
-        ["span", "nb", "개정 시행 뒤 센 6일"],
+        ["span", "nb", "최근 6일"],
         ["span", "nb", "10.0명,"],
         ["span", "nb", "100.0명"],
         ["span", "nb", "25%는"],
@@ -527,7 +544,7 @@ def test_drawn_blocks_keep_geo_words_in_both_columns_and_cap_long_lists(
 ) -> None:
     """§3.8 — geo 글은 나라·망 두 칸 모두에(받는 중·지난달 판), 지난달 판의 cloud 단서는 '그중 확인' 과 ▲ 글을 함께.
     036 §3.9 — 피드 상한을 믿지 않고 목록은 21행까지. §3.4 ④ — '지금' 앞 두 칸의 정시는 비운다. §3.10 — 목록 밖 창 이름."""
-    pending, old, many, day, odd = traffic["draws"]
+    pending, old, many, day, odd, cut, pre = traffic["draws"]
     for name in ("나라", "망 종류"):
         col = next(c for c in pending["cols"] if c[0] == name)
         assert col[1] == ["자료 받는 중 — 다음 갱신(60초)에 찬다"], col
@@ -540,6 +557,13 @@ def test_drawn_blocks_keep_geo_words_in_both_columns_and_cap_long_lists(
     assert day["hours"] == [["0시", "6시", "12시", "지금"]]
     assert odd["meta"] == "24시간 · 날마다 센 방문자"
     assert "function" not in odd["all"] and "native code" not in odd["all"]
+    # 060 §3.5 — 화면 글에 정책·게이트 낱말이 없다. 게이트로 잘린 창(게이트가 없어 생기지 않는 길)의 날 막대·게이트 전
+    # 응답의 빈 칸·나라·망 칸은 '자료 없음' 사실만
+    assert "자료 없음 24일" in cut["all"] and "부터" not in cut["all"]
+    assert pre["all"].count("자료 없음") >= 3
+    for drawn in traffic["draws"]:
+        for word in ("시행", "개정", "처리방침", "DB-IP 자료를 받지도"):
+            assert word not in drawn["all"], word
 
 
 def test_window_click_calls_only_the_access_path_at_once(
@@ -554,6 +578,18 @@ def test_window_click_calls_only_the_access_path_at_once(
     assert click["timers"] == 0
     assert click["pressed"] == ["7d"]
     assert click["meta"] == "7일 · 날마다 센 방문자"
+    # 060 §3.5 — 창 줄 meta 는 잘렸든 아니든 실제 시작('MM-DD HH:mm ~ 지금'), 세 창이 열린 응답이면 닫힌 버튼 안내가 없다
+    assert re.match(
+        r"\d{2}-\d{2} \d{2}:\d{2} ~ 지금\u00a0· 60초마다\u00a0· ", click["window"]
+    ), click["window"]
+    assert click["note"] == ""
+
+
+def test_closed_window_buttons_state_only_that_there_is_no_data(
+    traffic: dict[str, Any],
+) -> None:
+    """060 §3.5 — 서버가 7일·30일을 닫아 답하면(게이트가 없어 생기지 않는 길) 닫힌 버튼 옆에는 사실만 — 날짜·정책 낱말 없음."""
+    assert traffic["preNote"] == "7일·30일 자료 없음"
 
 
 def test_rapid_window_clicks_never_overlap_and_draw_only_the_last(
