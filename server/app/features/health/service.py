@@ -10,7 +10,7 @@ from app.features.health.models import (
     OutageOut,
 )
 
-# 현물 5곳(001·020) 뒤 perp 원천 3개(046 §3.8) 고정 순서
+# 현물 6곳(001·045) 뒤 perp 원천 4개(046 §3.8·047) 고정 순서
 EXCHANGES = COLLECT_SOURCES
 
 # state 경계(ms): 마지막 성공 후 경과 < 5초 ok, < 60초 stale, 그 외 down

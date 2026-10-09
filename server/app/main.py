@@ -66,6 +66,7 @@ from app.core.streams.bitget_perp import BitgetPerpStream
 from app.core.streams.bithumb import BithumbStream
 from app.core.streams.bybit import BybitStream
 from app.core.streams.bybit_perp import BybitPerpStream
+from app.core.streams.hyperliquid_perp import HyperliquidPerpStream
 from app.core.streams.okx import OkxStream
 from app.core.streams.upbit import UpbitStream
 from app.core.tick_store import Flusher, TickRelay
@@ -271,7 +272,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     bybit = BybitStream(store=store, sink=sink, record=record)
     bitget = BitgetStream(store=store, sink=sink, record=record)
     okx = OkxStream(store=store, sink=sink, record=record)
-    # 046 — perp 원천 3개는 현물 뒤 고정 순서(config.PERP_SOURCES). 행은 별도 맵·별도 싱크, 우주는 김프 우주를 따라 매초
+    # 046 — perp 원천 4개는 현물 뒤 고정 순서(config.PERP_SOURCES). 행은 별도 맵·별도 싱크, 우주는 김프 우주를 따라 매초
     perp_sink = PerpSink(store)
     # 세 원천 모두 WebSocket 없이 전체 티커 REST 를 매초 — 앱 공용 클라이언트(타임아웃 3초)로 (046 §3.5~3.7)
     binance_perp = BinancePerpStream(
@@ -283,6 +284,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     bitget_perp = BitgetPerpStream(
         store=store, sink=perp_sink, client=client, record=record
     )
+    # 047 — Hyperliquid 는 코인마다 bbo+activeAssetCtx 구독 3샤드, 목록은 /info meta(POST) — 역시 perps 가 10초마다 받는다
+    hyperliquid_perp = HyperliquidPerpStream(store=store, sink=perp_sink, record=record)
     streams = [
         upbit,
         bithumb,
@@ -293,9 +296,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         binance_perp,
         bybit_perp,
         bitget_perp,
+        hyperliquid_perp,
     ]
     perps = PerpUniverse(
-        sink=perp_sink, sources=[binance_perp, bybit_perp, bitget_perp], client=client
+        sink=perp_sink,
+        sources=[binance_perp, bybit_perp, bitget_perp, hyperliquid_perp],
+        client=client,
     )
     universe = UniverseRefresher(
         sink=sink,

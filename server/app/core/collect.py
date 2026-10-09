@@ -105,7 +105,7 @@ class CollectService:
                 + ", ".join(missing_rate)
                 + " (해당 국내 거래소의 김프 계산은 빠진다)."
             )
-        # 현물 5곳 뒤 perp 원천 3개 — snapshots[] 도 같은 순서 (046 §3.8)
+        # 현물 6곳 뒤 perp 원천 4개 — snapshots[] 도 같은 순서 (046 §3.8)
         saved = {ex: len(self._store.get_all(exchange=ex)) for ex in EXCHANGES}
         for src in PERP_SOURCES:
             saved[src] = len(self._store.perp_rows(src))

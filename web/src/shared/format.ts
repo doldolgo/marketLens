@@ -116,7 +116,7 @@ export function pctColor(v: number, digits = 2): string {
   return 'var(--color-text)'
 }
 
-/** 거래소 id → 표시명 (003 §3.4). 모르는 id 는 그대로. spreads·health 가 같이 쓴다. perp 원천은 046 §3.8. */
+/** 거래소 id → 표시명 (003 §3.4). 모르는 id 는 그대로. spreads·health 가 같이 쓴다. perp 원천은 046 §3.8(Hyperliquid 는 047). */
 const EX_NAMES: Record<string, string> = {
   upbit: '업비트',
   bithumb: '빗썸',
@@ -127,6 +127,7 @@ const EX_NAMES: Record<string, string> = {
   binance_perp: 'Binance perp',
   bybit_perp: 'Bybit perp',
   bitget_perp: 'Bitget perp',
+  hyperliquid_perp: 'Hyperliquid',
 }
 
 export function exName(id: string): string {

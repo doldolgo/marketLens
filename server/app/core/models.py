@@ -121,7 +121,7 @@ class PerpRow:
     첫 유효 호가(넷 다 > 0·유한)에서 만들어지고, 그 전에 온 펀딩은 PerpSink 가 보류한다.
     """
 
-    source: str  # binance_perp·bybit_perp·bitget_perp(·hyperliquid_perp)
+    source: str  # binance_perp·bybit_perp·bitget_perp·hyperliquid_perp
     base: str  # 배수 접두·접미를 뗀 코인 이름 (1000PEPE → PEPE)
     native_symbol: str  # 거래소 원본 심볼 (1000PEPEUSDT)
     multiplier: int  # 1·1000·10000·1000000
