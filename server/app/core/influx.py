@@ -379,10 +379,22 @@ def candle_head(dom: str, fx: str, base: str) -> str:
     return _head("candle", {"dom": dom, "fx": fx, "base": base})
 
 
+@functools.lru_cache(maxsize=4096)
+def _candle_net_fields(net_dom: str | None, net_fx: str | None) -> str:
+    """`candle` 줄의 망 이름 두 필드 조각(`net_dom=…,net_fx=…,`) — 망 이름 쌍마다 한 번만 이스케이프한다.
+
+    분 닫힘은 1분에 조합 1,800여 줄을 만드는데 망 이름 쌍은 100~200종뿐이라 같은 조각을 되풀이해 만든다.
+    이스케이프 규칙은 `_field_literal` 그대로 두고 결과만 기억한다 — 규칙이 이 모듈 한 곳에 남는다.
+    상한 4096 은 하네스 재생에서 본 쌍 수(114~179종)의 20배가 넘는다(넘쳐도 오래 안 쓴 쌍부터 다시 만들 뿐 줄은 같다).
+    """
+    return f"net_dom={_field_literal(net_dom or _NO_NETWORK)},net_fx={_field_literal(net_fx or _NO_NETWORK)},"
+
+
 def candle_line(
     head: str,
     ts: int,
-    *,
+    # 위치 인자로도 받는다 — 분 닫힘이 1,800여 줄에 키워드 20개씩 넘기는 비용을 없애려고(014 §3.3). 순서를 바꾸면
+    # 위치 인자 호출부의 값이 다른 필드로 들어가므로 순서는 이대로 고정이다(test_candles 가 20필드 값을 모두 달리 해 지킨다)
     fwd_o: float,
     fwd_h: float,
     fwd_l: float,
@@ -410,7 +422,7 @@ def candle_line(
         f"dom_dep={int(dom_dep)}i,dom_wd={int(dom_wd)}i,"
         f"fwd_c={float(fwd_c)!r},fwd_h={float(fwd_h)!r},fwd_l={float(fwd_l)!r},fwd_o={float(fwd_o)!r},"
         f"fx_dep={int(fx_dep)}i,fx_wd={int(fx_wd)}i,krw={float(krw)!r},"
-        f"net_dom={_field_literal(net_dom or _NO_NETWORK)},net_fx={_field_literal(net_fx or _NO_NETWORK)},"
+        f"{_candle_net_fields(net_dom, net_fx)}"
         f"rate={float(rate)!r},rev_c={float(rev_c)!r},rev_h={float(rev_h)!r},"
         f"rev_l={float(rev_l)!r},rev_o={float(rev_o)!r},samples={int(samples)}i,usdt={float(usdt)!r} {ts}"
     )
