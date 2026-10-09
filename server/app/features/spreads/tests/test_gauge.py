@@ -180,11 +180,12 @@ async def test_api_lifespan_has_gauge_task_only_with_statsd_addr(api_env) -> Non
     try:
         # attention_flush — 052 의 화면 영역 통계 10초 묶음 쓰기(api 역할이면 늘 있다)
         for statsd, expected in (
-            (None, ["attention_flush", "spreads_hub"]),
-            ("", ["attention_flush", "spreads_hub"]),
+            # 048 — gap 허브 구독 태스크도 api 역할에 늘 하나
+            (None, ["attention_flush", "gap_hub", "spreads_hub"]),
+            ("", ["attention_flush", "gap_hub", "spreads_hub"]),
             (
                 f"127.0.0.1:{port}",
-                ["attention_flush", "spreads_hub", "ws_clients_gauge"],
+                ["attention_flush", "gap_hub", "spreads_hub", "ws_clients_gauge"],
             ),
         ):
             api_env("api", statsd)

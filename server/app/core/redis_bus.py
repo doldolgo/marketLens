@@ -7,6 +7,8 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
 채널·키 (db.md Redis 절):
 - 채널 `spreads`        — 표 JSON, 실시간(수집 → api)
 - 키 `spreads:latest`   — 같은 JSON, TTL 10초. 늦게 붙은 구독자의 첫 표. 수집이 멈추면 사라진다
+- 채널 `gap`·키 `gap:latest` — 현선갭 표(048 §3.3), 같은 규칙. 채널·키 이름은 표 id 하나에서 나온다(`<id>`·`<id>:latest`) —
+  게시·구독·첫 표 읽기는 표 id 를 인자로 받고 기본값이 spreads 라 017 의 호출은 그대로다
 - 키 `spreads:want`     — 값 "1", TTL 15초. api 가 접속자가 있는 동안 5초마다(+ `GET /spreads` 요청마다, 018) 쓴다.
   읽는 쪽은 없다 — 수집은 2026-09-26 부터 접속자와 무관하게 매 틱 표를 만든다 (017 §3.1)
 - 키 `collect:heartbeat` — 틱 시각(ms) 문자열, TTL 30초. 수집이 매 틱 쓰고 api 의 `/health` 가 읽는다 (025)
@@ -36,6 +38,7 @@ from app.core.redis_stream import CONNECT_TIMEOUT_SEC, SOCKET_TIMEOUT_SEC
 
 CHANNEL = "spreads"
 LATEST_KEY = "spreads:latest"
+GAP_CHANNEL = "gap"  # 048 — 현선갭 표. 키는 latest_key(GAP_CHANNEL)
 WANT_KEY = "spreads:want"
 LATEST_TTL_SEC = 10
 WANT_TTL_SEC = 15
@@ -61,6 +64,11 @@ FLOW_HOT_WALLETS_KEY = "flow:eth:hot_wallets"
 FLOW_INTERNAL_KEY = "flow:eth:internal"
 # 052 — 화면 영역 이용 통계 하루 합계 해시 `attn:d:<YYYYMMDD>`(KST 날짜)
 ATTENTION_PREFIX = "attn:d:"
+
+
+def latest_key(table: str) -> str:
+    """표 id → 마지막 표 키 `<id>:latest` (017 §3.1·048 §3.3)."""
+    return f"{table}:latest"
 
 
 class RedisUnavailableError(Exception):
@@ -110,11 +118,11 @@ class RedisBus:
 
     # --- 수집 프로세스 쪽 (§3.1) ---
 
-    async def publish_table(self, data: str) -> None:
-        """`PUBLISH spreads` + `SET spreads:latest EX 10` 을 한 왕복으로. 실패는 예외."""
+    async def publish_table(self, data: str, table: str = CHANNEL) -> None:
+        """`PUBLISH <id>` + `SET <id>:latest EX 10` 을 한 왕복으로. 실패는 예외. 기본은 spreads, 048 은 `gap`."""
         async with self._client.pipeline(transaction=False) as pipe:
-            pipe.publish(CHANNEL, data)
-            pipe.set(LATEST_KEY, data, ex=LATEST_TTL_SEC)
+            pipe.publish(table, data)
+            pipe.set(latest_key(table), data, ex=LATEST_TTL_SEC)
             await pipe.execute()
 
     # --- 서빙 프로세스 쪽 (§3.2) ---
@@ -123,9 +131,9 @@ class RedisBus:
         """`SET spreads:want 1 EX 15` — 접속자가 있는 동안 5초마다. 실패는 예외."""
         await self._client.set(WANT_KEY, "1", ex=WANT_TTL_SEC)
 
-    async def latest(self) -> str | None:
-        """`GET spreads:latest` — 없으면 None(키 만료 = 수집이 표를 안 만들거나 멈춤). 실패는 예외."""
-        value = await self._client.get(LATEST_KEY)
+    async def latest(self, table: str = CHANNEL) -> str | None:
+        """`GET <id>:latest` — 없으면 None(키 만료 = 수집이 표를 안 만들거나 멈춤). 실패는 예외."""
+        value = await self._client.get(latest_key(table))
         return None if value is None else _text(value)
 
     async def latest_and_want(self) -> str | None:
@@ -266,11 +274,11 @@ class RedisBus:
             for day, raw in zip(days, found, strict=True)
         }
 
-    async def subscribe(self) -> Subscription:
-        """채널 구독 연결을 새로 연다 — 여기서 실제 연결이 일어나므로 실패는 예외."""
+    async def subscribe(self, channel: str = CHANNEL) -> Subscription:
+        """채널 구독 연결을 새로 연다 — 여기서 실제 연결이 일어나므로 실패는 예외. 한 연결은 한 채널만 (048 §3.4)."""
         pubsub = self._client.pubsub()
         try:
-            await pubsub.subscribe(CHANNEL)
+            await pubsub.subscribe(channel)
         except Exception:
             await pubsub.aclose()
             raise

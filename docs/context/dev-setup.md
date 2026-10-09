@@ -23,7 +23,7 @@ ruff check . && ruff format .
 ```bash
 cd web
 npm ci
-npm run dev        # http://localhost:5173/app/ (base 가 /app/, 022) , /api → localhost:8000 프록시 (ws: true — /api/ws/spreads 업그레이드 포함)
+npm run dev        # http://localhost:5173/app/ (base 가 /app/, 022) , /api → localhost:8000 프록시 (ws: true — /api/ws/spreads·/api/ws/gap 업그레이드 포함)
 npm run build      # tsc -b && vite build
 npm run lint       # oxlint
 ```
@@ -63,7 +63,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 | ETH_WS_URL | 없음 |
 | ETH_HTTP_URL | 없음 |
 
-- `ROLE`: 프로세스 역할(016) — `collector`(전체 동작) | `api`(Influx 조회 + `/ws/spreads` + `GET /spreads` Redis 읽기, 백그라운드 태스크는 017 구독 태스크 + `SLACK_WEBHOOK_URL` 이 있으면 025 알림 태스크 + `STATSD_ADDR` 가 있으면 027 게이지 태스크(+ 접속마다 보내기 태스크)). 로컬은 비워 둔다. `api` 는 compose 의 `api` 서비스가 `environment` 로만 준다. 둘 밖의 값이면 설정을 읽는 순간 실패한다.
+- `ROLE`: 프로세스 역할(016) — `collector`(전체 동작) | `api`(Influx 조회 + `/ws/spreads`·`/ws/gap` + `GET /spreads` Redis 읽기, 백그라운드 태스크는 017·048 구독 태스크 둘 + `SLACK_WEBHOOK_URL` 이 있으면 025 알림 태스크 + `STATSD_ADDR` 가 있으면 027 게이지 태스크(+ 접속마다 보내기 태스크)). 로컬은 비워 둔다. `api` 는 compose 의 `api` 서비스가 `environment` 로만 준다. 둘 밖의 값이면 설정을 읽는 순간 실패한다.
 - `INFLUX_URL`·`INFLUX_TOKEN`: InfluxDB 2.7 접속(org·bucket 은 `marketlens` 고정). 토큰이 없으면 flusher 비활성·`/history/*` 503 — 앱은 뜬다. 사람용 UI 는 `http://localhost:8086`(같은 토큰).
 - `REDIS_URL`: Redis 7 접속(009 틱 버퍼). compose 안에서는 `redis://redis:6379/0` 으로 덮어쓴다. 없으면 인계된 틱이 버려진다(앱은 뜬다).
 - `REFRESH_TOKEN`: 설정 시 `POST /refresh` 에 `X-Refresh-Token` 헤더가 필요하다.
@@ -86,7 +86,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 ```bash
 COMPOSE_PROFILES=collect,data,serve WEB_PORT=8080 docker compose --env-file server/.env up -d --build
 ```
-server·api·web·caddy·influxdb·redis 여섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 한 망에 뜬다. cloudflared 는 로컬에서 띄우지 않는다(profile tunnel — 배포의 serve 가 토큰 파일이 있을 때만, 030). `COMPOSE_PROFILES` 가 없으면 아무것도 안 뜬다 — 배포는 박스마다 profile 하나씩이라(021) 로컬만 셋을 다 켠다. 호스트에는 caddy(8080·443) 외에 박스 간 포트 server 8000·redis 6379·influxdb 8086 도 열리므로 **dev compose(Influx :8086·Redis :6379)와 겹친다 — 통합 기동 전에 `docker compose -f docker-compose.dev.yml down` 으로 내린다**(볼륨 유지). 이후 `stop`·`start`·`down` 도 같은 `COMPOSE_PROFILES=…` 를 앞에 붙인다(안 붙이면 그 서비스가 모델에 없다). `localhost:8080` 에 화면, `/api` 는 nginx 허용 목록 여섯만 넘긴다(028, 전부 정확 일치·접두 제거) — `/api/health`·`/api/health/collect`·`/api/history/events` 는 server, `/api/history/candles`·`/api/landing`·`/api/ws/spreads` 는 api 로 간다(016·017·022). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/history/candles?base=BTC`·`/api/landing` 502, `/api/health` 는 200, `start api` 로 복구. `stop redis` 면 `/api/landing` 의 `live` 가 null·WebSocket 은 `waiting`(화면은 직전 표 유지), `start redis` 뒤 10초 안에 복구. 닫힌 경로(`/api/docs`·`/api/spreads` 등)는 404 JSON 이다(028). 관리자 server(:8081)는 호스트에 안 열린다 — `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/status` 로 확인(029). caddy 접속 로그는 `./logs/caddy/access.log`(git 무시, 도메인 블록만 기록하므로 로컬은 catch-all 이라 거의 비어 있다 — 027). Caddyfile 을 고치면 `docker run --rm -v ./caddy:/etc/caddy:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile` 결과를 PR 본문에 적는다. 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
+server·api·web·caddy·influxdb·redis 여섯 컨테이너(프로젝트 `marketlens` — dev compose 의 `marketlens-dev` 와 분리)가 한 망에 뜬다. cloudflared 는 로컬에서 띄우지 않는다(profile tunnel — 배포의 serve 가 토큰 파일이 있을 때만, 030). `COMPOSE_PROFILES` 가 없으면 아무것도 안 뜬다 — 배포는 박스마다 profile 하나씩이라(021) 로컬만 셋을 다 켠다. 호스트에는 caddy(8080·443) 외에 박스 간 포트 server 8000·redis 6379·influxdb 8086 도 열리므로 **dev compose(Influx :8086·Redis :6379)와 겹친다 — 통합 기동 전에 `docker compose -f docker-compose.dev.yml down` 으로 내린다**(볼륨 유지). 이후 `stop`·`start`·`down` 도 같은 `COMPOSE_PROFILES=…` 를 앞에 붙인다(안 붙이면 그 서비스가 모델에 없다). `localhost:8080` 에 화면, `/api` 는 nginx 허용 목록(028, 전부 정확 일치·접두 제거)만 넘긴다 — `/api/health`·`/api/health/collect`·`/api/history/events`·`/api/flow/*` 는 server, `/api/history/candles`·`/api/landing`·`/api/ws/spreads`·`/api/ws/gap` 은 api 로 간다(016·017·022·048·050). 분리 확인: `docker compose --env-file server/.env stop api` 뒤 `/api/history/candles?base=BTC`·`/api/landing` 502, `/api/health` 는 200, `start api` 로 복구. `stop redis` 면 `/api/landing` 의 `live` 가 null·WebSocket 은 `waiting`(화면은 직전 표 유지), `start redis` 뒤 10초 안에 복구. 닫힌 경로(`/api/docs`·`/api/spreads` 등)는 404 JSON 이다(028). 관리자 server(:8081)는 호스트에 안 열린다 — `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/status` 로 확인(029). caddy 접속 로그는 `./logs/caddy/access.log`(git 무시, 도메인 블록만 기록하므로 로컬은 catch-all 이라 거의 비어 있다 — 027). Caddyfile 을 고치면 `docker run --rm -v ./caddy:/etc/caddy:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile` 결과를 PR 본문에 적는다. 내릴 때 `docker compose --env-file server/.env down`(볼륨 유지). 이 머신은 Docker 데몬이 OrbStack 이라 꺼져 있으면 `orb start`.
 
 ## 검증용 스모크
 ```bash
@@ -118,6 +118,10 @@ asyncio.run(main())
 EOF
 ```
 접속 직후 바로 `snapshot`(행 수 = `/spreads` 와 같음 — 수집이 매 틱 표를 만들어 `spreads:latest` 가 늘 살아 있다, `waiting` 은 수집 기동 직후뿐), 이후 매초 `delta`(바뀐 행만, 평상시 30~50%)·빈 초는 `heartbeat` 면 정상 (017).
+```bash
+docker compose -f docker-compose.dev.yml exec redis redis-cli GET gap:latest | head -c 400
+```
+048 — 기동 10초 뒤(perp 목록 첫 회차 + 현물·perp 스트림 한 바퀴) 행 키가 정확히 다음 11개면 정상: `sym, spot, perp, spotPrice, entry, exit, funding, intervalH, nextFundingTs, status, age`. 최상위는 `rows warnings dataReceivedAt fetchedAt` 넷(`rate`·`notional` 없음). 행 수는 김프 우주 ∩ perp 우주 코인 × (현물 4 × perp 3) — 로컬 실측 2,923행(359코인). 위 python 스니펫의 주소를 `ws://localhost:8000/ws/gap` 으로 바꾸면 같은 모양의 `snapshot` → 매초 `delta`(perp 최우선 호가가 매초 바뀌어 행의 70~97% 가 실린다) 가 온다.
 ```bash
 curl -s "localhost:8000/slippage/upbit?symbol=BTC/KRW&amount=1000000" | head -c 300
 ```

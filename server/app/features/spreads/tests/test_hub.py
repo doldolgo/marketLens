@@ -6,7 +6,7 @@ import json
 
 import fakeredis
 
-from app.core.redis_bus import WANT_KEY, RedisBus
+from app.core.redis_bus import CHANNEL, WANT_KEY, RedisBus
 from app.features.spreads import hub as hub_module
 from app.features.spreads.hub import (
     CODE_SLOW,
@@ -196,8 +196,8 @@ class CountingBus(RedisBus):
         self.opened = 0
         self.closed = 0
 
-    async def subscribe(self):  # noqa: ANN201
-        sub = await super().subscribe()
+    async def subscribe(self, channel: str = CHANNEL):  # noqa: ANN201
+        sub = await super().subscribe(channel)
         self.opened += 1
         close = sub.aclose
 
@@ -268,9 +268,9 @@ class SlowLatestBus(RedisBus):
         super().__init__(client)
         self.gate = asyncio.Event()
 
-    async def latest(self) -> str | None:
+    async def latest(self, table: str = CHANNEL) -> str | None:
         await self.gate.wait()
-        return await super().latest()
+        return await super().latest(table)
 
 
 async def test_connections_attached_while_latest_is_loading_get_the_snapshot() -> None:
@@ -297,7 +297,7 @@ async def test_connections_attached_while_latest_is_loading_get_the_snapshot() -
 class RefusedSubBus(RedisBus):
     """구독은 열리지만 첫 get 에서 거부된다 — Redis 가 메모리 상한에서 SUBSCRIBE 를 거절할 때와 같은 모양."""
 
-    async def subscribe(self):  # noqa: ANN201
+    async def subscribe(self, channel: str = CHANNEL):  # noqa: ANN201
         class Refused:
             async def get(self, timeout: float) -> str | None:
                 raise RuntimeError(

@@ -1,102 +1,43 @@
-// 선물–현물 갭 탭 (mock) — 스펙 002 §3.7, 구조는 docs/design/reference/tabs/GapTab.tsx.
+// 선물–현물 갭 탭 — /ws/gap 실데이터 (스펙 048 §3.6, 화면·조작은 002 §3.7, 구조는 docs/design/reference/tabs/GapTab.tsx).
 import { useState } from 'react'
-import { STALE_SEC } from '../../shared/config'
 import { fmtFunding3, fmtPct, fmtUsdt, pctColor } from '../../shared/format'
-import type { Feed } from '../../shared/types'
 import {
-  GridHeader, gridRow, NumField, Seg, segOpt, SymCell, TableFrame, ToggleBtn,
+  Empty, GridHeader, gridRow, NumField, Seg, segOpt, SymCell, TableFrame, ToggleBtn,
   bar, count, exTag, hint, label, searchInput, type Header,
 } from '../../shared/ui'
 import { bool, num, oneOf, sortOf, useUrlState } from '../../shared/urlState'
+import { useGapSocket } from './api'
+import { aggregateCoins, fundingEta, perpName, sortCoins, spotLabel, type Mode, type SortCol } from './coins'
 
 /** 심볼 | 현물가 USDT | 갭(가변) | 펀딩비 */
 const GRID = '100px 1fr 320px 150px'
 
-interface Combo {
-  spotEx: string
-  perpEx: string
-  gap: number
-  funding: number
-  price: number
-  age: number
-}
-
-interface Row {
-  sym: string
-  entry: Combo | null
-  exit: Combo | null
-}
-
-type SortCol = 'sym' | 'price' | 'gap' | 'funding'
-type Mode = 'entry' | 'exit'
-
-/** 펀딩 주기: Hyperliquid 1h, Bitget 4h(선선갭 탭과 동일), 그 외 8h. 남은 시간은 epoch 기준 UTC 정시 경계. */
-function fundingEta(ex: string, now: number): string {
-  const cycMs = (ex === 'Hyperliquid' ? 1 : ex === 'Bitget' ? 4 : 8) * 3_600_000
-  const remainMin = Math.ceil((cycMs - (now % cycMs)) / 60_000)
-  if (remainMin < 60) return `펀딩 ${remainMin}분 후`
-  return `펀딩 ${Math.floor(remainMin / 60)}시간 ${remainMin % 60}분 후`
-}
-
-export default function GapTab({ feed, now }: { feed: Feed; now: number }) {
-  // 필터·정렬은 URL 쿼리(g.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색어는 메모리만 — Clarity 가 주소를 통째로 싣는다 (033)
+export default function GapTab({ active, now }: { active: boolean; now: number }) {
+  // 탭이 보이는 동안만 구독 — 숨으면 닫고 표는 메모리에 둔다, 다시 보이면 snapshot 으로 통째 교체 (§3.6)
+  const table = useGapSocket(active)
+  // 필터·정렬은 URL 쿼리(g.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색어는 메모리만 (033)
   const [q, setQ] = useState('')
   const [mode, setMode] = useUrlState<Mode>('g.mode', 'entry', oneOf(['entry', 'exit']))
   const [thr, setThr] = useUrlState('g.thr', 0.5, num)
   const [only, setOnly] = useUrlState('g.only', false, bool)
   const [sort, setSort] = useUrlState<{ col: SortCol; asc: boolean }>('g.sort', { col: 'gap', asc: false }, sortOf(['sym', 'price', 'gap', 'funding']))
 
-  // fail 아닌 현물×선물 모든 조합 중 최대(진입)·최소(정리) 갭을 채택.
-  const all: Row[] = feed.markets.map((m) => {
-    let entry: Combo | null = null
-    let exit: Combo | null = null
-    for (const s of m.spot) {
-      if (s.status === 'fail') continue
-      for (const p of m.perp) {
-        if (p.status === 'fail') continue
-        const gap = ((1 + p.prem / 100) / (1 + s.off / 100) - 1) * 100
-        const c: Combo = {
-          spotEx: s.ex,
-          perpEx: p.ex,
-          gap,
-          funding: p.funding,
-          price: m.base * (1 + s.off / 100),
-          age: Math.max(s.age, p.age),
-        }
-        if (!entry || gap > entry.gap) entry = c
-        if (!exit || gap < exit.gap) exit = c
-      }
-    }
-    return { sym: m.sym, entry, exit }
-  })
+  // 마지막 프레임 이후 경과 초 — 셸의 1.5초 tick(now)으로 age 가 자라 delta 가 끊기면 5초 뒤 전 행이 stale
+  let elapsedSec = 0
+  if (table.receivedAt > 0) elapsedSec = Math.max(0, (now - table.receivedAt) / 1000)
+  const all = aggregateCoins(table.rows.values(), mode, elapsedSec)
 
-  const combo = (r: Row): Combo | null => (mode === 'entry' ? r.entry : r.exit)
-  const meets = (g: number): boolean => (mode === 'entry' ? g >= thr : g <= -thr)
+  const meets = (g: number): boolean => {
+    if (mode === 'entry') return g >= thr
+    return g <= -thr
+  }
 
   const ql = q.trim().toLowerCase()
   let rows = all.filter((r) => r.sym.toLowerCase().includes(ql))
-  if (only) {
-    rows = rows.filter((r) => {
-      const c = combo(r)
-      return c !== null && meets(c.gap)
-    })
-  }
-
-  const mul = sort.asc ? 1 : -1
-  rows = [...rows].sort((a, b) => {
-    const ca = combo(a)
-    const cb = combo(b)
-    // fail 행·값 없는 행은 항상 뒤.
-    if (!ca && !cb) return a.sym.localeCompare(b.sym)
-    if (!ca) return 1
-    if (!cb) return -1
-    const d =
-      sort.col === 'sym' ? a.sym.localeCompare(b.sym)
-      : sort.col === 'price' ? ca.price - cb.price
-      : sort.col === 'gap' ? ca.gap - cb.gap
-      : ca.funding - cb.funding
-    return d * mul
-  })
+  if (only) rows = rows.filter((r) => r.row !== null && meets(r.gap))
+  rows = sortCoins(rows, sort.col, sort.asc)
+  let mul = -1
+  if (sort.asc) mul = 1
 
   function switchMode(m: Mode) {
     setMode(m)
@@ -106,12 +47,17 @@ export default function GapTab({ feed, now }: { feed: Feed; now: number }) {
 
   function clickSort(col: string) {
     const c = col as SortCol
-    setSort((s) => (s.col === c ? { col: c, asc: !s.asc } : { col: c, asc: c === 'sym' }))
+    setSort((s) => {
+      if (s.col === c) return { col: c, asc: !s.asc }
+      return { col: c, asc: c === 'sym' }
+    })
   }
 
+  let gapHeader = '진입 갭 · 현물 → 선물'
+  if (mode === 'exit') gapHeader = '정리 갭 · 현물 → 선물'
   const headers: Header[] = [
     ['sym', '심볼', 'left'], ['price', '현물가 USDT', 'right'],
-    ['gap', mode === 'entry' ? '진입 갭 · 현물 → 선물' : '정리 갭 · 현물 → 선물', 'right'], ['funding', '펀딩비', 'right'],
+    ['gap', gapHeader, 'right'], ['funding', '펀딩비', 'right'],
   ]
 
   return (
@@ -128,27 +74,37 @@ export default function GapTab({ feed, now }: { feed: Feed; now: number }) {
 
       <TableFrame minWidth={760} area="table">
         <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={mul} onSort={clickSort} />
+        {all.length === 0 && <Empty>백엔드에서 갭 표를 받는 중입니다…</Empty>}
         {rows.map((r) => {
-          const c = combo(r)
-          const stale = c !== null && c.age >= STALE_SEC
-          const hot = c !== null && !stale && meets(c.gap)
+          const c = r.row
+          const hot = c !== null && !r.stale && meets(r.gap)
+          let priceText = '–'
+          if (c && c.spotPrice > 0) priceText = fmtUsdt(c.spotPrice)
+          let fundingText = '–'
+          let fundingColor = 'var(--color-neutral-700)'
+          if (c && c.funding !== null) {
+            fundingText = fmtFunding3(c.funding)
+            fundingColor = pctColor(c.funding, 3)
+          }
+          let gapColor = 'var(--color-neutral-700)'
+          if (c) gapColor = pctColor(r.gap)
           return (
-            <div key={r.sym} className="hv-row" style={gridRow(GRID, { hot, stale })}>
+            <div key={r.sym} className="hv-row" style={gridRow(GRID, { hot, stale: r.stale })}>
               <SymCell sym={r.sym} hot={hot} />
               <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-300)' }}>
-                {c ? fmtUsdt(c.price) : '–'}
+                {priceText}
               </div>
               <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-                <span style={exTag()}>{c ? c.spotEx : '–'} 현물</span>
+                <span style={exTag()}>{c ? spotLabel(c) : '–'} 현물</span>
                 <span style={{ fontSize: 10, color: 'var(--color-neutral-600)' }}>→</span>
-                <span style={exTag(true)}>{c ? c.perpEx : '–'} 선물</span>
-                <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 66, textAlign: 'right', color: c ? pctColor(c.gap) : 'var(--color-neutral-700)' }}>
-                  {c ? fmtPct(c.gap) : '–'}
+                <span style={exTag(true)}>{c ? perpName(c.perp) : '–'} 선물</span>
+                <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 66, textAlign: 'right', color: gapColor }}>
+                  {c ? fmtPct(r.gap) : '–'}
                 </span>
               </div>
               <div style={{ padding: '0 8px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
-                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: c ? pctColor(c.funding, 3) : 'var(--color-neutral-700)' }}>{c ? fmtFunding3(c.funding) : '–'}</span>
-                <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-600)' }}>{c ? fundingEta(c.perpEx, now) : ''}</span>
+                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: fundingColor }}>{fundingText}</span>
+                <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-600)' }}>{c ? fundingEta(c.nextFundingTs, now) : ''}</span>
               </div>
             </div>
           )

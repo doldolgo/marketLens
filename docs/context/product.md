@@ -14,6 +14,7 @@
 - **rev(역프 %)**: 국내에서 사서 해외에서 팔 때. 받은 USDT 를 원화로 **판다**(USDT bid). `(fx_bid × rate_bid / dom_ask − 1) × 100`
   (정확한 수식·엣지는 스펙 003 에 명시)
 - **perp 원천**: 해외 USDT 무기한 선물 시세 원천 `binance_perp`·`bybit_perp`·`bitget_perp`(·`hyperliquid_perp`). 최우선 호가 1단계·마크가·펀딩률·다음 정산·주기. 배수 심볼(`1000PEPE`)은 1코인 단위로 정규화한다. 바이낸스는 WebSocket, 바이빗·비트겟은 REST 전체 티커를 매초(046).
+- **현선갭**: 해외 현물 ask 에 사고 해외 perp bid 에 숏할 때의 가격 차이 퍼센트(진입)와 그 반대(정리). 최우선 호가 기준, 슬리피지 없음(048).
 - **선선갭**: 해외 거래소 간 **선물–선물** 가격 갭.
 - **틱(tick)**: 매초 LiveStore 의 최신 시세로 만든 전 조합 김프 원값 묶음 `{ts, rows, dwFailed}`. LiveStore 틱 슬롯 → Redis → InfluxDB 를 흐르는 저장 단위(스펙 009).
 - **원문 아카이브**: 거래소가 준 WebSocket 메시지·REST 응답을 해석 전 그대로 S3 에 남긴 것(스펙 010). 쓰는 필드·계산이 바뀌어도 재수집 없이 재생하기 위한 저장소.
@@ -43,7 +44,7 @@
 | wallet-status | 거래소 API 키로 입출금 가능 여부·망 조회 |
 | web-shell | 탭 네비·KPI 스트립·테마·공용 UI |
 | flow-eth | 업비트 이더리움 ERC-20 입출금 레이더 — 블록이 생기자마자(약 2초) 코인별 순유입·최근 전송(`/flow/netflow`·`/flow/recent`). ETH 네트워크·업비트 한정 |
-| (gap) 선물–현물 갭, 선선갭 | 해외 선물 vs 현물. FE mock 까지만 — 비범위 |
+| gap | 해외 현물 × perp 현선갭 실시간 표(entry·exit·펀딩) — 선선갭은 049 |
 | health | 거래소별 실패 구간 이력·상태·성공률(`/health/collect`). 백오프는 비범위 |
 | landing | 처음 온 사람용 소개 페이지(정적 HTML) + 요약 API |
 | admin | 관리자 페이지(운영자용 — 헬스·수집 상태·CloudWatch 경보·지표·canary·알림 기록·접속 요약(최근 30일까지 — 방문자 종류·확인된 방문자·유입 채널·나라·망 종류 · 창 고르기·시각화(042))·Clarity·비용·닫힌 API) + 화면 영역 이용 통계 수집(052 — 동의한 브라우저의 `attention.js` 비콘 → api → Redis 하루 합계 90일, 피드 `/admin/attention`) |

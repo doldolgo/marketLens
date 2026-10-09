@@ -383,6 +383,7 @@ PUBLIC_API = {
     "/api/history/candles": API,
     "/api/landing": API,
     "/api/ws/spreads": API,
+    "/api/ws/gap": API,  # 048 — spreads 바로 다음, 같은 모양
     # 052 — 화면 영역 이용 통계 비콘(POST 만 — 그 밖의 메서드는 nginx 405)
     "/api/attention": API,
 }
@@ -447,11 +448,14 @@ def test_public_api_forwards_exactly_the_six_allowlisted_paths() -> None:
             assert header in headers, (path, header)
 
 
+WS_PATHS = {("=", "/api/ws/spreads"), ("=", "/api/ws/gap")}  # 017·048
+
+
 def test_public_api_ws_spreads_upgrades_without_touching_read_timeout() -> None:
-    """017 — 업그레이드 헤더·HTTP/1.1 은 `= /api/ws/spreads` 에만, read timeout 은 기본 그대로."""
+    """017·048 — 업그레이드 헤더·HTTP/1.1 은 WebSocket 둘(`= /api/ws/spreads`·`= /api/ws/gap`)에만, read timeout 은 기본 그대로."""
     for key, children in _locations(_public_server()).items():
         headers = _args(children, "proxy_set_header")
-        upgrades = key == ("=", "/api/ws/spreads")
+        upgrades = key in WS_PATHS
         assert (["Upgrade", "$http_upgrade"] in headers) == upgrades, key
         assert (["Connection", "upgrade"] in headers) == upgrades, key
         assert (_args(children, "proxy_http_version") == [["1.1"]]) == upgrades, key
@@ -510,6 +514,7 @@ def test_closed_api_paths_route_to_the_json_404() -> None:
         "/api/spreads",
         "/api/ws",
         "/api/ws/other",
+        "/api/ws/gapx",  # 048 §4 — 정확 일치라 비슷한 이름도 닫힌다
         "/api/nope",
     ]
     for path in closed + [path + "/" for path in PUBLIC_API]:

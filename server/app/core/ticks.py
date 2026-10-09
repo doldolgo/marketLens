@@ -218,6 +218,7 @@ class TickLoop:
         events: EventSink | None = None,
         candles: EventSink | None = None,
         spreads: EventSink | None = None,
+        gap: EventSink | None = None,
         heartbeat: EventSink | None = None,
         wallet: WalletStatusProvider | None = None,
         day_open: EventSink | None = None,
@@ -233,6 +234,7 @@ class TickLoop:
         self._events = events
         self._candles = candles
         self._spreads = spreads
+        self._gap = gap
         self._heartbeat = heartbeat
         self._day_open = day_open
         self._wallet = wallet
@@ -308,6 +310,10 @@ class TickLoop:
             # 017 — 표 게시는 맨 마지막 자리 — received_at 이 찍힌 뒤라 GET /spreads 와 같은 표가 나온다
             self._spreads.observe(tick)
             lap = self._lap("표", lap)
+        if self._gap is not None:
+            # 048 — 현선갭 표는 spreads 표 다음 같은 회차에서. 같은 메모리 호가로 두 표가 한 초에 나간다
+            self._gap.observe(tick)
+            lap = self._lap("갭표", lap)
         if self._heartbeat is not None:
             # 025 — 맨 끝: 여기까지 왔다 = 이 초의 틱이 온전히 끝났다. 위에서 예외가 나면 이 초는 안 쓴다
             self._heartbeat.observe(tick)

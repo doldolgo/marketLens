@@ -182,14 +182,14 @@ def test_access_log_appends_only_ua_and_origin_referer() -> None:
 
 
 def test_polling_paths_and_canary_are_not_logged() -> None:
-    """폴링 다섯 경로(= 공개 허용 목록에서 WebSocket 을 뺀 것)와 canary UA 는 기록하지 않는다 (§3.2)."""
+    """폴링 경로(= 공개 허용 목록에서 WebSocket 둘을 뺀 것)와 canary UA 는 기록하지 않는다 (§3.2)."""
     snippet = _snippet()
     matchers = {args[0]: args[1:] for args, _ in snippet if args[0].startswith("@")}
     assert sorted(a[0] for a in _all(snippet, "log_skip")) == ["@canary", "@nolog"]
     assert matchers["@nolog"][0] == "path"
     assert set(matchers["@nolog"][1:]) == NOLOG_PATHS
-    assert NOLOG_PATHS == set(PUBLIC_API) - {"/api/ws/spreads"}
-    # WS 는 연결이 끝날 때 101·duration 한 줄 — 대시보드를 열어 둔 시간이라 남긴다
+    assert NOLOG_PATHS == set(PUBLIC_API) - {"/api/ws/spreads", "/api/ws/gap"}
+    # WS 는 연결이 끝날 때 101·duration 한 줄 — 대시보드를 열어 둔 시간이라 남긴다 (048 의 갭 WS 도 같다)
     assert matchers["@canary"] == ["header", "User-Agent", "*KimpTrack-Canary*"]
     assert "KimpTrack-Canary" in CANARY_UA
 
