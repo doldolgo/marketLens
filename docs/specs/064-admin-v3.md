@@ -70,7 +70,26 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 시작 — worktree feat/064-admin-v3(faa9af5 — origin/main 9b13b2c 위). 작업 중 origin/main 이 062·063·#121·#126 으로 나아가 병합했다
+#   (729d10e — 충돌: CLAUDE.md 062·063 행, status.md admin 행·빚, architecture.md admin 항목, 062·063 스펙 add/add → 스펙은 main 쪽)
+# 환경 — node v26.4.0(/opt/homebrew/bin). server venv 는 uv(샌드박스 밖 — 안에서는 uv 가 실패), web 은 npm ci(샌드박스 밖)
+# ECharts 사본 — 빈 scratch 디렉터리에서 npm pack echarts@5.5.1(샌드박스 밖, shasum 8dc9c68d…) → package/dist/echarts.min.js
+#   1,030,855B sha256 e84270bd0cd5bdf60fefc26d00c2a391cb2e81f4d26a7a9ee16185a54773a3cf('version="5.5.1"') + LICENSE·NOTICE·licenses/LICENSE-d3
+cd server && uv run --extra dev ruff check . && uv run --extra dev ruff format --check . && uv run --extra dev pytest -q
+#   All checks passed! · 382 files already formatted · 1999 passed, 1 skipped(test_geo_perf — DBIP_DIR 없음)
+cd web && npm ci && npm run lint && npm run build      # oxlint src exit 0 · tsc -b && vite build ✓(dist 에 admin 없음)
+for f in web/admin/*.js web/admin/vendor/echarts-5.5.1.min.js; do node --check "$f"; done   # 여섯 모두 통과
+# 064 시험 — node 는 가짜 DOM·fetch·location·history(tests/admin_dom.py), 경우마다 node 하나:
+#   test_admin.py 31(nginx·compose·화면 정적) · test_admin_rules.py 2(띠 규칙 경우 35·15분 평균) · test_admin_calc.py 5(큰 수·흐름·바이트·툴팁 글자)
+#   test_admin_pages.py 7(페이지별 경로 = 관리자 nginx 분기·기간·창·만료·빠진 피드·띠 칩·즉시 갱신) · test_admin_xss.py 3(모든 툴팁 서식에 <img onerror>)
+#   test_admin_fake.py 6(가짜 피드 서버 경우마다 세 페이지 '표시 오류' 0) · test_admin_render.py 4(진짜 ECharts 5.5.1 서버 그리기 — 그림 전부 예외 0)
+#   test_admin_contract.py 2(진짜 063 AwsReader.series·038/039/062 VisitFeeds 응답으로 그림 — 띠 칩까지)
+# 가짜 피드 서버 — uv run web/scripts/admin-fake-feeds.py --scenario problem(샌드박스 밖 127.0.0.1:18064, 확인 뒤 내림): / 200 text/html·
+#   CSP(style-src 'unsafe-inline' 포함)·X-Frame-Options DENY·no-store, /vendor/echarts-5.5.1.min.js text/javascript·private 1년,
+#   /api/health 503 stale, /screens.html 404, 디렉터리 밖 경로 404, POST /api/refresh 200, /__scenario/ok
+# dataviz 검사기(validate_palette.js) — 차트 색 순서 여덟을 카드 #1c1f2b 위에서: 대비 통과, 색각 이상 인접 쌍 #6f9bee↔#9184d9 ΔE 3.6 등 실패(§7 빚)
+# 하지 않은 것(설계 세션 몫 — 이 세션은 브라우저·Docker 를 쓰지 않았다): 세 페이지 1440·1024·390 폭 가로 넘침·상태 띠 모양·툴팁·시간 연결·
+#   CSP 위반 0, nginx -t(nginx-admin.conf 를 고쳤다 — location 둘)
 ```
 
 ## 6. 갱신할 문서
@@ -84,5 +103,31 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
+  - `web/admin/`: `index.html`(개요)·`server.html`(서버)·`traffic.html`(트래픽), `common.js`(경로 표 `PATHS`·`call`·`start` — 요청·세션·두 주기·고른 값 피드·카드별 그리기, 부분 상태 표 `tagOf`, 상태 띠 규칙 `problems`·`recentAvg`, 머리 점, `jump`, `once`, 글자·수·바이트·금액 도구), `charts.js`(칸 id 마다 인스턴스 하나·`draw`/`blank`·툴팁 `tip`(encodeHTML)·`spark`·`lines`·`bars`·`donut`·`gauges`·`budgetGauge`·`sparkBars`·`lanes`·`mirror`·`unzoom`), `overview.js`·`server.js`·`traffic.js`(카드 그리기 + 계산 `todayVisitors`·`hourlySuccess`·`alertHours`·`runs`·`collectLanes`·`alertPoints`·`flowGraph`·`heatGrid`·`botShare`·`countryLabel`), `admin.css`(§3.1 토큰), `vendor/echarts-5.5.1.min.js`·`ECHARTS-LICENSE.txt`·`ECHARTS-NOTICE.txt`·`ECHARTS-LICENSE-d3.txt`. 지운 것: v2 의 `admin.js`·`index.html`·`admin.css`.
+  - `web/nginx-admin.conf`(`/` CSP 에 `style-src 'self' 'unsafe-inline'`, `location /vendor/` — 같은 CSP·`X-Frame-Options`·`private, max-age=31536000, immutable`), `web/Dockerfile`(주석), `web/scripts/admin-fake-feeds.py`(가짜 피드 서버 — 이미지에 들지 않는다).
+  - `server/tests/`: `admin_dom.py`(node 바탕), `test_admin.py`(화면 단언을 v3 로·CSP·`/vendor/`), `test_admin_rules.py`·`test_admin_calc.py`·`test_admin_pages.py`·`test_admin_xss.py`·`test_admin_fake.py`·`test_admin_render.py`·`test_admin_contract.py`, `test_clarity.py`(관리자 파일 이름만). 지운 것: `test_admin_traffic.py`·`test_admin_attention.py`(v2 화면 node 시험).
+  - 문서: 이 스펙 §3·§5·§7, 029 §3.1~§3.3, 036·041·042 §3(화면 → 한 줄)·§4 머리 한 줄, 053 §3(관리자 화면 쪽만 지움)·§4 머리 한 줄, 043 지움, `CLAUDE.md`(§2·§4), context 넷(status·architecture·dev-setup·product).
 - 추측한 지점 / 실행 중 함께 고친 스펙 절:
+  1. 사람 결정(2026-10-09, 설계 세션 전달 — 060): 서버 기록 게이트·처리방침 시행일 글은 어느 페이지에도 없다. `before_gate` 하위 부분도 '연결 안 됨'(code 는 title 에도 싣지 않음), 창 단추는 응답 `windows` 에 없는 창만 끈다 — §3.4·§3.5 에 적었다.
+  2. §3.2 3 'perp 3' → 피드의 원천 전부(현물 6 + perp 4 — 047 뒤)를 그 순서로, 지연(`stale`)은 주황 알약 — 스펙 고침.
+  3. 상태 띠: 15분 평균 = [끝 − max(900초, 주기), 끝) 의 값 평균(7·30일 기간은 마지막 칸), 최근 1시간 5xx = `recent5xx`(20줄, WS 뺌)의 ts 로, WS 재접속 실패 = 24시간 창이면 `status.ws5xx`·7·30일 창이면 마지막 24시간 `hourly.wsErrors` 합(머리 점이 창에 따라 바뀌지 않게) — 스펙 고침. 열린 실패 구간이 있는 원천은 성공률 주황을 따로 내지 않는다. 헬스 호출 자체 실패도 빨강('응답 없음'). 예산 규칙은 한도가 있는 예산 모두(카드·게이지는 가장 나쁜 월 예산). 칩은 서버 페이지 카드(`#collect`·`#alarms`·`#canary`·`#cpu`·`#mem`·`#disk`·`#credit`·`#checks`·`#cost`)와 트래픽 `#problems` 로 간다.
+  4. 앱의 404 JSON(그 경로를 모르는 서버 — 062·063 배포 전)은 '연결 안 됨'. 표는 넷에 '첫 조회 중'(pending)·'불러오는 중'(첫 응답 전)·'표시 오류'(그 카드를 그리다 예외)를 더했다.
+  5. 큰 수 곁 그림: 지금 접속 = 063 `wsClients` 24시간, 오늘 방문자 = 오늘(KST — 응답 `endTs`) `visitors.days` 의 확인~모양 + 시간별 사람 모양 페이지 선, 수집 성공률 = 011 의 1시간 식을 24시간 칸마다 `outages` 로 다시 센 선(원천 평균), 경보 = 'OK' 또는 'ALARM n'(/ 전체) + 시간별 알림 막대(Slack + ALARM 으로 바뀐 경보), 비용 = 가장 나쁜 월 예산의 게이지.
+  6. 봇 비율 = (scanner + tool) ÷ 전체 요청 — 탐색 줄은 UA 종류와 겹쳐(브라우저 모양 탐색은 scanner, curl 은 tool) 더하면 두 번 센다. 빈 UA 의 탐색 줄(unknown)은 빠진다 — 스펙 고침.
+  7. 트래픽 방문자 큰 수 = 창 안 날마다 센 수의 합(하루 평균 아님). 방문 추이 24시간은 시간별 페이지(스크립트가 돈 페이지 + 그 밖 사람 모양 페이지 — 시간별 방문자 값은 피드에 없다). 요일×시간 열지도는 창과 무관하게 늘.
+  8. 'WS 머문 시간' → 'WS 연결 시간'(038 — 열어 둔 시간이지 머문 시간이 아니다) — 스펙 고침.
+  9. 그림 꼴: 네트워크·디스크 입출력은 상자마다 작은 그림(세로 눈금 따로 — 상자끼리 수십 배 차이), CPU 크레딧은 위 잔량·아래 사용 + 초과 과금(빨강, 상자끼리 쌓음) 두 칸, 점검은 걸린 시간 선 + 그 칸 위의 빨간 오류 점, 상태 검사·수집 상태는 가로 띠(사용자 정의 계열 — 실패 종류와 무관하게 빨강, 이름 옆 1시간 성공률), 비용 게이지는 실제(상태 색 + 호)·예측(흐린 짧은 바늘) 두 바늘.
+  10. 확대: 안쪽 확대(Ctrl+휠·트랙패드 핀치·끌기 — 그냥 휠은 페이지를 내린다) + '확대 풀기' 단추. 시간 차트의 확대 부품 id 를 모두 'zoom' 으로(connect 가 넘기는 id 가 다른 칸에서도 맞게).
+  11. 색: 상자 색은 이름에 고정(collect 강조·data 보조·serve 정상 — 차트 색 순서의 앞 셋), 도넛 색은 키 표 순서, 응답 상태 도넛만 상태 색. 둘 이상의 선은 범례 + 선 끝 이름표. 바이트는 1024 단위(10 미만 소수 1자리), 시간 축 글자는 `{M}/{d}`·`{HH}:{mm}`(영어 달 이름 없음).
+  12. `/vendor/` 캐시는 `private`(공유 캐시에 두지 않음)·1년·immutable, 접속 기록은 다른 정적 파일처럼 남긴다. ECharts 의 NOTICE·d3 BSD 라이선스도 옆에 둔다(사본에 d3 코드가 들어 재배포 고지).
+  13. '화면 분석 열기 ↗' 만 새 창(`rel="noopener"`), 'Clarity 열기 ↗'·콘솔 링크는 지금처럼 같은 탭·noreferrer.
+  14. 원천 이름은 한국어 표(`EX_NAME`), 나라는 국기 그림 문자 + `Intl.DisplayNames` 한국어 이름. 기기·OS·브라우저 도넛은 방문자 값이 없으면 기기·브라우저만 사람 모양 페이지 줄로. 개요 상자 게이지 값 = 띠 규칙과 같은 15분 평균·같은 문턱 색. 062 의 `entries`·`exits` 는 0 인 이름까지 실려 첫·마지막 페이지 그림은 사람이 있는 페이지만.
+  15. 가짜 피드 서버(설계 세션 확인용 — 표준 라이브러리, 경우 여섯, 실행 중 바꾸기)와 그 시험을 더했다(dev-setup.md).
+  16. 함께 고친 다른 문서: 029(CSP·`/vendor/`·화면 파일 문장), 036·041·042·053(§6 대로 — 053 은 공개 페이지 쪽 덮어 보기·헤더 계약이 살아 있어 관리자 화면 쪽만 지우고 머리 줄을 그 뜻으로, 041 은 피드 계약이 없어 그렇게 적음), `CLAUDE.md` §4 실행 순서 문단의 043, product.md admin 줄, architecture.md 046 항목의 `admin.js` 한 마디, status.md 의 063 빚 한 줄('정확 일치 location 이 없어 기록에 남는다' — main 의 063 이 location 을 더해 이미 풀렸다), test_clarity.py 의 관리자 파일 이름.
+  17. 커밋 300줄 예외 둘: ECharts 사본 커밋(299줄로 들었다)과 v2 화면을 통째로 지운 커밋(지우기만 5,728줄) — 고친 줄이 없는 커밋이다. 작업 중 origin/main 병합 커밋 하나(062·063·#121·#126).
 - 남은 빚:
+  - 설계 세션 브라우저 확인(§4 마지막 줄) — 세 페이지 1440·1024·390 폭 가로 넘침·상태 띠 정상/문제 모양·툴팁·시간 연결·CSP 위반 0. 실행 세션은 node 가짜 DOM·진짜 ECharts 서버 그리기(SVG)·가짜 피드 서버 응답으로만 봤다. `nginx -t` 도 아직(location 둘을 고쳤다).
+  - `screens.html` 은 065 전까지 없다(머리의 '화면' 링크 404) — 그 사이 관리자에서 화면 영역 덮어 보기를 못 본다.
+  - 차트 색 순서(§3.1)의 앞 두 색이 색각 이상에서 가깝다(검사기 ΔE 3.6, 정상 시각 7.0) — 범례·선 끝 이름표로 보완, 색은 설계 결정. 개요 '24시간 트래픽' 은 두 축 그림(§3.2 5 결정).
+  - 다른 스펙에 남은 043 언급(040 §2·§3.5·§3.7 '화면(043)', 041·042 의 기록 절)과 039 §3.2 '링크는 관리자 화면 index.html 에 고정'(→ traffic.html) — §6 밖이라 두었다(주인 담당 정리 제안).
+  - 063 시계열은 요청마다 인코딩한다(063 빚) — 서버·개요 페이지가 열린 동안 60초마다 부른다(서버 캐시 300초).
