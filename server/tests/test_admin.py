@@ -614,3 +614,256 @@ def test_pages_load_the_library_then_their_module_without_inline_code() -> None:
         ), page
         for title in re.findall(r'<span class="q" title="([^"]*)">\?</span>', html):
             assert 0 < len(title) <= 110 and title.count(". ") <= 1, (page, title)
+
+
+def _anchors(html: str) -> list[dict[str, str]]:
+    """`<a …>` 의 속성 — 큰따옴표·작은따옴표·따옴표 없는 값 모두. href 를 못 읽는 a 는 실패시킨다."""
+    out = []
+    for attrs in re.findall(r"<a\b([^>]*)>", html):
+        pairs = re.findall(
+            r"""([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))""", attrs
+        )
+        found = {k.lower(): a or b or c for k, a, b, c in pairs}
+        assert "href" in found, f"href 를 못 읽는 링크: <a{attrs}>"
+        out.append(found)
+    return out
+
+
+def test_links_are_fixed_addresses_and_only_the_screens_link_opens_a_new_window() -> (
+    None
+):
+    """036 §3.8 그대로 — 밖으로 나가는 링크는 고정 https·noreferrer·같은 탭, 계정·팀·프로젝트 ID 없음(레포 공개).
+    §3.4 — '화면 분석 열기 ↗'(screens.html)만 새 창(noopener). DB-IP 표시(039)는 나라를 그리는 트래픽 페이지에 하나."""
+    for page in PAGES:
+        html = _text(f"web/admin/{page}")
+        for a in _anchors(html):
+            href = a["href"]
+            if href.startswith("/") and not href.startswith("//"):
+                if "target" in a:
+                    assert (href, a["target"], a.get("rel")) == (
+                        "/screens.html",
+                        "_blank",
+                        "noopener",
+                    ), page
+                continue
+            assert (
+                href.startswith("https://")
+                and a.get("rel") == "noreferrer"
+                and "target" not in a
+            ), href
+            host = href.split("/")[2]
+            assert host in EXTERNAL_HOSTS or host.endswith(".console.aws.amazon.com"), (
+                href
+            )
+            if "cloudflare.com" in host:
+                assert href == f"https://{host}/", (
+                    href
+                )  # 대시보드 주소에는 계정 ID 가 든다 — 루트만
+        assert not re.search(r"(?<!\d)\d{12}(?!\d)", html), page
+        assert not re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", html), page
+        assert not re.search(r"[0-9a-f]{32,}", html), page
+        assert "cloudflareaccess.com" not in html and "/projects/view/" not in html, (
+            page
+        )
+    traffic = _text("web/admin/traffic.html")
+    assert (
+        traffic.count(
+            '<a href="https://db-ip.com" rel="noreferrer">IP Geolocation by DB-IP</a>'
+        )
+        == 1
+    )
+    assert traffic.count('target="_blank"') == 1
+    server = _text("web/admin/server.html")
+    assert '<a href="/api/docs">' in server and '<a href="/api/redoc">' in server
+    assert re.search(r'<input id="token" type="password" autocomplete="off"', server)
+    for page in ("index.html", "traffic.html"):
+        assert "target=" not in _text(f"web/admin/{page}").replace(
+            'target="_blank" rel="noopener"', ""
+        )
+
+
+def test_scripts_never_parse_html_store_data_or_write_addresses() -> None:
+    """§3.1·§4 — 피드 글자는 textContent·title 로만(innerHTML 없음), 저장소·새 창·주소 쓰기 없음. 요청은 call() 하나의
+    fetch, 새로고침·표시 지우기 주소는 그 페이지의 고정 주소(page.home), 링크 주소는 jump() 하나가 고정 표에서만."""
+    for name in SCRIPTS:
+        js = _script(name)
+        for banned in SCRIPT_BANNED:
+            assert banned not in js, (name, banned)
+        assert not re.search(r"https?://", js), name
+    every = _all_scripts()
+    common = _script("common.js")
+    assert (
+        every.count("fetch(") == 1
+        and "resp = await fetch(path, { ...init, headers: { ...XHR, ...init.headers }"
+        in common
+    )
+    assert every.count("'X-Requested-With': 'XMLHttpRequest'") == 1
+    assert (
+        every.count("location.replace(") == 1
+        and "location.replace(`${page.home}?${RELOAD_MARK}=1`);" in common
+    )
+    assert (
+        every.count("history.replaceState(") == 1
+        and "history.replaceState(null, '', page.home);" in common
+    )
+    assert (
+        every.count("location.search")
+        == 2
+        == common.count("new URLSearchParams(location.search).has(RELOAD_MARK)")
+    )
+    assert (
+        every.count("setAttribute('href'") == 1
+        and "if (href !== undefined) node.setAttribute('href', href);" in common
+    )
+    assert "const href = own(JUMP, to);" in common
+    for page, (path, module) in PAGES.items():
+        assert _script(module).count(f"home: '{path}',") == 1, page
+    # 툴팁 HTML 을 만드는 곳은 charts.js 의 tip() 하나 — 끼우는 값은 encodeHTML 을 지난 글자와 허용 목록의 클래스뿐
+    charts = _script("charts.js")
+    tip = re.search(
+        r"\nexport function tip\(head, rows = \[\]\) \{\n(.*?)\n\}\n",
+        charts,
+        flags=re.S,
+    )
+    assert tip, "tip()"
+    for name in SCRIPTS:
+        literals = len(re.findall(r"""['"`]<""", _script(name)))
+        assert literals == (
+            len(re.findall(r"""['"`]<""", tip.group(1))) if name == "charts.js" else 0
+        ), name
+    assert set(re.findall(r"\$\{([^}]*)\}", tip.group(1))) == {
+        "esc(head)",
+        "mark",
+        "key",
+        "esc(name)",
+        "esc(value)",
+    }
+    assert "const esc = (v) => lib().format.encodeHTML(clean(v));" in charts
+    assert "MARKS.has(mark)" in tip.group(1)
+
+
+def test_paths_table_polling_periods_and_no_copied_feed_periods() -> None:
+    """§3.1 — 부르는 경로는 common.js 표 하나(즉시 갱신만 server.js), 빠른 10초·느린 60초, 피드 주기는 refreshSec 로만."""
+    common = _script("common.js")
+    table = re.search(
+        r"export const PATHS = Object\.freeze\(\{(.*?)\}\);", common, flags=re.S
+    )
+    assert table, "PATHS"
+    assert dict(re.findall(r"(\w+): '([^']+)'", table.group(1))) == {
+        "collector": "/api/health",
+        "api": "/svc/api/health",
+        "status": "/svc/api/admin/status",
+        "collect": "/api/health/collect",
+        "aws": "/api/admin/aws",
+        "series": "/api/admin/aws/series",
+        "alerts": "/api/admin/alerts",
+        "access": "/svc/api/admin/access",
+        "clarity": "/svc/api/admin/clarity",
+    }
+    assert re.search(r"\bFAST_MS = 10_000;", common) and re.search(
+        r"\bSLOW_MS = 60_000;", common
+    )
+    assert (
+        "export const FAST = Object.freeze(['collector', 'api', 'status', 'collect']);"
+        in common
+    )
+    for name in SCRIPTS:
+        if name != "common.js":
+            expected = ["/api/refresh"] if name == "server.js" else []
+            assert re.findall(r"'(/(?:api|svc)/[^']*)'", _script(name)) == expected, (
+                name
+            )
+    every = _all_scripts()
+    for number in (
+        "10800",
+        "10_800",
+        "14400",
+        "14_400",
+        "43200",
+        "43_200",
+        "21600",
+        "21_600",
+    ):
+        assert not re.search(rf"(?<![\w.]){number}(?![\w.])", every), number
+
+
+def _root_tokens(css: str) -> dict[str, str]:
+    block = re.search(r":root\s*\{(.*?)\}", css, flags=re.S)
+    assert block, ":root 블록"
+    return {
+        k: v.strip()
+        for k, v in re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", block.group(1))
+    }
+
+
+def _rule(css: str, selector: str) -> str:
+    found = re.findall(rf"(?m)^{re.escape(selector)} \{{([^}}]*)\}}", css)
+    assert len(found) == 1, selector
+    return found[0]
+
+
+SPEC_COLORS = {
+    "--bg": "#121420",
+    "--card": "#1c1f2b",
+    "--line": "#2c3040",
+    "--text": "#ececf1",
+    "--muted": "#9a9cab",
+    "--accent": "#9184d9",
+    "--ok": "#5fbf8f",
+    "--warn": "#e0a458",
+    "--bad": "#e0697d",
+    "--sub": "#6f9bee",
+}
+
+
+def test_styles_and_chart_colors_follow_the_spec_tokens_and_layout() -> None:
+    """§3.1 — 어두운 바탕 토큰, 글 15px·큰 수 32px 굵게·카드 제목 15px, 최대 폭 1600px·카드 420px·큰 수 180px 격자,
+    640px 아래 한 줄, 외부 자원 없음. 차트 색 순서는 강조·보조·정상·주의·문제·#c792ea·#7fdbca·#f78c6c."""
+    css = re.sub(r"/\*.*?\*/", "", _text("web/admin/admin.css"), flags=re.S)
+    assert "@import" not in css and "url(" not in css
+    tokens = _root_tokens(css)
+    assert {k: tokens[k] for k in SPEC_COLORS} == SPEC_COLORS
+    assert (
+        "color-scheme: dark;" in _rule(css, ":root")
+        and "prefers-color-scheme" not in css
+    )
+    body = _rule(css, "body")
+    for decl in (
+        "background: var(--bg);",
+        "word-break: keep-all;",
+        "overflow-wrap: break-word;",
+    ):
+        assert decl in body, decl
+    assert re.search(r"font: 15px/", body)
+    big = _rule(css, ".big")
+    assert "font-size: 32px;" in big and "font-weight: 700;" in big
+    assert "font-size: 15px;" in css.split(".card-head h3 {", 1)[1].split("}", 1)[0]
+    assert "max-width: 1600px;" in _rule(css, ".wrap")
+    assert "repeat(auto-fit, minmax(min(420px, 100%), 1fr))" in _rule(css, ".grid")
+    assert "repeat(auto-fit, minmax(min(180px, 100%), 1fr))" in _rule(css, ".kpis")
+    narrow = re.search(r"@media \(max-width: 640px\) \{(.*)\}\s*$", css, flags=re.S)
+    assert narrow and re.search(
+        r"\.grid,\s*\.kpis \{\s*grid-template-columns: minmax\(0, 1fr\);",
+        narrow.group(1),
+    )
+    charts = _script("charts.js")
+    colors = dict(
+        re.findall(
+            r"  (\w+): '(#[0-9a-f]{6})',",
+            charts.split("export const COLOR", 1)[1].split("});", 1)[0],
+        )
+    )
+    assert {
+        f"--{k}": v for k, v in colors.items() if f"--{k}" in SPEC_COLORS
+    } == SPEC_COLORS
+    order = re.search(r"export const SERIES = Object\.freeze\(\[(.*?)\]\);", charts)
+    assert order and [x.strip() for x in order.group(1).split(",")] == [
+        "COLOR.accent",
+        "COLOR.sub",
+        "COLOR.ok",
+        "COLOR.warn",
+        "COLOR.bad",
+        "'#c792ea'",
+        "'#7fdbca'",
+        "'#f78c6c'",
+    ]
