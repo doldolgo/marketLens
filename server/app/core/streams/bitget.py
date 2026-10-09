@@ -205,6 +205,8 @@ class BitgetStream:
         self._last_trade_ts: dict[
             str, int
         ] = {}  # base → 마지막으로 실은 체결 ts (§3.4)
+        # 직전 set_universe 가 끝까지 배정을 맞춘 (심볼 맵 객체, 우주 사본) — 같은 맵·같은 우주면 배정 계산을 건너뛴다 (§3.3)
+        self._applied: tuple[dict[str, str], frozenset[str]] | None = None
         self._wake = asyncio.Event()  # set_universe 가 재조정 루프를 깨운다
         self._rebalance: asyncio.Task[None] | None = None
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다
@@ -298,7 +300,21 @@ class BitgetStream:
 
         우주 전체를 받으므로 자기 맵에 없는 base 는 무시한다(다른 해외에만 있는 코인).
         매초 불리므로 배정이 하나도 안 바뀌면 아무것도 하지 않는다 (§3.3).
+
+        심볼 맵이 직전 호출 때와 같은 객체이고 우주도 같으면 배정 계산부터 건너뛴다 — 목록은 하루 몇 번만 바뀌는데
+        계산은 매초 샤드 3개 × 심볼 수백 개의 crc32 다. 맵은 refresh 가 새 본문을 파싱할 때만 새 객체로 바뀌고 제자리에서
+        고치지 않으며, 샤드 배정(`assigned`·`has_work`)은 이 함수만 쓴다. 그래서 같은 맵·같은 우주로 다시 계산하면 모든
+        샤드가 `mine == assigned` 로 넘어간다 — 행·북·체결 ts 를 지우는 일도 재조정 깨우기도 없다.
         """
+        applied = self._applied
+        if (
+            applied is not None
+            and applied[0] is self._symbol_of
+            and applied[1] == bases
+        ):
+            return
+        # 배정을 고치는 도중 예외로 끝나면 다음 호출이 같은 우주라도 다시 계산하게 기억을 먼저 지운다
+        self._applied = None
         desired = {
             self._symbol_of[b]
             for b in (x.upper() for x in bases)
@@ -322,6 +338,8 @@ class BitgetStream:
                 shard.has_work.clear()
         if changed:
             self._wake.set()
+        # 사본으로 든다 — 넘겨받은 집합을 부른 쪽이 나중에 고쳐도 비교가 흔들리지 않게
+        self._applied = (self._symbol_of, frozenset(bases))
 
     # --- 판정 (§3.5) ---
 
