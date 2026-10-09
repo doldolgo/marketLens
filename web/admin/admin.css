@@ -299,6 +299,9 @@ a {
 .chart.mini {
   height: 96px;
 }
+.chart.short {
+  height: 150px;
+}
 
 /* — 상태 띠(개요) — 정상이면 큰 초록 한 줄, 아니면 심각한 순 칩 — */
 .band {

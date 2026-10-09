@@ -120,7 +120,6 @@ const kstMd = (ms) => {
   const d = new Date(ms + KST);
   return `${d.getUTCMonth() + 1}-${String(d.getUTCDate()).padStart(2, '0')}`;
 };
-const WINDOWS = ['24h', '7d', '30d'];
 const accessPart = (app) => partOf(app.current('access'));
 // 접속 요약이 ok 일 때 하위 부분(visitors·geo)의 상태 — 그 밖은 바깥 부분의 상태
 const subPart = (part, key) => (usable(part) ? partOf({ body: part }, key) : part);
@@ -259,3 +258,227 @@ function drawHeat(app) {
     }));
   });
 }
+
+// --- 어디서 — 들어온 길·출처·나라·망 종류·utm ---------------------------------------------------------
+
+const pairItems = (rows, name, color) => rows.map(([key, c, s]) => ({ name: name(key), value: s, color: color(key), tip: pair(c, s) }));
+const lineItems = (rows, name, denom) =>
+  rows.map(([key, v]) => ({ name: name(key), value: v, tip: [['c0', '사람 모양 페이지', int(v)], ['dim', '비율', denom > 0 ? pct((v / denom) * 100, 0) : '–']] }));
+// 그림 하나 — 값을 못 그리면 칸에 상태 글. part 는 그 그림이 기대는 부분(바깥 또는 하위)
+function chartCard(app, id, part, make) {
+  once(id, [app.current('access'), part], () => (usable(part) ? make(part) : blank(id, stateWord(part))));
+}
+
+function drawWhere(app) {
+  const part = accessPart(app);
+  const visitors = subPart(part, 'visitors');
+  const geo = subPart(part, 'geo');
+  tag('t-channels', visitors);
+  tag('t-countries', geo);
+  tag('t-networks', geo);
+  chartCard(app, 'c-channels', visitors, (v) => donut('c-channels', pairItems(rows3(v.channels), channelName, keyColor(CHANNEL_NAME))));
+  chartCard(app, 'c-referrers', part, (a) => bars('c-referrers', lineItems(rows2(a.referrers, 10), clean, n0(a.totals?.humanPages)), { fmt: int }));
+  chartCard(app, 'c-countries', geo, (g) => bars('c-countries', pairItems(rows3(g.countries), countryLabel, () => COLOR.accent), { fmt: int, labelWidth: 150 }));
+  chartCard(app, 'c-networks', geo, (g) => {
+    const rows = rows3(g.networks);
+    // 국내 통신사 행이 없는 창의 telecom 은 국내·해외를 합친 값일 수 있다(039 — KR 이 (기타)로 묶임)
+    const hasKr = rows.some(([key]) => key === 'telecom_kr');
+    const name = (key) => (key === 'telecom' && !hasKr ? '통신사' : nameIn(NET_NAME)(key));
+    return donut('c-networks', pairItems(rows, name, keyColor(NET_NAME)));
+  });
+  const utm = usable(part) ? rows2(part.utmSources, 10) : [];
+  const card = $('utm-card');
+  const hidden = !utm.length;
+  if (card.hidden !== hidden) {
+    card.hidden = hidden;
+    if (!hidden) refit('c-utm');
+  }
+  if (!hidden) chartCard(app, 'c-utm', part, (a) => bars('c-utm', lineItems(utm, clean, n0(a.totals?.humanPages)), { fmt: int }));
+}
+
+// --- 들어오고 나간 곳 (062 — entries·exits·depthPages) ----------------------------------------------------
+
+const DEPTH = [['1', '1쪽'], ['2', '2쪽'], ['3-5', '3~5쪽'], ['6+', '6쪽 이상']];
+function endsOption(v) {
+  const entries = rows3(v.entries, 12);
+  const exits = rows3(v.exits, 12);
+  const keys = [...new Set([...entries, ...exits].map(([key]) => key))];
+  if (!keys.length) return null;
+  const at = (rows) => new Map(rows.map(([key, c, s]) => [key, [c, s]]));
+  const [inMap, outMap] = [at(entries), at(exits)];
+  const order = [...keys].reverse(); // 범주 축은 아래에서 위로 — 받은 순서(큰 순)가 위에 오게
+  const bar = (name, map, color) => ({ type: 'bar', name, data: order.map((k) => map.get(k)?.[1] ?? 0), barMaxWidth: 12, itemStyle: { color, borderRadius: [0, 4, 4, 0] } });
+  return base({
+    grid: { left: 8, right: 24, top: 28, bottom: 4, containLabel: true },
+    legend: legend({ data: ['첫 페이지', '마지막 페이지'] }),
+    xAxis: valueAxis({ minInterval: 1 }),
+    yAxis: categoryAxis(order.map(pageName), { axisLine: { show: false }, axisLabel: { color: COLOR.text, fontSize: 12, width: 130, overflow: 'truncate' } }),
+    tooltip: axisTip((ps) => {
+      const key = order[ps[0]?.dataIndex];
+      const [ic, is] = inMap.get(key) ?? [0, 0];
+      const [oc, os] = outMap.get(key) ?? [0, 0];
+      return tip(pageName(key), [['c0', '첫 페이지(확인~모양)', `${int(ic)}~${int(is)}`], ['c1', '마지막 페이지(확인~모양)', `${int(oc)}~${int(os)}`]]);
+    }),
+    series: [bar('첫 페이지', inMap, COLOR.accent), bar('마지막 페이지', outMap, COLOR.sub)],
+  });
+}
+
+function drawEnds(app) {
+  const visitors = subPart(accessPart(app), 'visitors');
+  const missing = usable(visitors) && !Array.isArray(visitors.entries);
+  for (const id of ['t-ends', 't-depth']) {
+    if (missing) tagText(id, ['dim', '연결 안 됨', '접속 흐름 피드(062) 없음']);
+    else tag(id, visitors);
+  }
+  chartCard(app, 'c-ends', visitors, (v) => {
+    const option = missing ? null : endsOption(v);
+    return option ? draw('c-ends', option) : blank('c-ends', missing ? '연결 안 됨' : '자료 없음');
+  });
+  chartCard(app, 'c-depth', visitors, (v) => {
+    const depth = isObj(v.depthPages) ? v.depthPages : null;
+    if (!depth) return blank('c-depth', missing ? '연결 안 됨' : '자료 없음');
+    const cells = DEPTH.map(([key, label]) => [label, n0(depth[key]?.[0]), n0(depth[key]?.[1])]);
+    if (!cells.some((x) => x[2] > 0)) return blank('c-depth', '자료 없음');
+    return draw('c-depth', base({
+      grid: { left: 8, right: 8, top: 12, bottom: 4, containLabel: true },
+      xAxis: categoryAxis(cells.map((x) => x[0])),
+      yAxis: valueAxis({ minInterval: 1 }),
+      tooltip: itemTip((p) => tip(cells[p.dataIndex]?.[0], pair(cells[p.dataIndex]?.[1], cells[p.dataIndex]?.[2]))),
+      series: [{ type: 'bar', data: cells.map((x) => x[2]), barMaxWidth: 36, itemStyle: { color: COLOR.accent, borderRadius: [4, 4, 0, 0] } }],
+    }));
+  });
+}
+
+// --- 누가 — 요청 종류 여덟(100% 띠)·기기·OS·브라우저 ----------------------------------------------------
+
+function classesOption(a) {
+  const classes = isObj(a.classes) ? a.classes : {};
+  const keys = Object.keys(CLASS_NAME);
+  const totals = ['requests', 'pages'].map((k) => keys.reduce((sum, key) => sum + n0(classes[key]?.[k]), 0));
+  if (!totals[0]) return null;
+  const share = (key, i) => (totals[i] ? (n0(classes[key]?.[['requests', 'pages'][i]]) / totals[i]) * 100 : 0);
+  return base({
+    grid: { left: 8, right: 8, top: 4, bottom: 44, containLabel: true },
+    legend: { bottom: 0, left: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 8, textStyle: { color: COLOR.muted, fontSize: 12 } },
+    xAxis: valueAxis({ show: false, max: 100 }),
+    yAxis: categoryAxis(['요청', '페이지'], { inverse: true, axisLine: { show: false }, axisLabel: { color: COLOR.text, fontSize: 12 } }),
+    tooltip: itemTip((p) => {
+      const key = keys[p.seriesIndex];
+      return tip(CLASS_NAME[key], [['c0', '요청', int(classes[key]?.requests)], ['c1', '페이지', int(classes[key]?.pages)], ['dim', '비율', pct(p.value, 1)]]);
+    }),
+    series: keys.map((key, i) => ({
+      type: 'bar',
+      name: CLASS_NAME[key],
+      stack: 'all',
+      barWidth: 18,
+      data: [share(key, 0), share(key, 1)],
+      itemStyle: { color: SERIES[i], borderColor: COLOR.card, borderWidth: 1 },
+      label: { show: true, position: 'inside', color: '#121420', fontSize: 11, formatter: (p) => (p.value >= 6 ? `${Math.round(p.value)}%` : '') },
+    })),
+  });
+}
+
+// 기기·OS·브라우저 — 방문자(브라우저 모양)로, 시행 전이면 기기·브라우저는 사람 모양 페이지 줄로(OS 는 없다)
+const WHO = [['devices', 'c-devices', 't-devices', DEVICE_NAME], ['os', 'c-os', 't-os', OS_NAME], ['browsers', 'c-browsers', 't-browsers', BROWSER_NAME]];
+function drawWho(app) {
+  const part = accessPart(app);
+  chartCard(app, 'c-classes', part, (a) => {
+    const option = classesOption(a);
+    return option ? draw('c-classes', option) : blank('c-classes', '자료 없음');
+  });
+  const visitors = subPart(part, 'visitors');
+  for (const [key, id, tagId, table] of WHO) {
+    const lines = usable(part) && !usable(visitors) && key !== 'os' ? rows2(part[key]) : [];
+    tag(tagId, lines.length ? null : visitors);
+    if (lines.length) {
+      once(id, [app.current('access'), 'lines'], () => donut(id, lines.map(([k, v]) => ({ name: nameIn(table)(k), value: v, color: keyColor(table)(k), tip: [['c0', '사람 모양 페이지', int(v)]] }))));
+    } else chartCard(app, id, visitors, (v) => donut(id, pairItems(rows3(v[key]), nameIn(table), keyColor(table))));
+  }
+}
+
+// --- 무엇을 — 경로·대시보드 탭 ---------------------------------------------------------------------------
+
+function drawWhat(app) {
+  const part = accessPart(app);
+  chartCard(app, 'c-paths', part, (a) => bars('c-paths', lineItems(rows2(a.paths, 10), clean, n0(a.totals?.humanPages)), { fmt: int, labelWidth: 180 }));
+  chartCard(app, 'c-tabs', part, (a) => {
+    const rows = rows2(a.tabs);
+    return bars('c-tabs', lineItems(rows, nameIn(TAB_NAME), rows.reduce((sum, r) => sum + r[1], 0)), { fmt: int });
+  });
+}
+
+// --- 문제 — 응답 상태·WS 연결 시간·최근 5xx ------------------------------------------------------------------
+
+const STATUS = [['2xx', '2xx', COLOR.ok], ['3xx', '3xx', COLOR.sub], ['4xx', '4xx', COLOR.warn], ['5xx', '5xx', COLOR.bad], ['ws5xx', 'WS 재접속 실패', SERIES[7]]];
+const WS_BUCKETS = [['lt10s', '10초 미만'], ['lt1m', '1분 미만'], ['lt10m', '10분 미만'], ['lt1h', '1시간 미만'], ['ge1h', '1시간 이상']];
+function drawProblems(app) {
+  const part = accessPart(app);
+  chartCard(app, 'c-status', part, (a) => {
+    const total = STATUS.reduce((sum, [key]) => sum + n0(a.status?.[key]), 0);
+    return donut('c-status', STATUS.map(([key, name, color]) => ({ name, value: n0(a.status?.[key]), color, tip: [['dim', '요청', int(a.status?.[key])], ['dim', '비율', total ? pct((n0(a.status?.[key]) / total) * 100, 1) : '–']] })));
+  });
+  chartCard(app, 'c-durations', part, (a) => {
+    const durations = isObj(a.ws?.durations) ? a.ws.durations : {};
+    if (!WS_BUCKETS.some(([key]) => n0(durations[key]) > 0)) return blank('c-durations', '자료 없음');
+    return draw('c-durations', base({
+      grid: { left: 8, right: 8, top: 12, bottom: 4, containLabel: true },
+      xAxis: categoryAxis(WS_BUCKETS.map(([, label]) => label)),
+      yAxis: valueAxis({ minInterval: 1 }),
+      tooltip: itemTip((p) => tip(WS_BUCKETS[p.dataIndex]?.[1], [['c0', '끝난 연결', int(p.value)]])),
+      series: [{ type: 'bar', data: WS_BUCKETS.map(([key]) => n0(durations[key])), barMaxWidth: 36, itemStyle: { color: COLOR.accent, borderRadius: [4, 4, 0, 0] } }],
+    }));
+  });
+  once('r5xx', [app.current('access')], () => {
+    const recent = usable(part) ? list(part.recent5xx).filter(isObj).slice(0, 10) : [];
+    const rows = recent.map((r) => {
+      const tr = el('tr');
+      const path = clean(r.path);
+      tr.append(el('td', null, num(r.ts) === null ? '–' : when(r.ts * 1000)), el('td', 'mono', path.length > 80 ? `${path.slice(0, 80)}…` : path), el('td', 'num num-bad', r.status));
+      return tr;
+    });
+    $('r5xx').replaceChildren(...(rows.length ? rows : [el('tr', null, usable(part) ? '없음' : stateWord(part))]));
+  });
+}
+
+// --- Clarity (040 — 세션·평균 스크롤 깊이·활성 시간 + 불만 신호 여섯) ----------------------------------------------
+
+const SIGNALS = [['deadClick', '죽은 클릭'], ['rageClick', '분노 클릭'], ['excessiveScroll', '과한 스크롤'], ['quickback', '빠른 뒤로'], ['scriptError', '스크립트 오류'], ['errorClick', '오류 클릭']];
+function drawClarity(app) {
+  const entry = app.entry('clarity');
+  const part = partOf(entry);
+  tag('t-clarity', part);
+  const ok = usable(part, 'numOfDays');
+  const summary = ok && isObj(part.summary) ? part.summary : {};
+  put('v-sessions', ok ? int(part.traffic?.sessions) : '–');
+  put('v-scroll', ok ? pct(num(summary.scrollDepth), 0) : '–');
+  put('v-active', ok && num(summary.activeSec) !== null ? `${int(summary.activeSec)}초` : '–');
+  once('c-signals', [entry], () => {
+    if (!ok) return blank('c-signals', stateWord(part));
+    const signals = isObj(summary.signals) ? summary.signals : {};
+    const items = SIGNALS.map(([key, name]) => {
+      const s = isObj(signals[key]) ? signals[key] : {};
+      return { name, value: num(s.sessionPct), tip: [['c0', '세션 비율', pct(num(s.sessionPct))], ['dim', '세션', int(s.sessions)], ['dim', '횟수', int(s.count)]] };
+    });
+    return bars('c-signals', items, { fmt: (v) => pct(v), color: COLOR.warn });
+  });
+}
+
+const app = start({
+  home: '/traffic.html',
+  slow: ['access', 'clarity'],
+  picks: { access: '24h' },
+  cards: [
+    ['access', drawWindow],
+    ['kpis', drawKpis],
+    ['flows', drawFlows],
+    ['trend', drawTrend],
+    ['heat', drawHeat],
+    ['where', drawWhere],
+    ['ends', drawEnds],
+    ['who', drawWho],
+    ['what', drawWhat],
+    ['problems', drawProblems],
+    ['clarity', drawClarity],
+  ],
+});
+for (const button of document.querySelectorAll('[data-window]')) button.addEventListener('click', () => app.pick('access', button.dataset.window));
