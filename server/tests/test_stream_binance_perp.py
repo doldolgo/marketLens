@@ -1,12 +1,8 @@
-"""바이낸스 perp 커넥터 — depth5·markPrice 배열·exchangeInfo 필터·fundingInfo 60초·구독 묶음·샤드 판정·펀딩 연결 실패·분류·종료 (스펙 046 §3.5, §4)."""
+"""바이낸스 perp 원천 — bookTicker·premiumIndex 전체 매초 폴링(한 회차 병렬)·exchangeInfo 필터·fundingInfo 60초·실패 분류·정체 판정·종료 (스펙 046 §3.5, §4)."""
 
 import asyncio
-import json
-import os
-import subprocess
-import sys
+import logging
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -16,59 +12,33 @@ from app.core.errors import ExchangeApiError, ExchangeTimeoutError
 from app.core.live_store import LiveStore
 from app.core.perp import PerpSink
 from app.core.streams.binance_perp import (
-    CONTROL_INTERVAL,
+    BOOK_TICKER_URL,
     EXCHANGE_INFO_URL,
     FUNDING_INFO_INTERVAL_MS,
     FUNDING_INFO_URL,
-    FUNDING_SHARD,
-    MARKET_WS_URL,
-    PUBLIC_WS_URL,
-    SHARDS,
-    STREAMS_PER_MESSAGE,
+    POLL_INTERVAL,
+    PREMIUM_INDEX_URL,
     BinancePerpStream,
-    shard_of,
 )
 from tests.conftest import RawLog
-from tests.stream_fakes import (
-    Clock,
-    FakeConnector,
-    FakeSocket,
-    GatedSocket,
-    HandshakeRejected,
-    Sleeps,
-    until,
-)
+from tests.stream_fakes import Clock, Sleeps
 
 T0 = 1_787_727_947_000
-STALE_LIMIT = 30_000
-SERVER_DIR = Path(__file__).resolve().parents[1]
 SRC = "binance_perp"
-PEPE_SHARD = shard_of("1000PEPEUSDT")
-ACK = '{"result":null,"id":1}'
-PUBLIC_SOURCE = "ws:/public/ws"
-MARKET_SOURCE = "ws:/market/ws"
-
-
-def symbols_for(shard: int, n: int) -> list[str]:
-    """해시가 그 샤드에 떨어지는 가짜 USDT 심볼 n개 — 배정 규칙(crc32 % 3)을 그대로 쓴다."""
-    out: list[str] = []
-    i = 0
-    while len(out) < n:
-        symbol = f"T{i:04d}USDT"
-        i += 1
-        if shard_of(symbol) == shard:
-            out.append(symbol)
-    return out
+INFO_SOURCE = "rest:/fapi/v1/exchangeInfo"
+FUNDING_SOURCE = "rest:/fapi/v1/fundingInfo"
+BOOK_SOURCE = "rest:/fapi/v1/ticker/bookTicker"
+PREMIUM_SOURCE = "rest:/fapi/v1/premiumIndex"
 
 
 def base_of(symbol: str) -> str:
-    return symbol[: -len("USDT")]
+    return symbol[: -len("USDT")].removeprefix("1000")
 
 
 def info_row(symbol: str, **over: Any) -> dict[str, Any]:
     row: dict[str, Any] = {
         "symbol": symbol,
-        "baseAsset": base_of(symbol),
+        "baseAsset": symbol[: -len("USDT")],
         "quoteAsset": "USDT",
         "contractType": "PERPETUAL",
         "status": "TRADING",
@@ -77,14 +47,8 @@ def info_row(symbol: str, **over: Any) -> dict[str, Any]:
     return row
 
 
-def exchange_info(
-    symbols: list[str], extra: list[dict[str, Any]] | None = None, server_time: int = T0
-) -> dict[str, Any]:
-    return {
-        "timezone": "UTC",
-        "serverTime": server_time,
-        "symbols": [info_row(s) for s in symbols] + (extra or []),
-    }
+def exchange_info(rows: list[dict[str, Any]], server_time: int = T0) -> dict[str, Any]:
+    return {"timezone": "UTC", "serverTime": server_time, "symbols": rows}
 
 
 def funding_info(hours: dict[str, int]) -> list[dict[str, Any]]:
@@ -100,213 +64,344 @@ def funding_info(hours: dict[str, int]) -> list[dict[str, Any]]:
     ]
 
 
-def depth(
-    symbol: str = "1000PEPEUSDT",
-    bids: list[list[str]] | None = None,
-    asks: list[list[str]] | None = None,
-    ts: int = T0,
-) -> str:
-    """depth5 프레임 — b[0]·a[0] 가 최우선, 5단계 전부 보낸다."""
-    if bids is None:
-        bids = [[f"{0.0123 - i * 0.0001:.4f}", "500"] for i in range(5)]
-    if asks is None:
-        asks = [[f"{0.0124 + i * 0.0001:.4f}", "700"] for i in range(5)]
-    return json.dumps(
-        {
-            "e": "depthUpdate",
-            "E": ts + 1,
-            "T": ts,
-            "s": symbol,
-            "U": 1,
-            "u": 2,
-            "pu": 0,
-            "b": bids,
-            "a": asks,
-        }
-    )
+def book(symbol: str = "1000PEPEUSDT", ts: int = T0, **fields: Any) -> dict[str, Any]:
+    """bookTicker 항목 — 문서에 없는 lastUpdateId 도 실응답엔 온다."""
+    item: dict[str, Any] = {
+        "symbol": symbol,
+        "bidPrice": "0.0123",
+        "bidQty": "500",
+        "askPrice": "0.0124",
+        "askQty": "700",
+        "time": ts,
+        "lastUpdateId": 1,
+    }
+    item.update(fields)
+    return item
 
 
-def mark(items: list[tuple[str, str, str, int]]) -> str:
-    """`!markPrice@arr@1s` 프레임 — (심볼, 마크가, 펀딩률, 다음 정산 ms) 배열."""
-    return json.dumps(
-        [
-            {
-                "e": "markPriceUpdate",
-                "E": T0,
-                "s": s,
-                "p": p,
-                "i": p,
-                "P": p,
-                "r": r,
-                "T": t,
-            }
-            for s, p, r, t in items
-        ]
-    )
+def premium(symbol: str = "1000PEPEUSDT", **fields: Any) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "symbol": symbol,
+        "markPrice": "0.01235",
+        "indexPrice": "0.01235",
+        "estimatedSettlePrice": "0.01235",
+        "lastFundingRate": "0.0001",
+        "interestRate": "0.0001",
+        "nextFundingTime": T0 + 3_600_000,
+        "time": T0,
+    }
+    item.update(fields)
+    return item
+
+
+class Rest:
+    """가짜 REST — 목록·주기·두 티커 응답을 따로 두고 호출을 기록한다. 티커는 회차마다 순서대로(마지막 반복)."""
+
+    def __init__(
+        self,
+        symbols: list[str],
+        books: list[httpx.Response | Exception] | None = None,
+        premiums: list[httpx.Response | Exception] | None = None,
+        hours: dict[str, int] | None = None,
+    ) -> None:
+        self.symbols: list[dict[str, Any]] = [info_row(s) for s in symbols]
+        self.hours = dict(hours) if hours is not None else {}
+        self.books = list(books) if books is not None else []
+        self.premiums = list(premiums) if premiums is not None else []
+        self.calls: list[httpx.Request] = []
+
+    @staticmethod
+    def _next(
+        queue: list[httpx.Response | Exception], default: list[dict[str, Any]]
+    ) -> httpx.Response:
+        if not queue:
+            return httpx.Response(200, json=default)
+        item = queue.pop(0) if len(queue) > 1 else queue[0]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.calls.append(request)
+        path = request.url.path
+        if path == "/fapi/v1/ticker/bookTicker":
+            return self._next(self.books, [book()])
+        if path == "/fapi/v1/premiumIndex":
+            return self._next(self.premiums, [premium()])
+        if path == "/fapi/v1/fundingInfo":
+            return httpx.Response(200, json=funding_info(self.hours))
+        return httpx.Response(200, json=exchange_info(self.symbols))
+
+    def client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(transport=httpx.MockTransport(self.handler))
+
+    def calls_to(self, path: str) -> int:
+        return sum(1 for c in self.calls if c.url.path == path)
 
 
 def _client(handler) -> httpx.AsyncClient:  # type: ignore[no-untyped-def]
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
-def rest(
-    symbols: list[str],
-    hours: dict[str, int] | None = None,
-    extra: list[dict[str, Any]] | None = None,
-    calls: list[httpx.Request] | None = None,
-) -> httpx.AsyncClient:
-    def handler(request: httpx.Request) -> httpx.Response:
-        if calls is not None:
-            calls.append(request)
-        if request.url.path == "/fapi/v1/fundingInfo":
-            return httpx.Response(200, json=funding_info(hours or {}))
-        return httpx.Response(200, json=exchange_info(symbols, extra))
-
-    return _client(handler)
-
-
 async def build(
-    outcomes: list[FakeSocket | BaseException],
+    rest: Rest | None = None,
     *,
-    symbols: list[str] | None = None,
     universe: set[str] | None = None,
-    hours: dict[str, int] | None = None,
-    sleep: Sleeps | None = None,
-) -> tuple[BinancePerpStream, FakeConnector, Sleeps, RawLog, Clock, LiveStore]:
-    """exchangeInfo·fundingInfo(fake REST) 로 맵을 채우고 우주를 넣은 커넥터 — 배정 있는 호가 샤드 + 펀딩 샤드가 연결한다."""
-    symbols = symbols if symbols is not None else ["1000PEPEUSDT"]
+) -> tuple[BinancePerpStream, Rest, Sleeps, RawLog, Clock, LiveStore]:
+    rest = rest if rest is not None else Rest(["1000PEPEUSDT"])
     store = LiveStore()
     sink = PerpSink(store)
-    bases = {base_of(s).removeprefix("1000") for s in symbols}
+    bases = {base_of(r["symbol"]) for r in rest.symbols}
     sink.set_universe(universe if universe is not None else bases)
-    connector = FakeConnector(outcomes)
-    sleeps = sleep if sleep is not None else Sleeps()
+    sleeps = Sleeps()
     raw = RawLog()
     clock = Clock(T0)
+    client = rest.client()
     stream = BinancePerpStream(
-        store=store, sink=sink, record=raw, connect=connector, sleep=sleeps, clock=clock
+        store=store, sink=sink, client=client, record=raw, sleep=sleeps, clock=clock
     )
-    await stream.refresh(rest(symbols, hours))
+    await stream.refresh(client)
     stream.set_universe(sink.universe)
-    return stream, connector, sleeps, raw, clock, store
+    return stream, rest, sleeps, raw, clock, store
 
 
-async def run_until_exhausted(
-    stream: BinancePerpStream, connector: FakeConnector
-) -> None:
-    stream.start()
-    await until(connector.exhausted)
-    await stream.aclose()
+# --- 티커 회차 → 행 (§3.4·§3.5) ---
 
 
-def backoffs(sleeps: Sleeps) -> list[float]:
-    return [v for v in sleeps.values if v != CONTROL_INTERVAL]
-
-
-def params_of(sock: FakeSocket, method: str = "SUBSCRIBE") -> list[list[str]]:
-    return [m["params"] for m in sock.subscriptions() if m["method"] == method]
-
-
-# --- 호가·펀딩 프레임 → 행 (§3.4·§3.5) ---
-
-
-async def test_depth5_frame_sets_top_of_book_divided_by_multiplier() -> None:
-    sock = FakeSocket([ACK, depth()])
-    stream, connector, _, raw, clock, store = await build([sock, FakeSocket([])])
+async def test_poll_sets_quote_from_book_ticker_and_funding_from_premium_index() -> (
+    None
+):
+    stream, rest, _, raw, clock, store = await build()
     clock.now = T0 + 5
-    await run_until_exhausted(stream, connector)
+    await stream.poll()
     row = store.perp_row(SRC, "PEPE")
     assert row is not None
     assert (row.native_symbol, row.multiplier) == ("1000PEPEUSDT", 1000)
     assert (row.bid, row.ask) == (0.0123 / 1000, 0.0124 / 1000)
     assert (row.bid_size, row.ask_size) == (500_000.0, 700_000.0)
-    assert row.quote_ts == T0  # T 가 호가 시각
-    assert row.updated_at == datetime.fromtimestamp((T0 + 5) / 1000, tz=UTC)
+    assert row.mark == 0.01235 / 1000 and row.funding_rate == 0.0001
+    assert row.next_funding_ms == T0 + 3_600_000
     assert row.funding_interval_h == 8  # fundingInfo 에 없는 심볼은 8
-    assert connector.urls[:2] == [PUBLIC_WS_URL, MARKET_WS_URL]
-    assert params_of(sock) == [["1000pepeusdt@depth5@500ms"]]  # 소문자 스트림 이름
-    assert raw.keys(PUBLIC_SOURCE) == [None, "depth5:1000PEPEUSDT"]
-    assert sock.closed
-
-
-async def test_empty_side_leaves_the_quote_and_counts_the_receive() -> None:
-    sock = FakeSocket([depth(), depth(bids=[], ts=T0 + 10)])
-    stream, connector, _, _, clock, store = await build([sock, FakeSocket([])])
-    await run_until_exhausted(stream, connector)
-    row = store.perp_row(SRC, "PEPE")
-    assert row is not None and row.quote_ts == T0 and row.bid == 0.0123 / 1000
+    assert row.quote_ts == T0  # bookTicker 항목의 time 이 호가 시각
+    assert row.updated_at == datetime.fromtimestamp((T0 + 5) / 1000, tz=UTC)
+    urls = {str(c.url) for c in rest.calls[-2:]}
+    assert urls == {BOOK_TICKER_URL, PREMIUM_INDEX_URL}
+    assert raw.keys(BOOK_SOURCE) == ["bookTicker:all"]
+    assert raw.keys(PREMIUM_SOURCE) == ["premiumIndex:all"]
     state = store.stream_state(SRC)
-    assert state is not None and state.last_message_at == T0
+    assert state is not None and state.connected and state.last_message_at == T0 + 5
+    assert state.connected_since == T0 + 5 and state.url == BOOK_TICKER_URL
+    assert state.subscribed == 1  # 우주 안 심볼 수
+
+
+async def test_symbols_outside_the_map_or_universe_are_dropped() -> None:
+    rest = Rest(
+        ["1000PEPEUSDT", "SOLUSDT"],
+        books=[httpx.Response(200, json=[book(), book("SOLUSDT"), book("ETHUSDT")])],
+        premiums=[
+            httpx.Response(
+                200,
+                json=[
+                    premium(),
+                    premium("SOLUSDT"),
+                    premium("BTCUSDC"),  # USDC — 목록 필터로 맵에 없다
+                    premium("BTCUSDT_261225"),  # 기간물 — 맵에 없다
+                ],
+            )
+        ],
+    )
+    stream, _, _, _, _, store = await build(rest, universe={"PEPE"})
+    await stream.poll()
+    assert [r.base for r in store.perp_rows()] == ["PEPE"]
     assert stream.decode_failures == 0
 
 
-async def test_mark_array_applies_only_universe_symbols_and_is_held_before_quote() -> (
+async def test_missing_quote_field_is_invalid_and_funding_fields_are_optional() -> None:
+    rest = Rest(
+        ["1000PEPEUSDT"],
+        books=[
+            httpx.Response(200, json=[book()]),
+            httpx.Response(200, json=[book(ts=T0 + 1000, askQty="")]),
+        ],
+        premiums=[
+            httpx.Response(200, json=[premium()]),
+            httpx.Response(
+                200, json=[premium(lastFundingRate="0.0002", markPrice="x")]
+            ),
+        ],
+    )
+    stream, _, _, _, clock, store = await build(rest)
+    await stream.poll()
+    clock.now = T0 + 1000
+    await stream.poll()
+    row = store.perp_row(SRC, "PEPE")
+    assert row is not None
+    assert row.quote_ts == T0 and row.ask_size == 700_000.0  # 호가 불변
+    assert row.funding_rate == 0.0002 and row.mark == 0.01235 / 1000  # 펀딩은 온 것만
+    assert row.updated_at == datetime.fromtimestamp((T0 + 1000) / 1000, tz=UTC)
+
+
+async def test_universe_change_removes_rows_and_counts_subscribed() -> None:
+    rest = Rest(
+        ["1000PEPEUSDT", "SOLUSDT"],
+        books=[httpx.Response(200, json=[book(), book("SOLUSDT")])],
+        premiums=[httpx.Response(200, json=[premium(), premium("SOLUSDT")])],
+    )
+    stream, _, _, _, _, store = await build(rest)
+    await stream.poll()
+    assert {r.base for r in store.perp_rows()} == {"PEPE", "SOL"}
+    stream.set_universe({"SOL"})
+    assert [r.base for r in store.perp_rows()] == ["SOL"]
+    assert store.stream_state(SRC).subscribed == 1  # type: ignore[union-attr]
+    stream.set_universe({"SOL", "BTC"})  # 맵에 없는 BTC 는 무시
+    assert store.stream_state(SRC).subscribed == 1  # type: ignore[union-attr]
+
+
+# --- 회차·실패·판정 (§3.5·§3.8) ---
+
+
+async def test_both_endpoints_are_fetched_in_parallel_within_one_round() -> None:
+    """한 회차의 두 요청이 겹쳐 나간다 — 각 요청이 상대가 도착할 때까지 기다리므로 차례로 보내면 영원히 안 끝난다."""
+    arrived = 0
+    both = asyncio.Event()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal arrived
+        if request.url.path == "/fapi/v1/ticker/bookTicker":
+            body: Any = [book()]
+        else:
+            body = [premium()]
+        arrived += 1
+        if arrived == 2:
+            both.set()
+        await asyncio.wait_for(both.wait(), 1.0)
+        return httpx.Response(200, json=body)
+
+    stream, _, _, _, _, store = await build()
+    stream._client = _client(handler)
+    await asyncio.wait_for(stream.poll(), 1.0)
+    assert store.perp_row(SRC, "PEPE") is not None
+
+
+async def test_polls_every_second_after_each_round() -> None:
+    stream, rest, sleeps, _, _, _ = await build()
+    gate = asyncio.Event()
+
+    async def sleep(seconds: float) -> None:
+        sleeps.values.append(seconds)
+        if len(sleeps.values) >= 3:
+            gate.set()
+            await asyncio.Event().wait()
+        await asyncio.sleep(0)
+
+    stream._sleep = sleep  # type: ignore[assignment]
+    stream.start()
+    await asyncio.wait_for(gate.wait(), 1.0)
+    await stream.aclose()
+    assert sleeps.values == [POLL_INTERVAL] * 3 and POLL_INTERVAL == 1.0
+    assert rest.calls_to("/fapi/v1/ticker/bookTicker") == 3
+    assert rest.calls_to("/fapi/v1/premiumIndex") == 3
+
+
+@pytest.mark.parametrize(
+    ("response", "kind", "status"),
+    [
+        (httpx.Response(418, text="banned"), "banned", 418),
+        (httpx.Response(403, text="blocked"), "banned", 403),
+        (httpx.Response(429, text="slow"), "rate_limit", 429),
+        (httpx.Response(502, text="bad gateway"), "unavailable", 502),
+        (httpx.Response(404, text="nope"), "bad_request", 404),
+        (httpx.Response(200, text="not json"), "bad_response", None),
+        (httpx.Response(200, json={"code": -1}), "bad_response", None),
+        (httpx.ReadTimeout("t"), "timeout", None),
+        (httpx.ConnectError("refused"), "network", None),
+    ],
+)
+async def test_failed_round_leaves_rows_and_is_classified(
+    response: httpx.Response | Exception,
+    kind: str,
+    status: int | None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rest = Rest(
+        ["1000PEPEUSDT"],
+        books=[httpx.Response(200, json=[book()]), response],
+    )
+    stream, _, _, raw, clock, store = await build(rest)
+    await stream.poll()
+    clock.now = T0 + 1000
+    with caplog.at_level(logging.WARNING, logger="marketlens.stream.binance_perp"):
+        await stream.poll()
+        clock.now = T0 + 2000
+        await stream.poll()  # 같은 원인 — 60초 안이라 로그 1줄
+    row = store.perp_row(SRC, "PEPE")
+    assert row is not None and row.quote_ts == T0  # 실패 회차는 행을 건드리지 않는다
+    verdict = stream.judge(clock.now)
+    assert verdict is not None and verdict.error is not None
+    assert (verdict.error.kind, verdict.error.status_code, verdict.error.url) == (
+        kind,
+        status,
+        BOOK_TICKER_URL,
+    )
+    assert "티커 조회 실패" in verdict.error.message
+    assert len([r for r in caplog.records if "티커 조회 실패" in r.getMessage()]) == 1
+    state = store.stream_state(SRC)
+    assert state is not None and not state.connected and state.last_message_at == T0
+    if isinstance(response, httpx.Response):
+        assert raw.keys(BOOK_SOURCE) == ["bookTicker:all"] * 3  # 실패 본문도 원문
+    # 다음 회차가 성공하면 바로 회복
+    rest.books = [httpx.Response(200, json=[book(ts=T0 + 3000)])]
+    clock.now = T0 + 3000
+    await stream.poll()
+    assert stream.judge(clock.now).ok and state.connected  # type: ignore[union-attr]
+    assert state.connected_since == T0 + 3000
+
+
+async def test_premium_index_failure_fails_the_round_and_keeps_the_quote() -> None:
+    """펀딩 쪽만 죽어도 원천 실패 — 낡은 펀딩이 갭 표에 실리지 않게. 성공한 호가도 그 회차엔 싣지 않는다."""
+    rest = Rest(
+        ["1000PEPEUSDT"],
+        books=[
+            httpx.Response(200, json=[book()]),
+            httpx.Response(200, json=[book(ts=T0 + 1000, bidPrice="0.0200")]),
+        ],
+        premiums=[
+            httpx.Response(200, json=[premium()]),
+            httpx.Response(429, text="slow"),
+        ],
+    )
+    stream, _, _, _, clock, store = await build(rest)
+    await stream.poll()
+    clock.now = T0 + 1000
+    await stream.poll()
+    row = store.perp_row(SRC, "PEPE")
+    assert row is not None and row.quote_ts == T0 and row.bid == 0.0123 / 1000
+    verdict = stream.judge(clock.now)
+    assert verdict is not None and verdict.error is not None
+    assert (verdict.error.kind, verdict.error.url) == ("rate_limit", PREMIUM_INDEX_URL)
+
+
+async def test_no_verdict_before_the_first_round_and_stale_after_thirty_seconds() -> (
     None
 ):
-    frame = mark(
-        [
-            ("1000PEPEUSDT", "0.0125", "0.00010000", T0 + 3_600_000),
-            ("BTCUSDT", "70000", "0.0001", T0),  # 우주 밖(맵에 없음) — 버린다
-        ]
-    )
-    quote_sock, funding_sock = FakeSocket([depth()]), FakeSocket([ACK, frame])
-    stream, connector, _, raw, _, store = await build([quote_sock, funding_sock])
-    stream.start()
-    await until(funding_sock.drained)
-    await until(quote_sock.drained)
-    await stream.aclose()
-    row = store.perp_row(SRC, "PEPE")
-    assert row is not None
-    assert row.mark == 0.0125 / 1000 and row.funding_rate == 0.0001
-    assert row.next_funding_ms == T0 + 3_600_000
-    assert store.perp_row(SRC, "BTC") is None
-    assert params_of(funding_sock) == [["!markPrice@arr@1s"]]
-    assert raw.keys(MARKET_SOURCE) == [None, "markPrice:all"]
-    assert raw.payloads(MARKET_SOURCE)[1] == frame  # 배열 프레임 1개 그대로
-
-
-async def test_mark_with_non_numeric_fields_updates_the_rest() -> None:
-    quote_sock = FakeSocket([depth()])
-    funding_sock = FakeSocket([mark([("1000PEPEUSDT", "x", "0.0002", T0 + 1)])])
-    stream, connector, _, _, _, store = await build([quote_sock, funding_sock])
-    stream.start()
-    await until(funding_sock.drained)
-    await until(quote_sock.drained)
-    await stream.aclose()
-    row = store.perp_row(SRC, "PEPE")
-    assert row is not None
-    assert (
-        row.mark is None
-        and row.funding_rate == 0.0002
-        and row.next_funding_ms == T0 + 1
-    )
-
-
-async def test_funding_frame_counts_only_for_the_funding_shard() -> None:
-    funding_sock = GatedSocket()
-    quote_sock = GatedSocket()
-    stream, _, _, _, clock, store = await build([quote_sock, funding_sock])
-    stream.start()
-    await until(quote_sock.subscribed)
-    await until(funding_sock.subscribed)
-    await asyncio.sleep(0.01)  # 구독 묶음 전송이 끝나 connected_since 가 찍힌 뒤
-    clock.now = T0 + 40_000
-    funding_sock.push(mark([("1000PEPEUSDT", "0.01", "0.0001", T0)]))
-    await until(funding_sock.delivered)
-    verdict = stream.judge(clock.now)
-    assert verdict is not None and not verdict.ok and verdict.error is not None
-    assert verdict.error.message == (
-        f"Binance perp 스트림 정체: 샤드 {PEPE_SHARD} (구독 1종목) 30초 이상 무수신"
-    )
-    assert verdict.error.url == PUBLIC_WS_URL
-    await stream.aclose()
+    stream, _, _, _, _, _ = await build()
+    assert stream.judge(T0) is None
+    await stream.poll()
+    assert stream.judge(T0 + 29_999).ok  # type: ignore[union-attr]
+    verdict = stream.judge(T0 + 30_000)
+    assert verdict is not None and verdict.error is not None
+    assert verdict.error.kind == "stale_stream"
+    assert verdict.error.message == "Binance perp 티커 정체: 30초 이상 성공한 조회 없음"
 
 
 # --- exchangeInfo·fundingInfo (§3.5) ---
 
 
 async def test_exchange_info_keeps_only_perpetual_trading_usdt() -> None:
-    extra = [
+    rest = Rest([])
+    rest.symbols = [
+        info_row("1000PEPEUSDT"),
+        info_row("BTCUSDT"),
         info_row("BTCUSDT_261225", contractType="CURRENT_QUARTER", baseAsset="BTC"),
         info_row("TSLAUSDT", contractType="TRADIFI_PERPETUAL"),
         info_row("ETHUSDC", quoteAsset="USDC"),
@@ -316,89 +411,79 @@ async def test_exchange_info_keeps_only_perpetual_trading_usdt() -> None:
         info_row("1000SHIBUSDT", baseAsset="1000SHIB"),
         info_row("1MBABYDOGEUSDT", baseAsset="1MBABYDOGE"),
     ]
-    calls: list[httpx.Request] = []
-    stream, _, _, raw, _, _ = await build([])
-    assert (
-        await stream.refresh(
-            rest(["1000PEPEUSDT", "BTCUSDT"], extra=extra, calls=calls)
-        )
-        == 1
+    stream, _, _, raw, _, store = await build(
+        rest, universe={"PEPE", "BTC", "SHIB", "BABYDOGE"}
     )
     assert stream.bases() == {"PEPE", "BTC", "SHIB", "BABYDOGE"}
-    assert stream._symbol_of["PEPE"] == "PEPEUSDT"
-    assert stream._mult_of["1MBABYDOGEUSDT"] == 1_000_000
-    assert str(calls[0].url) == EXCHANGE_INFO_URL
-    assert raw.keys("rest:/fapi/v1/exchangeInfo") == ["symbols:perp"] * 2
+    assert str(rest.calls[0].url) == EXCHANGE_INFO_URL
+    assert raw.keys(INFO_SOURCE) == ["symbols:perp"]
+    rest.books = [
+        httpx.Response(
+            200,
+            json=[
+                book("PEPEUSDT"),
+                book("1000PEPEUSDT"),
+                book("1MBABYDOGEUSDT"),
+                book("1000SHIBUSDT"),
+            ],
+        )
+    ]
+    await stream.poll()
+    assert store.perp_row(SRC, "PEPE").native_symbol == "PEPEUSDT"  # type: ignore[union-attr]
+    assert store.perp_row(SRC, "BABYDOGE").multiplier == 1_000_000  # type: ignore[union-attr]
+    assert store.perp_row(SRC, "SHIB").multiplier == 1000  # type: ignore[union-attr]
 
 
 async def test_first_symbol_wins_when_no_multiplier_one() -> None:
-    stream, _, _, _, _, _ = await build([])
-    extra = [info_row("10000SATSUSDT", baseAsset="10000SATS")]
-    await stream.refresh(rest(["1000SATSUSDT"], extra=extra))
-    assert stream._symbol_of["SATS"] == "1000SATSUSDT"
+    rest = Rest([])
+    rest.symbols = [
+        info_row("1000SATSUSDT", baseAsset="1000SATS"),
+        info_row("10000SATSUSDT", baseAsset="10000SATS"),
+    ]
+    stream, _, _, _, _, store = await build(rest, universe={"SATS"})
+    rest.books = [httpx.Response(200, json=[book("1000SATSUSDT")])]
+    await stream.poll()
+    assert store.perp_row(SRC, "SATS").native_symbol == "1000SATSUSDT"  # type: ignore[union-attr]
 
 
 async def test_funding_info_every_sixty_seconds_and_missing_symbol_is_eight() -> None:
-    calls: list[httpx.Request] = []
-    stream, _, _, raw, clock, store = await build(
-        [], symbols=["1000PEPEUSDT", "BTCUSDT"], hours={"BTCUSDT": 4}
-    )
-    client = rest(
-        ["1000PEPEUSDT", "BTCUSDT"], {"BTCUSDT": 4, "1000PEPEUSDT": 1}, calls=calls
-    )
+    rest = Rest(["1000PEPEUSDT", "BTCUSDT"], hours={"BTCUSDT": 4})
+    stream, _, _, raw, clock, store = await build(rest)
+    rest.hours = {"BTCUSDT": 4, "1000PEPEUSDT": 1}
+    client = rest.client()
     clock.now = T0 + 10_000
     assert await stream.refresh(client) == 1  # 10초 — fundingInfo 는 아직
     clock.now = T0 + FUNDING_INFO_INTERVAL_MS
     assert await stream.refresh(client) == 2
-    assert [str(c.url) for c in calls] == [
+    assert [str(c.url) for c in rest.calls[-3:]] == [
         EXCHANGE_INFO_URL,
         EXCHANGE_INFO_URL,
         FUNDING_INFO_URL,
     ]
-    assert raw.keys("rest:/fapi/v1/fundingInfo") == ["funding:all"] * 2
-    sink = stream._sink
-    sink.quote(
-        source=SRC,
-        base="BTC",
-        native_symbol="BTCUSDT",
-        multiplier=1,
-        bid=1.0,
-        ask=1.1,
-        bid_size=1.0,
-        ask_size=1.0,
-        quote_ts=1,
-        received_at_ms=1,
-    )
-    sink.quote(
-        source=SRC,
-        base="PEPE",
-        native_symbol="1000PEPEUSDT",
-        multiplier=1000,
-        bid=1.0,
-        ask=1.1,
-        bid_size=1.0,
-        ask_size=1.0,
-        quote_ts=1,
-        received_at_ms=1,
-    )
+    assert raw.keys(FUNDING_SOURCE) == ["funding:all"] * 2
+    rest.books = [httpx.Response(200, json=[book(), book("BTCUSDT")])]
+    await stream.poll()
     assert store.perp_row(SRC, "BTC").funding_interval_h == 4  # type: ignore[union-attr]
     assert store.perp_row(SRC, "PEPE").funding_interval_h == 1  # type: ignore[union-attr]
     # 응답에서 빠진 심볼은 8 로 — 목록 갱신마다 전 행에 반영
+    rest.hours = {"BTCUSDT": 4}
     clock.now = T0 + 2 * FUNDING_INFO_INTERVAL_MS
-    await stream.refresh(rest(["1000PEPEUSDT", "BTCUSDT"], {"BTCUSDT": 4}))
+    await stream.refresh(client)
     assert store.perp_row(SRC, "PEPE").funding_interval_h == 8  # type: ignore[union-attr]
 
 
 async def test_exchange_info_that_differs_only_in_server_time_is_not_parsed() -> None:
-    stream, _, _, raw, _, _ = await build([])
-    bodies = [exchange_info(["1000PEPEUSDT"], server_time=T0 + k) for k in (1, 2)]
+    stream, _, _, raw, _, _ = await build()
+    bodies = [
+        exchange_info([info_row("1000PEPEUSDT")], server_time=T0 + k) for k in (1, 2)
+    ]
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/fapi/v1/fundingInfo":
             return httpx.Response(200, json=[])
         return httpx.Response(200, json=bodies.pop(0))
 
-    seen = {}
+    seen: dict[str, int] = {}
     original = stream._parse
 
     def spy(resp: httpx.Response, url: str) -> Any:
@@ -409,7 +494,7 @@ async def test_exchange_info_that_differs_only_in_server_time_is_not_parsed() ->
     await stream.refresh(_client(handler))
     await stream.refresh(_client(handler))
     assert seen.get(EXCHANGE_INFO_URL, 0) == 0  # build 에서 같은 본문을 이미 파싱했다
-    assert len(raw.keys("rest:/fapi/v1/exchangeInfo")) == 3  # 원문은 매번
+    assert len(raw.keys(INFO_SOURCE)) == 3  # 원문은 매번
 
 
 @pytest.mark.parametrize(
@@ -422,10 +507,10 @@ async def test_exchange_info_that_differs_only_in_server_time_is_not_parsed() ->
         (400, "bad_request"),
     ],
 )
-async def test_rest_failures_are_classified_and_keep_the_list(
+async def test_list_failures_are_classified_and_keep_the_list(
     status: int, kind: str
 ) -> None:
-    stream, _, _, _, _, _ = await build([])
+    stream, _, _, _, _, _ = await build()
     with pytest.raises(ExchangeApiError) as info:
         await stream.refresh(_client(lambda r: httpx.Response(status, text="no")))
     assert info.value.kind == kind and info.value.status_code == status
@@ -440,12 +525,14 @@ async def test_rest_failures_are_classified_and_keep_the_list(
 
 
 async def test_funding_info_failure_keeps_symbols_and_retries_next_round() -> None:
-    stream, _, _, _, clock, _ = await build([])
+    stream, _, _, _, clock, _ = await build()
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/fapi/v1/fundingInfo":
             return httpx.Response(429, text="slow down")
-        return httpx.Response(200, json=exchange_info(["1000PEPEUSDT", "BTCUSDT"]))
+        return httpx.Response(
+            200, json=exchange_info([info_row("1000PEPEUSDT"), info_row("BTCUSDT")])
+        )
 
     clock.now = T0 + FUNDING_INFO_INTERVAL_MS
     with pytest.raises(ExchangeApiError) as info:
@@ -456,227 +543,14 @@ async def test_funding_info_failure_keeps_symbols_and_retries_next_round() -> No
         await stream.refresh(_client(handler))  # 실패했으니 다음 회차에 다시
 
 
-# --- 구독·샤드 (§3.5) ---
+# --- 종료 ---
 
 
-async def test_subscribe_messages_carry_at_most_fifty_streams_spaced_and_per_shard() -> (
-    None
-):
-    symbols = symbols_for(0, 120)
-    socks = [GatedSocket() for _ in range(2)]
-    stream, _, sleeps, _, _, _ = await build(list(socks), symbols=symbols)
+async def test_aclose_stops_the_poll_loop() -> None:
+    stream, rest, _, _, _, _ = await build()
     stream.start()
-    await until(socks[0].subscribed)
-    await asyncio.sleep(0.02)
-    batches = params_of(socks[0])
-    assert [len(b) for b in batches] == [50, 50, 20]
-    assert all(
-        n.endswith("@depth5@500ms") and n == n.lower() for b in batches for n in b
-    )
-    assert sleeps.values.count(CONTROL_INTERVAL) >= 3
-    assert STREAMS_PER_MESSAGE == 50 and CONTROL_INTERVAL == 0.2
-    assert [m["id"] for m in socks[0].subscriptions()] == [1, 2, 3]
-    state = stream._store.stream_state(SRC)
-    assert (
-        state is not None and state.subscribed == 120
-    )  # 펀딩 구독은 심볼 수에 안 든다
-    await stream.aclose()
-
-
-def test_symbols_spread_over_three_shards_and_hash_is_stable_across_processes() -> None:
-    symbols = [f"T{i:04d}USDT" for i in range(50)] + ["BTCUSDT", "1000PEPEUSDT"]
-    assert {shard_of(s) for s in symbols} == {0, 1, 2} and SHARDS == 3
-    code = (
-        "import json, sys; from app.core.streams.binance_perp import shard_of; "
-        "print(json.dumps([shard_of(s) for s in sys.argv[1:]]))"
-    )
-    runs = []
-    for seed in ("1", "2"):
-        env = {**os.environ, "PYTHONPATH": str(SERVER_DIR), "PYTHONHASHSEED": seed}
-        out = subprocess.run(
-            [sys.executable, "-c", code, *symbols],
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
-            cwd=SERVER_DIR,
-        )
-        runs.append(json.loads(out.stdout))
-    assert runs[0] == runs[1] == [shard_of(s) for s in symbols]
-
-
-async def test_rebalance_subscribes_new_unsubscribes_dropped_and_removes_rows() -> None:
-    a, b = symbols_for(0, 2)
-    sock, funding = GatedSocket(), GatedSocket()
-    stream, _, _, _, _, store = await build(
-        [sock, funding], symbols=[a, b], universe={base_of(a)}
-    )
-    stream.start()
-    await until(sock.subscribed)
     await asyncio.sleep(0.01)
-    sock.push(depth(a))
-    await until(sock.delivered)
-    assert store.perp_row(SRC, base_of(a)) is not None
-    stream.set_universe({base_of(b)})
-    await asyncio.sleep(0.02)
-    assert params_of(sock, "UNSUBSCRIBE") == [[f"{a.lower()}@depth5@500ms"]]
-    assert params_of(sock)[-1] == [f"{b.lower()}@depth5@500ms"]
-    assert store.perp_row(SRC, base_of(a)) is None
-    stream.set_universe({base_of(b)})  # 같은 우주 — 전송 0
-    await asyncio.sleep(0.02)
-    assert len(sock.sent) == 3
     await stream.aclose()
-
-
-async def test_subscribe_rejection_is_bad_request_and_reconnects() -> None:
-    first = FakeSocket(['{"code":2,"msg":"Invalid request"}'], hold=True)
-    stream, connector, sleeps, _, _, _ = await build([first, FakeSocket([], hold=True)])
-    stream.start()
-    await asyncio.sleep(0.02)
-    await stream.aclose()
-    verdict = stream.judge(T0)
-    assert verdict is not None and verdict.error is not None
-    assert (
-        verdict.error.kind == "bad_request"
-        and "2 Invalid request" in verdict.error.message
-    )
-    assert first.closed and backoffs(sleeps)[:1] == [1.0]
-
-
-# --- 판정 (§3.8) ---
-
-
-async def test_dead_funding_connection_fails_the_source() -> None:
-    quote_sock = GatedSocket()
-    stream, connector, _, _, clock, store = await build(
-        [quote_sock, OSError("refused")]
-    )
-    stream.start()
-    await until(quote_sock.subscribed)
+    n = rest.calls_to("/fapi/v1/ticker/bookTicker")
     await asyncio.sleep(0.01)
-    quote_sock.push(depth())
-    await until(quote_sock.delivered)
-    verdict = stream.judge(clock.now + 1000)
-    assert verdict is not None and not verdict.ok and verdict.error is not None
-    assert (
-        verdict.error.kind == "network"
-        and f"샤드 {FUNDING_SHARD}" in verdict.error.message
-    )
-    assert verdict.error.url == MARKET_WS_URL
-    state = store.stream_state(SRC)
-    assert state is not None and not state.connected and state.subscribed == 1
-    await stream.aclose()
-
-
-async def test_stale_funding_connection_fails_the_source_with_its_label() -> None:
-    quote_sock, funding_sock = GatedSocket(), GatedSocket()
-    stream, _, _, _, clock, _ = await build([quote_sock, funding_sock])
-    stream.start()
-    await until(quote_sock.subscribed)
-    await until(funding_sock.subscribed)
-    await asyncio.sleep(0.01)
-    clock.now = T0 + 40_000
-    quote_sock.push(depth())
-    await until(quote_sock.delivered)
-    verdict = stream.judge(clock.now)
-    assert verdict is not None and verdict.error is not None
-    assert verdict.error.message == (
-        f"Binance perp 스트림 정체: 샤드 {FUNDING_SHARD} (펀딩) 30초 이상 무수신"
-    )
-    funding_sock.push(mark([("1000PEPEUSDT", "0.01", "0.0001", T0)]))
-    await until(funding_sock.delivered)
-    assert stream.judge(clock.now + 1000).ok  # type: ignore[union-attr]
-    await stream.aclose()
-
-
-async def test_no_assignment_means_no_verdict_even_with_funding_connected() -> None:
-    funding_sock = GatedSocket()
-    stream, _, _, _, clock, _ = await build([funding_sock], universe=set())
-    stream.start()
-    await until(funding_sock.subscribed)
-    assert stream.judge(clock.now + 1000) is None
-    await stream.aclose()
-
-
-async def test_quietest_shard_is_chosen_and_tie_picks_the_lower() -> None:
-    per_shard = [symbols_for(k, 1) for k in range(SHARDS)]
-    socks = [GatedSocket() for _ in range(SHARDS + 1)]
-    stream, _, _, _, clock, _ = await build(
-        list(socks), symbols=[s for g in per_shard for s in g]
-    )
-    stream.start()
-    for s in socks:
-        await until(s.subscribed)
-    await asyncio.sleep(0.01)
-    clock.now = T0 + 10_000
-    socks[1].push(depth(per_shard[1][0]))
-    await until(socks[1].delivered)
-    clock.now = T0 + 20_000
-    socks[2].push(depth(per_shard[2][0]))
-    socks[3].push(mark([]))
-    await until(socks[2].delivered)
-    await until(socks[3].delivered)
-    clock.now = T0 + 60_000
-    verdict = stream.judge(clock.now)
-    assert verdict is not None and verdict.error is not None
-    assert "샤드 0" in verdict.error.message  # 수신 0 (동률이면 작은 번호)
-    await stream.aclose()
-
-
-# --- 연결 실패·백오프·종료 ---
-
-
-@pytest.mark.parametrize(
-    ("exc", "kind", "status"),
-    [
-        (HandshakeRejected(418), "banned", 418),
-        (HandshakeRejected(403), "banned", 403),
-        (HandshakeRejected(429), "rate_limit", 429),
-        (HandshakeRejected(503), "unavailable", 503),
-        (HandshakeRejected(400), "bad_request", 400),
-        (TimeoutError(), "timeout", None),
-        (OSError("refused"), "network", None),
-    ],
-)
-async def test_connect_failures_are_classified(
-    exc: BaseException, kind: str, status: int | None
-) -> None:
-    stream, connector, _, _, _, _ = await build([exc, FakeSocket([], hold=True)])
-    stream.start()
-    await asyncio.sleep(0.02)
-    await stream.aclose()
-    verdict = stream.judge(T0)
-    assert verdict is not None and verdict.error is not None
-    assert (
-        verdict.error.kind,
-        verdict.error.status_code,
-        verdict.error.retry_after_sec,
-    ) == (kind, status, None)
-    assert (
-        f"샤드 {PEPE_SHARD}" in verdict.error.message
-        and verdict.error.url == PUBLIC_WS_URL
-    )
-
-
-async def test_backoff_grows_to_thirty_and_resets_after_first_quote() -> None:
-    failures: list[FakeSocket | BaseException] = [OSError("x") for _ in range(6)]
-    # 우주를 비워 펀딩 연결만 연결하게 — 두 샤드가 번갈아 실패하면 백오프가 섞인다
-    stream, connector, sleeps, _, _, _ = await build(
-        [*failures, FakeSocket([mark([])])], universe=set()
-    )
-    await run_until_exhausted(stream, connector)
-    assert backoffs(sleeps)[:7] == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 1.0]
-
-
-async def test_aclose_cancels_tasks_and_closes_all_sockets() -> None:
-    socks = [GatedSocket() for _ in range(SHARDS + 1)]
-    stream, _, _, _, _, store = await build(
-        list(socks), symbols=[s for k in range(SHARDS) for s in symbols_for(k, 1)]
-    )
-    stream.start()
-    for s in socks:
-        await until(s.subscribed)
-    await stream.aclose()
-    assert all(s.closed for s in socks)
-    state = store.stream_state(SRC)
-    assert state is not None and not state.connected and state.subscribed == 0
+    assert rest.calls_to("/fapi/v1/ticker/bookTicker") == n and stream._task is None

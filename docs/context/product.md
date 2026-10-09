@@ -13,7 +13,7 @@
 - **fwd(정방향 김프 %)**: 해외에서 사서 국내에서 팔 때. 원화로 USDT 를 **사서**(USDT ask) 보낸다. `(dom_bid / (fx_ask × rate_ask) − 1) × 100`
 - **rev(역프 %)**: 국내에서 사서 해외에서 팔 때. 받은 USDT 를 원화로 **판다**(USDT bid). `(fx_bid × rate_bid / dom_ask − 1) × 100`
   (정확한 수식·엣지는 스펙 003 에 명시)
-- **perp 원천**: 해외 USDT 무기한 선물 시세 원천 `binance_perp`·`bybit_perp`·`bitget_perp`(·`hyperliquid_perp`). 최우선 호가 1단계·마크가·펀딩률·다음 정산·주기. 배수 심볼(`1000PEPE`)은 1코인 단위로 정규화한다. 바이낸스는 WebSocket, 바이빗·비트겟은 REST 전체 티커를 매초(046).
+- **perp 원천**: 해외 USDT 무기한 선물 시세 원천 `binance_perp`·`bybit_perp`·`bitget_perp`(·`hyperliquid_perp`). 최우선 호가 1단계·마크가·펀딩률·다음 정산·주기. 배수 심볼(`1000PEPE`)은 1코인 단위로 정규화한다. 세 원천 모두 REST 전체 티커를 매초(046).
 - **현선갭**: 해외 현물 ask 에 사고 해외 perp bid 에 숏할 때의 가격 차이 퍼센트(진입)와 그 반대(정리). 최우선 호가 기준, 슬리피지 없음(048).
 - **선선갭**: 해외 거래소 간 **선물–선물** 가격 갭.
 - **틱(tick)**: 매초 LiveStore 의 최신 시세로 만든 전 조합 김프 원값 묶음 `{ts, rows, dwFailed}`. LiveStore 틱 슬롯 → Redis → InfluxDB 를 흐르는 저장 단위(스펙 009).
