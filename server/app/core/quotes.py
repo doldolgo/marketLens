@@ -22,6 +22,7 @@ class QuoteSink:
         self._universe: set[str] = (
             set()
         )  # 대문자 base. 비어 있으면 아무 행도 저장하지 않는다
+        self._set_once = False  # set_universe 본문을 한 번이라도 탔다 — 같은 우주 가드는 그 뒤에만 건다
         # 행이 아직 없을 때 온 체결가와, 행이 있어도 마지막으로 본 체결가 — (exchange, BASE) → (price, ts)
         self._trades: dict[tuple[str, str], tuple[float, int]] = {}
         # 직전 호가의 (수신 ms, 그 시각의 datetime) 한 칸 — `_now` 참고. 늘 맞는 짝으로 시작한다(0 ms = 1970-01-01)
@@ -44,6 +45,17 @@ class QuoteSink:
 
     def set_universe(self, bases: set[str]) -> int:
         """우주를 바꾼다. 빠진 base 의 행·보류 체결가는 그 자리에서 지운다. 지운 행 수를 돌려준다."""
+        # 우주 확정은 매초(0.78회/초) 거의 늘 같은 우주로 부른다 (§3.2). 우주가 그대로면 아래 본문은 아무것도 지우지
+        # 못한다 — 보류 체결가는 `trade` 가, 현물 행은 `orderbook` 이 우주 안 base 로만 넣고, 우주 밖 것은 우주가
+        # 바뀐 호출에서 이미 지웠다. 그래서 같은 우주면 대문자 집합을 다시 만들고 보류·행 표(1,700여 행)를 훑는 일
+        # 없이 0 을 돌려준다. 비교 상대인 지금 우주는 이미 대문자라 넘겨받은 집합을 그대로 견준다(소문자가 섞이면
+        # 다르다고 보고 본문을 탄다 — 결과는 같다). 첫 호출은 늘 본문을 탄다 — 빈 우주로 시작해도 한 번은 store 를
+        # 우주에 맞춘다.
+        # 전제: 운영에서 이 싱크를 거치지 않고 store 에 현물 행을 넣는 경로가 없다(`put_rows` 는 시드·테스트용).
+        # 그런 경로가 생기면 같은 우주로 다시 불러도 그 행이 지워지지 않으니 이 가드를 다시 본다.
+        if self._set_once and bases == self._universe:
+            return 0
+        self._set_once = True
         self._universe = {b.upper() for b in bases}
         for key in [k for k in self._trades if k[1] not in self._universe]:
             del self._trades[key]
