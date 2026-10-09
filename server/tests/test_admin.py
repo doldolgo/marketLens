@@ -296,26 +296,44 @@ def test_public_pages_can_be_framed_only_by_the_admin_overlay() -> None:
     assert "x-frame-options" not in caddy.lower()
 
 
+# 064 §3.1 — 스크립트는 자기 출처만(default-src), 스타일만 인라인을 연다(ECharts 툴팁이 인라인 스타일을 쓴다).
+# frame-src 는 화면 분석 페이지(053·065)가 띄우는 공개 사이트 하나
+ADMIN_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src https://kimptrack.com; frame-ancestors 'none'"
+SCREEN_LOCATIONS = {("/",), ("/vendor/",)}
+
+
 def test_frames_denied_on_every_response_and_csp_on_the_screen() -> None:
+    """모든 응답에 액자 금지, 화면(/)과 차트 라이브러리 사본(/vendor/)에만 CSP — 화면은 캐시하지 않고, 판 번호가 든
+    사본은 브라우저에만 오래(private·immutable). 둘 다 공개 root 밖의 정적 파일이다(064 §2)."""
     server = _admin_server()
     assert XFO in _args(server, "add_header")
-    for key, children in _locations(server).items():
+    locations = _locations(server)
+    for key, children in locations.items():
         assert XFO in _effective(children, "add_header"), key
-    screen = _args(_locations(server)[("/",)], "add_header")
-    csp = [
-        "Content-Security-Policy",
-        "default-src 'self'; frame-src https://kimptrack.com; frame-ancestors 'none'",
-        "always",
-    ]
-    assert csp in screen
-    # 화면 스크립트가 API 계약을 따른다 — 공개 index.html 과 같은 이유로 캐시하지 않는다
-    assert ["Cache-Control", "no-store", "always"] in screen
+    csp = ["Content-Security-Policy", ADMIN_CSP, "always"]
+    for key in SCREEN_LOCATIONS:
+        assert csp in _args(locations[key], "add_header"), key
+        assert _args(locations[key], "root") == [["/usr/share/nginx/admin"]], key
+        assert not _args(locations[key], "proxy_pass"), key
+    assert ["Cache-Control", "no-store", "always"] in _args(
+        locations[("/",)], "add_header"
+    )
+    vendor = _args(locations[("/vendor/",)], "add_header")
+    assert ["Cache-Control", "private, max-age=31536000, immutable", "always"] in vendor
+    assert _admin_route("/vendor/echarts-5.5.1.min.js") == ("/vendor/",)
     csp_elsewhere = [
         k
-        for k, c in _locations(server).items()
-        if k != ("/",) and any(h[0] == csp[0] for h in _args(c, "add_header"))
+        for k, c in locations.items()
+        if k not in SCREEN_LOCATIONS
+        and any(h[0] == csp[0] for h in _args(c, "add_header"))
     ]
     assert not csp_elsewhere
+    # 스크립트는 그대로 'self' 만 — 인라인·eval 을 여는 글자가 없다
+    assert "script-src" not in ADMIN_CSP and "unsafe-eval" not in ADMIN_CSP
+    assert (
+        ADMIN_CSP.count("'unsafe-inline'") == 1
+        and "style-src 'self' 'unsafe-inline'" in ADMIN_CSP
+    )
 
 
 def test_access_log_is_one_json_line_per_request_without_polling() -> None:
