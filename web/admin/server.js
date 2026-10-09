@@ -61,7 +61,7 @@ const BOX_MARK = Object.freeze({ collect: 'c0', data: 'c1', serve: 'c2' });
 const boxMark = (box, i) => own(BOX_MARK, box) ?? markOf(i + 3);
 const colorOf = (mark) => own(TONE, mark) ?? SERIES[Number(mark.slice(1))];
 // 확대 — Ctrl+휠(트랙패드 핀치)·끌기, 그냥 휠은 페이지를 내린다. x 축이 여럿인 그림은 그 번호를 모두 준다(기본은 첫 축만)
-const zoom = (axes) => [{ type: 'inside', xAxisIndex: [...Array(axes).keys()], zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }];
+const zoom = (axes) => [{ type: 'inside', id: 'zoom', xAxisIndex: [...Array(axes).keys()], zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }];
 
 // 값이 1 이상인 칸이 이어진 구간 [[시작 ms, 끝 ms]] — 상태 검사 실패 띠
 export function runs(points, periodSec) {

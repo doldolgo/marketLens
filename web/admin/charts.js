@@ -62,7 +62,8 @@ export function draw(id, option, group) {
   return held.chart;
 }
 
-// 같은 무리의 확대를 처음으로(서버 페이지 '확대 풀기')
+// 같은 무리의 확대를 처음으로(서버 페이지 '확대 풀기'). 시간 차트의 확대 부품은 모두 id 'zoom' — connect 가 넘기는
+// dataZoomId 가 다른 칸에서도 맞게
 export function unzoom(group) {
   for (const { chart } of live.values()) {
     if (chart.group === group) chart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
@@ -169,7 +170,7 @@ export function lines(id, o) {
     legend: shown.length > 1 ? legend({ data: shown.map((s) => s.name) }) : undefined,
     xAxis: timeAxis(o.startMs, o.endMs),
     yAxis: valueAxis({ min: 0, max: o.max, axisLabel: { ...LABEL, formatter: o.axisFmt ?? o.fmt } }),
-    dataZoom: o.group ? [{ type: 'inside', zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }] : undefined,
+    dataZoom: o.group ? [{ type: 'inside', id: 'zoom', zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }] : undefined,
     tooltip: axisTip((ps) => tip(when(ps[0]?.value?.[0]), ps.map((p) => [shown[p.seriesIndex]?.mark ?? '', p.seriesName, o.fmt(p.value?.[1])]))),
     series: shown.map((s, i) => ({
       type: 'line',
@@ -314,7 +315,7 @@ export function lanes(id, o) {
     grid: { left: 8, right: 16, top: 4, bottom: 4, containLabel: true },
     xAxis: timeAxis(o.startMs, o.endMs),
     yAxis: categoryAxis(o.rows, { inverse: true, axisLine: { show: false }, axisLabel: { ...LABEL, color: COLOR.text } }),
-    dataZoom: o.group ? [{ type: 'inside', zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }] : undefined,
+    dataZoom: o.group ? [{ type: 'inside', id: 'zoom', zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }] : undefined,
     tooltip: itemTip((p) => tip(o.segs[p.dataIndex]?.head, o.segs[p.dataIndex]?.tip ?? [])),
     series: [{
       type: 'custom',
@@ -351,7 +352,7 @@ export function mirror(id, o) {
     xAxis: panels.map((_, i) => timeAxis(o.startMs, o.endMs, { gridIndex: i, axisLabel: { show: i === panels.length - 1, ...LABEL, hideOverlap: true, formatter: TIME_LABEL } })),
     yAxis: panels.map((_, i) => valueAxis({ gridIndex: i, splitNumber: 2, axisLabel: { ...LABEL, formatter: o.fmt } })),
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
-    dataZoom: o.group ? [{ type: 'inside', xAxisIndex: axes, zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }] : undefined,
+    dataZoom: o.group ? [{ type: 'inside', id: 'zoom', xAxisIndex: axes, zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }] : undefined,
     tooltip: axisTip((ps) => tip(when(ps[0]?.value?.[0]), ps.map((p) => [p.seriesName === o.names[0] ? 'c0' : 'c1', `${panels[Math.floor(p.seriesIndex / 2)]?.title} ${p.seriesName}`, o.fmt(p.value?.[1])]))),
     series: panels.flatMap((p, i) => [
       { type: 'line', name: o.names[0], xAxisIndex: i, yAxisIndex: i, data: p.up, showSymbol: false, lineStyle: { width: 1.5, color: COLOR.accent }, itemStyle: { color: COLOR.accent }, areaStyle: { color: COLOR.accent, opacity: 0.18 } },
