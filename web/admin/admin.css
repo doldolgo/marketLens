@@ -1,0 +1,298 @@
+/* KimpTrack 관리자 v3 (스펙 064 §3.1) — 어두운 바탕 하나, 카드 = 제목 한 줄 + 그림. 외부 자원 없음(CSP 'self').
+   색은 아래 토큰만 쓴다. 숫자 색은 상태(정상·주의·문제)에만. 640px 아래는 한 줄. */
+:root {
+  --bg: #121420;
+  --card: #1c1f2b;
+  --line: #2c3040;
+  --text: #ececf1;
+  --muted: #9a9cab;
+  --accent: #9184d9;
+  --ok: #5fbf8f;
+  --warn: #e0a458;
+  --bad: #e0697d;
+  --sub: #6f9bee;
+  --c5: #c792ea;
+  --c6: #7fdbca;
+  --c7: #f78c6c;
+  --raise: #252938;
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-padding-top: 72px;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+a {
+  color: inherit;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+[hidden] {
+  display: none !important;
+}
+
+/* — 머리 줄 — */
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(18, 20, 32, 0.94);
+  border-bottom: 1px solid var(--line);
+}
+.top-in {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px 20px;
+  flex-wrap: wrap;
+}
+.brand {
+  font-size: 16px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.brand span {
+  color: var(--muted);
+  font-weight: 500;
+}
+.nav {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.nav a {
+  padding: 6px 12px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: 600;
+  text-decoration: none;
+}
+.nav a:hover {
+  color: var(--text);
+  background: var(--raise);
+}
+.nav a[aria-current="page"] {
+  color: var(--text);
+  background: #2b2f44;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.top-side {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.state::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 4px rgba(154, 156, 171, 0.15);
+}
+.state.ok::before {
+  background: var(--ok);
+  box-shadow: 0 0 0 4px rgba(95, 191, 143, 0.2);
+}
+.state.warn::before {
+  background: var(--warn);
+  box-shadow: 0 0 0 4px rgba(224, 164, 88, 0.22);
+}
+.state.bad::before {
+  background: var(--bad);
+  box-shadow: 0 0 0 4px rgba(224, 105, 125, 0.25);
+}
+.stamp {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.logout {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.notice {
+  max-width: 1600px;
+  margin: 12px auto 0;
+  padding: 10px 16px;
+  border-radius: 10px;
+  color: #ffd9df;
+  background: rgba(224, 105, 125, 0.14);
+  border: 1px solid rgba(224, 105, 125, 0.5);
+}
+
+/* — 배치 — */
+.wrap {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 20px 20px 48px;
+  display: grid;
+  gap: 16px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  gap: 16px;
+}
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  gap: 16px;
+}
+.wide {
+  grid-column: 1 / -1;
+}
+.sec {
+  margin: 12px 0 -4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+}
+.bar .end {
+  margin-left: auto;
+}
+
+/* — 카드 — */
+.card {
+  min-width: 0;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  margin-bottom: 10px;
+}
+.card-head h2,
+.card-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.q {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: help;
+}
+.tag {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tag:empty {
+  display: none;
+}
+.tag.wait,
+.tag.dim {
+  color: var(--muted);
+  background: var(--raise);
+}
+.tag.warn {
+  color: var(--warn);
+  background: rgba(224, 164, 88, 0.12);
+}
+.tag.bad {
+  color: var(--bad);
+  background: rgba(224, 105, 125, 0.12);
+}
+.big {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+.big small {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.big.ok,
+.num-ok {
+  color: var(--ok);
+}
+.big.warn,
+.num-warn {
+  color: var(--warn);
+}
+.big.bad,
+.num-bad {
+  color: var(--bad);
+}
+.sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* — 그림 칸 — 높이에 축 글자까지 든다 — */
+.chart {
+  height: 240px;
+  min-width: 0;
+}
+.chart.tall {
+  height: 320px;
+}
+.chart.sankey {
+  height: 460px;
+}
+.chart.spark {
+  height: 48px;
+  margin-top: 8px;
+}
+.chart.gauge {
+  height: 132px;
+}
+.empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  min-height: 32px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
