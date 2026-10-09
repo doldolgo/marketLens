@@ -2,7 +2,7 @@
 // 그림 칸 하나 = 인스턴스 하나(칸 id 로 기억). 라이브러리를 못 불러오면 그 칸에 '차트를 불러오지 못함' 한 줄(§3.5).
 // 툴팁 서식은 모두 tip() 하나를 지난다 — 피드 글자는 echarts.format.encodeHTML 을 거친다(§3.1 보안). 축·범례·라벨
 // 글자는 캔버스에 그려져 HTML 이 되지 않는다.
-import { clean, el, hm, md, num, list, own } from './common.js';
+import { clean, el, hm, md, num, n0, list, own } from './common.js';
 
 export const COLOR = Object.freeze({
   bg: '#121420',
@@ -222,5 +222,81 @@ export function donut(id, items, center) {
       itemStyle: { borderColor: COLOR.card, borderWidth: 2 },
       data: shown.map((it) => ({ name: it.name, value: it.value, itemStyle: { color: it.color } })),
     }],
+  }));
+}
+
+// 작은 막대(큰 수 곁 — 시간마다 센 수). points = [[ts초, 수]]
+export function sparkBars(id, points, color, fmt) {
+  const data = ms(points);
+  if (!data.some((p) => num(p[1]) !== null)) return blank(id, '자료 없음');
+  return draw(id, base({
+    grid: { left: 2, right: 2, top: 4, bottom: 2 },
+    xAxis: { type: 'time', show: false },
+    yAxis: { type: 'value', show: false, min: 0, minInterval: 1 },
+    tooltip: axisTip((ps) => tip(when(ps[0]?.value?.[0]), [['', '', fmt(ps[0]?.value?.[1])]])),
+    series: [{ type: 'bar', data, barMaxWidth: 6, itemStyle: { color, borderRadius: [2, 2, 0, 0] } }],
+  }));
+}
+
+// 반원 게이지 여럿(상자 카드 — CPU·메모리·디스크). items = [{ label, value(0~100|null), tone }], 값 글자는 상태일 때만 색
+export function gauges(id, items) {
+  const width = 100 / items.length;
+  return draw(id, base({
+    series: items.map((it, i) => ({
+      type: 'gauge',
+      center: [`${width * i + width / 2}%`, '62%'],
+      radius: '86%',
+      startAngle: 200,
+      endAngle: -20,
+      min: 0,
+      max: 100,
+      progress: { show: true, width: 9, roundCap: true, itemStyle: { color: TONE[it.tone] ?? COLOR.muted } },
+      axisLine: { roundCap: true, lineStyle: { width: 9, color: [[1, COLOR.line]] } },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { show: false },
+      pointer: { show: false },
+      anchor: { show: false },
+      title: { offsetCenter: [0, '78%'], color: COLOR.muted, fontSize: 12 },
+      detail: {
+        offsetCenter: [0, '8%'],
+        fontSize: 20,
+        fontWeight: 700,
+        color: it.tone === 'bad' || it.tone === 'warn' ? TONE[it.tone] : COLOR.text,
+        formatter: () => (num(it.value) === null ? '–' : `${Math.round(it.value)}%`),
+      },
+      data: [{ value: num(it.value) ?? 0, name: it.label }],
+    })),
+  }));
+}
+
+// 예산 게이지(§3.2·§3.3) — 호는 실제/한도, 바늘은 예측/한도(있을 때만). 100% 넘는 칸은 붉게, 끝은 120%
+export function budgetGauge(id, b, money) {
+  const r = (v) => Math.min(120, Math.max(0, (n0(v) / b.limit) * 100));
+  const tone = b.actual >= b.limit ? 'bad' : num(b.forecast) !== null && b.forecast >= b.limit ? 'warn' : 'ok';
+  const arc = {
+    type: 'gauge',
+    center: ['50%', '86%'],
+    radius: '150%',
+    startAngle: 180,
+    endAngle: 0,
+    min: 0,
+    max: 120,
+    splitNumber: 6,
+    axisLine: { lineStyle: { width: 10, color: [[100 / 120, COLOR.line], [1, 'rgba(224, 105, 125, 0.35)']] } },
+    axisTick: { show: false },
+    splitLine: { show: false },
+    axisLabel: { show: false },
+    anchor: { show: false },
+    title: { show: false },
+    detail: { show: false },
+  };
+  const series = [{ ...arc, progress: { show: true, width: 10, itemStyle: { color: TONE[tone] } }, pointer: { show: false }, data: [{ value: r(b.actual), name: '실제' }] }];
+  if (num(b.forecast) !== null) {
+    series.push({ ...arc, axisLine: { show: false }, progress: { show: false }, pointer: { show: true, length: '22%', width: 4, offsetCenter: [0, '-78%'], itemStyle: { color: COLOR.text } }, data: [{ value: r(b.forecast), name: '예측' }] });
+  }
+  return draw(id, base({
+    tooltip: itemTip(() => tip('이번 달 예산', [[tone, '실제', money(b.actual)], ['dim', '예측', money(b.forecast)], ['dim', '한도', money(b.limit)]])),
+    series,
   }));
 }

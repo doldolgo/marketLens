@@ -497,3 +497,16 @@ function header(app) {
   put('hdr-word', chips.length ? `${WORD[tone]} ${chips.length}` : WORD[tone]);
   node.title = chips.map((c) => `${c.name} ${c.value}`).join(' · ');
 }
+
+// 그 카드가 기대는 값(결과 객체)이 바뀌었을 때만 다시 그린다 — 10초 묶음마다 차트·툴팁·확대가 날아가지 않게(036)
+const drawn = new Map();
+export function once(name, deps, draw) {
+  const now = Array.isArray(deps) ? deps : [deps];
+  const last = drawn.get(name);
+  if (last && last.length === now.length && now.every((d, i) => d === last[i])) return;
+  draw();
+  drawn.set(name, now); // 그리다 예외가 나면 남기지 않는다 — 다음 묶음이 다시 그린다
+}
+
+// 그림 칸에 보일 상태 글 — 표가 없으면(ok) '자료 없음'
+export const stateWord = (part) => tagOf(part)?.[1] ?? '자료 없음';
