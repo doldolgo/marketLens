@@ -5,7 +5,8 @@
 `instType` 이 없고(`{channel, instId}`), 핑은 주기가 아니라 **마지막 수신에서 20초가 지나면** 문자열 `ping`,
 pong 은 10초 안에 와야 하며, `event:"notice"` 는 서비스 업그레이드 통지라 경고 1줄만 남긴다. 구독·해지 요청은
 연결당 시간당 480회 예산 — 80% 를 넘으면 재조정을 다음 회차로 미룬다. instruments 봉투에는 매 응답 바뀌는
-시각 필드가 없어 본문 전체 바이트로 직전 응답과 비교한다.
+시각 필드가 없어 본문 전체 바이트로 비교한다 — 같은 목록이 행 순서만 다른 두 본문으로 번갈아 오므로 최근에
+맵을 만든 응답 2개와 비교한다.
 심볼은 crc32 % 3 으로 샤드에 고정 배정되고, 샤드마다 소켓·시계·백오프·예산을 따로 둔다.
 메시지마다: 원문 싱크 기록 → 디코드 → 행 갱신(QuoteSink) → 그 샤드의 last_message_at(시세만).
 심볼 집합 계약(ForeignSymbolSource)도 이 커넥터가 구현한다 — 우주가 확정되면 차이만 재조정한다.
@@ -176,12 +177,16 @@ class OkxStream:
         self._wake = asyncio.Event()  # set_universe 가 재조정 루프를 깨운다
         self._rebalance: asyncio.Task[None] | None = None
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다
-        # 직전에 맵까지 만든 200 응답의 본문 전체 바이트 — 같으면 파싱·맵 재생성을 건너뛴다 (§3.3)
-        self._symbols_body: bytes | None = None
-        # 그 본문을 디코드한 텍스트와 그때의 문자 인코딩 — 같은 바이트·같은 인코딩이면 디코드 결과도 같으므로
-        # 매초 1.2MB 를 다시 디코드하지 않고 이 텍스트를 원문 싱크에 넘긴다(값이 같아 S3 바이트도 같다)
-        self._symbols_text: str | None = None
-        self._symbols_encoding: str | None = None
+        # 맵까지 만든 200 응답을 최근 것부터 2개까지 기억한다 — (본문 전체 바이트, 심볼 맵, 역맵, 디코드한 텍스트,
+        # 그때의 문자 인코딩). 새 본문의 바이트가 둘 중 하나와 같으면 파싱 없이 그 본문으로 만든 맵을 다시 쓴다 (§3.3).
+        # 하나가 아니라 둘인 까닭: OKX 는 같은 목록을 행 순서만 다른 두 본문으로 번갈아 준다(2026-10-09 캡처 5건 중
+        # 순서 2가지, 같은 날 cProfile 180초 141회차 중 65회 파싱). 직전 하나만 보면 순서가 바뀔 때마다 1.2MB 를
+        # 다시 파싱한다. 바이트가 같으면 맵도(키 순서까지) 같으므로 낡을 여지가 없다. 텍스트는 같은 바이트·같은
+        # 인코딩이면 디코드 결과도 같으므로 다시 디코드하지 않고 원문 싱크에 넘긴다(값이 같아 S3 바이트도 같다).
+        # 상주 메모리는 본문·텍스트 한 벌(약 2.5MB)이 더 든다 — 텍스트는 원문 싱크의 분 창과 같은 객체를 나눠 쓴다
+        self._lists: list[
+            tuple[bytes, dict[str, str], dict[str, str], str, str | None]
+        ] = []
         # 직전 set_universe 가 반영한 (심볼 맵, 우주 사본) — 맵 객체가 그대로이고 우주가 같으면 배정도 같다
         self._applied: tuple[dict[str, str], frozenset[str]] | None = None
 
@@ -191,8 +196,9 @@ class OkxStream:
         """instruments 1회 → live·USDT 심볼 맵. 응답 본문은 해석 전에 원문 싱크로(`symbols:all`).
 
         HTTP 200 이어도 `code != "0"` 이면 실패다 (§3.8). 원문 기록은 매 응답 하고, 200 본문의 바이트가
-        직전에 맵을 만든 응답과 같으면 파싱·맵 재생성을 건너뛴다 — OKX 봉투에는 매 응답 바뀌는 시각 필드가
-        없어 본문 전체로 비교한다. 바이트가 같으면 맵도 같으므로 낡을 여지가 없다 (§3.3).
+        최근에 맵을 만든 응답 2개 중 하나와 같으면 파싱 없이 그 본문으로 만든 맵을 쓴다 — OKX 봉투에는 매 응답
+        바뀌는 시각 필드가 없어 본문 전체로 비교하고, 같은 목록이 행 순서만 다른 두 본문으로 번갈아 오므로 둘을
+        기억한다. 바이트가 같으면 맵도 같으므로 낡을 여지가 없다 (§3.3).
         """
         url = INSTRUMENTS_URL
         try:
@@ -213,14 +219,29 @@ class OkxStream:
         at = self._clock()
         content = resp.content
         # 파싱을 건너뛸지는 본문 바이트만으로 정한다 (§3.3). 문자 인코딩은 텍스트를 다시 쓸지에만 본다 —
-        # 바이트가 같아도 charset 헤더가 바뀌면 디코드 결과가 달라질 수 있다
-        same = resp.status_code == 200 and content == self._symbols_body
-        if same and resp.encoding == self._symbols_encoding:
-            text = self._symbols_text
+        # 바이트가 같아도 charset 헤더가 바뀌면 디코드 결과가 달라질 수 있다. 바이트 비교는 길이부터 보고 앞에서부터
+        # 견주다 처음 다른 자리에서 멈춘다 — 순서만 다른 두 본문은 첫 행부터 달라(2026-10-09 캡처) 기억한 본문이
+        # 둘이어도 매초 비교 비용은 거의 한 번 몫이다
+        lists = self._lists
+        hit = None
+        if resp.status_code == 200:
+            for entry in lists:
+                if entry[0] == content:
+                    hit = entry
+                    break
+        if hit is not None and resp.encoding == hit[4]:
+            text = hit[3]
         else:
             text = resp.text
         self._record(self.id, f"rest:{INSTRUMENTS_PATH}", at, text, SYMBOLS_KEY)
-        if same:
+        if hit is not None:
+            if hit is not lists[0]:
+                # 다른 순서의 본문으로 돌아왔다 — 그 본문으로 만든 맵으로 바꾸고 맨 앞(최근)으로 올린다. 다시
+                # 파싱했다면 같은 내용·같은 키 순서의 새 맵이 됐을 자리라 결과가 같다. 맵 객체가 바뀌므로
+                # set_universe 는 이 회차에 배정을 다시 계산한다(다시 파싱해도 새 객체라 같다)
+                self._lists = [hit, lists[0]]
+                self._symbol_of = hit[1]
+                self._base_of = hit[2]
             return 1
         if resp.status_code != 200:
             raise ExchangeApiError(
@@ -266,12 +287,11 @@ class OkxStream:
             if not base or not symbol:
                 continue
             symbol_of.setdefault(base, symbol)  # 둘 이상이면 처음 것
+        base_of = {symbol: base for base, symbol in symbol_of.items()}
         self._symbol_of = symbol_of
-        self._base_of = {symbol: base for base, symbol in symbol_of.items()}
-        # 맵을 만든 회차에만 셋을 함께 기억한다 — 실패한 본문은 기억하지 않는다 (§3.3)
-        self._symbols_body = content
-        self._symbols_text = text
-        self._symbols_encoding = resp.encoding
+        self._base_of = base_of
+        # 맵을 만든 회차에만 기억한다 — 실패한 본문은 기억하지 않는다 (§3.3). 새 것을 앞에 두고 셋째는 버린다
+        self._lists = [(content, symbol_of, base_of, text, resp.encoding), *lists[:1]]
         return 1
 
     def bases(self) -> set[str]:
