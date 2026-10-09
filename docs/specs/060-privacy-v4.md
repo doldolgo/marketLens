@@ -120,4 +120,4 @@ for f in web/public/clarity.js web/public/attention.js web/admin/admin.js; do no
   - 038·039 의 게이트 코드(`before_gate`·창 자르기)는 상수가 첫 기록보다 앞이라 실제로는 돌지 않는 길로 남았다 — 지울지는 후속(064 와 함께). 그 코드의 docstring·주석의 '처리방침 v2 시행일'(access_cache·access_pairs·access_hours·geo_fetch)도 그대로다.
   - 제안(§2 밖이라 고치지 않음): 런북 `docs/runbooks/clarity.md` 31줄의 '안내 판 세 곳' 은 052 뒤로 네 곳(`attention.js`), 052 §3.2 의 '지금 판 D' 는 판 값이 날짜가 아닐 수 있다는 것(060)을 담지 않는다, status.md 의 (037) 빚 줄('방침 v2 가 038·039 보다 앞설 수 있다')은 이제 해당이 없다.
   - 전체 pytest 를 변경 뒤 9번 돌려 1번 '1 failed'(다시 돌린 8번은 모두 통과) — 그 회차는 실패 목록을 남기지 않아 어느 테스트인지 모른다. 이 레포에는 경과 시간을 재는 테스트가 여럿 있다(예: test_gap_service 300ms·test_raw_archive 0.4초·admin test_status 0.2초) — 기계가 바쁠 때의 시간 초과로 보이며 이 스펙의 테스트·코드와는 무관해 보인다(확인은 못 함).
-  - `server/uv.lock` 은 `uv run` 이 만든 파일이라 untracked 로 두었다(커밋하지 않음). 이 세션은 push 하지 않았다 — `origin/feat/060-privacy-v4` 는 세션 중 다른 곳에서 push 됐다(reflog 'update by push').
+  - `uv run` 이 만든 `server/uv.lock` 은 커밋하지 않고 끝에 지웠다. 이 세션은 push 하지 않았다 — `origin/feat/060-privacy-v4` 는 세션 중 다른 곳에서 push 됐다(reflog 'update by push').
