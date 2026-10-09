@@ -1,11 +1,13 @@
 """관리자 server 설정 계약 — nginx-admin.conf·web 이미지·compose (스펙 029 §3.1·§3.2·§3.5·§4, 034·035 의 피드 넷)
-와 관리자 화면 정적 단언(036 §4, 설명·이름표·문구는 041 §4).
+와 관리자 화면 v3 정적 단언(064 §4 — 페이지 셋의 머리·스크립트·차트 사본·링크·CSP·색). 계산·부르기는 node 시험
+(test_admin_rules.py·test_admin_calc.py·test_admin_pages.py)이 본다.
 
 test_deploy.py 와 같은 방식이다: Docker 없는 CI 에서 설정 파일을 읽어 단언한다. 실제로 nginx 를 띄워
 분기·403·기록을 보는 검증은 029 §5 의 로컬 Docker 명령이다. 문법은 여기서 못 잡는다 — nginx-admin.conf 를
 고친 PR 은 로컬 `nginx -t` 결과를 본문에 적는다(§3.6).
 """
 
+import hashlib
 import json
 import re
 
@@ -451,3 +453,164 @@ def test_root_path_only_on_collector_and_public_api_docs_stay_closed() -> None:
         for path in ("/api/docs", "/api/redoc", "/api/openapi.json", "/api/refresh"):
             assert _route(path) in DENY, path
     assert (ROOT / ADMIN_CONF).is_file()
+
+
+# --- 관리자 화면 v3 정적 단언 (064 §4) -------------------------------------------------------------
+
+SCREEN = ROOT / "web/admin"
+PAGES = {
+    "index.html": ("/", "overview.js"),
+    "server.html": ("/server.html", "server.js"),
+    "traffic.html": ("/traffic.html", "traffic.js"),
+}
+NAV = [
+    ("/", "개요"),
+    ("/server.html", "서버"),
+    ("/traffic.html", "트래픽"),
+    ("/screens.html", "화면"),
+]
+SCRIPTS = ("common.js", "charts.js", "overview.js", "server.js", "traffic.js")
+VENDOR = "vendor/echarts-5.5.1.min.js"
+# npm 꾸러미 echarts@5.5.1 의 dist/echarts.min.js 그대로(고치지 않는다 — §2)
+VENDOR_SHA256 = "e84270bd0cd5bdf60fefc26d00c2a391cb2e81f4d26a7a9ee16185a54773a3cf"
+# 밖으로 나가는 링크의 호스트(고정 https 주소뿐). db-ip.com 은 DB-IP CC BY 표시(039)
+EXTERNAL_HOSTS = {
+    "clarity.microsoft.com",
+    "dash.cloudflare.com",
+    "one.dash.cloudflare.com",
+    "github.com",
+    "db-ip.com",
+}
+# 화면 스크립트에 없어야 하는 것: 브라우저 저장소·HTML 해석·코드 실행·새 창·주소 읽기·style·링크·주소 쓰기·fetch 밖 요청
+SCRIPT_BANNED = (
+    "localStorage",
+    "sessionStorage",
+    "indexedDB",
+    "document.cookie",
+    "innerHTML",
+    "outerHTML",
+    "insertAdjacentHTML",
+    "document.write",
+    "eval(",
+    "new Function",
+    "window.open",
+    "location.pathname",
+    "location.href",
+    ".style",
+    "setAttribute('style'",
+    ".href",
+    "setAttribute('src'",
+    ".src",
+    "setAttributeNS",
+    "xlink:href",
+    "new XMLHttpRequest",
+    "sendBeacon",
+    "new WebSocket",
+    "EventSource",
+    "location.hash",
+    "pushState",
+    "location.assign",
+    "location.search =",
+    "location =",
+    "postMessage",
+)
+
+
+def _script(name: str) -> str:
+    return _text(f"web/admin/{name}")
+
+
+def _all_scripts() -> str:
+    return "".join(_script(name) for name in SCRIPTS)
+
+
+def test_screen_is_three_pages_shared_modules_and_one_vendored_library() -> None:
+    """§2 — 페이지 셋 + 공통 모듈 둘 + 페이지 스크립트 셋 + 스타일 + vendor(ECharts 5.5.1 사본·라이선스). 공개 root 밖."""
+    files = sorted(str(p.relative_to(SCREEN)) for p in SCREEN.rglob("*") if p.is_file())
+    assert files == sorted(
+        [
+            *PAGES,
+            *SCRIPTS,
+            "admin.css",
+            VENDOR,
+            "vendor/ECHARTS-LICENSE.txt",
+            "vendor/ECHARTS-NOTICE.txt",
+            "vendor/ECHARTS-LICENSE-d3.txt",
+        ]
+    )
+    assert "COPY admin /usr/share/nginx/admin" in _text("web/Dockerfile").splitlines()
+    public = {p.name for p in (ROOT / "web/public").rglob("*")}
+    assert not {"admin", *SCRIPTS, "admin.css"} & public
+
+
+def test_vendored_echarts_is_the_untouched_5_5_1_build_with_its_license() -> None:
+    """§2 — dist/echarts.min.js 를 고치지 않고(체크섬), Apache-2.0 원문과 NOTICE·d3 BSD 를 함께 둔다. node 시험의 가짜
+    encodeHTML 은 이 사본의 다섯 글자 바꿈과 같다."""
+    data = (SCREEN / VENDOR).read_bytes()
+    assert hashlib.sha256(data).hexdigest() == VENDOR_SHA256
+    text = data.decode("utf-8")
+    assert 'version="5.5.1"' in text
+    assert re.search(
+        r"""/\(\[&<>"'\]\)/g,\w+=\{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"\}""",
+        text,
+    )
+    license_text = _text("web/admin/vendor/ECHARTS-LICENSE.txt")
+    assert (
+        license_text.lstrip().startswith("Apache License")
+        and "Version 2.0, January 2004" in license_text
+    )
+    assert "Apache ECharts" in _text("web/admin/vendor/ECHARTS-NOTICE.txt")
+    assert "Mike Bostock" in _text("web/admin/vendor/ECHARTS-LICENSE-d3.txt")
+    harness = _text("server/tests/admin_dom.py")
+    assert "replace(/([&<>\"'])/g" in harness and "'&#39;'" in harness
+
+
+def test_every_page_has_the_same_header_with_its_own_link_marked() -> None:
+    """§3.1 — 머리 줄: 이름, 링크 넷(개요·서버·트래픽·화면 — 지금 페이지 강조), 상태 점(개요 링크), 마지막 갱신, 로그아웃."""
+    for page, (path, _) in PAGES.items():
+        html = _text(f"web/admin/{page}")
+        nav = re.search(r'<nav class="nav"[^>]*>(.*?)</nav>', html, flags=re.S)
+        assert nav, page
+        links = re.findall(
+            r'<a href="([^"]+)"( aria-current="page")?>([^<]+)</a>', nav.group(1)
+        )
+        assert [(href, label) for href, _, label in links] == NAV, page
+        assert [href for href, current, _ in links if current] == [path], page
+        assert (
+            '<a class="state wait" id="hdr-state" href="/"><span id="hdr-word">확인 중</span></a>'
+            in html
+        ), page
+        assert (
+            '<span class="stamp">마지막 갱신 <span id="updated">--:--:--</span></span>'
+            in html
+        ), page
+        assert '<a class="logout" href="/cdn-cgi/access/logout">로그아웃</a>' in html, (
+            page
+        )
+        assert '<p id="notice" class="notice" role="alert" hidden></p>' in html, page
+        assert (
+            html.count('class="brand"') == 1 and "KimpTrack <span>관리자</span>" in html
+        ), page
+
+
+def test_pages_load_the_library_then_their_module_without_inline_code() -> None:
+    """§3.1·§4 — 인라인 스크립트·스타일 없음(CSP 'self'), 라이브러리(defer) 뒤에 그 페이지의 ES 모듈 하나."""
+    for page, (_, module) in PAGES.items():
+        html = _text(f"web/admin/{page}")
+        scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, flags=re.S)
+        assert scripts == [
+            (f' src="{VENDOR}" defer', ""),
+            (f' type="module" src="{module}"', ""),
+        ], page
+        assert "<style" not in html and "style=" not in html, page
+        assert re.search(r"\son\w+\s*=", html) is None, page
+        assert "<form" not in html, page
+        assert '<link rel="stylesheet" href="admin.css" />' in html, page
+        # 긴 설명 문단·'이 절 읽는 법' 없이 제목 옆 '?' 하나(title 한두 문장)만
+        assert (
+            "이 절 읽는 법" not in html
+            and "이 칸 뜻" not in html
+            and '<details class="explain"' not in html
+        ), page
+        for title in re.findall(r'<span class="q" title="([^"]*)">\?</span>', html):
+            assert 0 < len(title) <= 110 and title.count(". ") <= 1, (page, title)
