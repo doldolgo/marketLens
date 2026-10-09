@@ -15,13 +15,10 @@
 
 ## 3. 동작
 
+> 이 화면(관리자 '화면 이용' 절)은 064·065 가 대신한다 — 아래 피드 계약(§3.1)과 공개 페이지 쪽 계약(§3.3 의 값 — 덮어 보기로 넘기는 값 · §3.4 의 주고받기·덮어 보기 모드 · §3.7 헤더)만 지금도 맞다.
+
 ### 3.1 읽는 값 (052 복사)
 `/svc/api/admin/attention?days=1|7|30|90` → `{state, code, gateAt, days, from, to, fetchedAt, rows}`. `state` `ok`·`before_gate`(rows 빔)·`error`(code `redis`). `rows` = `[{page, device, pv, areas:[{id, ms, clicks, seen}]}]` — 창 안 날의 합, ms 큰 순. 화면 이름: `landing`·`app-spread`·`app-history`·`app-gap`·`app-pp`·`app-health`·`app-flow`·`privacy`·`kimp-chart`·`kimp-history`. 기기 `mobile`(폭 < 768)·`pc`.
-
-### 3.2 절 배치·고르기
-- 새 절 `#screens` 는 `#traffic` 다음, `#cost` 앞. nav 에 '화면'. 머리 아래 041 꼴 '이 절 읽는 법'(접힘): 동의한 방문자만 센다·영역이 화면 높이 절반(작은 영역은 자기 절반) 넘게 보이고 문서가 보이며 5분 안에 입력이 있었던 시간만·하루 합계라 한 사람을 따라갈 수 없다·D 전은 비어 있다.
-- 고르는 줄(HTML 고정): 기간 `<select>`(오늘·7일·30일·90일 — 기본 7일), 화면 `<select>`(한국어 이름 — 랜딩·대시보드 스프레드·기록·갭·선선갭·수집 상태·입출금 레이더·처리방침·김프 차트·김프 기록. 고른 기간에 pv 가 있는 화면은 이름 뒤 '(n)', 없으면 '(0)'), 기기 단추 둘(PC·휴대폰 — `aria-pressed`). 기본 화면 = 고른 기간·기기에서 pv 가 가장 큰 화면.
-- 고른 값은 JS 변수에만(주소·저장소에 쓰지 않는다). 기간을 바꾸면 피드 하나만 곧바로 부른다(떠 있으면 끝난 뒤 한 번 — 마지막 값). 화면·기기를 바꾸면 부르지 않고 다시 그린다. 그 밖에는 절이 보이는 동안 5분마다.
 
 ### 3.3 값 계산 (화면 하나 × 기기 하나)
 - pv = 그 행의 pv. 영역마다: 평균 보인 시간 `t = ms / pv`(초, 소수 1자리), 도달률 `r = seen / pv`(%, 정수 — 100 넘으면 100), 클릭 `c = clicks / pv × 100`(100뷰당, 소수 1자리).
@@ -30,8 +27,7 @@
 - 데이터에 없는데 페이지에 있는 영역 = '기록 없음'(L 0). 데이터에 있는데 페이지에 없는 영역(바뀐 화면) = 목록 끝 '지금 화면에 없음'.
 
 ### 3.4 실제 화면 위에 그리기
-- 틀: 절 안 왼쪽(넓은 화면) 또는 위(좁은 화면)에 `<iframe>` 하나 — 주소 `https://kimptrack.com<경로>?kt-overlay=1`(대시보드는 `/app/?tab=<id>&kt-overlay=1`), 폭 PC 1280·휴대폰 390, 높이 PC 800·휴대폰 844 로 놓고 CSS `transform: scale()` 로 칸 폭에 맞춘다(휴대폰은 1배 이하). `sandbox="allow-scripts allow-same-origin"`, `referrerpolicy="strict-origin"`, `loading="lazy"`. 화면·기기를 바꾸면 주소를 바꾼다.
-- 출처 상수: admin.js 의 `SITE_ORIGIN = "https://kimptrack.com"`, attention.js 의 `ADMIN_ORIGIN = "https://admin.kimptrack.com"` — 각 파일에 한 번. 로컬 확인은 커밋하지 않는 시험 사본에서 둘을 `http://kimptrack.localhost:8080`·`http://admin.kimptrack.localhost:8081` 로 바꾸고 attention.js 의 호스트 검사도 같은 사본에서 바꾼다(033 §4 의 시험 사본과 같은 방식).
+- 출처 상수: attention.js 의 `ADMIN_ORIGIN = "https://admin.kimptrack.com"` — 파일에 한 번(관리자 쪽 상수·틀은 065). 로컬 확인은 커밋하지 않는 시험 사본에서 `http://admin.kimptrack.localhost:8081` 로 바꾸고 attention.js 의 호스트 검사도 같은 사본에서 바꾼다(033 §4 의 시험 사본과 같은 방식).
 - 주고받기(postMessage, 둘 다 상대 출처·창을 확인 — 다르면 무시):
   - 페이지 → 관리자(`ADMIN_ORIGIN`): `{type:"kt-attention-ready", v:1, page, areas:[id…]}`(지금 페이지에 크기 있는 영역 id 들 — §3.3 '기록 없음'·'지금 화면에 없음' 판정에 쓴다). 문서를 읽은 뒤 한 번, 그 뒤 영역 모임이 바뀔 때마다 다시(MutationObserver, 1초에 한 번까지) — 대시보드는 React 가 defer 스크립트 뒤에 그리고 기록 탭은 늦게 붙어 첫 목록이 빌 수 있다. 관리자는 받을 때마다 값을 다시 보낸다.
   - 관리자 → 페이지(`https://kimptrack.com`): ready 를 받은 뒤와 값이 바뀔 때마다 `{type:"kt-attention", v:1, label, areas:[{id, level, rank, t, r, c, low, small}]}`, 목록 행을 누르면 `{type:"kt-attention-focus", id}`.
@@ -42,22 +38,15 @@
   - 꼬리표: 상자 왼쪽 위 '#순위 · 평균 n초 · 도달 n% · 클릭 n' — **글씨 크기는 단계에 따라 12·14·16·19·22px**(많이 본 곳이 크게). 표본 적음은 꼬리표 끝 '· 표본 적음', 기록 없음은 '기록 없음'. 글자는 `textContent` 로만.
   - focus 를 받으면 그 영역을 `scrollIntoView({block:'center'})` 하고 상자 테두리를 2초 굵게.
   - 값이 오지 않으면(5초) 아무것도 그리지 않는다 — 관리자 쪽이 '페이지가 응답하지 않음' 을 보인다.
-- 덮어 보기로 띄운 페이지의 요청은 038 운영자 흔적이라 방문으로 세지 않는다(줄 분류 `is_operator` 의 출처 목록 — 채널용 `SELF_HOSTS` 가 아니다) — 문서 요청의 `referer` 출처가 `admin.kimptrack.com` 이고(틀은 `strict-origin`), 그 줄이 있는 짝은 그날 방문에서 빠진다(038 그대로). 출처 목록에 이 호스트를 더하는 것이 이 스펙의 일이다. 대시보드는 실시간 WS 를 연다 — 절이 보이는 동안만 틀을 두고, 절이 화면 밖으로 나가거나 관리자 탭이 숨으면 틀의 주소를 `about:blank` 로 바꾼다.
-
-### 3.5 옆 목록·답 문장
-- 답 문장(042 `p.answer` 꼴): '{기간} {화면} {기기} — 페이지뷰 {pv}. 가장 오래 본 곳은 {이름}(평균 {t}초), 가장 덜 닿은 곳은 {이름}(도달 {r}%).' pv 0 이면 '이 기간 이 화면·기기의 동의한 방문 기록이 없다.'
-- 목록(HTML 표, 순위 순): 순위 · 영역 이름 · 평균 보인 시간(막대 — 단계 색) · 도달률 · 100뷰당 클릭. 행을 누르면 focus. '지금 화면에 없음' 행은 끝에 회색.
-- 영역 이름표: admin.js 상수 `AREA_NAMES` — 052 §7 에 적힌 화면별 영역 id 전부의 한국어 이름(없으면 id 그대로). 덩어리 끝 '이 칸 뜻'(041 꼴): 평균 보인 시간·도달률·100뷰당 클릭·단계·표본 적음의 정의.
-
-### 3.6 상태·빈 칸
-- 036 부분 상태 칸 그대로(연결 안 됨·불러오지 못함·첫 조회 중). `before_gate`: 'D 부터 모읍니다(처리방침 v3 시행일)' — D 는 `gateAt` 의 KST 날짜. 틀은 띄우지 않는다.
-- 피드 실패에 직전 값이 있으면 그대로 그리고 머리에 '불러오지 못함'.
+- 덮어 보기로 띄운 페이지의 요청은 038 운영자 흔적이라 방문으로 세지 않는다(줄 분류 `is_operator` 의 출처 목록 — 채널용 `SELF_HOSTS` 가 아니다) — 문서 요청의 `referer` 출처가 `admin.kimptrack.com` 이고(틀은 `strict-origin`), 그 줄이 있는 짝은 그날 방문에서 빠진다(038 그대로). 출처 목록에 이 호스트를 더하는 것이 이 스펙의 일이다.
 
 ### 3.7 헤더
 - 공개 nginx: `/`·`/app/`(index.html 을 주는 location 들)·`/privacy`·`/kimp-chart`·`/kimp-history` 에 `frame-ancestors 'self' https://admin.kimptrack.com` — CSP 가 있는 세 정적 페이지는 052 가 고친 문자열의 `frame-ancestors 'none'` 만 바꾸고(test_privacy·test_kimp_pages 기대값도), 없는 곳은 이 지시어 하나짜리 CSP 를 더한다. `X-Frame-Options` 는 두지 않는다(있으면 지운다 — CSP 와 다르면 브라우저가 막는다).
-- 관리자 nginx `location /` CSP: `default-src 'self'; frame-src https://kimptrack.com; frame-ancestors 'none'`.
+- 관리자 nginx `location /`·`/vendor/` CSP: `default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src https://kimptrack.com; frame-ancestors 'none'`(064 — 스타일 인라인은 차트 툴팁).
 
 ## 4. 검증
+> 아래의 관리자 화면 쪽 확인(절·고르기·목록·node `test_admin_attention.py`)은 064·065 가 대신한다 — 공개 페이지 쪽(`attention.js` 덮어 보기·헤더) 확인은 지금도 맞다.
+
 - `server/tests/test_admin.py`(정적): `#screens` 가 `#traffic` 뒤·`#cost` 앞, nav, 고르는 줄 셋, 041 설명·'이 칸 뜻', `AREA_NAMES` 가 052 의 영역 id(정적 페이지 HTML·web/src 의 `data-area`)를 모두 덮는다, iframe 속성(sandbox·referrerpolicy), postMessage 대상 출처가 글자 그대로 `https://kimptrack.com`.
 - `test_admin_attention.py`(node, 042 방식): §3.3 계산(t·r·c·L·순위·low·small·100 넘는 r), 기본 화면 고르기, 기간 바꿈만 부르기·떠 있으면 한 번, 출처가 다른 메시지 무시, 답 문장 세 갈래.
 - `attention.js` 덮어 보기(node 가짜 DOM): 조건 둘 다일 때만 켜짐·세기 리스너 0, 누름 넷이 막힘, 영역 모임이 바뀌면 ready 다시, 다른 출처 메시지 무시, 상자 수 = 크기 있는 영역 수, 단계별 글씨 크기, low 빗금·small 꼬리표, focus 스크롤, ready 메시지에 영역 id. clarity.js: `kt-overlay=1`+틀 안이면 Clarity·띠 없음.
