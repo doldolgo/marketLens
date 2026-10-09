@@ -175,6 +175,105 @@ def metric_data_response(ids: list[str]) -> dict:
     return {"MetricDataResults": results, "Messages": []}
 
 
+# --- 063 시계열 ---
+
+SERIES_KEYS = [
+    "cpu",
+    "netIn",
+    "netOut",
+    "ebsRead",
+    "ebsWrite",
+    "creditBalance",
+    "creditUsage",
+    "surplusCharged",
+    "statusFailed",
+    "mem",
+    "disk",
+    "swap",
+]
+RATE_KEYS = {"netIn", "netOut", "ebsRead", "ebsWrite"}
+CREDIT_KEYS = {"creditBalance", "creditUsage", "surplusCharged"}
+# 원값(풀기 전) — 바이트 지표는 초당 값이고 응답에는 '× 주기' 한 합이 실린다
+SERIES_RAW = {
+    "cpu": 45.678,
+    "netIn": 1234.4,
+    "netOut": 2000.0,
+    "ebsRead": 10.6,
+    "ebsWrite": 0.4,
+    "creditBalance": 123.456,
+    "creditUsage": 0.1234,
+    "surplusCharged": 0.0,
+    "statusFailed": 1.0,
+    "mem": 12.3456,
+    "disk": 45.678,
+    "swap": 3.333,
+    "ws": 3.0,
+    "errors": 1.0,
+    "duration": 1523.46,
+}
+
+
+def series_ids() -> list[str]:
+    """상자 셋·`list_metrics_response` 일 때 시계열이 만드는 질의 Id — 질의 순서 그대로(swap 은 data 만)."""
+    ids: list[str] = []
+    for box in IDS:
+        ids += [f"{box}_{k}" for k in SERIES_KEYS if k not in ("mem", "disk", "swap")]
+        ids += [f"{box}_mem", f"{box}_disk"] + (["data_swap"] if box == "data" else [])
+    return ids + ["ws", "canary_errors", "canary_duration"]
+
+
+def bounds(window: int, period: int) -> tuple[int, int]:
+    """창의 (시작, 끝) — 끝은 NOW 를 주기로 내린 값 (063 §3.1)."""
+    end = int(NOW) // period * period
+    return end - window, end
+
+
+def stub_discovery(clients: Clients, alarms: dict | None = None) -> None:
+    """박스 찾기(DescribeAlarms)·차원(ListMetrics) — 1시간 캐시가 빈 읽기의 앞 두 호출."""
+    clients["cloudwatch"].add_response("describe_alarms", alarms or alarms_response())
+    clients["cloudwatch"].add_response(
+        "list_metrics", list_metrics_response(), {"Namespace": "MarketLens"}
+    )
+
+
+def capture_metric_data(clients: Clients) -> list[dict]:
+    """GetMetricData 에 실제로 넘긴 인자 — 부를 때마다 하나씩 쌓인다."""
+    captured: list[dict] = []
+    clients.clients["cloudwatch"].meta.events.register(
+        "provide-client-params.cloudwatch.GetMetricData",
+        lambda params, **kw: captured.append(params),
+    )
+    return captured
+
+
+def series_data_response(
+    ids: list[str],
+    start: int,
+    end: int,
+    period: int,
+    *,
+    first: bool = True,
+    last: bool = True,
+) -> dict:
+    """질의마다 첫 구간·마지막 구간 두 점(고르면 하나). c7g(collect)의 크레딧 셋은 자료 없음."""
+    results = []
+    for qid in ids:
+        key = qid if qid == "ws" else qid.split("_", 1)[1]
+        stamps = [ts for ts, on in ((start, first), (end - period, last)) if on]
+        if qid.startswith("collect_") and key in CREDIT_KEYS:
+            stamps = []
+        value = SERIES_RAW[key] * (period if key in RATE_KEYS else 1)
+        results.append(
+            {
+                "Id": qid,
+                "Timestamps": [dt(ts) for ts in stamps],
+                "Values": [value for _ in stamps],
+                "StatusCode": "Complete",
+            }
+        )
+    return {"MetricDataResults": results, "Messages": []}
+
+
 def log_event(ts_ms: int, message: str) -> dict:
     return {
         "logStreamName": "2026/10/01/[$LATEST]abc",

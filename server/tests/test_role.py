@@ -42,8 +42,8 @@ API_ONLY = {
     "/attention",
     "/admin/attention",
 }
-# 034 — 수집기에만 있는 관리자 피드 둘(자격증명이 collect 박스 역할에만 있다)
-COLLECTOR_ADMIN = {"/admin/aws", "/admin/alerts"}
+# 034·063 — 수집기에만 있는 관리자 피드 셋(자격증명이 collect 박스 역할에만 있다)
+COLLECTOR_ADMIN = {"/admin/aws", "/admin/alerts", "/admin/aws/series"}
 
 
 @pytest.fixture
