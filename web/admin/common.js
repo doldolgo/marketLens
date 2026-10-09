@@ -510,3 +510,19 @@ export function once(name, deps, draw) {
 
 // 그림 칸에 보일 상태 글 — 표가 없으면(ok) '자료 없음'
 export const stateWord = (part) => tagOf(part)?.[1] ?? '자료 없음';
+
+// 금액 — USD 는 $ 를 앞에, 그 밖 단위는 뒤에(서버 글자)
+const USD = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const money = (v, unit) => (num(v) === null ? '–' : unit == null || unit === 'USD' ? `$${USD.format(v)}` : `${USD.format(v)} ${clean(unit)}`);
+
+// 월 예산 가운데 한도 대비 실제가 가장 큰 것 — 색은 띠 규칙과 같다(실제 ≥ 100% 문제, 예측 ≥ 100% 주의)
+export function worstMonthly(part) {
+  let worst = null;
+  for (const b of list(part.items).filter(isObj)) {
+    if (b.timeUnit !== 'MONTHLY' || !(num(b.limit) > 0) || num(b.actual) === null) continue;
+    const r = b.actual / b.limit;
+    if (!worst || r > worst.r) worst = { b, r };
+  }
+  if (worst) worst.tone = worst.r >= 1 ? 'bad' : num(worst.b.forecast) !== null && worst.b.forecast >= worst.b.limit ? 'warn' : 'ok';
+  return worst;
+}

@@ -1,0 +1,97 @@
+<!doctype html>
+<!-- KimpTrack 관리자 v3 — 개요(스펙 064 §3.2 "지금 문제 있나"). web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
+     인라인 스크립트·스타일 없음(CSP). 값은 overview.js 가 글자(textContent)와 차트(vendor ECharts)로 채운다. -->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="color-scheme" content="dark" />
+    <title>개요 · KimpTrack 관리자</title>
+    <link rel="stylesheet" href="admin.css" />
+    <script src="vendor/echarts-5.5.1.min.js" defer></script>
+    <script type="module" src="overview.js"></script>
+  </head>
+  <body>
+    <header class="top">
+      <div class="top-in">
+        <a class="brand" href="/">KimpTrack <span>관리자</span></a>
+        <nav class="nav" aria-label="페이지">
+          <a href="/" aria-current="page">개요</a>
+          <a href="/server.html">서버</a>
+          <a href="/traffic.html">트래픽</a>
+          <a href="/screens.html">화면</a>
+        </nav>
+        <div class="top-side">
+          <a class="state wait" id="hdr-state" href="/"><span id="hdr-word">확인 중</span></a>
+          <span class="stamp">마지막 갱신 <span id="updated">--:--:--</span></span>
+          <a class="logout" href="/cdn-cgi/access/logout">로그아웃</a>
+        </div>
+      </div>
+    </header>
+    <p id="notice" class="notice" role="alert" hidden></p>
+
+    <main class="wrap">
+      <section id="band" class="band wait" aria-label="지금 상태">
+        <span id="band-word" class="band-word">확인 중</span>
+        <div id="chips" class="chips"></div>
+      </section>
+
+      <section class="kpis" aria-label="큰 수">
+        <div class="card">
+          <div class="card-head"><h2>지금 접속</h2><span class="q" title="api 가 지금 들고 있는 대시보드 연결 수(사람 수가 아니다). 선은 24시간 CloudWatch 5분 최댓값.">?</span><span class="tag" id="t-ws"></span></div>
+          <div class="big" id="v-ws">–</div>
+          <div class="chart spark" id="c-ws"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>오늘 방문자</h2><span class="q" title="오늘(KST) 확인 ~ 브라우저 모양 방문자. 선은 시간별 사람 모양 페이지.">?</span><span class="tag" id="t-visit"></span></div>
+          <div class="big" id="v-visit">–</div>
+          <div class="chart spark" id="c-visit"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>수집 성공률</h2><span class="q" title="최근 1시간, 수집 원천 전체 평균. 선은 실패 구간으로 센 시간별 성공률.">?</span><span class="tag" id="t-rate"></span></div>
+          <div class="big" id="v-rate">–</div>
+          <div class="chart spark" id="c-rate"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>경보</h2><span class="q" title="CloudWatch 경보 가운데 ALARM 인 수. 막대는 시간별 알림(Slack·경보 ALARM).">?</span><span class="tag" id="t-alarm"></span></div>
+          <div class="big" id="v-alarm">–</div>
+          <div class="chart spark" id="c-alarm"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>이번 달 비용</h2><span class="q" title="월 예산 가운데 한도 대비 실제가 가장 큰 것. 호는 실제, 바늘은 AWS 예측.">?</span><span class="tag" id="t-cost"></span></div>
+          <div class="big" id="v-cost">–</div>
+          <div class="chart spark" id="c-cost"></div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="h-ex">
+        <div class="card-head"><h2 id="h-ex">수집 원천</h2><span class="q" title="초록 수집 중 · 주황 지연(5~60초) · 빨강 끊김. 글자는 마지막 성공.">?</span><span class="tag" id="t-ex"></span></div>
+        <div class="pills" id="pills"></div>
+      </section>
+
+      <section class="grid" aria-label="상자 셋">
+        <div class="card">
+          <div class="card-head"><h2>collect</h2><span class="sub">수집기</span><span class="q" title="게이지는 최근 15분 평균, 선은 24시간 CPU.">?</span><span class="tag" id="t-box-collect"></span></div>
+          <div class="chart gauge" id="g-collect"></div>
+          <div class="chart mini" id="l-collect"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>data</h2><span class="sub">Influx·Redis</span><span class="q" title="게이지는 최근 15분 평균, 선은 24시간 CPU.">?</span><span class="tag" id="t-box-data"></span></div>
+          <div class="chart gauge" id="g-data"></div>
+          <div class="chart mini" id="l-data"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>serve</h2><span class="sub">caddy·web·api</span><span class="q" title="게이지는 최근 15분 평균, 선은 24시간 CPU.">?</span><span class="tag" id="t-box-serve"></span></div>
+          <div class="chart gauge" id="g-serve"></div>
+          <div class="chart mini" id="l-serve"></div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="h-traffic">
+        <div class="card-head"><h2 id="h-traffic">24시간 트래픽</h2><span class="q" title="시간별 사람 모양 페이지와 5xx, 오른쪽 축은 WS 접속 수(5분 최댓값).">?</span><span class="tag" id="t-traffic"></span></div>
+        <div class="chart tall" id="c-traffic"></div>
+      </section>
+    </main>
+  </body>
+</html>
