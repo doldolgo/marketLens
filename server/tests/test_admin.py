@@ -168,6 +168,7 @@ def test_admin_routes_every_api_path_like_before_the_allowlist() -> None:
         "/svc/api/admin/status": (API, "/admin/status"),
         "/api/admin/aws": (COLLECTOR, "/admin/aws"),
         "/api/admin/alerts": (COLLECTOR, "/admin/alerts"),
+        "/api/admin/aws/series": (COLLECTOR, "/admin/aws/series"),  # 063
         "/svc/api/admin/access": (API, "/admin/access"),
         "/svc/api/admin/clarity": (API, "/admin/clarity"),
         "/svc/api/admin/attention": (API, "/admin/attention"),
@@ -197,6 +198,15 @@ def test_monitoring_feeds_are_exact_collector_locations_that_inherit_server_head
         assert not _args(children, "proxy_set_header"), key
         assert not _args(children, "add_header"), key
         assert not _args(children, "proxy_hide_header"), key
+
+
+def test_series_feed_rides_the_admin_api_prefix_and_stays_closed_publicly() -> None:
+    """063 §3.1 — 새 location 없이 관리자 `/api/` 접두 분기(교차 사이트 검사 첫 줄)로 수집기에, 공개는 028 의 404 JSON."""
+    path = "/api/admin/aws/series"
+    assert _admin_route(path) == ("/api/",)
+    assert _locations(_admin_server())[("/api/",)][0] == SFS_CHECK
+    assert _forward(path) == (COLLECTOR, "/admin/aws/series")
+    assert _route(path) in DENY
 
 
 def test_api_feeds_are_exact_api_locations_that_inherit_server_headers() -> None:

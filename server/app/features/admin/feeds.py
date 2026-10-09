@@ -1,4 +1,5 @@
-"""수집기 관리자 피드 — `/admin/aws`·`/admin/alerts` 의 부분별 캐시·갱신·상태 (스펙 034 §3.1~§3.3).
+"""수집기 관리자 피드 — `/admin/aws`·`/admin/alerts` 의 부분별 캐시·갱신·상태 (스펙 034 §3.1~§3.3)와
+`/admin/aws/series` 의 창마다 캐시 (063 §3.3 — 같은 스레드·같은 Slot 규칙).
 
 응답은 부분들이고 부분은 `{state, code, fetchedAt, refreshSec, …값 키}` 다. 갱신 규칙은 022 랜딩과 같은 모양이다 —
 요청이 왔을 때 비었거나 주기가 지났으면 갱신을 하나만 띄우고 3초까지 기다린 뒤, 늦으면 직전 결과(없으면 pending)를
@@ -14,6 +15,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Executor, Future
+from functools import partial
 from typing import Any, Protocol
 
 from app.core.redact import redact
@@ -37,6 +39,24 @@ AWS_PARTS: dict[str, tuple[int, tuple[str, ...]]] = {
     "budget": (21_600, ("items",)),
 }
 HISTORY_REFRESH_SEC = AWS_PARTS["alarms"][0]  # 경보 이력은 alarms 주기를 따른다 (§3.3)
+# 063 — 창 → (창 초, 주기 초, 갱신 주기 초). 목록 밖·없음은 24h. 갱신 주기는 주기가 길수록 늘린다(요금과 신선도)
+SERIES_RANGES: dict[str, tuple[int, int, int]] = {
+    "6h": (21_600, 300, 300),
+    "24h": (86_400, 300, 300),
+    "7d": (604_800, 3_600, 1_800),
+    "30d": (2_592_000, 10_800, 3_600),
+}
+SERIES_DEFAULT = "24h"
+# `range` 는 어느 상태에도 싣고(고른 창), 나머지는 값 키라 ok 가 아니면 null (034 §3.1)
+SERIES_KEYS = (
+    "range",
+    "periodSec",
+    "startTs",
+    "endTs",
+    "boxes",
+    "wsClients",
+    "canary",
+)
 _ITEM_KEYS = (
     "at",
     "source",
@@ -148,6 +168,11 @@ class AdminFeeds:
             for name, (refresh, _) in AWS_PARTS.items()
         }
         self._history = Slot(HISTORY_REFRESH_SEC, mono, wait_sec, classify)
+        # 063 — 창마다 캐시 한 칸. 읽기는 위 부분들과 같은 전용 스레드에서 차례로 돈다
+        self._series = {
+            name: Slot(refresh, mono, wait_sec, classify)
+            for name, (_, _, refresh) in SERIES_RANGES.items()
+        }
         self._warn = Warner(mono)
 
     # --- /admin/aws ---
@@ -169,6 +194,21 @@ class AdminFeeds:
             name: render(result, *AWS_PARTS[name])
             for name, result in zip(AWS_PARTS, results, strict=True)
         }
+
+    # --- /admin/aws/series (063) ---
+
+    async def aws_series(self, range_: str | None) -> dict[str, Any]:
+        """기간을 고르는 시계열 — 응답이 부분 하나다. 경고 이름은 창과 무관하게 `aws.series` 하나(10분에 1줄)."""
+        name = range_ if range_ in SERIES_RANGES else SERIES_DEFAULT
+        window, period, refresh = SERIES_RANGES[name]
+        result = await self._aws_part(
+            "aws.series",
+            self._series[name],
+            partial(self._reader.series, window, period),
+        )
+        body = render(result, refresh, SERIES_KEYS)
+        body["range"] = name  # 고른 창 — 목록 밖·없음이면 24h
+        return body
 
     # --- /admin/alerts ---
 
