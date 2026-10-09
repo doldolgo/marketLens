@@ -18,7 +18,7 @@
 ## 3. 동작
 
 ### 3.1 읽는 계약 (037·038·035 복사)
-- 게이트: `server/app/core/config.py` 의 `PRIVACY_V2_EFFECTIVE = "YYYY-MM-DD"`(037, KST 날짜). 게이트 시각 = 그날 00:00 Asia/Seoul(= 전날 15:00Z)이고 응답 `gateAt`(ms)에 늘 실린다. "게이트 뒤 KST 날" = KST 날짜가 그 값 이상인 날.
+- 게이트: `server/app/core/config.py` 의 `PRIVACY_V2_EFFECTIVE = "YYYY-MM-DD"`(037, KST 날짜 — 060 — 2026-10-09 로 당김). 게이트 시각 = 그날 00:00 Asia/Seoul(= 전날 15:00Z)이고 응답 `gateAt`(ms)에 늘 실린다. "게이트 뒤 KST 날" = KST 날짜가 그 값 이상인 날.
 - 짝(038) = (가린 IP — IPv4 /24·IPv6 /48, UA 원문). 메모리에서는 BLAKE2b(8바이트, 열쇠 = 프로세스마다 무작위 16바이트에 KST 날짜를 섞은 날마다 다른 값)로만 든다. 짝 기록은 (파일, KST 날)마다 사람 브라우저 모양 짝만, 상한 1,000(넘으면 `capped`)이고, 같은 날을 여러 파일이 나누면 해시로 합친다.
 - 짝 게이트(038 §3.2): 짝을 쓰는 처리는 KST 날짜가 게이트 이상인 줄에만 한다. 게이트 전 날의 줄은 해시하지도 짝 기록에 넣지도 않고 줄 단위 집계에만 든다. 게이트 전 `visitors` 는 `unconfigured`·`before_gate`(값 null), 게이트 뒤 `visitors.sinceTs` = max(`startTs`, 게이트 초).
 - 날마다 센 방문자(KST 날마다 따로 센 짝 수의 합 — 24시간 창은 오늘·어제(KST)를 따로 세어 더한 수라 사람 수가 아니다)·`confirmed`(JS 신호 줄을 남긴 짝 — 하한)·`shaped`(브라우저 모양 — 상한, confirmed 포함): 038 `visitors` 와 같은 정의·같은 창 자르기.

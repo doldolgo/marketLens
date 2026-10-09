@@ -28,7 +28,7 @@
 ## 3. 동작
 
 ### 3.1 시행일 D — 한 곳과 정하는 규칙
-- **한 곳**: `server/app/core/config.py` 의 상수 `PRIVACY_V2_EFFECTIVE = "YYYY-MM-DD"`(KST 날짜 — 아래 D). 뜻은 '처리방침 v2 가 시행되는 날 = 접속 요약의 30일 창과 나라·망 종류가 열리는 날' 이다.
+- **한 곳**: `server/app/core/config.py` 의 상수 `PRIVACY_V2_EFFECTIVE = "YYYY-MM-DD"`(KST 날짜 — 아래 D). 뜻은 '처리방침 v2 가 시행되는 날 = 접속 요약의 30일 창과 나라·망 종류가 열리는 날' 이다(060 — 2026-10-09 로 당김).
   - 이 PR 에서는 앱 코드가 읽지 않고 test_privacy 만 읽는다. 038·039 는 D 00:00 Asia/Seoul(= 전날 15:00Z)을 게이트로 쓰고 응답 `gateAt`(epoch ms)에 싣는다.
   - 다음 개정 때도 이 상수는 그대로 둔다 — v2 기능이 열린 날이라서다. 다음 판의 시행일은 test_privacy 의 `EFFECTIVE` 와 HTML·sitemap 만 바꾼다.
   - 상수 옆 주석은 왜 여기 있는지(038·039 의 게이트, 테스트가 방침 HTML 과 묶는다)를 적는다.
