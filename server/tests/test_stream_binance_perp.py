@@ -47,9 +47,7 @@ def info_row(symbol: str, **over: Any) -> dict[str, Any]:
     return row
 
 
-def exchange_info(
-    rows: list[dict[str, Any]], server_time: int = T0
-) -> dict[str, Any]:
+def exchange_info(rows: list[dict[str, Any]], server_time: int = T0) -> dict[str, Any]:
     return {"timezone": "UTC", "serverTime": server_time, "symbols": rows}
 
 
