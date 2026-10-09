@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import subprocess
 import sys
 import time
@@ -1293,3 +1294,266 @@ async def test_quote_frames_only_raise_last_message_at_and_leave_the_rest() -> N
     assert state.last_message_at == T0 + 9_000
     await stream.aclose()
     assert not state.connected and state.subscribed == 0
+
+
+# --- 정렬된 단계 목록 북 (§3.4) — 가격 → 잔량 dict 를 발행마다 정렬하던 것과 결과가 같은지 ---
+
+
+class _PriceMapBook:
+    """대조용 북 — 가격 → 잔량 dict 에 §3.4 규칙대로 반영하고, 꺼낼 때마다 전체를 정렬한다(가장 단순한 구현)."""
+
+    def __init__(self, data: dict[str, Any]) -> None:
+        self.asks = {float(p): float(q) for p, q in data["a"]}
+        self.bids = {float(p): float(q) for p, q in data["b"]}
+
+    def apply(self, data: dict[str, Any]) -> None:
+        for side, levels in (("a", self.asks), ("b", self.bids)):
+            for p, q in data.get(side) or []:
+                price, size = float(p), float(q)
+                if size <= 0:
+                    levels.pop(price, None)
+                else:
+                    levels[price] = size
+
+    def levels(self) -> tuple[list[list[float]], list[list[float]]]:
+        asks = [[p, q] for p, q in sorted(self.asks.items())]
+        bids = [[p, q] for p, q in sorted(self.bids.items(), reverse=True)]
+        return asks, bids
+
+
+def _random_price(r: random.Random) -> str:
+    # 같은 값 다른 표기("100"·"100.0"·"1e2", "0"·"-0")·inf 를 섞는다 — 처음 가격 객체를 지키는지까지 본다
+    if r.random() < 0.03:
+        return r.choice(["inf", "-0", "0", "1e2", "100.0", "100", "0.10", "0.1"])
+    return f"{r.randint(90, 110) + r.choice([0, 0.5, 0.25, 0.1]):.{r.choice([1, 2, 3])}f}"
+
+
+def _random_size(r: random.Random) -> str:
+    k = r.random()
+    if k < 0.25:
+        return "0"
+    if k < 0.28:
+        return r.choice(["inf", "-1", "0.0", "-0", "1e-3"])
+    return f"{r.random() * 10:.4f}"
+
+
+def _random_levels(r: random.Random, most: int) -> list[list[str]]:
+    return [[_random_price(r), _random_size(r)] for _ in range(r.randint(0, most))]
+
+
+def test_book_levels_match_sorting_a_price_map_for_random_snapshots_and_deltas() -> (
+    None
+):
+    """스냅샷·델타를 무작위로 400회차 × 120번 — 매번 꺼낸 단계가 dict 정렬 결과와 repr 까지 같다 (§3.4).
+
+    중복 가격(같은 값 다른 표기 포함)·잔량 0·음수 잔량·inf·부호 있는 0 을 섞는다. NaN 가격은 넣지 않는다 —
+    dict 정렬도 순서가 정의되지 않아 비교할 기준이 없고, 바이빗 가격 문자열은 tickSize 자리수로 고정돼 있다.
+    """
+    for seed in range(400):
+        r = random.Random(seed)
+        book = bybit_module._Book()
+        ref: _PriceMapBook | None = None
+        for step in range(120):
+            if step == 0 or r.random() < 0.05:
+                data = {"a": _random_levels(r, 30), "b": _random_levels(r, 30)}
+                book = bybit_module._Book()
+                book.replace(data)
+                ref = _PriceMapBook(data)
+            else:
+                data = {"a": _random_levels(r, 8), "b": _random_levels(r, 8)}
+                if r.random() < 0.1:
+                    data.pop(r.choice(["a", "b"]))  # 한쪽만 온 델타
+                book.apply(data)
+                assert ref is not None
+                ref.apply(data)
+            assert ref is not None
+            assert repr(book.sorted_levels()) == repr(ref.levels()), (seed, step)
+
+
+def test_book_keeps_dict_rules_for_duplicate_prices_zero_sizes_and_signed_zero() -> (
+    None
+):
+    """같은 가격은 뒤 잔량·처음 가격 객체, 스냅샷의 잔량 0 이하 단계는 남고 델타 0 은 삭제 — 고정 기대값 (§3.4)."""
+    book = bybit_module._Book()
+    book.replace(
+        {
+            "a": [["100", "1"], ["100.0", "2"], ["99.5", "0"], ["1e2", "3"], ["101", "-1"]],
+            "b": [["0", "1"], ["-0", "2"], ["98", "1"], ["98.00", "4"]],
+        }
+    )
+    assert repr(book.sorted_levels()) == (
+        "([[99.5, 0.0], [100.0, 3.0], [101.0, -1.0]], [[98.0, 4.0], [0.0, 2.0]])"
+    )
+    book.apply(
+        {
+            "b": [["-0", "5"], ["97.5", "0"], ["97", "1"]],  # -0 은 0.0 자리의 잔량 교체(가격 객체 0.0 유지)
+            "a": [["1e2", "0.5"], ["101.0", "0"], ["inf", "1"]],
+        }
+    )
+    assert repr(book.sorted_levels()) == (
+        "([[99.5, 0.0], [100.0, 0.5], [inf, 1.0]], [[98.0, 4.0], [97.0, 1.0], [0.0, 5.0]])"
+    )
+    book.apply({"b": [["0.00", "0"], ["-0", "1"]]})  # 지운 뒤 다시 넣으면 새 가격 객체(-0.0)
+    assert repr(book.sorted_levels()) == (
+        "([[99.5, 0.0], [100.0, 0.5], [inf, 1.0]], [[98.0, 4.0], [97.0, 1.0], [-0.0, 1.0]])"
+    )
+
+
+def test_published_levels_stay_as_they_were_after_later_deltas() -> None:
+    """꺼낸 단계 목록은 뒤 델타(삽입·삭제·잔량 교체)에 바뀌지 않는다 — 목록은 복사, 원소는 새 목록으로 교체 (§3.4)."""
+    book = bybit_module._Book()
+    book.replace({"a": [["101", "1"], ["100", "1"]], "b": [["98", "1"], ["99", "1"]]})
+    asks, bids = book.sorted_levels()
+    kept = repr((asks, bids))
+    book.apply(
+        {
+            "a": [["100", "5"], ["100.5", "2"], ["101", "0"]],
+            "b": [["99", "0"], ["98", "3"], ["98.5", "4"]],
+        }
+    )
+    assert repr((asks, bids)) == kept
+    assert book.sorted_levels() == (
+        [[100.0, 5.0], [100.5, 2.0]],
+        [[98.5, 4.0], [98.0, 3.0]],
+    )
+
+
+async def test_size_only_delta_does_not_leak_into_rows_already_published() -> None:
+    """잔량만 바뀐 델타가 이미 내보낸 행을 바꾸지 않는다 — 행은 북의 단계 원소를 그대로 문다 (§3.2·§3.4).
+
+    원소를 제자리에서 고치면 발행 제한으로 아직 나가지 않아야 할 델타가 저장된 행에 새어 들고, 붙잡아 둔 옛 행도 바뀐다.
+    """
+    sock = GatedSocket()
+    stream, _, sleeps, _, clock, store = await build([sock])
+    stream.start()
+    await until(sock.subscribed)
+    sock.push(snapshot(levels=3))  # asks 71000·71010·71020, bids 70990·70980·70970, 잔량 0.1
+    await until(sock.delivered)
+    first = store.get("bybit", "BTC")
+    assert first is not None
+    first_levels = repr((first.asks, first.bids))
+    clock.now = T0 + 100  # 마지막 발행 뒤 100ms — 북에만 쌓인다
+    sock.push(
+        delta(asks=[["71000.00", "0.7"]], bids=[["70990.00", "0.9"]], ts=T0 + 90)
+    )
+    await until(sock.delivered)
+    row = store.get("bybit", "BTC")
+    assert row is not None and repr((row.asks, row.bids)) == first_levels
+    clock.now = T0 + 500
+    sleeps.release_flush()  # 한 주기 지남 → 묶인 델타가 새 행으로
+    await asyncio.sleep(0.01)
+    second = store.get("bybit", "BTC")
+    assert second is not None
+    assert second.asks == [[71_000.0, 0.7], [71_010.0, 0.1], [71_020.0, 0.1]]
+    assert second.bids == [[70_990.0, 0.9], [70_980.0, 0.1], [70_970.0, 0.1]]
+    assert repr((first.asks, first.bids)) == first_levels  # 붙잡아 둔 옛 행은 그대로
+    second_levels = repr((second.asks, second.bids))
+    clock.now = T0 + 600  # 다음 델타도 북에만 — 직전 행이 그대로인지
+    sock.push(
+        delta(asks=[["71000.00", "0.3"]], bids=[["70990.00", "0.2"]], ts=T0 + 590)
+    )
+    await until(sock.delivered)
+    row = store.get("bybit", "BTC")
+    assert row is not None and repr((row.asks, row.bids)) == second_levels
+    clock.now = T0 + 1_000
+    sleeps.release_flush()
+    await asyncio.sleep(0.01)
+    third = store.get("bybit", "BTC")
+    assert third is not None
+    assert third.asks[0] == [71_000.0, 0.3] and third.bids[0] == [70_990.0, 0.2]
+    assert repr((second.asks, second.bids)) == second_levels
+    assert repr((first.asks, first.bids)) == first_levels
+    await stream.aclose()
+
+
+# --- 같은 입력의 set_universe (§3.3) — 다시 계산하지 않아도 결과가 같은지 ---
+
+
+def _assignment(stream: BybitStream) -> list[set[str]]:
+    return [set(s.assigned) for s in stream._shards]
+
+
+async def test_set_universe_with_the_same_map_and_universe_skips_recomputing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """맵 객체와 우주가 직전과 같으면 배정을 다시 계산하지 않는다 — 배정·재조정 깨우기는 그대로 (§3.3)."""
+    per_shard = [symbols_for(k, 2) for k in range(SHARDS)]
+    symbols = [s for g in per_shard for s in g]
+    stream, _, _, _, _, _ = await build([], symbols=symbols)
+    expected = [set(g) for g in per_shard]
+    assert _assignment(stream) == expected
+    hashed: list[str] = []
+    real = bybit_module.shard_of
+    monkeypatch.setattr(
+        bybit_module, "shard_of", lambda s: hashed.append(s) or real(s)
+    )
+    stream._wake.clear()
+    stream.set_universe({base_of(s) for s in symbols})  # 같은 내용의 새 집합
+    assert hashed == []
+    assert _assignment(stream) == expected and not stream._wake.is_set()
+    # 다른 해외에만 있는 코인이 더해진 우주 — 입력이 달라 다시 계산하지만 배정은 같다
+    universe = {base_of(s) for s in symbols} | {"OTHERFX"}
+    stream.set_universe(universe)
+    assert hashed != []
+    assert _assignment(stream) == expected and not stream._wake.is_set()
+    # 같은 집합 객체를 제자리에서 고쳐 다시 넘겨도 바뀐 것으로 본다(우주는 사본으로 기억한다)
+    dropped = per_shard[0][0]
+    universe.discard(base_of(dropped))
+    stream.set_universe(universe)
+    assert _assignment(stream) == [expected[0] - {dropped}, *expected[1:]]
+    assert stream._wake.is_set()
+
+
+async def test_refresh_with_an_equal_map_keeps_the_assignment_without_waking() -> None:
+    """목록 본문이 달라 맵이 새 객체가 돼도 내용이 같으면 배정·구독·행이 그대로다 (§3.3)."""
+    a, b = symbols_for(BTC_SHARD, 2)
+    sock = GatedSocket()
+    stream, _, _, _, _, store = await build([sock], symbols=[a, b])
+    universe = {base_of(a), base_of(b)}
+    stream.start()
+    await until(sock.subscribed)
+    sock.push(snapshot(a))
+    await until(sock.delivered)
+    before_map = stream._symbol_of
+    before = (_assignment(stream), len(sock.sent))
+    usdc = {"symbol": f"{base_of(a)}USDC", "baseCoin": base_of(a), "quoteCoin": "USDC", "status": "Trading"}
+    await stream.refresh(
+        _client(lambda r: httpx.Response(200, json=instruments([a, b], extra=[usdc])))
+    )
+    assert stream._symbol_of is not before_map and stream._symbol_of == before_map
+    stream._wake.clear()
+    stream.set_universe(universe)
+    await asyncio.sleep(0.01)
+    assert (_assignment(stream), len(sock.sent)) == before
+    assert not stream._wake.is_set()
+    assert store.get("bybit", base_of(a)) is not None
+    await stream.aclose()
+
+
+async def test_refresh_that_drops_a_symbol_reassigns_even_with_the_same_universe() -> (
+    None
+):
+    """우주가 같아도 목록에서 빠진 심볼은 배정·북에서 빠지고 구독을 끊는다 — 맵이 바뀌면 다시 맞춘다 (§3.3)."""
+    a, b = symbols_for(BTC_SHARD, 2)
+    sock = GatedSocket()
+    stream, _, _, _, _, _ = await build([sock], symbols=[a, b])
+    universe = {base_of(a), base_of(b)}
+    stream.start()
+    await until(sock.subscribed)
+    sock.push(snapshot(a))
+    await until(sock.delivered)
+    assert a in stream._shards[BTC_SHARD].books
+    before = len(sock.sent)
+    stream.set_universe(universe)  # 같은 맵·같은 우주 — 보내지 않는다
+    await asyncio.sleep(0.01)
+    assert len(sock.sent) == before
+    await stream.refresh(
+        _client(lambda r: httpx.Response(200, json=instruments([b])))
+    )  # a 가 목록에서 빠졌다
+    stream.set_universe(universe)
+    await asyncio.sleep(0.01)
+    assert stream._shards[BTC_SHARD].assigned == {b}
+    assert a not in stream._shards[BTC_SHARD].books
+    new = [json.loads(m) for m in sock.sent[before:]]
+    assert [(m["op"], m["args"]) for m in new] == [("unsubscribe", topics(a))]
+    await stream.aclose()
