@@ -14,7 +14,9 @@
 import asyncio
 import contextlib
 import gc
+import importlib.util
 import logging
+import sys
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -98,6 +100,18 @@ from app.features.spreads.router import refresh_router as spreads_refresh_router
 from app.features.spreads.router import router as spreads_router
 from app.features.spreads.ws import ws_router as spreads_ws_router
 from app.features.wallet_status.service import WalletStatusService
+
+# httpcore 1.0.9 는 trio 인지 가리려고 REST 요청마다 `import sniffio` 를 4번 시도한다(AsyncShieldCancellation 3 +
+# AsyncEvent 1). anyio 4.12 부터 sniffio 에 기대지 않아 이 환경에는 깔려 있지 않은데, 실패한 import 는 캐시되지
+# 않아 그때마다 sys.path 를 다시 뒤진다(Mac 실측 요청당 ≈140µs, 수집기 REST 전체로 초당 ≈0.9ms — 2026-10-09).
+# 깔려 있지 않을 때만 sys.modules 에 None 을 넣어 곧바로 ImportError 가 나게 한다. 판별 결과는 지금과 같다 —
+# httpcore·httpx 는 ImportError 를 잡아 asyncio 로, anyio 는 sniffio 없음으로 본다. setdefault 를 쓰지 않는 것은
+# 그 결과가 import 순서에 달려서다 — anyio 는 내부 모듈(_core._eventloop)을 처음 읽을 때 sniffio 를 import 하는데
+# (지금은 위의 fastapi 가 먼저 읽힌다), 순서가 바뀌면 깔려 있는데 아직 안 읽힌 진짜 sniffio 까지 None 으로 막는다.
+# find_spec 은 깔려 있는지만 본다. 두 역할(collector·api) 모두 이 모듈을 읽으므로 둘 다 적용되고, sniffio 를
+# 필요로 하는 라이브러리(trio 등)를 들이면 sniffio 도 함께 깔리므로 이 줄은 아무것도 바꾸지 않는다.
+if importlib.util.find_spec("sniffio") is None:
+    sys.modules["sniffio"] = None
 
 logger = logging.getLogger("marketlens.main")
 
@@ -375,13 +389,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         flusher.start()
 
     # 5. 050 — 이더리움 ERC-20 입출금 감지기. Influx·Redis 가 준비된 뒤, ETH_WS_URL·ETH_HTTP_URL 둘 다 있을 때만.
-    # 씨앗 읽기 실패는 기동 실패다(감지기 없이 뜨면 거짓 0 이 쌓인다 — 050 §3.2). Redis 추가분은 start 가 합친다
+    # 씨앗 읽기 실패는 기동 실패다(감지기 없이 뜨면 거짓 0 이 쌓인다 — 050 §3.2). Redis 추가분은 start 가 합친다.
+    # 씨앗 gzip CSV 넷(입금주소 3.2만 행) 읽기는 Mac 기준 약 22ms 동기 작업이다. 이 시점엔 스트림·틱 루프가 이미 돌고
+    # 있어 루프가 그만큼 멈추므로 기본 실행기 스레드에서 읽는다. 예외는 await 지점으로 그대로 올라와 기동 실패는 같고,
+    # await 라서 감지기 시작·GC 정리보다 먼저 끝나는 순서도 같다(2026-10-09)
     eth_flow: EthFlowDetector | None = None
     if settings.eth_ws_url and settings.eth_http_url:
         eth_flow = EthFlowDetector(
             ws_url=settings.eth_ws_url,
             http_url=settings.eth_http_url,
-            seeds=load_seeds(),
+            seeds=await asyncio.to_thread(load_seeds),
             writer=influx,
             bus=bus,
         )
