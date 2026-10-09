@@ -21,8 +21,11 @@
 |---|---|
 | `/admin/aws` | collector |
 | `/admin/alerts` | collector |
+| `/admin/aws/series` | collector |
 
-- 수집기에 두는 이유: 자격증명이 collect 박스의 인스턴스 역할(`marketlens-s3-snapshot`, 메타데이터 hop 2 라 컨테이너가 쓴다 — 010)에만 있다. serve 는 027 이 일부러 컨테이너를 역할에서 막았다(토큰 필수·hop 1) — hop 을 올리면 cloudflared(030)까지 닿는다. serve 호스트 cron 은 앱 밖 코드·호스트 CLI·data 와 같이 쓰는 역할 확장이 들고, 정적 키는 오래 사는 비밀이다. 수집기는 페이지가 보이는 동안만 부르고 부담은 §3.4 처럼 작다. api 역할에서는 404 이고, OpenAPI 는 collector 스키마에만 두 경로가 있다.
+피드 목록 끝의 `/admin/aws/series`(063)는 기간을 고르는 AWS 시계열이다 — 이 절의 공통 규칙·§3.2 의 설정·오류 분류·전용 실행기를 그대로 쓰고, 경로·지표·창은 063 이 정한다.
+
+- 수집기에 두는 이유: 자격증명이 collect 박스의 인스턴스 역할(`marketlens-s3-snapshot`, 메타데이터 hop 2 라 컨테이너가 쓴다 — 010)에만 있다. serve 는 027 이 일부러 컨테이너를 역할에서 막았다(토큰 필수·hop 1) — hop 을 올리면 cloudflared(030)까지 닿는다. serve 호스트 cron 은 앱 밖 코드·호스트 CLI·data 와 같이 쓰는 역할 확장이 들고, 정적 키는 오래 사는 비밀이다. 수집기는 페이지가 보이는 동안만 부르고 부담은 §3.4 처럼 작다. api 역할에서는 404 이고, OpenAPI 는 collector 스키마에만 있다(063 의 `/admin/aws/series` 도 같다).
 - 관리자 nginx(029, :8081)에 정확 일치 둘: `= /api/admin/aws`·`= /api/admin/alerts` → 수집기(`${COLLECT_HOST}:8000`, 접두 `/api` 제거 — 029 의 `/api/` 분기와 같은 곳). 따로 두는 이유는 화면의 폴링을 접속 기록에서 빼려는 것이다(`access_log off`). 첫 줄은 029 의 교차 사이트 검사(`Sec-Fetch-Site` 가 same-origin·none·빈 값만 통과, 나머지 403 JSON). server 수준 헤더(`Cookie`·`Cf-Access-Jwt-Assertion` 비움·ACAO 지움·`X-Frame-Options`)는 상속한다 — 자기 `proxy_set_header`·`add_header` 를 두지 않는다. 공개 nginx(028)는 바꾸지 않는다 — 두 경로는 허용 목록 밖이라 028 의 404 JSON 이다.
 - 응답은 항상 200 JSON(상태 응답 — `{"error":…}` 형식 아님), 키 camelCase, `…At` 은 epoch ms, `…Ts` 와 점·시간 칸의 `ts` 는 epoch 초(product.md 시각 단위). 한 응답은 **부분**들이고, 부분은 `{state, code, fetchedAt, refreshSec, …값 키}` 객체다.
 
