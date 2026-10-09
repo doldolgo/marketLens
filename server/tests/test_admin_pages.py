@@ -279,3 +279,154 @@ def test_traffic_server_answering_another_window_moves_the_pick_back() -> None:
     assert got["pressed"] == ["24h"]
     assert got["disabled"] == [False, True, True]
     assert got["note"].startswith("7·30일은 ") and got["note"].endswith(" 부터")
+
+
+EXPIRY = (
+    RESPOND
+    + r"""
+const html = [401, '<html>login</html>']
+// 1. 빠른 경로 둘이 401 비JSON — 새로고침은 한 번(이 페이지의 고정 주소), 그 뒤로는 부르지 않는다
+{
+  const v = setup({ respond: (url) => (url === '/api/health' || url === '/svc/api/health' ? html : respond(url)) })
+  await page('server.js', '?e=1')
+  await flush()
+  out.first = { replaced: v.s.replaced, calls: v.s.calls.length }
+}
+// 2. 표시(?relogin=1)가 있으면 새로고침하지 않고 알림만
+{
+  const v = setup({ search: '?relogin=1', respond: (url) => (url === '/api/health/collect' ? ['reject', null] : respond(url)) })
+  await page('traffic.js', '?e=2')
+  await flush()
+  out.marked = { replaced: v.s.replaced, hidden: v.byId.get('notice').hidden, text: v.text('notice') }
+}
+// 3. 표시가 있어도 이 페이지의 키가 모두 만료 신호 없이 끝나면 표시를 지운다(주소는 고정 주소)
+{
+  const v = setup({ search: '?relogin=1', respond })
+  await page('overview.js', '?e=3')
+  await flush()
+  out.alive = { cleared: v.s.cleared, hidden: v.byId.get('notice').hidden, replaced: v.s.replaced }
+}
+// 4. 앱 JSON 의 401(토큰 오류)은 만료가 아니다 — 그 칸만 '불러오지 못함'
+{
+  const v = setup({ respond: (url) => (url === '/api/admin/alerts' ? [401, { detail: 'nope' }] : respond(url)) })
+  await page('server.js', '?e=4')
+  await flush()
+  out.appJson = { replaced: v.s.replaced, tag: v.text('t-alarms'), chart: v.text('c-alerts') }
+}
+"""
+)
+
+
+def test_expiry_signal_reloads_once_and_the_mark_is_cleared_when_all_paths_answer() -> (
+    None
+):
+    """029·036 그대로 — 401 비JSON·fetch 실패는 만료 신호: 표시가 없으면 `<이 페이지>?relogin=1` 로 한 번, 있으면 알림만.
+    이 페이지의 키가 모두 신호 없이 끝나면 표시를 지운다. 401 + 앱 JSON 은 만료가 아니다."""
+    got = run_admin(EXPIRY, _payload())
+    assert got["first"]["replaced"] == ["/server.html?relogin=1"]
+    assert (
+        got["first"]["calls"] == 7
+    )  # 첫 두 묶음뿐 — 새로고침을 기다리는 동안 더 부르지 않는다
+    assert got["marked"]["replaced"] == []
+    assert got["marked"]["hidden"] is False and "로그인" in got["marked"]["text"]
+    assert got["alive"] == {"cleared": ["/"], "hidden": True, "replaced": []}
+    assert got["appJson"]["replaced"] == []
+    assert got["appJson"]["chart"] == "불러오지 못함"
+
+
+DEGRADED = (
+    RESPOND
+    + r"""
+// 1. 차트 라이브러리를 못 불러옴 — 그림 칸만 한 줄, 큰 수·상태 띠는 그대로(§3.5)
+{
+  const v = setup({ respond, charts: false })
+  await page('overview.js', '?d=1')
+  await flush()
+  out.nolib = { band: v.text('band-word'), ws: v.text('v-ws'), spark: v.text('c-ws'), traffic: v.text('c-traffic'), gauge: v.text('g-data') }
+}
+// 2. 시계열 피드가 아직 없다(063 배포 전 — 앱의 404 JSON) — '연결 안 됨', 그 밖 카드는 그대로
+{
+  const v = setup({ respond: (url) => (url.startsWith('/api/admin/aws/series') ? [404, { detail: 'Not Found' }] : respond(url)) })
+  await page('server.js', '?d=2')
+  await flush()
+  out.noSeries = { tag: v.text('t-cpu'), chart: v.text('c-cpu'), collect: v.text('t-collect'), word: v.text('hdr-word') }
+}
+// 3. 문제가 있으면 띠는 칩(심각한 순) — 칩은 고정 표의 주소로만 링크
+{
+  const v = setup({ respond: (url) => (url === '/api/health' ? [503, { status: 'stale', lastTickAt: null }] : url === '/svc/api/admin/status' ? [200, { wsConnections: 0, redis: 'ok', influx: 'down' }] : respond(url)) })
+  await page('overview.js', '?d=3')
+  await flush()
+  const chips = v.byId.get('chips').kids
+  out.problem = { band: v.text('band-word'), cls: v.byId.get('band').className, chips: chips.map((c) => [c.className, c.textContent, c.attrs.href]), word: v.text('hdr-word') }
+}
+"""
+)
+
+
+def test_cards_degrade_alone_when_the_library_or_a_feed_is_missing() -> None:
+    """§3.5 — 라이브러리가 없으면 그림 칸만 '차트를 불러오지 못함', 062·063 이 없으면 그 카드만 '연결 안 됨'.
+    §3.2 — 문제가 있으면 띠는 빨강 칩(누르면 서버 페이지의 해당 카드)."""
+    got = run_admin(DEGRADED, _payload())
+    nolib = got["nolib"]
+    assert nolib["band"] == "정상" and nolib["ws"] == "4"
+    for key in ("spark", "traffic", "gauge"):
+        assert nolib[key] == "차트를 불러오지 못함", key
+    assert got["noSeries"] == {
+        "tag": "연결 안 됨",
+        "chart": "연결 안 됨",
+        "collect": "",
+        "word": "정상",
+    }
+    problem = got["problem"]
+    assert problem["band"] == "문제" and problem["cls"] == "band bad"
+    assert problem["chips"] == [
+        ["chip bad", "수집 멈춤stale", "/server.html#collect"],
+        ["chip bad", "Influx 끊김down", "/server.html#collect"],
+    ]
+    assert problem["word"] == "문제 2"
+
+
+REFRESH = (
+    RESPOND
+    + r"""
+const v = setup({ respond: (url, init) => (url === '/api/refresh' ? [input.refresh.status, input.refresh.body] : respond(url)), buttons: { range: ['24h'] } })
+await page('server.js')
+await flush()
+document.getElementById('token').value = 'secret-token'
+const sent = []
+const real = globalThis.fetch
+globalThis.fetch = (url, init = {}) => { if (url === '/api/refresh') sent.push(init.headers); return real(url, init) }
+v.byId.get('refresh').fire('click')
+await flush()
+out.result = { status: v.text('refresh-status'), saved: v.text('refresh-saved'), failures: v.text('refresh-failures'), warnings: v.text('refresh-warnings'), shown: !v.byId.get('refresh-result').hidden }
+out.sent = sent
+out.replaced = v.s.replaced
+out.last = v.s.calls.at(-1)
+"""
+)
+
+
+def test_refresh_tool_posts_the_token_header_and_shows_the_result() -> None:
+    """029 그대로 — POST /api/refresh 에 X-Refresh-Token·X-Requested-With, 200 이면 저장 수·실패·경고, 401 JSON 은 토큰 오류(새로고침 없음)."""
+    ok = {
+        "status": 200,
+        "body": {
+            "totalSaved": 1234,
+            "failures": [{"exchange": "okx", "errorCode": "timeout"}],
+            "warnings": ["<img src=x onerror=alert(1)>"],
+        },
+    }
+    got = run_admin(REFRESH, _payload(refresh=ok))
+    assert got["last"] == "POST /api/refresh"
+    assert got["sent"] == [
+        {"X-Requested-With": "XMLHttpRequest", "X-Refresh-Token": "secret-token"}
+    ]
+    assert got["result"] == {
+        "status": "200",
+        "saved": "1,234",
+        "failures": "okx · timeout",
+        "warnings": "<img src=x onerror=alert(1)>",
+        "shown": True,
+    }
+    bad = run_admin(REFRESH, _payload(refresh={"status": 401, "body": {"detail": "x"}}))
+    assert bad["result"]["status"] == "401 토큰 오류" and bad["replaced"] == []
