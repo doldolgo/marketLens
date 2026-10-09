@@ -1,0 +1,182 @@
+<!doctype html>
+<!-- KimpTrack 관리자 v3 — 트래픽(스펙 064 §3.4 누가·어디서·언제·무엇을). web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
+     인라인 스크립트·스타일 없음(CSP). 값은 traffic.js 가 글자(textContent)와 차트(vendor ECharts)로 채운다.
+     나라·망 종류는 DB-IP Lite(CC BY 4.0) — 이 페이지에 표시 링크를 둔다(039). -->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="color-scheme" content="dark" />
+    <title>트래픽 · KimpTrack 관리자</title>
+    <link rel="stylesheet" href="admin.css" />
+    <script src="vendor/echarts-5.5.1.min.js" defer></script>
+    <script type="module" src="traffic.js"></script>
+  </head>
+  <body>
+    <header class="top">
+      <div class="top-in">
+        <a class="brand" href="/">KimpTrack <span>관리자</span></a>
+        <nav class="nav" aria-label="페이지">
+          <a href="/">개요</a>
+          <a href="/server.html">서버</a>
+          <a href="/traffic.html" aria-current="page">트래픽</a>
+          <a href="/screens.html">화면</a>
+        </nav>
+        <div class="top-side">
+          <a class="state wait" id="hdr-state" href="/"><span id="hdr-word">확인 중</span></a>
+          <span class="stamp">마지막 갱신 <span id="updated">--:--:--</span></span>
+          <a class="logout" href="/cdn-cgi/access/logout">로그아웃</a>
+        </div>
+      </div>
+    </header>
+    <p id="notice" class="notice" role="alert" hidden></p>
+
+    <main class="wrap">
+      <div class="bar">
+        <div class="seg" role="group" aria-label="창">
+          <button type="button" data-window="24h" aria-pressed="true">24시간</button>
+          <button type="button" data-window="7d" aria-pressed="false">7일</button>
+          <button type="button" data-window="30d" aria-pressed="false">30일</button>
+        </div>
+        <span class="tag" id="t-access"></span>
+        <a class="out end" href="/screens.html" target="_blank" rel="noopener">화면 분석 열기 ↗</a>
+      </div>
+
+      <section class="kpis" aria-label="큰 수">
+        <div class="card">
+          <div class="card-head"><h2>방문자</h2><span class="q" title="확인(스크립트가 돈 방문자) ~ 브라우저 모양. KST 날마다 센 수의 합이라 사람 수가 아니다.">?</span><span class="tag" id="t-visitors"></span></div>
+          <div class="big" id="v-visitors">–</div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>사람 모양 페이지</h2><span class="q" title="브라우저 모양 UA 의 페이지 요청 — 위장 봇이 섞인다.">?</span></div>
+          <div class="big" id="v-pages">–</div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>지금 접속</h2><span class="q" title="api 가 지금 들고 있는 대시보드 연결 수.">?</span><span class="tag" id="t-now"></span></div>
+          <div class="big" id="v-now">–</div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>봇 비율</h2><span class="q" title="스캐너·자동화 도구 요청 ÷ 전체 요청. 탐색 경로 요청은 대부분 이 둘에 든다.">?</span></div>
+          <div class="big" id="v-bots">–</div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>5xx</h2><span class="q" title="서버 오류 응답(대시보드 WS 재접속 실패는 뺀 수).">?</span></div>
+          <div class="big" id="v-5xx">–</div>
+        </div>
+      </section>
+
+      <section class="card" id="flows" aria-labelledby="h-flows">
+        <div class="card-head"><h2 id="h-flows">흐름</h2><span class="q" title="들어온 길 → 첫 페이지 → 마지막 페이지. 굵기는 브라우저 모양 방문자(날마다 셈).">?</span><span class="tag" id="t-flows"></span></div>
+        <div class="chart sankey" id="c-flows"></div>
+      </section>
+
+      <section class="grid" aria-label="언제">
+        <div class="card">
+          <div class="card-head"><h2>방문 추이</h2><span class="q" title="24시간은 시간별 페이지(확인 = 스크립트가 돈 페이지), 7·30일은 날별 방문자. 선은 다시 온 사람.">?</span><span class="tag" id="t-trend"></span></div>
+          <div class="chart" id="c-trend"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>요일 × 시간</h2><span class="q" title="스크립트가 돈 페이지 보기 — 이 브라우저 시간대.">?</span><span class="tag" id="t-heat"></span></div>
+          <div class="chart" id="c-heat"></div>
+        </div>
+      </section>
+
+      <h2 class="sec">어디서</h2>
+      <section class="grid" aria-label="어디서">
+        <div class="card">
+          <div class="card-head"><h3>들어온 길</h3><span class="q" title="그날 첫 페이지의 출처로 나눈 방문자(브라우저 모양).">?</span><span class="tag" id="t-channels"></span></div>
+          <div class="chart" id="c-channels"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>출처 상위</h3><span class="q" title="다른 사이트에서 온 사람 모양 페이지.">?</span></div>
+          <div class="chart" id="c-referrers"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>나라</h3><span class="q" title="IP 앞부분으로 찾은 나라(브라우저 모양 방문자). 하루 3 미만인 나라는 (기타).">?</span><span class="tag" id="t-countries"></span></div>
+          <div class="chart" id="c-countries"></div>
+          <p class="sub"><a href="https://db-ip.com" rel="noreferrer">IP Geolocation by DB-IP</a></p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>망 종류</h3><span class="q" title="IP 앞부분이 속한 망(브라우저 모양 방문자).">?</span><span class="tag" id="t-networks"></span></div>
+          <div class="chart" id="c-networks"></div>
+        </div>
+        <div class="card" id="utm-card" hidden>
+          <div class="card-head"><h3>utm</h3><span class="q" title="utm_source 가 붙은 사람 모양 페이지.">?</span></div>
+          <div class="chart" id="c-utm"></div>
+        </div>
+      </section>
+
+      <h2 class="sec">들어오고 나간 곳</h2>
+      <section class="grid" aria-label="들어오고 나간 곳">
+        <div class="card">
+          <div class="card-head"><h3>첫 · 마지막 페이지</h3><span class="q" title="그날 처음 본 페이지와 마지막 페이지(브라우저 모양 방문자).">?</span><span class="tag" id="t-ends"></span></div>
+          <div class="chart" id="c-ends"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>본 페이지 수</h3><span class="q" title="방문자가 그날 본 페이지 수.">?</span><span class="tag" id="t-depth"></span></div>
+          <div class="chart" id="c-depth"></div>
+        </div>
+      </section>
+
+      <h2 class="sec">누가</h2>
+      <section class="grid" aria-label="누가">
+        <div class="card wide">
+          <div class="card-head"><h3>요청 종류</h3><span class="q" title="모든 요청·페이지를 UA 로 나눈 여덟 종류의 비율.">?</span></div>
+          <div class="chart short" id="c-classes"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>기기</h3><span class="tag" id="t-devices"></span></div>
+          <div class="chart" id="c-devices"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>OS</h3><span class="tag" id="t-os"></span></div>
+          <div class="chart" id="c-os"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>브라우저</h3><span class="tag" id="t-browsers"></span></div>
+          <div class="chart" id="c-browsers"></div>
+        </div>
+      </section>
+
+      <h2 class="sec">무엇을</h2>
+      <section class="grid" aria-label="무엇을">
+        <div class="card">
+          <div class="card-head"><h3>많이 연 경로</h3><span class="q" title="사람 모양 페이지의 경로.">?</span></div>
+          <div class="chart" id="c-paths"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>대시보드 진입 탭</h3><span class="q" title="대시보드를 열 때의 탭(사람 모양 페이지).">?</span></div>
+          <div class="chart" id="c-tabs"></div>
+        </div>
+      </section>
+
+      <h2 class="sec" id="problems">문제</h2>
+      <section class="grid" aria-label="문제">
+        <div class="card">
+          <div class="card-head"><h3>응답 상태</h3><span class="q" title="모든 요청의 응답 상태. WS 재접속 실패는 대시보드 WebSocket 5xx.">?</span></div>
+          <div class="chart" id="c-status"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>WS 연결 시간</h3><span class="q" title="끝난 대시보드 연결이 열려 있던 시간(머문 시간이 아니다).">?</span></div>
+          <div class="chart" id="c-durations"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>최근 5xx</h3></div>
+          <div class="scroll"><table class="table"><tbody id="r5xx"></tbody></table></div>
+        </div>
+      </section>
+
+      <h2 class="sec">Clarity</h2>
+      <section class="card" id="clarity" aria-label="Clarity">
+        <div class="card-head"><h3>화면 분석(동의한 방문자)</h3><span class="q" title="Microsoft Clarity — 최근 24시간, 동의한 방문자만. 몇 시간마다 한 번 받는다.">?</span><a class="out" href="https://clarity.microsoft.com/projects" rel="noreferrer">Clarity 열기 ↗</a><span class="tag" id="t-clarity"></span></div>
+        <div class="kpis">
+          <div><div class="sub">세션</div><div class="big" id="v-sessions">–</div></div>
+          <div><div class="sub">평균 스크롤 깊이</div><div class="big" id="v-scroll">–</div></div>
+          <div><div class="sub">활성 시간</div><div class="big" id="v-active">–</div></div>
+        </div>
+        <div class="chart" id="c-signals"></div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -18,7 +18,7 @@ COPY nginx.conf /etc/nginx/templates/default.conf.template
 # 029 — 관리자 server(:8081, 게시 안 함). 같은 envsubst 규칙(COLLECT_HOST 하나)으로 conf.d/admin.conf 가 된다
 COPY nginx-admin.conf /etc/nginx/templates/admin.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
-# 029 — 관리자 화면(정적 셋, 빌드 없음). 공개 root(/usr/share/nginx/html) 밖이라 공개 server 로는 받아 갈 수 없다
+# 029·064 — 관리자 화면(정적 페이지·ES 모듈·vendor 의 ECharts 사본, 빌드 없음). 공개 root(/usr/share/nginx/html) 밖이라 공개 server 로는 받아 갈 수 없다
 COPY admin /usr/share/nginx/admin
 # 029 — 관리자 접속 기록 디렉터리. compose 가 호스트 ./logs/admin 을 바인드하지만, 바인드가 없어도 nginx 가 뜨게
 # 이미지가 만든다(열지 못하면 공개 server 까지 내려간다). /var/log/nginx 는 stdout·stderr 링크라 건드리지 않는다
