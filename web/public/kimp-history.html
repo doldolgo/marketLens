@@ -83,12 +83,14 @@
     .btn:hover { background: rgba(145, 132, 217, 0.12); }
     .btn-lg { height: 48px; padding: 0 22px; font-size: 16px; }
 
-    .doc { padding-block: 48px 96px; }
+    /* 본문은 가운데 한 칸 — 17px 글자로 34em(578px). h1·h2 처럼 글자가 큰 요소도 같은 왼쪽 선에 서도록 em 이 아니라 px 로 잰다 */
+    .doc { padding-block: 48px 96px; --col: 578px; }
+    .doc > *, section > * { max-width: var(--col); margin-inline: auto; }
     h1 { font-size: 36px; line-height: 1.25; letter-spacing: -0.03em; }
-    .lead { margin-top: 24px; max-width: 34em; color: var(--n300); }
+    .lead { margin-top: 24px; color: var(--n300); }
     .cta { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; margin-top: 28px; }
-    section { margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--divider); }
-    section > * { max-width: 34em; }
+    /* 절은 넓은 그림·표를 담으려고 폭을 두지 않는다 — 위 구분선만 본문 칸 폭으로 가운데에 긋는다 */
+    .doc > section { max-width: none; margin-top: 56px; padding-top: 32px; background: linear-gradient(var(--divider), var(--divider)) 50% 0 / min(var(--col), 100%) 1px no-repeat; }
     section > .live { max-width: 48em; }
     h2 { font-size: 24px; line-height: 1.4; letter-spacing: -0.02em; }
     h3 { margin-top: 28px; font-size: 17px; line-height: 1.5; }

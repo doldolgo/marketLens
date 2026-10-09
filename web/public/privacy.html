@@ -52,8 +52,9 @@
     .btn:hover { background: rgba(145, 132, 217, 0.12); }
     .btn:active { background: rgba(145, 132, 217, 0.22); }
 
-    .doc { padding-block: 48px 96px; }
-    .doc > * { max-width: 34em; }
+    /* 본문은 가운데 한 칸 — 17px 글자로 34em(578px). h1·h2 처럼 글자가 큰 요소도 같은 왼쪽 선에 서도록 em 이 아니라 px 로 잰다 */
+    .doc { padding-block: 48px 96px; --col: 578px; }
+    .doc > * { max-width: var(--col); margin-inline: auto; }
     h1 { font-size: 36px; line-height: 1.25; letter-spacing: -0.03em; }
     .meta { margin-top: 8px; font-size: 15px; color: var(--n400); }
     .lead { margin-top: 24px; color: var(--n300); }
@@ -106,9 +107,10 @@
     .tbl th { padding: 0 14px 10px 0; border-bottom: 1px solid var(--divider); text-align: left; font-size: 13px; font-weight: 500; color: var(--n500); }
     .tbl td, .tbl tbody th { padding: 12px 14px 12px 0; border-bottom: 1px solid var(--divider); text-align: left; vertical-align: baseline; color: var(--n300); }
     .tbl tbody th { font-size: 15px; font-weight: 600; color: var(--text); }
-    /* 12절 대조표(037)는 네 칸이라 본문 폭(34em)보다 넓게 쓴다 — 절의 글과 위 구분선은 다른 절처럼 34em 그대로 */
-    .doc > .wide { max-width: none; border-top: 0; background: linear-gradient(var(--divider), var(--divider)) 0 0 / min(34em, 100%) 1px no-repeat; }
-    .wide > :not(.diff) { max-width: 34em; }
+    /* 12절 대조표(037)는 네 칸이라 본문 칸보다 넓게(880px) 가운데에 쓴다 — 절의 글과 위 구분선은 다른 절처럼 본문 칸 그대로 */
+    .doc > .wide { max-width: none; border-top: 0; background: linear-gradient(var(--divider), var(--divider)) 50% 0 / min(var(--col), 100%) 1px no-repeat; }
+    .wide > :not(.diff) { max-width: var(--col); margin-inline: auto; }
+    .wide > .diff { width: min(100%, 880px); margin-inline: auto; }
     .diff { table-layout: fixed; }
     .diff thead th:first-child { width: 7em; }
     .diff td p + p { margin-top: 8px; }

@@ -47,7 +47,11 @@ SFS_CHECK = (["if", "($admin_sfs_ok", "=", "0)"], [(["return", "403"], None)])
 # 교차 사이트 검사 예외 — 화면(/)과 문서 두 쪽 (§3.2)
 SFS_EXEMPT = {("=", "/api/docs"), ("=", "/api/redoc")}
 # 화면의 10초 폴링 — 기록하지 않는다 (§3.2). 034 의 수집기 관리자 피드 둘·035 의 api 피드 둘도 화면의 폴링이다
-FEEDS = {("=", "/api/admin/aws"), ("=", "/api/admin/alerts")}
+FEEDS = {
+    ("=", "/api/admin/aws"),
+    ("=", "/api/admin/alerts"),
+    ("=", "/api/admin/aws/series"),
+}
 API_FEEDS = {
     ("=", "/svc/api/admin/access"),
     ("=", "/svc/api/admin/clarity"),
@@ -168,6 +172,7 @@ def test_admin_routes_every_api_path_like_before_the_allowlist() -> None:
         "/svc/api/admin/status": (API, "/admin/status"),
         "/api/admin/aws": (COLLECTOR, "/admin/aws"),
         "/api/admin/alerts": (COLLECTOR, "/admin/alerts"),
+        "/api/admin/aws/series": (COLLECTOR, "/admin/aws/series"),  # 063
         "/svc/api/admin/access": (API, "/admin/access"),
         "/svc/api/admin/clarity": (API, "/admin/clarity"),
         "/svc/api/admin/attention": (API, "/admin/attention"),
@@ -197,6 +202,22 @@ def test_monitoring_feeds_are_exact_collector_locations_that_inherit_server_head
         assert not _args(children, "proxy_set_header"), key
         assert not _args(children, "add_header"), key
         assert not _args(children, "proxy_hide_header"), key
+
+
+def test_admin_locations_are_never_nested() -> None:
+    """nginx 는 정확 일치 location 안의 location 을 거부한다(`nginx -t` 실패 = 배포 실패) — 모든 location 은 server 바로 아래."""
+    for args, children in _admin_server():
+        if args and args[0] == "location":
+            nested = [a for a, _ in children if a and a[0] == "location"]
+            assert not nested, (args, nested)
+
+
+def test_series_feed_has_its_own_exact_location_and_stays_closed_publicly() -> None:
+    """063 §3.1 — 034 의 피드처럼 정확 일치 location(교차 사이트 검사 첫 줄·기록 끔)으로 수집기에, 공개는 028 의 404 JSON."""
+    path = "/api/admin/aws/series"
+    assert _admin_route(path) == ("=", path)
+    assert _forward(path) == (COLLECTOR, "/admin/aws/series")
+    assert _route(path) in DENY
 
 
 def test_api_feeds_are_exact_api_locations_that_inherit_server_headers() -> None:
