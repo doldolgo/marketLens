@@ -60,7 +60,8 @@ const GROUP = 'time';
 const BOX_MARK = Object.freeze({ collect: 'c0', data: 'c1', serve: 'c2' });
 const boxMark = (box, i) => own(BOX_MARK, box) ?? markOf(i + 3);
 const colorOf = (mark) => own(TONE, mark) ?? SERIES[Number(mark.slice(1))];
-const ZOOM = [{ type: 'inside', xAxisIndex: 'all', zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }];
+// 확대 — Ctrl+휠(트랙패드 핀치)·끌기, 그냥 휠은 페이지를 내린다. x 축이 여럿인 그림은 그 번호를 모두 준다(기본은 첫 축만)
+const zoom = (axes) => [{ type: 'inside', xAxisIndex: [...Array(axes).keys()], zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }];
 
 // 값이 1 이상인 칸이 이어진 구간 [[시작 ms, 끝 ms]] — 상태 검사 실패 띠
 export function runs(points, periodSec) {
@@ -125,7 +126,7 @@ function credits(p, span) {
     xAxis: [timeAxis(span.startMs, span.endMs, { axisLabel: { show: false } }), timeAxis(span.startMs, span.endMs, { gridIndex: 1 })],
     yAxis: [valueAxis({ min: 0, splitNumber: 3 }), valueAxis({ gridIndex: 1, min: 0, splitNumber: 2 })],
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
-    dataZoom: ZOOM,
+    dataZoom: zoom(2),
     tooltip: axisTip((ps) => tip(when(ps[0]?.value?.[0]), ps.map((q) => [marks[q.seriesIndex], q.seriesName, dec1(q.value?.[1])]))),
     series,
   }), GROUP);
@@ -143,7 +144,7 @@ function canary(p, span) {
     grid: { left: 8, right: 16, top: 12, bottom: 4, containLabel: true },
     xAxis: timeAxis(span.startMs, span.endMs),
     yAxis: valueAxis({ min: 0, axisLabel: { color: COLOR.muted, fontSize: 12, formatter: (v) => `${int(v)}ms` } }),
-    dataZoom: ZOOM,
+    dataZoom: zoom(1),
     tooltip: axisTip((ps) =>
       tip(when(ps[0]?.value?.[0]), ps.map((q) => (q.seriesIndex === 0 ? ['c0', '걸린 시간', `${int(q.value?.[1])}ms`] : ['bad', '오류', int(count.get(q.value?.[0]))]))),
     ),

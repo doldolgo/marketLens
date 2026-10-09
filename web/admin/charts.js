@@ -211,7 +211,7 @@ export function donut(id, items, center) {
   if (!shown.length) return blank(id, '자료 없음');
   return draw(id, base({
     tooltip: itemTip((p) => tip(shown[p.dataIndex]?.name, shown[p.dataIndex]?.tip ?? [])),
-    legend: legend({ orient: 'vertical', top: 'middle', right: 0, icon: 'circle', itemWidth: 8, itemHeight: 8, formatter: (name) => name }),
+    legend: legend({ orient: 'vertical', top: 'middle', right: 0, icon: 'circle', itemWidth: 8, itemHeight: 8, textStyle: { color: COLOR.muted, fontSize: 12, width: 130, overflow: 'truncate' } }),
     title: center ? { text: center, left: '29%', top: 'middle', textAlign: 'center', textStyle: { color: COLOR.text, fontSize: 18, fontWeight: 600 } } : undefined,
     series: [{
       type: 'pie',
@@ -343,7 +343,7 @@ export function mirror(id, o) {
   return draw(id, base({
     title: panels.map((p, i) => ({ text: p.title, left: 4, top: `${i * each}%`, textStyle: { fontSize: 12, fontWeight: 600, color: COLOR.muted } })),
     legend: legend({ data: o.names }),
-    grid: panels.map((_, i) => ({ left: 8, right: 16, top: `${i * each + 6}%`, height: `${each - 12}%`, containLabel: true })),
+    grid: panels.map((_, i) => ({ left: 8, right: 16, top: `${i * each + 5}%`, height: `${each - 13}%`, containLabel: true })),
     xAxis: panels.map((_, i) => timeAxis(o.startMs, o.endMs, { gridIndex: i, axisLabel: { show: i === panels.length - 1, ...LABEL, hideOverlap: true, formatter: TIME_LABEL } })),
     yAxis: panels.map((_, i) => valueAxis({ gridIndex: i, splitNumber: 2, axisLabel: { ...LABEL, formatter: o.fmt } })),
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
