@@ -411,19 +411,23 @@ ADDED = "(없음)"
 # 방문자가 읽는 글에 쓰지 않는 낱말(037 §3.2-4 — 평이한 말로)
 PLAIN_ONLY = ("열쇠", "해시")
 DIFF_TABLE = r'<table class="tbl diff">.*?</table>'
-# 037 §3.3 — 이전 판 사본은 얼려 둔 파일이다. 사본마다 보이는 글(<body> 의 태그 뗀 글자)의 sha256 — 사본을 새로 둘 때 더하고
-# 그 뒤로는 고치지 않는다(소개 문단·12절·동의 절 아래 줄처럼 대조 범위 밖의 글자도 여기서 멈춘다)
+# 037 §3.3 — 이전 판 사본은 얼려 둔 파일이다. 사본마다 보이는 글(<body> 의 태그 뗀 글자)의 sha256 — 사본을 새로 둘 때 게시한
+# 차례대로 끝에 더하고 그 뒤로는 고치지 않는다(소개 문단·12절·동의 절 아래 줄처럼 대조 범위 밖의 글자도 여기서 멈춘다).
+# 10월 11일 판은 시행 전에 10월 9일 판(v3)으로 바뀌었고, 그 v3 은 같은 날 두 번째 판(v4 — 060)으로 바뀌었다
 ARCHIVED_TEXT = {
     "privacy-20261001.html": "40976545d4ba5b8241e2107245a54d733767b0d40c81ca8ccc351fb6ebd795e3",
     "privacy-20261011.html": "a4d5b104cdb9af3c1a8e26c3499dd2907eaaf1f6af8c73a6bb2f586edace3099",
+    "privacy-20261009.html": "5b35b358781a1d97869dd2d577493cf1997bdf3a8ef4e0fa6f1b69f64978fe23",
 }
 # 사본마다 그 판의 동의 안내 판 — 10월 11일 판은 시행 전에 바뀌어 안내 판을 올리지 않았다
 ARCHIVED_NOTICE = {
     "privacy-20261001.html": "2026-10-01",
     "privacy-20261011.html": "2026-10-01",
+    "privacy-20261009.html": "2026-10-09",
 }
-# 바로 앞 판의 사본 — 대조표가 맞대는 판(051 — 2026년 10월 11일 판)
-PREVIOUS = max(ARCHIVED_TEXT)
+# 바로 앞 판의 사본 — 대조표가 맞대는 판. 파일 이름(시행일) 순이 아니라 게시한 차례의 끝이다(060 — 10월 9일 판(v3)은
+# 10월 11일 판보다 나중에 게시했다)
+PREVIOUS = list(ARCHIVED_TEXT)[-1]
 # 037 §3.3 — 사본의 동의 절 상자 아래 한 줄(그 판의 세 칸은 읽기만, 고르는 곳은 지금 판)
 ARCHIVED_CONSENT_LINE = (
     "<p>화면 분석 동의·철회는 지금 판의 “화면 분석 동의 관리”"
@@ -947,7 +951,10 @@ def test_archived_versions_are_static_and_external_free() -> None:
         day = f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:]}"
         assert page.times and set(page.times) == {day}, path.name
         assert page.titles == [f"개인정보 처리방침({_korean(day)} 판) — KimpTrack"]
-        assert f"{_korean(day)} 시행 판의 사본입니다" in html, path.name
+        # 같은 날 판이 둘이면 날짜 뒤 괄호로 어느 판인지 밝힌다(060 — '(그날 먼저 게시한 판)')
+        assert re.search(rf"{_korean(day)} 시행 판(\([^)<]*\))?의 사본입니다", html), (
+            path.name
+        )
         assert '<meta name="robots" content="noindex" />' in html, path.name
         assert not [link for link in page.links if link.get("rel") == "canonical"]
         assert 'href="/privacy"' in html, path.name
