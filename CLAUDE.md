@@ -139,6 +139,7 @@ marketlens/
 | 052 | attention | DONE | 화면 영역 이용 통계 수집 — `public/attention.js`(동의·`kimptrack.com` 일 때만, `data-area` 영역별 보인 시간·seen·클릭, 숨길 때 sendBeacon), 모든 화면 `data-area`, api `POST /attention`(공개 허용 경로 하나·caddy 로그 제외·검사·IP 10분 120회·D 전 버림)→메모리 10초 묶음→Redis `attn:d:<YYYYMMDD>` 그날 끝 + 90일, 관리자 피드 `GET /admin/attention?days=1·7·30·90`. 051 뒤 (BE·web·인프라) |
 | 053 | admin-attention | DONE | 관리자 '화면 이용' 절 — 기간·화면·기기 고르기, 실제 페이지를 iframe(`kt-overlay=1`)으로 띄워 postMessage 로 값을 넘기면 `attention.js` 덮어 보기가 영역 위에 다섯 단계 색·글씨 크기로 그림(거의 안 닿음 빗금·표본 적음), 순위 목록·답 문장, 공개 페이지 `frame-ancestors` 에 admin, 038 운영자 흔적에 admin 출처. 052·042 뒤 (web·인프라) |
 | 060 | privacy-v4 | DONE | 처리방침 v4(2026-10-09 두 번째 판) — 접속 기록 쓰임새(30일 요약·나라·방문 세기) 게이트 없앰 — 남은 기록 전체(`PRIVACY_V2_EFFECTIVE` 2026-09-01, (라) 지움, (다)에 062 의 첫·마지막 페이지), 화면 이용 통계를 요소·떠날 때 보던 곳·깊이까지 알림(`PRIVACY_V4_EFFECTIVE`, 동의 안내 판 `2026-10-09-2`), 12절 7일 약속 삭제, 이전 판 `privacy-20261009.html`, 관리자 화면의 정책·게이트 낱말 정리 (web·BE) |
+| 061 | attention-v2 | TODO | 화면 이용 통계 v2 — 요소(`data-el`·자동 열쇠)별 클릭·마우스 올림·보인 시간, 떠난 곳·깊이, 몸통 v2(16KB), 열쇠 300 제한, 피드 `page` 인자·`elements`·`exits`·`depth`. 060 뒤 (BE·web) |
 | 062 | access-flows | DONE | 접속 흐름 — 짝(038)마다 그날 첫 페이지(entry)·마지막 페이지(exit)·페이지 수, `/admin/access` `visitors.flows`([channel, entry, exit, c, s] 40줄 + (기타))·`entries`·`exits`·`depthPages`. 064 가 그린다 (BE) |
 | 063 | aws-metrics | DONE | 수집기 `GET /admin/aws/series?range=6h·24h·7d·30d` — 상자 셋 CPU·네트워크 in/out·EBS·크레딧 잔량/사용/초과 과금·상태 검사·메모리·디스크·스왑 + WS 접속·canary 시계열(GetMetricData, 034 스레드·Slot 재사용, 새 권한 없음). 064 가 그린다 (BE) |
 
