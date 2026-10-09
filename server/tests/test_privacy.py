@@ -364,6 +364,12 @@ EFFECTIVE_SENTENCE = (
     "부터 시행하며(이날 두 번째 판), 같은 날 먼저 게시한 판을 바꿉니다."
 )
 V4_HISTORY = "(두 번째 판) — 서버 접속 기록 쓰임새를 이날 기록부터·화면 이용 통계를 요소까지·바꾸는 방법"
+# 060 §7 — 2절 (다): 062 가 짝(하루 한 번 세는 값)에 붙이는 그날 첫·마지막 페이지 이름과 페이지 수. 게이트를 v4 시행일로
+# 당겨 이 처리도 그날 기록부터 돌므로 v4 가 함께 알린다
+ACCESS_FLOW_ITEMS = (
+    "처음과 마지막에 연 페이지(랜딩·대시보드 탭·처리방침·검색어 페이지 같은 페이지 이름)와 연 페이지 수"
+    "(어디로 들어와 어디서 나가는지 보려고)"
+)
 # 051 §3.3-10 — 이력의 v3 항목 설명(다음 판에서도 남는다)
 V3_HISTORY_SAYS = ("화면 영역 이용 통계", "동의한 방문자만", "동의 안내 판 올림")
 # 037 이 게시한 v2 판의 날짜 — 시행 전에 v3 으로 바뀌었다(사본 privacy-20261011.html). 060 부터 PRIVACY_V2_EFFECTIVE 는 이 날이
@@ -1115,6 +1121,9 @@ def test_change_notice_comes_first_and_names_what_changes() -> None:
         in first
     )
     assert "화면 이용 통계" in second and "(2절)" in second
+    assert (
+        "처음과 마지막에 연 페이지와 연 페이지 수" in first
+    )  # 062 의 짝 값(2절 (다)) — 060 §7
     assert "(12절)" in third and "7일" not in third
     # 다시 묻기는 셋 뒤
     assert text.index("12절)") < text.index("이미 동의했어도 한 번 더 묻습니다")
@@ -1131,6 +1140,8 @@ def test_body_sections_state_the_v2_facts() -> None:
     assert f"{_korean(PRIVACY_V2_EFFECTIVE)}(이 쓰임새를 시작한 날) 전" in _text(
         _section(html, "s2")
     )
+    # (다) — 062 가 짝에 붙이는 그날 첫·마지막 페이지 이름과 페이지 수(게이트를 당겨 v4 시행일부터 돈다 — 060 §7)
+    assert ACCESS_FLOW_ITEMS in _text(_section(_without_diff(html), "s2"))
     outside = _without_diff(html)
     assert outside.count("24시간 요약") == 1
     assert "24시간 요약에만" in _section(html, "s2")
@@ -1199,6 +1210,7 @@ def test_diff_table_rows_match_both_versions() -> None:
         "동의 관리 안내의 판",
         "1절 목적",
         "2절 표",
+        "2절 서버 접속 기록 (다)",
         "2절 서버 접속 기록 (라)",
         "2절 화면 이용 통계",
         "3절",
