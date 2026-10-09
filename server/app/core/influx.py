@@ -374,6 +374,17 @@ def premium_line(head: str, fwd: float, rev: float, ts: int) -> str:
     return f"{head}fwd={fwd!r},rev={rev!r} {ts}"
 
 
+def premium_line_text(head: str, fwd: str, rev: str, tail: str) -> str:
+    """`premium` 한 줄 — `fwd`·`rev` 는 Redis 틱 레코드의 숫자 글자 그대로, `tail` 은 `" {ts}"` (009 §3.5).
+
+    같은 값의 `premium_line(head, float(fwd), float(rev), ts)` 와 같은 바이트다. 레코드는 009 인계기가
+    `json.dumps` 로 썼고 그 float 표기는 `float.__repr__`(가장 짧은 왕복 글자)라, 글자를 float 로 읽어 다시 repr
+    해도 같은 글자가 나온다. 그래서 flusher 는 회차마다 11만 줄의 글자 → float → 글자 왕복을 건너뛴다.
+    글자가 아닌 값(정수·NaN·Infinity 상수)은 이 함수가 아니라 `premium_line` 으로 쓴다 — 표기 규칙은 이 모듈에만 둔다.
+    """
+    return f"{head}fwd={fwd},rev={rev}{tail}"
+
+
 def candle_head(dom: str, fx: str, base: str) -> str:
     """`candle` 줄의 머리 — `candle_point` 와 같은 태그(코인 이름 그대로)."""
     return _head("candle", {"dom": dom, "fx": fx, "base": base})
