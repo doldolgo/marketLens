@@ -6,6 +6,7 @@
 글자)과 페이지 수(255 에서 멈춤)만 더한다 — 경로·쿼리 원문은 남기지 않는다.
 """
 
+from typing import Any
 from urllib.parse import parse_qs
 
 from app.features.admin.access_classes import DEFAULT_TAB, TABS
@@ -20,8 +21,13 @@ FIXED_PAGES = {
     "/kimp-chart": "kimp-chart",
     "/kimp-history": "kimp-history",
 }
+# 응답 `entries`·`exits` 의 이름 — 0 인 이름도 싣는다
 PAGES = ("landing", *APP_PAGES.values(), "privacy", "kimp-chart", "kimp-history", OTHER)
 NPAGES_CAP = 255  # 짝의 그날 페이지 줄 수는 여기서 멈춘다
+FLOW_TOP = 40
+# 페이지 수 칸 — (이름, 칸의 끝(이하))
+DEPTHS = (("1", 1), ("2", 2), ("3-5", 5), ("6+", NPAGES_CAP))
+Row = list[int]  # [confirmed, shaped]
 
 
 def page_name(path: str, query: str) -> str:
@@ -33,3 +39,51 @@ def page_name(path: str, query: str) -> str:
             tab = parse_qs(query, keep_blank_values=True).get("tab", [DEFAULT_TAB])[0]
         return APP_PAGES.get(tab, APP_PAGES[DEFAULT_TAB])
     return FIXED_PAGES.get(path, OTHER)
+
+
+def _bump(table: dict[Any, Row], key: Any, confirmed: int) -> None:
+    row = table.get(key)
+    if row is None:
+        row = table[key] = [0, 0]
+    row[0] += confirmed
+    row[1] += 1
+
+
+class FlowCounts:
+    """창 하나의 흐름 셈 — `visitors` 가 창에서 세는 짝 가운데 페이지 줄이 있는 짝마다 `add` 한다."""
+
+    def __init__(self) -> None:
+        self.entries: dict[str, Row] = {}
+        self.exits: dict[str, Row] = {}
+        self.flows: dict[tuple[str, str, str], Row] = {}
+        self.depth: dict[str, Row] = {name: [0, 0] for name, _ in DEPTHS}
+
+    def add(
+        self, channel: str, entry: str, exit_: str, npages: int, confirmed: int
+    ) -> None:
+        _bump(self.entries, entry, confirmed)
+        _bump(self.exits, exit_, confirmed)
+        _bump(self.flows, (channel, entry, exit_), confirmed)
+        _bump(self.depth, next(n for n, top in DEPTHS if npages <= top), confirmed)
+
+    def values(self) -> dict[str, Any]:
+        """`flows` 는 shaped 큰 순(같으면 채널·첫·마지막 이름순) 40줄 + 나머지를 합친 `(기타)` 한 줄(나머지가 있을 때만)."""
+        ranked = sorted(self.flows.items(), key=lambda kv: (-kv[1][1], kv[0]))
+        flows: list[list[Any]] = [[*key, c, s] for key, (c, s) in ranked[:FLOW_TOP]]
+        rest = [row for _, row in ranked[FLOW_TOP:]]
+        if rest:
+            confirmed, shaped = sum(r[0] for r in rest), sum(r[1] for r in rest)
+            flows.append([OTHER, OTHER, OTHER, confirmed, shaped])
+        return {
+            "flows": flows,
+            "entries": _pages(self.entries),
+            "exits": _pages(self.exits),
+            "depthPages": {name: list(row) for name, row in self.depth.items()},
+        }
+
+
+def _pages(table: dict[str, Row]) -> list[list[Any]]:
+    """페이지 이름 모두(0 인 이름도) — shaped 내림차순·같으면 이름순."""
+    rows = [[name, *table.get(name, (0, 0))] for name in PAGES]
+    rows.sort(key=lambda r: (-r[2], r[0]))
+    return rows

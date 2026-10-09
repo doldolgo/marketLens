@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from typing import Any, NamedTuple
 
-from app.features.admin.access_flows import NPAGES_CAP
+from app.features.admin.access_flows import NPAGES_CAP, FlowCounts
 from app.features.admin.access_traits import Traits
 from app.features.admin.geo_kinds import NET_TELECOM_ALL, TELECOM, TELECOM_KR
 from app.features.admin.geo_table import IPV6
@@ -152,7 +152,8 @@ def visitors(
     files: Iterable[dict[int, DayPairs]], since_ts: int, end_ts: int
 ) -> tuple[dict[str, Any], int, GeoCounts]:
     """창 [since_ts, end_ts] 의 날마다 센 방문자 — (visitors 값 키, ws.pairs, 나라·망 종류).
-    since_ts 는 시 경계이고 게이트 뒤다."""
+    since_ts 는 시 경계이고 게이트 뒤다. `files` 는 줄 순서(앞 파일 먼저)다 — 같은 날을 합칠 때 같은 시각을 가른다.
+    값 키에는 같은 짝 가운데 그날 페이지 줄이 있는 짝의 흐름(062 — `flows`·`entries`·`exits`·`depthPages`)을 더한다."""
     by_day: dict[int, list[DayPairs]] = {}
     for days in files:
         for day, record in days.items():
@@ -167,6 +168,7 @@ def visitors(
     networks: dict[str, list[int]] = {}
     peaks: dict[str, int] = {}
     net_peaks: dict[str, int] = {}
+    flow = FlowCounts()
     capped = False
     day_rows = []
     for day in range(kst_day(since_ts), kst_day(end_ts) + 1, DAY_SEC):
@@ -198,6 +200,9 @@ def visitors(
                     row = table.setdefault(name, [0, 0])
                     row[0] += confirmed
                     row[1] += 1
+            if pair.entry is not None and pair.exit is not None:
+                # 그날 페이지 줄이 있는 짝만 — JS·WS 줄만 남긴 짝은 들어온 곳·나간 곳이 없다
+                flow.add(pair.channel, pair.entry, pair.exit, pair.npages, confirmed)
             if pair.net == IPV6:
                 ipv6 += 1
             elif pair.net is not None and pair.country is not None:
@@ -236,6 +241,7 @@ def visitors(
         "capped": capped,
         "days": day_rows,
         **{key: _rows(table) for key, table in tables.items()},
+        **flow.values(),
     }
     return values, ws_pairs, GeoCounts(countries, networks, ipv6, peaks, net_peaks)
 
