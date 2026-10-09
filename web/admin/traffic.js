@@ -97,7 +97,7 @@ export function botShare(a) {
   const total = n0(a?.totals?.requests);
   if (!total) return null;
   const req = (k) => n0(a.classes?.[k]?.requests);
-  return ((req('scanner') + req('tool')) / total) * 100;
+  return (100 * (req('scanner') + req('tool'))) / total;
 }
 
 // 나라 — 국기 그림 문자 + 브라우저의 한국어 지역 이름. 못 푸는 값(ZZ·(기타))은 글자 그대로
