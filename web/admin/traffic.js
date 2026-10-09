@@ -294,9 +294,10 @@ function drawWhere(app) {
 
 const DEPTH = [['1', '1쪽'], ['2', '2쪽'], ['3-5', '3~5쪽'], ['6+', '6쪽 이상']];
 function endsOption(v) {
+  // 062 는 페이지 이름 열하나를 0 인 것까지 싣는다 — 들어오거나 나간 사람이 있는 페이지만 그린다
   const entries = rows3(v.entries, 12);
   const exits = rows3(v.exits, 12);
-  const keys = [...new Set([...entries, ...exits].map(([key]) => key))];
+  const keys = [...new Set([...entries, ...exits].filter((r) => r[2] > 0).map(([key]) => key))];
   if (!keys.length) return null;
   const at = (rows) => new Map(rows.map(([key, c, s]) => [key, [c, s]]));
   const [inMap, outMap] = [at(entries), at(exits)];
