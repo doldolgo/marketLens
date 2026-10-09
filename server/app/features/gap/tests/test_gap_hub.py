@@ -9,7 +9,7 @@ import json
 
 import fakeredis
 
-from app.core.redis_bus import GAP_CHANNEL, WANT_KEY, RedisBus
+from app.core.redis_bus import GAP_CHANNEL, WANT_KEY, RedisBus, want_key
 from app.features.gap.tests.helpers import gap_row, gap_table, make_bus
 from app.features.spreads import hub as hub_module
 from app.features.spreads.hub import (
@@ -80,7 +80,7 @@ def test_delta_keys_rows_by_sym_spot_perp_and_lists_removed_in_that_format() -> 
     assert json.loads(text)["removed"] == ["BTC|binance|bybit_perp"]
 
 
-async def test_gap_hub_starts_from_gap_latest_and_never_touches_want() -> None:
+async def test_gap_hub_starts_from_gap_latest_and_writes_only_gap_want() -> None:
     bus, _ = make_bus()
     await bus.publish_table(json.dumps(gap_table([gap_row("BTC")])), GAP_CHANNEL)
     hub = SpreadsHub(bus=bus, table=GAP_CHANNEL)
@@ -95,6 +95,8 @@ async def test_gap_hub_starts_from_gap_latest_and_never_touches_want() -> None:
     assert (
         await bus._client.exists(WANT_KEY) == 0
     )  # spreads:want 는 gap 접속으로 갱신되지 않는다
+    # gap:want 는 첫 접속 때 곧바로 — 수집이 이 키를 보고 gap 표를 만들기 시작한다 (048 §3.3)
+    assert await bus._client.ttl(want_key(GAP_CHANNEL)) == 15
     await hub.aclose()
     assert ws.closed == 1001
 
@@ -178,3 +180,43 @@ async def test_two_hubs_subscribe_their_own_channel_only_and_unsubscribe_when_id
     spreads_hub.detach(s_conn)
     await spreads_hub.aclose()
     await gap_hub.aclose()
+
+
+async def test_first_viewer_with_no_table_gets_waiting_then_snapshot_once_collector_sees_want() -> None:
+    """048 §3.3 — 아무도 안 보던 동안 수집은 표를 안 만든다(`gap:latest` 없음). 첫 접속자는 waiting 을 받고,
+    허브가 곧바로 쓴 `gap:want` 를 수집이 읽은 다음 틱의 표가 그 접속자의 snapshot 이 된다."""
+    from datetime import UTC, datetime
+
+    from app.core.live_store import LiveStore
+    from app.core.models import Tick
+    from app.features.gap.push import GapPublisher
+    from app.features.gap.tests.helpers import perp, spot
+
+    bus, _ = make_bus()
+    store = LiveStore()
+    now = datetime.now(UTC)
+    spot(store, "binance", "BTC", now=now)
+    perp(store, "bybit_perp", "BTC", now=now)
+    publisher = GapPublisher(store=store, bus=bus)
+    await publisher.refresh_want()
+    publisher.observe(Tick(ts=1, rows=(), dw_failed=()))
+    assert publisher.pending == 0 and await bus.latest(GAP_CHANNEL) is None
+
+    hub = SpreadsHub(bus=bus, table=GAP_CHANNEL)
+    hub.start()
+    ws = FakeWs()
+    await hub.attach(ws)  # type: ignore[arg-type]
+    await settle()
+    assert unpack(ws.sent[0])["type"] == "waiting"
+    await publisher.refresh_want()  # 수집의 0.5초 읽기
+    assert publisher.wanted is True
+    publisher.observe(Tick(ts=2, rows=(), dw_failed=()))
+    assert await publisher.drain() == 1
+    for _ in range(50):
+        await asyncio.sleep(0.02)
+        frames = [unpack(b) for b in ws.sent]
+        if any(f["type"] == "snapshot" for f in frames):
+            break
+    snap = next(f for f in (unpack(b) for b in ws.sent) if f["type"] == "snapshot")
+    assert (snap["rows"][0]["sym"], snap["rows"][0]["perp"]) == ("BTC", "bybit_perp")
+    await hub.aclose()

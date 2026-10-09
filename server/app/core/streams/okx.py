@@ -5,7 +5,8 @@
 `instType` 이 없고(`{channel, instId}`), 핑은 주기가 아니라 **마지막 수신에서 20초가 지나면** 문자열 `ping`,
 pong 은 10초 안에 와야 하며, `event:"notice"` 는 서비스 업그레이드 통지라 경고 1줄만 남긴다. 구독·해지 요청은
 연결당 시간당 480회 예산 — 80% 를 넘으면 재조정을 다음 회차로 미룬다. instruments 봉투에는 매 응답 바뀌는
-시각 필드가 없어 본문 전체 바이트로 직전 응답과 비교한다.
+시각 필드가 없어 본문 전체 바이트로 비교한다 — 같은 목록이 행 순서만 다른 두 본문으로 번갈아 오므로 최근에
+맵을 만든 응답 2개와 비교한다.
 심볼은 crc32 % 3 으로 샤드에 고정 배정되고, 샤드마다 소켓·시계·백오프·예산을 따로 둔다.
 메시지마다: 원문 싱크 기록 → 디코드 → 행 갱신(QuoteSink) → 그 샤드의 last_message_at(시세만).
 심볼 집합 계약(ForeignSymbolSource)도 이 커넥터가 구현한다 — 우주가 확정되면 차이만 재조정한다.
@@ -71,6 +72,14 @@ _RATE_LIMIT_CODE = "50011"  # "Rate limit reached" — 문서가 200·429 양쪽
 _LIVE = "live"
 _PING = "ping"
 _PONG = "pong"
+# 수신 루프는 프레임마다(초당 수백 건) 돈다 — 형식 검사에 `bytes | bytearray` 를 쓰면 평가할 때마다
+# types.UnionType 을 새로 만든다. 튜플 상수 하나로 둔다
+_BYTES_TYPES = (bytes, bytearray)
+# json.loads 는 인자 형식·BOM 검사를 거쳐 기본 디코더로 넘긴다. 프레임 텍스트는 늘 str 이라 기본 디코더의
+# decode 를 바로 부른다 — 훅 없는 기본 설정 그대로라 결과도, 깨진 JSON·BOM 에서 나는 ValueError 도 같다
+_JSON_DECODE = json.JSONDecoder().decode
+_BOOK_KEY = "orderbook:"  # 원문 싱크 key 머리 — 뒤에 instId (001 §3.7)
+_TRADE_KEY = "trade:"
 
 
 def _now_ms() -> int:
@@ -168,8 +177,18 @@ class OkxStream:
         self._wake = asyncio.Event()  # set_universe 가 재조정 루프를 깨운다
         self._rebalance: asyncio.Task[None] | None = None
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다
-        # 직전에 맵까지 만든 200 응답의 본문 전체 바이트 — 같으면 파싱·맵 재생성을 건너뛴다 (§3.3)
-        self._symbols_body: bytes | None = None
+        # 맵까지 만든 200 응답을 최근 것부터 2개까지 기억한다 — (본문 전체 바이트, 심볼 맵, 역맵, 디코드한 텍스트,
+        # 그때의 문자 인코딩). 새 본문의 바이트가 둘 중 하나와 같으면 파싱 없이 그 본문으로 만든 맵을 다시 쓴다 (§3.3).
+        # 하나가 아니라 둘인 까닭: OKX 는 같은 목록을 행 순서만 다른 두 본문으로 번갈아 준다(2026-10-09 캡처 5건 중
+        # 순서 2가지, 같은 날 cProfile 180초 141회차 중 65회 파싱). 직전 하나만 보면 순서가 바뀔 때마다 1.2MB 를
+        # 다시 파싱한다. 바이트가 같으면 맵도(키 순서까지) 같으므로 낡을 여지가 없다. 텍스트는 같은 바이트·같은
+        # 인코딩이면 디코드 결과도 같으므로 다시 디코드하지 않고 원문 싱크에 넘긴다(값이 같아 S3 바이트도 같다).
+        # 상주 메모리는 본문·텍스트 한 벌(약 2.5MB)이 더 든다 — 텍스트는 원문 싱크의 분 창과 같은 객체를 나눠 쓴다
+        self._lists: list[
+            tuple[bytes, dict[str, str], dict[str, str], str, str | None]
+        ] = []
+        # 직전 set_universe 가 반영한 (심볼 맵, 우주 사본) — 맵 객체가 그대로이고 우주가 같으면 배정도 같다
+        self._applied: tuple[dict[str, str], frozenset[str]] | None = None
 
     # --- 심볼 집합 (ForeignSymbolSource, §3.3) ---
 
@@ -177,8 +196,9 @@ class OkxStream:
         """instruments 1회 → live·USDT 심볼 맵. 응답 본문은 해석 전에 원문 싱크로(`symbols:all`).
 
         HTTP 200 이어도 `code != "0"` 이면 실패다 (§3.8). 원문 기록은 매 응답 하고, 200 본문의 바이트가
-        직전에 맵을 만든 응답과 같으면 파싱·맵 재생성을 건너뛴다 — OKX 봉투에는 매 응답 바뀌는 시각 필드가
-        없어 본문 전체로 비교한다. 바이트가 같으면 맵도 같으므로 낡을 여지가 없다 (§3.3).
+        최근에 맵을 만든 응답 2개 중 하나와 같으면 파싱 없이 그 본문으로 만든 맵을 쓴다 — OKX 봉투에는 매 응답
+        바뀌는 시각 필드가 없어 본문 전체로 비교하고, 같은 목록이 행 순서만 다른 두 본문으로 번갈아 오므로 둘을
+        기억한다. 바이트가 같으면 맵도 같으므로 낡을 여지가 없다 (§3.3).
         """
         url = INSTRUMENTS_URL
         try:
@@ -194,10 +214,34 @@ class OkxStream:
                 f"OKX 연결 실패: {type(exc).__name__}: {exc}",
                 kind="network",
             ) from exc
-        self._record(
-            self.id, f"rest:{INSTRUMENTS_PATH}", self._clock(), resp.text, SYMBOLS_KEY
-        )
-        if resp.status_code == 200 and resp.content == self._symbols_body:
+        # 수신 시각은 본문 비교·디코드보다 먼저 읽는다 — 원문 싱크는 이 시각으로 분 창을 고르므로(010),
+        # 디코드 시간만큼 늦게 찍으면 분 경계에서 다른 창에 들어갈 수 있다
+        at = self._clock()
+        content = resp.content
+        # 파싱을 건너뛸지는 본문 바이트만으로 정한다 (§3.3). 문자 인코딩은 텍스트를 다시 쓸지에만 본다 —
+        # 바이트가 같아도 charset 헤더가 바뀌면 디코드 결과가 달라질 수 있다. 바이트 비교는 길이부터 보고 앞에서부터
+        # 견주다 처음 다른 자리에서 멈춘다 — 순서만 다른 두 본문은 첫 행부터 달라(2026-10-09 캡처) 기억한 본문이
+        # 둘이어도 매초 비교 비용은 거의 한 번 몫이다
+        lists = self._lists
+        hit = None
+        if resp.status_code == 200:
+            for entry in lists:
+                if entry[0] == content:
+                    hit = entry
+                    break
+        if hit is not None and resp.encoding == hit[4]:
+            text = hit[3]
+        else:
+            text = resp.text
+        self._record(self.id, f"rest:{INSTRUMENTS_PATH}", at, text, SYMBOLS_KEY)
+        if hit is not None:
+            if hit is not lists[0]:
+                # 다른 순서의 본문으로 돌아왔다 — 그 본문으로 만든 맵으로 바꾸고 맨 앞(최근)으로 올린다. 다시
+                # 파싱했다면 같은 내용·같은 키 순서의 새 맵이 됐을 자리라 결과가 같다. 맵 객체가 바뀌므로
+                # set_universe 는 이 회차에 배정을 다시 계산한다(다시 파싱해도 새 객체라 같다)
+                self._lists = [hit, lists[0]]
+                self._symbol_of = hit[1]
+                self._base_of = hit[2]
             return 1
         if resp.status_code != 200:
             raise ExchangeApiError(
@@ -205,7 +249,7 @@ class OkxStream:
                 url,
                 f"OKX 비-200 응답: {resp.status_code}",
                 status_code=resp.status_code,
-                body=resp.text,
+                body=text,
                 kind=_classify_rest_status(resp.status_code),
             )
         try:
@@ -215,9 +259,7 @@ class OkxStream:
                 self.id, url, f"OKX JSON 파싱 실패: {exc}", kind="bad_response"
             ) from exc
         if not isinstance(data, dict):
-            raise ExchangeApiError(
-                self.id, url, "OKX 응답이 객체가 아니다", body=resp.text
-            )
+            raise ExchangeApiError(self.id, url, "OKX 응답이 객체가 아니다", body=text)
         code = data.get("code")
         if code != _OK_CODE:
             raise ExchangeApiError(
@@ -225,13 +267,13 @@ class OkxStream:
                 url,
                 f"OKX code {code}: {data.get('msg', '')}",
                 status_code=resp.status_code,
-                body=resp.text,
+                body=text,
                 kind=_classify_rest_code(str(code)),
             )
         items = data.get("data")
         if not isinstance(items, list):
             raise ExchangeApiError(
-                self.id, url, "OKX instruments 에 data 가 없다", body=resp.text
+                self.id, url, "OKX instruments 에 data 가 없다", body=text
             )
         symbol_of: dict[str, str] = {}
         for item in items:
@@ -245,9 +287,11 @@ class OkxStream:
             if not base or not symbol:
                 continue
             symbol_of.setdefault(base, symbol)  # 둘 이상이면 처음 것
+        base_of = {symbol: base for base, symbol in symbol_of.items()}
         self._symbol_of = symbol_of
-        self._base_of = {symbol: base for base, symbol in symbol_of.items()}
-        self._symbols_body = resp.content
+        self._base_of = base_of
+        # 맵을 만든 회차에만 기억한다 — 실패한 본문은 기억하지 않는다 (§3.3). 새 것을 앞에 두고 셋째는 버린다
+        self._lists = [(content, symbol_of, base_of, text, resp.encoding), *lists[:1]]
         return 1
 
     def bases(self) -> set[str]:
@@ -258,15 +302,24 @@ class OkxStream:
 
         우주 전체를 받으므로 자기 맵에 없는 base 는 무시한다(다른 해외에만 있는 코인).
         매초 불리므로 배정이 하나도 안 바뀌면 아무것도 하지 않는다 (§3.3).
+
+        배정은 (심볼 맵, 우주)만으로 정해지고 샤드의 배정을 바꾸는 곳은 이 함수 하나다. 맵은 refresh 가 목록이
+        바뀐 회차에만 새 객체로 바꾸고 제자리에서 고치지 않는다. 그래서 맵 객체가 직전 호출 때 그대로이고 우주가
+        같으면 아래 계산은 어차피 아무것도 바꾸지 못한다 — 매초 오는 같은 우주는 비교 한 번으로 돌아간다(우주 확정).
         """
-        desired = {
-            self._symbol_of[b]
-            for b in (x.upper() for x in bases)
-            if b in self._symbol_of
-        }
+        symbol_of = self._symbol_of
+        applied = self._applied
+        if applied is not None and applied[0] is symbol_of and applied[1] == bases:
+            return
+        # 우주를 한 번 훑으며 샤드별로 나눈다 — 심볼마다 crc32 를 한 번만 계산한다
+        mine_of: list[set[str]] = [set() for _ in self._shards]
+        for b in bases:
+            symbol = symbol_of.get(b.upper())
+            if symbol is not None:
+                mine_of[shard_of(symbol)].add(symbol)
         changed = False
         for shard in self._shards:
-            mine = {s for s in desired if shard_of(s) == shard.index}
+            mine = mine_of[shard.index]
             if mine == shard.assigned:
                 continue
             changed = True
@@ -282,6 +335,9 @@ class OkxStream:
                 shard.has_work.clear()
         if changed:
             self._wake.set()
+        # 우주는 사본으로 든다 — 호출한 쪽이 같은 집합 객체를 고쳐 다시 넘겨도 바뀐 것으로 본다.
+        # 맵은 참조로 든다 — 참조를 쥐고 있어야 옛 맵이 해제되지 않아 같은 id 의 새 맵과 헷갈리지 않는다
+        self._applied = (symbol_of, frozenset(bases))
 
     # --- 판정 (§3.5) ---
 
@@ -600,49 +656,64 @@ class OkxStream:
                     await self._sleep(CONTROL_INTERVAL)
 
     async def _pump(self, shard: _Shard, ws: Any) -> None:
+        """프레임 하나 = 판별 → 원문 싱크 기록 → (시세면) 행 갱신 (§3.2·001 §3.7).
+
+        초당 수백 건이 지나는 길이라 프레임을 한 번만 훑는다 — `arg` 를 한 번 읽어 원문 key 와 처리 분기에
+        같이 쓰고, 디코드·key 계산을 따로 함수로 부르지 않는다. 판별 순서·key 규칙·기록 시점은 그대로다:
+        원문은 언제나 응답·거부 처리와 행 갱신보다 먼저 남긴다(거부 프레임도 원문이 남은 뒤에 끊긴다).
+        """
         while True:
             raw = await ws.recv()
             at = self._clock()
             shard.last_rx_at = at  # 무엇이 왔든 핑 타이머는 여기서 다시 센다 (§3.2)
-            if isinstance(raw, bytes | bytearray):
+            if type(raw) is str:
+                text = raw  # 소켓은 텍스트 프레임을 str 로 준다 — 가장 흔한 길을 먼저
+            elif isinstance(raw, _BYTES_TYPES):
                 try:
                     text = bytes(raw).decode("utf-8")
                 except UnicodeDecodeError:
                     self.decode_failures += 1
                     continue
             else:
-                text = str(raw)
+                text = str(raw)  # str 하위형 등 — 원문 싱크에는 정확히 str 로 넘긴다
             if text == _PONG:
                 # 문자열 pong — 시세도 디코드 실패도 아니다 (§3.2)
                 self._record(self.id, WS_SOURCE, at, text)
                 shard.pong_pending = False
                 continue
-            msg = _decode(text)
-            # 디코드 뒤, 행·상태 갱신 전 — 받은 텍스트 그대로 + 시세 프레임이면 종류:심볼 (001 §3.7)
-            self._record(self.id, WS_SOURCE, at, text, _quote_key(msg))
-            if msg is None:
+            try:
+                msg = _JSON_DECODE(text)
+            except ValueError:
+                msg = None
+            if not isinstance(msg, dict):
+                # 깨진 JSON·객체 아님 — 원문만 남기고(key 없음) 무효 프레임으로 센다
+                self._record(self.id, WS_SOURCE, at, text, None)
                 self.decode_failures += 1
-                continue
-            if "event" in msg:
-                # 구독·해지 응답 — 시세로 세지 않는다. error 는 구독 거부, notice 는 업그레이드 통지 (§3.2)
-                event = msg["event"]
-                if event == "error":
-                    raise _SubscribeRejected(
-                        f"code {msg.get('code')}: {msg.get('msg', '')}"
-                    )
-                if event == "notice":
-                    logger.warning(
-                        "OKX 샤드 %d 서비스 통지: code %s: %s",
-                        shard.index,
-                        msg.get("code"),
-                        msg.get("msg", ""),
-                    )
                 continue
             arg = msg.get("arg")
             if "data" not in msg or not isinstance(arg, dict):
-                self.decode_failures += 1  # 시세 모양이 아니다 (§3.2)
+                # 시세 모양이 아니다 — key 없음. 구독·해지 응답·거부·통지면 처리하고, 아니면 무효 프레임 (§3.2)
+                self._record(self.id, WS_SOURCE, at, text, None)
+                if "event" in msg:
+                    self._on_event(shard, msg)
+                else:
+                    self.decode_failures += 1
                 continue
+            # 시세 모양 — 받은 텍스트 그대로 + 종류:심볼(원본 instId) key 로, 행·상태 갱신 전에 (001 §3.7)
             channel, symbol = arg.get("channel"), str(arg.get("instId") or "")
+            if not symbol:
+                key = None
+            elif channel == BOOKS_CHANNEL:
+                key = _BOOK_KEY + symbol
+            elif channel == TRADE_CHANNEL:
+                key = _TRADE_KEY + symbol
+            else:
+                key = None
+            self._record(self.id, WS_SOURCE, at, text, key)
+            if "event" in msg:
+                # 시세 모양이어도 event 가 붙었으면 응답이다 — 원문(key 포함)만 남고 시세로 세지 않는다 (§3.2)
+                self._on_event(shard, msg)
+                continue
             base = self._base_of.get(symbol)
             if base is None:
                 continue  # 맵에 없는 심볼 — 버린다 (§3.4)
@@ -663,6 +734,19 @@ class OkxStream:
             last = self._state.last_message_at
             if last is None or at > last:
                 self._state.last_message_at = at
+
+    def _on_event(self, shard: _Shard, msg: dict[str, Any]) -> None:
+        """구독·해지 응답 — 시세로 세지 않는다. error 는 구독 거부, notice 는 업그레이드 통지 (§3.2)."""
+        event = msg["event"]
+        if event == "error":
+            raise _SubscribeRejected(f"code {msg.get('code')}: {msg.get('msg', '')}")
+        if event == "notice":
+            logger.warning(
+                "OKX 샤드 %d 서비스 통지: code %s: %s",
+                shard.index,
+                msg.get("code"),
+                msg.get("msg", ""),
+            )
 
     def _on_books(self, symbol: str, base: str, data: Any, at: int) -> None:
         """books5 스냅샷 1건 → 그 심볼의 행을 다시 만든다. 로컬 북은 없다 (§3.4).
@@ -738,32 +822,6 @@ def _sorted_levels(levels: list[list[float]], *, reverse: bool) -> list[list[flo
     return sorted(
         ([p, q] for p, q in merged.items()), key=lambda lv: lv[0], reverse=reverse
     )
-
-
-def _decode(text: str) -> dict[str, Any] | None:
-    """프레임 텍스트 → JSON 객체. 객체가 아니거나 JSON 이 아니면 None(무효 프레임)."""
-    try:
-        msg = json.loads(text)
-    except ValueError:
-        return None
-    if isinstance(msg, dict):
-        return msg
-    return None
-
-
-def _quote_key(msg: dict[str, Any] | None) -> str | None:
-    """원문 싱크의 `key` — 호가·체결 프레임이면 `orderbook:<instId>`·`trade:<instId>` (§3.1)."""
-    if msg is None or "data" not in msg or not isinstance(msg.get("arg"), dict):
-        return None
-    arg = msg["arg"]
-    symbol = str(arg.get("instId") or "")
-    if not symbol:
-        return None
-    if arg.get("channel") == BOOKS_CHANNEL:
-        return f"orderbook:{symbol}"
-    if arg.get("channel") == TRADE_CHANNEL:
-        return f"trade:{symbol}"
-    return None
 
 
 def _classify(exc: BaseException, shard: int) -> StreamError:

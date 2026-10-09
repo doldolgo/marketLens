@@ -10,7 +10,8 @@ snapshot 도 표 1장당 한 번만 압축해 둔다(2026-09-28) — 배포 직�
 채널은 첫 접속자가 붙을 때 구독하고 마지막 접속자가 떠난 뒤 30초가 지나면 닫는다(2026-09-28) — 접속자가
 없는 허브(배포의 `server` 컨테이너, 아무도 안 보는 api)가 매초 790KB 를 받아 버리지 않게.
 허브는 표 id 하나로 매개변수화된다(048 §3.4) — 채널 `<id>`·시작 키 `<id>:latest`·행 키 함수만 다르고 나머지 규칙은
-같다. 인스턴스와 구독 연결은 표마다 하나(`spreads`·`gap`)이고 `spreads:want` 갱신은 spreads 허브만 한다.
+같다. 인스턴스와 구독 연결은 표마다 하나(`spreads`·`gap`)이고 보는 사람 흔적 `<id>:want` 도 표마다 따로 쓴다 —
+`spreads:want` 는 spreads 허브만, `gap:want` 는 gap 허브만. 수집은 `gap:want` 가 있을 때만 gap 표를 만든다(048 §3.3).
 """
 
 import asyncio
@@ -160,8 +161,7 @@ class SpreadsHub:
         self._bus = bus
         self._table_id = table
         self._key = ROW_KEYS[table]
-        # `spreads:want`(018) 는 spreads 표에만 있는 흔적 — 다른 표의 접속으로 갱신되면 안 된다 (048 §3.4)
-        self._wants = table == CHANNEL
+        # 보는 사람 흔적은 표마다 `<id>:want` — 다른 표의 접속으로 갱신되면 안 된다 (048 §3.4)
         self._conns: set[Connection] = set()
         self._table: dict | None = None  # 직전 표 — 접속자가 있을 때만
         self._index: dict[str, dict] | None = None
@@ -198,9 +198,9 @@ class SpreadsHub:
                 await self._load_latest()
             finally:
                 self._loaded.set()
-            await (
-                self._refresh_want()
-            )  # 보는 사람이 있다는 흔적을 지금 1회 — 수집은 이 키를 읽지 않는다 (§3.1)
+            # 보는 사람이 있다는 흔적을 지금 1회 — spreads 는 수집이 읽지 않고(017 §3.1), gap 은 수집이 이 키를 보고
+            # 표를 만들기 시작한다(048 §3.3) — 그래서 첫 접속자는 waiting 뒤 1~2초 안에 snapshot 을 받는다
+            await self._refresh_want()
         else:
             # 첫 접속자가 latest 를 읽는 중이면 끝날 때까지 기다린다 — 그 사이 waiting 을 받은 접속자에게
             # latest 기준 delta 가 이어지면 snapshot 없이 바뀐 행만 받는다 (§3.2, 배포 직후 전원 재접속)
@@ -253,12 +253,12 @@ class SpreadsHub:
         self._snap = None
 
     async def _refresh_want(self) -> None:
-        if not self._wants or not self._conns:
+        if not self._conns:
             return
         try:
-            await self._bus.want()
+            await self._bus.want(self._table_id)
         except Exception as exc:
-            logger.warning("spreads:want 갱신 실패: %r", exc)
+            logger.warning("%s:want 갱신 실패: %r", self._table_id, exc)
 
     def start(self) -> None:
         self._task = asyncio.create_task(self.run(), name=f"{self._table_id}_hub")

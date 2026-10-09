@@ -68,11 +68,6 @@ def limit_sec(tier: Tier) -> int:
     return LIMIT_POINTS * tier.window_sec
 
 
-def _tri(v: bool | None) -> int:
-    """입출금 3상태 → 저장값 (1 가능·0 불가·−1 모름) — Influx 에 null 이 없다."""
-    return -1 if v is None else int(v)
-
-
 class CandleStore(Protocol):
     """Influx 중 이 모듈이 쓰는 부분 — 실물은 core.influx.InfluxClient, 테스트는 fake."""
 
@@ -370,30 +365,33 @@ class CandleAggregator:
                     head = candle_head(*key)
                     heads[key] = head
                 last = acc.last
+                # 위치 인자로 넘긴다 — 1,800여 줄에 키워드 20개씩 넘기면 그 전달이 분 닫힘 비용의 큰 몫이다(014 §3.3).
+                # 순서 = candle_line 선언 순서이고 줄 끝 주석이 필드 이름이다. 입출금 4상태는 3상태 저장값(1 가능·0 불가·
+                # −1 모름 — Influx 에 null 이 없다)으로: None 만 −1 로 바꾸고 bool 은 그대로 넘긴다(줄 함수가 int 로 적는다)
                 pending[(*key, minute)] = candle_line(
                     head,
                     minute,
-                    fwd_o=acc.fwd_o,
-                    fwd_h=acc.fwd_h,
-                    fwd_l=acc.fwd_l,
-                    fwd_c=last.fwd,
-                    rev_o=acc.rev_o,
-                    rev_h=acc.rev_h,
-                    rev_l=acc.rev_l,
-                    rev_c=last.rev,
-                    krw=last.dom_price,
-                    usdt=last.fx_price,
-                    rate=last.rate,
-                    dom_dep=_tri(last.dom_dep),
-                    dom_wd=_tri(last.dom_wd),
-                    fx_dep=_tri(last.fx_dep),
-                    fx_wd=_tri(last.fx_wd),
-                    blocked_fwd_sec=acc.blocked_fwd,
-                    blocked_rev_sec=acc.blocked_rev,
-                    samples=acc.samples,
+                    acc.fwd_o,  # fwd_o
+                    acc.fwd_h,  # fwd_h
+                    acc.fwd_l,  # fwd_l
+                    last.fwd,  # fwd_c
+                    acc.rev_o,  # rev_o
+                    acc.rev_h,  # rev_h
+                    acc.rev_l,  # rev_l
+                    last.rev,  # rev_c
+                    last.dom_price,  # krw
+                    last.fx_price,  # usdt
+                    last.rate,  # rate
+                    -1 if last.dom_dep is None else last.dom_dep,  # dom_dep
+                    -1 if last.dom_wd is None else last.dom_wd,  # dom_wd
+                    -1 if last.fx_dep is None else last.fx_dep,  # fx_dep
+                    -1 if last.fx_wd is None else last.fx_wd,  # fx_wd
+                    acc.blocked_fwd,  # blocked_fwd_sec
+                    acc.blocked_rev,  # blocked_rev_sec
+                    acc.samples,  # samples
                     # 024 §3.4 — 그 분 마지막 행의 망 이름(입출금 4상태와 같은 규칙)
-                    net_dom=last.net_dom,
-                    net_fx=last.net_fx,
+                    last.net_dom,  # net_dom
+                    last.net_fx,  # net_fx
                 )
             dropped = 0
             while len(pending) > PENDING_LIMIT:

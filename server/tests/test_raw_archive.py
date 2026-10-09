@@ -2,18 +2,21 @@
 
 import asyncio
 import gzip
+import importlib
 import json
 import logging
+import pkgutil
 import threading
 import time
 from collections.abc import Callable
+from types import ModuleType
 from typing import Any
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core import raw_archive
+from app.core import eth_flow, raw_archive, streams
 from app.core.config import Settings
 from app.core.contracts import noop_record
 from app.core.raw_archive import WORKER_NAME, RawArchive, format_line, pack
@@ -716,6 +719,20 @@ async def test_replaying_a_binance_depth_line_rebuilds_the_same_row() -> None:
 # --- 기동 (§3.2·§3.3) ---
 
 
+def _socket_modules() -> list[ModuleType]:
+    """`open_socket` 으로 실제 소켓을 여는 모듈 전부 — `app.core.streams` 아래 커넥터와 ETH 감지기(050).
+
+    목록을 손으로 적지 않고 패키지에서 찾는다 — 커넥터가 늘어도(045 OKX·047 Hyperliquid 처럼) 기동 테스트가 빠뜨리지
+    않게. 지금은 목록 REST 가 전부 실패해 우주가 비고, 배정 없는 샤드는 연결하지 않으므로 소켓을 열 일이 없다. 그래도
+    그 사슬 하나가 바뀌거나 환경 변수가 ETH 감지기를 켜면 기동 테스트가 실제 거래소·노드에 붙으려 한다.
+    """
+    found = [
+        importlib.import_module(f"{streams.__name__}.{info.name}")
+        for info in pkgutil.iter_modules(streams.__path__)
+    ]
+    return [m for m in found if hasattr(m, "open_socket")] + [eth_flow]
+
+
 def _boot(
     monkeypatch: pytest.MonkeyPatch, **settings: Any
 ) -> tuple[Any, dict[str, Any]]:
@@ -739,8 +756,10 @@ def _boot(
         raise httpx.ConnectError("down", request=request)
 
     real_client = httpx.AsyncClient
-    for module in ("upbit", "bithumb", "binance"):
-        monkeypatch.setattr(f"app.core.streams.{module}.open_socket", refuse)
+    for module in _socket_modules():
+        monkeypatch.setattr(module, "open_socket", refuse)
+    # REST 는 앱이 만드는 httpx 클라이언트를 통째로 거부한다 — 목록·perp 티커(바이낸스·바이빗·비트겟 perp 는 소켓 없이
+    # REST 만)·Hyperliquid meta·입출금·알림이 모두 이 클라이언트로 나간다
     monkeypatch.setattr(
         httpx,
         "AsyncClient",
@@ -751,6 +770,43 @@ def _boot(
         lambda: Settings(_env_file=None, redis_url="redis://127.0.0.1:1/0", **settings),
     )
     return create_app(), wired
+
+
+def test_boot_refuses_every_socket_module_including_newer_connectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """기동 테스트의 망 차단이 소켓을 여는 모듈 전부에 걸리는지 — 현물 6곳·Hyperliquid perp·ETH 감지기."""
+    names = {m.__name__.rsplit(".", 1)[-1] for m in _socket_modules()}
+    assert {
+        "upbit",
+        "bithumb",
+        "binance",
+        "bybit",
+        "bitget",
+        "okx",
+        "hyperliquid_perp",
+        "eth_flow",
+    } <= names
+    _boot(monkeypatch)
+    for module in _socket_modules():
+        with pytest.raises(OSError, match="refused"):
+            asyncio.run(module.open_socket("wss://example.invalid/ws"))
+
+
+async def test_boot_rest_client_refuses_without_touching_the_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """앱이 만드는 REST 클라이언트(목록·perp REST 원천·입출금이 쓰는 것)는 요청을 보내기 전에 거부된다."""
+    _boot(monkeypatch)
+    async with httpx.AsyncClient(timeout=1.0) as client:
+        for url in (
+            "https://fapi.binance.com/fapi/v1/ticker/bookTicker",
+            "https://api.bybit.com/v5/market/tickers?category=linear",
+            "https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES",
+            "https://openapi.okx.com/api/v5/public/instruments?instType=SPOT",
+        ):
+            with pytest.raises(httpx.ConnectError, match="down"):
+                await client.get(url)
 
 
 def test_boot_without_bucket_disables_archive_and_keeps_health_200(

@@ -12,11 +12,18 @@ import contextlib
 import gzip
 import json
 import logging
+import math
 from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from app.core.influx import dw_fail_point, premium_head, premium_line, to_line
+from app.core.influx import (
+    dw_fail_point,
+    premium_head,
+    premium_line,
+    premium_line_text,
+    to_line,
+)
 from app.core.live_store import LiveStore
 from app.core.models import Tick
 from app.core.redis_stream import (
@@ -70,6 +77,8 @@ def encode_tick(tick: Tick) -> bytes:
 
 # --- 계층 ① → ② 인계기 (§3.3) ---
 
+_INF = math.inf
+
 
 class TickRelay:
     """`handoff(tick)` 구현 — 동기·무예외. 호출은 틱 루프(직전 틱·종료 시 마지막 틱)뿐이다."""
@@ -89,6 +98,11 @@ class TickRelay:
         self._queue: deque[tuple[int, bytes]] = deque(maxlen=QUEUE_LIMIT)
         self._wake = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
+        # 레코드 JSON 을 조합마다 기억한다(2026-10-09) — 조합 → 행 글의 머리('{"dom":…,"base":…,"fwd":'),
+        # 조합 → (fwd, rev, 행 글). 매초 1,800여 행 중 값이 바뀌는 조합은 약 40% 라 나머지는 직전 글을 다시 쓴다.
+        # 조합 수만큼(약 1,800개, 0.8MB) 자라고 사라진 조합도 남지만 작다. 틱 루프(이벤트 루프)만 만진다
+        self._row_heads: dict[tuple[str, str, str], str] = {}
+        self._row_texts: dict[tuple[str, str, str], tuple[float, float, str]] = {}
 
     def __call__(self, tick: Tick) -> None:
         try:
@@ -103,10 +117,71 @@ class TickRelay:
                     QUEUE_LIMIT,
                     self._queue[0][0],
                 )
-            self._queue.append((tick.ts, encode_tick(tick)))
+            self._queue.append((tick.ts, self._encode(tick)))
             self._wake.set()
         except Exception:
             logger.exception("틱 인계 처리 중 예외 — 이 틱은 버린다 ts=%d", tick.ts)
+
+    def _encode(self, tick: Tick) -> bytes:
+        """`encode_tick(tick)` 과 같은 바이트 — 값이 직전 틱과 같은 조합은 행 글을 다시 쓰지 않는다.
+
+        gzip 레벨·머리 시각과 '틱 동기 구간에서 인코딩'(§3.4)은 그대로다. 빠른 길로 못 쓰는 틱은 `encode_tick` 으로 간다.
+        """
+        text = self._record_json(tick)
+        if text is None:
+            return encode_tick(tick)
+        return gzip.compress(text.encode(), compresslevel=GZIP_LEVEL, mtime=0)
+
+    def _record_json(self, tick: Tick) -> str | None:
+        """`encode_tick` 이 gzip 에 넣는 JSON 과 같은 글 — 못 쓰는 틱이면 None (§3.4).
+
+        행 글은 `{"dom":…,"fx":…,"base":…,"fwd":…,"rev":…}` 이고 이름 셋은 조합마다 한 번 `json.dumps` 로
+        이스케이프해 둔다(인계 레코드는 ensure_ascii 기본값이라 같은 함수로 쓴다). fwd·rev 는 `repr` — json 의 float
+        표기와 같다. 같은 조합의 fwd·rev 가 직전과 같으면(0.0 이면 부호까지) 직전 행 글을 그대로 쓴다 — 같은 float 는
+        같은 글자다. 순서가 중요하다: 타입을 먼저 본다(float 2.0 뒤에 int 2 나 True 가 오면 2 == 2.0 이라도 json 은
+        "2"·"true" 로 쓴다). float 가 아니거나 유한하지 않거나(json 은 NaN·Infinity 로 쓴다) ts 가 int 가 아니면 None.
+        """
+        ts = tick.ts
+        if type(ts) is not int:
+            return None
+        heads = self._row_heads
+        cache = self._row_texts
+        parts: list[str] = []
+        append = parts.append
+        for r in tick.rows:
+            fwd = r.fwd
+            rev = r.rev
+            if type(fwd) is not float or type(rev) is not float:
+                return None
+            key = (r.dom, r.fx, r.base)
+            hit = cache.get(key)
+            if (
+                hit is not None
+                and hit[0] == fwd
+                and hit[1] == rev
+                and (fwd != 0.0 or math.copysign(1.0, hit[0]) == math.copysign(1.0, fwd))
+                and (rev != 0.0 or math.copysign(1.0, hit[1]) == math.copysign(1.0, rev))
+            ):
+                append(hit[2])
+                continue
+            if not (-_INF < fwd < _INF and -_INF < rev < _INF):
+                return None
+            head = heads.get(key)
+            if head is None:
+                head = heads[key] = (
+                    '{"dom":'
+                    + json.dumps(r.dom)
+                    + ',"fx":'
+                    + json.dumps(r.fx)
+                    + ',"base":'
+                    + json.dumps(r.base)
+                    + ',"fwd":'
+                )
+            row_text = f'{head}{fwd!r},"rev":{rev!r}}}'
+            cache[key] = (fwd, rev, row_text)
+            append(row_text)
+        dw = json.dumps(list(tick.dw_failed), separators=(",", ":"))
+        return f'{{"ts":{ts!r},"rows":[{",".join(parts)}],"dwFailed":{dw}}}'
 
     @property
     def pending(self) -> int:
@@ -262,15 +337,29 @@ class Flusher:
         write = self._writer.write_lines
         buf: list[str] = []
         for entry in page:
-            record = json.loads(gzip.decompress(entry.data))
-            ts = int(record["ts"])
+            # 숫자 글자는 float 로 바꾸지 않고 글자 그대로 받는다(parse_float=str) — 인계기가 json.dumps(float repr)로 쓴
+            # 글자라 줄에 다시 repr 할 글자와 같다(premium_line_text). 회차마다 11만 줄의 글자 → float → 글자 왕복을
+            # 덜어 스레드가 GIL 을 잡는 시간이 절반이 된다(2026-10-09). 이 방법은 JSON 숫자와 문자열 리터럴을 가리지
+            # 못한다 — fwd·rev 를 쓰는 곳은 `encode_tick` 하나이고 늘 float 라 문자열이 올 일이 없다
+            record = json.loads(gzip.decompress(entry.data), parse_float=str)
+            ts_value = record["ts"]
+            # ts 는 늘 정수 글자지만 소수 글자였다면 기준(json 의 float → int)과 같게 읽는다
+            ts = int(float(ts_value) if type(ts_value) is str else ts_value)
+            tail = f" {ts}"
             for r in record["rows"]:
                 key = (r["dom"], r["fx"], r["base"])
                 head = heads.get(key)
                 if head is None:
                     head = premium_head(*key)
                     heads[key] = head
-                buf.append(premium_line(head, float(r["fwd"]), float(r["rev"]), ts))
+                fwd = r["fwd"]
+                rev = r["rev"]
+                if type(fwd) is str and type(rev) is str:
+                    buf.append(premium_line_text(head, fwd, rev, tail))
+                else:
+                    # 글자가 아닌 값(정수·NaN·Infinity 상수) — 지금처럼 float 로 바꿔 쓴다. 표기 규칙을 여기 두지 않게
+                    # Influx 모듈 함수를 그대로 부른다(float(글자) 의 repr 은 그 글자라 섞여도 같은 바이트다)
+                    buf.append(premium_line(head, float(fwd), float(rev), ts))
                 if len(buf) == WRITE_BATCH:
                     write(buf)
                     buf = []
