@@ -25,6 +25,7 @@
 | `/kimp-chart/`·`/kimp-history/` | 404(루트 location 의 `try_files`) |
 
 - 공개 nginx(:80)의 정확 일치 위치. `= /<slug>` 는 `try_files /<slug>.html =404` 에 머리 둘을 `always` 로 붙인다 — `Cache-Control: no-cache`(고치면 다음 방문에 바로, 그대로면 304)와 CSP. `/app/<slug>.html` 을 막는 이유는 032 와 같다(dist 의 파일이 `/app/` alias 로 CSP 없이 200 으로 나간다). 정규식 위치는 두지 않는다(028).
+- 모양 — 본문은 내용 폭(최대 1120px) 가운데의 한 칸 578px(17px 기준 34em — 글자가 큰 h1·h2 도 같은 왼쪽 선에 서도록 px). 절 위 구분선도 그 폭으로 가운데에 긋고, 화면 그림·코인 바로 가기는 880px·지난 7일 사건 표는 48em 까지 넓혀 가운데에 둔다(2026-10-09 사람 요구 — 왼쪽으로 치우쳐 보임).
 - CSP — kimp-chart 는 privacy 와 같은 값(`default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`). kimp-history 는 `/api/landing` 을 부르므로 `connect-src 'self'` 를 더한 값. 그 밖의 요청(외부 글꼴·그림·WebSocket)은 둘 다 막힌다.
 
 ### 3.2 공통 — 검색 구성

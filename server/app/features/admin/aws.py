@@ -1,4 +1,4 @@
-"""AWS 읽기 — 경보·24시간 지표·canary 로그·예산·경보 이력 (스펙 034 §3.2·§3.3).
+"""AWS 읽기 — 경보·24시간 지표·canary 로그·예산·경보 이력 (스펙 034 §3.2·§3.3)과 기간을 고르는 시계열 (063 §3.2).
 
 모든 함수는 동기이고 `feeds.py` 의 전용 실행기(스레드 1개)에서만 돈다 — 클라이언트 생성·호출·응답 풀기까지 한 번에.
 수집기의 기본 실행기(1 vCPU 에서 스레드 5개)는 Influx 쓰기·롤업·원문 묶기가 쓰므로, 느린 AWS 호출이 그 줄에 서지 않게
@@ -51,6 +51,29 @@ HISTORY_MAX_PAGES = 2
 LIST_MAX_PAGES = 5  # 경보·지표 목록 쪽 수 상한 — 지금은 한 쪽(경보 18개·지표 13개)
 # 자격증명을 못 찾은 결과를 들고 있는 시간 — 메타데이터 끝점이 답하지 않는 호스트는 조회 한 번이 약 2초다 (§3.2)
 NO_CREDENTIALS_TTL_SEC = 60.0
+# 063 시계열 — GetMetricData 한 번에 실을 수 있는 질의 수(API 한도)와 묶음마다 따르는 쪽 수 상한. 한 쪽은 기본 100,800점이라
+# 500질의 × 288점도 두 쪽이다 — 상한에 닿고도 토큰이 남으면 빈 칸을 '자료 없음' 처럼 보이지 않게 partial 로 끝낸다
+METRIC_QUERY_LIMIT = 500
+METRIC_MAX_PAGES = 5
+# 상자마다 (키, 지표, 통계, 풀기). 풀기 — pct: 소수 둘째 자리(퍼센트·크레딧), rate: 합 ÷ 주기(바이트/초 정수),
+# count: 정수(상태 검사 0·1), used: 100 − 값(가용 % → 사용 %). 키 순서가 응답 `series` 의 키 순서다
+SERIES_EC2 = (
+    ("cpu", "CPUUtilization", "Average", "pct"),
+    ("netIn", "NetworkIn", "Sum", "rate"),
+    ("netOut", "NetworkOut", "Sum", "rate"),
+    ("ebsRead", "EBSReadBytes", "Sum", "rate"),
+    ("ebsWrite", "EBSWriteBytes", "Sum", "rate"),
+    ("creditBalance", "CPUCreditBalance", "Minimum", "pct"),
+    ("creditUsage", "CPUCreditUsage", "Sum", "pct"),
+    ("surplusCharged", "CPUSurplusCreditsCharged", "Sum", "pct"),
+    ("statusFailed", "StatusCheckFailed", "Maximum", "count"),
+)
+# 에이전트 지표(네임스페이스 MarketLens) — ListMetrics 에 그 상자의 차원이 없으면 질의하지 않고 null (serve 의 swap 등)
+SERIES_AGENT = (
+    ("mem", "mem_available_percent", "Minimum", "used"),
+    ("disk", "disk_used_percent", "Maximum", "pct"),
+    ("swap", "swap_used_percent", "Maximum", "pct"),
+)
 
 # 앞 둘·뒤 둘이 각각 query·JSON 프로토콜의 같은 뜻 — Logs·Budgets 는 JSON 쪽 코드(`…Exception`)를 준다
 UNCONFIGURED_CODES = {
@@ -67,7 +90,8 @@ _CONTROL = ("START RequestId:", "END RequestId:", "REPORT RequestId:", "INIT_")
 
 
 class PartialRead(Exception):
-    """canary 로그를 한도(3쪽·2초)까지 읽었는데 끝난 실행을 못 찾음 — `error`·`partial`."""
+    """한도까지 읽고도 다 못 읽음 — `error`·`partial`. canary 로그 3쪽·2초 안에 끝난 실행이 없을 때(034),
+    시계열 GetMetricData 쪽 수 상한에 닿고도 토큰이 남았을 때(063)."""
 
 
 def classify(exc: BaseException) -> tuple[str, str]:
@@ -319,6 +343,127 @@ class AwsReader:
         self._dims = (now, metrics)
         return metrics
 
+    # --- 시계열 (063) ---
+
+    def series(self, window_sec: int, period_sec: int) -> dict[str, Any]:
+        """상자 셋의 EC2·에이전트 지표 + WS 접속·canary — 창·주기는 피드가 고른다(063 §3.1).
+
+        상자·차원은 metrics 와 같은 1시간 캐시를 쓴다(같은 스레드라 잠금이 없다). 점은 시작부터 주기 간격의 격자다.
+        """
+        end = int(self._clock()) // period_sec * period_sec
+        start = end - window_sec
+        boxes = self._box_ids()
+        dims = self._metric_dims()
+        queries: list[dict[str, Any]] = []
+
+        def add(
+            qid: str, ns: str, name: str, dimensions: list, stat: str, kind: str
+        ) -> tuple[str, str]:
+            metric = {"Namespace": ns, "MetricName": name, "Dimensions": dimensions}
+            queries.append(
+                {
+                    "Id": qid,
+                    "MetricStat": {
+                        "Metric": metric,
+                        "Period": period_sec,
+                        "Stat": stat,
+                    },
+                    "ReturnData": True,
+                }
+            )
+            return qid, kind
+
+        plan: list[tuple[str, str, dict[str, tuple[str, str] | None]]] = []
+        for box in BOXES:
+            iid = boxes.get(box)
+            if iid is None:
+                continue  # 메모리 경보가 없는 상자는 빠진다 (034 와 같다)
+            ec2 = [{"Name": "InstanceId", "Value": iid}]
+            ids: dict[str, tuple[str, str] | None] = {}
+            for key, name, stat, kind in SERIES_EC2:
+                # 크레딧 셋은 c7g(collect)에도 질의한다 — 자료가 없어 null 이 된다(034 의 credit 과 같다)
+                ids[key] = add(f"{box}_{key}", "AWS/EC2", name, ec2, stat, kind)
+            for key, name, stat, kind in SERIES_AGENT:
+                found = _find_dims(dims, name, iid)
+                ids[key] = (
+                    None
+                    if found is None
+                    else add(f"{box}_{key}", NAMESPACE, name, found, stat, kind)
+                )
+            plan.append((box, iid, ids))
+        # WS 접속 수는 serve 의 InstanceId 로 고른다 — 034 와 같은 이유(ListMetrics 는 순서 없이 준다), serve 가 빠지면 null
+        serve = boxes.get("serve")
+        ws = None if serve is None else _find_dims(dims, "marketlens_ws_clients", serve)
+        ws_id = (
+            None
+            if ws is None
+            else add("ws", NAMESPACE, "marketlens_ws_clients", ws, "Maximum", "count")
+        )
+        fn = [{"Name": "FunctionName", "Value": CANARY_FUNCTION}]
+        errors = add("canary_errors", "AWS/Lambda", "Errors", fn, "Sum", "count")
+        duration = add(
+            "canary_duration", "AWS/Lambda", "Duration", fn, "Maximum", "count"
+        )
+        raw = self._metric_points(queries, start, end)
+
+        def line(q: tuple[str, str] | None) -> list[list[Any]] | None:
+            if q is None:
+                return None
+            by_ts, kind = raw.get(q[0], {}), q[1]
+            points = [
+                [ts, _series_value(by_ts.get(ts), kind, period_sec)]
+                for ts in range(start, end, period_sec)
+            ]
+            return None if all(v is None for _, v in points) else points
+
+        return {
+            "periodSec": period_sec,
+            "startTs": start,
+            "endTs": end,
+            "boxes": [
+                {
+                    "box": box,
+                    "instanceId": iid,
+                    "series": {key: line(q) for key, q in ids.items()},
+                }
+                for box, iid, ids in plan
+            ],
+            "wsClients": line(ws_id),
+            "canary": {"errors": line(errors), "durationMs": line(duration)},
+        }
+
+    def _metric_points(
+        self, queries: list[dict[str, Any]], start: int, end: int
+    ) -> dict[str, dict[int, float]]:
+        """GetMetricData — 질의 500개마다 한 묶음, 묶음마다 nextToken 을 따른다. 질의 Id → {구간 시작 초: 값}."""
+        cw = self._client("cloudwatch")
+        points: dict[str, dict[int, float]] = {}
+        for i in range(0, len(queries), METRIC_QUERY_LIMIT):
+            token: str | None = None
+            for _ in range(METRIC_MAX_PAGES):
+                kwargs: dict[str, Any] = {
+                    "MetricDataQueries": queries[i : i + METRIC_QUERY_LIMIT],
+                    "StartTime": datetime.fromtimestamp(start, UTC),
+                    "EndTime": datetime.fromtimestamp(end, UTC),
+                    "ScanBy": "TimestampAscending",
+                }
+                if token:
+                    kwargs["NextToken"] = token
+                resp = cw.get_metric_data(**kwargs)
+                # 다음 쪽은 같은 Id 의 이어지는 점을 준다 — Id 마다 합친다
+                for r in resp.get("MetricDataResults", []):
+                    by_ts = points.setdefault(r["Id"], {})
+                    for ts, v in zip(
+                        r.get("Timestamps", []), r.get("Values", []), strict=False
+                    ):
+                        by_ts[int(ts.timestamp())] = v
+                token = resp.get("NextToken")
+                if not token:
+                    break
+            else:
+                raise PartialRead
+        return points
+
     # --- canary ---
 
     def canary(self) -> dict[str, Any]:
@@ -482,6 +627,19 @@ def _money(amount: Any) -> float | None:
         return _round(float(amount), 2)
     except (TypeError, ValueError):
         return None
+
+
+def _series_value(
+    value: float | None, kind: str, period_sec: int
+) -> float | int | None:
+    """063 §3.2 — 퍼센트·크레딧은 소수 둘째 자리, 바이트/초(합 ÷ 주기)·개수는 정수. 빼거나 나눈 뒤에 반올림한다."""
+    if value is None:
+        return None
+    if kind == "rate":
+        return _round(value / period_sec, None)
+    if kind == "used":
+        return _round(100 - value, 2)
+    return _round(value, 2 if kind == "pct" else None)
 
 
 def _find_dims(
