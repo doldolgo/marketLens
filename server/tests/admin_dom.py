@@ -36,6 +36,8 @@ class Node {
   setAttribute(k, v) { this.attrs[k] = String(v) }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn) }
   fire(type, ev = {}) { (this.listeners[type] || []).forEach((fn) => fn(ev)) }
+  // 진짜 ECharts(test_admin_render.py)가 글자 폭을 재려고 canvas 를 만들면 그림판 없음 — 글꼴 크기로 어림한다
+  getContext() { return null }
 }
 const ENC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
 const flush = async () => { for (let i = 0; i < 60; i++) await new Promise((r) => setImmediate(r)) }
