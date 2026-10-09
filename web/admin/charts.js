@@ -305,6 +305,8 @@ export function budgetGauge(id, b, money) {
 
 // 가로 띠(시간 구간) — rows = [이름표], segs = [{ row, from(ms), to(ms), tone, head, tip }] 앞의 것부터 그린다(뒤가 위).
 // 수집 상태(정상 초록·끊김 빨강)와 상태 검사(실패 빨강)가 쓴다. 높이: 문제 구간은 굵게, 바탕 띠는 얇게
+// 바탕 띠(정상·흐림·빈 자리)는 얇게, 문제 구간은 굵게
+const BASE_TONES = new Set(['ok', 'dim', 'track']);
 export function lanes(id, o) {
   if (!o.rows.length) return blank(id, '자료 없음');
   const color = (tone) => TONE[tone] ?? COLOR.line;
@@ -322,7 +324,7 @@ export function lanes(id, o) {
         const seg = o.segs[params.dataIndex];
         const from = api.coord([api.value(1), api.value(0)]);
         const to = api.coord([api.value(2), api.value(0)]);
-        const height = api.size([0, 1])[1] * (seg.tone === 'ok' || seg.tone === 'dim' ? 0.28 : 0.6);
+        const height = api.size([0, 1])[1] * (BASE_TONES.has(seg.tone) ? 0.28 : 0.6);
         const box = params.coordSys;
         const shape = lib().graphic.clipRectByRect(
           { x: from[0], y: from[1] - height / 2, width: Math.max(3, to[0] - from[0]), height },
