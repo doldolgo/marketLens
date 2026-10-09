@@ -270,7 +270,8 @@ export function gauges(id, items) {
   }));
 }
 
-// 예산 게이지(§3.2·§3.3) — 호는 실제/한도, 바늘은 예측/한도(있을 때만). 100% 넘는 칸은 붉게, 끝은 120%
+// 예산 게이지(§3.2·§3.3) — 실제·예측 두 바늘(실제는 상태 색 + 같은 길이의 호, 예측은 흐린 짧은 바늘 — 있을 때만).
+// 한도 100% 넘는 칸은 붉게, 끝은 120%
 export function budgetGauge(id, b, money) {
   const r = (v) => Math.min(120, Math.max(0, (n0(v) / b.limit) * 100));
   const tone = b.actual >= b.limit ? 'bad' : num(b.forecast) !== null && b.forecast >= b.limit ? 'warn' : 'ok';
@@ -287,13 +288,14 @@ export function budgetGauge(id, b, money) {
     axisTick: { show: false },
     splitLine: { show: false },
     axisLabel: { show: false },
-    anchor: { show: false },
+    anchor: { show: true, size: 6, itemStyle: { color: COLOR.text } },
     title: { show: false },
     detail: { show: false },
   };
-  const series = [{ ...arc, progress: { show: true, width: 10, itemStyle: { color: TONE[tone] } }, pointer: { show: false }, data: [{ value: r(b.actual), name: '실제' }] }];
+  const needle = (length, width, color) => ({ show: true, length, width, itemStyle: { color } });
+  const series = [{ ...arc, progress: { show: true, width: 10, itemStyle: { color: TONE[tone] } }, pointer: needle('72%', 4, TONE[tone]), data: [{ value: r(b.actual), name: '실제' }] }];
   if (num(b.forecast) !== null) {
-    series.push({ ...arc, axisLine: { show: false }, progress: { show: false }, pointer: { show: true, length: '22%', width: 4, offsetCenter: [0, '-78%'], itemStyle: { color: COLOR.text } }, data: [{ value: r(b.forecast), name: '예측' }] });
+    series.push({ ...arc, axisLine: { show: false }, progress: { show: false }, pointer: needle('52%', 3, COLOR.muted), data: [{ value: r(b.forecast), name: '예측' }] });
   }
   return draw(id, base({
     tooltip: itemTip(() => tip('이번 달 예산', [[tone, '실제', money(b.actual)], ['dim', '예측', money(b.forecast)], ['dim', '한도', money(b.limit)]])),
