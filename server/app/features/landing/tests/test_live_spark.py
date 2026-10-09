@@ -53,8 +53,12 @@ def _top(live: dict | None) -> list[tuple[str, str, float]]:
 def _rows() -> list[dict]:
     rows = [
         row("AAA", fwd=2.0, rev=-1.0, slip_fwd=0.3),
-        row("BBB", fwd=-0.5, rev=1.5, wd_dom=None),  # 역프 쪽 국내 출금 모름 — 김프만 후보
-        row("CCC", fwd=3.0, rev=0.2, status="stale"),  # 지금 값이 아니다 — 후보·over1 밖
+        row(
+            "BBB", fwd=-0.5, rev=1.5, wd_dom=None
+        ),  # 역프 쪽 국내 출금 모름 — 김프만 후보
+        row(
+            "CCC", fwd=3.0, rev=0.2, status="stale"
+        ),  # 지금 값이 아니다 — 후보·over1 밖
         row("DDD", fwd=0.9, rev=1.1, dep_fx=False),
     ]
     for r in rows:
@@ -83,13 +87,16 @@ def test_publisher_shaped_table_takes_the_strip_path_and_matches_full_parse() ->
     assert live == _reference(text)
     assert _top(live) == TOP
     # over1 = 원값 1.0 이상인 방향 — AAA 김프 2.3, BBB 역프 1.54, DDD 역프 1.14 (CCC 는 stale)
-    assert (live["pairs"], live["coins"], live["over1"], live["over1_movable"]) == (4, 4, 3, 1)
+    assert (live["pairs"], live["coins"], live["over1"], live["over1_movable"]) == (
+        4,
+        4,
+        3,
+        1,
+    )
 
 
 def test_spark_as_the_last_key_falls_back_to_full_parse() -> None:
-    rows = [
-        _reorder(r, [k for k in r if k != "spark"] + ["spark"]) for r in _rows()
-    ]
+    rows = [_reorder(r, [k for k in r if k != "spark"] + ["spark"]) for r in _rows()]
     text = _compact(rows)
     assert _strip_spark(text) is text
     assert _live(text) == _reference(text)
@@ -154,7 +161,9 @@ def test_spark_as_the_first_key_is_left_in_place_and_others_are_stripped() -> No
     rows[1] = _reorder(rows[1], ["spark"] + [k for k in rows[1] if k != "spark"])
     text = _compact(rows)
     stripped = _strip_spark(text)
-    assert stripped.count('"spark"') == 1  # 앞에 콤마가 없는 첫 키는 표식과 맞지 않아 그대로 파싱한다
+    assert (
+        stripped.count('"spark"') == 1
+    )  # 앞에 콤마가 없는 첫 키는 표식과 맞지 않아 그대로 파싱한다
     assert _live(text) == _reference(text)
 
 

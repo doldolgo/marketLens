@@ -22,7 +22,12 @@ DATA = Path(__file__).parent / "data" / "spreads_prod_3.json.xz"
 FIELDS = (
     "sym", "dom", "fx", "krw", "usd", "spark", "netDom", "depDom", "wdDom", "depFx", "wdFx", "netFx", "dayChg",
 )  # fmt: skip
-TIES = (1.0, 0.5, 2.25, -0.3)  # 값이 같은 후보가 여럿 생기게 — 동률 규칙까지 같아야 한다
+TIES = (
+    1.0,
+    0.5,
+    2.25,
+    -0.3,
+)  # 값이 같은 후보가 여럿 생기게 — 동률 규칙까지 같아야 한다
 
 
 @pytest.fixture(scope="module")

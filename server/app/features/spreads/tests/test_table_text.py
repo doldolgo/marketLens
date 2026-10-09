@@ -69,17 +69,58 @@ def _small_store() -> LiveStore:
     seed_rows(
         store,
         [
-            make_row("upbit", "BTC", price=150_000_000, asks=[[150_000_100, 1]], bids=[[150_000_000, 2]], dep=True, wd=True, networks=[Network("BTC", "Bitcoin", True, True)]),
-            make_row("upbit", "ETH", price=5_000_000.5, asks=[[5_000_100.0, 3.0]], bids=[[5_000_000.0, 3.0]], dep=True, wd=False, networks=[Network("ETH", ODD, True, False)]),
-            make_row("upbit", "XRP", price=800, asks=[], bids=[[799.0, 10.0]]),  # 빈 호가 → fail 행
+            make_row(
+                "upbit",
+                "BTC",
+                price=150_000_000,
+                asks=[[150_000_100, 1]],
+                bids=[[150_000_000, 2]],
+                dep=True,
+                wd=True,
+                networks=[Network("BTC", "Bitcoin", True, True)],
+            ),
+            make_row(
+                "upbit",
+                "ETH",
+                price=5_000_000.5,
+                asks=[[5_000_100.0, 3.0]],
+                bids=[[5_000_000.0, 3.0]],
+                dep=True,
+                wd=False,
+                networks=[Network("ETH", ODD, True, False)],
+            ),
+            make_row(
+                "upbit", "XRP", price=800, asks=[], bids=[[799.0, 10.0]]
+            ),  # 빈 호가 → fail 행
         ],
         NOW,
     )
     seed_rows(
         store,
         [
-            make_row("binance", "BTC", price=100_000, asks=[[100_001, 1.5]], bids=[[99_999, 1.5]], dep=True, wd=True, networks=[Network("BTC", "Bitcoin", True, True)]),
-            make_row("binance", "ETH", price=3400.25, asks=[[3400.5, 2.0]], bids=[[3400.0, 2.0]], dep=False, wd=None, networks=[Network("ETH", "Ethereum (ERC20)", False, True), Network("ARB", 'Arb "One"', True, True)]),
+            make_row(
+                "binance",
+                "BTC",
+                price=100_000,
+                asks=[[100_001, 1.5]],
+                bids=[[99_999, 1.5]],
+                dep=True,
+                wd=True,
+                networks=[Network("BTC", "Bitcoin", True, True)],
+            ),
+            make_row(
+                "binance",
+                "ETH",
+                price=3400.25,
+                asks=[[3400.5, 2.0]],
+                bids=[[3400.0, 2.0]],
+                dep=False,
+                wd=None,
+                networks=[
+                    Network("ETH", "Ethereum (ERC20)", False, True),
+                    Network("ARB", 'Arb "One"', True, True),
+                ],
+            ),
             make_row("binance", "XRP", price=0.55),
         ],
         NOW - timedelta(seconds=2),
@@ -90,7 +131,10 @@ def _small_store() -> LiveStore:
     minute = int(NOW.timestamp()) // 60
     buffer = SparkBuffer()
     buffer.seed(
-        [SparkBucketRow("upbit", "binance", "BTC", (minute - 2 + i) * 60, v) for i, v in enumerate([1.23456, -0.0004, 1e16])]
+        [
+            SparkBucketRow("upbit", "binance", "BTC", (minute - 2 + i) * 60, v)
+            for i, v in enumerate([1.23456, -0.0004, 1e16])
+        ]
         + [SparkBucketRow("upbit", "binance", "XRP", minute * 60, 1e-05)]
     )
     buffer.publish(store)
@@ -111,7 +155,9 @@ def _outcome(fn, *args, **kw) -> tuple[str, str]:  # noqa: ANN001
 # ---- 바이트 동일 ----
 
 
-def test_small_table_text_is_the_pre_change_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_small_table_text_is_the_pre_change_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """정수 가격("100000.0")·이스케이프 망 이름·fail 행·−0.0·지수 표기·조각 없는 조합·dayChg — 박아 둔 글자와 같다."""
     store = _small_store()
     assert encode_table(build_table(store, now=NOW, day_open=_DAY_OPEN)) == GOLDEN
@@ -119,7 +165,9 @@ def test_small_table_text_is_the_pre_change_bytes(monkeypatch: pytest.MonkeyPatc
     # 게시기 경로(메모·회차·글 기억 포함)도 같다 — 같은 게시기로 두 번(두 번째는 기억한 글을 다시 쓴다)
     _fix_publisher_now(monkeypatch, NOW)
     memo = WalletMemo()
-    publisher = SpreadsPublisher(store=store, bus=None, day_open=_DAY_OPEN, wallet_memo=memo)  # type: ignore[arg-type]
+    publisher = SpreadsPublisher(
+        store=store, bus=None, day_open=_DAY_OPEN, wallet_memo=memo
+    )  # type: ignore[arg-type]
     for second in range(2):
         build_tick(store, int(NOW.timestamp()) + second, [], memo)
         assert publisher._encode() == GOLDEN
@@ -139,7 +187,9 @@ def test_publisher_text_equals_the_dict_table_on_real_tables(
     rng = random.Random(400 + index)
     relay = TickRelay(stream=None, store=store, spark=buffer)
     memo = WalletMemo()
-    publisher = SpreadsPublisher(store=store, bus=None, day_open=day_open, wallet_memo=memo)  # type: ignore[arg-type]
+    publisher = SpreadsPublisher(
+        store=store, bus=None, day_open=day_open, wallet_memo=memo
+    )  # type: ignore[arg-type]
     now = REAL_NOW
     for step in range(4):
         build_tick(store, int(now.timestamp()), [], memo)
@@ -148,11 +198,15 @@ def test_publisher_text_equals_the_dict_table_on_real_tables(
         # 기준 — 메모 없이 행마다 판정한 dict 표를 통째로 인코딩
         payload = build_table(store, now=now, day_open=day_open)
         expected = encode_table(payload)
-        assert got == expected == encode_table_with_spark_json(payload, store.spark_json())
+        assert (
+            got == expected == encode_table_with_spark_json(payload, store.spark_json())
+        )
         rows = json.loads(got)["rows"]
         assert len(rows) > 1_400 and {"ok", "fail"} <= {r["status"] for r in rows}
         if step == 0:
-            assert "stale" in {r["status"] for r in rows} and ("-0.0," in got or "-0.0]" in got)
+            assert "stale" in {r["status"] for r in rows} and (
+                "-0.0," in got or "-0.0]" in got
+            )
         now += timedelta(seconds=1)
         _next_second(store, rng, now)
         relay(build_tick(store, int(now.timestamp()), []))
@@ -164,7 +218,9 @@ def test_wallet_texts_are_reused_only_while_the_verdict_object_is_the_same(
     """입출금 캐시가 새 객체로 바뀐 회차 — 바뀐 조합만 글을 새로 쓰고, 표 바이트는 매 회차 기준과 같다."""
     store = _small_store()
     memo = WalletMemo()
-    publisher = SpreadsPublisher(store=store, bus=None, day_open=_DAY_OPEN, wallet_memo=memo)  # type: ignore[arg-type]
+    publisher = SpreadsPublisher(
+        store=store, bus=None, day_open=_DAY_OPEN, wallet_memo=memo
+    )  # type: ignore[arg-type]
     _fix_publisher_now(monkeypatch, NOW)
     build_tick(store, 1, [], memo)
     assert publisher._encode() == GOLDEN
@@ -172,7 +228,10 @@ def test_wallet_texts_are_reused_only_while_the_verdict_object_is_the_same(
     # 조회기가 새 망 목록을 건 것처럼 — 같은 이름이라도 새 객체, 출금 값은 뒤집는다
     eth = store.get_all(exchange="binance")
     eth_row = next(r for r in eth if r.base == "ETH")
-    eth_row.networks = [Network("ETH", "Ethereum (ERC20)", False, False), Network("ARB", ODD, True, True)]
+    eth_row.networks = [
+        Network("ETH", "Ethereum (ERC20)", False, False),
+        Network("ARB", ODD, True, True),
+    ]
     build_tick(store, 2, [], memo)
     got = publisher._encode()
     assert got == encode_table(build_table(store, now=NOW, day_open=_DAY_OPEN))
@@ -186,21 +245,34 @@ def test_wallet_texts_are_reused_only_while_the_verdict_object_is_the_same(
 def test_excluding_every_coin_gives_empty_rows_in_both_paths() -> None:
     store = _small_store()
     for excluded in (["BTC"], ["btc", "ETH", "XRP"]):
-        assert _text(store, now=NOW, excluded=excluded) == encode_table(build_table(store, now=NOW, excluded=excluded))
+        assert _text(store, now=NOW, excluded=excluded) == encode_table(
+            build_table(store, now=NOW, excluded=excluded)
+        )
     assert '"rows":[]' in _text(store, now=NOW, excluded=["BTC", "ETH", "XRP"])
 
 
 def test_rows_older_than_300_seconds_carry_their_own_age() -> None:
     store = _small_store()
     old = next(r for r in store.get_all(exchange="binance") if r.base == "BTC")
-    store.put_row(replace(old), NOW - timedelta(seconds=400))  # 행 자체가 400초 안 바뀌었다
+    store.put_row(
+        replace(old), NOW - timedelta(seconds=400)
+    )  # 행 자체가 400초 안 바뀌었다
     got = _text(store, now=NOW)
     assert got == encode_table(build_table(store, now=NOW))
-    assert '"age":400.0' in got and '"age":2.0' in got  # 그 행만 400초, 나머지는 스트림 기준
+    assert (
+        '"age":400.0' in got and '"age":2.0' in got
+    )  # 그 행만 400초, 나머지는 스트림 기준
 
 
 def test_encode_text_table_follows_the_payload_key_order() -> None:
-    payload = {"rate": 1450.0, "notional": 1000.0, "rows": ['{"a":1}', '{"b":-0.0}'], "warnings": ["낡음 \"q\""], "dataReceivedAt": None, "fetchedAt": 5}
+    payload = {
+        "rate": 1450.0,
+        "notional": 1000.0,
+        "rows": ['{"a":1}', '{"b":-0.0}'],
+        "warnings": ['낡음 "q"'],
+        "dataReceivedAt": None,
+        "fetchedAt": 5,
+    }
     as_dicts = dict(payload, rows=[{"a": 1}, {"b": -0.0}])
     assert encode_text_table(payload) == encode_table(as_dicts)
 
@@ -214,7 +286,15 @@ def _set_price(store: LiveStore, exchange: str, base: str, price: float) -> None
 
 @pytest.mark.parametrize(
     "case",
-    ["usd_nan", "usd_inf", "krw_inf", "rate_nan", "spark_nan", "day_chg_inf", "fail_row_usd_nan"],
+    [
+        "usd_nan",
+        "usd_inf",
+        "krw_inf",
+        "rate_nan",
+        "spark_nan",
+        "day_chg_inf",
+        "fail_row_usd_nan",
+    ],
 )
 def test_non_finite_values_fail_exactly_like_the_dict_path(
     case: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -235,21 +315,39 @@ def test_non_finite_values_fail_exactly_like_the_dict_path(
     elif case == "spark_nan":
         minute = int(NOW.timestamp()) // 60
         buffer = SparkBuffer()
-        buffer.seed([SparkBucketRow("upbit", "binance", "ETH", (minute - 1 + i) * 60, v) for i, v in enumerate([1.0, math.nan])])
+        buffer.seed(
+            [
+                SparkBucketRow("upbit", "binance", "ETH", (minute - 1 + i) * 60, v)
+                for i, v in enumerate([1.0, math.nan])
+            ]
+        )
         buffer.publish(store)
         assert ("upbit", "binance", "ETH") not in store.spark_json()
     elif case == "day_chg_inf":
         day_open[("upbit", "BTC")] = 5e-324  # 국내가 / 기준가 가 넘쳐 inf
     elif case == "fail_row_usd_nan":
-        _set_price(store, "binance", "XRP", math.nan)  # fail 행의 usd 는 0.0 이라 표는 그대로 나간다
+        _set_price(
+            store, "binance", "XRP", math.nan
+        )  # fail 행의 usd 는 0.0 이라 표는 그대로 나간다
     memo = WalletMemo()
     build_tick(store, 1, [], memo)
-    expected = _outcome(lambda: encode_table_with_spark_json(build_table(store, now=NOW, day_open=day_open, wallet_memo=memo), store.spark_json()))
-    assert expected == _outcome(lambda: encode_table(build_table(store, now=NOW, day_open=day_open)))
+    expected = _outcome(
+        lambda: encode_table_with_spark_json(
+            build_table(store, now=NOW, day_open=day_open, wallet_memo=memo),
+            store.spark_json(),
+        )
+    )
+    assert expected == _outcome(
+        lambda: encode_table(build_table(store, now=NOW, day_open=day_open))
+    )
     _fix_publisher_now(monkeypatch, NOW)
-    publisher = SpreadsPublisher(store=store, bus=None, day_open=day_open, wallet_memo=memo)  # type: ignore[arg-type]
+    publisher = SpreadsPublisher(
+        store=store, bus=None, day_open=day_open, wallet_memo=memo
+    )  # type: ignore[arg-type]
     build_tick(store, 2, [], memo)
-    assert _outcome(publisher._encode) == expected  # 같은 예외 종류·같은 메시지(또는 같은 바이트)
+    assert (
+        _outcome(publisher._encode) == expected
+    )  # 같은 예외 종류·같은 메시지(또는 같은 바이트)
     if case == "fail_row_usd_nan":
         assert expected[0] == "ok"
         return
@@ -298,7 +396,9 @@ def test_table_reads_tick_cells_without_judging_and_judges_only_fail_combination
     tick = build_tick(store, 1, [], memo)
     assert {(r.dom, r.base) for r in tick.rows} == {("upbit", "BTC"), ("upbit", "ETH")}
     calls.clear()
-    got = _text(store, now=NOW, day_open=_DAY_OPEN, wallet_memo=memo, memo_round=memo.round)
+    got = _text(
+        store, now=NOW, day_open=_DAY_OPEN, wallet_memo=memo, memo_round=memo.round
+    )
     assert got == GOLDEN
     assert calls == [("upbit", "XRP")]  # 틱이 안 채운 fail 조합만 판정했다
 
@@ -309,7 +409,9 @@ def test_a_second_table_in_the_same_round_does_not_read_stale_cells(
     """틱 없이 입출금이 바뀐 뒤 같은 회차에 표를 또 만들면 입력을 비교해 다시 판정한다 — 낡은 판정이 나가지 않는다."""
     store = _small_store()
     memo = WalletMemo()
-    publisher = SpreadsPublisher(store=store, bus=None, day_open=_DAY_OPEN, wallet_memo=memo)  # type: ignore[arg-type]
+    publisher = SpreadsPublisher(
+        store=store, bus=None, day_open=_DAY_OPEN, wallet_memo=memo
+    )  # type: ignore[arg-type]
     _fix_publisher_now(monkeypatch, NOW)
     build_tick(store, 1, [], memo)
     assert publisher._encode() == GOLDEN
@@ -320,4 +422,13 @@ def test_a_second_table_in_the_same_round_does_not_read_stale_cells(
     assert got == encode_table(build_table(store, now=NOW, day_open=_DAY_OPEN))
     assert '"netDom":"Ethereum","depDom":false,"wdDom":false' in got
     # 회차를 넘겨도(memo_round) 회차가 다르면 같은 규칙이다
-    assert _text(store, now=NOW, day_open=_DAY_OPEN, wallet_memo=memo, memo_round=memo.round - 1) == got
+    assert (
+        _text(
+            store,
+            now=NOW,
+            day_open=_DAY_OPEN,
+            wallet_memo=memo,
+            memo_round=memo.round - 1,
+        )
+        == got
+    )

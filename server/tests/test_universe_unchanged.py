@@ -37,7 +37,9 @@ SHARDS = 3
 class ListDomestic:
     """회차마다 `lists` 의 다음 목록을 돌려주는 국내 스트림 fake. `same_object` 면 같은 목록 객체를 제자리에서 바꿔 준다."""
 
-    def __init__(self, id_: str, lists: list[list[str]], same_object: bool = False) -> None:
+    def __init__(
+        self, id_: str, lists: list[list[str]], same_object: bool = False
+    ) -> None:
         self.id = id_
         self._lists = lists
         self._same_object = same_object
@@ -205,7 +207,12 @@ def _binance_body(symbols: list[str], server_time: int, other_quote: bool) -> by
     ]
     if other_quote:  # 맵에 들지 않는 행 — 본문 바이트만 바뀌고 맵 내용은 같다
         rows.append(
-            {"symbol": "ETHBTC", "status": "TRADING", "baseAsset": "ETH", "quoteAsset": "BTC"}
+            {
+                "symbol": "ETHBTC",
+                "status": "TRADING",
+                "baseAsset": "ETH",
+                "quoteAsset": "BTC",
+            }
         )
     body = {"timezone": "UTC", "serverTime": server_time, "symbols": rows}
     return json.dumps(body, separators=(",", ":")).encode()
@@ -218,9 +225,19 @@ def _bitget_body(symbols: list[str], request_time: int, other_quote: bool) -> by
     ]
     if other_quote:
         rows.append(
-            {"symbol": "ETHBTC", "baseCoin": "ETH", "quoteCoin": "BTC", "status": "online"}
+            {
+                "symbol": "ETHBTC",
+                "baseCoin": "ETH",
+                "quoteCoin": "BTC",
+                "status": "online",
+            }
         )
-    body = {"code": "00000", "msg": "success", "requestTime": request_time, "data": rows}
+    body = {
+        "code": "00000",
+        "msg": "success",
+        "requestTime": request_time,
+        "data": rows,
+    }
     return json.dumps(body, separators=(",", ":")).encode()
 
 
@@ -230,7 +247,9 @@ KINDS = [
 ]
 
 SYMBOLS = [f"T{i:03d}USDT" for i in range(24)]  # 세 샤드에 고루 떨어진다
-UNIVERSE = {s[:-4] for s in SYMBOLS[:18]} | {"ONLYOTHER"}  # 다른 해외에만 있는 base 도 섞인다
+UNIVERSE = {s[:-4] for s in SYMBOLS[:18]} | {
+    "ONLYOTHER"
+}  # 다른 해외에만 있는 base 도 섞인다
 
 
 def _expected(symbols: list[str], universe: set[str]) -> list[set[str]]:
@@ -270,7 +289,9 @@ class Probe:
         monkeypatch.setattr(self.store, "remove_row", counting_remove)
 
     async def refresh(self, symbols: list[str], other_quote: bool = False) -> None:
-        self.t += 1_000  # 매 응답 바뀌는 시각 필드 — 이것만 다르면 맵을 다시 만들지 않는다
+        self.t += (
+            1_000  # 매 응답 바뀌는 시각 필드 — 이것만 다르면 맵을 다시 만들지 않는다
+        )
         content = self.kind.body(symbols, self.t, other_quote)
         client = httpx.AsyncClient(
             transport=httpx.MockTransport(
@@ -383,7 +404,9 @@ async def test_universe_change_with_the_same_map_removes_rows_and_wakes(
     assert p.removed == [gone]
     assert p.take_wake() is True
 
-    p.stream.set_universe(set(UNIVERSE))  # 직전과 다른 우주 — 기억한 것과 비교해 다시 계산한다
+    p.stream.set_universe(
+        set(UNIVERSE)
+    )  # 직전과 다른 우주 — 기억한 것과 비교해 다시 계산한다
     assert p.assigned() == _expected(SYMBOLS, UNIVERSE)
     assert p.take_wake() is True
 
@@ -411,8 +434,12 @@ async def test_call_that_failed_midway_does_not_leave_a_skip_behind(
     await p.refresh(SYMBOLS)
     p.stream.set_universe(set(UNIVERSE))
     p.take_wake()
-    add0 = next(s for s in SYMBOLS[18:] if _shard(s) == 0)  # 우주 밖 → 넣으면 샤드 0 이 바뀐다
-    drop_late = next(s for s in SYMBOLS[:18] if _shard(s) > 0)  # 우주 안 → 빼면 뒤 샤드에서 행 삭제
+    add0 = next(
+        s for s in SYMBOLS[18:] if _shard(s) == 0
+    )  # 우주 밖 → 넣으면 샤드 0 이 바뀐다
+    drop_late = next(
+        s for s in SYMBOLS[:18] if _shard(s) > 0
+    )  # 우주 안 → 빼면 뒤 샤드에서 행 삭제
     changed = (UNIVERSE | {add0[:-4]}) - {drop_late[:-4]}
 
     def boom(exchange: str, base: str) -> None:

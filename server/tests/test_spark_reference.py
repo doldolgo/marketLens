@@ -106,7 +106,8 @@ def _same_lists(a: dict[SparkKey, list[float]], b: dict[SparkKey, list[float]]) 
     return all(
         len(a[k]) == len(b[k])
         and all(
-            (x == y or (x != x and y != y)) and math.copysign(1.0, x) == math.copysign(1.0, y)
+            (x == y or (x != x and y != y))
+            and math.copysign(1.0, x) == math.copysign(1.0, y)
             for x, y in zip(a[k], b[k], strict=True)
         )
         for k in a
@@ -120,22 +121,41 @@ def _assert_same(new: SparkBuffer, ref: _DequeSpark) -> None:
 
 def _random_ticks(n: int, seed: int) -> list[Tick]:
     rng = random.Random(seed)
-    keys = [("upbit", ("binance", "bybit")[i % 2], ("BTC", "eth", "Xrp", f"C{i}")[i % 4]) for i in range(40)]
+    keys = [
+        ("upbit", ("binance", "bybit")[i % 2], ("BTC", "eth", "Xrp", f"C{i}")[i % 4])
+        for i in range(40)
+    ]
     ts = T0
     out = []
     for _ in range(n):
-        ts += rng.choice((0, 1, 1, 1, 1, 7, 61, 300, -60))  # 같은 초·다음 초·분 건너뛰기·지난 분
+        ts += rng.choice(
+            (0, 1, 1, 1, 1, 7, 61, 300, -60)
+        )  # 같은 초·다음 초·분 건너뛰기·지난 분
         rows = []
         for dom, fx, base in rng.sample(keys, rng.randint(0, 40)):
             fwd = rng.choice(
-                (rng.uniform(-3, 3), 0.0, -0.0, 1e-4, -4e-4, math.nan, math.inf, -math.inf, 1e16, round(rng.uniform(-1, 1), 3), 2.0)
+                (
+                    rng.uniform(-3, 3),
+                    0.0,
+                    -0.0,
+                    1e-4,
+                    -4e-4,
+                    math.nan,
+                    math.inf,
+                    -math.inf,
+                    1e16,
+                    round(rng.uniform(-1, 1), 3),
+                    2.0,
+                )
             )
             rows.append(TickRow(dom, fx, base, fwd, 0.0))
         out.append(Tick(ts=ts, rows=tuple(rows), dw_failed=()))
     return out
 
 
-def test_publishes_the_same_lists_and_fragments_as_the_ring_buffer_on_random_ticks() -> None:
+def test_publishes_the_same_lists_and_fragments_as_the_ring_buffer_on_random_ticks() -> (
+    None
+):
     for seed in (1, 2, 3):
         new, ref = SparkBuffer(), _DequeSpark()
         for tick in _random_ticks(1_500, seed):
@@ -156,8 +176,22 @@ def test_seed_then_ticks_match_including_a_full_window_rollover() -> None:
     ref.seed(rows)
     _assert_same(new, ref)
     # 같은 분 → 다음 분(가득 찬 창에서 맨 앞이 빠진다) → 분 건너뛰기 → 지난 분(무시)
-    for ts, fwd in ((T0 + 5, 0.5), (T0 + 6, 0.5), (T0 + 60, -0.0), (T0 + 61, 0.25), (T0 + 300, 1e16), (T0 + 200, 9.0)):
-        tick = Tick(ts=ts, rows=(TickRow("upbit", "binance", "BTC", fwd, 0.0), TickRow("bithumb", "okx", "sol", fwd, 0.0)), dw_failed=())
+    for ts, fwd in (
+        (T0 + 5, 0.5),
+        (T0 + 6, 0.5),
+        (T0 + 60, -0.0),
+        (T0 + 61, 0.25),
+        (T0 + 300, 1e16),
+        (T0 + 200, 9.0),
+    ):
+        tick = Tick(
+            ts=ts,
+            rows=(
+                TickRow("upbit", "binance", "BTC", fwd, 0.0),
+                TickRow("bithumb", "okx", "sol", fwd, 0.0),
+            ),
+            dw_failed=(),
+        )
         new.update(tick)
         ref.update(tick)
         _assert_same(new, ref)
@@ -165,16 +199,26 @@ def test_seed_then_ticks_match_including_a_full_window_rollover() -> None:
     assert len(btc) == SPARK_LEN and btc[-1] == 1e16
     # 고정 기대값 — NaN 이 창에서 빠지기 전까지 SOL 은 조각이 없다
     assert ("bithumb", "okx", "SOL") not in new.fragments()
-    assert new.fragments()[("upbit", "binance", "ETH")] == "[" + ",".join(repr(round(0.1 * i - 1.0, 3)) for i in range(SPARK_LEN)) + "]"
+    assert (
+        new.fragments()[("upbit", "binance", "ETH")]
+        == "[" + ",".join(repr(round(0.1 * i - 1.0, 3)) for i in range(SPARK_LEN)) + "]"
+    )
 
 
-async def test_restore_adopts_every_field_so_the_next_ticks_continue_the_same_way() -> None:
+async def test_restore_adopts_every_field_so_the_next_ticks_continue_the_same_way() -> (
+    None
+):
     """복원(스레드에서 채운 버퍼 → _adopt) 뒤 첫 틱부터 기준과 같다 — 끝 버킷·직전 원값을 빠짐없이 넘겨받는다."""
     minute = T0 // 60
 
     class Reader:
-        def query_spark(self, *, start: int, stop: int, timeout_sec: float | None = None) -> list[SparkBucketRow]:
-            return [SparkBucketRow("upbit", "binance", "BTC", (minute - 2 + i) * 60, v) for i, v in enumerate([1.0, 2.0, 3.0])]
+        def query_spark(
+            self, *, start: int, stop: int, timeout_sec: float | None = None
+        ) -> list[SparkBucketRow]:
+            return [
+                SparkBucketRow("upbit", "binance", "BTC", (minute - 2 + i) * 60, v)
+                for i, v in enumerate([1.0, 2.0, 3.0])
+            ]
 
     new = SparkBuffer()
     store = LiveStore()

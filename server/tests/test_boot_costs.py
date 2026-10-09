@@ -62,7 +62,10 @@ async def _library() -> str:
     return httpcore_library()
 
 
-@pytest.mark.skipif(_sniffio_installed(), reason="sniffio 가 깔린 환경 — 표지를 두지 않는 쪽은 아래 하위 프로세스 테스트가 본다")
+@pytest.mark.skipif(
+    _sniffio_installed(),
+    reason="sniffio 가 깔린 환경 — 표지를 두지 않는 쪽은 아래 하위 프로세스 테스트가 본다",
+)
 def test_sniffio_marker_keeps_results_and_drops_the_per_request_import_search(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -89,7 +92,9 @@ def test_sniffio_marker_keeps_results_and_drops_the_per_request_import_search(
 
 def _run_boot_import(tmp_path: Path, code: str, extra_path: Path | None = None) -> str:
     """새 인터프리터에서 app.main 을 읽는다 — cwd 를 빈 임시 폴더로 두어 레포의 .env 를 읽지 않는다."""
-    paths = [str(SERVER_DIR)] if extra_path is None else [str(extra_path), str(SERVER_DIR)]
+    paths = (
+        [str(SERVER_DIR)] if extra_path is None else [str(extra_path), str(SERVER_DIR)]
+    )
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(paths)}
     done = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(code)],
@@ -202,7 +207,12 @@ def test_seeds_are_read_off_the_event_loop_and_equal_a_direct_read(
     assert seen["on_loop"] is False
     direct = real()
     assert seen["seeds"] == direct
-    assert (len(direct.contracts), len(direct.deposit), len(direct.hot), len(direct.internal)) == (
+    assert (
+        len(direct.contracts),
+        len(direct.deposit),
+        len(direct.hot),
+        len(direct.internal),
+    ) == (
         206,
         32_027,
         950,

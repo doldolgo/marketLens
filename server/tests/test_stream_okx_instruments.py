@@ -185,16 +185,17 @@ POOL: list[tuple[str, Any]] = [
     ("D", lambda: httpx.Response(200, content=D)),
     ("A-latin", lambda: httpx.Response(200, content=A, headers=LATIN)),
     ("B-latin", lambda: httpx.Response(200, content=B, headers=LATIN)),
-    ("A-429", lambda: httpx.Response(429, content=A)),  # 바이트는 A 여도 200 이 아니면 실패
+    (
+        "A-429",
+        lambda: httpx.Response(429, content=A),
+    ),  # 바이트는 A 여도 200 이 아니면 실패
     ("500", lambda: httpx.Response(500, content=b"oops")),
     ("code", lambda: httpx.Response(200, content=_body(ROWS, code="50011"))),
     ("html", lambda: httpx.Response(200, content=b"<html>busy</html>")),
     ("list", lambda: httpx.Response(200, content=b"[]")),
     ("nodata", lambda: httpx.Response(200, content=b'{"code":"0","msg":""}')),
 ]
-ALL_BASES = sorted({str(r["baseCcy"]).upper() for r in ROWS if r["baseCcy"]}) + [
-    "ZZZ"
-]
+ALL_BASES = sorted({str(r["baseCcy"]).upper() for r in ROWS if r["baseCcy"]}) + ["ZZZ"]
 
 
 def _client_for(make: Any) -> httpx.AsyncClient:
@@ -329,7 +330,10 @@ async def test_two_row_orders_alternating_are_parsed_once_each(
     ("order", "parsed"),
     [
         ([A, B, C, A], 4),  # 셋째(C)가 들어오며 A 는 잊힌다 — 기억은 최근 2개까지
-        ([A, B, A, C, B], 4),  # A 를 다시 쓰면 A 가 최근이 되고, C 가 들어오며 B 가 잊힌다
+        (
+            [A, B, A, C, B],
+            4,
+        ),  # A 를 다시 쓰면 A 가 최근이 되고, C 가 들어오며 B 가 잊힌다
         ([A, B, A, C, A], 3),  # 최근에 쓴 A 는 남는다
         ([C, A, B, C], 4),
     ],

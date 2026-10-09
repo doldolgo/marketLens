@@ -289,7 +289,9 @@ def build_table(
         name = memo_texts.name
         wt_prev = memo_texts.wallet
         wt_cur: dict[MemoKey, tuple[WalletFields, str]] = {}
-        age_texts: dict[float, str] = {}  # 표 1장 안 — age 는 스트림 쌍 단위 값이라 고유값이 몇 개뿐이다
+        age_texts: dict[
+            float, str
+        ] = {}  # 표 1장 안 — age 는 스트림 쌍 단위 값이라 고유값이 몇 개뿐이다
         ex_texts = {ex: name(ex) for ex in (*domestic, *foreign)}
     for base in sorted(bases):
         if base in excluded_upper:
@@ -327,7 +329,9 @@ def build_table(
                         fx_row, store, stream_ages, now_ms, now, cutoff
                     )
                     if text:
-                        fm.append(repr(float(fx_row.price)))  # [7] 해외가(ok 행의 usd) 글
+                        fm.append(
+                            repr(float(fx_row.price))
+                        )  # [7] 해외가(ok 행의 usd) 글
 
                 # age 는 양측 스트림 중 오래된 쪽 — max(0.0, 국내, 해외) 와 같은 값(앞에서부터 더 큰 것만 바꾼다)
                 age = 0.0

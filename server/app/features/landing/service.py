@@ -109,7 +109,11 @@ def _strip_spark(text: str) -> str:
             return "".join(parts)
         start = i + len(_SPARK_HEAD)
         end = find("]", start)
-        if end < 0 or not text.startswith(_SPARK_TAIL, end) or find("[", start, end) >= 0:
+        if (
+            end < 0
+            or not text.startswith(_SPARK_TAIL, end)
+            or find("[", start, end) >= 0
+        ):
             return text
         parts.append(text[pos:i])
         pos = end + 1  # `]` 다음의 `,"status":` 부터 이어 붙인다

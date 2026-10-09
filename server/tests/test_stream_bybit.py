@@ -1325,7 +1325,9 @@ def _random_price(r: random.Random) -> str:
     # 같은 값 다른 표기("100"·"100.0"·"1e2", "0"·"-0")·inf 를 섞는다 — 처음 가격 객체를 지키는지까지 본다
     if r.random() < 0.03:
         return r.choice(["inf", "-0", "0", "1e2", "100.0", "100", "0.10", "0.1"])
-    return f"{r.randint(90, 110) + r.choice([0, 0.5, 0.25, 0.1]):.{r.choice([1, 2, 3])}f}"
+    return (
+        f"{r.randint(90, 110) + r.choice([0, 0.5, 0.25, 0.1]):.{r.choice([1, 2, 3])}f}"
+    )
 
 
 def _random_size(r: random.Random) -> str:
@@ -1377,7 +1379,13 @@ def test_book_keeps_dict_rules_for_duplicate_prices_zero_sizes_and_signed_zero()
     book = bybit_module._Book()
     book.replace(
         {
-            "a": [["100", "1"], ["100.0", "2"], ["99.5", "0"], ["1e2", "3"], ["101", "-1"]],
+            "a": [
+                ["100", "1"],
+                ["100.0", "2"],
+                ["99.5", "0"],
+                ["1e2", "3"],
+                ["101", "-1"],
+            ],
             "b": [["0", "1"], ["-0", "2"], ["98", "1"], ["98.00", "4"]],
         }
     )
@@ -1386,14 +1394,20 @@ def test_book_keeps_dict_rules_for_duplicate_prices_zero_sizes_and_signed_zero()
     )
     book.apply(
         {
-            "b": [["-0", "5"], ["97.5", "0"], ["97", "1"]],  # -0 은 0.0 자리의 잔량 교체(가격 객체 0.0 유지)
+            "b": [
+                ["-0", "5"],
+                ["97.5", "0"],
+                ["97", "1"],
+            ],  # -0 은 0.0 자리의 잔량 교체(가격 객체 0.0 유지)
             "a": [["1e2", "0.5"], ["101.0", "0"], ["inf", "1"]],
         }
     )
     assert repr(book.sorted_levels()) == (
         "([[99.5, 0.0], [100.0, 0.5], [inf, 1.0]], [[98.0, 4.0], [97.0, 1.0], [0.0, 5.0]])"
     )
-    book.apply({"b": [["0.00", "0"], ["-0", "1"]]})  # 지운 뒤 다시 넣으면 새 가격 객체(-0.0)
+    book.apply(
+        {"b": [["0.00", "0"], ["-0", "1"]]}
+    )  # 지운 뒤 다시 넣으면 새 가격 객체(-0.0)
     assert repr(book.sorted_levels()) == (
         "([[99.5, 0.0], [100.0, 0.5], [inf, 1.0]], [[98.0, 4.0], [97.0, 1.0], [-0.0, 1.0]])"
     )
@@ -1427,15 +1441,15 @@ async def test_size_only_delta_does_not_leak_into_rows_already_published() -> No
     stream, _, sleeps, _, clock, store = await build([sock])
     stream.start()
     await until(sock.subscribed)
-    sock.push(snapshot(levels=3))  # asks 71000·71010·71020, bids 70990·70980·70970, 잔량 0.1
+    sock.push(
+        snapshot(levels=3)
+    )  # asks 71000·71010·71020, bids 70990·70980·70970, 잔량 0.1
     await until(sock.delivered)
     first = store.get("bybit", "BTC")
     assert first is not None
     first_levels = repr((first.asks, first.bids))
     clock.now = T0 + 100  # 마지막 발행 뒤 100ms — 북에만 쌓인다
-    sock.push(
-        delta(asks=[["71000.00", "0.7"]], bids=[["70990.00", "0.9"]], ts=T0 + 90)
-    )
+    sock.push(delta(asks=[["71000.00", "0.7"]], bids=[["70990.00", "0.9"]], ts=T0 + 90))
     await until(sock.delivered)
     row = store.get("bybit", "BTC")
     assert row is not None and repr((row.asks, row.bids)) == first_levels
@@ -1484,9 +1498,7 @@ async def test_set_universe_with_the_same_map_and_universe_skips_recomputing(
     assert _assignment(stream) == expected
     hashed: list[str] = []
     real = bybit_module.shard_of
-    monkeypatch.setattr(
-        bybit_module, "shard_of", lambda s: hashed.append(s) or real(s)
-    )
+    monkeypatch.setattr(bybit_module, "shard_of", lambda s: hashed.append(s) or real(s))
     stream._wake.clear()
     stream.set_universe({base_of(s) for s in symbols})  # 같은 내용의 새 집합
     assert hashed == []
@@ -1516,7 +1528,12 @@ async def test_refresh_with_an_equal_map_keeps_the_assignment_without_waking() -
     await until(sock.delivered)
     before_map = stream._symbol_of
     before = (_assignment(stream), len(sock.sent))
-    usdc = {"symbol": f"{base_of(a)}USDC", "baseCoin": base_of(a), "quoteCoin": "USDC", "status": "Trading"}
+    usdc = {
+        "symbol": f"{base_of(a)}USDC",
+        "baseCoin": base_of(a),
+        "quoteCoin": "USDC",
+        "status": "Trading",
+    }
     await stream.refresh(
         _client(lambda r: httpx.Response(200, json=instruments([a, b], extra=[usdc])))
     )

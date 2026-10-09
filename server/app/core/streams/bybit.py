@@ -113,7 +113,9 @@ class _Book:
     def __init__(self) -> None:
         self.ask_keys: list[float] = []  # 가격 오름차순 — asks 와 같은 자리
         self.asks: list[list[float]] = []
-        self.bid_keys: list[float] = []  # -가격 오름차순(= 가격 내림차순) — bids 와 같은 자리
+        self.bid_keys: list[
+            float
+        ] = []  # -가격 오름차순(= 가격 내림차순) — bids 와 같은 자리
         self.bids: list[list[float]] = []
         self.ts = 0  # 마지막으로 반영한 프레임의 `ts` — 발행 시 행의 호가 시각
         self.received_at = 0  # 그 프레임의 수신 시각 — 발행 시 행의 `updated_at`
@@ -146,7 +148,9 @@ class _Book:
                 else:
                     levels[i] = [levels[i][0], size]  # 처음 가격 객체를 지킨 새 목록
             elif size > 0:
-                keys.insert(i, price)  # 없는 가격 = 삽입. 없는 가격의 잔량 0 은 할 일이 없다
+                keys.insert(
+                    i, price
+                )  # 없는 가격 = 삽입. 없는 가격의 잔량 0 은 할 일이 없다
                 levels.insert(i, [price, size])
         keys, levels = self.bid_keys, self.bids
         for p, q in data.get("b") or []:
