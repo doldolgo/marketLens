@@ -300,3 +300,58 @@ export function budgetGauge(id, b, money) {
     series,
   }));
 }
+
+// 가로 띠(시간 구간) — rows = [이름표], segs = [{ row, from(ms), to(ms), tone, head, tip }] 앞의 것부터 그린다(뒤가 위).
+// 수집 상태(정상 초록·끊김 빨강)와 상태 검사(실패 빨강)가 쓴다. 높이: 문제 구간은 굵게, 바탕 띠는 얇게
+export function lanes(id, o) {
+  if (!o.rows.length) return blank(id, '자료 없음');
+  const color = (tone) => TONE[tone] ?? COLOR.line;
+  return draw(id, base({
+    grid: { left: 8, right: 16, top: 4, bottom: 4, containLabel: true },
+    xAxis: timeAxis(o.startMs, o.endMs),
+    yAxis: categoryAxis(o.rows, { inverse: true, axisLine: { show: false }, axisLabel: { ...LABEL, color: COLOR.text } }),
+    dataZoom: o.group ? [{ type: 'inside', zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }] : undefined,
+    tooltip: itemTip((p) => tip(o.segs[p.dataIndex]?.head, o.segs[p.dataIndex]?.tip ?? [])),
+    series: [{
+      type: 'custom',
+      encode: { x: [1, 2], y: 0 },
+      data: o.segs.map((s) => [s.row, s.from, s.to]),
+      renderItem: (params, api) => {
+        const seg = o.segs[params.dataIndex];
+        const from = api.coord([api.value(1), api.value(0)]);
+        const to = api.coord([api.value(2), api.value(0)]);
+        const height = api.size([0, 1])[1] * (seg.tone === 'ok' || seg.tone === 'dim' ? 0.28 : 0.6);
+        const box = params.coordSys;
+        const shape = lib().graphic.clipRectByRect(
+          { x: from[0], y: from[1] - height / 2, width: Math.max(3, to[0] - from[0]), height },
+          { x: box.x, y: box.y, width: box.width, height: box.height },
+        );
+        return shape && { type: 'rect', transition: [], shape: { ...shape, r: 2 }, style: { fill: color(seg.tone) } };
+      },
+    }],
+  }), o.group);
+}
+
+// 위아래로 뒤집은 면적의 작은 그림 여럿(상자마다 한 칸 — 들어옴·읽기 위, 나감·쓰기 아래). panels = [{ title, up, down }]
+// 점은 [[ms, 값]]. 칸마다 세로 눈금이 따로다(상자마다 크기가 수십 배 다르다)
+export function mirror(id, o) {
+  const panels = o.panels.filter((p) => hasValue(p.up) || hasValue(p.down));
+  if (!panels.length) return blank(id, '자료 없음');
+  const each = 100 / panels.length;
+  const axes = panels.map((_, i) => i);
+  const flip = (points) => points.map(([t, v]) => [t, v === null ? null : -v]);
+  return draw(id, base({
+    title: panels.map((p, i) => ({ text: p.title, left: 4, top: `${i * each}%`, textStyle: { fontSize: 12, fontWeight: 600, color: COLOR.muted } })),
+    legend: legend({ data: o.names }),
+    grid: panels.map((_, i) => ({ left: 8, right: 16, top: `${i * each + 6}%`, height: `${each - 12}%`, containLabel: true })),
+    xAxis: panels.map((_, i) => timeAxis(o.startMs, o.endMs, { gridIndex: i, axisLabel: { show: i === panels.length - 1, ...LABEL, hideOverlap: true, formatter: TIME_LABEL } })),
+    yAxis: panels.map((_, i) => valueAxis({ gridIndex: i, splitNumber: 2, axisLabel: { ...LABEL, formatter: o.fmt } })),
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    dataZoom: o.group ? [{ type: 'inside', xAxisIndex: axes, zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }] : undefined,
+    tooltip: axisTip((ps) => tip(when(ps[0]?.value?.[0]), ps.map((p) => [p.seriesName === o.names[0] ? 'c0' : 'c1', `${panels[Math.floor(p.seriesIndex / 2)]?.title} ${p.seriesName}`, o.fmt(p.value?.[1])]))),
+    series: panels.flatMap((p, i) => [
+      { type: 'line', name: o.names[0], xAxisIndex: i, yAxisIndex: i, data: p.up, showSymbol: false, lineStyle: { width: 1.5, color: COLOR.accent }, itemStyle: { color: COLOR.accent }, areaStyle: { color: COLOR.accent, opacity: 0.18 } },
+      { type: 'line', name: o.names[1], xAxisIndex: i, yAxisIndex: i, data: flip(p.down), showSymbol: false, lineStyle: { width: 1.5, color: COLOR.sub }, itemStyle: { color: COLOR.sub }, areaStyle: { color: COLOR.sub, opacity: 0.18 } },
+    ]),
+  }), o.group);
+}
