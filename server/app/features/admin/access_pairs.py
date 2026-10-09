@@ -4,7 +4,8 @@
 날짜를 섞은 값이라, 같은 짝도 날이 다르면 다른 값(날을 넘어 이을 수 없다)이고 같은 날을 여러 파일이 나눠도 같은
 값이다(합칠 수 있다). 짝 값·IP·UA 원문은 응답·로그 어디에도 내지 않는다. 짝 하나가 그날 갖는 것은 KST 시 비트
 셋(페이지·JS 신호·101)·첫 페이지 줄의 시각과 채널·다시 온 여부·탐색/운영자 흔적·UA 로 정한 기기·OS·브라우저·인앱,
-그리고 DB-IP 판이 올라 있을 때 처음 기록하며 찾은 나라·망 종류(039 — IP 는 남기지 않는다)뿐이다.
+DB-IP 판이 올라 있을 때 처음 기록하며 찾은 나라·망 종류(039 — IP 는 남기지 않는다), 첫·마지막 페이지 줄의 페이지
+이름과 마지막 페이지 줄의 시각·페이지 줄 수(062)뿐이다.
 """
 
 import hashlib
@@ -13,6 +14,7 @@ from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from typing import Any, NamedTuple
 
+from app.features.admin.access_flows import NPAGES_CAP
 from app.features.admin.access_traits import Traits
 from app.features.admin.geo_kinds import NET_TELECOM_ALL, TELECOM, TELECOM_KR
 from app.features.admin.geo_table import IPV6
@@ -67,6 +69,10 @@ class PairDay:
         "traits",
         "country",
         "net",
+        "entry",
+        "exit",
+        "last",
+        "npages",
     )
 
     def __init__(
@@ -80,6 +86,12 @@ class PairDay:
         # 039 — 나라 두 글자 또는 `(기타)`·망 종류. 판 없이 기록한 짝은 둘 다 None, IPv6 는 망 칸만 `ipv6`
         self.country = country
         self.net = net
+        # 062 — 첫·마지막 페이지 줄의 페이지 이름(고정 글자), 마지막 페이지 줄의 시각(파일을 합칠 때 고른다)·페이지 줄 수.
+        # 페이지 줄이 없는 짝(JS·WS 줄만)은 None·None·None·0 이라 흐름 셈에서 빠진다
+        self.entry: str | None = None
+        self.exit: str | None = None
+        self.last: float | None = None
+        self.npages = 0
 
 
 class DayPairs:
@@ -93,12 +105,17 @@ class DayPairs:
 
 
 def _merge(a: PairDay, b: PairDay) -> PairDay:
-    """같은 날을 두 파일이 나눔 — 시는 합집합, 첫 페이지 줄은 이른 쪽, 흔적은 하나라도 있으면. 캐시 기록은 바꾸지 않는다."""
+    """같은 날을 두 파일이 나눔 — 시는 합집합, 첫 페이지 줄은 이른 쪽, 마지막 페이지 줄은 늦은 쪽, 페이지 수는 합(255 에서
+    멈춤), 흔적은 하나라도 있으면. a 가 앞 파일이라 같은 시각이면 첫 페이지는 a·마지막 페이지는 b 다(줄 순서, 062).
+    캐시 기록은 바꾸지 않는다."""
     early = a if b.first is None or (a.first is not None and a.first <= b.first) else b
+    late = b if a.last is None or (b.last is not None and b.last >= a.last) else a
     out = PairDay(a.traits, a.country, a.net)  # 같은 짝 = 같은 /24·같은 판
     out.pages, out.js, out.ws = a.pages | b.pages, a.js | b.js, a.ws | b.ws
     out.flags = a.flags | b.flags
     out.first, out.channel, out.returning = early.first, early.channel, early.returning
+    out.entry, out.exit, out.last = early.entry, late.exit, late.last
+    out.npages = min(a.npages + b.npages, NPAGES_CAP)
     return out
 
 
