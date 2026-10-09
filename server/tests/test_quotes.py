@@ -1,12 +1,17 @@
 """메시지 → 행 갱신 규칙 (스펙 001 §3.4·§3.5, §4) — 거래소와 무관한 공통 규칙."""
 
+import dataclasses
 import math
+import random
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
 from app.core.live_store import LiveStore
+from app.core.models import Row
 from app.core.quotes import QuoteSink
-from app.core.rows import NOTIONAL_CAP_KRW, clean_levels
+from app.core.rows import NOTIONAL_CAP_KRW, NOTIONAL_CAP_USDT, clean_levels
 
 T0 = 1_700_000_000_000
 
@@ -213,3 +218,246 @@ def test_zero_nan_and_infinite_trade_prices_leave_the_row_price_alone(
     _book(sink, at=T0 + 3)
     row = store.get("upbit", "BTC")
     assert row is not None and (row.price, row.price_timestamp) == (100.5, T0 + 1)
+
+
+# --- 호가 경로 순서·수신 시각 메모·위치 인자 Row (2026-10-09) 가 기존 구현과 같은지 ---
+
+
+def test_row_field_order_matches_the_positional_construction_in_orderbook() -> None:
+    """QuoteSink.orderbook 은 Row 를 위치 인자로 만든다 — 앞 8필드 순서가 바뀌면 값이 엇갈려 들어간다."""
+    assert [f.name for f in dataclasses.fields(Row)][:8] == [
+        "exchange",
+        "base",
+        "quote",
+        "native_symbol",
+        "price",
+        "asks",
+        "bids",
+        "price_timestamp",
+    ]
+    store, sink = _sink()
+    sink.trade(exchange="upbit", base="BTC", price=100.5, price_timestamp=T0 - 9)
+    _book(sink, at=T0 + 3, ts=T0 - 7)
+    row = store.get("upbit", "BTC")
+    assert row is not None
+    assert (row.exchange, row.base, row.quote, row.native_symbol) == (
+        "upbit",
+        "BTC",
+        "KRW",
+        "KRW-BTC",
+    )
+    assert (row.price, row.price_timestamp) == (100.5, T0 - 9)
+    assert row.asks == [[101.0, 1.0], [102.0, 2.0]]
+    assert row.bids == [[99.0, 1.0], [98.0, 2.0]]
+
+
+def test_updated_at_is_the_receive_time_for_same_and_alternating_ms() -> None:
+    """같은 ms 의 호가는 같은 수신 시각(tz-aware UTC)이고, ms 가 오가도(A·B·A) 한 칸 메모가 옛 값을 내지 않는다."""
+    store, sink = _sink()
+    expected = datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC)  # T0 = 1_700_000_000_000
+    _book(sink, "BTC", at=T0)
+    _book(sink, "ETH", at=T0)
+    _book(sink, "USDT", asks=[[1401.0, 1.0]], bids=[[1399.0, 1.0]], at=T0)
+    btc, eth = store.get("upbit", "BTC"), store.get("upbit", "ETH")
+    rate = store.get_rate("upbit")
+    assert btc is not None and eth is not None and rate is not None
+    for got in (btc.updated_at, eth.updated_at, rate.updated_at):
+        assert got == expected and got is not None and got.utcoffset() == timedelta(0)
+    for at in (T0 + 1, T0 + 2, T0 + 1, T0 + 1, T0, T0 + 1500):
+        _book(sink, "BTC", at=at)
+        row = store.get("upbit", "BTC")
+        assert row is not None and row.updated_at == expected + timedelta(
+            milliseconds=at - T0
+        )
+    _book(sink, "ETH", at=T0 + 250.0)  # type: ignore[arg-type]  # float ms 도 같은 시각
+    eth = store.get("upbit", "ETH")
+    assert eth is not None and eth.updated_at == expected + timedelta(milliseconds=250)
+
+
+def test_malformed_levels_in_the_universe_still_raise() -> None:
+    """우주 안 호가는 기존처럼 정리에서 예외가 난다 — 커넥터가 디코드 실패로 센다."""
+    _, sink = _sink()
+    with pytest.raises(ValueError):
+        _book(sink, asks=[[101.0, 1.0, 3.0]])
+    with pytest.raises(ValueError):
+        _book(sink, "USDT", bids=[[1399.0]])
+
+
+def _clean_before(levels: list[list[float]], cap: float) -> list[list[float]]:
+    """2026-10-09 이전 clean_levels 를 그대로 옮긴 대조용."""
+    out: list[list[float]] = []
+    cum = 0.0
+    for level in levels:
+        price, size = level
+        if not (0.0 < price < math.inf and 0.0 < size < math.inf):
+            continue
+        out.append(level)
+        cum += price * size
+        if cum >= cap:
+            break
+    return out
+
+
+class _SinkBefore(QuoteSink):
+    """2026-10-09 이전 QuoteSink.orderbook 을 그대로 옮긴 대조용 — 정리 → 수신 시각 → USDT → 우주 순, 키워드 Row."""
+
+    def orderbook(
+        self,
+        *,
+        exchange: str,
+        base: str,
+        quote: str,
+        native_symbol: str,
+        asks: list[list[float]],
+        bids: list[list[float]],
+        timestamp_ms: int,
+        received_at_ms: int,
+    ) -> None:
+        key = base.upper()
+        cap = NOTIONAL_CAP_KRW if quote == "KRW" else NOTIONAL_CAP_USDT
+        asks = _clean_before(asks, cap)
+        bids = _clean_before(bids, cap)
+        now = datetime.fromtimestamp(received_at_ms / 1000, tz=UTC)
+        if key == "USDT" and quote == "KRW":
+            if asks and bids and asks[0][0] > 0 and bids[0][0] > 0:
+                self._store.set_rate(exchange, asks[0][0], bids[0][0], now)
+            return
+        if key not in self._universe:
+            return
+        if not asks or not bids:
+            self._store.remove_row(exchange, key)
+            return
+        trade = self._trades.get((exchange, key))
+        if trade is not None and trade[0] > 0:
+            price, price_ts = trade
+        else:
+            price, price_ts = (bids[0][0] + asks[0][0]) / 2, timestamp_ms
+        self._store.put_row(
+            Row(
+                exchange=exchange,
+                base=key,
+                quote=quote,
+                native_symbol=native_symbol,
+                price=price,
+                asks=asks,
+                bids=bids,
+                price_timestamp=price_ts,
+            ),
+            now,
+        )
+
+
+def _row_sig(row: Row | None, nets: dict[int, str]) -> tuple[Any, ...] | None:
+    """행 전 필드 — 단계는 받은 [p, s] 객체 id(두 싱크에 같은 목록을 넣는다), 망 목록은 심은 객체 이름."""
+    if row is None:
+        return None
+    return (
+        row.exchange,
+        row.base,
+        row.quote,
+        row.native_symbol,
+        row.price,
+        type(row.price),
+        row.price_timestamp,
+        [id(lv) for lv in row.asks],
+        [id(lv) for lv in row.bids],
+        row.deposit_enabled,
+        row.withdrawal_enabled,
+        nets.get(id(row.networks), "새 목록"),
+        row.updated_at,
+        None if row.updated_at is None else row.updated_at.utcoffset(),
+    )
+
+
+def _rate_sig(store: LiveStore, exchange: str) -> tuple[Any, ...] | None:
+    rate = store.get_rate(exchange)
+    return None if rate is None else (rate.ask, rate.bid, rate.updated_at)
+
+
+def test_orderbook_matches_the_previous_implementation_on_random_streams() -> None:
+    """무작위 호가·체결·우주 변경 2만 건에서 행 전 필드(물려받은 입출금·망 목록 객체 포함)·USDT 시세가 기존 구현과 같다."""
+    rng = random.Random(20261009)
+    nan, inf = math.nan, math.inf
+    venues = [
+        ("upbit", "KRW"),
+        ("bithumb", "KRW"),
+        ("binance", "USDT"),
+        ("bybit", "USDT"),
+    ]
+    bases = ["BTC", "ETH", "XRP", "SOL", "DOGE", "btc", "USDT", "usdt"]
+    universe = {"BTC", "ETH", "XRP", "SOL"}
+
+    stores = (LiveStore(), LiveStore())
+    sinks = (_SinkBefore(stores[0]), QuoteSink(stores[1]))
+    # 입출금 3필드 물려받기를 덮으려고 행을 먼저 심는다 — 단계 [p, s] 객체는 두 저장소가 같은 것을 갖고,
+    # 망 목록은 저장소마다 새 객체라 이름으로 비교한다. 행이 지워져도 id 가 재사용되지 않게 목록을 붙잡아 둔다
+    nets: dict[int, str] = {}
+    held: list[list[Any]] = []
+    seeds = [
+        (ex, quote, b, (True, False, None)[(i + j) % 3], [2.0, 1.0], [1.0, 1.0])
+        for i, (ex, quote) in enumerate(venues)
+        for j, b in enumerate(sorted(universe))
+    ]
+    for store in stores:
+        for ex, quote, b, dep, ask, bid in seeds:
+            net_list: list[Any] = []
+            nets[id(net_list)] = f"{ex}:{b}"
+            held.append(net_list)
+            row = Row(ex, b, quote, b, 1.0, [ask], [bid], 0, dep, dep, net_list)
+            store.put_row(row, datetime(2026, 10, 9, tzinfo=UTC))
+    for sink in sinks:
+        sink.set_universe(universe)
+
+    def side(n: int, price0: float, step: float) -> list[list[float]]:
+        out = []
+        for k in range(n):
+            p, s = price0 + k * step, rng.uniform(0.01, 5_000.0)
+            if rng.random() < 0.05:
+                p = rng.choice([0.0, -1.0, nan, inf])
+            if rng.random() < 0.05:
+                s = rng.choice([0.0, -2.0, nan, inf])
+            out.append([float(p), float(s)])
+        return out
+
+    at = T0
+    for step in range(20_000):
+        r = rng.random()
+        ex, quote = rng.choice(venues)
+        base = rng.choice(bases)
+        if r < 0.005:
+            new_universe = set(rng.sample(["BTC", "ETH", "XRP", "SOL", "DOGE"], 3))
+            removed = [sink.set_universe(new_universe) for sink in sinks]
+            assert removed[0] == removed[1]
+            continue
+        if r < 0.2:
+            price = rng.choice([rng.uniform(1, 1e5), 0.0, -1.0, nan, inf])
+            for sink in sinks:
+                sink.trade(exchange=ex, base=base, price=price, price_timestamp=at - 3)
+        else:
+            # 같은 ms 반복(소켓 한 번 읽기)·전진·역행 — 한 칸 메모가 어느 쪽에서도 같은 시각을 내는지
+            jump = rng.choice([0, 0, 0, rng.randint(1, 900), -rng.randint(1, 50)])
+            at += jump
+            price0 = 1_400.0 if base.upper() == "USDT" else rng.uniform(1.0, 1e8)
+            tick = price0 * 1e-4
+            asks = side(rng.choice([0, 1, 15, 30, 200]), price0, tick)
+            bids = side(rng.choice([0, 1, 15, 30, 200]), price0 - tick, -tick)
+            for sink in sinks:
+                sink.orderbook(
+                    exchange=ex,
+                    base=base,
+                    quote=quote,
+                    native_symbol=f"{base}{quote}",
+                    asks=asks,
+                    bids=bids,
+                    timestamp_ms=at - 7,
+                    received_at_ms=at,
+                )
+        key = base.upper()
+        before = (_row_sig(stores[0].get(ex, key), nets), _rate_sig(stores[0], ex))
+        after = (_row_sig(stores[1].get(ex, key), nets), _rate_sig(stores[1], ex))
+        assert before == after, step
+    # 끝 상태 — 전 행(호출마다 본 것 밖의 행도)
+    ends = [sorted(str(_row_sig(x, nets)) for x in store.get_all()) for store in stores]
+    assert ends[0] == ends[1]
+    for ex, _ in venues:
+        assert _rate_sig(stores[0], ex) == _rate_sig(stores[1], ex)
