@@ -172,3 +172,184 @@ const drawChecks = (app) => timeCard(app, 'checks', checks);
 function drawRange(app) {
   for (const button of document.querySelectorAll('[data-range]')) button.setAttribute('aria-pressed', String(button.dataset.range === app.picked.series));
 }
+
+// --- 수집 상태 (011 — 원천마다 24시간 띠: 정상 초록 · 실패 구간 빨강, 이름 옆 1시간 성공률) ---------------------
+
+// 실패 종류 이름 — 공개 수집 상태 탭(011)의 유형 칩과 같다. 표에 없는 값은 원래 글자 그대로
+const KIND_NAME = Object.freeze({
+  timeout: '타임아웃',
+  network: '연결 실패',
+  rate_limit: 'rate limit',
+  banned: '차단',
+  unavailable: '거래소 오류',
+  bad_request: '요청 오류',
+  bad_response: '응답 오류',
+  stale_stream: '스트림 정체',
+});
+const kindName = (kind) => own(KIND_NAME, kind) ?? clean(kind);
+const cut = (text, n) => (clean(text).length > n ? `${clean(text).slice(0, n)}…` : clean(text));
+
+export function collectLanes(body, now) {
+  const start = now - 86_400_000;
+  const exchanges = list(body.exchanges).filter(isObj);
+  const ids = exchanges.map((ex) => ex.exchange);
+  const segs = exchanges.map((ex, row) => ({
+    row,
+    from: start,
+    to: now,
+    tone: 'ok',
+    head: exName(ex.exchange),
+    tip: [['ok', '1시간 성공률', pct(ex.successRate1h)], ['dim', '마지막 성공', ago(ex.lastSuccessAt, now)]],
+  }));
+  for (const o of list(body.outages).filter((x) => isObj(x) && num(x.startedAt) !== null)) {
+    const row = ids.indexOf(o.exchange);
+    const to = num(o.endedAt) ?? now;
+    if (row < 0 || to < start) continue;
+    const rows = [['bad', kindName(o.kind), `×${int(o.count)}`], ['dim', '시간', `${hm(o.startedAt)} ~ ${num(o.endedAt) === null ? '진행 중' : hm(o.endedAt)}`]];
+    if (num(o.statusCode) !== null) rows.push(['dim', 'HTTP', String(o.statusCode)]);
+    if (o.message) rows.push(['', cut(o.message, 160), '']);
+    segs.push({ row, from: Math.max(start, o.startedAt), to, tone: 'bad', head: `${exName(o.exchange)} 실패`, tip: rows });
+  }
+  return { startMs: start, endMs: now, rows: exchanges.map((ex) => `${exName(ex.exchange)}  ${pct(ex.successRate1h)}`), segs };
+}
+
+function drawCollect(app) {
+  const entry = app.entry('collect');
+  tag('t-collect', plainOf(entry));
+  once('c-collect', [entry, Math.floor(Date.now() / 60_000)], () => {
+    if (!entry?.body) return blank('c-collect', stateWord(plainOf(entry)));
+    return lanes('c-collect', collectLanes(entry.body, Date.now()));
+  });
+}
+
+// --- 경보 (034 — 경보 이름 알약 + 지난 7일 알림 시각표: 원 Slack, 마름모 경보 상태 변경) ----------------------
+
+const ALARM_RANK = Object.freeze({ ALARM: 0, INSUFFICIENT_DATA: 1, OK: 2 });
+const ALARM_TONE = Object.freeze({ ALARM: 'bad', INSUFFICIENT_DATA: 'dim', OK: 'ok' });
+const ALARM_WORD = Object.freeze({ ALARM: 'ALARM', INSUFFICIENT_DATA: '데이터 부족', OK: 'OK' });
+const alarmName = (name) => clean(name).replace(/^marketlens-/, '');
+// Slack 글의 머리 그림 → 색(025 문구 규칙)
+const slackTone = (text) => (clean(text).startsWith('🔴') ? 'bad' : clean(text).startsWith('🟢') ? 'ok' : clean(text).startsWith('⚠') ? 'warn' : 'c0');
+
+function alarmPills(part) {
+  if (!usable(part)) return [el('p', 'empty', stateWord(part))];
+  const items = list(part.items).filter(isObj);
+  if (!items.length) return [el('p', 'empty', '경보 없음')];
+  items.sort((a, b) => (own(ALARM_RANK, a.state) ?? 1) - (own(ALARM_RANK, b.state) ?? 1) || clean(a.name).localeCompare(clean(b.name)));
+  return items.map((a) => {
+    const pill = el('span', `pill ${own(ALARM_TONE, a.state) ?? 'dim'}`, alarmName(a.name));
+    pill.title = [clean(a.name), own(ALARM_WORD, a.state) ?? clean(a.state), clean(a.reason)].filter(Boolean).join(' — ');
+    return pill;
+  });
+}
+
+export function alertPoints(items, now) {
+  const start = now - 7 * 86_400_000;
+  const rows = list(items).filter((it) => isObj(it) && num(it.at) !== null && it.at >= start && it.at <= now + 60_000);
+  const slack = rows.filter((it) => it.source === 'slack');
+  const alarm = rows.filter((it) => it.source === 'alarm');
+  const tipOf = (it) =>
+    it.source === 'alarm'
+      ? [[own(ALARM_TONE, it.toState) ?? 'dim', alarmName(it.alarm), `${own(ALARM_WORD, it.fromState) ?? clean(it.fromState)} → ${own(ALARM_WORD, it.toState) ?? clean(it.toState)}`], ...(it.text ? [['', cut(it.text, 200), '']] : [])]
+      : [[slackTone(it.text), cut(it.text, 200), it.delivered === false ? '전송 실패' : ''], ['dim', clean(it.role ?? 'slack'), '']];
+  return { start, slack, alarm, tipOf };
+}
+
+function drawAlarms(app) {
+  const part = partOf(app.entry('aws'), 'alarms');
+  tag('t-alarms', part);
+  once('alarm-pills', [part], () => $('alarm-pills').replaceChildren(...alarmPills(part)));
+  const alerts = app.entry('alerts');
+  once('c-alerts', [alerts, Math.floor(Date.now() / 60_000)], () => {
+    if (!alerts?.body) return blank('c-alerts', stateWord(plainOf(alerts)));
+    const now = Date.now();
+    const { start, slack, alarm, tipOf } = alertPoints(alerts.body.items, now);
+    if (!slack.length && !alarm.length) return blank('c-alerts', '지난 7일 알림 없음');
+    const dot = (it, tone) => ({ value: [it.at, it.source === 'alarm' ? '경보' : 'Slack'], itemStyle: { color: colorOf(tone), borderColor: COLOR.card, borderWidth: 2 } });
+    return draw('c-alerts', base({
+      grid: { left: 8, right: 16, top: 8, bottom: 4, containLabel: true },
+      xAxis: timeAxis(start, now),
+      yAxis: categoryAxis(['Slack', '경보'], { axisLine: { show: false }, axisLabel: { color: COLOR.text, fontSize: 12 } }),
+      tooltip: itemTip((p) => {
+        const it = (p.seriesIndex === 0 ? slack : alarm)[p.dataIndex];
+        return it ? tip(when(it.at), tipOf(it)) : '';
+      }),
+      series: [
+        { type: 'scatter', name: 'Slack', symbol: 'circle', symbolSize: 11, data: slack.map((it) => dot(it, slackTone(it.text))) },
+        { type: 'scatter', name: '경보', symbol: 'diamond', symbolSize: 13, data: alarm.map((it) => dot(it, own(ALARM_TONE, it.toState) ?? 'dim')) },
+      ],
+    }));
+  });
+}
+
+// --- 비용 (034 — 예산 게이지: 실제·예측 두 바늘, 금액) ---------------------------------------------------
+
+function drawCost(app) {
+  const part = partOf(app.entry('aws'), 'budget');
+  tag('t-cost', part);
+  once('cost', [part], () => {
+    if (!usable(part)) {
+      $('cost-rows').replaceChildren();
+      return blank('c-cost', stateWord(part));
+    }
+    const worst = worstMonthly(part);
+    if (worst) budgetGauge('c-cost', worst.b, (v) => money(v, worst.b.unit));
+    else blank('c-cost', '월 예산 없음');
+    return $('cost-rows').replaceChildren(
+      ...list(part.items).filter(isObj).flatMap((b) => [
+        el('dt', null, b.name ?? '예산'),
+        el('dd', null, `실제 ${money(b.actual, b.unit)} · 예측 ${money(b.forecast, b.unit)} · 한도 ${money(b.limit, b.unit)}`),
+      ]),
+    );
+  });
+}
+
+// --- 도구 — 즉시 갱신(029·003 그대로: 토큰은 입력칸과 변수에만, 401 은 토큰 오류) -------------------------------
+
+function wireTools(app) {
+  $('unzoom').addEventListener('click', () => unzoom(GROUP));
+  for (const button of document.querySelectorAll('[data-range]')) button.addEventListener('click', () => app.pick('series', button.dataset.range));
+  $('refresh').addEventListener('click', async () => {
+    const button = $('refresh');
+    const token = $('token').value;
+    button.disabled = true;
+    $('refresh-result').hidden = false;
+    try {
+      const { status, body } = await call('/api/refresh', { method: 'POST', headers: token ? { 'X-Refresh-Token': token } : {} });
+      const ok = status === 200 && body !== null;
+      put('refresh-status', `${status}${status === 401 ? ' 토큰 오류' : status === 403 ? ' 권한·설정 오류' : ''}`, ok ? 'num-ok' : 'num-bad');
+      put('refresh-saved', ok ? int(body.totalSaved) : '–');
+      put('refresh-failures', ok ? list(body.failures).filter(isObj).map((f) => `${clean(f.exchange)} · ${clean(f.errorCode)}`).join(', ') || '없음' : '–');
+      put('refresh-warnings', ok ? list(body.warnings).map(clean).join(' / ') || '없음' : '–');
+    } catch (err) {
+      // 버튼은 만료 표시를 지우지 않는다(지우는 것은 폴링 묶음뿐) — 만료 신호면 새로고침 한 번 또는 알림
+      if (isExpired(err)) app.expired();
+      put('refresh-status', isExpired(err) ? '로그인 만료·연결 끊김' : '보내지 못함', 'num-bad');
+      for (const id of ['refresh-saved', 'refresh-failures', 'refresh-warnings']) put(id, '–');
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+const app = start({
+  home: '/server.html',
+  slow: ['aws', 'series', 'alerts'],
+  picks: { series: '24h' },
+  cards: [
+    ['range', drawRange],
+    ['cpu', drawCpu],
+    ['net', drawNet],
+    ['mem', drawMem],
+    ['disk', drawDisk],
+    ['credit', drawCredit],
+    ['io', drawIo],
+    ['ws', drawWs],
+    ['canary', drawCanary],
+    ['checks', drawChecks],
+    ['collect', drawCollect],
+    ['alarms', drawAlarms],
+    ['cost', drawCost],
+  ],
+});
+wireTools(app);
