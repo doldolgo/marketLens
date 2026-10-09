@@ -279,6 +279,8 @@ export function start(page) {
     },
     expired,
     paint: () => paint(),
+    // 이 페이지가 가진 피드로 센 상태 띠 칩(§3.2) — 머리의 점과 개요의 띠가 같이 쓴다
+    chips: () => problems(Object.fromEntries(keys.map((key) => [key, app.current(key)])), Date.now()),
   };
 
   function paint() {
@@ -296,4 +298,202 @@ export function start(page) {
   run(fast);
   run(slow);
   return app;
+}
+
+// --- 부분 상태 표 (§3.1 — 카드 오른쪽 위 작은 표로만) ---------------------------------------------
+
+const BAD_SHAPE = Object.freeze({ why: '응답 모양 오류' });
+// 앱이 모르는 경로(404 JSON) — 그 피드가 이 서버에 아직 없다(062·063 배포 전, 부분 상태 규칙대로 '연결 안 됨')
+const NO_FEED = Object.freeze({ state: 'unconfigured', code: null });
+const PLAIN_OK = Object.freeze({ state: 'ok' });
+
+// 결과에서 부분 하나 — undefined(첫 응답 전·고른 값을 부르는 중)·{ why }(호출 실패)·부분 객체({ state, code, … }).
+// sub 가 없으면 응답 전체가 부분이다(series·access·clarity)
+export function partOf(entry, sub) {
+  if (!entry) return undefined;
+  if (entry.why) return { why: entry.why };
+  if (entry.off) return NO_FEED;
+  const part = sub ? entry.body[sub] : entry.body;
+  return isObj(part) && typeof part.state === 'string' ? part : BAD_SHAPE;
+}
+// 상태 응답(헬스·status·collect)은 부분 꼴이 아니다 — 호출 결과만 표로
+export const plainOf = (entry) => (!entry ? undefined : entry.why ? { why: entry.why } : entry.off ? NO_FEED : PLAIN_OK);
+
+// 값을 그릴 수 있는가 — ok, 또는 error 인데 값이 있다(Clarity 의 마지막 성공 값, 040)
+export function usable(part, valueKey) {
+  if (!part || part.why) return false;
+  if (part.state === 'ok') return true;
+  return part.state === 'error' && valueKey !== undefined && part[valueKey] != null;
+}
+
+// 표 = [색, 글, title] 또는 null(문제 없음 — 비운다). 오래됨 = fetchedAt 이 refreshSec 의 세 배를 넘음(036)
+export function tagOf(part, now = Date.now()) {
+  if (part === undefined) return ['wait', '불러오는 중', ''];
+  if (part.why) return ['bad', '불러오지 못함', part.why];
+  const code = clean(part.code ?? '');
+  if (part.state === 'ok') {
+    const old = num(part.refreshSec) > 0 && num(part.fetchedAt) !== null && now - part.fetchedAt > part.refreshSec * 3000;
+    return old ? ['warn', '오래됨', `${ago(part.fetchedAt, now)} 값`] : null;
+  }
+  if (part.state === 'pending') return ['wait', '첫 조회 중', ''];
+  if (part.state === 'unconfigured' && code === 'before_gate') return ['dim', '시행 전', '처리방침 개정 시행일부터 센다'];
+  if (part.state === 'unconfigured') return ['dim', '연결 안 됨', code];
+  if (part.state === 'denied') return ['dim', '권한 없음', code];
+  return ['bad', '불러오지 못함', code];
+}
+
+export function tagText(id, t) {
+  const node = $(id);
+  if (!node) return;
+  node.className = t ? `tag ${t[0]}` : 'tag';
+  put(id, t ? t[1] : '');
+  node.title = t ? clean(t[2]) : '';
+}
+export const tag = (id, part) => tagText(id, tagOf(part));
+
+// --- 상태 띠 규칙 (§3.2 1 — 개요의 띠와 모든 페이지 머리의 점이 같은 함수) -----------------------------
+
+// 수집 원천 이름 — /health/collect 순서(현물 6 → perp 4, 011·046·047). 표에 없는 값은 원래 글자 그대로
+export const EX_NAME = Object.freeze({
+  upbit: '업비트',
+  bithumb: '빗썸',
+  binance: '바이낸스',
+  bybit: '바이빗',
+  bitget: '비트겟',
+  okx: 'OKX',
+  binance_perp: '바이낸스 perp',
+  bybit_perp: '바이빗 perp',
+  bitget_perp: '비트겟 perp',
+  hyperliquid_perp: 'Hyperliquid',
+});
+export const exName = (id) => own(EX_NAME, id) ?? clean(id);
+
+// 바로 가기 — 칩이 가리키는 곳은 이 표뿐이고, 링크 주소를 쓰는 곳은 jump() 하나다(피드 글자가 주소가 되지 않게)
+const JUMP = Object.freeze({
+  collect: '/server.html#collect',
+  alarms: '/server.html#alarms',
+  canary: '/server.html#canary',
+  cpu: '/server.html#cpu',
+  mem: '/server.html#mem',
+  disk: '/server.html#disk',
+  credit: '/server.html#credit',
+  checks: '/server.html#checks',
+  cost: '/server.html#cost',
+  problems: '/traffic.html#problems',
+});
+export function jump(node, to) {
+  const href = own(JUMP, to);
+  if (href !== undefined) node.setAttribute('href', href);
+  return node;
+}
+
+// 시계열 끝 15분 평균 — 점 [[ts초, 값|null]] 가운데 끝(endTs) 앞 15분(주기가 더 길면 마지막 칸)의 값 평균, 없으면 null
+export function recentAvg(points, endTs, periodSec) {
+  if (num(endTs) === null) return null;
+  const from = endTs - Math.max(900, n0(periodSec));
+  const vals = list(points)
+    .filter((p) => Array.isArray(p) && num(p[0]) !== null && p[0] >= from && p[0] < endTs)
+    .map((p) => num(p[1]))
+    .filter((v) => v !== null);
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+
+// 상자 지표 문턱(§3.2) — [시리즈 키, 이름, 빨강 이상, 주황 이상, 바로 가기]
+export const BOX_LEVELS = Object.freeze([
+  ['cpu', 'CPU', 90, 75, 'cpu'],
+  ['mem', '메모리', 90, 80, 'mem'],
+  ['disk', '디스크', 85, 75, 'disk'],
+]);
+export const levelOf = (v, red, amber) => (num(v) === null ? null : v >= red ? 'bad' : v >= amber ? 'warn' : 'ok');
+
+// WS 재접속 실패 — 24시간 창은 status.ws5xx(§3.2), 7·30일 창은 마지막 24시간 칸의 wsErrors 합(머리 점이 창에 따라 바뀌지 않게)
+export function wsFailures(a) {
+  if (a.window === '24h') return n0(a.status?.ws5xx);
+  const end = n0(a.endTs);
+  return list(a.hourly).filter((h) => isObj(h) && n0(h.ts) > end - 86_400).reduce((sum, h) => sum + n0(h.wsErrors), 0);
+}
+
+const okPart = (body, key) => (isObj(body) && isObj(body[key]) && body[key].state === 'ok' ? body[key] : null);
+
+// f = { 키: 마지막 결과 } — 없는 키는 판정하지 않는다. 칩 = { tone, name, value, to }, 빨강 먼저(같은 색은 규칙 순서)
+export function problems(f, now = Date.now()) {
+  const out = [];
+  const add = (tone, name, value, to) => out.push({ tone, name: clean(name), value: clean(value), to });
+  for (const [key, name] of [['collector', '수집 멈춤'], ['api', 'API 이상']]) {
+    const entry = f[key];
+    if (!entry) continue;
+    const status = entry.body?.status;
+    if (entry.why || entry.off) add('bad', name, '응답 없음', 'collect');
+    else if (status !== 'ok') add('bad', name, typeof status === 'string' ? status : '?', 'collect');
+  }
+  const st = f.status?.body;
+  if (st?.redis === 'down') add('bad', 'Redis 끊김', 'down', 'collect');
+  if (st?.influx === 'down') add('bad', 'Influx 끊김', 'down', 'collect');
+  for (const ex of list(f.collect?.body?.exchanges).filter(isObj)) {
+    if (isObj(ex.openOutage)) add('bad', `${exName(ex.exchange)} 끊김`, span((now - n0(ex.openOutage.startedAt)) / 1000), 'collect');
+    else if (num(ex.successRate1h) !== null && ex.successRate1h < 99) add('warn', `${exName(ex.exchange)} 성공률`, pct(ex.successRate1h), 'collect');
+  }
+  const aws = f.aws?.body;
+  const alarms = okPart(aws, 'alarms');
+  const firing = alarms ? Math.max(list(alarms.items).filter((a) => isObj(a) && a.state === 'ALARM').length, n0(alarms.counts?.alarm)) : 0;
+  if (firing > 0) add('bad', '경보', `${firing}`, 'alarms');
+  const canary = okPart(aws, 'canary');
+  if (canary?.ok === false) add('bad', '점검 실패', ago(canary.lastRunAt, now), 'canary');
+  const series = f.series?.body;
+  if (isObj(series) && series.state === 'ok') {
+    for (const b of list(series.boxes).filter(isObj)) {
+      const s = isObj(b.series) ? b.series : {};
+      const avg = (key) => recentAvg(s[key], series.endTs, series.periodSec);
+      const box = clean(b.box);
+      for (const [key, label, red, amber, to] of BOX_LEVELS) {
+        const v = avg(key);
+        const tone = levelOf(v, red, amber);
+        if (tone === 'bad' || tone === 'warn') add(tone, `${box} ${label}`, pct(v), to);
+      }
+      const credit = avg('creditBalance');
+      if (credit !== null && credit < 30) add(credit < 10 ? 'bad' : 'warn', `${box} 크레딧`, dec1(credit), 'credit');
+      const surplus = avg('surplusCharged');
+      if (surplus !== null && surplus > 0) add('warn', `${box} 초과 과금`, dec1(surplus), 'credit');
+      const failed = avg('statusFailed');
+      if (failed !== null && failed > 0) add('bad', `${box} 상태 검사`, '실패', 'checks');
+    }
+  }
+  const a = f.access?.body;
+  if (isObj(a) && a.state === 'ok') {
+    const end = num(a.endTs);
+    const fives = end === null ? 0 : list(a.recent5xx).filter((r) => isObj(r) && num(r.ts) !== null && r.ts >= end - 3600).length;
+    if (fives >= 1) add(fives >= 10 ? 'bad' : 'warn', '5xx', `${fives}`, 'problems');
+    const ws = wsFailures(a);
+    if (ws >= 1) add('warn', 'WS 재접속 실패', `${ws}`, 'problems');
+  }
+  for (const b of list(okPart(aws, 'budget')?.items).filter(isObj)) {
+    if (!(num(b.limit) > 0)) continue;
+    if (num(b.actual) !== null && b.actual >= b.limit) add('bad', '예산 넘음', pct((b.actual / b.limit) * 100, 0), 'cost');
+    else if (num(b.forecast) !== null && b.forecast >= b.limit) add('warn', '예산 예측 넘음', pct((b.forecast / b.limit) * 100, 0), 'cost');
+  }
+  const slack = list(f.alerts?.body?.items).filter((i) => isObj(i) && i.source === 'slack' && num(i.at) !== null && i.at >= now - 3_600_000);
+  if (slack.length) add('warn', 'Slack 알림', `${slack.length}`, 'alarms');
+  return out.filter((c) => c.tone === 'bad').concat(out.filter((c) => c.tone === 'warn'));
+}
+
+// 칩 하나 — 짧은 이름 + 값, 누르면 그 페이지의 해당 카드로(§3.2)
+export function chip(c) {
+  const node = jump(el('a', `chip ${c.tone}`), c.to);
+  node.append(el('span', 'chip-dot'), el('span', 'chip-name', c.name));
+  if (c.value) node.append(el('b', 'chip-val', c.value));
+  return node;
+}
+
+// --- 머리 줄 (§3.1) — 전체 상태 점(그 페이지가 가진 피드로 센 띠 규칙), 개요 링크 -----------------------------
+
+const WORD = Object.freeze({ ok: '정상', warn: '주의', bad: '문제', wait: '확인 중' });
+function header(app) {
+  const node = $('hdr-state');
+  if (!node) return;
+  const ready = app.entry('collector') !== undefined && app.entry('api') !== undefined;
+  const chips = ready ? app.chips() : [];
+  const tone = !ready ? 'wait' : chips.some((c) => c.tone === 'bad') ? 'bad' : chips.length ? 'warn' : 'ok';
+  node.className = `state ${tone}`;
+  put('hdr-word', chips.length ? `${WORD[tone]} ${chips.length}` : WORD[tone]);
+  node.title = chips.map((c) => `${c.name} ${c.value}`).join(' · ');
 }
