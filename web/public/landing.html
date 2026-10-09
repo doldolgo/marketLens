@@ -260,8 +260,6 @@
     .steps li:last-child::before { content: none; }
     .step-n { position: absolute; top: 0; left: 0; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--n600); border-radius: 50%; font-size: 13px; font-weight: 600; line-height: 1; color: var(--n300); }
     .steps h3 + p { margin-top: 8px; color: var(--n300); text-wrap: pretty; }
-    .limits { margin-top: 56px; padding-top: 28px; border-top: 1px solid var(--divider); }
-    .limits h3 + .prose { margin-top: 8px; }
 
     /* 자주 묻는 질문 — 늘 펼쳐 둔다 */
     .faq { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 56px; margin-top: 32px; }
@@ -452,10 +450,6 @@
         <li><span class="step-n" aria-hidden="true">3</span><h3>기록</h3><p>맨 위 호가로 계산한 값은 빠짐없이 저장합니다. 크게 벌어졌던 구간은 따로 모아 두어 나중에 다시 볼 수 있습니다.</p></li>
         <li><span class="step-n" aria-hidden="true">4</span><h3>전달</h3><p>실시간 김프 표에는 바뀐 값만 골라 곧바로 보냅니다.</p></li>
       </ol>
-      <div class="limits">
-        <h3>반영하지 않는 것</h3>
-        <p class="prose">거래 수수료와 출금 수수료, 코인을 보내는 데 걸리는 시간과 그동안의 가격 변화, 출금 한도나 트래블룰 같은 거래소 정책은 계산에 넣지 않습니다. 실제로 옮기기 전에는 거래소에서 직접 확인해 주세요.</p>
-      </div>
     </section>
 
     <section class="wrap section" id="faq" aria-labelledby="faq-title" data-area="faq">
