@@ -468,3 +468,158 @@ a {
   text-decoration: none;
   white-space: nowrap;
 }
+
+/* — 차트 툴팁(echarts tooltip.className 'tt') — 글자는 encodeHTML 을 지난다. 값이 굵게 — */
+.tt {
+  max-width: 340px;
+  white-space: normal !important;
+}
+.tt-h {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.tt-r {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tt-n {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.tt-r b {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tt-k {
+  flex: none;
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--muted);
+}
+.tt-k.c0 {
+  background: var(--accent);
+}
+.tt-k.c1 {
+  background: var(--sub);
+}
+.tt-k.c2,
+.tt-k.ok {
+  background: var(--ok);
+}
+.tt-k.c3,
+.tt-k.warn {
+  background: var(--warn);
+}
+.tt-k.c4,
+.tt-k.bad {
+  background: var(--bad);
+}
+.tt-k.c5 {
+  background: var(--c5);
+}
+.tt-k.c6 {
+  background: var(--c6);
+}
+.tt-k.c7 {
+  background: var(--c7);
+}
+
+/* — 표·도구 — */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th,
+.table td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.table th {
+  font-weight: 600;
+  color: var(--muted);
+}
+.table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.scroll {
+  overflow-x: auto;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+details.card > summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+.tools {
+  display: grid;
+  gap: 16px;
+  margin-top: 12px;
+}
+.input {
+  min-width: 0;
+  flex: 1 1 200px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: #171a25;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+.kv dt {
+  color: var(--muted);
+}
+.kv dd {
+  margin: 0;
+}
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.links a {
+  color: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .top-in {
+    padding: 8px 12px;
+  }
+  .top-side {
+    width: 100%;
+    margin-left: 0;
+    justify-content: space-between;
+  }
+  .wrap {
+    padding: 12px 12px 32px;
+  }
+  .grid,
+  .kpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .band-word {
+    font-size: 24px;
+  }
+}
