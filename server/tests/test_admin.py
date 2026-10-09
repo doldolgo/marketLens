@@ -47,7 +47,7 @@ SFS_CHECK = (["if", "($admin_sfs_ok", "=", "0)"], [(["return", "403"], None)])
 # 교차 사이트 검사 예외 — 화면(/)과 문서 두 쪽 (§3.2)
 SFS_EXEMPT = {("=", "/api/docs"), ("=", "/api/redoc")}
 # 화면의 10초 폴링 — 기록하지 않는다 (§3.2). 034 의 수집기 관리자 피드 둘·035 의 api 피드 둘도 화면의 폴링이다
-FEEDS = {("=", "/api/admin/aws"), ("=", "/api/admin/alerts")}
+FEEDS = {("=", "/api/admin/aws"), ("=", "/api/admin/alerts"), ("=", "/api/admin/aws/series")}
 API_FEEDS = {
     ("=", "/svc/api/admin/access"),
     ("=", "/svc/api/admin/clarity"),
@@ -200,11 +200,10 @@ def test_monitoring_feeds_are_exact_collector_locations_that_inherit_server_head
         assert not _args(children, "proxy_hide_header"), key
 
 
-def test_series_feed_rides_the_admin_api_prefix_and_stays_closed_publicly() -> None:
-    """063 §3.1 — 새 location 없이 관리자 `/api/` 접두 분기(교차 사이트 검사 첫 줄)로 수집기에, 공개는 028 의 404 JSON."""
+def test_series_feed_has_its_own_exact_location_and_stays_closed_publicly() -> None:
+    """063 §3.1 — 034 의 피드처럼 정확 일치 location(교차 사이트 검사 첫 줄·기록 끔)으로 수집기에, 공개는 028 의 404 JSON."""
     path = "/api/admin/aws/series"
-    assert _admin_route(path) == ("/api/",)
-    assert _locations(_admin_server())[("/api/",)][0] == SFS_CHECK
+    assert _admin_route(path) == ("=", path)
     assert _forward(path) == (COLLECTOR, "/admin/aws/series")
     assert _route(path) in DENY
 

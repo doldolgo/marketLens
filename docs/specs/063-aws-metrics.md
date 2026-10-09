@@ -16,7 +16,7 @@
 ## 3. 동작
 
 ### 3.1 경로·창
-- `GET /admin/aws/series?range=6h|24h|7d|30d` — 수집기 역할에만(034 와 같은 라우터·`ADMIN_AWS_REGION` 이 비면 `unconfigured`). 관리자 nginx 는 `/api/` 접두 분기가 이미 수집기로 보낸다 — 새 location 은 두지 않고, test_admin 의 경로 표에 `/api/admin/aws/series` 를 더한다(공개 nginx 는 404 그대로).
+- `GET /admin/aws/series?range=6h|24h|7d|30d` — 수집기 역할에만(034 와 같은 라우터·`ADMIN_AWS_REGION` 이 비면 `unconfigured`). 관리자 nginx 는 034 의 두 피드처럼 정확 일치 `location = /api/admin/aws/series`(교차 사이트 검사·`access_log off` — 화면의 폴링을 관리자 접속 기록에서 뺀다)를 둔다(설계 세션, 2026-10-09). 공개 nginx 는 404 그대로(028 목록 밖).
 - `range` 가 목록 밖·없음이면 `24h`. 주기(periodSec): 6h·24h → 300, 7d → 3600, 30d → 10800. 끝 = 지금을 주기로 내림, 시작 = 끝 − 창. 점은 시작부터 주기 간격의 격자(빈 칸 null) — 034 의 `metrics` 와 같은 꼴.
 
 ### 3.2 지표 (상자 셋 `collect`·`data`·`serve` — 034 처럼 경보 `marketlens-<box>-memory` 의 InstanceId 로 찾음, 1시간 캐시 재사용)
@@ -117,7 +117,7 @@ uv run pytest -q tests/test_role.py tests/test_admin.py tests/test_deploy.py    
   - 실행 중 고친 스펙 절: 이 스펙은 없음. 034 §3.1 — §6 대로 표에 한 줄과 안내 문장, 그리고 "OpenAPI 는 collector 스키마에만 두 경로" 가 셋이 되어 "collector 스키마에만 있다(063 도 같다)" 로.
 - 남은 빚:
   - AWS 는 Stubber·가짜로만 확인했다 — 운영 응답(상자 셋·24h cpu 288점·30d 3시간 격자)은 §4 설계 세션 확인.
-  - series 는 정확 일치 location 이 없어(§3.1) 관리자 접속 기록(029)에 남는다 — 064 가 폴링하면 줄이 쌓인다. 빼려면 034 와 같은 모양의 `= /api/admin/aws/series` 하나.
+  - (설계 세션이 고침) 관리자 nginx 에 정확 일치 `= /api/admin/aws/series`(기록 끔)를 더했다 — 064 의 폴링이 관리자 접속 기록에 쌓이지 않는다.
   - `creditUsage`·`surplusCharged`·canary `errors` 는 주기당 합이라 창마다 단위가 다르다(5분·1시간·3시간 합) — 064 가 `periodSec` 로 읽는다.
   - ListMetrics 는 2주 안에 자료가 있던 지표만 준다 — 2주 넘게 멈춘 에이전트 지표는 30d 창 앞쪽에 자료가 있어도 null.
   - 24h 창을 하루 종일 열어 두면 GetMetricData 시간당 444지표(월 ≈$3.2, 034 metrics 와 따로) — 첫 달 청구로 확인.
