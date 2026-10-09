@@ -1171,7 +1171,7 @@ function stat(label, value, tone, sub) {
   return box;
 }
 
-// 시행일·KST 날 — 화면의 시행일 글자는 늘 gateAt 의 KST 날짜다(§3.2). 날 막대도 KST 날로 자른다(§3.4 ④)
+// KST 날 — 날 막대는 KST 날로 자른다(§3.4 ④). 화면에 게이트 날짜·정책 낱말은 쓰지 않는다(060 §3.5 — 게이트 없음)
 const KST_SEC = 32_400;
 const kstDay = (sec) => Math.floor((sec + KST_SEC) / 86_400) * 86_400 - KST_SEC;
 function kstMd(ms) {
@@ -1181,9 +1181,8 @@ function kstMd(ms) {
 const hourStart = (sec) => sec - (sec % 3600);
 // 응답이 답한 창 — 서버 값이라 own() 으로 찾고, 목록 밖이면 고른 창('constructor' 같은 이름이 Object 의 것을 집지 않게)
 const winOf = (a) => (own(WINDOW_NAME, a.window) ? a.window : picked);
-// 7일·30일 창의 시작이 시행일로 잘렸는가 — 자르기 전 시작 = endTs 가 든 시의 시작 − (N−1)시간
+// 창이 덮는 시작 — endTs 가 든 시의 시작 − (N−1)시간(날 막대의 칸)
 const naturalStart = (a) => hourStart(n0(a.endTs)) - (WINDOW_HOURS[winOf(a)] - 1) * 3600;
-const isCut = (a) => winOf(a) !== '24h' && n0(a.startTs) > naturalStart(a);
 const spanDays = (a) => Math.ceil((n0(a.endTs) - n0(a.startTs)) / 86_400);
 
 // 창 버튼 — 응답 windows 에 든 창만 연다(없거나 호출 실패면 24시간만). 고른 버튼은 aria-pressed
@@ -1195,12 +1194,13 @@ function drawWindowBar(entry, part, current) {
     button.setAttribute('aria-pressed', String(button.dataset.window === picked));
   }
   const gate = num(body?.gateAt);
-  $('window-note').textContent = gate !== null && !open.includes('7d') ? `7일·30일은 ${kstMd(gate)} 부터 센다` : '';
+  // 게이트가 없어 7일·30일은 늘 열린다(060) — 서버가 닫아 답하면 사실만
+  $('window-note').textContent = gate !== null && !open.includes('7d') ? '7일·30일 자료 없음' : '';
   const meta = $('m-window');
   if (!current) return meta.replaceChildren(badge('wait', `${WINDOW_NAME[picked]} 불러오는 중`));
   if (!usable(part)) return meta.replaceChildren(...head(part));
   const startMs = n0(part.startTs) * 1000;
-  const range = isCut(part) ? `${kstMd(n0(part.gateAt))} 부터 ${spanDays(part)}일` : `${md(startMs)} ${hm(startMs)} ~ 지금`;
+  const range = `${md(startMs)} ${hm(startMs)} ~ 지금`;
   const tail = [`읽지 못한 줄 ${int(part.totals?.skipped)}`];
   if (num(part.firstTs) !== null && part.firstTs > n0(part.startTs)) tail.push(`기록 시작 ${md(part.firstTs * 1000)} ${hm(part.firstTs * 1000)}`);
   // 한 줄 글(flex 칸으로 나누지 않는다) — '·' 앞은 줄 안 바꿈 공백이라 줄 머리에 오지 않는다
@@ -1275,11 +1275,10 @@ function sentences(pieces) {
   return kept.length ? kept.flatMap((p, i) => (i ? [' ', ...p] : p)) : ['기록 없음'];
 }
 
-// 답 문장에 쓰는 값 — 갈래(전·24h·기간)와 시행일·기간 글자
+// 답 문장에 쓰는 값 — 갈래(전·24h·기간)와 기간 글자. 갈래 '전'(7일·30일이 닫힌 응답)은 게이트가 없어 생기지 않는다(060)
 function facts(a) {
   const pre = !list(a.windows).includes('7d');
   const days = spanDays(a);
-  const D = num(a.gateAt) === null ? '–' : kstMd(a.gateAt);
   return {
     a,
     pre,
@@ -1289,20 +1288,18 @@ function facts(a) {
     T: isObj(a.totals) ? a.totals : {},
     S: isObj(a.status) ? a.status : {},
     hourly: list(a.hourly).filter(isObj),
-    D,
-    period: isCut(a) ? `${D} 부터 ${days}일` : `최근 ${days}일`,
+    period: `최근 ${days}일`,
   };
 }
 
 function answer1(f) {
   const { T, vis: v } = f;
-  if (f.pre) return [t`방문자는 ${f.D} 부터 센다.`, t`지금은 줄 수만 — 사람 모양 페이지 ${int(n0(T.humanPages))}, 그중 스크립트가 돈 페이지 ${int(n0(T.jsViews))}.`];
+  if (f.pre) return [['방문자 수 자료 없음.'], t`지금은 줄 수만 — 사람 모양 페이지 ${int(n0(T.humanPages))}, 그중 스크립트가 돈 페이지 ${int(n0(T.jsViews))}.`];
   if (!v) return null;
   const [c, s, r] = [n0(v.confirmed), n0(v.shaped), n0(v.returning)];
   const out = [];
   if (!f.span) {
     out.push(t`확인 ${int(c)}, 브라우저 모양 ${int(s)}(날마다 센 방문자) — 오늘·어제(KST)를 따로 세어 더한 수라 사람 수가 아니다.`);
-    if (n0(v.sinceTs) > n0(f.a.startTs)) out.push(t`${f.D} 부터 센 값이다.`);
   } else {
     const [ac, as] = [perDay(f.a, v, c), perDay(f.a, v, s)];
     if (ac !== null) out.push(t`${f.period} 동안 스크립트가 돈 방문자는 하루 평균 ${ac}명, 브라우저 모양까지 치면 ${as}명 — 실제 사람은 이 사이다.`);
@@ -1328,7 +1325,7 @@ function answer2(f) {
 }
 
 function answer3(f) {
-  if (f.pre) return [t`나라·망 종류와 들어온 길은 ${f.D} 부터 센다.`, ['지금은 외부 출처·utm 만 페이지 줄로 보인다.']];
+  if (f.pre) return [['나라·망 종류와 들어온 길은 자료 없음.'], ['지금은 외부 출처·utm 만 페이지 줄로 보인다.']];
   const out = [];
   const g = f.geo;
   if (g?.state === 'ok') {
@@ -1544,17 +1541,16 @@ function keys(pairs) {
   return row;
 }
 
-// 짝 단위 칸이 비었을 때 — 시행 전이면 시행일 빈 상태(036 §3.5 의 before_gate 예외), 아니면 036 상태 글
-function pairNote(f, part, tail = '') {
-  if (f.pre || part?.code === 'before_gate') return el('p', 'state-msg', `${f.D} 부터 센다${tail}`);
+// 짝 단위 칸이 비었을 때 — 게이트 전이면 '자료 없음'(036 §3.5 의 before_gate 예외 — 060 은 게이트가 없어 생기지 않는다), 아니면 036 상태 글
+function pairNote(f, part) {
+  if (f.pre || part?.code === 'before_gate') return el('p', 'state-msg', '자료 없음');
   return stateMsg(isObj(part) ? part : BAD_SHAPE, CAUSE.access);
 }
-const DBIP_TAIL = '. 그 전에는 DB-IP 자료를 받지도 않는다';
 
 // geo 상태 한 줄(§3.8) — 받는 중·실패·지난달 판. ok 이고 이번 달 판이면 null
 function geoNote(f) {
   const g = f.geo;
-  if (!g || f.pre || g.code === 'before_gate') return pairNote(f, g, DBIP_TAIL);
+  if (!g || f.pre || g.code === 'before_gate') return pairNote(f, g);
   if (g.state === 'pending') return el('p', 'state-msg', '자료 받는 중 — 다음 갱신(60초)에 찬다');
   if (g.state !== 'ok') return marked('warn', `받지 못함(${clean(g.code ?? g.state)}) — 1시간 뒤 다시`);
   return oldMonth(f) ? marked('warn', `지난달 판 ${clean(g.month)} 으로 셈`) : null;
@@ -1578,7 +1574,7 @@ function q1(f) {
   const tiles = el('div', 'tiles');
   tiles.append(
     range,
-    stat('다시 온', v ? int(r) : '—', null, v ? (c > 0 ? `확인의 ${pct(r, c)}%` : '확인 0') : f.pre ? `${f.D} 부터` : ''),
+    stat('다시 온', v ? int(r) : '—', null, v ? (c > 0 ? `확인의 ${pct(r, c)}%` : '확인 0') : f.pre ? '자료 없음' : ''),
     stat('스크립트가 돈 페이지', int(T.jsViews), null, `사람 모양 페이지 ${int(n0(T.humanPages))} 중`),
     stat('사람 모양 페이지', int(T.humanPages), null, '위장 봇 섞임'),
   );
@@ -1624,7 +1620,7 @@ function q2(f) {
     step('페이지', int(pages), ofPrev(pages, req)),
     step('사람 모양 페이지', int(hp), ofPrev(hp, pages)),
     step('스크립트가 돈 페이지', int(js), ofPrev(js, hp)),
-    step('확인 방문자(날마다 셈)', v ? int(c) : '—', v ? (c > 0 ? `1명이 평균 ${AVG.format(js / c)}쪽` : '') : `${f.D} 부터`),
+    step('확인 방문자(날마다 셈)', v ? int(c) : '—', v ? (c > 0 ? `1명이 평균 ${AVG.format(js / c)}쪽` : '') : '자료 없음'),
   );
   const classes = isObj(f.a.classes) ? f.a.classes : {};
   const kinds = CLASSES.map((k) => {
@@ -1687,7 +1683,7 @@ function q3(f) {
 // ③ 바닥의 geo 상태 배지 — DB-IP 링크는 index.html 에 고정(상태와 무관하게 늘 보인다)
 function geoBadge(f) {
   const g = f.geo;
-  if (!g || f.pre || g.code === 'before_gate') return [badge('dim', `나라·망 자료 — ${f.D} 부터`)];
+  if (!g || f.pre || g.code === 'before_gate') return [badge('dim', '나라·망 자료 없음')];
   if (g.state === 'pending') return [badge('wait', '자료 받는 중')];
   if (g.state !== 'ok') return [badge('warn', `받지 못함(${clean(g.code ?? g.state)})`)];
   const since = n0(g.sinceTs) * 1000;
@@ -1727,11 +1723,9 @@ function hourBars(hourly) {
   return root;
 }
 
-// 7일·30일 날 막대 — 칸은 시행일로 자르기 전 창이 덮는 KST 날 전부, 시행 전 날들은 회색 덩어리 하나(§3.8)
+// 7일·30일 날 막대 — 칸은 창이 덮는 KST 날 전부, 게이트 전 날들은 회색 덩어리 하나(§3.8 — 060 은 게이트가 없어 생기지 않는다)
 function dayBars(f) {
   const v = f.vis;
-  const win = winOf(f.a);
-  const N = WINDOW_HOURS[win];
   const gateDay = kstDay(n0(f.a.gateAt) / 1000);
   const cols = [];
   for (let d = kstDay(naturalStart(f.a)); d <= kstDay(n0(f.a.endTs)); d += 86_400) cols.push(d);
@@ -1745,7 +1739,7 @@ function dayBars(f) {
   const strip = frame(W, 16, 'strip', `브라우저 모양 얇은 줄 — 최고 ${int(topS)}`);
   days.append(svg('line', { x1: 0, x2: W, y1: H, y2: H }, 'floor'));
   if (before) {
-    const label = `${f.D} 전 ${before}일 — 세지 않음`;
+    const label = `자료 없음 ${before}일`;
     days.append(tip(svg('rect', { x: 0, y: 0, width: before * 10, height: H }, 'pre'), label));
     strip.append(tip(svg('rect', { x: 0, y: 0, width: before * 10, height: 16 }, 'pre'), label));
   }
@@ -1760,11 +1754,10 @@ function dayBars(f) {
     days.append(tip(g, `${kstMd(ts * 1000)} · 확인 ${int(c)} · 다시 온 ${int(r)} · 브라우저 모양 ${int(s)}`));
     if (s > 0) strip.append(tip(svg('rect', { x: i * 10 + 1, y: 16 - (s / topS) * 16, width: 8, height: (s / topS) * 16 }, 'shaped'), `${kstMd(ts * 1000)} · 브라우저 모양 ${int(s)}`));
   });
-  const full = kstMd(n0(f.a.gateAt) + (N - 1) * 3_600_000);
   const out = [];
-  if (before >= 8) out.push(el('p', 'pre-label', `${f.D} 전 ${before}일 — 세지 않음 · ${full} 부터 ${WINDOW_NAME[win]}이 다 찬다`));
+  if (before >= 8) out.push(el('p', 'pre-label', `자료 없음 ${before}일`));
   const legend = [['', '확인'], ['returning', '다시 온(아랫부분)'], ['shaped', '브라우저 모양(아래 줄)']];
-  if (before && before < 8) legend.push(['pre', `${f.D} 전 ${before}일 — 세지 않음`]);
+  if (before && before < 8) legend.push(['pre', `자료 없음 ${before}일`]);
   out.push(days, axis(`${kstMd(cols[0] * 1000)} (KST)`, kstMd(cols[cols.length - 1] * 1000)), strip, el('p', 'muted small', `브라우저 모양 · 눈금 따로 · 최고 ${int(topS)}`), keys(legend));
   return out;
 }
@@ -1850,7 +1843,7 @@ function q6(f) {
   const tiles = el('div', 'tiles');
   tiles.append(
     stat('끝난 연결', int(ws.count), null, '연결 수 — 사람 수가 아니다'),
-    stat('연결한 방문자', f.vis && num(ws.pairs) !== null ? int(ws.pairs) : '—', null, f.vis ? '날마다 셈' : f.pre ? `${f.D} 부터` : ''),
+    stat('연결한 방문자', f.vis && num(ws.pairs) !== null ? int(ws.pairs) : '—', null, f.vis ? '날마다 셈' : f.pre ? '자료 없음' : ''),
     stat('재접속 실패', int(ws.errors), null, '대시보드 WebSocket 5xx'),
   );
   const durations = isObj(ws.durations) ? ws.durations : {};
@@ -1883,7 +1876,7 @@ function recent5xx(a) {
   );
 }
 
-// 덩어리 머리 meta — 늘 창(시행 뒤 '날마다 센 방문자', 시행 전 '줄 수')
+// 덩어리 머리 meta — 늘 창(게이트 뒤 '날마다 센 방문자', 게이트 전 '줄 수')
 const qMeta = (a) => `${WINDOW_NAME[winOf(a)]} · ${list(a.windows).includes('7d') ? '날마다 센 방문자' : '줄 수'}`;
 const BLOCKS = [q1, q2, q3, q4, q5, q6];
 
@@ -1911,7 +1904,7 @@ function blankTraffic(part) {
   $('r5xx').hidden = true;
 }
 
-// 절 요약 앞 조각(§3.3) — 7일·30일 '확인 방문자 하루 a명', 24시간(시행 뒤) '24시간 확인 a', 시행 전 '24시간 스크립트가 돈 페이지 j'
+// 절 요약 앞 조각(§3.3) — 7일·30일 '확인 방문자 하루 a명', 24시간(게이트 뒤) '24시간 확인 a', 게이트 전 '24시간 스크립트가 돈 페이지 j'
 function trafficLead(a) {
   const v = visOf(a);
   if (!list(a.windows).includes('7d')) return `24시간 스크립트가 돈 페이지 ${int(a.totals?.jsViews)}`;
@@ -2111,12 +2104,6 @@ const scr = { days: 7, page: SCREEN_PAGES[0], chosen: false, device: 'pc', inVie
 const PAGE_OPTIONS = Array.from(document.querySelectorAll('#scr-page option'));
 const DEVICE_BUTTONS = Array.from(document.querySelectorAll('[data-device]'));
 
-// KST 날짜 YYYY-MM-DD (§3.6 — 시행일 D)
-function kstDate(ms) {
-  const d = new Date(ms + KST_SEC * 1000);
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-}
-
 // 틀로 보내기 — 대상 출처는 늘 공개 사이트 하나
 function post(message) {
   const win = $('scr-frame').contentWindow;
@@ -2224,25 +2211,25 @@ function screenList(v, page) {
   return out;
 }
 
-// 값이 없을 때 본문(§3.6) — 시행 전·첫 조회 전·불러오지 못함(036 부분 상태 칸)
+// 값이 없을 때 본문(§3.6) — 게이트 전('자료 없음')·첫 조회 전·불러오지 못함(036 부분 상태 칸)
 function blankScreens(part) {
   $('a-screens').replaceChildren();
   let msg;
-  if (part?.state === 'before_gate') msg = el('p', 'state-msg', `${kstDate(n0(part.gateAt))} 부터 모읍니다`);
+  if (part?.state === 'before_gate') msg = el('p', 'state-msg', '자료 없음');
   else if (part === undefined && !att.flight) msg = el('p', 'state-msg', '이 절이 화면에 보이면 부른다');
   else if (part?.state === 'error') msg = el('p', 'state-msg t-bad', `불러오지 못함${part.code ? ` — ${clean(part.code)}` : ''}`);
   else msg = stateMsg(part, '');
   $('b-screens').replaceChildren(msg);
 }
 
-// 머리 — 직전 값을 그리는 실패면 '불러오지 못함 · 마지막 성공', 시행 전, 그 밖은 036 부분 상태
+// 머리 — 직전 값을 그리는 실패면 '불러오지 못함 · 마지막 성공', 게이트 전('자료 없음'), 그 밖은 036 부분 상태
 function screensHead(part, feed) {
   if (feed && feed !== part) {
     const out = [badge('bad', `불러오지 못함 · 마지막 성공 ${ago(feed.fetchedAt)}`)];
     if (!part.why && part.code) out.push(el('span', 'code', part.code));
     return out;
   }
-  if (part?.state === 'before_gate') return [badge('dim', '모으기 전')];
+  if (part?.state === 'before_gate') return [badge('dim', '자료 없음')];
   if (part === undefined && !att.flight) return [el('span', 'muted', '보이면 부른다')];
   return head(part);
 }
@@ -2280,7 +2267,7 @@ function drawScreens() {
     const total = rows.reduce((acc, r) => acc + n0(r?.pv), 0);
     const stale = feed !== part ? ' · 불러오지 못함' : '';
     $('s-screens').replaceChildren(marked(stale ? 'warn' : 'ok', `${PERIOD_NAME[scr.days]} 동의한 페이지뷰 ${int(total)}${stale}`));
-  } else if (part?.state === 'before_gate') $('s-screens').replaceChildren(marked('dim', `${kstDate(n0(part.gateAt))} 부터 모은다`));
+  } else if (part?.state === 'before_gate') $('s-screens').replaceChildren(marked('dim', '자료 없음'));
   else if (part === undefined && !att.flight) $('s-screens').replaceChildren(marked('dim', '보이면 부른다'));
   else $('s-screens').replaceChildren(marked(...softWord(part)));
 }
