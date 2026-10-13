@@ -4,6 +4,10 @@
 Export 가 부른 시각(World 시계)·종류를 적고, Redis 는 fakeredis(읽기·쓰기를 따로 깨뜨릴 수 있다)다.
 """
 
+import random
+
+import pytest
+
 from app.features.admin.tests.clarity_fakes import (
     HOUR_MS,
     NOW,
@@ -14,6 +18,7 @@ from app.features.admin.tests.clarity_fakes import (
 
 DAY = 24 * 3600
 KINDS = ["base", "pages", "device", "channel"]
+GAP = {"base": 21_600, "pages": 43_200, "device": DAY, "channel": DAY}
 KEYS = ("admin:clarity", "admin:clarity:pages", "admin:clarity:dims")
 
 
@@ -102,6 +107,43 @@ async def test_seventy_two_hours_of_minute_requests_stay_at_eight_a_day() -> Non
     assert most_in_a_day(times(w.clarity)) == 8
     # 6·12·24·24시간마다 빠짐없이
     assert [len(times(w.clarity, k)) for k in KINDS] == [12, 6, 3, 3]
+
+
+def next_due(w: World) -> float:
+    """Redis 기록으로 본 가장 이른 다음 때(World 초) — 기록이 없으면 지금."""
+    records = {
+        "base": w.stored(),
+        "pages": w.stored_pages(),
+        "device": w.stored_dims("device"),
+        "channel": w.stored_dims("channel"),
+    }
+    due = [r["attemptAt"] / 1000 - NOW + GAP[k] for k, r in records.items() if r]
+    return min(due, default=w.t)
+
+
+@pytest.mark.parametrize("seed", range(5))
+async def test_random_gaps_slow_calls_and_deletes_never_pass_eight_or_ten(
+    seed: int,
+) -> None:
+    """30일 동안 무작위 요청 — 절반은 가장 이른 다음 때(+0·1·60초)에 맞춰 오고 나머지는 간격 경계(± 1초)를 노린다, 호출은
+    0~10초 걸린다 — 어떤 24시간에도 8회. 같은 요청에 키를 무작위로 지우면(사람의 바로 부르기, 다시 뜨지 않는 한
+    프로세스) 어떤 24시간에도 10회."""
+    rng = random.Random(seed)
+    gaps = (1, 30, 60, 600, 3_599, 3_600, 21_599, 21_600, 21_601, 43_201)
+    for deletes, limit in ((False, 8), (True, 10)):
+        w = World(Clarity())
+        while w.t < 30 * DAY:
+            for kind in KINDS:
+                w.clarity.takes[kind] = rng.choice((0, 0, 1, 5, 10))
+            if deletes and rng.random() < 0.2:
+                w.forget(*rng.sample(KEYS, rng.randint(1, len(KEYS))))
+            await w.get()
+            if rng.random() < 0.5:
+                w.t = max(w.t + 1, next_due(w) + rng.choice((0, 0, 1, 60)))
+            else:
+                w.advance(sec=rng.choice(gaps))
+        assert most_in_a_day(times(w.clarity)) <= limit, (seed, deletes)
+        assert w.clarity.max_active == 1
 
 
 async def test_attempts_are_timed_when_sent_so_slow_calls_never_fit_more_a_day() -> (
