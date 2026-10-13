@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from app.features.admin import access_cache
+from app.features.admin.access_bands import ips_query
 from app.features.admin.access_cache import AccessLog
 from app.features.admin.visits import VisitFeeds
 
@@ -159,3 +160,10 @@ class Feeds:
 
     async def get(self, window: str | None = None) -> dict[str, Any]:
         return await self.feeds.access(window)
+
+    async def ips(self, window: str | None = None, **params: str) -> dict[str, Any]:
+        """067 대역 목록 — `params` 는 쿼리 글자 그대로(net·country·q·bots·sort·limit·offset)."""
+        return await self.feeds.ips(window, ips_query(**params))
+
+    async def ip(self, band: str, window: str | None = None) -> dict[str, Any]:
+        return await self.feeds.ip(band, window)

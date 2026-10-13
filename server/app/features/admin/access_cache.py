@@ -1,4 +1,4 @@
-"""접속 요약 — 창·게이트·회전 파일별 메모리 캐시·창 조립 (스펙 038 §3.1~§3.3·§3.6).
+"""접속 요약 — 창·게이트·회전 파일별 메모리 캐시·창 조립 (스펙 038 §3.1~§3.3·§3.6, 대역 목록 067 §3.2).
 
 읽는 계약(027·035): caddy 가 도메인 요청마다 JSON 한 줄을 `access.log` 에 쓰고, 하루 또는 50MiB 에서 회전해 gzip 된
 회전 파일 `access-<UTC 시각>-<size|time>.log.gz` 를 같은 디렉터리에 둔다(압축 중엔 같은 이름 `.log` 가 잠깐 함께 있고
@@ -23,7 +23,8 @@ from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from typing import IO, Any, NamedTuple
 
-from app.features.admin import geo_part
+from app.features.admin import access_bands, geo_part
+from app.features.admin.access_bands import IpsQuery
 from app.features.admin.access_classes import CLASSES
 from app.features.admin.access_hours import AT, COUNTS, LISTS, FileTally
 from app.features.admin.access_pairs import PairKeys, before_gate, visitors
@@ -130,6 +131,43 @@ def raw_size(path: str, size: int) -> int | None:
     except OSError:
         return 0  # 권한 등 — 읽기도 실패해 깨진 회전 파일로 센다
     return 0 if isize > BUDGET_BYTES else isize
+
+
+def listing(
+    directory: str | None,
+) -> tuple[Current | None, dict[str, tuple[str, int, float]]]:
+    """(`access.log`, 회전 파일 키 → (경로, 크기, 수정 시각)) — 디렉터리·파일이 없으면 `NoLogFile`."""
+    if not directory:
+        raise NoLogFile
+    try:
+        entries = list(os.scandir(directory))
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise NoLogFile from exc
+    current: Current | None = None
+    rotated: dict[str, tuple[str, int, float]] = {}
+    for entry in entries:
+        name = entry.name
+        if name == LOG_NAME:
+            try:
+                st = entry.stat()
+            except FileNotFoundError:
+                st = None  # 회전 중 — 열기도 빈 파일로 본다
+            # 크기를 모르면 -1 — 다음 회차의 어떤 크기도 '줄어듦' 이 아니다
+            ino, size = (0, -1) if st is None else (st.st_ino, st.st_size)
+            current = Current(entry.path, ino, size)
+        elif name.startswith(ROTATED_PREFIX) and name.endswith((".log", ".log.gz")):
+            stem = name.removesuffix(".gz").removesuffix(".log")
+            # 압축 중이면 같은 줄을 담은 `.log` 와 덜 쓴 `.log.gz` 가 함께 있다 — 다 쓴 `.log` 를 읽는다
+            if stem in rotated and name.endswith(".gz"):
+                continue
+            try:
+                st = entry.stat()
+            except FileNotFoundError:
+                continue
+            rotated[stem] = (entry.path, st.st_size, st.st_mtime)
+    if current is None and not rotated:
+        raise NoLogFile
+    return current, rotated
 
 
 def open_log(path: str) -> IO[str]:
@@ -259,37 +297,29 @@ class AccessLog:
         return broken
 
     def _listing(self) -> tuple[Current | None, dict[str, tuple[str, int, float]]]:
-        if not self._dir:
-            raise NoLogFile
-        try:
-            entries = list(os.scandir(self._dir))
-        except (FileNotFoundError, NotADirectoryError) as exc:
-            raise NoLogFile from exc
-        current: Current | None = None
-        rotated: dict[str, tuple[str, int, float]] = {}
-        for entry in entries:
-            name = entry.name
-            if name == LOG_NAME:
-                try:
-                    st = entry.stat()
-                except FileNotFoundError:
-                    st = None  # 회전 중 — 열기도 빈 파일로 본다
-                # 크기를 모르면 -1 — 다음 회차의 어떤 크기도 '줄어듦' 이 아니다
-                ino, size = (0, -1) if st is None else (st.st_ino, st.st_size)
-                current = Current(entry.path, ino, size)
-            elif name.startswith(ROTATED_PREFIX) and name.endswith((".log", ".log.gz")):
-                stem = name.removesuffix(".gz").removesuffix(".log")
-                # 압축 중이면 같은 줄을 담은 `.log` 와 덜 쓴 `.log.gz` 가 함께 있다 — 다 쓴 `.log` 를 읽는다
-                if stem in rotated and name.endswith(".gz"):
-                    continue
-                try:
-                    st = entry.stat()
-                except FileNotFoundError:
-                    continue
-                rotated[stem] = (entry.path, st.st_size, st.st_mtime)
-        if current is None and not rotated:
-            raise NoLogFile
-        return current, rotated
+        return listing(self._dir)
+
+    def ips(
+        self,
+        name: str,
+        now: float,
+        query: IpsQuery,
+        geo: Callable[[], GeoTable | None] = _no_table,
+    ) -> tuple[dict[str, Any], list[str]]:
+        """067 — 창 하나의 대역 목록(거르기·정렬·쪽 뒤)과 깨진 회전 파일. 파일 캐시는 `summary` 와 같은 것을 나눠 쓰고
+        (회전 파일마다 한 번 읽어 대역 칸을 둔다), 나라·망 종류는 지금 올린 판으로 대역의 첫 주소를 찾는다."""
+        with self._lock:
+            table = geo()
+            broken = self._sync(now, table)
+            name = choose(name, now, self._gate)
+            start, end = bounds(name, now, self._gate)
+            ordered = sorted(self._files.values(), key=lambda e: e.mtime)
+            tallies = [e.tally.bands for e in ordered]
+            if self._current is not None:
+                tallies.append(self._current.bands)
+            cells = access_bands.spark_cells(name == DEFAULT_WINDOW, start, end)
+            values = access_bands.page(tallies, start, end, cells, query, table)
+            return {"window": name, **values}, broken
 
     def _assemble(
         self, name: str, now: float, table: GeoTable | None

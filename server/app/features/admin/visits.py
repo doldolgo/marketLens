@@ -1,5 +1,5 @@
 """api 관리자 피드 — `/admin/access`·`/admin/clarity`·`/admin/clarity/history` 의 부분 상태와 갱신 (스펙 035 §3.1~§3.2·
-038 §3.1~§3.3·040 §3.2·§3.5·068 §3.1·§3.2).
+038 §3.1~§3.3·040 §3.2·§3.5·068 §3.1·§3.2), 067 의 IP 대역 목록 `/admin/access/ips`·상세 `/admin/access/ip`.
 
 공통 규칙은 034 와 같은 문장이다(`parts.py`). 접속 요약은 창(24h·7d·30d)마다 따로 60초 칸이고, 파일 캐시는 창 셋이
 나눠 쓰며 파일 읽기는 `asyncio.to_thread`(기본 실행기 — api 에는 수집 쓰기가 없다). 마지막 접속 요청에서 1시간이 지나면
@@ -12,6 +12,9 @@
 접속 갱신이 게이트 뒤 ok 이면 DB-IP 판(039)이 필요한지 보고 받기를 띄운다 — 갱신은 받기를 기다리지 않고, 판이 없는
 동안 하위 부분 `geo` 는 받는 중 `pending`·실패 `error` 다. 판은 캐시 잠금 안에서 하나 집어 그 회차 끝까지 쓴다 — 창
 둘의 갱신이 갈아 끼우는 순간에 겹쳐도 옛 판으로 캐시를 다시 만들지 않게.
+067 — 대역 목록은 (창, 거르기·정렬·쪽)마다, 상세는 (대역, 창)마다 60초 칸이고 칸은 32개까지(가장 오래 안 부른 것부터
+버린다). 목록은 요약과 같은 파일 캐시를 쓰고, 상세는 창 안 파일을 그 대역 줄만 골라 다시 읽는다(한 번에 하나). 둘 다 접속
+요청이라 1시간 비움 타이머를 다시 걸고, 비울 때 함께 버린다. 응답은 `{state, code, window, …}` 이고 ok 가 아니면 값 키가 null.
 읽기·부르기는 한 번에 하나이고 3초까지 기다린 뒤 늦으면 직전 결과(없으면 pending)를 답한다. 요청이 없으면 아무것도
 읽거나 부르지 않는다. 처리기 안 예외도 500 이 아니라 그 부분 `error` 와 WARNING 1줄(부분마다 10분에 1줄, 예외 이름만 —
 문장에 가린 IP·UA 가 실릴 수 있다)이다 — 라우터가 응답을 JSON 으로 쓰다 실패하지 않게, 쓸 수 없는 값(NaN·짝 없는
@@ -21,13 +24,17 @@
 
 import asyncio
 import os
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
 import httpx
 
 from app.core import config
+from app.features.admin import access_ip
+from app.features.admin.access_bands import IpsQuery
 from app.features.admin.access_cache import (
     VALUE_KEYS,
     WINDOW_KEYS,
@@ -83,6 +90,21 @@ PAGES_KEYS = ("nextAt", "numOfDays", "rowsIn", "rowLimitHit", "groups")
 BASE_PARAMS = {"numOfDays": "1"}
 # 동의한 방문자만이라 표본이 작아 72시간 — 차원은 둘(주소·기기)
 PAGES_PARAMS = {"numOfDays": "3", "dimension1": "URL", "dimension2": "Device"}
+# 067 — 대역 목록(창·거르기·정렬·쪽마다)·상세(대역·창마다) 60초 칸. 칸이 이만큼 차면 가장 오래 안 부른 것부터 버린다
+BAND_SLOTS = 32
+IPS_KEYS = ("total", "bands")
+IP_KEYS = (
+    "partial",
+    "country",
+    "net",
+    "hourly",
+    "kinds",
+    "status",
+    "agents",
+    "paths",
+    "pairs",
+    "recent",
+)
 
 
 class VisitFeeds:
@@ -115,6 +137,9 @@ class VisitFeeds:
         self._schedule = schedule or _call_later
         self._idle: Any = None
         self._log, self._access = self._fresh_access()
+        self._ips: OrderedDict[tuple[str, IpsQuery], Slot] = OrderedDict()
+        self._ip: OrderedDict[tuple[str, str], Slot] = OrderedDict()
+        self._scan_lock = threading.Lock()  # 상세 다시 읽기는 프로세스에서 한 번에 하나
         # 주기 0 — Clarity 의 캐시는 Redis 기록이고, 이 칸은 한 번에 하나·3초 기다림·직전 결과만 맡는다
         self._clarity = Slot(0, mono, wait_sec)
         budget = (
@@ -180,16 +205,22 @@ class VisitFeeds:
         }
 
     def _drop_access(self) -> None:
-        """1시간 안 부르지 않음 — 요약이 창과 원본보다 오래 남지 않게 통째로 버린다. 다음 요청은 첫 채움부터."""
+        """1시간 안 부르지 않음 — 요약이 창과 원본보다 오래 남지 않게 통째로 버린다(067 의 대역 칸·상세도). 다음 요청은
+        첫 채움부터."""
         self._idle = None
         self._log, self._access = self._fresh_access()
+        self._ips, self._ip = OrderedDict(), OrderedDict()
+
+    def _touch(self) -> None:
+        """접속 요청(요약·대역 목록·상세)마다 1시간 비움 타이머를 다시 건다."""
+        if self._idle is not None:
+            self._idle.cancel()
+        self._idle = self._schedule(ACCESS_IDLE_SEC, self._drop_access)
 
     async def access(self, window: str | None = None) -> dict[str, Any]:
         now = self._clock()
         name = choose(window, now, self._gate)
-        if self._idle is not None:
-            self._idle.cancel()
-        self._idle = self._schedule(ACCESS_IDLE_SEC, self._drop_access)
+        self._touch()
         log = self._log
         try:
             result = await self._access[name].get(lambda: self._load_access(log, name))
@@ -219,6 +250,97 @@ class VisitFeeds:
             if geo["state"] == "pending":
                 geo["state"], geo["code"] = self.geo.waiting()
         return Result("ok", None, int(now * 1000), values)
+
+    # --- /admin/access/ips·/admin/access/ip (067) ---
+
+    def _band_slot(self, slots: OrderedDict[Any, Slot], key: Any) -> Slot:
+        slot = slots.get(key)
+        if slot is None:
+            if len(slots) >= BAND_SLOTS:
+                slots.popitem(last=False)
+            slot = slots[key] = Slot(ACCESS_REFRESH_SEC, self._mono, self._wait)
+        else:
+            slots.move_to_end(key)
+        return slot
+
+    async def ips(self, window: str | None, query: IpsQuery) -> dict[str, Any]:
+        """대역 목록 — `{state, code, window, total, bands}`. 파일 캐시는 요약(038)과 나눠 쓴다."""
+        now = self._clock()
+        name = choose(window, now, self._gate)
+        self._touch()
+        log = self._log
+        try:
+            slot = self._band_slot(self._ips, (name, query))
+            result = await slot.get(
+                lambda: self._load_band("access.ips", log.ips, name, query)
+            )
+        except Exception as exc:
+            result = self._failed("access.ips", exc)
+        head = {"state": result.state, "code": result.code, "window": name}
+        return self._checked("access.ips", head, result, IPS_KEYS)
+
+    async def ip(self, band: str, window: str | None) -> dict[str, Any]:
+        """대역 하나의 상세 — 창 안 파일을 그 대역 줄만 골라 다시 훑는다(요청이 있을 때만·한 번에 하나)."""
+        now = self._clock()
+        name = choose(window, now, self._gate)
+        self._touch()
+        try:
+            slot = self._band_slot(self._ip, (band, name))
+            result = await slot.get(
+                lambda: self._load_band("access.ip", self._scan, name, band)
+            )
+        except Exception as exc:
+            result = self._failed("access.ip", exc)
+        head = {
+            "state": result.state,
+            "code": result.code,
+            "window": name,
+            "band": band,
+        }
+        return self._checked("access.ip", head, result, IP_KEYS)
+
+    def _scan(
+        self, name: str, now: float, band: str, geo: Callable[[], Any]
+    ) -> tuple[dict[str, Any], list[str]]:
+        with self._scan_lock:
+            return access_ip.scan(self._dir, band, name, now, self._gate, geo())
+
+    async def _load_band(
+        self, part: str, read: Callable[..., Any], name: str, arg: Any
+    ) -> Result:
+        """`read(name, now, arg, geo)` 를 스레드에서 — 깨진 회전 파일은 WARNING 1줄, 게이트 뒤 ok 면 DB-IP 판을 챙긴다."""
+        now = self._clock()
+        try:
+            values, broken = await asyncio.to_thread(
+                read, name, now, arg, lambda: self.geo.table
+            )
+        except NoLogFile:
+            return Result("unconfigured", "no_file")
+        except Exception as exc:
+            return self._failed(part, exc)
+        if broken:
+            self._warn(part, broken[0])
+        if now >= self._gate:
+            self.geo.ensure()  # 나라·망 종류(039) — 판이 없으면 받기를 띄운다, 기다리지 않는다
+        return Result("ok", None, int(now * 1000), values)
+
+    def _checked(
+        self,
+        name: str,
+        head: dict[str, Any],
+        result: Result,
+        keys: tuple[str, ...],
+    ) -> dict[str, Any]:
+        """ok 가 아니면 값 키는 null. JSON 으로 쓸 수 없는 값이 든 답은 그 부분 `error`·예외 이름(값 키 null)."""
+        values = result.values if result.state == "ok" and result.values else {}
+        body = {**head, **{k: values.get(k) for k in keys}}
+        try:
+            check_json(body)
+        except (TypeError, ValueError) as exc:
+            code = type(exc).__name__
+            self._warn(name, code)
+            return {**head, "state": "error", "code": code, **dict.fromkeys(keys)}
+        return body
 
     # --- /admin/clarity ---
 
