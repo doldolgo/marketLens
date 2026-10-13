@@ -409,12 +409,12 @@ def test_frame_messages_check_origin_and_window_then_send_values_and_focus(
 def test_before_gate_and_failures_with_a_previous_value(
     screens: dict[str, Any],
 ) -> None:
-    """§3.6 — before_gate 는 'D 부터 모읍니다(처리방침 v3 시행일)'·틀 없음, 실패에 직전 값이 있으면 그대로 그리고 머리에
+    """§3.6 — before_gate 는 '자료 없음'(060 §3.5 — 날짜·정책 낱말 없이, 본문·머리 모두)·틀 없음, 실패에 직전 값이 있으면 그대로 그리고 머리에
     '불러오지 못함'."""
     g = screens["gate"]
-    assert g["block"] == "2026-10-18 부터 모읍니다(처리방침 v3 시행일)"
+    assert g["block"] == "자료 없음"
     assert g["stage"] is True and set(g["frames"]) <= {"about:blank"}
-    assert "시행 전" in g["head"]
+    assert g["head"] == "○자료 없음"  # dim 배지 표시 + 사실만
     s = screens["stale"]
     assert s["head"].startswith("✕불러오지 못함 · 마지막 성공")
     assert s["head"].endswith("redis")

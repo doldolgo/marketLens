@@ -47,7 +47,11 @@ SFS_CHECK = (["if", "($admin_sfs_ok", "=", "0)"], [(["return", "403"], None)])
 # 교차 사이트 검사 예외 — 화면(/)과 문서 두 쪽 (§3.2)
 SFS_EXEMPT = {("=", "/api/docs"), ("=", "/api/redoc")}
 # 화면의 10초 폴링 — 기록하지 않는다 (§3.2). 034 의 수집기 관리자 피드 둘·035 의 api 피드 둘도 화면의 폴링이다
-FEEDS = {("=", "/api/admin/aws"), ("=", "/api/admin/alerts")}
+FEEDS = {
+    ("=", "/api/admin/aws"),
+    ("=", "/api/admin/alerts"),
+    ("=", "/api/admin/aws/series"),
+}
 API_FEEDS = {
     ("=", "/svc/api/admin/access"),
     ("=", "/svc/api/admin/clarity"),
@@ -168,6 +172,7 @@ def test_admin_routes_every_api_path_like_before_the_allowlist() -> None:
         "/svc/api/admin/status": (API, "/admin/status"),
         "/api/admin/aws": (COLLECTOR, "/admin/aws"),
         "/api/admin/alerts": (COLLECTOR, "/admin/alerts"),
+        "/api/admin/aws/series": (COLLECTOR, "/admin/aws/series"),  # 063
         "/svc/api/admin/access": (API, "/admin/access"),
         "/svc/api/admin/clarity": (API, "/admin/clarity"),
         "/svc/api/admin/attention": (API, "/admin/attention"),
@@ -197,6 +202,22 @@ def test_monitoring_feeds_are_exact_collector_locations_that_inherit_server_head
         assert not _args(children, "proxy_set_header"), key
         assert not _args(children, "add_header"), key
         assert not _args(children, "proxy_hide_header"), key
+
+
+def test_admin_locations_are_never_nested() -> None:
+    """nginx 는 정확 일치 location 안의 location 을 거부한다(`nginx -t` 실패 = 배포 실패) — 모든 location 은 server 바로 아래."""
+    for args, children in _admin_server():
+        if args and args[0] == "location":
+            nested = [a for a, _ in children if a and a[0] == "location"]
+            assert not nested, (args, nested)
+
+
+def test_series_feed_has_its_own_exact_location_and_stays_closed_publicly() -> None:
+    """063 §3.1 — 034 의 피드처럼 정확 일치 location(교차 사이트 검사 첫 줄·기록 끔)으로 수집기에, 공개는 028 의 404 JSON."""
+    path = "/api/admin/aws/series"
+    assert _admin_route(path) == ("=", path)
+    assert _forward(path) == (COLLECTOR, "/admin/aws/series")
+    assert _route(path) in DENY
 
 
 def test_api_feeds_are_exact_api_locations_that_inherit_server_headers() -> None:
@@ -975,6 +996,24 @@ def test_misleading_words_are_fixed() -> None:
     assert notes and notes.group(1).count("<li>") == 1  # SCP 글 하나
 
 
+def test_screen_has_no_policy_or_gate_words() -> None:
+    """060 §3.5 — 서버 접속 기록에 게이트가 없다(사람 결정 2026-10-09). 운영자가 보는 글(화면 파일 셋 — 답·안내·빈 칸·이름표·
+    정적 설명)에 처리방침 개정·시행 낱말과 게이트 날짜 글('부터 센다'·'부터 모읍니다'·DB-IP 를 받지 않는다는 말)이 없다.
+    화면 선택의 페이지 이름 '처리방침' 은 그대로다."""
+    for name in SCREEN_FILES:
+        text = _text(f"web/admin/{name}")
+        for word in (
+            "시행",
+            "개정",
+            "처리방침 v",
+            "} 부터 센다",
+            "부터 모읍니다",
+            "부터 모은다",
+            "DB-IP 자료를 받지도",
+        ):
+            assert word not in text, (name, word)
+
+
 def test_overview_tiles_stay_plain_links_and_there_is_no_popover() -> None:
     """041 §2 — 개요 칸(링크) 안에는 span 셋뿐(누르는 요소를 넣지 않는다), 칸 위에 뜨는 풍선 없음."""
     html = _text("web/admin/index.html")
@@ -1087,14 +1126,15 @@ ALARM_NAMES = [
 ODD = ["zzz", "constructor", "__proto__"]
 KINDS = [*KIND_NAMES, *ODD]
 TABS = [*TAB_NAMES, "(기타)", "constructor"]
-# 041 §3.1·§7 타일 부제 — [이름, 부제]. 서버 기록 덩어리의 타일은 042 §3.4 ①·⑥ (시행 전 — windows ["24h"]·시행일 10-11)
+# 041 §3.1·§7 타일 부제 — [이름, 부제]. 서버 기록 덩어리의 타일은 042 §3.4 ①·⑥ (게이트 전 응답 — windows ["24h"],
+# 060 §3.5 — 게이트가 없어 생기지 않는 길이고 짝 단위 칸은 '자료 없음' 사실만)
 ACCESS_TILES = [
     ("확인 ~ 브라우저 모양", "방문자(날마다 셈)"),
-    ("다시 온", "시행 뒤부터"),
+    ("다시 온", "자료 없음"),
     ("스크립트가 돈 페이지", "사람 모양 페이지 0 중"),
     ("사람 모양 페이지", "위장 봇 섞임"),
     ("끝난 연결", "연결 수 — 사람 수가 아니다"),
-    ("연결한 방문자", "시행(10-11 00:00) 뒤부터"),
+    ("연결한 방문자", "자료 없음"),
     ("재접속 실패", "대시보드 WebSocket 5xx"),
 ]
 CLARITY_TILES = [
@@ -1487,9 +1527,11 @@ def test_screens_section_has_the_pick_row_frame_and_explanations() -> None:
         "5분",
         "하루",
         "따라갈 수 없다",
-        "(D) 전",
+        "자료가 없는 날은 비어 있다",  # 060 §3.5 — 정책 낱말 없이
     ):
         assert needed in words, needed
+    for gone in ("시행", "처리방침 v3"):
+        assert gone not in words, gone
     (terms,) = _folded(body, TERMS)
     dts, _ = _dl(terms)
     for needed in ("평균 보인 시간", "도달률", "100뷰당 클릭", "단계", "표본 적음"):

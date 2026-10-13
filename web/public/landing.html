@@ -260,8 +260,6 @@
     .steps li:last-child::before { content: none; }
     .step-n { position: absolute; top: 0; left: 0; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--n600); border-radius: 50%; font-size: 13px; font-weight: 600; line-height: 1; color: var(--n300); }
     .steps h3 + p { margin-top: 8px; color: var(--n300); text-wrap: pretty; }
-    .limits { margin-top: 56px; padding-top: 28px; border-top: 1px solid var(--divider); }
-    .limits h3 + .prose { margin-top: 8px; }
 
     /* 자주 묻는 질문 — 늘 펼쳐 둔다 */
     .faq { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 56px; margin-top: 32px; }
@@ -335,7 +333,7 @@
     <section class="wrap hero" aria-labelledby="hero-title" data-area="hero">
       <div class="hero-text">
         <h1 id="hero-title"><span class="h1-line">실시간 김프·역프,</span> <span class="h1-line">실제로 옮길 수 있는지까지</span></h1>
-        <p class="prose lead">KimpTrack(김프트랙)은 <span class="nw">업비트·빗썸·바이낸스·바이비트·비트겟·OKX</span> 여섯 거래소, 약 400개 코인의 가격 차이와 입출금 상태를 매초 들여다봅니다. 김프가 벌어진 코인을 찾는 데서 끝나지 않고, 지금 그 경로로 코인을 옮길 수 있는지, $1,000어치를 실제로 사고팔면 몇 %가 남는지까지 한 화면에 보여 줍니다. 가입 없이 무료입니다.</p>
+        <p class="prose lead">KimpTrack(김프트랙)은 <span class="nw">업비트·빗썸·바이낸스·바이비트·비트겟·OKX</span> 여섯 거래소, 약 400개 코인의 가격 차이와 입출금 상태를 매초 들여다봅니다. 김프가 벌어진 코인을 찾는 데서 끝나지 않고 지금 그 경로로 코인을 옮길 수 있는지, 실제로 사고팔면 몇 %가 남는지까지 한 화면에 보여 줍니다.</p>
         <div class="cta">
           <a class="btn btn-lg" href="/app/">실시간 김프 표 보기</a>
           <a class="link" href="/app/?tab=history">김프 기록과 차트</a>
@@ -448,14 +446,10 @@
       <h2 id="method-title">KimpTrack이 김프를 계산하는 방법</h2>
       <ol class="steps" role="list">
         <li><span class="step-n" aria-hidden="true">1</span><h3>수집</h3><p><span class="nw">업비트·빗썸과</span> 해외 거래소 4곳의 호가를 실시간으로 받습니다. 입출금이 열려 있는지도 수시로 확인합니다.</p></li>
-        <li><span class="step-n" aria-hidden="true">2</span><h3>계산</h3><p>매초 모든 코인의 <span class="nw">김프·역프를</span> 다시 계산합니다. 맨 위 호가 하나가 아니라 실제로 사고팔 때의 단가를 씁니다.</p></li>
+        <li><span class="step-n" aria-hidden="true">2</span><h3>계산</h3><p>매초 모든 코인의 <span class="nw">김프·역프를</span> 다시 계산합니다. 맨 위 호가 하나가 아니라 $1,000어치를 실제로 사고팔 때의 단가를 씁니다.</p></li>
         <li><span class="step-n" aria-hidden="true">3</span><h3>기록</h3><p>맨 위 호가로 계산한 값은 빠짐없이 저장합니다. 크게 벌어졌던 구간은 따로 모아 두어 나중에 다시 볼 수 있습니다.</p></li>
         <li><span class="step-n" aria-hidden="true">4</span><h3>전달</h3><p>실시간 김프 표에는 바뀐 값만 골라 곧바로 보냅니다.</p></li>
       </ol>
-      <div class="limits">
-        <h3>반영하지 않는 것</h3>
-        <p class="prose">거래 수수료와 출금 수수료, 코인을 보내는 데 걸리는 시간과 그동안의 가격 변화, 출금 한도나 트래블룰 같은 거래소 정책은 계산에 넣지 않습니다. 실제로 옮기기 전에는 거래소에서 직접 확인해 주세요.</p>
-      </div>
     </section>
 
     <section class="wrap section" id="faq" aria-labelledby="faq-title" data-area="faq">
@@ -467,7 +461,7 @@
         </div>
         <div class="qa">
           <h3>왜 $1,000 기준인가요?</h3>
-          <p>모든 코인의 호가창 두께를 같은 기준으로 비교하려는 것입니다. 금액이 클수록 단가가 더 밀리므로, 더 큰 금액을 옮긴다면 김프가 이보다 작아질 수 있습니다.</p>
+          <p>모든 코인의 호가창 두께를 같은 기준으로 비교하려는 것입니다. 금액이 클수록 단가가 더 밀리므로, 더 큰 금액을 옮긴다면 김프가 이보다 작아질 수 있습니다. 반대로 금액이 이보다 작으면 맨 위 호가에 가까운 단가로 체결되어 김프가 오히려 더 클 수 있습니다.</p>
         </div>
         <div class="qa">
           <h3>환율은 무엇을 쓰나요?</h3>
@@ -478,20 +472,8 @@
           <p>보내는 거래소의 출금과 받는 거래소의 입금을 같은 네트워크 기준으로 확인합니다. 한쪽이라도 막혔거나, 상태를 확인하지 못했거나, 두 거래소가 같은 네트워크를 지원하지 않으면 옮길 수 없는 경로로 봅니다.</p>
         </div>
         <div class="qa">
-          <h3>수수료와 전송 시간도 반영하나요?</h3>
-          <p>아니요. 거래·출금 수수료와 전송 시간, 그 사이의 가격 변화는 빠져 있습니다. 표시된 김프만큼 수익이 난다는 뜻이 아닙니다.</p>
-        </div>
-        <div class="qa">
-          <h3>얼마나 자주 갱신되나요?</h3>
-          <p>모든 경로를 매초 다시 계산합니다. 이 페이지의 카드는 화면을 보고 있는 동안 10초마다 새 값을 받고, 실시간 김프 표는 바뀐 값을 곧바로 받습니다.</p>
-        </div>
-        <div class="qa">
           <h3>가입이나 비용이 필요한가요?</h3>
           <p>아니요. 로그인이나 앱 설치 없이 웹에서 무료로 볼 수 있습니다. 실시간 김프 표는 PC 화면에 맞춰 만들었습니다.</p>
-        </div>
-        <div class="qa">
-          <h3>매수·매도 신호를 주나요?</h3>
-          <p>아니요. 거래소 사이의 가격 차이와 입출금 상태를 보여 줄 뿐, 언제 사고팔지 권하지 않습니다.</p>
         </div>
         <div class="qa">
           <h3>역김프와 역프는 같은 말인가요?</h3>

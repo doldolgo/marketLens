@@ -1,11 +1,14 @@
-"""관리자 경로 — api 의 `GET /admin/status`(029 §3.4)·피드 둘(035 §3.1)과 수집기의 피드 둘(034 §3.1).
+"""관리자 경로 — api 의 `GET /admin/status`(029 §3.4)·피드 둘(035 §3.1)과 수집기의 피드 셋(034 §3.1·063 §3.1).
 
 `router` 는 api 역할에만, `collector_router` 는 collector 역할에만 포함한다(`main.py`) — 다른 역할에서는 404 다.
 공개 nginx 는 028 허용 목록 밖이라 404, 관리자 nginx(:8081)가 `/svc/api/admin/{status,access,clarity}` 와
-`= /api/admin/aws`·`= /api/admin/alerts` 를 넘긴다. 모두 항상 200 인 상태 응답이다.
+`= /api/admin/aws`·`= /api/admin/alerts` 를, `/api/admin/aws/series` 는 `/api/` 접두 분기로 넘긴다(063 — 새 location 없음).
+모두 항상 200 인 상태 응답이다.
 """
 
-from fastapi import APIRouter, Request
+from typing import Annotated
+
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.features.admin.feeds import AdminFeeds
@@ -48,6 +51,15 @@ async def get_admin_aws(request: Request) -> JSONResponse:
     """경보·24시간 지표·canary·예산 — 부분별 state (034 §3.2)."""
     feeds: AdminFeeds = request.app.state.admin_feeds
     return JSONResponse(await feeds.aws())
+
+
+@collector_router.get("/admin/aws/series")
+async def get_admin_aws_series(
+    request: Request, range_: Annotated[str | None, Query(alias="range")] = None
+) -> JSONResponse:
+    """상자 셋·WS 접속·canary 시계열 — `range` 6h·24h·7d·30d(목록 밖·없음은 24h), 부분 하나 (063 §3)."""
+    feeds: AdminFeeds = request.app.state.admin_feeds
+    return JSONResponse(await feeds.aws_series(range_))
 
 
 @collector_router.get("/admin/alerts")

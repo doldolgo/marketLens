@@ -15,6 +15,8 @@ WS_PATH = "/api/ws/spreads"
 JS_PATHS = frozenset(("/clarity.js", "/app/clarity.js"))
 RETURNING_PATHS = frozenset(("/", "/privacy"))
 SELF_HOSTS = frozenset(("kimptrack.com", "www.kimptrack.com", "admin.kimptrack.com"))
+TABS = ("spread", "history", "gap", "pp", "health", "flow")  # 대시보드 탭 id(002)
+DEFAULT_TAB = "spread"
 CLASSES = tuple("browser search ai preview tool scanner operator unknown".split())
 # 9999-12-30T00:00Z — 이 뒤의 `ts` 는 KST 날짜(짝 열쇠)로 바꿀 수 없다
 TS_LIMIT = 253_402_128_000.0

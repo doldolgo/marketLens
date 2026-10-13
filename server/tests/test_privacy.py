@@ -1,9 +1,10 @@
-"""개인정보 처리방침 계약 — nginx 위치 셋·privacy.html·링크·sitemap 을 파일로 읽어 단언한다 (스펙 032 §4·037 §4·051 §4).
+"""개인정보 처리방침 계약 — nginx 위치 셋·privacy.html·링크·sitemap 을 파일로 읽어 단언한다 (스펙 032 §4·037 §4·051 §4·060 §4).
 
 머지가 곧 게시다. 사람이 채울 자리표시자(`〔`)가 남았거나, 페이지가 외부 자원·서버 호출을 부르게 되거나, 033 과 함께 쓰는
-동의 계약(`kt.analytics` — 동의한 방문자만 분석, 기본 꺼짐)과 방침의 필수 안내가 빠지면 여기서 멈춘다. 개정(037)은 시행일 한 곳
-(`PRIVACY_V2_EFFECTIVE`, v3 은 `PRIVACY_V3_EFFECTIVE` — 051)·페이지의 `<time>` 넷·sitemap·이력과, 바뀐 문장 대조표를 두 판(지금 판·
-바로 앞 판 사본)의 본문과 맞대 본다. v3(051)은 동의 안내 판을 올렸다 — 동의 창(033 clarity.js)과 방침 동의 상자는 같은 글이다.
+동의 계약(`kt.analytics` — 동의한 방문자만 분석, 기본 꺼짐)과 방침의 필수 안내가 빠지면 여기서 멈춘다. 개정(037)은 날짜 상수
+(`PRIVACY_V2_EFFECTIVE` — 접속 기록 쓰임새, v3 은 `PRIVACY_V3_EFFECTIVE` — 051, v4 는 `PRIVACY_V4_EFFECTIVE` — 060)·페이지의
+`<time>` 넷·sitemap·이력과, 바뀐 문장 대조표를 두 판(지금 판·바로 앞 판 사본)의 본문과 맞대 본다. v3(051)·v4(060)는 동의 안내
+판을 올렸다 — 동의 창(033 clarity.js)과 방침 동의 상자는 같은 글이다. 판 값은 같은지만 본다(`NOTICE_DIGESTS` 의 마지막 키).
 실제로 브라우저에서 CSP·버튼을 보는 검증은 스펙 §5 의 로컬 Docker·브라우저 명령이다.
 """
 
@@ -19,7 +20,11 @@ from pathlib import Path
 
 import pytest
 
-from app.core.config import PRIVACY_V2_EFFECTIVE, PRIVACY_V3_EFFECTIVE
+from app.core.config import (
+    PRIVACY_V2_EFFECTIVE,
+    PRIVACY_V3_EFFECTIVE,
+    PRIVACY_V4_EFFECTIVE,
+)
 from tests.test_deploy import (
     PUBLIC_API,
     ROOT,
@@ -31,7 +36,7 @@ from tests.test_deploy import (
 
 PUBLIC = ROOT / "web/public"
 CANONICAL = "https://kimptrack.com/privacy"
-EFFECTIVE = "2026-10-09"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1)
+EFFECTIVE = "2026-10-09"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1·060 §3.3)
 # 052 — 같은 출처 스크립트 /attention.js 하나('self')와 그 비콘(connect-src 'self'). 세 정적 페이지가 같은 문자열이다.
 # 053 — 틀에는 자기 출처와 관리자 화면(덮어 보기)만
 CSP = (
@@ -104,26 +109,31 @@ MUST_NOT_SAY = (
     "[허용]",
 )
 # §3.3 — 033 의 띠와 같은 문장(머리·셋 모두 규칙·나이). 동의 상자 안 세 칸보다 앞에 있다. 051 §3.3-4 — 머리 질문에
-# KimpTrack 서버의 화면 영역 이용 통계(모든 페이지), 셋 모두 규칙에 'Clarity와 KimpTrack 영역 통계가 돕니다'
+# KimpTrack 서버의 통계(모든 페이지), 셋 모두 규칙에 'Clarity와 KimpTrack 영역 통계가 돕니다'. 060 §3.3-4 — 그 통계를 화면의
+# 영역과 요소·마우스를 올려 둔 시간·떠날 때 보던 곳으로
 SHARED_SENTENCES = (
     "랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? "
     "Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 또 KimpTrack 서버가 모든 페이지(랜딩·대시보드·처리방침·검색어 페이지)에서 "
-    "화면 영역별로 보인 시간·클릭 수를 하루 합계로 모아도 될까요? 동의하지 않아도 모든 기능을 그대로 씁니다.",
+    "화면의 영역과 요소(단추·링크 같은 것)별로 보인 시간·클릭 수·마우스를 올려 둔 시간과 떠날 때 보던 곳을 하루 합계로 모아도 될까요? "
+    "동의하지 않아도 모든 기능을 그대로 씁니다.",
     "세 가지에 모두 동의하고 [선택한 대로 저장]을 누른 경우에만 Clarity와 KimpTrack 영역 통계가 돕니다 — Clarity는 셋이 다 "
     "있어야 돌아가므로 하나라도 빠지면 거부로 저장합니다.",
     "만 14세 미만은 동의하지 마세요.",
 )
-# 051 §3.3-10 — 바로 앞 판(2026-10-11, 안내 판 2026-10-01)의 동의 상자 문장. 사본은 동의 절에 세 칸의 알릴 사항만 남겨(037 §3.3)
-# 이 문장들이 없다 — 대조표의 '동의 관리' 행 '이전 판' 칸을 여기와 맞춘다(얼려 둔 글자)
+# 060 §3.3-9 — 바로 앞 판(2026-10-09 먼저 게시한 판, 안내 판 2026-10-09)의 동의 상자에서 바뀐 문장. 사본은 동의 절에 세 칸의
+# 알릴 사항만 남겨(037 §3.3) 이 문장들이 없다 — 대조표의 '동의 관리' 행 '이전 판' 칸을 여기와 맞춘다(얼려 둔 글자)
 PREVIOUS_CONSENT_TEXT = (
-    "랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? "
-    "Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 동의하지 않아도 모든 기능을 그대로 씁니다.",
-    "세 가지에 모두 동의하고 [선택한 대로 저장]을 누른 경우에만 분석합니다 — Clarity는 셋이 다 있어야 돌아가므로 "
-    "하나라도 빠지면 거부로 저장합니다.",
-    "지금 안내의 판은 2026-10-01입니다.",
+    "또 KimpTrack 서버가 모든 페이지(랜딩·대시보드·처리방침·검색어 페이지)에서 화면 영역별로 보인 시간·클릭 수를 하루 합계로 "
+    "모아도 될까요?",
+    "지금 안내의 판은 2026-10-09입니다.",
 )
-# 051 §3.3-4 — '수집·이용' 칸 끝 한 줄(영역 통계는 Microsoft 에 가지 않고 국내에) — 033 의 동의 창에도 같은 글
-COLLECT_NOTE = "화면 영역 이용 통계는 Microsoft에 가지 않고 국내(AWS 서울 리전)의 KimpTrack 서버에 둡니다."
+# 051 §3.3-4·060 §3.3-4 — '수집·이용' 칸 끝 한 줄(화면 이용 통계는 Microsoft 에 가지 않고 국내에) — 033 의 동의 창에도 같은 글
+COLLECT_NOTE = "화면 이용 통계는 Microsoft에 가지 않고 국내(AWS 서울 리전)의 KimpTrack 서버에 둡니다."
+# 060 §3.3-3 — 수집·이용 칸 항목 끝·2절이 함께 적는 KimpTrack 서버의 새 항목(요소·떠날 때 보던 곳·깊이)
+ELEMENT_ITEMS = (
+    "영역 안의 요소(단추·링크·탭·입력칸·표의 코인 행 같은 것 — 입력한 글자·화면의 숫자는 빼고)별 클릭 수·마우스를 올려 둔 "
+    "시간·화면에 보인 시간, 페이지를 떠날 때 보던 영역과 그 페이지에서 내려온 깊이"
+)
 # §3.3 — 철회 뒤 이미 보낸 기록을 바로 지우는 길(법 제37조 제3항, 절차는 033 런북)과 그 한계. 상자 아래 문단·3절에 따로
 INQUIRY = '<a class="link" href="https://go.microsoft.com/fwlink/?linkid=2126612">개인정보 문의</a>'
 DELETION = "운영자가 Clarity 프로젝트의 기록을 통째로 지우고(모든 방문자의 기록이 함께 지워집니다) 새 프로젝트로 다시 시작합니다"
@@ -264,14 +274,20 @@ def _notice_version() -> str:
 
 NOTICE = _notice_version()
 # §3.3 — 판마다 세 칸의 글자(체크 글자와 알릴 사항·칸 끝 줄, 태그 뗀)의 sha256. 글자를 바꾸면 멈춘다 — 받는 자·항목·목적·보유
-# 기간이 바뀌었으면 판을 올리고(스크립트·보이는 판 글자·033 clarity.js) 새 판을 더한다(예전 판은 지우지 않는다 — 이전 판 사본이
-# 그 판의 값과 맞댄다). 문장만 다듬었으면 지금 판의 값만 고치고 PR 본문에 이유를 적는다
+# 기간이 바뀌었으면 판을 올리고(스크립트·보이는 판 글자·033 clarity.js·052 attention.js) 새 판을 끝에 더한다(예전 판은 지우지
+# 않는다 — 이전 판 사본이 그 판의 값과 맞댄다). 지금 판은 마지막 키다 — 판 값은 같은지만 보고 날짜와 맞대지 않는다(060 §3.2 —
+# 같은 날 두 번째 판은 '2026-10-09-2'). 문장만 다듬었으면 지금 판의 값만 고치고 PR 본문에 이유를 적는다
 NOTICE_DIGESTS = {
     "2026-10-01": "7ee34255a0120818e76ffc210a12eb5cd556773eb6b06462a62cebb4a4bc6bc1",
     "2026-10-09": "a32da2cb07e8dd922855849ed03198d918a7c36891b7339a65d830941705cb9b",  # 051 — 화면 영역 이용 통계(KimpTrack 서버)
+    "2026-10-09-2": "738a2acbd578635e944e5c2e040911c8621616c5852b2c7b3a60a65b3ec7ede5",  # 060 — 화면 요소·떠날 때 보던 곳·깊이
 }
-# 바로 앞 판 — 이 판의 동의로는 켜지 않고 다시 묻는다 (051 §4 — 2026-10-01 의 granted 는 '정하지 않음')
-OLD = max((v for v in NOTICE_DIGESTS if v < NOTICE), default="2026-09-01")
+# 바로 앞 판 — 이 판의 동의로는 켜지 않고 다시 묻는다 (060 §3.6 — 2026-10-09 의 granted 는 '정하지 않음'). 판 값의 글자 순이
+# 아니라 NOTICE_DIGESTS 에 더한 차례로 고른다
+_VERSIONS = list(NOTICE_DIGESTS)
+OLD = (
+    _VERSIONS[_VERSIONS.index(NOTICE) - 1] if NOTICE in _VERSIONS[1:] else "2026-09-01"
+)
 # 스크립트가 숨기고 보이는 상태 요소. 버튼 줄 안의 [모두 거부]는 an-actions 가 보일 때만 센다
 STATUS_IDS = {"an-state", "an-actions", "an-gpc", "an-nostore", "an-stuck"}
 # 버튼 줄은 늘 [선택한 대로 저장]·[모두 거부], 동의함이면 세 칸 앞 상태 줄 옆에 [동의 철회]도
@@ -311,22 +327,55 @@ CONSENT_CASES = [
 # fmt: on
 # §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(동의 상자의 국외 이전 칸과 같은 이름) + 근거
 TRANSFER_TERMS = CONSENT_CELLS[2][2] | {"근거"}
-# 051 §3.3-2 — 맨 위 변경 안내 상자가 말하는 것(시행 문장, 바뀌는 것 — 2절 요약 한 줄, 다시 묻기). 이전 판 날짜는 아래 테스트가
-# PRIVACY_V2_EFFECTIVE 로 맞춘다
+# 060 §3.3-2 — 맨 위 변경 안내 상자가 말하는 것(시행 문장, 바뀌는 것 셋 — 접속 기록 쓰임새(남은 기록 전체)·화면 이용 통계의
+# 2절 요약 한 줄·바꾸는 방법, 다시 묻기)
 CHANGE_NOTICE_SAYS = (
-    "그 전날까지는 2026년 10월 1일 판",
-    "화면 분석에 동의한 방문자",
-    "KimpTrack 서버",
-    "화면 영역 이용 통계",
-    "1초 이상",
-    "클릭 수",
-    "하루 합계로만 90일",
+    "같은 날 먼저 게시한 판(2026년 10월 9일 판)을 바꿉니다",
+    "바뀌는 것은 셋입니다",
+    "30일 요약",
+    "나라와 망 종류",
+    "하루 한 번 세는 값",
+    "남아 있는 기록 전체(로그 보관 기간 안)",
+    "(전에는 2026년 10월 11일 기록부터)",
+    "화면 이용 통계",
+    "화면 요소",
+    "마우스를 올려 둔 시간",
+    "떠날 때 보던 영역",
+    "내려온 깊이",
+    "하루 합계로만",
     "저장하지 않습니다",
+    "전후 대조",
+    "다시 동의를 받습니다",
     "이미 동의했어도 한 번 더 묻습니다",
     "12절 대조표",
 )
+# 060 §3.3-2 — 변경 안내의 링크 넷: 이전 판 셋(10월 9일 판·10월 11일 판(시행 전 바뀜)·10월 1일 판)과 대조
+CHANGE_NOTICE_LINKS = (
+    'href="/privacy-20261009.html"',
+    'href="/privacy-20261011.html"',
+    'href="/privacy-20261001.html"',
+    'href="#s12"',
+)
+# 060 §3.3-8 — 12절 규칙(7일 전 게시 약속과 그 단서는 지웠다)·시행 문장·이력 첫 항목
+CHANGE_RULE = (
+    "이 방침을 바꿀 때는 시행일과 바뀐 문장의 전후 대조를 이 페이지에 알리고 이전 판을 남깁니다. "
+    "동의를 받아 하는 처리가 늘면 바뀐 안내로 다시 동의를 받고, 그 동의를 받은 때부터 합니다."
+)
+EFFECTIVE_SENTENCE = (
+    "부터 시행하며(이날 두 번째 판), 같은 날 먼저 게시한 판을 바꿉니다."
+)
+V4_HISTORY = "(두 번째 판) — 서버 접속 기록 쓰임새를 남은 기록 전체에·화면 이용 통계를 요소까지·바꾸는 방법"
+# 060 §7 — 2절 (다): 062 가 짝(하루 한 번 세는 값)에 붙이는 그날 첫·마지막 페이지 이름과 페이지 수. 게이트를 v4 시행일로
+# 당겨 이 처리도 그날 기록부터 돌므로 v4 가 함께 알린다
+ACCESS_FLOW_ITEMS = (
+    "처음과 마지막에 연 페이지(랜딩·대시보드 탭·처리방침·검색어 페이지 같은 페이지 이름)와 연 페이지 수"
+    "(어디로 들어와 어디서 나가는지 보려고)"
+)
 # 051 §3.3-10 — 이력의 v3 항목 설명(다음 판에서도 남는다)
 V3_HISTORY_SAYS = ("화면 영역 이용 통계", "동의한 방문자만", "동의 안내 판 올림")
+# 037 이 게시한 v2 판의 날짜 — 시행 전에 v3 으로 바뀌었다(사본 privacy-20261011.html). 060 부터 PRIVACY_V2_EFFECTIVE 는 이 날이
+# 아니라 접속 기록 쓰임새를 시작한 날이라, 이력의 v2 항목은 이 날짜로 찾는다
+V2_DAY = "2026-10-11"
 # 037 §3.2-6 — 이력의 v2 항목 설명(다음 판에서도 남는다)
 V2_HISTORY_SAYS = (
     "최근 30일까지",
@@ -350,80 +399,90 @@ V2_FACTS = {
         "운영체제",
         "스크립트",
         "다시 온",
-        "24시간 요약에만",
-        "24시간을 넘는",
         "보낸 때부터 90일",
     ),
     "s3": ("며칠 걸릴 수 있습니다",),
+    # 060 §3.3-8 — 12절의 변경 규칙은 v4 가 바꿨다. v2 의 사실로 남는 것은 이력의 CloudWatch 사실 줄
     "s12": (
-        "그 전날까지는 2026년 10월 1일 판",
-        "새로 동의를 받아서만 하는 처리",
-        "늘거나 새로 생기면",
-        "7일 전까지",
-        "줄이거나 멈추는",
         "보낸 시각으로 찍혀",
         "최대 3일",
         "줄마다 골라 지울 수 없어",
     ),
 }
-# 051 §3.3 — 본문 절(변경 안내·대조표 밖)마다 v3 의 사실 — 화면 영역 이용 통계
-V3_FACTS = {
+# 051 §3.3·060 §3.3 — 본문 절(변경 안내·대조표 밖)마다 화면 이용 통계(KimpTrack 서버)의 사실. v3 의 영역 통계에 v4 가 요소·떠날 때
+# 보던 곳·깊이를 더하고 이름을 '화면 이용 통계' 로 바꿨다
+SCREEN_USE_FACTS = {
     "glance": ("화면 영역별 이용 통계", "하루 합계", "둘 다 동의한 경우에만"),
     "consent-title": (
-        "화면 영역별로 보인 시간·클릭 수를 하루 합계로",
+        "화면의 영역과 요소(단추·링크 같은 것)별로 보인 시간·클릭 수·마우스를 올려 둔 시간과 떠날 때 보던 곳을 하루 합계로",
         "모든 페이지(랜딩·대시보드·처리방침·검색어 페이지)",
         "Clarity와 KimpTrack 영역 통계가 돕니다",
     ),
     "s1": (
-        "어느 화면 영역을 많이·적게 보는지",
-        "화면 영역 이용 통계 — KimpTrack 서버, 동의한 방문자만",
+        "어느 화면 영역·요소를 많이·적게 보고 누르는지, 어디서 떠나는지",
+        "화면 이용 통계 — KimpTrack 서버, 동의한 방문자만",
     ),
     "s2": (
-        "화면 영역 이용 통계 — KimpTrack 서버",
-        "화면 영역 이용 통계(동의한 경우만)",
+        "화면 이용 통계 — KimpTrack 서버",
+        "화면 이용 통계(동의한 경우만)",
         "하루 합계 90일",
         "768px",
         "1초 이상 보였는지",
         "클릭 수",
+        ELEMENT_ITEMS,
         "페이지를 본 횟수",
         "그날(한국 시간) 합계에 더하기만",
         "IP도 저장하지 않습니다",
         "서버 접속 기록에도 남기지 않습니다",
         "Microsoft를 포함해 다른 곳으로 보내지 않습니다",
-        "날짜별 합계만",
+        "Redis에는 화면 이용 통계의 날짜별 합계만",
+        "화면 이용 통계도 정보주체의 동의",
         "제15조 제1항 제1호",
         "한 사람분을 골라 지울 수 없고",
         "그 뒤로는 보내지 않습니다",
     ),
-    "s3": ("화면 영역 이용 통계는 날짜별 합계가 90일을 넘으면 서버가 지웁니다",),
+    "s3": ("화면 이용 통계는 날짜별 합계가 90일을 넘으면 서버가 지웁니다",),
     "s7": (
-        "KimpTrack 서버로 — 브라우저 스크립트가 화면을 떠날 때 보냄(하루 합계로 90일)",
+        "KimpTrack 서버로 — 화면의 영역·요소별 보인 시간·클릭 수·마우스를 올려 둔 시간과 떠날 때 보던 영역·내려온 깊이를 "
+        "브라우저 스크립트가 화면을 떠날 때 보냄(하루 합계로 90일)",
     ),
-    "s9": ("영역 이름과 숫자만",),
+    "s9": (
+        "화면 이용 통계는 영역·요소 이름과 숫자만 보내고, 화면의 글자·입력값·좌표는 보내지 않습니다",
+    ),
     "s12": ("2026년 10월 1일 판이 적은 90일",),
 }
+# 060 §3.3 — 이름을 바꾼 뒤 본문(대조표 밖)에 남으면 안 되는 옛 이름. 12절 이력의 v3 항목은 그 판이 쓴 이름 그대로라 뺀다
+OLD_NAME = "화면 영역 이용 통계"
 # 051 §3.3-6 — IP 는 남용 막기에만, 서버 메모리에서 10분
 IP_TEN_MINUTES = (
     r"IP를 서버 메모리에서만 10분 동안 셉니다\(서버를 다시 시작하면 사라집니다\)"
 )
 # 051 §3.3-10 — 대조표에서 새로 넣은 문장의 '이전 판' 칸
 ADDED = "(없음)"
+# 060 §3.3-5 — 대조표에서 지운 문장의 '이 판' 칸(새로 넣은 문장의 '(없음)' 과 짝)
+REMOVED = "(지움)"
+# 060 §3.1 — 접속 기록을 남기기 시작한 날(027 caddy 접속 로그). 게이트 상수는 이보다 앞서 게이트가 없는 것과 같다
+FIRST_LOG_DAY = "2026-09-29"
 # 방문자가 읽는 글에 쓰지 않는 낱말(037 §3.2-4 — 평이한 말로)
 PLAIN_ONLY = ("열쇠", "해시")
 DIFF_TABLE = r'<table class="tbl diff">.*?</table>'
-# 037 §3.3 — 이전 판 사본은 얼려 둔 파일이다. 사본마다 보이는 글(<body> 의 태그 뗀 글자)의 sha256 — 사본을 새로 둘 때 더하고
-# 그 뒤로는 고치지 않는다(소개 문단·12절·동의 절 아래 줄처럼 대조 범위 밖의 글자도 여기서 멈춘다)
+# 037 §3.3 — 이전 판 사본은 얼려 둔 파일이다. 사본마다 보이는 글(<body> 의 태그 뗀 글자)의 sha256 — 사본을 새로 둘 때 게시한
+# 차례대로 끝에 더하고 그 뒤로는 고치지 않는다(소개 문단·12절·동의 절 아래 줄처럼 대조 범위 밖의 글자도 여기서 멈춘다).
+# 10월 11일 판은 시행 전에 10월 9일 판(v3)으로 바뀌었고, 그 v3 은 같은 날 두 번째 판(v4 — 060)으로 바뀌었다
 ARCHIVED_TEXT = {
     "privacy-20261001.html": "40976545d4ba5b8241e2107245a54d733767b0d40c81ca8ccc351fb6ebd795e3",
     "privacy-20261011.html": "a4d5b104cdb9af3c1a8e26c3499dd2907eaaf1f6af8c73a6bb2f586edace3099",
+    "privacy-20261009.html": "5b35b358781a1d97869dd2d577493cf1997bdf3a8ef4e0fa6f1b69f64978fe23",
 }
 # 사본마다 그 판의 동의 안내 판 — 10월 11일 판은 시행 전에 바뀌어 안내 판을 올리지 않았다
 ARCHIVED_NOTICE = {
     "privacy-20261001.html": "2026-10-01",
     "privacy-20261011.html": "2026-10-01",
+    "privacy-20261009.html": "2026-10-09",
 }
-# 바로 앞 판의 사본 — 대조표가 맞대는 판(051 — 2026년 10월 11일 판)
-PREVIOUS = max(ARCHIVED_TEXT)
+# 바로 앞 판의 사본 — 대조표가 맞대는 판. 파일 이름(시행일) 순이 아니라 게시한 차례의 끝이다(060 — 10월 9일 판(v3)은
+# 10월 11일 판보다 나중에 게시했다)
+PREVIOUS = list(ARCHIVED_TEXT)[-1]
 # 037 §3.3 — 사본의 동의 절 상자 아래 한 줄(그 판의 세 칸은 읽기만, 고르는 곳은 지금 판)
 ARCHIVED_CONSENT_LINE = (
     "<p>화면 분석 동의·철회는 지금 판의 “화면 분석 동의 관리”"
@@ -736,15 +795,16 @@ def test_page_states_the_consent_contract_and_required_notices() -> None:
     assert "'granted'" in script and "'denied'" in script
 
 
-def test_notice_version_is_shown_and_not_after_the_effective_date() -> None:
-    """지금 판은 스크립트·보이는 글자가 같고 시행일보다 늦지 않다 (§3.3 — 033 clarity.js 의 판도 같다)."""
+def test_notice_version_is_shown_and_is_the_last_digest_key() -> None:
+    """지금 판은 스크립트·보이는 글자가 같고 `NOTICE_DIGESTS` 의 마지막 키다 — 판 값은 같은지만 보고 날짜와 맞대지 않는다
+    (§3.3 — 033 clarity.js·052 attention.js 의 판도 같다, 060 §3.2)."""
     html, _ = _read(PUBLIC / "privacy.html")
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", NOTICE), NOTICE
+    assert NOTICE and re.fullmatch(r"[0-9A-Za-z.-]+", NOTICE), NOTICE
     assert f'<code id="an-version">{NOTICE}</code>' in html
-    assert NOTICE <= EFFECTIVE
-    # 051 §3.2 — v3 시행일에 판을 올렸다(그 판의 해시가 있다). 다음 판도 그날보다 앞서지 않는다
+    assert NOTICE == list(NOTICE_DIGESTS)[-1]
+    # 051 §3.2 — v3 이 판 2026-10-09 를 열었고, 060 이 같은 날 두 번째 판을 더했다(예전 판 해시는 지우지 않는다)
     assert PRIVACY_V3_EFFECTIVE in NOTICE_DIGESTS
-    assert PRIVACY_V3_EFFECTIVE <= NOTICE
+    assert NOTICE == "2026-10-09-2" and OLD == "2026-10-09"
 
 
 def test_notice_version_is_tied_to_the_notice_text() -> None:
@@ -842,12 +902,13 @@ def test_consent_box_splits_three_consents_before_the_buttons() -> None:
     )
     assert collect["목적"] == (
         "KimpTrack의 화면 이용 분석 — 어떤 화면·기능이 쓰이고 어디서 막히는지 알아 서비스를 고치기, "
-        "어느 영역을 많이·적게 보는지 알아 화면을 고치기"
+        "어느 영역·요소를 많이·적게 보고 누르는지, 어디서 떠나는지 알아 화면을 고치기"
     )
-    # 051 §3.3-4 — 수집·이용 칸에만 KimpTrack 서버의 영역 통계(항목·보유 기간·칸 끝 국내 보관 한 줄). 제공·국외 이전 칸은 그대로
-    assert (
-        "(KimpTrack 서버)" in collect["항목"] and "1초 이상 보였는지" in collect["항목"]
-    )
+    # 051 §3.3-4 — 수집·이용 칸에만 KimpTrack 서버의 통계(항목·보유 기간·칸 끝 국내 보관 한 줄). 제공·국외 이전 칸은 그대로.
+    # 060 §3.3-4 — 항목 끝은 'KimpTrack 서버:' 뒤에 2절과 같은 항목(요소·떠날 때 보던 곳·깊이) — Clarity 항목 뒤에 둔다
+    kimptrack = collect["항목"].split(". KimpTrack 서버: ")
+    assert len(kimptrack) == 2 and "sessionStorage _cltk" in kimptrack[0]
+    assert "1초 이상 보였는지" in kimptrack[1] and kimptrack[1].endswith(ELEMENT_ITEMS)
     assert "KimpTrack 서버: 하루 합계로만 90일" in collect["보유 기간"]
     assert [_text(note) for note in _cell_notes(cells[0])] == [COLLECT_NOTE]
     for cell in cells[1:]:
@@ -947,7 +1008,10 @@ def test_archived_versions_are_static_and_external_free() -> None:
         day = f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:]}"
         assert page.times and set(page.times) == {day}, path.name
         assert page.titles == [f"개인정보 처리방침({_korean(day)} 판) — KimpTrack"]
-        assert f"{_korean(day)} 시행 판의 사본입니다" in html, path.name
+        # 같은 날 판이 둘이면 날짜 뒤 괄호로 어느 판인지 밝힌다(060 — '(그날 먼저 게시한 판)')
+        assert re.search(rf"{_korean(day)} 시행 판(\([^)<]*\))?의 사본입니다", html), (
+            path.name
+        )
         assert '<meta name="robots" content="noindex" />' in html, path.name
         assert not [link for link in page.links if link.get("rel") == "canonical"]
         assert 'href="/privacy"' in html, path.name
@@ -968,18 +1032,27 @@ def test_archived_versions_are_static_and_external_free() -> None:
 # --- 처리방침 v2 — 시행일·변경 안내·대조표 (037 §3) ----------------------------------
 
 
-def test_v2_effective_constant_is_a_date_after_the_first_version() -> None:
-    """038·039 의 날짜 게이트가 읽는 시행일 한 곳 (037 §3.1)."""
+def test_v2_gate_constant_is_before_the_first_log_line() -> None:
+    """038·039 의 날짜 게이트가 읽는 한 곳 — 게이트 없음: 첫 접속 기록보다 앞선 날이라 남아 있는 기록 전체를 쓴다
+    (037 §3.1·060 §3.1 — 사람 결정 2026-10-09)."""
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", PRIVACY_V2_EFFECTIVE)
-    assert date.fromisoformat(PRIVACY_V2_EFFECTIVE) > date(2026, 10, 1)
+    assert PRIVACY_V2_EFFECTIVE < FIRST_LOG_DAY
 
 
 def test_v3_effective_constant_is_a_date_after_the_first_version() -> None:
-    """052 의 날짜 게이트가 읽는 시행일 한 곳 — 지금 판의 시행일과 같다. 사람 결정(2026-10-09)으로 v2(10-11)보다 앞서
-    시행해 v2 는 시행 전에 바뀌었다 (051 §3.1)."""
+    """052 의 날짜 게이트가 읽는 한 곳 — 영역 통계를 받기 시작한 날. 사람 결정(2026-10-09)으로 v2(10-11)보다 앞서 시행해 v2 는
+    시행 전에 바뀌었고, 같은 날 v4 가 v3 을 바꿨다(그대로 둔다 — 051 §3.1·060 §3.1)."""
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", PRIVACY_V3_EFFECTIVE)
     assert date.fromisoformat(PRIVACY_V3_EFFECTIVE) > date(2026, 10, 1)
-    assert EFFECTIVE == PRIVACY_V3_EFFECTIVE
+    assert PRIVACY_V3_EFFECTIVE == "2026-10-09"
+
+
+def test_v4_constant_is_the_page_effective_date() -> None:
+    """060 §3.1 — 요소별 통계(061)의 게이트 `PRIVACY_V4_EFFECTIVE` 는 지금 판의 시행일(페이지 <time> 넷·sitemap)과 같다.
+    접속 기록 쓰임새에는 게이트가 없다(`PRIVACY_V2_EFFECTIVE` 가 첫 기록보다 앞 — 사람 결정 2026-10-09)."""
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", PRIVACY_V4_EFFECTIVE)
+    assert PRIVACY_V4_EFFECTIVE == EFFECTIVE == "2026-10-09"
+    assert PRIVACY_V2_EFFECTIVE < FIRST_LOG_DAY < PRIVACY_V4_EFFECTIVE
 
 
 def test_effective_date_ties_the_four_times_and_the_history() -> None:
@@ -989,21 +1062,31 @@ def test_effective_date_ties_the_four_times_and_the_history() -> None:
     times = re.findall(r'<time datetime="([^"]*)">([^<]*)</time>', html)
     assert times == [(EFFECTIVE, _korean(EFFECTIVE))] * 4
     tag = f'<time datetime="{EFFECTIVE}">'
-    assert f'<p class="meta">시행일 {tag}' in html
+    # 060 §3.3-1 — 같은 날 두 번째 판이라 머리 시행일 바로 뒤에 그것을 적는다
+    assert (
+        f'<p class="meta">시행일 {tag}{_korean(EFFECTIVE)}</time>(이날 두 번째 판)</p>'
+        in html
+    )
     assert tag in _change_notice(html)
     rule = re.search(r"<p>(.*?)</p>", _section(html, "s12"), flags=re.S).group(1)
     assert tag in rule and "부터 시행" in rule
+    assert (
+        _text(rule)
+        == f"이 방침은 {_korean(EFFECTIVE)}{EFFECTIVE_SENTENCE} {CHANGE_RULE}"
+    )
     items = _history(html)
     assert items[0].startswith(tag)
-    # v3 가 열린 날의 항목도 다음 판에서 남는다 — 052 의 게이트가 그날을 읽는다 (051 §3.3-10)
+    assert _text(items[0]) == f"{_korean(EFFECTIVE)}{V4_HISTORY}"
+    # v3 가 열린 날의 항목도 다음 판에서 남는다 — 052 의 게이트가 그날을 읽는다 (051 §3.3-10). 060 — 그 판의 사본 링크
     v3 = [
         i for i in items if _text(i).startswith(f"{_korean(PRIVACY_V3_EFFECTIVE)} — ")
     ]
     assert len(v3) == 1
     for word in V3_HISTORY_SAYS:
         assert word in _text(v3[0]), word
-    # v2 가 열린 날의 항목은 다음 판에서도 이력에 남는다 — 038·039 의 게이트가 그날을 읽는다
-    v2 = f"{_korean(PRIVACY_V2_EFFECTIVE)} — "
+    assert 'href="/privacy-20261009.html">그 판 보기</a>' in v3[0]
+    # v2 판(시행 전에 바뀜)의 항목은 다음 판에서도 이력에 남는다 — 그 판이 알린 접속 기록 쓰임새를 038·039 가 연다
+    v2 = f"{_korean(V2_DAY)} — "
     opened = [item for item in items if _text(item).startswith(v2)]
     assert len(opened) == 1
     # 그 항목의 설명(아래 사실 문단 앞) — 무엇이 바뀌었는지 (037 §3.2-6)
@@ -1017,24 +1100,37 @@ def test_effective_date_ties_the_four_times_and_the_history() -> None:
 
 
 def test_change_notice_comes_first_and_names_what_changes() -> None:
-    """맨 위 변경 안내 — 머리 시행일 줄 바로 아래, 소개 문단 앞. 시행 문장·바뀌는 것(2절 요약)·다시 묻기·링크 둘 (051 §3.3-2)."""
+    """맨 위 변경 안내 — 머리 시행일 줄 바로 아래, 소개 문단 앞. 시행 문장·바뀌는 것 셋(차례대로)·다시 묻기·링크 넷 (060 §3.3-2)."""
     html, page = _read(PUBLIC / "privacy.html")
     assert "변경 안내" in page.h2
     start = html.index('id="changes"')
     assert html.index('<p class="meta">시행일') < start < html.index('<p class="lead">')
     notice = _change_notice(html)
-    for href in (f'href="/{PREVIOUS}"', 'href="#s12"'):
-        assert href in notice, href
+    assert f'href="/{PREVIOUS}"' in notice
+    assert re.findall(r'href="([^"]*)"', notice) == [
+        link.split('"')[1] for link in CHANGE_NOTICE_LINKS
+    ]
     text = _text(notice)
     for word in CHANGE_NOTICE_SAYS:
         assert word in text, word
-    # 시행 중이던 판 = 10월 1일 판, 10월 11일 판(v2)은 시행 전에 이 판으로 바뀌었다 — 그 날짜는 상수 한 곳에서
-    assert "그 전날까지는 2026년 10월 1일 판을 따릅니다" in text
-    assert f"{_korean(PRIVACY_V2_EFFECTIVE)} 판은 시행 전에 이 판으로 바뀌었고" in text
-    assert 'href="/privacy-20261001.html"' in notice
-    assert text.index("그 전날까지는 2026년 10월 1일 판") < text.index(
-        "화면 영역 이용 통계"
+    assert text.startswith(
+        f"변경 안내 이 판은 {_korean(EFFECTIVE)}부터 시행합니다 — 같은 날 먼저 게시한 판"
     )
+    # 바뀌는 것 셋 — 번호 목록, 차례는 접속 기록 쓰임새 → 화면 이용 통계 → 바꾸는 방법. 쓰임새의 날짜는 상수 한 곳에서
+    changes = re.findall(r"<li>(.*?)</li>", notice, flags=re.S)
+    assert len(changes) == 3
+    first, second, third = (_text(item) for item in changes)
+    assert (
+        "서버 접속 기록의 30일 요약·나라와 망 종류 추정·하루 한 번 세는 값을 남아 있는 기록 전체(로그 보관 기간 안)에 "
+        "씁니다(전에는 2026년 10월 11일 기록부터)."
+    ) in first
+    assert "화면 이용 통계" in second and "(2절)" in second
+    assert (
+        "처음과 마지막에 연 페이지와 연 페이지 수" in first
+    )  # 062 의 짝 값(2절 (다)) — 060 §7
+    assert "(12절)" in third and "7일" not in third
+    # 다시 묻기는 셋 뒤
+    assert text.index("12절)") < text.index("이미 동의했어도 한 번 더 묻습니다")
 
 
 def test_body_sections_state_the_v2_facts() -> None:
@@ -1044,33 +1140,37 @@ def test_body_sections_state_the_v2_facts() -> None:
         text = _text(_without_diff(_section(html, label)))
         for word in words:
             assert word in text, (label, word)
-    # (라) — v2 가 열린 날을 글자로(이 판의 시행일은 v3 이다, 051 §7)
-    assert f"{_korean(PRIVACY_V2_EFFECTIVE)}(이 쓰임새를 시작하는 날) 전" in _text(
-        _section(html, "s2")
-    )
+    # (라) — 시작 날짜 문장은 없다: 남아 있는 기록 전체를 쓴다(060 §3.1·§3.3-5 — 대조표의 이전 판 칸에만 남는다)
+    s2 = _text(_section(_without_diff(html), "s2"))
+    assert "(다)" in s2 and "(라)" not in s2
+    # (다) — 062 가 짝에 붙이는 그날 첫·마지막 페이지 이름과 페이지 수(게이트를 당겨 v4 시행일부터 돈다 — 060 §7)
+    assert ACCESS_FLOW_ITEMS in _text(_section(_without_diff(html), "s2"))
     outside = _without_diff(html)
-    assert outside.count("24시간 요약") == 1
-    assert "24시간 요약에만" in _section(html, "s2")
+    assert "24시간 요약" not in outside
     assert "90일이 지나면 지웁니다" not in outside
     visible = _text(_body(html))
     for word in PLAIN_ONLY:
         assert word not in visible, word
 
 
-def test_body_sections_state_the_v3_facts() -> None:
-    """본문 절마다 v3 의 사실 — 화면 영역 이용 통계(무엇을·어떻게·얼마 동안·근거·파기) (051 §3.3)."""
+def test_body_sections_state_the_screen_use_facts() -> None:
+    """본문 절마다 화면 이용 통계의 사실 — 무엇을(영역·요소·떠날 때 보던 곳·깊이)·어떻게·얼마 동안·근거·파기 (051 §3.3·060 §3.3)."""
     html, _ = _read(PUBLIC / "privacy.html")
     body = _without_diff(html)
-    for label, words in V3_FACTS.items():
+    for label, words in SCREEN_USE_FACTS.items():
         text = _text(_section(body, label))
         for word in words:
             assert word in text, (label, word)
     assert re.search(IP_TEN_MINUTES, _text(_section(body, "s2")))
-    # 2절 새 소제목은 Clarity 소제목 앞 (051 §3.3-6)
+    # 2절 소제목은 Clarity 소제목 앞 (051 §3.3-6), 이름은 '화면 이용 통계 — KimpTrack 서버' (060 §3.3-3)
     s2 = _section(body, "s2")
-    assert s2.index("<h3>화면 영역 이용 통계 — KimpTrack 서버</h3>") < s2.index(
+    assert s2.index("<h3>화면 이용 통계 — KimpTrack 서버</h3>") < s2.index(
         "<h3>화면 이용 기록 — Microsoft Clarity</h3>"
     )
+    # 옛 이름은 대조표 밖에서는 12절 이력의 v3 항목(그 판이 쓴 이름)에만 남는다
+    visible = _text(_body(body))
+    assert visible.count(OLD_NAME) == 1
+    assert OLD_NAME in _text(_history(html)[1])
     # 7절 저장 장치 목록은 그대로 — 영역 통계는 쿠키·브라우저 저장소를 쓰지 않는다 (051 §3.3-8)
     devices = re.search(r"<ul>(.*?)</ul>", _section(body, "s7"), flags=re.S).group(1)
     assert len(re.findall(r"<li>", devices)) == 5 and "영역" not in devices
@@ -1088,25 +1188,64 @@ def test_diff_table_rows_match_both_versions() -> None:
     consent = _text(_section(_without_diff(html), "consent-title"))
     before = _text(_body(archived))
     restored = _body_sections(html)
+    expected = _body_sections(archived)
     for section, old, new, why in rows:
-        assert new and new in now, (section, new)
         assert why, section
-        added = old == ADDED
+        added, removed = old == ADDED, new == REMOVED
+        assert not (added and removed), section
+        # 지운 문장(060 §3.3-5)은 지금 판 본문에 없고 사본에만 있다
+        assert (removed and old not in now) or (new and new in now), (section, new)
         assert added or old in before or old in PREVIOUS_CONSENT_TEXT, (section, old)
         if section.startswith("동의 관리"):
-            assert new in consent, (section, new)
+            assert removed or new in consent, (section, new)
             continue  # 동의 절은 사본과 모양이 달라 되돌려 맞대는 범위 밖이다
         if section.startswith("12절"):
             continue  # 12절은 시행 문장·이력도 판마다 달라 되돌려 맞대는 범위 밖이다 — 전후 글자만 본다
+        if removed:
+            assert old in expected, (section, old)
+            expected = expected.replace(old, "")  # 지운 문장은 사본 쪽에서 빼고 맞댄다
+            continue
         assert new in restored, (section, new)
         restored = restored.replace(new, "" if added else old)
-    assert " ".join(restored.split()) == _body_sections(archived)
-    # 051 — 새 소제목·1절 목적은 새로 넣은 행, 동의 상자의 바뀐 문장(질문·저장 규칙·판)은 행이 있다
+    assert " ".join(restored.split()) == " ".join(expected.split())
+    # 060 §3.3 — 동의 상자의 바뀐 문장(질문·판)은 행이 있고, 바뀐 절마다 행이 있다. 새로 넣은 문장은 없다(모두 고친 문장)
     names = {row[0]: row for row in rows}
-    for name in ("1절 목적", "2절 화면 영역 이용 통계", "2절 처리 근거", "3절", "9절"):
-        assert names[name][1] == ADDED, name
+    assert len(names) == len(rows)
+    for name in (
+        "동의 관리 질문",
+        "동의 관리 수집·이용 칸 항목",
+        "동의 관리 수집·이용 칸 목적",
+        "동의 관리 수집·이용 칸 끝",
+        "동의 관리 안내의 판",
+        "1절 목적",
+        "2절 표",
+        "2절 서버 접속 기록 (다)",
+        "2절 서버 접속 기록 (라)",
+        "2절 화면 이용 통계",
+        "3절",
+        "7절 행태정보",
+        "9절",
+        "12절 변경",
+    ):
+        assert names[name][1] not in ("", ADDED), name
     for sentence in PREVIOUS_CONSENT_TEXT:
         assert [row for row in rows if row[1] == sentence], sentence
+    # (라)는 지운 문장 — 이 판 칸 '(지움)'(060 §3.3-5)
+    assert names["2절 서버 접속 기록 (라)"][2] == REMOVED
+    # 12절 — 지운 약속은 이전 판 칸에만, 이 판 칸은 지금 규칙 그대로
+    old_rule, new_rule = names["12절 변경"][1:3]
+    assert "7일 전까지" in old_rule and new_rule == CHANGE_RULE
+
+
+def test_section_12_rule_drops_the_seven_day_promise() -> None:
+    """060 §3.3-8 — 12절 규칙은 '시행일과 전후 대조를 알리고 이전 판을 남긴다·동의 처리가 늘면 다시 동의' 이고, 7일 전 게시
+    약속과 그 단서는 본문(대조표 밖) 어디에도 없다 — 대조표의 이전 판 칸에만 남는다."""
+    html, _ = _read(PUBLIC / "privacy.html")
+    visible = _text(_without_diff(_body(html)))
+    assert CHANGE_RULE in _text(_section(_without_diff(html), "s12"))
+    for gone in ("7일 전", "7×24", "늘거나 새로 생기면", "새로 동의를 받아서만"):
+        assert gone not in visible, gone
+    assert "7일 전까지" in _text(re.search(DIFF_TABLE, html, flags=re.S).group(0))
 
 
 # --- 링크·sitemap (§3.2) ------------------------------------------------------------

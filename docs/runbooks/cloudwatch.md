@@ -317,6 +317,7 @@ aws iam put-role-policy --role-name marketlens-s3-snapshot --policy-name marketl
 - 확인 2 — 관리자 페이지 인프라 칸의 네 `state`(또는 collect 에서 `curl -s localhost:8000/admin/aws` 를 두 번 — 첫 요청은 3초 안에 못 채운 부분이 `pending`). `alarms`·`metrics`·`canary` 는 `ok`, 예산은 `ok` 또는 SCP 에 막히면 `denied`·`AccessDeniedException`(034 §3.2 — 막히는지는 모른다). 결과(특히 예산)를 034 §7 에 적는다. 정책을 붙이기 전에 페이지를 열었다면 실패도 주기만큼 캐시돼 있다 — 경보·canary 60초, 지표 5분, 예산 6시간 뒤에 다시 부른다.
 - 확인 3 — 관리자 접속 기록(030 런북의 `logs/admin/access.log`)에 `/api/admin/aws`·`/api/admin/alerts` 줄이 없다(폴링은 기록하지 않는다).
 - 2026-10-01 결과: 네 부분 모두 `ok` — 예산(`budgets:ViewBudget`)은 조직 SCP 에 막히지 않았다.
+- 시계열(063 — `/admin/aws/series`)은 GetMetricData 한 번(지표 ≈40개 — 상자 셋이면 37, 관리자 화면이 열린 동안만, 창에 따라 5분·30분·1시간에 한 번) — 새 권한 없음(위 `Metrics` 문 그대로). 24h 창을 하루 종일 열어 두면 월 ≈$3.2(지표 1,000개당 $0.01, 034 metrics 와 따로).
 - 되돌리기: `aws iam delete-role-policy --role-name marketlens-s3-snapshot --policy-name marketlens-admin-read` — 네 부분이 `denied` 가 되고 수집은 영향이 없다.
 
 ## 경보 목록 (027 §3.6)

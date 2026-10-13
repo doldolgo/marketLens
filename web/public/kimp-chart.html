@@ -77,13 +77,16 @@
     .btn:hover { background: rgba(145, 132, 217, 0.12); }
     .btn-lg { height: 48px; padding: 0 22px; font-size: 16px; }
 
-    .doc { padding-block: 48px 96px; }
+    /* 본문은 가운데 한 칸 — 17px 글자로 34em(578px). h1·h2 처럼 글자가 큰 요소도 같은 왼쪽 선에 서도록 em 이 아니라 px 로 잰다 */
+    .doc { padding-block: 48px 96px; --col: 578px; }
+    .doc > *, section > * { max-width: var(--col); margin-inline: auto; }
     h1 { font-size: 36px; line-height: 1.25; letter-spacing: -0.03em; }
-    .lead { margin-top: 24px; max-width: 34em; color: var(--n300); }
+    .nw { white-space: nowrap; }
+    .lead { margin-top: 24px; color: var(--n300); }
     .cta { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; margin-top: 28px; }
-    section { margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--divider); }
-    section > * { max-width: 34em; }
-    section > .shot, section > .grid { max-width: none; }
+    /* 절은 넓은 그림·표를 담으려고 폭을 두지 않는다 — 위 구분선만 본문 칸 폭으로 가운데에 긋는다 */
+    .doc > section { max-width: none; margin-top: 56px; padding-top: 32px; background: linear-gradient(var(--divider), var(--divider)) 50% 0 / min(var(--col), 100%) 1px no-repeat; }
+    section > .shot, section > .grid { max-width: 880px; }
     h2 { font-size: 24px; line-height: 1.4; letter-spacing: -0.02em; }
     h3 { margin-top: 28px; font-size: 17px; line-height: 1.5; }
     section p, section ul, section ol, section dl { margin-top: 12px; color: var(--n300); }
@@ -121,7 +124,7 @@
   </header>
 
   <main class="wrap doc">
-    <h1>김프 차트 — 실시간·과거 김치프리미엄 봉 차트</h1>
+    <h1>김프 차트 — <span class="nw">실시간·과거</span> 김치프리미엄 봉 차트</h1>
     <p class="lead">KimpTrack 김프 차트는 업비트·빗썸과 바이낸스·바이비트·비트겟·OKX을 잇는 조합마다 김프(김치프리미엄)와 역프를 1분에 한 점씩 기록해 봉 차트로 보여 줍니다. 코인 하나를 고르면 해외 거래소마다 카드가 하나씩 쌓이고, 각 카드 아래에는 그 시각에 입출금이 열려 있었는지가 띠로 붙습니다. 가입 없이 무료입니다.</p>
     <div class="cta">
       <a class="btn btn-lg" href="/app/?tab=history">김프 차트 열기</a>

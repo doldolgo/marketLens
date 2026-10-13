@@ -375,7 +375,7 @@ details > summary:hover { color: var(--color-accent-300); }
 
 /* ══ 접속 서버 기록 v3 (042) — 창 줄과 질문 여섯 덩어리. 색은 뜻에만: 확인(하한) accent-400·브라우저 모양(상한)
    neutral-700·다시 온 accent-600·봇 종류 neutral-600, 상태색은 상태(5xx ✕·주의 ▲)에만. 열지도 강도 h1~h5 는
-   accent 700→200(밝을수록 많다 — 043 의 랜딩 도달 단계도 같은 클래스), h0 과 시행 전 덩어리는 막대 바탕색 ══ */
+   accent 700→200(밝을수록 많다 — 043 의 랜딩 도달 단계도 같은 클래스), h0 과 게이트 전(자료 없음) 덩어리는 막대 바탕색 ══ */
 .window-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .chip:disabled { color: var(--color-neutral-600); cursor: not-allowed; }
 .chip:disabled:hover { color: var(--color-neutral-600); }
@@ -440,7 +440,7 @@ details > summary:hover { color: var(--color-accent-300); }
 .chart .shaped { fill: var(--color-neutral-700); }
 .chart .returning { fill: var(--color-accent-600); }
 .chart .bot { fill: var(--color-neutral-600); }
-/* 시행 전 덩어리 — 바탕(neutral-900)이 카드와 대비가 낮아 범례 견본처럼 neutral-700 테두리를 두른다 */
+/* 게이트 전(자료 없음) 덩어리 — 바탕(neutral-900)이 카드와 대비가 낮아 범례 견본처럼 neutral-700 테두리를 두른다 */
 .chart .pre { fill: var(--color-neutral-900); stroke: var(--color-neutral-700); stroke-width: 1; vector-effect: non-scaling-stroke; }
 /* ⑥ 응답 표·지속 막대(036 ratio·columns 의 fill) — 뜻 없는 수량이라 회색, 장애색은 5xx 행에만 */
 .q .chart .fill { fill: var(--color-neutral-600); }
