@@ -197,6 +197,7 @@ export function mountDetail(app) {
         tables(model);
       },
       onRow: tbl.onRow,
+      expand: tbl.expand,
     });
     put('sheet-count', `${int(part.length)} / ${int(rows.length)}행`);
     const more = $('sheet-more');

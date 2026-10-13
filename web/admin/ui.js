@@ -106,7 +106,8 @@ export function meter(value, red, amber) {
 }
 
 // 표 — columns [{ key, label, num?, fmt?(값, 행), cell?(행) → 노드, sort?(false 면 정렬 안 함), cls? }], rows [객체].
-// o = { sort: { key, dir }, onSort(key), onRow(행) } — 머리 단추로 정렬, 행을 누르거나 Enter 면 onRow
+// o = { sort: { key, dir }, onSort(key), onRow(행), expand(행) → 노드 } — 머리 단추로 정렬, 행을 누르거나 Enter 면 onRow,
+// expand 가 있으면 행을 눌러 그 아래 한 줄을 펼치고 접는다(최근 요청의 나머지 칸)
 export function table(node, columns, rows, o = {}) {
   if (!node) return;
   const head = el('tr');
@@ -131,14 +132,31 @@ export function table(node, columns, rows, o = {}) {
       else td.textContent = clean(c.fmt ? c.fmt(r[c.key], r) : (r[c.key] ?? '–'));
       tr.append(td);
     }
-    if (o.onRow) {
+    const act = o.onRow ? () => o.onRow(r) : null;
+    let more = null;
+    if (o.expand) {
+      more = el('tr', 'rowmore');
+      const td = el('td');
+      td.setAttribute('colspan', String(columns.length));
+      td.append(o.expand(r));
+      more.append(td);
+      more.hidden = true;
+      tr.setAttribute('aria-expanded', 'false');
+    }
+    const go = act ?? (more ? () => {
+      more.hidden = !more.hidden;
+      tr.setAttribute('aria-expanded', String(!more.hidden));
+    } : null);
+    if (go) {
+      tr.className = 'go';
       tr.setAttribute('tabindex', '0');
-      tr.addEventListener('click', () => o.onRow(r));
+      tr.addEventListener('click', go);
       tr.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') o.onRow(r);
+        if (ev.key === 'Enter') go();
       });
     }
     tbody.append(tr);
+    if (more) tbody.append(more);
   }
   node.replaceChildren(thead, tbody);
 }
