@@ -1,79 +1,54 @@
-// 개요 페이지(스펙 064 §3.2) — "지금 문제 있나": 상태 띠 · 큰 수 다섯 · 수집 원천 알약 · 상자 셋 · 24시간 트래픽.
-// 느린 묶음: AWS 요약·AWS 시계열(24시간)·알림 기록·접속 요약(24시간). 그리기는 카드마다 따로(common.start).
-import {
-  $,
-  BOX_LEVELS,
-  ago,
-  chip,
-  clean,
-  el,
-  exName,
-  int,
-  isObj,
-  levelOf,
-  list,
-  money,
-  n0,
-  num,
-  once,
-  own,
-  partOf,
-  pct,
-  plainOf,
-  put,
-  recentAvg,
-  start,
-  stateWord,
-  tag,
-  usable,
-  worstMonthly,
-} from './common.js';
-import { COLOR, axisTip, base, blank, budgetGauge, draw, gauges, legend, ms, spark, sparkBars, timeAxis, tip, valueAxis, when } from './charts.js';
+// 개요 페이지(스펙 066 §3.3) — "지금 문제 있나": 상태 띠(064 규칙 그대로, 칩 → 그 카드의 상세 판) · 큰 수 다섯(비교 배지) ·
+// 거래소 줄(원천마다 24시간 상태 띠) · 상자 표(문턱 눈금 막대 — 게이지 아홉 대신) · 트래픽(위아래 세 칸, 십자선 공유).
+// 기간 1시간·6시간·24시간(1시간은 6시간 시계열을 잘라 쓴다), 비교 이전 기간·지난주 같은 때.
+import { $, dec1, el, int, kstDay, list, money, n0, num, once, partOf, pct, plainOf, put, req, stateWord, tag, usable } from './common.js';
+import { align, crop, deltaText, hourPoints, sumHours, valueAt } from './calc.js';
+import { blank, draw, lanesOption, sparkBarsOption, sparkOption, timeOption } from './charts.js';
+import { BOXES, BOX_ROLE, boxMark, cmpPhrase } from './names.js';
+import { ACCESS_RANGES, RANGE_MS, accessCompare, accessReqs, accessWindow, alertHours, boxGet, hourlySuccess, seriesCompare, seriesReqs, seriesWindow, todayVisitors } from './models.js';
+import { collectLanes } from './ops.js';
+import { OPS_DETAILS } from './opsdetail.js';
+import { BOX_LEVELS, chip, recentAvg, worstMonthly } from './rules.js';
+import { bigNumber, meter, table } from './ui.js';
+import { start } from './app.js';
 
-const BOXES = ['collect', 'data', 'serve'];
 const HOUR = 3_600_000;
-const KST = 32_400;
-const kstDay = (sec) => Math.floor((sec + KST) / 86_400) * 86_400 - KST;
+const DAY = 86_400_000;
+const GROUP = 'overview';
+const ACCESS24 = req('access', { window: '24h' });
+const ACCESS7 = req('access', { window: '7d' });
 
-// --- 계산(§4 node 시험 대상) -----------------------------------------------------------------------
-
-// 오늘(KST — 응답 endTs 가 든 날) 방문자 [확인, 브라우저 모양]. visitors 가 ok 가 아니면 null
-export function todayVisitors(a) {
-  const v = a?.visitors;
-  if (!isObj(v) || v.state !== 'ok') return null;
-  const day = kstDay(n0(a.endTs));
-  const d = list(v.days).find((x) => isObj(x) && x.ts === day);
-  return d ? [n0(d.confirmed), n0(d.shaped)] : [0, 0];
-}
-
-// 24시간 시간 칸마다 수집 성공률 — 011 의 1시간 식(1 − 실패 구간과 겹친 초 ÷ 칸 길이)을 원천 전체로 평균. [[ts초, %]]
-export function hourlySuccess(body, now) {
-  const n = list(body?.exchanges).filter(isObj).length;
-  if (!n) return [];
-  const outages = list(body.outages).filter((o) => isObj(o) && num(o.startedAt) !== null);
-  const top = Math.floor(now / HOUR) * HOUR;
-  const out = [];
-  for (let i = 23; i >= 0; i -= 1) {
-    const from = top - i * HOUR;
-    const to = Math.min(from + HOUR, now);
-    if (to <= from) continue;
-    const down = outages.reduce((sum, o) => sum + Math.max(0, Math.min(num(o.endedAt) ?? now, to) - Math.max(o.startedAt, from)), 0);
-    out.push([from / 1000, Math.max(0, 100 * (1 - down / (n * (to - from))))]);
-  }
+// 트래픽 창 — 접속 요약 24시간의 시간 칸을 고른 기간만큼(1·6시간은 겹치는 칸). 비교: 1·6시간의 이전 기간은 같은 응답 안에서,
+// 24시간의 이전 기간은 7일 응답에서 잘라 지금 축으로 민다. 지난주 같은 때는 7일 창 밖이라 없다('이 자료는 비교 없음')
+export function trafficWindow(app) {
+  const v = app.view;
+  const main = app.entry(ACCESS24);
+  const part = partOf(main);
+  const other = v.cmp === 'prev' ? app.entry(ACCESS7) : null;
+  const out = { part, ok: usable(part), deps: [main, other] };
+  if (!out.ok) return out;
+  const L = RANGE_MS[v.range] ?? DAY;
+  const end = n0(part.endTs) * 1000;
+  out.endMs = Math.floor(end / HOUR) * HOUR + HOUR;
+  out.startMs = Math.floor((end - L) / HOUR) * HOUR;
+  const op = other ? partOf(other) : undefined;
+  let src = null;
+  let by = 0;
+  if (v.cmp === 'prev' && v.range !== '24h') [src, by] = [part, L];
+  else if (v.cmp === 'prev' && usable(op)) [src, by] = [op, L];
+  out.cmpState = v.cmp === 'none' ? 'none' : src ? 'ok' : v.cmp === 'prev' && op === undefined ? 'wait' : 'missing';
+  out.line = (key) => ({ data: crop(hourPoints(part.hourly, key), out.startMs, out.endMs), cmp: src ? align(hourPoints(src.hourly, key), out.startMs, out.endMs, by) : null });
   return out;
 }
 
-// 24시간 시간 칸마다 알림 수 — 보낸 Slack 알림과 ALARM 으로 바뀐 경보. [[ts초, 수]]
-export function alertHours(items, now) {
-  const top = Math.floor(now / HOUR) * HOUR;
-  const counts = new Map();
-  for (let i = 23; i >= 0; i -= 1) counts.set(top - i * HOUR, 0);
-  for (const it of list(items).filter(isObj)) {
-    if (!(it.source === 'slack' || (it.source === 'alarm' && it.toState === 'ALARM')) || num(it.at) === null) continue;
-    const hour = Math.floor(it.at / HOUR) * HOUR;
-    if (counts.has(hour)) counts.set(hour, counts.get(hour) + 1);
-  }
-  return [...counts].map(([hour, count]) => [hour / 1000, count]);
+// 오늘 방문자 배지 — 오늘(KST) 지금까지의 사람 모양 페이지를 비교 날의 같은 시각까지와(이전 기간 = 어제, 지난주 = 7일 전)
+export function visitDelta(part, src, cmp) {
+  if (!src || cmp === 'none') return '';
+  const end = n0(part.endTs);
+  const from = kstDay(end);
+  const back = cmp === 'week' ? 7 * 86_400 : 86_400;
+  const phrase = cmp === 'week' ? '지난주 같은 때' : '어제 같은 때';
+  return deltaText(sumHours(part.hourly, 'humanPages', from, end), sumHours(src.hourly, 'humanPages', from - back, end - back), phrase);
 }
 
 // --- 카드 ----------------------------------------------------------------------------------------
@@ -81,156 +56,231 @@ export function alertHours(items, now) {
 const BAND_WORD = { ok: '정상', warn: '주의', bad: '문제', wait: '확인 중' };
 let chipKey = null;
 function drawBand(app) {
-  const ready = app.entry('collector') !== undefined && app.entry('api') !== undefined;
-  const chips = ready ? app.chips() : [];
-  const tone = !ready ? 'wait' : chips.some((c) => c.tone === 'bad') ? 'bad' : chips.length ? 'warn' : 'ok';
-  $('band').className = `band ${tone}`;
-  put('band-word', BAND_WORD[tone]);
+  const chips = app.ready() ? app.chips() : [];
+  const tone = !app.ready() ? 'wait' : chips.some((c) => c.tone === 'bad') ? 'bad' : chips.length ? 'warn' : 'ok';
+  $('band').className = `band ${tone} s12`;
+  $('band-shape').className = tone === 'wait' ? 'shape' : `shape ${tone}`;
+  // 정상은 조용히 한 줄 — '● 정상 · 14:03 확인'
+  put('band-word', tone === 'ok' ? `정상 · ${new Date(app.now()).toTimeString().slice(0, 5)} 확인` : BAND_WORD[tone]);
   const key = JSON.stringify(chips);
   if (key !== chipKey) $('chips').replaceChildren(...chips.map(chip));
   chipKey = key;
 }
 
 function drawWs(app) {
-  const entry = app.entry('status');
-  tag('t-ws', plainOf(entry));
-  put('v-ws', entry?.body ? int(entry.body.wsConnections) : '–');
-  const series = app.current('series');
-  once('c-ws', series, () => {
-    const part = partOf(series);
-    if (!usable(part)) return blank('c-ws', stateWord(part));
-    return spark('c-ws', part.wsClients, COLOR.accent, (v) => `${int(v)} 접속`);
-  });
+  const status = app.entry(req('status'));
+  const w = seriesWindow(app, app.view.range, app.view.cmp);
+  tag('t-ws', plainOf(status));
+  const now = num(status?.body?.wsConnections);
+  bigNumber('v-ws', int(now));
+  const line = w.ok ? w.line((p) => p?.wsClients) : null;
+  put('d-ws', line?.cmp ? deltaText(now, valueAt(line.cmp, w.endMs), cmpPhrase(app.view.range, app.view.cmp)) : '');
+  once('c-ws', [...w.deps, app.view.range, app.view.cmp], () =>
+    line ? draw('c-ws', sparkOption(line.data, 'acc', (v) => `${int(v)} 접속`, line.cmp)) : blank('c-ws', stateWord(w.part)),
+  );
 }
 
 function drawVisit(app) {
-  const access = app.current('access');
-  const part = partOf(access);
-  // 접속 요약이 ok 면 방문자 하위 부분의 상태를 표로
-  tag('t-visit', usable(part) ? partOf({ body: part }, 'visitors') : part);
-  const today = usable(part) ? todayVisitors(part) : null;
-  if (today) $('v-visit').replaceChildren(int(today[0]), el('small', null, ` ~ ${int(today[1])}`));
-  else put('v-visit', '–');
-  once('c-visit', access, () => {
-    if (!usable(part)) return blank('c-visit', stateWord(part));
-    const hours = list(part.hourly).filter(isObj).map((h) => [h.ts, num(h.humanPages)]);
-    return spark('c-visit', hours, COLOR.accent, (v) => `사람 모양 페이지 ${int(v)}`);
+  const t = trafficWindow(app);
+  const visitors = usable(t.part) ? partOf({ body: t.part }, 'visitors') : t.part;
+  tag('t-visit', visitors);
+  const today = usable(t.part) ? todayVisitors(t.part) : null;
+  bigNumber('v-visit', today ? int(today[0]) : '–', today ? `~ ${int(today[1])}` : '');
+  const seven = app.view.cmp === 'prev' ? partOf(app.entry(ACCESS7)) : null;
+  put('d-visit', t.ok ? visitDelta(t.part, usable(seven) ? seven : null, app.view.cmp) : '');
+  $('d-visit').title = '오늘 지금까지의 사람 모양 페이지를 비교 날의 같은 시각까지와 견준다';
+  once('c-visit', [...t.deps, app.view.range, app.view.cmp], () => {
+    if (!t.ok) return blank('c-visit', stateWord(t.part));
+    const { data, cmp } = t.line('humanPages');
+    return draw('c-visit', sparkOption(data, 'acc', (v) => `사람 모양 페이지 ${int(v)}`, cmp));
   });
 }
 
 function drawRate(app) {
-  const entry = app.entry('collect');
+  const entry = app.entry(req('collect'));
   tag('t-rate', plainOf(entry));
   const rate = num(entry?.body?.successRate1h);
-  put('v-rate', pct(rate), rate !== null && rate < 99 ? 'big warn' : 'big');
-  once('c-rate', [entry, Math.floor(Date.now() / 60_000)], () => {
+  bigNumber('v-rate', pct(rate), '', rate !== null && rate < 99 ? 'warn' : null);
+  once('c-rate', [entry, app.view.range, Math.floor(Date.now() / 60_000)], () => {
     if (!entry?.body) return blank('c-rate', stateWord(plainOf(entry)));
-    return spark('c-rate', hourlySuccess(entry.body, Date.now()), COLOR.accent, (v) => pct(v, 2));
+    const now = Date.now();
+    return draw('c-rate', sparkOption(crop(hourlySuccess(entry.body, now), now - (RANGE_MS[app.view.range] ?? DAY), now), 'acc', (v) => pct(v, 2)));
   });
 }
 
 function drawAlarm(app) {
-  const part = partOf(app.entry('aws'), 'alarms');
+  const aws = app.entry(req('aws'));
+  const part = partOf(aws, 'alarms');
   tag('t-alarm', part);
   if (usable(part)) {
-    const items = list(part.items).filter(isObj);
-    const firing = Math.max(items.filter((a) => a.state === 'ALARM').length, n0(part.counts?.alarm));
-    $('v-alarm').replaceChildren(firing ? `ALARM ${int(firing)}` : 'OK', el('small', null, ` / ${int(items.length)}`));
-    $('v-alarm').className = `big ${firing ? 'bad' : 'ok'}`;
-  } else put('v-alarm', '–', 'big');
-  const alerts = app.entry('alerts');
-  once('c-alarm', [alerts, Math.floor(Date.now() / 60_000)], () => {
+    const items = list(part.items);
+    const firing = Math.max(items.filter((a) => a?.state === 'ALARM').length, n0(part.counts?.alarm));
+    bigNumber('v-alarm', firing ? `ALARM ${int(firing)}` : 'OK', `/ ${int(items.length)}`, firing ? 'bad' : null);
+  } else bigNumber('v-alarm', '–');
+  const alerts = app.entry(req('alerts'));
+  once('c-alarm', [alerts, app.view.range, Math.floor(Date.now() / 60_000)], () => {
     if (!alerts?.body) return blank('c-alarm', stateWord(plainOf(alerts)));
-    return sparkBars('c-alarm', alertHours(alerts.body.items, Date.now()), COLOR.sub, (v) => `알림 ${int(v)}`);
+    const now = Date.now();
+    return draw('c-alarm', sparkBarsOption(crop(alertHours(alerts.body.items, now), now - (RANGE_MS[app.view.range] ?? DAY), now), 'acc', (v) => `알림 ${int(v)}`));
   });
 }
 
+// 이번 달 비용 — 큰 수 '실제 / 한도', 아래 막대(채움 = 실제 ÷ 한도, 눈금 = 예측). 게이지는 서버 페이지 비용 카드 하나만(066 §3.1)
 function drawCost(app) {
-  const part = partOf(app.entry('aws'), 'budget');
+  const aws = app.entry(req('aws'));
+  const part = partOf(aws, 'budget');
   tag('t-cost', part);
   const worst = usable(part) ? worstMonthly(part) : null;
   if (!worst) {
-    put('v-cost', usable(part) ? '예산 없음' : '–', 'big');
-    return once('c-cost', [part], () => blank('c-cost', usable(part) ? '월 예산 없음' : stateWord(part)));
+    bigNumber('v-cost', usable(part) ? '예산 없음' : '–');
+    put('d-cost', '');
+    return $('m-cost').replaceChildren();
   }
-  const unit = worst.b.unit;
-  $('v-cost').replaceChildren(money(worst.b.actual, unit), el('small', null, ` / ${money(worst.b.limit, unit)}`));
-  $('v-cost').className = worst.tone === 'ok' ? 'big' : `big ${worst.tone}`;
-  return once('c-cost', [part], () => budgetGauge('c-cost', worst.b, (v) => money(v, unit)));
+  const b = worst.b;
+  bigNumber('v-cost', money(b.actual, b.unit), `/ ${money(b.limit, b.unit)}`, worst.tone === 'ok' ? null : worst.tone);
+  put('d-cost', num(b.forecast) === null ? '' : `예측 ${money(b.forecast, b.unit)} · ${pct((b.forecast / b.limit) * 100, 0)}`);
+  const forecast = num(b.forecast) === null ? 100 : Math.min(100, (b.forecast / b.limit) * 100);
+  return $('m-cost').replaceChildren(meter(Math.min(100, (b.actual / b.limit) * 100), 100, forecast));
 }
 
-// 수집 원천 알약 — 초록 수집 중 · 주황 지연 · 빨강 끊김(열린 실패 구간 포함), 글자는 마지막 성공
-const PILL = { ok: 'ok', stale: 'warn', down: 'bad' };
-function drawPills(app) {
-  const entry = app.entry('collect');
+function drawExchanges(app) {
+  const entry = app.entry(req('collect'));
   tag('t-ex', plainOf(entry));
-  const exchanges = list(entry?.body?.exchanges).filter(isObj);
-  if (entry?.body && !exchanges.length) return $('pills').replaceChildren(el('p', 'empty', '자료 없음'));
-  return $('pills').replaceChildren(
-    ...exchanges.map((ex) => {
-      const pill = el('span', `pill ${isObj(ex.openOutage) ? 'bad' : (own(PILL, ex.state) ?? 'dim')}`, exName(ex.exchange));
-      pill.append(el('small', null, ago(ex.lastSuccessAt)));
-      pill.title = `${clean(ex.exchange)} · 1시간 성공률 ${pct(ex.successRate1h)}`;
-      return pill;
-    }),
-  );
-}
-
-// 상자 셋 — 게이지는 최근 15분 평균(띠 규칙과 같은 값·같은 문턱), 아래 선은 24시간 CPU
-function drawBoxes(app) {
-  const entry = app.current('series');
-  const part = partOf(entry);
-  for (const box of BOXES) {
-    tag(`t-box-${box}`, part);
-    once(`box-${box}`, entry, () => {
-      const found = usable(part) ? list(part.boxes).find((b) => isObj(b) && b.box === box) : undefined;
-      if (!found) {
-        blank(`g-${box}`, usable(part) ? '자료 없음' : stateWord(part));
-        return blank(`l-${box}`, '');
-      }
-      const s = isObj(found.series) ? found.series : {};
-      gauges(`g-${box}`, BOX_LEVELS.map(([key, label, red, amber]) => {
-        const value = recentAvg(s[key], part.endTs, part.periodSec);
-        return { label, value, tone: levelOf(value, red, amber) };
-      }));
-      return spark(`l-${box}`, s.cpu, COLOR.accent, (v) => `CPU ${pct(v)}`);
-    });
-  }
-}
-
-// 24시간 트래픽 — 시간별 사람 모양 페이지·5xx 막대(시의 가운데), WS 접속 선(오른쪽 축 — §3.2 5)
-const TRAFFIC = [['사람 모양 페이지', 'c0'], ['5xx', 'bad'], ['WS 접속', 'c1']];
-function drawTraffic(app) {
-  const access = app.current('access');
-  const series = app.current('series');
-  const part = partOf(access);
-  tag('t-traffic', part);
-  once('traffic', [access, series], () => {
-    if (!usable(part)) return blank('c-traffic', stateWord(part));
-    const hours = list(part.hourly).filter((h) => isObj(h) && num(h.ts) !== null);
-    if (!hours.length) return blank('c-traffic', '자료 없음');
-    const mid = (h) => h.ts * 1000 + HOUR / 2;
-    const ws = partOf(series);
-    const bar = (key, color) => ({ type: 'bar', data: hours.map((h) => [mid(h), num(h[key])]), barMaxWidth: 14, itemStyle: { color, borderRadius: [4, 4, 0, 0] } });
-    return draw('c-traffic', base({
-      grid: { left: 8, right: 8, top: 34, bottom: 4, containLabel: true },
-      legend: legend({ data: TRAFFIC.map(([name]) => name) }),
-      tooltip: axisTip((ps) => tip(when(ps[0]?.value?.[0]), ps.map((p) => [TRAFFIC[p.seriesIndex]?.[1], p.seriesName, int(p.value?.[1])]))),
-      xAxis: timeAxis(n0(part.startTs) * 1000, n0(part.endTs) * 1000),
-      yAxis: [valueAxis({ minInterval: 1 }), valueAxis({ minInterval: 1, splitLine: { show: false } })],
-      series: [
-        { ...bar('humanPages', COLOR.accent), name: TRAFFIC[0][0] },
-        { ...bar('errors', COLOR.bad), name: TRAFFIC[1][0] },
-        { type: 'line', name: TRAFFIC[2][0], yAxisIndex: 1, data: usable(ws) ? ms(ws.wsClients) : [], showSymbol: false, lineStyle: { width: 2, color: COLOR.sub }, itemStyle: { color: COLOR.sub } },
-      ],
-    }));
+  once('c-ex', [entry, Math.floor(Date.now() / 60_000)], () => {
+    if (!entry?.body) return blank('c-ex', stateWord(plainOf(entry)));
+    const lanes = collectLanes(entry.body, Date.now());
+    return lanes.rows.length ? draw('c-ex', lanesOption(lanes)) : blank('c-ex', '자료 없음');
   });
 }
 
+// 상자 표 — 상자 | CPU·메모리·디스크 문턱 눈금 막대(최근 15분 평균 — 띠 규칙과 같은 값·문턱) | 크레딧 | 고른 기간 CPU 선
+function drawBoxes(app) {
+  const w = seriesWindow(app, app.view.range, 'none');
+  tag('t-boxes', w.part);
+  once('tbl-boxes', [...w.deps, app.view.range], () => {
+    const node = $('tbl-boxes');
+    if (!w.ok) return node.replaceChildren(el('caption', 'empty', stateWord(w.part)));
+    const rows = BOXES.map((box) => {
+      const found = w.boxes.find((b) => b.box === box);
+      const s = found?.series ?? {};
+      const avg = (key) => recentAvg(s[key], w.part.endTs, w.part.periodSec);
+      return { box, found, avg, line: found ? w.line(boxGet(box, 'cpu')).data : [] };
+    });
+    const levels = Object.fromEntries(BOX_LEVELS.map((l) => [l[0], l]));
+    const gauge = (key) => (r) => (r.found ? meter(r.avg(key), levels[key][2], levels[key][3]) : el('span', 'dim', '–'));
+    table(node, [
+      {
+        key: 'box',
+        label: '상자',
+        cell: (r) => {
+          const who = el('span', 'who');
+          who.append(el('i', `key sq ${boxMark(r.box)}`), el('b', null, r.box), el('span', 'dim', BOX_ROLE[r.box]));
+          return who;
+        },
+      },
+      { key: 'cpu', label: 'CPU', cell: gauge('cpu') },
+      { key: 'mem', label: '메모리', cell: gauge('mem') },
+      { key: 'disk', label: '디스크', cell: gauge('disk') },
+      { key: 'credit', label: '크레딧', num: true, cell: (r) => el('span', null, dec1(r.avg('creditBalance'))) },
+      {
+        key: 'line',
+        label: 'CPU 선',
+        cell: (r) => {
+          const box = el('div', 'chart spark');
+          box.id = `c-box-${r.box}`;
+          return box;
+        },
+      },
+    ], rows, { onRow: () => app.openDetail('cpu') });
+    // 표가 막 만든 칸(문서에 붙은 뒤)에 작은 선 — 칸 id 마다 인스턴스 하나
+    for (const r of rows) {
+      if (r.line.length) draw(`c-box-${r.box}`, sparkOption(r.line, boxMark(r.box), (v) => `CPU ${pct(v)}`));
+      else blank(`c-box-${r.box}`, '–');
+    }
+  });
+}
+
+// 트래픽 — 위아래 세 칸(사람 모양 페이지 · 5xx · WS 접속), 십자선 공유(둘째 y축 대신 — 066 §3.1). 점선은 비교 기간
+function drawTraffic(app) {
+  const t = trafficWindow(app);
+  const w = seriesWindow(app, app.view.range, app.view.cmp);
+  tag('t-traffic', t.part);
+  once('c-traffic', [...t.deps, ...w.deps, app.view.range, app.view.cmp], () => {
+    if (!t.ok) {
+      put('f-traffic', '');
+      return blank('c-traffic', stateWord(t.part));
+    }
+    const ws = w.ok ? w.line((p) => p?.wsClients) : { data: [], cmp: null };
+    const pages = t.line('humanPages');
+    const phrase = cmpPhrase(app.view.range, app.view.cmp);
+    const sum = (pts) => list(pts).reduce((s, p) => s + n0(p[1]), 0);
+    put('f-traffic', pages.cmp ? deltaText(sum(pages.data), sum(pages.cmp), `사람 모양 페이지 합 — ${phrase}`) : t.cmpState === 'missing' ? '이 자료는 비교 없음' : '');
+    return draw('c-traffic', timeOption({
+      startMs: t.startMs,
+      endMs: t.endMs,
+      zoom: 'card',
+      panes: [{ title: '사람 모양 페이지', fmt: int }, { title: '5xx', fmt: int }, { title: 'WS 접속', fmt: int }],
+      series: [
+        { name: '사람 모양 페이지', mark: 'acc', type: 'bar', pane: 0, ...pages },
+        { name: '5xx', mark: 'bad', type: 'bar', pane: 1, ...t.line('errors') },
+        { name: 'WS 접속', mark: 'c1', pane: 2, data: crop(ws.data, t.startMs, t.endMs), cmp: ws.cmp ? crop(ws.cmp, t.startMs, t.endMs) : null },
+      ],
+    }), GROUP);
+  });
+}
+
+// --- 개요만의 상세 판(나머지는 서버와 같은 OPS_DETAILS) ---------------------------------------------------
+
+function accessDetail(title, unit, build, related) {
+  return {
+    title,
+    unit,
+    related,
+    ranges: ACCESS_RANGES,
+    range: () => '24h',
+    compare: accessCompare,
+    needs: (app, pv) => [...accessReqs(pv.range, pv.cmp), ...seriesReqs(pv.range, pv.cmp)],
+    model: (app, pv) => {
+      const a = accessWindow(app, pv.range, pv.cmp);
+      const base = { part: a.part, deps: a.deps, note: a.cmpState === 'missing' ? '이 자료는 비교 없음' : '' };
+      if (!a.ok) return base;
+      return { ...base, span: [a.startMs, a.endMs], time: { startMs: a.startMs, endMs: a.endMs, ...build(app, pv, a) } };
+    },
+  };
+}
+const DETAILS = {
+  ...OPS_DETAILS,
+  visit: accessDetail('방문 추이', '시간별 · 사람 모양 페이지 · 스크립트가 돈 페이지', (app, pv, a) => ({
+    panes: [{ fmt: int }],
+    series: [{ name: '사람 모양 페이지', mark: 'acc', type: 'bar', ...a.hours('humanPages') }, { name: '스크립트가 돈 페이지', mark: 'c1', ...a.hours('jsViews') }],
+  }), ['traffic']),
+  traffic: accessDetail('트래픽', '시간별 · 사람 모양 페이지 · 5xx · WS 접속', (app, pv, a) => {
+    const w = seriesWindow(app, pv.range, pv.cmp);
+    const ws = w.ok ? w.line((p) => p?.wsClients) : { data: [], cmp: null };
+    return {
+      panes: [{ title: '사람 모양 페이지', fmt: int }, { title: '5xx', fmt: int }, { title: 'WS 접속', fmt: int }],
+      series: [
+        { name: '사람 모양 페이지', mark: 'acc', type: 'bar', pane: 0, ...a.hours('humanPages') },
+        { name: '5xx', mark: 'bad', type: 'bar', pane: 1, ...a.hours('errors') },
+        { name: 'WS 접속', mark: 'c1', pane: 2, ...ws },
+      ],
+    };
+  }, ['visit', 'ws']),
+};
+
 start({
+  id: 'overview',
   home: '/',
-  slow: ['aws', 'series', 'alerts', 'access'],
-  picks: { series: '24h', access: '24h' },
+  ranges: ['1h', '6h', '24h'],
+  range: '24h',
+  compare: seriesCompare,
+  needs: (app) => [req('aws'), req('alerts'), ...seriesReqs(app.view.range, app.view.cmp), ACCESS24, ...(app.view.cmp === 'prev' ? [ACCESS7] : [])],
+  rules: (app) => ({
+    aws: app.entry(req('aws')),
+    series: app.entry(seriesReqs(app.view.range, 'none')[0]),
+    alerts: app.entry(req('alerts')),
+    access: app.entry(ACCESS24),
+  }),
   cards: [
     ['band', drawBand],
     ['ws', drawWs],
@@ -238,8 +288,9 @@ start({
     ['rate', drawRate],
     ['alarm', drawAlarm],
     ['cost', drawCost],
-    ['ex', drawPills],
-    ['box', drawBoxes],
+    ['ex', drawExchanges],
+    ['boxes', drawBoxes],
     ['traffic', drawTraffic],
   ],
+  details: DETAILS,
 });

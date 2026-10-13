@@ -1,7 +1,7 @@
 <!doctype html>
-<!-- KimpTrack 관리자 v3 — 서버(스펙 064 §3.3 AWS·수집·경보·비용). web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
-     인라인 스크립트·스타일 없음(CSP). 값은 server.js 가 글자(textContent)와 차트(vendor ECharts)로 채운다.
-     밖으로 나가는 링크는 이 파일의 고정 주소뿐이다 — 계정·영역 ID·팀 도메인·프로젝트 ID 를 넣지 않는다(레포 공개). -->
+<!-- KimpTrack 관리자 v4 — 서버(스펙 066 §3.3 — 어느 상자의 무엇이). web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
+     인라인 스크립트·스타일 없음(CSP). 값은 server.js 가 채운다. 밖으로 나가는 링크는 이 파일의 고정 주소뿐이다 — 계정·영역 ID·팀 도메인·프로젝트 ID 를 넣지 않는다(레포 공개).
+     틀(왼쪽 내비·머리·상세 판)은 여섯 페이지가 같은 글자다. 아이콘은 icons.svg 묶음(<use href>). -->
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
@@ -14,123 +14,161 @@
     <script type="module" src="server.js"></script>
   </head>
   <body>
-    <header class="top">
-      <div class="top-in">
-        <a class="brand" href="/">KimpTrack <span>관리자</span></a>
+    <div class="app" id="app" data-menu="closed">
+      <aside class="side" id="side" aria-label="관리자 메뉴">
+        <a class="brand" href="/"><svg class="i" aria-hidden="true"><use href="icons.svg#logo"/></svg><span>KimpTrack</span><small>관리자</small></a>
         <nav class="nav" aria-label="페이지">
-          <a href="/">개요</a>
-          <a href="/server.html" aria-current="page">서버</a>
-          <a href="/traffic.html">트래픽</a>
-          <a href="/screens.html">화면</a>
+          <a href="/" title="개요"><svg class="i" aria-hidden="true"><use href="icons.svg#overview"/></svg><span>개요</span><i class="mark" id="m-overview"></i></a>
+          <a href="/server.html" aria-current="page" title="서버"><svg class="i" aria-hidden="true"><use href="icons.svg#server"/></svg><span>서버</span><i class="mark" id="m-server"></i></a>
+          <a href="/traffic.html" title="트래픽"><svg class="i" aria-hidden="true"><use href="icons.svg#traffic"/></svg><span>트래픽</span><i class="mark" id="m-traffic"></i></a>
+          <a href="/visitors.html" title="방문자"><svg class="i" aria-hidden="true"><use href="icons.svg#visitors"/></svg><span>방문자</span></a>
+          <a href="/clarity.html" title="Clarity"><svg class="i" aria-hidden="true"><use href="icons.svg#clarity"/></svg><span>Clarity</span></a>
+          <a href="/screens.html" title="화면"><svg class="i" aria-hidden="true"><use href="icons.svg#screens"/></svg><span>화면</span></a>
         </nav>
-        <div class="top-side">
-          <a class="state wait" id="hdr-state" href="/"><span id="hdr-word">확인 중</span></a>
-          <span class="stamp">마지막 갱신 <span id="updated">--:--:--</span></span>
-          <a class="logout" href="/cdn-cgi/access/logout">로그아웃</a>
+        <div class="side-foot">
+          <span title="마지막 갱신"><svg class="i" aria-hidden="true"><use href="icons.svg#clock"/></svg><span id="updated">--:--:--</span></span>
+          <a href="/cdn-cgi/access/logout" title="로그아웃"><svg class="i" aria-hidden="true"><use href="icons.svg#logout"/></svg><span>로그아웃</span></a>
         </div>
-      </div>
-    </header>
-    <p id="notice" class="notice" role="alert" hidden></p>
-
-    <main class="wrap">
-      <div class="bar">
-        <div class="seg" role="group" aria-label="기간">
-          <button type="button" data-range="6h" aria-pressed="false">6시간</button>
-          <button type="button" data-range="24h" aria-pressed="true">24시간</button>
-          <button type="button" data-range="7d" aria-pressed="false">7일</button>
-          <button type="button" data-range="30d" aria-pressed="false">30일</button>
-        </div>
-        <button type="button" class="btn" id="unzoom">확대 풀기</button>
-        <span class="q" title="시간 차트는 함께 움직인다 — Ctrl+휠(트랙패드 핀치)로 확대, 끌어서 이동.">?</span>
-      </div>
-
-      <section class="grid" aria-label="AWS 지표">
-        <div class="card" id="cpu">
-          <div class="card-head"><h2>CPU</h2><span class="q" title="상자마다 CPU 사용률 평균(%).">?</span><span class="tag" id="t-cpu"></span></div>
-          <div class="chart" id="c-cpu"></div>
-        </div>
-        <div class="card" id="net">
-          <div class="card-head"><h2>네트워크</h2><span class="q" title="상자마다 초당 바이트 — 위 들어옴, 아래 나감.">?</span><span class="tag" id="t-net"></span></div>
-          <div class="chart tall" id="c-net"></div>
-        </div>
-        <div class="card" id="mem">
-          <div class="card-head"><h2>메모리</h2><span class="q" title="상자마다 메모리 사용률(100 − 가용률, %).">?</span><span class="tag" id="t-mem"></span></div>
-          <div class="chart" id="c-mem"></div>
-        </div>
-        <div class="card" id="disk">
-          <div class="card-head"><h2>디스크</h2><span class="q" title="상자마다 디스크 사용률(%). 선 75 주의 · 85 문제.">?</span><span class="tag" id="t-disk"></span></div>
-          <div class="chart" id="c-disk"></div>
-        </div>
-        <div class="card" id="credit">
-          <div class="card-head"><h2>CPU 크레딧</h2><span class="q" title="크레딧이 있는 상자만(t4g). 위 잔량, 아래 사용 막대와 초과 과금(빨강).">?</span><span class="tag" id="t-credit"></span></div>
-          <div class="chart tall" id="c-credit"></div>
-        </div>
-        <div class="card" id="io">
-          <div class="card-head"><h2>디스크 입출력</h2><span class="q" title="상자마다 EBS 초당 바이트 — 위 읽기, 아래 쓰기.">?</span><span class="tag" id="t-io"></span></div>
-          <div class="chart tall" id="c-io"></div>
-        </div>
-        <div class="card" id="ws">
-          <div class="card-head"><h2>WS 접속 수</h2><span class="q" title="api 의 대시보드 연결 수 — CloudWatch 주기마다 최댓값.">?</span><span class="tag" id="t-ws"></span></div>
-          <div class="chart" id="c-ws"></div>
-        </div>
-        <div class="card" id="canary">
-          <div class="card-head"><h2>점검(canary)</h2><span class="q" title="5분마다 바깥에서 사이트를 점검하는 Lambda — 선은 걸린 시간, 빨간 점은 오류.">?</span><span class="tag" id="t-canary"></span></div>
-          <div class="chart" id="c-canary"></div>
-        </div>
-        <div class="card" id="checks">
-          <div class="card-head"><h2>상태 검사</h2><span class="q" title="EC2 상태 검사 — 실패한 구간을 빨간 띠로.">?</span><span class="tag" id="t-checks"></span></div>
-          <div class="chart" id="c-checks"></div>
-        </div>
-      </section>
-
-      <section class="card" id="collect" aria-labelledby="h-collect">
-        <div class="card-head"><h2 id="h-collect">수집 상태</h2><span class="q" title="원천마다 최근 24시간 — 초록 정상, 빨강 실패 구간(차단·rate limit 은 굵게). 이름 옆은 1시간 성공률.">?</span><span class="tag" id="t-collect"></span></div>
-        <div class="chart tall" id="c-collect"></div>
-      </section>
-
-      <section class="grid" aria-label="경보·비용">
-        <div class="card" id="alarms">
-          <div class="card-head"><h2>경보</h2><span class="q" title="CloudWatch 경보(빨강 ALARM · 회색 데이터 부족 · 초록 OK)와 지난 7일 알림 — 원은 Slack, 마름모는 경보 상태 변경.">?</span><span class="tag" id="t-alarms"></span></div>
-          <div class="pills" id="alarm-pills"></div>
-          <div class="chart" id="c-alerts"></div>
-        </div>
-        <div class="card" id="cost">
-          <div class="card-head"><h2>비용</h2><span class="q" title="이번 달 예산 — 호는 실제, 바늘은 AWS 예측, 붉은 칸은 한도 넘음.">?</span><span class="tag" id="t-cost"></span></div>
-          <div class="chart gauge" id="c-cost"></div>
-          <dl class="kv" id="cost-rows"></dl>
-        </div>
-      </section>
-
-      <details class="card" id="tools">
-        <summary>도구</summary>
-        <div class="tools">
-          <div class="bar">
-            <label for="token" class="sub">갱신 토큰</label>
-            <input id="token" type="password" autocomplete="off" spellcheck="false" class="input" />
-            <button id="refresh" type="button" class="btn">즉시 갱신</button>
-            <span class="q" title="수집기에 마켓 목록·구독·입출금 상태를 지금 다시 읽힌다(진단용). 토큰은 저장하지 않는다.">?</span>
+      </aside>
+      <div class="page">
+        <div class="top"><button type="button" class="ibtn" id="menu-btn" aria-label="메뉴" aria-expanded="false" aria-controls="side"><svg class="i" aria-hidden="true"><use href="icons.svg#menu"/></svg></button><b>KimpTrack 관리자</b></div>
+        <header class="head">
+          <h1>서버</h1><span class="ask">어느 상자의 무엇이</span>
+          <div class="tools">
+            <div class="seg" role="group" aria-label="기간"><button type="button" data-range="6h" aria-pressed="false">6시간</button><button type="button" data-range="24h" aria-pressed="true">24시간</button><button type="button" data-range="7d" aria-pressed="false">7일</button><button type="button" data-range="30d" aria-pressed="false">30일</button></div>
+            <div class="seg" role="group" aria-label="비교"><span class="seg-label"><svg class="i" aria-hidden="true"><use href="icons.svg#compare"/></svg>비교</span><button type="button" data-cmp="none" aria-pressed="true">없음</button><button type="button" data-cmp="prev" aria-pressed="false" title="단축키 X">이전 기간</button><button type="button" data-cmp="week" aria-pressed="false">지난주</button></div>
+            <span class="tick">10초마다 · <span id="clock">--:--:--</span></span>
           </div>
-          <dl id="refresh-result" class="kv" hidden>
-            <dt>HTTP</dt><dd id="refresh-status"></dd>
-            <dt>저장</dt><dd id="refresh-saved"></dd>
-            <dt>실패</dt><dd id="refresh-failures"></dd>
-            <dt>경고</dt><dd id="refresh-warnings"></dd>
-          </dl>
-          <ul class="links">
-            <li><a href="/api/docs">API 문서</a></li>
-            <li><a href="/api/redoc">ReDoc</a></li>
-            <li><a rel="noreferrer" href="https://ap-northeast-2.console.aws.amazon.com/cloudwatch/home?region=ap-northeast-2#alarmsV2:">CloudWatch 경보</a></li>
-            <li><a rel="noreferrer" href="https://ap-northeast-2.console.aws.amazon.com/cloudwatch/home?region=ap-northeast-2#metricsV2:graph=~();namespace=MarketLens">CloudWatch 지표</a></li>
-            <li><a rel="noreferrer" href="https://ap-northeast-2.console.aws.amazon.com/lambda/home?region=ap-northeast-2#/functions/marketlens-smoke">Lambda marketlens-smoke</a></li>
-            <li><a rel="noreferrer" href="https://ap-northeast-2.console.aws.amazon.com/cloudwatch/home?region=ap-northeast-2#logsV2:log-groups/log-group/$252Faws$252Flambda$252Fmarketlens-smoke">canary 로그</a></li>
-            <li><a rel="noreferrer" href="https://us-east-1.console.aws.amazon.com/billing/home#/budgets">예산</a></li>
-            <li><a rel="noreferrer" href="https://clarity.microsoft.com/projects">Clarity</a></li>
-            <li><a rel="noreferrer" href="https://one.dash.cloudflare.com/">Cloudflare Zero Trust</a></li>
-            <li><a rel="noreferrer" href="https://dash.cloudflare.com/">Cloudflare DNS</a></li>
-            <li><a rel="noreferrer" href="https://github.com/doldolgo/marketLens/actions">GitHub Actions</a></li>
-          </ul>
+        </header>
+        <div class="filters" id="filters" hidden></div>
+        <p id="notice" class="notice" role="alert" hidden></p>
+        <main class="content" id="content">
+          <div class="kchips s12" role="group" aria-label="상자 거르기 — 범례">
+            <button type="button" class="kchip" data-box="collect" aria-pressed="true"><i class="key k1"></i>collect<span class="dim">수집기</span></button>
+            <button type="button" class="kchip" data-box="data" aria-pressed="true"><i class="key k2"></i>data<span class="dim">Influx·Redis</span></button>
+            <button type="button" class="kchip" data-box="serve" aria-pressed="true"><i class="key k3"></i>serve<span class="dim">caddy·web·api</span></button>
+            <button type="button" class="linkbtn" id="unzoom">확대 풀기</button>
+          </div>
+          <section class="card s6" id="card-cpu" aria-labelledby="h-cpu">
+            <header class="card-head"><h2 id="h-cpu"><button type="button" class="t" data-detail="cpu">CPU</button></h2><span class="unit">% · 상자별</span><span class="help" title="점선은 주의 75 · 문제 90(상태 띠 규칙). Ctrl+휠로 확대하면 같은 페이지의 시간 차트가 함께 움직인다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-cpu"></span><button type="button" class="ibtn" data-detail="cpu" aria-label="CPU 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart" id="c-cpu"></div>
+          <p class="card-foot" id="f-cpu"></p>
+          </section>
+          <section class="card s6" id="card-net" aria-labelledby="h-net">
+            <header class="card-head"><h2 id="h-net"><button type="button" class="t" data-detail="net">네트워크</button></h2><span class="unit">초당 · 위 들어옴 · 아래 나감</span><span class="help" title="상자마다 한 칸(크기가 수십 배 달라 세로 눈금이 따로다)."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-net"></span><button type="button" class="ibtn" data-detail="net" aria-label="네트워크 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart h320" id="c-net"></div>
+          </section>
+          <section class="card s6" id="card-mem" aria-labelledby="h-mem">
+            <header class="card-head"><h2 id="h-mem"><button type="button" class="t" data-detail="mem">메모리</button></h2><span class="unit">% · 상자별</span><span class="help" title="100 − 가용률. 점선은 주의 80 · 문제 90."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-mem"></span><button type="button" class="ibtn" data-detail="mem" aria-label="메모리 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart" id="c-mem"></div>
+          <p class="card-foot" id="f-mem"></p>
+          </section>
+          <section class="card s6" id="card-disk" aria-labelledby="h-disk">
+            <header class="card-head"><h2 id="h-disk"><button type="button" class="t" data-detail="disk">디스크</button></h2><span class="unit">% · 상자별</span><span class="help" title="점선은 주의 75 · 문제 85."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-disk"></span><button type="button" class="ibtn" data-detail="disk" aria-label="디스크 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart" id="c-disk"></div>
+          <p class="card-foot" id="f-disk"></p>
+          </section>
+          <section class="card s6" id="card-credit" aria-labelledby="h-credit">
+            <header class="card-head"><h2 id="h-credit"><button type="button" class="t" data-detail="credit">CPU 크레딧</button></h2><span class="unit">잔량 · 사용 · 초과 과금</span><span class="help" title="크레딧이 있는 상자(t4g)만. 위 잔량, 아래 사용과 초과 과금(빨강)."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-credit"></span><button type="button" class="ibtn" data-detail="credit" aria-label="CPU 크레딧 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart h320" id="c-credit"></div>
+          </section>
+          <section class="card s6" id="card-io" aria-labelledby="h-io">
+            <header class="card-head"><h2 id="h-io"><button type="button" class="t" data-detail="io">디스크 입출력</button></h2><span class="unit">초당 · 위 읽기 · 아래 쓰기</span><span class="help" title="상자마다 한 칸, EBS 초당 바이트."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-io"></span><button type="button" class="ibtn" data-detail="io" aria-label="디스크 입출력 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart h320" id="c-io"></div>
+          </section>
+          <section class="card s12" id="card-collect" aria-labelledby="h-collect">
+            <header class="card-head"><h2 id="h-collect"><button type="button" class="t" data-detail="collect">수집 상태</button></h2><span class="unit">24시간 · 원천별</span><span class="help" title="정상은 옅은 가는 줄, 끊긴 구간은 칸 가득 빨강, 자료 없음은 빗금. 오른쪽은 마지막 성공 · 1시간 성공률."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-collect"></span><button type="button" class="ibtn" data-detail="collect" aria-label="수집 상태 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart h320" id="c-collect"></div>
+          </section>
+          <section class="card s6" id="card-alarms" aria-labelledby="h-alarms">
+            <header class="card-head"><h2 id="h-alarms"><button type="button" class="t" data-detail="alarms">경보</button></h2><span class="unit">지난 7일</span><span class="help" title="알약 = 지금 OK 가 아닌 경보. 줄 = ALARM 구간, 맨 아래 = Slack 알림 점."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-alarms"></span><button type="button" class="ibtn" data-detail="alarms" aria-label="경보 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chips" id="alarm-pills"></div>
+            <div class="chart h280" id="c-alarms"></div>
+          </section>
+          <section class="card s6" id="card-cost" aria-labelledby="h-cost">
+            <header class="card-head"><h2 id="h-cost"><button type="button" class="t" data-detail="cost">비용</button></h2><span class="unit">이번 달 예산</span><span class="help" title="호와 긴 바늘은 실제, 짧은 흐린 바늘은 AWS 예측. 붉은 칸은 한도 넘음."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-cost"></span><button type="button" class="ibtn" data-detail="cost" aria-label="비용 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart h200" id="c-cost"></div>
+            <dl class="kv" id="cost-rows"></dl>
+          </section>
+          <section class="card s4" id="card-ws" aria-labelledby="h-ws">
+            <header class="card-head"><h2 id="h-ws"><button type="button" class="t" data-detail="ws">WS 접속</button></h2><span class="unit">대시보드 연결 수</span><span class="help" title="api 의 대시보드 연결 수 — CloudWatch 주기마다 최댓값."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-ws"></span><button type="button" class="ibtn" data-detail="ws" aria-label="WS 접속 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart h200" id="c-ws"></div>
+          <p class="card-foot" id="f-ws"></p>
+          </section>
+          <section class="card s4" id="card-canary" aria-labelledby="h-canary">
+            <header class="card-head"><h2 id="h-canary"><button type="button" class="t" data-detail="canary">점검(canary)</button></h2><span class="unit">걸린 시간 · 오류</span><span class="help" title="5분마다 바깥에서 사이트를 점검하는 Lambda — 선은 걸린 시간, 아래 칸은 오류."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-canary"></span><button type="button" class="ibtn" data-detail="canary" aria-label="점검(canary) 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart h200" id="c-canary"></div>
+          </section>
+          <section class="card s4" id="card-checks" aria-labelledby="h-checks">
+            <header class="card-head"><h2 id="h-checks"><button type="button" class="t" data-detail="checks">상태 검사</button></h2><span class="unit">EC2</span><span class="help" title="실패한 구간을 칸 가득 빨강으로. 자료 없음은 빗금."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-checks"></span><button type="button" class="ibtn" data-detail="checks" aria-label="상태 검사 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart h200" id="c-checks"></div>
+          </section>
+          <details class="card s12" id="tools">
+            <summary>도구</summary>
+            <div class="bar">
+              <label for="token" class="dim">갱신 토큰</label>
+              <input id="token" type="password" autocomplete="off" spellcheck="false" class="input" />
+              <button id="refresh" type="button" class="btn">즉시 갱신</button>
+              <span class="help" title="수집기에 마켓 목록·구독·입출금 상태를 지금 다시 읽힌다(진단용). 토큰은 저장하지 않는다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span>
+            </div>
+            <dl id="refresh-result" class="kv" hidden>
+              <dt>HTTP</dt><dd id="refresh-status"></dd>
+              <dt>저장</dt><dd id="refresh-saved"></dd>
+              <dt>실패</dt><dd id="refresh-failures"></dd>
+              <dt>경고</dt><dd id="refresh-warnings"></dd>
+            </dl>
+            <ul class="links">
+              <li><a href="/api/docs">API 문서</a></li>
+              <li><a href="/api/redoc">ReDoc</a></li>
+              <li><a rel="noreferrer" href="https://ap-northeast-2.console.aws.amazon.com/cloudwatch/home?region=ap-northeast-2#alarmsV2:">CloudWatch 경보</a></li>
+              <li><a rel="noreferrer" href="https://ap-northeast-2.console.aws.amazon.com/cloudwatch/home?region=ap-northeast-2#metricsV2:graph=~();namespace=MarketLens">CloudWatch 지표</a></li>
+              <li><a rel="noreferrer" href="https://ap-northeast-2.console.aws.amazon.com/lambda/home?region=ap-northeast-2#/functions/marketlens-smoke">Lambda marketlens-smoke</a></li>
+              <li><a rel="noreferrer" href="https://ap-northeast-2.console.aws.amazon.com/cloudwatch/home?region=ap-northeast-2#logsV2:log-groups/log-group/$252Faws$252Flambda$252Fmarketlens-smoke">canary 로그</a></li>
+              <li><a rel="noreferrer" href="https://us-east-1.console.aws.amazon.com/billing/home#/budgets">예산</a></li>
+              <li><a rel="noreferrer" href="https://clarity.microsoft.com/projects">Clarity</a></li>
+              <li><a rel="noreferrer" href="https://one.dash.cloudflare.com/">Cloudflare Zero Trust</a></li>
+              <li><a rel="noreferrer" href="https://dash.cloudflare.com/">Cloudflare DNS</a></li>
+              <li><a rel="noreferrer" href="https://github.com/doldolgo/marketLens/actions">GitHub Actions</a></li>
+            </ul>
+          </details>
+        </main>
+      </div>
+    </div>
+    <div class="sheet" id="sheet" hidden>
+      <section class="sheet-panel" id="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1">
+        <header class="sheet-head">
+          <h2 id="sheet-title">상세</h2>
+          <span class="unit" id="sheet-unit"></span>
+          <span class="tag" id="t-sheet"></span>
+          <div class="tools">
+            <button type="button" class="ibtn" id="sheet-prev" aria-label="이전 항목" title="이전" hidden><svg class="i" aria-hidden="true"><use href="icons.svg#prev"/></svg></button>
+            <button type="button" class="ibtn" id="sheet-next" aria-label="다음 항목" title="다음" hidden><svg class="i" aria-hidden="true"><use href="icons.svg#next"/></svg></button>
+            <div class="seg" role="group" aria-label="상세 기간" id="sheet-ranges"></div>
+            <div class="seg" role="group" aria-label="상세 비교"><span class="seg-label"><svg class="i" aria-hidden="true"><use href="icons.svg#compare"/></svg>비교</span><button type="button" data-scmp="none">없음</button><button type="button" data-scmp="prev">이전 기간</button><button type="button" data-scmp="week">지난주</button></div>
+            <button type="button" class="btn" id="sheet-csv"><svg class="i" aria-hidden="true"><use href="icons.svg#download"/></svg>CSV</button>
+            <button type="button" class="ibtn" id="sheet-close" aria-label="닫기 (Esc)" title="닫기 (Esc)"><svg class="i" aria-hidden="true"><use href="icons.svg#close"/></svg></button>
+          </div>
+        </header>
+        <div class="sheet-sub" id="sheet-chips"></div>
+        <div class="sheet-body">
+          <p class="note" id="sheet-note"></p>
+          <section class="panel" id="sheet-graph" hidden>
+            <div class="panel-head"><span>그래프</span><span class="unit" id="sheet-window"></span><span class="end"><button type="button" class="btn" id="sheet-select" aria-pressed="false" title="끌어서 고른 구간으로 확대"><svg class="i" aria-hidden="true"><use href="icons.svg#zoom"/></svg>구간 확대</button><button type="button" class="btn" id="sheet-reset"><svg class="i" aria-hidden="true"><use href="icons.svg#reset"/></svg>원래대로</button></span></div>
+            <div class="chart big-chart" id="c-sheet"></div>
+          </section>
+          <section class="panel" id="sheet-stats" hidden>
+            <div class="panel-head"><span>통계</span><span class="unit">보이는 구간 기준</span></div>
+            <div class="scroll"><table class="tbl" id="sheet-stat-tbl"></table></div>
+          </section>
+          <section class="panel" id="sheet-custom" hidden></section>
+          <section class="panel" id="sheet-table" hidden>
+            <div class="panel-head"><span id="sheet-table-title">원자료</span><span class="end"><label class="search" id="sheet-find-box" hidden><svg class="i" aria-hidden="true"><use href="icons.svg#search"/></svg><input class="input" id="sheet-find" type="search" placeholder="찾기" autocomplete="off" aria-label="표에서 찾기" /></label></span></div>
+            <div class="scroll"><table class="tbl" id="sheet-tbl"></table></div>
+            <div class="list-foot"><span id="sheet-count"></span><button type="button" class="linkbtn" id="sheet-more" hidden>200행 더 보기</button></div>
+          </section>
+          <div class="related" id="sheet-related" hidden></div>
         </div>
-      </details>
-    </main>
+      </section>
+    </div>
   </body>
 </html>

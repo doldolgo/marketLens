@@ -1,6 +1,5 @@
-"""관리자 화면 v3 의 계산 — 큰 수·흐름 그림·바이트 단위·툴팁 글자·이름표 (스펙 064 §4 node).
-
-`web/admin` 의 모듈을 node 에 가짜 document 와 싣고(보이지 않는 탭 — 요청 0) 공개한 계산 함수만 부른다.
+"""관리자 화면 v4 의 계산 (스펙 066 §4 node) — 상세 판 통계(경계값·null 섞임)·CSV 글자(따옴표·쉼표·한국어·UTC/KST)·비교선 시각 이동
+(068 offset·지난주·1시간·offset 을 모르는 서버·접속 요약의 더 긴 창)·상위 목록 막대 폭·100% 띠 다섯 + 기타. 공개 함수만 부른다.
 """
 
 from typing import Any
@@ -12,125 +11,208 @@ from tests.test_admin_rules import NOW
 
 SCENARIO = r"""
 setup({ visible: false, respond: () => [404, {}] })
+const calc = await page('calc.js')
 const common = await page('common.js')
-const charts = await page('charts.js')
-const overview = await page('overview.js')
-const traffic = await page('traffic.js')
-const now = input.now
-out.bytes = [0, 512, 1023, 1024, 1536, 10240, 1048576, -2048, 5e12, null].map(common.bytes)
-const day = (d) => ({ ts: d, confirmed: 3, shaped: 9 })
-const kst0 = Math.floor((input.now / 1000 + 32400) / 86400) * 86400 - 32400
-out.today = [
-  overview.todayVisitors({ endTs: input.now / 1000, visitors: { state: 'ok', days: [day(kst0 - 86400), { ts: kst0, confirmed: 2, shaped: 7 }] } }),
-  overview.todayVisitors({ endTs: input.now / 1000, visitors: { state: 'ok', days: [day(kst0 - 86400)] } }),
-  overview.todayVisitors({ endTs: input.now / 1000, visitors: { state: 'unconfigured', code: 'before_gate' } }),
-]
-const top = Math.floor(now / 3600000) * 3600000
-const rate = overview.hourlySuccess({ exchanges: [{}, {}], outages: [{ startedAt: top - 3 * 3600000, endedAt: top - 3 * 3600000 + 1800000 }, { startedAt: top - 600000, endedAt: null }] }, now)
-out.success = { n: rate.length, early: rate.find((p) => p[0] * 1000 === top - 3 * 3600000)?.[1], current: rate.at(-1)?.[1], other: rate[0][1] }
-const hours = overview.alertHours([{ source: 'slack', at: now - 1000 }, { source: 'alarm', toState: 'ALARM', at: now - 2000 }, { source: 'alarm', toState: 'OK', at: now - 3000 }, { source: 'slack', at: now - 2 * 86400000 }], now)
-out.alerts = { n: hours.length, last: hours.at(-1)[1], sum: hours.reduce((s, h) => s + h[1], 0) }
-out.bots = [traffic.botShare({ totals: { requests: 1000 }, classes: { scanner: { requests: 220 }, tool: { requests: 130 }, ai: { requests: 60 } } }), traffic.botShare({ totals: { requests: 0 } })]
-const worst = common.worstMonthly({ items: [{ timeUnit: 'MONTHLY', limit: 100, actual: 20, forecast: 120 }, { timeUnit: 'MONTHLY', limit: 50, actual: 30 }, { timeUnit: 'ANNUALLY', limit: 10, actual: 9 }] })
-out.worst = [worst.b.limit, worst.tone, common.worstMonthly({ items: [{ timeUnit: 'MONTHLY', limit: 100, actual: 20, forecast: 120 }] }).tone, common.worstMonthly({ items: [] })]
-out.flows = traffic.flowGraph(input.flows)
-out.tip = charts.tip('<img src=x onerror=alert(1)>', [['c0', '<img src=x onerror=alert(1)>', '<b>9</b>'], ['x" onmouseover="alert(1)', 'a', 'b']])
-out.countries = ['KR', 'US', 'ZZ', '(기타)', 'kr'].map(traffic.countryLabel)
-out.names = [traffic.channelName('direct'), traffic.channelName('constructor'), traffic.pageName('app-history'), traffic.pageName('__proto__')]
+const models = await page('models.js')
+const H = 3600000
+// 상세 판 통계 — 구간 경계 포함·null 섞임·정렬 안 된 입력
+const pts = [[40, 3], [0, 5], [10, null], [20, 1], [30, 9]]
+out.stats = [calc.stats(pts), calc.stats(pts, 10, 30), calc.stats(pts, 50, 60), calc.stats(Array.from({ length: 20 }, (_, i) => [i, i + 1])), calc.stats([[1, 7]])]
+out.change = [calc.change(110, 100), calc.change(5, 0), calc.change(-5, -10), calc.change(null, 1)]
+out.delta = [calc.deltaText(110, 100, '어제 같은 때'), calc.deltaText(88, 100, '앞 7일'), calc.deltaText(100.2, 100, '전날'), calc.deltaText(1, 0, 'x')]
+// CSV — 따옴표·쉼표·줄바꿈·한국어·수식 막기, BOM·CRLF, UTC/KST 두 칸, 파일 이름
+out.cells = ['=1+1', '+82', '-x', '@a', 'a,b', 'say "hi"', '줄\n바꿈', '한국어', 3.5, -2, null, Infinity].map(calc.csvCell)
+out.csv = calc.toCsv(['이름', '값'], [['a,b', 1], ['한국어', null]])
+const t0 = Date.UTC(2026, 9, 14, 0, 0)
+out.series = calc.seriesCsv([{ name: 'CPU', data: [[t0, 12.5], [t0 + 300000, null]], cmp: [[t0, 10]] }, { name: 'data', data: [[t0 + 300000, 3]] }], t0, t0 + 300000)
+out.name = calc.csvName('ip:203.0.113.0/24', t0, t0 + 6 * H)
+// 비교선 — 이전 기간 점을 지금 축으로(시각 + 기간 길이)
+out.align = calc.align([[0, 1], [10, 2], [20, 3], [35, 4]], 15, 30, 10)
+out.valueAt = [calc.valueAt([[0, 1], [10, null], [20, 3]], 15), calc.valueAt([[0, 1]], -1)]
+// 상위 목록 — 큰 순, 막대 폭 = 값 ÷ 최댓값, 비율 = 값 ÷ 분모, 0·틀린 행은 뺀다
+out.top = calc.topRows([{ key: 'a', value: 5 }, { key: 'b', value: 20 }, { key: 'c', value: 0 }, { key: 'd', value: 10 }, null], 2, 40)
+const list = document.getElementById('l')
+;(await page('ui.js')).topList('l', [{ key: 'a', name: 'A', value: 5 }, { key: 'b', name: 'B', value: 20 }], { n: 6, fmt: common.int, more: () => {} })
+out.topDom = list.kids[0].kids.map((row) => [row.kids[0].style.width, row.textContent])
+out.topFoot = list.kids[1].textContent
+// 100% 띠 — 다섯 + 기타(나머지·이름이 기타인 칸)
+out.split = calc.split100(['a', 'b', 'c', 'd', 'e', 'f', 'other', '(기타)'].map((key, i) => ({ key, value: 8 - i })))
+out.split0 = calc.split100([{ key: 'a', value: 0 }])
+;(await page('ui.js')).bar100s('b', [{ name: '기기', items: [{ key: 'x', name: 'X', value: 3, mark: 'k1' }, { key: 'y', name: 'Y', value: 1, mark: 'k2' }], fmt: common.int }])
+out.barDom = document.getElementById('b').kids[0].kids[1].kids.map((seg) => [seg.className, seg.style.width])
+// 시간 창 모델 — 가짜 app(열쇠 → 결과)
+const fakeApp = (bodies) => ({ entry: (r) => (bodies[r.key] === undefined ? undefined : bodies[r.key] === 404 ? { off: true } : { body: bodies[r.key], text: 'x' }), now: () => input.now, view: { f: [] }, filters: () => [] })
+const END = 1_800_000_000
+const series = (start, end, extra = {}) => ({ state: 'ok', periodSec: 300, startTs: start, endTs: end, boxes: [], wsClients: [[start, 1], [end - 300, 2]], ...extra })
+const W = (bodies, range, cmp) => { const w = models.seriesWindow(fakeApp(bodies), range, cmp); return { ok: w.ok, state: w.cmpState, start: w.startMs, end: w.endMs, line: w.ok ? w.line((p) => p.wsClients) : null } }
+const r = (range, extra) => models.seriesReqs(range, extra)
+out.reqs = [r('24h', 'prev'), r('1h', 'prev'), r('6h', 'week'), r('7d', 'week'), r('30d', 'none')].map((x) => x.map((q) => q.url))
+out.prev24 = W({ [r('24h', 'prev')[0].key]: series(END - 86400, END), [r('24h', 'prev')[1].key]: series(END - 2 * 86400 + 600, END - 86400 + 600, { offset: 'prev' }) }, '24h', 'prev')
+out.week6 = W({ [r('6h', 'week')[0].key]: series(END - 21600, END), [r('6h', 'week')[1].key]: series(END - 14 * 86400, END - 7 * 86400, { offset: 'prev' }) }, '6h', 'week')
+out.accessWeek = [models.accessCompare('7d'), models.accessReqs('7d', 'week').map((q) => q.url)]
+out.hour = W({ [r('1h', 'prev')[0].key]: series(END - 21600, END) }, '1h', 'prev')
+out.compareBefore = models.seriesCompare('24h')
+out.old = W({ [r('24h', 'prev')[0].key]: series(END - 86400, END), [r('24h', 'prev')[1].key]: series(END - 86400, END) }, '24h', 'prev')
+out.compareAfter = [models.seriesCompare('24h'), models.seriesCompare('1h'), models.seriesCompare('6h'), models.seriesCompare('7d'), models.seriesCompare('30d')]
+const hours = (start, n, v) => Array.from({ length: n }, (_, i) => ({ ts: start + i * 3600, humanPages: v(i) }))
+const acc = (start, n, v) => ({ state: 'ok', startTs: start, endTs: start + n * 3600, hourly: hours(start, n, v) })
+const a24 = models.accessReqs('24h', 'prev')
+const aw = models.accessWindow(fakeApp({ [a24[0].key]: acc(END - 86400, 24, () => 5), [a24[1].key]: acc(END - 7 * 86400, 168, (i) => i) }), '24h', 'prev')
+out.access = { state: aw.cmpState, line: aw.hours('humanPages'), compare: [models.accessCompare('24h'), models.accessCompare('30d')] }
 """
-
-FLOWS = [
-    ["direct", "landing", "landing", 3, 10],
-    ["direct", "landing", "app-spread", 2, 8],
-    ["search", "kimp-chart", "landing", 1, 5],
-    ["direct", "app-spread", "app-spread", 0, 0],  # 모양 0 — 빠진다
-    ["direct", 7, "landing", 1, 1],  # 글자가 아닌 이름 — 빠진다
-    "깨진 줄",
-    ["(기타)", "(기타)", "(기타)", 1, 4],
-]
 
 
 @pytest.fixture(scope="module")
 def got() -> dict[str, Any]:
-    return run_admin(SCENARIO, {"now": NOW, "flows": FLOWS})
+    return run_admin(SCENARIO, {"now": NOW})
 
 
-def test_bytes_pick_units_automatically(got: dict[str, Any]) -> None:
-    """§3.5 — 1024 단위 B·KB·MB·GB·TB, 10 미만은 소수 1자리, 음수(아래로 뒤집은 면적)는 크기만, null 은 '–'."""
-    assert got["bytes"] == [
-        "0 B",
-        "512 B",
-        "1,023 B",
-        "1.0 KB",
-        "1.5 KB",
-        "10 KB",
-        "1.0 MB",
-        "2.0 KB",
-        "4.5 TB",
-        "–",
-    ]
-
-
-def test_big_numbers_today_visitors_success_alerts_bots_budget(
-    got: dict[str, Any],
-) -> None:
-    """§3.2 2 — 오늘(KST) 방문자 [확인, 모양](오늘 칸 없으면 0, 시행 전 null), 시간별 성공률(원천 둘·30분 끊김 = 75%,
-    진행 중 구간), 시간별 알림(Slack + ALARM 으로 바뀐 경보, 24칸), 봇 비율(스캐너 + 도구 ÷ 전체), 가장 나쁜 월 예산."""
-    assert got["today"] == [[2, 7], [0, 0], None]
-    success = got["success"]
-    assert success["n"] == 24
-    assert success["early"] == 75
-    assert success["other"] == 100
-    assert success["current"] < 100
-    assert got["alerts"] == {"n": 24, "last": 2, "sum": 2}
-    assert got["bots"] == [35, None]
-    assert got["worst"] == [50, "ok", "warn", None]
-
-
-def test_flows_become_sankey_nodes_and_links(got: dict[str, Any]) -> None:
-    """§4 — 층 머리로 들어온/나간 같은 페이지를 다른 마디로, 고리 굵기 = 모양 합(확인은 c), (기타)는 세 층 마디, 모양 0·틀린 줄은 뺀다."""
-    flows = got["flows"]
-    assert [n["name"] for n in flows["nodes"]] == [
-        "0:direct",
-        "1:landing",
-        "2:landing",
-        "2:app-spread",
-        "0:search",
-        "1:kimp-chart",
-        "0:(기타)",
-        "1:(기타)",
-        "2:(기타)",
-    ]
-    assert [n["depth"] for n in flows["nodes"]] == [0, 1, 2, 2, 0, 1, 0, 1, 2]
-    labels = {n["name"]: n["label"] for n in flows["nodes"]}
-    assert labels["1:landing"] == labels["2:landing"] == "랜딩"
-    assert labels["0:direct"] == "직접" and labels["2:(기타)"] == "(기타)"
-    links = {(x["source"], x["target"]): (x["value"], x["c"]) for x in flows["links"]}
-    assert links == {
-        ("0:direct", "1:landing"): (18, 5),
-        ("1:landing", "2:landing"): (10, 3),
-        ("1:landing", "2:app-spread"): (8, 2),
-        ("0:search", "1:kimp-chart"): (5, 1),
-        ("1:kimp-chart", "2:landing"): (5, 1),
-        ("0:(기타)", "1:(기타)"): (4, 1),
-        ("1:(기타)", "2:(기타)"): (4, 1),
+def test_detail_stats_over_the_visible_window(got: dict[str, Any]) -> None:
+    """066 §3.2 — 보이는 구간 [from, to] 안 null 아닌 값의 최소·평균·최대·p95(가장 가까운 순위 — 올림)·마지막(가장 늦은 점)."""
+    full, window, none, twenty, one = got["stats"]
+    assert full == {"n": 4, "min": 1, "avg": 4.5, "max": 9, "p95": 9, "last": 3}
+    assert window == {"n": 2, "min": 1, "avg": 5, "max": 9, "p95": 9, "last": 9}
+    assert none == {
+        "n": 0,
+        "min": None,
+        "avg": None,
+        "max": None,
+        "p95": None,
+        "last": None,
     }
+    assert twenty["p95"] == 19 and twenty["avg"] == 10.5
+    assert one == {"n": 1, "min": 7, "avg": 7, "max": 7, "p95": 7, "last": 7}
+    assert got["change"] == [
+        {"diff": 10, "pct": 10},
+        {"diff": 5, "pct": None},
+        {"diff": 5, "pct": 50},
+        {"diff": None, "pct": None},
+    ]
+    assert got["delta"] == [
+        "어제 같은 때보다 ▲ 10%",
+        "앞 7일보다 ▼ 12%",
+        "전날보다 – 0%",
+        "",
+    ]
 
 
-def test_tooltip_html_turns_feed_text_into_plain_text(got: dict[str, Any]) -> None:
-    """§3.1 보안 — 툴팁 서식의 글자는 encodeHTML 을 지나 `<img onerror>` 가 글로 나오고, 표시 클래스는 허용 목록만."""
-    html = got["tip"]
-    assert "<img" not in html and "<b>9" not in html
-    assert html.count("&lt;img src=x onerror=alert(1)&gt;") == 2
-    assert "&lt;b&gt;9&lt;/b&gt;" in html
-    assert "onmouseover" not in html
-    assert '<i class="tt-k c0"></i>' in html
+def test_csv_text_quotes_formulas_korean_and_two_clocks(got: dict[str, Any]) -> None:
+    """066 §3.2 — CSV: 보이는 구간·계열 그대로, 시각은 UTC·KST 두 칸, 이전 기간은 그 계열 옆 칸, BOM·CRLF, 파일 이름 kimptrack-<id>-<시작>-<끝>."""
+    assert got["cells"] == [
+        "'=1+1",
+        "'+82",
+        "'-x",
+        "'@a",
+        '"a,b"',
+        '"say ""hi"""',
+        '"줄\n바꿈"',
+        "한국어",
+        "3.5",
+        "-2",
+        "",
+        "",
+    ]
+    assert got["csv"] == '﻿이름,값\r\n"a,b",1\r\n한국어,\r\n'
+    assert got["series"].split("\r\n") == [
+        "﻿시각(UTC),시각(KST),CPU,CPU (이전),data",
+        "2026-10-14T00:00:00Z,2026-10-14 09:00:00,12.5,10,",
+        "2026-10-14T00:05:00Z,2026-10-14 09:05:00,,,3",
+        "",
+    ]
+    assert got["name"] == "kimptrack-ip-203.0.113.0-24-20261014T0900-20261014T1500.csv"
 
 
-def test_country_and_name_labels(got: dict[str, Any]) -> None:
-    """나라는 국기 그림 문자 + 한국어 이름, 못 푸는 값은 글자 그대로. 이름표 밖 값(constructor·__proto__)은 원래 글자."""
-    kr, us, zz, other, low = got["countries"]
-    assert kr == "\U0001f1f0\U0001f1f7 대한민국"
-    assert us.startswith("\U0001f1fa\U0001f1f8 ")
-    assert [zz, other, low] == ["ZZ", "(기타)", "kr"]
-    assert got["names"] == ["직접", "constructor", "대시보드 기록", "__proto__"]
+def test_comparison_lines_move_onto_the_current_axis(got: dict[str, Any]) -> None:
+    """066 §3.2 — 이전 기간 = 068 offset=prev(1시간은 6시간 응답 안에서), 지난주 같은 때 = 7일 창의 이전 기간(offset=prev)에서 잘라
+    (7일 이하 — 지금 7일 창은 지난주 같은 때를 담지 않는다). offset 을 모르는 서버(068 전 — offset 키 없음)는 비교 없음이고 그 뒤 이 문서에서
+    offset 을 쓰는 비교 단추(이전 기간·지난주)가 꺼진다. 접속 요약 24시간의 지난주는 7일 창 밖이라 없다. 시각으로 맞춘다(배열 순서가 아니라)."""
+    assert got["align"] == [[20, 2], [30, 3]]
+    assert got["valueAt"] == [1, None]
+    assert got["reqs"] == [
+        [
+            "/api/admin/aws/series?range=24h",
+            "/api/admin/aws/series?range=24h&offset=prev",
+        ],
+        ["/api/admin/aws/series?range=6h"],
+        [
+            "/api/admin/aws/series?range=6h",
+            "/api/admin/aws/series?range=7d&offset=prev",
+        ],
+        [
+            "/api/admin/aws/series?range=7d",
+            "/api/admin/aws/series?range=7d&offset=prev",
+        ],
+        ["/api/admin/aws/series?range=30d"],
+    ]
+    end = 1_800_000_000_000
+    prev = got["prev24"]
+    assert (prev["ok"], prev["state"], prev["start"], prev["end"]) == (
+        True,
+        "ok",
+        end - 86_400_000,
+        end,
+    )
+    assert (
+        prev["line"]["cmp"] == [[end - 86_400_000 + 600_000, 1], [end + 300_000, 2]][:1]
+    )  # 창 밖(끝 뒤)은 잘린다
+    # 7일 창 이전 기간의 (끝 − 7일 − 5분) 점이 지금 축의 (끝 − 5분)으로 — 창 밖 점은 잘린다
+    assert got["week6"]["state"] == "ok" and got["week6"]["line"]["cmp"] == [
+        [end - 300_000, 2]
+    ]
+    hour = got["hour"]
+    assert (hour["state"], hour["start"]) == ("ok", end - 3_600_000) and hour["line"][
+        "data"
+    ] == [[end - 300_000, 2]]
+    assert hour["line"]["cmp"] == []
+    assert got["compareBefore"] == {"prev": True, "week": True}
+    assert got["old"]["state"] == "missing" and got["old"]["line"]["cmp"] is None
+    assert got["compareAfter"] == [
+        {"prev": False, "week": False},
+        {"prev": True, "week": False},
+        {"prev": False, "week": False},
+        {"prev": False, "week": False},
+        {"prev": False, "week": False},
+    ]
+    access = got["access"]
+    assert (
+        access["state"] == "ok"
+        and len(access["line"]["data"]) == 24
+        and len(access["line"]["cmp"]) == 24
+    )
+    # 7일 응답에서 바로 앞 하루(24시간 뒤로 민 것)
+    assert [v for _, v in access["line"]["cmp"]][:2] == [
+        120,
+        121,
+    ]  # 7일 응답의 마지막 하루 앞 칸(24시간 뒤로 민 것)
+    assert access["compare"] == [
+        {"prev": True, "week": False},
+        {"prev": False, "week": False},
+    ]
+    # 7일의 지난주 같은 때 = 이전 기간(30일 응답에서)
+    assert got["accessWeek"] == [
+        {"prev": True, "week": True},
+        [
+            "/svc/api/admin/access?window=7d",
+            "/svc/api/admin/access?window=30d",
+        ],
+    ]
+
+
+def test_top_list_bars_and_hundred_percent_bands(got: dict[str, Any]) -> None:
+    """066 §3.1 — 상위 목록: 큰 순, 글 뒤 막대 폭 = 값 ÷ 최댓값, 비율 = 값 ÷ 분모. 100% 띠: 다섯 조각 + 기타(이름이 기타·그 밖인 칸 포함)."""
+    assert [(r["key"], r["ratio"], r["share"]) for r in got["top"]] == [
+        ("b", 1, 0.5),
+        ("d", 0.5, 0.25),
+    ]
+    assert got["topDom"] == [["100%", "B2080%"], ["25%", "A520%"]]
+    assert got["topFoot"] == "2 / 2전체 보기"
+    split = got["split"]
+    assert [p["key"] for p in split] == ["a", "b", "c", "d", "e", "(기타)"]
+    assert (
+        split[-1]["value"] == 2 + 1 + 3
+        and split[-1]["mark"] == "kx"
+        and split[-1]["other"] is True
+    )
+    assert abs(sum(p["share"] for p in split) - 1) < 1e-9
+    assert got["split0"] == []
+    assert got["barDom"] == [["k1", "75%"], ["k2", "25%"]]

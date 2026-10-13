@@ -2,18 +2,19 @@
 # requires-python = ">=3.12"
 # dependencies = []
 # ///
-"""관리자 화면 v3 확인용 가짜 피드 서버 (스펙 064 §4 설계 세션 — 배포 이미지에 들지 않는다).
+"""관리자 화면 v4 확인용 가짜 피드 서버 (스펙 064 §4·066 §4 설계 세션 — 배포 이미지에 들지 않는다).
 
     uv run web/scripts/admin-fake-feeds.py [--port 18064] [--scenario ok]
 
 - `web/admin` 의 정적 파일을 `/` 에 관리자 nginx 와 같은 헤더(CSP·X-Frame-Options·Cache-Control)로 주고, 화면이 부르는
-  피드 아홉(029·011·034·035·038·039·040·062·063 의 응답 꼴)과 `POST /api/refresh` 를 지어낸 값으로 답한다.
-  표준 라이브러리만 쓰고 127.0.0.1 에만 붙는다. 실제 서버·AWS·Clarity 를 부르지 않는다.
+  피드 열둘(029·011·034·035·038·039·040·062·063 + 067 대역 둘·068 날별 기록 — 068 은 #133 의 실제 응답 꼴)과
+  `POST /api/refresh` 를 지어낸 값으로 답한다. 표준 라이브러리만 쓰고 127.0.0.1 에만 붙는다. 실제 서버·AWS·Clarity 를 부르지 않는다.
 - 경우(--scenario, 돌던 중에는 `GET /__scenario/<이름>` 로 바꾼다):
-  ok(정상) · problem(빨강·주황 칩 여럿) · missing(062·063 배포 전 — 시계열 404·흐름 키 없음) ·
-  empty(연결 안 됨 — AWS·Clarity·접속 로그 없음) ·
+  ok(정상) · problem(빨강·주황 칩 여럿) · old(067·068 배포 전 — 대역·날별 기록 404, offset 모름, Clarity dims 없음) ·
+  missing(062·063·067·068 배포 전 — 시계열 404·흐름 키 없음) · empty(연결 안 됨 — AWS·Clarity·접속 로그 없음) ·
+  bands(대역 많음 — 1,200개, 200행씩) · nobands(대역 없음) ·
   xss(글자 칸마다 `<img onerror>` — 글로만 보여야 한다) · expired(헬스가 401 비JSON — 로그인 만료 새로고침 한 번).
-- `/screens.html` 은 065 전이라 없다(404). 시각은 이 컴퓨터 시계다.
+- 시각은 이 컴퓨터 시계다.
 """
 
 import argparse
@@ -21,6 +22,7 @@ import json
 import math
 import mimetypes
 import random
+import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -28,7 +30,9 @@ from urllib.parse import parse_qs, urlsplit
 
 ADMIN = Path(__file__).resolve().parent.parent / "admin"
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src https://kimptrack.com; frame-ancestors 'none'"
-SCENARIOS = ("ok", "problem", "missing", "empty", "xss", "expired")
+SCENARIOS = ("ok", "problem", "old", "missing", "empty", "bands", "nobands", "xss", "expired")
+# 067·068 이 없는 서버(배포 전·그보다 앞)
+PRE_068 = ("old", "missing")
 X = "<img src=x onerror=alert(1)>"
 BOXES = ("collect", "data", "serve")
 PERIOD = {"6h": (21_600, 300), "24h": (86_400, 300), "7d": (604_800, 3600), "30d": (2_592_000, 10_800)}
@@ -128,14 +132,17 @@ def aws() -> dict:
     return {"alarms": part(60, counts=counts, items=items), "metrics": part(300), "canary": canary, "budget": budget}
 
 
-def series(range_: str) -> tuple[int, dict]:
+def series(range_: str, offset: str | None = None) -> tuple[int, dict]:
     s = state["scenario"]
     if s == "missing":
         return 404, {"detail": "Not Found"}
+    # 068 — offset=prev 면 바로 앞 같은 길이(끝 = 지금 창의 시작), 그 밖 값은 없는 것과 같다. 068 전 서버(old)는 offset 을 모른다
+    shift = offset == "prev" and s not in PRE_068
+    extra = {} if s in PRE_068 else {"offset": "prev" if shift else None}
     if s == "empty":
-        return 200, {**off(), "range": range_, "periodSec": None, "startTs": None, "endTs": None, "boxes": None, "wsClients": None, "canary": None}
+        return 200, {**off(), "range": range_, "periodSec": None, "startTs": None, "endTs": None, "boxes": None, "wsClients": None, "canary": None, **extra}
     window, step = PERIOD.get(range_, PERIOD["24h"])
-    end = int(time.time()) // step * step
+    end = int(time.time()) // step * step - (window if shift else 0)
     start = end - window
     hot = s == "problem"
     base = {"collect": (55, 15, 1.6e6, 4.2e5), "data": (22, 8, 3.1e5, 2.2e5), "serve": (12, 6, 1.5e5, 8.3e5)}
@@ -165,7 +172,7 @@ def series(range_: str) -> tuple[int, dict]:
     ws = grid(start, end, step, lambda t: int(wave(t, 4, 3)))
     canary = {"errors": grid(start, end, step, lambda t: 1 if hot and t > end - 1800 else 0), "durationMs": grid(start, end, step, lambda t: int(wave(t, 1100, 250)))}
     return 200, part(300 if range_ in ("6h", "24h") else 1800 if range_ == "7d" else 3600, range=range_, periodSec=step, startTs=start, endTs=end,
-                     boxes=boxes, wsClients=ws, canary=canary)
+                     boxes=boxes, wsClients=ws, canary=canary, **extra)
 
 
 def alerts() -> dict:
@@ -254,16 +261,195 @@ def access(window: str) -> dict:
                 devices=top(("desktop", "mobile", "tablet")), browsers=top(("chrome", "safari", "whale")))
 
 
-def clarity() -> dict:
-    if state["scenario"] == "empty":
-        return {**off(None), "nextAt": None, "numOfDays": None, "traffic": None, "summary": None, "countries": None, "metrics": None, "pages": off(None)}
+def _dims(seed: int) -> dict:
+    """068 차원 여섯 — [[이름, 세션]…](20행까지). xss 경우는 이름마다 HTML 조각."""
+    rng = random.Random(seed)
+    names = {
+        "device": ("PC", "Mobile", "Tablet", "Other"),
+        "browser": ("Chrome", "Safari", "Edge", "Samsung Internet", "Whale", "Firefox"),
+        "os": ("Windows", "MacOSX", "iOS", "Android", "Linux"),
+        "channel": ("Direct", "Organic search", "Referral", "Social", "Other"),
+        "source": ("google", "naver", "t.co", "kakao", "github.com"),
+        "country": ("South Korea", "United States", "Japan", "Singapore"),
+    }
+    return {k: [[txt(n), max(1, int(40 / (i + 1) * rng.uniform(0.6, 1.4)))] for i, n in enumerate(v)] for k, v in names.items()}
+
+
+def _signals(rng: random.Random) -> dict:
     signal = lambda pct, n: {"sessions": n, "sessionPct": pct, "pageViews": n * 2, "count": n * 3}  # noqa: E731
-    summary = {"scrollDepth": 47.3, "totalSec": 212.0, "activeSec": 64.0,
-               "signals": {"deadClick": signal(6.1, 3), "rageClick": signal(1.2, 1), "excessiveScroll": signal(3.4, 2),
-                           "quickback": signal(9.8, 5), "scriptError": signal(0.0, 0), "errorClick": signal(0.8, 1)}}
+    keys = ("deadClick", "rageClick", "excessiveScroll", "quickback", "scriptError", "errorClick")
+    base = (6.1, 1.2, 3.4, 9.8, 0.0, 0.8)
+    return {k: signal(round(max(0.0, b + rng.uniform(-1.5, 1.5)), 2) if b else 0.0, rng.randint(0, 5)) for k, b in zip(keys, base, strict=True)}
+
+
+def clarity() -> dict:
+    s = state["scenario"]
+    if s == "empty":
+        return {**off(None), "nextAt": None, "numOfDays": None, "traffic": None, "summary": None, "countries": None, "metrics": None,
+                "pages": off(None), "dims": {**off(None), **dict.fromkeys(("device", "browser", "os", "channel", "source", "country"))}}
+    rng = random.Random(7)
+    summary = {"scrollDepth": 47.3, "totalSec": 212.0, "activeSec": 64.0, "signals": _signals(rng)}
     now = int(time.time() * 1000)
-    return part(14_400, nextAt=now + 7_200_000, numOfDays=1, traffic={"sessions": 51, "botSessions": 2, "users": 40, "pagesPerSession": 1.8},
-                summary=summary, countries=[["South Korea", 44], ["United States", 3]], metrics=[], pages=part(43_200, groups=[]))
+    kinds = ("landing", "app:spread", "app:history", "app:gap", "privacy", "other")
+    groups = []
+    for i, page in enumerate(kinds):
+        for j, device in enumerate(("mobile", "desktop", "tablet")):
+            sessions = max(0, int(30 / (i + 1) / (j + 1)) - j)
+            if not sessions:
+                continue
+            groups.append({"page": txt(page), "device": device, "sessions": sessions, "scrollDepth": round(rng.uniform(20, 90), 2), "totalSec": round(rng.uniform(30, 400), 2),
+                           "activeSec": round(rng.uniform(10, 120), 2), **{f"{k}Pct": round(rng.uniform(0, 12), 2) for k in ("deadClick", "rageClick", "excessiveScroll", "quickback", "scriptError", "errorClick")}})
+    out = part(21_600, nextAt=now + 3 * 3_600_000, numOfDays=1, traffic={"sessions": 51, "botSessions": 2, "users": 40, "pagesPerSession": 1.8},
+               summary=summary, countries=[[txt("South Korea"), 44], ["United States", 3], ["Japan", 2]], metrics=[],
+               pages=part(43_200, nextAt=now + 9 * 3_600_000, numOfDays=3, rowsIn=412, rowLimitHit=False, groups=groups))
+    # 068 — 차원 하위 부분(기기·유입 하루 한 번). 068 전 서버에는 없다
+    if s not in PRE_068:
+        out["dims"] = {"state": "ok", "code": None, "fetchedAt": now - 5 * 3_600_000, "refreshSec": 86_400, **_dims(11)}
+    return out
+
+
+def history(days: str) -> tuple[int, dict]:
+    """068 GET /admin/clarity/history — 날 오름차순, 기록 없는 날은 빠진다. 배포 뒤 20일째라 그만큼만 있고 한 날이 비었다."""
+    s = state["scenario"]
+    if s in PRE_068:
+        return 404, {"detail": "Not Found"}
+    n = {"7": 7, "30": 30, "90": 90}.get(days, 30)
+    now = int(time.time())
+    head = {"code": None, "fetchedAt": now * 1000, "refreshSec": 60, "days": n}
+    if s == "empty":
+        return 200, {"state": "unconfigured", **head, "rows": None}
+    today = (now + 32_400) // 86_400 * 86_400 - 32_400
+    rows = []
+    for k in range(min(n, 20) - 1, -1, -1):
+        if k == 6:
+            continue
+        day = today - k * 86_400
+        rng = random.Random(day)
+        sessions = int(wave(day, 48, 14, day=7 * 86_400))
+        dims = _dims(day)
+        if k == 3:
+            dims["channel"] = dims["source"] = None  # 그날 유입 호출은 실패
+        rows.append({
+            "date": time.strftime("%Y-%m-%d", time.gmtime(day + 32_400)),
+            "fetchedAt": (day + 20 * 3600) * 1000,
+            "traffic": {"sessions": sessions, "botSessions": rng.randint(0, 4), "users": int(sessions * 0.8), "pagesPerSession": round(rng.uniform(1.3, 2.4), 2)},
+            "summary": {"scrollDepth": round(rng.uniform(35, 60), 2), "totalSec": round(rng.uniform(150, 260), 2), "activeSec": round(rng.uniform(40, 90), 2), "signals": _signals(rng)},
+            "countries": [[txt("South Korea"), int(sessions * 0.85)], ["United States", 3]],
+            "dims": dims,
+        })
+    return 200, {"state": "ok", **head, "rows": rows}
+
+
+NETS = ("telecom_kr", "telecom", "cloud", "other")
+KINDS = ("browser", "search", "ai", "preview", "tool", "scanner", "operator", "unknown")
+BAND_PAGES = ("/", "/app/", "/kimp-chart", "/privacy", "/kimp-history", "/wp-login.php", "/.env")
+AGENTS = ("desktop·windows·chrome", "mobile·ios·safari", "(기타)", "mobile·android·samsung", "desktop·macos·safari", "tablet·ios·safari")
+WINDOW_SEC = {"24h": 86_400, "7d": 604_800, "30d": 2_592_000}
+
+
+def _bands(window: str) -> list[dict]:
+    """067(#132) 대역 — 경우마다 수(ok 48 · bands 1,200 · nobands 0) + 모음 행 '(없음)'·'(기타)'. 같은 창이면 같은 값(쪽을 넘겨도
+    어긋나지 않게). band 는 접미까지 든 글자, IPv6 의 net 은 'ipv6', 모음 행의 나라·망은 null, spark 는 24시간 24칸·7일 8칸·30일 31칸."""
+    s = state["scenario"]
+    n = {"bands": 1200, "nobands": 0}.get(s, 48)
+    now = int(time.time())
+    span = WINDOW_SEC.get(window, 86_400)
+    slots = {"24h": 24, "7d": 8, "30d": 31}.get(window, 24)
+    out = []
+    for i in range(n + (2 if n else 0)):
+        rng = random.Random(f"{window}:{i}")
+        band = f"2001:db8:{i:x}::/48" if i % 17 == 16 else f"{(i * 37) % 223 + 1}.{(i * 11) % 256}.{(i * 53) % 256}.0/24"
+        if i >= n:
+            band = ("(없음)", "(기타)")[i - n]
+        net = "ipv6" if ":" in band else "cloud" if i % 5 == 1 else NETS[i % len(NETS)]
+        requests = int(rng.paretovariate(1.1) * 12) + 1
+        kinds = dict.fromkeys(KINDS, 0)
+        human = 0 if net == "cloud" and i % 3 else int(requests * rng.uniform(0.2, 0.9))
+        kinds["browser"] = human
+        kinds["scanner" if net == "cloud" else "search"] = requests - human
+        pages = int(human * 0.6)
+        fives = 1 if state["scenario"] == "problem" and i < 3 else 0
+        first = now - rng.randint(60, span)
+        out.append({
+            "band": txt(band) if s == "xss" and i == 0 else band,
+            "country": None if i >= n or ":" in band else txt("KR") if s == "xss" and i == 1 else ("KR" if net == "telecom_kr" else ("US", "JP", "SG", "DE", "FR")[i % 5]),
+            "net": None if i >= n else net,
+            "requests": requests,
+            "pages": pages,
+            "js": int(pages * 0.3),
+            "ws": int(pages * 0.1),
+            "pairs": max(1, int(human / 7)),
+            "kinds": kinds,
+            "status": {"2xx": requests - fives - int(requests * 0.1), "3xx": 0, "4xx": int(requests * 0.1), "5xx": fives},
+            "botPct": round(100 * (requests - human) / requests, 1),
+            "first": first,
+            "last": rng.randint(first, now),
+            "spark": [int(wave(now - k * (span // slots), requests / slots, requests / slots / 2)) for k in range(slots - 1, -1, -1)],
+            "topPaths": [[txt(BAND_PAGES[(i + k) % len(BAND_PAGES)]), max(1, requests // (k + 2))] for k in range(3)],
+            "topAgents": [[txt(("desktop·windows·chrome", "mobile·ios·safari", "(기타)")[k]), max(1, requests // (k + 2))] for k in range(3)],
+        })
+    return out
+
+
+def ips(query: dict) -> tuple[int, dict]:
+    """067 GET /admin/access/ips — 거르기(net·country·q 대역 앞부분·bots=0) 뒤 정렬(requests·pages·last 큰 순)·limit(500까지)·offset."""
+    s = state["scenario"]
+    if s in PRE_068:
+        return 404, {"detail": "Not Found"}
+    pick = lambda k, d=None: (query.get(k) or [d])[0]  # noqa: E731
+    window = pick("window", "24h") if pick("window") in WINDOW_SEC else "24h"
+    if s == "empty":
+        return 200, {"state": "unconfigured", "code": "no_file", "window": window, "total": None, "bands": None}
+    rows = _bands(window)  # 틀린 인자는 오류 없이 기본값
+    if pick("net"):
+        rows = [b for b in rows if b["net"] == pick("net")]
+    if pick("country"):
+        rows = [b for b in rows if b["country"] == pick("country")]
+    if pick("q"):
+        rows = [b for b in rows if b["band"].startswith(pick("q"))]
+    if pick("bots") == "0":
+        rows = [b for b in rows if b["kinds"]["browser"] > 0]
+    key = pick("sort", "requests") if pick("sort") in ("requests", "pages", "last") else "requests"
+    rows.sort(key=lambda b: (-b[key], b["band"]))  # 큰 순, 같으면 대역 글자 순
+    limit = min(500, max(1, int(pick("limit", "200")))) if str(pick("limit", "200")).isdigit() else 200
+    offset = int(pick("offset", "0")) if str(pick("offset", "0")).isdigit() else 0
+    return 200, {"state": "ok", "code": None, "window": window, "total": len(rows), "bands": rows[offset:offset + limit]}
+
+
+def ip(query: dict) -> tuple[int, dict]:
+    """067 GET /admin/access/ip — 대역 하나: 시간별·종류·상태·브라우저 정보·경로·짝의 첫/마지막 페이지·최근 요청 100줄. 꼴이 틀리면 400."""
+    s = state["scenario"]
+    if s in PRE_068:
+        return 404, {"detail": "Not Found"}
+    band = (query.get("band") or [""])[0]
+    window = (query.get("window") or ["24h"])[0]
+    window = window if window in WINDOW_SEC else "24h"
+    if not re.fullmatch(r"(\d{1,3}\.){3}0/24|[0-9a-f]{1,4}(:[0-9a-f]{1,4}){0,2}::/48", band):
+        return 400, {"error": {"code": "bad_band", "message": "band 꼴이 아니다", "detail": None}}
+    found = next((b for b in _bands(window) if b["band"] == band), None)
+    if found is None:
+        found = {"country": None, "net": None, "kinds": dict.fromkeys(KINDS, 0), "status": {"2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0}, "requests": 0}
+    now = int(time.time())
+    hours = WINDOW_SEC[window] // 3600
+    top = now - now % 3600
+    rng = random.Random(band)
+    hourly = [{"ts": top - k * 3600, "requests": int(wave(top - k * 3600, found["requests"] / hours * 3, 1)), "pages": 0, "js": 0, "errors": 0} for k in range(hours - 1, -1, -1)]
+    for h in hourly:
+        h["pages"] = int(h["requests"] * 0.5)
+        h["js"] = int(h["pages"] * 0.3)
+    at = now
+    recent = []
+    for k in range(100):
+        at -= rng.randint(30, 400)  # 최근 순
+        recent.append({"ts": at, "path": txt(BAND_PAGES[k % len(BAND_PAGES)]), "status": (200, 200, 404, 200, 502)[k % 5], "kind": KINDS[k % 3 * 2],
+                       "browser": txt(("chrome", "safari", "")[k % 3]), "os": ("windows", "ios", "")[k % 3], "device": ("desktop", "mobile", "")[k % 3],
+                       "referer": ("https://www.google.com", None, "https://t.co")[k % 3]})
+    pairs = [{"entry": txt(("landing", "app-spread", "privacy")[k % 3]), "exit": ("app-history", "landing", "kimp-chart")[k % 3], "npages": k % 6 + 1,
+              "device": ("desktop", "mobile")[k % 2], "os": ("windows", "ios")[k % 2], "browser": ("chrome", "safari")[k % 2], "channel": ("direct", "search", "social")[k % 3]}
+             for k in range(12)]
+    return 200, {"state": "ok", "code": None, "window": window, "band": band, "partial": s == "bands", "country": found["country"], "net": found["net"], "hourly": hourly,
+                 "kinds": found["kinds"], "status": found["status"], "agents": [[txt(a), 20 - k] for k, a in enumerate(AGENTS)],
+                 "paths": [[txt(pth), 30 - k] for k, pth in enumerate(BAND_PAGES)], "pairs": pairs, "recent": recent}
 
 
 def feed(method: str, path: str, query: dict, body: dict) -> tuple[int, object] | None:
@@ -279,10 +465,13 @@ def feed(method: str, path: str, query: dict, body: dict) -> tuple[int, object] 
         "/svc/api/admin/status": lambda: (200, status()),
         "/api/health/collect": lambda: (200, collect()),
         "/api/admin/aws": lambda: (200, aws()),
-        "/api/admin/aws/series": lambda: series(pick("range", "24h")),
+        "/api/admin/aws/series": lambda: series(pick("range", "24h"), pick("offset", None)),
         "/api/admin/alerts": lambda: (200, alerts()),
         "/svc/api/admin/access": lambda: (200, access(pick("window", "24h"))),
+        "/svc/api/admin/access/ips": lambda: ips(query),
+        "/svc/api/admin/access/ip": lambda: ip(query),
         "/svc/api/admin/clarity": lambda: (200, clarity()),
+        "/svc/api/admin/clarity/history": lambda: history(pick("days", "30")),
     }
     return table[path]() if method == "GET" and path in table else None
 

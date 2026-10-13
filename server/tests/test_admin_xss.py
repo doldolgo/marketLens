@@ -1,8 +1,8 @@
-"""관리자 화면 v3 — 피드 글자가 HTML 이 되지 않는가 (스펙 064 §3.1 보안·§4 툴팁 서식 확인).
+"""관리자 화면 v4 — 피드 글자가 HTML 이 되지 않는가 (스펙 066 §4 '툴팁·표 글자 XSS', 064 §3.1 보안).
 
-글자가 들어갈 수 있는 모든 칸(경로·출처·나라·경보 이름·알림 글·상자 이름·거래소 이름…)에 `<img onerror>` 를 넣은 가짜
-피드로 세 페이지를 그린 뒤, 기록된 차트 option 마다 툴팁 서식(formatter)을 그 차트의 실제 데이터로 불러 본다.
-ECharts 는 툴팁 서식의 결과를 HTML 로 쓰므로, 결과에 `<img` 가 없어야 한다(글자는 encodeHTML 을 지난다).
+가짜 피드 서버의 xss 경우(글자 칸마다 `<img onerror>`)로 페이지 여섯을 그리고, 카드와 열 수 있는 상세 판마다 차트 option 의 툴팁 서식을
+그 차트의 실제 데이터로 불러 본다(ECharts 는 서식 결과를 HTML 로 쓴다 — `<img` 가 없어야 한다). 표·목록·띠·칩 글자는 DOM 에 글로만
+들어가야 한다(그림·스크립트·틀 요소가 생기지 않는다).
 """
 
 from typing import Any
@@ -10,230 +10,122 @@ from typing import Any
 import pytest
 
 from tests.admin_dom import run_admin
+from tests.test_admin_detail import FAST, SERIES, answers
 
 X = "<img src=x onerror=alert(1)>"
-NOW = 1_791_525_610_000
-SEC = NOW // 1000
-END = SEC - SEC % 300
-PTS = [[END - 900, 5], [END - 600, 7], [END - 300, 9]]
-ONE = {"cpu": PTS, "mem": PTS, "disk": PTS, "netIn": PTS, "netOut": PTS, "ebsRead": PTS}
-SERIES = {
-    **ONE,
-    "ebsWrite": PTS,
-    "creditBalance": PTS,
-    "creditUsage": PTS,
-    "surplusCharged": PTS,
-    "statusFailed": [[END - 600, 1]],
+PAGES: dict[str, tuple[list[str], list[str]]] = {
+    "overview.js": (
+        [
+            "/api/admin/aws",
+            "/api/admin/alerts",
+            *SERIES,
+            "/svc/api/admin/access?window=24h",
+            "/svc/api/admin/access?window=7d",
+        ],
+        ["ws", "visit", "collect", "alarms", "cost", "traffic"],
+    ),
+    "server.js": (
+        ["/api/admin/aws", "/api/admin/alerts", *SERIES],
+        ["cpu", "net", "credit", "canary", "checks", "collect", "alarms", "cost"],
+    ),
+    "traffic.js": (
+        [f"/svc/api/admin/access?window={w}" for w in ("24h", "7d", "30d")],
+        [
+            "trend",
+            "flows",
+            "src",
+            "geo",
+            "ends",
+            "what",
+            "who",
+            "heat",
+            "status",
+            "durations",
+        ],
+    ),
+    "visitors.js": (
+        ["/svc/api/admin/access/ips?window=24h&sort=requests&limit=200&offset=0"],
+        [],
+    ),
+    "insight.js": (
+        [
+            "/svc/api/admin/clarity",
+            *[f"/svc/api/admin/clarity/history?days={d}" for d in (7, 30, 90)],
+            "/svc/api/admin/access?window=30d",
+        ],
+        ["sessions", "signals", "match", "pages", "countries", "dims", "refs"],
+    ),
 }
 
-FEEDS = {
-    "/api/health": [200, {"status": X}],
-    "/svc/api/health": [200, {"status": "ok"}],
-    "/svc/api/admin/status": [200, {"wsConnections": 1, "redis": X, "influx": "ok"}],
-    "/api/health/collect": [
-        200,
-        {
-            "successRate1h": 98,
-            "exchanges": [
-                {
-                    "exchange": X,
-                    "state": X,
-                    "lastSuccessAt": NOW,
-                    "successRate1h": 98,
-                    "openOutage": {"startedAt": NOW - 60_000},
-                }
-            ],
-            "outages": [
-                {
-                    "exchange": X,
-                    "kind": X,
-                    "startedAt": NOW - 60_000,
-                    "endedAt": None,
-                    "count": 2,
-                    "statusCode": 500,
-                    "message": X,
-                }
-            ],
-        },
-    ],
-    "/api/admin/aws": [
-        200,
-        {
-            "alarms": {
-                "state": "ok",
-                "counts": {"alarm": 1},
-                "items": [{"name": X, "state": "ALARM", "reason": X}],
-            },
-            "canary": {"state": "ok", "ok": False, "lastRunAt": NOW},
-            "budget": {
-                "state": "ok",
-                "items": [
-                    {
-                        "name": X,
-                        "timeUnit": "MONTHLY",
-                        "limit": 10,
-                        "actual": 11,
-                        "forecast": 12,
-                        "unit": X,
-                    }
-                ],
-            },
-        },
-    ],
-    "/api/admin/aws/series": [
-        200,
-        {
-            "state": "ok",
-            "fetchedAt": NOW,
-            "refreshSec": 300,
-            "range": "24h",
-            "periodSec": 300,
-            "startTs": END - 86_400,
-            "endTs": END,
-            "boxes": [{"box": X, "series": SERIES}, {"box": "data", "series": SERIES}],
-            "wsClients": PTS,
-            "canary": {"errors": [[END - 600, 2]], "durationMs": PTS},
-        },
-    ],
-    "/api/admin/alerts": [
-        200,
-        {
-            "slack": {"state": "ok"},
-            "alarms": {"state": "ok"},
-            "items": [
-                {
-                    "source": "slack",
-                    "at": NOW - 5000,
-                    "text": X,
-                    "role": X,
-                    "key": X,
-                    "delivered": False,
-                },
-                {
-                    "source": "alarm",
-                    "at": NOW - 6000,
-                    "alarm": X,
-                    "fromState": X,
-                    "toState": X,
-                    "text": X,
-                },
-            ],
-        },
-    ],
-    "/svc/api/admin/clarity": [
-        200,
-        {
-            "state": "ok",
-            "fetchedAt": NOW,
-            "refreshSec": 14400,
-            "numOfDays": 1,
-            "traffic": {"sessions": 3},
-            "summary": {
-                "scrollDepth": 40,
-                "activeSec": 9,
-                "signals": {"deadClick": {"sessionPct": 5, "sessions": 1, "count": 1}},
-            },
-        },
-    ],
-}
-ROWS3 = [[X, 1, 3], ["(기타)", 1, 2]]
-ACCESS = {
-    "state": "ok",
-    "fetchedAt": NOW,
-    "refreshSec": 60,
-    "window": "7d",
-    "windows": ["24h", "7d", "30d"],
-    "gateAt": NOW - 10 * 86_400_000,
-    "startTs": SEC - 7 * 86_400,
-    "endTs": SEC,
-    "totals": {"requests": 10, "humanPages": 5, "jsViews": 2},
-    "hourly": [
-        {"ts": SEC - 3600, "humanPages": 3, "jsViews": 1, "errors": 1, "wsErrors": 1}
-    ],
-    "status": {"2xx": 5, "5xx": 1, "ws5xx": 1},
-    "recent5xx": [{"ts": SEC - 10, "path": X, "status": 502}],
-    "ws": {"durations": {"lt10s": 1}},
-    "classes": {
-        "browser": {"requests": 5, "pages": 3},
-        "scanner": {"requests": 5, "pages": 2},
-    },
-    "paths": [[X, 4]],
-    "referrers": [[X, 3]],
-    "utmSources": [[X, 2]],
-    "tabs": [[X, 1]],
-    "devices": [[X, 1]],
-    "browsers": [[X, 1]],
-    "visitors": {
-        "state": "ok",
-        "sinceTs": SEC - 7 * 86_400,
-        "confirmed": 1,
-        "shaped": 3,
-        "returning": 0,
-        "capped": False,
-        "days": [{"ts": SEC - 86_400, "confirmed": 1, "shaped": 3, "returning": 1}],
-        "channels": ROWS3,
-        "devices": ROWS3,
-        "os": ROWS3,
-        "browsers": ROWS3,
-        "inApp": ROWS3,
-        "flows": [[X, X, X, 1, 3], ["(기타)", "(기타)", "(기타)", 1, 2]],
-        "entries": ROWS3,
-        "exits": ROWS3,
-        "depthPages": {"1": [1, 3]},
-    },
-    "geo": {
-        "state": "ok",
-        "month": "2026-10",
-        "countries": ROWS3,
-        "networks": ROWS3,
-        "ipv6": 0,
-    },
-}
+TIP_TEXT = {"overview.js", "server.js", "traffic.js"}
+DOM_TEXT = {"server.js", "traffic.js", "visitors.js", "insight.js"}
 
 SCENARIO = r"""
-const respond = (url) => {
-  const [path] = url.split('?')
-  if (path === '/svc/api/admin/access') return [200, { ...input.access, window: new URLSearchParams(url.split('?')[1]).get('window') }]
-  return input.feeds[path] || [404, { detail: 'Not Found' }]
-}
-const v = setup({ respond, buttons: { range: ['24h'], window: ['24h', '7d', '30d'] } })
+const respond = (url) => input.answers[url] || [404, { detail: 'Not Found' }]
+const v = setup({ respond, buttons: { detail: input.details } })
+document.getElementById('sheet').hidden = true
 await page(input.page)
 await flush()
-if (input.page === 'traffic.js') { v.click('window', '7d'); await flush() }
 const first = (ser) => {
-  const d = Array.isArray(ser.data) ? ser.data[0] : undefined
+  const d = Array.isArray(ser.data) ? ser.data.find((x) => x != null) : undefined
   return d && typeof d === 'object' && !Array.isArray(d) ? d.value : d
 }
 const html = []
-for (const [id, chart] of v.s.charts) {
-  const o = chart.options.at(-1)
-  const f = o?.tooltip?.formatter
-  if (typeof f !== 'function') continue
-  const series = o.series || []
-  if (o.tooltip.trigger === 'axis') {
-    html.push([id, f(series.map((ser, i) => ({ seriesIndex: i, seriesName: ser.name ?? input.x, dataIndex: 0, value: first(ser), data: first(ser) })))])
-  } else {
-    series.forEach((ser, i) => {
-      const data = Array.isArray(ser.data) ? ser.data : []
-      data.slice(0, 6).forEach((d, j) => html.push([id, f({ seriesIndex: i, dataIndex: j, name: d?.name ?? input.x, value: d && typeof d === 'object' && !Array.isArray(d) ? d.value : d, data: d })]))
-      ;(ser.links || []).slice(0, 6).forEach((d) => html.push([id, f({ seriesIndex: i, dataType: 'edge', data: d, value: d.value })]))
-    })
+const tooltips = (tag) => {
+  for (const [id, chart] of v.s.charts) {
+    const o = chart.options.at(-1)
+    const f = o?.tooltip?.formatter
+    if (typeof f !== 'function') continue
+    const series = o.series || []
+    if (o.tooltip.trigger === 'axis') {
+      html.push([`${tag}:${id}`, f(series.map((ser, i) => ({ seriesIndex: i, seriesName: ser.name ?? input.x, dataIndex: 0, value: first(ser), data: first(ser), axisValue: 0 })))])
+    } else {
+      series.forEach((ser, i) => {
+        const data = Array.isArray(ser.data) ? ser.data : []
+        data.slice(0, 6).forEach((d, j) => html.push([`${tag}:${id}`, f({ seriesIndex: i, dataIndex: j, name: d?.name ?? input.x, value: d && typeof d === 'object' && !Array.isArray(d) ? d.value : d, data: d })]))
+        ;(ser.links || []).slice(0, 6).forEach((d) => html.push([`${tag}:${id}`, f({ seriesIndex: i, dataType: 'edge', data: d, value: d.value })]))
+      })
+    }
   }
 }
-// DOM 에 그림·스크립트 요소가 생기지 않았다(글자는 textContent 로만)
-const walk = (n) => (typeof n === 'string' ? [] : [n.tag, ...n.kids.flatMap(walk)])
-out.tags = [...new Set([...v.byId.values()].flatMap(walk))]
+tooltips('page')
+for (const d of input.details) {
+  v.click('detail', d)
+  await flush()
+  tooltips(d)
+  document.getElementById('sheet-close').fire('click')
+  await flush()
+}
+if (input.page === 'visitors.js') {
+  const rows = document.getElementById('tbl-bands').kids[1]?.kids || []
+  // 글자를 넣은 대역은 대역 꼴이 아니라 열리지 않는다 — 꼴이 맞는 대역의 판(경로·브라우저 정보에 글자가 든다)
+  rows.find((tr) => !tr.kids[0].textContent.includes('<img') && tr.kids[0].textContent.includes('/'))?.fire('click')
+  await flush()
+  tooltips('ip')
+}
+const tagsOf = (n) => (typeof n === 'string' ? [] : [n.tag, ...n.kids.flatMap(tagsOf)])
+out.tags = [...new Set([...v.byId.values()].flatMap(tagsOf))]
 out.html = html
 out.text = [...v.byId.values()].map((n) => n.textContent).join('\n')
 """
 
 
-@pytest.mark.parametrize("page", ["overview.js", "server.js", "traffic.js"])
-def test_feed_text_never_becomes_html_in_tooltips_or_the_page(page: str) -> None:
-    got: dict[str, Any] = run_admin(
-        SCENARIO, {"page": page, "feeds": FEEDS, "access": ACCESS, "x": X}
-    )
-    assert got["html"], page
+@pytest.mark.parametrize("page", list(PAGES))
+def test_feed_text_never_becomes_html_in_tooltips_tables_or_the_page(page: str) -> None:
+    feeds, details = PAGES[page]
+    urls = [*FAST, *feeds]
+    payload: dict[str, Any] = {
+        "page": page,
+        "details": details,
+        "x": X,
+        "answers": answers("xss", urls),
+    }
+    if page == "visitors.js":
+        bands = payload["answers"][feeds[0]][1]["bands"]
+        for band in bands[:3]:
+            url = f"/svc/api/admin/access/ip?band={band['band'].replace('/', '%2F').replace(':', '%3A')}&window=24h"
+            payload["answers"].update(answers("xss", [url]))
+    got = run_admin(SCENARIO, payload)
     for chart, html in got["html"]:
         assert "<img" not in html, (chart, html)
     escaped = [
@@ -241,6 +133,11 @@ def test_feed_text_never_becomes_html_in_tooltips_or_the_page(page: str) -> None
         for chart, html in got["html"]
         if "&lt;img src=x onerror=alert(1)&gt;" in html
     ]
-    assert escaped, page  # 피드 글자가 실제로 툴팁에 들어갔다(빈 시험이 아니다)
-    assert not {"img", "script", "iframe"} & set(got["tags"]), got["tags"]
-    assert X in got["text"]  # 글자 그대로 보인다
+    # 피드 글자가 실제로 툴팁(차트에만 그리는 이름 — 원천·경보·흐름 마디)과 DOM(표·목록·알약)에 들어갔다 — 빈 시험이 아니다
+    if page in TIP_TEXT:
+        assert escaped, page
+    if page in DOM_TEXT:
+        assert X in got["text"], page
+    assert not {"img", "script", "iframe", "object", "embed"} & set(got["tags"]), got[
+        "tags"
+    ]

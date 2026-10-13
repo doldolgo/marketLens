@@ -1,0 +1,48 @@
+<!doctype html>
+<!-- KimpTrack 관리자 v4 — 화면(스펙 066 §3.3). web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
+     인라인 스크립트·스타일 없음(CSP). 화면 분석 창은 065 몫 — 이 스펙에서는 내비 항목과 한 줄만.
+     틀(왼쪽 내비·머리·상세 판)은 여섯 페이지가 같은 글자다. 아이콘은 icons.svg 묶음(<use href>). -->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="color-scheme" content="dark" />
+    <title>화면 · KimpTrack 관리자</title>
+    <link rel="stylesheet" href="admin.css" />
+    <script type="module" src="screens.js"></script>
+  </head>
+  <body>
+    <div class="app" id="app" data-menu="closed">
+      <aside class="side" id="side" aria-label="관리자 메뉴">
+        <a class="brand" href="/"><svg class="i" aria-hidden="true"><use href="icons.svg#logo"/></svg><span>KimpTrack</span><small>관리자</small></a>
+        <nav class="nav" aria-label="페이지">
+          <a href="/" title="개요"><svg class="i" aria-hidden="true"><use href="icons.svg#overview"/></svg><span>개요</span><i class="mark" id="m-overview"></i></a>
+          <a href="/server.html" title="서버"><svg class="i" aria-hidden="true"><use href="icons.svg#server"/></svg><span>서버</span><i class="mark" id="m-server"></i></a>
+          <a href="/traffic.html" title="트래픽"><svg class="i" aria-hidden="true"><use href="icons.svg#traffic"/></svg><span>트래픽</span><i class="mark" id="m-traffic"></i></a>
+          <a href="/visitors.html" title="방문자"><svg class="i" aria-hidden="true"><use href="icons.svg#visitors"/></svg><span>방문자</span></a>
+          <a href="/clarity.html" title="Clarity"><svg class="i" aria-hidden="true"><use href="icons.svg#clarity"/></svg><span>Clarity</span></a>
+          <a href="/screens.html" aria-current="page" title="화면"><svg class="i" aria-hidden="true"><use href="icons.svg#screens"/></svg><span>화면</span></a>
+        </nav>
+        <div class="side-foot">
+          <span title="마지막 갱신"><svg class="i" aria-hidden="true"><use href="icons.svg#clock"/></svg><span id="updated">--:--:--</span></span>
+          <a href="/cdn-cgi/access/logout" title="로그아웃"><svg class="i" aria-hidden="true"><use href="icons.svg#logout"/></svg><span>로그아웃</span></a>
+        </div>
+      </aside>
+      <div class="page">
+        <div class="top"><button type="button" class="ibtn" id="menu-btn" aria-label="메뉴" aria-expanded="false" aria-controls="side"><svg class="i" aria-hidden="true"><use href="icons.svg#menu"/></svg></button><b>KimpTrack 관리자</b></div>
+        <header class="head">
+          <h1>화면</h1>
+          <div class="tools">
+            <span class="tick">10초마다 · <span id="clock">--:--:--</span></span>
+          </div>
+        </header>
+        <div class="filters" id="filters" hidden></div>
+        <p id="notice" class="notice" role="alert" hidden></p>
+        <main class="content" id="content">
+          <section class="card s12"><p class="empty">준비 중 — 화면 분석(065)이 이 자리에 들어온다.</p></section>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
