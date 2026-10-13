@@ -645,6 +645,8 @@
     // 단계 1~5 의 채움·테두리 — 옅은 파랑 → 노랑 → 주황 → 빨강, 불투명도 0.18~0.5, 테두리 2~4px. 단계 0 은 회색 점선만
     const FILL = ["", "rgba(96,165,250,.18)", "rgba(250,204,21,.26)", "rgba(251,146,60,.34)", "rgba(239,68,68,.42)", "rgba(220,38,38,.5)"]
     const LINE = ["2px dashed rgba(156,163,175,.9)", "2px solid #60a5fa", "2px solid #facc15", "3px solid #fb923c", "3px solid #ef4444", "4px solid #dc2626"]
+    // 요소 상자의 채움(065) — 테두리가 단계를 말하고 칠은 옅게(불투명도 0.10 이하 — 큰 카드·차트의 내용을 가리지 않게)
+    const EL_FILL = ["", "rgba(96,165,250,.06)", "rgba(250,204,21,.07)", "rgba(251,146,60,.08)", "rgba(239,68,68,.09)", "rgba(220,38,38,.1)"]
     const HATCH = "repeating-linear-gradient(45deg,rgba(107,114,128,.55) 0 2px,transparent 2px 8px)"
     const FOCUS_MS = 2000
     const MODES = ["area", "element", "depth"]
@@ -812,7 +814,7 @@
       el.className = "kt-ov-el kt-ov-l" + level
       el.setAttribute("data-kt-el", ek)
       place(el, rect)
-      set(el, { border: LINE[level], backgroundColor: level ? FILL[level] : "transparent" })
+      set(el, { border: LINE[level], backgroundColor: level ? EL_FILL[level] : "transparent" })
       if (focused) set(el, { borderWidth: "6px", borderStyle: "solid" })
       if (v && v.rank !== null && v.rank <= TOP_TAGS) {
         const size = EL_SIZES[level]

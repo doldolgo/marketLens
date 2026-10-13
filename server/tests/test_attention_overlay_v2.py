@@ -400,9 +400,17 @@ def test_only_the_top_20_get_tags_and_fonts_follow_the_level() -> None:
         boxes[0]["border"].startswith("2px dashed")
         and boxes[0]["fill"] == "transparent"
     )
-    assert boxes[5]["border"].startswith("4px solid") and boxes[5]["fill"].endswith(
-        ",.5)"
+    # 테두리가 단계를 말하고(053 의 색·굵기) 칠은 옅게 — 불투명도 0.10 이하(큰 카드·차트의 내용을 가리지 않게)
+    assert (
+        boxes[5]["border"].startswith("4px solid #dc2626")
+        and boxes[5]["fill"] == "rgba(220,38,38,.1)"
     )
+    alphas = [
+        float(b["fill"].rsplit(",", 1)[1].rstrip(")"))
+        for b in boxes
+        if b["fill"] != "transparent"
+    ]
+    assert alphas and max(alphas) <= 0.1
     # 화면 맨 위에 붙은 요소의 꼬리표는 상자 안
     got = _one(
         areas=AREAS,
