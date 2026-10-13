@@ -222,3 +222,223 @@ export const catAxis = (data, extra = {}) => ({
   ...extra,
   axisLabel: { ...LABEL(), ...extra.axisLabel },
 });
+
+// --- 그림 option (066 §3.1 차트 규칙 — 선 2px·점은 올릴 때만·가로 격자 3~4개·눈금 11px·애니메이션 끔·lttb) -----------------
+
+const flip = (data, neg) => (neg ? list(data).map((p) => [p[0], num(p[1]) === null ? null : -p[1]]) : data);
+const SLIDER = () => ({
+  type: 'slider',
+  id: 'mini',
+  height: 22,
+  bottom: 8,
+  borderColor: T.line,
+  backgroundColor: 'transparent',
+  fillerColor: alpha(T.accent, 0.14),
+  dataBackground: { lineStyle: { color: T['text-3'], width: 1 }, areaStyle: { color: T.grid } },
+  selectedDataBackground: { lineStyle: { color: T.accent, width: 1 }, areaStyle: { color: alpha(T.accent, 0.12) } },
+  handleStyle: { color: T['text-2'], borderColor: T['line-strong'] },
+  moveHandleStyle: { color: T['line-strong'] },
+  textStyle: { color: T['text-3'], fontSize: 11 },
+  labelFormatter: (v) => when(v),
+});
+
+// 작은 선(큰 수 곁) — 축 없음. 이전 기간이 있으면 점선으로 아래에
+export function sparkOption(data, mark, fmt, cmp) {
+  const c = color(mark);
+  const series = [];
+  if (hasValue(cmp)) series.push({ type: 'line', data: cmp, showSymbol: false, silent: true, z: 1, lineStyle: { width: 1, type: 'dashed', color: T['text-3'] } });
+  series.push({ type: 'line', data, showSymbol: false, z: 2, lineStyle: { width: 1.5, color: c }, itemStyle: { color: c }, areaStyle: { color: c, opacity: 0.1 } });
+  const main = series.length - 1;
+  return {
+    animation: false,
+    grid: { left: 1, right: 1, top: 3, bottom: 1 },
+    xAxis: { type: 'time', show: false },
+    yAxis: { type: 'value', show: false, scale: true },
+    tooltip: axisTip((ps) => {
+      const p = list([ps].flat()).find((q) => q.seriesIndex === main);
+      return p ? tip(when(p.value?.[0]), [[mark, '', fmt(p.value?.[1])]]) : '';
+    }),
+    series,
+  };
+}
+// 작은 막대(시간마다 센 수)
+export function sparkBarsOption(data, mark, fmt) {
+  return {
+    animation: false,
+    grid: { left: 1, right: 1, top: 3, bottom: 1 },
+    xAxis: { type: 'time', show: false },
+    yAxis: { type: 'value', show: false, min: 0, minInterval: 1 },
+    tooltip: axisTip((ps) => {
+      const p = list([ps].flat())[0];
+      return p ? tip(when(p.value?.[0]), [[mark, '', fmt(p.value?.[1])]]) : '';
+    }),
+    series: [{ type: 'bar', data, barMaxWidth: 6, itemStyle: { color: color(mark), borderRadius: [2, 2, 0, 0] } }],
+  };
+}
+
+// 시간 그림 — 칸(panes) 여럿을 같은 시간 축 위아래로(둘째 y축 대신), 십자선 공유(axisPointer.link). 이전 기간은 점선·--text-3·낮은 z.
+// o = { startMs, endMs, panes:[{ title?, fmt, axisFmt?, min?, max?, refs?:[[y, 색 이름, 이름표]] }],
+//       series:[{ name, mark, data, cmp?, type?:'line'|'bar', pane?, neg?(아래로 뒤집음), area?, step?, stack? }],
+//       areas?:[[from, to, 이름]](옅은 빨강 구간), zoom?:'card'|'detail', legend?, labels?(선 끝 이름표) }
+export function timeOption(o) {
+  const panes = list(o.panes).length ? o.panes : [{ fmt: o.fmt ?? short }];
+  const n = panes.length;
+  const shown = list(o.series).filter((s) => hasValue(s.data) || hasValue(s.cmp));
+  const detail = o.zoom === 'detail';
+  const legendOn = o.legend ?? (!detail && shown.length > 1);
+  const labels = (o.labels ?? !detail) && shown.length > 1 && shown.length <= 4 && n === 1;
+  const paneOf = (s) => Math.min(n - 1, Math.max(0, s.pane ?? 0));
+  const neg = (i) => shown.some((s) => paneOf(s) === i && s.neg);
+  // 칸 배치(%) — 위(범례·첫 칸 이름) · 칸 사이 틈(다음 칸 이름) · 아래(축 글자·미니맵)
+  const head = legendOn || panes[0].title ? 12 : 5;
+  const foot = detail ? 16 : 10;
+  const gap = n > 1 ? 10 : 0;
+  const h = (100 - head - foot - gap * (n - 1)) / n;
+  const axes = [...Array(n).keys()];
+  const meta = [];
+  const series = [];
+  for (const s of shown) {
+    if (!hasValue(s.cmp)) continue;
+    const i = paneOf(s);
+    meta.push({ s, cmp: true });
+    series.push({ type: 'line', name: `${s.name} · 이전`, xAxisIndex: i, yAxisIndex: i, data: flip(s.cmp, s.neg), showSymbol: false, silent: true, z: 1, step: s.step, lineStyle: { width: 1.5, type: 'dashed', color: T['text-3'] }, itemStyle: { color: T['text-3'] }, emphasis: { disabled: true } });
+  }
+  const seen = new Set();
+  for (const s of shown) {
+    const i = paneOf(s);
+    const c = color(s.mark);
+    const first = !seen.has(i);
+    seen.add(i);
+    const base = { name: s.name, xAxisIndex: i, yAxisIndex: i, data: flip(s.data, s.neg), z: 3 };
+    const item =
+      s.type === 'bar'
+        ? { ...base, type: 'bar', stack: s.stack, barMaxWidth: detail ? 18 : 12, itemStyle: { color: c, borderRadius: s.neg ? [0, 0, 3, 3] : [3, 3, 0, 0] } }
+        : {
+            ...base,
+            type: 'line',
+            showSymbol: false,
+            symbolSize: 7,
+            step: s.step,
+            sampling: 'lttb',
+            lineStyle: { width: s.width ?? 2, color: c },
+            itemStyle: { color: c },
+            areaStyle: s.area ? { color: c, opacity: 0.1 } : undefined,
+            endLabel: labels ? { show: true, formatter: '{a}', color: T['text-2'], fontSize: 11 } : undefined,
+          };
+    if (first && list(panes[i].refs).length) {
+      item.markLine = {
+        symbol: 'none',
+        silent: true,
+        label: { position: 'insideEndTop', color: T['text-3'], fontSize: 11, formatter: '{b}' },
+        data: panes[i].refs.map(([y, tone, label]) => ({ yAxis: y, name: label ?? String(y), lineStyle: { color: color(tone), type: 'dashed', width: 1, opacity: 0.8 } })),
+      };
+    }
+    if (first && i === 0 && list(o.areas).length) {
+      item.markArea = { silent: true, itemStyle: { color: alpha(T.bad, 0.1) }, label: { show: false }, data: o.areas.map(([a, b, name]) => [{ xAxis: a, name: clean(name) }, { xAxis: b }]) };
+    }
+    meta.push({ s, cmp: false });
+    series.push(item);
+  }
+  const fmtOf = (s) => panes[paneOf(s)].fmt;
+  const valueOf = (p, s) => {
+    const raw = num(p?.value?.[1]);
+    return raw === null ? null : s.neg ? -raw : raw;
+  };
+  return {
+    animation: false,
+    grid: panes.map((_, i) => ({ left: 8, right: labels ? 64 : 14, top: `${head + i * (h + gap)}%`, height: `${h}%`, containLabel: true })),
+    legend: legendOn ? { top: 0, right: 0, type: 'scroll', icon: 'roundRect', itemWidth: 12, itemHeight: 3, textStyle: { color: T['text-2'], fontSize: 12 }, data: shown.map((s) => s.name) } : undefined,
+    xAxis: panes.map((_, i) => timeAxis(o.startMs, o.endMs, { gridIndex: i, axisLabel: { show: i === n - 1 } })),
+    yAxis: panes.map((p, i) =>
+      valueAxis({
+        gridIndex: i,
+        min: p.min ?? (neg(i) ? undefined : 0),
+        max: p.max,
+        splitNumber: n > 1 ? 2 : 3,
+        name: p.title ? clean(p.title) : undefined,
+        nameLocation: 'end',
+        nameGap: 8,
+        nameTextStyle: { align: 'left', color: T['text-2'], fontSize: 12, fontWeight: 600 },
+        axisLabel: { formatter: (v) => (p.axisFmt ?? p.fmt)(neg(i) ? Math.abs(v) : v) },
+      }),
+    ),
+    axisPointer: n > 1 ? { link: [{ xAxisIndex: 'all' }] } : undefined,
+    dataZoom:
+      o.zoom === 'card'
+        ? [{ type: 'inside', id: 'zoom', xAxisIndex: axes, zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }]
+        : detail
+          ? [{ type: 'inside', id: 'zoom', xAxisIndex: axes }, { ...SLIDER(), xAxisIndex: axes }]
+          : undefined,
+    toolbox: detail ? { show: false, feature: { dataZoom: { xAxisIndex: axes, yAxisIndex: 'none' } } } : undefined,
+    tooltip: axisTip((ps) => {
+      const arr = list([ps].flat());
+      const t = num(arr[0]?.value?.[0]) ?? num(arr[0]?.axisValue);
+      const rows = [];
+      for (const p of arr) {
+        const m = meta[p.seriesIndex];
+        if (!m || m.cmp) continue;
+        const v = valueOf(p, m.s);
+        rows.push([m.s.mark, m.s.name, fmtOf(m.s)(v)]);
+        const q = arr.find((x) => meta[x.seriesIndex]?.cmp && meta[x.seriesIndex].s === m.s);
+        if (q) {
+          const cv = valueOf(q, m.s);
+          const d = change(v, cv);
+          rows.push(['cmp', '이전', d.pct === null ? fmtOf(m.s)(cv) : `${fmtOf(m.s)(cv)} · ${signed(d.pct)}%`]);
+        }
+      }
+      return tip(t === null ? '' : when(t), rows);
+    }),
+    series,
+  };
+}
+
+// 상태 띠 한 칸 — 정상은 얇고 옅게, 주의·끊김은 칸 높이 가득, 자료 없음은 점선 테두리 + 빗금(45°)
+const LANE_H = Object.freeze({ bad: 0.64, warn: 0.5, none: 0.5, ok: 0.2, track: 0.12 });
+function hatch(r, step = 6) {
+  const out = [];
+  for (let k = step; k < r.width + r.height; k += step) {
+    let x1 = r.x + k - r.height;
+    let y1 = r.y + r.height;
+    let x2 = r.x + k;
+    let y2 = r.y;
+    if (x1 < r.x) {
+      y1 -= r.x - x1;
+      x1 = r.x;
+    }
+    if (x2 > r.x + r.width) {
+      y2 += x2 - (r.x + r.width);
+      x2 = r.x + r.width;
+    }
+    if (x2 > x1) out.push({ type: 'line', silent: true, shape: { x1, y1, x2, y2 }, style: { stroke: T.none, lineWidth: 1, opacity: 0.55 } });
+  }
+  return out;
+}
+function laneItem(segs) {
+  return (params, api) => {
+    const seg = segs[params.dataIndex];
+    const a = api.coord([api.value(1), api.value(0)]);
+    const b = api.coord([api.value(2), api.value(0)]);
+    const height = api.size([0, 1])[1] * (own(LANE_H, seg.tone) ?? 0.2);
+    const box = params.coordSys;
+    const r = lib().graphic.clipRectByRect({ x: a[0], y: a[1] - height / 2, width: Math.max(2, b[0] - a[0]), height }, { x: box.x, y: box.y, width: box.width, height: box.height });
+    if (!r) return null;
+    if (seg.tone === 'none') {
+      return { type: 'group', children: [{ type: 'rect', shape: r, style: { fill: 'transparent', stroke: T.none, lineWidth: 1, lineDash: [2, 2] } }, ...hatch(r)] };
+    }
+    const fill = seg.tone === 'track' ? T.grid : color(seg.tone);
+    return { type: 'rect', transition: [], shape: { ...r, r: 2 }, style: { fill, opacity: seg.tone === 'ok' ? 0.45 : 1 } };
+  };
+}
+// 상태 띠 — rows = 왼쪽 이름, right = 오른쪽 글(마지막 성공·성공률), segs = [{ row, from, to, tone, head, tip }]
+export function lanesOption(o) {
+  const right = list(o.right).length ? [catAxis(o.right, { inverse: true, position: 'right', axisLabel: { color: T['text-3'], fontSize: 11 } })] : [];
+  return {
+    animation: false,
+    grid: { left: 8, right: right.length ? 8 : 16, top: 6, bottom: 4, containLabel: true },
+    xAxis: timeAxis(o.startMs, o.endMs),
+    yAxis: [catAxis(o.rows, { inverse: true, axisLabel: { color: T['text-1'], fontSize: 12 } }), ...right],
+    dataZoom: o.zoom ? [{ type: 'inside', id: 'zoom', zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }] : undefined,
+    tooltip: itemTip((p) => tip(o.segs[p.dataIndex]?.head, o.segs[p.dataIndex]?.tip ?? [])),
+    series: [{ type: 'custom', encode: { x: [1, 2], y: 0 }, data: o.segs.map((s) => [s.row, s.from, s.to]), renderItem: laneItem(o.segs) }],
+  };
+}
