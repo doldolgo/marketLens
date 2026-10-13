@@ -4,9 +4,14 @@
 덮어 보기 값 메시지, 이름표(EL_NAMES·틀 열쇠·자동 열쇠 여덟·(기타)), 그리고 052·061 의 목록을 이름표가 모두 덮는지.
 """
 
+import json
+import re
 from typing import Any
 
 from tests.admin_dom import run_admin
+from tests.test_attention import DASHBOARD_COMMON, DASHBOARD_TABS, STATIC_AREAS
+from tests.test_attention_elements import COMMON, DASHBOARD, SCRIPTED, STATIC
+from tests.test_deploy import _text
 
 # calls = [[이름, 'm.<함수>' | 'n.<함수>', [인자…]]] — 인자 {"$set": […]} 는 Set 으로
 CALL = r"""
@@ -207,3 +212,203 @@ def test_exits_share_and_depth_reach_with_the_half_line() -> None:
     ]
     assert (got["depth"]["half"], got["depth"]["total"]) == (4, 60)
     assert got["zero"]["reach"] is None and got["dash"] is None
+
+
+def test_overlay_message_carries_mode_drawable_elements_tags_and_static_depth() -> None:
+    """§3.5 — 값 메시지(053 + 065): 영역(053 꼴 — 페이지에 있는 것), 요소(지금 화면에 있고 단계가 있는 것만 — (기타)·없음·null 빼고,
+    꼬리표 글 = 이름 · 고른 지표 값, small = 표본 적음), 깊이(정적 페이지의 도달 11칸, 대시보드는 null)."""
+    row = _row(
+        4,
+        ELEMENTS,
+        areas=[{"id": "hero", "ms": 8_000, "clicks": 1, "seen": 4}],
+        depth=[1] * 11,
+    )
+    scenario = r"""
+const m = await page('screensmodel.js')
+const msg = (page, metric, present) => {
+  const row = { ...input.row, page }
+  return m.overlayMessage({ page, mode: 'element', metric, label: 'L', areas: m.areaValues(row, ['hero']), elements: m.elementValues(row, metric, present, 'pc'), depth: m.depthValues(row) })
+}
+out.landing = msg('landing', 'clicks', new Set(['hero|live:1']))
+out.hover = msg('landing', 'hover', null).elements.map((e) => e.tag)
+out.hoverKeys = msg('landing', 'hover', null).elements.map((e) => e.key)
+out.dash = msg('app-spread', 'vis', null)
+"""
+    got = run_admin(scenario, {"row": row})
+    land = got["landing"]
+    assert {k: land[k] for k in ("type", "v", "label", "mode")} == {
+        "type": "kt-attention",
+        "v": 1,
+        "label": "L",
+        "mode": "element",
+    }
+    assert land["areas"] == [
+        {
+            "id": "hero",
+            "level": 5,
+            "rank": 1,
+            "t": 2.0,
+            "r": 100,
+            "c": 25.0,
+            "low": False,
+            "small": True,
+        }
+    ]
+    assert [
+        (e["area"], e["key"], e["level"], e["rank"], e["small"])
+        for e in land["elements"]
+    ] == [
+        ("hero", "live:1", 5, 1, True),
+        ("events", "row:BTC", 4, 2, True),
+    ]  # faq:rate 는 지금 화면에 없음 — 그리지 않는다, 행은 늘 있다
+    assert (
+        land["elements"][0]["tag"] == "지금 가장 큰 경로 카드 · 클릭 10 · 100뷰당 250.0"
+    )
+    assert land["depth"] == [
+        100,
+        90.9,
+        81.8,
+        72.7,
+        63.6,
+        54.5,
+        45.5,
+        36.4,
+        27.3,
+        18.2,
+        9.1,
+    ]
+    assert got["hover"][:2] == [
+        "지금 가장 큰 경로 카드 · 마우스 올림 평균 7.5초",
+        "김프·역프란 링크 · 마우스 올림 평균 2.3초",
+    ]
+    # 단계가 null(m = 0 이고 보인 시간도 0)인 요소·행은 싣지 않는다 — 단계 0(보이기만)은 싣는다
+    assert got["hoverKeys"] == ["live:1", "nav:kimp", "link:/app/", "faq:rate"]
+    assert got["dash"]["depth"] is None
+    assert (
+        got["dash"]["elements"][0]["tag"]
+        == "지금 가장 큰 경로 카드 · 보인 시간 평균 100.0초"
+    )
+
+
+def test_names_page_specific_template_and_auto_keys() -> None:
+    """§3.4 — EL_NAMES(화면마다 뜻이 다르면 '<화면>|<열쇠>' 먼저), 틀 열쇠는 061 §7 이름 꼴, 목록에 없는 자동 열쇠 여덟, (기타), 그 밖은 열쇠
+    그대로. 영역 이름은 053 표(대시보드는 공통 app 다음), 없으면 id."""
+    cases = {
+        "a": ["n.elName", ["app-spread", "row:BTC"]],
+        "b": ["n.elName", ["app-history", "period:7d"]],
+        "c": ["n.elName", ["app-history", "row:ETH"]],
+        "d": ["n.elName", ["app-spread", "fx:gateio"]],
+        "e": ["n.elName", ["app-history", "fx:okx"]],
+        "f": ["n.elName", ["app-spread", "dom:all"]],
+        "g": ["n.elName", ["app-history", "dom:all"]],
+        "h": ["n.elName", ["app-history", "sort:sym"]],
+        "i": ["n.elName", ["app-spread", "sort:sym"]],
+        "j": ["n.elName", ["app-flow", "search"]],
+        "k": ["n.elName", ["app-gap", "search"]],
+        "l": ["n.elName", ["landing", "link:/kimp-chart"]],
+        "m": ["n.elName", ["landing", "link:mailto"]],
+        "n": ["n.elName", ["privacy", "btn:동의 철회"]],
+        "o": ["n.elName", ["landing", "faq:왜 다른가"]],
+        "p": ["n.elName", ["app-spread", "input:q"]],
+        "q": ["n.elName", ["app-spread", "select:dom"]],
+        "r": ["n.elName", ["privacy", "check:checkbox"]],
+        "s": ["n.elName", ["app-gap", "tab:history"]],
+        "t": ["n.elName", ["landing", "(기타)"]],
+        "u": ["n.elName", ["landing", "weird-key"]],
+        "v": ["n.elName", ["app-history", "interval:4h"]],
+        "w": ["n.elName", ["kimp-chart", "coin:all"]],
+        "x": ["n.elName", ["landing", "live:3"]],
+        "y": ["n.areaName", ["app-gap", "kpi"]],
+        "z": ["n.areaName", ["landing", "nope"]],
+    }
+    got = _call(*((k, fn, args) for k, (fn, args) in cases.items()))
+    assert got == {
+        "a": "코인 행 BTC",
+        "b": "기간 1주",
+        "c": "티커 행 ETH",
+        "d": "비교 해외 거래소 Gate.io",
+        "e": "해외 OKX",
+        "f": "기준 국내 거래소 모두",
+        "g": "국내 전체",
+        "h": "티커 정렬",
+        "i": "심볼 정렬",
+        "j": "코인 심볼 입력칸",
+        "k": "심볼 검색칸",
+        "l": "링크 /kimp-chart",
+        "m": "메일 링크",
+        "n": "단추 동의 철회",
+        "o": "질문 왜 다른가",
+        "p": "입력칸 q",
+        "q": "고르기 dom",
+        "r": "체크 상자 checkbox",
+        "s": "탭 기록/통계",
+        "t": "(기타 — 열쇠 300 넘음)",
+        "u": "weird-key",
+        "v": "봉 종류 4시간",
+        "w": "전체 코인 김프 차트",
+        "x": "경로 카드 3위",
+        "y": "KPI 줄",
+        "z": "nope",
+    }
+
+
+SAMPLE = {
+    "row": "BTC",
+    "fx": "binance",
+    "period": "7d",
+    "interval": "1h",
+    "chart-dom": "upbit",
+    "fold": "okx",
+    "card": "bybit",
+    "dir": "kimp",
+    "tab": "spread",
+    "live": "3",
+}
+
+
+def _expand(page: str, key: str) -> str:
+    """템플릿 열쇠 '<접두>:*' → 보기 값 하나."""
+    return f"{key[:-2]}:{SAMPLE[key[:-2]]}" if key.endswith(":*") else key
+
+
+def test_name_tables_cover_every_listed_element_key_and_area() -> None:
+    """§4 정적 — EL_NAMES 가 061 목록(tests/test_attention_elements.py)의 화면별 열쇠를 모두 덮는다(틀 열쇠는 규칙 — 보기 값 하나로),
+    AREA_NAMES 가 052 영역 id(tests/test_attention.py)를 모두 덮는다. 이름은 열쇠 그대로가 아닌 한국어."""
+    screens: dict[str, list[str]] = {
+        f"app-{tab}": [*COMMON, *keys] for tab, (_, keys) in DASHBOARD.items()
+    }
+    for page, pairs in STATIC.items():
+        # 같은 열쇠가 영역 둘에 있으면(랜딩 머리·바닥의 nav:*) 이름은 하나
+        screens[page] = list(dict.fromkeys(k for _, k in pairs)) + SCRIPTED.get(
+            page, []
+        )
+    calls = [
+        (f"{p}|{k}", "n.elName", [p, _expand(p, k)])
+        for p, keys in screens.items()
+        for k in keys
+    ]
+    areas = {
+        p: [*DASHBOARD_COMMON, *a]
+        for p, (_, a) in ((f"app-{t}", v) for t, v in DASHBOARD_TABS.items())
+    } | STATIC_AREAS
+    calls += [
+        (f"area:{p}|{a}", "n.areaName", [p, a]) for p, ids in areas.items() for a in ids
+    ]
+    got = _call(*calls)
+    assert len(got) == len(calls) > 150
+    for name, text in got.items():
+        key = name.split("|", 1)[1]
+        assert re.search(r"[가-힣]", text) and text != key, (name, text)
+    # AREA_NAMES 는 053 의 표 그대로(JSON 꼴) — 화면별 표의 id 가 052 목록과 같다
+    block = re.search(
+        r"\nconst AREA_NAMES = (\{\n.*?\n\});\n",
+        _text("web/admin/screensnames.js"),
+        flags=re.S,
+    )
+    assert block, "AREA_NAMES"
+    names = json.loads(block.group(1))
+    assert {p: list(t) for p, t in names.items() if p in STATIC_AREAS} == STATIC_AREAS
+    assert list(names["app"]) == DASHBOARD_COMMON
+    assert {t: sorted(names[f"app-{t}"]) for t in DASHBOARD_TABS} == {
+        t: sorted(a) for t, (_, a) in DASHBOARD_TABS.items()
+    }
