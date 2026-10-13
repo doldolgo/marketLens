@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from tests.admin_dom import run_admin
-from tests.test_admin import _admin_route, _forward
+from tests.test_admin import _forward
 from tests.test_deploy import API, COLLECTOR
 
 NOW = 1_791_525_610_000  # 2026-10-09T06:00:10Z
@@ -149,12 +149,6 @@ BACKEND = {
     "/svc/api/admin/clarity/history": (API, "/admin/clarity/history"),
     "/api/refresh": (COLLECTOR, "/refresh"),
 }
-PENDING_ROUTES = {
-    "/svc/api/admin/access/ips",
-    "/svc/api/admin/access/ip",
-    "/svc/api/admin/clarity/history",
-}
-
 FIRST_LOAD = (
     RESPOND
     + r"""
@@ -169,8 +163,7 @@ for (const name of input.pages) {
 
 
 def test_each_page_calls_its_paths_once_and_every_path_has_an_admin_route() -> None:
-    """066 §3.1 — 빠른 넷(029)과 그 페이지가 쓰는 느린 피드만(주소 = 경로 + 쿼리), 경로마다 관리자 nginx 분기. 067·068 의 경로는 그 스펙이
-    정확 일치 location 을 더할 때까지 정적 '/' 로 가서 404 — 화면은 '연결 안 됨'(066 §3.4)."""
+    """066 §3.1 — 빠른 넷(029)과 그 페이지가 쓰는 느린 피드만(주소 = 경로 + 쿼리), 경로마다 관리자 nginx 분기(067·068 의 정확 일치 포함)."""
     got = run_admin(FIRST_LOAD, _payload(pages=list(EXPECTED_CALLS)))
     for name, expected in EXPECTED_CALLS.items():
         assert got[name]["calls"] == expected, name
@@ -184,8 +177,6 @@ def test_each_page_calls_its_paths_once_and_every_path_has_an_admin_route() -> N
     }
     assert paths == set(BACKEND)
     for path, target in BACKEND.items():
-        if path in PENDING_ROUTES and _admin_route(path) == ("/",):
-            continue
         assert _forward(path) == target, path
 
 
