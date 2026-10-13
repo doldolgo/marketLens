@@ -50,10 +50,12 @@
     ["checkbox", "check"],
     ["switch", "check"],
   ])
-  // 영역 안에서 찾는 요소 — data-el(행 빼고 — 행은 클릭만 센다) 또는 대화형 요소
-  const FIND =
-    '[data-el]:not([data-el^="row:"]),a[href],button,summary,input,select,textarea,label,' +
+  // 영역 안의 대화형 요소 — 세기(061)와 덮어 보기(065)가 같이 쓴다
+  const ITEMS =
+    "a[href],button,summary,input,select,textarea,label," +
     "[role=button],[role=tab],[role=checkbox],[role=switch],[role=link]"
+  // 영역 안에서 찾는 요소 — data-el(행 빼고 — 행은 클릭만 센다) 또는 대화형 요소
+  const FIND = '[data-el]:not([data-el^="row:"]),' + ITEMS
   // 열쇠에 못 쓰는 글자 — 제어 문자·| ·짝 없는 대리 문자(UTF-8 로 못 적는다)
   const BAD_KEY = /[\u0000-\u001f\u007f-\u009f|]|[\ud800-\udbff](?![\udc00-\udfff])|(?:^|[^\ud800-\udbff])[\udc00-\udfff]/
 
@@ -77,11 +79,6 @@
     // 다른 출처의 틀 — 틀 안이다
   }
   const overlayAsked = params.get("kt-overlay") === "1"
-  if (location.hostname !== HOST || !firstPage) return
-  // 덮어 보기(053) — 주소에 kt-overlay=1 이 있고 틀 안일 때만. 세지도 보내지도 않는다(아래 세기 코드에 닿지 않는다)
-  if (framed && overlayAsked) return overlay(firstPage)
-  // 켜는 조건(§3.2) — 호스트·틀 밖·덮어 보기 아님·목록 안 화면. 하나라도 아니면 아무것도 하지 않는다
-  if (framed || overlayAsked) return
 
   // 동의 상태 '켬' — 지금 판의 granted 이고 GPC 가 아니다. 저장소를 읽다 예외면 끔
   const consented = () => {
@@ -195,19 +192,28 @@
     return ""
   }
 
-  // 찾은 요소의 추적 열쇠 — 자기 data-el, 또는 data-el 조상이 없을 때 자동 열쇠(조상이 있으면 그 조상이 센다). 행(row:)은 빼고
-  const trackKey = (el, area) => {
+  // 찾은 요소의 열쇠 — 자기 data-el, 또는 data-el 조상이 없을 때 자동 열쇠(조상이 있으면 그 조상이 센다).
+  // 덮어 보기(065)도 이 함수로 (영역, 열쇠)를 가진 요소를 찾는다 — 세는 것과 그리는 것이 같은 요소
+  const elementKey = (el, area) => {
     const own = el.getAttribute("data-el")
-    let key = ""
-    if (own !== null) key = validKey(own)
-    else {
-      for (let n = el.parentElement; n && n !== area; n = n.parentElement) {
-        if (n.getAttribute("data-el") !== null) return ""
-      }
-      key = autoKey(el, area)
+    if (own !== null) return validKey(own)
+    for (let n = el.parentElement; n && n !== area; n = n.parentElement) {
+      if (n.getAttribute("data-el") !== null) return ""
     }
+    return autoKey(el, area)
+  }
+
+  // 추적 열쇠 — 행(row:)은 빼고(행은 클릭만 센다)
+  const trackKey = (el, area) => {
+    const key = elementKey(el, area)
     return key.indexOf("row:") === 0 ? "" : key
   }
+
+  // 켜는 조건(§3.2) — 호스트·목록 안 화면. 덮어 보기(053)는 주소에 kt-overlay=1 이 있고 틀 안일 때만 — 세지도 보내지도 않는다
+  // (아래 세기 코드에 닿지 않는다). 열쇠 함수 뒤에 둔다 — 덮어 보기가 그 함수를 쓴다. 틀 안이거나 덮어 보기 표시만 있으면 아무것도 하지 않는다
+  if (location.hostname !== HOST || !firstPage) return
+  if (framed && overlayAsked) return overlay(firstPage)
+  if (framed || overlayAsked) return
 
   // ── 세기 (052 §3.2 + 061 §3.2) ───────────────────────────────────────────────────────────
 
