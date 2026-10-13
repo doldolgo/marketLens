@@ -7,7 +7,6 @@ test_deploy.py 와 같은 방식이다: Docker 없는 CI 에서 설정 파일을
 고친 PR 은 로컬 `nginx -t` 결과를 본문에 적는다(§3.6).
 """
 
-import hashlib
 import json
 import re
 

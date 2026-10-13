@@ -60,38 +60,54 @@ new Function('exports', 'module', code)(lib.exports, lib)
 const real = lib.exports
 const respond = (url) => {
   const [path] = url.split('?')
-  if (path === '/api/admin/aws/series') return input.series ? [200, input.series] : [404, { detail: 'Not Found' }]
-  if (path === '/svc/api/admin/access') return input.access ? [200, input.access] : [404, { detail: 'Not Found' }]
+  if (path === '/api/admin/aws/series') return input.series && url.includes('range=24h') && !url.includes('offset') ? [200, input.series] : [404, { detail: 'Not Found' }]
+  if (path === '/svc/api/admin/access') return input.access && url.includes(`window=${input.access.window}`) ? [200, input.access] : [404, { detail: 'Not Found' }]
   if (path === '/api/admin/aws') return [200, { alarms: { state: 'unconfigured' }, metrics: { state: 'unconfigured' }, canary: { state: 'unconfigured' }, budget: { state: 'unconfigured' } }]
   return input.feeds[path] || [404, { detail: 'Not Found' }]
 }
-for (const name of input.pages) {
-  const v = setup({ respond, buttons: { range: ['24h'], window: ['24h', '7d', '30d'] } })
+for (const [name, search, details] of input.pages) {
+  const v = setup({ respond, search, buttons: { detail: details } })
+  document.getElementById('sheet').hidden = true
   const made = new Map()
   globalThis.echarts = {
-    init: (el) => { const c = real.init(null, null, { renderer: 'svg', ssr: true, width: 720, height: 320 }); made.set(el.id, c); return c },
+    init: (el, theme) => { const c = real.init(null, theme, { renderer: 'svg', ssr: true, width: 720, height: 320 }); made.set(el.id, c); return c },
+    registerTheme: real.registerTheme,
     connect: real.connect,
     format: real.format,
     graphic: real.graphic,
   }
   await page(name, `?c=${name}`)
   await flush()
-  if (name === 'traffic.js') { v.click('window', '7d'); await flush() }
   const failed = []
-  for (const [id, chart] of made) {
-    try { chart.renderToSVGString() } catch (err) { failed.push([id, String(err).slice(0, 200)]) }
+  const render = (tag) => {
+    for (const [id, chart] of made) {
+      if (chart.isDisposed()) continue
+      try { chart.renderToSVGString() } catch (err) { failed.push([`${tag}:${id}`, String(err).slice(0, 300)]) }
+    }
   }
+  render('page')
   const option = (id) => made.get(id)?.getOption()
-  out[name] = {
-    failed,
-    errors: [...v.byId.entries()].filter(([id, n]) => id.startsWith('t-') && n.textContent === '표시 오류').map(([id]) => id),
+  const got = {
     tags: Object.fromEntries([...v.byId.entries()].filter(([id, n]) => id.startsWith('t-') && n.textContent).map(([id, n]) => [id, n.textContent])),
     charts: [...made.keys()],
     chips: (v.byId.get('chips')?.kids || []).map((c) => c.textContent),
     sankey: option('c-flows')?.series?.[0]?.data?.map((n) => n.name) ?? null,
     cpu: option('c-cpu')?.series?.map((s) => s.name) ?? null,
-    texts: Object.fromEntries(['v-visitors', 'v-pages', 'v-5xx', 'v-bots'].map((id) => [id, v.text(id)])),
+    texts: Object.fromEntries(['v-visitors', 'v-pages', 'v-errors', 'v-bots'].map((id) => [id, v.text(id)])),
+    sheets: {},
   }
+  // 상세 판 — 진짜 응답으로 그래프(진짜 dataZoom 으로 보이는 구간)·통계·원자료가 찬다
+  for (const d of details) {
+    v.click('detail', d)
+    await flush()
+    render(d)
+    got.sheets[d] = { title: v.text('sheet-title'), tag: v.text('t-sheet'), chart: made.has('c-sheet') && !made.get('c-sheet').isDisposed(), stats: v.text('sheet-stat-tbl'), count: v.text('sheet-count') }
+    document.getElementById('sheet-close').fire('click')
+    await flush()
+  }
+  got.failed = failed
+  got.errors = [...v.byId.entries()].filter(([id, n]) => id.startsWith('t-') && n.textContent === '표시 오류').map(([id]) => id)
+  out[name] = got
 }
 """
 
@@ -131,50 +147,45 @@ async def _real_access() -> dict[str, Any]:
 
 def test_real_series_feed_draws_the_server_and_overview_pages() -> None:
     """063 응답: 서버 시간 카드 아홉과 개요 상자 셋이 그려지고, 마지막 칸의 상태 검사 실패(빨강)·메모리 사용 87.65%(주황)를
-    상자마다 칩으로 낸다(최근 15분 평균 — §3.2)."""
-    got = run_admin(
-        SCENARIO,
-        {
-            "pages": ["server.js", "overview.js"],
-            "feeds": PLAIN,
-            "series": _real_series(),
-            "access": None,
-        },
-    )
+    상자마다 칩으로 낸다(최근 15분 평균 — 064 §3.2). 상세 판(066 §3.2)은 같은 응답으로 그래프·통계·원자료를 채운다."""
+    pages = [
+        ["server.js", "", ["cpu", "mem", "credit", "checks", "net"]],
+        ["overview.js", "", ["cpu"]],
+    ]
+    feeds = {"pages": pages, "feeds": PLAIN, "series": _real_series(), "access": None}
+    got = run_admin(SCENARIO, feeds)
     server, overview = got["server.js"], got["overview.js"]
     for page in (server, overview):
         assert page["failed"] == [] and page["errors"] == [], page
     assert server["cpu"] == ["collect", "data", "serve"]
-    assert {
-        "c-cpu",
-        "c-net",
-        "c-mem",
-        "c-disk",
-        "c-credit",
-        "c-io",
-        "c-ws",
-        "c-canary",
-        "c-checks",
-    } <= set(server["charts"])
-    assert not {
-        k: v for k, v in server["tags"].items() if k in {"t-cpu", "t-net", "t-checks"}
-    }
+    times = {"c-cpu", "c-net", "c-mem", "c-disk", "c-credit", "c-io", "c-ws"}
+    assert times | {"c-canary", "c-checks"} <= set(server["charts"])
+    assert not {k for k in server["tags"] if k in {"t-cpu", "t-net", "t-checks"}}
+    for d, sheet in server["sheets"].items():
+        assert sheet["chart"] and sheet["tag"] == "" and sheet["count"], (d, sheet)
+    assert server["sheets"]["cpu"]["title"] == "CPU"
+    for box in ("collect", "data", "serve"):
+        assert box in server["sheets"]["cpu"]["stats"], server["sheets"]["cpu"]
+    assert {"c-box-collect", "c-box-data", "c-box-serve"} <= set(overview["charts"])
+    assert overview["sheets"]["cpu"]["chart"]
     chips = overview["chips"]
     for box in ("collect", "data", "serve"):
         assert f"{box} 상태 검사실패" in chips, chips
         assert f"{box} 메모리87.7%" in chips, chips
-    assert chips.index("serve 상태 검사실패") < chips.index(
-        "collect 메모리87.7%"
-    )  # 빨강 먼저
+    # 빨강 먼저
+    assert chips.index("serve 상태 검사실패") < chips.index("collect 메모리87.7%")
 
 
 async def test_real_access_feed_draws_the_traffic_page() -> None:
-    """038·039·062 응답(7일 창): 흐름 마디가 들어온 길·첫·마지막 페이지 층으로 나뉘고, 큰 수·카드가 그 값으로 찬다."""
+    """038·039·062 응답(7일 창 — `?range=7d`): 흐름 마디가 들어온 길·첫·마지막 페이지 층으로 나뉘고, 큰 수·카드·상세 판이
+    그 값으로 찬다."""
     access = await _real_access()
     assert (access["state"], access["window"]) == ("ok", "7d")
+    pages = [
+        ["traffic.js", "?range=7d", ["trend", "flows", "src", "geo", "ends", "status"]]
+    ]
     got = run_admin(
-        SCENARIO,
-        {"pages": ["traffic.js"], "feeds": PLAIN, "series": None, "access": access},
+        SCENARIO, {"pages": pages, "feeds": PLAIN, "series": None, "access": access}
     )
     traffic = got["traffic.js"]
     assert traffic["failed"] == [] and traffic["errors"] == [], traffic
@@ -190,22 +201,16 @@ async def test_real_access_feed_draws_the_traffic_page() -> None:
         "2:kimp-chart",
     }
     visitors = access["visitors"]
-    assert (
-        traffic["texts"]["v-visitors"]
-        == f"{visitors['confirmed']} ~ {visitors['shaped']}"
-    )
-    assert traffic["texts"]["v-5xx"] == "1" and traffic["texts"]["v-pages"] == str(
-        access["totals"]["humanPages"]
-    )
-    assert {
-        "c-flows",
-        "c-ends",
-        "c-depth",
-        "c-trend",
-        "c-heat",
-        "c-classes",
-        "c-status",
-    } <= set(traffic["charts"])
-    assert (
-        traffic["tags"].get("t-countries") == "첫 조회 중"
-    )  # DB-IP 를 받는 중(039 — 이 시험은 받지 않는다)
+    texts = traffic["texts"]
+    assert texts["v-visitors"] == f"{visitors['confirmed']}~ {visitors['shaped']}"
+    assert texts["v-pages"] == str(access["totals"]["humanPages"])
+    assert texts["v-errors"].endswith("1")  # ■ 모양 + 수
+    assert {"c-flows", "c-trend", "c-heat"} <= set(traffic["charts"])
+    # DB-IP 를 받는 중(039 — 이 시험은 받지 않는다)
+    assert traffic["tags"].get("t-geo") == "첫 조회 중"
+    sheets = traffic["sheets"]
+    assert sheets["trend"]["chart"] and sheets["flows"]["chart"], sheets
+    # 날별 방문자 — 오늘(창 끝 = 지금, 정오 전) 막대도 창 안에 든다
+    assert sheets["trend"]["count"] == "3 / 3행", sheets["trend"]
+    assert sheets["geo"]["tag"] == "첫 조회 중", sheets["geo"]
+    assert all(sheets[d]["count"] for d in ("src", "ends", "status")), sheets
