@@ -62,7 +62,7 @@ function drawTrend(app) {
     const first = t.series[0];
     put('f-trend', first.cmp ? deltaText(sum(first.data), sum(first.cmp), `${first.name} 합 — ${cmpPhrase(app.view.range, app.view.cmp)}`) : t.cmpState === 'missing' ? '이 자료는 비교 없음' : '');
     if (!t.series.some((s) => list(s.data).some((p) => n0(p[1]) > 0))) return blank('c-trend', '자료 없음');
-    return draw('c-trend', timeOption({ startMs: t.a.startMs, endMs: t.a.endMs, zoom: 'card', panes: [{ fmt: int }], series: t.series }), GROUP);
+    return draw('c-trend', timeOption({ startMs: t.a.startMs, endMs: t.a.endMs, daily: t.daily, zoom: 'card', panes: [{ fmt: int }], series: t.series }), GROUP);
   });
 }
 

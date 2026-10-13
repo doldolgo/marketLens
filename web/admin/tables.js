@@ -38,7 +38,8 @@ export function statTable(node, t, series, lo, hi) {
 
 // 원자료 — 보이는 계열의 시각마다 값(+ 이전 기간 값). 기본 최근 순
 export function rawTable(id, t, series, lo, hi) {
-  const columns = [{ key: 'time', label: '시각(KST)', fmt: (v) => kstText(v), csv: (r) => kstText(r.time, true) }];
+  // 날 칸이면 날짜만 보인다(점은 그날이 창과 겹친 구간의 가운데 — CSV 는 그 시각 그대로)
+  const columns = [{ key: 'time', label: t.daily ? '날(KST)' : '시각(KST)', fmt: (v) => (t.daily ? kstText(v).slice(0, 10) : kstText(v)), csv: (r) => kstText(r.time, true) }];
   series.forEach((s, i) => {
     const fmt = fmtOf(t, s);
     if (hasValue(s.cmp)) {

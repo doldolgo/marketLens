@@ -74,7 +74,7 @@ function drawMatch(app) {
   once('c-match', [...m.deps, app.view.range], () => {
     if (!m.ok) return blank('c-match', stateWord(m.part));
     if (!m.series.some((s) => s.data.length)) return blank('c-match', '기록 쌓는 중');
-    return draw('c-match', timeOption({ startMs: m.startMs, endMs: m.endMs, panes: [{ fmt: int }], series: m.series }));
+    return draw('c-match', timeOption({ startMs: m.startMs, endMs: m.endMs, daily: true, panes: [{ fmt: int }], series: m.series }));
   });
 }
 

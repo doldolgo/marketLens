@@ -41,6 +41,16 @@ out.valid = ['1.2.3.0/24', '1.2.3.4/24', '1.2.3.0', '2001:db8:1::/48', '2001:DB8
 out.bytes = [0, 512, 1023, 1024, 1536, 10240, 1048576, -2048, 5e12, null].map(common.bytes)
 const kst0 = Math.floor((input.now / 1000 + 32400) / 86400) * 86400 - 32400
 out.today = [models.todayVisitors({ endTs: input.now / 1000, visitors: { state: 'ok', days: [{ ts: kst0 - 86400, confirmed: 3, shaped: 9 }, { ts: kst0, confirmed: 2, shaped: 7 }] } }), models.todayVisitors({ endTs: input.now / 1000, visitors: { state: 'unconfigured' } })]
+// 접속 날 점(038 visitors.days) — 그날이 창과 겹친 구간의 가운데(오늘은 지금까지), 이전 기간 날도 민 뒤 같은 규칙. 맞대기는 그날 00:00
+const nowS = input.now / 1000
+const visits = (start, days) => ({ state: 'ok', startTs: start, endTs: nowS, hourly: [], visitors: { state: 'ok', days } })
+const aq = models.accessReqs('7d', 'prev')
+const week = visits(nowS - 7 * 86400, [{ ts: kst0 - 7 * 86400, shaped: 1 }, { ts: kst0 - 86400, shaped: 4, confirmed: 3 }, { ts: kst0, shaped: 2, confirmed: 1 }])
+out.accessDays = models.accessWindow(fakeApp({ [aq[0].key]: week, [aq[1].key]: visits(nowS - 30 * 86400, [{ ts: kst0 - 8 * 86400, shaped: 5 }, { ts: kst0 - 7 * 86400, shaped: 3 }]) }), '7d', 'prev').days('shaped')
+const kdate = (sec) => new Date((sec + 32400) * 1000).toISOString().slice(0, 10)
+const mq = [models.historyReqs('7d', 'none')[0], models.accessReqs(ins.accessRange('7d'), 'none')[0]]
+const rows = [{ date: kdate(kst0 - 86400), traffic: { sessions: 2 } }, { date: kdate(kst0), traffic: { sessions: 1 } }]
+out.match = ins.matchModel(fakeApp({ [mq[0].key]: { state: 'ok', rows }, [mq[1].key]: week }), '7d').series.map((x) => x.data)
 const top = Math.floor(input.now / H) * H
 const rate = models.hourlySuccess({ exchanges: [{}, {}], outages: [{ startedAt: top - 3 * H, endedAt: top - 3 * H + 1800000 }, { startedAt: top - 600000, endedAt: null }] }, input.now)
 out.success = { n: rate.length, early: rate.find((p) => p[0] === top - 3 * H + H / 2)?.[1], other: rate[0][1], current: rate.at(-1)[1] }
@@ -107,6 +117,24 @@ def test_clarity_daily_lines_and_shading(got: dict[str, Any]) -> None:
     ]
     assert got["lastTwo"] == [[4, 1], [1, None]]
     assert got["shade"] == ["", "q1", "q5", "", ""]
+
+
+def test_access_day_points_stay_inside_the_window(got: dict[str, Any]) -> None:
+    """066 §3.3 트래픽 큰 추이(7·30일 날별) — 날 점은 그날이 창과 겹친 구간의 가운데라 오늘 막대가 축(창 끝 = 지금) 밖으로 나가지 않는다.
+    이전 기간 날은 창 길이만큼 민 뒤 같은 규칙. 맞대기는 Clarity 날 점처럼 그날 00:00 KST 에 둔다."""
+    day, now = 86_400_000, NOW
+    k = ((now // 1000 + 32_400) // 86_400 * 86_400 - 32_400) * 1000
+    first = (now - 7 * day + k - 6 * day) / 2
+    assert got["accessDays"] == {
+        "data": [[first, 1], [k - day / 2, 4], [(k + now) / 2, 2]],
+        "cmp": [[k - day / 2, 5], [(k + now) / 2, 3]],
+    }
+    assert max(t for t, _ in got["accessDays"]["data"]) < now
+    assert got["match"] == [
+        [[k - day, 2], [k, 1]],
+        [[k - day, 3], [k, 1]],
+        [[k - day, 4], [k, 2]],
+    ]
 
 
 def test_inherited_calculations_and_tooltip_text(got: dict[str, Any]) -> None:

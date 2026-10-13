@@ -279,7 +279,7 @@ export function sparkBarsOption(data, mark, fmt) {
 // 시간 그림 — 칸(panes) 여럿을 같은 시간 축 위아래로(둘째 y축 대신), 십자선 공유(axisPointer.link). 이전 기간은 점선·--text-3·낮은 z.
 // o = { startMs, endMs, panes:[{ title?, fmt, axisFmt?, min?, max?, refs?:[[y, 색 이름, 이름표]] }],
 //       series:[{ name, mark, data, cmp?, type?:'line'|'bar', pane?, neg?(아래로 뒤집음), area?, step?, stack? }],
-//       areas?:[[from, to, 이름]](옅은 빨강 구간), zoom?:'card'|'detail', legend?, labels?(선 끝 이름표) }
+//       areas?:[[from, to, 이름]](옅은 빨강 구간), zoom?:'card'|'detail', legend?, labels?(선 끝 이름표), daily?(날 칸 — 툴팁 머리는 날짜만) }
 export function timeOption(o) {
   const panes = list(o.panes).length ? o.panes : [{ fmt: o.fmt ?? short }];
   const n = panes.length;
@@ -386,7 +386,7 @@ export function timeOption(o) {
           rows.push(['cmp', '이전', d.pct === null ? fmtOf(m.s)(cv) : `${fmtOf(m.s)(cv)} · ${signed(d.pct)}%`]);
         }
       }
-      return tip(t === null ? '' : when(t), rows);
+      return tip(t === null ? '' : o.daily ? md(t) : when(t), rows);
     }),
     series,
   };

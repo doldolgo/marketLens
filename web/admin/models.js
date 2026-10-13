@@ -70,7 +70,14 @@ export function accessReqs(window, cmp) {
   if (cmp !== 'none' && Object.hasOwn(ACCESS_CMP, window)) out.push(req('access', { window: ACCESS_CMP[window] }));
   return out;
 }
-const dayPoints = (days, key) => list(days).filter((d) => isObj(d) && num(d.ts) !== null).map((d) => [d.ts * 1000 + 12 * HOUR, n0(d[key])]);
+// 날 칸 점 — 그날(KST [0시, 다음 0시))이 창과 겹친 구간의 가운데. 오늘은 지금까지의 가운데라 창 끝을 넘지 않는다(정오에 두면 오전엔
+// 오늘 막대가 축 밖으로 나간다). 비교 날은 by 만큼 민 뒤 같은 규칙
+const dayPoints = (days, key, startMs, endMs, by = 0) =>
+  list(days)
+    .filter((d) => isObj(d) && num(d.ts) !== null)
+    .map((d) => [d.ts * 1000 + by, n0(d[key])])
+    .filter(([t]) => t + DAY > startMs && t < endMs)
+    .map(([t, v]) => [(Math.max(t, startMs) + Math.min(t + DAY, endMs)) / 2, v]);
 // { ok, part, startMs, endMs, cmpState, deps, hours(key) → { data, cmp }, days(key) → { data, cmp } } — 이전 기간 점은 지금 축으로 민 것
 export function accessWindow(app, window, cmp) {
   const [main, other] = accessReqs(window, cmp);
@@ -87,7 +94,7 @@ export function accessWindow(app, window, cmp) {
   else if (other && o !== undefined) out.cmpState = 'missing';
   out.hours = (key) => ({ data: hourPoints(part.hourly, key), cmp: src ? align(hourPoints(src.hourly, key), out.startMs, out.endMs, by) : null });
   const visits = (p) => (isObj(p?.visitors) && p.visitors.state === 'ok' ? p.visitors.days : null);
-  out.days = (key) => ({ data: dayPoints(visits(part), key), cmp: src ? align(dayPoints(visits(src), key), out.startMs, out.endMs, by) : null });
+  out.days = (key) => ({ data: dayPoints(visits(part), key, out.startMs, out.endMs), cmp: src ? dayPoints(visits(src), key, out.startMs, out.endMs, by) : null });
   return out;
 }
 

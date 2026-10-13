@@ -1,6 +1,6 @@
 // 트래픽 그림 option 과 상세 판(스펙 066 §3.2·§3.3) — 큰 추이(고른 지표)·흐름·목록 넷(전체 — 찾기·정렬·CSV)·누가·요일×시간·응답 상태·
 // WS 연결 시간. 카드의 탭·지표는 state 하나에 두고(traffic.js 가 바꾼다) 판이 같은 값을 읽는다.
-import { clean, int, isObj, kstText, list, n0, num, pct } from './common.js';
+import { clean, int, isObj, kstText, list, n0, num, partOf, pct, usable } from './common.js';
 import { colsOption, heatOption, sankeyOption, tip } from './charts.js';
 import { channelName, pageName } from './names.js';
 import { ACCESS_RANGES, accessCompare, accessReqs, accessWindow, seriesReqs, seriesWindow } from './models.js';
@@ -18,6 +18,7 @@ export function trendModel(app, range, cmp, which) {
   if (!a.ok) return out;
   const hourly = (name, key, mark, type) => ({ name, mark, type, ...a.hours(key) });
   if (which === 'visitors' && range !== '24h') {
+    out.daily = true;
     out.series = [{ name: '브라우저 모양 방문자', mark: 'acc', type: 'bar', ...a.days('shaped') }, { name: '확인된 방문자', mark: 'c1', ...a.days('confirmed'), cmp: null }, { name: '다시 온', mark: 'c3', ...a.days('returning'), cmp: null }];
   } else if (which === 'visitors' || which === 'pages') {
     out.series = [hourly('사람 모양 페이지', 'humanPages', 'acc', 'bar'), { ...hourly('스크립트가 돈 페이지', 'jsViews', 'c1'), cmp: null }].slice(0, which === 'pages' ? 1 : 2);
@@ -89,6 +90,13 @@ function accessDetail(title, unit, build, compare = NO_CMP) {
 const listDetail = (name, title) =>
   accessDetail(title, '전체 목록 · 찾기 · 정렬 · CSV', (app, pv, a) => {
     const cur = tabOf(name);
+    const head = `${title} · ${cur[1]}`;
+    const deps = [...a.deps, cur[0]];
+    // 카드와 같은 하위 부분의 상태(나라·망 = geo, 방문자 목록 = visitors) — 값이 없으면 표 없이 배지만
+    const picked = cur[2](a.part);
+    const sub = picked === a.part ? a.part : partOf({ body: { x: picked } }, 'x');
+    if (name === 'ends' && usable(sub) && !Array.isArray(sub.entries)) return { title: head, deps, badge: ['dim', '연결 안 됨', '접속 흐름 피드(062) 없음'] };
+    if (!usable(sub)) return { title: head, deps, part: sub };
     const items = cur[3](a.part);
     const denom = denomOf(a.part, cur[4]);
     const withC = items.some((it) => it.c !== undefined);
@@ -96,7 +104,7 @@ const listDetail = (name, title) =>
     if (withC) columns.push({ key: 'c', label: '확인', num: true, fmt: int });
     columns.push({ key: 'value', label: cur[4] === '방문자' ? '브라우저 모양' : cur[4], num: true, fmt: int }, { key: 'share', label: '비율', num: true, fmt: (v) => pct(v, 1) });
     const rows = items.map((it) => ({ ...it, share: num(denom) > 0 ? (it.value / denom) * 100 : null }));
-    return { title: `${title} · ${cur[1]}`, deps: [...a.deps, cur[0]], table: { title: cur[1], columns, rows, sort: { key: 'value', dir: 'desc' }, search: ['name'] } };
+    return { title: head, deps, table: { title: cur[1], columns, rows, sort: { key: 'value', dir: 'desc' }, search: ['name'] } };
   });
 
 export const TRAFFIC_DETAILS = Object.freeze({
@@ -111,7 +119,7 @@ export const TRAFFIC_DETAILS = Object.freeze({
     model: (app, pv) => {
       const t = trendModel(app, pv.range, pv.cmp, state.metric);
       const base = { part: t.part, deps: [...t.deps, state.metric], title: METRIC_NAME[state.metric], note: t.cmpState === 'missing' ? '이 자료는 비교 없음' : '' };
-      return t.ok ? { ...base, span: [t.a.startMs, t.a.endMs], time: { startMs: t.a.startMs, endMs: t.a.endMs, panes: [{ fmt: int }], series: t.series } } : base;
+      return t.ok ? { ...base, span: [t.a.startMs, t.a.endMs], time: { startMs: t.a.startMs, endMs: t.a.endMs, daily: t.daily, panes: [{ fmt: int }], series: t.series } } : base;
     },
   },
   flows: accessDetail('흐름', '들어온 길 → 첫 페이지 → 마지막 페이지', (app, pv, a) => {

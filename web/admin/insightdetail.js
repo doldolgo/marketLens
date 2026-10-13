@@ -1,6 +1,6 @@
 // Clarity 모델과 상세 판(스펙 066 §3.2·§3.3) — 040 요약 + 068 날별 기록·차원. 큰 수 여섯의 값 고르기, 맞대기(우리 방문자 038), 페이지 × 기기
 // 칸 진하기, 차원 목록, 판(날별 선 + 같은 길이의 앞 구간 · 신호 여섯 · 표들). DOM 없음.
-import { dec1, int, isObj, list, n0, num, partOf, pct, req, usable } from './common.js';
+import { dec1, int, isObj, kstDay, list, n0, num, partOf, pct, req, usable } from './common.js';
 import { SIGNALS, clarityDevice, clarityPage } from './names.js';
 import { HISTORY_RANGES, accessReqs, accessWindow, historyCompare, historyReqs, historyWindow } from './models.js';
 
@@ -35,7 +35,8 @@ export function matchModel(app, range) {
   if (!h.ok) return out;
   out.startMs = h.startMs;
   out.endMs = h.endMs;
-  const clip = (pts) => pts.filter((p) => p[0] >= h.startMs - 86_400_000 && p[0] <= h.endMs);
+  // 우리 방문자 날 점을 Clarity 날 점(그날 00:00 KST)과 같은 x 에 — 한 툴팁에 같은 날 둘이 나란히
+  const clip = (pts) => pts.map((p) => [kstDay(Math.floor(p[0] / 1000)) * 1000, p[1]]).filter((p) => p[0] >= h.startMs && p[0] < h.endMs);
   out.series = [
     { name: 'Clarity 세션', mark: 'acc', data: h.line((r) => r?.traffic?.sessions).data },
     { name: '확인된 방문자', mark: 'c1', data: a.ok ? clip(a.days('confirmed').data) : [] },
@@ -83,7 +84,7 @@ function historyDetail(title, unit, build, compare = historyCompare) {
     model: (app, pv) => {
       const h = historyWindow(app, pv.range, pv.cmp, app.now());
       const base = { part: h.part, deps: h.deps, note: h.ok && h.firstMs !== null ? `기록은 ${new Date(h.firstMs).toISOString().slice(5, 10)} 부터 모음 · 그날 마지막으로 받은 직전 24시간 값` : '' };
-      return h.ok ? { ...base, span: [h.startMs, h.endMs], time: { startMs: h.startMs, endMs: h.endMs, ...build(h) } } : base;
+      return h.ok ? { ...base, span: [h.startMs, h.endMs], time: { startMs: h.startMs, endMs: h.endMs, daily: true, ...build(h) } } : base;
     },
   };
 }
@@ -126,7 +127,7 @@ export const INSIGHT_DETAILS = Object.freeze({
     model: (app, pv) => {
       const m = matchModel(app, pv.range);
       const base = { part: m.part, deps: m.deps, note: '우리 방문자는 최근 30일까지(서버 기록)' };
-      return m.ok ? { ...base, span: [m.startMs, m.endMs], time: { startMs: m.startMs, endMs: m.endMs, panes: [{ fmt: int }], series: m.series } } : base;
+      return m.ok ? { ...base, span: [m.startMs, m.endMs], time: { startMs: m.startMs, endMs: m.endMs, daily: true, panes: [{ fmt: int }], series: m.series } } : base;
     },
   },
   pages: baseDetail('페이지 × 기기', '최근 72시간 · 세션 가중 평균', (part) => {
