@@ -297,3 +297,255 @@ def test_element_values_are_checked_and_bad_entries_dropped() -> None:
     (card,) = [b for b in got["boxes"] if b["el"]]
     assert card["el"] == "hero|live:1"
     assert card["tag"]["text"] == "#1 · " + "가" * 80 + " · 표본 적음"
+
+
+def test_modes_area_element_and_depth_and_no_mode_is_053() -> None:
+    """§3.5 — area 는 053 그대로(영역 상자·꼬리표), element 는 영역을 옅은 회색 테두리만(꼬리표 없음)·요소 상자를 위에,
+    depth 는 띠만. mode 가 없거나 목록 밖이면 area(053)."""
+    elements = [_el("hero", "live:1", 5, 1)]
+    for mode in (None, "area", "heat"):
+        got = _one(
+            areas=AREAS, els=ELS, steps=[_values(mode, elements=elements), "flush"]
+        )
+        assert [b["area"] for b in got["boxes"]] == ["top", "hero", "foot"], mode
+        assert got["boxes"][1]["tag"]["text"].startswith("#1 · 평균 9.0초"), mode
+    got = _one(
+        areas=AREAS, els=ELS, steps=[_values("element", elements=elements), "flush"]
+    )
+    frames = [b for b in got["boxes"] if b["area"]]
+    assert [b["area"] for b in frames] == ["top", "hero", "foot"]
+    assert all(b["tags"] == [] and b["fill"] == "transparent" for b in frames)
+    assert all(b["border"].startswith("1px solid") for b in frames)
+    assert [b["el"] for b in got["boxes"] if b["el"]] == ["hero|live:1"]
+    reach = [100, 90, 80, 70, 60, 45, 30, 20, 10, 5, 2]
+    got = _one(
+        areas=AREAS,
+        els=ELS,
+        steps=[_values("depth", elements=elements, depth=reach), "flush"],
+    )
+    assert [b["depth"] for b in got["boxes"]] == [str(j) for j in range(10)]
+
+
+def test_element_boxes_cover_every_matching_element_with_the_collection_key() -> None:
+    """§3.5 — (영역, 열쇠)를 가진 요소마다(같은 열쇠 여럿은 모두) — 열쇠는 061 수집과 같은 함수(data-el·자동 열쇠·행).
+    data-el 조상 안의 요소는 따로 그리지 않고, 행은 지금 DOM 에 있는 것만, 화면 밖 요소는 건너뛴다, 값 없는 요소는 그리지 않는다."""
+    elements = [
+        _el("hero", "link:/app/", 3, 2),
+        _el("hero", "live:1", 5, 1),
+        _el("hero", "btn:BTC #%", 2, 3),  # 화면 글자의 숫자는 # — 수집과 같은 이름
+        _el("hero", "row:BTC", 1, 4),
+        _el("hero", "row:ETH", 1, 5),  # DOM 에 없는 행
+        _el("foot", "link:/app/", 4, 6),  # 화면 밖(문서 3,700px)
+        _el("top", "link:/app/", 4, 7),  # 그 영역에는 없다
+    ]
+    got = _one(
+        areas=AREAS, els=ELS, steps=[_values("element", elements=elements), "flush"]
+    )
+    drawn = [(b["el"], b["left"], b["top"]) for b in got["boxes"] if b["el"]]
+    assert drawn == [
+        ("hero|link:/app/", "10px", "120px"),
+        ("hero|link:/app/", "10px", "200px"),
+        ("hero|live:1", "300px", "120px"),
+        ("hero|btn:BTC #%", "700px", "120px"),
+        ("hero|row:BTC", "0px", "400px"),
+    ]
+    # 스크롤하면 화면 밖이던 바닥 링크가 들어오고 위의 것은 나간다
+    got = _one(
+        areas=AREAS,
+        els=ELS,
+        steps=[_values("element", elements=elements), "scroll|3300", "flush"],
+    )
+    assert [(b["el"], b["top"]) for b in got["boxes"] if b["el"]] == [
+        ("foot|link:/app/", "400px")
+    ]
+
+
+def test_only_the_top_20_get_tags_and_fonts_follow_the_level() -> None:
+    """§3.5 — 꼬리표 '#순위 · 글' 은 순위 20 안만(나머지는 테두리만), 글씨는 단계 0~5 에 11·12·13·15·17·17px, 단계 0 은 회색 점선만.
+    꼬리표는 상자 위(화면 위가 모자라면 상자 안)."""
+    els = [
+        {
+            "ref": f"b{i}",
+            "in": "hero",
+            "attrs": {"data-el": f"b{i}"},
+            "rect": [10 + 40 * i, 300, 30, 30],
+        }
+        for i in range(22)
+    ]
+    elements = [_el("hero", f"b{i}", (i % 6), i + 1) for i in range(22)]
+    got = _one(
+        areas=AREAS, els=els, steps=[_values("element", elements=elements), "flush"]
+    )
+    boxes = [b for b in got["boxes"] if b["el"]]
+    assert len(boxes) == 22
+    assert [b["tag"] is not None for b in boxes] == [True] * 20 + [False] * 2
+    sizes = [11, 12, 13, 15, 17, 17]
+    for i, b in enumerate(boxes[:20]):
+        assert f" {sizes[i % 6]}px/" in b["tag"]["font"], (i, b["tag"])
+        assert (
+            b["tag"]["text"] == f"#{i + 1} · 이름 b{i}" and b["tag"]["bottom"] == "100%"
+        )
+    assert (
+        boxes[0]["border"].startswith("2px dashed")
+        and boxes[0]["fill"] == "transparent"
+    )
+    assert boxes[5]["border"].startswith("4px solid") and boxes[5]["fill"].endswith(
+        ",.5)"
+    )
+    # 화면 맨 위에 붙은 요소의 꼬리표는 상자 안
+    got = _one(
+        areas=AREAS,
+        els=ELS,
+        steps=[_values("element", elements=[_el("top", "nav:faq", 3, 1)]), "flush"],
+    )
+    (nav,) = [b for b in got["boxes"] if b["el"]]
+    assert nav["tag"]["top"] == "0" and nav["tag"]["bottom"] is None
+
+
+def test_depth_draws_ten_bands_with_tags_and_dashboards_ignore_it() -> None:
+    """§3.5 — 정적 페이지: 문서 높이를 10칸으로 나눈 띠, 칸 j 의 어둡기 = (100 − 도달[j+1]) / 100 × 0.55, 칸 위 경계 왼쪽에
+    'j×10% · 도달 n%', 문서 끝에 '끝까지 n%'. 스크롤하면 다시 놓는다. 대시보드 화면은 깊이를 그리지 않는다."""
+    reach = [100, 90, 80, 70, 60, 45, 30, 20, 10, 5, 2]
+    got = _one(areas=AREAS, docH=4000, steps=[_values("depth", depth=reach), "flush"])
+    bands = got["boxes"]
+    assert [b["top"] for b in bands] == [f"{400 * j}px" for j in range(10)]
+    assert all(
+        b["height"] == "400px" and b["borderTop"].startswith("1px dashed")
+        for b in bands
+    )
+    assert [b["fill"] for b in bands] == [
+        f"rgba(17,24,39,{(100 - reach[j + 1]) / 100 * 0.55:.3f})" for j in range(10)
+    ]
+    assert [b["tags"] for b in bands[:2]] == [["0% · 도달 100%"], ["10% · 도달 90%"]]
+    assert bands[9]["tags"] == ["90% · 도달 5%", "끝까지 2%"]
+    got = _one(
+        areas=AREAS,
+        docH=4000,
+        steps=[_values("depth", depth=reach), "scroll|1000", "flush"],
+    )
+    assert [b["top"] for b in got["boxes"]][:3] == ["-1000px", "-600px", "-200px"]
+    # 대시보드·깊이 꼴이 틀림 — 띠 없음
+    for case in (
+        {"path": "/app/", "search": "?tab=spread&kt-overlay=1", "depth": reach},
+        {"depth": reach[:10]},
+        {"depth": [*reach[:10], 101]},
+    ):
+        got = _one(
+            areas=AREAS,
+            path=case.get("path", "/"),
+            search=case.get("search", "?kt-overlay=1"),
+            steps=[_values("depth", depth=case["depth"]), "flush"],
+        )
+        assert got["boxes"] == [], case
+
+
+def test_ready_lists_sized_elements_without_rows_up_to_300_and_again_when_they_change() -> (
+    None
+):
+    """§3.5 — ready 에 elements: 지금 크기 있는 요소의 [영역, 열쇠](행 빼고, 같은 짝은 한 번, 300개까지). 모임이 바뀔 때만 다시
+    (053 의 1초 규칙). 크기 0 요소는 빠진다."""
+    els = [
+        *ELS,
+        {
+            "ref": "hidden",
+            "in": "hero",
+            "attrs": {"data-el": "hidden"},
+            "rect": [0, 0, 0, 0],
+        },
+    ]
+    els.append(
+        {
+            "ref": "late",
+            "in": "top",
+            "attrs": {"data-el": "late"},
+            "rect": [200, 10, 50, 30],
+            "later": True,
+        }
+    )
+    got = _one(
+        areas=AREAS, els=els, steps=["t|1000", "timers", "add|late", "t|1000", "timers"]
+    )
+    first, second = (p["data"] for p in got["posted"])
+    assert [p["origin"] for p in got["posted"]] == [ADMIN, ADMIN]
+    assert first == {
+        "type": "kt-attention-ready",
+        "v": 1,
+        "page": "landing",
+        "areas": ["top", "hero", "foot"],
+        "elements": [
+            ["top", "nav:faq"],
+            ["hero", "link:/app/"],
+            ["hero", "live:1"],
+            ["hero", "btn:BTC #%"],
+            ["foot", "link:/app/"],
+        ],
+    }
+    assert second["elements"][1] == ["top", "late"]
+    many = [
+        {
+            "ref": f"m{i}",
+            "in": "hero",
+            "attrs": {"data-el": f"m{i:03d}"},
+            "rect": [0, 100 + i, 10, 1],
+        }
+        for i in range(310)
+    ]
+    got = _one(areas=AREAS, els=many, steps=[])
+    (ready,) = (p["data"] for p in got["posted"])
+    assert len(ready["elements"]) == 300 and ready["elements"][-1] == ["hero", "m299"]
+
+
+def test_focus_with_a_key_scrolls_to_the_first_element_and_thickens_it() -> None:
+    """§3.5 — focus 에 key 가 있으면 그 영역 안 그 열쇠의 첫 요소를 scrollIntoView({block:'center'}), 그 상자를 2초 굵게(값이 없어도).
+    없는 열쇠·꼴이 틀린 열쇠는 아무것도. key 가 없으면 053 그대로(영역)."""
+    focus = {"type": "kt-attention-focus", "id": "hero", "key": "link:/app/"}
+    got = _one(
+        areas=AREAS,
+        els=ELS,
+        steps=[_values("element", elements=[]), _msg(**focus), "flush"],
+    )
+    assert got["scrolled"] == [["app1", {"block": "center"}]]
+    (box,) = [b for b in got["boxes"] if b["el"]]
+    assert (box["el"], box["top"], box["borderWidth"]) == (
+        "hero|link:/app/",
+        "120px",
+        "6px",
+    )
+    later = _one(
+        areas=AREAS,
+        els=ELS,
+        steps=[
+            _values("element", elements=[]),
+            _msg(**focus),
+            "t|2000",
+            "timers",
+            "flush",
+        ],
+    )
+    assert [b for b in later["boxes"] if b["el"]] == []
+    for key in ("link:/nope", "a|b", 3):
+        got = _one(
+            areas=AREAS,
+            els=ELS,
+            steps=[_values("element"), _msg(**{**focus, "key": key}), "flush"],
+        )
+        assert got["scrolled"] == [], key
+    got = _one(
+        areas=AREAS,
+        els=ELS,
+        steps=[_values("element"), _msg(type="kt-attention-focus", id="hero"), "flush"],
+    )
+    assert got["scrolled"] == [["hero", {"block": "center"}]]
+    hero = next(b for b in got["boxes"] if b["area"] == "hero")
+    assert hero["borderWidth"] == "6px"
+
+
+def test_another_origin_cannot_send_the_new_keys() -> None:
+    """053 그대로 — 출처가 관리자가 아니면 새 키도 무시한다."""
+    got = _one(
+        areas=AREAS,
+        els=ELS,
+        origin="https://kimptrack.com",
+        steps=[_values("element", elements=[_el("hero", "live:1", 5, 1)]), "flush"],
+    )
+    assert got["boxes"] is None and got["scrolled"] == []
