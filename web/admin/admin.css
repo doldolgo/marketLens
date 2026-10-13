@@ -304,6 +304,30 @@ select {
   font-size: var(--fs-12);
   font-weight: 600;
 }
+/* 큰 수 줄 — 같은 무게의 타일만 한 줄에(조사 §2-1) */
+.kpis {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: inherit;
+}
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+}
+.note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+}
+.note:empty {
+  display: none;
+}
+body[data-sheet="open"] {
+  overflow: hidden;
+}
 
 /* — 단추 · 고르기 · 입력 — */
 .seg {
@@ -538,6 +562,27 @@ select {
 .kcmp {
   background: repeating-linear-gradient(90deg, var(--text-3) 0 4px, transparent 4px 7px);
 }
+.kok {
+  background: var(--ok);
+}
+.kwarn {
+  background: var(--warn);
+}
+.kseq1 {
+  background: var(--seq-1);
+}
+.kseq2 {
+  background: var(--seq-2);
+}
+.kseq3 {
+  background: var(--seq-3);
+}
+.kseq4 {
+  background: var(--seq-4);
+}
+.kseq5 {
+  background: var(--seq-5);
+}
 
 /* — 거르기 칩(머리 아래 줄) · 범례 겸 거르기(상자) — */
 .fchip {
@@ -643,6 +688,7 @@ select {
   text-underline-offset: 3px;
 }
 .unit {
+  min-width: 0;
   overflow: hidden;
   color: var(--text-3);
   font-size: var(--fs-12);
@@ -783,9 +829,19 @@ select {
   gap: var(--sp-2);
 }
 button.kpi {
+  width: 100%;
+  color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+.kpi-name {
+  font-size: var(--fs-14);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.meter-box {
+  padding-top: var(--sp-2);
 }
 button.kpi:hover {
   border-color: var(--line-strong);
@@ -1049,7 +1105,7 @@ button.lrow:hover {
 }
 .b100 > i {
   display: block;
-  flex: none;
+  flex: 0 1 auto;
   min-width: 3px;
   height: 100%;
 }
@@ -1211,6 +1267,33 @@ button.lrow:hover {
 .kv dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+caption.empty {
+  padding: var(--sp-6) 0;
+  caption-side: bottom;
+}
+details.card > summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-13);
+}
+.links a {
+  color: var(--text-2);
+}
+.num-ok {
+  color: var(--ok);
+}
+.num-bad {
+  color: var(--bad);
 }
 
 /* — 상세 판(066 §3.2) — 같은 페이지 위 거의 전체 화면, 뒤는 가림(--scrim), 그래프 칸은 늘 --surface 위 — */
