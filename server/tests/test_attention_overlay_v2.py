@@ -6,6 +6,7 @@
 """
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -154,6 +155,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
       left: k.style.left, top: k.style.top, width: k.style.width, height: k.style.height, border: k.style.border || null,
       borderWidth: k.style.borderWidth || null, fill: k.style.backgroundColor, borderTop: k.style.borderTop || null,
       tag: tagOf(k) || null, tags: k.kids.map((t) => t.textContent),
+      tagFor: k.attrs['data-kt-tag'] || null, text: k.textContent || null, font: k.style.font || null,
     })) : null,
   }
 })))
@@ -208,7 +210,7 @@ def _el(area: str, key: str, level: int, rank: int | None, **more: Any) -> dict:
         "key": key,
         "level": level,
         "rank": rank,
-        "tag": f"이름 {key}",
+        "tag": "7",  # 관리자가 만든 꼬리표 값(고른 지표 값)
         "small": False,
         **more,
     }
@@ -299,15 +301,16 @@ def test_element_values_are_checked_and_bad_entries_dropped() -> None:
         areas=AREAS, els=ELS, steps=[_values("element", elements=[*bad, good]), "flush"]
     )
     (card,) = [b for b in got["boxes"] if b["el"]]
-    assert card["el"] == "hero|live:1"
-    assert card["tag"]["text"] == "#1 · " + "가" * 80 + " · 표본 적음"
+    (tag,) = [b for b in got["boxes"] if b["tagFor"]]
+    assert card["el"] == tag["tagFor"] == "hero|live:1"
+    assert tag["text"] == "#1 " + "가" * 80 + " · 표본 적음"
     # 꼬리표 글은 textContent 로만 — HTML 조각이 글로 남고 요소가 생기지 않는다
     xss = {**_el("hero", "live:1", 4, 1), "tag": "<img src=x onerror=alert(1)>"}
     got = _one(
         areas=AREAS, els=ELS, steps=[_values("element", elements=[xss]), "flush"]
     )
-    (card,) = [b for b in got["boxes"] if b["el"]]
-    assert card["tags"] == ["#1 · <img src=x onerror=alert(1)>"]
+    (tag,) = [b for b in got["boxes"] if b["tagFor"]]
+    assert tag["text"] == "#1 <img src=x onerror=alert(1)>"
 
 
 def test_modes_area_element_and_depth_and_no_mode_is_053() -> None:
@@ -371,15 +374,16 @@ def test_element_boxes_cover_every_matching_element_with_the_collection_key() ->
     ]
 
 
-def test_only_the_top_20_get_tags_and_fonts_follow_the_level() -> None:
-    """§3.5 — 꼬리표 '#순위 · 글' 은 순위 20 안만(나머지는 테두리만), 글씨는 단계 0~5 에 11·12·13·15·17·17px, 단계 0 은 회색 점선만.
-    꼬리표는 상자 위(화면 위가 모자라면 상자 안)."""
+def test_only_the_top_20_get_one_compact_tag_per_key_with_level_fonts() -> None:
+    """§3.5 — 꼬리표 '#순위 값'(값 = 관리자가 만든 tag — 이름은 옆 표에)은 순위 20 안만(나머지는 테두리만), 글씨는 단계 0~5 에
+    11·12·13·15·17·17px, 단계 0 상자는 회색 점선만. 꼬리표는 층에 따로 — (영역, 열쇠)마다 하나, 그 열쇠의 화면에 보이는 첫 요소 위
+    (위가 모자라면 상자 안 위). 같은 열쇠 요소의 상자는 모두."""
     els = [
         {
             "ref": f"b{i}",
             "in": "hero",
             "attrs": {"data-el": f"b{i}"},
-            "rect": [10 + 40 * i, 300, 30, 30],
+            "rect": [10, 60 + 30 * i, 30, 20],
         }
         for i in range(22)
     ]
@@ -388,14 +392,14 @@ def test_only_the_top_20_get_tags_and_fonts_follow_the_level() -> None:
         areas=AREAS, els=els, steps=[_values("element", elements=elements), "flush"]
     )
     boxes = [b for b in got["boxes"] if b["el"]]
-    assert len(boxes) == 22
-    assert [b["tag"] is not None for b in boxes] == [True] * 20 + [False] * 2
+    tags = [b for b in got["boxes"] if b["tagFor"]]
+    assert len(boxes) == 22 and all(b["tags"] == [] for b in boxes)
+    assert [t["tagFor"] for t in tags] == [f"hero|b{i}" for i in range(20)]
     sizes = [11, 12, 13, 15, 17, 17]
-    for i, b in enumerate(boxes[:20]):
-        assert f" {sizes[i % 6]}px/" in b["tag"]["font"], (i, b["tag"])
-        assert (
-            b["tag"]["text"] == f"#{i + 1} · 이름 b{i}" and b["tag"]["bottom"] == "100%"
-        )
+    for i, tag in enumerate(tags):
+        height = math.ceil(sizes[i % 6] * 1.3) + 2
+        assert tag["text"] == f"#{i + 1} 7" and f" {sizes[i % 6]}px/" in tag["font"]
+        assert (tag["left"], tag["top"]) == ("10px", f"{60 + 30 * i - height}px")
     assert (
         boxes[0]["border"].startswith("2px dashed")
         and boxes[0]["fill"] == "transparent"
@@ -411,14 +415,58 @@ def test_only_the_top_20_get_tags_and_fonts_follow_the_level() -> None:
         if b["fill"] != "transparent"
     ]
     assert alphas and max(alphas) <= 0.1
-    # 화면 맨 위에 붙은 요소의 꼬리표는 상자 안
+    # 같은 열쇠 link:/app/ 요소 둘 — 상자 둘, 꼬리표는 첫 요소(app1, 120px) 위에 하나. 표본 적음이면 끝에
+    value = _el("hero", "link:/app/", 3, 1, tag="66", small=True)
+    got = _one(
+        areas=AREAS, els=ELS, steps=[_values("element", elements=[value]), "flush"]
+    )
+    assert [b["top"] for b in got["boxes"] if b["el"]] == ["120px", "200px"]
+    (tag,) = [b for b in got["boxes"] if b["tagFor"]]
+    assert (tag["text"], tag["top"]) == ("#1 66 · 표본 적음", f"{120 - 22}px")
+    # 화면 맨 위에 붙은 요소(10px — 꼬리표 높이 22 보다 위가 좁다)의 꼬리표는 상자 안 위
     got = _one(
         areas=AREAS,
         els=ELS,
         steps=[_values("element", elements=[_el("top", "nav:faq", 3, 1)]), "flush"],
     )
-    (nav,) = [b for b in got["boxes"] if b["el"]]
-    assert nav["tag"]["top"] == "0" and nav["tag"]["bottom"] is None
+    (tag,) = [b for b in got["boxes"] if b["tagFor"]]
+    assert (tag["left"], tag["top"]) == ("10px", "10px")
+
+
+def test_overlapping_tags_are_nudged_down_three_times_then_dropped_by_rank() -> None:
+    """§3.5 — 순위 차례로 놓고, 이미 놓은 꼬리표와 겹치면 꼬리표 높이(15px 글씨 → 22px)만큼 아래로 세 번까지, 그래도 겹치면 그
+    꼬리표만 버린다(상자는 둔다). 높은 순위가 자리를 먼저 갖는다 — 문서에서 뒤에 있어도."""
+    els = [
+        {
+            "ref": f"c{i}",
+            "in": "hero",
+            "attrs": {"data-el": f"c{i}"},
+            "rect": [
+                10 + 5 * i,
+                300,
+                40,
+                30,
+            ],  # 꼬리표(너비 ≈47px)끼리 모두 가로로 겹친다
+        }
+        for i in range(6)
+    ]
+    elements = [_el("hero", f"c{i}", 3, i + 1, tag="9") for i in range(6)]
+    got = _one(
+        areas=AREAS, els=els, steps=[_values("element", elements=elements), "flush"]
+    )
+    assert len([b for b in got["boxes"] if b["el"]]) == 6
+    assert [(t["tagFor"], t["top"]) for t in got["boxes"] if t["tagFor"]] == [
+        ("hero|c0", "278px"),
+        ("hero|c1", "300px"),
+        ("hero|c2", "322px"),
+        ("hero|c3", "344px"),
+    ]
+    elements = [_el("hero", "c0", 3, 2, tag="9"), _el("hero", "c1", 3, 1, tag="9")]
+    got = _one(
+        areas=AREAS, els=els[:2], steps=[_values("element", elements=elements), "flush"]
+    )
+    tops = {t["tagFor"]: t["top"] for t in got["boxes"] if t["tagFor"]}
+    assert tops == {"hero|c1": "278px", "hero|c0": "300px"}
 
 
 def test_depth_draws_ten_bands_with_tags_and_dashboards_ignore_it() -> None:

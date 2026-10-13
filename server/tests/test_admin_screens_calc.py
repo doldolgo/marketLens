@@ -261,9 +261,8 @@ out.dash = msg('app-spread', 'vis', null)
         ("hero", "live:1", 5, 1, True),
         ("events", "row:BTC", 4, 2, True),
     ]  # faq:rate 는 지금 화면에 없음 — 그리지 않는다, 행은 늘 있다
-    assert (
-        land["elements"][0]["tag"] == "지금 가장 큰 경로 카드 · 클릭 10 · 100뷰당 250.0"
-    )
+    # 꼬리표 값은 고른 지표 값만(이름은 옆 표 — 페이지가 앞에 '#순위 ' 를 붙인다): 클릭 수
+    assert [e["tag"] for e in land["elements"]] == ["10", "7"]
     assert land["depth"] == [
         100,
         90.9,
@@ -277,17 +276,12 @@ out.dash = msg('app-spread', 'vis', null)
         18.2,
         9.1,
     ]
-    assert got["hover"][:2] == [
-        "지금 가장 큰 경로 카드 · 마우스 올림 평균 7.5초",
-        "김프·역프란 링크 · 마우스 올림 평균 2.3초",
-    ]
+    # 평균 마우스 올림 초(30,000ms / 4 pv, 9,000ms / 4 pv), 보이기만 한 요소는 0.0초
+    assert got["hover"] == ["7.5초", "2.3초", "0.0초", "0.0초"]
     # 단계가 null(m = 0 이고 보인 시간도 0)인 요소·행은 싣지 않는다 — 단계 0(보이기만)은 싣는다
     assert got["hoverKeys"] == ["live:1", "nav:kimp", "link:/app/", "faq:rate"]
     assert got["dash"]["depth"] is None
-    assert (
-        got["dash"]["elements"][0]["tag"]
-        == "지금 가장 큰 경로 카드 · 보인 시간 평균 100.0초"
-    )
+    assert got["dash"]["elements"][0]["tag"] == "100.0초"  # 평균 보인 시간 초
 
 
 def test_names_page_specific_template_and_auto_keys() -> None:

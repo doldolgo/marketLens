@@ -253,7 +253,13 @@ def test_ready_judges_absent_elements_and_rows_stay_present() -> None:
         ("hero", "live:1", 3, 4),
         ("events", "row:BTC", 1, 5),
     ]
-    assert message["elements"][0]["tag"] == "김프·역프란 링크 · 클릭 66 · 100뷰당 27.5"
+    assert [e["tag"] for e in message["elements"]] == [
+        "66",
+        "53",
+        "42",
+        "28",
+        "1",
+    ]  # 클릭 수
     assert ready["foot"] == "열쇠 26개 · 지금 화면에 없음 20개"
     assert ready["elements"][:6] == [
         ["go", "#1", "김프·역프란 링크", "머리 막대"],

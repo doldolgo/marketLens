@@ -807,7 +807,7 @@
       return el
     }
 
-    // 요소 상자(065) — 053 의 단계 색(단계 0 은 회색 점선만), 꼬리표 '#순위 · 글' 은 순위 20 안만(상자 위, 화면 위가 모자라면 상자 안)
+    // 요소 상자(065) — 053 의 단계 테두리(단계 0 은 회색 점선만)와 옅은 칠. 꼬리표는 따로(아래 elementTag — 열쇠마다 하나)
     const elementBox = (ek, v, rect, focused) => {
       const level = v ? v.level : 0
       const el = document.createElement("div")
@@ -816,22 +816,41 @@
       place(el, rect)
       set(el, { border: LINE[level], backgroundColor: level ? EL_FILL[level] : "transparent" })
       if (focused) set(el, { borderWidth: "6px", borderStyle: "solid" })
-      if (v && v.rank !== null && v.rank <= TOP_TAGS) {
-        const size = EL_SIZES[level]
-        const tag = document.createElement("span")
-        tag.className = "kt-ov-tag"
-        tag.textContent = "#" + v.rank + " · " + v.tag + (v.small ? " · 표본 적음" : "")
-        set(tag, tagStyle(size))
-        set(tag, rect.top >= size * 1.3 + 4 ? { bottom: "100%" } : { top: "0" })
-        el.appendChild(tag)
-      }
       return el
     }
 
-    // 값이 있는 요소마다(같은 열쇠 여럿은 모두, 행은 지금 DOM 에 있는 것만), 화면 밖은 건너뛴다. focus 받은 요소는 값이 없어도 2초
+    // 요소 꼬리표(065) — '#순위 값'(값 = 관리자가 만든 tag, 표본 적음이면 ' · 표본 적음'). 상자 위(화면 위가 모자라면 상자 안 위),
+    // 이미 놓은 꼬리표와 겹치면 꼬리표 높이만큼 아래로 세 번까지 — 그래도 겹치면 버린다(null — 상자는 둔다). 너비는 글자 수로 어림한다
+    // (재면 꼬리표마다 배치를 다시 해야 한다 — 숫자·영문 0.62em, 그 밖 1em, 좌우 여백 5px)
+    const elementTag = (ek, v, rect, placed) => {
+      const size = EL_SIZES[v.level]
+      const text = "#" + v.rank + " " + v.tag + (v.small ? " · 표본 적음" : "")
+      let em = 0
+      for (const ch of text) em += ch.charCodeAt(0) < 0x1100 ? 0.62 : 1
+      const width = Math.min(320, em * size + 10)
+      const height = Math.ceil(size * 1.3) + 2
+      const left = rect.left
+      let top = rect.top >= height ? rect.top - height : rect.top
+      for (let tries = 0; placed.some((p) => left < p.right && left + width > p.left && top < p.bottom && top + height > p.top); tries++) {
+        if (tries === 3) return null
+        top += height
+      }
+      placed.push({ left, top, right: left + width, bottom: top + height })
+      const tag = document.createElement("span")
+      tag.className = "kt-ov-tag kt-ov-eltag"
+      tag.setAttribute("data-kt-tag", ek)
+      tag.textContent = text
+      set(tag, tagStyle(size))
+      set(tag, { left: left + "px", top: top + "px", height: height + "px", boxSizing: "border-box" })
+      return tag
+    }
+
+    // 값이 있는 요소마다 상자(같은 열쇠 여럿은 모두, 행은 지금 DOM 에 있는 것만), 화면 밖은 건너뛴다. focus 받은 요소는 값이 없어도 2초.
+    // 꼬리표는 순위 20 안의 (영역, 열쇠)마다 하나 — 그 열쇠의 화면에 보이는 첫 요소에, 순위 차례로 놓는다(높은 순위가 자리를 먼저)
     const elementBoxes = (out, now) => {
       const w = window.innerWidth
       const h = window.innerHeight
+      const firsts = new Map()
       for (const [el, id, key] of found) {
         const ek = id + "|" + key
         const v = elValues.get(ek)
@@ -840,6 +859,12 @@
         const r = el.getBoundingClientRect()
         if (!(r.width > 0 && r.height > 0) || r.bottom <= 0 || r.right <= 0 || r.top >= h || r.left >= w) continue
         out.push(elementBox(ek, v, r, focused))
+        if (v && v.rank !== null && v.rank <= TOP_TAGS && !firsts.has(ek)) firsts.set(ek, [v, r])
+      }
+      const placed = []
+      for (const [ek, [v, r]] of Array.from(firsts).sort((a, b) => a[1][0].rank - b[1][0].rank)) {
+        const tag = elementTag(ek, v, r, placed)
+        if (tag) out.push(tag)
       }
     }
 

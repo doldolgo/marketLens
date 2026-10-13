@@ -1,8 +1,8 @@
 // 화면 페이지의 값 계산(스펙 065 §3.3) — 고른 화면 × 기기 행에서 요소·영역·떠난 곳·깊이, 덮어 보기로 넘길 값. DOM 없음(node 시험이 바로 부른다).
 // 피드(052·061 /admin/attention): rows = [{ page, device, pv, areas:[{id, ms, clicks, seen}], exits:[[영역, n]], depth(11칸|null), elements? }].
-import { isObj, list, n0, num, own, partOf, req, usable } from './common.js';
+import { int, isObj, list, n0, num, own, partOf, req, usable } from './common.js';
 import { pageName } from './names.js';
-import { OTHER_KEY, elName } from './screensnames.js';
+import { OTHER_KEY } from './screensnames.js';
 
 // 화면 칩 차례(065 §3.1) — 정적 넷, 대시보드 탭 여섯. 기본 화면에서 pv 가 같으면 앞의 것
 export const SCREEN_PAGES = Object.freeze(['landing', 'privacy', 'kimp-chart', 'kimp-history', 'app-spread', 'app-history', 'app-gap', 'app-pp', 'app-health', 'app-flow']);
@@ -156,12 +156,11 @@ export function depthValues(row) {
 }
 
 const secText = (v) => (v === null ? '–' : `${v.toFixed(1)}초`);
-// 꼬리표 글(065 §3.5 — 관리자가 만든다, 페이지가 80자에서 자른다) — 이름 · 고른 지표 값
-export function elementTag(page, e, metric) {
-  const name = elName(page, e.key);
-  if (metric === 'hover') return `${name} · 마우스 올림 평균 ${secText(e.h)}`;
-  if (metric === 'vis') return `${name} · 보인 시간 평균 ${secText(e.v)}`;
-  return `${name} · 클릭 ${e.c} · 100뷰당 ${e.cRate.toFixed(1)}`;
+// 꼬리표 값(065 §3.5 — 관리자가 만든다. 페이지가 앞에 '#순위 ', 표본 적음이면 뒤에 ' · 표본 적음') — 고른 지표 값만, 이름은 옆 표에
+export function elementTag(e, metric) {
+  if (metric === 'hover') return secText(e.h);
+  if (metric === 'vis') return secText(e.v);
+  return int(e.c);
 }
 
 // 덮어 보기 값 메시지(053 + 065 §3.5) — 영역(053 꼴, 지금 페이지에 있는 것), 요소(그릴 것 — 지금 화면에 있고 단계가 있는 것, 300개까지),
@@ -177,7 +176,7 @@ export function overlayMessage(o) {
     elements: elements.rows
       .filter((e) => e.state === 'ok' && e.level !== null)
       .slice(0, FEED_MAX)
-      .map((e) => ({ area: e.area, key: e.key, level: e.level, rank: e.rank, tag: elementTag(page, e, metric), small: elements.small })),
+      .map((e) => ({ area: e.area, key: e.key, level: e.level, rank: e.rank, tag: elementTag(e, metric), small: elements.small })),
     depth: !isDashboard(page) && depth?.reach ? depth.reach.map((r) => Math.round(r * 10) / 10) : null,
   };
 }
