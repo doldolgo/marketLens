@@ -44,7 +44,7 @@ BACKOFF_MAX = 30.0
 CLOSE_TIMEOUT = 2.0  # 종료 시 취소 + 소켓 close 합계 상한 (§3.11)
 _IDLE_POLL = 1.0  # 구독할 마켓이 없는 동안 목록을 다시 보는 간격
 _QUOTE = "KRW"
-# 반영을 미루는 시세 프레임의 머리 (§3.4-1) — 업비트가 실제로 보내는 꼴(공백 없음, type·code 가 맨 앞)일 때만 빠른 길로
+# 반영을 미루는 시세 프레임의 머리 (§3.5-5) — 업비트가 실제로 보내는 꼴(공백 없음, type·code 가 맨 앞)일 때만 빠른 길로
 # 가고, 그 밖의 꼴은 지금처럼 받은 자리에서 파싱한다. 머리 다음부터 첫 따옴표까지가 code 글자다
 _BOOK_HEAD = '{"type":"orderbook","code":"'
 _TICKER_HEAD = '{"type":"ticker","code":"'
@@ -85,7 +85,7 @@ class UpbitStream:
         self._state = store.stream(self.id)
         self._state.url = WS_URL
         self._sink = sink
-        # 반영을 미룬 프레임 — code → (원문, 수신 ms), 심볼마다 마지막 1건 (§3.4-1). 저장소가 읽기 전에 _settle 을 부른다
+        # 반영을 미룬 프레임 — code → (원문, 수신 ms), 심볼마다 마지막 1건 (§3.5-5). 저장소가 읽기 전에 _settle 을 부른다
         self._books: dict[str, tuple[str, int]] = {}
         self._tickers: dict[str, tuple[str, int]] = {}
         self._record = record
@@ -297,7 +297,7 @@ class UpbitStream:
                     continue
             else:
                 text = str(raw)
-            # 빠른 길 (§3.4-1) — 호가·현재가 프레임은 파싱하지 않고 code 만 글자로 뽑아 원문을 남긴 뒤 심볼마다 마지막
+            # 빠른 길 (§3.5-5) — 호가·현재가 프레임은 파싱하지 않고 code 만 글자로 뽑아 원문을 남긴 뒤 심볼마다 마지막
             # 프레임만 든다. 같은 초 안에 뒤 프레임이 덮는 호가(2026-10-13 캡처 63%)는 끝내 파싱하지 않는다
             if text.startswith(_BOOK_HEAD):
                 if self._defer(text, at, len(_BOOK_HEAD), _BOOK_KEY, self._books):
@@ -361,7 +361,7 @@ class UpbitStream:
         return True
 
     def _settle(self) -> None:
-        """미룬 프레임 반영 — 저장소가 읽기 직전에 부른다 (§3.4-1). 현재가 먼저, 호가 다음(순서는 결과와 무관하다).
+        """미룬 프레임 반영 — 저장소가 읽기 직전에 부른다 (§3.5-5). 현재가 먼저, 호가 다음(순서는 결과와 무관하다).
 
         심볼마다 마지막 프레임 하나를 받은 자리에서 하던 처리 그대로 행에 반영한다. 파싱·처리 실패는 무효 프레임으로
         센다(원문·last_message_at 은 받은 자리에서 이미 남았다).

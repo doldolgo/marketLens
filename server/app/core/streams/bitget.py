@@ -74,7 +74,7 @@ _OK_CODE = "00000"  # 봉투 code — HTTP 200 이어도 이 값이 아니면 �
 _ONLINE = "online"
 _PING = "ping"
 _PONG = "pong"
-# 반영을 미루는 books15 스냅샷 프레임의 머리 (001 §3.4-1) — 비트겟이 실제로 보내는 꼴(공백 없음, action·arg 가 맨 앞,
+# 반영을 미루는 books15 스냅샷 프레임의 머리 (001 §3.5-5) — 비트겟이 실제로 보내는 꼴(공백 없음, action·arg 가 맨 앞,
 # arg 키 순서 instType·channel·instId)일 때만 빠른 길로 가고, 그 밖의 꼴(update 포함)은 지금처럼 받은 자리에서 파싱한다.
 # 머리 다음부터 첫 따옴표까지가 instId 글자다
 _SNAPSHOT_HEAD = (
@@ -223,7 +223,7 @@ class BitgetStream:
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다
         # 직전에 맵까지 만든 200 응답의 비교용 바이트(requestTime 제외) — 같으면 파싱·맵 재생성을 건너뛴다 (§3.3)
         self._symbols_body: bytes | None = None
-        # 반영을 미룬 스냅샷 — 심볼 → (샤드, 원문, 수신 ms, 받은 때의 base), 심볼마다 마지막 1건 (001 §3.4-1).
+        # 반영을 미룬 스냅샷 — 심볼 → (샤드, 원문, 수신 ms, 받은 때의 base), 심볼마다 마지막 1건 (001 §3.5-5).
         # 저장소가 읽기 전에 _settle 을 부른다
         self._books_pending: dict[str, tuple[_Shard, str, int, str]] = {}
 
@@ -340,7 +340,7 @@ class BitgetStream:
             if mine == shard.assigned:
                 continue
             if not changed and self._books_pending:
-                # 빠지는 심볼의 미룬 스냅샷은 행을 지우기 전에 반영한다 — 받은 자리에서 반영하던 순서 그대로 (001 §3.4-1)
+                # 빠지는 심볼의 미룬 스냅샷은 행을 지우기 전에 반영한다 — 받은 자리에서 반영하던 순서 그대로 (001 §3.5-5)
                 self._settle()
             changed = True
             for symbol in shard.assigned - mine:
@@ -679,7 +679,7 @@ class BitgetStream:
                 self._record(self.id, WS_SOURCE, at, text)
                 shard.pong_pending = False
                 continue
-            # 빠른 길 (001 §3.4-1) — books15 스냅샷은 파싱하지 않고 instId 만 글자로 뽑아 원문을 남긴 뒤 심볼마다 마지막
+            # 빠른 길 (001 §3.5-5) — books15 스냅샷은 파싱하지 않고 instId 만 글자로 뽑아 원문을 남긴 뒤 심볼마다 마지막
             # 프레임만 든다. 같은 초 안에 뒤 스냅샷이 덮는 프레임(2026-10-13 캡처 75%)은 끝내 파싱하지 않는다
             if text.startswith(_SNAPSHOT_HEAD) and self._defer(shard, text, at):
                 continue
@@ -753,7 +753,7 @@ class BitgetStream:
         return True
 
     def _settle(self) -> None:
-        """미룬 스냅샷 반영 — 저장소가 읽기 직전에 부른다 (001 §3.4-1).
+        """미룬 스냅샷 반영 — 저장소가 읽기 직전에 부른다 (001 §3.5-5).
 
         심볼마다 마지막 스냅샷 하나를 받은 자리에서 하던 처리 그대로 북·행에 반영한다. base 는 받은 때의 맵으로 정한
         것을 쓴다. 파싱·처리 실패는 무효 프레임으로 센다(원문·last_message_at 은 받은 자리에서 이미 남았다).

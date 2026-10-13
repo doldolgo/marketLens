@@ -431,7 +431,7 @@ class TickLoop:
     def tick(self, ts: int) -> Tick:
         """§3.6-2~5 — 동기. 틱 생성 → 슬롯·인계 → received_at → 판정. 단계마다 걸린 시간을 모은다."""
         started = lap = time.perf_counter()
-        # §3.4-1 — 커넥터가 미뤄 둔 호가 프레임을 먼저 반영한다(읽기 메서드도 하지만 단계 시간을 따로 보려고 여기서)
+        # §3.5-5 — 커넥터가 미뤄 둔 호가 프레임을 먼저 반영한다(읽기 메서드도 하지만 단계 시간을 따로 보려고 여기서)
         self._store.settle()
         lap = self._lap("미룬 호가", lap)
         dw_failed: list[str] = []

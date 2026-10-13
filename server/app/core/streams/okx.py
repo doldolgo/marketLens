@@ -80,7 +80,7 @@ _BYTES_TYPES = (bytes, bytearray)
 _JSON_DECODE = json.JSONDecoder().decode
 _BOOK_KEY = "orderbook:"  # 원문 싱크 key 머리 — 뒤에 instId (001 §3.7)
 _TRADE_KEY = "trade:"
-# 반영을 미루는 books5 스냅샷 프레임의 머리 (001 §3.4-1) — OKX 가 실제로 보내는 꼴(공백 없음, arg 가 맨 앞, arg 키 순서
+# 반영을 미루는 books5 스냅샷 프레임의 머리 (001 §3.5-5) — OKX 가 실제로 보내는 꼴(공백 없음, arg 가 맨 앞, arg 키 순서
 # channel·instId)일 때만 빠른 길로 가고, 그 밖의 꼴은 지금처럼 받은 자리에서 파싱한다. 머리 다음부터 첫 따옴표까지가 instId
 _BOOKS_HEAD = '{"arg":{"channel":"' + BOOKS_CHANNEL + '","instId":"'
 # 스냅샷의 호가 시각 `"ts":"<ms>"` — 프레임에 한 번만 있을 때만 글자로 읽는다(data 원소의 ts)
@@ -183,7 +183,7 @@ class OkxStream:
             str, int
         ] = {}  # instId → 마지막으로 실은 호가 시각 — 더 오래된 스냅샷은 버린다 (§3.4)
         # 반영을 미룬 스냅샷 — instId → (원문, 호가 시각, 수신 ms, 받은 때의 base), 심볼마다 호가 시각이 가장 늦은 1건
-        # (001 §3.4-1). 저장소가 읽기 전에 _settle 을 부른다
+        # (001 §3.5-5). 저장소가 읽기 전에 _settle 을 부른다
         self._books_pending: dict[str, tuple[str, int, int, str]] = {}
         self._wake = asyncio.Event()  # set_universe 가 재조정 루프를 깨운다
         self._rebalance: asyncio.Task[None] | None = None
@@ -334,7 +334,7 @@ class OkxStream:
             if mine == shard.assigned:
                 continue
             if not changed and self._books_pending:
-                # 빠지는 심볼의 미룬 스냅샷은 행을 지우기 전에 반영한다 — 받은 자리에서 반영하던 순서 그대로 (001 §3.4-1)
+                # 빠지는 심볼의 미룬 스냅샷은 행을 지우기 전에 반영한다 — 받은 자리에서 반영하던 순서 그대로 (001 §3.5-5)
                 self._settle()
             changed = True
             for symbol in shard.assigned - mine:
@@ -695,7 +695,7 @@ class OkxStream:
                 self._record(self.id, WS_SOURCE, at, text)
                 shard.pong_pending = False
                 continue
-            # 빠른 길 (001 §3.4-1) — books5 스냅샷은 파싱하지 않고 instId·호가 시각만 글자로 뽑아 원문을 남긴 뒤 심볼마다
+            # 빠른 길 (001 §3.5-5) — books5 스냅샷은 파싱하지 않고 instId·호가 시각만 글자로 뽑아 원문을 남긴 뒤 심볼마다
             # 호가 시각이 가장 늦은 프레임만 든다. 같은 초 안에 뒤 스냅샷이 덮는 프레임(2026-10-13 캡처 68%)은 끝내 파싱하지 않는다
             if text.startswith(_BOOKS_HEAD) and self._defer(shard, text, at):
                 continue
@@ -797,7 +797,7 @@ class OkxStream:
         return True
 
     def _settle(self) -> None:
-        """미룬 스냅샷 반영 — 저장소가 읽기 직전에 부른다 (001 §3.4-1).
+        """미룬 스냅샷 반영 — 저장소가 읽기 직전에 부른다 (001 §3.5-5).
 
         심볼마다 남은 스냅샷 하나를 받은 자리에서 하던 처리(`_on_books`) 그대로 행에 반영한다. base 는 받은 때의 맵으로
         정한 것을 쓴다. 파싱·처리 실패는 무효 프레임으로 센다(원문·last_message_at 은 받은 자리에서 이미 남았다).
