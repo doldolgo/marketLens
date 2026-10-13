@@ -602,19 +602,17 @@ def test_focus_scrolls_only_inside_the_frame_document() -> None:
         "flush",
     ]
     got = _one(areas=AREAS, els=els, steps=steps)
-    assert got["scrollTops"] == {
-        "box": [915 - (200 + 150), 0]
-    }  # 상자 가운데로 — 가로는 넘치지 않아 그대로
-    assert got["scrolled"] == [
-        ["window", 0, 915 - 400]
-    ]  # 스크롤 상자 scrollIntoView 없음
+    # 스크롤 상자는 그 요소가 가운데 오게(915 − 상자 가운데 350), 가로는 넘치지 않아 그대로
+    assert got["scrollTops"] == {"box": [565, 0]}
+    # 마지막에 이 창 — scrollIntoView 는 한 번도 부르지 않는다(부르면 scrolled 에 [ref, 옵션] 이 남는다)
+    assert got["scrolled"] == [["window", 0, 915 - 400]]
     steps = [
         _values("element"),
         _msg(type="kt-attention-focus", id="hero", key="side"),
         "flush",
     ]
     got = _one(areas=AREAS, els=els, steps=steps)
-    assert got["scrolled"] == [
-        ["window", 1400 - 1280, 315 - 400]
-    ]  # 화면 오른쪽 밖 — 가까운 쪽으로 120
+    # 화면 오른쪽 밖(1300~1400, 창 1280) — 가로는 가까운 쪽으로 120
+    assert got["scrolled"] == [["window", 120, 315 - 400]]
     assert got["scrollTops"] == {}
+    assert ".scrollIntoView(" not in JS and JS.count("window.scrollTo(") == 1
