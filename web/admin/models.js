@@ -1,7 +1,7 @@
 // 피드 → 그림 모델(스펙 066 §3.2·§3.3) — 카드와 상세 판이 같은 함수로 같은 값을 그린다. 기간·비교 원천 고르기(063 시계열 +
 // 068 offset=prev, 038 의 더 긴 창에서 잘라 쓰기, 068 날별 기록)와 수집·경보·방문 계산. DOM·echarts 없음(node 시험 대상).
 import { isObj, kstDay, list, n0, num, partOf, req, usable } from './common.js';
-import { align, crop, dailyLine, hourPoints, ms } from './calc.js';
+import { align, cellPoints, crop, dailyLine, ms } from './calc.js';
 
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
@@ -70,15 +70,8 @@ export function accessReqs(window, cmp) {
   if (cmp !== 'none' && Object.hasOwn(ACCESS_CMP, window)) out.push(req('access', { window: ACCESS_CMP[window] }));
   return out;
 }
-// 날 칸 점 — 그날(KST [0시, 다음 0시))이 창과 겹친 구간의 가운데. 오늘은 지금까지의 가운데라 창 끝을 넘지 않는다(정오에 두면 오전엔
-// 오늘 막대가 축 밖으로 나간다). 비교 날은 by 만큼 민 뒤 같은 규칙
-const dayPoints = (days, key, startMs, endMs, by = 0) =>
-  list(days)
-    .filter((d) => isObj(d) && num(d.ts) !== null)
-    .map((d) => [d.ts * 1000 + by, n0(d[key])])
-    .filter(([t]) => t + DAY > startMs && t < endMs)
-    .map(([t, v]) => [(Math.max(t, startMs) + Math.min(t + DAY, endMs)) / 2, v]);
-// { ok, part, startMs, endMs, cmpState, deps, hours(key) → { data, cmp }, days(key) → { data, cmp } } — 이전 기간 점은 지금 축으로 민 것
+// { ok, part, startMs, endMs, cmpState, deps, hours(key) → { data, cmp }, days(key) → { data, cmp } } — 이전 기간 점은 지금 축으로 민 것.
+// 시·날 칸 점은 칸이 창과 겹친 구간의 가운데(cellPoints — 지금 칸이 창 끝을 넘지 않는다)
 export function accessWindow(app, window, cmp) {
   const [main, other] = accessReqs(window, cmp);
   const entry = app.entry(main);
@@ -92,9 +85,10 @@ export function accessWindow(app, window, cmp) {
   const src = usable(o) ? o : null;
   if (src) out.cmpState = 'ok';
   else if (other && o !== undefined) out.cmpState = 'missing';
-  out.hours = (key) => ({ data: hourPoints(part.hourly, key), cmp: src ? align(hourPoints(src.hourly, key), out.startMs, out.endMs, by) : null });
+  const cells = (rows, key, width, shift = 0) => cellPoints(rows, key, width, out.startMs, out.endMs, shift);
+  out.hours = (key) => ({ data: cells(part.hourly, key, HOUR), cmp: src ? cells(src.hourly, key, HOUR, by) : null });
   const visits = (p) => (isObj(p?.visitors) && p.visitors.state === 'ok' ? p.visitors.days : null);
-  out.days = (key) => ({ data: dayPoints(visits(part), key, out.startMs, out.endMs), cmp: src ? dayPoints(visits(src), key, out.startMs, out.endMs, by) : null });
+  out.days = (key) => ({ data: cells(visits(part), key, DAY), cmp: src ? cells(visits(src), key, DAY, by) : null });
   return out;
 }
 
@@ -143,7 +137,8 @@ export function historyWindow(app, range, cmp, now) {
 
 // --- 수집(011)·알림(034) ------------------------------------------------------------------
 
-// 시간 칸마다 수집 성공률 — 011 의 1시간 식(1 − 실패 구간과 겹친 초 ÷ 칸 길이)을 원천 전체로 평균. [[칸 가운데 ms, %]] (064)
+// 시간 칸마다 수집 성공률 — 011 의 1시간 식(1 − 실패 구간과 겹친 초 ÷ 칸 길이)을 원천 전체로 평균. [[칸 가운데 ms, %]] (064).
+// 지금 칸의 점은 지금까지의 가운데(창 끝 = 지금을 넘지 않게 — 아래 둘도 같다)
 export function hourlySuccess(body, now) {
   const n = list(body?.exchanges).filter(isObj).length;
   if (!n) return [];
@@ -155,7 +150,7 @@ export function hourlySuccess(body, now) {
     const to = Math.min(from + HOUR, now);
     if (to <= from) continue;
     const down = outages.reduce((sum, o) => sum + Math.max(0, Math.min(num(o.endedAt) ?? now, to) - Math.max(o.startedAt, from)), 0);
-    out.push([from + HOUR / 2, Math.max(0, 100 * (1 - down / (n * (to - from))))]);
+    out.push([(from + to) / 2, Math.max(0, 100 * (1 - down / (n * (to - from))))]);
   }
   return out;
 }
@@ -168,7 +163,7 @@ export function outageMinutes(body, now) {
     const from = top - i * HOUR;
     const to = Math.min(from + HOUR, now);
     const down = outages.reduce((sum, o) => sum + Math.max(0, Math.min(num(o.endedAt) ?? now, to) - Math.max(o.startedAt, from)), 0);
-    out.push([from + HOUR / 2, Math.round(down / 6000) / 10]);
+    out.push([(from + to) / 2, Math.round(down / 6000) / 10]);
   }
   return out;
 }
@@ -183,5 +178,5 @@ export function alertHours(items, now, hours = 24, only = null) {
     const hour = Math.floor(it.at / HOUR) * HOUR;
     if (counts.has(hour)) counts.set(hour, counts.get(hour) + 1);
   }
-  return [...counts].map(([hour, count]) => [hour + HOUR / 2, count]);
+  return [...counts].map(([hour, count]) => [(hour + Math.min(hour + HOUR, now)) / 2, count]);
 }

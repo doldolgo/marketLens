@@ -59,7 +59,15 @@ export const signed = (v, digits = 0) => (num(v) === null ? '–' : `${v > 0 ? '
 
 // --- 시간 칸(038 hourly · 068 날) ------------------------------------------------------------------
 
-// 시간 칸 [{ts초, …}] → [[그 시의 가운데 ms, key 값]] — 막대가 시의 가운데에 선다
+// 칸 [{ts초, …}](너비 width ms) → [[칸이 창 [startMs, endMs] 와 겹친 구간의 가운데 ms, key 값]]. 지금 칸은 지금까지의 가운데라
+// 창 끝(= 지금)을 넘지 않는다(칸 가운데에 두면 앞 절반 동안 마지막 막대가 축 밖으로 나간다). 이전 기간 칸은 by 만큼 민 뒤 같은 규칙
+export const cellPoints = (cells, key, width, startMs, endMs, by = 0) =>
+  list(cells)
+    .filter((c) => isObj(c) && num(c.ts) !== null)
+    .map((c) => [c.ts * 1000 + by, num(c[key]) ?? 0])
+    .filter(([t]) => t + width > startMs && t < endMs)
+    .map(([t, v]) => [(Math.max(t, startMs) + Math.min(t + width, endMs)) / 2, v]);
+// 시간 칸 [{ts초, …}] → [[그 시의 가운데 ms, key 값]] — 축을 시 단위로 넓힌 그림(개요 24시간 트래픽)만
 export const hourPoints = (hourly, key) =>
   list(hourly).filter((h) => isObj(h) && num(h.ts) !== null).map((h) => [h.ts * 1000 + HOUR / 2, num(h[key]) ?? 0]);
 // [from, to] ms 와 겹치는 시간 칸만

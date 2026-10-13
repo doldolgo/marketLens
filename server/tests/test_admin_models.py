@@ -50,10 +50,14 @@ out.accessDays = models.accessWindow(fakeApp({ [aq[0].key]: week, [aq[1].key]: v
 const kdate = (sec) => new Date((sec + 32400) * 1000).toISOString().slice(0, 10)
 const mq = [models.historyReqs('7d', 'none')[0], models.accessReqs(ins.accessRange('7d'), 'none')[0]]
 const rows = [{ date: kdate(kst0 - 86400), traffic: { sessions: 2 } }, { date: kdate(kst0), traffic: { sessions: 1 } }]
+const a24 = models.accessReqs('24h', 'none')[0]
+const topS = Math.floor(nowS / 3600) * 3600
+out.accessHours = models.accessWindow(fakeApp({ [a24.key]: { state: 'ok', startTs: nowS - 86400, endTs: nowS, hourly: [{ ts: topS - 3600, humanPages: 5 }, { ts: topS, humanPages: 2 }] } }), '24h', 'none').hours('humanPages').data
 out.match = ins.matchModel(fakeApp({ [mq[0].key]: { state: 'ok', rows }, [mq[1].key]: week }), '7d').series.map((x) => x.data)
 const top = Math.floor(input.now / H) * H
 const rate = models.hourlySuccess({ exchanges: [{}, {}], outages: [{ startedAt: top - 3 * H, endedAt: top - 3 * H + 1800000 }, { startedAt: top - 600000, endedAt: null }] }, input.now)
-out.success = { n: rate.length, early: rate.find((p) => p[0] === top - 3 * H + H / 2)?.[1], other: rate[0][1], current: rate.at(-1)[1] }
+out.success = { n: rate.length, early: rate.find((p) => p[0] === top - 3 * H + H / 2)?.[1], other: rate[0][1], current: rate.at(-1)[1], currentAt: rate.at(-1)[0] - top }
+out.alertAt = models.alertHours([], input.now).at(-1)[0] - top
 const alerts = [{ source: 'slack', at: input.now - 1000 }, { source: 'alarm', toState: 'ALARM', at: input.now - 2000 }, { source: 'alarm', toState: 'OK', at: input.now - 3000 }]
 out.alerts = [models.alertHours(alerts, input.now).at(-1)[1], models.alertHours(alerts, input.now, 168, 'slack').length, models.alertHours(alerts, input.now, 24, 'alarm').at(-1)[1]]
 out.bots = [tm.botShare({ totals: { requests: 1000 }, classes: { scanner: { requests: 220 }, tool: { requests: 130 }, ai: { requests: 60 } } }), tm.botShare({ totals: { requests: 0 } })]
@@ -130,6 +134,10 @@ def test_access_day_points_stay_inside_the_window(got: dict[str, Any]) -> None:
         "cmp": [[k - day / 2, 5], [(k + now) / 2, 3]],
     }
     assert max(t for t, _ in got["accessDays"]["data"]) < now
+    # 시 칸도 같다 — 지금 시(정시 10초 뒤)의 점은 지금까지의 가운데, 지난 시는 그 시의 가운데. 수집 성공률·알림 칸도 지금 칸은 같다
+    top = now // 3_600_000 * 3_600_000
+    assert got["accessHours"] == [[top - 1_800_000, 5], [(top + now) / 2, 2]]
+    assert got["success"]["currentAt"] == got["alertAt"] == (now - top) / 2
     assert got["match"] == [
         [[k - day, 2], [k, 1]],
         [[k - day, 3], [k, 1]],

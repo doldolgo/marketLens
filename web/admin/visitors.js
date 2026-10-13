@@ -2,7 +2,7 @@
 // 대역 표(머리 눌러 정렬 — 요청·사람 모양 페이지·마지막은 서버가, 그 밖은 불러온 행 안에서 · 200행씩) · 행 → 대역 상세 판
 // (시간별 요청 · 종류·상태 띠 · 브라우저 정보·경로 상위 · 첫/마지막 페이지 · 최근 요청 100줄 펼치기 · ◀ 이전/다음 ▶).
 import { $, button, el, int, kstText, list, num, once, partOf, pct, pressed, put, req, stateWord, tag, usable, widthOf } from './common.js';
-import { sortRows } from './calc.js';
+import { cellPoints, sortRows } from './calc.js';
 import { countryLabel, netName } from './names.js';
 import { RANGE_MS } from './models.js';
 import { IP_RANGES, NETS, SERVER_SORT, bandKpis, bandLabel, bandRows, ipsReqs, kindItems, loadedBands, pairList, recentRows, statusItems, validBand } from './ipmodel.js';
@@ -138,7 +138,7 @@ function ipModel(app, pv, band) {
   const endMs = app.now();
   const startMs = endMs - (RANGE_MS[pv.range] ?? RANGE_MS['24h']);
   const hourly = list(part.hourly).filter((h) => num(h?.ts) !== null);
-  const pts = (key) => hourly.map((h) => [h.ts * 1000 + 1_800_000, num(h[key]) ?? 0]);
+  const pts = (key) => cellPoints(hourly, key, 3_600_000, startMs, endMs);
   return {
     ...base,
     span: [startMs, endMs],
