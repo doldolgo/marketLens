@@ -133,6 +133,43 @@ def raw_size(path: str, size: int) -> int | None:
     return 0 if isize > BUDGET_BYTES else isize
 
 
+def listing(
+    directory: str | None,
+) -> tuple[Current | None, dict[str, tuple[str, int, float]]]:
+    """(`access.log`, 회전 파일 키 → (경로, 크기, 수정 시각)) — 디렉터리·파일이 없으면 `NoLogFile`."""
+    if not directory:
+        raise NoLogFile
+    try:
+        entries = list(os.scandir(directory))
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise NoLogFile from exc
+    current: Current | None = None
+    rotated: dict[str, tuple[str, int, float]] = {}
+    for entry in entries:
+        name = entry.name
+        if name == LOG_NAME:
+            try:
+                st = entry.stat()
+            except FileNotFoundError:
+                st = None  # 회전 중 — 열기도 빈 파일로 본다
+            # 크기를 모르면 -1 — 다음 회차의 어떤 크기도 '줄어듦' 이 아니다
+            ino, size = (0, -1) if st is None else (st.st_ino, st.st_size)
+            current = Current(entry.path, ino, size)
+        elif name.startswith(ROTATED_PREFIX) and name.endswith((".log", ".log.gz")):
+            stem = name.removesuffix(".gz").removesuffix(".log")
+            # 압축 중이면 같은 줄을 담은 `.log` 와 덜 쓴 `.log.gz` 가 함께 있다 — 다 쓴 `.log` 를 읽는다
+            if stem in rotated and name.endswith(".gz"):
+                continue
+            try:
+                st = entry.stat()
+            except FileNotFoundError:
+                continue
+            rotated[stem] = (entry.path, st.st_size, st.st_mtime)
+    if current is None and not rotated:
+        raise NoLogFile
+    return current, rotated
+
+
 def open_log(path: str) -> IO[str]:
     if path.endswith(".gz"):
         handle = gzip.open(path, "rt", encoding="utf-8", errors="replace")
@@ -260,37 +297,7 @@ class AccessLog:
         return broken
 
     def _listing(self) -> tuple[Current | None, dict[str, tuple[str, int, float]]]:
-        if not self._dir:
-            raise NoLogFile
-        try:
-            entries = list(os.scandir(self._dir))
-        except (FileNotFoundError, NotADirectoryError) as exc:
-            raise NoLogFile from exc
-        current: Current | None = None
-        rotated: dict[str, tuple[str, int, float]] = {}
-        for entry in entries:
-            name = entry.name
-            if name == LOG_NAME:
-                try:
-                    st = entry.stat()
-                except FileNotFoundError:
-                    st = None  # 회전 중 — 열기도 빈 파일로 본다
-                # 크기를 모르면 -1 — 다음 회차의 어떤 크기도 '줄어듦' 이 아니다
-                ino, size = (0, -1) if st is None else (st.st_ino, st.st_size)
-                current = Current(entry.path, ino, size)
-            elif name.startswith(ROTATED_PREFIX) and name.endswith((".log", ".log.gz")):
-                stem = name.removesuffix(".gz").removesuffix(".log")
-                # 압축 중이면 같은 줄을 담은 `.log` 와 덜 쓴 `.log.gz` 가 함께 있다 — 다 쓴 `.log` 를 읽는다
-                if stem in rotated and name.endswith(".gz"):
-                    continue
-                try:
-                    st = entry.stat()
-                except FileNotFoundError:
-                    continue
-                rotated[stem] = (entry.path, st.st_size, st.st_mtime)
-        if current is None and not rotated:
-            raise NoLogFile
-        return current, rotated
+        return listing(self._dir)
 
     def ips(
         self,
