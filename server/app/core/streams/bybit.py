@@ -4,7 +4,8 @@
 바이낸스와 다른 점: 호가가 자기완결 스냅샷이 아니라 스냅샷 뒤 델타라 심볼마다 로컬 북을 들고,
 핑은 라이브러리 프레임이 아니라 JSON `{"op":"ping"}` 을 20초마다 보내며 pong 이 없으면 끊는다.
 심볼은 crc32 % 3 으로 샤드에 고정 배정되고, 샤드마다 소켓·시계·백오프·북을 따로 둔다.
-메시지마다: 원문 싱크 기록 → 디코드 → 북·행 갱신(QuoteSink) → 그 샤드의 last_message_at(시세만).
+메시지마다: 원문 싱크 기록 → 디코드 → 북 갱신 → 그 샤드의 last_message_at(시세만). 북을 행으로 내보내는 것(QuoteSink)은
+저장소를 읽기 직전에 바뀐 북마다 한 번이다(001 §3.5-5, 2026-10-13).
 심볼 집합 계약(ForeignSymbolSource)도 이 커넥터가 구현한다 — 우주가 확정되면 차이만 재조정한다.
 """
 
@@ -61,7 +62,6 @@ PING_INTERVAL = 20.0  # JSON ping 주기 — 공식 문서 요구 (§3.2)
 PONG_TIMEOUT = 20.0  # 이 안에 pong 이 없으면 끊고 재연결 — 조용히 죽은 TCP 감지 (§3.2)
 # 심볼당 행 발행(정렬 + QuoteSink.orderbook) 최소 간격 — 델타는 100ms 마다 오지만 표는 1초에 1번만 읽으므로
 # 메시지마다 200단계를 정렬·행 재생성하던 비용(py-spy: 수집기 CPU 22%)을 1/5 로 줄인다 (§3.2)
-PUBLISH_INTERVAL_MS = 500
 BACKOFF_START = 1.0
 BACKOFF_MAX = 30.0
 CLOSE_TIMEOUT = 2.0  # 종료 시 취소 + 소켓 3개 동시 close 합계 상한
@@ -101,7 +101,7 @@ class _Book:
 
     asks 는 가격 오름차순, bids 는 가격 내림차순이고, 이분 탐색용 키 열을 나란히 든다(bids 키는 부호를 뒤집은
     가격이라 오름차순). 북을 늘 정렬된 채로 두는 이유: 델타는 바뀐 단계만 와서(2026-10-09 캡처 평균 5단계) 그
-    자리만 찾아 고치면 되지만, 발행은 심볼당 500ms 마다 북 전체(쪽마다 약 200단계)를 행으로 내보낸다. 가격 →
+    자리만 찾아 고치면 되지만, 발행은 저장소를 읽을 때마다(틱 1초) 북 전체(쪽마다 약 200단계)를 행으로 내보낸다. 가격 →
     잔량 dict 로 들면 발행마다 정렬하고 `[가격, 잔량]` 목록 약 400개를 새로 만들어야 하고, 그 목록들은 옛 행이
     교체될 때 다시 해제된다. 정렬된 목록이면 발행은 얕은 복사뿐이다 — 같은 캡처 60초 재생에서 바이빗 처리(행
     저장 포함) CPU 가 31.7 → 17.9ms/초로 43% 준다(로컬 Mac). 대신 델타 반영은 조금 비싸진다(델타 1건 1.2 → 3.1µs).
@@ -119,8 +119,6 @@ class _Book:
         self.bids: list[list[float]] = []
         self.ts = 0  # 마지막으로 반영한 프레임의 `ts` — 발행 시 행의 호가 시각
         self.received_at = 0  # 그 프레임의 수신 시각 — 발행 시 행의 `updated_at`
-        self.published_at = 0  # 마지막으로 행을 내보낸 시각 (§3.2 발행 제한)
-        self.dirty = False  # 델타를 반영했지만 아직 행으로 내보내지 않았다
 
     def replace(self, data: dict[str, Any]) -> None:
         # 같은 가격이 둘 이상 오면 뒤 잔량·처음 가격 객체 — dict 로 먼저 모아 그 규칙을 그대로 지킨다.
@@ -192,8 +190,6 @@ class _Shard:
         self.ws: Any | None = None
         self.task: asyncio.Task[None] | None = None
         self.ping_task: asyncio.Task[None] | None = None
-        # dirty 북을 주기적으로 발행 (§3.2) — 소켓과 수명이 같다
-        self.flush_task: asyncio.Task[None] | None = None
         self.backoff = BACKOFF_START
         self.next_id = 0
         self.pong_pending = False  # ping 을 보냈고 아직 pong 이 안 왔다
@@ -236,6 +232,8 @@ class BybitStream:
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다
         # 직전에 맵까지 만든 200 응답의 비교용 바이트(꼬리 time 제외) — 같으면 파싱·맵 재생성을 건너뛴다 (§3.3)
         self._symbols_body: bytes | None = None
+        # 마지막 발행 뒤 바뀐 북 — 심볼 → (샤드, 북). 저장소가 읽기 전에 _settle 이 행으로 내보내고 비운다 (001 §3.5-5)
+        self._dirty: dict[str, tuple[_Shard, _Book]] = {}
 
     # --- 심볼 집합 (ForeignSymbolSource, §3.3) ---
 
@@ -499,6 +497,8 @@ class BybitStream:
                 continue
             shard.ws = ws
             shard.subscribed = set()
+            if self._dirty:
+                self._settle()  # 옛 소켓에서 바뀐 북은 북을 비우기 전에 행으로 — 받은 데이터를 버리지 않는다
             shard.books.clear()  # 새 소켓은 새 스냅샷으로 시작한다 — 옛 북에 새 델타를 얹지 않는다 (§3.4)
             shard.pong_pending = False
             shard.pong_timed_out = False
@@ -513,7 +513,6 @@ class BybitStream:
                 )  # 구독 시각 = 첫 묶음을 다 보낸 시각
                 self._publish()
                 shard.ping_task = asyncio.create_task(self._run_ping(shard, ws))
-                shard.flush_task = asyncio.create_task(self._run_flush(shard))
                 await self._pump(shard, ws)
             except asyncio.CancelledError:
                 raise
@@ -537,11 +536,12 @@ class BybitStream:
                     self._record_rejection(exc)
             finally:
                 await self._stop_ping(shard)
-                await self._stop_flush(shard)
                 shard.state.connected = False
                 shard.state.connected_since = None
                 shard.state.subscribed = 0
                 shard.subscribed = set()
+                if self._dirty:
+                    self._settle()  # 끊긴 소켓에서 바뀐 북은 비우기 전에 행으로
                 shard.books.clear()
                 self._publish()  # close 가 늦어도 집계는 먼저 미연결이 된다
                 await self._close_socket(shard)
@@ -598,37 +598,6 @@ class BybitStream:
     async def _stop_ping(self, shard: _Shard) -> None:
         task, shard.ping_task = shard.ping_task, None
         if task is None or task is asyncio.current_task():
-            return
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await task
-
-    async def _run_flush(self, shard: _Shard) -> None:
-        """PUBLISH_INTERVAL 마다 델타로 바뀌었지만 아직 안 내보낸 북을 전부 행으로 만든다 (§3.2).
-
-        델타가 끊긴 심볼도 마지막 델타 뒤 한 주기 안에는 반드시 발행된다 — 누락 없음.
-        발행 실패가 이 태스크를 죽이면 dirty 북이 영원히 안 나가므로 로그만 남기고 계속 돈다.
-        """
-        while True:
-            await self._sleep(PUBLISH_INTERVAL_MS / 1000)
-            try:
-                self._flush(shard)
-            except Exception:
-                logger.exception("바이빗 샤드 %d 호가 행 발행 실패", shard.index)
-
-    def _flush(self, shard: _Shard) -> None:
-        now = self._clock()
-        for symbol, book in shard.books.items():
-            if not book.dirty:
-                continue
-            base = self._base_of.get(symbol)
-            if base is None:
-                continue  # 맵에서 빠진 심볼 — 펌프와 같은 규칙으로 버린다 (§3.4)
-            self._publish_book(symbol, base, book, now)
-
-    async def _stop_flush(self, shard: _Shard) -> None:
-        task, shard.flush_task = shard.flush_task, None
-        if task is None:
             return
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -733,26 +702,39 @@ class BybitStream:
         ts = int(msg["ts"])
         book = shard.books.get(symbol)
         if kind == "snapshot" or data.get("u") == 1:
-            # 새 스냅샷·서비스 재시작(u=1) → 북 통째 교체 (§3.4). 교체 직후 상태는 간격과 무관하게 바로 내보낸다
+            # 새 스냅샷·서비스 재시작(u=1) → 북 통째 교체 (§3.4)
             book = _Book()
             book.replace(data)
             shard.books[symbol] = book
-            book.ts, book.received_at = ts, at
-            self._publish_book(symbol, base, book, at)
         elif kind == "delta":
             if book is None:
                 return  # 스냅샷 전에 온 델타 — 북이 없으니 버린다 (§3.4)
             book.apply(data)  # 델타는 바뀐 단계만 오므로 하나도 빠짐없이 북에 반영한다
-            book.ts, book.received_at = ts, at
-            if at - book.published_at >= PUBLISH_INTERVAL_MS:
-                self._publish_book(symbol, base, book, at)  # 조용하던 심볼은 바로
-            else:
-                # 최근에 내보냈다 — 다음 주기(_run_flush)에 묶어서 (§3.2)
-                book.dirty = True
         else:
             raise ValueError(f"알 수 없는 orderbook type: {kind!r}")
+        book.ts, book.received_at = ts, at
+        # 행은 저장소를 읽기 직전에 바뀐 북마다 한 번 내보낸다 (001 §3.5-5·§3.2) — 틱은 1초에 한 번 읽으므로 그 사이
+        # 델타마다 200단계 북을 행으로 다시 만들 까닭이 없다. 같은 심볼은 마지막 북 하나만 든다(스냅샷이면 새 북)
+        if not self._dirty:
+            self._store.defer(self._settle)
+        self._dirty[symbol] = (shard, book)
 
-    def _publish_book(self, symbol: str, base: str, book: _Book, now: int) -> None:
+    def _settle(self) -> None:
+        """바뀐 북을 행으로 — 저장소가 읽기 직전에 부른다 (001 §3.5-5·§3.2).
+
+        북이 그 샤드에서 이미 빠졌으면(재연결로 비움·우주에서 빠짐) 내보내지 않는다 — 주기 발행이 지금 북만 훑던 것과
+        같다. base 는 지금 맵으로 찾고, 맵에서 빠진 심볼은 펌프와 같은 규칙으로 버린다(§3.4).
+        """
+        dirty, self._dirty = self._dirty, {}
+        for symbol, (shard, book) in dirty.items():
+            if shard.books.get(symbol) is not book:
+                continue
+            base = self._base_of.get(symbol)
+            if base is None:
+                continue
+            self._publish_book(symbol, base, book)
+
+    def _publish_book(self, symbol: str, base: str, book: _Book) -> None:
         """북 → 정렬 → 행 1회. 호가 시각·수신 시각은 그 북에 마지막으로 반영된 프레임의 것 (§3.2)."""
         asks, bids = book.sorted_levels()
         self._sink.orderbook(
@@ -765,8 +747,6 @@ class BybitStream:
             timestamp_ms=book.ts,
             received_at_ms=book.received_at,
         )
-        book.dirty = False
-        book.published_at = now
 
     def _on_trade(self, base: str, data: Any) -> None:
         """한 프레임의 체결 중 `T` 가 가장 큰 것 — 배열 순서를 믿지 않는다 (§3.4)."""
