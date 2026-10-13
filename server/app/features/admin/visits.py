@@ -1,10 +1,14 @@
-"""api 관리자 피드 — `/admin/access`·`/admin/clarity` 의 부분 상태와 갱신 (스펙 035 §3.1~§3.2·038 §3.1~§3.3·040 §3.2·§3.5).
+"""api 관리자 피드 — `/admin/access`·`/admin/clarity`·`/admin/clarity/history` 의 부분 상태와 갱신 (스펙 035 §3.1~§3.2·
+038 §3.1~§3.3·040 §3.2·§3.5·068 §3.1·§3.2).
 
 공통 규칙은 034 와 같은 문장이다(`parts.py`). 접속 요약은 창(24h·7d·30d)마다 따로 60초 칸이고, 파일 캐시는 창 셋이
 나눠 쓰며 파일 읽기는 `asyncio.to_thread`(기본 실행기 — api 에는 수집 쓰기가 없다). 마지막 접속 요청에서 1시간이 지나면
-파일 캐시·짝 기록·열쇠·창 칸을 통째로 버린다(038 §3.3). Clarity 는 호출이 둘이다 — 기본 요약(4시간)과 페이지×기기 묶음(12시간,
-하위 부분 `pages`). 요청마다 Redis 기록 둘을 읽어 때를 정하고(`clarity_schedule.py`), 한 갱신 안에서 기본 → 묶음
-순서로 하나씩 부른다 — Clarity 호출이 동시에 둘 나가지 않는다. 기본이 401·403·429 면 묶음은 미룬다.
+파일 캐시·짝 기록·열쇠·창 칸을 통째로 버린다(038 §3.3). Clarity 는 호출이 넷이다 — 기본 요약(6시간)·페이지×기기
+묶음(12시간, 하위 부분 `pages`)·기기와 유입 차원(24시간씩, 하위 부분 `dims` 하나에 칸 둘 — 068). 요청마다 Redis 기록 넷을
+읽어 때를 정하고(`clarity_schedule.py`), 한 갱신 안에서 기본 → 묶음 → 기기 → 유입 순서로 하나씩 부른다 — Clarity 호출이
+동시에 둘 나가지 않는다. 기본이 401·403·429 면 나머지는 미룬다. 기본이 성공할 때마다(그날 차원이 성공할 때도) 그 KST 날의
+칸 `admin:clarity:day:<YYYYMMDD>` 를 곧바로 덮어쓰고(`clarity_days.py` — 못 쓰면 다음 갱신에 다시), `/admin/clarity/history`
+는 창(7·30·90일)마다 60초 칸으로 그 칸들을 읽는다.
 접속 갱신이 게이트 뒤 ok 이면 DB-IP 판(039)이 필요한지 보고 받기를 띄운다 — 갱신은 받기를 기다리지 않고, 판이 없는
 동안 하위 부분 `geo` 는 받는 중 `pending`·실패 `error` 다. 판은 캐시 잠금 안에서 하나 집어 그 회차 끝까지 쓴다 — 창
 둘의 갱신이 갈아 끼우는 순간에 겹쳐도 옛 판으로 캐시를 다시 만들지 않게.
@@ -41,8 +45,20 @@ from app.features.admin.clarity import (
     fetch,
     load_record,
 )
+from app.features.admin.clarity_days import (
+    HISTORY_DAYS,
+    HISTORY_DEFAULT,
+    HISTORY_KEYS,
+    HISTORY_REFRESH_SEC,
+    day_of,
+    day_text,
+    expire_at,
+    history_rows,
+    window_days,
+)
+from app.features.admin.clarity_dims import DIMS_CALLS, DIMS_KEYS, parse_dims
 from app.features.admin.clarity_pages import parse_pages
-from app.features.admin.clarity_schedule import ClarityKind
+from app.features.admin.clarity_schedule import ClarityKind, DirectBudget
 from app.features.admin.clarity_values import parse_base
 from app.features.admin.geo_fetch import GeoLoader
 from app.features.admin.parts import (
@@ -57,9 +73,11 @@ from app.features.admin.parts import (
 ACCESS_REFRESH_SEC = 60
 # 마지막 접속 요청에서 이만큼 지나면 캐시·짝 기록·열쇠를 버린다(038 §3.3)
 ACCESS_IDLE_SEC = 3600.0
-# 시도 사이 — 어떤 24시간에도 기본 6 + 묶음 2 = 8회라 하루 10회 한도에서 사람 몫 2회가 남는다 (040 §3.2)
-CLARITY_REFRESH_SEC = 14_400
+# 시도 사이 — 어떤 24시간에도 기본 4 + 묶음 2 + 기기 1 + 유입 1 = 8회라 하루 10회 한도에서 사람 몫 2회가 남는다
+# (040 §3.2·068 §3.1)
+CLARITY_REFRESH_SEC = 21_600
 PAGES_REFRESH_SEC = 43_200
+DIMS_REFRESH_SEC = 86_400
 CLARITY_KEYS = ("nextAt", "numOfDays", "traffic", "summary", "countries", "metrics")
 PAGES_KEYS = ("nextAt", "numOfDays", "rowsIn", "rowLimitHit", "groups")
 BASE_PARAMS = {"numOfDays": "1"}
@@ -99,6 +117,9 @@ class VisitFeeds:
         self._log, self._access = self._fresh_access()
         # 주기 0 — Clarity 의 캐시는 Redis 기록이고, 이 칸은 한 번에 하나·3초 기다림·직전 결과만 맡는다
         self._clarity = Slot(0, mono, wait_sec)
+        budget = (
+            DirectBudget()
+        )  # 바로 부르기 — 종류 넷이 같이 쓴다(어떤 24시간에도 두 번)
         self._base = ClarityKind(
             name="clarity",
             refresh_sec=CLARITY_REFRESH_SEC,
@@ -106,6 +127,7 @@ class VisitFeeds:
             parse=parse_base,
             load=lambda bus: bus.clarity_load(),
             save=lambda bus, data: bus.clarity_save(data),
+            budget=budget,
         )
         self._pages = ClarityKind(
             name="clarity.pages",
@@ -114,7 +136,31 @@ class VisitFeeds:
             parse=parse_pages,
             load=lambda bus: bus.clarity_pages_load(),
             save=lambda bus, data: bus.clarity_pages_save(data),
+            budget=budget,
         )
+        # 068 — 차원 호출 둘(기기·유입). 기록은 해시 `admin:clarity:dims` 의 칸 하나씩, 목록 이름은 응답 `dims` 의 키
+        self._dims = tuple(
+            (
+                ClarityKind(
+                    name=f"clarity.dims.{field}",
+                    refresh_sec=DIMS_REFRESH_SEC,
+                    params=params,
+                    parse=parse_dims(dims),
+                    load=lambda bus, f=field: bus.clarity_dims_load(f),
+                    save=lambda bus, data, f=field: bus.clarity_dims_save(f, data),
+                    budget=budget,
+                ),
+                tuple(name for name, _ in dims),
+            )
+            for field, params, dims in DIMS_CALLS
+        )
+        self._kinds = (self._base, self._pages, *(kind for kind, _ in self._dims))
+        # 못 쓴 날별 기록(다음 갱신이 다시 쓴다)·이번 갱신에 Redis 에서 읽은 기록
+        self._day_pending = False
+        self._stored: dict[ClarityKind, Record] = {}
+        self._history = {
+            n: Slot(HISTORY_REFRESH_SEC, mono, wait_sec) for n in HISTORY_DAYS.values()
+        }
         self._warn = Warner(mono)
         # 039 — DB-IP 판. 1시간 비움(§3.3)과 무관하게 프로세스에 남는다(방문자 정보가 아닌 공개 자료)
         self.geo = GeoLoader(
@@ -178,32 +224,36 @@ class VisitFeeds:
 
     async def clarity(self, *, bus: ClarityStore | None) -> dict[str, Any]:
         if self._token is None:
-            outer = inner = (
-                UNCONFIGURED  # 토큰 없음 — Redis 도 Clarity 도 부르지 않는다
-            )
+            # 토큰 없음 — Redis 도 Clarity 도 부르지 않는다
+            outer = inner = dims = UNCONFIGURED
         else:
             try:
                 result = await self._clarity.get(lambda: self._refresh_clarity(bus))
             except Exception as exc:
                 result = self._failed("clarity", exc)
             parts = result.values or {}
-            outer = parts.get("outer", result)  # pending·처리기 예외면 둘이 같은 상태
+            # pending·처리기 예외면 셋이 같은 상태
+            outer = parts.get("outer", result)
             inner = parts.get("pages", result)
+            dims = parts.get("dims", result)
         # 값은 state 와 무관하게 마지막 성공 값이다(035 §3.3 — §3.1 의 예외). 경과는 fetchedAt 이 말한다
         pages = self._writable(
             "clarity.pages", _body(inner, PAGES_REFRESH_SEC, PAGES_KEYS), PAGES_KEYS
         )
+        dims_part = self._writable(
+            "clarity.dims", _body(dims, DIMS_REFRESH_SEC, DIMS_KEYS), DIMS_KEYS
+        )
         body = self._writable(
             "clarity", _body(outer, CLARITY_REFRESH_SEC, CLARITY_KEYS), CLARITY_KEYS
         )
-        return {**body, "pages": pages}
+        return {**body, "pages": pages, "dims": dims_part}
 
     async def _refresh_clarity(self, bus: ClarityStore | None) -> Result:
         now_ms = int(self._clock() * 1000)
         texts: list[str | None] | None = None
         if bus is not None:  # None = lifespan 전 — Redis 자리가 없다
             try:
-                texts = [await kind.load(bus) for kind in (self._base, self._pages)]
+                texts = [await kind.load(bus) for kind in self._kinds]
             except Exception:
                 texts = None
         if bus is None or texts is None:
@@ -216,14 +266,20 @@ class VisitFeeds:
             code = type(exc).__name__
             self._warn("clarity", code)
             return self._clarity_parts(now_ms, ("error", code))
+        self._stored = dict(zip(self._kinds, stored, strict=True))
+        if self._day_pending:  # 앞 갱신에서 못 쓴 날별 기록
+            await self._save_day(bus)
         faults: dict[str, tuple[str, str | None]] = {}
         await self._step(self._base, stored[0], bus, now_ms, True, faults)
         blocked = self._base.blocks_pages()
-        await self._step(self._pages, stored[1], bus, now_ms, not blocked, faults)
+        for kind, record in zip(self._kinds[1:], stored[1:], strict=True):
+            await self._step(kind, record, bus, now_ms, not blocked, faults)
         base = self._base.record
-        if blocked and base is not None and self._pages.record is None:
-            # 기록이 없고 미뤘다 — 기본의 state·code 를 그대로 보인다
-            faults.setdefault("clarity.pages", (base.state or "error", base.code))
+        if blocked and base is not None:
+            for kind in self._kinds[1:]:
+                if kind.record is None:
+                    # 기록이 없고 미뤘다 — 기본의 state·code 를 그대로 보인다
+                    faults.setdefault(kind.name, (base.state or "error", base.code))
         return self._clarity_parts(now_ms, None, faults)
 
     async def _step(
@@ -256,7 +312,7 @@ class VisitFeeds:
         # 다음 묶음이 보낸 때로부터 12시간보다 일찍 나가 어떤 24시간에 3회가 들 수 있다 (§3.2)
         sent_ms = int(self._clock() * 1000)
         if direct:
-            kind.direct_at = sent_ms
+            kind.spend_direct(sent_ms)
         state, code, values = await fetch(
             self._token or "", self._transport, params=kind.params, parse=kind.parse
         )
@@ -274,6 +330,47 @@ class VisitFeeds:
             )
         kind.record, kind.saved, kind.dirty = record, False, True
         await self._save(kind, bus)
+        if state == "ok" and self._writes_day(kind, sent_ms):
+            await self._save_day(bus)
+
+    def _writes_day(self, kind: ClarityKind, sent_ms: int) -> bool:
+        """날별 기록을 덮어쓸 성공인가 — 기본, 또는 기본의 마지막 성공과 같은 KST 날의 차원 성공(068 §3.2).
+        차원이 다음 날에 성공하면 쓰지 않는다 — 기본의 날 칸에 든 그날 차원 값을 null 로 덮지 않게."""
+        if kind is self._base:
+            return True
+        base = self._base.record
+        return (
+            kind is not self._pages
+            and base is not None
+            and base.success_at is not None
+            and day_of(base.success_at) == day_of(sent_ms)
+        )
+
+    async def _save_day(self, bus: ClarityStore) -> None:
+        """기본의 마지막 성공 KST 날 칸을 덮어쓴다 — 기본의 정규화 값 + 그날 성공한 차원의 목록(아니면 null).
+        Redis 에 못 쓰면 다음 갱신이 다시 쓴다. 값을 다시 쓸 수 없으면(손으로 넣은 기록) 버린다."""
+        self._day_pending = False
+        base = self._base.record
+        if base is None or base.success_at is None or base.values is None:
+            return
+        day = day_of(base.success_at)
+        dims: dict[str, Any] = {}
+        for kind, names in self._dims:
+            # 메모리와 이번 갱신에 읽은 Redis 기록 중 늦은 성공 — 다시 뜬 앱의 첫 갱신은 기본이 차원보다 먼저 불려
+            # 메모리가 비어 있다
+            values = _day_values(day, kind.record, self._stored.get(kind))
+            for name in names:
+                dims[name] = None if values is None else values.get(name)
+        try:
+            text = await asyncio.to_thread(day_text, base.success_at, base.values, dims)
+        except Exception as exc:
+            self._warn("clarity.day", type(exc).__name__)
+            return
+        try:
+            await bus.clarity_day_save(day, text, expire_at(day))
+        except Exception:
+            self._warn("clarity.day", "redis")
+            self._day_pending = True
 
     async def _save(self, kind: ClarityKind, bus: ClarityStore) -> None:
         """기억한 기록을 Redis 에 — 실패하면 쓰이지 않은 채로 두고(다음 요청이 다시 쓴다) WARNING."""
@@ -297,7 +394,47 @@ class VisitFeeds:
         faults = faults or {}
         outer = self._base.part(now_ms, fault or faults.get("clarity"))
         inner = self._pages.part(now_ms, fault or faults.get("clarity.pages"))
-        return Result("ok", values={"outer": outer, "pages": inner})
+        dims = _merged(
+            [
+                kind.part(now_ms, fault or faults.get(kind.name))
+                for kind, _ in self._dims
+            ]
+        )
+        return Result("ok", values={"outer": outer, "pages": inner, "dims": dims})
+
+    # --- /admin/clarity/history (068) ---
+
+    async def clarity_history(
+        self, days: str | None, *, bus: ClarityStore | None
+    ) -> dict[str, Any]:
+        """날별 기록 — 창(7·30·90일, 목록 밖·없음은 30)마다 60초 칸. 토큰이 없으면 Redis 도 읽지 않는다(040 과 같다)."""
+        n = HISTORY_DAYS.get(days or "", HISTORY_DEFAULT)
+        if self._token is None:
+            result = UNCONFIGURED
+        else:
+            try:
+                result = await self._history[n].get(lambda: self._load_history(n, bus))
+            except Exception as exc:
+                result = self._failed("clarity.history", exc)
+        body = render(result, HISTORY_REFRESH_SEC, HISTORY_KEYS)
+        body["days"] = n  # 고른 창 — 어느 상태에도
+        return self._writable("clarity.history", body, HISTORY_KEYS, keep=("days",))
+
+    async def _load_history(self, n: int, bus: ClarityStore | None) -> Result:
+        now_ms = int(self._clock() * 1000)
+        days = window_days(now_ms, n)
+        try:
+            if bus is None:  # lifespan 전 — Redis 자리가 없다
+                raise ConnectionError("no bus")
+            texts = await bus.clarity_days_load(days)
+        except Exception:
+            self._warn("clarity.history", "redis")
+            return Result("error", "redis")
+        try:
+            rows = await asyncio.to_thread(history_rows, days, texts)
+        except Exception as exc:
+            return self._failed("clarity.history", exc)
+        return Result("ok", None, now_ms, {"rows": rows})
 
     # --- 공통 ---
 
@@ -328,6 +465,31 @@ class VisitFeeds:
                 **{k: body[k] for k in keep},
             }
         return body
+
+
+def _day_values(day: str, *records: Record | None) -> dict[str, Any] | None:
+    """기록들 가운데 마지막 성공의 값 — 그 성공이 그 KST 날이 아니면 None."""
+    done = [r for r in records if r is not None and r.success_at is not None]
+    best = max(done, key=lambda r: r.success_at or 0, default=None)
+    if best is None or best.success_at is None or day_of(best.success_at) != day:
+        return None
+    return best.values
+
+
+def _merged(parts: list[Result]) -> Result:
+    """차원 칸 둘 → 하위 부분 `dims` 하나. state·code 는 처음으로 ok 가 아닌 칸(기기 → 유입), `fetchedAt` 은 두 칸의
+    마지막 성공 가운데 이른 쪽(경과를 넉넉히 보이게), 값은 칸마다 그 칸의 마지막 성공."""
+    bad = next((part for part in parts if part.state != "ok"), None)
+    fetched = [part.fetched_at for part in parts if part.fetched_at is not None]
+    values: dict[str, Any] = {}
+    for part in parts:
+        values.update(part.values or {})
+    return Result(
+        bad.state if bad else "ok",
+        bad.code if bad else None,
+        min(fetched) if fetched else None,
+        values,
+    )
 
 
 def _call_later(delay: float, callback: Callable[[], None]) -> asyncio.TimerHandle:
