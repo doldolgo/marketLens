@@ -22,6 +22,7 @@ import json
 import math
 import mimetypes
 import random
+import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -339,6 +340,111 @@ def history(days: str) -> tuple[int, dict]:
     return 200, {"state": "ok", **head, "rows": rows}
 
 
+NETS = ("telecom_kr", "telecom", "cloud", "other", "unknown")
+KINDS = ("browser", "search", "ai", "preview", "tool", "scanner", "operator", "unknown")
+BAND_PAGES = ("/", "/app/", "/kimp-chart", "/privacy", "/kimp-history", "/wp-login.php", "/.env")
+AGENTS = ("Chrome · Windows · 데스크톱", "Safari · iOS · 휴대폰", "curl", "Googlebot", "python-requests", "Samsung Internet · Android · 휴대폰")
+WINDOW_SEC = {"24h": 86_400, "7d": 604_800, "30d": 2_592_000}
+
+
+def _bands(window: str) -> list[dict]:
+    """067 대역 — 경우마다 수(ok 48 · bands 1,200 · nobands 0), 같은 창이면 같은 값(쪽을 넘겨도 어긋나지 않게)."""
+    s = state["scenario"]
+    n = {"bands": 1200, "nobands": 0}.get(s, 48)
+    now = int(time.time())
+    span = WINDOW_SEC.get(window, 86_400)
+    slots = 24 if window == "24h" else span // 86_400
+    out = []
+    for i in range(n):
+        rng = random.Random(f"{window}:{i}")
+        band = f"2001:db8:{i:x}::" if i % 17 == 16 else f"{(i * 37) % 223 + 1}.{(i * 11) % 256}.{(i * 53) % 256}.0"
+        net = "cloud" if i % 5 == 1 else NETS[i % len(NETS)]
+        requests = int(rng.paretovariate(1.1) * 12) + 1
+        kinds = dict.fromkeys(KINDS, 0)
+        human = 0 if net == "cloud" and i % 3 else int(requests * rng.uniform(0.2, 0.9))
+        kinds["browser"] = human
+        kinds["scanner" if net == "cloud" else "search"] = requests - human
+        pages = int(human * 0.6)
+        fives = 1 if state["scenario"] == "problem" and i < 3 else 0
+        first = now - rng.randint(60, span)
+        out.append({
+            "band": txt(band) if s == "xss" and i == 0 else band,
+            "country": txt("KR") if s == "xss" and i == 1 else ("KR" if net == "telecom_kr" else ("US", "JP", "SG", "DE", "(기타)")[i % 5]),
+            "net": None if ":" in band else net,
+            "requests": requests,
+            "pages": pages,
+            "js": int(pages * 0.3),
+            "ws": int(pages * 0.1),
+            "pairs": max(1, int(human / 7)),
+            "kinds": kinds,
+            "status": {"2xx": requests - fives - int(requests * 0.1), "3xx": 0, "4xx": int(requests * 0.1), "5xx": fives},
+            "botPct": round(100 * (requests - human) / requests, 1),
+            "first": first,
+            "last": rng.randint(first, now),
+            "spark": [int(wave(now - k * (span // slots), requests / slots, requests / slots / 2)) for k in range(slots - 1, -1, -1)],
+            "topPaths": [[txt(BAND_PAGES[(i + k) % len(BAND_PAGES)]), max(1, requests // (k + 2))] for k in range(3)],
+            "topAgents": [[txt(AGENTS[(i + k) % len(AGENTS)]), max(1, requests // (k + 2))] for k in range(3)],
+        })
+    return out
+
+
+def ips(query: dict) -> tuple[int, dict]:
+    """067 GET /admin/access/ips — 거르기(net·country·q 대역 앞부분·bots=0) 뒤 정렬(requests·pages·last 큰 순)·limit(500까지)·offset."""
+    s = state["scenario"]
+    if s in PRE_068:
+        return 404, {"detail": "Not Found"}
+    pick = lambda k, d=None: (query.get(k) or [d])[0]  # noqa: E731
+    window = pick("window", "24h") if pick("window") in WINDOW_SEC else "24h"
+    if s == "empty":
+        return 200, {"state": "unconfigured", "code": "no_file", "window": window, "total": None, "bands": None}
+    rows = _bands(window)
+    if pick("net"):
+        rows = [b for b in rows if b["net"] == pick("net")]
+    if pick("country"):
+        rows = [b for b in rows if b["country"] == pick("country")]
+    if pick("q"):
+        rows = [b for b in rows if b["band"].startswith(pick("q"))]
+    if pick("bots") == "0":
+        rows = [b for b in rows if b["kinds"]["browser"] > 0]
+    key = pick("sort", "requests") if pick("sort") in ("requests", "pages", "last") else "requests"
+    rows.sort(key=lambda b: -b[key])
+    limit = min(500, max(1, int(pick("limit", "200")))) if str(pick("limit", "200")).isdigit() else 200
+    offset = int(pick("offset", "0")) if str(pick("offset", "0")).isdigit() else 0
+    return 200, {"state": "ok", "code": None, "window": window, "total": len(rows), "bands": rows[offset:offset + limit]}
+
+
+def ip(query: dict) -> tuple[int, dict]:
+    """067 GET /admin/access/ip — 대역 하나: 시간별·종류·상태·브라우저 정보·경로·짝의 첫/마지막 페이지·최근 요청 100줄. 꼴이 틀리면 400."""
+    s = state["scenario"]
+    if s in PRE_068:
+        return 404, {"detail": "Not Found"}
+    band = (query.get("band") or [""])[0]
+    window = (query.get("window") or ["24h"])[0]
+    window = window if window in WINDOW_SEC else "24h"
+    if not re.fullmatch(r"(\d{1,3}\.){3}0|[0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4}){0,2}::", band):
+        return 400, {"detail": "band 꼴이 아니다"}
+    found = next((b for b in _bands(window) if b["band"] == band), None)
+    if found is None:
+        found = {"country": None, "net": None, "kinds": dict.fromkeys(KINDS, 0), "status": {"2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0}, "requests": 0}
+    now = int(time.time())
+    hours = WINDOW_SEC[window] // 3600
+    top = now - now % 3600
+    rng = random.Random(band)
+    hourly = [{"ts": top - k * 3600, "requests": int(wave(top - k * 3600, found["requests"] / hours * 3, 1)), "pages": 0, "js": 0, "errors": 0} for k in range(hours - 1, -1, -1)]
+    for h in hourly:
+        h["pages"] = int(h["requests"] * 0.5)
+        h["js"] = int(h["pages"] * 0.3)
+    recent = [{"ts": now - k * rng.randint(30, 400), "path": txt(BAND_PAGES[k % len(BAND_PAGES)]), "status": (200, 200, 404, 200, 502)[k % 5], "kind": KINDS[k % 3 * 2],
+               "browser": txt(("Chrome", "Safari", "")[k % 3]), "os": ("Windows", "iOS", "")[k % 3], "device": ("desktop", "mobile", "")[k % 3],
+               "referer": ("https://www.google.com", "", "https://t.co")[k % 3]} for k in range(100)]
+    pairs = [{"entry": txt(("landing", "app-spread", "privacy")[k % 3]), "exit": ("app-history", "landing", "kimp-chart")[k % 3], "npages": k % 6 + 1,
+              "device": ("desktop", "mobile")[k % 2], "os": ("windows", "ios")[k % 2], "browser": ("chrome", "safari")[k % 2], "channel": ("direct", "search", "social")[k % 3]}
+             for k in range(12)]
+    return 200, {"state": "ok", "window": window, "band": band, "country": found["country"], "net": found["net"], "hourly": hourly,
+                 "kinds": found["kinds"], "status": found["status"], "agents": [[txt(a), 20 - k] for k, a in enumerate(AGENTS)],
+                 "paths": [[txt(pth), 30 - k] for k, pth in enumerate(BAND_PAGES)], "pairs": pairs, "recent": recent, "partial": s == "bands"}
+
+
 def feed(method: str, path: str, query: dict, body: dict) -> tuple[int, object] | None:
     if method == "POST" and path == "/api/refresh":
         if not body.get("token"):
@@ -355,6 +461,8 @@ def feed(method: str, path: str, query: dict, body: dict) -> tuple[int, object] 
         "/api/admin/aws/series": lambda: series(pick("range", "24h"), pick("offset", None)),
         "/api/admin/alerts": lambda: (200, alerts()),
         "/svc/api/admin/access": lambda: (200, access(pick("window", "24h"))),
+        "/svc/api/admin/access/ips": lambda: ips(query),
+        "/svc/api/admin/access/ip": lambda: ip(query),
         "/svc/api/admin/clarity": lambda: (200, clarity()),
         "/svc/api/admin/clarity/history": lambda: history(pick("days", "30")),
     }
