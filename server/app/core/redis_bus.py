@@ -5,7 +5,7 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
 — 그래서 클래스를 나눴다. 명령 자동 재시도는 009 와 같이 끈다 — 실패는 호출자가 처리한다.
 
 채널·키 (db.md Redis 절):
-- 채널 `spreads`        — 표 JSON, 실시간(수집 → api)
+- 채널 `spreads`        — 표 JSON, 실시간(수집 → api). 구독자가 있을 때만 PUBLISH 한다(`PUBSUB NUMSUB`, 2026-10-13)
 - 키 `spreads:latest`   — 같은 JSON, TTL 10초. 늦게 붙은 구독자의 첫 표. 수집이 멈추면 사라진다
 - 채널 `gap`·키 `gap:latest` — 현선갭 표(048 §3.3), 같은 규칙. 채널·키 이름은 표 id 하나에서 나온다(`<id>`·`<id>:latest`) —
   게시·구독·첫 표 읽기는 표 id 를 인자로 받고 기본값이 spreads 라 017 의 호출은 그대로다
@@ -126,12 +126,22 @@ class RedisBus:
 
     # --- 수집 프로세스 쪽 (§3.1) ---
 
-    async def publish_table(self, data: str, table: str = CHANNEL) -> None:
-        """`PUBLISH <id>` + `SET <id>:latest EX 10` 을 한 왕복으로. 실패는 예외. 기본은 spreads, 048 은 `gap`."""
+    async def publish_table(self, data: str, table: str = CHANNEL) -> int:
+        """`SET <id>:latest EX 10` 은 매번, `PUBLISH <id>` 는 그 채널에 구독자가 있을 때만 — 받은 구독자 수를 돌려준다.
+
+        한 왕복에 SET 과 `PUBSUB NUMSUB <id>` 를 보내고 구독자가 있으면 이어서 PUBLISH 한다(017 §3.1, 2026-10-13). api 의
+        허브는 접속자가 있는 동안만 채널을 구독하므로, 아무도 안 보는 동안 표 1장(spreads 약 0.7MB)을 매초 채널로 한 번 더
+        보내지 않는다 — collect → data 송신이 그만큼 준다. 구독이 막 열려 이 회차를 놓친 허브는 다음 회차부터 받는다:
+        허브의 첫 표는 `<id>:latest` 이고 놓친 표는 다음 delta 가 직전 인덱스와 비교하므로 표가 어긋나지 않는다(§3.2).
+        실패는 예외. 기본은 spreads, 048 은 `gap`.
+        """
         async with self._client.pipeline(transaction=False) as pipe:
-            pipe.publish(table, data)
             pipe.set(latest_key(table), data, ex=LATEST_TTL_SEC)
-            await pipe.execute()
+            pipe.pubsub_numsub(table)
+            _, numsub = await pipe.execute()
+        if not numsub or not int(numsub[0][1]):
+            return 0
+        return int(await self._client.publish(table, data))
 
     # --- 서빙 프로세스 쪽 (§3.2) ---
 
