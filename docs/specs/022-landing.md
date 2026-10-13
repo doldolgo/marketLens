@@ -204,7 +204,7 @@ docker run --rm -v ./caddy:/etc/caddy:ro caddy:2-alpine caddy validate --config 
 #   보이는 정적 글(실시간 자리·상단 바·바닥 제외, 공백 뺀 글자 수) 2,346 → 1,103자 · dateModified·lastmod 2026-10-14
 #   ruff check·format 통과 · pytest 2410 passed(test_landing_seo 17 — 차익거래 풀이·접힌 답 2개 새로) — 실패 6 은 샌드박스가 소켓을 막은 test_gauge(이 변경과 무관)
 #   vite build ✓ · oxlint 는 이 Mac 의 Node 18 에서 네이티브 바인딩이 없어 못 돌림(src 는 안 바뀜 — CI 몫) · 인라인 스크립트 node --check 통과
-#   글꼴 kimptrack-sans-a9fe32cb.woff2 54,008B·글자 276개 · Browser pane(정적 서버 + 운영 /api/landing 대역): 1280·375·320 가로 스크롤·넘치는 요소 없음, h1 두 줄(320 에서 280/280px), 사건 숫자·막대 채워짐, 글꼴 KimpTrack Sans 하나
+#   글꼴 kimptrack-sans-15d63017.woff2 54,160B·글자 276개 · Browser pane(정적 서버 + 운영 /api/landing 대역): 1280·375·320 가로 스크롤·넘치는 요소 없음, h1 두 줄(320 에서 280/280px), 사건 숫자·막대 채워짐, 글꼴 KimpTrack Sans 하나
 ```
 - 요약 API(§3.2)의 서버 검증 기록은 2026-09-28 판 그대로다(코드가 바뀌지 않았다) — git 기록의 이 절 이전 판.
 - 커밋 전 검토(4개 관점 — 검색·문구와 사실·문서 일치·성능과 접근성 — 에 지적마다 반박 검증)에서 확인된 29건을 반영했다: 서비스 전체가 '열린 경로만' 보여 준다는 과장(h1·설명·정의·비교 표·og), 스프레드 탭 옛 링크(`/?s.…`), `/app/landing.html` 사본, 사건 경계(1% 이상·0.5% 이하), 역프 식, USDT 매수·매도 호가 방향, '최우선'→'맨 위' 호가, 원값 저장, 폴링 재그림, 낡은 값의 대비, 글꼴 기능·해시 이름·임시 폴더, 문서 줄들. `gzip_proxied` 는 007 PR(#82) 몫이라 여기서 고치지 않았다.

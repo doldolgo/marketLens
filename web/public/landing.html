@@ -76,7 +76,7 @@
   </script>
   <!-- 글꼴 — Pretendard 를 이 페이지 글자만 남겨 자른 파일 하나를 같은 출처에서 받는다(OFL 이라 이름을 바꿨다: KimpTrack Sans).
        글자를 고치면 web/scripts/subset-landing-font.py 로 다시 만든다 — 빠진 글자는 시스템 글꼴로 보인다 (스펙 022 §3.4) -->
-  <link rel="preload" href="landing/fonts/kimptrack-sans-a9fe32cb.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="landing/fonts/kimptrack-sans-15d63017.woff2" as="font" type="font/woff2" crossorigin />
   <!-- 033 — 화면 분석(Clarity) 동의 창(모달)·불러올지 판단. 동의 창도 이 파일이 그린다(시스템 글꼴 — 이 페이지의 서브셋 글꼴을 쓰지 않는다) -->
   <script defer src="clarity.js"></script>
   <!-- 052 — 화면 영역 이용 통계(동의한 방문자만 — clarity.js 와 같은 판정). 영역은 data-area -->
@@ -84,7 +84,7 @@
   <style>
     @font-face {
       font-family: "KimpTrack Sans";
-      src: url("landing/fonts/kimptrack-sans-a9fe32cb.woff2") format("woff2");
+      src: url("landing/fonts/kimptrack-sans-15d63017.woff2") format("woff2");
       font-weight: 400 700;
       font-style: normal;
       font-display: swap;
@@ -410,15 +410,16 @@
   </style>
 </head>
 <body data-clarity-unmask="true">
+  <!-- 061 — data-el 은 화면 이용 통계의 요소 열쇠(모양·동작과 무관). 자동 열쇠(링크 경로)가 겹치는 링크·글자가 바뀌는 카드·질문에만 단다 -->
   <header class="wrap bar" data-area="top">
     <a class="mark" href="/">
       <svg width="22" height="10" viewBox="0 0 22 10" aria-hidden="true" focusable="false"><circle cx="4" cy="5" r="3.5" fill="currentColor" /><rect x="5" y="4" width="12" height="2" fill="currentColor" /><circle cx="18" cy="5" r="3.5" fill="currentColor" /></svg>
       KimpTrack
     </a>
     <nav class="nav" aria-label="이 페이지">
-      <a href="#kimp"><span class="nw">김프·역프란</span></a>
-      <a href="#method">계산 방법</a>
-      <a href="#faq">자주 묻는 질문</a>
+      <a href="#kimp" data-el="nav:kimp"><span class="nw">김프·역프란</span></a>
+      <a href="#method" data-el="nav:method">계산 방법</a>
+      <a href="#faq" data-el="nav:faq">자주 묻는 질문</a>
     </nav>
     <a class="btn" href="/app/">실시간 김프 표</a>
   </header>
@@ -440,7 +441,7 @@
         </div>
         <div class="cta">
           <a class="btn btn-lg" href="/app/">실시간 김프 표 보기</a>
-          <a class="link" href="/app/?tab=history">김프 기록과 차트</a>
+          <a class="link" href="/app/?tab=history" data-el="app:history">김프 기록과 차트</a>
         </div>
       </div>
       <!-- 실데이터 자리 — 스크립트가 /api/landing 으로 채운다. 지어낸 숫자·자리표시 숫자는 넣지 않는다 (스펙 022 §3.5).
@@ -616,31 +617,31 @@
       <h2 id="faq-title">자주 묻는 질문</h2>
       <div class="faq">
         <details class="qa">
-          <summary><h3>김프 사이트마다 숫자가 다른 이유는 무엇인가요?</h3></summary>
+          <summary data-el="faq:why-differ"><h3>김프 사이트마다 숫자가 다른 이유는 무엇인가요?</h3></summary>
           <p>쓰는 가격과 환율이 달라서입니다. KimpTrack은 가격 하나와 은행 환율 대신 $1,000어치를 체결한 평균 단가와 국내 거래소의 USDT 호가를 씁니다.</p>
         </details>
         <details class="qa">
-          <summary><h3>왜 $1,000 기준인가요?</h3></summary>
+          <summary data-el="faq:why-1000"><h3>왜 $1,000 기준인가요?</h3></summary>
           <p>모든 코인을 같은 금액으로 비교하려는 것입니다. 더 큰 금액을 옮기면 김프가 이보다 작아지고, 더 작은 금액이면 커질 수 있습니다.</p>
         </details>
         <details class="qa">
-          <summary><h3>환율은 무엇을 쓰나요?</h3></summary>
+          <summary data-el="faq:rate"><h3>환율은 무엇을 쓰나요?</h3></summary>
           <p>업비트·빗썸이 각자 가진 USDT(테더) 원화 호가입니다. 김프는 USDT를 사는 쪽이라 매도호가, 역프는 파는 쪽이라 매수호가를 씁니다.</p>
         </details>
         <details class="qa">
-          <summary><h3>옮길 수 없는 경로는 어떻게 판단하나요?</h3></summary>
+          <summary data-el="faq:blocked"><h3>옮길 수 없는 경로는 어떻게 판단하나요?</h3></summary>
           <p>보내는 거래소의 출금과 받는 거래소의 입금을 같은 네트워크로 확인합니다. 한쪽이라도 막혔거나, 확인하지 못했거나, 같은 네트워크가 없으면 옮길 수 없는 경로입니다.</p>
         </details>
         <details class="qa">
-          <summary><h3>가입이나 비용이 필요한가요?</h3></summary>
+          <summary data-el="faq:cost"><h3>가입이나 비용이 필요한가요?</h3></summary>
           <p>아니요. 로그인이나 앱 설치 없이 웹에서 무료로 봅니다. 실시간 김프 표는 PC 화면에 맞춰 만들었습니다.</p>
         </details>
         <details class="qa">
-          <summary><h3>역김프와 역프는 같은 말인가요?</h3></summary>
+          <summary data-el="faq:reverse-term"><h3>역김프와 역프는 같은 말인가요?</h3></summary>
           <p>네. 국내 가격이 해외보다 싼 상태를 역프, 역김프, 역프리미엄이라고 부릅니다.</p>
         </details>
         <details class="qa">
-          <summary><h3>김프 차트와 과거 기록도 볼 수 있나요?</h3></summary>
+          <summary data-el="faq:chart"><h3>김프 차트와 과거 기록도 볼 수 있나요?</h3></summary>
           <p>네. <a class="link" href="/app/?tab=history">김프 기록과 차트</a>에서 봉 차트와 사건 목록을 봅니다. 읽는 법은 <a class="link" href="/kimp-chart">김프 차트</a>와 <a class="link" href="/kimp-history">김프 히스토리</a> 안내에 있습니다.</p>
         </details>
       </div>
@@ -650,14 +651,14 @@
   <footer class="wrap foot" data-area="foot">
     <nav class="foot-nav" aria-label="바로 가기">
       <a href="/app/">실시간 김프 표</a>
-      <a href="/app/?tab=history">김프 기록과 차트</a>
+      <a href="/app/?tab=history" data-el="app:history">김프 기록과 차트</a>
       <a href="/kimp-chart">김프 차트</a>
       <a href="/kimp-history">김프 히스토리</a>
-      <a href="#kimp"><span class="nw">김프·역프란</span></a>
-      <a href="#method">계산 방법</a>
-      <a href="#faq">자주 묻는 질문</a>
+      <a href="#kimp" data-el="nav:kimp"><span class="nw">김프·역프란</span></a>
+      <a href="#method" data-el="nav:method">계산 방법</a>
+      <a href="#faq" data-el="nav:faq">자주 묻는 질문</a>
       <a class="foot-privacy" href="/privacy">개인정보 처리방침</a>
-      <a href="/privacy#consent">화면 분석 설정</a>
+      <a href="/privacy#consent" data-el="consent-settings">화면 분석 설정</a>
     </nav>
     <p class="notice">KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다.</p>
     <p>운영 고원규·이진중 · 문의 <a class="link" href="mailto:joseph13ko15@gmail.com">joseph13ko15@gmail.com</a>, <a class="link" href="mailto:untilduck@gmail.com">untilduck@gmail.com</a></p>
@@ -770,7 +771,8 @@
         const key = [t.sym, t.dom, t.fx, t.dir, fmtPct(t.pct)].join('|')
         const flash = valueKey !== null && key !== valueKey ? ' flash' : ''
         valueKey = key
-        keepFocus(card, `<a class="card-link" href="${esc(historyLink(t))}">`
+        // data-el — 061 요소 열쇠: 글자가 바뀌는 카드라 자리(1위~5위)로 센다
+        keepFocus(card, `<a class="card-link" href="${esc(historyLink(t))}" data-el="live:1">`
           + '<div class="card-head"><span>지금 가장 큰 경로</span><span class="age" id="age"></span></div>'
           + '<div class="card-body">'
           + `<p class="sym">${esc(t.sym)}</p>`
@@ -786,9 +788,9 @@
           + `<span><span class="ex">${esc(exName(t.fx))}</span> $${fmtUsdt(t.usd)}</span></div>`
           + '</div></a>')
         const rest = live.top.slice(1, 5)
-        keepFocus(nextList, rest.map((r) => {
+        keepFocus(nextList, rest.map((r, i) => {
           const [f, g] = ends(r)
-          return `<li><a href="${esc(historyLink(r))}"><span class="n-sym">${esc(r.sym)}</span>`
+          return `<li><a href="${esc(historyLink(r))}" data-el="live:${i + 2}"><span class="n-sym">${esc(r.sym)}</span>`
             + `<span class="n-route">${esc(exName(f.ex))} → ${esc(exName(g.ex))}</span>`
             + `<span class="n-pct ${sign(r.pct)}">${fmtPct(r.pct)}</span></a></li>`
         }).join(''))
@@ -809,8 +811,9 @@
         $('ev-bar-r').style.flexGrow = both ? ev.reverse / both : 0
         $('ev-bar-k').hidden = ev.kimp === 0
         $('ev-bar-r').hidden = ev.reverse === 0
+        // data-el — 061 요소 열쇠: 표의 코인 행은 row:<심볼>(클릭만 센다)
         keepFocus(eventsRows, ev.top.map((e) => {
-          return `<tr><td class="c-sym"><a href="${esc(historyLink(e))}">${esc(e.sym)}</a></td>`
+          return `<tr data-el="row:${esc(e.sym)}"><td class="c-sym"><a href="${esc(historyLink(e))}">${esc(e.sym)}</a></td>`
             + `<td class="c-route">${esc(exName(e.dom))} · ${esc(exName(e.fx))}</td>`
             + `<td class="c-dir">${dirName(e.dir)}</td>`
             + `<td class="num c-max ${sign(e.maxPercent)}">${fmtPct(e.maxPercent)}</td>`

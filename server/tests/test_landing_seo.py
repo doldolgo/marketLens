@@ -166,7 +166,7 @@ def test_faq_answers_stay_in_the_html_behind_details() -> None:
         html.index('id="faq"') : html.index("</section>", html.index('id="faq"'))
     ]
     items = re.findall(
-        r'<details class="qa">\s*<summary><h3>(.+?)</h3></summary>\s*<p>(.+?)</p>\s*</details>',
+        r'<details class="qa">\s*<summary[^>]*><h3>(.+?)</h3></summary>\s*<p>(.+?)</p>\s*</details>',
         faq,
         re.S,
     )

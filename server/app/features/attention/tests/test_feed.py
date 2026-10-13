@@ -62,6 +62,8 @@ async def test_window_starting_before_the_gate_starts_at_the_gate(rig: Rig) -> N
             "device": "pc",
             "pv": 3,
             "areas": [{"id": "hero", "ms": 1000, "clicks": 0, "seen": 0}],
+            "exits": [],  # 061 — 떠난 곳·깊이(정적 페이지는 11칸)
+            "depth": [0] * 11,
         }
     ]
 
