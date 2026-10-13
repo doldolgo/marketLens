@@ -442,3 +442,115 @@ export function lanesOption(o) {
     series: [{ type: 'custom', encode: { x: [1, 2], y: 0 }, data: o.segs.map((s) => [s.row, s.from, s.to]), renderItem: laneItem(o.segs) }],
   };
 }
+
+// 사건 띠(경보 7일 — 066 §3.3) — 줄마다 ALARM 구간(빨강 칸 가득)과 알림 점. dots = [{ row, at, tone, head, tip }]
+export function eventsOption(o) {
+  const base = lanesOption(o);
+  base.series.push({
+    type: 'scatter',
+    data: o.dots.map((d) => ({ value: [d.at, d.row], itemStyle: { color: color(d.tone), borderColor: T.surface, borderWidth: 2 } })),
+    symbolSize: 10,
+    z: 4,
+  });
+  base.tooltip = itemTip((p) => {
+    const it = p.seriesIndex === 0 ? o.segs[p.dataIndex] : o.dots[p.dataIndex];
+    return it ? tip(it.head, it.tip ?? []) : '';
+  });
+  return base;
+}
+
+// 요일×시간 열지도 — 한 색 진하기(--seq-1 낮음 → --seq-5 높음, 0 은 격자색). cells = [[x, y, 값]]
+export function heatOption(o) {
+  const max = Math.max(0, ...o.cells.map((c) => num(c[2]) ?? 0));
+  const step = max / 5;
+  const pieces = [{ lte: 0, color: T.grid }, ...[1, 2, 3, 4].map((i) => ({ gt: (i - 1) * step, lte: i * step, color: T[`seq-${i}`] })), { gt: 4 * step, color: T['seq-5'] }];
+  return {
+    animation: false,
+    grid: { left: 8, right: 8, top: 6, bottom: 4, containLabel: true },
+    xAxis: catAxis(o.xs, { splitArea: { show: false }, axisLabel: { interval: o.interval ?? 2 } }),
+    yAxis: catAxis(o.ys, { inverse: true, axisLabel: { color: T['text-2'] } }),
+    visualMap: { show: false, type: 'piecewise', dimension: 2, seriesIndex: 0, pieces },
+    tooltip: itemTip((p) => tip(o.head(p.value?.[0], p.value?.[1]), [['acc', o.name, o.fmt(p.value?.[2])]])),
+    series: [{ type: 'heatmap', data: o.cells, itemStyle: { borderColor: T.surface, borderWidth: 2, borderRadius: 3 }, emphasis: { itemStyle: { borderColor: T['text-2'], borderWidth: 1 } } }],
+  };
+}
+
+// 흐름(062 sankey) — 마디 색은 들어온 길(차트 8색), 페이지 마디는 흐린 회색. 고리 색은 출발 마디, 올리면 앞뒤 고리 강조
+export function sankeyOption(o) {
+  const label = new Map(o.nodes.map((n) => [n.name, n.label]));
+  const head = (text, left) => ({ text, left, top: 0, textStyle: { fontSize: 12, fontWeight: 600, color: T['text-3'] } });
+  return {
+    animation: false,
+    title: [head(o.heads[0], 8), head(o.heads[1], 'center'), head(o.heads[2], '72%')],
+    tooltip: itemTip((p) => (p.dataType === 'edge' ? o.tipLink(label.get(p.data?.source) ?? '', label.get(p.data?.target) ?? '', p.data) : o.tipNode(label.get(p.name) ?? '', p.value))),
+    series: [
+      {
+        type: 'sankey',
+        left: 8,
+        right: 150,
+        top: 26,
+        bottom: 6,
+        nodeWidth: 10,
+        nodeGap: 10,
+        nodeAlign: 'justify',
+        layoutIterations: 64,
+        draggable: false,
+        emphasis: { focus: 'adjacency' },
+        data: o.nodes.map((n) => ({ name: n.name, depth: n.depth, itemStyle: { color: color(n.mark), borderWidth: 0 } })),
+        links: o.links,
+        lineStyle: { color: 'source', opacity: 0.3, curveness: 0.5 },
+        label: { color: T['text-1'], fontSize: 12, formatter: (p) => label.get(p.name) ?? '' },
+      },
+    ],
+  };
+}
+
+// 세로 막대(범주) — 막대 위 값, 한 계열이라 강조색
+export function colsOption(o) {
+  return {
+    animation: false,
+    grid: { left: 8, right: 8, top: 18, bottom: 4, containLabel: true },
+    xAxis: catAxis(o.cats, { axisLabel: { color: T['text-2'], interval: 0 } }),
+    yAxis: valueAxis({ minInterval: 1 }),
+    tooltip: itemTip((p) => tip(o.cats[p.dataIndex], [[o.mark ?? 'acc', o.name, o.fmt(p.value)]])),
+    series: [
+      {
+        type: 'bar',
+        data: o.values,
+        barMaxWidth: 28,
+        itemStyle: { color: color(o.mark ?? 'acc'), borderRadius: [4, 4, 0, 0] },
+        label: { show: true, position: 'top', color: T['text-2'], fontSize: 11, formatter: (p) => (p.value ? o.fmt(p.value) : '') },
+      },
+    ],
+  };
+}
+
+// 예산 게이지 — 남기는 게이지 하나(066 §3.1). 실제(상태색 호 + 바늘)·예측(흐린 짧은 바늘), 한도 넘는 칸은 붉게, 끝은 120%
+export function budgetOption(b, money) {
+  const r = (v) => Math.min(120, Math.max(0, ((num(v) ?? 0) / b.limit) * 100));
+  const tone = b.actual >= b.limit ? 'bad' : num(b.forecast) !== null && b.forecast >= b.limit ? 'warn' : 'ok';
+  const arc = {
+    type: 'gauge',
+    center: ['50%', '82%'],
+    radius: '130%',
+    startAngle: 180,
+    endAngle: 0,
+    min: 0,
+    max: 120,
+    axisLine: { lineStyle: { width: 10, color: [[100 / 120, T.grid], [1, alpha(T.bad, 0.35)]] } },
+    axisTick: { show: false },
+    splitLine: { show: false },
+    axisLabel: { show: false },
+    anchor: { show: true, size: 6, itemStyle: { color: T['text-1'] } },
+    title: { show: false },
+    detail: { show: false },
+  };
+  const needle = (length, width, c) => ({ show: true, length, width, itemStyle: { color: c } });
+  const series = [{ ...arc, progress: { show: true, width: 10, itemStyle: { color: color(tone) } }, pointer: needle('70%', 4, color(tone)), data: [{ value: r(b.actual), name: '실제' }] }];
+  if (num(b.forecast) !== null) series.push({ ...arc, axisLine: { show: false }, progress: { show: false }, pointer: needle('50%', 3, T['text-3']), data: [{ value: r(b.forecast), name: '예측' }] });
+  return {
+    animation: false,
+    tooltip: itemTip(() => tip('이번 달 예산', [[tone, '실제', money(b.actual)], ['cmp', '예측', money(b.forecast)], ['', '한도', money(b.limit)]])),
+    series,
+  };
+}
