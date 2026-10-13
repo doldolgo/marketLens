@@ -126,6 +126,7 @@ function drawPick(app) {
 
 // 틀 칸 — 위 한 줄 '<화면> · <기기> · <기간> — pv n'(+ ▲ 표본 적음), 띄우기, 5초 무응답 한 줄, 값 메시지(ok 일 때만 — 같으면 다시 보내지 않음)
 function drawFrame(app) {
+  aim(app, screenOf(app)); // 먼저 — 틀을 다시 띄웠으면 새 ready 전에는 값을 보내지 않는다
   const c = current(app);
   tag('t-frame', c.part);
   const pv = n0(c.row?.pv);
@@ -135,7 +136,6 @@ function drawFrame(app) {
   const stage = $('stage');
   if (stage) stage.className = `scr-stage ${c.device}`;
   fit(c.device);
-  aim(app, c.page);
   const note = $('frame-note');
   if (note) {
     note.hidden = ui.key === 'about:blank' || ui.key === '' || ui.ready !== null;
