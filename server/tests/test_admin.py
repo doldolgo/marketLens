@@ -41,6 +41,7 @@ FEEDS = {
 API_FEEDS = {
     ("=", "/svc/api/admin/access"),
     ("=", "/svc/api/admin/clarity"),
+    ("=", "/svc/api/admin/clarity/history"),  # 068 — Clarity 날별 기록
     ("=", "/svc/api/admin/attention"),  # 052 — 화면 영역 이용 통계
 }
 POLLING = (
@@ -161,6 +162,7 @@ def test_admin_routes_every_api_path_like_before_the_allowlist() -> None:
         "/api/admin/aws/series": (COLLECTOR, "/admin/aws/series"),  # 063
         "/svc/api/admin/access": (API, "/admin/access"),
         "/svc/api/admin/clarity": (API, "/admin/clarity"),
+        "/svc/api/admin/clarity/history": (API, "/admin/clarity/history"),  # 068
         "/svc/api/admin/attention": (API, "/admin/attention"),
     }
     for path, target in expected.items():
@@ -207,7 +209,8 @@ def test_series_feed_has_its_own_exact_location_and_stays_closed_publicly() -> N
 
 
 def test_api_feeds_are_exact_api_locations_that_inherit_server_headers() -> None:
-    """035 §3.1 — 정확 일치 둘이 api 의 경로로(통째로 바꿈), 첫 줄 교차 사이트 검사, 기록 끔, 자기 헤더 없음."""
+    """035 §3.1·052·068 — 정확 일치 넷이 api 의 경로로(통째로 바꿈), 첫 줄 교차 사이트 검사, 기록 끔, 자기 헤더 없음.
+    Clarity 날별 기록(068)은 접두가 아니라 자기 정확 일치라 `/svc/api/admin/clarity` 의 location 을 지나지 않는다."""
     locations = _locations(_admin_server())
     for key in API_FEEDS:
         children = locations[key]
@@ -220,6 +223,9 @@ def test_api_feeds_are_exact_api_locations_that_inherit_server_headers() -> None
         assert not _args(children, "proxy_set_header"), key
         assert not _args(children, "add_header"), key
         assert not _args(children, "proxy_hide_header"), key
+    history = "/svc/api/admin/clarity/history"
+    assert _admin_route(history) == ("=", history)
+    assert _forward(history) == (API, "/admin/clarity/history")
 
 
 def test_public_server_has_no_svc_branch_so_api_feeds_are_static_404() -> None:
@@ -229,6 +235,7 @@ def test_public_server_has_no_svc_branch_so_api_feeds_are_static_404() -> None:
     for path in (
         "/svc/api/admin/access",
         "/svc/api/admin/clarity",
+        "/svc/api/admin/clarity/history",
         "/svc/api/admin/attention",
     ):
         assert _route(path) == ("/",), path
