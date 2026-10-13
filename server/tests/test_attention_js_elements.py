@@ -91,18 +91,25 @@ def test_rows_count_clicks_only_and_tracked_elements_count_time_and_hover() -> N
     els = [
         _el("row", "table", "div", attrs={"data-el": "row:BTC"}, top=40, height=40),
         _el("sym", "row", "span", text="BTC", top=40, height=40),
+        # 기록 탭처럼 단추인 행 — 대화형이라 찾기에 걸려도 추적하지 않는다
+        _el("brow", "table", attrs={"data-el": "row:ETH"}, top=80, height=30),
         _el("sort", "table", attrs={"data-el": "sort:val"}, top=0, height=30),
     ]
     got = _one(
         **APP,
         areas=[["table", 0, 600]],
         els=els,
-        steps=["over:sym", "t:2000", "click:sym", "over:sort", "t:1000", "hide"],
+        steps=[
+            *("over:sym", "t:2000", "click:sym", "over:brow", "t:2000"),
+            *("click:brow", "over:sort", "t:1000", "hide"),
+        ],
     )
     assert _e(got) == {
         ("table", "row:BTC"): (1, 0, 0),  # 클릭만 — 보인 시간·마우스 올림 없음
-        ("table", "sort:val"): (0, 1000, 3000),
+        ("table", "row:ETH"): (1, 0, 0),
+        ("table", "sort:val"): (0, 1000, 5000),
     }
+    assert got["observed"] == 1 + 1  # 영역 + 정렬 머리
 
 
 def test_element_visibility_follows_the_area_rule_and_one_key_counts_once() -> None:
@@ -168,6 +175,13 @@ def test_hover_needs_a_mouse_on_pc_drops_short_stays_and_cuts_at_30_seconds() ->
     got = _one(ls=ON, areas=[["a", 0, 600]], els=els, steps=steps)
     hover = {key: h for (_, key), (_, h, _) in _e(got).items()}
     assert hover == {"b1": 500, "b2": 30000}
+    # 창 밖으로 나간 때 끝난다 — 나가 있던 동안은 세지 않는다
+    steps = ["over:b2", "t:1000", "leave:b2", "t:2000", "over:b1", "t:400", "hide"]
+    got = _one(ls=ON, areas=[["a", 0, 600]], els=els, steps=steps)
+    assert {key: h for (_, key), (_, h, _) in _e(got).items()} == {
+        "b1": 400,
+        "b2": 1000,
+    }
     # 휴대폰 폭과 마우스가 아닌 포인터는 세지 않는다
     for case in ({"w": 767}, {}):
         kind = "touch" if not case else "mouse"

@@ -167,3 +167,17 @@ async def test_the_301st_new_key_of_a_day_screen_and_device_is_other(
     ).status_code == 204
     await rig.ticks.release()
     assert rig.day("20261020") == {"landing|pc|faq|e|k300|c": 1}
+
+
+async def test_all_zero_elements_take_no_key_slot(rig: Rig) -> None:
+    zeros = [["faq", f"z{i}", 0, 0, 0] for i in range(150)]
+    for _ in range(2):
+        body = _v2(pv=0, a={}, e=zeros, d=None, x=None)
+        assert (await rig.post(body)).status_code == 204
+    more = [["faq", f"z{i}", 0, 0, 0] for i in range(150, 300)]
+    assert (await rig.post(_v2(pv=0, a={}, e=more, d=None, x=None))).status_code == 204
+    # 값이 모두 0 인 열쇠 300개를 받은 뒤에도 새 열쇠는 제 이름으로 센다
+    one = _v2(pv=0, a={}, e=[["faq", "real", 1, 0, 0]], d=None, x=None)
+    assert (await rig.post(one)).status_code == 204
+    await rig.ticks.release()
+    assert rig.day("20261019") == {"landing|pc|faq|e|real|c": 1}
