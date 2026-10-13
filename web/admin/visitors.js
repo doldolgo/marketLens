@@ -131,7 +131,8 @@ function ipModel(app, pv, band) {
     title: bandLabel(band),
     unit: usable(part) ? [countryLabel(part.country ?? '–'), part.net ? netName(part.net) : '–'].join(' · ') : '',
     nav: { prev: at > 0 ? `ip:${order[at - 1]}` : null, next: at >= 0 && at < order.length - 1 ? `ip:${order[at + 1]}` : null },
-    note: part?.partial ? '읽기 상한(압축 풀린 100MiB)에 닿아 최근 파일부터 그만큼만 읽었다' : '',
+    badge: usable(part) && part.partial ? ['warn', '일부만 읽음', '읽기 상한(압축 풀린 100MiB)에 닿아 최근 파일부터 그만큼만 읽었다'] : null,
+    note: part?.why?.includes('bad_band') ? '이 대역은 상세를 볼 수 없다 — 대역 꼴이 아니다(bad_band)' : '',
   };
   if (!usable(part)) return base;
   const endMs = app.now();

@@ -1,19 +1,23 @@
 // IP 대역 모델(스펙 066 §3.3 '방문자' — 067 피드): 대역 글자 검사·표시, 쪽 요청, 큰 수 넷, 표 행, 대역 하나의 판 모델. DOM 없음.
 // 대역은 접속 기록의 가린 IP 그대로(IPv4 /24 · IPv6 /48 — 원 IP·짝 열쇠·UA 원문은 피드에 없다). 대역 글자는 주소 쿼리에 싣지 않는다.
+// 067 #132 의 실제 꼴: band 는 '1.2.3.0/24'·'2001:db8:1::/48' 처럼 접미까지 든 글자, '(없음)'·'(기타)' 행은 모음이라 상세가 없다.
 import { clean, isObj, kstDay, kstText, list, n0, num, own, partOf, req, usable } from './common.js';
 import { CLASS_NAME, STATUS_KEYS, classMark, countryLabel, netName } from './names.js';
 
 export const IP_RANGES = Object.freeze(['24h', '7d', '30d']);
-export const NETS = Object.freeze(['telecom_kr', 'telecom', 'cloud', 'other', 'unknown']);
+// 거르기에 쓰는 망 종류 — IPv6 대역은 'ipv6'(DB-IP 는 IPv4 만 찾는다)
+export const NETS = Object.freeze(['telecom_kr', 'telecom', 'cloud', 'other', 'ipv6']);
 export const PAGE_ROWS = 200;
 // 서버가 정렬하는 열(067 sort) — 그 밖 열은 불러온 행 안에서 정렬한다
 export const SERVER_SORT = Object.freeze(['requests', 'pages', 'last']);
 
-// 067 §3.3 — IPv4 /24 꼴(x.y.z.0) 또는 IPv6 /48 꼴(앞 세 마디 + ::)
-const V4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)\.(25[0-5]|2[0-4]\d|1?\d?\d)\.(25[0-5]|2[0-4]\d|1?\d?\d)\.0$/;
-const V6 = /^[0-9a-f]{1,4}(:[0-9a-f]{1,4}){0,2}::$/i;
+// 067 §3.3 — 상세를 부를 수 있는 대역: IPv4 /24 꼴(x.y.z.0/24) 또는 IPv6 /48 꼴(앞 세 마디까지 + ::/48, 소문자).
+// 그 밖(모음 행·호스트 비트·대문자)은 서버가 400 bad_band 로 답한다 — 화면은 부르지 않는다
+const OCTET = '(25[0-5]|2[0-4]\\d|1?\\d?\\d)';
+const V4 = new RegExp(`^${OCTET}\\.${OCTET}\\.${OCTET}\\.0/24$`);
+const V6 = /^[0-9a-f]{1,4}(:[0-9a-f]{1,4}){0,2}::\/48$/;
 export const validBand = (band) => typeof band === 'string' && (V4.test(band) || V6.test(band));
-export const bandLabel = (band) => (validBand(band) ? `${band}${band.includes(':') ? '/48' : '/24'}` : clean(band));
+export const bandLabel = (band) => clean(band);
 // 처음·마지막 시각 — 초(그 밖 *Ts·ts 와 같은 단위)로 읽되 ms 로 오면 그대로
 export const toMs = (t) => (num(t) === null ? null : t > 1e12 ? t : t * 1000);
 
@@ -66,7 +70,7 @@ export function bandRows(bands) {
   return bands.map((b) => ({
     band: b.band,
     label: bandLabel(b.band),
-    where: [countryLabel(b.country ?? '–'), b.net ? netName(b.net) : '–'].join(' · '),
+    where: [b.country ? countryLabel(b.country) : '–', b.net ? netName(b.net) : '–'].join(' · '),
     requests: num(b.requests),
     ratio: max ? n0(b.requests) / max : 0,
     pages: num(b.pages),

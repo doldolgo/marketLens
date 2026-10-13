@@ -3,7 +3,7 @@
 // 미니맵, '구간 확대' 로 끌어서 고른 구간, '원래대로') → 통계 표(보이는 구간 — 최소·평균·최대·p95·마지막·이전 대비) → 원자료 표
 // (머리 눌러 정렬, 200행씩) 또는 목록 표(찾기·정렬) → 관련 카드. 판의 기간·비교는 판만의 값이다(열 때 페이지 값을 받는다).
 // 판 그림은 페이지의 connect 무리에 넣지 않고(뒤 카드가 따라 움직이지 않게), 닫으면 dispose 한다.
-import { $, button, download, int, kstText, list, num, own, pressed, put, tag } from './common.js';
+import { $, button, download, int, kstText, list, num, own, pressed, put, tag, tagText } from './common.js';
 import { csvName, hasValue, matches, sortRows, toCsv } from './calc.js';
 import { blank, chartOf, dispose, draw, timeOption } from './charts.js';
 import { RANGE_NAME } from './names.js';
@@ -78,6 +78,7 @@ export function mountDetail(app) {
     put('sheet-title', model.title ?? p.title);
     put('sheet-unit', model.unit ?? p.unit ?? '');
     tag('t-sheet', model.part);
+    if (model.badge) tagText('t-sheet', model.badge); // 판이 덧붙이는 작은 배지('일부만 읽음')
     head(p, model);
     const deps = [...list(model.deps), pv.v, pv.range, pv.cmp, id];
     if (last && last.length === deps.length && deps.every((d, i) => d === last[i])) return;

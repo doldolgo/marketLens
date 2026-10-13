@@ -31,7 +31,10 @@ export function createStore(o) {
       const fine = status === 200 || (status === 503 && HEALTH.includes(r.name));
       if (status === 404) keep(r.key, { off: true });
       else if (status === 403) keep(r.key, failed(r.key, '권한·설정 오류 (403)'));
-      else if (body === null || !fine) keep(r.key, failed(r.key, `응답 오류 (HTTP ${status})`));
+      else if (body === null || !fine) {
+        const code = typeof body?.error?.code === 'string' ? ` · ${body.error.code.slice(0, 40)}` : '';
+        keep(r.key, failed(r.key, `응답 오류 (HTTP ${status}${code})`));
+      }
       else keep(r.key, { body, text });
       okSince.add(r.key);
       return false;

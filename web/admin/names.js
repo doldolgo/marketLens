@@ -66,7 +66,7 @@ export const PAGE_NAME = Object.freeze({
   'kimp-chart': '김프 차트',
   'kimp-history': '김프 기록',
 });
-export const NET_NAME = Object.freeze({ telecom_kr: '국내 통신사', telecom: '해외 통신사', cloud: '데이터센터', other: '그 밖', unknown: '모름' });
+export const NET_NAME = Object.freeze({ telecom_kr: '국내 통신사', telecom: '해외 통신사', cloud: '데이터센터', other: '그 밖', unknown: '모름', ipv6: 'IPv6' });
 export const CLASS_NAME = Object.freeze({
   browser: '사람 브라우저 모양',
   search: '검색엔진',
