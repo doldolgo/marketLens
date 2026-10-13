@@ -12,7 +12,7 @@ from html.parser import HTMLParser
 from typing import get_type_hints
 
 from app.core.redis_bus import RedisBus
-from app.features.attention.models import PAGES, TABS
+from app.features.attention.models import MAX_BODY_BYTES, PAGES, TABS
 from tests.test_deploy import API, ROOT, _args, _locations, _public_server
 
 WEB = ROOT / "web"
@@ -142,7 +142,7 @@ def test_script_sends_nothing_but_the_beacon_and_keeps_no_visitor_state() -> Non
 # --- nginx·caddy (§3.2·§3.4·§3.6) ----------------------------------------------------
 
 
-def test_public_beacon_location_is_post_only_4k_and_passes_the_visitor_ip() -> None:
+def test_public_beacon_location_is_post_only_16k_and_passes_the_visitor_ip() -> None:
     block = _locations(_public_server())[("=", "/api/attention")]
     guards = [c for args, c in block if args[0] == "if"]
     assert [args for args, _ in block if args[0] == "if"] == [
@@ -151,7 +151,9 @@ def test_public_beacon_location_is_post_only_4k_and_passes_the_visitor_ip() -> N
     assert guards == [[(["return", "405"], None)]]
     # if 는 location 의 첫 줄 — 다른 지시어보다 먼저
     assert block[0][0][0] == "if"
-    assert _args(block, "client_max_body_size") == [["4k"]]
+    # 061 — 몸통 v2(요소) 상한 16,384바이트 = 앱의 MAX_BODY_BYTES
+    assert _args(block, "client_max_body_size") == [["16k"]]
+    assert MAX_BODY_BYTES == 16 * 1024
     assert _args(block, "proxy_pass") == [[API]]
     assert ["X-Client-IP", "$http_x_forwarded_for"] in _args(block, "proxy_set_header")
 
