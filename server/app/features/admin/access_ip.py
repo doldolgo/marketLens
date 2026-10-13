@@ -89,9 +89,8 @@ class BandScan:
         self.band = band
         self.needle = needle(band)
         self.start, self.last, self.gate = start, hour_start(end), gate
-        self.hours: dict[
-            int, list[int]
-        ] = {}  # 시 → [요청, 사람 모양 페이지, JS 신호, 5xx(WS 경로 뺌)]
+        # 시 → [요청, 사람 모양 페이지, JS 신호, 5xx(WS 경로 뺌)]
+        self.hours: dict[int, list[int]] = {}
         self.kinds: Counter[str] = Counter()
         self.status = [0, 0, 0, 0]
         self.paths: Counter[str] = Counter()
