@@ -55,10 +55,18 @@ PAGES: dict[str, tuple[list[str], list[str]]] = {
         ],
         ["sessions", "signals", "match", "pages", "countries", "dims", "refs"],
     ),
+    # 065 — 요소 열쇠 하나가 `<img onerror>`(이름표는 열쇠 그대로 — 표·판에 글로만), 영역 id 꼴이 아닌 항목은 버린다
+    "screens.js": (
+        [
+            "/svc/api/admin/attention?days=7",
+            "/svc/api/admin/attention?days=7&page=landing",
+        ],
+        ["elements", "areas", "exits"],
+    ),
 }
 
 TIP_TEXT = {"overview.js", "server.js", "traffic.js"}
-DOM_TEXT = {"server.js", "traffic.js", "visitors.js", "insight.js"}
+DOM_TEXT = {"server.js", "traffic.js", "visitors.js", "insight.js", "screens.js"}
 
 SCENARIO = r"""
 const respond = (url) => input.answers[url] || [404, { detail: 'Not Found' }]

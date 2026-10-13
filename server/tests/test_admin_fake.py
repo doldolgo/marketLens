@@ -20,6 +20,8 @@ URLS = [
     "/svc/api/admin/access/ips?window=24h&sort=requests&limit=200&offset=0",
     "/svc/api/admin/clarity",
     *[f"/svc/api/admin/clarity/history?days={d}" for d in (7, 30, 90)],
+    "/svc/api/admin/attention?days=7",
+    "/svc/api/admin/attention?days=7&page=landing",
 ]
 PAGES = [
     "overview.js",
@@ -88,6 +90,10 @@ def test_every_fake_scenario_draws_every_card_without_errors(scenario: str) -> N
                 assert "t-bands" in result["off"], result
             if view.startswith("insight.js"):
                 assert {"t-dims", "t-refs", "t-match"} <= set(result["off"]), result
+        if scenario == "empty" and view.startswith(
+            "screens.js"
+        ):  # 화면 이용 통계 시행 전(before_gate)
+            assert {"t-frame", "t-panel"} <= set(result["off"]), result
     if scenario == "ok":
         assert {v: got[f"{v}"]["charts"] for v in PAGES} == {
             "overview.js": 9,
