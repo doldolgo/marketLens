@@ -26,15 +26,28 @@ def _every() -> str:
     return "".join(_script(name) for name in SCRIPTS)
 
 
+# 065 화면만의 예외 — 틀로 보내는 postMessage 한 곳(대상 출처 SITE_ORIGIN)과 틀 주소(.src) 한 곳, 공개 사이트 출처 글자 하나
+FRAME = {"postMessage": 1, ".src": 1}
+
+
 def test_scripts_never_parse_html_store_data_or_open_windows() -> None:
-    """064 §3.1 — 금지 글자 없음, 스크립트 안 바깥 주소 없음, 요청은 call() 의 fetch 하나(헤더 X-Requested-With)."""
+    """064 §3.1 — 금지 글자 없음, 스크립트 안 바깥 주소 없음, 요청은 call() 의 fetch 하나(헤더 X-Requested-With).
+    065 화면(screens.js)만 틀 예외 둘과 출처 상수 하나(test_admin_screens_static 이 자리를 본다)."""
     for name in SCRIPTS:
         js = _script(name)
         for banned in BANNED:
-            assert banned not in js, (name, banned)
-        # SVG 이름공간(요소를 만드는 글자)만 — 바깥 주소가 아니다
+            want = FRAME.get(banned, 0) if name == "screens.js" else 0
+            assert js.count(banned) == want, (name, banned)
+        # SVG 이름공간(요소를 만드는 글자)만 — 바깥 주소가 아니다. 화면은 공개 사이트 출처 상수 하나
+        site = (
+            "const SITE_ORIGIN = 'https://kimptrack.com';"
+            if name == "screens.js"
+            else ""
+        )
+        assert js.count(site) == 1 or not site, name
         assert not re.search(
-            r"https?://", js.replace("'http://www.w3.org/2000/svg'", "")
+            r"https?://",
+            js.replace("'http://www.w3.org/2000/svg'", "").replace(site or "\0", ""),
         ), name
     every = _every()
     common = _script("common.js")
@@ -281,7 +294,10 @@ def test_no_server_log_gate_wording_on_any_page() -> None:
         text = _text(f"web/admin/{name}")
         for word in ("시행", "개정", "DB-IP 자료", "gateAt", "window-note"):
             assert word not in text, (name, word)
-        assert text.count("처리방침") == (2 if name == "names.js" else 0), name
+        # 이름표 둘 — 페이지 이름(names.js 의 두 표)과 대시보드 머리 링크 열쇠(065 screensnames.js 의 EL_NAMES)
+        assert text.count("처리방침") == {"names.js": 2, "screensnames.js": 1}.get(
+            name, 0
+        ), name
     for page in PAGES:
         buttons = re.findall(
             r"<button\b[^>]*\bdata-range=[^>]*>", _text(f"web/admin/{page}")

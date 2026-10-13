@@ -1522,16 +1522,17 @@ details.card > summary {
   background: repeating-linear-gradient(90deg, var(--text-3) 0 3px, transparent 3px 5px);
 }
 
-/* — 화면(065) — 고르기 줄 · 틀 칸(남은 폭 전부, 줄이기만 — screens.js 가 --fit·--stage-h 를 준다) | 오른쪽 판 360px(1279px 이하는 틀 아래).
+/* — 화면(065) — 고르기 줄 · 몸 = 틀 칸(남은 폭 전부, 줄이기만 — screens.js 가 --fit·--stage-h 를 준다) | 오른쪽 판 360px(1279px 이하는 틀 아래).
    단계 색 lv1~lv5 는 덮어 보기(attention.js)의 상자 테두리와 같은 색 — 옅은 파랑 → 노랑 → 주황 → 빨강, lv0 은 보이기만(회색) — */
-.content.scr {
+.scr-body {
+  display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
   align-items: start;
+  gap: inherit;
 }
 .scr-pick {
   display: flex;
   flex-wrap: wrap;
-  grid-column: 1 / -1;
   align-items: center;
   gap: var(--sp-2) var(--sp-3);
 }
@@ -1748,7 +1749,7 @@ details.card > summary {
   .kpis.six {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-  .content.scr {
+  .scr-body {
     grid-template-columns: minmax(0, 1fr);
   }
 }

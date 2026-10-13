@@ -43,13 +43,14 @@
         </header>
         <div class="filters" id="filters" hidden></div>
         <p id="notice" class="notice" role="alert" hidden></p>
-        <main class="content scr" id="content">
-          <div class="scr-pick" aria-label="고르기">
+        <main class="content" id="content">
+          <div class="scr-pick s12" aria-label="고르기">
             <div class="scr-pages" id="pick-page" role="group" aria-label="화면"></div>
             <div class="seg" role="group" aria-label="기기"><button type="button" data-device="pc" aria-pressed="true">PC</button><button type="button" data-device="mobile" aria-pressed="false">휴대폰</button></div>
             <div class="seg" role="group" aria-label="보기"><button type="button" data-mode="element" aria-pressed="true">요소</button><button type="button" data-mode="area" aria-pressed="false">영역</button><button type="button" data-mode="depth" aria-pressed="false">깊이</button></div>
             <div class="seg" role="group" aria-label="지표" id="metric-seg"><button type="button" data-metric="clicks" aria-pressed="true">클릭</button><button type="button" data-metric="hover" aria-pressed="false">마우스 올림</button><button type="button" data-metric="vis" aria-pressed="false">보인 시간</button></div>
           </div>
+          <div class="scr-body s12">
           <section class="card scr-main" id="card-frame" aria-labelledby="h-frame">
             <header class="card-head"><h2 id="h-frame">실제 화면</h2><span class="unit" id="frame-line"></span><span class="scr-small" id="frame-small" hidden><i class="shape warn"></i>표본 적음</span><span class="help" title="실제 페이지를 틀로 띄워 그 위에 값을 그린다. 누름은 막혀 있고 화면은 위의 고르기로만 바꾼다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-frame"></span></span></header>
             <div class="scr-stagewrap" id="stage-wrap">
@@ -81,6 +82,7 @@
               <p class="note" id="depth-note"></p>
             </div>
           </section>
+          </div>
         </main>
       </div>
     </div>
