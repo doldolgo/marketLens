@@ -171,6 +171,7 @@ export function start(page) {
         draw(app);
       } catch (err) {
         errors.push([name, String(err?.stack ?? err).slice(0, 300)]);
+        console.error('[admin] 카드', name, err); // 개발자 도구에서 어느 카드가 왜 멈췄는지
         tagText(`t-${name}`, ['bad', '표시 오류', '응답 모양이 예상과 다르다']);
       }
     }
@@ -178,11 +179,13 @@ export function start(page) {
       chrome();
     } catch (err) {
       errors.push(['chrome', String(err?.stack ?? err).slice(0, 300)]);
+      console.error('[admin] 머리', err);
     }
     try {
       detail.paint();
     } catch (err) {
       errors.push(['detail', String(err?.stack ?? err).slice(0, 300)]);
+      console.error('[admin] 상세 판', err);
       tagText('t-sheet', ['bad', '표시 오류', '응답 모양이 예상과 다르다']);
     }
     errors.splice(0, Math.max(0, errors.length - 20));
