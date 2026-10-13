@@ -206,3 +206,82 @@ export function notice(text) {
   node.textContent = clean(text);
   node.hidden = !text;
 }
+
+// --- 부분 상태 표 (064 §3.1 → 066 §3.1 — 카드 머리 오른쪽 작은 배지) -----------------------------------
+// 결과 하나 = { body, text, okAt, why, off } — body 는 마지막 성공 값(실패해도 두고 흐리게 그린다), why 는 마지막 호출의 실패 사유,
+// off 는 그 피드가 이 서버에 아직 없음(404 — 서버 배포 전)
+
+const BAD_SHAPE = Object.freeze({ why: '응답 모양 오류' });
+const NO_FEED = Object.freeze({ state: 'unconfigured', code: null });
+const PLAIN_OK = Object.freeze({ state: 'ok' });
+
+// 결과에서 부분 하나 — undefined(첫 응답 전)·{ why }(실패하고 값 없음)·부분 객체({ state, code, … }). 실패했지만 값이 있으면
+// 그 값에 stale(사유)·staleAt(받은 때)을 붙인다. sub 가 없으면 응답 전체가 부분이다(series·access·clarity·ips…)
+export function partOf(entry, sub) {
+  if (!entry) return undefined;
+  if (entry.off) return NO_FEED;
+  if (entry.body === undefined || entry.body === null) return entry.why ? { why: entry.why } : undefined;
+  const part = sub ? entry.body[sub] : entry.body;
+  const found = isObj(part) && typeof part.state === 'string' ? part : sub && part === undefined ? NO_FEED : BAD_SHAPE;
+  return entry.why && !found.why ? { ...found, stale: entry.why, staleAt: entry.okAt } : found;
+}
+// 상태 응답(헬스·status·collect)은 부분 꼴이 아니다 — 호출 결과만 표로
+export function plainOf(entry) {
+  if (!entry) return undefined;
+  if (entry.off) return NO_FEED;
+  if (entry.body === undefined || entry.body === null) return entry.why ? { why: entry.why } : undefined;
+  return entry.why ? { ...PLAIN_OK, stale: entry.why, staleAt: entry.okAt } : PLAIN_OK;
+}
+
+// 값을 그릴 수 있는가 — ok(실패 뒤 마지막 값 포함), 또는 error 인데 값이 있다(Clarity 의 마지막 성공 값, 040)
+export function usable(part, valueKey) {
+  if (!part || part.why) return false;
+  if (part.state === 'ok') return true;
+  return part.state === 'error' && valueKey !== undefined && part[valueKey] != null;
+}
+
+// 표 = [색, 글, title] 또는 null(문제 없음 — 비운다). 오래됨 = fetchedAt 이 refreshSec 의 세 배를 넘음(036).
+// 서버 기록 게이트 문구는 쓰지 않는다(사람 결정 2026-10-09 — 060): before_gate 도 다른 '연결 안 됨' 과 같고 code 는 싣지 않는다
+const QUIET_CODES = new Set(['before_gate']);
+export function tagOf(part, now = Date.now()) {
+  if (part === undefined) return ['wait', '불러오는 중', ''];
+  if (part.why) return ['bad', '불러오지 못함', part.why];
+  if (part.stale) return ['bad', `불러오지 못함 · ${ago(part.staleAt, now)} 값`, part.stale];
+  const code = QUIET_CODES.has(part.code) ? '' : clean(part.code ?? '');
+  if (part.state === 'ok') {
+    const old = num(part.refreshSec) > 0 && num(part.fetchedAt) !== null && now - part.fetchedAt > part.refreshSec * 3000;
+    return old ? ['warn', '오래됨', `${ago(part.fetchedAt, now)} 값`] : null;
+  }
+  if (part.state === 'pending') return ['wait', '첫 조회 중', ''];
+  if (part.state === 'unconfigured') return ['dim', '연결 안 됨', code];
+  if (part.state === 'denied') return ['dim', '권한 없음', code];
+  return ['bad', '불러오지 못함', code];
+}
+
+export function tagText(id, t) {
+  const node = $(id);
+  if (!node) return;
+  node.className = t ? `tag ${t[0]}` : 'tag';
+  put(id, t ? t[1] : '');
+  node.title = t ? clean(t[2]) : '';
+}
+// 카드 하나의 상태 — 배지와, 실패 뒤 마지막 값이면 카드를 흐리게(066 §3.1)
+export function tag(id, part) {
+  tagText(id, tagOf(part));
+  const card = $(id)?.closest?.('.card');
+  if (card) card.classList.toggle('stale', Boolean(part?.stale));
+}
+
+// 그림 칸에 보일 상태 글 — 표가 없으면(ok) '자료 없음'
+export const stateWord = (part) => tagOf(part)?.[1] ?? '자료 없음';
+
+// 그 카드가 기대는 값(결과 객체·고른 값)이 바뀌었을 때만 다시 그린다 — 10초 묶음마다 차트·툴팁·확대가 날아가지 않게(036)
+const drawn = new Map();
+export function once(name, deps, draw) {
+  const now = Array.isArray(deps) ? deps : [deps];
+  const last = drawn.get(name);
+  if (last && last.length === now.length && now.every((d, i) => d === last[i])) return;
+  draw();
+  drawn.set(name, now); // 그리다 예외가 나면 남기지 않는다 — 다음 묶음이 다시 그린다
+}
+export const forget = (name) => drawn.delete(name);
