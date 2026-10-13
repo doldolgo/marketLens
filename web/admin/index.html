@@ -1,0 +1,132 @@
+<!doctype html>
+<!-- KimpTrack 관리자 v4 — 개요(스펙 066 §3.3 — 지금 문제 있나). web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
+     인라인 스크립트·스타일 없음(CSP). 값은 overview.js 가 글자(textContent)와 차트(vendor ECharts)로 채운다.
+     틀(왼쪽 내비·머리·상세 판)은 여섯 페이지가 같은 글자다. 아이콘은 icons.svg 묶음(<use href>). -->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="color-scheme" content="dark" />
+    <title>개요 · KimpTrack 관리자</title>
+    <link rel="stylesheet" href="admin.css" />
+    <script src="vendor/echarts-5.5.1.min.js" defer></script>
+    <script type="module" src="overview.js"></script>
+  </head>
+  <body>
+    <div class="app" id="app" data-menu="closed">
+      <aside class="side" id="side" aria-label="관리자 메뉴">
+        <a class="brand" href="/"><svg class="i" aria-hidden="true"><use href="icons.svg#logo"/></svg><span>KimpTrack</span><small>관리자</small></a>
+        <nav class="nav" aria-label="페이지">
+          <a href="/" aria-current="page" title="개요"><svg class="i" aria-hidden="true"><use href="icons.svg#overview"/></svg><span>개요</span><i class="mark" id="m-overview"></i></a>
+          <a href="/server.html" title="서버"><svg class="i" aria-hidden="true"><use href="icons.svg#server"/></svg><span>서버</span><i class="mark" id="m-server"></i></a>
+          <a href="/traffic.html" title="트래픽"><svg class="i" aria-hidden="true"><use href="icons.svg#traffic"/></svg><span>트래픽</span><i class="mark" id="m-traffic"></i></a>
+          <a href="/visitors.html" title="방문자"><svg class="i" aria-hidden="true"><use href="icons.svg#visitors"/></svg><span>방문자</span></a>
+          <a href="/clarity.html" title="Clarity"><svg class="i" aria-hidden="true"><use href="icons.svg#clarity"/></svg><span>Clarity</span></a>
+          <a href="/screens.html" title="화면"><svg class="i" aria-hidden="true"><use href="icons.svg#screens"/></svg><span>화면</span></a>
+        </nav>
+        <div class="side-foot">
+          <span title="마지막 갱신"><svg class="i" aria-hidden="true"><use href="icons.svg#clock"/></svg><span id="updated">--:--:--</span></span>
+          <a href="/cdn-cgi/access/logout" title="로그아웃"><svg class="i" aria-hidden="true"><use href="icons.svg#logout"/></svg><span>로그아웃</span></a>
+        </div>
+      </aside>
+      <div class="page">
+        <div class="top"><button type="button" class="ibtn" id="menu-btn" aria-label="메뉴" aria-expanded="false" aria-controls="side"><svg class="i" aria-hidden="true"><use href="icons.svg#menu"/></svg></button><b>KimpTrack 관리자</b></div>
+        <header class="head">
+          <h1>개요</h1><span class="ask">지금 문제 있나</span>
+          <div class="tools">
+            <div class="seg" role="group" aria-label="기간"><button type="button" data-range="1h" aria-pressed="false">1시간</button><button type="button" data-range="6h" aria-pressed="false">6시간</button><button type="button" data-range="24h" aria-pressed="true">24시간</button></div>
+            <div class="seg" role="group" aria-label="비교"><span class="seg-label"><svg class="i" aria-hidden="true"><use href="icons.svg#compare"/></svg>비교</span><button type="button" data-cmp="none" aria-pressed="true">없음</button><button type="button" data-cmp="prev" aria-pressed="false" title="단축키 X">이전 기간</button><button type="button" data-cmp="week" aria-pressed="false">지난주</button></div>
+            <span class="tick">10초마다 · <span id="clock">--:--:--</span></span>
+          </div>
+        </header>
+        <div class="filters" id="filters" hidden></div>
+        <p id="notice" class="notice" role="alert" hidden></p>
+        <main class="content" id="content">
+          <section class="band wait s12" id="band" aria-label="지금 상태" aria-live="polite"><span class="band-word"><i class="shape" id="band-shape"></i><span id="band-word">확인 중</span></span><div class="chips" id="chips"></div></section>
+          <div class="kpis s12" aria-label="큰 수">
+          <section class="card kpi" id="card-ws" aria-labelledby="h-ws">
+            <header class="card-head"><h2 id="h-ws"><button type="button" class="t" data-detail="ws">지금 접속</button></h2><span class="unit">WS 연결</span><span class="help" title="api 가 지금 들고 있는 대시보드 연결 수(사람 수가 아니다). 선은 고른 기간의 5분 최댓값."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-ws"></span><button type="button" class="ibtn" data-detail="ws" aria-label="지금 접속 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="big" id="v-ws">–</div>
+            <div class="delta" id="d-ws"></div>
+            <div class="chart spark" id="c-ws"></div>
+          </section>
+          <section class="card kpi" id="card-visit" aria-labelledby="h-visit">
+            <header class="card-head"><h2 id="h-visit"><button type="button" class="t" data-detail="visit">오늘 방문자</button></h2><span class="unit">확인 ~ 브라우저 모양</span><span class="help" title="오늘(KST) 날마다 센 방문자 — 확인(스크립트가 돈) ~ 브라우저 모양. 선은 시간별 사람 모양 페이지."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-visit"></span><button type="button" class="ibtn" data-detail="visit" aria-label="오늘 방문자 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="big" id="v-visit">–</div>
+            <div class="delta" id="d-visit"></div>
+            <div class="chart spark" id="c-visit"></div>
+          </section>
+          <section class="card kpi" id="card-rate" aria-labelledby="h-rate">
+            <header class="card-head"><h2 id="h-rate"><button type="button" class="t" data-detail="collect">수집 성공률</button></h2><span class="unit">1시간</span><span class="help" title="최근 1시간, 수집 원천 전체 평균. 선은 실패 구간으로 센 시간별 성공률."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-rate"></span><button type="button" class="ibtn" data-detail="collect" aria-label="수집 성공률 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="big" id="v-rate">–</div>
+            <div class="delta" id="d-rate"></div>
+            <div class="chart spark" id="c-rate"></div>
+          </section>
+          <section class="card kpi" id="card-alarm" aria-labelledby="h-alarm">
+            <header class="card-head"><h2 id="h-alarm"><button type="button" class="t" data-detail="alarms">경보</button></h2><span class="unit">CloudWatch</span><span class="help" title="ALARM 인 경보 수 / 전체. 막대는 시간별 알림(Slack · ALARM 으로 바뀐 경보)."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-alarm"></span><button type="button" class="ibtn" data-detail="alarms" aria-label="경보 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="big" id="v-alarm">–</div>
+            <div class="delta" id="d-alarm"></div>
+            <div class="chart spark" id="c-alarm"></div>
+          </section>
+          <section class="card kpi" id="card-cost" aria-labelledby="h-cost">
+            <header class="card-head"><h2 id="h-cost"><button type="button" class="t" data-detail="cost">이번 달 비용</button></h2><span class="unit">실제 / 예산</span><span class="help" title="월 예산 가운데 한도 대비 실제가 가장 큰 것. 막대 눈금은 예산 100%."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-cost"></span><button type="button" class="ibtn" data-detail="cost" aria-label="이번 달 비용 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="big" id="v-cost">–</div>
+            <div class="delta" id="d-cost"></div>
+            <div class="meter-box" id="m-cost"></div>
+          </section>
+          </div>
+          <section class="card s6" id="card-ex" aria-labelledby="h-ex">
+            <header class="card-head"><h2 id="h-ex"><button type="button" class="t" data-detail="collect">수집 원천</button></h2><span class="unit">24시간 · 마지막 성공 · 1시간 성공률</span><span class="help" title="정상은 옅은 가는 줄, 끊긴 구간은 칸 가득 빨강, 자료 없음은 빗금."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-ex"></span><button type="button" class="ibtn" data-detail="collect" aria-label="수집 원천 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart h320" id="c-ex"></div>
+          </section>
+          <section class="card s6" id="card-boxes" aria-labelledby="h-boxes">
+            <header class="card-head"><h2 id="h-boxes"><button type="button" class="t" data-detail="cpu">상자</button></h2><span class="unit">최근 15분 평균 · CPU 선</span><span class="help" title="막대 눈금은 주의·문제 문턱(상태 띠 규칙과 같다). 선은 고른 기간의 CPU."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-boxes"></span><button type="button" class="ibtn" data-detail="cpu" aria-label="상자 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="scroll"><table class="tbl" id="tbl-boxes"></table></div>
+          </section>
+          <section class="card s12" id="card-traffic" aria-labelledby="h-traffic">
+            <header class="card-head"><h2 id="h-traffic"><button type="button" class="t" data-detail="traffic">트래픽</button></h2><span class="unit">시간별 · 사람 모양 페이지 · 5xx · WS 접속</span><span class="help" title="세 칸이 같은 시간 축이고 십자선을 같이 쓴다. 점선은 고른 비교 기간."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-traffic"></span><button type="button" class="ibtn" data-detail="traffic" aria-label="트래픽 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="chart h360" id="c-traffic"></div>
+          <p class="card-foot" id="f-traffic"></p>
+          </section>
+        </main>
+      </div>
+    </div>
+    <div class="sheet" id="sheet" hidden>
+      <section class="sheet-panel" id="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1">
+        <header class="sheet-head">
+          <h2 id="sheet-title">상세</h2>
+          <span class="unit" id="sheet-unit"></span>
+          <span class="tag" id="t-sheet"></span>
+          <div class="tools">
+            <button type="button" class="ibtn" id="sheet-prev" aria-label="이전 항목" title="이전" hidden><svg class="i" aria-hidden="true"><use href="icons.svg#prev"/></svg></button>
+            <button type="button" class="ibtn" id="sheet-next" aria-label="다음 항목" title="다음" hidden><svg class="i" aria-hidden="true"><use href="icons.svg#next"/></svg></button>
+            <div class="seg" role="group" aria-label="상세 기간" id="sheet-ranges"></div>
+            <div class="seg" role="group" aria-label="상세 비교"><span class="seg-label"><svg class="i" aria-hidden="true"><use href="icons.svg#compare"/></svg>비교</span><button type="button" data-scmp="none">없음</button><button type="button" data-scmp="prev">이전 기간</button><button type="button" data-scmp="week">지난주</button></div>
+            <button type="button" class="btn" id="sheet-csv"><svg class="i" aria-hidden="true"><use href="icons.svg#download"/></svg>CSV</button>
+            <button type="button" class="ibtn" id="sheet-close" aria-label="닫기 (Esc)" title="닫기 (Esc)"><svg class="i" aria-hidden="true"><use href="icons.svg#close"/></svg></button>
+          </div>
+        </header>
+        <div class="sheet-sub" id="sheet-chips"></div>
+        <div class="sheet-body">
+          <p class="note" id="sheet-note"></p>
+          <section class="panel" id="sheet-graph" hidden>
+            <div class="panel-head"><span>그래프</span><span class="unit" id="sheet-window"></span><span class="end"><button type="button" class="btn" id="sheet-select" aria-pressed="false" title="끌어서 고른 구간으로 확대"><svg class="i" aria-hidden="true"><use href="icons.svg#zoom"/></svg>구간 확대</button><button type="button" class="btn" id="sheet-reset"><svg class="i" aria-hidden="true"><use href="icons.svg#reset"/></svg>원래대로</button></span></div>
+            <div class="chart big-chart" id="c-sheet"></div>
+          </section>
+          <section class="panel" id="sheet-stats" hidden>
+            <div class="panel-head"><span>통계</span><span class="unit">보이는 구간 기준</span></div>
+            <div class="scroll"><table class="tbl" id="sheet-stat-tbl"></table></div>
+          </section>
+          <section class="panel" id="sheet-custom" hidden></section>
+          <section class="panel" id="sheet-table" hidden>
+            <div class="panel-head"><span id="sheet-table-title">원자료</span><span class="end"><label class="search" id="sheet-find-box" hidden><svg class="i" aria-hidden="true"><use href="icons.svg#search"/></svg><input class="input" id="sheet-find" type="search" placeholder="찾기" autocomplete="off" aria-label="표에서 찾기" /></label></span></div>
+            <div class="scroll"><table class="tbl" id="sheet-tbl"></table></div>
+            <div class="list-foot"><span id="sheet-count"></span><button type="button" class="linkbtn" id="sheet-more" hidden>200행 더 보기</button></div>
+          </section>
+          <div class="related" id="sheet-related" hidden></div>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
