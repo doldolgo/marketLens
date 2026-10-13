@@ -1,0 +1,82 @@
+"""현선갭 표 글 갈래 — `build_gap_text` 가 `encode_gap_table(build_gap_table())` 와 바이트까지 같은가 (스펙 048 §3.3).
+
+무작위 저장소(정상·fail·stale·300초 넘은 행·펀딩 없음·배수 정수 주기·이스케이프가 필요한 코인 이름)를 여럿 만들어
+같은 `now` 로 두 갈래를 견준다. 유한하지 않은 값이 든 표는 글 갈래가 ValueError 로 멈추고, 게시기는 dict 갈래로
+다시 만들어 기준과 같은 예외를 낸다.
+"""
+
+import random
+from datetime import timedelta
+
+import pytest
+
+from app.core.live_store import LiveStore
+from app.features.gap.push import build_gap_json, encode_gap_table
+from app.features.gap.service import SPOT_EXCHANGES, build_gap_table, build_gap_text
+from app.features.gap.tests.helpers import T0, perp, spot
+
+PERP_IDS = ("binance_perp", "bybit_perp", "bitget_perp", "hyperliquid_perp")
+ODD_NAMES = ('Q"X', "역\\슬", "한글코인", "TAB\tX")
+
+
+def _random_store(seed: int) -> LiveStore:
+    rnd = random.Random(seed)
+    store = LiveStore()
+    names = [f"C{i}" for i in range(60)] + list(ODD_NAMES)
+    for base in names:
+        for ex in rnd.sample(SPOT_EXCHANGES, rnd.randint(1, len(SPOT_EXCHANGES))):
+            age = rnd.choice([0, 0, 0, 2, 6, 400])
+            now = T0 - timedelta(seconds=age)
+            ask = [rnd.uniform(0.001, 50_000), rnd.choice([0.0, rnd.uniform(0.01, 10)])]
+            bid = [ask[0] * rnd.uniform(0.98, 0.9999), rnd.uniform(0.01, 10)]
+            if rnd.random() < 0.05:
+                bid = [0.0, 1.0]  # fail
+            spot(
+                store,
+                ex,
+                base,
+                ask=ask,
+                bid=bid,
+                price=rnd.choice([ask[0], 7, 0.1 + 0.2]),
+                now=now,
+            )
+        for src in rnd.sample(PERP_IDS, rnd.randint(1, len(PERP_IDS))):
+            age = rnd.choice([0, 0, 1, 7, 301])
+            now = T0 - timedelta(seconds=age)
+            perp(
+                store,
+                src,
+                base,
+                bid=rnd.uniform(0.001, 50_000),
+                ask=rnd.uniform(0.001, 50_000),
+                bid_size=rnd.choice([0.0, 1.0, 2.5]),
+                funding_rate=rnd.choice([None, 0.0, -0.0, 1e-4, -3.75e-5, 0.1 + 0.2]),
+                next_funding_ms=rnd.choice([None, 1_791_475_200_000]),
+                funding_interval_h=rnd.choice([None, 1, 4, 8]),
+                now=now,
+            )
+    store.mark_received(int(T0.timestamp()))
+    return store
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_text_branch_is_byte_identical_to_dict_branch(seed: int) -> None:
+    store = _random_store(seed)
+    now = T0 + timedelta(seconds=1)
+    text = build_gap_text(store, now=now)
+    ref = encode_gap_table(build_gap_table(store, now=now))
+    # fetchedAt 은 함수마다 지금 시각이라 뺀다 — 나머지 바이트가 같아야 한다
+    assert text.rsplit(',"fetchedAt":', 1)[0] == ref.rsplit(',"fetchedAt":', 1)[0]
+
+
+def test_non_finite_value_falls_back_to_the_dict_branch_error() -> None:
+    store = _random_store(3)
+    perp(store, "bybit_perp", "C1", bid=float("inf"))
+    with pytest.raises(ValueError):
+        build_gap_text(store, now=T0)
+    # 게시기의 글은 dict 갈래로 다시 만든다 — 기준과 같은 예외(NaN·inf 거부)가 난다
+    with pytest.raises(ValueError) as fallback:
+        build_gap_json(store)
+    with pytest.raises(ValueError) as reference:
+        encode_gap_table(build_gap_table(store, now=T0))
+    assert str(fallback.value) == str(reference.value)

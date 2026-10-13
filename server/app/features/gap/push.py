@@ -2,7 +2,8 @@
 
 017 §3.1 을 표 id `gap` 으로: 틱 루프가 `observe(tick)` 를 부르면(동기·무예외) 표를 만들어 큐에 넣고, 별도 태스크가
 `PUBLISH gap` + `SET gap:latest EX 10` 한다 — 게시 실패가 틱을 막지 않는다. 큐는 2장 — 밀린 표는 값이 없으므로
-오래된 것부터 버린다. spark 조각이 없으므로 보통 인코더(NaN 거부)로 한 번 인코딩한다.
+오래된 것부터 버린다. 표 글은 `build_gap_text` 가 행 dict 없이 바로 쓴다(2026-10-09) — `encode_gap_table(build_gap_table())`
+과 같은 바이트이고, 유한하지 않은 값으로 멈춘 회차만 dict 갈래로 다시 만들어 기준과 같은 결과(같은 예외)를 낸다.
 표는 **보는 사람이 있을 때만** 만든다(048 §3.3) — api 의 gap 허브가 접속자가 있는 동안 `gap:want`(TTL 15초)를 쓰고, 여기서
 0.5초마다 그 키를 읽는다. 표 1장이 약 3,400행·760KB 라 아무도 안 보는데 매초 만들면 틱이 7~10ms(로컬) 더 걸리고
 collect → data 송신이 PUBLISH·SET 두 번으로 약 1.5MB/s 늘었다(2026-10-09 실측). 첫 접속자는 `waiting` 을 받은 뒤
@@ -15,11 +16,12 @@ import json
 import logging
 import time
 from collections import deque
+from datetime import UTC, datetime
 
 from app.core.live_store import LiveStore
 from app.core.models import Tick
 from app.core.redis_bus import GAP_CHANNEL, RedisBus
-from app.features.gap.service import build_gap_table
+from app.features.gap.service import build_gap_table, build_gap_text
 
 logger = logging.getLogger("marketlens.gap_push")
 
@@ -40,6 +42,19 @@ def encode_gap_table(payload: dict[str, object]) -> str:
         allow_nan=False,
         separators=(",", ":"),
     )
+
+
+def build_gap_json(store: LiveStore) -> str:
+    """표 1장의 게시 글 — 글 갈래로 만들고, 유한하지 않은 값으로 멈추면 dict 갈래로 다시 만든다 (§3.3).
+
+    다시 만드는 쪽은 바꾸기 전의 게시 경로(`encode_gap_table(build_gap_table())`) 그대로라 결과도 예외도 기준과
+    같다. 두 번 모두 같은 `now` 를 쓰고 사이에 await 가 없다. 정상 회차에는 다시 만들 일이 없다.
+    """
+    now = datetime.now(UTC)
+    try:
+        return build_gap_text(store, now=now)
+    except (ValueError, TypeError):
+        return encode_gap_table(build_gap_table(store, now=now))
 
 
 class GapPublisher:
@@ -65,7 +80,7 @@ class GapPublisher:
             return
         try:
             started = time.perf_counter()
-            self._queue.append(encode_gap_table(build_gap_table(self._store)))
+            self._queue.append(build_gap_json(self._store))
             elapsed = time.perf_counter() - started
             if elapsed > SLOW_BUILD_WARN_SEC:
                 logger.warning(
@@ -96,7 +111,11 @@ class GapPublisher:
             self.wanted = await self._bus.wanted(GAP_CHANNEL)
         except Exception as exc:
             self.wanted = False
-            self._warn(f"want:{type(exc).__name__}", "gap:want 읽기 실패 — 표를 만들지 않는다: %r", exc)
+            self._warn(
+                f"want:{type(exc).__name__}",
+                "gap:want 읽기 실패 — 표를 만들지 않는다: %r",
+                exc,
+            )
 
     async def run_sender_loop(self) -> None:
         while True:
@@ -113,7 +132,9 @@ class GapPublisher:
                 await self._bus.publish_table(data, GAP_CHANNEL)
                 sent += 1
             except Exception as exc:
-                self._warn(type(exc).__name__, "갭표 게시 실패 — 이 회차는 건너뛴다: %r", exc)
+                self._warn(
+                    type(exc).__name__, "갭표 게시 실패 — 이 회차는 건너뛴다: %r", exc
+                )
         return sent
 
     def _warn(self, cause: str, msg: str, exc: Exception) -> None:
