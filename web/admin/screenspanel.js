@@ -84,7 +84,7 @@ function drawElements(app, c, send) {
     { label: '순위', cls: 'rank', text: (e) => (e.rank ? `#${e.rank}` : '–') },
     { label: '이름', cell: (e) => nameCell(elName(c.page, e.key), e.state === 'gone' ? '지금 화면에 없음' : '') },
     { label: '영역', text: (e) => areaName(c.page, e.area) },
-    { label: METRIC_NAME[c.metric], cell: (e) => bar(`lv${e.level ?? 0}`, max ? e.m / max : 0, e.level === null ? '단계 없음' : `단계 ${e.level}`) },
+    { label: `${METRIC_NAME[c.metric]} 막대`, cell: (e) => bar(`lv${e.level ?? 0}`, max ? e.m / max : 0, e.level === null ? '단계 없음' : `단계 ${e.level}`) },
     { label: '클릭', num: true, text: (e) => int(e.c) },
     { label: '100뷰당', num: true, text: (e) => e.cRate.toFixed(1) },
     { label: '마우스 올림', num: true, text: (e) => sec(e.h) },
