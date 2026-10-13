@@ -330,7 +330,9 @@ def test_focus_scrolls_to_the_area_and_thickens_its_border_for_two_seconds() -> 
         areas=AREAS,
         steps=[VALUES, _msg(focus), _msg({**focus, "id": "nope"}), "flush"],
     )
-    assert got["scrolled"] == [["window", 0, 310 - 400]]  # hero 가운데(60 + 500 / 2)를 화면 가운데로
+    assert got["scrolled"] == [
+        ["window", 0, 310 - 400]
+    ]  # hero 가운데(60 + 500 / 2)를 화면 가운데로
     hero = next(b for b in got["boxes"] if b["id"] == "hero")
     assert hero["borderWidth"] == "6px"
     later = _one(areas=AREAS, steps=[VALUES, _msg(focus), "t|2000", "timers", "flush"])
