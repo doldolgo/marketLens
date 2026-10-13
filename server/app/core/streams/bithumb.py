@@ -49,6 +49,12 @@ _IDLE_POLL = 1.0
 _QUOTE = "KRW"
 KST_OFFSET_MS = 32_400_000  # 9시간
 FUTURE_TOLERANCE_MS = 3_600_000  # 현재보다 1시간 이상 미래면 벽시계 버그로 판정
+# 반영을 미루는 시세 프레임의 머리 (001 §3.5-5) — 빗썸이 실제로 보내는 꼴(공백 없음, type·code 가 맨 앞)일 때만 빠른 길로
+# 가고, 그 밖의 꼴은 지금처럼 받은 자리에서 파싱한다. 머리 다음부터 첫 따옴표까지가 code 글자다
+_BOOK_HEAD = '{"type":"orderbook","code":"'
+_TICKER_HEAD = '{"type":"ticker","code":"'
+_BOOK_KEY = "orderbook:"
+_TICKER_KEY = "ticker:"
 
 
 def _now_ms() -> int:
@@ -80,9 +86,13 @@ class BithumbStream:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], int] = _now_ms,
     ) -> None:
+        self._store = store
         self._state = store.stream(self.id)
         self._state.url = WS_URL
         self._sink = sink
+        # 반영을 미룬 프레임 — code → (원문, 수신 ms), 심볼마다 마지막 1건 (001 §3.5-5). 저장소가 읽기 전에 _settle 을 부른다
+        self._books: dict[str, tuple[str, int]] = {}
+        self._tickers: dict[str, tuple[str, int]] = {}
         self._record = record
         self._connect = connect
         self._sleep = sleep
@@ -311,6 +321,14 @@ class BithumbStream:
                     continue
             else:
                 text = str(raw)
+            # 빠른 길 (001 §3.5-5) — 호가·현재가 프레임은 파싱하지 않고 code 만 글자로 뽑아 원문을 남긴 뒤 심볼마다 마지막
+            # 프레임만 든다. 같은 초 안에 뒤 프레임이 덮는 호가(2026-10-13 캡처 76%)는 끝내 파싱하지 않는다
+            if text.startswith(_BOOK_HEAD):
+                if self._defer(text, at, len(_BOOK_HEAD), _BOOK_KEY, self._books):
+                    continue
+            elif text.startswith(_TICKER_HEAD):
+                if self._defer(text, at, len(_TICKER_HEAD), _TICKER_KEY, self._tickers):
+                    continue
             msg = _decode(text)
             # 디코드 뒤, 행·시세·상태 갱신 전 — 받은 텍스트 그대로 + 시세 프레임이면 종류:심볼 (§3.7)
             self._record(self.id, WS_SOURCE, at, text, _quote_key(msg))
@@ -335,6 +353,64 @@ class BithumbStream:
                 continue
             self._state.last_message_at = at
             self._backoff = BACKOFF_START
+
+    def _defer(
+        self,
+        text: str,
+        at: int,
+        start: int,
+        key_head: str,
+        pending: dict[str, tuple[str, int]],
+    ) -> bool:
+        """빠른 길 한 프레임 — 미뤘으면(또는 우주 밖이라 버렸으면) True, code 를 글자로 못 뽑으면 False(파싱하는 길로).
+
+        원문 key·기록 시점·last_message_at·백오프는 파싱하는 길과 같다: key 는 `"<종류>:<code>"` 이고 행이 바뀌기 전에
+        남긴다. code 에 이스케이프가 있거나 `-` 가 없으면 글자와 파싱 값이 다를 수 있어 파싱하는 길로 보낸다.
+        """
+        end = text.find('"', start)
+        if end <= start or text[end + 1 : end + 2] != ",":
+            return False
+        code = text[start:end]
+        quote, sep, base = code.partition("-")
+        if not sep or "\\" in code:
+            return False
+        self._record(self.id, WS_SOURCE, at, text, key_head + code)
+        self._state.last_message_at = at
+        self._backoff = BACKOFF_START
+        if not self._sink.accepts(base.upper(), quote):
+            return True  # 우주 밖 — 싱크가 어차피 버린다. 미룰 것도 파싱할 것도 없다 (001 §3.5-3)
+        if not self._books and not self._tickers:
+            self._store.defer(self._settle)
+        pending[code] = (text, at)
+        return True
+
+    def _settle(self) -> None:
+        """미룬 프레임 반영 — 저장소가 읽기 직전에 부른다 (001 §3.5-5). 현재가 먼저, 호가 다음(순서는 결과와 무관하다).
+
+        심볼마다 마지막 프레임 하나를 받은 자리에서 하던 처리 그대로 행에 반영한다 — 현재가의 KST 벽시계 보정은 그
+        프레임의 수신 시각으로 판정한다. 파싱·처리 실패는 무효 프레임으로 센다(원문·last_message_at 은 받은 자리에서
+        이미 남았다).
+        """
+        tickers, self._tickers = self._tickers, {}
+        books, self._books = self._books, {}
+        for text, at in tickers.values():
+            self._settle_one(text, at)
+        for text, at in books.values():
+            self._settle_one(text, at)
+
+    def _settle_one(self, text: str, at: int) -> None:
+        msg = _decode(text)
+        if msg is None:
+            self.decode_failures += 1
+            return
+        kind = msg.get("type")
+        try:
+            if kind == "orderbook":
+                self._on_orderbook(msg, at)
+            elif kind == "ticker":
+                self._on_ticker(msg, at)
+        except (KeyError, TypeError, ValueError):
+            self.decode_failures += 1
 
     def _on_orderbook(self, msg: dict[str, Any], at: int) -> None:
         code = str(msg["code"])

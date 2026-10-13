@@ -374,15 +374,38 @@ def premium_line(head: str, fwd: float, rev: float, ts: int) -> str:
     return f"{head}fwd={fwd!r},rev={rev!r} {ts}"
 
 
+def premium_line_text(head: str, fwd: str, rev: str, tail: str) -> str:
+    """`premium` 한 줄 — `fwd`·`rev` 는 Redis 틱 레코드의 숫자 글자 그대로, `tail` 은 `" {ts}"` (009 §3.5).
+
+    같은 값의 `premium_line(head, float(fwd), float(rev), ts)` 와 같은 바이트다. 레코드는 009 인계기가
+    `json.dumps` 로 썼고 그 float 표기는 `float.__repr__`(가장 짧은 왕복 글자)라, 글자를 float 로 읽어 다시 repr
+    해도 같은 글자가 나온다. 그래서 flusher 는 회차마다 11만 줄의 글자 → float → 글자 왕복을 건너뛴다.
+    글자가 아닌 값(정수·NaN·Infinity 상수)은 이 함수가 아니라 `premium_line` 으로 쓴다 — 표기 규칙은 이 모듈에만 둔다.
+    """
+    return f"{head}fwd={fwd},rev={rev}{tail}"
+
+
 def candle_head(dom: str, fx: str, base: str) -> str:
     """`candle` 줄의 머리 — `candle_point` 와 같은 태그(코인 이름 그대로)."""
     return _head("candle", {"dom": dom, "fx": fx, "base": base})
 
 
+@functools.lru_cache(maxsize=4096)
+def _candle_net_fields(net_dom: str | None, net_fx: str | None) -> str:
+    """`candle` 줄의 망 이름 두 필드 조각(`net_dom=…,net_fx=…,`) — 망 이름 쌍마다 한 번만 이스케이프한다.
+
+    분 닫힘은 1분에 조합 1,800여 줄을 만드는데 망 이름 쌍은 100~200종뿐이라 같은 조각을 되풀이해 만든다.
+    이스케이프 규칙은 `_field_literal` 그대로 두고 결과만 기억한다 — 규칙이 이 모듈 한 곳에 남는다.
+    상한 4096 은 하네스 재생에서 본 쌍 수(114~179종)의 20배가 넘는다(넘쳐도 오래 안 쓴 쌍부터 다시 만들 뿐 줄은 같다).
+    """
+    return f"net_dom={_field_literal(net_dom or _NO_NETWORK)},net_fx={_field_literal(net_fx or _NO_NETWORK)},"
+
+
 def candle_line(
     head: str,
     ts: int,
-    *,
+    # 위치 인자로도 받는다 — 분 닫힘이 1,800여 줄에 키워드 20개씩 넘기는 비용을 없애려고(014 §3.3). 순서를 바꾸면
+    # 위치 인자 호출부의 값이 다른 필드로 들어가므로 순서는 이대로 고정이다(test_candles 가 20필드 값을 모두 달리 해 지킨다)
     fwd_o: float,
     fwd_h: float,
     fwd_l: float,
@@ -410,7 +433,7 @@ def candle_line(
         f"dom_dep={int(dom_dep)}i,dom_wd={int(dom_wd)}i,"
         f"fwd_c={float(fwd_c)!r},fwd_h={float(fwd_h)!r},fwd_l={float(fwd_l)!r},fwd_o={float(fwd_o)!r},"
         f"fx_dep={int(fx_dep)}i,fx_wd={int(fx_wd)}i,krw={float(krw)!r},"
-        f"net_dom={_field_literal(net_dom or _NO_NETWORK)},net_fx={_field_literal(net_fx or _NO_NETWORK)},"
+        f"{_candle_net_fields(net_dom, net_fx)}"
         f"rate={float(rate)!r},rev_c={float(rev_c)!r},rev_h={float(rev_h)!r},"
         f"rev_l={float(rev_l)!r},rev_o={float(rev_o)!r},samples={int(samples)}i,usdt={float(usdt)!r} {ts}"
     )

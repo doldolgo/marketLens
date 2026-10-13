@@ -238,3 +238,22 @@ def test_spark_change_counts_as_changed_row() -> None:
     _, prev = make_delta({}, table([row("BTC")]))
     text, _ = make_delta(prev, table([row("BTC", spark=[0.1, 0.2])]))
     assert [r["sym"] for r in json.loads(text)["rows"]] == ["BTC"]
+
+
+async def test_publish_skips_the_channel_without_subscribers_but_always_sets_latest() -> (
+    None
+):
+    """017 §3.1(2026-10-13) — `<id>:latest` 는 매번 쓰고, 채널 PUBLISH 는 구독자가 있을 때만 한다."""
+    bus, server = make_bus()
+    assert await bus.publish_table('{"rows":[]}') == 0
+    assert await bus.latest() == '{"rows":[]}'
+    listener = RedisBus(fakeredis.aioredis.FakeRedis(server=server))
+    sub = await listener.subscribe()
+    assert await bus.publish_table('{"rows":[1]}') == 1
+    assert await sub.get(timeout=1.0) == '{"rows":[1]}'
+    assert await bus.latest() == '{"rows":[1]}'
+    # 구독을 풀면(Redis 는 연결이 끊겨도 같다) 다시 채널로 보내지 않는다 — 키는 계속 새 표다
+    await sub._pubsub.unsubscribe()
+    await sub.aclose()
+    assert await bus.publish_table('{"rows":[2]}') == 0
+    assert await bus.latest() == '{"rows":[2]}'

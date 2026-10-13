@@ -4,16 +4,19 @@
 갱신하고 LiveStore 에 게시한다 — Redis·Influx 성공과 무관한 메모리 계산이다.
 기동 시 Influx 의 최근 30분 집계로 채운다(10초 상한, 실패면 빈 채로 — 조회·채우기는 스레드에서).
 
-게시는 증분이다(2026-09-28). 원값이 직전과 같은 조합(약 80%)은 반올림도 링버퍼도 건너뛰고, 값이 바뀐
+게시는 증분이다(2026-09-28). 원값이 직전과 같은 조합(약 80%)은 반올림도 버퍼도 건너뛰고, 값이 바뀐
 조합만 목록과 JSON 조각을 새 객체로 갈아 끼운다. 게시 맵은 그 맵의 얕은 사본이라 이미 게시된 목록·조각은
 누구도 제자리에서 고치지 않는다. 조각은 017 게시기가 표 JSON 의 spark 자리에 그대로 끼운다 — 표 1장에 든
 spark 부동소수 4만여 개를 매초 다시 포맷하지 않기 위해서다.
+
+버퍼는 따로 두지 않는다(2026-10-09). 조합마다 기억하는 것은 끝 버킷(int) 하나와 게시 목록뿐이다 — (버킷, 값)
+링버퍼에서 실제로 읽던 버킷은 끝 하나였고 값은 게시 목록과 같았다. 그래서 바뀐 조합마다 튜플 둘·deque 조작을
+덜고, 분이 바뀌는 틱에 전 조합의 목록을 버퍼에서 다시 뽑지 않는다(직전 목록에 끝값을 붙인다).
 """
 
 import asyncio
 import logging
 import math
-from collections import deque
 from collections.abc import Iterable
 from typing import Protocol
 
@@ -41,10 +44,12 @@ class SparkReader(Protocol):
 
 class SparkBuffer:
     def __init__(self) -> None:
-        # 조합 → (버킷, fwd) 오래된 → 최신. 같은 버킷은 마지막 값으로 덮인다.
-        self._buf: dict[SparkKey, deque[tuple[int, float]]] = {}
-        # 조합 → 직전 갱신의 (버킷, 원값) — 같으면 넣어도 끝값이 같은 값으로 덮일 뿐이라 건너뛴다
-        self._raw: dict[SparkKey, tuple[int, float]] = {}
+        # 조합 → 게시 목록 끝값의 버킷. 목록(_lists)이 곧 버킷 오래된 → 최신의 값이고 같은 버킷은 마지막 값으로 덮인다
+        self._last: dict[SparkKey, int] = {}
+        # 조합 → 직전 갱신의 버킷·원값 — 둘 다 같으면 넣어도 끝값이 같은 값으로 덮일 뿐이라 건너뛴다.
+        # 튜플 하나로 들지 않고 dict 둘로 나눈다 — 바뀐 조합(틱당 약 600개)마다 새 튜플을 만들지 않게
+        self._raw_bucket: dict[SparkKey, int] = {}
+        self._raw_value: dict[SparkKey, float] = {}
         # 게시용 — 값이 바뀐 조합만 새 목록·새 조각으로 갈아 끼운다(이미 게시된 객체는 고치지 않는다)
         self._lists: dict[SparkKey, list[float]] = {}
         self._json: dict[SparkKey, str] = {}
@@ -53,42 +58,53 @@ class SparkBuffer:
 
     def update(self, tick: Tick) -> None:
         bucket = tick.ts // BUCKET_SEC
-        raw = self._raw
+        raw_bucket = self._raw_bucket
+        raw_value = self._raw_value
+        put = self._put
         for row in tick.rows:
+            # 맵의 키는 base 대문자다(009 §3.6) — 틱 행은 이미 대문자지만 단위 계약이라 그대로 맞춘다
             key = (row.dom, row.fx, row.base.upper())
             fwd = row.fwd
-            prev = raw.get(key)
-            # 같은 분·같은 원값 — fwd 는 김프 식이라 −0.0 이 나오지 않으므로 == 가 곧 비트까지 같음이다
-            if prev is not None and prev[0] == bucket and prev[1] == fwd:
+            # 같은 분·같은 원값 — fwd 는 김프 식이라 −0.0 이 나오지 않으므로 == 가 곧 비트까지 같음이다.
+            # 버킷이 같으면 원값도 반드시 기억돼 있다(둘은 늘 함께 쓴다)
+            if raw_bucket.get(key) == bucket and raw_value[key] == fwd:
                 continue
-            raw[key] = (bucket, fwd)
-            self._put(key, bucket, fwd)
+            raw_bucket[key] = bucket
+            raw_value[key] = fwd
+            put(key, bucket, fwd)
 
     def seed(self, rows: Iterable[SparkBucketRow]) -> None:
         """복원 — 버킷 오름차순으로 넣는다(조회 결과 순서에 기대지 않는다). 게시할 목록·조각도 함께 찬다."""
         for r in sorted(rows, key=lambda r: r.bucket_ts):
             key = (r.dom, r.fx, r.base.upper())
             # 복원한 값이 끝자리를 바꿨을 수 있다 — 직전 원값 기억을 지워 다음 틱이 건너뛰지 않게
-            self._raw.pop(key, None)
+            self._raw_bucket.pop(key, None)
+            self._raw_value.pop(key, None)
             self._put(key, r.bucket_ts // BUCKET_SEC, r.fwd)
 
     def _put(self, key: SparkKey, bucket: int, value: float) -> None:
         value = round(value, SPARK_DIGITS)
-        buf = self._buf.get(key)
-        if buf is None:
-            buf = deque(maxlen=SPARK_LEN)
-            self._buf[key] = buf
-        if buf and buf[-1][0] == bucket:
-            buf[-1] = (bucket, value)  # 같은 분 — 마지막 값, 앞부분은 그대로
-            # 게시한 목록은 고치지 않는다 — 사본의 끝값만 바꿔 새 목록으로 건다
+        last = self._last.get(key)
+        if last == bucket:
+            # 같은 분 — 마지막 값만 바뀐다. 게시한 목록은 고치지 않는다 — 사본의 끝값만 바꿔 새 목록으로 건다
             values = self._lists[key].copy()
             values[-1] = value
             head = self._heads[key]
-        elif not buf or buf[-1][0] < bucket:
-            dropped = len(buf) == SPARK_LEN  # 가득 찼으면 붙이는 순간 맨 앞 값이 빠진다
-            buf.append((bucket, value))
-            values = [v for _, v in buf]
-            head = self._next_head(key, buf, dropped)
+        elif last is None or last < bucket:
+            old = self._lists.get(key)
+            if old is None:
+                values = [value]
+                dropped = False
+            elif len(old) == SPARK_LEN:
+                # 가득 찼으면 붙이는 순간 맨 앞 값이 빠진다
+                values = old[1:]
+                values.append(value)
+                dropped = True
+            else:
+                values = old + [value]
+                dropped = False
+            self._last[key] = bucket
+            head = self._next_head(key, values, dropped)
             self._heads[key] = head
         else:
             return  # 이미 지난 버킷의 값은 무시한다 — 틱은 시각 순으로 오므로 정상 경로엔 없다
@@ -100,13 +116,13 @@ class SparkBuffer:
             self._json.pop(key, None)
 
     def _next_head(
-        self, key: SparkKey, buf: deque[tuple[int, float]], dropped: bool
+        self, key: SparkKey, values: list[float], dropped: bool
     ) -> str | None:
         """새 분이 붙은 뒤의 앞부분 — 직전 조각의 끝 ']' 를 ',' 로 바꾸고, 맨 앞 값이 빠졌으면 첫 값을 뗀다."""
         prev = self._json.get(key)
         if prev is None:
-            # 첫 값이거나 직전 조각이 없다(유한하지 않은 값) — 버퍼에서 다시 쓴다
-            before = [v for _, v in buf][:-1]
+            # 첫 값이거나 직전 조각이 없다(유한하지 않은 값) — 새 목록에서 끝값 앞까지를 다시 쓴다
+            before = values[:-1]
             if not all(math.isfinite(v) for v in before):
                 return None
             return "[" + "".join(repr(v) + "," for v in before)
@@ -129,9 +145,14 @@ class SparkBuffer:
         store.set_spark(self.snapshot(), self.fragments())
 
     def _adopt(self, other: "SparkBuffer") -> None:
-        """복원 — 스레드에서 채운 새 버퍼의 상태를 통째로 넘겨받는다(루프에서, 틱 루프 시작 전의 빈 버퍼에)."""
-        self._buf = other._buf
-        self._raw = other._raw
+        """복원 — 스레드에서 채운 새 버퍼의 상태를 통째로 넘겨받는다(루프에서, 틱 루프 시작 전의 빈 버퍼에).
+
+        끝 버킷·직전 원값 둘·목록·조각·앞부분을 빠짐없이 넘긴다 — 하나라도 빠지면 복원 뒤 첫 틱이 원값 기억을
+        못 찾거나(KeyError) 끝 버킷을 몰라 목록을 엉뚱하게 이어 붙인다.
+        """
+        self._last = other._last
+        self._raw_bucket = other._raw_bucket
+        self._raw_value = other._raw_value
         self._lists = other._lists
         self._json = other._json
         self._heads = other._heads

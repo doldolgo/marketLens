@@ -1286,3 +1286,273 @@ async def test_aclose_closes_sockets_concurrently_within_budget(
     assert asyncio.get_running_loop().time() - started < 1.0
     assert [s.close_calls for s in socks] == [1, 1, 1]  # 셋을 동시에 닫는다
     assert store.stream_state("okx").connected is False  # type: ignore[union-attr]
+
+
+# --- 수신 루프 판별 순서·원문 key (§3.2·001 §3.7) — 한 번 훑는 판별이 기준과 같은지 고정한다 ---
+
+
+class _Text(str):
+    """str 하위형 프레임 — 원문 싱크에는 정확히 str 로 넘어가야 한다."""
+
+
+@pytest.mark.parametrize(
+    ("frame", "key", "failures"),
+    [
+        ("{}", None, 1),
+        ("null", None, 1),
+        ('"text"', None, 1),
+        ("﻿" + snapshot(), None, 1),  # BOM 붙은 JSON 은 깨진 프레임
+        ('{"arg":"x","data":[]}', None, 1),  # arg 가 객체가 아니다
+        (
+            '{"event":"unsubscribe","arg":{"channel":"trades","instId":"BTC-USDT"}}',
+            None,
+            0,
+        ),
+        ('{"arg":{"channel":"books5"},"data":[]}', None, 0),  # instId 없음 — 버린다
+        ('{"arg":{"channel":"books5","instId":123},"data":[]}', "orderbook:123", 0),
+        (
+            '{"arg":{"channel":"books5","instId":"BTC-USDT"},"data":[]}',
+            "orderbook:BTC-USDT",
+            1,
+        ),  # 시세 모양인데 data 가 비었다
+        (
+            '{"arg":{"channel":"trades","instId":"BTC-USDT"},"data":null}',
+            "trade:BTC-USDT",
+            1,
+        ),
+        (
+            '{"event":"subscribe","arg":{"channel":"trades","instId":"BTC-USDT"},"data":[]}',
+            "trade:BTC-USDT",
+            0,
+        ),  # 시세 모양이어도 event 가 붙으면 응답 — key 는 남고 무효로 세지 않는다
+    ],
+)
+async def test_each_frame_shape_gets_its_key_and_failure_count(
+    frame: str, key: str | None, failures: int
+) -> None:
+    stream, connector, _, raw, _, store = await build([FakeSocket([frame])])
+    await run_until_exhausted(stream, connector)
+    assert raw.payloads(WS_SOURCE) == [frame]
+    assert raw.keys(WS_SOURCE) == [key]
+    assert stream.decode_failures == failures
+    assert store.get("okx", "BTC") is None
+    state = store.stream_state("okx")
+    assert state is not None and state.last_message_at is None
+
+
+async def test_event_frame_shaped_like_a_quote_is_recorded_with_key_and_leaves_the_row() -> (
+    None
+):
+    """event·arg·data 를 모두 가진 프레임 — 원문은 시세 key 로 남고, 행·수신 시각·무효 수는 그대로다 (§3.2)."""
+    first = snapshot(price=71_000.0, ts=T0)
+    later = json.loads(snapshot(price=50_000.0, ts=T0 + 10))
+    shaped = json.dumps({"event": "subscribe", **later})
+    stream, connector, _, raw, clock, store = await build([FakeSocket([first, shaped])])
+    clock.now = T0 + 1
+    await run_until_exhausted(stream, connector)
+    assert raw.payloads(WS_SOURCE) == [first, shaped]
+    assert raw.keys(WS_SOURCE) == [f"orderbook:{BTC}", f"orderbook:{BTC}"]
+    row = store.get("okx", "BTC")
+    assert row is not None
+    # 첫 스냅샷 그대로 — event 프레임은 행을 바꾸지 않는다
+    assert row.bids[0][0] == 70_990.0
+    assert row.price_timestamp == T0
+    assert stream.decode_failures == 0
+    # 응답이라 거부로 끊지 않는다 — 끊긴 이유는 프레임이 다 떨어진 소켓
+    verdict = stream.judge(T0 + 1)
+    assert verdict is not None and verdict.error is not None
+    assert verdict.error.kind == "network"
+
+
+async def test_error_event_shaped_like_a_quote_is_recorded_then_rejects() -> None:
+    """같은 모양의 event:error — 원문(key 포함)이 먼저 남고 그 뒤에 구독 거부(bad_request)로 끊긴다."""
+    shaped = json.dumps(
+        {
+            "event": "error",
+            "code": "60012",
+            "msg": "Invalid request",
+            **json.loads(snapshot(ts=T0 + 10)),
+        }
+    )
+    stream, connector, _, raw, clock, store = await build(
+        [FakeSocket([snapshot(), shaped])]
+    )
+    clock.now = T0 + 1
+    await run_until_exhausted(stream, connector)
+    assert raw.payloads(WS_SOURCE) == [snapshot(), shaped]
+    assert raw.keys(WS_SOURCE) == [f"orderbook:{BTC}", f"orderbook:{BTC}"]
+    row = store.get("okx", "BTC")
+    assert row is not None and row.price_timestamp == T0
+    verdict = stream.judge(T0 + 1)
+    assert verdict is not None and verdict.error is not None
+    assert verdict.error.kind == "bad_request" and "60012" in verdict.error.message
+    assert connector.urls == [WS_URL, WS_URL]  # 거부 뒤 재연결
+
+
+async def test_bytes_bytearray_and_str_subclass_frames_are_recorded_as_plain_text() -> (
+    None
+):
+    frames: list[Any] = [
+        snapshot().encode(),
+        bytearray(trade().encode()),
+        _Text(snapshot(price=72_000.0, ts=T0 + 5)),
+    ]
+    stream, connector, _, raw, _, store = await build([FakeSocket(frames)])
+    await run_until_exhausted(stream, connector)
+    payloads = raw.payloads(WS_SOURCE)
+    assert payloads == [snapshot(), trade(), snapshot(price=72_000.0, ts=T0 + 5)]
+    assert all(type(p) is str for p in payloads)
+    assert raw.keys(WS_SOURCE) == [
+        f"orderbook:{BTC}",
+        f"trade:{BTC}",
+        f"orderbook:{BTC}",
+    ]
+    row = store.get("okx", "BTC")
+    assert row is not None and row.price == 70_995.5
+    assert row.bids[0][0] == 71_990.0  # str 하위형 스냅샷도 행을 갱신한다
+    assert stream.decode_failures == 0
+
+
+# --- instruments 원문 텍스트·수신 시각 (§3.3·001 §3.7) ---
+
+
+async def test_same_instruments_body_records_the_same_text_every_time() -> None:
+    body = _instruments_bytes([BTC])
+    responses = [
+        httpx.Response(200, content=body),
+        httpx.Response(200, content=body),
+        httpx.Response(503, content=b"down"),
+        httpx.Response(200, content=body),
+    ]
+    store, sink = store_with_universe(set())
+    raw = RawLog()
+    stream = OkxStream(store=store, sink=sink, record=raw)
+    client = _client(lambda r: responses.pop(0))
+    assert await stream.refresh(client) == 1
+    assert await stream.refresh(client) == 1
+    with pytest.raises(ExchangeApiError) as exc_info:
+        await stream.refresh(client)
+    assert exc_info.value.body == "down"
+    assert await stream.refresh(client) == 1
+    text = body.decode("utf-8")
+    assert raw.payloads(REST_SOURCE) == [text, text, "down", text]
+    assert raw.keys(REST_SOURCE) == ["symbols:all"] * 4
+
+
+async def test_charset_change_on_the_same_bytes_is_recorded_as_decoded_but_not_parsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """파싱을 건너뛸지는 바이트만 본다(§3.3). 원문 텍스트는 그 응답의 charset 으로 디코드한 그대로다."""
+    parses = _count_parses(monkeypatch)
+    payload = instruments_body([BTC])
+    payload["msg"] = "정상"  # ASCII 밖 글자 — charset 에 따라 디코드 결과가 달라진다
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    latin = {"content-type": "application/json; charset=latin-1"}
+    responses = [
+        httpx.Response(200, content=body),
+        httpx.Response(200, content=body, headers=latin),
+        httpx.Response(200, content=body),
+    ]
+    store, sink = store_with_universe(set())
+    raw = RawLog()
+    stream = OkxStream(store=store, sink=sink, record=raw)
+    client = _client(lambda r: responses.pop(0))
+    for _ in range(3):
+        assert await stream.refresh(client) == 1
+    assert parses[0] == 1  # 바이트가 같으니 charset 이 바뀌어도 다시 파싱하지 않는다
+    assert stream.bases() == {"BTC"}
+    assert raw.payloads(REST_SOURCE) == [
+        body.decode("utf-8"),
+        body.decode("latin-1"),
+        body.decode("utf-8"),
+    ]
+
+
+async def test_instruments_receive_time_is_read_before_the_body_is_decoded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """원문 싱크는 수신 시각으로 분 창을 고른다 — 시각은 응답을 받은 직후, 본문 디코드보다 먼저 읽는다."""
+    order: list[str] = []
+    real_text = httpx.Response.text
+
+    def text(self: httpx.Response) -> str:
+        order.append("text")
+        return real_text.fget(self)  # type: ignore[attr-defined, no-any-return]
+
+    monkeypatch.setattr(httpx.Response, "text", property(text))
+
+    def clock() -> int:
+        order.append("clock")
+        return T0
+
+    store, sink = store_with_universe(set())
+    raw = RawLog()
+    stream = OkxStream(store=store, sink=sink, record=raw, clock=clock)
+    body = _instruments_bytes([BTC])
+    for _ in range(2):  # 맵을 만드는 회차와 같은 본문 회차
+        order.clear()
+        await stream.refresh(_client(lambda r: httpx.Response(200, content=body)))
+        assert order[0] == "clock"
+    assert [e[2] for e in raw.entries] == [T0, T0]
+
+
+# --- 우주 확정 무동작 (§3.3) — 같은 입력이면 비교 한 번으로 돌아가되 바뀐 입력은 놓치지 않는다 ---
+
+
+async def test_same_list_in_a_new_body_sends_nothing_but_a_shrunk_list_reassigns() -> (
+    None
+):
+    a, c = symbols_for(BTC_SHARD, 2)
+    sock = GatedSocket()
+    stream, _, _, _, _, store = await build([sock], symbols=[a, c])
+    stream.start()
+    await until(sock.subscribed)
+    sock.push(snapshot(a))
+    await until(sock.delivered)
+    before = len(sock.sent)
+    assert sent_ops(sock, "subscribe") == [args_of(a) + args_of(c)]
+    # 바이트만 다르고(맵 밖 행 하나 더) 맵 내용은 같은 목록 — 맵은 새 객체가 되지만 배정은 같다
+    extra = [
+        {"instId": "ZZZ-BTC", "baseCcy": "ZZZ", "quoteCcy": "BTC", "state": "live"}
+    ]
+    await stream.refresh(
+        _client(lambda r: httpx.Response(200, json=instruments_body([a, c], extra)))
+    )
+    stream.set_universe({base_of(a), base_of(c)})
+    await asyncio.sleep(0.01)
+    assert len(sock.sent) == before
+    assert store.get("okx", base_of(a)) is not None
+    # c 가 목록에서 빠진 회차 — 우주가 같아도 맵이 바뀌었으니 다시 배정하고 해지를 보낸다
+    await stream.refresh(
+        _client(lambda r: httpx.Response(200, json=instruments_body([a])))
+    )
+    stream.set_universe({base_of(a), base_of(c)})
+    await asyncio.sleep(0.01)
+    new = [json.loads(s) for s in sock.sent[before:]]
+    assert [(m["op"], m["args"]) for m in new] == [("unsubscribe", args_of(c))]
+    await stream.aclose()
+
+
+async def test_universe_set_changed_in_place_and_passed_again_is_applied() -> None:
+    a, c = symbols_for(BTC_SHARD, 2)
+    sock = GatedSocket()
+    stream, _, _, _, _, _ = await build([sock], symbols=[a, c], universe={base_of(a)})
+    stream.start()
+    await until(sock.subscribed)
+    await asyncio.sleep(0.01)
+    before = len(sock.sent)
+    universe = {base_of(a), base_of(c)}
+    stream.set_universe(universe)  # c 가 들어온다
+    await asyncio.sleep(0.01)
+    universe.discard(base_of(c))  # 호출한 쪽이 같은 집합 객체를 고쳐 다시 넘긴다
+    stream.set_universe(universe)
+    await asyncio.sleep(0.01)
+    new = [json.loads(s) for s in sock.sent[before:]]
+    assert [(m["op"], m["args"]) for m in new] == [
+        ("subscribe", args_of(c)),
+        ("unsubscribe", args_of(c)),
+    ]
+    stream.set_universe({b.lower() for b in universe})  # 대소문자만 다른 같은 우주
+    await asyncio.sleep(0.01)
+    assert len(sock.sent) == before + 2
+    await stream.aclose()

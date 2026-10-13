@@ -75,6 +75,9 @@ class WalletStatusService:
         self._record = record
         self._last_at: float | None = None
         self._states: dict[str, _ExchangeState] = {}
+        # 조회 결과 세대 — _states 를 바꿀 때마다(성공·실패 모두) 1 오른다. 틱 루프는 이 값이 바뀐 틱에만 캐시를
+        # 전 행에 반영하고 그 사이에는 새로 생긴 행에만 반영한다(001 §3.6-1, contracts.WalletStatusProvider)
+        self.generation = 0
 
     # --- 틱 루프(core.ticks)가 부르는 계약(core.contracts.WalletStatusProvider) ---
 
@@ -186,7 +189,11 @@ class WalletStatusService:
     async def _fetch_one(
         self, exchange: str, coro: Awaitable[dict[str, CoinStatus]]
     ) -> int:
-        """조회 1건 — 성공·실패를 상태로 바꾸고 나간 호출 수를 돌려준다."""
+        """조회 1건 — 성공·실패를 상태로 바꾸고 나간 호출 수를 돌려준다.
+
+        세대(`generation`)는 상태를 대입한 바로 뒤, 같은 동기 구간에서 올린다. await 앞에서 올리면 응답을 기다리는
+        사이 틱이 그 세대를 기억해 버려, 뒤이어 상태가 바뀌어도 행이 다음 조회 회차(≈60초)까지 낡은 값으로 남는다.
+        """
         try:
             statuses = await coro
         except WalletStatusError as exc:
@@ -194,6 +201,7 @@ class WalletStatusService:
             self._states[exchange] = _ExchangeState(
                 available=False, message=exc.message
             )
+            self.generation += 1
             return exc.calls
         except Exception as exc:
             # 조회기 버그도 그 거래소만 unknown 으로 — 시세 수집은 무관해야 한다
@@ -201,6 +209,8 @@ class WalletStatusService:
             self._states[exchange] = _ExchangeState(
                 available=False, message=f"{type(exc).__name__}: {exc}"
             )
+            self.generation += 1
             return 1
         self._states[exchange] = _ExchangeState(available=True, statuses=statuses)
+        self.generation += 1
         return 1

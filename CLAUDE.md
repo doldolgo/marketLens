@@ -103,7 +103,7 @@ marketlens/
 | 016 | process-split | DONE | 서버 `ROLE`(collector | api) — Influx 조회(`/history/premium`·`streaks`·`streaks/bulk`·`candles`, 018 부터 `/spreads` 도)를 별도 컨테이너 `api` 에서, nginx 경로 분기, compose 5컨테이너 (BE·인프라) |
 | 017 | spreads-push | DONE | 스프레드 표 WebSocket 푸시 — 수집이 매 틱 $1,000 표를 만들어 Redis 채널로(2026-09-26 부터 접속자와 무관), `api` 가 구독해 바뀐 행만 `/ws/spreads` 로 접속자 전원에 같은 바이트, FE 폴링 대체(fallback 폴링 없음), 체결 규모 $1,000 고정 |
 | 018 | spreads-serve | DONE | `GET /spreads` 를 `api` 가 Redis `spreads:latest` 로 답하고 nginx `/api/spreads` 를 `api` 로 — 스프레드 탭이 보는 컨테이너는 api 하나, `notional` 쿼리 삭제, 요청마다 `spreads:want` 갱신 (BE·인프라) |
-| 019 | bybit | DONE | 바이빗 USDT 현물 추가 — WS 3샤드 orderbook.200(스냅샷+델타, 행 발행 500ms 제한)+publicTrade, instruments-info 매초, 입출금(HMAC), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗), `/history/*` `fx=bybit`, web 표시명·기록 탭 Bybit 실데이터 |
+| 019 | bybit | DONE | 바이빗 USDT 현물 추가 — WS 3샤드 orderbook.200(스냅샷+델타, 행 발행은 저장소 읽기 직전)+publicTrade, instruments-info 매초, 입출금(HMAC), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗), `/history/*` `fx=bybit`, web 표시명·기록 탭 Bybit 실데이터 |
 | 020 | bitget | DONE | 비트겟 USDT 현물 추가 — WS 3샤드 books15(스냅샷)+trade, symbols 매초, 입출금(public·키 없음), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟), `/history/*` `fx=bitget`, web 표시명·기록 탭 Bitget 실데이터 |
 | 021 | infra-split | DONE | EC2 3대 분리 — compose profile 3개(collect=server c7g.medium / data=redis·influxdb t4g.small / serve=api·web t4g.micro), 박스 간 사설 IP(루트 .env DATA_HOST·COLLECT_HOST), nginx 업스트림 주입, 배포 3타깃(data→collect→serve), 런북 ec2-split.md (인프라) |
 | 022 | landing | DONE | 정적 HTML 랜딩 `/` — 실시간 경로 카드·7일 사건·김프 뜻·계산 방법·질문과 답, 요약 API `GET /landing`(api), 대시보드는 `/app/`. 검색 구성(검색어 제목·설명·h1, JSON-LD, data-nosnippet, 자체 서브셋 글꼴, 아이콘, robots·sitemap, 대시보드 noindex, 404, www 301) |

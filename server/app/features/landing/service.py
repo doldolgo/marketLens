@@ -80,10 +80,49 @@ class LandingReader(Protocol):
     ) -> EventSummary: ...
 
 
+# 표 글자에서 행의 spark 목록을 찾는 두 표식 — 017 게시기는 공백 없이(`separators=(",", ":")`) 행 키를 003 순서로
+# 적으므로 spark 는 `,"spark":[…]` 로 시작해 바로 다음 키 status 앞의 `],"status":` 에서 끝난다
+_SPARK_HEAD = ',"spark":['
+_SPARK_TAIL = '],"status":'
+
+
+def _strip_spark(text: str) -> str:
+    """표 글자에서 행마다 `,"spark":[…]` 를 걷어 낸 글자 — live 는 spark 를 읽지 않는다.
+
+    표 글자의 약 40% 가 spark 부동소수(행 1,800여 개 × 30개)라 그만큼 파싱을 던다. 걷어 낸 글자를 파싱하면
+    spark 키만 빠질 뿐 나머지 값은 원문을 파싱한 것과 같다 — JSON 문자열 안에서는 따옴표가 `\\"` 로 적혀
+    두 표식이 문자열 안에 생길 수 없고, 목록 안에 `[` 가 없으면서 첫 `]` 바로 뒤가 `,"status":` 이면 그 `]` 가
+    목록의 끝이다. 한 행이라도 모양이 다르면(spark 가 행 끝·다음 키가 status 가 아님·목록 안에 `[`) 원문을 그대로
+    돌려줘 전체를 파싱한다 — 다음 행의 status 까지 건너뛰면 두 행이 한 행으로 합쳐져 아무 신호 없이 틀리기
+    때문이다. 걷어 낸 목록 안의 글자는 검사하지 않는다(spark 목록 안에서만 JSON 이 깨진 글자도 파싱된다) —
+    게시기가 `json.dumps` 로 적으므로 그런 표는 생기지 않는다.
+    """
+    find = text.find
+    parts: list[str] = []
+    pos = 0
+    while True:
+        i = find(_SPARK_HEAD, pos)
+        if i < 0:
+            if not parts:
+                return text  # spark 가 없는 표(빈 표·다른 모양) — 사본을 만들지 않는다
+            parts.append(text[pos:])
+            return "".join(parts)
+        start = i + len(_SPARK_HEAD)
+        end = find("]", start)
+        if (
+            end < 0
+            or not text.startswith(_SPARK_TAIL, end)
+            or find("[", start, end) >= 0
+        ):
+            return text
+        parts.append(text[pos:i])
+        pos = end + 1  # `]` 다음의 `,"status":` 부터 이어 붙인다
+
+
 def build_live(text: str) -> LiveOut | None:
     """`spreads:latest` 본문 → live. JSON 이 아니거나 `rows` 가 배열이 아니면 None."""
     try:
-        table = json.loads(text)
+        table = json.loads(_strip_spark(text))
     except ValueError:
         return None
     if not isinstance(table, dict) or not isinstance(table.get("rows"), list):

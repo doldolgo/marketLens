@@ -83,6 +83,8 @@ class BitgetPerpStream:
             str, int | None
         ] = {}  # 심볼 → 주기(시간) — 다음 정산 계산용
         self._wanted: set[str] = set()
+        # 직전 set_universe 가 끝까지 반영한 (심볼 맵 객체, 우주 사본) — 같은 맵·같은 우주면 desired 계산부터 건너뛴다 (§3.7)
+        self._applied: tuple[dict[str, str], frozenset[str]] | None = None
         self._task: asyncio.Task[None] | None = None
         self._muted: dict[str, tuple[int, int]] = {}
         self.decode_failures = 0
@@ -186,18 +188,37 @@ class BitgetPerpStream:
         return set(self._symbol_of)
 
     def set_universe(self, bases: set[str]) -> None:
-        """perp 우주 확정 → 반영 대상 심볼 교체. 빠진 심볼의 행은 그 자리에서 지운다. 같으면 무동작 (§3.7)."""
+        """perp 우주 확정 → 반영 대상 심볼 교체. 빠진 심볼의 행은 그 자리에서 지운다. 같으면 무동작 (§3.7).
+
+        심볼 맵이 직전 호출 때와 같은 객체이고 우주도 같으면 desired 를 다시 만들지 않고 바로 돌아온다 — 매초 불리는데
+        목록은 하루 몇 번만 바뀐다. 건너뛰어도 결과가 같은 근거: 맵은 refresh 가 새 본문을 파싱할 때만 새 객체로 바뀌고
+        제자리에서 고치지 않으며(base_of 도 같은 자리에서 함께 바뀐다), `_wanted`·subscribed 는 이 함수만 쓴다.
+        그래서 같은 맵·같은 우주로 다시 계산하면 `desired == _wanted` 로 무동작이다. 심볼만 바뀌고 base 집합은 같은
+        목록(PEPEUSDT → 1000PEPEUSDT)도 맵이 새 객체라 다시 계산한다.
+        """
+        applied = self._applied
+        if (
+            applied is not None
+            and applied[0] is self._symbol_of
+            and applied[1] == bases
+        ):
+            return
+        # 반영 도중 예외로 끝나면 다음 호출이 같은 우주라도 다시 계산하게 기억을 먼저 지운다
+        self._applied = None
         desired = {
             self._symbol_of[b]
             for b in (x.upper() for x in bases)
             if b in self._symbol_of
         }
         if desired == self._wanted:
+            # 바뀐 것이 없는 출구에서도 기억한다 — 안 그러면 가드가 영영 걸리지 않는다. 사본으로 든다(부른 쪽이 고쳐도 안 흔들리게)
+            self._applied = (self._symbol_of, frozenset(bases))
             return
         for symbol in self._wanted - desired:
             self._store.remove_perp_row(self.id, self._base_of.get(symbol, symbol))
         self._wanted = desired
         self._state.subscribed = len(desired)
+        self._applied = (self._symbol_of, frozenset(bases))
 
     # --- 판정 (§3.8) ---
 

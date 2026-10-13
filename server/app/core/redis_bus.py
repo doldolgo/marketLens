@@ -5,12 +5,15 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
 — 그래서 클래스를 나눴다. 명령 자동 재시도는 009 와 같이 끈다 — 실패는 호출자가 처리한다.
 
 채널·키 (db.md Redis 절):
-- 채널 `spreads`        — 표 JSON, 실시간(수집 → api)
+- 채널 `spreads`        — 표 JSON, 실시간(수집 → api). 구독자가 있을 때만 PUBLISH 한다(`PUBSUB NUMSUB`, 2026-10-13)
 - 키 `spreads:latest`   — 같은 JSON, TTL 10초. 늦게 붙은 구독자의 첫 표. 수집이 멈추면 사라진다
 - 채널 `gap`·키 `gap:latest` — 현선갭 표(048 §3.3), 같은 규칙. 채널·키 이름은 표 id 하나에서 나온다(`<id>`·`<id>:latest`) —
   게시·구독·첫 표 읽기는 표 id 를 인자로 받고 기본값이 spreads 라 017 의 호출은 그대로다
 - 키 `spreads:want`     — 값 "1", TTL 15초. api 가 접속자가 있는 동안 5초마다(+ `GET /spreads` 요청마다, 018) 쓴다.
   읽는 쪽은 없다 — 수집은 2026-09-26 부터 접속자와 무관하게 매 틱 표를 만든다 (017 §3.1)
+- 키 `gap:want`         — 같은 모양(값 "1", TTL 15초). api 의 gap 허브가 접속자가 있는 동안 5초마다(첫 접속 때 곧바로) 쓰고,
+  수집의 gap 게시기가 0.5초마다 읽어 **키가 있을 때만** 표를 만들어 게시한다 (048 §3.3) — 아무도 안 보는 동안
+  표 1장(약 3,400행·760KB)을 매초 두 번(PUBLISH·SET) 보내지 않게
 - 키 `collect:heartbeat` — 틱 시각(ms) 문자열, TTL 30초. 수집이 매 틱 쓰고 api 의 `/health` 가 읽는다 (025)
 - 키 `premium_events:open` — 열린 사건 전체의 JSON 사본, TTL 600초. 수집의 사건 쓰기 태스크가 60초 갱신 회차·닫힘 점을
   쓴 회차·종료 때 쓰고 수집 자신이 기동 복원 때 읽는다 (013 §3.3)
@@ -39,7 +42,7 @@ from app.core.redis_stream import CONNECT_TIMEOUT_SEC, SOCKET_TIMEOUT_SEC
 CHANNEL = "spreads"
 LATEST_KEY = "spreads:latest"
 GAP_CHANNEL = "gap"  # 048 — 현선갭 표. 키는 latest_key(GAP_CHANNEL)
-WANT_KEY = "spreads:want"
+WANT_KEY = "spreads:want"  # = want_key(CHANNEL)
 LATEST_TTL_SEC = 10
 WANT_TTL_SEC = 15
 HEARTBEAT_KEY = "collect:heartbeat"
@@ -64,6 +67,11 @@ FLOW_HOT_WALLETS_KEY = "flow:eth:hot_wallets"
 FLOW_INTERNAL_KEY = "flow:eth:internal"
 # 052 — 화면 영역 이용 통계 하루 합계 해시 `attn:d:<YYYYMMDD>`(KST 날짜)
 ATTENTION_PREFIX = "attn:d:"
+
+
+def want_key(table: str) -> str:
+    """표 id → 보는 사람 흔적 키 `<id>:want` (017 §3.2·048 §3.3)."""
+    return f"{table}:want"
 
 
 def latest_key(table: str) -> str:
@@ -118,18 +126,32 @@ class RedisBus:
 
     # --- 수집 프로세스 쪽 (§3.1) ---
 
-    async def publish_table(self, data: str, table: str = CHANNEL) -> None:
-        """`PUBLISH <id>` + `SET <id>:latest EX 10` 을 한 왕복으로. 실패는 예외. 기본은 spreads, 048 은 `gap`."""
+    async def publish_table(self, data: str, table: str = CHANNEL) -> int:
+        """`SET <id>:latest EX 10` 은 매번, `PUBLISH <id>` 는 그 채널에 구독자가 있을 때만 — 받은 구독자 수를 돌려준다.
+
+        한 왕복에 SET 과 `PUBSUB NUMSUB <id>` 를 보내고 구독자가 있으면 이어서 PUBLISH 한다(017 §3.1, 2026-10-13). api 의
+        허브는 접속자가 있는 동안만 채널을 구독하므로, 아무도 안 보는 동안 표 1장(spreads 약 0.7MB)을 매초 채널로 한 번 더
+        보내지 않는다 — collect → data 송신이 그만큼 준다. 구독이 막 열려 이 회차를 놓친 허브는 다음 회차부터 받는다:
+        허브의 첫 표는 `<id>:latest` 이고 놓친 표는 다음 delta 가 직전 인덱스와 비교하므로 표가 어긋나지 않는다(§3.2).
+        실패는 예외. 기본은 spreads, 048 은 `gap`.
+        """
         async with self._client.pipeline(transaction=False) as pipe:
-            pipe.publish(table, data)
             pipe.set(latest_key(table), data, ex=LATEST_TTL_SEC)
-            await pipe.execute()
+            pipe.pubsub_numsub(table)
+            _, numsub = await pipe.execute()
+        if not numsub or not int(numsub[0][1]):
+            return 0
+        return int(await self._client.publish(table, data))
 
     # --- 서빙 프로세스 쪽 (§3.2) ---
 
-    async def want(self) -> None:
-        """`SET spreads:want 1 EX 15` — 접속자가 있는 동안 5초마다. 실패는 예외."""
-        await self._client.set(WANT_KEY, "1", ex=WANT_TTL_SEC)
+    async def want(self, table: str = CHANNEL) -> None:
+        """`SET <id>:want 1 EX 15` — 그 표의 허브에 접속자가 있는 동안 5초마다. 실패는 예외. 기본은 spreads."""
+        await self._client.set(want_key(table), "1", ex=WANT_TTL_SEC)
+
+    async def wanted(self, table: str) -> bool:
+        """`EXISTS <id>:want` — 그 표를 보는 사람이 있는가(수집 쪽, 048 §3.3). 실패는 예외."""
+        return bool(await self._client.exists(want_key(table)))
 
     async def latest(self, table: str = CHANNEL) -> str | None:
         """`GET <id>:latest` — 없으면 None(키 만료 = 수집이 표를 안 만들거나 멈춤). 실패는 예외."""

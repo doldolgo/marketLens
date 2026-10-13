@@ -90,10 +90,24 @@ export function useSpreadSocket(feed: Feed): void {
     let silenceTimer: ReturnType<typeof setTimeout> | null = null
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
+    // 숨은 브라우저 탭은 표를 병합만 하고 그리지 않는다 — 연결·병합은 그대로(delta 는 바뀐 행만 오므로 하나라도 빠지면 표가
+    // 틀어진다), 셸·표 다시 그리기만 다시 보이는 순간 한 번으로 모은다. feed.replace 는 미루지 않는다 — 미루면 셸 tick 이 옛 배열의
+    // age 를 키우고 새 delta 로 바뀐 행 객체는 키우지 않아, 숨은 동안 delta 가 끊겼을 때 다시 보인 직후 stale 판정이 틀어진다
+    let unpainted = false
     function apply(rate: number): void {
       feed.replace(table.rows(), rate)
+      if (document.hidden) {
+        unpainted = true
+        return
+      }
       bump()
     }
+    const onVisible = () => {
+      if (document.hidden || !unpainted) return
+      unpainted = false
+      bump()
+    }
+    document.addEventListener('visibilitychange', onVisible)
 
     function applyTable(res: SpreadsResponse): void {
       hasTable = true
@@ -165,6 +179,7 @@ export function useSpreadSocket(feed: Feed): void {
     connect()
     return () => {
       alive = false
+      document.removeEventListener('visibilitychange', onVisible)
       if (silenceTimer !== null) clearTimeout(silenceTimer)
       if (reconnectTimer !== null) clearTimeout(reconnectTimer)
       ws?.close()

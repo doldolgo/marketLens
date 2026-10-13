@@ -3,7 +3,7 @@
 기록 함수는 001 의 core 계약 `record(exchange, source, received_at_ms, payload, key)`(동기·무예외)을
 구현한다. 받은 문자열을 그 거래소의 UTC 분 창 버퍼에 참조로만 붙이는 메모리 작업뿐이라 수신 경로를 막지 않는다.
 `key` 가 있는 원문(시세 프레임)은 창 안에서 `(source, key)` 마다 마지막 1건만 남기고, 없는 원문은 전량 남긴다.
-닫기 회차(태스크, 매초)가 지난 창을 닫고, 스레드에서 살아남은 원문만 줄로 조립(유효성 검사 포함)해 gzip 한 뒤
+닫기 회차(태스크, 매초)가 지난 창을 닫고, 스레드에서 살아남은 원문만 정렬·줄 조립(유효성 검사 포함)해 gzip 한 뒤
 대기열에 넣는다. 업로드 워커(데몬 스레드 하나)가 대기열 머리부터 S3 에 올린다 — 둘은 잠금으로만 만나고
 닫기 주기는 업로드 결과와 무관하다.
 어떤 실패도 수집·/spreads·Redis·Influx 경로에 번지지 않는다. S3 를 읽는 코드는 없다.
@@ -52,10 +52,43 @@ def _reject_constant(name: str) -> None:
     raise ValueError(f"non-standard JSON constant {name}")
 
 
+def _drop_object(_pairs: list[tuple[str, object]]) -> None:
+    """`object_pairs_hook` — 객체를 만들지 않고 버린다. 검사에는 파싱 성공 여부만 필요하다."""
+    return None
+
+
 def _is_verbatim_json(payload: str) -> bool:
-    """원문을 그대로 이어 붙여도 되는가 — 표준 JSON 이고 최상위가 객체·배열이며 줄바꿈이 없다."""
+    """원문을 그대로 이어 붙여도 되는가 — 표준 JSON 이고 최상위가 객체·배열이며 줄바꿈이 없다.
+
+    분마다 살아남는 원문의 대부분(바이트 기준)은 목록 REST 본문(바이낸스 exchangeInfo 2.5MB 등)이다.
+    훅 없이 파싱하면 본문마다 dict 수만 개를 만들었다 버리고(2.5MB 한 건에 메모리 최고 8MB, 세대0 수집 여러 번),
+    그 C 호출 한 번(Mac 에서 11~14ms) 동안 GIL 을 놓지 않아 닫기 스레드가 도는 사이 이벤트 루프가 그만큼 멈춘다.
+    `object_pairs_hook` 으로 객체마다 None 을 돌려주면 트리가 남지 않고(같은 본문 0.02MB), 훅이 파이썬 함수라
+    긴 파싱 도중에도 GIL 을 넘길 지점이 생긴다 — 루프가 기다리는 최장 시간이 C 호출 길이에서 전환 간격(5ms)
+    수준으로 준다(캡처 60초 재생, Mac 실측: 메인 스레드가 GIL 을 못 받은 최장 간격 14.8→6.4ms,
+    asyncio 1ms 타이머 늦음 최대 약 20→15ms). 검사 CPU 도 분당 약 11% 준다.
+    숫자 변환·문자열 디코드·비표준 상수 거부는 같은 스캐너가 그대로 하므로 판정은 바뀌지 않는다.
+    """
     if "\n" in payload or "\r" in payload:
         return False
+    try:
+        json.loads(
+            payload, parse_constant=_reject_constant, object_pairs_hook=_drop_object
+        )
+    except ValueError:
+        return False
+    except RecursionError:
+        # 훅 호출이 C 재귀 한도 바로 앞에서 한 단을 더 써서, 객체가 한도 직전 깊이(약 1만 단)로 중첩된 원문은
+        # 훅 쪽만 RecursionError 를 낸다. 훅 없는 판정으로 다시 봐서 어느 깊이에서든 기준과 같게 한다
+        # (거기서도 RecursionError 면 지금처럼 밖으로 나가 그 줄만 버린다). 거래소 원문에는 없는 병적인 입력이다.
+        return _is_verbatim_json_tree(payload)
+    # 파싱이 성공했으면 최상위 값의 종류는 첫 글자로 정해진다. 앞에서 줄바꿈을 걸렀으므로 앞에 올 수 있는
+    # JSON 공백은 공백·탭뿐이다 — 앞 공백이 없으면 lstrip 은 같은 객체를 돌려줘 복사도 없다.
+    return payload.lstrip(" \t")[:1] in ("{", "[")
+
+
+def _is_verbatim_json_tree(payload: str) -> bool:
+    """훅 없이 값 트리를 만들어 보는 판정 — `_is_verbatim_json` 이 RecursionError 를 만났을 때만 쓴다."""
     try:
         value = json.loads(payload, parse_constant=_reject_constant)
     except ValueError:
@@ -90,18 +123,12 @@ def pack(lines: list[bytes]) -> bytes:
 # --- 분 창 버퍼와 닫힌 객체 (§3.5) ---
 
 
-@dataclass(slots=True)
-class _Entry:
-    """받은 원문의 참조 — 줄은 창을 닫을 때 살아남은 것만 조립한다 (§3.5).
-
-    시세 프레임은 분당 (source, key) 마지막 1건만 남으므로 기록마다 줄을 만들면 99% 이상을 버린다.
-    frozen 을 쓰지 않는 것은 수신 경로에서 프레임마다 만들어지기 때문이다(생성 비용이 절반).
-    """
-
-    received_at_ms: int
-    seq: int  # 기록 순 — receivedAt 이 같을 때의 순서
-    source: str
-    payload: str
+# 받은 원문의 참조 = (receivedAt, seq, source, payload) — 줄은 창을 닫을 때 살아남은 것만 조립한다 (§3.5).
+# 시세 프레임은 분당 (source, key) 마지막 1건만 남으므로 기록마다 줄을 만들면 99% 이상을 버린다.
+# 클래스(slots 데이터클래스)가 아니라 튜플인 것은 수신 경로에서 프레임마다(초당 수천 번) 만들어지기 때문이다 —
+# 파이썬 __init__ 호출이 없어 기록 1회가 약 90~130ns 짧다(캡처 60초 재생, Mac 실측). seq 는 기록 순번이라
+# receivedAt 이 같을 때의 순서를 정하고, 아카이브 안에서 유일하다.
+_Entry = tuple[int, int, str, str]
 
 
 @dataclass
@@ -115,33 +142,39 @@ class _Buffer:
         return len(self.keyed) + len(self.plain)
 
     def entries(self) -> list[_Entry]:
-        """줄 순서 = receivedAt 오름차순, 같으면 기록 순 (§3.5)."""
-        return sorted(
-            [*self.keyed.values(), *self.plain], key=lambda e: (e.received_at_ms, e.seq)
-        )
+        """줄 순서 = receivedAt 오름차순, 같으면 기록 순 (§3.5).
+
+        튜플 그대로 정렬한다 — 앞 두 칸이 (receivedAt, seq) 이고 seq 가 유일해 비교가 source·payload 까지
+        가지 않으므로 key 함수를 쓴 정렬과 순서가 같다. 닫힌 버퍼를 스레드에서 조립할 때 부른다.
+        """
+        return sorted([*self.keyed.values(), *self.plain])
 
 
 @dataclass(frozen=True)
 class _Closed:
-    """닫혔지만 아직 줄 조립·gzip 전인 버퍼 — 둘 다 스레드에서 한다."""
+    """닫혔지만 아직 정렬·줄 조립·gzip 전인 버퍼 — 셋 다 스레드에서 한다.
+
+    버퍼는 `_buffers`·`_open` 에서 이미 떼어 냈으므로 더는 기록이 붙지 않는다 — 스레드가 잠금 없이 읽어도 된다.
+    """
 
     exchange: str
     key: str
-    entries: list[_Entry]
+    buf: _Buffer
 
 
 def _format_entries(exchange: str, entries: list[_Entry]) -> list[bytes]:
     """살아남은 원문을 순서대로 줄로 — 한 줄의 실패는 그 줄만 버리고 로그, 객체는 나머지로 만든다."""
     lines: list[bytes] = []
-    for e in entries:
+    # format_line 은 부를 때마다 모듈 전역에서 찾는다 — 테스트가 바꿔치기해 조립 횟수·실패를 본다
+    for received_at_ms, _seq, source, payload in entries:
         try:
-            lines.append(format_line(exchange, e.source, e.received_at_ms, e.payload))
+            lines.append(format_line(exchange, source, received_at_ms, payload))
         except Exception:
             logger.exception(
                 "원문 줄 조립 실패 — 이 줄은 버린다 %s %s receivedAt=%d",
                 exchange,
-                e.source,
-                e.received_at_ms,
+                source,
+                received_at_ms,
             )
     return lines
 
@@ -173,6 +206,10 @@ class RawArchive:
         self._retry_interval_sec = retry_interval_sec
         # 버퍼는 이벤트 루프 스레드만 만진다 — 기록 함수와 닫기 회차. 키 = (거래소, 창 번호).
         self._buffers: dict[tuple[str, int], _Buffer] = {}
+        # 거래소마다 마지막으로 기록한 (창 번호, 버퍼) — 평상시 거래소당 열린 창은 하나라, 같은 창이면
+        # (거래소, 창) 튜플 키를 만들어 `_buffers` 를 찾는 일을 건너뛴다. 닫기 회차가 버퍼를 떼어 낼 때
+        # 그 버퍼를 가리키는 칸도 지운다(`_forget`) — 남겨 두면 늦게 온 원문이 닫힌 버퍼에 붙어 사라진다.
+        self._open: dict[str, tuple[int, _Buffer]] = {}
         self._seq = 0
         # 거래소를 합쳐 닫힌 순서 하나의 FIFO. 넣기·상한 버림(닫기 회차)과 머리 빼기(워커)는
         # 전부 `_changed`(잠금 + 조건변수) 아래에서만 한다 (§3.6).
@@ -200,19 +237,28 @@ class RawArchive:
         `key` 가 있으면 창 안의 같은 (source, key) 원문을 이것으로 바꾼다(표본화 — §3.5).
         줄 조립(JSON 유효성 검사·머리 직렬화)은 여기서 하지 않는다 — 커넥터가 이미 파싱한 프레임을
         수신 경로에서 다시 파싱하지 않고, 닫을 때 살아남은 원문에만 한다.
+
+        이벤트 루프 스레드에서만 부른다(커넥터·입출금 조회기가 전부 코루틴이다). 닫힌 버퍼를 스레드가 잠금 없이
+        읽어도 되는 근거가 이것이다 — 다른 스레드에서 부르면 닫기 회차가 떼어 낸 버퍼에 원문이 붙을 수 있고,
+        스레드가 그 버퍼를 정렬하던 중이면 dict 크기가 바뀌어 객체 하나를 통째로 잃는다.
         """
         try:
             window = received_at_ms // WINDOW_MS
-            buf = self._buffers.get((exchange, window))
-            if buf is None:
-                buf = _Buffer()
-                self._buffers[exchange, window] = buf
-            self._seq += 1
-            entry = _Entry(received_at_ms, self._seq, source, payload)
-            if key is None:
-                buf.plain.append(entry)
+            opened = self._open.get(exchange)
+            if opened is not None and opened[0] == window:
+                buf = opened[1]
             else:
-                buf.keyed[source, key] = entry
+                # 거래소의 첫 기록·분이 바뀐 첫 기록·시계 역행 — 지금까지처럼 (거래소, 창) 버퍼를 찾거나 만든다
+                buf = self._buffers.get((exchange, window))
+                if buf is None:
+                    buf = _Buffer()
+                    self._buffers[exchange, window] = buf
+                self._open[exchange] = (window, buf)
+            self._seq = seq = self._seq + 1
+            if key is None:
+                buf.plain.append((received_at_ms, seq, source, payload))
+            else:
+                buf.keyed[source, key] = (received_at_ms, seq, source, payload)
         except Exception:
             logger.exception(
                 "원문 기록 중 예외 — 이 원문은 버린다 %s %s", exchange, source
@@ -270,30 +316,43 @@ class RawArchive:
             logger.exception(
                 "원문 닫기 회차 예외 — 닫힌 객체 %d개(%d줄)를 잃는다, 다음 회차를 이어간다",
                 len(closed),
-                sum(len(item.entries) for item in closed),
+                sum(len(item.buf) for item in closed),
             )
         return len(closed)
 
     def _close_due(self, now_ms: int, *, force: bool) -> list[_Closed]:
-        """지금 시각의 창보다 앞선 창(force 면 전부)을 닫는다 — 닫힌 순서 = 거래소별 창 번호 순."""
+        """지금 시각의 창보다 앞선 창(force 면 전부)을 닫는다 — 닫힌 순서 = 거래소별 창 번호 순.
+
+        루프에서는 버퍼를 떼어 내기만 하고, 줄 순서 정렬은 조립과 함께 스레드에서 한다 — 분 경계 회차의
+        루프 몫이 약 1.2ms 에서 0.1ms 로 준다(캡처 60초 재생, Mac 실측). 정렬 CPU 는 스레드로 옮겨질 뿐이다.
+        """
         current = now_ms // WINDOW_MS
         closed: list[_Closed] = []
         for (exchange, window), buf in sorted(self._buffers.items()):
             if not len(buf):
                 del self._buffers[exchange, window]
+                self._forget(exchange, buf)
                 continue
             if force or window < current:
                 del self._buffers[exchange, window]
-                closed.append(
-                    _Closed(exchange, object_key(exchange, window), buf.entries())
-                )
+                self._forget(exchange, buf)
+                closed.append(_Closed(exchange, object_key(exchange, window), buf))
         return closed
 
+    def _forget(self, exchange: str, buf: _Buffer) -> None:
+        """떼어 낸 버퍼를 열린 창 기억에서도 지운다 — 그 창에 늦게 온 원문은 새 버퍼로 가서 다음 회차에 올라간다.
+
+        기억이 다른(더 새) 버퍼를 가리키면 그대로 둔다 — 다음 분 창이 이미 열린 거래소의 앞 창을 닫는 평상시 경우다.
+        """
+        opened = self._open.get(exchange)
+        if opened is not None and opened[1] is buf:
+            del self._open[exchange]
+
     def _pack_and_enqueue(self, closed: list[_Closed]) -> None:
-        """스레드에서 — 닫힌 버퍼의 원문을 줄로 조립·gzip 해 대기열 꼬리에 넣고 워커를 깨운다. 예외를 내지 않는다."""
+        """스레드에서 — 닫힌 버퍼의 원문을 정렬·줄 조립·gzip 해 대기열 꼬리에 넣고 워커를 깨운다. 예외를 내지 않는다."""
         for item in closed:
             try:
-                lines = _format_entries(item.exchange, item.entries)
+                lines = _format_entries(item.exchange, item.buf.entries())
                 obj = RawObject(item.key, pack(lines), len(lines))
             except Exception:
                 logger.exception(
