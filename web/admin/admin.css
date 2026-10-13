@@ -669,10 +669,14 @@ body[data-sheet="open"] {
 }
 .card-head {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-height: 28px;
+}
+/* 머리는 넓은 화면에서 한 줄 — 단위 글(.unit)이 줄임표로 줄고 '?'·⤢ 는 제목 줄에 남는다. 탭이 든 머리와 좁은 화면(767px 아래)만
+   자기 상자 안에서 줄을 바꾼다(360px 에도 가로 넘침 없음 — 066 §3.4) */
+.card-head:has(.tabs) {
+  flex-wrap: wrap;
 }
 .card-head h2,
 .card-head h3 {
@@ -1564,6 +1568,9 @@ details.card > summary {
 @media (max-width: 767px) {
   .app {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .card-head {
+    flex-wrap: wrap;
   }
   .side {
     position: fixed;

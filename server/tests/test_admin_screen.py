@@ -319,8 +319,12 @@ def test_controls_wrap_inside_their_own_box_on_narrow_screens() -> None:
     """066 §3.4 — 360px 에도 가로 넘침 없음: 고르기(망 종류 여섯 등)·카드 안 탭·카드 머리는 자리가 모자라면 자기 상자 안에서
     줄을 바꾸고, 입력 칸은 상자보다 넓어지지 않는다. 표는 카드 안 가로 스크롤(.scroll) 안에만 있다."""
     css = _text("web/admin/admin.css")
-    for selector in (".seg", ".tabs", ".card-head"):
+    for selector in (".seg", ".tabs", ".card-head:has(.tabs)"):
         assert "flex-wrap: wrap;" in _rule(css, selector), selector
+    # 탭 없는 카드 머리는 넓은 화면에서 한 줄(단위 글이 줄임표로 준다) — 좁은 화면(767px 아래)에서만 줄을 바꾼다
+    assert "flex-wrap" not in _rule(css, ".card-head")
+    narrow = css[css.index("@media (max-width: 767px) {") :]
+    assert re.search(r"^  \.card-head \{\n    flex-wrap: wrap;\n  \}", narrow, re.M)
     for selector in (".seg", ".tabs", ".input", ".search", ".end", ".tag"):
         assert "max-width: 100%;" in _rule(css, selector), selector
     assert "nowrap" not in _rule(css, ".tag")  # 긴 상태 글은 배지 안에서 줄 바꿈
