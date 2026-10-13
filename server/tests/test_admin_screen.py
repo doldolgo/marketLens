@@ -327,3 +327,11 @@ def test_controls_wrap_inside_their_own_box_on_narrow_screens() -> None:
         html = _text(f"web/admin/{page}")
         tables = re.findall(r"(.{0,22})<table\b", html)
         assert all(before.endswith('<div class="scroll">') for before in tables), page
+
+
+def test_overview_box_table_spans_the_row_so_all_six_columns_show() -> None:
+    """066 §3.3 개요 상자 표(상자 | CPU·메모리·디스크 | 크레딧 | CPU 선) — 1280px 이상에서 안쪽 가로 스크롤 없이 여섯 칸이 다
+    보이게 한 줄 전체(s12). 옆에 있던 수집 원천 띠도 한 줄 전체(반쪽 카드 혼자 남지 않게). 안쪽 스크롤은 좁은 화면에서만."""
+    html = _text("web/admin/index.html")
+    for card in ("card-ex", "card-boxes"):
+        assert re.search(rf'<section class="card s12" id="{card}"', html), card
