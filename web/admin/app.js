@@ -132,13 +132,14 @@ export function start(page) {
       replaceUrl();
       refresh();
     },
-    // 그 페이지만의 주소 인자(065) — 허용 값만, 바뀐 것이 있을 때만 주소를 고치고 다시 그린다
-    setParams(next) {
+    // 그 페이지만의 주소 인자(065) — 허용 값만, 바뀐 것이 있을 때만 주소를 고치고 다시 그린다. quiet 면 주소만(그리는 중에 보기를
+    // 맞출 때 — 대시보드 화면의 깊이 보기 → 요소처럼 새 자료가 필요 없는 고침)
+    setParams(next, quiet = false) {
       const changed = Object.entries(next).filter(([k, v]) => own(page.params ?? {}, k)?.includes(v) && view.p[k] !== v);
       if (!changed.length || reloading) return;
       for (const [k, v] of changed) view.p[k] = v;
       replaceUrl();
-      refresh();
+      if (!quiet) refresh();
     },
     // 값 하나만 고르는 거르기(망 종류·나라 등) — 같은 값을 다시 고르면 지운다
     pickFilter(k, v) {
