@@ -53,6 +53,7 @@ uv run --extra dev pytest -q                       # 구현 전 기준선 — 24
 # 완료 검증 — main(061 머지)을 받은 뒤 마지막 코드 커밋에서
 uv run --extra dev ruff check . && uv run --extra dev ruff format --check . && uv run --extra dev pytest -q
   # All checks passed! · 413 files already formatted · 2485 passed, 1 skipped
+  # main(022 머지)을 한 번 더 받은 뒤 같은 명령 — All checks passed! · 413 files already formatted · 2487 passed, 1 skipped
 
 # §4 목록 — 네트워크 없음(Clarity 는 httpx MockTransport·Redis 는 fakeredis·AWS 는 botocore Stubber, 시계는 주입)
 uv run --extra dev pytest -q app/features/admin/tests/test_clarity_{schedule,dims,history,defer,feed,safety,leaks,values,pages}.py \
