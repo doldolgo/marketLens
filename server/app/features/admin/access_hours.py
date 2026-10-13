@@ -5,7 +5,8 @@
 메모리는 줄 수와 무관하다. 짝은 처리방침 v2 시행일(게이트) 뒤 줄에서만 만든다 — 게이트 앞 줄은 해시하지 않는다.
 게이트 뒤 날의 짝을 처음 기록할 때만 DB-IP 판(039)으로 그 IP 의 /24 를 찾아 나라·망 종류를 짝 기록에 둔다.
 짝의 페이지 줄마다 그날 첫·마지막 페이지 이름과 페이지 수를 고친다(062 — 이름은 고정 글자, 경로·쿼리는 남기지 않는다).
-UA 원문·IP 는 세는 동안의 지역 변수에만 있고 남기지 않는다(UA·출처 판정 메모도 파일 읽기가 끝나면 — 깨진 파일로
+줄마다 가린 IP 대역 칸도 센다(067 `access_bands.py` — 대역은 가린 IP 글자 그대로, 짝은 038 해시만).
+UA 원문은 세는 동안의 지역 변수에만 있고 남기지 않는다(UA·출처 판정 메모도 파일 읽기가 끝나면 — 깨진 파일로
 예외가 나도 — 버린다. UA 메모의 키는 판정이 보는 앞 1,024자, 출처는 512자를 넘으면 메모하지 않는다).
 세는 동안 따로 차례를 넘기지 않는다 — 인터프리터가 5ms 마다 GIL 을 넘겨 같은 프로세스의 이벤트 루프 지연은 측정상 ≤30ms(§5).
 """
@@ -17,6 +18,7 @@ from urllib.parse import parse_qs
 
 from app.features.admin import access_classes as lines
 from app.features.admin import access_traits
+from app.features.admin.access_bands import BandTally, agent_name, pair_mark
 from app.features.admin.access_classes import CLASSES, Line
 from app.features.admin.access_flows import NPAGES_CAP, page_name
 from app.features.admin.access_pairs import (
@@ -66,8 +68,9 @@ MEMO_CAP = (
 MEMO_KEY_MAX = 512
 Ref = tuple[str, str] | None  # (출처 키, 호스트)
 _NO_REF: tuple[None, bool] = (None, False)
-# 어느 줄의 날과도 맞지 않는 빈 자리
-_NO_DAY: tuple[int, DayPairs, bytes] = (-DAY_SEC, DayPairs(), b"")
+# 어느 줄의 날과도 맞지 않는 빈 자리 — 짝 기록·열쇠
+_NO_DAY: tuple[int, DayPairs] = (-DAY_SEC, DayPairs())
+_NO_KEY: tuple[int, bytes] = (-DAY_SEC, b"")
 _line_ts, _parse, _probe = lines.line_ts, lines.parse, lines.PROBE.search
 UA_JUDGE = lines.UA_JUDGE
 JS_PATHS, WS_PATH = lines.JS_PATHS, lines.WS_PATH
@@ -113,11 +116,13 @@ class FileTally:
         self.earliest: float | None = None
         self.no_ts = 0  # ts 없는 줄
         self.broken = 0  # 깨진 회전 파일이면 1
+        self.bands = BandTally()  # 067 — 가린 IP 대역 칸
         self._seq = 0
         self._kinds: dict[str, str] = {}
         self._traits: dict[str, Traits] = {}
         self._refs: dict[str, tuple[Ref, bool]] = {}
-        self._day = _NO_DAY  # 마지막 줄의 KST 날·짝 기록·열쇠
+        self._day = _NO_DAY  # 마지막 브라우저 짝 줄의 KST 날·짝 기록
+        self._key = _NO_KEY  # 마지막 짝 줄의 KST 날·열쇠
 
     def read(self, handle: Iterable[str]) -> None:
         line = self.line
@@ -132,6 +137,8 @@ class FileTally:
             self._traits.clear()
             self._refs.clear()
             self._day = _NO_DAY
+            self._key = _NO_KEY
+            self.bands.finish()
 
     def line(self, raw: str) -> None:
         ts = _line_ts(raw)
@@ -234,10 +241,46 @@ class FileTally:
             if page:
                 c[HUMAN] += 1
                 self._lists(hour, judged, path, query, ref)
-        if ua_kind == "browser" and ip and ts >= self.gate_ts:
-            flags = (PROBED if probe else 0) | (OPERATED if operator else 0)
-            signal = js_view or upgraded
-            self._pair(ts, rec, judged, path, query, ref, page, signal, upgraded, flags)
+        its = int(ts)
+        pair: bytes | None = None
+        mark = 0
+        if ip and ts >= self.gate_ts:
+            # 짝 해시는 한 번 — 038 의 짝 기록(브라우저 모양만)과 067 의 대역 짝 수(모든 종류)가 같은 값을 쓴다
+            day, key = self._key
+            if not day <= its < day + DAY_SEC:
+                day = kst_day(ts)
+                key = self.keys.day_key(day)
+                self._key = day, key
+            pair, mark = pair_hash(key, ip, ua), pair_mark(day, its)
+            if ua_kind == "browser":
+                flags = (PROBED if probe else 0) | (OPERATED if operator else 0)
+                signal = js_view or upgraded
+                self._pair(
+                    ts,
+                    rec,
+                    judged,
+                    path,
+                    query,
+                    ref,
+                    page,
+                    signal,
+                    upgraded,
+                    flags,
+                    pair,
+                )
+        human = kind == "browser"
+        self.bands.add(
+            ts,
+            its - its % 3600,
+            ip,
+            path,
+            agent_name(self._trait(judged)),
+            kind,
+            status,
+            (human and page, human and js_view, upgraded, ws_path),
+            pair,
+            mark,
+        )
 
     def _lists(self, hour: Hour, judged: str, path: str, query: str, ref: Ref) -> None:
         if hour.lists is None:
@@ -278,16 +321,15 @@ class FileTally:
         *how: Any,
     ) -> None:
         """짝 하나의 그날 기록 — 해시는 (IP, UA 전체), 특성은 UA 앞 1,024자(`judged`).
-        `how` 는 (페이지 줄, JS 신호 줄, 101 줄, 탐색·운영자 흔적 비트)."""
-        page, signal, upgraded, flags = how
+        `how` 는 (페이지 줄, JS 신호 줄, 101 줄, 탐색·운영자 흔적 비트, 그날 열쇠로 만든 짝 해시)."""
+        page, signal, upgraded, flags, h = how
         its = int(ts)
-        day, record, key = self._day
-        # 줄은 대개 시각 순 — 날이 바뀔 때만 기록·열쇠를 찾는다
+        day, record = self._day
+        # 줄은 대개 시각 순 — 날이 바뀔 때만 기록을 찾는다
         if not day <= its < day + DAY_SEC:
             day = kst_day(ts)
-            record, key = recorded(self.days, day), self.keys.day_key(day)
-            self._day = day, record, key
-        h = pair_hash(key, rec[6], rec[4])
+            record = recorded(self.days, day)
+            self._day = day, record
         pair = record.pairs.get(h)
         if pair is None:
             if len(record.pairs) >= PAIR_CAP:
