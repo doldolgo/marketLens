@@ -157,14 +157,10 @@ def test_attention_answers_cover_page_or_not_300_keys_mobile_gate_and_xss() -> N
         and sum(e["key"] == "(기타)" for e in r["elements"]) == 1
         for r in many["rows"]
     )
-    assert (
-        att("empty", days="7") | {"rows": []} == att("empty", days="7")
-        and att("empty", days="7")["state"] == "before_gate"
-    )
-    assert (att("problem", days="7")["state"], att("problem", days="7")["code"]) == (
-        "error",
-        "redis",
-    )
+    gate = att("empty", days="7")
+    assert (gate["state"], gate["rows"]) == ("before_gate", [])
+    broken = att("problem", days="7")
+    assert (broken["state"], broken["code"], broken["rows"]) == ("error", "redis", [])
     keys = {
         e["key"]
         for r in att("xss", days="7", page="landing")["rows"]
