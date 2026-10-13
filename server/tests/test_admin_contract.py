@@ -66,6 +66,11 @@ const respond = (url) => {
   if (path === '/api/admin/aws/series') return input.series && url.includes('range=24h') ? [200, input.series] : [404, { detail: 'Not Found' }]
   if (path === '/svc/api/admin/access') return input.access && url.includes(`window=${input.access.window}`) ? [200, input.access] : [404, { detail: 'Not Found' }]
   if (path === '/api/admin/aws') return [200, { alarms: { state: 'unconfigured' }, metrics: { state: 'unconfigured' }, canary: { state: 'unconfigured' }, budget: { state: 'unconfigured' } }]
+  const q = new URLSearchParams(url.split('?')[1] || '')
+  if (path === '/svc/api/admin/access/ips') return input.ips ? [200, input.ips] : [404, { detail: 'Not Found' }]
+  if (path === '/svc/api/admin/access/ip') return input.ip?.[q.get('band')] ? [200, input.ip[q.get('band')]] : [400, { error: { code: 'bad_band', message: 'x', detail: null } }]
+  if (path === '/svc/api/admin/clarity' && input.clarity) return [200, input.clarity]
+  if (path === '/svc/api/admin/clarity/history') return input.history?.[q.get('days')] ? [200, input.history[q.get('days')]] : [404, { detail: 'Not Found' }]
   return input.feeds[path] || [404, { detail: 'Not Found' }]
 }
 for (const [name, search, details] of input.pages) {
@@ -96,15 +101,21 @@ for (const [name, search, details] of input.pages) {
     chips: (v.byId.get('chips')?.kids || []).map((c) => c.textContent),
     sankey: option('c-flows')?.series?.[0]?.data?.map((n) => n.name) ?? null,
     cpu: option('c-cpu')?.series?.map((s) => s.name) ?? null,
-    texts: Object.fromEntries(['v-visitors', 'v-pages', 'v-errors', 'v-bots'].map((id) => [id, v.text(id)])),
+    texts: Object.fromEntries(['v-visitors', 'v-pages', 'v-errors', 'v-bots', 'v-count', 'v-sessions', 'v-scroll'].map((id) => [id, v.text(id)])),
     sheets: {},
   }
-  // 상세 판 — 진짜 응답으로 그래프(진짜 dataZoom 으로 보이는 구간)·통계·원자료가 찬다
-  for (const d of details) {
-    v.click('detail', d)
+  // 상세 판 — 진짜 응답으로 그래프(진짜 dataZoom 으로 보이는 구간)·통계·원자료가 찬다. 대역 판은 표의 행을 눌러 연다
+  const sheet = (d) => ({ title: v.text('sheet-title'), tag: v.text('t-sheet'), chart: made.has('c-sheet') && !made.get('c-sheet').isDisposed(), stats: v.text('sheet-stat-tbl'), count: v.text('sheet-count'), raw: v.text('sheet-tbl'), note: v.text('sheet-note') })
+  const opens = details.map((d) => [d, () => v.click('detail', d)])
+  if (name === 'visitors.js') {
+    got.bands = v.text('tbl-bands')
+    for (const b of input.openBands || []) opens.push([b, () => (document.getElementById('tbl-bands').kids[1]?.kids || []).find((tr) => tr.kids[0].textContent.startsWith(b))?.fire('click')])
+  }
+  for (const [d, open] of opens) {
+    open()
     await flush()
     render(d)
-    got.sheets[d] = { title: v.text('sheet-title'), tag: v.text('t-sheet'), chart: made.has('c-sheet') && !made.get('c-sheet').isDisposed(), stats: v.text('sheet-stat-tbl'), count: v.text('sheet-count'), raw: v.text('sheet-tbl') }
+    got.sheets[d] = sheet(d)
     document.getElementById('sheet-close').fire('click')
     await flush()
   }
@@ -147,10 +158,9 @@ async def _real_pair() -> tuple[dict[str, Any], dict[str, Any]]:
     return out[0], out[1]
 
 
-async def _real_access() -> dict[str, Any]:
-    """038·039·062 — 방문자 셋(검색·직접·소셜)·봇 하나·5xx 하나의 caddy 줄로 센 7일 창."""
-    t0 = AFTER - 2 * HOUR
-    lines = [
+def _lines(t0: float) -> list[str]:
+    """방문자 셋(검색·직접·소셜 — 대역 셋)·봇 하나·5xx 하나의 caddy 줄, t0 부터 4분."""
+    return [
         line(t0, "/", referer="https://www.google.com", ip="203.0.113.0"),
         line(t0 + 1, "/clarity.js", ip="203.0.113.0"),
         line(t0 + 60, "/app/?tab=history", ip="203.0.113.0"),
@@ -161,8 +171,12 @@ async def _real_access() -> dict[str, Any]:
         line(t0 + 200, "/wp-login.php", ua="curl/8.0", ip="192.0.2.0"),
         line(t0 + 240, "/api/history/events", status=502, ip="203.0.113.0"),
     ]
+
+
+async def _real_access() -> dict[str, Any]:
+    """038·039·062 — 위 줄로 센 7일 창."""
     with tempfile.TemporaryDirectory() as directory:
-        write(Path(directory), "access.log", lines)
+        write(Path(directory), "access.log", _lines(AFTER - 2 * HOUR))
         return await Feeds(Path(directory), AFTER).get("7d")
 
 
