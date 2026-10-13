@@ -25,10 +25,12 @@ from app.features.admin.tests.aws_fakes import (
     NOW,
     START,
     Clients,
+    bounds,
     series_data_response,
     series_ids,
     stub_discovery,
 )
+from app.features.admin.tests.test_series_feed import World
 from tests.admin_dom import run_admin
 
 OK = [200, {"status": "ok", "version": "x", "lastTickAt": 1}]
@@ -60,7 +62,8 @@ new Function('exports', 'module', code)(lib.exports, lib)
 const real = lib.exports
 const respond = (url) => {
   const [path] = url.split('?')
-  if (path === '/api/admin/aws/series') return input.series && url.includes('range=24h') && !url.includes('offset') ? [200, input.series] : [404, { detail: 'Not Found' }]
+  if (path === '/api/admin/aws/series' && url.includes('offset=prev')) return input.prevSeries && url.includes('range=24h') ? [200, input.prevSeries] : [404, { detail: 'Not Found' }]
+  if (path === '/api/admin/aws/series') return input.series && url.includes('range=24h') ? [200, input.series] : [404, { detail: 'Not Found' }]
   if (path === '/svc/api/admin/access') return input.access && url.includes(`window=${input.access.window}`) ? [200, input.access] : [404, { detail: 'Not Found' }]
   if (path === '/api/admin/aws') return [200, { alarms: { state: 'unconfigured' }, metrics: { state: 'unconfigured' }, canary: { state: 'unconfigured' }, budget: { state: 'unconfigured' } }]
   return input.feeds[path] || [404, { detail: 'Not Found' }]
@@ -101,7 +104,7 @@ for (const [name, search, details] of input.pages) {
     v.click('detail', d)
     await flush()
     render(d)
-    got.sheets[d] = { title: v.text('sheet-title'), tag: v.text('t-sheet'), chart: made.has('c-sheet') && !made.get('c-sheet').isDisposed(), stats: v.text('sheet-stat-tbl'), count: v.text('sheet-count') }
+    got.sheets[d] = { title: v.text('sheet-title'), tag: v.text('t-sheet'), chart: made.has('c-sheet') && !made.get('c-sheet').isDisposed(), stats: v.text('sheet-stat-tbl'), count: v.text('sheet-count'), raw: v.text('sheet-tbl') }
     document.getElementById('sheet-close').fire('click')
     await flush()
   }
@@ -124,6 +127,24 @@ def _real_series() -> dict[str, Any]:
     body = render(Result("ok", None, int(time.time() * 1000), values), 300, SERIES_KEYS)
     body["range"] = "24h"
     return body
+
+
+async def _real_pair() -> tuple[dict[str, Any], dict[str, Any]]:
+    """068 — 진짜 피드 코드(`AdminFeeds.aws_series`)의 24시간 창과 그 이전 기간(`offset=prev` — 끝 = 지금 창의 시작)."""
+    out = []
+    for offset in (None, "prev"):
+        clients = Clients("cloudwatch")
+        start, end = bounds(86_400, 300)
+        if offset:
+            start, end = start - 86_400, start
+        stub_discovery(clients)
+        clients["cloudwatch"].add_response(
+            "get_metric_data", series_data_response(series_ids(), start, end, 300)
+        )
+        body = await World(clients).feeds.aws_series("24h", offset)
+        body["fetchedAt"] = int(time.time() * 1000)  # 가짜 시계면 '오래됨'
+        out.append(body)
+    return out[0], out[1]
 
 
 async def _real_access() -> dict[str, Any]:
@@ -174,6 +195,21 @@ def test_real_series_feed_draws_the_server_and_overview_pages() -> None:
         assert f"{box} 메모리87.7%" in chips, chips
     # 빨강 먼저
     assert chips.index("serve 상태 검사실패") < chips.index("collect 메모리87.7%")
+
+
+async def test_real_previous_window_draws_dashed_compare_lines() -> None:
+    """068 `offset=prev` 응답: `?cmp=prev` 면 서버 시간 카드에 '· 이전' 점선 계열이, 상세 판 원자료에 이전 값 칸이 든다(066 §3.2 비교선)."""
+    now, prev = await _real_pair()
+    assert (now["offset"], prev["offset"]) == (None, "prev")
+    assert prev["endTs"] == now["startTs"]
+    pages = [["server.js", "?cmp=prev", ["cpu"]]]
+    feeds = {"pages": pages, "feeds": PLAIN, "series": now, "prevSeries": prev}
+    server = run_admin(SCENARIO, {**feeds, "access": None})["server.js"]
+    assert server["failed"] == [] and server["errors"] == [], server
+    boxes = ["collect", "data", "serve"]
+    assert server["cpu"] == [f"{b} · 이전" for b in boxes] + boxes
+    raw = server["sheets"]["cpu"]["raw"]
+    assert all(f"{b} (이전)" in raw for b in boxes), raw[:200]
 
 
 async def test_real_access_feed_draws_the_traffic_page() -> None:
