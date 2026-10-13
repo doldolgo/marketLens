@@ -669,10 +669,14 @@ body[data-sheet="open"] {
 }
 .card-head {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-height: 28px;
+}
+/* 머리는 넓은 화면에서 한 줄 — 단위 글(.unit)이 줄임표로 줄고 '?'·⤢ 는 제목 줄에 남는다. 탭이 든 머리와 좁은 화면(767px 아래)만
+   자기 상자 안에서 줄을 바꾼다(360px 에도 가로 넘침 없음 — 066 §3.4) */
+.card-head:has(.tabs) {
+  flex-wrap: wrap;
 }
 .card-head h2,
 .card-head h3 {
@@ -718,19 +722,22 @@ body[data-sheet="open"] {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
+  max-width: 100%;
   margin-left: auto;
 }
+/* 상태 배지 — 좁은 타일(Clarity 둘씩)에서 긴 상태('불러오지 못함 · 12분 전 값')는 배지 안에서 줄을 바꾼다 */
 .tag {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-height: 22px;
+  max-width: 100%;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: 11px;
   background: var(--raised);
   color: var(--text-3);
   font-size: var(--fs-12);
-  white-space: nowrap;
 }
 .tag:empty {
   display: none;
@@ -1083,6 +1090,13 @@ button.lrow:hover {
   color: var(--text-3);
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+/* 셋째 칸이 증감('▲ 12.3%p')인 목록(불만 신호) — 잘리지 않게 고정 폭 */
+.deltas .lrow {
+  grid-template-columns: minmax(0, 1fr) auto 7em;
+}
+.deltas .lrow .p {
+  overflow: visible;
 }
 .list-foot {
   display: flex;
@@ -1741,6 +1755,9 @@ details.card > summary {
 @media (max-width: 767px) {
   .app {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .card-head {
+    flex-wrap: wrap;
   }
   .side {
     position: fixed;
