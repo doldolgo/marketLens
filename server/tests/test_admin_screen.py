@@ -214,7 +214,7 @@ def test_icons_are_one_local_sprite_and_every_use_points_into_it() -> None:
     symbols = set(re.findall(r'<symbol id="([\w-]+)" viewBox="0 0 24 24"', body))
     used = set()
     for page in PAGES:
-        html = _text(f"web/admin/{page}")
+        html = re.sub(r"<!--.*?-->", "", _text(f"web/admin/{page}"), flags=re.S)
         for use in re.findall(r"<use\b[^>]*>", html):
             m = re.fullmatch(r'<use href="icons\.svg#([\w-]+)"/>', use)
             assert m and m.group(1) in symbols, (page, use)
