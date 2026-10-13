@@ -13,7 +13,8 @@ import { table } from './ui.js';
 const STEP = 200; // 원자료·목록 표는 200행씩
 // 판 하나(page.details 의 값) = { title, unit, ranges?(판 기간 단추), range?(페이지 기간 → 판 기간), compare?(range) → { prev, week },
 //   needs(app, pv, arg) → [req…], model(app, pv, arg) → { part, deps, title?, unit?, note?, nav?, span?, related?,
-//   time?: { startMs, endMs, panes, series, areas, empty }, table?: { title, columns, rows, sort, search, onRow }, custom?(상자, ctx) },
+//   time?: { startMs, endMs, panes, series, areas, empty }, chart?(시간 축 없는 option), table?: { title, columns, rows, sort, search, onRow },
+//   custom?(상자, ctx) },
 //   related?: [판 id…], accepts?(arg) }
 export function mountDetail(app) {
   const page = app.page;
@@ -121,8 +122,13 @@ export function mountDetail(app) {
     const t = m.time;
     $('sheet-chips')?.replaceChildren(...(t ? seriesChips(t.series, pv.hidden, toggle) : []));
     const graphBox = $('sheet-graph');
-    if (graphBox) graphBox.hidden = !t;
+    if (graphBox) graphBox.hidden = !t && !m.chart;
+    for (const bid of ['sheet-select', 'sheet-reset']) {
+      const b = $(bid);
+      if (b) b.hidden = !t;
+    }
     if (t) graph(t);
+    else if (m.chart) draw('c-sheet', m.chart); // 시간 축이 없는 그림(흐름·열지도·막대) — 확대·통계 없이
     else dispose('c-sheet');
     tables(m);
     const custom = $('sheet-custom');
