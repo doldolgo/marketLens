@@ -43,6 +43,8 @@ class PerpUniverse:
         self._muted: dict[tuple[str, str], tuple[float, int]] = {}
         self._task: asyncio.Task[None] | None = None
         self.universe: set[str] = set()
+        # 직전 apply 의 입력 사본 (김프 우주, 원천 순서대로 base 집합) — 같으면 perp 우주 집계를 건너뛴다
+        self._last_inputs: tuple[frozenset[str], list[frozenset[str]]] | None = None
 
     async def refresh(self) -> RefreshOutcome:
         """원천 목록을 동시에 받는다. 실패한 원천은 직전 목록 유지. 우주 확정은 다음 초의 apply 가 한다."""
@@ -92,8 +94,21 @@ class PerpUniverse:
         return error
 
     def apply(self, kimp: set[str]) -> None:
-        """김프 우주가 확정될 때마다(매초) perp 우주를 다시 확정해 싱크·원천에 넘긴다 (§3.2)."""
-        self.universe = perp_universe(kimp, (s.bases() for s in self._sources))
+        """김프 우주가 확정될 때마다(매초) perp 우주를 다시 확정해 싱크·원천에 넘긴다 (§3.2).
+
+        목록은 10초마다, 실제로는 하루 몇 번만 바뀌므로 거의 매초 입력이 같다. (김프 우주, 원천별 base 집합)이 직전과
+        같으면 perp 우주 집계(원천 4곳 2천여 base 세기)만 건너뛰고 직전 결과를 쓴다 — 같은 입력이면 같은 식의 같은 값이다.
+        싱크·원천 set_universe 는 매 회차 그대로 부른다(같으면 그쪽이 무동작으로 돌아온다). 입력은 frozenset 사본으로
+        든다 — bases() 가 사본을 준다는 보장이 계약에 없고, 넘겨받은 김프 우주를 부른 쪽이 나중에 고쳐도 비교가
+        흔들리지 않게.
+        """
+        given = [s.bases() for s in self._sources]
+        per = [frozenset(b) for b in given]
+        last = self._last_inputs
+        if last is None or last[1] != per or last[0] != kimp:
+            self.universe = perp_universe(kimp, given)
+            # 집계가 끝난 뒤에 기억한다 — 도중에 예외로 끝나면 다음 회차가 같은 입력이라도 다시 센다
+            self._last_inputs = (frozenset(kimp), per)
         removed = self._sink.set_universe(self.universe)
         if removed:
             logger.info("perp 우주 갱신으로 행 %d개 소멸", removed)

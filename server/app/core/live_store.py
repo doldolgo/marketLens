@@ -91,6 +91,7 @@ class LiveStore:
     # --- perp 행 (046 §3.1) — 쓰기는 행 1개 단위와 우주 밖 일괄 삭제뿐, 필드 갱신은 행 객체 제자리에서 ---
 
     def put_perp_row(self, row: PerpRow) -> None:
+        # 원천 표는 여기서 한 번만 만들고 바꿔 끼우지 않는다 — PerpSink 가 perp_table 로 붙잡고 있다
         self._perp.setdefault(row.source, {})[row.base.upper()] = row
 
     def remove_perp_row(self, source: str, base: str) -> None:
@@ -158,6 +159,16 @@ class LiveStore:
 
     def perp_row(self, source: str, base: str) -> PerpRow | None:
         return self._perp.get(source, {}).get(base.upper())
+
+    def perp_table(self, source: str) -> dict[str, PerpRow] | None:
+        """원천 하나의 perp 행 표 그 자체(BASE 대문자 → 행) — 아직 행이 한 번도 없었으면 None, 만들지 않는다.
+
+        PerpSink 가 원천마다 이 표를 붙잡고 초당 수천 번 `table.get(BASE)` 로 찾는다 — perp_row 처럼 매번 빈 dict
+        기본값을 만들고 upper 를 한 번 더 하지 않으려고. 그래서 원천 표는 한 번 만들면 바꿔 끼우지 않는다: put 은
+        setdefault, remove·retain 은 제자리에서 지운다. 없을 때 만들지 않는 것은 perp_rows 의 원천 순서가 첫 행이
+        생긴 순서 그대로여야 해서다. 호출자는 이 표를 고치지 않는다(조회 전용).
+        """
+        return self._perp.get(source)
 
     def perp_rows(self, source: str | None = None) -> list[PerpRow]:
         """perp 행 전체 또는 원천 하나의 행 — 현물 get_all 과 같은 꼴, 섞이지 않는다."""
