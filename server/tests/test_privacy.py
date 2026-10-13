@@ -483,6 +483,11 @@ ARCHIVED_NOTICE = {
 # 바로 앞 판의 사본 — 대조표가 맞대는 판. 파일 이름(시행일) 순이 아니라 게시한 차례의 끝이다(060 — 10월 9일 판(v3)은
 # 10월 11일 판보다 나중에 게시했다)
 PREVIOUS = list(ARCHIVED_TEXT)[-1]
+# 사본 이름 `privacy-<시행일>.html` — 같은 날 둘째 판부터는 `-<차례>` 를 붙인다(067 — 060 §7 의 제안). 이력 항목의 날짜 뒤
+# '(두 번째 판)' 과 사본 제목의 '두 번째' 가 그 차례다
+ARCHIVE_NAME = r"privacy-(\d{4})(\d{2})(\d{2})(?:-(\d+))?\.html"
+ORDINALS = {"두": 2, "세": 3, "네": 4}
+NTH = {n: f" {word} 번째" for word, n in ORDINALS.items()}
 # 037 §3.3 — 사본의 동의 절 상자 아래 한 줄(그 판의 세 칸은 읽기만, 고르는 곳은 지금 판)
 ARCHIVED_CONSENT_LINE = (
     "<p>화면 분석 동의·철회는 지금 판의 “화면 분석 동의 관리”"
@@ -994,20 +999,25 @@ def test_archived_versions_are_static_and_external_free() -> None:
     """이전 판 privacy-<시행일>.html 은 location / 로 CSP 없이 나간다 — 스크립트 없는 정적 사본이고, 검색에는 지금 판만
     나오며, 그 판에서 방문자가 무엇에 동의했는지(세 칸의 알릴 사항)를 입력칸 없이 보여 준다 (032 §3.6·037 §3.3)."""
     now, _ = _read(PUBLIC / "privacy.html")
-    linked = re.findall(r'href="/(privacy-\d{8}\.html)"', now)
+    linked = re.findall(r'href="/(privacy-\d{8}(?:-\d+)?\.html)"', now)
     assert linked, "지금 판이 이전 판으로 잇지 않는다"
     paths = sorted(PUBLIC.glob("privacy-*.html"))
     # 이력의 옛 판마다 사본이 있고, 사본마다 이력에서 잇고, 얼려 둔 글자의 값이 있다
     assert {path.name for path in paths} == set(linked) == set(ARCHIVED_TEXT)
     for path in paths:
         html, page = _read(path)
-        assert re.fullmatch(r"privacy-\d{8}\.html", path.name), path.name
+        found = re.fullmatch(ARCHIVE_NAME, path.name)
+        assert found, path.name
         assert "〔" not in html and "<script" not in html, path.name
         _assert_no_external_resources(path.name, page)
-        stamp = path.name[len("privacy-") : -len(".html")]
-        day = f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:]}"
+        y, m, d, nth = found.groups()
+        day = f"{y}-{m}-{d}"
         assert page.times and set(page.times) == {day}, path.name
-        assert page.titles == [f"개인정보 처리방침({_korean(day)} 판) — KimpTrack"]
+        # 같은 날 둘째 판부터는 제목에 차례(067 — `-2` 는 '두 번째 판')
+        nth_word = "" if nth is None else NTH[int(nth)]
+        assert page.titles == [
+            f"개인정보 처리방침({_korean(day)}{nth_word} 판) — KimpTrack"
+        ]
         # 같은 날 판이 둘이면 날짜 뒤 괄호로 어느 판인지 밝힌다(060 — '(그날 먼저 게시한 판)')
         assert re.search(rf"{_korean(day)} 시행 판(\([^)<]*\))?의 사본입니다", html), (
             path.name
@@ -1093,10 +1103,13 @@ def test_effective_date_ties_the_four_times_and_the_history() -> None:
     headline = _text(opened[0].split("<p>")[0])
     for word in V2_HISTORY_SAYS:
         assert word in headline, word
-    # 지금 판을 뺀 항목마다 그 판의 사본 링크
+    # 지금 판을 뺀 항목마다 그 판의 사본 링크 — 같은 날 둘째 판부터는 이름에 `-<차례>`(067)
     for item in items[1:]:
-        y, m, d = re.match(r"(\d{4})년 (\d{1,2})월 (\d{1,2})일", _text(item)).groups()
-        assert f'href="/privacy-{y}{int(m):02d}{int(d):02d}.html"' in item, item
+        y, m, d, word = re.match(
+            r"(\d{4})년 (\d{1,2})월 (\d{1,2})일(?:\((\S+) 번째 판\))?", _text(item)
+        ).groups()
+        nth = "" if word is None else f"-{ORDINALS[word]}"
+        assert f'href="/privacy-{y}{int(m):02d}{int(d):02d}{nth}.html"' in item, item
 
 
 def test_change_notice_comes_first_and_names_what_changes() -> None:
