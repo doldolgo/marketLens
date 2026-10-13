@@ -936,6 +936,31 @@
     // 도달 11칸(065) — 0~100 의 수 11개, 아니면 null
     const reachOf = (d) => (Array.isArray(d) && d.length === 11 && d.every((n) => finite(n) && n >= 0 && n <= 100) ? d.slice() : null)
 
+    // 가운데로(053·065) — 이 문서 안에서만 굴린다. scrollIntoView 는 같은 사이트의 관리자 문서까지 굴려(틀 밖 페이지가 움직인다)
+    // 쓰지 않는다. 요소의 스크롤 상자 조상(overflow auto·scroll 이고 넘치는 것)을 안쪽부터, 마지막에 이 창을 window.scrollTo 로 —
+    // 세로는 가운데, 가로는 가까운 쪽(scrollIntoView 의 기본 inline 과 같다 — 넓은 행이 옆으로 밀리지 않게)
+    const nearest = (a, b, lo, hi) => {
+      if ((a < lo && b > hi) || (a >= lo && b <= hi)) return 0
+      return (a < lo) === (b - a <= hi - lo) ? a - lo : b - hi
+    }
+    const center = (el) => {
+      for (let n = el.parentElement; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+        const s = window.getComputedStyle(n)
+        const y = /auto|scroll/.test(s.overflowY) && n.scrollHeight > n.clientHeight
+        const x = /auto|scroll/.test(s.overflowX) && n.scrollWidth > n.clientWidth
+        if (!y && !x) continue
+        const box = n.getBoundingClientRect()
+        const r = el.getBoundingClientRect()
+        const top = box.top + (n.clientTop || 0)
+        const left = box.left + (n.clientLeft || 0)
+        if (y) n.scrollTop += (r.top + r.bottom) / 2 - (top + n.clientHeight / 2)
+        if (x) n.scrollLeft += nearest(r.left, r.right, left, left + n.clientWidth)
+      }
+      const r = el.getBoundingClientRect()
+      const dx = nearest(r.left, r.right, 0, window.innerWidth)
+      window.scrollTo((window.scrollX || 0) + dx, (window.scrollY || 0) + (r.top + r.bottom) / 2 - window.innerHeight / 2)
+    }
+
     // 관리자 메시지 — 출처와 창(부모)을 모두 확인하고, 다르면 무시
     const onMessage = (event) => {
       if (event.origin !== ADMIN_ORIGIN || event.source !== window.parent) return
@@ -959,24 +984,25 @@
         depth = reachOf(d.depth)
         schedule()
       } else if (d.type === "kt-attention-focus" && typeof d.id === "string") {
+        let target = null
         if (d.key === undefined) {
-          const el = sized().get(d.id)
-          if (!el) return
-          el.scrollIntoView({ block: "center" })
+          target = sized().get(d.id) || null
+          if (!target) return
           focusId = d.id
           focusKey = ""
         } else {
           // 065 — 그 영역 안 그 열쇠의 첫 요소(문서 차례)
           const hit = validKey(d.key) ? found.find((f) => f[1] === d.id && f[2] === d.key && f[0].isConnected) : null
           if (!hit) return
-          hit[0].scrollIntoView({ block: "center" })
+          target = hit[0]
           focusId = ""
           focusKey = d.id + "|" + d.key
-          focusEl = hit[0]
+          focusEl = target
         }
         focusUntil = Date.now() + FOCUS_MS
         schedule()
         window.setTimeout(guard(schedule), FOCUS_MS)
+        center(target)
       }
     }
 

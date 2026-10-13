@@ -53,7 +53,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
   // 페이지 요소 — 문서 위 (left, top, width, height), 부모·자식, 속성·글자, 라벨의 control
   class El {
     constructor(ref, tag, attrs, rect, text) {
-      Object.assign(this, { ref, tag, attrs: attrs || {}, rect, text: text || '', kids: [], parent: null, attached: true })
+      Object.assign(this, { ref, tag, attrs: attrs || {}, rect, text: text || '', kids: [], parent: null, attached: true, scrollTop: 0, scrollLeft: 0 })
     }
     get tagName() { return this.tag.toUpperCase() }
     get parentElement() { return this.parent }
@@ -93,6 +93,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     const el = new El(e.ref, e.tag || 'button', e.attrs, e.rect || [0, 0, 100, 30], e.text)
     refs.set(e.ref, el)
     if (e.later) { el.attached = false; el.parent = parent } else parent.append(el)
+    if (e.scroll) Object.assign(el, e.scroll) // 스크롤 상자 — overflowX·overflowY·scrollHeight·clientHeight·scrollWidth·clientWidth
     return el
   }
   for (const e of c.els || []) make(e)
@@ -113,6 +114,8 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     requestAnimationFrame: (fn) => { rafs.push(fn); return rafs.length },
     setTimeout: (fn, ms) => { timers.push({ at: clock + ms, fn }); return timers.length },
     fetch: () => Promise.resolve(),
+    getComputedStyle: (n) => ({ overflowX: n.overflowX || 'visible', overflowY: n.overflowY || 'visible' }),
+    scrollTo: (x, y) => scrolled.push(['window', x, y]),
   }
   Object.defineProperty(window, 'scrollY', { get: () => scrollY })
   window.top = {}
@@ -145,6 +148,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
   const tagOf = (k) => k.kids[0] && { text: k.kids[0].textContent, font: k.kids[0].style.font, bottom: k.kids[0].style.bottom || null, top: k.kids[0].style.top || null }
   return {
     posted, scrolled,
+    scrollTops: Object.fromEntries([...refs].filter(([, el]) => el.scrollTop || el.scrollLeft).map(([k, el]) => [k, [el.scrollTop, el.scrollLeft]])),
     boxes: layer ? layer.kids.map((k) => ({
       cls: k.className, area: k.attrs['data-kt-area'] || null, el: k.attrs['data-kt-el'] || null, depth: k.attrs['data-kt-depth'] ?? null,
       left: k.style.left, top: k.style.top, width: k.style.width, height: k.style.height, border: k.style.border || null,
@@ -503,15 +507,17 @@ def test_ready_lists_sized_elements_without_rows_up_to_300_and_again_when_they_c
 
 
 def test_focus_with_a_key_scrolls_to_the_first_element_and_thickens_it() -> None:
-    """§3.5 — focus 에 key 가 있으면 그 영역 안 그 열쇠의 첫 요소를 scrollIntoView({block:'center'}), 그 상자를 2초 굵게(값이 없어도).
-    없는 열쇠·꼴이 틀린 열쇠는 아무것도. key 가 없으면 053 그대로(영역)."""
+    """§3.5 — focus 에 key 가 있으면 그 영역 안 그 열쇠의 첫 요소를 가운데로(이 창의 window.scrollTo), 그 상자를 2초 굵게(값이
+    없어도). 없는 열쇠·꼴이 틀린 열쇠는 아무것도. key 가 없으면 053 그대로(영역)."""
     focus = {"type": "kt-attention-focus", "id": "hero", "key": "link:/app/"}
     got = _one(
         areas=AREAS,
         els=ELS,
         steps=[_values("element", elements=[]), _msg(**focus), "flush"],
     )
-    assert got["scrolled"] == [["app1", {"block": "center"}]]
+    assert got["scrolled"] == [
+        ["window", 0, 140 - 400]
+    ]  # app1 가운데(120 + 40 / 2)를 화면 가운데로
     (box,) = [b for b in got["boxes"] if b["el"]]
     assert (box["el"], box["top"], box["borderWidth"]) == (
         "hero|link:/app/",
@@ -542,7 +548,7 @@ def test_focus_with_a_key_scrolls_to_the_first_element_and_thickens_it() -> None
         els=ELS,
         steps=[_values("element"), _msg(type="kt-attention-focus", id="hero"), "flush"],
     )
-    assert got["scrolled"] == [["hero", {"block": "center"}]]
+    assert got["scrolled"] == [["window", 0, 0]]  # hero 가운데 400 = 화면 가운데
     hero = next(b for b in got["boxes"] if b["area"] == "hero")
     assert hero["borderWidth"] == "6px"
 
@@ -556,3 +562,59 @@ def test_another_origin_cannot_send_the_new_keys() -> None:
         steps=[_values("element", elements=[_el("hero", "live:1", 5, 1)]), "flush"],
     )
     assert got["boxes"] is None and got["scrolled"] == []
+
+
+def test_focus_scrolls_only_inside_the_frame_document() -> None:
+    """§3.5 — 옮기기는 틀 문서 안에서만: 스크롤 상자 조상(overflow auto·scroll 이고 넘치는 것)의 scrollTop 을 그 요소가 가운데 오게,
+    가로는 가까운 쪽(넘치지 않으면 그대로), 마지막에 이 창의 window.scrollTo. scrollIntoView 는 부르지 않는다(관리자 문서까지 굴린다)."""
+    box = {
+        "overflowY": "auto",
+        "overflowX": "auto",
+        "scrollHeight": 2000,
+        "clientHeight": 300,
+        "scrollWidth": 600,
+        "clientWidth": 600,
+    }
+    els = [
+        {
+            "ref": "box",
+            "in": "hero",
+            "tag": "div",
+            "rect": [0, 200, 600, 300],
+            "scroll": box,
+        },
+        {
+            "ref": "deep",
+            "in": "box",
+            "attrs": {"data-el": "deep"},
+            "rect": [10, 900, 100, 30],
+        },
+        {
+            "ref": "side",
+            "in": "hero",
+            "attrs": {"data-el": "side"},
+            "rect": [1300, 300, 100, 30],
+        },
+    ]
+    steps = [
+        _values("element"),
+        _msg(type="kt-attention-focus", id="hero", key="deep"),
+        "flush",
+    ]
+    got = _one(areas=AREAS, els=els, steps=steps)
+    assert got["scrollTops"] == {
+        "box": [915 - (200 + 150), 0]
+    }  # 상자 가운데로 — 가로는 넘치지 않아 그대로
+    assert got["scrolled"] == [
+        ["window", 0, 915 - 400]
+    ]  # 스크롤 상자 scrollIntoView 없음
+    steps = [
+        _values("element"),
+        _msg(type="kt-attention-focus", id="hero", key="side"),
+        "flush",
+    ]
+    got = _one(areas=AREAS, els=els, steps=steps)
+    assert got["scrolled"] == [
+        ["window", 1400 - 1280, 315 - 400]
+    ]  # 화면 오른쪽 밖 — 가까운 쪽으로 120
+    assert got["scrollTops"] == {}
