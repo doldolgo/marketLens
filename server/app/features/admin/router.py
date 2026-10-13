@@ -55,11 +55,14 @@ async def get_admin_aws(request: Request) -> JSONResponse:
 
 @collector_router.get("/admin/aws/series")
 async def get_admin_aws_series(
-    request: Request, range_: Annotated[str | None, Query(alias="range")] = None
+    request: Request,
+    range_: Annotated[str | None, Query(alias="range")] = None,
+    offset: str | None = None,
 ) -> JSONResponse:
-    """상자 셋·WS 접속·canary 시계열 — `range` 6h·24h·7d·30d(목록 밖·없음은 24h), 부분 하나 (063 §3)."""
+    """상자 셋·WS 접속·canary 시계열 — `range` 6h·24h·7d·30d(목록 밖·없음은 24h), `offset=prev` 면 그 앞 같은 길이의
+    이전 기간(목록 밖·없음은 지금 창), 부분 하나 (063 §3·068 §3.3)."""
     feeds: AdminFeeds = request.app.state.admin_feeds
-    return JSONResponse(await feeds.aws_series(range_))
+    return JSONResponse(await feeds.aws_series(range_, offset))
 
 
 @collector_router.get("/admin/alerts")
