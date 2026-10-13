@@ -17,20 +17,7 @@
 
 ## 3. 동작
 
-### 3.1 한 페이지 구조
-| id | 절 |
-|---|---|
-| `overview` | 개요 |
-| `collect` | 수집 |
-| `infra` | 인프라 |
-| `alerts` | 알림 |
-| `traffic` | 접속 |
-| `screens` | 화면 이용 |
-| `cost` | 비용 |
-| `tools` | 도구 |
-
-- 절은 이 순서로 한 페이지에 쌓는다(탭 전환 없음 — 스크롤과 절 이동 링크).
-- 머리(화면 위에 붙어 있음): `KimpTrack 관리자`, 종합 배지(§3.4 개요와 같은 값), `마지막 갱신 HH:MM:SS`, 절 이동 링크 여덟(`#id` — 화면 이용은 '화면', 053), 로그아웃. 로그인 만료 알림 줄(029)은 머리 바로 아래.
+> 이 화면은 064·065 가 대신한다 — 아래 피드 계약만 지금도 맞다.
 
 ### 3.2 읽는 값
 **빠른 묶음 — 029 그대로(복사)**
@@ -59,99 +46,9 @@
 - `geo`(039 하위 부분) `{state, code, month, loadedAt, sinceTs, countries, networks, ipv6}` — 게이트 전 `unconfigured`·`before_gate`(`visitors` 와 같은 짝 게이트), `countries` 는 `[[ISO 두 글자, confirmed, shaped]]` 20행 + `(기타)`(창 안 어느 KST 하루에도 짝이 3 미만인 나라와 20행 밖을 합침), `networks` 는 `telecom_kr`·`telecom`·`cloud`·`other`·`unknown` + 끝의 `(기타)`(KR 이 `(기타)` 에 합쳐진 창에서는 `telecom_kr` 이 `telecom` 에 든다, 어느 KST 하루에도 짝이 3 미만인 종류는 `(기타)` 에 합침).
 - `/svc/api/admin/clarity` = 부분 하나(14400초, 040) + `nextAt`·`numOfDays`(1)·`traffic{sessions, botSessions, users, pagesPerSession}`·`summary{scrollDepth, totalSec, activeSec, signals}`(signals 키 여섯 `deadClick`·`rageClick`·`excessiveScroll`·`quickback`·`scriptError`·`errorClick`, 값 `{sessions, sessionPct, pageViews, count}`)·`countries[[이름, 세션]]`(20행, 못 알아보면 null)·`metrics[{name, rows}]`(받은 이름·키 그대로, 행 20개, 주소는 쿼리를 떼되 대시보드 주소는 `?tab=<id>` 만)·`pages`(하위 부분 `{state, code, fetchedAt, refreshSec 43200, nextAt, numOfDays 3, rowsIn, rowLimitHit, groups}` — `groups[{page, device, sessions, scrollDepth, totalSec, activeSec, deadClickPct, rageClickPct, excessiveScrollPct, quickbackPct, scriptErrorPct, errorClickPct}]` 40개 이하, 주소 없음). 못 알아본 칸은 null. 창은 부른 때 직전 24시간(기본)·72시간(`pages`)이고 시간대가 없다(Clarity 문서는 결과를 UTC 로 적는다).
 
-### 3.3 갱신 주기
-- 빠른 묶음(경로 넷) 10초, 느린 묶음(피드 넷) 60초 — 둘 다 **보이는 동안만**(`visibilityState`). 두 묶음은 따로 돈다 — 느린 쪽이 늦어도 빠른 쪽 주기를 막지 않는다. 같은 묶음은 앞선 호출이 끝나기 전에 다시 부르지 않는다.
-- 숨었다가 보이면 빠른 묶음은 곧바로, 느린 묶음은 마지막 호출에서 60초가 지났을 때만 곧바로 부른다(탭을 오가도 몰리지 않게).
-- 느린 값의 신선도는 서버 캐시가 정한다. 화면은 부분마다 머리에 `fetchedAt` 경과("4분 전 값")를 늘 적고, 경과가 응답에 온 그 부분의 `refreshSec` × 3 을 넘으면 주의색으로 칠한다(`refreshSec` 0 인 `slack` 은 보지 않는다). 상수를 복사해 두지 않는다 — 서버 주기가 바뀌어도 화면을 고치지 않게.
-- 브라우저에 쌓는 값은 없다. 추이는 전부 피드가 준 점으로 그린다 — 며칠 열어 둬도 메모리가 늘지 않게.
-- 다시 그리기: 머리의 경과·절 요약·개요는 묶음이 끝날 때마다, 칸의 본문(목록·표·차트)은 그 칸의 값이 바뀌었을 때만 — 빠른 묶음이 느린 칸의 목록 안 스크롤·초점·펼침·툴팁을 날리지 않게. 알림 목록은 필터를 바꿀 때만 맨 위로.
-- 본문 안 경과 글자("n분 전" — 경보 행의 바뀐 지·canary 최근 실행)는 묶음이 끝날 때마다 그 글자만 고친다 — 본문을 다시 만들지 않으면서 개요 칸·절 요약과 같은 경과를 보인다. 글자가 달라졌을 때만 쓴다 — 같은 글자를 다시 쓰면 텍스트 노드가 바뀌어 그 안에 걸친 글자 선택이 풀린다.
-- 접속 창(042 §3.2): 고른 창은 JS 변수에만, 바꾸면 접속 경로 하나만 곧바로 부른다 — 느린 묶음 주기·여덟 경로 만료 셈은 그대로.
-
-### 3.4 절별 내용
-설명 — 절마다 머리 줄 바로 아래 접힌 '이 절 읽는 법'(개요는 칸 여섯 아래), 덩어리 끝 '이 칸 뜻', 행 안 한국어 이름표(실패 종류·경보 꼬리·탭), 타일 부제. 자리·문구 규칙·항목은 041 이고 042·043 도 같은 틀을 쓴다.
-
-**개요** — 타일 일곱: 종합·수집기·api·지금 접속·경보·canary·이번 달 비용. 타일을 누르면 그 절로 간다.
-- 종합 판정(위에서부터 먼저 맞는 것):
-  - 알 수 없음: 수집기 또는 api `/health` 호출 자체가 실패(403·JSON 아님·만료).
-  - 장애: 수집기 또는 api 상태가 `ok` 아님, Redis·Influx 중 `down`, `ALARM` 경보 1개 이상, 거래소 하나라도 `down`.
-  - 주의: 거래소 `stale`, canary 최근 실행 실패(`ok` false), `alarms`·`canary` 부분의 `error`.
-  - 정상: 그 밖. `unconfigured`·`denied`·`pending` 과 그 밖 부분(`metrics`·`budget`·알림 `slack`·접속·Clarity)의 `error` 는 판정에 넣지 않는다 — 그 칸에만 보인다. AWS 자격이 없거나 AWS 밖으로 옮겨도(`unconfigured`) 개요가 늘 주의가 되지 않게.
-- 종합 타일 아래에 사유를 최대 셋 한 줄로("경보 ALARM collect-memory · bybit 끊김" — `ALARM` 경보는 둘까지 이름, 셋 이상이면 "경보 3개 ALARM"). 판정 재료를 못 읽었으면(`/health/collect`·`/admin/status` 호출 실패) 판정은 그대로 두고 사유에 "거래소 상태 모름"·"Redis·Influx 상태 모름". 다른 타일 값: 수집기(상태·마지막 틱 n초 전), api(상태·Redis·Influx), 지금 접속(`wsConnections`), 경보(`ALARM` 수 / 전체), canary(통과·실패·n분 전), 비용(월 예산 중 한도 대비 실제 비율이 가장 큰 것의 실제 / 한도).
-
-**수집** — 029 화면에서 옮기고 넓힌다.
-- 요약 줄: 전체 1시간 성공률·마켓 수 합·수집기 시작 시각(`serverStartedAt`). 1시간 성공률은 소수 1자리(011 의 서버 정밀도).
-- 거래소 표: 거래소·상태 배지·열린 실패 구간(실패 종류 이름표 · n회 · n분째)·마지막 성공(n초 전)·1시간 성공률·마켓 수·마지막 오류(시각·실패 종류 이름표·HTTP(있을 때)·`message` 앞 300자 한 줄, 전체는 `title` — 열린 구간이 없는 거래소는 흐림).
-- 실패 구간 24시간 타임라인: 거래소·perp 원천 줄(`/health/collect` 의 `exchanges` 순서 — 현물 6 + perp 4, 045·046·047), `outages` 를 막대로(진행 중은 지금까지), `banned`·`rate_limit` 은 장애색·꽉 찬 높이, 그 밖은 주의색·낮은 막대(색만으로 가르지 않는다), 1분 미만도 최소 폭, 막대마다 `HH:mm–HH:mm · 실패 종류 이름표 · ×count`, 아래에 최신 다섯 구간을 같은 글자로(휴대폰은 `title` 을 못 본다). 구간이 없으면 "최근 24시간 실패 없음". 011 의 수집 상태 탭과 같은 색 규칙이다.
-- 즉시 갱신: 029 그대로 — 토큰칸(`type=password`·자동완성 끔)·버튼·결과(HTTP 상태·`totalSaved`·`failures` 의 거래소·`errorCode`·`warnings`).
-
-**인프라** — `metrics`·`alarms`·`canary`. 순서는 경보·canary → 박스 카드. 세 부분이 같은 이유로 비면(연결 안 됨·권한 없음·같은 호출 실패) 절 전체를 카드 하나로 접는다.
-- 박스 카드 셋(collect 수집기 / data Influx·Redis / serve caddy·web·api, `instanceId` 는 `title`): 메모리 가용률·디스크 사용률·CPU 사용률 선 차트와 각각 지금 값·24시간 최저(메모리)·최고(디스크·CPU). 기준선은 027 경보 임계(메모리 10%·디스크 80%). 값 색: 메모리 10% 미만 장애·20% 미만 주의, 디스크 80% 초과 장애·70% 초과 주의(주의 기준은 기본값 — 사람 확인), CPU 는 색 없음. t4g 박스(data·serve)는 크레딧 잔고 선과 지금·24시간 최저 — 027 잔고 경보 임계(최대 적립의 30% — data 173·serve 86) 미만이면 장애색. 카드 머리에 지금 값 중 가장 나쁜 주의·장애 배지, 축 글자는 카드 맨 아래 한 번. 스왑은 값이 있는 박스만(지금은 data) — serve 스왑은 027 에이전트가 모으지 않아 카드에 "스왑 지표 없음" 한 줄.
-- 경보 표: 이름(`marketlens-` 접두를 뗀다, 이름 뒤에 경보 꼬리 이름표(041) — title 은 전체 이름과 조건, 그 아래 둘째 줄에 사유 앞 160자·전체 `title`)·상태 배지·바뀐 지(n분 전). 정렬 `ALARM` → `INSUFFICIENT_DATA` → `OK`, 같으면 이름순. `OK` 행은 접힌 묶음("정상 n개") 안에 두고, 다시 그려도 펼침 상태를 유지한다.
-- canary 카드: 최근 실행(통과·실패·n분 전), 24시간 실행·오류 수(`metrics.canary` 합), 실행 시간(ms) 선 차트, 최근 실행 로그 줄(고정폭 글꼴, 최대 10줄).
-
-**알림** — 알림 기록.
-- 필터 버튼 셋: 전체·앱(Slack)·경보(CloudWatch). 고른 값은 JS 변수에만 둔다.
-- 행: 시각(오늘이면 `HH:mm:ss`, 아니면 `MM-DD HH:mm`)·출처 배지(`collector`·`api`·`경보`)·글. Slack 글은 🔴 로 시작하면 장애색, 🟢 정상색, ⚠️ 주의색, 그 밖 기본색. `delivered` 가 false 면 "전송 실패" 배지(주의색 — Slack 에는 없는 알림이다). 경보 행의 글은 `<이름> <꼬리 이름표> <이전> → <새>`, 새 상태 `ALARM` 장애색·`OK` 정상색·`INSUFFICIENT_DATA` 흐림. `key` 는 `title`.
-- 머리 줄 "n건 · 보낸 Slack 알림(전송 실패 포함)과 경보 상태 변경 — 10분 억제로 보내지 않은 알림은 기록에도 없다". 최신순, 목록 높이 상한을 넘으면 목록 안에서 스크롤.
-
-**접속** — 실시간(그대로) → 창 줄과 서버 기록 덩어리 여섯(042 §3.3~§3.9) → Clarity(그대로 — 043 이 바꾼다).
-- 실시간: 지금 WebSocket 접속 수(빠른 묶음 `wsConnections`) 큰 숫자 + 24시간 `wsClients` 선. 부제 "열린 대시보드 수 — 사람 수가 아니다".
-- 서버 기록: 042 가 정한다(창·덩어리·답 문장·빈 상태·좁은 폭).
-- Clarity(Clarity 요약): 타일 넷(세션·봇 세션·사용자·세션당 페이지)과 "받은 지표" 목록 — 지표마다 이름 한 줄과 행마다 `키:값 · 키:값` 글자 한 줄(20행, 한 줄 200자에서 자르고 전체는 `title`). 부제 "최근 1일 · UTC 기준 — Clarity 가 준 값". 정규화 값(`summary`·`countries`·`pages`)은 040 응답에 있다 — 그리는 것은 043. 타일 넷은 부제 한 줄(041).
-
-**비용** — `budget`.
-- 월 단위(`timeUnit` `MONTHLY`) 비용 예산 전부를 한 줄씩: 이름·실제·한도·예측(달러 소수 2자리), 가로 막대 하나(실제 사용액, 85%·100% 표시선 — 027 예산 알림 기준)와 이번 달이 지난 비율 표시선(한도 × 지난 비율 자리 — 실제 막대가 넘으면 한도보다 빠르게 쓰는 중). 예측이 한도를 넘으면 주의색. 월 단위가 아닌 예산은 막대 없이 이름·실제·한도만. 예산이 0개면 "예산 없음".
-- 고정 문구 하나: "서비스별 내역은 조직 SCP 가 Cost Explorer 를 막아 여기 없다 — 결제 콘솔에서 본다".
-
-**도구** — 링크 묶음. 앱: API 문서 `/api/docs`·ReDoc `/api/redoc`(029). AWS 서울: CloudWatch 경보, CloudWatch 지표(네임스페이스 `MarketLens`), Lambda `marketlens-smoke`, 로그 그룹 `/aws/lambda/marketlens-smoke`, 예산(결제 콘솔). Clarity: 프로젝트 목록 `https://clarity.microsoft.com/projects`. Cloudflare: 루트 둘만 — `https://one.dash.cloudflare.com/`(Zero Trust)·`https://dash.cloudflare.com/`(DNS). GitHub: 레포 Actions. 로그아웃은 머리에 있다.
-
-### 3.5 칸의 상태
-| 상태 | 보이는글 |
-|---|---|
-| 첫호출전 | `…` |
-| `pending` | `…` |
-| `ok` | 값 |
-| 빈목록 | 기록없음 |
-| `unconfigured` | 연결안됨 |
-| `denied` | 권한없음 |
-| `error` | 불러오지못함 |
-
-- 부분의 상태는 그 부분 칸에만 보인다 — AWS 예산만 `denied` 면 비용 절과 비용 타일만 "권한 없음" 이고 경보·지표는 그대로다.
-- `unconfigured`: 흐린 배지 "연결 안 됨" + 한 줄 원인(AWS "AWS 자격 없음", 접속 "로그 파일 없음", Clarity "토큰 없음 또는 033 전"). `denied`: 흐린 배지 "권한 없음" + "IAM 정책 또는 조직 SCP — 콘솔에서 본다". `pending`: `…` 와 "첫 조회 중", 판정 제외. 배지 옆에 `code` 를 작게 적는다.
-- 값 규칙: **값이 null 이면 칸을 비운다.** `error` 인데 값이 있으면(Clarity — 마지막 성공 값) 값을 그대로 보이고 장애색 배지 "불러오지 못함 · 마지막 성공 n시간 전" 을 단다. `error` 에 값이 없으면 장애색 "불러오지 못함" 과 빈칸.
-- HTTP 수준 실패(403·JSON 아닌 응답·만료 신호)는 029 규칙 그대로 — 그 호출이 채우는 칸을 모두 비우고 사유("권한·설정 오류 (403)"·"응답 오류 (HTTP n)"·"로그인 만료·연결 끊김")를 적는다. 직전 값이 정상으로 읽히지 않게.
-- 값은 왔는데 목록이 0개면 "지난 24시간 기록 없음" 처럼 그 칸의 빈 문구. 차트는 값 있는 점이 2개 미만이면 차트 대신 "값 없음"(0개)·"값 1개뿐"(1개) — 경보 상태 `INSUFFICIENT_DATA` 의 "데이터 부족"(AWS 한국어 이름)과 겹치지 않게.
-- `unconfigured` 이고 code 가 `before_gate` 인 하위 부분(`visitors`·`geo`)은 '연결 안 됨' 대신 시행일 빈 상태 글(042 §3.8).
-
-### 3.6 차트
-- 외부 라이브러리 없이 SVG 요소를 DOM 으로 만든다. 모양은 기하 속성(`viewBox`·`points`·`d`·`x`·`y`·`width`·`height`)으로만, 색·선 굵기는 CSS 클래스(토큰)로 준다. `style` 속성·`element.style`·`cssText` 는 쓰지 않는다 — CSP 가 `style` 속성과 `cssText` 를 막는다(MDN style-src, 2026-10-01 확인). `element.style.속성` 은 허용되지만 한 규칙으로 둔다. 예외는 053 화면 이용 절의 틀 폭 하나 — CSS 변수 `--fit` 을 `style.setProperty` 로 쓰는 한 곳(칸 폭은 실행 때만 안다)이고, 틀 주소(`src`)도 그 절의 한 곳에서만 공개 사이트 출처 상수로 만든 주소나 `about:blank` 를 쓴다.
-- 네 종류 + 접속 절의 겹친 두 막대·하한–상한 띠·날 막대·요일×시간 열지도(042 — rect + 클래스): 선(24시간 추이), 세로 막대(시간대별 요청·지속 시간 구간), 가로 막대(표의 비율·예산), 타임라인(실패 구간).
-- 선: 가로는 칸 폭을 따라 늘고 선 굵기는 그대로다(`non-scaling-stroke`). null 점에서 선을 끊는다 — 보간하지 않아 빈 구간이 비어 보인다. 비율 지표는 세로 0~100 고정, 개수·ms·크레딧은 0~최댓값. 기준선은 점선. 축 대신 글자로 "24시간 전·지금" 과 최저·최고·지금 값. 타임라인은 창을 5등분한 눈금(`HH:mm`)과 "지금", 접속 시간 막대는 정시(0·6·12·18시) 눈금과 "지금", 날 막대는 KST 날(042).
-- SVG 속성은 허용 목록(기하·`role`·`aria-label`)만 — 그 밖의 이름(`href`·`style`·`on…`)은 만들다 멈춘다. 그림 요소는 `svg`·`g`·`line`·`rect`·`path`·`title` 뿐.
-- 모든 SVG 에 `role="img"` 와 요약 `aria-label`(예 "serve 메모리 가용률 24시간 — 최저 31%, 지금 42%"), 막대·구간마다 `<title>`(글자로) — 마우스를 올리면 값이 보인다. 애니메이션 없음.
-
-### 3.7 디자인
-- 토큰의 진실은 `docs/design/theme.css` 다. `admin.css` 는 그 `:root` 토큰(색·램프·간격·반경·그림자)과 컴포넌트 클래스 `.card`·`.card-kicker`·`.tag`·`.table`·`.btn`·`.btn-primary`·`.btn-secondary`·`.input`·`.hr` 를 복사한다(번들 밖이라 `web/src/shared` 를 못 쓴다 — 029 와 같다). 첫 줄 `@import`(Google Fonts)와 Inter 는 뺀다 — CSP 가 막고, 불러오면 운영자 IP 가 국외로 나간다. 글꼴은 시스템 글꼴.
-- 상태색: 정상 `--color-ok`, 주의 `--color-warn`, 장애 `--color-up`, 흐림 `--color-neutral-500`. 색만으로 가르지 않는다 — 배지에 글자(정상·주의·장애·알 수 없음, `OK`·`ALARM`). ✕·장애색은 §3.4 판정의 장애 재료(와 그 임계 값·5xx)에만 — 판정 밖 부분의 호출 실패·`error` 는 개요 칸·절 요약에서 ▲. 작은 글자는 WCAG AA 4.5:1 이상(배지의 주의·장애 글자는 상태색을 흰색 쪽으로 70% 섞어 밝힌다).
-- 절 라벨은 `.card-kicker` 모양, 숫자는 `tabular-nums`, 표 행 구분은 theme.css `.table` 의 양끝이 옅어지는 선. 참조 화면은 `docs/design/reference/tabs/HealthTab.tsx`(요약 줄·카드·24시간 타임라인·로그 표).
-- 폭: 본문 최대 1200px, 카드 격자는 칸 폭 260px 이상으로 자동 줄바꿈. 640px 이하는 한 줄 배치·좌우 여백 16px·머리의 절 이동은 옆으로 미는 한 줄·표는 카드 안에서 가로 스크롤. **페이지 전체 가로 스크롤 없음**(360px 에서도). 한국어는 낱말 단위로 줄을 바꾸고(`word-break: keep-all` — 랜딩·처리방침·404·동의 띠와 같다) 칸보다 긴 낱말만 넘칠 때 끊는다(`overflow-wrap: break-word`). 누르는 곳은 36px 이상. 어두운 테마 하나(`color-scheme: dark`).
-
-### 3.8 보안 계약 (029 에서 옮김 + 더함)
-- 029 그대로: 비밀값 없음. 서버·방문자가 정하는 글자는 `textContent` 로만 넣는다(HTML 해석 금지). 즉시 갱신 토큰은 입력칸과 JS 변수에만(`localStorage`·`sessionStorage`·IndexedDB·쿠키 금지, `form` 없음). 모든 요청은 한 함수를 지나 `X-Requested-With: XMLHttpRequest` 를 붙이고 같은 출처 상대 경로(`/api/…`·`/svc/…`)만 부른다. 링크는 같은 탭(`target`·`window.open` 없음). CSP 는 029 그대로(`default-src 'self'; frame-src https://kimptrack.com; frame-ancestors 'none'` — `frame-src` 는 053 의 틀 하나).
-- 세션 판별(029 그대로): (1) 401 + 앱 JSON(`detail`)은 토큰 오류 — 새로고침하지 않는다. (2) 401 인데 JSON 이 아니거나 fetch 자체가 실패하면 로그인 만료 신호 — 표시 `?relogin=1` 이 없으면 `/?relogin=1` 로 한 번 새로고침, 있으면 알림 줄만. 주소는 `/` 로 고정한다. (3) 403 은 "권한·설정 오류".
-- **표시 지우기(바뀜)**: 마지막 만료 신호(없으면 이 화면을 연 때) 뒤 여덟 경로(빠른 넷·느린 넷)가 모두 한 번 이상 만료 신호 없이 끝났을 때만 지운다 — 만료 신호가 오면 센 것을 처음부터 다시 센다. 묶음이 둘이라, 한 묶음만 보고 지우면 다른 묶음에만 있는 만료가 60초마다 새로고침을 되풀이한다. 즉시 갱신 버튼은 지우지 않는다(029).
-- **더함**: 방문자가 정하는 값(경로·탭·외부 출처·`utm_source`·기기·브라우저 이름·Clarity 행)과 서버 글(경보 사유·Slack 글·canary 로그·거래소 오류)은 `title` 말고는 어떤 속성(특히 `href`·`src`)에도 쓰지 않는다 — 방문자가 정한 출처나 Clarity 주소가 누를 수 있는 링크가 되면 운영자를 낚는 길이 된다. 보이는 글자에서 양방향 제어문자(U+202A–U+202E·U+2066–U+2069)를 뺀다. 길면 자르고 전체는 `title`.
-- **더함**: 외부 링크는 `index.html` 의 고정 `https://` 주소뿐이고(호스트에 `db-ip.com`(DB-IP CC BY 표시 — 042) 포함) 모두 `rel="noreferrer"`(관리자 주소를 콘솔 쪽에 넘기지 않는다). 주소에 계정·영역 ID·Access AUD·팀 도메인(`*.cloudflareaccess.com`)·이메일·Clarity 프로젝트 ID(`/projects/view/<ID>`)·토큰을 넣지 않는다(레포 공개) — 대시보드에서 복사한 Cloudflare 주소에는 계정 ID 가 들어 있으니 루트 주소만 쓴다. 화면은 이미지 파일을 쓰지 않는다.
-
-### 3.9 엣지
-- 034·035 전 배포(피드 경로 없음): 느린 묶음이 404 → 인프라·알림·접속(서버 기록·Clarity)·비용이 "응답 오류 (HTTP 404)", 빠른 묶음·즉시 갱신은 그대로 — 그래서 두 스펙 머지가 시작 조건이다.
-- AWS 자격이 없거나 AWS 밖으로 옮김: AWS 요약 네 부분과 알림의 `alarms` 가 `unconfigured`(자격 없음)가 되고, 인프라·비용 절과 개요의 경보·canary·비용 타일·접속의 24시간 선만 "연결 안 됨" 이다. 종합 판정은 §3.4 대로 앱 쪽 값과 `alarms`·`canary` 의 `error` 로만 한다 — `unconfigured` 는 판정 밖이다. AWS 링크는 남는다 — 옮길 곳이 정해지면 사람이 이 스펙을 고친다.
-- Clarity 하루 호출 한도(프로젝트당 10회 — 035): 실패해도 마지막 성공 값과 "마지막 성공 n시간 전" 배지가 보이고, 판정은 바뀌지 않는다.
-- 브라우저 시계가 서버보다 빠름: 경과가 음수면 0초(029 와 같다). 시각은 브라우저 시간대.
-- 긴 목록: 피드 상한을 믿지 않고 화면도 자른다 — 알림 200행, 접속 목록 21행(042 §3.9 — 위 5행 + 접힘), 최근 5xx 20행, canary 로그 10줄, Clarity 지표마다 20행.
-
 ## 4. 검증
+> 아래의 화면 확인(정적 단언·브라우저)은 064(화면 분석은 065)가 대신한다 — 이 스펙을 구현할 때의 기록으로만 남긴다.
+
 **PR 안 — 실행 세션(완료 조건)**. 시작 전에 main 에 034·035 가 있는지 본다(없으면 멈추고 묻는다).
 - 정적 단언(`server/tests/test_admin.py` — 029 의 화면 단언은 유지하고 아래를 더한다 — 설명·이름표·문구 고침 단언은 041 §4 가 더한다)(042 §4 가 넓힌다):
   - `admin.js`: `X-Requested-With`·`visibilityState`·`createElementNS`·`refreshSec` 가 있다 / `fetch(` 는 1회 / `location.replace(`·`history.replaceState(` 각 1회, 주소 `/` 고정(029) / 10초·60초 주기 상수 / 본문 안 경과 글자는 시각을 data 속성에 둔 span 이고 그리기 끝에 글자만 고치는 함수가 돈다(글자가 다를 때만 쓴다) / 금지: `localStorage`·`sessionStorage`·`indexedDB`·`document.cookie`·`innerHTML`·`outerHTML`·`insertAdjacentHTML`·`document.write`·`eval(`·`new Function`·`window.open`·`location.pathname`·`location.href`·`.style`·`setAttribute('style'`·`.href`·`setAttribute('href'`·`setAttribute('src'`·`.src`·`setAttributeNS`·`xlink:href`·`new XMLHttpRequest`·`sendBeacon`·`new WebSocket`·`EventSource` / SVG 속성 허용 목록이 §3.6 그대로이고 `svg()` 가 그 밖을 던진다·글자 그대로 부르는 SVG 요소와 속성 키가 목록 안 / 파일 안의 `http://`·`https://` 는 SVG 이름공간과 053 의 공개 사이트 출처 상수(`SITE_ORIGIN`) 둘뿐 / `.style`·`.src` 금지의 예외는 053 의 `fitFrame`(`--fit` 한 줄)·`aimFrame`(틀 주소 한 줄) 두 함수 안뿐.
