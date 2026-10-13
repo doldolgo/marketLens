@@ -105,7 +105,7 @@ export const pairKey = (s: { dom: string; fx: string }) => `${s.dom}|${s.fx}`
 // 적용받은 카드도 같은 이벤트를 다시 쏘므로 "같은 값이면 무시" 로 되울림을 끊는다.
 interface SyncMember {
   /** 십자선을 붙일 시리즈(판 0) — 없으면(데이터 없음) 십자선만 지운다. */
-  host: () => ISeriesApi<'Candlestick' | 'Line'> | null
+  host: () => ISeriesApi<'Candlestick'> | null
   at: (ts: number) => Candle1m | null
   onHover: (ts: number | null) => void
   /** 이 카드의 시간축(봉 시각 합집합)과 봉 간격(초) — 봉이 없으면 null(범위 연동에서 제외). */
@@ -230,11 +230,11 @@ export interface CardProps {
 
 interface Refs {
   chart: IChartApi
-  candle: ISeriesApi<'Candlestick'>
   shade: ISeriesApi<'Histogram'>
   /** 선택 구성(국내 집합·방향)이 바뀔 때만 다시 만드는 시리즈. 평소엔 setData 만 — 지우고 다시 만들면 시간축 index 가 흔들려
    *  라이브러리가 범위 이벤트를 쏘고, 그게 과거 로드 연쇄를 일으킨다. */
-  premLines: Map<Dom, ISeriesApi<'Line'>>
+  /** 판 0: 국내 거래소별 김프 캔들 — 여럿이면 같은 판에 겹친다. */
+  candles: Map<Dom, ISeriesApi<'Candlestick'>>
   priceLines: Map<string, ISeriesApi<'Line'>>
   /** 입출금 줄: 키 = `{거래소}:{deposit|withdraw}`. */
   bandLines: Map<string, ISeriesApi<'Histogram'>>
@@ -249,10 +249,9 @@ function fill<P>(series: { setData(d: P[]): void; update(d: P): void } | undefin
   for (const pt of pts) series.update(pt)
 }
 
-/** 카드의 모든 시리즈에 점을 넣는다 — 순서(캔들 → 김프 선 → 가격 → 띠)는 setData·update 모두 같다. */
+/** 카드의 모든 시리즈에 점을 넣는다 — 순서(캔들 → 가격 → 띠)는 setData·update 모두 같다. */
 function fillCard(r: Refs, pts: CardPoints, tail: boolean): void {
-  fill(r.candle, pts.candle, tail)
-  for (const [dom, arr] of pts.prem) fill(r.premLines.get(dom), arr, tail)
+  for (const [dom, arr] of pts.candle) fill(r.candles.get(dom), arr, tail)
   for (const [key, arr] of pts.price) fill(r.priceLines.get(key), arr, tail)
   for (const [key, arr] of pts.band) fill(r.bandLines.get(key), arr, tail)
 }
@@ -303,7 +302,7 @@ function FxChartBody(p: CardProps) {
   const color = dirColor(p.dir)
   const mock = FX_CHOICES.find((f) => f.id === p.fx)?.mock === true
 
-  // ── 차트 1회 생성 (정적 시리즈 = 캔들·음영) + 연동 등록
+  // ── 차트 1회 생성 (정적 시리즈 = 음영) + 연동 등록
   useEffect(() => {
     const el = boxRef.current
     if (!el) return
@@ -319,21 +318,16 @@ function FxChartBody(p: CardProps) {
       },
       grid: { vertLines: { color: grid }, horzLines: { color: grid } },
       rightPriceScale: { borderColor: border },
-      timeScale: { borderColor: border, timeVisible: true, secondsVisible: false, rightOffset: 4 },
+      // rightBarStaysOnScroll: 휠 확대·축소 때 오른쪽 끝 봉을 고정하고 왼쪽만 늘고 준다(트레이딩뷰와 같다) — 기본값은 마우스 위치 기준
+      timeScale: { borderColor: border, timeVisible: true, secondsVisible: false, rightOffset: 4, rightBarStaysOnScroll: true },
       crosshair: { mode: 0 }, // 0 = Normal(자유) — 캔들 자석 없이 봉 단위로 읽는다
       localization: { locale: 'ko-KR', timeFormatter: (t: number) => fmtTime(fromChartTime(t) * 1000) },
     })
-    const up = cssVar('--color-up', '#e0697d')
-    const down = cssVar('--color-down', '#6f9bee')
-    const candle = chart.addSeries(CandlestickSeries, {
-      upColor: up, downColor: down, wickUpColor: up, wickDownColor: down, borderVisible: false,
-      priceFormat: PCT_FORMAT, autoscaleInfoProvider: premAutoscale,
-    }, 0)
     // 사건 음영: 판 0 위에 겹치는 히스토그램(자기 축 없음, 위아래 여백 0 → 판 전체 높이)
     const shade = chart.addSeries(HistogramSeries, { priceScaleId: '', priceLineVisible: false, lastValueVisible: false, base: 0 }, 0)
     shade.priceScale().applyOptions({ scaleMargins: { top: 0, bottom: 0 } })
 
-    const r: Refs = { chart, candle, shade, premLines: new Map(), priceLines: new Map(), bandLines: new Map(), configKey: null }
+    const r: Refs = { chart, shade, candles: new Map(), priceLines: new Map(), bandLines: new Map(), configKey: null }
     refs.current = r
     // 십자선 → 연동(전 카드의 읽기 줄 + 다른 카드의 십자선). 캔버스 밖 React 상태는 헤더 줄만 다시 그린다.
     const onCross = (param: MouseEventParams) => {
@@ -352,7 +346,7 @@ function FxChartBody(p: CardProps) {
       host: () => {
         const S = seriesRef.current
         if (S.length === 0) return null
-        return S.length === 1 ? r.candle : r.premLines.get(axisOf(S).dom) ?? null
+        return r.candles.get(axisOf(S).dom) ?? null
       },
       at: (ts) => (seriesRef.current.length ? findAt(axisOf(seriesRef.current).candles, ts) : null),
       onHover: setHoverTs,
@@ -427,16 +421,23 @@ function FxChartBody(p: CardProps) {
     ]
     if (r.configKey !== configKey) {
       // 구성이 바뀜 → 동적 시리즈 재생성
-      for (const s of [...r.premLines.values(), ...r.priceLines.values(), ...r.bandLines.values()]) r.chart.removeSeries(s)
-      r.premLines.clear(); r.priceLines.clear(); r.bandLines.clear()
-      // 판 0: 국내 여럿 → 거래소별 종가 선 (하나면 정적 캔들이 맡는다)
-      if (!single) {
-        for (const s of S) {
-          r.premLines.set(s.dom, r.chart.addSeries(LineSeries, {
-            color: DOM_COLOR[s.dom], lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
-            priceFormat: PCT_FORMAT, autoscaleInfoProvider: premAutoscale,
-          }, 0))
+      for (const s of [...r.candles.values(), ...r.priceLines.values(), ...r.bandLines.values()]) r.chart.removeSeries(s)
+      r.candles.clear(); r.priceLines.clear(); r.bandLines.clear()
+      // 판 0: 국내 거래소별 캔들. 하나면 상승·하락 색(빨강·파랑). 여럿이면 같은 판에 겹치므로 거래소 색(가격 선과 같은 색)으로 구분하고
+      // 상승·하락은 채움(상승)·테두리만(하락)으로 — 채움을 조금 비쳐 아래 깔린 다른 거래소 캔들이 보이게
+      const up = cssVar('--color-up', '#e0697d')
+      const down = cssVar('--color-down', '#6f9bee')
+      for (const s of S) {
+        const tone = DOM_COLOR[s.dom]
+        let colors
+        if (single) {
+          colors = { upColor: up, downColor: down, wickUpColor: up, wickDownColor: down, borderVisible: false }
+        } else {
+          colors = { upColor: alpha(tone, 0.85), downColor: alpha(tone, 0), wickUpColor: tone, wickDownColor: tone, borderVisible: true, borderUpColor: tone, borderDownColor: tone }
         }
+        r.candles.set(s.dom, r.chart.addSeries(CandlestickSeries, {
+          ...colors, priceFormat: PCT_FORMAT, autoscaleInfoProvider: premAutoscale,
+        }, 0))
       }
       // 판 1: 거래소별 USDT 가격 선 — 이 해외 거래소 선(강조색) + 국내 환산 선
       const priceSpecs = [{ key: 'fx', color: FX_COLOR }, ...S.map((s) => ({ key: `dom:${s.dom}`, color: DOM_COLOR[s.dom] }))]
@@ -460,9 +461,8 @@ function FxChartBody(p: CardProps) {
         r.bandLines.set(`${row.id}:deposit`, dep)
         r.bandLines.set(`${row.id}:withdraw`, wd)
       })
-      // 기준선(진입·이탈·0) — 데이터가 빈 시리즈의 기준선은 그려지지 않으므로 캔들 또는 첫 국내 선에 붙인다
-      r.candle.priceLines().forEach((l) => r.candle.removePriceLine(l))
-      const host: ISeriesApi<'Candlestick' | 'Line'> = single ? r.candle : r.premLines.get(axis.dom)!
+      // 기준선(진입·이탈·0) — 데이터가 빈 시리즈의 기준선은 그려지지 않으므로 축 쌍의 캔들에 붙인다(시리즈를 새로 만들었으니 옛 기준선은 없다)
+      const host: ISeriesApi<'Candlestick'> = r.candles.get(axis.dom)!
       host.createPriceLine({ price: ENTER_PCT, color: dirHex, lineStyle: LineStyle.Dashed, lineWidth: 1, title: `진입 ${ENTER_PCT.toFixed(1)}%` })
       host.createPriceLine({ price: EXIT_PCT, color: cssVar('--color-neutral-500', '#8a8a96'), lineStyle: LineStyle.SparseDotted, lineWidth: 1, title: `이탈 ${EXIT_PCT.toFixed(1)}%` })
       host.createPriceLine({ price: 0, color: cssVar('--color-neutral-600', '#6a6a78'), lineStyle: LineStyle.Solid, lineWidth: 1, title: '' })
@@ -528,7 +528,7 @@ function FxChartBody(p: CardProps) {
     <div style={{ ...card, padding: 'var(--space-6) var(--space-8) var(--space-6)' }}>
       <div style={{ marginBottom: 'var(--space-3)' }}>
         <CardHeader fx={p.fx} dir={p.dir} doms={S.map((s) => exName(s.dom)).join('·')} mock={mock}
-          right={single ? '캔들' : '국내 거래소별 종가 선'} collapsed={false} onToggle={p.onToggle} />
+          right={single ? '캔들' : '국내 거래소별 캔들 — 채움 상승 · 테두리 하락'} collapsed={false} onToggle={p.onToggle} />
       </div>
       {/* 읽기 줄 2줄 — 위: 시각·김프·가격, 아래: 거래소별 입출금. 한 줄에 몰면 폭에 따라 꺾여 읽기 어렵다 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 11.5, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-300)', marginBottom: 'var(--space-4)', minHeight: 36 }}>
@@ -588,7 +588,7 @@ function FxChartBody(p: CardProps) {
       </div>
 
       <div style={{ ...kicker, marginTop: 'var(--space-4)', padding: '0 var(--space-4)' }}>
-        위 = {fxLabel(p.fx)} 기준 {DIR_LABEL[p.dir]} 원값 {INTERVAL_LABEL[p.interval]} {single ? '시/고/저/종' : '종가(국내별)'}, 음영 = 사건 구간 · 가운데 = USDT 기준 가격(국내는 환율 환산) · 아래 = 거래소별 입출금, 판마다 위 줄 입금·아래 줄 출금 — 붉음 = 막힘, 회색 = 모름, 흐림 = {DIR_LABEL[p.dir]} 경로 밖
+        위 = {fxLabel(p.fx)} 기준 {DIR_LABEL[p.dir]} 원값 {INTERVAL_LABEL[p.interval]} 시/고/저/종{single ? '' : '(국내별 캔들, 채움 = 상승 · 테두리만 = 하락)'}, 음영 = 사건 구간 · 가운데 = USDT 기준 가격(국내는 환율 환산) · 아래 = 거래소별 입출금, 판마다 위 줄 입금·아래 줄 출금 — 붉음 = 막힘, 회색 = 모름, 흐림 = {DIR_LABEL[p.dir]} 경로 밖
       </div>
     </div>
   )
