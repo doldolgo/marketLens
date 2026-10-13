@@ -1,0 +1,296 @@
+/* KimpTrack 관리자 v4 (스펙 066) — 토큰은 조사 docs/admin-design-research.md §5 그대로, 어두운 테마 하나. 외부 자원 없음(CSP 'self').
+   색은 두 역할만: 상태 4색(--ok·--warn·--bad·--none) = 뜻(늘 모양 ● ▲ ■ ○ 과 글을 함께), 차트 8색(--c1~--c8) = 누구.
+   상자 색 고정 collect --c1 · data --c2 · serve --c3. 정상은 조용히(옅게), 문제만 진하게. 4px 단위 간격, 12칸 격자. */
+:root {
+  /* 바탕 3단 + 선 — 카드/페이지 대비 1.12, 떠 있는 판/카드 1.13 */
+  --bg: #121420;
+  --surface: #1c1f2b;
+  --raised: #252938;
+  --line: #2c3040;
+  --line-strong: #3a3f52;
+  --grid: #262a37;
+  /* 글 3단 — 카드 위 13.9 · 7.1 · 5.3 : 1 */
+  --text-1: #ececf1;
+  --text-2: #a7aab9;
+  --text-3: #8e92a4;
+  --accent: #9184d9;
+  /* 상태 4색 — 늘 모양(● ▲ ■ ○)과 글을 함께 */
+  --ok: #5fbf8f;
+  --warn: #e0a458;
+  --bad: #e0697d;
+  --none: #8e92a4;
+  /* 차트 8색 — 순서 고정(파랑·주황·청록·노랑·자홍·초록·보라·빨강) */
+  --c1: #3987e5;
+  --c2: #d95926;
+  --c3: #199e70;
+  --c4: #c98500;
+  --c5: #d55181;
+  --c6: #008300;
+  --c7: #9085e9;
+  --c8: #e66767;
+  /* 한 색 진하기(열지도·표 칸) — 낮음 → 높음 */
+  --seq-1: #184f95;
+  --seq-2: #256abf;
+  --seq-3: #3987e5;
+  --seq-4: #6da7ec;
+  --seq-5: #b7d3f6;
+  /* 글자 · 간격 · 모서리 · 그림자 */
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-24: 24px;
+  --fs-32: 32px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-12: 48px;
+  --r-sm: 6px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / .45);
+  --shadow-sheet: 0 24px 64px rgb(0 0 0 / .6);
+  --scrim: rgb(8 9 14 / .72);
+  /* 상자 색 고정(066 §3.1) */
+  --box-collect: var(--c1);
+  --box-data: var(--c2);
+  --box-serve: var(--c3);
+  --side: 200px;
+  --font: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text-1);
+  font: 400 var(--fs-14)/1.5 var(--font);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: inherit;
+}
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+[hidden] {
+  display: none !important;
+}
+.i {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+/* — 틀: 왼쪽 세로 내비(200px · 1279px 아래 아이콘만 56px · 767px 아래 ☰ 시트) + 페이지 — */
+.app {
+  display: grid;
+  grid-template-columns: var(--side) minmax(0, 1fr);
+  min-height: 100vh;
+}
+.side {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  height: 100vh;
+  padding: var(--sp-4) var(--sp-3);
+  background: var(--bg);
+  border-right: 1px solid var(--line);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 8px;
+  color: var(--text-1);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.brand .i {
+  width: 24px;
+  height: 24px;
+  color: var(--accent);
+}
+.brand small {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-weight: 400;
+}
+.nav {
+  display: grid;
+  gap: 2px;
+}
+.nav a {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.nav a:hover {
+  color: var(--text-1);
+  background: rgb(255 255 255 / 0.04);
+}
+.nav a[aria-current="page"] {
+  color: var(--text-1);
+  background: var(--raised);
+}
+.nav a[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.nav .mark {
+  margin-left: auto;
+}
+.side-foot {
+  display: grid;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.side-foot > * {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.side-foot a {
+  color: var(--text-2);
+  text-decoration: none;
+}
+.side-foot a:hover {
+  color: var(--text-1);
+  background: rgb(255 255 255 / 0.04);
+}
+.side-foot .i {
+  width: 16px;
+  height: 16px;
+}
+.page {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.top {
+  display: none;
+}
+.head {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3) var(--sp-4);
+  padding: var(--sp-4) var(--sp-6);
+  background: rgb(18 20 32 / 0.92);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+}
+.head h1 {
+  margin: 0;
+  font-size: var(--fs-20);
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.ask {
+  color: var(--text-3);
+  font-size: var(--fs-13);
+}
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  margin-left: auto;
+}
+.tick {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-6) 0;
+}
+.notice {
+  margin: var(--sp-3) var(--sp-6) 0;
+  padding: 10px 14px;
+  border: 1px solid rgb(224 105 125 / 0.45);
+  border-radius: var(--r-sm);
+  background: rgb(224 105 125 / 0.12);
+}
+.content {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-content: start;
+  gap: var(--sp-4);
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: var(--sp-6);
+}
+.s3 {
+  grid-column: span 3;
+}
+.s4 {
+  grid-column: span 4;
+}
+.s6 {
+  grid-column: span 6;
+}
+.s8 {
+  grid-column: span 8;
+}
