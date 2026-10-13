@@ -17,7 +17,7 @@
 
 ### 3.1 경로·창
 - `GET /admin/aws/series?range=6h|24h|7d|30d` — 수집기 역할에만(034 와 같은 라우터·`ADMIN_AWS_REGION` 이 비면 `unconfigured`). 관리자 nginx 는 034 의 두 피드처럼 정확 일치 `location = /api/admin/aws/series`(교차 사이트 검사·`access_log off` — 화면의 폴링을 관리자 접속 기록에서 뺀다)를 둔다(설계 세션, 2026-10-09). 공개 nginx 는 404 그대로(028 목록 밖).
-- `range` 가 목록 밖·없음이면 `24h`. 주기(periodSec): 6h·24h → 300, 7d → 3600, 30d → 10800. 끝 = 지금을 주기로 내림, 시작 = 끝 − 창. 점은 시작부터 주기 간격의 격자(빈 칸 null) — 034 의 `metrics` 와 같은 꼴.
+- `range` 가 목록 밖·없음이면 `24h`. 주기(periodSec): 6h·24h → 300, 7d → 3600, 30d → 10800. 끝 = 지금을 주기로 내림, 시작 = 끝 − 창. 점은 시작부터 주기 간격의 격자(빈 칸 null) — 034 의 `metrics` 와 같은 꼴(068 — `offset=prev`).
 
 ### 3.2 지표 (상자 셋 `collect`·`data`·`serve` — 034 처럼 경보 `marketlens-<box>-memory` 의 InstanceId 로 찾음, 1시간 캐시 재사용)
 | 이름 | 원천 |
