@@ -329,9 +329,11 @@ body[data-sheet="open"] {
   overflow: hidden;
 }
 
-/* — 단추 · 고르기 · 입력 — */
+/* — 단추 · 고르기 · 입력 — 고르기는 자리가 모자라면 자기 상자 안에서 줄을 바꾼다(360px 에도 가로 넘침 없음 — 066 §3.4) — */
 .seg {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--line);
@@ -425,6 +427,7 @@ body[data-sheet="open"] {
 }
 .input {
   min-width: 0;
+  max-width: 100%;
   min-height: 30px;
   padding: 0 10px;
   border: 1px solid var(--line);
@@ -440,6 +443,7 @@ body[data-sheet="open"] {
   position: relative;
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
 }
 .search .i {
   position: absolute;
@@ -661,6 +665,7 @@ body[data-sheet="open"] {
 }
 .card-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-height: 28px;
@@ -770,6 +775,8 @@ body[data-sheet="open"] {
 }
 .tabs {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 2px;
 }
 .tabs button {

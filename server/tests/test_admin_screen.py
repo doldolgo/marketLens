@@ -306,3 +306,24 @@ def test_links_are_fixed_addresses_and_none_opens_a_new_window() -> None:
     server = _text("web/admin/server.html")
     assert '<a href="/api/docs">' in server and '<a href="/api/redoc">' in server
     assert re.search(r'<input id="token" type="password" autocomplete="off"', server)
+
+
+def _rule(css: str, selector: str) -> str:
+    """admin.css 에서 선택자 하나의 맨 바깥(미디어 쿼리 밖) 규칙 몸."""
+    match = re.search(rf"^{re.escape(selector)} \{{\n(.*?)^\}}", css, re.S | re.M)
+    assert match, selector
+    return match.group(1)
+
+
+def test_controls_wrap_inside_their_own_box_on_narrow_screens() -> None:
+    """066 §3.4 — 360px 에도 가로 넘침 없음: 고르기(망 종류 여섯 등)·카드 안 탭·카드 머리는 자리가 모자라면 자기 상자 안에서
+    줄을 바꾸고, 입력 칸은 상자보다 넓어지지 않는다. 표는 카드 안 가로 스크롤(.scroll) 안에만 있다."""
+    css = _text("web/admin/admin.css")
+    for selector in (".seg", ".tabs", ".card-head"):
+        assert "flex-wrap: wrap;" in _rule(css, selector), selector
+    for selector in (".seg", ".tabs", ".input", ".search"):
+        assert "max-width: 100%;" in _rule(css, selector), selector
+    for page in PAGES:
+        html = _text(f"web/admin/{page}")
+        tables = re.findall(r"(.{0,22})<table\b", html)
+        assert all(before.endswith('<div class="scroll">') for before in tables), page
