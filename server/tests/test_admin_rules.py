@@ -1,7 +1,6 @@
-"""관리자 화면 v3 의 계산 — 상태 띠 규칙·큰 수·흐름 그림·바이트 단위·툴팁 글자 (스펙 064 §4 node).
+"""관리자 화면의 상태 띠 규칙 (스펙 064 §3.2 1 — 066 §4 '상태 띠 규칙(064 그대로 통과)') — rules.js 를 node 로.
 
-`web/admin` 의 모듈을 node 에 가짜 document 와 싣고(보이지 않는 탭 — 요청 0) 공개한 계산 함수만 부른다.
-그리기 모양·폭·대비는 설계 세션이 브라우저로 본다(§4 마지막 줄).
+규칙 경우마다 빨강·주황·경계값·값 없음(064 그대로), 066 에서 더한 것: 페이지마다 가장 나쁜 색(내비 모양), 칩 → 그 카드의 상세 판 주소.
 """
 
 from datetime import UTC, datetime
@@ -203,13 +202,23 @@ CASES: list[tuple[dict, list[list[str]]]] = [
 
 SCENARIO = r"""
 setup({ visible: false, respond: () => [404, {}] })
-const common = await page('common.js')
-out.chips = input.cases.map((f) => common.problems(f, input.now).map((c) => [c.tone, c.name, c.value]))
+const rules = await page('rules.js')
+out.chips = input.cases.map((f) => rules.problems(f, input.now).map((c) => [c.tone, c.name, c.value]))
 out.recent = [
-  common.recentAvg([[100, 1], [1000, 4], [1100, null], [1200, 8]], 1500, 300),
-  common.recentAvg([], 1500, 300),
-  common.recentAvg([[100, 1]], null, 300),
+  rules.recentAvg([[100, 1], [1000, 4], [1100, null], [1200, 8]], 1500, 300),
+  rules.recentAvg([], 1500, 300),
+  rules.recentAvg([[100, 1]], null, 300),
 ]
+const chip = (tone, to) => ({ tone, name: 'x', value: '1', to })
+out.marks = [
+  rules.marks([]),
+  rules.marks([chip('warn', 'problems')]),
+  rules.marks([chip('warn', 'cpu'), chip('bad', 'collect'), chip('warn', 'problems')]),
+]
+out.links = ['collect', 'alarms', 'canary', 'cpu', 'mem', 'disk', 'credit', 'checks', 'cost', 'problems', 'constructor'].map((to) => {
+  const node = rules.chip(chip('bad', to))
+  return [to, node.attrs.href ?? null, node.className, node.textContent]
+})
 """
 
 
@@ -229,3 +238,40 @@ def test_status_band_rules_red_amber_boundaries_and_missing_values(
 def test_recent_average_uses_only_the_last_fifteen_minutes(got: dict[str, Any]) -> None:
     """끝 1500 초 앞 15분 = 600 ≤ ts < 1500 의 값만(null 은 뺀다), 점이나 끝이 없으면 null."""
     assert got["recent"] == [6, None, None]
+
+
+def test_nav_marks_take_the_worst_tone_of_the_chips_pointing_at_each_page(
+    got: dict[str, Any],
+) -> None:
+    """066 §3.1 — 내비 항목 옆 모양: 개요는 전체, 서버·트래픽은 그 페이지를 가리키는 칩 가운데 가장 나쁜 색(없으면 null)."""
+    assert got["marks"] == [
+        {"overview": None, "server": None, "traffic": None},
+        {"overview": "warn", "server": None, "traffic": "warn"},
+        {"overview": "bad", "server": "bad", "traffic": "warn"},
+    ]
+
+
+def test_chips_open_the_card_detail_on_its_page_through_the_fixed_table(
+    got: dict[str, Any],
+) -> None:
+    """066 §3.3 — 칩을 누르면 그 페이지의 그 카드 상세 판(#detail=…). 주소는 고정 표에서만 — 표 밖 값은 링크가 없다."""
+    links = {to: href for to, href, _, _ in got["links"]}
+    assert links == {
+        **{
+            to: f"/server.html#detail={to}"
+            for to in (
+                "collect",
+                "alarms",
+                "canary",
+                "cpu",
+                "mem",
+                "disk",
+                "credit",
+                "checks",
+                "cost",
+            )
+        },
+        "problems": "/traffic.html#detail=status",
+        "constructor": None,
+    }
+    assert all(cls == "chip bad" and text == "x1" for _, _, cls, text in got["links"])
