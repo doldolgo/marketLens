@@ -24,6 +24,7 @@ delta 약 16ms·snapshot 약 33ms)이 이벤트 루프를 멈추지 않는다. �
 """
 
 import asyncio
+import concurrent.futures
 import contextlib
 import functools
 import gzip
@@ -325,12 +326,14 @@ class Connection:
 class _Out:
     """나갈 프레임 하나와 받을 접속자 — 압축이 스레드에서 도는 동안 `frame` 이 None 이다."""
 
-    __slots__ = ("frame", "job", "to")
+    __slots__ = ("frame", "job", "task", "to")
 
     def __init__(self, to: list[Connection], frame: bytes | None = None) -> None:
         self.frame = frame
         self.to = to
         self.job: asyncio.Future[bytes] | None = None
+        # 스레드 쪽 작업 그 자체 — 버릴 때 루프 한 바퀴를 기다리지 않고 바로 취소한다(`_drop`)
+        self.task: concurrent.futures.Future[bytes] | None = None
 
 
 # --- 허브 ---
@@ -499,10 +502,12 @@ class SpreadsHub:
                     max_workers=1, thread_name_prefix=f"{self._table_id}-gzip"
                 )
             out = _Out(to)
-            # pack 은 부르는 시점의 모듈 전역 — 스레드 1개라 끝나는 순서 = 넣은 순서
-            job = asyncio.get_running_loop().run_in_executor(self._gzip, pack, message)
+            # pack 은 부르는 시점의 모듈 전역 — 스레드 1개라 끝나는 순서 = 넣은 순서. 스레드 쪽 작업(task)을 따로 들고
+            # 루프 쪽 future(job)로 감싼다 — run_in_executor 와 같은 짝인데, 버릴 때 task 를 그 자리에서 취소하려고
+            task = self._gzip.submit(pack, message)
+            job = asyncio.wrap_future(task)
             job.add_done_callback(functools.partial(self._packed, out))
-            out.job = job
+            out.job, out.task = job, task
         self._out.append(out)
         self._flush()
         return out
@@ -546,7 +551,13 @@ class SpreadsHub:
         self._text = self._index = None
         self._text_index = False
         self._snap = None
-        for out in self._out:
+        # 뒤 프레임부터 취소한다 — 앞 작업을 취소하는 동안(future 락) 스레드가 깨어나 그 작업을 건너뛰고 다음 작업을
+        # 잡을 수 있어서, 앞에서부터 취소하면 아직 시작 안 한 뒤 프레임이 스레드에서 돌 수 있다(2026-10-13 CI). 스레드 쪽
+        # 작업(task)도 그 자리에서 취소한다 — 루프 쪽 future 취소는 다음 루프 회차에야 스레드 작업까지 닿는다.
+        # 이미 도는 압축은 결과를 버린다(`_packed` 가 취소된 future 를 건너뛴다)
+        for out in reversed(self._out):
+            if out.task is not None:
+                out.task.cancel()
             if out.job is not None:
                 out.job.cancel()
         self._out.clear()

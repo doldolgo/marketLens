@@ -172,6 +172,8 @@ async def test_last_detach_while_compressing_drops_the_frame_and_the_next_viewer
     await wait_until(lambda: len(a.sent) == 1)
     held.hold()
     hub.on_table(t(1))
+    # 표 1 의 압축이 스레드에서 붙잡힐 때까지 — 그래야 표 2 가 '아직 스레드에 들어가지 못한' 압축이다
+    await wait_until(lambda: delta(t(0), t(1)) in [x for _, x in held.calls])
     hub.on_table(t(2))  # 아직 스레드에 들어가지 못한 압축 — 0명이 되면 빠진다
     hub.detach(conn)
     await asyncio.sleep(0.01)  # 취소가 스레드 쪽 작업까지 닿는 루프 한 바퀴
