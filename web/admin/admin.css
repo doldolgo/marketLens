@@ -795,3 +795,291 @@ button.kpi[aria-pressed="true"] {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
+/* — 그림 칸 — 높이에 축 글자까지 든다. 비어 있으면(첫 응답 전) 옅은 격자 뼈대 — */
+.chart {
+  position: relative;
+  min-width: 0;
+  height: 240px;
+}
+.chart:empty {
+  border-radius: var(--r-sm);
+  background: repeating-linear-gradient(to bottom, transparent 0 calc(25% - 1px), var(--grid) calc(25% - 1px) 25%);
+}
+.chart.spark {
+  height: 36px;
+  background: none;
+}
+.h120 {
+  height: 120px;
+}
+.h160 {
+  height: 160px;
+}
+.h200 {
+  height: 200px;
+}
+.h280 {
+  height: 280px;
+}
+.h320 {
+  height: 320px;
+}
+.h360 {
+  height: 360px;
+}
+.h420 {
+  height: 420px;
+}
+.h480 {
+  height: 480px;
+}
+.empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  min-height: 32px;
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+  text-align: center;
+}
+
+/* — 상태 띠(개요) — 정상이면 조용한 한 줄, 아니면 심각한 순 칩 — */
+.band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  min-height: 44px;
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.band.ok,
+.band.wait {
+  padding-left: 2px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-2);
+}
+.band.warn {
+  border-color: rgb(224 164 88 / 0.45);
+}
+.band.bad {
+  border-color: rgb(224 105 125 / 0.55);
+  box-shadow: inset 3px 0 0 var(--bad);
+}
+.band-word {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.band.ok .band-word,
+.band.wait .band-word {
+  font-weight: 400;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid;
+  border-radius: 999px;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  text-decoration: none;
+}
+.chip:hover {
+  filter: brightness(1.15);
+}
+.chip.bad {
+  border-color: rgb(224 105 125 / 0.5);
+  background: rgb(224 105 125 / 0.14);
+}
+.chip.warn {
+  border-color: rgb(224 164 88 / 0.45);
+  background: rgb(224 164 88 / 0.12);
+}
+.chip b {
+  color: var(--text-2);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* — 문턱 눈금 막대(상자 표) — 정상은 회색, 문턱을 넘으면 그 상태색 + 모양 — */
+.meters {
+  display: grid;
+  grid-template-columns: minmax(56px, 1fr) 58px;
+  align-items: center;
+  gap: 10px;
+}
+.meter {
+  position: relative;
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--grid);
+}
+.meter .fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 3px;
+  background: var(--text-3);
+}
+.meter .fill.warn {
+  background: var(--warn);
+}
+.meter .fill.bad {
+  background: var(--bad);
+}
+.meter .tick {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--line-strong);
+}
+.meters b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* — 상위 목록 — 행 = 이름·값·비율, 글 뒤에 값 ÷ 최댓값 폭의 옅은 막대(Plausible) — */
+.list {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+}
+.lrow {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 3.6em;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 32px;
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  text-align: left;
+}
+button.lrow {
+  width: 100%;
+  cursor: pointer;
+}
+button.lrow:hover {
+  background: rgb(255 255 255 / 0.03);
+}
+.lrow .bg {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  border-radius: 4px;
+  background: rgb(57 135 229 / 0.18);
+  pointer-events: none;
+}
+.lrow > span {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lrow .v {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.lrow .p {
+  color: var(--text-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.list-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+
+/* — 100% 가로 띠 — 다섯 조각 + 기타, 조각 사이 2px 틈, 아래 범례(값·비율) — */
+.b100s {
+  display: grid;
+  gap: var(--sp-4);
+}
+.b100-item {
+  display: grid;
+  gap: var(--sp-2);
+}
+.b100-name {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+}
+.b100 {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--grid);
+}
+.b100 > i {
+  display: block;
+  flex: none;
+  min-width: 3px;
+  height: 100%;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+}
+.legend > * {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+}
+.legend button {
+  cursor: pointer;
+}
+.legend button:hover {
+  color: var(--text-1);
+}
+.legend b {
+  color: var(--text-1);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
