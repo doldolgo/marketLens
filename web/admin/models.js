@@ -11,7 +11,12 @@ export const RANGE_MS = Object.freeze({ '1h': HOUR, '6h': 6 * HOUR, '24h': DAY, 
 
 export const SERIES_RANGES = Object.freeze(['1h', '6h', '24h', '7d', '30d']);
 const SERIES_FEED = Object.freeze({ '1h': '6h', '6h': '6h', '24h': '24h', '7d': '7d', '30d': '30d' });
-export const seriesCompare = (range) => ({ prev: Object.hasOwn(SERIES_FEED, range), week: Object.hasOwn(SERIES_FEED, range) && range !== '30d' });
+// 068 배포 전 서버는 offset 을 모르고 지금 창을 다시 준다 — 한 번 보면 이 문서에서 offset 을 쓰는 비교를 끈다('이 자료는 비교 없음')
+const seen = { prevMissing: false };
+export const seriesCompare = (range) => {
+  const known = Object.hasOwn(SERIES_FEED, range);
+  return { prev: known && (range === '1h' || !seen.prevMissing), week: known && range !== '30d' && (range !== '7d' || !seen.prevMissing) };
+};
 export function seriesReqs(range, cmp) {
   const base = SERIES_FEED[range] ?? '24h';
   const out = [req('series', { range: base })];
@@ -43,7 +48,10 @@ export function seriesWindow(app, range, cmp) {
     if (usable(o) && shifted) {
       src = o;
       by = cmp === 'week' ? 7 * DAY : L;
-    } else if (o !== undefined) out.cmpState = 'missing';
+    } else if (o !== undefined) {
+      out.cmpState = 'missing';
+      if (usable(o) && !shifted) seen.prevMissing = true;
+    }
   }
   if (src) out.cmpState = 'ok';
   out.line = (get) => ({ data: crop(ms(get(part)), out.startMs, out.endMs), cmp: src ? align(ms(get(src)), out.startMs, out.endMs, by) : null });

@@ -191,6 +191,11 @@ export function start(page) {
   // 머리·내비·거르기 칩 — 고른 기간·비교, 비교가 없는 자료는 단추를 끄고 title, '10초마다 · 시각', 페이지마다 가장 나쁜 상태 모양
   let chipsKey = null;
   function chrome() {
+    // 비교 원천이 없다고 밝혀졌으면(068 배포 전) 고른 비교를 거둔다
+    if (!cmpOpen(page, view.range, view.cmp)) {
+      view.cmp = 'none';
+      replaceUrl();
+    }
     for (const b of document.querySelectorAll('[data-range]')) b.setAttribute('aria-pressed', String(b.dataset.range === view.range));
     for (const b of document.querySelectorAll('[data-cmp]')) {
       const open = cmpOpen(page, view.range, b.dataset.cmp);
