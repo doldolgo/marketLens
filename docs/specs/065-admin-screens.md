@@ -88,9 +88,9 @@
 #   server/uv.lock 은 커밋하지 않고 끝에 지웠다. 브라우저·Docker 는 쓰지 않았다(지시 — nginx 설정은 고치지 않았다)
 cd server && uv sync --extra dev
 cd server && uv run --extra dev ruff check . && uv run --extra dev ruff format --check . && uv run --extra dev pytest -q -rs
-#   All checks passed! · 429 files already formatted · 2590 passed, 1 skipped(test_geo_perf — DBIP_DIR 없음, 065 와 무관)
-#   새 시험 26 — test_attention_overlay_v2.py 8 · test_admin_screens_calc.py 7 · test_admin_screens_page.py 7 · test_admin_screens_static.py 4,
-#   고친 066 시험의 화면 경우(test_admin_xss·fake·pages·screen·scripts). 053 의 test_attention_overlay.py 8 은 손대지 않고 통과
+#   All checks passed! · 429 files already formatted · 2591 passed, 1 skipped(test_geo_perf — DBIP_DIR 없음, 065 와 무관)
+#   새 시험 27 — test_attention_overlay_v2.py 8 · test_admin_screens_calc.py 7 · test_admin_screens_page.py 7 · test_admin_screens_static.py 4 ·
+#   test_admin_fake.py 1(attention 응답), 고친 066 시험의 화면 경우(test_admin_xss·fake·pages·screen·scripts). 053 의 test_attention_overlay.py 8 은 손대지 않고 통과
 for f in web/admin/*.js web/public/attention.js; do node --check "$f"; done   # 29개 — node 18.12.0·26.4.0 둘 다 통과
 cd web && npm ci && npm run lint && npm run build   # oxlint 종료 0 · tsc -b && vite build ✓ (index 250.81 kB · gzip 78.53 kB — web/admin 은 빌드 밖)
 uv run web/scripts/admin-fake-feeds.py --port 18999  # /screens.html·/screens.js 200(CSP·X-Frame-Options DENY·no-store), attention days=7 15행,
