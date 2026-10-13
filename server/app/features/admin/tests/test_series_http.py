@@ -16,6 +16,7 @@ KEYS = [
     "fetchedAt",
     "refreshSec",
     "range",
+    "offset",  # 068 — 지금 창이면 null
     "periodSec",
     "startTs",
     "endTs",

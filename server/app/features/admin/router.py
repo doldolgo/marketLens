@@ -1,9 +1,8 @@
-"""관리자 경로 — api 의 `GET /admin/status`(029 §3.4)·피드 둘(035 §3.1)과 수집기의 피드 셋(034 §3.1·063 §3.1).
+"""관리자 경로 — api 의 `GET /admin/status`(029 §3.4)·피드 셋(035 §3.1·068 §3.2)과 수집기의 피드 셋(034 §3.1·063 §3.1).
 
 `router` 는 api 역할에만, `collector_router` 는 collector 역할에만 포함한다(`main.py`) — 다른 역할에서는 404 다.
-공개 nginx 는 028 허용 목록 밖이라 404, 관리자 nginx(:8081)가 `/svc/api/admin/{status,access,clarity}` 와
-`= /api/admin/aws`·`= /api/admin/alerts` 를, `/api/admin/aws/series` 는 `/api/` 접두 분기로 넘긴다(063 — 새 location 없음).
-모두 항상 200 인 상태 응답이다.
+공개 nginx 는 028 허용 목록 밖이라 404, 관리자 nginx(:8081)가 정확 일치로 `/svc/api/admin/{status,access,clarity,
+clarity/history}` 와 `/api/admin/{aws,alerts,aws/series}` 를 넘긴다. 모두 항상 200 인 상태 응답이다.
 """
 
 from typing import Annotated
@@ -40,10 +39,23 @@ async def get_admin_access(request: Request, window: str | None = None) -> JSONR
 
 @router.get("/admin/clarity")
 async def get_admin_clarity(request: Request) -> JSONResponse:
-    """Clarity 요약 — 기본 4시간·페이지×기기 12시간, 하위 부분 pages, Redis 기록 둘 (035 §3.3·040 §3.2·§3.5)."""
+    """Clarity 요약 — 기본 6시간·페이지×기기 12시간·기기·유입 차원 24시간씩, 하위 부분 pages·dims, Redis 기록 넷
+    (035 §3.3·040 §3.2·§3.5·068 §3.1)."""
     state = request.app.state
     feeds: VisitFeeds = state.admin_visits
     return JSONResponse(await feeds.clarity(bus=getattr(state, "spreads_bus", None)))
+
+
+@router.get("/admin/clarity/history")
+async def get_admin_clarity_history(
+    request: Request, days: str | None = None
+) -> JSONResponse:
+    """Clarity 날별 기록 — `days` 7·30·90(목록 밖·없음은 30), 날 오름차순·기록 없는 날은 빠진다, 60초 캐시 (068 §3.2)."""
+    state = request.app.state
+    feeds: VisitFeeds = state.admin_visits
+    return JSONResponse(
+        await feeds.clarity_history(days, bus=getattr(state, "spreads_bus", None))
+    )
 
 
 @collector_router.get("/admin/aws")
@@ -55,11 +67,14 @@ async def get_admin_aws(request: Request) -> JSONResponse:
 
 @collector_router.get("/admin/aws/series")
 async def get_admin_aws_series(
-    request: Request, range_: Annotated[str | None, Query(alias="range")] = None
+    request: Request,
+    range_: Annotated[str | None, Query(alias="range")] = None,
+    offset: str | None = None,
 ) -> JSONResponse:
-    """상자 셋·WS 접속·canary 시계열 — `range` 6h·24h·7d·30d(목록 밖·없음은 24h), 부분 하나 (063 §3)."""
+    """상자 셋·WS 접속·canary 시계열 — `range` 6h·24h·7d·30d(목록 밖·없음은 24h), `offset=prev` 면 그 앞 같은 길이의
+    이전 기간(목록 밖·없음은 지금 창), 부분 하나 (063 §3·068 §3.3)."""
     feeds: AdminFeeds = request.app.state.admin_feeds
-    return JSONResponse(await feeds.aws_series(range_))
+    return JSONResponse(await feeds.aws_series(range_, offset))
 
 
 @collector_router.get("/admin/alerts")

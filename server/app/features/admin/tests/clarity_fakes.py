@@ -1,8 +1,8 @@
-"""Clarity 피드 테스트 공용 — 가짜 Data Export(httpx MockTransport)·fakeredis·손으로 미는 시계 (스펙 035 §4·040 §4)."""
+"""Clarity 피드 테스트 공용 — 가짜 Data Export(httpx MockTransport)·fakeredis·손으로 미는 시계 (스펙 035 §4·040 §4·068 §4)."""
 
 import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import fakeredis
@@ -228,23 +228,98 @@ PAGES_EXPORT = [
 ]
 
 
+def dim_row(sessions: Any, **dims: str) -> dict[str, Any]:
+    """차원 셋 행 — 차원 이름(`Device`·`Country/Region` …)이 키로 붙고 Traffic 세션이 든다."""
+    return {**dims, "totalSessionCount": sessions, "totalBotSessionCount": "0"}
+
+
+def device_row(sessions: Any, device: str, browser: str, os: str) -> dict[str, Any]:
+    return dim_row(sessions, Device=device, Browser=browser, OS=os)
+
+
+def channel_row(
+    sessions: Any, channel: str, source: str, country: str
+) -> dict[str, Any]:
+    return dim_row(
+        sessions, Channel=channel, Source=source, **{"Country/Region": country}
+    )
+
+
+# 세션이 있는 기기 차원 응답(지어낸 값 — 068). 조합마다 Traffic 한 행, 세션은 숫자·숫자 글자를 섞는다
+DEVICE_EXPORT = [
+    {
+        "metricName": "Traffic",
+        "information": [
+            device_row("20", "PC", "Chrome", "Windows"),
+            device_row(5, "PC", "Edge", "Windows"),
+            device_row("9", "Mobile", "Chrome", "Android"),
+            device_row(8, "Mobile", "Safari", "iOS"),
+        ],
+    },
+    {
+        "metricName": "ScrollDepth",
+        "information": [
+            {
+                "Device": "PC",
+                "Browser": "Chrome",
+                "OS": "Windows",
+                "averageScrollDepth": 40,
+            }
+        ],
+    },
+]
+DEVICE_LISTS = {
+    "device": [["PC", 25], ["Mobile", 17]],
+    "browser": [["Chrome", 29], ["Safari", 8], ["Edge", 5]],
+    "os": [["Windows", 25], ["Android", 9], ["iOS", 8]],
+}
+# 세션이 있는 유입 차원 응답(지어낸 값 — 068)
+CHANNEL_EXPORT = [
+    {
+        "metricName": "Traffic",
+        "information": [
+            channel_row("12", "Direct", "(direct)", "South Korea"),
+            channel_row(7, "Organic search", "google", "South Korea"),
+            channel_row("3", "Organic search", "naver", "Japan"),
+            channel_row(2, "Social", "t.co", "United States"),
+        ],
+    }
+]
+CHANNEL_LISTS = {
+    "channel": [["Direct", 12], ["Organic search", 10], ["Social", 2]],
+    "source": [["(direct)", 12], ["google", 7], ["naver", 3], ["t.co", 2]],
+    "country": [["South Korea", 19], ["Japan", 3], ["United States", 2]],
+}
+# 호출 종류 — 쿼리 `dimension1` 로 가른다(없으면 기본)
+KINDS = {"URL": "pages", "Device": "device", "Channel": "channel"}
+DIMS_KEYS = ["device", "browser", "os", "channel", "source", "country"]
+
+
 class Clarity:
-    """가짜 Data Export — 쿼리(`dimension1`)로 기본·묶음을 가르고, 부른 요청·시각·동시 호출 수를 적고,
+    """가짜 Data Export — 쿼리(`dimension1`)로 기본·묶음·기기·유입을 가르고, 부른 요청·시각·동시 호출 수를 적고,
     종류마다 차례로 응답(상태·본문)을 준다. 본문 `TIMEOUT` 은 시간 초과."""
 
     TIMEOUT = object()
 
     def __init__(
-        self, *replies: tuple[int, Any], pages: tuple[tuple[int, Any], ...] = ()
+        self,
+        *replies: tuple[int, Any],
+        pages: tuple[tuple[int, Any], ...] = (),
+        device: tuple[tuple[int, Any], ...] = (),
+        channel: tuple[tuple[int, Any], ...] = (),
     ) -> None:
-        self.replies = list(replies) or [(200, EXPORT)]
-        self.page_replies = list(pages) or [(200, PAGES_EXPORT)]
+        self.queues = {
+            "base": list(replies) or [(200, EXPORT)],
+            "pages": list(pages) or [(200, PAGES_EXPORT)],
+            "device": list(device) or [(200, DEVICE_EXPORT)],
+            "channel": list(channel) or [(200, CHANNEL_EXPORT)],
+        }
         self.requests: list[httpx.Request] = []
         self.calls: list[tuple[float, str]] = []  # (부른 시각 — World 시계 초, 종류)
         self.gate: asyncio.Event | None = None
-        self.delay = {"base": 0.0, "pages": 0.0}  # 실제 초 — 느린 호출 흉내
+        self.delay = dict.fromkeys(self.queues, 0.0)  # 실제 초 — 느린 호출 흉내
         # 가짜 시계 초 — 호출이 걸리는 동안 World 시계를 민다(보낸 시각은 그 앞에 적는다)
-        self.takes = {"base": 0, "pages": 0}
+        self.takes = dict.fromkeys(self.queues, 0)
         self.clock: Callable[[], float] = lambda: 0.0
         self.spend: Callable[[int], None] = lambda sec: None
         self.active = 0
@@ -252,7 +327,7 @@ class Clarity:
 
     @staticmethod
     def kind(request: httpx.Request) -> str:
-        return "pages" if "dimension1" in request.url.params else "base"
+        return KINDS.get(request.url.params.get("dimension1", ""), "base")
 
     def count(self, kind: str) -> int:
         return sum(1 for _, k in self.calls if k == kind)
@@ -272,7 +347,7 @@ class Clarity:
                 await self.gate.wait()
             if self.delay[kind]:
                 await asyncio.sleep(self.delay[kind])
-            queue = self.replies if kind == "base" else self.page_replies
+            queue = self.queues[kind]
             status, body = queue.pop(0) if len(queue) > 1 else queue[0]
         finally:
             self.active -= 1
@@ -290,7 +365,8 @@ class Clarity:
 
 
 class FlakyBus(RedisBus):
-    """fakeredis 위의 버스 — Clarity 기록 읽기만·쓰기만 실패하게 바꿀 수 있다."""
+    """fakeredis 위의 버스 — Clarity 기록 읽기만·쓰기만(`read`·`write`), 날별 기록 쓰기·읽기만(`day-write`·`day-read`)
+    실패하게 바꿀 수 있다."""
 
     def __init__(self, world: "World") -> None:
         super().__init__(fakeredis.aioredis.FakeRedis(server=world.server))
@@ -317,6 +393,22 @@ class FlakyBus(RedisBus):
         self._check("write")
         await super().clarity_pages_save(data)
 
+    async def clarity_dims_load(self, field: str) -> str | None:
+        self._check("read")
+        return await super().clarity_dims_load(field)
+
+    async def clarity_dims_save(self, field: str, data: str) -> None:
+        self._check("write")
+        await super().clarity_dims_save(field, data)
+
+    async def clarity_day_save(self, day: str, data: str, expire_at: int) -> None:
+        self._check("day-write")
+        await super().clarity_day_save(day, data, expire_at)
+
+    async def clarity_days_load(self, days: Sequence[str]) -> list[str | None]:
+        self._check("day-read")
+        return await super().clarity_days_load(days)
+
 
 class World:
     def __init__(
@@ -327,8 +419,9 @@ class World:
         self.server = fakeredis.FakeServer()
         self.token = token
         self.wait = wait
-        self.broken: set[str] = set()  # "read"·"write" — 그쪽 Redis 명령이 실패한다
-        # 피드가 Clarity 기록에 닿은 차례("read"·"write") — 토큰이 없으면 비어 있어야 한다
+        # "read"·"write"·"day-write"·"day-read" — 그쪽 Redis 명령이 실패한다
+        self.broken: set[str] = set()
+        # 피드가 Clarity 기록에 닿은 차례(위 이름) — 토큰이 없으면 비어 있어야 한다
         self.redis_calls: list[str] = []
         self.feeds = self.new_app()
         clarity.clock = lambda: self.t
@@ -356,6 +449,18 @@ class World:
     def stored_pages(self) -> dict[str, Any] | None:
         return self.stored("admin:clarity:pages")
 
+    def stored_dims(self, field: str) -> dict[str, Any] | None:
+        raw = fakeredis.FakeRedis(server=self.server).hget("admin:clarity:dims", field)
+        return None if raw is None else json.loads(raw)
+
+    def stored_day(self, day: str) -> dict[str, Any] | None:
+        return self.stored(f"admin:clarity:day:{day}")
+
+    def day_ttl(self, day: str) -> int:
+        return fakeredis.FakeRedis(server=self.server).expiretime(
+            f"admin:clarity:day:{day}"
+        )
+
     def seed(self, key: str, text: str) -> None:
         fakeredis.FakeRedis(server=self.server).set(key, text)
 
@@ -365,6 +470,11 @@ class World:
 
     async def get(self, feeds: VisitFeeds | None = None) -> dict[str, Any]:
         return await (feeds or self.feeds).clarity(bus=self.bus)
+
+    async def history(
+        self, days: str | None = None, feeds: VisitFeeds | None = None
+    ) -> dict[str, Any]:
+        return await (feeds or self.feeds).clarity_history(days, bus=self.bus)
 
     def advance(self, hours: int = 0, sec: int = 0) -> None:
         self.t += hours * 3600 + sec

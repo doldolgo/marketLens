@@ -1,12 +1,14 @@
-"""`/admin/clarity` 두 호출이 서로에게 기대는 곳 — 미루기·느린 호출·한쪽 실패·7일·옛 기록 (스펙 040 §3.2·§3.5·§3.7·§4).
+"""`/admin/clarity` 호출들이 서로에게 기대는 곳 — 미루기·느린 호출·한쪽 실패·7일·옛 기록 (스펙 040 §3.2·§3.5·§3.7·§4,
+068 §3.1·§3.4).
 
-기본이 401·403·429 면 묶음은 미루고 시도로도 적지 않는다. 두 기록은 state·값·간격을 따로 갖는다.
+기본이 401·403·429 면 묶음·기기·유입은 미루고 시도로도 적지 않는다. 기록은 종류마다 state·값·간격을 따로 갖는다.
 """
 
 import asyncio
 import json
 
 from app.features.admin.tests.clarity_fakes import (
+    DIMS_KEYS,
     EXPORT,
     HOUR_MS,
     NOW,
@@ -16,10 +18,10 @@ from app.features.admin.tests.clarity_fakes import (
 )
 
 
-async def test_a_denied_or_limited_summary_defers_the_pages_call() -> None:
+async def test_a_denied_or_limited_summary_defers_the_other_calls() -> None:
     w = World(Clarity((401, {})))
     body = await w.get()
-    assert w.clarity.count("pages") == 0
+    assert [w.clarity.count(k) for k in ("pages", "device", "channel")] == [0, 0, 0]
     assert (body["state"], body["code"]) == ("denied", "http_401")
     assert body["pages"] == {
         "state": "denied",
@@ -32,28 +34,49 @@ async def test_a_denied_or_limited_summary_defers_the_pages_call() -> None:
         "rowLimitHit": None,
         "groups": None,
     }
-    assert w.stored_pages() is None  # 시도로도 적지 않는다
+    assert body["dims"] == {
+        "state": "denied",
+        "code": "http_401",
+        "fetchedAt": None,
+        "refreshSec": 86_400,
+        **dict.fromkeys(DIMS_KEYS),
+    }
+    # 시도로도 적지 않는다
+    assert w.stored_pages() is None and w.stored_dims("device") is None
     limited = World(Clarity((429, {})))
     body = await limited.get()
-    assert limited.clarity.count("pages") == 0
-    assert (body["pages"]["state"], body["pages"]["code"]) == ("error", "http_429")
+    assert len(limited.clarity.calls) == 1  # 기본만
+    for part in (body["pages"], body["dims"]):
+        assert (part["state"], part["code"]) == ("error", "http_429")
 
 
 async def test_a_summary_back_to_ok_calls_the_deferred_pages() -> None:
     w = World(Clarity((429, {}), (200, EXPORT)))
     await w.get()
-    w.advance(4)
+    w.advance(6)
     body = await w.get()
-    assert [k for _, k in w.clarity.calls] == ["base", "base", "pages"]
-    assert body["state"] == "ok" and body["pages"]["state"] == "ok"
+    assert [k for _, k in w.clarity.calls] == [
+        "base",
+        "base",
+        "pages",
+        "device",
+        "channel",
+    ]
+    assert body["state"] == body["pages"]["state"] == body["dims"]["state"] == "ok"
 
 
 async def test_other_summary_failures_still_call_the_pages() -> None:
     for reply in ((500, {}), (0, Clarity.TIMEOUT)):
         w = World(Clarity(reply))
         body = await w.get()
-        assert [k for _, k in w.clarity.calls] == ["base", "pages"], reply
+        assert [k for _, k in w.clarity.calls] == [
+            "base",
+            "pages",
+            "device",
+            "channel",
+        ], reply
         assert body["state"] == "error" and body["pages"]["state"] == "ok"
+        assert body["dims"]["state"] == "ok"
     assert body["code"] == "timeout"
 
 
@@ -124,12 +147,13 @@ async def test_an_old_035_record_answers_without_summary_and_countries() -> None
     w = World(Clarity())
     w.seed("admin:clarity", json.dumps(old))
     body = await w.get()
-    assert w.clarity.count("base") == 0  # 035 의 마지막 시도 + 4시간에 부른다
-    assert w.clarity.count("pages") == 1  # 묶음은 기록이 없어 첫 요청에
+    assert w.clarity.count("base") == 0  # 035 의 마지막 시도 + 6시간에 부른다
+    # 묶음·기기·유입은 기록이 없어 첫 요청에
+    assert [w.clarity.count(k) for k in ("pages", "device", "channel")] == [1, 1, 1]
     assert (body["state"], body["summary"], body["countries"]) == ("ok", None, None)
     assert body["traffic"] == old["values"]["traffic"]
     assert body["metrics"] == old["values"]["metrics"]
-    assert body["nextAt"] == now_ms + 3 * HOUR_MS
+    assert body["nextAt"] == now_ms + 5 * HOUR_MS
 
 
 async def test_a_long_deferral_still_drops_week_old_pages_values_from_redis() -> None:

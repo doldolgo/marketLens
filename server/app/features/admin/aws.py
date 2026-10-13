@@ -345,12 +345,16 @@ class AwsReader:
 
     # --- 시계열 (063) ---
 
-    def series(self, window_sec: int, period_sec: int) -> dict[str, Any]:
+    def series(
+        self, window_sec: int, period_sec: int, shift_sec: int = 0
+    ) -> dict[str, Any]:
         """상자 셋의 EC2·에이전트 지표 + WS 접속·canary — 창·주기는 피드가 고른다(063 §3.1).
 
         상자·차원은 metrics 와 같은 1시간 캐시를 쓴다(같은 스레드라 잠금이 없다). 점은 시작부터 주기 간격의 격자다.
+        `shift_sec` 만큼 창을 앞으로 옮긴다 — 이전 기간은 창 길이(끝 = 지금 창의 시작, 068 §3.3). 창은 주기의 배수라
+        옮긴 끝도 격자 위다.
         """
-        end = int(self._clock()) // period_sec * period_sec
+        end = int(self._clock()) // period_sec * period_sec - shift_sec
         start = end - window_sec
         boxes = self._box_ids()
         dims = self._metric_dims()
