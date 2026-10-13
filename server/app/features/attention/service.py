@@ -330,5 +330,7 @@ class AttentionService:
 
     # --- 관리자 피드 (§3.6) ---
 
-    async def feed(self, days: str | None, bus: RedisBus | None) -> dict[str, Any]:
-        return await self._feed.read(days, bus)
+    async def feed(
+        self, days: str | None, page: str | None, bus: RedisBus | None
+    ) -> dict[str, Any]:
+        return await self._feed.read(days, page, bus)
