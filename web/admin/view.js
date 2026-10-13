@@ -34,7 +34,10 @@ export function readView(page, search, hash) {
     if (ok?.(value) && !f.some(([k, v]) => k === key && v === value)) f.push([key, value]);
   }
   const d = new URLSearchParams(String(hash ?? '').replace(/^#/, '')).get('detail');
-  return { range, cmp, f, detail: d !== null && detailOK(page, d) ? d : null };
+  const view = { range, cmp, f, detail: d !== null && detailOK(page, d) ? d : null };
+  // 그 페이지만의 주소 인자(065 화면 — page·device·mode·metric): page.params = { 이름: [기본값, …허용 값] }, 목록 밖은 기본값
+  if (page.params) view.p = Object.fromEntries(Object.entries(page.params).map(([k, vals]) => [k, vals.includes(q.get(k)) ? q.get(k) : vals[0]]));
+  return view;
 }
 // 보기 → 주소. 기본값은 싣지 않는다(처음 주소가 그대로 깨끗하게)
 export function urlOf(page, view, extra = []) {
@@ -42,6 +45,7 @@ export function urlOf(page, view, extra = []) {
   if (view.range !== page.range) q.set('range', view.range);
   if (view.cmp !== 'none') q.set('cmp', view.cmp);
   for (const [k, v] of view.f) q.append('f', `${k}:${v}`);
+  for (const [k, vals] of Object.entries(page.params ?? {})) if (view.p?.[k] != null && view.p[k] !== vals[0]) q.set(k, view.p[k]);
   for (const [k, v] of extra) q.set(k, v);
   const s = q.toString();
   return `${page.home}${s ? `?${s}` : ''}${view.detail ? `#detail=${encodeURIComponent(view.detail)}` : ''}`;

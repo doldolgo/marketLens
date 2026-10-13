@@ -23,6 +23,7 @@ export const PATHS = Object.freeze({
   ip: '/svc/api/admin/access/ip',
   clarity: '/svc/api/admin/clarity',
   history: '/svc/api/admin/clarity/history',
+  attention: '/svc/api/admin/attention',
 });
 export const FAST = Object.freeze(['collector', 'api', 'status', 'collect']);
 // 025 — 헬스의 503 도 상태 응답이다(본문을 읽는다)
@@ -179,13 +180,19 @@ export function svg(tag, attrs = {}) {
   return node;
 }
 
-// 막대 폭·자리 — 0~1 비율 수만 받아 % 로 쓴다(피드 글자는 들어가지 않는다). 화면이 style 을 만지는 곳은 이 둘뿐
+// 막대 폭·자리 — 0~1 비율 수만 받아 % 로 쓴다(피드 글자는 들어가지 않는다). 화면이 style 을 만지는 곳은 이 둘과 아래 틀 칸뿐
 const ratioPct = (r) => `${Math.round(Math.min(1, Math.max(0, num(r) ?? 0)) * 1000) / 10}%`;
 export function widthOf(node, ratio) {
   node.style.width = ratioPct(ratio);
 }
 export function leftOf(node, ratio) {
   node.style.left = ratioPct(ratio);
+}
+// 틀 칸(065 화면) — 실제 페이지를 줄이는 몫(0~1, 늘리지 않는다)과 칸 높이(px) 두 수만 CSS 변수로
+export function frameVars(node, fit, height) {
+  const s = node.style;
+  s.setProperty('--fit', String(Math.round(Math.min(1, Math.max(0.05, num(fit) ?? 1)) * 10000) / 10000));
+  s.setProperty('--stage-h', `${Math.round(Math.max(0, num(height) ?? 0))}px`);
 }
 
 // CSV 내려받기(066 §3.2) — 브라우저에서 만든 Blob 의 주소만 링크로 쓴다(서버 호출 없음)
