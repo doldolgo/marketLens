@@ -26,6 +26,7 @@ from app.features.admin.tests.access_fakes import (
     write,
 )
 
+START = AFTER - AFTER % HOUR - 23 * HOUR  # 24시간 창의 시작 — KST 어제 11:00
 DAY_A = GATE + 9 * DAY  # KST 10-20 00:00
 # KST 10-21 10:30 — 24시간 창은 KST 10-20 11:00 부터, 7일 창은 KST 10-14 11:00 부터(8칸)
 NOW7 = GATE + 10 * DAY + 10 * HOUR + 1800
@@ -232,29 +233,41 @@ def test_paths_drop_the_query_and_the_tops_keep_three_by_count(tmp_path: Path) -
     assert row["last"] == t + 6
 
 
-def test_each_hour_keeps_ten_paths_and_five_browser_names_then_other(
+def test_a_file_keeps_the_top_ten_paths_and_five_browser_names_then_other(
     tmp_path: Path,
 ) -> None:
     t = AFTER - 3 * HOUR
-    paths = [line(t + i, f"/p{i}") for i in range(13)]  # 열 개 뒤 셋은 (기타)
-    later = [line(AFTER - 60, "/p12")]  # 다음 시는 새 칸 — 이름으로 센다
-    agents = [
-        CHROME,
-        EDGE,
-        SAMSUNG,
-        IPHONE,
-        FIREFOX,
-        CURL,
-        KAKAO,
-    ]  # 다섯 뒤 둘은 (기타)
+    # 한 번씩 열둘 + 네 번 하나 — 파일을 다 읽으면 수가 큰 순(같으면 이름순) 열 개, 나머지 셋은 (기타)
+    paths = [line(t + i, f"/p{i}") for i in range(12)]
+    paths += [line(AFTER - 60 - i, "/p12") for i in range(4)]  # 늦게 와도 수로 고른다
+    agents = [CHROME, EDGE, SAMSUNG, IPHONE, FIREFOX, CURL, KAKAO]
     names = [
         line(t + 20 + i, "/", ua=ua, ip="198.51.100.0") for i, ua in enumerate(agents)
     ]
-    write(tmp_path, "access.log", paths + names + later)
+    write(tmp_path, "access.log", paths + names)
     rows = by_band(ips(tmp_path))
-    assert rows["203.0.113.0/24"]["topPaths"] == [["(기타)", 3], ["/p0", 1], ["/p1", 1]]
-    assert rows["203.0.113.0/24"]["requests"] == 14
-    assert rows["198.51.100.0/24"]["topAgents"][0] == ["(기타)", 2]
+    assert rows["203.0.113.0/24"]["topPaths"] == [
+        ["/p12", 4],
+        ["(기타)", 3],
+        ["/p0", 1],
+    ]
+    assert rows["203.0.113.0/24"]["requests"] == 16
+    # 다섯 뒤 둘(이름순으로 뒤인 mobile·ios 둘)은 (기타)
+    assert rows["198.51.100.0/24"]["topAgents"] == [
+        ["(기타)", 2],
+        ["desktop·macos·firefox", 1],
+        ["desktop·other·other", 1],
+    ]
+
+
+def test_tops_come_from_whole_files_that_have_lines_in_the_window(
+    tmp_path: Path,
+) -> None:
+    # 회전 파일 하나가 24시간 창 경계를 걸친다 — 수는 창 안 줄만, 상위 목록은 그 파일 것(근사값 — 상세가 다시 읽는다)
+    rotated(tmp_path, [line(START - HOUR, "/before"), line(START + HOUR, "/inside")])
+    (row,) = ips(tmp_path)["bands"]
+    assert row["requests"] == 1
+    assert row["topPaths"] == [["/before", 1], ["/inside", 1]]
 
 
 def test_a_file_keeps_50000_bands_and_puts_the_rest_in_other(

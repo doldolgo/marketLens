@@ -3,9 +3,10 @@
 대역 = 접속 기록 줄의 가린 IP(027 caddy 가 IPv4 /24·IPv6 /48 로 가린다)를 그 길이로 다시 자른 주소에 `/24`·`/48` 을 붙인
 글자다. 가린 줄은 글자가 그대로이고, 가려지지 않은 줄(손으로 고친 기록)도 같은 대역으로 접혀 원래 IP 가 응답에 나가지 않는다.
 IP 칸이 없는 줄은 `(없음)`, IP 로 풀 수 없는 글자와 파일 하나에서 5만 개를 넘은 새 대역은 `(기타)`.
-파일마다 대역 → 시(時) 칸(수 열여섯·처음·마지막 줄 시각·경로·브라우저 정보 수)과 짝(그날 (IP, UA) 의 038 해시 → 그날 시 비트)을
-둔다. 창은 038 처럼 창 안 시 칸만 더해 회전 파일이 창 경계를 걸쳐도 수가 창과 같다. 짝 해시·UA 원문은 응답에 없다 — 브라우저
-정보는 038 의 기기·OS·브라우저 이름이다. 목록은 두 번에 만든다: 모든 대역을 거르기·정렬 열쇠(요청·페이지·브라우저 종류 요청·
+파일마다 대역 → 시(時) 칸(수 열여섯·처음·마지막 줄 시각), 그 파일의 경로 상위 10·브라우저 정보 상위 5(나머지는 `(기타)` 하나),
+짝(그날 (IP, UA) 의 038 해시 → 그날 시 비트)을 둔다. 수·처음·마지막·짝은 038 처럼 창 안 시 칸만 더해 회전 파일이 창 경계를
+걸쳐도 창과 같고, 상위 목록은 창 안 줄이 있는 파일의 것을 더한 근사값이다(경계 파일은 창 밖 줄도 든다 — 정확한 값은 상세가
+다시 읽는다). 짝 해시·UA 원문은 응답에 없다 — 브라우저 정보는 038 의 기기·OS·브라우저 이름이다. 목록은 두 번에 만든다: 모든 대역을 거르기·정렬 열쇠(요청·페이지·브라우저 종류 요청·
 마지막 시각)로만 세고, 고른 쪽(최대 500)만 나머지 값을 모은다 — 대역이 많은 날에도 응답을 만드는 동안의 메모리가 쪽에 묶인다.
 """
 
@@ -25,19 +26,19 @@ from app.features.admin.geo_table import IPV6, GeoTable, locate
 NO_BAND = "(없음)"
 OTHER = "(기타)"
 BAND_CAP = 50_000  # 파일 하나의 대역 — 넘는 새 대역은 (기타) (§3.2)
-# 시 칸마다 경로 10·브라우저 정보 5 — 이미 있는 이름은 세고 넘는 새 이름은 (기타)
-PATH_CAP = 10
-AGENT_CAP = 5
+# 파일마다 대역의 경로 상위 10·브라우저 정보 상위 5 — 다 읽은 뒤 나머지는 (기타) 하나로 (§3.2)
+TOP_PATHS = 10
+TOP_AGENTS = 5
 PATH_LIMIT = 100
 TOP = 3  # 응답의 topPaths·topAgents
 LIMIT, LIMIT_MAX = 200, 500
 SORTS = ("requests", "pages", "last")
 BOT_KINDS = ("scanner", "tool", "ai", "search")  # botPct 의 분자 (§3.2)
 STATUS_NAMES = ("2xx", "3xx", "4xx", "5xx")
-# 시 칸 — 수 열여섯(요청·사람 모양 페이지·JS 신호·WS 101·종류 여덟·상태 넷), 처음·마지막 줄 시각, 경로·브라우저 정보 수
+# 시 칸 — 수 열여섯(요청·사람 모양 페이지·JS 신호·WS 101·종류 여덟·상태 넷)과 처음·마지막 줄 시각
 REQ, PAGES, JS, WS, KIND, STATUS = 0, 1, 2, 3, 4, 12
 CELLS = 16
-FIRST, LAST, PATHS, AGENTS = 16, 17, 18, 19
+FIRST, LAST = 16, 17
 KIND_NO = {k: KIND + i for i, k in enumerate(CLASSES)}  # 종류 → 시 칸 번호
 BROWSER = KIND_NO["browser"]
 _NAMES: dict[Traits, str] = {}  # 기기·OS·브라우저 이름 셋의 조합 — 많아야 수백 가지
@@ -89,12 +90,14 @@ def geo_of(table: GeoTable | None, band: str) -> tuple[str | None, str | None]:
 
 
 class Band:
-    """파일 하나에서 대역 하나 — 시 시작 → 시 칸, 짝 해시 → (KST 날 번호 << 24) | 그날 시 비트."""
+    """파일 하나에서 대역 하나 — 시 시작 → 시 칸, 경로·브라우저 정보 → 수, 짝 해시 → (KST 날 번호 << 24) | 그날 시 비트."""
 
-    __slots__ = ("hours", "pairs")
+    __slots__ = ("hours", "paths", "agents", "pairs")
 
     def __init__(self) -> None:
         self.hours: dict[int, list[Any]] = {}
+        self.paths: dict[str, int] = {}
+        self.agents: dict[str, int] = {}
         self.pairs: dict[bytes, int] = {}
 
 
@@ -136,7 +139,7 @@ class BandTally:
                 b = self.bands[band] = Band()
         rec = b.hours.get(hour)
         if rec is None:
-            rec = b.hours[hour] = [0] * CELLS + [ts, ts, {}, {}]
+            rec = b.hours[hour] = [0] * CELLS + [ts, ts]
         elif ts < rec[FIRST]:
             rec[FIRST] = ts
         elif ts > rec[LAST]:
@@ -153,27 +156,35 @@ class BandTally:
         if ws:
             rec[WS] += 1
         path = path[:PATH_LIMIT]
-        paths = rec[PATHS]
+        paths = b.paths
         if path in paths:
             paths[path] += 1
-        elif len(paths) < PATH_CAP:
+        else:
             paths[self._paths.setdefault(path, path)] = 1
-        else:
-            paths[OTHER] = paths.get(OTHER, 0) + 1
-        agents = rec[AGENTS]
-        if agent in agents:
-            agents[agent] += 1
-        elif len(agents) < AGENT_CAP:
-            agents[agent] = 1
-        else:
-            agents[OTHER] = agents.get(OTHER, 0) + 1
+        agents = b.agents
+        agents[agent] = agents.get(agent, 0) + 1
         if pair is not None:
             pairs = b.pairs
             pairs[pair] = pairs.get(pair, 0) | mark
 
     def finish(self) -> None:
+        """다 읽음 — 대역마다 경로·브라우저 정보를 상위만 남기고(나머지 수는 `(기타)` 하나로) 읽는 동안의 메모를 버린다.
+        읽는 동안의 이름 수는 줄 수를 넘지 않고, 캐시에 남는 것은 대역마다 많아야 11·6개다."""
+        for b in self.bands.values():
+            if len(b.paths) > TOP_PATHS:
+                b.paths = _fold(b.paths, TOP_PATHS)
+            if len(b.agents) > TOP_AGENTS:
+                b.agents = _fold(b.agents, TOP_AGENTS)
         self._memo.clear()
         self._paths.clear()
+
+
+def _fold(counts: dict[str, int], n: int) -> dict[str, int]:
+    """수 내림차순(같으면 이름순) n 개와 나머지를 합친 `(기타)`."""
+    best = heapq.nsmallest(n, counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    kept = dict(best)
+    kept[OTHER] = kept.get(OTHER, 0) + sum(counts.values()) - sum(kept.values())
+    return kept
 
 
 def pair_mark(day: int, its: int) -> int:
@@ -323,6 +334,7 @@ def _gather(
             b = found.get(band)
             if b is None:
                 continue
+            seen = False
             for hour, rec in b.hours.items():
                 if not start <= hour <= last:
                     continue
@@ -332,8 +344,12 @@ def _gather(
                 acc.first = min(acc.first, rec[FIRST])
                 acc.last = max(acc.last, rec[LAST])
                 acc.spark[(hour - origin) // size] += rec[REQ]
-                acc.paths.update(rec[PATHS])
-                acc.agents.update(rec[AGENTS])
+                seen = True
+            if not seen:
+                continue
+            # 상위 목록은 파일 단위 — 창 안 줄이 있는 파일의 것을 더한다(경계 파일은 창 밖 줄도 든 근사값)
+            acc.paths.update(b.paths)
+            acc.agents.update(b.agents)
             # 짝 — 같은 날을 두 파일이 나눠도 해시가 같아 한 번만 센다(038 의 열쇠), 다른 날은 해시가 달라 날마다 따로
             for pair, mark in b.pairs.items():
                 dayno = mark >> 24
