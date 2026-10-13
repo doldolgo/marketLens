@@ -1522,6 +1522,233 @@ details.card > summary {
   background: repeating-linear-gradient(90deg, var(--text-3) 0 3px, transparent 3px 5px);
 }
 
+/* — 화면(065) — 고르기 줄 · 몸 = 틀 칸(남은 폭 전부, 줄이기만 — screens.js 가 --fit·--stage-h 를 준다) | 오른쪽 판 360px(1279px 이하는 틀 아래).
+   단계 색 lv1~lv5 는 덮어 보기(attention.js)의 상자 테두리와 같은 색 — 옅은 파랑 → 노랑 → 주황 → 빨강, lv0 은 보이기만(회색) — */
+.scr-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  align-items: start;
+  gap: inherit;
+}
+.scr-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+}
+.scr-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.scr-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.scr-chip .bg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: rgb(57 135 229 / 0.16);
+  pointer-events: none;
+}
+.scr-chip > span,
+.scr-chip > b {
+  position: relative;
+}
+.scr-chip b {
+  color: var(--text-3);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.scr-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--text-1);
+  font-weight: 600;
+}
+.scr-chip.zero {
+  opacity: 0.5;
+}
+.scr-small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--warn);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+.scr-stagewrap {
+  min-width: 0;
+}
+.scr-stage {
+  position: relative;
+  width: calc(var(--fw) * var(--fit, 1));
+  max-width: 100%;
+  height: var(--stage-h, 640px);
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.scr-stage.pc {
+  --fw: 1280px;
+}
+.scr-stage.mobile {
+  --fw: 390px;
+}
+.scr-stage iframe {
+  display: block;
+  width: var(--fw);
+  height: calc(var(--stage-h, 640px) / var(--fit, 1));
+  border: 0;
+  transform: scale(var(--fit, 1));
+  transform-origin: 0 0;
+}
+.scr-note {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: rgb(18 20 32 / 0.9);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+}
+.scr-side .card-head {
+  flex-wrap: wrap;
+}
+.scr-panel {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.scr-panel .panel-head {
+  margin: 0;
+}
+.scr-tbl th,
+.scr-tbl td {
+  padding: 5px 6px;
+}
+.scr-tbl tr.on td {
+  background: rgb(145 132 217 / 0.16);
+}
+.scr-tbl tr.gone td,
+.scr-tbl .rank {
+  color: var(--text-3);
+}
+.scr-bar {
+  display: block;
+  width: 56px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--grid);
+}
+.scr-bar i {
+  display: block;
+  height: 100%;
+}
+/* 판 표 — 360px 에 세 칸(순위 · 이름 한 줄과 흐린 둘째 줄 · 막대와 값), 나머지 칸은 상세 판에 */
+.scr-tbl {
+  table-layout: fixed;
+}
+.scr-tbl .rank {
+  width: 3em;
+}
+.scr-tbl .scr-valcell {
+  width: 9em;
+}
+.scr-name,
+.scr-line,
+.scr-sub {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scr-sub {
+  color: var(--text-3);
+  font-size: var(--fs-11);
+}
+.scr-line .shape {
+  margin-right: 4px;
+}
+.scr-val {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.scr-val .scr-bar {
+  flex: none;
+  width: 48px;
+}
+.scr-val b {
+  min-width: 3.4em;
+  font-weight: 400;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.lv0 {
+  background: var(--none);
+}
+.lv1 {
+  background: #60a5fa;
+}
+.lv2 {
+  background: #facc15;
+}
+.lv3 {
+  background: #fb923c;
+}
+.lv4 {
+  background: #ef4444;
+}
+.lv5 {
+  background: #dc2626;
+}
+.stair {
+  display: grid;
+  grid-template-columns: 4.6em minmax(0, 1fr) 3.4em;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 24px;
+  font-size: var(--fs-13);
+}
+.stair .scr-bar {
+  width: 100%;
+}
+.stair b {
+  font-weight: 400;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.stair-mark {
+  grid-column: 1 / -1;
+  color: var(--warn);
+  font-size: var(--fs-12);
+}
+.stair .scr-bar i {
+  background: rgb(57 135 229 / 0.7);
+}
+
 /* — 좁은 화면 — 1280 이상 3~4열 · 768~1279 2열(내비 아이콘만) · 768 미만 1열(☰ 시트, 상세 판은 화면 전체) — */
 @media (min-width: 1440px) {
   .content {
@@ -1563,6 +1790,9 @@ details.card > summary {
   }
   .kpis.six {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .scr-body {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 @media (max-width: 767px) {

@@ -50,10 +50,12 @@
     ["checkbox", "check"],
     ["switch", "check"],
   ])
-  // 영역 안에서 찾는 요소 — data-el(행 빼고 — 행은 클릭만 센다) 또는 대화형 요소
-  const FIND =
-    '[data-el]:not([data-el^="row:"]),a[href],button,summary,input,select,textarea,label,' +
+  // 영역 안의 대화형 요소 — 세기(061)와 덮어 보기(065)가 같이 쓴다
+  const ITEMS =
+    "a[href],button,summary,input,select,textarea,label," +
     "[role=button],[role=tab],[role=checkbox],[role=switch],[role=link]"
+  // 영역 안에서 찾는 요소 — data-el(행 빼고 — 행은 클릭만 센다) 또는 대화형 요소
+  const FIND = '[data-el]:not([data-el^="row:"]),' + ITEMS
   // 열쇠에 못 쓰는 글자 — 제어 문자·| ·짝 없는 대리 문자(UTF-8 로 못 적는다)
   const BAD_KEY = /[\u0000-\u001f\u007f-\u009f|]|[\ud800-\udbff](?![\udc00-\udfff])|(?:^|[^\ud800-\udbff])[\udc00-\udfff]/
 
@@ -77,11 +79,6 @@
     // 다른 출처의 틀 — 틀 안이다
   }
   const overlayAsked = params.get("kt-overlay") === "1"
-  if (location.hostname !== HOST || !firstPage) return
-  // 덮어 보기(053) — 주소에 kt-overlay=1 이 있고 틀 안일 때만. 세지도 보내지도 않는다(아래 세기 코드에 닿지 않는다)
-  if (framed && overlayAsked) return overlay(firstPage)
-  // 켜는 조건(§3.2) — 호스트·틀 밖·덮어 보기 아님·목록 안 화면. 하나라도 아니면 아무것도 하지 않는다
-  if (framed || overlayAsked) return
 
   // 동의 상태 '켬' — 지금 판의 granted 이고 GPC 가 아니다. 저장소를 읽다 예외면 끔
   const consented = () => {
@@ -195,19 +192,28 @@
     return ""
   }
 
-  // 찾은 요소의 추적 열쇠 — 자기 data-el, 또는 data-el 조상이 없을 때 자동 열쇠(조상이 있으면 그 조상이 센다). 행(row:)은 빼고
-  const trackKey = (el, area) => {
+  // 찾은 요소의 열쇠 — 자기 data-el, 또는 data-el 조상이 없을 때 자동 열쇠(조상이 있으면 그 조상이 센다).
+  // 덮어 보기(065)도 이 함수로 (영역, 열쇠)를 가진 요소를 찾는다 — 세는 것과 그리는 것이 같은 요소
+  const elementKey = (el, area) => {
     const own = el.getAttribute("data-el")
-    let key = ""
-    if (own !== null) key = validKey(own)
-    else {
-      for (let n = el.parentElement; n && n !== area; n = n.parentElement) {
-        if (n.getAttribute("data-el") !== null) return ""
-      }
-      key = autoKey(el, area)
+    if (own !== null) return validKey(own)
+    for (let n = el.parentElement; n && n !== area; n = n.parentElement) {
+      if (n.getAttribute("data-el") !== null) return ""
     }
+    return autoKey(el, area)
+  }
+
+  // 추적 열쇠 — 행(row:)은 빼고(행은 클릭만 센다)
+  const trackKey = (el, area) => {
+    const key = elementKey(el, area)
     return key.indexOf("row:") === 0 ? "" : key
   }
+
+  // 켜는 조건(§3.2) — 호스트·목록 안 화면. 덮어 보기(053)는 주소에 kt-overlay=1 이 있고 틀 안일 때만 — 세지도 보내지도 않는다
+  // (아래 세기 코드에 닿지 않는다). 열쇠 함수 뒤에 둔다 — 덮어 보기가 그 함수를 쓴다. 틀 안이거나 덮어 보기 표시만 있으면 아무것도 하지 않는다
+  if (location.hostname !== HOST || !firstPage) return
+  if (framed && overlayAsked) return overlay(firstPage)
+  if (framed || overlayAsked) return
 
   // ── 세기 (052 §3.2 + 061 §3.2) ───────────────────────────────────────────────────────────
 
@@ -630,22 +636,38 @@
   // ── 덮어 보기 (053) ─────────────────────────────────────────────────────────────────────────
   // 관리자 화면이 이 페이지를 틀로 띄워 영역별 값을 postMessage 로 넘기면, 영역 위에 단계 색 상자와 꼬리표를 그린다.
   // 누름은 막는다(링크·탭 단추가 화면을 바꾸지 않게 — 화면은 관리자 고르기로만 바뀐다). 휠·터치 스크롤은 그대로.
-  // 값이 오기 전에는 아무것도 그리지 않는다. 글자는 textContent 로만, 받은 값은 꼴을 검사한 수·id 만 쓴다
+  // 값이 오기 전에는 아무것도 그리지 않는다. 글자는 textContent 로만, 받은 값은 꼴을 검사한 수·id 만 쓴다.
+  // 065 — 값 메시지의 mode 로 보기를 고른다: area(053 그대로)·element(영역은 옅은 테두리만, (영역, 열쇠)를 가진 요소마다 단계
+  // 상자 — 열쇠는 세기와 같은 elementKey)·depth(정적 페이지만 — 문서 높이 10칸 띠). 새 키가 없는 메시지는 053 그대로다
   function overlay(page) {
     const SIZES = [12, 12, 14, 16, 19, 22] // 꼬리표 글씨 — 단계 0~5(많이 본 곳이 크게)
+    const EL_SIZES = [11, 12, 13, 15, 17, 17] // 요소 꼬리표 글씨(065)
     // 단계 1~5 의 채움·테두리 — 옅은 파랑 → 노랑 → 주황 → 빨강, 불투명도 0.18~0.5, 테두리 2~4px. 단계 0 은 회색 점선만
     const FILL = ["", "rgba(96,165,250,.18)", "rgba(250,204,21,.26)", "rgba(251,146,60,.34)", "rgba(239,68,68,.42)", "rgba(220,38,38,.5)"]
     const LINE = ["2px dashed rgba(156,163,175,.9)", "2px solid #60a5fa", "2px solid #facc15", "3px solid #fb923c", "3px solid #ef4444", "4px solid #dc2626"]
+    // 요소 상자의 채움(065) — 테두리가 단계를 말하고 칠은 옅게(불투명도 0.10 이하 — 큰 카드·차트의 내용을 가리지 않게)
+    const EL_FILL = ["", "rgba(96,165,250,.06)", "rgba(250,204,21,.07)", "rgba(251,146,60,.08)", "rgba(239,68,68,.09)", "rgba(220,38,38,.1)"]
     const HATCH = "repeating-linear-gradient(45deg,rgba(107,114,128,.55) 0 2px,transparent 2px 8px)"
     const FOCUS_MS = 2000
+    const MODES = ["area", "element", "depth"]
+    const MAX_ELEMENTS = 300 // 받는 요소 값·알리는 요소 수(065)
+    const TAG_CHARS = 80 // 요소 꼬리표 글(관리자가 만든다)은 여기서 자른다
+    const TOP_TAGS = 20 // 요소 꼬리표는 순위 20 안만 — 나머지는 테두리만
+    const PICK = "[data-el]," + ITEMS // 요소 찾기 — 행(row:)도(지금 DOM 에 있는 행에 그린다)
     let values = null // id → 받은 값. null 이면 아직 값이 오지 않았다 — 그리지 않는다
     let label = ""
+    let mode = "area"
+    let elValues = new Map() // "영역|열쇠" → 받은 요소 값(065)
+    let depth = null // 도달 11칸(0~100) 또는 null(065)
+    let found = [] // [요소, 영역 id, 열쇠] — 문서 차례, DOM 바뀜에 1초에 한 번 다시 찾는다(065)
     let layer = null
     let frame = 0
     let scanTimer = 0
     let scanAt = 0
-    let told = null // 마지막으로 알린 영역 id 들
+    let told = null // 마지막으로 알린 영역 id·요소
     let focusId = ""
+    let focusKey = "" // focus 를 받은 "영역|열쇠"(065)
+    let focusEl = null
     let focusUntil = 0
 
     const set = (el, props) => {
@@ -672,13 +694,44 @@
       return out
     }
 
-    // 관리자에게 지금 영역 id 들을 알린다 — 처음 한 번, 그 뒤로는 모임이 바뀌었을 때만
+    // 크기 있는 영역 안의 열쇠 있는 요소(065) — 문서 차례. 영역은 가장 가까운 조상 영역(세기가 영역마다 찾는 것과 같다)
+    const findElements = (areas) => {
+      const idOf = new Map()
+      areas.forEach((el, id) => idOf.set(el, id))
+      const out = []
+      for (const el of document.querySelectorAll(PICK)) {
+        const area = el.parentElement ? el.parentElement.closest("[data-area]") : null
+        const id = area ? idOf.get(area) : undefined
+        if (id === undefined) continue
+        const key = elementKey(el, area)
+        if (key) out.push([el, id, key])
+      }
+      return out
+    }
+
+    // 관리자에게 지금 영역 id 들과 크기 있는 요소의 [영역, 열쇠](행 빼고, 300개까지)를 알린다 — 처음 한 번, 그 뒤로는 모임이
+    // 바뀌었을 때만. 요소가 하나도 없으면 elements 를 싣지 않는다(053 꼴 그대로 — 관리자는 그때 '지금 화면에 없음' 을 판정하지 않는다)
     const announce = () => {
-      const ids = Array.from(sized().keys())
-      const key = ids.join(" ")
-      if (key === told) return
-      told = key
-      window.parent.postMessage({ type: "kt-attention-ready", v: 1, page, areas: ids }, ADMIN_ORIGIN)
+      const areas = sized()
+      found = findElements(areas)
+      if (values) schedule()
+      const ids = Array.from(areas.keys())
+      const pairs = []
+      const seen = new Set()
+      for (const [el, id, key] of found) {
+        if (pairs.length >= MAX_ELEMENTS) break
+        if (key.indexOf("row:") === 0 || seen.has(id + "|" + key)) continue // 행은 재지 않는다(대시보드 표는 행이 많다)
+        const r = el.getBoundingClientRect()
+        if (!(r.width > 0 && r.height > 0)) continue
+        seen.add(id + "|" + key)
+        pairs.push([id, key])
+      }
+      const sig = JSON.stringify([ids, pairs])
+      if (sig === told) return
+      told = sig
+      const ready = { type: "kt-attention-ready", v: 1, page, areas: ids }
+      if (pairs.length) ready.elements = pairs
+      window.parent.postMessage(ready, ADMIN_ORIGIN)
     }
 
     const tagText = (v) => {
@@ -727,7 +780,129 @@
       return el
     }
 
-    // 그리기 — 스크롤·크기·DOM 바뀜마다 프레임당 한 번. 층은 맨 위 고정·누름 통과
+    // 상자 자리 — 화면 위 그 사각형(065 의 영역 테두리·요소 상자)
+    const place = (el, rect) =>
+      set(el, { position: "absolute", boxSizing: "border-box", left: rect.left + "px", top: rect.top + "px", width: rect.width + "px", height: rect.height + "px" })
+    const tagStyle = (size) => ({
+      position: "absolute",
+      left: "0",
+      maxWidth: "320px",
+      padding: "1px 5px",
+      background: "rgba(17,24,39,.88)",
+      color: "#f9fafb",
+      font: "600 " + size + "px/1.3 system-ui,-apple-system,sans-serif",
+      whiteSpace: "nowrap",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+    })
+
+    // 요소 보기의 영역(065) — 옅은 회색 테두리만, 꼬리표 없음
+    const frameBox = (id, rect, now) => {
+      const el = document.createElement("div")
+      el.className = "kt-ov-box kt-ov-area"
+      el.setAttribute("data-kt-area", id)
+      place(el, rect)
+      set(el, { border: "1px solid rgba(156,163,175,.45)", backgroundColor: "transparent" })
+      if (id === focusId && now < focusUntil) set(el, { borderWidth: "6px", borderStyle: "solid" })
+      return el
+    }
+
+    // 요소 상자(065) — 053 의 단계 테두리(단계 0 은 회색 점선만)와 옅은 칠. 꼬리표는 따로(아래 elementTag — 열쇠마다 하나)
+    const elementBox = (ek, v, rect, focused) => {
+      const level = v ? v.level : 0
+      const el = document.createElement("div")
+      el.className = "kt-ov-el kt-ov-l" + level
+      el.setAttribute("data-kt-el", ek)
+      place(el, rect)
+      set(el, { border: LINE[level], backgroundColor: level ? EL_FILL[level] : "transparent" })
+      if (focused) set(el, { borderWidth: "6px", borderStyle: "solid" })
+      return el
+    }
+
+    // 요소 꼬리표(065) — '#순위 값'(값 = 관리자가 만든 tag, 표본 적음이면 ' · 표본 적음'). 상자 위(화면 위가 모자라면 상자 안 위),
+    // 이미 놓은 꼬리표와 겹치면 꼬리표 높이만큼 아래로 세 번까지 — 그래도 겹치면 버린다(null — 상자는 둔다). 너비는 글자 수로 어림한다
+    // (재면 꼬리표마다 배치를 다시 해야 한다 — 숫자·영문 0.62em, 그 밖 1em, 좌우 여백 5px)
+    const elementTag = (ek, v, rect, placed) => {
+      const size = EL_SIZES[v.level]
+      const text = "#" + v.rank + " " + v.tag + (v.small ? " · 표본 적음" : "")
+      let em = 0
+      for (const ch of text) em += ch.charCodeAt(0) < 0x1100 ? 0.62 : 1
+      const width = Math.min(320, em * size + 10)
+      const height = Math.ceil(size * 1.3) + 2
+      const left = rect.left
+      let top = rect.top >= height ? rect.top - height : rect.top
+      for (let tries = 0; placed.some((p) => left < p.right && left + width > p.left && top < p.bottom && top + height > p.top); tries++) {
+        if (tries === 3) return null
+        top += height
+      }
+      placed.push({ left, top, right: left + width, bottom: top + height })
+      const tag = document.createElement("span")
+      tag.className = "kt-ov-tag kt-ov-eltag"
+      tag.setAttribute("data-kt-tag", ek)
+      tag.textContent = text
+      set(tag, tagStyle(size))
+      set(tag, { left: left + "px", top: top + "px", height: height + "px", boxSizing: "border-box" })
+      return tag
+    }
+
+    // 값이 있는 요소마다 상자(같은 열쇠 여럿은 모두, 행은 지금 DOM 에 있는 것만), 화면 밖은 건너뛴다. focus 받은 요소는 값이 없어도 2초.
+    // 꼬리표는 순위 20 안의 (영역, 열쇠)마다 하나 — 그 열쇠의 화면에 보이는 첫 요소에, 순위 차례로 놓는다(높은 순위가 자리를 먼저)
+    const elementBoxes = (out, now) => {
+      const w = window.innerWidth
+      const h = window.innerHeight
+      const firsts = new Map()
+      for (const [el, id, key] of found) {
+        const ek = id + "|" + key
+        const v = elValues.get(ek)
+        const focused = el === focusEl && ek === focusKey && now < focusUntil
+        if ((!v && !focused) || !el.isConnected) continue
+        const r = el.getBoundingClientRect()
+        if (!(r.width > 0 && r.height > 0) || r.bottom <= 0 || r.right <= 0 || r.top >= h || r.left >= w) continue
+        out.push(elementBox(ek, v, r, focused))
+        if (v && v.rank !== null && v.rank <= TOP_TAGS && !firsts.has(ek)) firsts.set(ek, [v, r])
+      }
+      const placed = []
+      for (const [ek, [v, r]] of Array.from(firsts).sort((a, b) => a[1][0].rank - b[1][0].rank)) {
+        const tag = elementTag(ek, v, r, placed)
+        if (tag) out.push(tag)
+      }
+    }
+
+    // 깊이 띠(065 — 정적 페이지만): 문서 높이를 10칸으로. 칸 j 의 어둡기 = (100 − 도달[j+1]) / 100 × 0.55(안 내려온 만큼 어둡게),
+    // 칸 위 경계 왼쪽에 'j×10% · 도달 n%', 문서 끝에 '끝까지 n%'
+    const depthTag = (text, edge) => {
+      const tag = document.createElement("span")
+      tag.className = "kt-ov-tag"
+      tag.textContent = text
+      set(tag, tagStyle(13))
+      set(tag, edge === "top" ? { top: "0" } : { bottom: "0" })
+      return tag
+    }
+    const bands = (out) => {
+      const total = document.documentElement.scrollHeight
+      if (!(total > 0)) return
+      const y = window.scrollY || 0
+      for (let j = 0; j < 10; j++) {
+        const band = document.createElement("div")
+        band.className = "kt-ov-depth"
+        band.setAttribute("data-kt-depth", String(j))
+        set(band, {
+          position: "absolute",
+          boxSizing: "border-box",
+          left: "0",
+          width: "100%",
+          top: (total * j) / 10 - y + "px",
+          height: total / 10 + "px",
+          borderTop: "1px dashed rgba(156,163,175,.9)",
+          backgroundColor: "rgba(17,24,39," + (((100 - depth[j + 1]) / 100) * 0.55).toFixed(3) + ")",
+        })
+        band.appendChild(depthTag(j * 10 + "% · 도달 " + Math.round(depth[j]) + "%", "top"))
+        if (j === 9) band.appendChild(depthTag("끝까지 " + Math.round(depth[10]) + "%", "bottom"))
+        out.push(band)
+      }
+    }
+
+    // 그리기 — 스크롤·크기·DOM 바뀜마다 프레임당 한 번. 층은 맨 위 고정·누름 통과. 대시보드의 깊이 보기는 그리지 않는다(065)
     const draw = () => {
       frame = 0
       if (!values) return
@@ -740,7 +915,12 @@
       if (label) layer.setAttribute("aria-label", label)
       const now = Date.now()
       const boxes = []
-      for (const [id, el] of sized()) boxes.push(box(id, el.getBoundingClientRect(), now))
+      if (mode === "depth") {
+        if (depth && DEPTH_PAGES.indexOf(page) >= 0) bands(boxes)
+      } else {
+        for (const [id, el] of sized()) boxes.push((mode === "element" ? frameBox : box)(id, el.getBoundingClientRect(), now))
+        if (mode === "element") elementBoxes(boxes, now)
+      }
       layer.replaceChildren(...boxes)
     }
 
@@ -771,6 +951,42 @@
       if (!finite(a.t) || !finite(a.r) || !finite(a.c)) return null
       return { level, rank: a.rank, t: a.t, r: Math.round(a.r), c: a.c, low: a.low === true, small: a.small === true }
     }
+    // 요소 값 한 줄(065) — 영역 id 꼴·열쇠 꼴(세기와 같은 validKey)·단계 0~5 정수·순위 1 이상 정수 또는 null·꼬리표 글·참거짓.
+    // 하나라도 어긋나면 그 항목을 버린다
+    const elementEntry = (a) => {
+      if (!a || typeof a !== "object" || typeof a.area !== "string" || !AREA_ID.test(a.area) || !validKey(a.key)) return null
+      if (!Number.isInteger(a.level) || a.level < 0 || a.level > 5) return null
+      if (!(a.rank === null || (Number.isInteger(a.rank) && a.rank > 0))) return null
+      if (typeof a.tag !== "string" || typeof a.small !== "boolean") return null
+      return { level: a.level, rank: a.rank, tag: Array.from(a.tag).slice(0, TAG_CHARS).join(""), small: a.small }
+    }
+    // 도달 11칸(065) — 0~100 의 수 11개, 아니면 null
+    const reachOf = (d) => (Array.isArray(d) && d.length === 11 && d.every((n) => finite(n) && n >= 0 && n <= 100) ? d.slice() : null)
+
+    // 가운데로(053·065) — 이 문서 안에서만 굴린다. scrollIntoView 는 같은 사이트의 관리자 문서까지 굴려(틀 밖 페이지가 움직인다)
+    // 쓰지 않는다. 요소의 스크롤 상자 조상(overflow auto·scroll 이고 넘치는 것)을 안쪽부터, 마지막에 이 창을 window.scrollTo 로 —
+    // 세로는 가운데, 가로는 가까운 쪽(scrollIntoView 의 기본 inline 과 같다 — 넓은 행이 옆으로 밀리지 않게)
+    const nearest = (a, b, lo, hi) => {
+      if ((a < lo && b > hi) || (a >= lo && b <= hi)) return 0
+      return (a < lo) === (b - a <= hi - lo) ? a - lo : b - hi
+    }
+    const center = (el) => {
+      for (let n = el.parentElement; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+        const s = window.getComputedStyle(n)
+        const y = /auto|scroll/.test(s.overflowY) && n.scrollHeight > n.clientHeight
+        const x = /auto|scroll/.test(s.overflowX) && n.scrollWidth > n.clientWidth
+        if (!y && !x) continue
+        const box = n.getBoundingClientRect()
+        const r = el.getBoundingClientRect()
+        const top = box.top + (n.clientTop || 0)
+        const left = box.left + (n.clientLeft || 0)
+        if (y) n.scrollTop += (r.top + r.bottom) / 2 - (top + n.clientHeight / 2)
+        if (x) n.scrollLeft += nearest(r.left, r.right, left, left + n.clientWidth)
+      }
+      const r = el.getBoundingClientRect()
+      const dx = nearest(r.left, r.right, 0, window.innerWidth)
+      window.scrollTo((window.scrollX || 0) + dx, (window.scrollY || 0) + (r.top + r.bottom) / 2 - window.innerHeight / 2)
+    }
 
     // 관리자 메시지 — 출처와 창(부모)을 모두 확인하고, 다르면 무시
     const onMessage = (event) => {
@@ -785,15 +1001,35 @@
         }
         values = next
         label = typeof d.label === "string" ? d.label.slice(0, 200) : ""
+        // 065 — 없으면 053 그대로(영역 보기·요소 없음·깊이 없음)
+        mode = MODES.indexOf(d.mode) >= 0 ? d.mode : "area"
+        elValues = new Map()
+        for (const a of Array.isArray(d.elements) ? d.elements.slice(0, MAX_ELEMENTS) : []) {
+          const v = elementEntry(a)
+          if (v) elValues.set(a.area + "|" + a.key, v)
+        }
+        depth = reachOf(d.depth)
         schedule()
       } else if (d.type === "kt-attention-focus" && typeof d.id === "string") {
-        const el = sized().get(d.id)
-        if (!el) return
-        el.scrollIntoView({ block: "center" })
-        focusId = d.id
+        let target = null
+        if (d.key === undefined) {
+          target = sized().get(d.id) || null
+          if (!target) return
+          focusId = d.id
+          focusKey = ""
+        } else {
+          // 065 — 그 영역 안 그 열쇠의 첫 요소(문서 차례)
+          const hit = validKey(d.key) ? found.find((f) => f[1] === d.id && f[2] === d.key && f[0].isConnected) : null
+          if (!hit) return
+          target = hit[0]
+          focusId = ""
+          focusKey = d.id + "|" + d.key
+          focusEl = target
+        }
         focusUntil = Date.now() + FOCUS_MS
         schedule()
         window.setTimeout(guard(schedule), FOCUS_MS)
+        center(target)
       }
     }
 
@@ -805,6 +1041,8 @@
       // defer 로 실려 문서는 이미 읽혔다 — 곧바로 한 번(대시보드는 React 가 뒤에 그려 모임이 바뀌면 다시 알린다)
       if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", guard(announce))
       else announce()
+      // 문서 높이 바뀜(그림·글꼴이 늦게 와 DOM 은 그대로일 때)에도 다시 그린다 — 깊이 띠(065)
+      if (typeof window.ResizeObserver === "function") new window.ResizeObserver(guard(schedule)).observe(document.documentElement)
     } catch (e) {
       // 덮어 보기만 없고 페이지는 그대로
     }

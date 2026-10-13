@@ -13,7 +13,7 @@ import { table } from './ui.js';
 const STEP = 200; // 원자료·목록 표는 200행씩
 // 판 하나(page.details 의 값) = { title, unit, ranges?(판 기간 단추), range?(페이지 기간 → 판 기간), compare?(range) → { prev, week },
 //   needs(app, pv, arg) → [req…], model(app, pv, arg) → { part, deps, title?, unit?, note?, nav?, span?, related?,
-//   time?: { startMs, endMs, panes, series, areas, empty }, chart?(시간 축 없는 option), table?: { title, columns, rows, sort, search, onRow },
+//   time?: { startMs, endMs, panes, series, areas, empty }, chart?(시간 축 없는 option), table?: { title, columns, rows, sort, search, onRow, file? },
 //   custom?(상자, ctx) },
 //   related?: [판 id…], accepts?(arg) }
 export function mountDetail(app) {
@@ -224,7 +224,8 @@ export function mountDetail(app) {
       return;
     }
     const [lo, hi] = model.span ?? [app.now(), app.now()];
-    download(csvName(id, lo, hi), toCsv(tbl.columns.map((c) => c.label), rows.map((r) => tbl.columns.map((c) => csvValue(c, r)))));
+    // 표가 파일 이름을 정하면 그것(065 화면 — kimptrack-screens-<화면>-<기기>-<range>.csv)
+    download(tbl.file ?? csvName(id, lo, hi), toCsv(tbl.columns.map((c) => c.label), rows.map((r) => tbl.columns.map((c) => csvValue(c, r)))));
   }
 
   function setRange(r) {

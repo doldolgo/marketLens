@@ -29,7 +29,7 @@ let byId = new Map()
 // 노드는 부모 하나 — 다른 곳에 붙이면 앞 부모에서 빠진다(브라우저 DOM 처럼). id 를 붙이면 getElementById 로 찾힌다
 class Node {
   constructor(tag) {
-    Object.assign(this, { tag, kids: [], parent: null, dataset: {}, attrs: {}, _text: '', title: '', className: '', hidden: false, disabled: false, value: '', listeners: {}, style: {}, _id: '' })
+    Object.assign(this, { tag, kids: [], parent: null, dataset: {}, attrs: {}, _text: '', title: '', className: '', hidden: false, disabled: false, value: '', listeners: {}, style: { setProperty(k, v) { this[k] = String(v) } }, _id: '' })
   }
   get id() { return this._id }
   set id(v) { this._id = String(v); byId.set(this._id, this) }
@@ -62,6 +62,9 @@ class Node {
   closest(sel) { const cls = sel.replace(/^\./, ''); let n = this; while (n) { if (n.className.split(/\s+/).includes(cls)) return n; n = n.parent } return null }
   // 진짜 ECharts(test_admin_render.py)가 글자 폭을 재려고 canvas 를 만들면 그림판 없음 — 글꼴 크기로 어림한다
   getContext() { return null }
+  // 065 화면의 틀 칸 맞추기 — 크기는 시나리오가 clientWidth·rect 로 정한다(기본 0)
+  get clientWidth() { return this._width ?? 0 }
+  getBoundingClientRect() { return { top: this._top ?? 0, left: 0, width: this._width ?? 0, height: 0, right: this._width ?? 0, bottom: this._top ?? 0 } }
 }
 const ENC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
 const flush = async () => { for (let i = 0; i < 80; i++) await new Promise((r) => setImmediate(r)) }
@@ -86,7 +89,7 @@ function setup({ visible = true, search = '', hash = '', respond, hold = () => f
     documentElement: new Node('html'),
     activeElement: null,
   }
-  globalThis.window = { addEventListener: (type, fn) => (winListeners[type] ||= []).push(fn) }
+  globalThis.window = { innerHeight: 900, scrollY: 0, addEventListener: (type, fn) => (winListeners[type] ||= []).push(fn) }
   // 기록(history) — 쌓기·바꾸기·뒤로 가기. 주소의 ?…·#… 를 location 에 옮긴다
   const entries = [{ state: null, url: `${search}${hash}` }]
   let at = 0

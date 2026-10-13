@@ -131,7 +131,12 @@ EXPECTED_CALLS = {
         "/svc/api/admin/clarity/history?days=30",
         "/svc/api/admin/access?window=30d",
     ],
-    "screens.js": FAST,
+    # 065 — page 없는 응답(화면 칩 pv)이 기본 화면을 정하면 곧바로 그 화면 하나(피드가 없으면 첫 화면 랜딩)
+    "screens.js": [
+        *FAST,
+        "/svc/api/admin/attention?days=7",
+        "/svc/api/admin/attention?days=7&page=landing",
+    ],
 }
 # 관리자 nginx 가 넘기는 곳(029·034·035·063 + 067·068) — 067·068 의 정확 일치 location 은 그 스펙의 PR 이 더한다
 BACKEND = {
@@ -147,6 +152,7 @@ BACKEND = {
     "/svc/api/admin/access/ip": (API, "/admin/access/ip"),
     "/svc/api/admin/clarity": (API, "/admin/clarity"),
     "/svc/api/admin/clarity/history": (API, "/admin/clarity/history"),
+    "/svc/api/admin/attention": (API, "/admin/attention"),
     "/api/refresh": (COLLECTOR, "/refresh"),
 }
 FIRST_LOAD = (

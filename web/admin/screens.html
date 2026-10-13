@@ -1,6 +1,7 @@
 <!doctype html>
-<!-- KimpTrack 관리자 v4 — 화면(스펙 066 §3.3). web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
-     인라인 스크립트·스타일 없음(CSP). 화면 분석 창은 065 몫 — 이 스펙에서는 내비 항목과 한 줄만.
+<!-- KimpTrack 관리자 v4 — 화면(스펙 065 — 어디를 보고 무엇을 누르나). web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
+     인라인 스크립트·스타일 없음(CSP). 값은 screens.js 가 채운다(052·061 화면 이용 통계 — 동의한 방문자의 하루 합계).
+     실제 페이지(https://kimptrack.com)를 틀로 띄워 postMessage 로 값을 넘기면 그 페이지의 attention.js 가 덮어 그린다(053·065).
      틀(왼쪽 내비·머리·상세 판)은 여섯 페이지가 같은 글자다. 아이콘은 icons.svg 묶음(<use href>). -->
 <html lang="ko">
   <head>
@@ -32,17 +33,94 @@
       <div class="page">
         <div class="top"><button type="button" class="ibtn" id="menu-btn" aria-label="메뉴" aria-expanded="false" aria-controls="side"><svg class="i" aria-hidden="true"><use href="icons.svg#menu"/></svg></button><b>KimpTrack 관리자</b></div>
         <header class="head">
-          <h1>화면</h1>
+          <h1>화면</h1><span class="ask">어디를 보고 무엇을 누르나</span>
           <div class="tools">
+            <a class="out" id="here" href="/screens.html" target="_blank" rel="noopener">새 창으로<svg class="i" aria-hidden="true"><use href="icons.svg#external"/></svg></a>
+            <div class="seg" role="group" aria-label="기간"><button type="button" data-range="1d" aria-pressed="false">오늘</button><button type="button" data-range="7d" aria-pressed="true">7일</button><button type="button" data-range="30d" aria-pressed="false">30일</button><button type="button" data-range="90d" aria-pressed="false">90일</button></div>
+            <div class="seg" role="group" aria-label="비교"><span class="seg-label"><svg class="i" aria-hidden="true"><use href="icons.svg#compare"/></svg>비교</span><button type="button" data-cmp="none" aria-pressed="true">없음</button><button type="button" data-cmp="prev" aria-pressed="false" title="단축키 X">이전 기간</button><button type="button" data-cmp="week" aria-pressed="false">지난주</button></div>
             <span class="tick">10초마다 · <span id="clock">--:--:--</span></span>
           </div>
         </header>
         <div class="filters" id="filters" hidden></div>
         <p id="notice" class="notice" role="alert" hidden></p>
         <main class="content" id="content">
-          <section class="card s12"><p class="empty">준비 중 — 화면 분석(065)이 이 자리에 들어온다.</p></section>
+          <div class="scr-pick s12" aria-label="고르기">
+            <div class="scr-pages" id="pick-page" role="group" aria-label="화면"></div>
+            <div class="seg" role="group" aria-label="기기"><button type="button" data-device="pc" aria-pressed="true">PC</button><button type="button" data-device="mobile" aria-pressed="false">휴대폰</button></div>
+            <div class="seg" role="group" aria-label="보기"><button type="button" data-mode="element" aria-pressed="true">요소</button><button type="button" data-mode="area" aria-pressed="false">영역</button><button type="button" data-mode="depth" aria-pressed="false">깊이</button></div>
+            <div class="seg" role="group" aria-label="지표" id="metric-seg"><button type="button" data-metric="clicks" aria-pressed="true">클릭</button><button type="button" data-metric="hover" aria-pressed="false">마우스 올림</button><button type="button" data-metric="vis" aria-pressed="false">보인 시간</button></div>
+          </div>
+          <div class="scr-body s12">
+          <section class="card scr-main" id="card-frame" aria-labelledby="h-frame">
+            <header class="card-head"><h2 id="h-frame">실제 화면</h2><span class="unit" id="frame-line"></span><span class="scr-small" id="frame-small" hidden><i class="shape warn"></i>표본 적음</span><span class="help" title="실제 페이지를 틀로 띄워 그 위에 값을 그린다. 누름은 막혀 있고 화면은 위의 고르기로만 바꾼다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-frame"></span></span></header>
+            <div class="scr-stagewrap" id="stage-wrap">
+              <div class="scr-stage pc" id="stage">
+                <iframe id="frame" title="실제 화면 덮어 보기" sandbox="allow-scripts allow-same-origin" referrerpolicy="strict-origin" loading="lazy"></iframe>
+                <p class="scr-note" id="frame-note" hidden></p>
+              </div>
+            </div>
+          </section>
+          <section class="card scr-side" id="card-panel" aria-labelledby="h-panel">
+            <header class="card-head"><h2 id="h-panel">값</h2><div class="seg" role="group" aria-label="판"><button type="button" data-panel="elements" aria-pressed="true">요소</button><button type="button" data-panel="areas" aria-pressed="false">영역</button><button type="button" data-panel="exits" aria-pressed="false">떠난 곳·깊이</button></div><span class="end"><span class="tag" id="t-panel"></span></span></header>
+            <p class="note" id="panel-note"></p>
+            <div class="scr-panel" id="panel-elements">
+              <div class="panel-head"><span id="el-head">요소</span><span class="help" title="클릭·100뷰당 클릭·평균 마우스 올림(PC)·평균 보인 시간. 행을 누르면 틀에서 그 요소로 간다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="elements" aria-label="요소 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
+              <div class="kchips" id="el-areas" role="group" aria-label="영역으로 거르기"></div>
+              <div class="scroll"><table class="tbl scr-tbl" id="tbl-elements"></table></div>
+              <div class="list-foot"><span id="el-foot"></span></div>
+            </div>
+            <div class="scr-panel" id="panel-areas" hidden>
+              <div class="panel-head"><span>영역 · 평균 보인 시간 큰 순</span><span class="help" title="평균 보인 시간·도달률(1초 이상 보인 페이지뷰 몫)·100뷰당 클릭. ▲ 는 도달 20% 미만."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="areas" aria-label="영역 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
+              <div class="scroll"><table class="tbl scr-tbl" id="tbl-areas"></table></div>
+            </div>
+            <div class="scr-panel" id="panel-exits" hidden>
+              <div class="panel-head"><span>떠난 곳</span><span class="help" title="페이지를 떠날 때(pagehide) 가장 크게 보이던 영역."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="exits" aria-label="떠난 곳·깊이 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
+              <div class="list" id="l-exits"></div>
+              <p class="note" id="exit-note"></p>
+              <div class="panel-head"><span>깊이</span><span class="help" title="그 지점까지 내려온 페이지뷰 비율 — 정적 페이지만."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span></div>
+              <div class="list stairs" id="l-depth"></div>
+              <p class="note" id="depth-note"></p>
+            </div>
+          </section>
+          </div>
         </main>
       </div>
+    </div>
+    <div class="sheet" id="sheet" hidden>
+      <section class="sheet-panel" id="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1">
+        <header class="sheet-head">
+          <h2 id="sheet-title">상세</h2>
+          <span class="unit" id="sheet-unit"></span>
+          <span class="tag" id="t-sheet"></span>
+          <div class="tools">
+            <button type="button" class="ibtn" id="sheet-prev" aria-label="이전 항목" title="이전" hidden><svg class="i" aria-hidden="true"><use href="icons.svg#prev"/></svg></button>
+            <button type="button" class="ibtn" id="sheet-next" aria-label="다음 항목" title="다음" hidden><svg class="i" aria-hidden="true"><use href="icons.svg#next"/></svg></button>
+            <div class="seg" role="group" aria-label="상세 기간" id="sheet-ranges"></div>
+            <div class="seg" role="group" aria-label="상세 비교"><span class="seg-label"><svg class="i" aria-hidden="true"><use href="icons.svg#compare"/></svg>비교</span><button type="button" data-scmp="none">없음</button><button type="button" data-scmp="prev">이전 기간</button><button type="button" data-scmp="week">지난주</button></div>
+            <button type="button" class="btn" id="sheet-csv"><svg class="i" aria-hidden="true"><use href="icons.svg#download"/></svg>CSV</button>
+            <button type="button" class="ibtn" id="sheet-close" aria-label="닫기 (Esc)" title="닫기 (Esc)"><svg class="i" aria-hidden="true"><use href="icons.svg#close"/></svg></button>
+          </div>
+        </header>
+        <div class="sheet-sub" id="sheet-chips"></div>
+        <div class="sheet-body">
+          <p class="note" id="sheet-note"></p>
+          <section class="panel" id="sheet-graph" hidden>
+            <div class="panel-head"><span>그래프</span><span class="unit" id="sheet-window"></span><span class="end"><button type="button" class="btn" id="sheet-select" aria-pressed="false" title="끌어서 고른 구간으로 확대"><svg class="i" aria-hidden="true"><use href="icons.svg#zoom"/></svg>구간 확대</button><button type="button" class="btn" id="sheet-reset"><svg class="i" aria-hidden="true"><use href="icons.svg#reset"/></svg>원래대로</button></span></div>
+            <div class="chart big-chart" id="c-sheet"></div>
+          </section>
+          <section class="panel" id="sheet-stats" hidden>
+            <div class="panel-head"><span>통계</span><span class="unit">보이는 구간 기준</span></div>
+            <div class="scroll"><table class="tbl" id="sheet-stat-tbl"></table></div>
+          </section>
+          <section class="panel" id="sheet-custom" hidden></section>
+          <section class="panel" id="sheet-table" hidden>
+            <div class="panel-head"><span id="sheet-table-title">원자료</span><span class="end"><label class="search" id="sheet-find-box" hidden><svg class="i" aria-hidden="true"><use href="icons.svg#search"/></svg><input class="input" id="sheet-find" type="search" placeholder="찾기" autocomplete="off" aria-label="표에서 찾기" /></label></span></div>
+            <div class="scroll"><table class="tbl" id="sheet-tbl"></table></div>
+            <div class="list-foot"><span id="sheet-count"></span><button type="button" class="linkbtn" id="sheet-more" hidden>200행 더 보기</button></div>
+          </section>
+          <div class="related" id="sheet-related" hidden></div>
+        </div>
+      </section>
     </div>
   </body>
 </html>

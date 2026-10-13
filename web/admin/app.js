@@ -14,7 +14,9 @@ const TONE_WORD = Object.freeze({ bad: '문제', warn: '주의' });
 // --- 페이지 하나 ----------------------------------------------------------------------------
 
 // page = { id, home(고정 주소), ranges, range(기본), compare(range) → { prev, week }, filters({ 키: 값 검사 }), filterName(k, v),
-//   needs(app) → [req…](느린 묶음), rules(app) → { 이름: 결과 }(띠 규칙), cards [[이름, 그리기]], details({ id: 판 }), wire(app) }
+//   params({ 이름: [기본값, …허용 값] } — 그 페이지만의 주소 인자, 065), slowMs(느린 묶음 주기 — 없으면 60초, 065 화면은 5분),
+//   needs(app) → [req…](느린 묶음 — 받은 값에 따라 늘 수 있다), rules(app) → { 이름: 결과 }(띠 규칙), cards [[이름, 그리기]],
+//   details({ id: 판 }), wire(app) }
 export function start(page) {
   const view = readView(page, location.search, location.hash);
   const store = createStore({ wanted: (key) => needs().has(key), stopped: () => reloading });
@@ -53,11 +55,12 @@ export function start(page) {
       notice('');
     }
     paint();
+    loadMissing();
   }
 
   // 두 묶음은 따로 돈다. 같은 묶음은 앞선 호출이 끝나기 전에 다시 부르지 않고, 다음 호출은 앞선 호출을 시작한 때부터 잰다
   const fast = { fast: true, every: FAST_MS, busy: false, timer: 0, started: 0 };
-  const slow = { fast: false, every: SLOW_MS, busy: false, timer: 0, started: 0 };
+  const slow = { fast: false, every: page.slowMs ?? SLOW_MS, busy: false, timer: 0, started: 0 };
   async function run(loop) {
     clearTimeout(loop.timer);
     if (loop.busy || reloading || document.visibilityState !== 'visible') return;
@@ -77,11 +80,15 @@ export function start(page) {
     if (reloading || document.visibilityState !== 'visible') return;
     loop.timer = setTimeout(() => run(loop), Math.max(0, loop.every - (Date.now() - loop.started)));
   }
-  // 보기가 바뀌면(기간·비교·거르기·상세 판) 아직 없는 느린 열쇠만 곧바로 부른다(묶음의 다음 시각은 그대로)
-  function refresh() {
+  // 보기가 바뀌면(기간·비교·거르기·상세 판) 아직 없는 느린 열쇠만 곧바로 부른다(묶음의 다음 시각은 그대로).
+  // 받은 값으로 새 열쇠가 생겨도 같다(065 화면 — 기본 화면은 page 없는 응답이 정한다)
+  function loadMissing() {
     const want = [...needs().values()].filter((r) => !r.fast && store.entry(r.key) === undefined && !store.busy(r.key));
+    if (want.length && !reloading) Promise.all(want.map(store.load)).then(settle);
+  }
+  function refresh() {
     paint();
-    if (want.length) Promise.all(want.map(store.load)).then(settle);
+    loadMissing();
   }
   function replaceUrl() {
     history.replaceState(history.state, '', urlOf(page, view, marked()));
@@ -124,6 +131,15 @@ export function start(page) {
       view.f.splice(0, view.f.length, ...next);
       replaceUrl();
       refresh();
+    },
+    // 그 페이지만의 주소 인자(065) — 허용 값만, 바뀐 것이 있을 때만 주소를 고치고 다시 그린다. quiet 면 주소만(그리는 중에 보기를
+    // 맞출 때 — 대시보드 화면의 깊이 보기 → 요소처럼 새 자료가 필요 없는 고침)
+    setParams(next, quiet = false) {
+      const changed = Object.entries(next).filter(([k, v]) => own(page.params ?? {}, k)?.includes(v) && view.p[k] !== v);
+      if (!changed.length || reloading) return;
+      for (const [k, v] of changed) view.p[k] = v;
+      replaceUrl();
+      if (!quiet) refresh();
     },
     // 값 하나만 고르는 거르기(망 종류·나라 등) — 같은 값을 다시 고르면 지운다
     pickFilter(k, v) {
@@ -209,6 +225,10 @@ export function start(page) {
     const stamp = lastFast ? clock(lastFast) : '--:--:--';
     put('clock', stamp);
     put('updated', stamp);
+    // '새 창으로'(065) — 지금 보기 그대로의 이 페이지 주소
+    const here = $('here');
+    const url = urlOf(page, view);
+    if (here && here.getAttribute('href') !== url) here.setAttribute('href', url);
     const tones = app.ready() ? marks(app.chips()) : {};
     for (const id of ['overview', 'server', 'traffic']) {
       const node = $(`m-${id}`);

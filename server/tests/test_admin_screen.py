@@ -16,8 +16,10 @@ PAGES = {
     "traffic.html": ("/traffic.html", "traffic.js", True),
     "visitors.html": ("/visitors.html", "visitors.js", True),
     "clarity.html": ("/clarity.html", "insight.js", True),
-    "screens.html": ("/screens.html", "screens.js", False),
+    "screens.html": ("/screens.html", "screens.js", True),
 }
+# 차트가 없어 ECharts 를 싣지 않는 페이지(065 화면 — 상세 판은 표만)
+NO_LIBRARY = {"screens.html"}
 NAV = [
     ("/", "개요", "overview"),
     ("/server.html", "서버", "server"),
@@ -33,6 +35,7 @@ RANGES = {
     "traffic.html": (["24h", "7d", "30d"], "24h"),
     "visitors.html": (["24h", "7d", "30d"], "24h"),
     "clarity.html": (["7d", "30d", "90d"], "30d"),
+    "screens.html": (["1d", "7d", "30d", "90d"], "7d"),
 }
 MODULES = (
     "common.js",
@@ -53,6 +56,10 @@ MODULES = (
     "trafficdetail.js",
     "ipmodel.js",
     "insightdetail.js",
+    "screensnames.js",
+    "screensmodel.js",
+    "screensdetail.js",
+    "screenspanel.js",
 )
 SCRIPTS = (*MODULES, *(module for _, module, _ in PAGES.values()))
 VENDOR = "vendor/echarts-5.5.1.min.js"
@@ -196,7 +203,6 @@ def test_head_has_range_presets_and_compare_matching_each_page_module() -> None:
             or "ranges: HISTORY_RANGES" in module
         ), page
         assert f"range: '{default}'," in module, page
-    assert "data-range" not in _text("web/admin/screens.html")
 
 
 def test_icons_are_one_local_sprite_and_every_use_points_into_it() -> None:
@@ -246,7 +252,7 @@ def test_pages_load_the_library_then_their_module_without_inline_code() -> None:
         html = _text(f"web/admin/{page}")
         scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, flags=re.S)
         expected = [(f' type="module" src="{module}"', "")]
-        if sheet:
+        if sheet and page not in NO_LIBRARY:
             expected.insert(0, (f' src="{VENDOR}" defer', ""))
         assert scripts == expected, page
         assert "<style" not in html and "style=" not in html, page
@@ -270,11 +276,21 @@ def _anchors(html: str) -> list[dict[str, str]]:
 
 
 def test_links_are_fixed_addresses_and_none_opens_a_new_window() -> None:
-    """036 §3.8 그대로 — 밖으로 나가는 링크는 고정 https·noreferrer·같은 탭, 계정·팀·프로젝트 ID 없음(레포 공개). 새 창 없음."""
+    """036 §3.8 그대로 — 밖으로 나가는 링크는 고정 https·noreferrer·같은 탭, 계정·팀·프로젝트 ID 없음(레포 공개). 새 창 없음 —
+    065 화면의 '새 창으로 ↗' 하나만 예외(그 페이지 주소, noopener — 주소는 app.js 가 지금 보기로 맞춘다)."""
     for page in PAGES:
         html = _text(f"web/admin/{page}")
         for a in _anchors(html):
             href = a["href"]
+            if a.get("id") == "here":
+                assert page == "screens.html" and a == {
+                    "class": "out",
+                    "id": "here",
+                    "href": "/screens.html",
+                    "target": "_blank",
+                    "rel": "noopener",
+                }, a
+                continue
             assert "target" not in a, (page, href)
             if href.startswith("/") and not href.startswith("//"):
                 continue

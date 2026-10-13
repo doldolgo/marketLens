@@ -7,13 +7,14 @@
     uv run web/scripts/admin-fake-feeds.py [--port 18064] [--scenario ok]
 
 - `web/admin` 의 정적 파일을 `/` 에 관리자 nginx 와 같은 헤더(CSP·X-Frame-Options·Cache-Control)로 주고, 화면이 부르는
-  피드 열둘(029·011·034·035·038·039·040·062·063 + 067 대역 둘·068 날별 기록 — 068 은 #133 의 실제 응답 꼴)과
+  피드 열셋(029·011·034·035·038·039·040·062·063 + 067 대역 둘·068 날별 기록 — 068 은 #133 의 실제 응답 꼴 + 052·061 화면 이용 통계)과
   `POST /api/refresh` 를 지어낸 값으로 답한다. 표준 라이브러리만 쓰고 127.0.0.1 에만 붙는다. 실제 서버·AWS·Clarity 를 부르지 않는다.
+  화면 페이지(065)의 틀은 실제 공개 사이트를 부른다 — 덮어 보기까지 보려면 065 §4 의 시험 사본(kimptrack.com 을 로컬에 묶음)으로.
 - 경우(--scenario, 돌던 중에는 `GET /__scenario/<이름>` 로 바꾼다):
-  ok(정상) · problem(빨강·주황 칩 여럿) · old(067·068 배포 전 — 대역·날별 기록 404, offset 모름, Clarity dims 없음) ·
-  missing(062·063·067·068 배포 전 — 시계열 404·흐름 키 없음) · empty(연결 안 됨 — AWS·Clarity·접속 로그 없음) ·
-  bands(대역 많음 — 1,200개, 200행씩) · nobands(대역 없음) ·
-  xss(글자 칸마다 `<img onerror>` — 글로만 보여야 한다) · expired(헬스가 401 비JSON — 로그인 만료 새로고침 한 번).
+  ok(정상) · problem(빨강·주황 칩 여럿, 화면 이용 통계는 Redis 실패 error) · old(067·068 배포 전 — 대역·날별 기록 404, offset 모름,
+  Clarity dims 없음) · missing(062·063·067·068 배포 전 — 시계열 404·흐름 키 없음) · empty(연결 안 됨 — AWS·Clarity·접속 로그 없음,
+  화면 이용 통계는 시행 전 before_gate) · bands(대역 많음 — 1,200개, 200행씩, 랜딩 요소 300개 + (기타)) · nobands(대역 없음, 화면 이용
+  기록 없음) · xss(글자 칸마다 `<img onerror>` — 글로만 보여야 한다, 요소 열쇠 하나도) · expired(헬스가 401 비JSON — 로그인 만료 새로고침 한 번).
 - 시각은 이 컴퓨터 시계다.
 """
 
@@ -452,6 +453,103 @@ def ip(query: dict) -> tuple[int, dict]:
                  "paths": [[txt(pth), 30 - k] for k, pth in enumerate(BAND_PAGES)], "pairs": pairs, "recent": recent}
 
 
+# 052·061 화면 이용 통계 — 화면마다 영역(052 목록)과 요소 열쇠(061 §7 목록 + 자동 열쇠 보기). 대시보드 영역은 공통 셋 + 탭 영역
+ATT_AREAS = {
+    "landing": ("top", "hero", "analyze", "events", "kimp", "method", "faq", "foot"),
+    "privacy": ("top", "changes", "glance", "consent", *(f"s{n}" for n in range(1, 13)), "foot"),
+    "kimp-chart": ("top", "what", "read", "coins", "faq", "foot"),
+    "kimp-history": ("top", "live", "what", "how", "faq", "foot"),
+    "app-spread": ("header", "tabs", "kpi", "filters", "table"),
+    "app-history": ("header", "tabs", "kpi", "filters", "table", "summary", "list", "filters-2", "chart"),
+    "app-gap": ("header", "tabs", "kpi", "filters", "table"),
+    "app-pp": ("header", "tabs", "kpi", "filters", "table"),
+    "app-health": ("header", "tabs", "kpi", "summary", "cards", "chart", "list"),
+    "app-flow": ("header", "tabs", "kpi", "filters", "table", "table-2"),
+}
+TABS_EL = tuple(("tabs", f"tab:{t}") for t in ("spread", "history", "gap", "pp", "health", "flow"))
+ATT_ELEMENTS = {
+    "landing": (("top", "nav:kimp"), ("top", "nav:method"), ("top", "nav:faq"), ("top", "link:/"), ("hero", "app:history"),
+                *(("hero", f"live:{n}") for n in range(1, 6)), ("hero", "link:/app/"), ("analyze", "link:/kimp-history"),
+                ("analyze", "link:/kimp-chart"), ("events", "row:BTC"), ("events", "row:ETH"), ("faq", "faq:why-differ"),
+                ("faq", "faq:why-1000"), ("faq", "faq:rate"), ("faq", "faq:blocked"), ("faq", "faq:cost"), ("faq", "faq:reverse-term"),
+                ("faq", "faq:chart"), ("foot", "app:history"), ("foot", "consent-settings"), ("foot", "link:mailto"), ("foot", "link:/privacy")),
+    "privacy": (("top", "link:/"), ("consent", "btn:동의 철회"), ("consent", "btn:선택한 대로 저장"), ("consent", "btn:모두 거부"),
+                ("consent", "check:checkbox"), ("changes", "link:/privacy-20261009.html")),
+    "kimp-chart": (("top", "link:/app/"), *(("coins", f"coin:{c}") for c in ("btc", "eth", "xrp", "sol", "doge", "all")),
+                   ("faq", "faq:realtime"), ("faq", "faq:vs-price"), ("faq", "faq:apps"), ("faq", "faq:fees"), ("foot", "nav:kimp")),
+    "kimp-history": (("live", "row:BTC"), ("live", "row:SOL"), ("faq", "faq:range"), ("faq", "faq:max-vs-live"), ("faq", "faq:profit"), ("foot", "nav:kimp")),
+    "app-spread": (*TABS_EL, ("filters", "search"), ("filters", "dom:all"), ("filters", "dom:upbit"), ("filters", "threshold"), ("filters", "only-over"),
+                   ("filters", "fx:binance"), ("filters", "fx:okx"), ("table", "sort:sym"), ("table", "sort:val"), ("table", "row:BTC"),
+                   ("table", "row:ETH"), ("table", "row:DOGE")),
+    "app-history": (*TABS_EL, ("filters", "dir:kimp"), ("filters", "period:7d"), ("filters", "period:30d"), ("filters", "search"),
+                    ("table", "sort:cnt"), ("table", "row:BTC"), ("filters-2", "interval:1h"), ("filters-2", "chart-dom:upbit"),
+                    ("chart", "card:binance"), ("chart", "fold:binance")),
+    "app-gap": (*TABS_EL, ("filters", "search"), ("filters", "mode:entry"), ("table", "sort:gap")),
+    "app-pp": (*TABS_EL, ("filters", "search"), ("filters", "threshold-price"), ("table", "sort:fund")),
+    "app-health": TABS_EL,
+    "app-flow": (*TABS_EL, ("filters", "window:1h"), ("filters", "dir:in"), ("filters", "search"), ("table", "row:BTC"), ("table-2", "tx")),
+}
+# (화면, 기기) → 창 7일의 pv — 랜딩 PC 가 가장 크다(기본 화면), 선선갭 PC 는 표본 적음, 선선갭·수집 상태 휴대폰은 기록 없음
+ATT_PV = {("landing", "pc"): 240, ("landing", "mobile"): 130, ("app-spread", "pc"): 180, ("app-history", "pc"): 64, ("app-gap", "pc"): 21,
+          ("app-pp", "pc"): 3, ("app-health", "pc"): 9, ("app-flow", "pc"): 12, ("app-spread", "mobile"): 14, ("privacy", "pc"): 16,
+          ("privacy", "mobile"): 5, ("kimp-chart", "pc"): 35, ("kimp-chart", "mobile"): 22, ("kimp-history", "pc"): 28, ("kimp-history", "mobile"): 11}
+ATT_DEPTH_PAGES = ("landing", "privacy", "kimp-chart", "kimp-history")
+
+
+def _att_row(page: str, device: str, scale: float, with_elements: bool) -> dict | None:
+    pv = int(ATT_PV.get((page, device), 0) * scale)
+    if pv <= 0:
+        return None
+    rng = random.Random(f"{page}:{device}")
+    areas = [{"id": a, "ms": int(pv * rng.uniform(800, 9000) / (i + 1)), "clicks": int(pv * rng.uniform(0, 0.4)),
+              "seen": min(pv, int(pv * rng.uniform(0.05, 1.0)))} for i, a in enumerate(ATT_AREAS[page])]
+    areas.sort(key=lambda a: (-a["ms"], a["id"]))
+    exits = [[a["id"], max(1, int(pv * 0.5 / (i + 2)))] for i, a in enumerate(areas[:4])]
+    depth = None
+    if page in ATT_DEPTH_PAGES:
+        depth = [int(pv * w) for w in (0.04, 0.08, 0.1, 0.12, 0.12, 0.1, 0.08, 0.07, 0.05, 0.04, 0.1)]
+    row = {"page": page, "device": device, "pv": pv, "areas": areas, "exits": exits, "depth": depth}
+    if with_elements:
+        elements = []
+        for area, key in ATT_ELEMENTS[page]:
+            clicks = int(pv * rng.uniform(0, 0.3)) if rng.random() > 0.2 else 0
+            row_key = key.startswith("row:")
+            elements.append({"area": area, "key": key, "clicks": clicks,
+                             "hoverMs": 0 if device == "mobile" or row_key else int(pv * rng.uniform(0, 900)),
+                             "visMs": 0 if row_key else int(pv * rng.uniform(0, 6000))})
+        if state["scenario"] == "bands" and page == "landing":  # 피드 상한 300 — 열쇠 300 을 넘은 짝은 (기타)
+            elements += [{"area": "faq", "key": f"btn:질문 {i}", "clicks": 1, "hoverMs": 0, "visMs": 400} for i in range(299 - len(elements))]
+            elements.append({"area": "faq", "key": "(기타)", "clicks": 2, "hoverMs": 0, "visMs": 900})
+        if state["scenario"] == "xss":
+            elements += [{"area": areas[0]["id"], "key": X, "clicks": 9, "hoverMs": 0, "visMs": 100},
+                         {"area": X, "key": "btn:x", "clicks": 9, "hoverMs": 0, "visMs": 100}]
+        elements.sort(key=lambda e: (-e["clicks"], -e["visMs"], e["area"], e["key"]))
+        row["elements"] = elements[:300]
+    return row
+
+
+def attention(query: dict) -> dict:
+    """052·061 GET /admin/attention — days(1·7·30·90, 목록 밖은 7)·page(목록 안이면 그 화면 행만 + elements). empty 는 시행 전(before_gate),
+    problem 은 Redis 실패(error), nobands 는 기록 없음(rows 빔). 창이 길수록 pv 가 커진다."""
+    days = {"1": 1, "7": 7, "30": 30, "90": 90}.get((query.get("days") or ["7"])[0], 7)
+    page = (query.get("page") or [None])[0]
+    page = page if page in ATT_AREAS else None
+    now = int(time.time())
+    today = time.strftime("%Y-%m-%d", time.gmtime(now + 32_400))
+    body = {"state": "ok", "code": None, "gateAt": (now - 40 * 86_400) * 1000, "days": days,
+            "from": time.strftime("%Y-%m-%d", time.gmtime(now + 32_400 - (days - 1) * 86_400)), "to": today, "fetchedAt": now * 1000, "rows": []}
+    s = state["scenario"]
+    if s == "empty":
+        return {**body, "state": "before_gate", "from": today}
+    if s == "problem":
+        return {**body, "state": "error", "code": "redis"}
+    if s == "nobands":
+        return body
+    scale = {1: 0.2, 7: 1.0, 30: 3.4, 90: 8.0}[days]
+    rows = [_att_row(p, d, scale, page is not None) for p in ATT_AREAS for d in ("mobile", "pc") if page is None or p == page]
+    return {**body, "rows": [r for r in rows if r]}
+
+
 def feed(method: str, path: str, query: dict, body: dict) -> tuple[int, object] | None:
     if method == "POST" and path == "/api/refresh":
         if not body.get("token"):
@@ -472,6 +570,7 @@ def feed(method: str, path: str, query: dict, body: dict) -> tuple[int, object] 
         "/svc/api/admin/access/ip": lambda: ip(query),
         "/svc/api/admin/clarity": lambda: (200, clarity()),
         "/svc/api/admin/clarity/history": lambda: history(pick("days", "30")),
+        "/svc/api/admin/attention": lambda: (200, attention(query)),
     }
     return table[path]() if method == "GET" and path in table else None
 

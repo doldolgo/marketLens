@@ -63,6 +63,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     requestAnimationFrame: (fn) => { rafs.push(fn); return rafs.length },
     setTimeout: (fn, ms) => { timers.push({ at: clock + ms, fn }); return timers.length },
     fetch: () => { sent.push('fetch'); return Promise.resolve() },
+    scrollTo: (x, y) => scrolled.push(['window', x, y]),
   }
   window.top = c.framed === false ? window : {}
   const document = {
@@ -322,13 +323,16 @@ def test_low_reach_hatches_small_samples_say_so_and_tags_follow_the_scroll() -> 
 
 
 def test_focus_scrolls_to_the_area_and_thickens_its_border_for_two_seconds() -> None:
-    """§3.4 — focus 를 받으면 그 영역을 가운데로 scrollIntoView, 상자 테두리 2초 굵게. 없는 영역이면 아무것도."""
+    """§3.4 — focus 를 받으면 그 영역을 가운데로(이 문서 안에서만 — window.scrollTo, scrollIntoView 는 관리자 문서까지 굴려 쓰지
+    않는다, 065 §3.5), 상자 테두리 2초 굵게. 없는 영역이면 아무것도."""
     focus = {"type": "kt-attention-focus", "v": 1, "id": "hero"}
     got = _one(
         areas=AREAS,
         steps=[VALUES, _msg(focus), _msg({**focus, "id": "nope"}), "flush"],
     )
-    assert got["scrolled"] == [["hero", {"block": "center"}]]
+    assert got["scrolled"] == [
+        ["window", 0, 310 - 400]
+    ]  # hero 가운데(60 + 500 / 2)를 화면 가운데로
     hero = next(b for b in got["boxes"] if b["id"] == "hero")
     assert hero["borderWidth"] == "6px"
     later = _one(areas=AREAS, steps=[VALUES, _msg(focus), "t|2000", "timers", "flush"])

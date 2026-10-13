@@ -20,6 +20,8 @@ URLS = [
     "/svc/api/admin/access/ips?window=24h&sort=requests&limit=200&offset=0",
     "/svc/api/admin/clarity",
     *[f"/svc/api/admin/clarity/history?days={d}" for d in (7, 30, 90)],
+    "/svc/api/admin/attention?days=7",
+    "/svc/api/admin/attention?days=7&page=landing",
 ]
 PAGES = [
     "overview.js",
@@ -88,6 +90,10 @@ def test_every_fake_scenario_draws_every_card_without_errors(scenario: str) -> N
                 assert "t-bands" in result["off"], result
             if view.startswith("insight.js"):
                 assert {"t-dims", "t-refs", "t-match"} <= set(result["off"]), result
+        if scenario == "empty" and view.startswith(
+            "screens.js"
+        ):  # 화면 이용 통계 시행 전(before_gate)
+            assert {"t-frame", "t-panel"} <= set(result["off"]), result
     if scenario == "ok":
         assert {v: got[f"{v}"]["charts"] for v in PAGES} == {
             "overview.js": 9,
@@ -120,3 +126,44 @@ def test_clarity_page_table_shades_whole_cells() -> None:
     ]
     assert len(shaded) >= 5, got["cells"][:12]
     assert all(kids in ([], ["text"]) for _, kids in got["cells"]), got["cells"][:12]
+
+
+def test_attention_answers_cover_page_or_not_300_keys_mobile_gate_and_xss() -> None:
+    """065 §4 — 가짜 서버의 attention 응답: page 없음(행만 — 요소 없음)·page 있음(그 화면 행 + 요소), bands 는 랜딩 요소 300(그중 (기타)),
+    휴대폰 행은 마우스 올림 0, empty 는 before_gate(행 빔), problem 은 error·redis, xss 는 `<img onerror>` 열쇠."""
+
+    def att(scenario: str, **query: str) -> dict:
+        got = _fake(scenario).feed(
+            "GET", "/svc/api/admin/attention", {k: [v] for k, v in query.items()}, {}
+        )
+        assert got and got[0] == 200
+        return got[1]
+
+    whole = att("ok", days="7")
+    assert (
+        whole["state"] == "ok"
+        and len(whole["rows"]) > 10
+        and all("elements" not in r for r in whole["rows"])
+    )
+    landing = att("ok", days="7", page="landing")
+    assert {r["page"] for r in landing["rows"]} == {"landing"} and all(
+        r["elements"] for r in landing["rows"]
+    )
+    mobile = next(r for r in landing["rows"] if r["device"] == "mobile")
+    assert all(e["hoverMs"] == 0 for e in mobile["elements"])
+    many = att("bands", days="7", page="landing")
+    assert all(
+        len(r["elements"]) == 300
+        and sum(e["key"] == "(기타)" for e in r["elements"]) == 1
+        for r in many["rows"]
+    )
+    gate = att("empty", days="7")
+    assert (gate["state"], gate["rows"]) == ("before_gate", [])
+    broken = att("problem", days="7")
+    assert (broken["state"], broken["code"], broken["rows"]) == ("error", "redis", [])
+    keys = {
+        e["key"]
+        for r in att("xss", days="7", page="landing")["rows"]
+        for e in r["elements"]
+    }
+    assert "<img src=x onerror=alert(1)>" in keys
