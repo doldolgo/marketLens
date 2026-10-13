@@ -105,6 +105,14 @@ class StreamJudge(Protocol):
 
 
 class WalletStatusProvider(Protocol):
+    """입출금 조회기 계약. `generation`(정수)은 apply 결과가 바뀔 때마다(조회 결과를 캐시에 넣을 때마다) 오른다 —
+    틱 루프는 이 값이 바뀐 틱에만 캐시를 전 행에 반영하고, 그 사이 틱에는 직전 행 없이 새로 생긴 행에만 반영한다
+    (001 §3.6-1). 이 속성이 없는 구현은 틱이 매 틱 전 행에 반영한다(바뀐 때를 모르므로).
+    """
+
+    @property
+    def generation(self) -> int: ...
+
     async def refresh_if_due(
         self, client: httpx.AsyncClient, *, force: bool = False
     ) -> dict[str, int] | None:

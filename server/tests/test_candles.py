@@ -11,6 +11,7 @@ from app.core.candles import (
     ensure_candle_buckets,
     window_start,
 )
+from app.core.influx import CandleRow, candle_point, to_line
 from tests.candle_fakes import T0, FakeCandleStore, candle, row, tick
 
 M = 60
@@ -455,3 +456,69 @@ async def test_rollup_takes_last_network_names() -> None:
         "Ethereum",
         "-",
     )  # 마지막 봉 값(입출금 4상태와 같은 규칙)
+
+
+# ── 분 닫힘 줄의 필드 자리 (014 §3.3 — 위치 인자 호출) ───────────────────────
+
+
+async def test_minute_close_line_puts_each_of_20_fields_in_its_own_place() -> None:
+    """분 닫힘은 `candle_line` 을 위치 인자로 부른다 — 인자 둘이 자리를 바꾸면 값이 다른 필드로 들어간다.
+
+    20필드 값을 조합 안에서 서로 다 다르게 두어(OHLC 넷이 서로 다름, 가격 셋·막힌 초 둘·samples·망 이름 둘이
+    서로 다름) 어느 두 자리가 바뀌어도 줄이 달라지게 한다. 입출금 4상태는 값이 셋(1·0·−1)뿐이라 한 조합 안에서
+    겹치는 짝이 생기므로, 두 조합에 겹치는 짝이 다른 순열을 준다. 기대 줄은 손으로 적은 값의 봉 행 → 점 → `to_line`.
+    """
+    store = FakeCandleStore()
+    agg, _ = make(store)
+    # AAA: 김프 0.3→0.9→0.1→0.6→0.5, 역프 −0.1→0.4→−0.7→0.2→−0.2. 막힘 — 김프 2초(해외 출금·국내 입금),
+    # 역프 3초(국내 출금·해외 입금). 마지막 행 입출금 (가능, 불가, 모름, 가능)
+    a = [
+        row(0.3, base="AAA", rev=-0.1, fx_wd=False),
+        row(0.9, base="AAA", rev=0.4, dom_dep=False),
+        row(0.1, base="AAA", rev=-0.7, dom_wd=False),
+        row(0.6, base="AAA", rev=0.2, fx_dep=False),
+        row(
+            0.5, base="AAA", rev=-0.2, dom_price=101.5, fx_price=0.0725, rate=1401.25,
+            dom_dep=True, dom_wd=False, fx_dep=None, fx_wd=True, net_dom="Ethereum", net_fx="ERC20",
+        ),
+    ]  # fmt: skip
+    # BBB: 김프 1.25→2.5→0.75→1.5→1.0→2.0, 역프 −1.5→−0.25→−2.75→−1.0→−2.0→−0.5. 막힘 — 김프 4초, 역프 2초.
+    # 마지막 행 입출금 (모름, 가능, 불가, 불가)
+    b = [
+        row(1.25, base="BBB", dom="bithumb", rev=-1.5, fx_wd=False),
+        row(2.5, base="BBB", dom="bithumb", rev=-0.25, dom_dep=False),
+        row(0.75, base="BBB", dom="bithumb", rev=-2.75, fx_wd=False),
+        row(1.5, base="BBB", dom="bithumb", rev=-1.0, dom_wd=False),
+        row(1.0, base="BBB", dom="bithumb", rev=-2.0),
+        row(
+            2.0, base="BBB", dom="bithumb", rev=-0.5, dom_price=2550.0, fx_price=1.8125, rate=1399.5,
+            dom_dep=None, dom_wd=True, fx_dep=False, fx_wd=False, net_dom="Solana", net_fx=None,
+        ),
+    ]  # fmt: skip
+    for i in range(6):
+        agg.observe(tick(T0 + i, *([a[i]] if i < len(a) else []), b[i]))
+    agg.observe(tick(T0 + M))  # 분 닫힘
+    await agg.flush()
+
+    expected = [
+        CandleRow(
+            dom="bithumb", fx="binance", base="BBB", ts=T0,
+            fwd_o=1.25, fwd_h=2.5, fwd_l=0.75, fwd_c=2.0,
+            rev_o=-1.5, rev_h=-0.25, rev_l=-2.75, rev_c=-0.5,
+            krw=2550.0, usdt=1.8125, rate=1399.5,
+            dom_dep=-1, dom_wd=1, fx_dep=0, fx_wd=0,
+            blocked_fwd_sec=4, blocked_rev_sec=2, samples=6,
+            net_dom="Solana", net_fx=None,
+        ),
+        CandleRow(
+            dom="upbit", fx="binance", base="AAA", ts=T0,
+            fwd_o=0.3, fwd_h=0.9, fwd_l=0.1, fwd_c=0.5,
+            rev_o=-0.1, rev_h=0.4, rev_l=-0.7, rev_c=-0.2,
+            krw=101.5, usdt=0.0725, rate=1401.25,
+            dom_dep=1, dom_wd=0, fx_dep=-1, fx_wd=1,
+            blocked_fwd_sec=2, blocked_rev_sec=3, samples=5,
+            net_dom="Ethereum", net_fx="ERC20",
+        ),
+    ]  # fmt: skip
+    got = [line for _, lines in store.lines for line in lines]
+    assert got == [to_line(candle_point(r)) for r in expected]

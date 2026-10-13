@@ -6,6 +6,7 @@ wallet_status(조회)와 spreads(행 판정)가 같이 쓰므로 core 에 둔다
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal, NamedTuple, Protocol
@@ -284,6 +285,10 @@ _MemoEntry = tuple[
 ]
 
 
+# 회차가 맞지 않는 표가 받는 조회 함수의 자리 — 늘 None 이라 모든 조합이 입력 비교(`fields`)로 간다
+_NO_ENTRIES: dict[MemoKey, _MemoEntry] = {}
+
+
 class WalletMemo:
     """망 판정 조합 메모 — 006 §3.7. 틱과 같은 회차의 표(017)가 하나를 나눠 쓴다.
 
@@ -292,16 +297,42 @@ class WalletMemo:
     행에 캐시의 망 목록을 사본 없이 걸기 때문이다. 이 메모가 맞는 전제는 "행의 망 목록과 그 안의 망은
     제자리에서 고치지 않는다"(006 §3.5)이다. 회차(`rotate`)마다 직전·이번 회차에 쓰인 조합만 남는다 —
     상폐 조합은 저절로 빠진다.
+
+    같은 회차의 표는 틱이 채운 칸을 **입력 비교 없이** 읽는다(`current_getter`). 틱(`build_tick`)과 표 사이에
+    await 가 없고(TickLoop.tick 은 동기다) 입출금 반영(apply)은 틱 앞이라, 그 사이 행의 망 목록·코인 값이
+    바뀌지 않기 때문이다. 틱이 칸을 안 채운 조합(빈 호가·0 가격으로 틱 자격이 없는 fail 행)만 `fields` 로
+    입력을 비교해 판정한다. 표 1,840행마다 입력 여섯을 다시 견주지 않으려는 것이다(2026-10-09).
     """
 
     def __init__(self) -> None:
         self._prev: dict[MemoKey, _MemoEntry] = {}
         self._cur: dict[MemoKey, _MemoEntry] = {}
+        self._round = 0
 
     def rotate(self) -> None:
-        """새 회차 — 틱이 판정을 시작할 때 부른다."""
+        """새 회차 — 틱이 판정을 시작할 때 부른다. 회차 번호가 1 늘어난다."""
         self._prev = self._cur
         self._cur = {}
+        self._round += 1
+
+    @property
+    def round(self) -> int:
+        """지금 회차 번호 — 표(017)가 "이 회차를 연 틱 뒤의 첫 표인가" 를 가리는 표식이다."""
+        return self._round
+
+    def current_getter(
+        self, round_id: int | None
+    ) -> Callable[[MemoKey], _MemoEntry | None]:
+        """이번 회차에 틱이 채운 칸을 읽는 함수 — 표 1장에 한 번 꺼내 행마다 부른다(행마다 메서드를 부르지 않게).
+
+        `round_id` 가 지금 회차와 같을 때만 이번 회차 칸을 그대로 읽는다. 다르거나 None 이면(회차를 모르는
+        호출 — 테스트·`build_spreads`, 같은 회차의 두 번째 표) 늘 None 을 돌려 모든 조합이 `fields` 의 입력
+        비교로 간다 — 틱 없이 입출금이 바뀐 뒤 부른 표가 낡은 판정을 읽지 않게 하는 표당 비교 1번이다.
+        돌려받은 함수의 칸 끝자리(`entry[6]`)가 판정이다.
+        """
+        if round_id is not None and round_id == self._round:
+            return self._cur.get
+        return _NO_ENTRIES.get
 
     def fields(
         self, key: MemoKey, dom_row: WalletRow, fx_row: WalletRow

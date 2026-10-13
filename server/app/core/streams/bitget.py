@@ -74,6 +74,17 @@ _OK_CODE = "00000"  # 봉투 code — HTTP 200 이어도 이 값이 아니면 �
 _ONLINE = "online"
 _PING = "ping"
 _PONG = "pong"
+# 반영을 미루는 books15 스냅샷 프레임의 머리 (001 §3.5-5) — 비트겟이 실제로 보내는 꼴(공백 없음, action·arg 가 맨 앞,
+# arg 키 순서 instType·channel·instId)일 때만 빠른 길로 가고, 그 밖의 꼴(update 포함)은 지금처럼 받은 자리에서 파싱한다.
+# 머리 다음부터 첫 따옴표까지가 instId 글자다
+_SNAPSHOT_HEAD = (
+    '{"action":"snapshot","arg":{"instType":"'
+    + INST_TYPE
+    + '","channel":"'
+    + BOOKS_CHANNEL
+    + '","instId":"'
+)
+_BOOK_KEY = "orderbook:"
 
 
 def _now_ms() -> int:
@@ -205,11 +216,16 @@ class BitgetStream:
         self._last_trade_ts: dict[
             str, int
         ] = {}  # base → 마지막으로 실은 체결 ts (§3.4)
+        # 직전 set_universe 가 끝까지 배정을 맞춘 (심볼 맵 객체, 우주 사본) — 같은 맵·같은 우주면 배정 계산을 건너뛴다 (§3.3)
+        self._applied: tuple[dict[str, str], frozenset[str]] | None = None
         self._wake = asyncio.Event()  # set_universe 가 재조정 루프를 깨운다
         self._rebalance: asyncio.Task[None] | None = None
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다
         # 직전에 맵까지 만든 200 응답의 비교용 바이트(requestTime 제외) — 같으면 파싱·맵 재생성을 건너뛴다 (§3.3)
         self._symbols_body: bytes | None = None
+        # 반영을 미룬 스냅샷 — 심볼 → (샤드, 원문, 수신 ms, 받은 때의 base), 심볼마다 마지막 1건 (001 §3.5-5).
+        # 저장소가 읽기 전에 _settle 을 부른다
+        self._books_pending: dict[str, tuple[_Shard, str, int, str]] = {}
 
     # --- 심볼 집합 (ForeignSymbolSource, §3.3) ---
 
@@ -298,7 +314,21 @@ class BitgetStream:
 
         우주 전체를 받으므로 자기 맵에 없는 base 는 무시한다(다른 해외에만 있는 코인).
         매초 불리므로 배정이 하나도 안 바뀌면 아무것도 하지 않는다 (§3.3).
+
+        심볼 맵이 직전 호출 때와 같은 객체이고 우주도 같으면 배정 계산부터 건너뛴다 — 목록은 하루 몇 번만 바뀌는데
+        계산은 매초 샤드 3개 × 심볼 수백 개의 crc32 다. 맵은 refresh 가 새 본문을 파싱할 때만 새 객체로 바뀌고 제자리에서
+        고치지 않으며, 샤드 배정(`assigned`·`has_work`)은 이 함수만 쓴다. 그래서 같은 맵·같은 우주로 다시 계산하면 모든
+        샤드가 `mine == assigned` 로 넘어간다 — 행·북·체결 ts 를 지우는 일도 재조정 깨우기도 없다.
         """
+        applied = self._applied
+        if (
+            applied is not None
+            and applied[0] is self._symbol_of
+            and applied[1] == bases
+        ):
+            return
+        # 배정을 고치는 도중 예외로 끝나면 다음 호출이 같은 우주라도 다시 계산하게 기억을 먼저 지운다
+        self._applied = None
         desired = {
             self._symbol_of[b]
             for b in (x.upper() for x in bases)
@@ -309,6 +339,9 @@ class BitgetStream:
             mine = {s for s in desired if shard_of(s) == shard.index}
             if mine == shard.assigned:
                 continue
+            if not changed and self._books_pending:
+                # 빠지는 심볼의 미룬 스냅샷은 행을 지우기 전에 반영한다 — 받은 자리에서 반영하던 순서 그대로 (001 §3.5-5)
+                self._settle()
             changed = True
             for symbol in shard.assigned - mine:
                 base = self._base_of.get(symbol, symbol)
@@ -322,6 +355,8 @@ class BitgetStream:
                 shard.has_work.clear()
         if changed:
             self._wake.set()
+        # 사본으로 든다 — 넘겨받은 집합을 부른 쪽이 나중에 고쳐도 비교가 흔들리지 않게
+        self._applied = (self._symbol_of, frozenset(bases))
 
     # --- 판정 (§3.5) ---
 
@@ -456,6 +491,8 @@ class BitgetStream:
                 continue
             shard.ws = ws
             shard.subscribed = set()
+            if self._books_pending:
+                self._settle()  # 옛 소켓의 미룬 스냅샷은 북을 비우기 전에 — 받은 자리에서 반영하던 순서 그대로
             shard.books.clear()  # 새 소켓은 새 스냅샷으로 시작한다 — 옛 북에 새 update 를 얹지 않는다 (§3.4)
             shard.requests_at.clear()  # 새 연결은 구독 예산도 새로 (§3.2)
             shard.budget_warned = False
@@ -499,6 +536,8 @@ class BitgetStream:
                 shard.state.connected_since = None
                 shard.state.subscribed = 0
                 shard.subscribed = set()
+                if self._books_pending:
+                    self._settle()  # 끊긴 소켓의 미룬 스냅샷은 북을 비우기 전에 반영한다
                 shard.books.clear()
                 self._publish()  # close 가 늦어도 집계는 먼저 미연결이 된다
                 await self._close_socket(shard)
@@ -640,6 +679,10 @@ class BitgetStream:
                 self._record(self.id, WS_SOURCE, at, text)
                 shard.pong_pending = False
                 continue
+            # 빠른 길 (001 §3.5-5) — books15 스냅샷은 파싱하지 않고 instId 만 글자로 뽑아 원문을 남긴 뒤 심볼마다 마지막
+            # 프레임만 든다. 같은 초 안에 뒤 스냅샷이 덮는 프레임(2026-10-13 캡처 75%)은 끝내 파싱하지 않는다
+            if text.startswith(_SNAPSHOT_HEAD) and self._defer(shard, text, at):
+                continue
             msg = _decode(text)
             # 디코드 뒤, 행·상태 갱신 전 — 받은 텍스트 그대로 + 시세 프레임이면 종류:심볼 (001 §3.7)
             self._record(self.id, WS_SOURCE, at, text, _quote_key(msg))
@@ -664,6 +707,9 @@ class BitgetStream:
                 continue  # 맵에 없는 심볼 — 버린다 (§3.4)
             try:
                 if channel == BOOKS_CHANNEL:
+                    if self._books_pending:
+                        # 빠른 길로 못 간 호가(update 등) — 미룬 스냅샷을 먼저 반영해 받은 순서대로 북에 얹는다
+                        self._settle()
                     self._on_books(shard, symbol, base, action, msg["data"], at)
                 elif channel == TRADE_CHANNEL:
                     self._on_trade(base, msg["data"])
@@ -679,6 +725,54 @@ class BitgetStream:
             last = self._state.last_message_at
             if last is None or at > last:
                 self._state.last_message_at = at
+
+    def _defer(self, shard: _Shard, text: str, at: int) -> bool:
+        """빠른 길 한 프레임 — 미뤘으면(또는 맵에 없는 심볼이라 버렸으면) True, instId 를 글자로 못 뽑으면 False.
+
+        원문 key·기록 시점·last_message_at·백오프는 파싱하는 길과 같다: key 는 `orderbook:<심볼 대문자>` 이고 행이 바뀌기
+        전에 남긴다. 맵에 없는 심볼은 파싱하는 길처럼 시세로 세지 않고 버린다. instId 에 이스케이프가 있으면 글자와
+        파싱 값이 다를 수 있어 파싱하는 길로 보낸다.
+        """
+        start = len(_SNAPSHOT_HEAD)
+        end = text.find('"', start)
+        if end <= start or text[end + 1 : end + 2] != "}" or "\\" in text[start:end]:
+            return False
+        symbol = text[start:end].upper()
+        self._record(self.id, WS_SOURCE, at, text, _BOOK_KEY + symbol)
+        base = self._base_of.get(symbol)
+        if base is None:
+            return True  # 맵에 없는 심볼 — 버린다 (§3.4)
+        shard.state.last_message_at = at
+        shard.backoff = BACKOFF_START
+        last = self._state.last_message_at
+        if last is None or at > last:
+            self._state.last_message_at = at
+        if not self._books_pending:
+            self._store.defer(self._settle)
+        self._books_pending[symbol] = (shard, text, at, base)
+        return True
+
+    def _settle(self) -> None:
+        """미룬 스냅샷 반영 — 저장소가 읽기 직전에 부른다 (001 §3.5-5).
+
+        심볼마다 마지막 스냅샷 하나를 받은 자리에서 하던 처리 그대로 북·행에 반영한다. base 는 받은 때의 맵으로 정한
+        것을 쓴다. 파싱·처리 실패는 무효 프레임으로 센다(원문·last_message_at 은 받은 자리에서 이미 남았다).
+        """
+        pending, self._books_pending = self._books_pending, {}
+        for symbol, (shard, text, at, base) in pending.items():
+            msg = _decode(text)
+            if msg is None:
+                self.decode_failures += 1
+                continue
+            action = msg.get("action")
+            if "event" in msg or action not in ("snapshot", "update"):
+                # 머리는 스냅샷인데 모양이 다르다 — 시세로 쓰지 않는다
+                self.decode_failures += 1
+                continue
+            try:
+                self._on_books(shard, symbol, base, action, msg["data"], at)
+            except (KeyError, TypeError, ValueError, IndexError):
+                self.decode_failures += 1
 
     def _on_books(
         self,

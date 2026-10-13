@@ -3,15 +3,16 @@
 이 기능의 고정값(§3.1)도 여기 둔다 — 다른 기능이 쓰게 되는 날 core 로 옮긴다.
 """
 
+import json
 import time
 from collections.abc import Collection, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.core.collect import RefreshSummary
-from app.core.live_store import LiveStore
+from app.core.live_store import LiveStore, SparkKey
 from app.core.models import Row
-from app.core.networks import WalletMemo, wallet_fields
+from app.core.networks import MemoKey, WalletFields, WalletMemo, wallet_fields
 from app.core.orderbook import WALK_EPSILON, walk_levels
 from app.core.premium import premium_percent
 from app.features.spreads.models import (
@@ -46,6 +47,61 @@ class MarketDataNotFoundError(Exception):
         super().__init__(message)
         self.message = message
         self.detail = detail
+
+
+# 표 JSON 의 인코더 설정 — 017 `encode_table` 과 같다(camelCase·공백 없음·NaN 금지). 글 갈래가 값 하나씩 쓸 때 쓴다
+_JSON = json.JSONEncoder(
+    ensure_ascii=False, allow_nan=False, separators=(",", ":")
+).encode
+# 이름 글 기억 상한 — 코인 약 600·거래소·망 이름이라 닿지 않는다. 닿으면 비우고 다시 채운다(값은 같다)
+_NAME_TEXTS_MAX = 8192
+
+
+class TableTexts:
+    """표 글 갈래(017 게시기)가 표와 표 사이에 들고 가는 글 — 게시기 인스턴스 하나가 든다 (§3.2-7).
+
+    - 이름 글: 코인·거래소 이름 → JSON 문자열 글(따옴표·이스케이프 포함). 이름은 바뀌지 않으니 매초 다시 쓰지 않는다.
+    - 입출금 글: (국내, 해외, 코인) → (판정 객체, 입출금 6필드 글). 망 판정 메모(006 §3.7)는 입력이 그대로면
+      **같은 판정 객체**를 돌려주므로 `is` 가 같으면 글도 같다 — 6필드는 60초에 한 번 바뀌는데 1,840행을 매초
+      다시 쓰지 않으려는 것이다. 표 1장의 행을 끝까지 만들었을 때만 이번 표의 dict 로 갈아 끼운다 — 표에 안 나온
+      조합은 저절로 빠지고(망 판정 메모의 회차 규칙과 같다), 예외로 멈춘 표는 직전 것을 그대로 둔다.
+    """
+
+    def __init__(self) -> None:
+        self.names: dict[str, str] = {}
+        self.wallet: dict[MemoKey, tuple[WalletFields, str]] = {}
+
+    def name(self, s: str) -> str:
+        text = self.names.get(s)
+        if text is None:
+            if len(self.names) >= _NAME_TEXTS_MAX:
+                self.names.clear()
+            text = self.names[s] = _JSON(s)
+        return text
+
+
+def _wallet_text(wf: WalletFields) -> str:
+    """입출금 6필드의 글 — 키 순서·값 표기가 행 dict 를 통째로 인코딩한 것과 같다(끝에 쉼표). 판정이 바뀐 조합에만 부른다."""
+    return (
+        _JSON(
+            {
+                "netDom": wf.net_dom,
+                "depDom": wf.dep_dom,
+                "wdDom": wf.wd_dom,
+                "depFx": wf.dep_fx,
+                "wdFx": wf.wd_fx,
+                "netFx": wf.net_fx,
+            }
+        )[1:-1]
+        + ","
+    )
+
+
+def _float_text(v: object) -> str:
+    """국내 시장 단위 값(dayChg)의 글 — 행 dict 를 인코딩할 때와 같은 글. 늘 float 라 repr 이고, 아니면 인코더로."""
+    if type(v) is float:
+        return repr(v)
+    return _JSON(v)
 
 
 def _walk_amount(levels: list[list[float]], amount: float) -> tuple[float, float]:
@@ -144,15 +200,28 @@ def build_table(
     notional: float = DEFAULT_NOTIONAL,
     day_open: Mapping[tuple[str, str], float] | None = None,
     wallet_memo: WalletMemo | None = None,
+    memo_round: int | None = None,
+    spark_json: Mapping[SparkKey, str] | None = None,
+    texts: TableTexts | None = None,
 ) -> dict[str, object]:
     """전 (국내 × 해외 × 코인) 페어의 김프/역프 표 — 스펙 003 §3.2.
 
     `day_open` 은 026 의 기준가 장부((국내 거래소, 코인) → KST 00시 가격) — 없으면 `dayChg` 는 전부 null.
-    `wallet_memo` 는 같은 회차의 틱이 채운 망 판정 메모(006 §3.7) — 없으면 행마다 판정한다.
+    `wallet_memo` 는 같은 회차의 틱이 채운 망 판정 메모(006 §3.7) — 없으면 행마다 판정한다. `memo_round` 가
+    메모의 지금 회차와 같으면 틱이 채운 칸을 입력 비교 없이 읽는다(`WalletMemo.current_getter` — 017 게시기가
+    그 회차를 연 틱 바로 뒤에서만 넘긴다). 틱이 안 채운 조합과 회차를 모르는 호출은 입력을 비교해 판정한다.
 
-    응답 모양(camelCase 키·순서) 그대로의 dict 를 돌려준다 — 017 게시기가 이걸 바로 json 으로
-    만든다. 모델이 필요하면 `build_spreads` (테스트·문서용, 같은 계산). 키 이름·순서의 진실은
-    `SpreadRow` 이고 이 dict 가 그것과 같은 바이트가 되는지는 테스트가 지킨다.
+    응답 모양(camelCase 키·순서) 그대로의 dict 를 돌려준다. 모델이 필요하면 `build_spreads` (테스트·문서용,
+    같은 계산). 키 이름·순서의 진실은 `SpreadRow` 이고 이 dict 가 그것과 같은 바이트가 되는지는 테스트가 지킨다.
+
+    글 갈래(`spark_json` 을 주면 — 017 게시기 전용, 2026-10-09): `rows` 에 행 dict 대신 **행 JSON 글**을 담는다.
+    행 계산은 한 벌이고 행을 내보내는 자리만 갈린다. 글은 행 dict 를 `encode_table` 로 인코딩한 것과 같은
+    바이트다 — 키는 글자 상수, 부동소수는 `repr(float(x))`(json 의 float 표기와 같다), 이름은 `TableTexts` 가
+    기억한 JSON 문자열, spark 자리는 009 가 게시한 조각(`spark_json` — 이 동기 구간에서 읽은 것), 조각이 없으면
+    목록을 인코딩한다. 국내가·dayChg 는 국내 시장 재료를, 해외가는 해외 시장 재료를 만들 때 한 번 글로 쓰고, age 는
+    표 1장 안에서 같은 값의 글을 다시 쓴다. 입출금 6필드 글은 `texts` 가 판정 객체와 함께 든다. 행 1,840개마다
+    키 19개짜리 dict 를 만들고 C 인코더가 다시 훑던 일을 덜려는 것이다. 유한하지 않은 값이 든 행을 만나면
+    `ValueError` 를 낸다 — 게시기는 그때 dict 갈래로 다시 만들어 기준과 같은 결과(같은 예외)를 낸다.
 
     표 계산 경로(§3.2 끝): 거래소 단위 값(스트림 age)과 시장 단위 값(최우선 검사·age·dayChg·사는 쪽
     걷기)은 처음 쓰일 때 한 번만 구하고, 행 루프는 원값·파는 쪽 걷기·되맞추기·평균가·순값만 한다.
@@ -207,14 +276,31 @@ def build_table(
     cutoff = now - _ROW_STALE
     opens = day_open if day_open is not None else {}
     stream_ages: dict[str, float] = {}
-    rows_out: list[dict[str, object]] = []
+    rows_out: list[Any] = []
     append = rows_out.append
+    # 006 §3.7 — 이번 회차에 틱이 채운 칸을 읽는 함수는 표 1장에 한 번 꺼낸다(행마다 메서드를 부르지 않게)
+    cur_get = (
+        wallet_memo.current_getter(memo_round) if wallet_memo is not None else None
+    )
+    text = spark_json is not None
+    if spark_json is not None:
+        frags = spark_json
+        memo_texts = texts if texts is not None else TableTexts()
+        name = memo_texts.name
+        wt_prev = memo_texts.wallet
+        wt_cur: dict[MemoKey, tuple[WalletFields, str]] = {}
+        age_texts: dict[
+            float, str
+        ] = {}  # 표 1장 안 — age 는 스트림 쌍 단위 값이라 고유값이 몇 개뿐이다
+        ex_texts = {ex: name(ex) for ex in (*domestic, *foreign)}
     for base in sorted(bases):
         if base in excluded_upper:
             continue
         fx_markets: dict[
             str, list[Any]
         ] = {}  # 이 코인의 해외 시장 — 국내 거래소들이 나눠 쓴다
+        if text:
+            sym_text = name(base)
         for dom_ex, dom_table, rate_ask, rate_bid, notional_krw in doms:
             dom_row = dom_table.get(base)
             if dom_row is None:
@@ -233,11 +319,19 @@ def build_table(
                     ref = opens.get((dom_ex, base))
                     if ref is not None and ref > 0 and dom_row.price > 0:
                         day_chg = (dom_row.price / ref - 1) * 100
+                    if text:
+                        # 글 갈래 — 국내 시장 단위 값의 글을 시장마다 한 번: [7] 국내가(ok 행의 krw = 최우선 bid), [8] dayChg
+                        dm.append(repr(float(dm[1][0])) if dm[3] else "0.0")
+                        dm.append("null" if day_chg is None else _float_text(day_chg))
                 fm = fx_markets.get(fx_ex)
                 if fm is None:
                     fm = fx_markets[fx_ex] = _market(
                         fx_row, store, stream_ages, now_ms, now, cutoff
                     )
+                    if text:
+                        fm.append(
+                            repr(float(fx_row.price))
+                        )  # [7] 해외가(ok 행의 usd) 글
 
                 # age 는 양측 스트림 중 오래된 쪽 — max(0.0, 국내, 해외) 와 같은 값(앞에서부터 더 큰 것만 바꾼다)
                 age = 0.0
@@ -340,40 +434,94 @@ def build_table(
 
                 # 입출금 6필드는 망 판정으로 채운다 — fail 행도 같은 규칙 (006 §3.7)
                 # 024 부터 core 공용 함수 — 틱도 같은 판정을 쓴다. `net_fx` 는 FE 의 "네트워크 같음/다름" 판단 재료다
-                wf = (
-                    wallet_fields(dom_row, fx_row)
-                    if wallet_memo is None
-                    else wallet_memo.fields((dom_ex, fx_ex, base), dom_row, fx_row)
+                key = (dom_ex, fx_ex, base)
+                if cur_get is None:
+                    wf = wallet_fields(dom_row, fx_row)
+                else:
+                    # 이번 회차에 틱이 채운 칸이면 그대로, 없으면(틱 자격이 없는 fail 행·회차를 모르는 호출) 입력 비교
+                    entry = cur_get(key)
+                    wf = (
+                        entry[6]
+                        if entry is not None
+                        else wallet_memo.fields(key, dom_row, fx_row)  # type: ignore[union-attr]
+                    )
+
+                if not text:
+                    # float() 는 모델이 하던 int→float 강제와 같다 — 거래소가 정수로 준 가격이 "100" 이 아니라
+                    # "100.0" 으로 나가야 옛 바이트와 같다
+                    append(
+                        {
+                            "sym": base,
+                            "dom": dom_ex,
+                            "fx": fx_ex,
+                            "fwd": float(fwd),
+                            "rev": float(rev),
+                            "usd": float(usd),
+                            # 009 가 게시한 fwd 추이(1분 버킷 ≤30개) — fail 행도 싣는다, 없으면 빈 배열.
+                            # 값은 009 가 버퍼에 넣을 때 이미 소수 3자리다(0.001%p = 김프 눈금보다 촘촘하다): 490행 ×
+                            # 30개를 1초마다 보내므로 배정밀도 그대로면 응답이 gzip 106KB 다. 원값은 Influx 에 남는다.
+                            "spark": store.spark(dom_ex, fx_ex, base),
+                            "status": status,
+                            "age": float(age),
+                            "slipFwd": float(slip_fwd),
+                            "slipRev": float(slip_rev),
+                            "krw": float(krw),
+                            "netDom": wf.net_dom,
+                            "depDom": wf.dep_dom,
+                            "wdDom": wf.wd_dom,
+                            "depFx": wf.dep_fx,
+                            "wdFx": wf.wd_fx,
+                            "netFx": wf.net_fx,
+                            "dayChg": day_chg,
+                        }
+                    )
+                    continue
+
+                # --- 글 갈래 — 위 dict 를 `encode_table` 로 인코딩한 것과 같은 글 ---
+                # float() 강제는 dict 갈래와 같다. 유한성은 행 부동소수의 합 하나로 본다 — 하나라도 NaN·±inf 면 합이
+                # NaN·±inf 라 `chk - chk` 가 0 이 아니다(유한한 값끼리 합이 넘쳐도 걸린다 — 그때는 게시기가 dict
+                # 갈래로 다시 만들어 기준 바이트를 낸다). dict 갈래라면 인코더가 거부했을 행이다
+                fwd = float(fwd)
+                rev = float(rev)
+                usd = float(usd)
+                age = float(age)
+                slip_fwd = float(slip_fwd)
+                slip_rev = float(slip_rev)
+                krw = float(krw)
+                chk = fwd + rev + usd + age + slip_fwd + slip_rev + krw
+                if day_chg is not None:
+                    chk += day_chg
+                if chk - chk != 0.0:
+                    raise ValueError(
+                        f"표 행에 유한하지 않은 값 — {base} {dom_ex}/{fx_ex}"
+                    )
+                frag = frags.get(key)
+                if frag is None:
+                    # 조각이 없는 조합(유한하지 않은 값이 든 추이·조각 없이 게시된 맵) — 목록을 인코딩한다(NaN 거부도 같다)
+                    frag = _JSON(store.spark(dom_ex, fx_ex, base))
+                # age 는 0.0 에서 큰 값으로만 바뀌므로(위의 비교) −0.0·NaN 이 키로 오지 않는다 — 같은 키 = 같은 글
+                age_text = age_texts.get(age)
+                if age_text is None:
+                    age_text = age_texts[age] = repr(age)
+                wt = wt_prev.get(key)
+                if wt is None or wt[0] is not wf:
+                    wt = (wf, _wallet_text(wf))
+                wt_cur[key] = wt
+                if status == "fail":
+                    usd_text = krw_text = "0.0"
+                else:
+                    usd_text = fm[7]
+                    krw_text = dm[7]
+                append(
+                    f'{{"sym":{sym_text},"dom":{ex_texts[dom_ex]},"fx":{ex_texts[fx_ex]},'
+                    f'"fwd":{fwd!r},"rev":{rev!r},"usd":{usd_text},"spark":{frag},'
+                    f'"status":"{status}","age":{age_text},"slipFwd":{slip_fwd!r},'
+                    f'"slipRev":{slip_rev!r},"krw":{krw_text},{wt[1]}"dayChg":{dm[8]}}}'
                 )
 
-                # float() 는 모델이 하던 int→float 강제와 같다 — 거래소가 정수로 준 가격이 "100" 이 아니라
-                # "100.0" 으로 나가야 옛 바이트와 같다
-                append(
-                    {
-                        "sym": base,
-                        "dom": dom_ex,
-                        "fx": fx_ex,
-                        "fwd": float(fwd),
-                        "rev": float(rev),
-                        "usd": float(usd),
-                        # 009 가 게시한 fwd 추이(1분 버킷 ≤30개) — fail 행도 싣는다, 없으면 빈 배열.
-                        # 값은 009 가 버퍼에 넣을 때 이미 소수 3자리다(0.001%p = 김프 눈금보다 촘촘하다): 490행 ×
-                        # 30개를 1초마다 보내므로 배정밀도 그대로면 응답이 gzip 106KB 다. 원값은 Influx 에 남는다.
-                        "spark": store.spark(dom_ex, fx_ex, base),
-                        "status": status,
-                        "age": float(age),
-                        "slipFwd": float(slip_fwd),
-                        "slipRev": float(slip_rev),
-                        "krw": float(krw),
-                        "netDom": wf.net_dom,
-                        "depDom": wf.dep_dom,
-                        "wdDom": wf.wd_dom,
-                        "depFx": wf.dep_fx,
-                        "wdFx": wf.wd_fx,
-                        "netFx": wf.net_fx,
-                        "dayChg": day_chg,
-                    }
-                )
+    if text:
+        # 행을 끝까지 만들었다 — 이번 표의 입출금 글로 갈아 끼운다(표에 안 나온 조합은 빠진다)
+        memo_texts.wallet = wt_cur
 
     # 6. 최상위 값 + USDT 시세 미갱신 경고 — 시세가 "있긴 한데 낡은" 거래소만 (스펙 008 §3.2)
     warnings: list[str] = []
@@ -407,7 +555,7 @@ def build_spreads(
     notional: float = DEFAULT_NOTIONAL,
     day_open: Mapping[tuple[str, str], float] | None = None,
 ) -> SpreadsResponse:
-    """`build_table` 과 같은 표를 `SpreadsResponse` 모델로 — 테스트·문서용. 뜨거운 경로는 dict 다."""
+    """`build_table` 과 같은 표를 `SpreadsResponse` 모델로 — 테스트·문서용. 뜨거운 경로(017 게시기)는 글 갈래다."""
     return SpreadsResponse.model_validate(
         build_table(
             store, now=now, excluded=excluded, notional=notional, day_open=day_open

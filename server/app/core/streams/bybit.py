@@ -4,7 +4,8 @@
 바이낸스와 다른 점: 호가가 자기완결 스냅샷이 아니라 스냅샷 뒤 델타라 심볼마다 로컬 북을 들고,
 핑은 라이브러리 프레임이 아니라 JSON `{"op":"ping"}` 을 20초마다 보내며 pong 이 없으면 끊는다.
 심볼은 crc32 % 3 으로 샤드에 고정 배정되고, 샤드마다 소켓·시계·백오프·북을 따로 둔다.
-메시지마다: 원문 싱크 기록 → 디코드 → 북·행 갱신(QuoteSink) → 그 샤드의 last_message_at(시세만).
+메시지마다: 원문 싱크 기록 → 디코드 → 북 갱신 → 그 샤드의 last_message_at(시세만). 북을 행으로 내보내는 것(QuoteSink)은
+저장소를 읽기 직전에 바뀐 북마다 한 번이다(001 §3.5-5, 2026-10-13).
 심볼 집합 계약(ForeignSymbolSource)도 이 커넥터가 구현한다 — 우주가 확정되면 차이만 재조정한다.
 """
 
@@ -15,6 +16,7 @@ import logging
 import re
 import time
 import zlib
+from bisect import bisect_left
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -60,7 +62,6 @@ PING_INTERVAL = 20.0  # JSON ping 주기 — 공식 문서 요구 (§3.2)
 PONG_TIMEOUT = 20.0  # 이 안에 pong 이 없으면 끊고 재연결 — 조용히 죽은 TCP 감지 (§3.2)
 # 심볼당 행 발행(정렬 + QuoteSink.orderbook) 최소 간격 — 델타는 100ms 마다 오지만 표는 1초에 1번만 읽으므로
 # 메시지마다 200단계를 정렬·행 재생성하던 비용(py-spy: 수집기 CPU 22%)을 1/5 로 줄인다 (§3.2)
-PUBLISH_INTERVAL_MS = 500
 BACKOFF_START = 1.0
 BACKOFF_MAX = 30.0
 CLOSE_TIMEOUT = 2.0  # 종료 시 취소 + 소켓 3개 동시 close 합계 상한
@@ -96,39 +97,80 @@ class _SubscribeRejected(Exception):
 
 
 class _Book:
-    """심볼 하나의 로컬 북 — 가격 → 잔량. 스냅샷으로 통째 교체, 델타로 삽입·교체·삭제 (§3.4)."""
+    """심볼 하나의 로컬 북 — 가격 순으로 정렬된 `[가격, 잔량]` 단계 목록. 스냅샷으로 통째 교체, 델타로 삽입·교체·삭제 (§3.4).
+
+    asks 는 가격 오름차순, bids 는 가격 내림차순이고, 이분 탐색용 키 열을 나란히 든다(bids 키는 부호를 뒤집은
+    가격이라 오름차순). 북을 늘 정렬된 채로 두는 이유: 델타는 바뀐 단계만 와서(2026-10-09 캡처 평균 5단계) 그
+    자리만 찾아 고치면 되지만, 발행은 저장소를 읽을 때마다(틱 1초) 북 전체(쪽마다 약 200단계)를 행으로 내보낸다. 가격 →
+    잔량 dict 로 들면 발행마다 정렬하고 `[가격, 잔량]` 목록 약 400개를 새로 만들어야 하고, 그 목록들은 옛 행이
+    교체될 때 다시 해제된다. 정렬된 목록이면 발행은 얕은 복사뿐이다 — 같은 캡처 60초 재생에서 바이빗 처리(행
+    저장 포함) CPU 가 31.7 → 17.9ms/초로 43% 준다(로컬 Mac). 대신 델타 반영은 조금 비싸진다(델타 1건 1.2 → 3.1µs).
+
+    결과는 dict 를 정렬하던 것과 순서·값·가격 객체까지 같다: 같은 가격의 단계는 하나뿐이고, 잔량만 바뀌면
+    처음 들어온 가격 객체를 지킨다(dict 키가 그렇듯이).
+    """
 
     def __init__(self) -> None:
-        self.asks: dict[float, float] = {}
-        self.bids: dict[float, float] = {}
+        self.ask_keys: list[float] = []  # 가격 오름차순 — asks 와 같은 자리
+        self.asks: list[list[float]] = []
+        self.bid_keys: list[
+            float
+        ] = []  # -가격 오름차순(= 가격 내림차순) — bids 와 같은 자리
+        self.bids: list[list[float]] = []
         self.ts = 0  # 마지막으로 반영한 프레임의 `ts` — 발행 시 행의 호가 시각
         self.received_at = 0  # 그 프레임의 수신 시각 — 발행 시 행의 `updated_at`
-        self.published_at = 0  # 마지막으로 행을 내보낸 시각 (§3.2 발행 제한)
-        self.dirty = False  # 델타를 반영했지만 아직 행으로 내보내지 않았다
 
     def replace(self, data: dict[str, Any]) -> None:
-        self.asks = {float(p): float(q) for p, q in data["a"]}
-        self.bids = {float(p): float(q) for p, q in data["b"]}
+        # 같은 가격이 둘 이상 오면 뒤 잔량·처음 가격 객체 — dict 로 먼저 모아 그 규칙을 그대로 지킨다.
+        # 잔량 0 단계도 북에 남긴다(행 규칙 clean_levels 가 거른다) — 스냅샷을 dict 로 받던 때와 같다
+        asks = {float(p): float(q) for p, q in data["a"]}
+        bids = {float(p): float(q) for p, q in data["b"]}
+        self.ask_keys = sorted(asks)
+        self.asks = [[p, asks[p]] for p in self.ask_keys]
+        prices = sorted(bids, reverse=True)
+        self.bids = [[p, bids[p]] for p in prices]
+        self.bid_keys = [-p for p in prices]
 
     def apply(self, data: dict[str, Any]) -> None:
-        for side, levels in (("a", self.asks), ("b", self.bids)):
-            for p, q in data.get(side) or []:
-                price, size = float(p), float(q)
+        # 단계 원소 `[가격, 잔량]` 은 clean_levels 를 지나 행에 그대로 실린다 — 제자리에서 고치면 이미 내보낸
+        # 행의 호가가 바뀐다. 잔량이 바뀌면 반드시 새 목록으로 갈아 끼운다(levels[i][1] = … 금지).
+        # 매도·매수를 따로 쓴 것은 매수 키의 부호 뒤집기를 단계마다 분기 없이 하려는 것이다.
+        keys, levels = self.ask_keys, self.asks
+        for p, q in data.get("a") or []:
+            price, size = float(p), float(q)
+            i = bisect_left(keys, price)
+            if i < len(keys) and keys[i] == price:
                 if size <= 0:
-                    levels.pop(price, None)  # 잔량 0 = 그 가격 삭제 (공식 문서 규칙)
+                    del keys[i]  # 잔량 0 = 그 가격 삭제 (공식 문서 규칙)
+                    del levels[i]
                 else:
-                    levels[price] = size
+                    levels[i] = [levels[i][0], size]  # 처음 가격 객체를 지킨 새 목록
+            elif size > 0:
+                keys.insert(
+                    i, price
+                )  # 없는 가격 = 삽입. 없는 가격의 잔량 0 은 할 일이 없다
+                levels.insert(i, [price, size])
+        keys, levels = self.bid_keys, self.bids
+        for p, q in data.get("b") or []:
+            price, size = float(p), float(q)
+            key = -price
+            i = bisect_left(keys, key)
+            if i < len(keys) and keys[i] == key:
+                if size <= 0:
+                    del keys[i]
+                    del levels[i]
+                else:
+                    levels[i] = [levels[i][0], size]
+            elif size > 0:
+                keys.insert(i, key)
+                levels.insert(i, [price, size])
 
     def sorted_levels(self) -> tuple[list[list[float]], list[list[float]]]:
-        """asks 오름차순·bids 내림차순 — 행 규칙(001 §3.3)이 기대하는 순서."""
-        # items() 튜플을 C 레벨 비교로 바로 정렬한 뒤 리스트로 바꾼다 — 리스트 200개를 먼저
-        # 만들고 lambda 키를 200번 호출하는 비용을 없앤다 (py-spy: 수집기 CPU 22%가 여기).
-        # 스냅샷이 정렬된 순서로 들어오고 델타는 제자리 교체가 대부분이라 북은 거의 정렬 상태 →
-        # 비교 횟수 자체는 적어서 lambda·리스트 생성 절감이 그대로 이득(마이크로벤치 1.1~1.3배).
-        # 가격은 dict 키라 유일하므로 튜플 비교가 두 번째 원소(잔량)까지 보는 일은 없다.
-        asks = [[p, q] for p, q in sorted(self.asks.items())]
-        bids = [[p, q] for p, q in sorted(self.bids.items(), reverse=True)]
-        return asks, bids
+        """asks 오름차순·bids 내림차순 — 행 규칙(001 §3.3)이 기대하는 순서. 이미 정렬돼 있어 얕은 복사만 한다."""
+        # 복사를 지우지 않는다 — 행 쪽(clean_levels)이 거를 것이 없을 때 입력 목록을 그대로 돌려주게 바뀌어도
+        # 북의 del·insert 가 이미 내보낸 행의 단계 목록을 바꾸지 않게 하는 복사다. 원소는 북과 행이 함께 물지만
+        # apply 가 원소를 제자리에서 고치지 않으므로 안전하다.
+        return self.asks[:], self.bids[:]
 
 
 class _Shard:
@@ -148,8 +190,6 @@ class _Shard:
         self.ws: Any | None = None
         self.task: asyncio.Task[None] | None = None
         self.ping_task: asyncio.Task[None] | None = None
-        # dirty 북을 주기적으로 발행 (§3.2) — 소켓과 수명이 같다
-        self.flush_task: asyncio.Task[None] | None = None
         self.backoff = BACKOFF_START
         self.next_id = 0
         self.pong_pending = False  # ping 을 보냈고 아직 pong 이 안 왔다
@@ -184,11 +224,16 @@ class BybitStream:
         self._shards = [_Shard(i) for i in range(SHARDS)]
         self._symbol_of: dict[str, str] = {}  # base → 심볼 (instruments-info baseCoin)
         self._base_of: dict[str, str] = {}  # 심볼 → base
+        # 직전 set_universe 가 끝까지 처리한 (심볼 맵 객체, 우주 사본) — 둘 다 같으면 배정도 같다 (§3.3).
+        # id 가 아니라 맵 객체를 들고 있어, 버려진 맵의 id 를 새 맵이 물려받아 같다고 오인할 일이 없다
+        self._applied: tuple[dict[str, str], frozenset[str]] | None = None
         self._wake = asyncio.Event()  # set_universe 가 재조정 루프를 깨운다
         self._rebalance: asyncio.Task[None] | None = None
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다
         # 직전에 맵까지 만든 200 응답의 비교용 바이트(꼬리 time 제외) — 같으면 파싱·맵 재생성을 건너뛴다 (§3.3)
         self._symbols_body: bytes | None = None
+        # 마지막 발행 뒤 바뀐 북 — 심볼 → (샤드, 북). 저장소가 읽기 전에 _settle 이 행으로 내보내고 비운다 (001 §3.5-5)
+        self._dirty: dict[str, tuple[_Shard, _Book]] = {}
 
     # --- 심볼 집합 (ForeignSymbolSource, §3.3) ---
 
@@ -280,7 +325,20 @@ class BybitStream:
 
         우주 전체를 받으므로 자기 맵에 없는 base 는 무시한다(다른 해외에만 있는 코인).
         매초 불리므로 배정이 하나도 안 바뀌면 아무것도 하지 않는다 (§3.3).
+
+        심볼 맵 객체와 우주가 직전 호출과 같으면 샤드 배정을 다시 계산하지 않고 바로 돌아온다 — 매초 배정 심볼 수백
+        개의 crc32(샤드마다 한 번씩)를 다시 계산해 봐야 같은 배정이 나오기 때문이다(우주 407·심볼 390 에서 호출 1번
+        116 → 2µs, 로컬 Mac). 목록·우주는 상장·상폐 때만 바뀌므로 거의 모든 호출이 이 지름길로 끝난다. 기준 동작과 같은 근거:
+        맵은 refresh 가 본문을 다시 파싱할 때만 새 객체로 바뀌고 제자리에서 고치지 않으며, shard.assigned 를
+        바꾸는 곳은 이 함수뿐이다. 그래서 두 입력이 같으면 다시 계산해도 모든 샤드에서 mine == shard.assigned 라 할 일이 없다.
         """
+        applied = self._applied
+        if (
+            applied is not None
+            and applied[0] is self._symbol_of
+            and applied[1] == bases
+        ):
+            return
         desired = {
             self._symbol_of[b]
             for b in (x.upper() for x in bases)
@@ -302,6 +360,9 @@ class BybitStream:
                 shard.has_work.clear()
         if changed:
             self._wake.set()
+        # 끝까지 처리한 뒤에만 기억한다 — 중간에 예외가 나면 다음 호출이 처음부터 다시 맞춘다.
+        # 우주는 사본으로 든다 — 호출자가 같은 집합을 제자리에서 고쳐 다시 넘겨도 바뀐 것으로 본다
+        self._applied = (self._symbol_of, frozenset(bases))
 
     # --- 판정 (§3.5) ---
 
@@ -436,6 +497,8 @@ class BybitStream:
                 continue
             shard.ws = ws
             shard.subscribed = set()
+            if self._dirty:
+                self._settle()  # 옛 소켓에서 바뀐 북은 북을 비우기 전에 행으로 — 받은 데이터를 버리지 않는다
             shard.books.clear()  # 새 소켓은 새 스냅샷으로 시작한다 — 옛 북에 새 델타를 얹지 않는다 (§3.4)
             shard.pong_pending = False
             shard.pong_timed_out = False
@@ -450,7 +513,6 @@ class BybitStream:
                 )  # 구독 시각 = 첫 묶음을 다 보낸 시각
                 self._publish()
                 shard.ping_task = asyncio.create_task(self._run_ping(shard, ws))
-                shard.flush_task = asyncio.create_task(self._run_flush(shard))
                 await self._pump(shard, ws)
             except asyncio.CancelledError:
                 raise
@@ -474,11 +536,12 @@ class BybitStream:
                     self._record_rejection(exc)
             finally:
                 await self._stop_ping(shard)
-                await self._stop_flush(shard)
                 shard.state.connected = False
                 shard.state.connected_since = None
                 shard.state.subscribed = 0
                 shard.subscribed = set()
+                if self._dirty:
+                    self._settle()  # 끊긴 소켓에서 바뀐 북은 비우기 전에 행으로
                 shard.books.clear()
                 self._publish()  # close 가 늦어도 집계는 먼저 미연결이 된다
                 await self._close_socket(shard)
@@ -535,37 +598,6 @@ class BybitStream:
     async def _stop_ping(self, shard: _Shard) -> None:
         task, shard.ping_task = shard.ping_task, None
         if task is None or task is asyncio.current_task():
-            return
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await task
-
-    async def _run_flush(self, shard: _Shard) -> None:
-        """PUBLISH_INTERVAL 마다 델타로 바뀌었지만 아직 안 내보낸 북을 전부 행으로 만든다 (§3.2).
-
-        델타가 끊긴 심볼도 마지막 델타 뒤 한 주기 안에는 반드시 발행된다 — 누락 없음.
-        발행 실패가 이 태스크를 죽이면 dirty 북이 영원히 안 나가므로 로그만 남기고 계속 돈다.
-        """
-        while True:
-            await self._sleep(PUBLISH_INTERVAL_MS / 1000)
-            try:
-                self._flush(shard)
-            except Exception:
-                logger.exception("바이빗 샤드 %d 호가 행 발행 실패", shard.index)
-
-    def _flush(self, shard: _Shard) -> None:
-        now = self._clock()
-        for symbol, book in shard.books.items():
-            if not book.dirty:
-                continue
-            base = self._base_of.get(symbol)
-            if base is None:
-                continue  # 맵에서 빠진 심볼 — 펌프와 같은 규칙으로 버린다 (§3.4)
-            self._publish_book(symbol, base, book, now)
-
-    async def _stop_flush(self, shard: _Shard) -> None:
-        task, shard.flush_task = shard.flush_task, None
-        if task is None:
             return
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -670,26 +702,39 @@ class BybitStream:
         ts = int(msg["ts"])
         book = shard.books.get(symbol)
         if kind == "snapshot" or data.get("u") == 1:
-            # 새 스냅샷·서비스 재시작(u=1) → 북 통째 교체 (§3.4). 교체 직후 상태는 간격과 무관하게 바로 내보낸다
+            # 새 스냅샷·서비스 재시작(u=1) → 북 통째 교체 (§3.4)
             book = _Book()
             book.replace(data)
             shard.books[symbol] = book
-            book.ts, book.received_at = ts, at
-            self._publish_book(symbol, base, book, at)
         elif kind == "delta":
             if book is None:
                 return  # 스냅샷 전에 온 델타 — 북이 없으니 버린다 (§3.4)
             book.apply(data)  # 델타는 바뀐 단계만 오므로 하나도 빠짐없이 북에 반영한다
-            book.ts, book.received_at = ts, at
-            if at - book.published_at >= PUBLISH_INTERVAL_MS:
-                self._publish_book(symbol, base, book, at)  # 조용하던 심볼은 바로
-            else:
-                # 최근에 내보냈다 — 다음 주기(_run_flush)에 묶어서 (§3.2)
-                book.dirty = True
         else:
             raise ValueError(f"알 수 없는 orderbook type: {kind!r}")
+        book.ts, book.received_at = ts, at
+        # 행은 저장소를 읽기 직전에 바뀐 북마다 한 번 내보낸다 (001 §3.5-5·§3.2) — 틱은 1초에 한 번 읽으므로 그 사이
+        # 델타마다 200단계 북을 행으로 다시 만들 까닭이 없다. 같은 심볼은 마지막 북 하나만 든다(스냅샷이면 새 북)
+        if not self._dirty:
+            self._store.defer(self._settle)
+        self._dirty[symbol] = (shard, book)
 
-    def _publish_book(self, symbol: str, base: str, book: _Book, now: int) -> None:
+    def _settle(self) -> None:
+        """바뀐 북을 행으로 — 저장소가 읽기 직전에 부른다 (001 §3.5-5·§3.2).
+
+        북이 그 샤드에서 이미 빠졌으면(재연결로 비움·우주에서 빠짐) 내보내지 않는다 — 주기 발행이 지금 북만 훑던 것과
+        같다. base 는 지금 맵으로 찾고, 맵에서 빠진 심볼은 펌프와 같은 규칙으로 버린다(§3.4).
+        """
+        dirty, self._dirty = self._dirty, {}
+        for symbol, (shard, book) in dirty.items():
+            if shard.books.get(symbol) is not book:
+                continue
+            base = self._base_of.get(symbol)
+            if base is None:
+                continue
+            self._publish_book(symbol, base, book)
+
+    def _publish_book(self, symbol: str, base: str, book: _Book) -> None:
         """북 → 정렬 → 행 1회. 호가 시각·수신 시각은 그 북에 마지막으로 반영된 프레임의 것 (§3.2)."""
         asks, bids = book.sorted_levels()
         self._sink.orderbook(
@@ -702,8 +747,6 @@ class BybitStream:
             timestamp_ms=book.ts,
             received_at_ms=book.received_at,
         )
-        book.dirty = False
-        book.published_at = now
 
     def _on_trade(self, base: str, data: Any) -> None:
         """한 프레임의 체결 중 `T` 가 가장 큰 것 — 배열 순서를 믿지 않는다 (§3.4)."""

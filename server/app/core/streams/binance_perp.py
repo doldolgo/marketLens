@@ -56,9 +56,17 @@ FUNDING_INFO_INTERVAL_MS = (
 DEFAULT_INTERVAL_H = (
     8  # fundingInfo 응답에 없는 심볼의 주기 — 문서에 기본값 명문이 없어 가정 (§3.5)
 )
-# exchangeInfo 에서 매 응답 바뀌는 것은 머리의 serverTime 하나다 — 이것만 빼고 직전 본문과 비교한다 (§3.5)
+# exchangeInfo 에서 매 응답 바뀌는 것은 머리의 serverTime 과 심볼마다의 filters 배열 안 키 순서다 — 둘을 빼고 직전 본문과
+# 비교한다 (§3.5). 바이낸스는 캐시 본문 여러 벌을 돌려주고 벌마다 filters 안 객체(PRICE_FILTER 등)의 키 순서가 다르다 —
+# 2026-10-09 캡처 연속 5건 전부(serverTime 만 빼면 5건이 모두 달랐고 filters 까지 빼면 5건이 같았다). 그래서 serverTime 만
+# 빼면 10초마다 1.15MB 를 다시 파싱했다.
 _SERVER_TIME = re.compile(rb'"serverTime":\s*\d+')
 _SERVER_TIME_WITHIN = 256
+# filters 배열 내용 — `"filters":[` 부터 첫 `]` 까지. 맵(symbol_of·base_of·mult_of)은 filters 를 읽지 않으므로 빼도 맵 결과가
+# 같다. **맵이 filters(tickSize 등)를 읽게 되면 이 제외를 없앤다.** JSON 문자열 안의 따옴표는 이스케이프되므로 이 모양은
+# 키로만 나타나고, 지우는 구간은 언제나 filters 배열 안이다. 안에 중첩 배열이나 `]` 든 문자열이 생기면 일치가 짧게 끊겨
+# 덜 지워질 뿐이라 비교가 '다름'(= 파싱) 쪽으로 기운다 — 거짓 '같음'은 나지 않는다
+_FILTERS = re.compile(rb'"filters":\[[^\]]*\]')
 _NAN = float("nan")
 _CONTRACT = "PERPETUAL"
 _TRADING = "TRADING"
@@ -105,8 +113,10 @@ class BinancePerpStream:
         # (원인) → (마지막으로 로그한 시각 ms, 그 뒤 억누른 횟수)
         self._muted: dict[str, tuple[int, int]] = {}
         self.decode_failures = 0  # 버린 무효 항목 수 — 그 자체로 실패가 아니다
-        # 직전에 맵까지 만든 200 응답의 비교용 바이트(serverTime 제외) — 같으면 파싱·맵 재생성을 건너뛴다 (§3.2)
+        # 직전에 맵까지 만든 200 응답의 비교용 바이트(serverTime·filters 내용 제외) — 같으면 파싱·맵 재생성을 건너뛴다 (§3.2)
         self._symbols_body: bytes | None = None
+        # 직전 set_universe 가 끝까지 반영한 (심볼 맵 객체, 우주 사본) — 같은 맵·같은 우주면 desired 계산부터 건너뛴다 (§3.5)
+        self._applied: tuple[dict[str, str], frozenset[str]] | None = None
 
     # --- 심볼 집합·펀딩 주기 (PerpSymbolSource, §3.2·§3.5) ---
 
@@ -159,13 +169,17 @@ class BinancePerpStream:
             ) from exc
 
     async def _refresh_symbols(self, client: httpx.AsyncClient) -> int:
-        """exchangeInfo → 심볼 맵. 본문은 해석 전에 원문 싱크로(`symbols:perp`). serverTime 만 뺀 바이트가 같으면 파싱 생략."""
+        """exchangeInfo → 심볼 맵. 본문은 해석 전에 원문 싱크로(`symbols:perp`). serverTime·filters 내용을 뺀 바이트가 같으면 파싱 생략.
+
+        원문 기록은 비교보다 먼저, 받은 문자열 그대로다(010). 생략 길은 주기 반영(_apply_intervals)도 하지 않는다 — 맵이
+        같으면 반영할 값도 같고, 주기가 바뀌면 60초 fundingInfo 회차가 반영한다.
+        """
         url = EXCHANGE_INFO_URL
         resp = await self._get(client, url)
         self._record(
             self.id, f"rest:{EXCHANGE_INFO_PATH}", self._clock(), resp.text, SYMBOLS_KEY
         )
-        comparable = _without_server_time(resp.content)
+        comparable = _FILTERS.sub(b'"filters":[]', _without_server_time(resp.content))
         if resp.status_code == 200 and comparable == self._symbols_body:
             return 1
         data = self._parse(resp, url)
@@ -245,18 +259,36 @@ class BinancePerpStream:
         return set(self._symbol_of)
 
     def set_universe(self, bases: set[str]) -> None:
-        """perp 우주 확정 → 반영 대상 심볼 교체. 빠진 심볼의 행은 그 자리에서 지운다. 같으면 무동작 (§3.5)."""
+        """perp 우주 확정 → 반영 대상 심볼 교체. 빠진 심볼의 행은 그 자리에서 지운다. 같으면 무동작 (§3.5).
+
+        심볼 맵이 직전 호출 때와 같은 객체이고 우주도 같으면 desired 를 다시 만들지 않고 바로 돌아온다 — 매초 불리는데
+        목록은 하루 몇 번만 바뀐다. 건너뛰어도 결과가 같은 근거: 맵은 _refresh_symbols 가 새 본문을 파싱할 때만 새 객체로
+        바뀌고 제자리에서 고치지 않으며(base_of 도 같은 자리에서 함께 바뀐다), `_wanted`·subscribed 는 이 함수만 쓴다.
+        그래서 같은 맵·같은 우주로 다시 계산하면 `desired == _wanted` 로 무동작이다.
+        """
+        applied = self._applied
+        if (
+            applied is not None
+            and applied[0] is self._symbol_of
+            and applied[1] == bases
+        ):
+            return
+        # 반영 도중 예외로 끝나면 다음 호출이 같은 우주라도 다시 계산하게 기억을 먼저 지운다
+        self._applied = None
         desired = {
             self._symbol_of[b]
             for b in (x.upper() for x in bases)
             if b in self._symbol_of
         }
         if desired == self._wanted:
+            # 바뀐 것이 없는 출구에서도 기억한다 — 안 그러면 가드가 영영 걸리지 않는다. 사본으로 든다(부른 쪽이 고쳐도 안 흔들리게)
+            self._applied = (self._symbol_of, frozenset(bases))
             return
         for symbol in self._wanted - desired:
             self._store.remove_perp_row(self.id, self._base_of.get(symbol, symbol))
         self._wanted = desired
         self._state.subscribed = len(desired)
+        self._applied = (self._symbol_of, frozenset(bases))
 
     # --- 판정 (§3.8) ---
 
@@ -447,7 +479,7 @@ def _int_or_none(value: object) -> int | None:
 
 
 def _without_server_time(content: bytes) -> bytes:
-    """비교용 바이트 — 머리의 `"serverTime":<ms>` 하나만 뺀 것. 없으면 본문 그대로."""
+    """머리의 `"serverTime":<ms>` 하나를 뺀 바이트. 없으면 본문 그대로. 비교용 바이트는 여기서 filters 내용도 비운 것이다(_FILTERS)."""
     m = _SERVER_TIME.search(content, 0, _SERVER_TIME_WITHIN)
     return content if m is None else content[: m.start()] + content[m.end() :]
 

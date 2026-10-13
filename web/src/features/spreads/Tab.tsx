@@ -1,9 +1,9 @@
 // 실시간 스프레드 탭 — 코인 1개 = 행 1개 집계 표 (스펙 003 §3.5, 구조는 docs/design/reference/tabs/SpreadTab.tsx).
-import { memo, useState } from 'react'
+import { memo, useState, type CSSProperties } from 'react'
 import { HIGHLIGHT_PCT } from '../../shared/config'
 import { fmtKrw, fmtPct, fmtUsdt, pctColor } from '../../shared/format'
 import { FX_EXS } from '../../shared/mock'
-import type { Feed, IoState } from '../../shared/types'
+import type { IoState, SpreadRow } from '../../shared/types'
 import {
   Empty, GridHeader, gridRow, NumField, Seg, segOpt, SymCell, TableFrame, ToggleBtn,
   bar, count, exTag, hint, label, searchInput, vDivider, type Header,
@@ -79,60 +79,101 @@ function lineProps(c: CoinRow, thr: number): LineProps {
   }
 }
 
+// 행 스타일 — delta 1장마다 행 수백 개(실측 407행 중 149~325행)가 다시 그려지는 자리라, 값이 정해진 스타일 객체는 모듈에서 한 번만
+// 만든다. React 는 style 이 이전과 같은 객체면 비교 없이 넘어가고, 새 객체면 키마다 이전 값과 견준다. 값·키 순서는 렌더마다 만들던
+// 인라인 객체와 같게 둔다 — DOM 의 style 글자가 같아야 하므로 키를 더하거나 순서를 바꿀 때는 아래 상수도 같이 본다
+const rowStyle = (hot: boolean, stale: boolean): CSSProperties => (
+  { ...gridRow(GRID, { hot, stale }), cursor: 'pointer', contentVisibility: 'auto', containIntrinsicSize: 'auto 40px' }
+)
+/** [hot][stale] — 화면 밖 행은 스타일·레이아웃·페인트를 건너뛴다(DOM 에는 남아 찾기·복사·접근성은 그대로). 행 높이가 40px 고정이라 자리 추정이 정확하다 */
+const ROW_STYLE = [[rowStyle(false, false), rowStyle(false, true)], [rowStyle(true, false), rowStyle(true, true)]] as const
+const priceCell: CSSProperties = { padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }
+const usdCell: CSSProperties = { padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-300)' }
+const exCell: CSSProperties = { padding: '0 8px', display: 'flex', alignItems: 'center' }
+const EX_TAG = exTag()
+const valCell: CSSProperties = { padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }
+const slipStyle: CSSProperties = { fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-600)', whiteSpace: 'nowrap' }
+const ioCell: CSSProperties = { padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 5 }
+const netCell: CSSProperties = { padding: '0 8px', textAlign: 'right', fontSize: 11, color: 'var(--color-neutral-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+const TAG_OPEN = tagStyle(true)
+const TAG_SHUT = tagStyle(false)
+const TAG_UNKNOWN = tagStyle(null)
+const ioTag = (state: IoState) => (state === null ? TAG_UNKNOWN : state ? TAG_OPEN : TAG_SHUT)
+// 색이 값마다 다른 두 칸(변동율·김프 값)은 색 문자열마다 한 번 만든다. 색은 pctColor 의 세 가지와 값 없음(neutral-700)뿐이라
+// 칸마다 많아야 4개다 — 색 계산이 값에 따라 연속으로 바뀌게 되면 이 캐시가 끝없이 자라므로 그때는 캐시를 걷어낸다
+const chgCells = new Map<string, CSSProperties>()
+function chgCell(color: string): CSSProperties {
+  let s = chgCells.get(color)
+  if (!s) chgCells.set(color, (s = { padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color }))
+  return s
+}
+const valTexts = new Map<string, CSSProperties>()
+function valTextStyle(color: string): CSSProperties {
+  let s = valTexts.get(color)
+  if (!s) valTexts.set(color, (s = { fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 72, textAlign: 'right', color }))
+  return s
+}
+
 const CoinLine = memo(function CoinLine(p: LineProps & { onPick: (sym: string) => void }) {
   return (
-    // 화면 밖 행은 스타일·레이아웃·페인트를 건너뛴다(DOM 에는 남아 찾기·복사·접근성은 그대로). 행 높이가 40px 고정이라 자리 추정이 정확하다
-    <div onClick={() => p.onPick(p.sym)} className="hv-row"
-      style={{ ...gridRow(GRID, { hot: p.hot, stale: p.stale }), cursor: 'pointer', contentVisibility: 'auto', containIntrinsicSize: 'auto 40px' }}>
+    <div onClick={() => p.onPick(p.sym)} className="hv-row" style={ROW_STYLE[p.hot ? 1 : 0][p.stale ? 1 : 0]}>
       <SymCell sym={p.sym} hot={p.hot} />
-      <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: p.chgColor }}>
+      <div style={chgCell(p.chgColor)}>
         {p.chgText}
       </div>
-      <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+      <div style={priceCell}>
         {p.priceText}
       </div>
-      <div style={{ padding: '0 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-300)' }}>
+      <div style={usdCell}>
         {p.usdText}
       </div>
-      <div style={{ padding: '0 8px', display: 'flex', alignItems: 'center' }}>
-        <span style={exTag()}>{p.fxEx}</span>
+      <div style={exCell}>
+        <span style={EX_TAG}>{p.fxEx}</span>
       </div>
-      <div style={{ padding: '0 8px', display: 'flex', alignItems: 'center' }}>
-        <span style={exTag()}>{p.domEx}</span>
+      <div style={exCell}>
+        <span style={EX_TAG}>{p.domEx}</span>
       </div>
-      <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-600)', whiteSpace: 'nowrap' }}>
+      <div style={valCell}>
+        <span style={slipStyle}>
           {p.slipText}
         </span>
-        <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 72, textAlign: 'right', color: p.valColor }}>
+        <span style={valTextStyle(p.valColor)}>
           {p.valText}
         </span>
       </div>
-      <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 5 }}>
+      <div style={ioCell}>
         {/* 다름이면 어느 방향이든 옮길 길이 없다 — "중단" 두 개로 보이면 안 되므로 태그 하나 */}
         {p.netDiff ? (
-          <span style={tagStyle(false)}>네트워크 다름</span>
+          <span style={TAG_SHUT}>네트워크 다름</span>
         ) : (
           <>
-            <span style={tagStyle(p.wd)}>{ioLabel('출금', p.wd)}</span>
-            <span style={tagStyle(p.dep)}>{ioLabel('입금', p.dep)}</span>
+            <span style={ioTag(p.wd)}>{ioLabel('출금', p.wd)}</span>
+            <span style={ioTag(p.dep)}>{ioLabel('입금', p.dep)}</span>
           </>
         )}
       </div>
-      <div style={{ padding: '0 8px', textAlign: 'right', fontSize: 11, color: 'var(--color-neutral-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <div style={netCell}>
         {p.net}
       </div>
     </div>
   )
 })
 
+/**
+ * 표는 셸의 리렌더(1.5초 tick·5초 수집 상태 폴링·매초 delta) 가운데 아래 셋이 그대로인 것은 건너뛴다(memo 얕은 비교).
+ * 표가 피드에서 읽는 것은 행 배열(값)과, 그 행의 age 로 내리는 stale 판정뿐이다 — 판정이 바뀌는 tick 에는 staleTick 이 오른다.
+ * 나중에 표가 age·now 를 stale 판정 말고 다른 곳(예: 'N초 전' 글자)에 쓰게 되면 staleTick 조건(shared/feed 의 tickFeed)을 같이 넓힌다.
+ */
 interface Props {
-  feed: Feed
+  /** 피드 행 배열 — snapshot·delta 마다 새 배열이다. 참조가 그대로면 행 값도 그대로다(tick 이 키우는 age 말고는). */
+  rows: SpreadRow[]
+  /** tick 이 행의 stale 판정을 바꿨을 때만 오른다 — 본문에서는 읽지 않는다(memo 비교용). */
+  staleTick: number
   /** 셸이 고정 참조로 준다 — 바뀌면 모든 행이 다시 그려진다. */
   onPick: (sym: string) => void
 }
 
-export default function SpreadsTab({ feed, onPick }: Props) {
+export default memo(function SpreadsTab({ rows, onPick }: Props) {
   // 필터·정렬은 URL 쿼리(s.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색어는 메모리만 — Clarity 가 주소를 통째로 싣는다 (033)
   const [q, setQ] = useState('')
   const [domFilter, setDomFilter] = useUrlState<DomFilter>('s.dom', 'all', alias([['all', 'all'], ['upbit', '업비트'], ['bithumb', '빗썸']]))
@@ -146,7 +187,7 @@ export default function SpreadsTab({ feed, onPick }: Props) {
   const [fxOff, setFxOff] = useUrlState<Record<string, boolean>>('s.fxoff', {}, FX_OFF_CODEC)
   const fxAllOn = FX_EXS.every((fx) => !fxOff[fx])
 
-  const all = aggregateCoins(feed.spreads, domFilter, fxOff, view)
+  const all = aggregateCoins(rows, domFilter, fxOff, view)
 
   const ql = q.trim().toLowerCase()
   let coins = all.filter((c) => c.sym.toLowerCase().includes(ql))
@@ -217,10 +258,10 @@ export default function SpreadsTab({ feed, onPick }: Props) {
 
       <TableFrame minWidth={1040} area="table">
         <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} />
-        {feed.spreads.length === 0 && <Empty>백엔드에서 스프레드를 받는 중입니다…</Empty>}
-        {feed.spreads.length > 0 && coins.length === 0 && <Empty>조건에 맞는 코인이 없습니다. 필터를 넓혀 보세요.</Empty>}
+        {rows.length === 0 && <Empty>백엔드에서 스프레드를 받는 중입니다…</Empty>}
+        {rows.length > 0 && coins.length === 0 && <Empty>조건에 맞는 코인이 없습니다. 필터를 넓혀 보세요.</Empty>}
         {coins.map((c) => <CoinLine key={c.sym} {...lineProps(c, thr)} onPick={onPick} />)}
       </TableFrame>
     </>
   )
-}
+})

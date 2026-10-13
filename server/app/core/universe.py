@@ -69,6 +69,9 @@ class UniverseRefresher:
         self._sleep = sleep
         self._monotonic = monotonic
         self._markets: dict[str, list[str]] = {}  # 거래소 → KRW 마켓 코드 전체
+        # 거래소 → (base 집합을 만든 코드 목록의 사본, 그 base 집합). 목록은 하루 몇 번만 바뀌는데 우주 확정은 매초라
+        # 코드 ≈700개의 split·upper 를 목록이 직전과 같으면(==) 되풀이하지 않는다 — _domestic_bases 참고
+        self._domestic_cache: dict[str, tuple[list[str], frozenset[str]]] = {}
         # (거래소, 원인) → (마지막으로 로그한 시각, 그 뒤 억누른 횟수) — 초당 폭주 방지 (§3.2)
         self._muted: dict[tuple[str, str], tuple[float, int]] = {}
         self._task: asyncio.Task[None] | None = None
@@ -146,10 +149,23 @@ class UniverseRefresher:
                 "%s 마켓 목록 갱신 실패 — 직전 목록 유지%s: %s", exchange, suffix, error
             )
 
+    def _domestic_bases(self, exchange: str, codes: list[str]) -> frozenset[str]:
+        """국내 거래소 하나의 KRW 코드 목록 → base 집합. 목록이 직전과 같으면(==) 그때 만든 집합을 그대로 쓴다.
+
+        비교 상대는 넘겨받은 목록이 아니라 그 사본이다 — 목록을 누가 제자리에서 고쳐도 낡은 집합이 남지 않는다.
+        업비트·빗썸은 본문이 같으면 같은 코드 문자열의 새 목록을 주므로 비교는 원소마다 동일 객체 확인으로 끝난다.
+        """
+        cached = self._domestic_cache.get(exchange)
+        if cached is not None and cached[0] == codes:
+            return cached[1]
+        bases = frozenset(c.split("-", 1)[1].upper() for c in codes if "-" in c)
+        self._domestic_cache[exchange] = (list(codes), bases)
+        return bases
+
     def _apply(self) -> None:
         domestic: set[str] = set()
-        for codes in self._markets.values():
-            domestic |= {c.split("-", 1)[1].upper() for c in codes if "-" in c}
+        for exchange, codes in self._markets.items():
+            domestic |= self._domestic_bases(exchange, codes)
         # 해외는 합집합 — 한쪽 해외에만 있는 코인도 우주에 들고, 그쪽 행만 생긴다 (019 §2-1)
         foreign: set[str] = set()
         for source in self._foreigns:

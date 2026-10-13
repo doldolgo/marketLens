@@ -177,11 +177,22 @@ export function gridRow(cols: string, o: { hot?: boolean; stale?: boolean; heigh
   }
 }
 
+// 심볼 셀 스타일 [hot ? 1 : 0] — 스프레드·현선갭·선선갭 표의 행마다 매초 수백 번 그려지는 칸이라 두 가지 객체를 모듈에서 한 번만 만든다.
+// React 는 같은 style 객체면 키별 비교를 건너뛴다. 값·키 순서는 렌더마다 만들던 인라인 객체와 같아 DOM 의 style 글자도 같다
+const symCellStyle = (hot: boolean): CSSProperties => (
+  { padding: '0 8px', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500, fontSize: 13.5, color: hot ? 'var(--color-accent-300)' : 'var(--color-text)' }
+)
+const symDotStyle = (hot: boolean): CSSProperties => (
+  { width: 4, height: 4, borderRadius: '50%', background: hot ? 'var(--color-accent)' : 'transparent', flex: 'none' }
+)
+const SYM_CELL = [symCellStyle(false), symCellStyle(true)] as const
+const SYM_DOT = [symDotStyle(false), symDotStyle(true)] as const
+
 /** 심볼 셀 — 앞 점은 hot 일 때만 accent 로 보인다. */
 export function SymCell({ sym, hot }: { sym: string; hot: boolean }) {
   return (
-    <div style={{ padding: '0 8px', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500, fontSize: 13.5, color: hot ? 'var(--color-accent-300)' : 'var(--color-text)' }}>
-      <span style={{ width: 4, height: 4, borderRadius: '50%', background: hot ? 'var(--color-accent)' : 'transparent', flex: 'none' }} />{sym}
+    <div style={SYM_CELL[hot ? 1 : 0]}>
+      <span style={SYM_DOT[hot ? 1 : 0]} />{sym}
     </div>
   )
 }

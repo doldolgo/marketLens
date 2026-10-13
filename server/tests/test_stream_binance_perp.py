@@ -1,6 +1,7 @@
 """바이낸스 perp 원천 — bookTicker·premiumIndex 전체 매초 폴링(한 회차 병렬)·exchangeInfo 필터·fundingInfo 60초·실패 분류·정체 판정·종료 (스펙 046 §3.5, §4)."""
 
 import asyncio
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -495,6 +496,151 @@ async def test_exchange_info_that_differs_only_in_server_time_is_not_parsed() ->
     await stream.refresh(_client(handler))
     assert seen.get(EXCHANGE_INFO_URL, 0) == 0  # build 에서 같은 본문을 이미 파싱했다
     assert len(raw.keys(INFO_SOURCE)) == 3  # 원문은 매번
+
+
+# --- exchangeInfo 비교에서 filters 내용 빼기 (§3.5) — 바이낸스는 캐시 본문 벌마다 filters 안 키 순서가 다르다 ---
+
+
+def _filters(order: int, tick: str = "0.0000010") -> list[dict[str, Any]]:
+    """심볼의 filters — `order` 가 홀수면 객체 안 키 순서만 뒤집는다(값은 같다)."""
+    price = {
+        "minPrice": "0.0000010",
+        "maxPrice": "200",
+        "filterType": "PRICE_FILTER",
+        "tickSize": tick,
+    }
+    lot = {
+        "stepSize": "1",
+        "filterType": "LOT_SIZE",
+        "maxQty": "1000000",
+        "minQty": "1",
+    }
+    if order % 2:
+        price = dict(reversed(list(price.items())))
+        lot = dict(reversed(list(lot.items())))
+    return [price, lot]
+
+
+def _info_body(rows: list[dict[str, Any]], server_time: int) -> bytes:
+    """실응답처럼 공백 없는 JSON 바이트."""
+    return json.dumps(
+        exchange_info(rows, server_time=server_time), separators=(",", ":")
+    ).encode()
+
+
+async def _refresh_bodies(stream: BinancePerpStream, bodies: list[bytes]) -> list[int]:
+    """본문을 차례로 넣고 회차마다 exchangeInfo 를 파싱했는지(1/0)를 돌려준다."""
+    parsed: list[int] = []
+    original = stream._parse
+
+    def spy(resp: httpx.Response, url: str) -> Any:
+        if url == EXCHANGE_INFO_URL:
+            parsed[-1] += 1
+        return original(resp, url)
+
+    stream._parse = spy  # type: ignore[method-assign]
+    queue = list(bodies)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/fapi/v1/fundingInfo":
+            return httpx.Response(200, json=[])
+        return httpx.Response(200, content=queue.pop(0))
+
+    for _ in bodies:
+        parsed.append(0)
+        await stream.refresh(_client(handler))
+    return parsed
+
+
+def _rows(order: int, **btc: Any) -> list[dict[str, Any]]:
+    return [
+        info_row("1000PEPEUSDT", filters=_filters(order)),
+        info_row("BTCUSDT", filters=_filters(order + 1), **btc),
+    ]
+
+
+async def test_exchange_info_that_differs_only_in_filters_key_order_is_not_parsed() -> (
+    None
+):
+    """filters 안 키 순서와 serverTime 만 다른 본문은 파싱하지 않는다. 원문은 매번 받은 그대로 기록한다.
+
+    맵(symbol_of·base_of·mult_of)이 filters 를 읽지 않는다는 가정 위의 생략이다 — 맵이 filters 를 읽게 되면
+    binance_perp 의 filters 제외와 이 테스트를 함께 없앤다.
+    """
+    stream, _, _, raw, _, _ = await build(Rest(["1000PEPEUSDT", "BTCUSDT"]))
+    bodies = [_info_body(_rows(k), T0 + k) for k in (1, 2, 3, 4)]
+    assert len({bytes(b) for b in bodies}) == 4  # 바이트는 모두 다르다
+    parsed = await _refresh_bodies(stream, bodies[:1])
+    symbol_of = stream._symbol_of
+    parsed += await _refresh_bodies(stream, bodies[1:])
+    assert parsed == [1, 0, 0, 0]  # 첫 본문은 filters 가 생겨 내용이 달라 파싱한다
+    assert stream._symbol_of is symbol_of and stream.bases() == {"PEPE", "BTC"}
+    assert raw.payloads(INFO_SOURCE)[1:] == [b.decode() for b in bodies]
+
+
+async def test_exchange_info_with_a_changed_status_is_parsed_even_when_filters_shuffle() -> (
+    None
+):
+    stream, _, _, _, _, _ = await build(Rest(["1000PEPEUSDT", "BTCUSDT"]))
+    parsed = await _refresh_bodies(
+        stream,
+        [
+            _info_body(_rows(0), T0 + 1),
+            _info_body(_rows(1, status="SETTLING"), T0 + 2),
+            _info_body(_rows(0), T0 + 3),  # 원래 목록으로 돌아오면 다시 파싱한다
+        ],
+    )
+    assert parsed == [1, 1, 1]
+    assert stream.bases() == {"PEPE", "BTC"}
+    parsed = await _refresh_bodies(
+        stream, [_info_body(_rows(1, status="SETTLING"), T0 + 4)]
+    )
+    assert parsed == [1] and stream.bases() == {"PEPE"}
+
+
+async def test_exchange_info_with_only_filter_values_changed_keeps_the_map_and_intervals() -> (
+    None
+):
+    rest = Rest(["1000PEPEUSDT", "BTCUSDT"], hours={"BTCUSDT": 4})
+    stream, rest, _, _, _, store = await build(rest)
+    rest.books = [httpx.Response(200, json=[book(), book("BTCUSDT")])]
+    await stream.poll()
+    assert await _refresh_bodies(stream, [_info_body(_rows(0), T0 + 1)]) == [1]
+    symbol_of = stream._symbol_of
+    calls: list[tuple[str, int | None]] = []
+    original = stream._sink.set_interval
+
+    def spy(source: str, base: str, hours: int | None) -> None:
+        calls.append((base, hours))
+        original(source, base, hours)
+
+    stream._sink.set_interval = spy  # type: ignore[method-assign]
+    changed = [
+        info_row("1000PEPEUSDT", filters=_filters(1, tick="0.0000001")),
+        info_row("BTCUSDT", filters=_filters(0, tick="0.10")),
+    ]
+    assert await _refresh_bodies(stream, [_info_body(changed, T0 + 2)]) == [0]
+    assert stream._symbol_of is symbol_of and calls == []  # 맵도 주기 반영도 그대로
+    assert store.perp_row(SRC, "BTC").funding_interval_h == 4  # type: ignore[union-attr]
+    assert store.perp_row(SRC, "PEPE").funding_interval_h == 8  # type: ignore[union-attr]
+
+
+async def test_exchange_info_with_a_nested_array_in_filters_is_parsed() -> None:
+    """filters 안에 중첩 배열이 있으면 지우는 구간이 첫 `]` 에서 끊겨 덜 지워진다 — 다름(= 파싱) 쪽으로 기운다."""
+    stream, _, _, _, _, _ = await build(Rest(["1000PEPEUSDT", "BTCUSDT"]))
+
+    def rows(order: int) -> list[dict[str, Any]]:
+        nested = [{"filterType": "X", "levels": [1, 2]}, *_filters(order)]
+        return [
+            info_row("1000PEPEUSDT", filters=nested),
+            info_row("BTCUSDT", filters=_filters(order)),
+        ]
+
+    parsed = await _refresh_bodies(
+        stream, [_info_body(rows(k), T0 + k) for k in (1, 2, 3)]
+    )
+    assert parsed == [1, 1, 1]
+    assert stream.bases() == {"PEPE", "BTC"}
 
 
 @pytest.mark.parametrize(
