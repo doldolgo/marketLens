@@ -27,6 +27,9 @@ class LiveStore:
         self._spark_json: dict[SparkKey, str] = {}
         # perp 행 맵(046 §3.1) — 원천 id → (base 대문자 → PerpRow). 현물 행 맵과 분리돼 (exchange, base) 조회에 섞이지 않는다
         self._perp: dict[str, dict[str, PerpRow]] = {}
+        # 직전 행 없이 새로 생긴 (거래소, base 대문자) — 틱이 take_new_rows 로 가져가 입출금 캐시를 그 행에만
+        # 반영한다(001 §3.6-1). 교체된 행은 물려받기로 이미 같은 3필드라 넣지 않는다. 키 수(≈2천)를 넘지 않는다
+        self._new_keys: set[tuple[str, str]] = set()
 
     # --- 쓰기 (수집 경로만 부른다) ---
 
@@ -39,6 +42,9 @@ class LiveStore:
             row.deposit_enabled = prev.deposit_enabled
             row.withdrawal_enabled = prev.withdrawal_enabled
             row.networks = prev.networks
+        else:
+            # 물려받을 값이 없는 행만 — 흔한 경로(교체)는 비용이 없다
+            self._new_keys.add((row.exchange, key))
         row.updated_at = now
         table[key] = row
 
@@ -46,6 +52,28 @@ class LiveStore:
         """행 여러 개를 순서대로 put_row — 시드·테스트용 편의. 다른 행은 건드리지 않는다."""
         for row in rows:
             self.put_row(row, now)
+
+    def take_new_rows(self) -> dict[str, list[Row]]:
+        """직전 호출 뒤 직전 행 없이 새로 생긴 행 — {거래소: [지금 행]} 을 돌려주고 비운다 (001 §3.6-1).
+
+        행은 지금 표에서 키로 다시 찾는다 — 그 사이 교체됐으면 지금 행, 지워졌으면 빠진다. 틱 루프만 부른다.
+        """
+        keys = self._new_keys
+        if not keys:
+            return {}
+        self._new_keys = set()
+        out: dict[str, list[Row]] = {}
+        snapshots = self._snapshots
+        for exchange, key in keys:
+            table = snapshots.get(exchange)
+            row = table.get(key) if table is not None else None
+            if row is not None:
+                rows = out.get(exchange)
+                if rows is None:
+                    out[exchange] = [row]
+                else:
+                    rows.append(row)
+        return out
 
     def remove_row(self, exchange: str, base: str) -> None:
         self._snapshots.get(exchange, {}).pop(base.upper(), None)
