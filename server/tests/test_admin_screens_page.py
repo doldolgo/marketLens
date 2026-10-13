@@ -458,3 +458,19 @@ def test_hidden_document_blanks_the_frame_and_shows_it_again() -> None:
         "about:blank",
         f"{SITE}/app/?tab=gap&kt-overlay=1",
     )
+
+
+def test_element_table_says_no_records_when_the_screen_has_views_but_no_elements() -> (
+    None
+):
+    """§3.6 — 화면 기록(pv)은 있는데 요소 값이 없으면(요소 수집 전 기록) 빈 표 대신 흐린 한 줄 '요소 기록 없음'."""
+
+    def no_elements(feeds: dict) -> None:
+        for url, (_, body) in feeds.items():
+            if url.startswith(f"{ATT}?days=7&page=landing"):
+                for row in body["rows"]:
+                    row["elements"] = []
+
+    got = _run("ok", "out.a = snap()", search="?page=landing", tweak=no_elements)["a"]
+    assert got["elements"] == [["gone", "요소 기록 없음"]]
+    assert got["foot"] == "열쇠 0개 · 지금 화면에 없음 0개"
