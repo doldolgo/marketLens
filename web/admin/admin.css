@@ -294,3 +294,248 @@ select {
 .s8 {
   grid-column: span 8;
 }
+.s12,
+.sec {
+  grid-column: 1 / -1;
+}
+.sec {
+  margin: var(--sp-2) 0 calc(var(--sp-2) * -1);
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-weight: 600;
+}
+
+/* — 단추 · 고르기 · 입력 — */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+}
+.seg button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.seg button:hover:not(:disabled) {
+  color: var(--text-1);
+}
+.seg button[aria-pressed="true"] {
+  color: var(--text-1);
+  font-weight: 600;
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.seg button:disabled {
+  color: var(--text-3);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.seg-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 6px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.seg-label .i {
+  width: 15px;
+  height: 15px;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--raised);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn .i,
+.ibtn .i {
+  width: 16px;
+  height: 16px;
+}
+.ibtn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.ibtn:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--raised);
+}
+.ibtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.input {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--text-1);
+  font-size: var(--fs-13);
+}
+.input::placeholder {
+  color: var(--text-3);
+}
+.search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.search .i {
+  position: absolute;
+  left: 9px;
+  width: 15px;
+  height: 15px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.search .input {
+  padding-left: 30px;
+}
+.out {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.out:hover {
+  color: var(--text-1);
+}
+.out .i {
+  width: 14px;
+  height: 14px;
+}
+.linkbtn {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+.linkbtn:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--raised);
+}
+.linkbtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* — 상태 모양(● 정상 ▲ 주의 ■ 문제 ○ 자료 없음) — 색만으로 가르지 않게 늘 모양과 글을 함께 — */
+.shape {
+  display: inline-block;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--none);
+}
+.shape.ok {
+  background: var(--ok);
+  box-shadow: none;
+}
+.shape.warn {
+  width: 10px;
+  border-radius: 0;
+  background: var(--warn);
+  box-shadow: none;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.shape.bad {
+  border-radius: 1.5px;
+  background: var(--bad);
+  box-shadow: none;
+}
+
+/* 색 열쇠 — 차트 8색·기타·이전 기간(점선) */
+.key {
+  display: inline-block;
+  flex: none;
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--text-3);
+}
+.key.sq {
+  width: 9px;
+  height: 9px;
+}
+.k1 {
+  background: var(--c1);
+}
+.k2 {
+  background: var(--c2);
+}
+.k3 {
+  background: var(--c3);
+}
+.k4 {
+  background: var(--c4);
+}
+.k5 {
+  background: var(--c5);
+}
+.k6 {
+  background: var(--c6);
+}
+.k7 {
+  background: var(--c7);
+}
+.k8 {
+  background: var(--c8);
+}
+.kx {
+  background: var(--line-strong);
+}
+.kacc {
+  background: var(--accent);
+}
+.kbad {
+  background: var(--bad);
+}
+.kcmp {
+  background: repeating-linear-gradient(90deg, var(--text-3) 0 4px, transparent 4px 7px);
+}
+
