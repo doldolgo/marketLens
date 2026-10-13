@@ -1,6 +1,6 @@
 # 066 — admin-renewal
 
-상태: TODO | 의존: main(064 머지 — 개요·서버·트래픽 페이지·ECharts 5.5.1 사본·공통 모듈). 새 피드 계약은 067(IP 대역)·068(Clarity 날별·AWS 이전 기간)에서 복사 — 아직 머지 전이면 가짜 응답으로 만들고 시험한다(부분 상태 '연결 안 됨'). 065(화면 분석 창)가 이 스펙의 틀(내비·토큰·상세 판)을 쓴다.
+상태: DONE | 의존: main(064 머지 — 개요·서버·트래픽 페이지·ECharts 5.5.1 사본·공통 모듈). 새 피드 계약은 067(IP 대역)·068(Clarity 날별·AWS 이전 기간)에서 복사 — 아직 머지 전이면 가짜 응답으로 만들고 시험한다(부분 상태 '연결 안 됨'). 065(화면 분석 창)가 이 스펙의 틀(내비·토큰·상세 판)을 쓴다.
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -56,7 +56,20 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 2026-10-14 KST, worktree marketLens-exec-066 (feat/066-admin-renewal — e76a350(064 머지) 위 스펙 커밋 bb84bbc 에서 시작,
+#   끝에 origin/main 99bfd98(067·068·061·022) 을 merge 442fad8 — 충돌은 CLAUDE.md 인덱스(066·067·068 행 모두 살림)와 067·068 스펙 add/add(main 쪽))
+# uv 는 Bash 샌드박스 밖에서(안에서는 실패). uv 가 만든 server/uv.lock 은 커밋하지 않고 끝에 지웠다. 브라우저는 쓰지 않았다(지시)
+cd server && uv sync --extra dev
+cd server && uv run --extra dev ruff check . && uv run --extra dev ruff format --check . && uv run --extra dev pytest -q
+#   끝(merge 뒤): All checks passed! · 425 files already formatted · 2555 passed, 1 skipped (건너뜀은 test_geo_perf — DBIP_DIR 없음)
+#   관리자 시험(tests/test_admin*.py) 98 — node 26.4.0(/opt/homebrew/bin)·18.12.0(nvm) 둘 다 통과
+for f in web/admin/*.js; do node --check "$f"; done   # 24개 ok
+cd web && npm ci && npm run lint && npm run build     # oxlint 1.80 종료 0(지적 없음) · tsc -b && vite build ✓ (web/admin 은 빌드 대상 밖)
+# 가짜 피드 서버 — uv run web/scripts/admin-fake-feeds.py --port 18999: 페이지 여섯·icons.svg 200(CSP·X-Frame-Options DENY·no-store),
+#   series range=7d&offset=prev·대역 목록·Clarity history 200, 대역 상세 band=bad 400 JSON, /__scenario/old 뒤 대역 목록 404
+# 진짜 ECharts 5.5.1 SSR(test_admin_render) — 경우 여섯 × 페이지 여섯 × 상세 판 전부 예외 0, 상태 띠 '자료 없음' 빗금(경로 3 → 51)
+# 진짜 피드 코드 응답(test_admin_contract·_visits) — 063 시계열·068 offset=prev·038/039/062 접속 요약·067 대역 목록/상세·068 Clarity dims/history
+# 차트 8색 — dataviz validate_palette.js (dark, surface #1c1f2b): 다섯 검사 통과(가까운 이웃 색각 ΔE 8.4 protan · 정상 ΔE 19.3)
 ```
 
 ## 6. 갱신할 문서
@@ -69,5 +82,30 @@
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-- 추측한 지점 / 실행 중 함께 고친 스펙 절:
+  - `web/admin/`: 페이지 여섯 `index.html`·`server.html`·`traffic.html`·`visitors.html`·`clarity.html`·`screens.html`(같은 틀 — 왼쪽 내비·머리·거르기 칩 줄·상세 판), `admin.css`(조사 §5 토큰·12칸 격자·1279/767px 꺾임), `icons.svg`(직접 그린 24×24 선 아이콘 22개, currentColor), 틀 `app.js`·`view.js`·`store.js`·`common.js`·`rules.js`·`names.js`, 계산·그림 `calc.js`·`models.js`·`charts.js`·`ui.js`·`tables.js`·`detail.js`, 페이지 `overview.js`·`server.js`·`traffic.js`·`visitors.js`·`insight.js`·`screens.js`, 페이지 모델 `ops.js`·`opsdetail.js`·`trafficmodel.js`·`trafficdetail.js`·`ipmodel.js`·`insightdetail.js`. v3 의 화면 파일은 지우고 새로 썼다(ECharts 사본·라이선스는 그대로).
+  - `web/scripts/admin-fake-feeds.py`: 067 대역 목록·상세(400 `bad_band` 포함)·068 날별 기록·series `offset`·Clarity `dims`(refreshSec 21600), 경우 `old`(067·068 배포 전)·`bands`(1,200개)·`nobands`.
+  - 테스트(`server/tests/`): `admin_dom.py`(가짜 DOM — history·hash·키·Blob·URL), `test_admin.py`(nginx·compose 만 남김), 정적 `test_admin_screen.py`·`test_admin_scripts.py`, node `test_admin_rules.py`·`calc`·`models`·`pages`·`session`·`detail`·`xss`·`fake`, 진짜 ECharts `test_admin_render.py`, 진짜 피드 코드 응답 `test_admin_contract.py`·`test_admin_contract_visits.py`.
+  - 문서: 이 스펙(§3.2 비교 원천 두 줄·§5·§7), `docs/admin-design-research.md`(근거 — 설계 세션), `CLAUDE.md`(066 DONE·§2), `docs/context/status.md`·`architecture.md`·`dev-setup.md`, `docs/specs/064-admin-v3.md`.
+- 추측한 지점 / 실행 중 함께 고친 스펙 절 (사람 없이 조사 문서와 맞는 가장 보수적인 쪽으로 정함):
+  1. 내비 모양: 개요 = 띠 칩 전체의 가장 나쁜 색, 서버·트래픽 = 그 페이지 카드를 가리키는 칩만(띠 규칙의 바로 가기 표), 방문자·Clarity·화면은 가리키는 칩이 없어 모양 없음. 내비 아래 '마지막 갱신' 과 머리 '10초마다 · HH:MM:SS' 는 마지막 빠른 묶음 시각.
+  2. 주소: 기본값은 주소에 쓰지 않는다. 상세 판 열기만 pushState(뒤로 가기로 닫힘·×/Esc 도 그 기록이면 뒤로 가기), 기간·비교·거르기는 replaceState. 만료 새로고침은 그 페이지 고정 주소 + 지금 보기 + `relogin=1`(029 의 한 번 규칙 그대로).
+  3. 단축키 X = 비교 없음 ↔ 이전 기간(판이 열려 있으면 판의 비교), Ctrl·⌘·Alt 와 함께거나 입력 칸이면 무시. Esc = 판 닫기, 판이 없으면 좁은 화면 메뉴 닫기.
+  4. 상세 판: 열 때 페이지의 기간·비교를 받고(판 목록에 없으면 판 기본), 판 안에서 바꾼 값은 판에만 둔다(주소에는 `#detail` 만). 기간 단추는 피드가 주는 창 전부. 카드 그림은 Ctrl+휠로만 확대(페이지 스크롤과 다투지 않게 — 조사 §6), 판은 휠·끌기·미니맵·'구간 확대'(ECharts dataZoomSelect)·'원래대로'. 통계·원자료·CSV 는 확대한 구간과 보이는 계열을 따른다. 원자료는 최근 순 200행씩, 목록 판은 찾기·정렬, CSV 는 찾고 정렬한 행 전부.
+  5. CSV: UTF-8 BOM·CRLF, `= + - @`·탭·CR 로 시작하는 글자 앞에 `'`(엑셀 수식 막기), 파일 이름 시각은 KST `YYYYMMDDTHHMM`(판의 창 — 창이 없는 판(Clarity 요약 표·예산)은 지금 시각 둘).
+  6. 비교 원천(§3.2 두 줄을 고침): '지난주 같은 때' 를 지금 7일 창에서 잘라 쓰면 그 구간이 창 바로 앞이라 점선이 비었다 — AWS 는 7일 창의 이전 기간(`range=7d&offset=prev`)에서 잘라 쓰고, 접속 요약 24시간의 지난주는 7일 응답 밖이라 비교 없음('이 자료는 비교 없음' — 30일 응답을 부르면 되지만 §3.2 가 원천을 7d 로 정해 두었다). offset 을 모르는 서버(068 전 — 응답에 `offset: "prev"` 없음)를 한 번 보면 그 문서에서 offset 을 쓰는 비교 단추를 끈다.
+  7. 시·날 칸 점: 칸이 창과 겹친 구간의 가운데에 둔다(지금 칸은 지금까지의 가운데). 칸 가운데(시 +30분·정오)에 두면 창 끝(= 지금)을 넘어 오늘·이번 시 막대가 축 밖으로 나가고 판 통계·원자료에서 빠졌다(진짜 피드 응답 대조에서 찾음). 날 막대 툴팁 머리와 원자료는 날짜만, 맞대기는 Clarity 날 점처럼 그날 00:00 KST.
+  8. 상위 목록 6행 + '전체 보기'(판), 100% 띠 다섯 + 기타. 목록 행 누름: 접속 요약 피드는 거르기를 받지 않아 판만 연다(§3.1 의 '지원 안 하면'), 거르기는 방문자 페이지(067 인자 — 망 종류·나라·봇)와 서버 상자 칩(화면 안 거르기 — 피드를 다시 부르지 않음)만. 목록 판은 카드와 같은 하위 부분 상태(예 DB-IP 받는 중)를 배지로.
+  9. 상태 띠 custom: 칸 높이 정상 20%(옅게)·주의 50%·끊김 64%·자료 없음 50% + 점선 테두리 + 45° 빗금. 경보 7일 사건 줄 = 경보 이력의 ALARM → OK 구간(끝 없음 = 지금까지) + Slack 알림 점.
+  10. 비용: 게이지 하나(월 예산 가운데 실제/한도가 가장 큰 것 — 실제·예측 두 바늘)를 남기고 예산마다 실제·예측·한도 한 줄(§3.3 '게이지 하나 유지 가능'). 개요의 비용은 큰 수(금액 / 한도).
+  11. 방문자: 큰 수 넷 — 대역 수(`total`), 데이터센터(`net` = cloud) 대역 요청 비중·상위 10 대역 비중·오늘(KST) 처음 본 대역은 불러온 대역 기준(더 남아 있으면 '≈'·'불러온 n개 대역 기준'). 찾기 글자는 주소에 싣지 않는다(대역이 주소·관리자 접속 기록에 남지 않게). 서버 정렬은 요청·사람 모양 페이지·마지막(067 `sort`), 그 밖 열은 불러온 행 안에서. `(없음)`·`(기타)` 행은 판을 열지 않고, 400 `bad_band` 는 판 안 한 줄, `partial` 은 '일부만 읽음' 배지, ◀ ▶ 는 불러온 표 순서. [이 대역만 트래픽 보기] 는 '이 대역만 보기' — 접속 요약 피드가 대역 거르기를 받지 않아 방문자 표·큰 수를 그 대역으로(찾기 칸) 거른다.
+  12. Clarity: 기간 7·30·90일(기본 30 — history `days`), 큰 수 = 040 요약 값 + 날별 작은 선 + 전날 대비(마지막 두 기록), '다음 HH:MM' 은 040 `nextAt` 이 있을 때만, 맞대기의 우리 방문자는 30일까지(90일 창도 30d 응답), 판 머리 '기록은 MM-DD 부터 모음 · 그날 마지막으로 받은 직전 24시간 값'.
+  13. 개요 기간 1시간·6시간·24시간(1시간은 6시간 시계열·24시간 접속 요약을 잘라 씀), 큰 수 다섯 = WS 접속·오늘 방문자·수집 성공률(1h)·경보·이번 달 비용. 화면 페이지는 '준비 중' 한 줄과 틀만.
+  14. 064 §3 은 머리 한 줄("화면은 066 이 대신한다")과 066 이 이어받는 규칙(데이터 부르기·보안·상태 띠 규칙·엣지)만 남기고 화면 묘사(머리 줄·글·색·배치·페이지 카드)를 지웠다 — 규칙까지 지우면 §3.1·§3.3 의 '064 규칙 그대로' 가 가리킬 곳이 없다. §4 첫 줄과 머리 의존 문장도 066 을 가리키게 고쳤다.
+  15. 067·068 은 작업 중 main 에 들어왔다(#132·#133) — 조정 메시지의 마지막 꼴로 만들었고, merge 뒤 진짜 피드 코드 응답으로 다시 대조했다(`test_admin_contract_visits`). 관리자 nginx 경로는 067·068 이 더했다(페이지 시험의 '아직 없는 경로' 허용을 지움).
 - 남은 빚:
+  - 브라우저 확인(설계 세션 몫 — 이 세션은 브라우저를 쓰지 않았다): 페이지 여섯 1440·1024·390 폭 가로 넘침·내비 접힘·☰ 시트, 상세 판 열기/닫기/뒤로 가기/Esc·CSV 내려받기·휠/끌기 확대·미니맵·구간 확대·원래대로, 비교 점선, 거르기 칩, 대역 판 ◀ ▶·배지, 툴팁 위치(confine), CSP 위반 0.
+  - 색각 무늬(decal) 켜기 단추는 없다(§4 '있으면'). 8색은 검사기 통과(§5), 상태는 모양과 함께.
+  - 24시간 접속 요약의 '지난주 같은 때' 는 없다 — 쓰려면 30d 응답에서 잘라야 한다(부담 — 사람 결정). 1시간 창의 지난주는 7일 이전 기간(1시간 칸)이라 점 하나뿐.
+  - 방문자 큰 수 셋은 불러온 쪽 기준(위 11). 툴팁 머리 시각·요일×시간 열지도는 브라우저 시간대, 날 칸·원자료·CSV 는 KST(064 와 같음).
+  - 운영 확인(배포 뒤): 실제 피드로 흐름(062)·AWS 시계열과 이전 기간(063·068)·대역(067)·Clarity 날별·차원(068) 카드와 판.
+  - 커밋 크기: `0499a98`(정적 시험 308줄)·`a37f854`(상세 판 시험 354줄)은 300줄을 넘었다(이미 push 해 다시 쓰지 않음). 지우기만 한 커밋 `b192f2c`(v3 화면 3,014줄)·`335ff69`(427줄)·`4a4796b`(445줄)은 예외.
