@@ -21,7 +21,7 @@ _ERRORS = {
 
 
 async def _read_capped(request: Request) -> bytes | None:
-    """몸통을 상한 + 1 바이트까지만 읽는다 — 넘으면 None. 배포에선 nginx 가 4k 로 먼저 자른다."""
+    """몸통을 상한 + 1 바이트까지만 읽는다 — 넘으면 None. 배포에선 nginx 가 16k 로 먼저 자른다(061)."""
     chunks: list[bytes] = []
     size = 0
     async for chunk in request.stream():

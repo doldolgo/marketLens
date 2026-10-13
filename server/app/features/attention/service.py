@@ -1,4 +1,4 @@
-"""화면 영역 이용 통계 — 비콘 받기·IP 10분 제한·10초 묶음 쓰기 (스펙 052 §3.4·§3.5). 관리자 피드는 `feed.py`.
+"""화면 이용 통계 — 비콘 받기·IP 10분 제한·10초 묶음 쓰기 (스펙 052 §3.4·§3.5, 061 §3.4·§3.5). 관리자 피드는 `feed.py`.
 
 api 역할 하나에 서비스 하나(`app.state.attention`). 받은 비콘은 메모리의 (KST 날, 필드) 합에 더해 두고 10초마다 한 번
 Redis 해시 `attn:d:<YYYYMMDD>` 에 파이프라인으로 보낸다 — 비콘마다 Redis 를 부르지 않아 방문이 몰려도 Redis 왕복은 10초에
@@ -6,7 +6,9 @@ Redis 해시 `attn:d:<YYYYMMDD>` 에 파이프라인으로 보낸다 — 비콘�
 아니다). IP 는 10분 고정 창의 셈 표에만 있고 로그·Redis·응답에 쓰지 않는다.
 
 처리방침 v3 시행일(`PRIVACY_V3_EFFECTIVE`) 00:00 Asia/Seoul 전에 온 비콘은 검사만 하고 버린다 — 개정 전에 새 항목을 모으지
-않으려는 날짜 게이트다(시각 계산은 `kst.py`).
+않으려는 날짜 게이트다(시각 계산은 `kst.py`). 요소·깊이·떠난 곳(061, 몸통 v2)은 v4 시행일(`PRIVACY_V4_EFFECTIVE`) 00:00 전이면
+그것만 버리고 영역은 더한다. 요소 열쇠는 (KST 날, 화면, 기기)마다 서로 다른 (영역, 열쇠) 300개까지 메모리로 세고, 넘는 새
+열쇠는 `(기타)` 로 더한다 — 프로세스가 다시 뜨면 새로 센다(Redis 크기 상한의 근사).
 """
 
 import asyncio
@@ -23,20 +25,27 @@ from app.features.attention.feed import AttentionFeed
 from app.features.attention.kst import day_key, expire_at, gate_ts, kst_date
 from app.features.attention.models import (
     AREA_ID,
+    DEPTH_MAX,
+    DEPTH_PAGES,
     DEVICES,
+    ELEMENT_METRICS,
+    KEY_LIMIT,
     MAX_AREAS,
     MAX_BODY_BYTES,
     MAX_CLICKS,
+    MAX_ELEMENTS,
     MAX_MS,
     METRICS,
+    OTHER_KEY,
     PAGES,
     Beacon,
+    valid_key,
 )
 
 logger = logging.getLogger("marketlens.attention")
 
 FLUSH_SEC = 10.0
-# 실패가 이어져 메모리에 쌓인 필드가 이만큼을 넘으면 묶음을 버린다(§3.5) — 하루 ≈900 필드라 20일치 남짓
+# 실패가 이어져 메모리에 쌓인 필드가 이만큼을 넘으면 묶음을 버린다(§3.5) — 영역만이면 하루 ≈900 필드라 20일치 남짓
 MAX_PENDING_FIELDS = 20_000
 RATE_WINDOW_SEC = 600
 RATE_LIMIT = 120
@@ -50,20 +59,12 @@ def _int_in(value: object, low: int, high: int) -> bool:
     return type(value) is int and low <= value <= high
 
 
-def parse_beacon(body: bytes) -> Beacon | None:
-    """§3.4 ③ — 어긋나면 None(400). 키는 다섯 개 그대로만 받는다."""
-    try:
-        data = json.loads(body)
-    except (ValueError, RecursionError):
-        # 깨진 UTF-8·JSON, 4KB 안의 깊은 중첩(파이썬 재귀 한도) 모두 400
-        return None
-    if not isinstance(data, dict) or set(data) != {"v", "page", "device", "pv", "a"}:
-        return None
-    if type(data["v"]) is not int or data["v"] != 1:
-        return None
-    page, device, pv, raw = data["page"], data["device"], data["pv"], data["a"]
-    if page not in PAGES or device not in DEVICES or not _int_in(pv, 0, 1):
-        return None
+V1_KEYS = frozenset({"v", "page", "device", "pv", "a"})
+V2_KEYS = V1_KEYS | {"e", "d", "x"}
+
+
+def _areas(raw: object) -> dict[str, tuple[int, int, int]] | None:
+    """`a` — 영역 id → [ms, clicks, seen] (052 §3.4 ③)."""
     if not isinstance(raw, dict) or len(raw) > MAX_AREAS:
         return None
     areas: dict[str, tuple[int, int, int]] = {}
@@ -80,11 +81,76 @@ def parse_beacon(body: bytes) -> Beacon | None:
         ):
             return None
         areas[area] = (ms, clicks, seen)
-    return Beacon(page=page, device=device, pv=pv, areas=areas)
+    return areas
+
+
+def _elements(raw: object) -> dict[tuple[str, str], tuple[int, int, int]] | None:
+    """`e` — [영역, 열쇠, clicks, hoverMs, visMs] 목록 (061 §3.4). 같은 (영역, 열쇠)가 둘이면 어긋남."""
+    if not isinstance(raw, list) or len(raw) > MAX_ELEMENTS:
+        return None
+    elements: dict[tuple[str, str], tuple[int, int, int]] = {}
+    for item in raw:
+        if not isinstance(item, list) or len(item) != 5:
+            return None
+        area, key, clicks, hover, vis = item
+        if not (isinstance(area, str) and AREA_ID.fullmatch(area) and valid_key(key)):
+            return None
+        if not (
+            _int_in(clicks, 0, MAX_CLICKS)
+            and _int_in(hover, 0, MAX_MS)
+            and _int_in(vis, 0, MAX_MS)
+        ):
+            return None
+        if (area, key) in elements:
+            return None
+        elements[(area, key)] = (clicks, hover, vis)
+    return elements
+
+
+def parse_beacon(body: bytes) -> Beacon | None:
+    """§3.4 ③ — 어긋나면 None(400). v1 은 키 다섯, v2 는 여덟 그대로만 받는다."""
+    try:
+        data = json.loads(body)
+    except (ValueError, RecursionError):
+        # 깨진 UTF-8·JSON, 몸통 안의 깊은 중첩(파이썬 재귀 한도) 모두 400
+        return None
+    if not isinstance(data, dict) or type(data.get("v")) is not int:
+        return None
+    version = data["v"]
+    if (version, set(data)) not in ((1, V1_KEYS), (2, V2_KEYS)):
+        return None
+    page, device, pv = data["page"], data["device"], data["pv"]
+    if page not in PAGES or device not in DEVICES or not _int_in(pv, 0, 1):
+        return None
+    areas = _areas(data["a"])
+    if areas is None:
+        return None
+    if version == 1:
+        return Beacon(page=page, device=device, pv=pv, areas=areas)
+    elements = _elements(data["e"])
+    depth, exit_area = data["d"], data["x"]
+    if elements is None:
+        return None
+    # 깊이는 정적 페이지 넷만 — 대시보드 화면의 깊이는 어긋남
+    if depth is not None and not (_int_in(depth, 0, DEPTH_MAX) and page in DEPTH_PAGES):
+        return None
+    if exit_area is not None and not (
+        isinstance(exit_area, str) and AREA_ID.fullmatch(exit_area)
+    ):
+        return None
+    return Beacon(
+        page=page,
+        device=device,
+        pv=pv,
+        areas=areas,
+        elements=elements,
+        depth=depth,
+        exit=exit_area,
+    )
 
 
 def beacon_counts(beacon: Beacon) -> dict[str, int]:
-    """비콘 → 해시 필드별 더할 값(0 은 뺀다)."""
+    """비콘의 영역·페이지뷰 → 해시 필드별 더할 값(0 은 뺀다). 요소·깊이·떠난 곳은 `element_counts`."""
     head = f"{beacon.page}|{beacon.device}"
     counts: dict[str, int] = {}
     if beacon.pv:
@@ -93,6 +159,45 @@ def beacon_counts(beacon: Beacon) -> dict[str, int]:
         for metric, n in zip(METRICS, values, strict=True):
             if n:
                 counts[f"{head}|{area}|{metric}"] = n
+    return counts
+
+
+class KeyLimiter:
+    """(KST 날, 화면, 기기)마다 서로 다른 (영역, 열쇠) 300개 — 그날 처음 본 순서, 넘는 새 열쇠는 `(기타)`. 날이 바뀌면 지난날 표를 비운다."""
+
+    def __init__(self) -> None:
+        self._day = ""
+        self._seen: dict[tuple[str, str], set[tuple[str, str]]] = {}
+
+    def key(self, day: str, page: str, device: str, area: str, key: str) -> str:
+        if day != self._day:
+            self._day = day
+            self._seen = {}
+        seen = self._seen.setdefault((page, device), set())
+        if (area, key) in seen:
+            return key
+        if len(seen) >= KEY_LIMIT:
+            return OTHER_KEY
+        seen.add((area, key))
+        return key
+
+
+def element_counts(beacon: Beacon, day: str, limiter: KeyLimiter) -> dict[str, int]:
+    """요소 `<page>|<device>|<area>|e|<열쇠>|c·h·v`·떠난 곳 `…|<area>|x`·깊이 `…||d<0~10>` (061 §3.5). 0 은 뺀다."""
+    head = f"{beacon.page}|{beacon.device}"
+    counts: dict[str, int] = {}
+    for (area, key), values in beacon.elements.items():
+        if not any(values):
+            continue
+        key = limiter.key(day, beacon.page, beacon.device, area, key)
+        for metric, n in zip(ELEMENT_METRICS, values, strict=True):
+            if n:
+                field = f"{head}|{area}|e|{key}|{metric}"
+                counts[field] = counts.get(field, 0) + n
+    if beacon.exit is not None:
+        counts[f"{head}|{beacon.exit}|x"] = 1
+    if beacon.depth is not None:
+        counts[f"{head}||d{beacon.depth}"] = 1
     return counts
 
 
@@ -134,13 +239,17 @@ class AttentionService:
         mono: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         privacy_effective: str | None = None,
+        elements_effective: str | None = None,
     ) -> None:
         self._clock = clock
         self._mono = mono
         self._sleep = sleep
         effective = privacy_effective or config.PRIVACY_V3_EFFECTIVE
         self._gate = gate_ts(effective)
+        # 061 — 요소·깊이·떠난 곳은 v4 시행일부터(영역은 위 v3 게이트 그대로)
+        self._elements_gate = gate_ts(elements_effective or config.PRIVACY_V4_EFFECTIVE)
         self._limiter = RateLimiter()
+        self._keys = KeyLimiter()
         self._pending: dict[str, dict[str, int]] = {}
         self._bus: RedisBus | None = None
         self._task: asyncio.Task[None] | None = None
@@ -151,7 +260,7 @@ class AttentionService:
     def accept(
         self, body: bytes | None, sec_fetch_site: str | None, client_ip: str | None
     ) -> Outcome:
-        """① 교차 사이트 ② 크기(body None = 4,096바이트 초과) ③ 검사 ④ 게이트 ⑤ IP 제한 ⑥ 더하기."""
+        """① 교차 사이트 ② 크기(body None = 16,384바이트 초과) ③ 검사 ④ 게이트 ⑤ IP 제한 ⑥ 더하기(요소는 v4 게이트 뒤)."""
         if sec_fetch_site is not None and sec_fetch_site != "same-origin":
             return "cross_site"
         if body is None or len(body) > MAX_BODY_BYTES:
@@ -164,9 +273,12 @@ class AttentionService:
             return "dropped"
         if client_ip and not self._limiter.allow(client_ip, now):
             return "dropped"
+        day = day_key(kst_date(now))
         counts = beacon_counts(beacon)
+        if now >= self._elements_gate:
+            counts.update(element_counts(beacon, day, self._keys))
         if counts:
-            _merge(self._pending, day_key(kst_date(now)), counts)
+            _merge(self._pending, day, counts)
         return "added"
 
     # --- 10초 묶음 쓰기 (§3.5) ---
