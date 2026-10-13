@@ -20,7 +20,7 @@ DESCRIPTION = (
     "입출금이 열렸는지와 지난 기록까지 보여 줍니다."
 )
 H1 = "실시간 김프·역프, 실제로 옮길 수 있는지까지"
-MODIFIED = "2026-10-09"
+MODIFIED = "2026-10-14"
 OG_IMAGE = "https://kimptrack.com/landing/og-v3.png"
 
 
@@ -145,6 +145,35 @@ def test_one_h1_and_section_headings() -> None:
         "KimpTrack이 김프를 계산하는 방법",
         "자주 묻는 질문",
     ]
+
+
+def test_arbitrage_term_says_it_is_not_a_profit_in_the_same_definition() -> None:
+    """차익거래·따리를 풀이하는 칸은 같은 칸 안에서 수수료·전송 시간이 빠진 참고값이라고 말한다 (§3.3-5)."""
+    html = (PUBLIC / "landing.html").read_text("utf-8")
+    term = re.search(
+        r"<dt>차익거래\(아비트라지\)·따리</dt>\s*<dd>(.*?)</dd>", html, re.S
+    )
+    assert term, "용어 칸이 없다"
+    assert (
+        "수수료와 전송 시간이 빠져 있어, 그만큼 남는다는 뜻은 아닙니다" in term.group(1)
+    )
+
+
+def test_faq_answers_stay_in_the_html_behind_details() -> None:
+    """질문과 답은 접어 두지만 답 문장이 HTML 에 있다 — 검색 로봇이 펼치지 않고 읽는다 (§3.3-7)."""
+    html = (PUBLIC / "landing.html").read_text("utf-8")
+    faq = html[
+        html.index('id="faq"') : html.index("</section>", html.index('id="faq"'))
+    ]
+    items = re.findall(
+        r'<details class="qa">\s*<summary><h3>(.+?)</h3></summary>\s*<p>(.+?)</p>\s*</details>',
+        faq,
+        re.S,
+    )
+    assert len(items) == 7
+    for question, answer in items:
+        assert question.endswith("?")
+        assert len(re.sub(r"<[^>]+>", "", answer)) > 20, question
 
 
 def test_in_page_links_point_to_existing_sections() -> None:
