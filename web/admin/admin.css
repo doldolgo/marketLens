@@ -1084,6 +1084,13 @@ button.lrow:hover {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+/* 셋째 칸이 증감('▲ 12.3%p')인 목록(불만 신호) — 잘리지 않게 고정 폭 */
+.deltas .lrow {
+  grid-template-columns: minmax(0, 1fr) auto 7em;
+}
+.deltas .lrow .p {
+  overflow: visible;
+}
 .list-foot {
   display: flex;
   align-items: center;

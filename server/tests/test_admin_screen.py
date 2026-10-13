@@ -353,3 +353,13 @@ def test_clarity_six_kpis_fill_whole_rows() -> None:
         r"\.kpis\.six \{\n\s+grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);",
         narrow,
     )
+
+
+def test_signal_deltas_have_a_fixed_column_wide_enough_for_the_whole_value() -> None:
+    """066 §3.3 Clarity 불만 신호 — 셋째 칸(전날 대비 '▲ 12.3%p')이 '▲ 0.5…' 로 잘리지 않게 그 목록만 고정 폭 7em."""
+    assert '<div class="list deltas" id="l-signals">' in _text("web/admin/clarity.html")
+    css = _text("web/admin/admin.css")
+    assert "grid-template-columns: minmax(0, 1fr) auto 7em;" in _rule(
+        css, ".deltas .lrow"
+    )
+    assert "overflow: visible;" in _rule(css, ".deltas .lrow .p")
