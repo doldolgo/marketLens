@@ -81,7 +81,7 @@ async def test_token_stays_out_and_warnings_name_only_the_part_and_code(
     leak = {"message": f"bad token {TOKEN}"}
     w = World(Clarity((200, EXPORT), (401, leak), pages=((500, leak),)))
     first = await w.get()
-    w.advance(4)
+    w.advance(6)
     second = await w.get()
     server = fakeredis.FakeRedis(server=w.server)
     texts = [

@@ -2,8 +2,9 @@
 
 외부 계약(Microsoft Learn "Clarity Data Export API", 2025-12-05 갱신): `GET …/project-live-insights`, 인자 `numOfDays`
 1~3·`dimension1`~`3`, 헤더 `Authorization: Bearer <토큰>`, 응답 `[{metricName, information: [행…]}]`(지표마다 1,000행까지),
-**프로젝트당 하루 10회**(넘으면 429). 호출은 둘이다 — 기본 요약(차원 없음)과 페이지×기기 묶음(`URL`·`Device`, 72시간).
-일정·한도 지키기는 `visits.py`, 값 만들기는 `clarity_values.py`(기본)·`clarity_pages.py`(묶음)가 한다.
+**프로젝트당 하루 10회**(넘으면 429). 호출은 넷이다 — 기본 요약(차원 없음)·페이지×기기 묶음(`URL`·`Device`, 72시간)·
+기기 차원(`Device`·`Browser`·`OS`)·유입 차원(`Channel`·`Source`·`Country/Region`)(068). 일정·한도 지키기는 `visits.py`,
+값 만들기는 `clarity_values.py`(기본)·`clarity_pages.py`(묶음)·`clarity_dims.py`(차원 둘)가 한다.
 기록은 Redis 에 `{attemptAt, state, code, successAt, values}` 로 둔다 — api 재시작(배포)이 한도를 쓰지 않게.
 주소 값은 쿼리·해시를 떼고(출처 지표는 출처로) 저장·응답한다. 대시보드 주소(`kimptrack.com/app/`)만 허용된 탭 id 하나를
 `?tab=<id>` 로 남긴다 — 탭을 바꾸면 Clarity 가 새 페이지로 세므로 탭마다 값이 갈리게 하려는 것이다.
@@ -19,7 +20,7 @@ import json
 import math
 import re
 import unicodedata
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Protocol
@@ -121,7 +122,8 @@ def metric_items(payload: Any) -> list[tuple[str, str, list[Any]]]:
 
 
 class ClarityStore(Protocol):
-    """core `RedisBus` 의 `admin:clarity`(기본)·`admin:clarity:pages`(묶음) 읽기·쓰기 (035 §3.3·040 §3.2)."""
+    """core `RedisBus` 의 `admin:clarity`(기본)·`admin:clarity:pages`(묶음)·`admin:clarity:dims`(차원 칸 둘) 읽기·쓰기와
+    날별 기록 `admin:clarity:day:<YYYYMMDD>` (035 §3.3·040 §3.2·068 §3.1·§3.2)."""
 
     async def clarity_load(self) -> str | None: ...
 
@@ -130,6 +132,14 @@ class ClarityStore(Protocol):
     async def clarity_pages_load(self) -> str | None: ...
 
     async def clarity_pages_save(self, data: str) -> None: ...
+
+    async def clarity_dims_load(self, field: str) -> str | None: ...
+
+    async def clarity_dims_save(self, field: str, data: str) -> None: ...
+
+    async def clarity_day_save(self, day: str, data: str, expire_at: int) -> None: ...
+
+    async def clarity_days_load(self, days: Sequence[str]) -> list[str | None]: ...
 
 
 @dataclass(frozen=True)
@@ -315,6 +325,12 @@ def is_ours(authority: str) -> bool:
     """`사용자@호스트:포트` 의 호스트가 kimptrack.com·www.kimptrack.com 인지 — 대소문자 무관·끝 점 하나 무시."""
     host = authority.rsplit("@", 1)[-1].split(":", 1)[0].lower().removesuffix(".")
     return host in OUR_HOSTS
+
+
+def is_name(value: Any) -> bool:
+    """목록 이름(나라·기기·유입 — 040 §3.3·068 §3.2)이 될 글자인지 — 주소 꼴(`<스킴>://`·`/`·`호스트.이름/…`)은 아니다.
+    이름은 줄이지 않고 실으므로 주소가 쿼리째 Redis·응답에 남지 않게 버린다(`metrics` 의 같은 행은 주소 줄이기를 거친다)."""
+    return isinstance(value, str) and address_parts(value) is None
 
 
 def address_parts(value: str) -> tuple[str | None, str] | None:

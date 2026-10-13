@@ -1,4 +1,4 @@
-"""화면 영역 통계 테스트 공통 — api 역할 앱(lifespan 없음)에 시계를 바꾼 서비스와 fakeredis 버스를 꽂는다 (스펙 052 §4)."""
+"""화면 이용 통계 테스트 공통 — api 역할 앱(lifespan 없음)에 시계를 바꾼 서비스와 fakeredis 버스를 꽂는다 (스펙 052 §4·061 §4)."""
 
 import asyncio
 import json
@@ -19,6 +19,8 @@ from app.main import create_app
 
 KST = ZoneInfo("Asia/Seoul")
 EFFECTIVE = "2026-10-18"
+# 061 — 요소·깊이·떠난 곳의 게이트(PRIVACY_V4_EFFECTIVE). 영역 게이트 다음 날로 둬 둘을 따로 본다
+EFFECTIVE_V4 = "2026-10-19"
 # 시행일 다음 날 낮 — 게이트 뒤
 NOON = datetime(2026, 10, 19, 12, 0, tzinfo=KST).timestamp()
 
@@ -113,6 +115,7 @@ async def rig(api_app: FastAPI) -> AsyncIterator[Rig]:
         mono=clock.monotonic,
         sleep=ticks.sleep,
         privacy_effective=EFFECTIVE,
+        elements_effective=EFFECTIVE_V4,
     )
     server = fakeredis.FakeServer()
     bus = RedisBus(fakeredis.aioredis.FakeRedis(server=server))

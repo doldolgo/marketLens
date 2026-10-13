@@ -116,7 +116,7 @@ function valTextStyle(color: string): CSSProperties {
 
 const CoinLine = memo(function CoinLine(p: LineProps & { onPick: (sym: string) => void }) {
   return (
-    <div onClick={() => p.onPick(p.sym)} className="hv-row" style={ROW_STYLE[p.hot ? 1 : 0][p.stale ? 1 : 0]}>
+    <div onClick={() => p.onPick(p.sym)} className="hv-row" data-el={`row:${p.sym}`} style={ROW_STYLE[p.hot ? 1 : 0][p.stale ? 1 : 0]}>
       <SymCell sym={p.sym} hot={p.hot} />
       <div style={chgCell(p.chgColor)}>
         {p.chgText}
@@ -212,44 +212,45 @@ export default memo(function SpreadsTab({ rows, onPick }: Props) {
     setSort({ col: 'val', asc: false })
   }
 
+  // 넷째 칸은 061 요소 열쇠(data-el)
   const headers: Header[] = [
-    ['sym', '심볼', 'left'], ['chg', '변동율', 'right'], ['price', '국내가격', 'right'], ['usd', '해외가격', 'right'],
-    ['fxEx', '해외거래소', 'left'], ['domEx', '국내거래소', 'left'],
-    ['val', view === 'kimp' ? '김프' : '역프', 'right'], ['io', '입출금', 'right'], ['net', '네트워크', 'right'],
+    ['sym', '심볼', 'left', 'sort:sym'], ['chg', '변동율', 'right', 'sort:chg'], ['price', '국내가격', 'right', 'sort:price'],
+    ['usd', '해외가격', 'right', 'sort:usd'], ['fxEx', '해외거래소', 'left', 'sort:fxex'], ['domEx', '국내거래소', 'left', 'sort:domex'],
+    ['val', view === 'kimp' ? '김프' : '역프', 'right', 'sort:val'], ['io', '입출금', 'right', 'sort:io'], ['net', '네트워크', 'right', 'sort:net'],
   ]
 
   return (
     <>
-      {/* 필터바 — 2행은 flexBasis 100% 로 같은 바 안에서 줄을 바꾼다 */}
+      {/* 필터바 — 2행은 flexBasis 100% 로 같은 바 안에서 줄을 바꾼다. data-el 은 061 요소 열쇠(모양·동작과 무관) */}
       <div data-area="filters" style={bar}>
-        <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={searchInput} />
+        <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={searchInput} data-el="search" />
         <span style={label}>기준 국내 거래소</span>
-        <Seg opts={[['all', '모두'], ['업비트', '업비트'], ['빗썸', '빗썸']].map(([id, l]) => segOpt(l, domFilter === id, () => setDomFilter(id as DomFilter)))} />
-        <NumField label="하이라이트 임계값" value={thr} step={0.1} onChange={setThr} />
-        <ToggleBtn on={onlyThr} label="임계 초과만" onClick={() => setOnlyThr(!onlyThr)} />
-        <label style={{ ...fxCheck, color: onlyIo ? 'var(--color-accent-300)' : 'var(--color-neutral-300)' }}>
+        <Seg opts={[['all', '모두', 'dom:all'], ['업비트', '업비트', 'dom:upbit'], ['빗썸', '빗썸', 'dom:bithumb']].map(([id, l, el]) => segOpt(l, domFilter === id, () => setDomFilter(id as DomFilter), el))} />
+        <NumField label="하이라이트 임계값" value={thr} step={0.1} onChange={setThr} el="threshold" />
+        <ToggleBtn on={onlyThr} label="임계 초과만" onClick={() => setOnlyThr(!onlyThr)} el="only-over" />
+        <label data-el="only-io" style={{ ...fxCheck, color: onlyIo ? 'var(--color-accent-300)' : 'var(--color-neutral-300)' }}>
           <input type="checkbox" checked={onlyIo} style={checkbox} onChange={() => setOnlyIo(!onlyIo)} />입출금 열림
         </label>
-        <label style={{ ...fxCheck, color: onlyNet ? 'var(--color-accent-300)' : 'var(--color-neutral-300)' }}>
+        <label data-el="only-net" style={{ ...fxCheck, color: onlyNet ? 'var(--color-accent-300)' : 'var(--color-neutral-300)' }}>
           <input type="checkbox" checked={onlyNet} style={checkbox} onChange={() => setOnlyNet(!onlyNet)} />네트워크 같음
         </label>
         <span style={count}>{coins.length} / {all.length} 코인 표시</span>
         <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
           <span style={label}>기준 보기</span>
-          <Seg pad="4px 10px" opts={[['kimp', '김프 기준'], ['rev', '역프 기준']].map(([id, l]) => segOpt(l, view === id, () => switchView(id as View)))} />
+          <Seg pad="4px 10px" opts={[['kimp', '김프 기준', 'view:kimp'], ['rev', '역프 기준', 'view:rev']].map(([id, l, el]) => segOpt(l, view === id, () => switchView(id as View), el))} />
           {vDivider}
           {/* 차감은 항상 적용된다 — 가격 기준 세그먼트도, 체결 규모 선택지도 없다 (§3.5, 017 로 $1,000 고정) */}
           <span style={label}>체결 규모</span>
           <span style={hint}>$1,000 호가창 시장가 체결 기준 · 매수·매도 양측 슬리피지 차감</span>
           {vDivider}
           <span style={label}>비교 해외 거래소</span>
-          <label style={{ ...fxCheck, color: fxAllOn ? 'var(--color-accent-300)' : 'var(--color-neutral-400)' }}>
+          <label data-el="fx:all" style={{ ...fxCheck, color: fxAllOn ? 'var(--color-accent-300)' : 'var(--color-neutral-400)' }}>
             <input type="checkbox" checked={fxAllOn} style={checkbox}
               onChange={() => setFxOff(fxAllOn ? Object.fromEntries(FX_EXS.map((fx) => [fx, true])) : {})} />모두
           </label>
           {vDivider}
           {FX_EXS.map((fx) => (
-            <label key={fx} style={{ ...fxCheck, color: fxOff[fx] ? 'var(--color-neutral-600)' : 'var(--color-neutral-300)' }}>
+            <label key={fx} data-el={`fx:${fx.toLowerCase().replace(/[^a-z0-9]/g, '')}`} style={{ ...fxCheck, color: fxOff[fx] ? 'var(--color-neutral-600)' : 'var(--color-neutral-300)' }}>
               <input type="checkbox" checked={!fxOff[fx]} style={checkbox} onChange={() => setFxOff({ ...fxOff, [fx]: !fxOff[fx] })} />{fx}
             </label>
           ))}

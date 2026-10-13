@@ -1,7 +1,8 @@
-// KimpTrack 화면 영역 이용 통계 — 화면마다 data-area 영역의 보인 시간·1초 이상 보임·클릭 수를 세어 숨길 때 보낸다 (스펙 052).
-// 화면 분석에 동의한 방문자만(clarity.js 와 같은 판정 — 지금 판의 granted·GPC 아님). 마우스 위치·좌표·스크롤 경로·글자·입력값은
-// 보내지 않고, 쿠키·저장소에 아무것도 쓰지 않는다(방문자 식별 없음). 번들 밖 정적 파일이라 oxlint 대상이 아니다(node --check).
-// 예외를 밖으로 던지지 않는다 — 실패하면 통계만 없고 페이지는 그대로다.
+// KimpTrack 화면 이용 통계 — 화면마다 data-area 영역의 보인 시간·1초 이상 보임·클릭 수(스펙 052)와 영역 안 요소별 클릭 수·마우스를
+// 올려 둔 시간·보인 시간, 페이지를 떠날 때 보던 영역·내려온 깊이(스펙 061)를 세어 숨길 때 보낸다.
+// 화면 분석에 동의한 방문자만(clarity.js 와 같은 판정 — 지금 판의 granted·GPC 아님). 영역·요소 이름과 숫자만 보낸다 — 입력값·화면 글자의
+// 숫자(가격 등)·좌표·마우스 경로는 보내지 않고, 쿠키·저장소에 아무것도 쓰지 않는다(방문자 식별 없음). 번들 밖 정적 파일이라 oxlint
+// 대상이 아니다(node --check). 예외를 밖으로 던지지 않는다 — 실패하면 통계만 없고 페이지는 그대로다.
 ;(() => {
   // 지금 안내 판 — clarity.js 의 NOTICE_VERSION 과 같은 값(server/tests/test_clarity.py·test_attention.py 가 묶는다).
   // 판을 올리는 PR 은 이 값도 함께 올린다 — 예전 판의 granted 는 동의가 아니다(2026-10-09-2 — 060, 같은 날 두 번째 판)
@@ -24,13 +25,37 @@
   ])
   const AREA_ID = /^[a-z][a-z0-9-]{0,31}$/
   const MAX_AREAS = 40
-  const MAX_MS = 600000 // 구간 전체에서 영역당
+  const MAX_MS = 600000 // 구간 전체에서 영역·요소당(보인 시간·마우스 올림 각각)
   const MAX_CLICKS = 50
   const SEEN_MS = 1000
   const IDLE_MS = 300000 // 마지막 입력 뒤 5분이 지나면 쌓지 않는다
   const MIN_PX = 40
   const MOBILE_WIDTH = 768
-  const SCAN_MS = 1000 // 늦게 생기는 영역 찾기는 1초에 한 번까지
+  const SCAN_MS = 1000 // 늦게 생기는 영역·요소 찾기는 1초에 한 번까지
+
+  // 요소(061) — 영역 안에서 사람이 누르거나 보는 낱낱. 열쇠는 data-el 이 먼저, 없으면 대화형 요소의 <종류>:<이름>
+  const MAX_TRACKED = 200 // 화면(구간)당 보인 시간·마우스 올림을 세는 서로 다른 (영역, 열쇠) — 문서에서 처음 찾은 순서
+  const MAX_SENT = 150 // 몸통 e 항목 — (클릭, 보인 시간) 큰 순
+  const MAX_BODY = 16384 // 몸통 바이트 — 넘치면 e 를 뒤에서부터 줄인다
+  const KEY_MAX = 64
+  const TEXT_CHARS = 24 // 보이는 글자로 만든 이름은 앞 24자
+  const HOVER_MIN_MS = 300 // 한 번 머문 시간이 이보다 짧으면 버린다
+  const HOVER_CUT_MS = 30000 // 한 번 머문 시간은 여기서 자른다
+  const DEPTH_PAGES = ["landing", "privacy", "kimp-chart", "kimp-history"] // 깊이는 문서가 스크롤되는 정적 페이지만
+  // role 이 태그보다 먼저 — <button role="tab"> 은 tab
+  const ROLES = new Map([
+    ["link", "link"],
+    ["button", "btn"],
+    ["tab", "tab"],
+    ["checkbox", "check"],
+    ["switch", "check"],
+  ])
+  // 영역 안에서 찾는 요소 — data-el(행 빼고 — 행은 클릭만 센다) 또는 대화형 요소
+  const FIND =
+    '[data-el]:not([data-el^="row:"]),a[href],button,summary,input,select,textarea,label,' +
+    "[role=button],[role=tab],[role=checkbox],[role=switch],[role=link]"
+  // 열쇠에 못 쓰는 글자 — 제어 문자·| ·짝 없는 대리 문자(UTF-8 로 못 적는다)
+  const BAD_KEY = /[\u0000-\u001f\u007f-\u009f|]|[\ud800-\udbff](?![\udc00-\udfff])|(?:^|[^\ud800-\udbff])[\udc00-\udfff]/
 
   // 이벤트 처리기도 밖으로 던지지 않는다
   const guard = (fn) => (event) => {
@@ -68,11 +93,131 @@
     }
   }
 
+  // ── 열쇠 (061 §3.1) ──────────────────────────────────────────────────────────────────────
+
+  const validKey = (k) => (typeof k === "string" && k.length > 0 && k.length <= KEY_MAX && !BAD_KEY.test(k) ? k : "")
+  const tagOf = (el) => String(el.tagName || "").toLowerCase()
+
+  // 글자 다듬기 — 제어 문자·| 는 공백으로, 공백은 하나로. 화면에 보이는 글자(screen)면 숫자(가격 등)는 # 로 가린다
+  const clean = (s, screen) => {
+    const t = String(s == null ? "" : s)
+      .replace(/[\u0000-\u001f\u007f-\u009f|]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+    return screen ? t.replace(/\d[\d,.]*/g, "#") : t
+  }
+
+  // <종류>:<이름> — 이름은 앞 chars 글자(코드 포인트라 이모지 반쪽이 남지 않는다), 열쇠는 64자 안으로
+  const join = (kind, name, chars) => {
+    const cps = Array.from(name).slice(0, chars)
+    let key = kind + ":" + cps.join("").trim()
+    while (key.length > KEY_MAX && cps.length) {
+      cps.pop()
+      key = kind + ":" + cps.join("").trim()
+    }
+    return key.length > kind.length + 1 ? validKey(key) : ""
+  }
+
+  // 대화형 요소의 종류 — role 이 먼저, 아니면 태그. 대화형이 아니면 ""
+  const kindOf = (el) => {
+    const role = el.getAttribute("role")
+    if (role && ROLES.has(role)) return ROLES.get(role)
+    const tag = tagOf(el)
+    if (tag === "a") return el.hasAttribute("href") ? "link" : ""
+    if (tag === "button") return "btn"
+    if (tag === "summary") return "faq"
+    if (tag === "input") return /^(checkbox|radio)$/i.test(el.getAttribute("type") || "") ? "check" : "input"
+    if (tag === "select") return "select"
+    if (tag === "textarea") return "input"
+    if (tag === "label") return "label"
+    return ""
+  }
+
+  // 링크 이름 — 같은 출처는 경로만, 다른 출처는 호스트 + 경로(쿼리·조각 뺌). http(s) 가 아니면 주소 종류만(메일 주소를 싣지 않게)
+  const linkPath = (el) => {
+    const href = el.getAttribute("href")
+    if (href === null) return ""
+    try {
+      const u = new URL(href, location.href)
+      if (u.protocol !== "http:" && u.protocol !== "https:") return u.protocol.slice(0, -1)
+      return u.origin === location.origin ? u.pathname : u.host + u.pathname
+    } catch (e) {
+      return ""
+    }
+  }
+
+  // 자동 열쇠 — 이름은 aria-label → (링크) 경로 → (입력칸) name·placeholder·type → 보이는 글자 앞 24자. 입력칸의 값은 읽지 않는다.
+  // 라벨은 그 입력칸의 열쇠다(라벨을 누르면 브라우저가 입력칸을 한 번 더 누른다)
+  const autoKey = (el, area) => {
+    const kind = kindOf(el)
+    if (!kind) return ""
+    if (kind === "label") {
+      const c = el.control
+      return c && c !== el && tagOf(c) !== "label" ? keyIn(c, area) : ""
+    }
+    const aria = clean(el.getAttribute("aria-label"), true)
+    if (aria) return join(kind, aria, KEY_MAX)
+    if (kind === "link") {
+      const path = clean(linkPath(el), false)
+      if (path) return join(kind, path, KEY_MAX)
+    }
+    const tag = tagOf(el)
+    if (tag === "input" || tag === "select" || tag === "textarea") {
+      const type = tag === "input" ? clean(el.getAttribute("type"), false).toLowerCase() || "text" : tag
+      return join(kind, clean(el.getAttribute("name"), false) || clean(el.getAttribute("placeholder"), true) || type, KEY_MAX)
+    }
+    return join(kind, clean(el.textContent, true), TEXT_CHARS)
+  }
+
+  // el 이 영역 안에서 받는 열쇠 — 그 요소나 가장 가까운 조상(영역 안)의 data-el, 없으면 자동 열쇠. 영역 밖이면 ""
+  function keyIn(el, area) {
+    let tagged = null
+    for (let n = el; n; n = n.parentElement) {
+      if (n === area) return tagged !== null ? validKey(tagged) : autoKey(el, area)
+      if (tagged === null) tagged = n.getAttribute("data-el")
+    }
+    return ""
+  }
+
+  // 누르거나 마우스를 올린 곳의 열쇠 — 대상에서 영역까지 올라가며 가장 가까운 data-el, 없으면 처음 만난 대화형 요소의 자동 열쇠.
+  // 누름(clicking)에서 라벨의 입력칸 밖을 눌렀으면 "" — 브라우저가 이어서 입력칸을 누르고 그 누름이 같은 열쇠로 센다(한 번 = 1)
+  const hitKey = (target, area, clicking) => {
+    let tagged = null
+    let first = null
+    const passed = []
+    for (let n = target; n; n = n.parentElement) {
+      if (n === area) return tagged !== null ? validKey(tagged) : first ? autoKey(first, area) : ""
+      if (clicking && !first && tagOf(n) === "label" && n.control && passed.indexOf(n.control) < 0) return ""
+      passed.push(n)
+      if (tagged === null) tagged = n.getAttribute("data-el")
+      if (!first && kindOf(n)) first = n
+    }
+    return ""
+  }
+
+  // 찾은 요소의 추적 열쇠 — 자기 data-el, 또는 data-el 조상이 없을 때 자동 열쇠(조상이 있으면 그 조상이 센다). 행(row:)은 빼고
+  const trackKey = (el, area) => {
+    const own = el.getAttribute("data-el")
+    let key = ""
+    if (own !== null) key = validKey(own)
+    else {
+      for (let n = el.parentElement; n && n !== area; n = n.parentElement) {
+        if (n.getAttribute("data-el") !== null) return ""
+      }
+      key = autoKey(el, area)
+    }
+    return key.indexOf("row:") === 0 ? "" : key
+  }
+
+  // ── 세기 (052 §3.2 + 061 §3.2) ───────────────────────────────────────────────────────────
+
   let started = false
   let seg = null // 구간(한 번 본 화면) — 멈추면 null
   let visible = new Set() // 지금 '보임' 인 영역 id
-  const near = new Set() // 화면 근처에 들어온 요소(IntersectionObserver)
-  const watched = new Map() // 요소 → 영역 id
+  let visibleEls = new Set() // 지금 '보임' 인 추적 요소 "영역|열쇠"
+  const near = new Set() // 화면 근처에 들어온 영역·요소(IntersectionObserver)
+  const watched = new Map() // 영역 요소 → 영역 id
+  const tracked = new Map() // 추적 요소 → "영역|열쇠"
   const ids = new Set() // 세는 영역 id(40개까지)
   let io = null
   let mo = null
@@ -82,8 +227,10 @@
   let lastAt = 0 // 시간을 마지막으로 나눠 준 때
   let lastInput = 0
   let docVisible = true
+  let hover = null // 지금 마우스가 머문 추적 요소 { ek, at }
 
-  // 구간 하나 — 기기는 시작 때 폭으로 정하고 구간 중에는 그대로. total·clicks 는 구간 전체 합(상한), pend 는 아직 안 보낸 몫
+  // 구간 하나 — 기기는 시작 때 폭으로 정하고 구간 중에는 그대로. total·clicks 는 구간 전체 합(상한), pend 는 아직 안 보낸 몫.
+  // els 는 요소별 (아직 안 보낸 c·h·v, 구간 합 tc·th·tv), keys 는 추적하는 "영역|열쇠"(200개까지). 추적 요소는 구간마다 새로 찾는다
   const begin = (page) => {
     seg = {
       page,
@@ -93,15 +240,38 @@
       clicks: {},
       seen: {},
       pend: {},
+      els: new Map(),
+      keys: new Set(),
+      depthOn: DEPTH_PAGES.indexOf(page) >= 0,
+      depth: 0,
+      dSent: false,
+      xSent: false,
     }
     lastAt = Date.now()
     visible = new Set()
+    visibleEls = new Set()
+    hover = null
+    for (const el of tracked.keys()) {
+      io.unobserve(el)
+      near.delete(el)
+    }
+    tracked.clear()
     schedule()
   }
 
   const slot = (id) => seg.pend[id] || (seg.pend[id] = [0, 0, 0])
 
-  // 지난번부터 지금까지 — 문서가 보이고 마지막 입력 뒤 5분 안이었던 만큼만 보이는 영역에 나눠 준다
+  const elSlot = (ek) => {
+    let s = seg.els.get(ek)
+    if (!s) {
+      const i = ek.indexOf("|")
+      s = { area: ek.slice(0, i), key: ek.slice(i + 1), c: 0, h: 0, v: 0, tc: 0, th: 0, tv: 0 }
+      seg.els.set(ek, s)
+    }
+    return s
+  }
+
+  // 지난번부터 지금까지 — 문서가 보이고 마지막 입력 뒤 5분 안이었던 만큼만 보이는 영역·추적 요소에 나눠 준다
   const account = (t) => {
     if (!seg) return
     const until = Math.min(t, lastInput + IDLE_MS)
@@ -119,27 +289,52 @@
           slot(id)[2] = 1
         }
       }
+      // 같은 열쇠의 요소가 여럿이면 하나라도 보이면 보임 — visibleEls 는 열쇠 단위다
+      for (const ek of visibleEls) {
+        const s = elSlot(ek)
+        const add = Math.min(d, MAX_MS - s.tv)
+        if (add > 0) {
+          s.tv += add
+          s.v += add
+        }
+      }
     }
     lastAt = t
   }
 
-  // 보임(§3.2) — 보이는 높이 ≥ min(영역 높이 × 0.5, 화면 높이 × 0.5) 이고 ≥ min(40px, 영역 높이)
+  // 보임(§3.2) — 보이는 높이 ≥ min(높이 × 0.5, 화면 높이 × 0.5) 이고 ≥ min(40px, 높이). 영역과 추적 요소가 같은 규칙
+  const shows = (r, h) => {
+    const shown = Math.min(r.bottom, h) - Math.max(r.top, 0)
+    return r.height > 0 && shown >= Math.min(MIN_PX, r.height) && shown >= Math.min(r.height * 0.5, h * 0.5)
+  }
+
+  // 깊이(061) — (scrollY + 화면 높이) / 문서 높이를 10% 칸으로, 끝까지(1px 안) = 10
+  const depthNow = () => {
+    const total = document.documentElement.scrollHeight
+    const bottom = (window.scrollY || 0) + window.innerHeight
+    if (!(total > 0) || bottom >= total - 1) return 10
+    return Math.max(0, Math.min(10, Math.floor((bottom / total) * 10)))
+  }
+
   const measure = () => {
     frame = 0
     if (!seg) return
     account(Date.now())
     const h = window.innerHeight
     const next = new Set()
+    const nextEls = new Set()
     for (const el of near) {
       if (!el.isConnected) {
         near.delete(el)
         continue
       }
-      const r = el.getBoundingClientRect()
-      const shown = Math.min(r.bottom, h) - Math.max(r.top, 0)
-      if (r.height > 0 && shown >= Math.min(MIN_PX, r.height) && shown >= Math.min(r.height * 0.5, h * 0.5)) next.add(watched.get(el))
+      if (!shows(el.getBoundingClientRect(), h)) continue
+      if (watched.has(el)) next.add(watched.get(el))
+      else if (tracked.has(el)) nextEls.add(tracked.get(el))
     }
     visible = next
+    visibleEls = nextEls
+    if (seg.depthOn) seg.depth = Math.max(seg.depth, depthNow())
   }
 
   // 스크롤·크기·DOM 바뀜 — 애니메이션 프레임당 한 번 다시 잰다
@@ -155,18 +350,20 @@
     schedule()
   }
 
-  // 영역 찾기 — 떨어져 나간 요소는 놓고, 새 요소는 id 꼴이 맞고 40개 안이면 지켜본다
+  const forget = (map, el) => {
+    io.unobserve(el)
+    map.delete(el)
+    near.delete(el)
+  }
+
+  // 찾기 — 떨어져 나간 영역·요소는 놓고, 새 영역은 id 꼴이 맞고 40개 안이면, 영역 안의 새 요소는 열쇠가 있고 (영역, 열쇠)가
+  // 이 구간의 200개 안이면 지켜본다(같은 열쇠 여럿은 하나로 센다)
   const scan = () => {
     scanTimer = 0
     scanAt = Date.now()
     if (!seg) return
-    for (const el of Array.from(watched.keys())) {
-      if (!el.isConnected) {
-        io.unobserve(el)
-        watched.delete(el)
-        near.delete(el)
-      }
-    }
+    for (const el of Array.from(watched.keys())) if (!el.isConnected) forget(watched, el)
+    for (const el of Array.from(tracked.keys())) if (!el.isConnected) forget(tracked, el)
     for (const el of document.querySelectorAll("[data-area]")) {
       if (watched.has(el)) continue
       const id = el.getAttribute("data-area")
@@ -174,6 +371,20 @@
       ids.add(id)
       watched.set(el, id)
       io.observe(el)
+    }
+    for (const [area, id] of watched) {
+      for (const el of area.querySelectorAll(FIND)) {
+        if (tracked.has(el)) continue
+        const key = trackKey(el, area)
+        if (!key) continue
+        const ek = id + "|" + key
+        if (!seg.keys.has(ek)) {
+          if (seg.keys.size >= MAX_TRACKED) continue
+          seg.keys.add(ek)
+        }
+        tracked.set(el, ek)
+        io.observe(el)
+      }
     }
     schedule()
   }
@@ -195,23 +406,90 @@
     schedule()
   }
 
-  // 클릭 — 대상의 가장 가까운 영역 하나에 1, 영역 밖 클릭은 버린다
+  const areaOf = (target) => {
+    const el = target && target.closest ? target.closest("[data-area]") : null
+    const id = el ? el.getAttribute("data-area") : ""
+    return ids.has(id) ? [el, id] : null
+  }
+
+  // 클릭 — 대상의 가장 가까운 영역 하나에 1(052), 그리고 열쇠가 있으면 그 요소에 1(행 포함, 061). 영역 밖 클릭은 버린다.
+  // 요소는 사람이 누른 것만 센다 — 페이지 스크립트가 부른 .click() 은 isTrusted 가 false 다(사건 표의 행 누름이 링크를 다시 누른다)
   const onClick = (event) => {
     if (!seg) return
-    const el = event.target && event.target.closest ? event.target.closest("[data-area]") : null
-    if (!el) return
-    const id = el.getAttribute("data-area")
-    if (!ids.has(id)) return
+    const hit = areaOf(event.target)
+    if (!hit) return
+    const [area, id] = hit
     const used = seg.clicks[id] || 0
-    if (used >= MAX_CLICKS) return
-    seg.clicks[id] = used + 1
-    slot(id)[1] += 1
+    if (used < MAX_CLICKS) {
+      seg.clicks[id] = used + 1
+      slot(id)[1] += 1
+    }
+    if (event.isTrusted === false) return
+    const key = hitKey(event.target, area, true)
+    if (!key) return
+    const s = elSlot(id + "|" + key)
+    if (s.tc < MAX_CLICKS) {
+      s.tc += 1
+      s.c += 1
+    }
+  }
+
+  // 마우스 올림(061) — PC 이고 마우스일 때 추적 요소(행 빼고) 위에 머문 시간. 문서가 보이는 동안만, 한 번 머문 시간이 300ms 미만이면
+  // 버리고 30초에서 자른다. 머문 곳이 바뀌거나 창 밖으로 나가거나 문서가 숨거나 보낼 때 끝낸다
+  const endHover = (t) => {
+    if (!hover || !seg) {
+      hover = null
+      return
+    }
+    const d = Math.min(t - hover.at, HOVER_CUT_MS)
+    const s = elSlot(hover.ek)
+    hover = null
+    if (d < HOVER_MIN_MS) return
+    const add = Math.min(d, MAX_MS - s.th)
+    if (add > 0) {
+      s.th += add
+      s.h += add
+    }
+  }
+
+  const onOver = (event) => {
+    if (!seg || seg.device !== "pc" || event.pointerType !== "mouse") return
+    const t = Date.now()
+    const hit = docVisible ? areaOf(event.target) : null
+    const key = hit ? hitKey(event.target, hit[0], false) : ""
+    const ek = key && seg.keys.has(hit[1] + "|" + key) ? hit[1] + "|" + key : ""
+    if (hover && hover.ek === ek) return
+    endHover(t)
+    if (ek) hover = { ek, at: t }
+  }
+
+  const onOut = (event) => {
+    if (!event.relatedTarget) endHover(Date.now())
+  }
+
+  // 떠난 곳(061) — 지금 보이는 높이가 가장 큰 영역(같으면 문서에서 앞). 없으면 null
+  const exitArea = () => {
+    const h = window.innerHeight
+    let best = null
+    let most = 0
+    for (const [el, id] of watched) {
+      if (!el.isConnected) continue
+      const r = el.getBoundingClientRect()
+      const shown = Math.min(r.bottom, h) - Math.max(r.top, 0)
+      if (r.height > 0 && shown > most) {
+        most = shown
+        best = id
+      }
+    }
+    return best
   }
 
   // 멈춤 — 철회를 본 뒤로는 세지도 보내지도 않는다
   const stop = () => {
     seg = null
     visible = new Set()
+    visibleEls = new Set()
+    hover = null
     if (io) io.disconnect()
     if (mo) mo.disconnect()
   }
@@ -229,11 +507,38 @@
     if (sent && typeof sent.catch === "function") sent.catch(() => {})
   }
 
-  // 보내기(§3.3) — 직전에 동의를 다시 본다. 보낸 몫은 0 으로(구간 합·이미 보낸 seen 은 기억), pv 는 구간의 첫 보냄에만 1.
-  // 값이 모두 0 인 영역은 빼고, 영역도 pv 도 없으면 보내지 않는다. 영역 40개 × id 32자라 몸통은 4,096바이트를 넘지 않는다
-  const send = () => {
+  // UTF-8 바이트 수 — 몸통 상한을 재는 데만
+  const bytes = (s) => {
+    let n = 0
+    for (const ch of s) {
+      const c = ch.codePointAt(0)
+      n += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4
+    }
+    return n
+  }
+
+  // 몸통 글자 — 16,384바이트를 넘으면 e 를 뒤에서부터(덜 누르고 덜 보인 것부터) 줄인다
+  const encode = (body) => {
+    const e = body.e
+    body.e = []
+    let total = bytes(JSON.stringify(body))
+    let n = 0
+    for (; n < e.length; n++) {
+      const add = bytes(JSON.stringify(e[n])) + (n ? 1 : 0)
+      if (total + add > MAX_BODY) break
+      total += add
+    }
+    body.e = e.slice(0, n)
+    return JSON.stringify(body)
+  }
+
+  // 보내기(052 §3.3·061 §3.3) — 직전에 동의를 다시 본다. 보낸 몫은 0 으로(구간 합·이미 보낸 seen 은 기억), pv 는 구간의 첫 보냄에만 1.
+  // 값이 모두 0 인 영역·요소는 빼고, 보낼 것이 하나도 없으면 보내지 않는다. 깊이·떠난 곳은 pagehide(final)에만, 구간에 한 번
+  const send = (final) => {
     if (!seg) return
-    account(Date.now())
+    const t = Date.now()
+    account(t)
+    endHover(t)
     if (!consented()) return stop()
     const a = {}
     let any = false
@@ -245,25 +550,46 @@
       }
     }
     seg.pend = {}
+    const e = []
+    seg.els.forEach((s) => {
+      if (s.c || s.h || s.v) e.push([s.area, s.key, s.c, s.h, s.v])
+      s.c = 0
+      s.h = 0
+      s.v = 0
+    })
+    e.sort((p, q) => q[2] - p[2] || q[4] - p[4])
+    if (e.length > MAX_SENT) e.length = MAX_SENT
+    let d = null
+    let x = null
+    if (final && seg.depthOn && !seg.dSent) {
+      seg.dSent = true
+      d = Math.max(seg.depth, depthNow())
+    }
+    if (final && !seg.xSent) {
+      seg.xSent = true
+      x = exitArea()
+    }
     const pv = seg.pvSent ? 0 : 1
-    if (!any && !pv) return
+    if (!any && !e.length && !pv && d === null && x === null) return
     seg.pvSent = true
-    post(JSON.stringify({ v: 1, page: seg.page, device: seg.device, pv, a }))
+    post(encode({ v: 2, page: seg.page, device: seg.device, pv, a, e, d, x }))
   }
 
   const onVisibility = () => {
     account(Date.now())
     docVisible = document.visibilityState === "visible"
-    if (!docVisible) send()
+    if (!docVisible) send(false)
   }
 
-  // 대시보드 탭이 바뀌면 지금 구간을 끝내고(보내고) 새 탭 이름으로 새 구간. 같은 id 는 무시
+  // 대시보드 탭이 바뀌면 지금 구간을 끝내고(보내고) 새 탭 이름으로 새 구간 — 추적 요소도 새로 찾는다. 같은 id 는 무시
   const onTab = (event) => {
     if (!seg) return
     const tab = event && event.detail
     if (TABS.indexOf(tab) < 0 || "app-" + tab === seg.page) return
-    send()
-    if (seg) begin("app-" + tab)
+    send(false)
+    if (!seg) return
+    begin("app-" + tab)
+    scan()
   }
 
   const start = () => {
@@ -282,9 +608,11 @@
     }
     document.addEventListener("scroll", guard(onScroll), opts)
     document.addEventListener("click", guard(onClick), true)
+    document.addEventListener("pointerover", guard(onOver), opts)
+    document.addEventListener("pointerout", guard(onOut), opts)
     document.addEventListener("visibilitychange", guard(onVisibility))
     window.addEventListener("resize", guard(schedule))
-    window.addEventListener("pagehide", guard(send))
+    window.addEventListener("pagehide", guard(() => send(true)))
     if (firstPage.indexOf("app-") === 0) window.addEventListener("kt:tab", guard(onTab))
   }
 
