@@ -97,8 +97,10 @@ def test_notice_version_is_the_clarity_one() -> None:
 
 
 def test_script_sends_nothing_but_the_beacon_and_keeps_no_visitor_state() -> None:
-    """좌표·글자·입력값·저장소 쓰기·쿠키·다른 주소 없음 (§2 하지 않는 것). 053 의 덮어 보기 부분(파일 끝)은 세지 않고
-    관리자 출처 하나와만 메시지를 주고받는다 — 꼬리표 글자를 textContent 로 쓰는 것 말고는 같은 금지를 따른다."""
+    """좌표·입력값·저장소 쓰기·쿠키·다른 주소 없음 (§2 하지 않는 것). 053 의 덮어 보기 부분(파일 끝)은 세지 않고
+    관리자 출처 하나와만 메시지를 주고받는다 — 꼬리표 글자를 textContent 로 쓰는 것 말고는 같은 금지를 따른다.
+    061 — 세는 부분은 요소 이름(자동 열쇠의 보이는 글자 앞 24자)을 읽는 한 곳에서만 textContent 를 쓰고, 그 글자는 숫자를
+    가리는 clean(…, true) 를 거친다(화면 글자의 숫자는 보내지 않는다)."""
     assert set(re.findall(r"[\"'](/api/[\w/-]*)", JS)) == {"/api/attention"}
     # 주소 글자는 덮어 보기의 관리자 출처 상수 하나뿐
     assert re.findall(r"https?://[^\s\"']*", JS) == ["https://admin.kimptrack.com"]
@@ -127,13 +129,14 @@ def test_script_sends_nothing_but_the_beacon_and_keeps_no_visitor_state() -> Non
         "screenX",
         "offsetX",
         "innerText",
-        "textContent",
         "innerHTML",
         ".value",
         "setInterval",
         "XMLHttpRequest",
     ):
         assert banned not in counting, banned
+    assert counting.count("textContent") == 1
+    assert "clean(el.textContent, true)" in counting
 
 
 # --- nginx·caddy (§3.2·§3.4·§3.6) ----------------------------------------------------

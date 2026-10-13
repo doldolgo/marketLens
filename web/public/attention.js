@@ -32,6 +32,30 @@
   const MOBILE_WIDTH = 768
   const SCAN_MS = 1000 // 늦게 생기는 영역 찾기는 1초에 한 번까지
 
+  // 요소(061) — 영역 안에서 사람이 누르거나 보는 낱낱. 열쇠는 data-el 이 먼저, 없으면 대화형 요소의 <종류>:<이름>
+  const MAX_TRACKED = 200 // 화면(구간)당 보인 시간·마우스 올림을 세는 서로 다른 (영역, 열쇠) — 문서에서 처음 찾은 순서
+  const MAX_SENT = 150 // 몸통 e 항목 — (클릭, 보인 시간) 큰 순
+  const MAX_BODY = 16384 // 몸통 바이트 — 넘치면 e 를 뒤에서부터 줄인다
+  const KEY_MAX = 64
+  const TEXT_CHARS = 24 // 보이는 글자로 만든 이름은 앞 24자
+  const HOVER_MIN_MS = 300 // 한 번 머문 시간이 이보다 짧으면 버린다
+  const HOVER_CUT_MS = 30000 // 한 번 머문 시간은 여기서 자른다
+  const DEPTH_PAGES = ["landing", "privacy", "kimp-chart", "kimp-history"] // 깊이는 문서가 스크롤되는 정적 페이지만
+  // role 이 태그보다 먼저 — <button role="tab"> 은 tab
+  const ROLES = new Map([
+    ["link", "link"],
+    ["button", "btn"],
+    ["tab", "tab"],
+    ["checkbox", "check"],
+    ["switch", "check"],
+  ])
+  // 영역 안에서 찾는 요소 — data-el(행 빼고 — 행은 클릭만 센다) 또는 대화형 요소
+  const FIND =
+    '[data-el]:not([data-el^="row:"]),a[href],button,summary,input,select,textarea,label,' +
+    "[role=button],[role=tab],[role=checkbox],[role=switch],[role=link]"
+  // 열쇠에 못 쓰는 글자 — 제어 문자·| ·짝 없는 대리 문자(UTF-8 로 못 적는다)
+  const BAD_KEY = /[\u0000-\u001f\u007f-\u009f|]|[\ud800-\udbff](?![\udc00-\udfff])|(?:^|[^\ud800-\udbff])[\udc00-\udfff]/
+
   // 이벤트 처리기도 밖으로 던지지 않는다
   const guard = (fn) => (event) => {
     try {
@@ -66,6 +90,122 @@
     } catch (e) {
       return false
     }
+  }
+
+  // ── 열쇠 (061 §3.1) ──────────────────────────────────────────────────────────────────────
+
+  const validKey = (k) => (typeof k === "string" && k.length > 0 && k.length <= KEY_MAX && !BAD_KEY.test(k) ? k : "")
+  const tagOf = (el) => String(el.tagName || "").toLowerCase()
+
+  // 글자 다듬기 — 제어 문자·| 는 공백으로, 공백은 하나로. 화면에 보이는 글자(screen)면 숫자(가격 등)는 # 로 가린다
+  const clean = (s, screen) => {
+    const t = String(s == null ? "" : s)
+      .replace(/[\u0000-\u001f\u007f-\u009f|]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+    return screen ? t.replace(/\d[\d,.]*/g, "#") : t
+  }
+
+  // <종류>:<이름> — 이름은 앞 chars 글자(코드 포인트라 이모지 반쪽이 남지 않는다), 열쇠는 64자 안으로
+  const join = (kind, name, chars) => {
+    const cps = Array.from(name).slice(0, chars)
+    let key = kind + ":" + cps.join("").trim()
+    while (key.length > KEY_MAX && cps.length) {
+      cps.pop()
+      key = kind + ":" + cps.join("").trim()
+    }
+    return key.length > kind.length + 1 ? validKey(key) : ""
+  }
+
+  // 대화형 요소의 종류 — role 이 먼저, 아니면 태그. 대화형이 아니면 ""
+  const kindOf = (el) => {
+    const role = el.getAttribute("role")
+    if (role && ROLES.has(role)) return ROLES.get(role)
+    const tag = tagOf(el)
+    if (tag === "a") return el.hasAttribute("href") ? "link" : ""
+    if (tag === "button") return "btn"
+    if (tag === "summary") return "faq"
+    if (tag === "input") return /^(checkbox|radio)$/i.test(el.getAttribute("type") || "") ? "check" : "input"
+    if (tag === "select") return "select"
+    if (tag === "textarea") return "input"
+    if (tag === "label") return "label"
+    return ""
+  }
+
+  // 링크 이름 — 같은 출처는 경로만, 다른 출처는 호스트 + 경로(쿼리·조각 뺌). http(s) 가 아니면 주소 종류만(메일 주소를 싣지 않게)
+  const linkPath = (el) => {
+    const href = el.getAttribute("href")
+    if (href === null) return ""
+    try {
+      const u = new URL(href, location.href)
+      if (u.protocol !== "http:" && u.protocol !== "https:") return u.protocol.slice(0, -1)
+      return u.origin === location.origin ? u.pathname : u.host + u.pathname
+    } catch (e) {
+      return ""
+    }
+  }
+
+  // 자동 열쇠 — 이름은 aria-label → (링크) 경로 → (입력칸) name·placeholder·type → 보이는 글자 앞 24자. 입력칸의 값은 읽지 않는다.
+  // 라벨은 그 입력칸의 열쇠다(라벨을 누르면 브라우저가 입력칸을 한 번 더 누른다)
+  const autoKey = (el, area) => {
+    const kind = kindOf(el)
+    if (!kind) return ""
+    if (kind === "label") {
+      const c = el.control
+      return c && c !== el && tagOf(c) !== "label" ? keyIn(c, area) : ""
+    }
+    const aria = clean(el.getAttribute("aria-label"), true)
+    if (aria) return join(kind, aria, KEY_MAX)
+    if (kind === "link") {
+      const path = clean(linkPath(el), false)
+      if (path) return join(kind, path, KEY_MAX)
+    }
+    const tag = tagOf(el)
+    if (tag === "input" || tag === "select" || tag === "textarea") {
+      const type = tag === "input" ? clean(el.getAttribute("type"), false).toLowerCase() || "text" : tag
+      return join(kind, clean(el.getAttribute("name"), false) || clean(el.getAttribute("placeholder"), true) || type, KEY_MAX)
+    }
+    return join(kind, clean(el.textContent, true), TEXT_CHARS)
+  }
+
+  // el 이 영역 안에서 받는 열쇠 — 그 요소나 가장 가까운 조상(영역 안)의 data-el, 없으면 자동 열쇠. 영역 밖이면 ""
+  function keyIn(el, area) {
+    let tagged = null
+    for (let n = el; n; n = n.parentElement) {
+      if (n === area) return tagged !== null ? validKey(tagged) : autoKey(el, area)
+      if (tagged === null) tagged = n.getAttribute("data-el")
+    }
+    return ""
+  }
+
+  // 누르거나 마우스를 올린 곳의 열쇠 — 대상에서 영역까지 올라가며 가장 가까운 data-el, 없으면 처음 만난 대화형 요소의 자동 열쇠.
+  // 누름(clicking)에서 라벨의 입력칸 밖을 눌렀으면 "" — 브라우저가 이어서 입력칸을 누르고 그 누름이 같은 열쇠로 센다(한 번 = 1)
+  const hitKey = (target, area, clicking) => {
+    let tagged = null
+    let first = null
+    const passed = []
+    for (let n = target; n; n = n.parentElement) {
+      if (n === area) return tagged !== null ? validKey(tagged) : first ? autoKey(first, area) : ""
+      if (clicking && !first && tagOf(n) === "label" && n.control && passed.indexOf(n.control) < 0) return ""
+      passed.push(n)
+      if (tagged === null) tagged = n.getAttribute("data-el")
+      if (!first && kindOf(n)) first = n
+    }
+    return ""
+  }
+
+  // 찾은 요소의 추적 열쇠 — 자기 data-el, 또는 data-el 조상이 없을 때 자동 열쇠(조상이 있으면 그 조상이 센다). 행(row:)은 빼고
+  const trackKey = (el, area) => {
+    const own = el.getAttribute("data-el")
+    let key = ""
+    if (own !== null) key = validKey(own)
+    else {
+      for (let n = el.parentElement; n && n !== area; n = n.parentElement) {
+        if (n.getAttribute("data-el") !== null) return ""
+      }
+      key = autoKey(el, area)
+    }
+    return key.indexOf("row:") === 0 ? "" : key
   }
 
   let started = false
