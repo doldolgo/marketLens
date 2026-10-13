@@ -316,15 +316,16 @@
   </style>
 </head>
 <body data-clarity-unmask="true">
+  <!-- 061 — data-el 은 화면 이용 통계의 요소 열쇠(모양·동작과 무관). 자동 열쇠(링크 경로)가 겹치는 링크·글자가 바뀌는 카드·질문에만 단다 -->
   <header class="wrap bar" data-area="top">
     <a class="mark" href="/">
       <svg width="22" height="10" viewBox="0 0 22 10" aria-hidden="true" focusable="false"><circle cx="4" cy="5" r="3.5" fill="currentColor" /><rect x="5" y="4" width="12" height="2" fill="currentColor" /><circle cx="18" cy="5" r="3.5" fill="currentColor" /></svg>
       KimpTrack
     </a>
     <nav class="nav" aria-label="이 페이지">
-      <a href="#kimp"><span class="nw">김프·역프란</span></a>
-      <a href="#method">계산 방법</a>
-      <a href="#faq">자주 묻는 질문</a>
+      <a href="#kimp" data-el="nav:kimp"><span class="nw">김프·역프란</span></a>
+      <a href="#method" data-el="nav:method">계산 방법</a>
+      <a href="#faq" data-el="nav:faq">자주 묻는 질문</a>
     </nav>
     <a class="btn" href="/app/">실시간 김프 표</a>
   </header>
@@ -336,7 +337,7 @@
         <p class="prose lead">KimpTrack(김프트랙)은 <span class="nw">업비트·빗썸·바이낸스·바이비트·비트겟·OKX</span> 여섯 거래소, 약 400개 코인의 가격 차이와 입출금 상태를 매초 들여다봅니다. 김프가 벌어진 코인을 찾는 데서 끝나지 않고 지금 그 경로로 코인을 옮길 수 있는지, 실제로 사고팔면 몇 %가 남는지까지 한 화면에 보여 줍니다.</p>
         <div class="cta">
           <a class="btn btn-lg" href="/app/">실시간 김프 표 보기</a>
-          <a class="link" href="/app/?tab=history">김프 기록과 차트</a>
+          <a class="link" href="/app/?tab=history" data-el="app:history">김프 기록과 차트</a>
         </div>
       </div>
       <!-- 실데이터 자리 — 스크립트가 /api/landing 으로 채운다. 지어낸 숫자·자리표시 숫자는 넣지 않는다 (스펙 022 §3.5).
@@ -456,31 +457,31 @@
       <h2 id="faq-title">자주 묻는 질문</h2>
       <div class="faq">
         <div class="qa">
-          <h3>김프 사이트마다 숫자가 다른 이유는 무엇인가요?</h3>
+          <h3 data-el="faq:why-differ">김프 사이트마다 숫자가 다른 이유는 무엇인가요?</h3>
           <p>계산에 쓰는 가격과 환율이 다르기 때문입니다. 대개는 가격 하나와 은행 환율로 계산하지만, KimpTrack은 $1,000어치를 호가창에 체결한 평균 단가와 국내 거래소의 USDT 호가를 씁니다. 호가가 얇은 코인일수록 값이 작게 나옵니다.</p>
         </div>
         <div class="qa">
-          <h3>왜 $1,000 기준인가요?</h3>
+          <h3 data-el="faq:why-1000">왜 $1,000 기준인가요?</h3>
           <p>모든 코인의 호가창 두께를 같은 기준으로 비교하려는 것입니다. 금액이 클수록 단가가 더 밀리므로, 더 큰 금액을 옮긴다면 김프가 이보다 작아질 수 있습니다. 반대로 금액이 이보다 작으면 맨 위 호가에 가까운 단가로 체결되어 김프가 오히려 더 클 수 있습니다.</p>
         </div>
         <div class="qa">
-          <h3>환율은 무엇을 쓰나요?</h3>
+          <h3 data-el="faq:rate">환율은 무엇을 쓰나요?</h3>
           <p>은행 환율이 아니라 업비트·빗썸이 각자 가진 USDT(테더) 원화 호가를 씁니다. 은행 환율 대신 이 호가를 쓰기 때문에 테더 김프가 값에 들어갑니다. 김프는 USDT를 사는 쪽이라 매도호가를, 역프는 USDT를 파는 쪽이라 매수호가를 씁니다.</p>
         </div>
         <div class="qa">
-          <h3>옮길 수 없는 경로는 어떻게 판단하나요?</h3>
+          <h3 data-el="faq:blocked">옮길 수 없는 경로는 어떻게 판단하나요?</h3>
           <p>보내는 거래소의 출금과 받는 거래소의 입금을 같은 네트워크 기준으로 확인합니다. 한쪽이라도 막혔거나, 상태를 확인하지 못했거나, 두 거래소가 같은 네트워크를 지원하지 않으면 옮길 수 없는 경로로 봅니다.</p>
         </div>
         <div class="qa">
-          <h3>가입이나 비용이 필요한가요?</h3>
+          <h3 data-el="faq:cost">가입이나 비용이 필요한가요?</h3>
           <p>아니요. 로그인이나 앱 설치 없이 웹에서 무료로 볼 수 있습니다. 실시간 김프 표는 PC 화면에 맞춰 만들었습니다.</p>
         </div>
         <div class="qa">
-          <h3>역김프와 역프는 같은 말인가요?</h3>
+          <h3 data-el="faq:reverse-term">역김프와 역프는 같은 말인가요?</h3>
           <p>네. 국내 가격이 해외보다 싼 상태를 역프, 역김프, 역프리미엄이라고 부릅니다. KimpTrack은 역프를 국내에서 사서 해외에서 팔 때 기준으로 따로 계산해 양수로 보여 줍니다.</p>
         </div>
         <div class="qa">
-          <h3>김프 차트와 과거 기록도 볼 수 있나요?</h3>
+          <h3 data-el="faq:chart">김프 차트와 과거 기록도 볼 수 있나요?</h3>
           <p>네. <a class="link" href="/app/?tab=history">김프 기록과 차트</a>에서 코인과 경로를 골라 김프·역프의 봉 차트와 크게 벌어졌던 사건 목록을 볼 수 있습니다. 읽는 법은 <a class="link" href="/kimp-chart">김프 차트</a>와 <a class="link" href="/kimp-history">김프 히스토리</a> 안내에 있습니다.</p>
         </div>
       </div>
@@ -490,14 +491,14 @@
   <footer class="wrap foot" data-area="foot">
     <nav class="foot-nav" aria-label="바로 가기">
       <a href="/app/">실시간 김프 표</a>
-      <a href="/app/?tab=history">김프 기록과 차트</a>
+      <a href="/app/?tab=history" data-el="app:history">김프 기록과 차트</a>
       <a href="/kimp-chart">김프 차트</a>
       <a href="/kimp-history">김프 히스토리</a>
-      <a href="#kimp"><span class="nw">김프·역프란</span></a>
-      <a href="#method">계산 방법</a>
-      <a href="#faq">자주 묻는 질문</a>
+      <a href="#kimp" data-el="nav:kimp"><span class="nw">김프·역프란</span></a>
+      <a href="#method" data-el="nav:method">계산 방법</a>
+      <a href="#faq" data-el="nav:faq">자주 묻는 질문</a>
       <a class="foot-privacy" href="/privacy">개인정보 처리방침</a>
-      <a href="/privacy#consent">화면 분석 설정</a>
+      <a href="/privacy#consent" data-el="consent-settings">화면 분석 설정</a>
     </nav>
     <p class="notice">KimpTrack의 수치는 거래소 공개 데이터로 자동 계산한 참고값이며 투자 권유가 아닙니다. 거래·출금 수수료와 전송 시간은 반영하지 않았습니다.</p>
     <p>운영 고원규·이진중 · 문의 <a class="link" href="mailto:joseph13ko15@gmail.com">joseph13ko15@gmail.com</a>, <a class="link" href="mailto:untilduck@gmail.com">untilduck@gmail.com</a></p>
@@ -610,7 +611,8 @@
         const key = [t.sym, t.dom, t.fx, t.dir, fmtPct(t.pct)].join('|')
         const flash = valueKey !== null && key !== valueKey ? ' flash' : ''
         valueKey = key
-        keepFocus(card, `<a class="card-link" href="${esc(historyLink(t))}">`
+        // data-el — 061 요소 열쇠: 글자가 바뀌는 카드라 자리(1위~5위)로 센다
+        keepFocus(card, `<a class="card-link" href="${esc(historyLink(t))}" data-el="live:1">`
           + '<div class="card-head"><span>지금 가장 큰 경로</span><span class="age" id="age"></span></div>'
           + '<div class="card-body">'
           + `<p class="sym">${esc(t.sym)}</p>`
@@ -626,9 +628,9 @@
           + `<span><span class="ex">${esc(exName(t.fx))}</span> $${fmtUsdt(t.usd)}</span></div>`
           + '</div></a>')
         const rest = live.top.slice(1, 5)
-        keepFocus(nextList, rest.map((r) => {
+        keepFocus(nextList, rest.map((r, i) => {
           const [f, g] = ends(r)
-          return `<li><a href="${esc(historyLink(r))}"><span class="n-sym">${esc(r.sym)}</span>`
+          return `<li><a href="${esc(historyLink(r))}" data-el="live:${i + 2}"><span class="n-sym">${esc(r.sym)}</span>`
             + `<span class="n-route">${esc(exName(f.ex))} → ${esc(exName(g.ex))}</span>`
             + `<span class="n-pct ${sign(r.pct)}">${fmtPct(r.pct)}</span></a></li>`
         }).join(''))
@@ -640,8 +642,9 @@
         eventsTable.hidden = !ev || ev.top.length === 0
         if (!ev) return
         eventsSum.textContent = ` 지난 7일 동안 ${fmtCount(ev.count)}건(김프 ${fmtCount(ev.kimp)}건, 역프 ${fmtCount(ev.reverse)}건)이 있었고, 지금 ${fmtCount(ev.open)}건이 진행 중입니다.`
+        // data-el — 061 요소 열쇠: 표의 코인 행은 row:<심볼>(클릭만 센다)
         keepFocus(eventsRows, ev.top.map((e) => {
-          return `<tr><td class="c-sym"><a href="${esc(historyLink(e))}">${esc(e.sym)}</a></td>`
+          return `<tr data-el="row:${esc(e.sym)}"><td class="c-sym"><a href="${esc(historyLink(e))}">${esc(e.sym)}</a></td>`
             + `<td class="c-route">${esc(exName(e.dom))} · ${esc(exName(e.fx))}</td>`
             + `<td class="c-dir">${dirName(e.dir)}</td>`
             + `<td class="num c-max ${sign(e.maxPercent)}">${fmtPct(e.maxPercent)}</td>`
