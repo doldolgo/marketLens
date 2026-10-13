@@ -37,7 +37,10 @@ def _client() -> httpx.AsyncClient:
 
 def _service() -> WalletStatusService:
     return WalletStatusService(
-        upbit_api_key=None, upbit_secret_key=None, binance_api_key=None, binance_secret_key=None
+        upbit_api_key=None,
+        upbit_secret_key=None,
+        binance_api_key=None,
+        binance_secret_key=None,
     )
 
 
@@ -47,7 +50,9 @@ class FullEveryTick:
     def __init__(self, inner: WalletStatusService) -> None:
         self._inner = inner
 
-    async def refresh_if_due(self, client: httpx.AsyncClient, *, force: bool = False) -> dict[str, int] | None:
+    async def refresh_if_due(
+        self, client: httpx.AsyncClient, *, force: bool = False
+    ) -> dict[str, int] | None:
         return None
 
     def apply(self, rows: list[Row], exchange: str) -> None:
@@ -80,7 +85,10 @@ def _statuses(rng: random.Random) -> dict[str, CoinStatus]:
     for base in _BASES:
         if rng.random() < 0.3:
             continue  # 응답에 그 코인이 없음 → unknown
-        nets = [Network(code, code.title(), rng.random() < 0.7, rng.random() < 0.7) for code in rng.sample(("ETH", "SOL", "TRX", "BSC"), rng.randint(0, 3))]
+        nets = [
+            Network(code, code.title(), rng.random() < 0.7, rng.random() < 0.7)
+            for code in rng.sample(("ETH", "SOL", "TRX", "BSC"), rng.randint(0, 3))
+        ]
         out[base.upper()] = CoinStatus(rng.random() < 0.8, rng.random() < 0.8, nets)
     return out
 
@@ -101,9 +109,15 @@ async def _fetch(service: WalletStatusService, rng: random.Random, ex: str) -> N
     await service._fetch_one(ex, coro)  # 실제 조회 1건 경로 — 상태 대입과 세대 올리기
 
 
-def _snapshot(store: LiveStore) -> dict[tuple[str, str], tuple[object, object, list[Network]]]:
+def _snapshot(
+    store: LiveStore,
+) -> dict[tuple[str, str], tuple[object, object, list[Network]]]:
     return {
-        (row.exchange, row.base.upper()): (row.deposit_enabled, row.withdrawal_enabled, row.networks)
+        (row.exchange, row.base.upper()): (
+            row.deposit_enabled,
+            row.withdrawal_enabled,
+            row.networks,
+        )
         for row in store.get_all()
     }
 
@@ -122,13 +136,17 @@ def _assert_same(a: LiveStore, b: LiveStore, *, identity: bool) -> None:
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3])
-async def test_generation_path_matches_applying_to_every_row_every_tick(seed: int) -> None:
+async def test_generation_path_matches_applying_to_every_row_every_tick(
+    seed: int,
+) -> None:
     rng = random.Random(seed)
     service = _service()
     new_store, ref_store = LiveStore(), LiveStore()
     client = _client()
     new_loop = TickLoop(store=new_store, streams=[], client=client, wallet=service)
-    ref_loop = TickLoop(store=ref_store, streams=[], client=client, wallet=FullEveryTick(service))  # type: ignore[arg-type]
+    ref_loop = TickLoop(
+        store=ref_store, streams=[], client=client, wallet=FullEveryTick(service)
+    )  # type: ignore[arg-type]
     for store in (new_store, ref_store):
         store.set_rate("upbit", 1400.0, 1390.0, NOW)
         store.set_rate("bithumb", 1401.0, 1391.0, NOW)
@@ -168,7 +186,9 @@ async def test_generation_path_matches_applying_to_every_row_every_tick(seed: in
             continue
         _assert_same(new_store, ref_store, identity=False)
     # 대조가 의미 있으려면 세대가 그대로인 틱(새 행 경로)과 바뀐 틱(전 행 경로)이 둘 다 많아야 한다
-    same = sum(1 for a, b in zip(gens_at_tick, gens_at_tick[1:], strict=False) if a == b)
+    same = sum(
+        1 for a, b in zip(gens_at_tick, gens_at_tick[1:], strict=False) if a == b
+    )
     assert same > 200 and len(gens_at_tick) - same > 50
 
 
@@ -186,7 +206,10 @@ async def test_tick_during_a_pending_fetch_does_not_keep_stale_rows() -> None:
 
     async def slow() -> dict[str, CoinStatus]:
         await gate.wait()
-        return {"BTC": CoinStatus(True, False, nets), "ETH": CoinStatus(False, True, [])}
+        return {
+            "BTC": CoinStatus(True, False, nets),
+            "ETH": CoinStatus(False, True, []),
+        }
 
     fetch = asyncio.create_task(service._fetch_one("upbit", slow()))
     await asyncio.sleep(0)  # 조회가 응답 대기에 들어갔다
@@ -196,7 +219,10 @@ async def test_tick_during_a_pending_fetch_does_not_keep_stale_rows() -> None:
     loop.tick(T0 + 2)
     btc, eth = store.get("upbit", "BTC"), store.get("upbit", "ETH")
     assert btc is not None and eth is not None
-    assert (btc.deposit_enabled, btc.withdrawal_enabled) == (True, False) and btc.networks is nets
+    assert (btc.deposit_enabled, btc.withdrawal_enabled) == (
+        True,
+        False,
+    ) and btc.networks is nets
     assert (eth.deposit_enabled, eth.withdrawal_enabled) == (False, True)
 
 
@@ -215,7 +241,10 @@ async def test_new_row_between_generations_gets_the_cache_on_the_next_tick() -> 
     store.put_row(row, NOW)  # 세대 사이에 새로 생긴 행(소문자 base)
     assert row.deposit_enabled is None
     loop.tick(T0 + 1)
-    assert (row.deposit_enabled, row.withdrawal_enabled) == (True, True) and row.networks is nets
+    assert (row.deposit_enabled, row.withdrawal_enabled) == (
+        True,
+        True,
+    ) and row.networks is nets
     # 교체된 행은 물려받는다 — 새 행 목록에 들어가지 않는다
     replaced = make_row("bithumb", "SOL")
     store.put_row(replaced, NOW)
@@ -223,7 +252,9 @@ async def test_new_row_between_generations_gets_the_cache_on_the_next_tick() -> 
     assert replaced.networks is nets
 
 
-async def test_apply_error_on_the_new_row_path_is_repaired_by_a_full_pass_next_tick() -> None:
+async def test_apply_error_on_the_new_row_path_is_repaired_by_a_full_pass_next_tick() -> (
+    None
+):
     service = _service()
     nets = [Network("ETH", "Ethereum", True, False)]
 
@@ -242,7 +273,9 @@ async def test_apply_error_on_the_new_row_path_is_repaired_by_a_full_pass_next_t
         def generation(self) -> int:
             return service.generation
 
-        async def refresh_if_due(self, client: httpx.AsyncClient, *, force: bool = False) -> None:
+        async def refresh_if_due(
+            self, client: httpx.AsyncClient, *, force: bool = False
+        ) -> None:
             return None
 
         def apply(self, rows: list[Row], exchange: str) -> None:
@@ -271,7 +304,10 @@ async def test_apply_error_on_the_new_row_path_is_repaired_by_a_full_pass_next_t
         loop.tick(T0 + 1)  # 새 행 경로에서 예외 — 새 행 목록은 이미 비었다
     assert row.deposit_enabled is None
     loop.tick(T0 + 2)  # 세대를 모르는 상태라 전 행으로 다시 반영한다
-    assert (row.deposit_enabled, row.withdrawal_enabled) == (True, False) and row.networks is nets
+    assert (row.deposit_enabled, row.withdrawal_enabled) == (
+        True,
+        False,
+    ) and row.networks is nets
 
 
 def test_take_new_rows_returns_current_rows_of_new_keys_once() -> None:

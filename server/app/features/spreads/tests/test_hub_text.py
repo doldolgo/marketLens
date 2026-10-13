@@ -77,7 +77,13 @@ def _row(rng: random.Random, sym: str, dom: str, fx: str) -> dict:
     }
 
 
-def _table(rows: list[dict], *, rate: float = 1400.0, warnings: list[str] | None = None, at: int = 0) -> dict:
+def _table(
+    rows: list[dict],
+    *,
+    rate: float = 1400.0,
+    warnings: list[str] | None = None,
+    at: int = 0,
+) -> dict:
     """build_table 의 최상위 — rate·notional·rows·warnings·시각 둘 순서."""
     return {
         "rate": rate,
@@ -106,7 +112,9 @@ def _next(rng: random.Random, rows: list[dict], serial: list[int]) -> list[dict]
             else:
                 r["spark"] = [-0.0]  # 빈 목록 → 값 하나는 바뀐 행
         elif roll < 0.3:
-            r["dayChg"] = -0.0 if r["dayChg"] == 0.0 and str(r["dayChg"]) != "-0.0" else 0.0
+            r["dayChg"] = (
+                -0.0 if r["dayChg"] == 0.0 and str(r["dayChg"]) != "-0.0" else 0.0
+            )
         elif roll < 0.45:
             r["fwd"] = rng.uniform(-5, 5)
             r["spark"] = [*r["spark"][1:], round(rng.uniform(-2, 2), 3)]
@@ -117,7 +125,10 @@ def _next(rng: random.Random, rows: list[dict], serial: list[int]) -> list[dict]
         out.append(r)
     for _ in range(rng.randint(0, 3)):
         serial[0] += 1
-        out.insert(rng.randrange(len(out) + 1), _row(rng, f"N{serial[0]}", rng.choice(DOMS), rng.choice(FXS)))
+        out.insert(
+            rng.randrange(len(out) + 1),
+            _row(rng, f"N{serial[0]}", rng.choice(DOMS), rng.choice(FXS)),
+        )
     return out
 
 
@@ -143,7 +154,17 @@ def _texts(seed_: int, n: int, rows: int = 40) -> list[str]:
             cur = _next(rng, cur, serial)
         warnings = [WARN] if rng.random() < 0.3 else []
         rate = rng.choice([1400.0, 1400.5])
-        out.append(_encode(rng, _table(cur if rng.random() > 0.03 else [], rate=rate, warnings=warnings, at=i)))
+        out.append(
+            _encode(
+                rng,
+                _table(
+                    cur if rng.random() > 0.03 else [],
+                    rate=rate,
+                    warnings=warnings,
+                    at=i,
+                ),
+            )
+        )
     return out
 
 
@@ -179,10 +200,24 @@ def test_text_delta_and_snapshot_are_the_parse_path_bytes(seed_: int) -> None:
 
 def test_zero_sign_only_change_is_not_a_changed_row_but_strings_with_zero_are() -> None:
     """spark 끝값·dayChg 의 0.0 ↔ -0.0 은 파싱 경로처럼 안 실린다. 문자열 안의 `:-0.0,`·`[-0.0]` 은 값이 아니라 그대로 비교한다."""
-    a = {**_row(random.Random(1), "BTC", "upbit", "binance"), "spark": [0.1, 0.0], "dayChg": 0.0, "netDom": "x:-0.0,y"}
-    b = {**a, "spark": [0.1, -0.0], "dayChg": -0.0, "age": 9.0}  # 0 부호와 age 만 — 안 바뀐 행
+    a = {
+        **_row(random.Random(1), "BTC", "upbit", "binance"),
+        "spark": [0.1, 0.0],
+        "dayChg": 0.0,
+        "netDom": "x:-0.0,y",
+    }
+    b = {
+        **a,
+        "spark": [0.1, -0.0],
+        "dayChg": -0.0,
+        "age": 9.0,
+    }  # 0 부호와 age 만 — 안 바뀐 행
     c = {**b, "netDom": "x:0.0,y"}  # 문자열 안 — 바뀐 행
-    d = {**a, "spark": [0.1, -0.0, -0.0], "netFx": '"spark":[-0.0]'}  # 값 개수가 다르다 — 바뀐 행
+    d = {
+        **a,
+        "spark": [0.1, -0.0, -0.0],
+        "netFx": '"spark":[-0.0]',
+    }  # 값 개수가 다르다 — 바뀐 행
     texts = [encode_table(_table([r])) for r in (a, b, c, d)]
     got = _text_chain(texts)
     assert got == _ref_chain(texts)
@@ -209,7 +244,10 @@ def test_real_tables_with_minute_rollover_values() -> None:
                 }
             )  # fmt: skip
         texts.append(encode_table(_table(rows, rate=t["rate"], at=i)))
-    assert sum('"spark":[' in p and "-0.0" in p for p in split_table(texts[0], CHANNEL)[2]) > 0  # type: ignore[index]
+    assert (
+        sum('"spark":[' in p and "-0.0" in p for p in split_table(texts[0], CHANNEL)[2])
+        > 0
+    )  # type: ignore[index]
     assert _text_chain(texts) == _ref_chain(texts)
 
 
@@ -237,21 +275,36 @@ def test_table_contract_the_text_path_relies_on() -> None:
 
 
 def _odd_shapes() -> dict[str, str]:
-    base = _table([_row(random.Random(2), "BTC", "upbit", "binance"), _row(random.Random(3), "ETH", "upbit", "bybit")], warnings=[WARN])
+    base = _table(
+        [
+            _row(random.Random(2), "BTC", "upbit", "binance"),
+            _row(random.Random(3), "ETH", "upbit", "bybit"),
+        ],
+        warnings=[WARN],
+    )
     inserted = json.loads(json.dumps(base))
-    inserted["rows"] = [{**{k: r[k] for k in ("sym", "dom", "fx")}, "fxName": "Binance", **r} for r in inserted["rows"]]
+    inserted["rows"] = [
+        {**{k: r[k] for k in ("sym", "dom", "fx")}, "fxName": "Binance", **r}
+        for r in inserted["rows"]
+    ]
     no_sym_first = json.loads(json.dumps(base))
     no_sym_first["rows"] = [{"dom": r["dom"], **r} for r in no_sym_first["rows"]]
     dup = json.loads(json.dumps(base))
     dup["rows"] = [dup["rows"][0], dup["rows"][0]]
     no_age = json.loads(json.dumps(base))
-    no_age["rows"] = [{k: v for k, v in r.items() if k != "age"} for r in no_age["rows"]]
+    no_age["rows"] = [
+        {k: v for k, v in r.items() if k != "age"} for r in no_age["rows"]
+    ]
     typed = {"type": "x", **base}
     control = json.loads(json.dumps(base))
-    control["rows"][0]["netDom"] = "a\x01b"  # 제어문자는 게시기 글에서도 \u0001 — 파싱 경로로 간다
+    control["rows"][0]["netDom"] = (
+        "a\x01b"  # 제어문자는 게시기 글에서도 \u0001 — 파싱 경로로 간다
+    )
     return {
         "spaces": json.dumps(base),
-        "ascii_escapes": json.dumps(base, ensure_ascii=False, separators=(",", ":")).replace("업", "\\uc5c5"),
+        "ascii_escapes": json.dumps(
+            base, ensure_ascii=False, separators=(",", ":")
+        ).replace("업", "\\uc5c5"),
         "ensure_ascii": json.dumps(base, separators=(",", ":")),
         "key_between": encode_table(inserted),
         "sym_not_first": encode_table(no_sym_first),
@@ -271,11 +324,17 @@ def test_tables_not_in_the_publisher_shape_fall_back_to_parsing(name: str) -> No
 
 
 @pytest.mark.parametrize("name", list(_odd_shapes()))
-async def test_hub_sends_the_parse_path_bytes_for_odd_shapes_and_returns_to_text(name: str) -> None:
+async def test_hub_sends_the_parse_path_bytes_for_odd_shapes_and_returns_to_text(
+    name: str,
+) -> None:
     """모양이 다른 표가 끼어도 허브가 내보내는 글은 파싱 경로 그대로이고, 다음 정상 표부터 다시 글 경로다."""
     rng = random.Random(5)
     rows = [_row(rng, "BTC", "upbit", "binance"), _row(rng, "ETH", "upbit", "bybit")]
-    texts = [encode_table(_table(rows)), _odd_shapes()[name], encode_table(_table(rows[::-1], at=2))]
+    texts = [
+        encode_table(_table(rows)),
+        _odd_shapes()[name],
+        encode_table(_table(rows[::-1], at=2)),
+    ]
     texts.append(encode_table(_table([{**rows[0], "fwd": 9.5}], at=3)))
     bus, _ = make_bus()
     await bus.publish_table(texts[0])
@@ -285,7 +344,9 @@ async def test_hub_sends_the_parse_path_bytes_for_odd_shapes_and_returns_to_text
     for t in texts[1:]:
         hub.on_table(t)
     await wait_until(lambda: len(ws.sent) == 4)
-    assert ws.sent == [make_snapshot(json.loads(texts[0]))] + [_delta(texts[i - 1], texts[i]) for i in (1, 2, 3)]
+    assert ws.sent == [make_snapshot(json.loads(texts[0]))] + [
+        _delta(texts[i - 1], texts[i]) for i in (1, 2, 3)
+    ]
     await hub.aclose()
 
 
@@ -323,7 +384,9 @@ def _delta(prev: str, cur: str) -> str:
 
 
 @pytest.mark.parametrize("odd_first", [False, True])
-async def test_hub_session_frames_match_the_parse_path(monkeypatch, odd_first: bool) -> None:  # noqa: ANN001
+async def test_hub_session_frames_match_the_parse_path(
+    monkeypatch, odd_first: bool
+) -> None:  # noqa: ANN001
     """접속·이탈이 섞인 한 흐름 — 접속마다 받은 메시지가 파싱 경로로 만든 기대값과 글자까지 같다.
 
     표는 160행(약 90KB)이라 압축은 스레드에서 돈다. `odd_first` 면 첫 표만 공백 있는 글이다 — 파싱 경로로 한 번 갔다가
@@ -360,10 +423,21 @@ async def test_hub_session_frames_match_the_parse_path(monkeypatch, odd_first: b
     await hub.attach(c)  # type: ignore[arg-type]
     for t in texts[11:14]:
         hub.on_table(t)
-    want_a = [make_snapshot(json.loads(texts[0]))] + [_delta(texts[i - 1], texts[i]) for i in range(1, 8)]
-    want_b = [make_snapshot(json.loads(texts[4]))] + [_delta(texts[i - 1], texts[i]) for i in range(5, 10)]
-    want_c = [make_snapshot(json.loads(texts[10]))] + [_delta(texts[i - 1], texts[i]) for i in range(11, 14)]
-    await wait_until(lambda: (len(a.sent), len(b.sent), len(c.sent)) == (len(want_a), len(want_b), len(want_c)))
+    want_a = [make_snapshot(json.loads(texts[0]))] + [
+        _delta(texts[i - 1], texts[i]) for i in range(1, 8)
+    ]
+    want_b = [make_snapshot(json.loads(texts[4]))] + [
+        _delta(texts[i - 1], texts[i]) for i in range(5, 10)
+    ]
+    want_c = [make_snapshot(json.loads(texts[10]))] + [
+        _delta(texts[i - 1], texts[i]) for i in range(11, 14)
+    ]
+    await wait_until(
+        lambda: (
+            (len(a.sent), len(b.sent), len(c.sent))
+            == (len(want_a), len(want_b), len(want_c))
+        )
+    )
     await asyncio.sleep(0.05)
     assert a.sent == want_a
     assert b.sent == want_b

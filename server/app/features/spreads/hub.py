@@ -148,9 +148,7 @@ def _keep_str(m: re.Match[str]) -> str:
 
 def _zero(cmp: str) -> str:
     """비교 글자의 값 -0.0 을 0.0 으로 — 0.0 ↔ -0.0 만 바뀐 행을 파싱 경로처럼 "안 바뀜" 으로 본다."""
-    if not (
-        "-0.0," in cmp or "-0.0]" in cmp or "-0.0}" in cmp or cmp.endswith("-0.0")
-    ):
+    if not ("-0.0," in cmp or "-0.0]" in cmp or "-0.0}" in cmp or cmp.endswith("-0.0")):
         return cmp  # -0.012 같은 음수뿐이다
     return _NEG_ZERO.sub(_keep_str, cmp)
 
@@ -356,7 +354,9 @@ class SpreadsHub:
         self._snap: _Out | None = None
         # 나갈 프레임 줄 — 만든 순서대로 나간다. 앞 프레임이 압축 중이면 뒤 프레임은 다 됐어도 기다린다
         self._out: deque[_Out] = deque()
-        self._gzip: ThreadPoolExecutor | None = None  # 첫 큰 프레임 때 만든다 — 접속자가 없는 허브엔 스레드가 없다
+        self._gzip: ThreadPoolExecutor | None = (
+            None  # 첫 큰 프레임 때 만든다 — 접속자가 없는 허브엔 스레드가 없다
+        )
         self._shape_warned = -SHAPE_WARN_SEC
         self._task: asyncio.Task[None] | None = None
         self._wanted = (
@@ -401,7 +401,9 @@ class SpreadsHub:
                 # 이 표를 처음 받는 접속자 — 여기서 한 번 압축하고, 같은 표 동안 붙는 접속자는 이 프레임을 받는다
                 self._snap = self._send(self._snapshot(self._text), [conn])
             elif snap.frame is None:
-                snap.to.append(conn)  # 아직 압축 중 — 끝나면 같은 바이트를 같은 자리에서 받는다
+                snap.to.append(
+                    conn
+                )  # 아직 압축 중 — 끝나면 같은 바이트를 같은 자리에서 받는다
             else:
                 self._put(snap.frame, [conn])
         else:
@@ -517,7 +519,9 @@ class SpreadsHub:
         if exc is not None:
             # 받을 접속자들의 표가 이 프레임만큼 비고, 줄에 남은 프레임은 이 프레임을 전제로 만든 것이다 — 상태와 줄을
             # 버려 다음 표를 전원에게 snapshot 으로 보낸다(그 사이 붙는 접속자는 waiting)
-            logger.warning("%s 프레임 압축 실패 — 다음 표를 snapshot 으로: %r", self._table_id, exc)
+            logger.warning(
+                "%s 프레임 압축 실패 — 다음 표를 snapshot 으로: %r", self._table_id, exc
+            )
             self._drop()
             return
         out.frame = job.result()

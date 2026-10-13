@@ -129,7 +129,10 @@ def _rows(store: LiveStore, now: datetime, as_text: bool) -> list[Any]:
                 # 거래 정지·심볼 장애 — 스트림은 살아 있는데 이 코인 프레임만 안 온다 (003 §3.2-4 와 같다)
                 page = max(page, (now - updated).total_seconds())
             pok = (
-                prow.bid > 0 and prow.bid_size > 0 and prow.ask > 0 and prow.ask_size > 0
+                prow.bid > 0
+                and prow.bid_size > 0
+                and prow.ask > 0
+                and prow.ask_size > 0
             )
             # 펀딩 세 값은 fail 행에도 그대로 싣는다 — 호가와 무관한 값이다 (§3.2)
             rate = prow.funding_rate
@@ -154,7 +157,16 @@ def _rows(store: LiveStore, now: datetime, as_text: bool) -> list[Any]:
                 )
             else:
                 perp_markets.append(
-                    (page, prow.bid, prow.ask, pok, source, funding, interval_h, next_ts)
+                    (
+                        page,
+                        prow.bid,
+                        prow.ask,
+                        pok,
+                        source,
+                        funding,
+                        interval_h,
+                        next_ts,
+                    )
                 )
         if as_text:
             sym_text = _name_text(base)

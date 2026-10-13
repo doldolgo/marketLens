@@ -93,7 +93,9 @@ def delta(prev: str, cur: str) -> str:
     return make_delta(index_rows(json.loads(prev)), json.loads(cur))[0]
 
 
-async def test_loop_runs_while_compressing_and_frames_leave_in_order(monkeypatch, to_thread) -> None:  # noqa: ANN001
+async def test_loop_runs_while_compressing_and_frames_leave_in_order(
+    monkeypatch, to_thread
+) -> None:  # noqa: ANN001
     held = HeldPack(monkeypatch)
     bus, _ = make_bus()
     await bus.publish_table(t(0))
@@ -108,11 +110,15 @@ async def test_loop_runs_while_compressing_and_frames_leave_in_order(monkeypatch
     held.release()
     await wait_until(lambda: len(ws.sent) == 3)
     assert ws.sent == [snap(t(0)), delta(t(0), t(1)), delta(t(1), t(2))]
-    assert {name for name, _ in held.calls} == {"spreads-gzip_0"}  # 허브 전용 스레드 하나
+    assert {name for name, _ in held.calls} == {
+        "spreads-gzip_0"
+    }  # 허브 전용 스레드 하나
     await hub.aclose()
 
 
-async def test_connection_attached_while_a_delta_compresses_gets_the_new_snapshot_only(monkeypatch, to_thread) -> None:  # noqa: ANN001
+async def test_connection_attached_while_a_delta_compresses_gets_the_new_snapshot_only(
+    monkeypatch, to_thread
+) -> None:  # noqa: ANN001
     held = HeldPack(monkeypatch)
     bus, _ = make_bus()
     await bus.publish_table(t(0))
@@ -131,7 +137,9 @@ async def test_connection_attached_while_a_delta_compresses_gets_the_new_snapsho
     await hub.aclose()
 
 
-async def test_connections_joining_while_the_snapshot_compresses_share_one_compression(monkeypatch, to_thread) -> None:  # noqa: ANN001
+async def test_connections_joining_while_the_snapshot_compresses_share_one_compression(
+    monkeypatch, to_thread
+) -> None:  # noqa: ANN001
     held = HeldPack(monkeypatch)
     bus, _ = make_bus()
     hub = SpreadsHub(bus=bus)
@@ -194,7 +202,9 @@ class GatedLatestBus(RedisBus):
         return await super().latest(table)
 
 
-async def test_table_arriving_during_the_first_latest_read_keeps_the_synchronous_order(monkeypatch, to_thread) -> None:  # noqa: ANN001
+async def test_table_arriving_during_the_first_latest_read_keeps_the_synchronous_order(
+    monkeypatch, to_thread
+) -> None:  # noqa: ANN001
     """첫 접속자의 latest 읽기 중에 표가 오면 그 표의 snapshot, 이어서 latest 의 snapshot, 그 뒤 latest 기준 delta —
     동기로 압축하던 허브가 그 접속에 넣던 순서 그대로다(압축 중인 첫 snapshot 을 latest snapshot 이 앞지르지 않는다)."""
     held = HeldPack(monkeypatch)
@@ -215,7 +225,9 @@ async def test_table_arriving_during_the_first_latest_read_keeps_the_synchronous
     await hub.aclose()
 
 
-async def test_aclose_while_compressing_sends_nothing_more(monkeypatch, to_thread) -> None:  # noqa: ANN001
+async def test_aclose_while_compressing_sends_nothing_more(
+    monkeypatch, to_thread
+) -> None:  # noqa: ANN001
     held = HeldPack(monkeypatch)
     bus, _ = make_bus()
     await bus.publish_table(t(0))
@@ -238,7 +250,9 @@ async def test_aclose_while_compressing_sends_nothing_more(monkeypatch, to_threa
     await hub.aclose()
 
 
-async def test_failed_compression_resends_a_snapshot_to_everyone(monkeypatch, to_thread, caplog) -> None:  # noqa: ANN001
+async def test_failed_compression_resends_a_snapshot_to_everyone(
+    monkeypatch, to_thread, caplog
+) -> None:  # noqa: ANN001
     real = hub_module.pack
     fail_on = delta(t(0), t(1))
 
@@ -298,13 +312,19 @@ async def test_thread_and_loop_compression_send_identical_frames(monkeypatch) ->
     assert [len(s) for s in on_loop] == [6, 7, 4]
 
 
-async def test_real_size_frames_go_to_the_thread_and_small_ones_stay_on_the_loop(monkeypatch) -> None:  # noqa: ANN001
+async def test_real_size_frames_go_to_the_thread_and_small_ones_stay_on_the_loop(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     """기준 16KB — 빈 delta·작은 표는 루프에서, 수백 행 표는 허브 전용 스레드에서. 작은 프레임도 앞 프레임을 앞지르지 않는다."""
     held = HeldPack(monkeypatch)
     big = [row(f"C{i}", fwd=float(i)) for i in range(120)]
     t0 = encode_table({**table(big), "fetchedAt": 0})
-    t1 = encode_table({**table([{**r, "fwd": r["fwd"] + 0.5} for r in big]), "fetchedAt": 1})  # 전 행 바뀜 — 큰 delta
-    t2 = encode_table({**table([{**r, "fwd": r["fwd"] + 0.5} for r in big]), "fetchedAt": 2})  # 바뀐 행 0 — 작은 delta
+    t1 = encode_table(
+        {**table([{**r, "fwd": r["fwd"] + 0.5} for r in big]), "fetchedAt": 1}
+    )  # 전 행 바뀜 — 큰 delta
+    t2 = encode_table(
+        {**table([{**r, "fwd": r["fwd"] + 0.5} for r in big]), "fetchedAt": 2}
+    )  # 바뀐 행 0 — 작은 delta
     bus, _ = make_bus()
     await bus.publish_table(t0)
     hub = SpreadsHub(bus=bus)

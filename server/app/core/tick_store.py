@@ -159,8 +159,12 @@ class TickRelay:
                 hit is not None
                 and hit[0] == fwd
                 and hit[1] == rev
-                and (fwd != 0.0 or math.copysign(1.0, hit[0]) == math.copysign(1.0, fwd))
-                and (rev != 0.0 or math.copysign(1.0, hit[1]) == math.copysign(1.0, rev))
+                and (
+                    fwd != 0.0 or math.copysign(1.0, hit[0]) == math.copysign(1.0, fwd)
+                )
+                and (
+                    rev != 0.0 or math.copysign(1.0, hit[1]) == math.copysign(1.0, rev)
+                )
             ):
                 append(hit[2])
                 continue

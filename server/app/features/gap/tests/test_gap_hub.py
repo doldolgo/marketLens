@@ -182,7 +182,9 @@ async def test_two_hubs_subscribe_their_own_channel_only_and_unsubscribe_when_id
     await gap_hub.aclose()
 
 
-async def test_first_viewer_with_no_table_gets_waiting_then_snapshot_once_collector_sees_want() -> None:
+async def test_first_viewer_with_no_table_gets_waiting_then_snapshot_once_collector_sees_want() -> (
+    None
+):
     """048 §3.3 — 아무도 안 보던 동안 수집은 표를 안 만든다(`gap:latest` 없음). 첫 접속자는 waiting 을 받고,
     허브가 곧바로 쓴 `gap:want` 를 수집이 읽은 다음 틱의 표가 그 접속자의 snapshot 이 된다."""
     from datetime import UTC, datetime

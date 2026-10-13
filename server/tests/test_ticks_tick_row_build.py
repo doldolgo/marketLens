@@ -69,8 +69,12 @@ def _reference_build_tick(
                         dom=dom_ex,
                         fx=fx_ex,
                         base=base,
-                        fwd=premium_percent(buy_krw=fx_ask * rate_ask, sell_krw=dom_bid),
-                        rev=premium_percent(buy_krw=dom_ask, sell_krw=fx_bid * rate_bid),
+                        fwd=premium_percent(
+                            buy_krw=fx_ask * rate_ask, sell_krw=dom_bid
+                        ),
+                        rev=premium_percent(
+                            buy_krw=dom_ask, sell_krw=fx_bid * rate_bid
+                        ),
                         dom_price=dom_row.price,
                         fx_price=fx_row.price,
                         rate=mid,
@@ -112,10 +116,16 @@ def _random_store(rng: random.Random) -> LiveStore:
         for base in _BASES:
             if rng.random() < 0.25:
                 continue
-            quote = rng.choice(("KRW", "KRW", "BTC")) if ex in ("upbit", "bithumb") else rng.choice(("USDT", "USDT", "USDC"))
+            quote = (
+                rng.choice(("KRW", "KRW", "BTC"))
+                if ex in ("upbit", "bithumb")
+                else rng.choice(("USDT", "USDT", "USDC"))
+            )
             asks = [] if rng.random() < 0.05 else [[_price(rng), 1.0]]
             bids = [] if rng.random() < 0.05 else [[_price(rng), 1.0]]
-            row = make_row(ex, base, quote=quote, price=_price(rng), asks=asks, bids=bids)
+            row = make_row(
+                ex, base, quote=quote, price=_price(rng), asks=asks, bids=bids
+            )
             store.put_row(row, NOW)
             row.deposit_enabled = rng.choice((True, False, None))
             row.withdrawal_enabled = rng.choice((True, False, None))
@@ -140,8 +150,12 @@ def test_tick_rows_match_the_reference_build_type_length_and_values() -> None:
             assert (got.ts, got.dw_failed) == (want.ts, want.dw_failed)
             assert len(got.rows) == len(want.rows)
             for g, w in zip(got.rows, want.rows, strict=True):
-                assert type(g) is TickRow  # namedtuple 하위형 그대로 — 필드 이름으로 읽힌다
-                assert len(g) == len(TickRow._fields)  # 필드가 늘었는데 tuple.__new__ 자리를 빠뜨리면 여기서 걸린다
+                assert (
+                    type(g) is TickRow
+                )  # namedtuple 하위형 그대로 — 필드 이름으로 읽힌다
+                assert len(g) == len(
+                    TickRow._fields
+                )  # 필드가 늘었는데 tuple.__new__ 자리를 빠뜨리면 여기서 걸린다
                 assert repr(g) == repr(w)  # NaN 이 끼어도 비교되게 repr 로
                 assert g._asdict().keys() == w._asdict().keys()
             seen += len(got.rows)
@@ -152,8 +166,16 @@ def test_tick_row_built_from_tuple_new_behaves_like_the_constructor() -> None:
     store = LiveStore()
     store.put_rows(
         [
-            make_row("upbit", "btc", price=100_050.0, bids=[[100_000.0, 1.0]], asks=[[100_100.0, 1.0]]),
-            make_row("binance", "BTC", price=70.5, bids=[[70.0, 1.0]], asks=[[71.0, 1.0]]),
+            make_row(
+                "upbit",
+                "btc",
+                price=100_050.0,
+                bids=[[100_000.0, 1.0]],
+                asks=[[100_100.0, 1.0]],
+            ),
+            make_row(
+                "binance", "BTC", price=70.5, bids=[[70.0, 1.0]], asks=[[71.0, 1.0]]
+            ),
         ],
         NOW,
     )

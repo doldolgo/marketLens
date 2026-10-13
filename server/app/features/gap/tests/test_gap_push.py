@@ -136,7 +136,9 @@ async def test_want_key_turns_building_on_and_its_expiry_turns_it_off() -> None:
     await publisher.refresh_want()
     publisher.observe(Tick(ts=1, rows=(), dw_failed=()))
     assert publisher.pending == 1
-    await bus._client.delete(want_key(GAP_CHANNEL))  # 마지막 접속자가 떠나고 15초가 지났다
+    await bus._client.delete(
+        want_key(GAP_CHANNEL)
+    )  # 마지막 접속자가 떠나고 15초가 지났다
     await publisher.refresh_want()
     publisher.observe(Tick(ts=2, rows=(), dw_failed=()))
     assert publisher.pending == 1  # 새 표는 없다
@@ -159,4 +161,6 @@ async def test_want_read_failure_turns_building_off_and_warns_once(
     await publisher.refresh_want()
     await publisher.refresh_want()
     assert publisher.wanted is False
-    assert len([r for r in caplog.records if "gap:want 읽기 실패" in r.getMessage()]) == 1
+    assert (
+        len([r for r in caplog.records if "gap:want 읽기 실패" in r.getMessage()]) == 1
+    )

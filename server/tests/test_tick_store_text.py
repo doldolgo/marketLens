@@ -34,7 +34,19 @@ from tests.test_real_tables import DATA, _next_second, build_world
 from tests.test_real_tables import NOW as REAL_NOW
 
 T0 = 1_787_000_000
-EDGE = [1e-05, 1e300, 5e-324, 0.1 + 0.2, -0.0, 0.0, 2.5e-310, 1.2345678901234567, -3.25, 123456.789, 1e16]
+EDGE = [
+    1e-05,
+    1e300,
+    5e-324,
+    0.1 + 0.2,
+    -0.0,
+    0.0,
+    2.5e-310,
+    1.2345678901234567,
+    -3.25,
+    123456.789,
+    1e16,
+]
 ODD_NAMES = ["BTC", "eth", "A,B", "C D", "E=F", "G\\H", '가"\\x\u2028']
 
 
@@ -46,14 +58,32 @@ def _reference_batches(datas: list[bytes]) -> list[list[str]]:
         ts = int(record["ts"])
         for r in record["rows"]:
             lines.append(
-                to_line(premium_point(dom=r["dom"], fx=r["fx"], base=r["base"], ts=ts, fwd=float(r["fwd"]), rev=float(r["rev"])))
+                to_line(
+                    premium_point(
+                        dom=r["dom"],
+                        fx=r["fx"],
+                        base=r["base"],
+                        ts=ts,
+                        fwd=float(r["fwd"]),
+                        rev=float(r["rev"]),
+                    )
+                )
             )
-        lines.extend(to_line(dw_fail_point(exchange=ex, ts=ts)) for ex in record["dwFailed"])
+        lines.extend(
+            to_line(dw_fail_point(exchange=ex, ts=ts)) for ex in record["dwFailed"]
+        )
     return [lines[i : i + WRITE_BATCH] for i in range(0, len(lines), WRITE_BATCH)]
 
 
 def _tick(ts: int, n: int, rng: random.Random, dw: tuple[str, ...] = ()) -> Tick:
-    special = [*EDGE, math.nan, math.inf, -math.inf, 3, 0]  # 정수 3·0 — json 은 "3"·"0" 으로 적는다
+    special = [
+        *EDGE,
+        math.nan,
+        math.inf,
+        -math.inf,
+        3,
+        0,
+    ]  # 정수 3·0 — json 은 "3"·"0" 으로 적는다
     rows = tuple(
         TickRow(
             ("upbit", "bithumb")[i % 2],
@@ -69,9 +99,16 @@ def _tick(ts: int, n: int, rng: random.Random, dw: tuple[str, ...] = ()) -> Tick
 
 async def test_flusher_lines_match_the_float_round_trip_on_edge_values() -> None:
     rng = random.Random(21)
-    ticks = [_tick(T0, 2_600, rng, ("upbit",)), _tick(T0 + 1, 2_600, rng), _tick(T0 + 2, 0, rng, ("bithumb", "okx")), _tick(T0 + 3, 4_999, rng)]
+    ticks = [
+        _tick(T0, 2_600, rng, ("upbit",)),
+        _tick(T0 + 1, 2_600, rng),
+        _tick(T0 + 2, 0, rng, ("bithumb", "okx")),
+        _tick(T0 + 3, 4_999, rng),
+    ]
     datas = [encode_tick(t) for t in ticks]
-    assert b"NaN" in gzip.decompress(datas[0]) and b"Infinity" in gzip.decompress(datas[0])
+    assert b"NaN" in gzip.decompress(datas[0]) and b"Infinity" in gzip.decompress(
+        datas[0]
+    )
     stream = RedisTickStream(fakeredis.aioredis.FakeRedis())
     for t, data in zip(ticks, datas, strict=True):
         await stream.add(t.ts, data)
@@ -81,24 +118,39 @@ async def test_flusher_lines_match_the_float_round_trip_on_edge_values() -> None
     assert influx.batches == expected
     joined = "\n".join("\n".join(b) for b in expected)
     # 정수 값도 "3.0" 으로(기준은 float() 뒤 repr), NaN·inf 는 repr 그대로
-    assert "fwd=3.0," in joined and "=nan" in joined and "=inf" in joined and "=-inf" in joined
+    assert (
+        "fwd=3.0," in joined
+        and "=nan" in joined
+        and "=inf" in joined
+        and "=-inf" in joined
+    )
 
 
 def test_record_digits_are_float_repr_so_the_text_line_is_the_float_line() -> None:
     """`encode_tick` 의 숫자 글자 = repr(float) — 무작위 비트 패턴(부정규·큰 지수 포함)과 김프 모양 값에서."""
     rng = random.Random(5)
-    values = [struct.unpack("<d", rng.getrandbits(64).to_bytes(8, "little"))[0] for _ in range(20_000)]
+    values = [
+        struct.unpack("<d", rng.getrandbits(64).to_bytes(8, "little"))[0]
+        for _ in range(20_000)
+    ]
     values += [rng.uniform(-10, 10) for _ in range(20_000)] + EDGE
     values = [v for v in values if math.isfinite(v)]
     head = premium_head("upbit", "binance", "btc")
     rows = tuple(TickRow("upbit", "binance", "BTC", v, -v) for v in values)
-    record = json.loads(gzip.decompress(encode_tick(Tick(ts=T0, rows=rows, dw_failed=()))), parse_float=str)
+    record = json.loads(
+        gzip.decompress(encode_tick(Tick(ts=T0, rows=rows, dw_failed=()))),
+        parse_float=str,
+    )
     for v, r in zip(values, record["rows"], strict=True):
         fwd, rev = r["fwd"], r["rev"]
-        if type(fwd) is not str:  # 정수 글자로 적힌 float 는 없다 — float 는 늘 소수점이나 지수가 붙는다
+        if (
+            type(fwd) is not str
+        ):  # 정수 글자로 적힌 float 는 없다 — float 는 늘 소수점이나 지수가 붙는다
             raise AssertionError(fwd)
         assert fwd == repr(v) and rev == repr(-v)
-        assert premium_line_text(head, fwd, rev, f" {T0}") == premium_line(head, v, -v, T0)
+        assert premium_line_text(head, fwd, rev, f" {T0}") == premium_line(
+            head, v, -v, T0
+        )
 
 
 async def test_relay_bytes_equal_encode_tick_tick_by_tick() -> None:
@@ -148,7 +200,12 @@ async def test_relay_bytes_equal_encode_tick_on_real_ticks() -> None:
         before = dict(relay._row_texts)
         relay(tick)
         assert relay._queue.pop()[1] == encode_tick(tick)
-        reused += sum(1 for r in tick.rows if before.get((r.dom, r.fx, r.base)) is relay._row_texts.get((r.dom, r.fx, r.base)))
+        reused += sum(
+            1
+            for r in tick.rows
+            if before.get((r.dom, r.fx, r.base))
+            is relay._row_texts.get((r.dom, r.fx, r.base))
+        )
         now += timedelta(seconds=1)
         _next_second(store, rng, now)
     assert reused > 1_000  # 값이 그대로인 조합은 실제로 직전 글을 다시 썼다

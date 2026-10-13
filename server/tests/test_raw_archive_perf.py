@@ -132,7 +132,9 @@ def test_deep_nesting_near_the_recursion_limit_gives_the_reference_outcome(
 # --- 분 창 버퍼와 열린 창 기억 (§3.5) ---
 
 
-async def test_closed_object_lines_are_fixed_for_mixed_keyed_and_plain_records() -> None:
+async def test_closed_object_lines_are_fixed_for_mixed_keyed_and_plain_records() -> (
+    None
+):
     """같은 receivedAt 이 keyed·plain 에 섞이고 keyed 가 교체돼도 줄 순서 = (receivedAt, 기록 순) — 바이트로 고정."""
     archive, s3, clock = build()
     records: list[tuple[int, str, str | None]] = [
@@ -179,7 +181,9 @@ async def test_late_line_for_an_already_closed_window_is_uploaded_not_lost() -> 
     assert await archive.run_once() == 1
     await settled(lambda: len(s3.puts) == 2)
     assert s3.puts[0][0] == s3.puts[1][0]
-    assert [[json.loads(ln)["receivedAt"] for ln in lines_of(b)] for _, b in s3.puts] == [
+    assert [
+        [json.loads(ln)["receivedAt"] for ln in lines_of(b)] for _, b in s3.puts
+    ] == [
         [T0],
         [T0 + 1],
     ]
@@ -219,7 +223,9 @@ async def test_exchange_alternating_between_two_open_windows_keeps_each_line_in_
     archive.record("bithumb", WS, T0 + 1, '{"b":0}')
     archive.record("upbit", WS, T0 + 2, '{"w":0,"i":1}', OB_BTC)
     archive.record("upbit", WS, NEXT + 3, '{"w":1,"i":1}', OB_BTC)
-    archive.record("upbit", WS, T0 + 4, '{"w":0,"i":2}', OB_BTC)  # 같은 창의 같은 키 — 앞 것을 교체
+    archive.record(
+        "upbit", WS, T0 + 4, '{"w":0,"i":2}', OB_BTC
+    )  # 같은 창의 같은 키 — 앞 것을 교체
     assert archive.buffered("upbit") == 4
     clock.now = NEXT
     assert await archive.run_once() == 2  # 앞 창(upbit·bithumb)만

@@ -78,16 +78,27 @@ def _driver(ticks: int, yields: int = 1):  # noqa: ANN202
     return (lambda: next(times)), sleep, after_tick, done
 
 
-async def test_run_holds_gc_during_the_tick_and_turns_it_back_on_after_the_hold() -> None:
+async def test_run_holds_gc_during_the_tick_and_turns_it_back_on_after_the_hold() -> (
+    None
+):
     gc.enable()
     gc.set_threshold(*GC_THRESHOLDS)
     probe = GcProbe()
     clock, sleep, after_tick, done = _driver(1)
-    loop = TickLoop(store=seeded(), streams=[], client=_client(), spreads=probe, clock=clock, sleep=sleep)
+    loop = TickLoop(
+        store=seeded(),
+        streams=[],
+        client=_client(),
+        spreads=probe,
+        clock=clock,
+        sleep=sleep,
+    )
     loop.start()
     await asyncio.wait_for(done.wait(), 2.0)
     assert probe.enabled == [False]  # 틱 안에서는 자동 수집이 꺼져 있다
-    assert probe.thresholds == [GC_THRESHOLDS]  # 세대 임계는 그대로(001 §3.1 — test_gc_settle 단언이 보류 창에도 맞는다)
+    assert probe.thresholds == [
+        GC_THRESHOLDS
+    ]  # 세대 임계는 그대로(001 §3.1 — test_gc_settle 단언이 보류 창에도 맞는다)
     assert after_tick == [False]  # 틱 직후에도 아직 보류 창 안이다
     assert await _wait_enabled()  # 틱 끝 + GC_HOLD_SEC 에 다시 켜진다
     await loop.aclose()
@@ -102,7 +113,14 @@ async def test_next_tick_before_the_resume_keeps_holding_and_never_leaves_gc_off
     gc.enable()
     probe = GcProbe()
     clock, sleep, after_tick, done = _driver(GC_HOLD_CARRY_MAX + 3)
-    loop = TickLoop(store=seeded(), streams=[], client=_client(), spreads=probe, clock=clock, sleep=sleep)
+    loop = TickLoop(
+        store=seeded(),
+        streams=[],
+        client=_client(),
+        spreads=probe,
+        clock=clock,
+        sleep=sleep,
+    )
     loop.start()
     await asyncio.wait_for(done.wait(), 2.0)
     # 이어서 보류하다가 상한(GC_HOLD_CARRY_MAX)을 넘은 틱 하나는 보류하지 않고 켠 채로 돈다 — 그 뒤 다시 보류
@@ -116,7 +134,14 @@ async def test_tick_that_raises_still_turns_gc_back_on() -> None:
     gc.enable()
     probe = GcProbe(fail=True)
     clock, sleep, after_tick, done = _driver(2)
-    loop = TickLoop(store=seeded(), streams=[], client=_client(), spreads=probe, clock=clock, sleep=sleep)
+    loop = TickLoop(
+        store=seeded(),
+        streams=[],
+        client=_client(),
+        spreads=probe,
+        clock=clock,
+        sleep=sleep,
+    )
     loop.start()
     await asyncio.wait_for(done.wait(), 2.0)
     assert probe.enabled == [False, False]  # 예외로 끝난 틱 다음 틱도 같은 규칙
@@ -128,7 +153,14 @@ async def test_gc_turned_off_elsewhere_is_left_alone() -> None:
     gc.disable()
     probe = GcProbe()
     clock, sleep, after_tick, done = _driver(2)
-    loop = TickLoop(store=seeded(), streams=[], client=_client(), spreads=probe, clock=clock, sleep=sleep)
+    loop = TickLoop(
+        store=seeded(),
+        streams=[],
+        client=_client(),
+        spreads=probe,
+        clock=clock,
+        sleep=sleep,
+    )
     loop.start()
     await asyncio.wait_for(done.wait(), 2.0)
     await asyncio.sleep(GC_HOLD_SEC + 0.1)
@@ -158,7 +190,14 @@ async def test_run_registers_gc_callback_only_while_running_and_logs_gc_per_gene
     # 틱마다 관측자가 1세대 수집을 한 번 부른다 — 틱 안 1세대 횟수가 틱 수와 같아야 한다
     probe = GcProbe(collect=1)
     clock, sleep, after_tick, done = _driver(STAGE_REPORT_SEC + 1, yields=2)
-    loop = TickLoop(store=seeded(), streams=[], client=_client(), spreads=probe, clock=clock, sleep=sleep)
+    loop = TickLoop(
+        store=seeded(),
+        streams=[],
+        client=_client(),
+        spreads=probe,
+        clock=clock,
+        sleep=sleep,
+    )
     callback = loop._gc_callback
     assert callback not in gc.callbacks
     loop.start()
@@ -166,7 +205,11 @@ async def test_run_registers_gc_callback_only_while_running_and_logs_gc_per_gene
     assert callback in gc.callbacks
     [line] = _summaries(caplog)
     # 단계 칸은 그대로 읽힌다
-    assert _has_stage(line, "깨어남") and _has_stage(line, "합계") and _has_stage(line, "표")
+    assert (
+        _has_stage(line, "깨어남")
+        and _has_stage(line, "합계")
+        and _has_stage(line, "표")
+    )
     gc_part = line.split("GC 틱 안/밖: ", 1)[1]
     gen0, gen1, gen2, last = gc_part.split(" · ")
     # 틱 안에서는 자동 수집이 꺼져 있어 0세대·2세대 수집이 없다. 1세대는 관측자가 부른 61번이 전부 틱 안
@@ -179,7 +222,9 @@ async def test_run_registers_gc_callback_only_while_running_and_logs_gc_per_gene
     assert callback not in gc.callbacks
 
 
-def test_gc_part_is_only_added_while_run_is_registered(caplog: pytest.LogCaptureFixture) -> None:
+def test_gc_part_is_only_added_while_run_is_registered(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     caplog.set_level(logging.INFO, logger="marketlens.ticks")
     loop = TickLoop(store=seeded(), streams=[], client=_client())
     for i in range(STAGE_REPORT_SEC + 1):
@@ -198,10 +243,14 @@ class _Seq:
         return self.values.pop(0) if len(self.values) > 1 else self.values[0]
 
 
-def test_gc_stats_counts_generations_inside_and_outside_ticks(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gc_stats_counts_generations_inside_and_outside_ticks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     stats = _GcStats()
     monkeypatch.setattr(
-        ticks_mod.time, "perf_counter", _Seq(10.000, 10.002, 20.000, 20.005, 30.000, 30.010, 40.000, 40.0015)
+        ticks_mod.time,
+        "perf_counter",
+        _Seq(10.000, 10.002, 20.000, 20.005, 30.000, 30.010, 40.000, 40.0015),
     )
     monkeypatch.setattr(ticks_mod.time, "monotonic", _Seq(100.0, 104.4, 200.0))
     stats.in_tick = True
@@ -211,7 +260,9 @@ def test_gc_stats_counts_generations_inside_and_outside_ticks(monkeypatch: pytes
     stats.callback("start", {"generation": 1, "collected": 0, "uncollectable": 0})
     stats.callback("stop", {"generation": 1, "collected": 0, "uncollectable": 0})
     stats.callback("start", {"generation": 2, "collected": 0, "uncollectable": 0})
-    stats.callback("stop", {"generation": 2, "collected": 7, "uncollectable": 0})  # monotonic 100.0
+    stats.callback(
+        "stop", {"generation": 2, "collected": 7, "uncollectable": 0}
+    )  # monotonic 100.0
     stats.callback("start", {"generation": 0, "collected": 0, "uncollectable": 0})
     stats.callback("stop", {"generation": 0, "collected": 1, "uncollectable": 0})
     assert stats.summary() == (  # monotonic 104.4
