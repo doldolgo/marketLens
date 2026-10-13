@@ -39,23 +39,27 @@
 - 때: 문서가 숨겨질 때(`visibilitychange` → hidden)·`pagehide`·구간 끝. 보내기 직전에 동의를 다시 판정해 '켬' 이 아니면 버리고 멈춘다(같은 탭·다른 탭 철회 모두). 보낸 뒤 보낸 몫을 0 으로(구간 합 상한·이미 보낸 seen 은 기억) 다시 보이면 같은 구간을 이어 센다. 페이지뷰(pv)는 구간의 첫 보냄에만 1.
 - 몸통(JSON 글자 — sendBeacon 에 문자열을 넘겨 `text/plain`, 미리 묻기 없음): `{"v":1,"page":"app-spread","device":"pc","pv":1,"a":{"table":[ms,clicks,seen],…}}`. 값이 모두 0 인 영역은 빼고, `a` 가 비고 pv 가 0 이면 보내지 않는다. 몸통 ≤ 4,096바이트.
 - 방법: `navigator.sendBeacon('/api/attention', 몸통)` — 없거나 false 면 `fetch(…, {method:'POST', keepalive:true, credentials:'omit'})` 한 번. 실패해도 다시 보내지 않는다.
+- (061 가 v2 로 넓혔다 — 061 §3) 몸통 v2 는 요소 `e`·깊이 `d`·떠난 곳 `x` 를 더하고 상한은 16,384바이트다.
 
 ### 3.4 서버가 받기 — `POST /attention` (api 역할)
 - 공개 nginx `location = /api/attention`: POST 가 아니면 405(`if ($request_method != POST) { return 405; }` — location 안 `return` 만), `client_max_body_size 4k`(넘으면 nginx 기본 413 — 비콘은 응답을 읽지 않는다), `proxy_set_header X-Client-IP $http_x_forwarded_for`(caddy 에 trusted_proxies 가 없어 caddy 가 넣은 값이 방문자 IP 하나다), api 로. 접속 기록은 server 수준에서 이미 꺼져 있다. caddy 는 이 경로를 로그에서 뺀다(027 의 폴링 제외와 같은 꼴).
 - 순서: ① `Sec-Fetch-Site` 가 있고 `same-origin` 이 아니면 403 ② 몸통 4,096바이트 초과 413 ③ 검사 — JSON 객체, `v`=1, `page` 가 §3.1 목록, `device` ∈ {mobile, pc}, `pv` ∈ {0,1}, `a` 객체·키 ≤ 40·키가 영역 id 꼴, 값은 정수 셋 `[ms 0..600000, clicks 0..50, seen 0|1]`. 어긋나면 400 이고 아무것도 더하지 않는다 ④ 시각이 D 00:00 KST 전이면 204·버림 ⑤ 같은 `X-Client-IP` 의 10분 고정 창 안 121번째부터 204·버림(메모리 표 — 창이 바뀌면 비움, 키 5만 넘으면 새 키는 세지 않고 받음) ⑥ 받은 날(KST)의 합계에 더함 → 204. 오류 응답은 앱 공통 오류 모양(`{"error":{code,…}}` — code `cross_site`·`too_large`·`bad_beacon`).
 - IP 는 ⑤ 의 메모리 표에만 있고 로그·Redis·응답에 쓰지 않는다. `X-Client-IP` 가 없으면 ⑤ 를 건너뛴다.
 - 게이트 시각 계산(D 00:00 Asia/Seoul)은 이 기능 폴더 안에 둔다 — admin 의 같은 함수를 import 하지 않는다(기능 간 import 금지).
+- (061 가 v2 로 넓혔다 — 061 §3) v1·v2 몸통을 모두 받고 상한은 16,384바이트(공개 nginx 16k), 요소·깊이·떠난 곳은 `PRIVACY_V4_EFFECTIVE` 게이트·열쇠 300 제한.
 
 ### 3.5 저장 — Redis
 - 키 `attn:d:<YYYYMMDD>`(KST 날짜) 해시 하나. 필드 `<page>|<device>|<area>|<m>` (m = `ms`·`clicks`·`seen`), 페이지뷰는 `<page>|<device>||pv`. 값은 정수 합. 만료는 `EXPIREAT` 그 KST 날의 끝 + 90일(쓸 때마다 같은 값으로) — 처리방침의 '하루 합계 90일' 과 같고, 피드의 90일 창(오늘 포함)은 모두 살아 있다.
 - 쓰기: api 가 메모리에 더해 두고 10초마다 한 번 파이프라인(HINCRBY 묶음 + EXPIREAT)으로 보낸다. 실패하면 메모리에 두고 다음에 다시 — 쌓인 필드가 2만을 넘으면 그 묶음을 버리고 WARNING 한 줄. api lifespan 이 이 주기 작업을 띄우고 끌 때 한 번 보낸다(`main.py` `_api_lifespan` 과 그 설명 글을 고친다 — 지금은 'Redis 는 구독 목적으로만').
 - `RedisBus` 공개 메서드(core 계약, 기존 것처럼 async): `async attention_add(day: str, counts: Mapping[str, int], expire_at: int) -> None`(한 파이프라인), `async attention_days(days: Sequence[str]) -> dict[str, dict[str, int]]`(키 없으면 빈 dict).
 - 크기: 화면 10 × 기기 2 × 영역 ≈ 15 × 3 + pv ≈ 900 필드/일 — 90일 ≈ 8만 필드, 수 MB(Redis 는 noeviction).
+- (061 가 v2 로 넓혔다 — 061 §3) 같은 해시에 요소 `…|e|<열쇠>|c·h·v`·떠난 곳 `…|<영역>|x`·깊이 `…||d<0~10>` 필드가 더해진다.
 
 ### 3.6 관리자 피드 — `GET /admin/attention?days=1|7|30|90`
 - api 역할. 관리자 nginx 에 `location = /svc/api/admin/attention` 을 `/svc/api/admin/access` 와 같은 꼴(교차 사이트 검사·`rewrite ^ /admin/attention break`·폴링 접속 기록 끔)로 더한다 — 정확 일치 목록이라 저절로 열리지 않는다. 공개 nginx 는 404 그대로(028 목록 밖).
 - `days` 가 목록 밖·없음이면 7. 창: 오늘(KST)을 넣어 거꾸로 `days` 날, 시작이 D 보다 앞이면 D 로 자른다.
 - 응답(200, `Cache-Control: no-store`): `{state, code, gateAt, days, from, to, fetchedAt, rows}` — `state` `ok`·`before_gate`(오늘이 D 전 — rows 빈 목록)·`error`(Redis 실패 — code `redis`), `gateAt` D 00:00 KST epoch ms, `from`·`to` `YYYY-MM-DD`, `rows` = `[{page, device, pv, areas:[{id, ms, clicks, seen}]}]` — 창 안 날을 더한 값, pv 0 인 행 없음, areas 는 ms 큰 순. 같은 `days` 결과를 60초 메모리 캐시.
+- (061 가 v2 로 넓혔다 — 061 §3) `page` 인자, 행마다 `exits`·`depth`(page 를 주면 `elements` 도), 캐시는 (days, page)마다.
 
 ### 3.7 엣지
 - 철회: 보냄마다 다시 판정하므로 철회 뒤 첫 보냄부터 멈춘다(clarity.js 의 다른 탭 새로고침은 랜딩·대시보드에서 Clarity 가 켜졌을 때뿐이라 기대지 않는다).

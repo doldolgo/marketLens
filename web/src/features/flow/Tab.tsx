@@ -7,8 +7,9 @@ import { oneOf, useUrlState } from '../../shared/urlState'
 import { useNetflow, useRecent } from './api'
 import type { FlowDir, FlowFeed, FlowWindow, NetflowRow, RecentRow } from './types'
 
-const WINDOWS: [FlowWindow, string][] = [['1h', '1시간'], ['6h', '6시간'], ['24h', '24시간']]
-const DIRS: [FlowDir, string][] = [['all', '전체'], ['in', '입금'], ['out', '출금']]
+// 셋째 칸은 061 화면 이용 통계의 요소 열쇠(data-el)
+const WINDOWS: [FlowWindow, string, string][] = [['1h', '1시간', 'window:1h'], ['6h', '6시간', 'window:6h'], ['24h', '24시간', 'window:24h']]
+const DIRS: [FlowDir, string, string][] = [['all', '전체', 'dir:all'], ['in', '입금', 'dir:in'], ['out', '출금', 'dir:out']]
 
 /** 원화 강조 기준 — 1억 이상은 accent 굵게 (§3.8). */
 const KRW_BIG = 100_000_000
@@ -128,7 +129,7 @@ function TableTitle({ children }: { children: string }) {
 
 function NetRow({ r, asOf, onCoin }: { r: NetflowRow; asOf: number; onCoin: (sym: string) => void }) {
   return (
-    <div className="hv-row4" style={gridRow(NET_COLS, { height: 36, rule: 6 })}>
+    <div className="hv-row4" data-el={`row:${r.symbol}`} style={gridRow(NET_COLS, { height: 36, rule: 6 })}>
       <button className="hv-txt" onClick={() => onCoin(r.symbol)} style={textBtn}>{r.symbol}</button>
       <span style={{ ...cell, color: 'var(--color-neutral-300)' }}>{countCell(r.inCount, r.inAmount)}</span>
       <span style={{ ...cell, color: 'var(--color-neutral-300)' }}>{countCell(r.outCount, r.outAmount)}</span>
@@ -151,7 +152,7 @@ function RecentRowView({ r }: { r: RecentRow }) {
       <span style={mono} title={r.counterparty}>{shortHex(r.counterparty)}</span>
       <span style={{ ...cell, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
         {/* 새 창 — 열어 둔 대시보드의 WebSocket 을 끊지 않게 */}
-        <a href={`https://etherscan.io/tx/${r.txHash}`} target="_blank" rel="noopener" className="hv-txt" title={r.txHash}
+        <a href={`https://etherscan.io/tx/${r.txHash}`} target="_blank" rel="noopener" className="hv-txt" title={r.txHash} data-el="tx"
           style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11.5, color: 'var(--color-neutral-400)', textDecoration: 'none' }}>
           {shortHex(r.txHash)}
         </a>
@@ -189,9 +190,9 @@ export default function FlowTab({ active }: { active: boolean }) {
     <>
       {/* 바 1: 창 · 방향 · 코인 검색 · 우측 오류 문구 + 피드 상태 */}
       <div data-area="filters" style={bar}>
-        <Seg opts={WINDOWS.map(([id, l]) => segOpt(l, win === id, () => setWin(id)))} />
-        <Seg opts={DIRS.map(([id, l]) => segOpt(l, dir === id, () => setDir(id)))} />
-        <input className="input" placeholder="코인 심볼 입력 후 Enter" value={q}
+        <Seg opts={WINDOWS.map(([id, l, el]) => segOpt(l, win === id, () => setWin(id), el))} />
+        <Seg opts={DIRS.map(([id, l, el]) => segOpt(l, dir === id, () => setDir(id), el))} />
+        <input className="input" placeholder="코인 심볼 입력 후 Enter" value={q} data-el="search"
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') applySearch(q) }}
           style={{ ...searchInput, width: 200 }} />

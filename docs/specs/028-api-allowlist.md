@@ -37,7 +37,7 @@
 
 - `/api/ws/spreads`·`/api/ws/gap`(048) 은 WebSocket 업그레이드 헤더(`Upgrade`·`Connection`, HTTP/1.1)를 지금처럼 붙인다. 접두 location `/api/ws/` 는 없앤다 — 접두면 api 에 새 `/ws/*` 가 생길 때 자동 공개되고, `/api/ws` 가 nginx 의 자동 301 을 받는다.
 - 누가 쓰나: 대시보드 — `/api/health/collect`(수집 상태 탭 5초), `/api/history/events`·`/api/history/candles`(기록 탭), `/api/ws/spreads`(스프레드 탭), `/api/ws/gap`(갭 탭, 048), `/api/flow/netflow`·`/api/flow/recent`(입출금 레이더 탭, 050). 랜딩 — `/api/landing`. 모든 화면의 `attention.js`(052) — `/api/attention`. 감시 — uptime(025)은 `/api/health`, canary(027)는 `/api/health`·`/api/history/candles`·`/api/ws/spreads`.
-- `/api/attention`(052)은 **POST 만** 넘긴다 — location 첫 줄이 `if ($request_method != POST) { return 405; }`(location 안 `return` 만 쓰는 if), `client_max_body_size 4k`(넘으면 nginx 기본 413), 헤더 4개에 더해 `X-Client-IP $http_x_forwarded_for`(caddy 에 trusted_proxies 가 없어 caddy 가 넣은 값이 방문자 IP 하나다 — api 가 IP 10분 제한에만 쓴다).
+- `/api/attention`(052)은 **POST 만** 넘긴다 — location 첫 줄이 `if ($request_method != POST) { return 405; }`(location 안 `return` 만 쓰는 if), `client_max_body_size 16k`(061 — 요소를 싣는 몸통 v2, 앱 상한 16,384바이트와 같다. 넘으면 nginx 기본 413), 헤더 4개에 더해 `X-Client-IP $http_x_forwarded_for`(caddy 에 trusted_proxies 가 없어 caddy 가 넣은 값이 방문자 IP 하나다 — api 가 IP 10분 제한에만 쓴다).
 - 공개 server 에는 `/api` 에 걸리는 **정규식 location 을 두지 않는다** — 정규식은 접두 location(아래 404)보다 먼저 이겨 허용 목록을 우회한다(예: 남겨 둔 `~ ^/api/history/(premium|…)` 가 `premium` 을 api 로 넘긴다).
 
 ### 3.2 그 밖의 `/api` — 404

@@ -55,19 +55,21 @@ export default function GapTab({ active, now }: { active: boolean; now: number }
 
   let gapHeader = '진입 갭 · 현물 → 선물'
   if (mode === 'exit') gapHeader = '정리 갭 · 현물 → 선물'
+  // 넷째 칸은 061 요소 열쇠(data-el)
   const headers: Header[] = [
-    ['sym', '심볼', 'left'], ['price', '현물가 USDT', 'right'],
-    ['gap', gapHeader, 'right'], ['funding', '펀딩비', 'right'],
+    ['sym', '심볼', 'left', 'sort:sym'], ['price', '현물가 USDT', 'right', 'sort:price'],
+    ['gap', gapHeader, 'right', 'sort:gap'], ['funding', '펀딩비', 'right', 'sort:funding'],
   ]
 
   return (
     <>
+      {/* data-el — 061 화면 이용 통계의 요소 열쇠(모양·동작과 무관) */}
       <div data-area="filters" style={bar}>
-        <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={searchInput} />
+        <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={searchInput} data-el="search" />
         <span style={label}>기준 보기</span>
-        <Seg pad="4px 10px" opts={[['entry', '진입 기준'], ['exit', '정리 기준']].map(([id, l]) => segOpt(l, mode === id, () => switchMode(id as Mode)))} />
-        <NumField label="하이라이트 임계값" value={thr} step={0.1} onChange={setThr} />
-        <ToggleBtn on={only} label="임계 초과만" onClick={() => setOnly(!only)} />
+        <Seg pad="4px 10px" opts={[['entry', '진입 기준', 'mode:entry'], ['exit', '정리 기준', 'mode:exit']].map(([id, l, el]) => segOpt(l, mode === id, () => switchMode(id as Mode), el))} />
+        <NumField label="하이라이트 임계값" value={thr} step={0.1} onChange={setThr} el="threshold" />
+        <ToggleBtn on={only} label="임계 초과만" onClick={() => setOnly(!only)} el="only-over" />
         <span style={hint}>양의 갭 = perp &gt; 현물 → 현물 매수 + 선물 숏 · 음의 갭 = 반대 방향</span>
         <span style={count}>{rows.length} / {all.length} 코인 표시</span>
       </div>

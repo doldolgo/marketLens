@@ -45,9 +45,11 @@ const dirColor = (dir: Dir) => pctColor(dir === 'kimp' ? 1 : -1)
 const RANK_GRID = '64px 120px repeat(7, 1fr)'
 /** 거래소 | 시작 | 종료 | 지속 | 최대 스프레드 | 망 */
 const LOG_GRID = '108px 1fr 1fr 78px 100px 1.2fr'
-const HEADERS: [SortKey, string][] = [
-  ['ongoingSince', '상태'], ['cnt', '횟수'], ['maxDur', '최대 지속'], ['avgDur', '평균 지속'],
-  ['maxPct', '최대 스프레드'], ['avgPct', '평균 스프레드'], ['net', '네트워크'], ['last', '최신'],
+/** 셋째 칸은 061 화면 이용 통계의 요소 열쇠(data-el) */
+const HEADERS: [SortKey, string, string][] = [
+  ['ongoingSince', '상태', 'sort:ongoingsince'], ['cnt', '횟수', 'sort:cnt'], ['maxDur', '최대 지속', 'sort:maxdur'],
+  ['avgDur', '평균 지속', 'sort:avgdur'], ['maxPct', '최대 스프레드', 'sort:maxpct'], ['avgPct', '평균 스프레드', 'sort:avgpct'],
+  ['net', '네트워크', 'sort:net'], ['last', '최신', 'sort:last'],
 ]
 /** 표 정렬 URL 표기 `열:asc|desc` — 열은 HEADERS 의 키만. */
 const SORT_CODEC: Codec<{ key: SortKey; dir: number }> = {
@@ -210,15 +212,18 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
   )
   const needOlder = () => { if (!oldestReached) setOlderState({ key: chartKey, n: older + 1 }) }
 
+  // el — 061 요소 열쇠(data-el, 모양·동작과 무관)
   const dirOpts: SegOpt[] = (['kimp', 'reverse'] as Dir[]).map((d) => ({
     label: DIR_LABEL[d], onClick: () => setDir(d),
     bg: dir === d ? 'var(--color-neutral-900)' : 'transparent',
     color: dir === d ? dirColor(d) : 'var(--color-neutral-500)',
+    el: `dir:${d}`,
   }))
-  const seg = (label: string, active: boolean, onClick: () => void): SegOpt => ({
+  const seg = (label: string, active: boolean, onClick: () => void, el: string): SegOpt => ({
     label, onClick,
     bg: active ? 'var(--color-neutral-900)' : 'transparent',
     color: active ? 'var(--color-accent-300)' : 'var(--color-neutral-500)',
+    el,
   })
   // 필터 앞 작은 제목 — 차트 툴바의 `국내`·`해외` 와 같은 모양이라 두 설정 줄이 같은 문법으로 읽힌다
   const group = (title: string, body: ReactNode) => (
@@ -236,17 +241,17 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
             data-area 는 052 화면 영역 이용 통계의 영역(필터 둘·표·요약·로그·차트) */}
         <div data-area="filters" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
           <Seg opts={dirOpts} pad="6px 16px" />
-          {group('기간', <Seg opts={PERS.map((p) => seg(PER_LABEL[p], per === p, () => setPer(p)))} />)}
+          {group('기간', <Seg opts={PERS.map((p) => seg(PER_LABEL[p], per === p, () => setPer(p), `period:${p}`))} />)}
           {group('국내', <Seg opts={[
-            seg('전체', dom === null, () => setDom(null)),
-            seg('업비트', dom === 'upbit', () => setDom('upbit')),
-            seg('빗썸', dom === 'bithumb', () => setDom('bithumb')),
+            seg('전체', dom === null, () => setDom(null), 'dom:all'),
+            seg('업비트', dom === 'upbit', () => setDom('upbit'), 'dom:upbit'),
+            seg('빗썸', dom === 'bithumb', () => setDom('bithumb'), 'dom:bithumb'),
           ]} />)}
           {group('해외', <Seg opts={[
-            seg('전체', fxf === null, () => setFxf(null)),
-            ...REAL_FXS.map((id) => seg(exName(id), fxf === id, () => setFxf(id))),
+            seg('전체', fxf === null, () => setFxf(null), 'fx:all'),
+            ...REAL_FXS.map((id) => seg(exName(id), fxf === id, () => setFxf(id), `fx:${id}`)),
           ]} />)}
-          <input className="input" placeholder="심볼 검색 → Enter" value={q} style={searchInput}
+          <input className="input" placeholder="심볼 검색 → Enter" value={q} style={searchInput} data-el="search"
             onChange={(e) => setQ(e.target.value.toUpperCase())}
             onKeyDown={(e) => {
               const s = q.trim().toUpperCase()
@@ -266,12 +271,12 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
             <div style={{ overflowX: 'auto' }}>
               <div style={{ minWidth: 800 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: RANK_GRID, padding: '0 var(--space-6)', borderBottom: '1px solid var(--color-neutral-800)' }}>
-                  <button onClick={() => onSort('sym')} className="hv-txt"
+                  <button onClick={() => onSort('sym')} className="hv-txt" data-el="sort:sym"
                     style={{ appearance: 'none', background: 'none', border: 'none', font: 'inherit', fontSize: 10.5, letterSpacing: '0.07em', textTransform: 'uppercase', padding: '7px 0', cursor: 'pointer', textAlign: 'left', color: sortKey === 'sym' ? 'var(--color-accent-300)' : 'var(--color-neutral-600)' }}>
                     티커{sortKey === 'sym' ? (sortDir < 0 ? ' ▾' : ' ▴') : ''}
                   </button>
-                  {HEADERS.map(([k, label]) => (
-                    <button key={k} onClick={() => onSort(k)} className="hv-txt"
+                  {HEADERS.map(([k, label, el]) => (
+                    <button key={k} onClick={() => onSort(k)} className="hv-txt" data-el={el}
                       style={{
                         appearance: 'none', background: 'none', border: 'none', font: 'inherit', fontSize: 10.5,
                         letterSpacing: '0.04em', textTransform: 'uppercase', padding: '7px 4px', cursor: 'pointer',
@@ -283,7 +288,7 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
                   ))}
                 </div>
                 {rank.map((x) => (
-                  <button key={x.sym} onClick={() => onSelect(x.sym)} className="hv-row"
+                  <button key={x.sym} onClick={() => onSelect(x.sym)} className="hv-row" data-el={`row:${x.sym}`}
                     style={{
                       display: 'grid', gridTemplateColumns: RANK_GRID, alignItems: 'center', width: '100%',
                       appearance: 'none', border: 'none', font: 'inherit',

@@ -176,11 +176,12 @@ export function ChartToolbar(p: ToolbarProps) {
   const group = <T extends string>(title: string, all: T[], list: T[], label: (v: T) => string, set: (l: T[]) => void) => (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
       <span style={{ ...hint, fontSize: 11 }}>{title}</span>
-      <label style={cbLabel(list.length === all.length)}>
+      {/* data-el — 061 화면 이용 통계의 요소 열쇠(모양·동작과 무관) */}
+      <label data-el="chart-dom:all" style={cbLabel(list.length === all.length)}>
         <input type="checkbox" style={cbStyle} checked={list.length === all.length} onChange={() => set(list.length === all.length ? [all[0]] : all)} />전체
       </label>
       {all.map((v) => (
-        <label key={v} style={cbLabel(list.includes(v))}>
+        <label key={v} data-el={`chart-dom:${v}`} style={cbLabel(list.includes(v))}>
           <input type="checkbox" style={cbStyle} checked={list.includes(v)} onChange={() => toggle(list, all, v, set)} />{label(v)}
         </label>
       ))}
@@ -190,6 +191,7 @@ export function ChartToolbar(p: ToolbarProps) {
     label: INTERVAL_LABEL[i], onClick: () => p.onInterval(i),
     bg: p.interval === i ? 'var(--color-neutral-900)' : 'transparent',
     color: p.interval === i ? 'var(--color-accent-300)' : 'var(--color-neutral-500)',
+    el: `interval:${i}`,
   }))
   return (
     // data-area — 052 화면 영역 이용 통계의 영역(기록 탭의 두 번째 필터 줄)
@@ -264,7 +266,7 @@ function CardHeader(p: { fx: string; dir: Dir; doms: string; mock: boolean; righ
       <span style={{ fontSize: 12, color: dirColor(p.dir) }}>{DIR_LABEL[p.dir]} · {p.doms}</span>
       {p.mock && <Pill tone="warn">MOCK — binance 봉을 변형한 시안 데이터</Pill>}
       {p.right && <span style={{ ...hint, marginLeft: 'auto' }}>{p.right}</span>}
-      <button type="button" className="btn" onClick={p.onToggle}
+      <button type="button" className="btn" onClick={p.onToggle} data-el={`fold:${p.fx}`}
         style={{ marginLeft: p.right ? 0 : 'auto', fontSize: 12, padding: '2px 10px', color: 'var(--color-neutral-400)', borderColor: 'var(--color-neutral-800)' }}>
         {p.collapsed ? '펼치기 ▾' : '접기 ▴'}
       </button>
@@ -276,8 +278,9 @@ export default function FxChartCard(p: CardProps) {
   // 접힌 카드는 헤더만 — 차트 훅을 태우지 않게 본체 컴포넌트를 따로 둔다(훅은 조건부로 못 부른다)
   if (p.collapsed) {
     const mock = FX_CHOICES.find((f) => f.id === p.fx)?.mock === true
+    // data-el — 061 요소 열쇠: 카드(차트 위 누름·마우스 올림·보인 시간) · 접기 단추
     return (
-      <div style={{ ...card, padding: 'var(--space-4) var(--space-8)' }}>
+      <div data-el={`card:${p.fx}`} style={{ ...card, padding: 'var(--space-4) var(--space-8)' }}>
         <CardHeader fx={p.fx} dir={p.dir} doms={p.series.map((s) => exName(s.dom)).join('·')} mock={mock} collapsed onToggle={p.onToggle} />
       </div>
     )
@@ -525,7 +528,7 @@ function FxChartBody(p: CardProps) {
   )
 
   return (
-    <div style={{ ...card, padding: 'var(--space-6) var(--space-8) var(--space-6)' }}>
+    <div data-el={`card:${p.fx}`} style={{ ...card, padding: 'var(--space-6) var(--space-8) var(--space-6)' }}>
       <div style={{ marginBottom: 'var(--space-3)' }}>
         <CardHeader fx={p.fx} dir={p.dir} doms={S.map((s) => exName(s.dom)).join('·')} mock={mock}
           right={single ? '캔들' : '국내 거래소별 캔들 — 채움 상승 · 테두리 하락'} collapsed={false} onToggle={p.onToggle} />

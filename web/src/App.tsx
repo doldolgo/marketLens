@@ -157,9 +157,10 @@ export default function App() {
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-ok)', animation: 'tr-pulse 1.6s ease-in-out infinite' }} />실시간 수집 중
           </span>
         </div>
+        {/* data-el — 061 화면 이용 통계의 요소 열쇠(모양·동작과 무관). 처리방침·설정 링크는 영역 밖이라 052 규칙대로 세지 않는다 */}
         <div data-area="tabs" style={{ display: 'flex', gap: 'var(--space-2)', alignSelf: 'stretch', alignItems: 'stretch' }}>
           {TABS.map(([id, text]) => (
-            <button key={id} onClick={() => pickTab(id)} className="hv-txt"
+            <button key={id} onClick={() => pickTab(id)} className="hv-txt" data-el={`tab:${id}`}
               style={{
                 appearance: 'none', background: 'none', border: 'none',
                 borderBottom: `2px solid ${tab === id ? 'var(--color-accent)' : 'transparent'}`,
@@ -171,12 +172,12 @@ export default function App() {
           ))}
         </div>
         {/* 032 — 방침은 새 탭으로. 열어 둔 대시보드의 WebSocket 을 끊지 않게. 푸터가 아닌 이유: 입출금 레이더 탭은 셸 푸터를 그리지 않는다 */}
-        <a href="/privacy" target="_blank" rel="noopener" className="hv-txt"
+        <a href="/privacy" target="_blank" rel="noopener" className="hv-txt" data-el="privacy"
           style={{ marginLeft: 'auto', color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
           개인정보 처리방침
         </a>
         {/* 033 — 동의 창은 한 번 고르면 다시 뜨지 않으므로 바꾸러 가는 길을 늘 둔다(철회가 동의보다 어렵지 않게). 방침과 같은 모양·새 탭 */}
-        <a href="/privacy#consent" target="_blank" rel="noopener" className="hv-txt"
+        <a href="/privacy#consent" target="_blank" rel="noopener" className="hv-txt" data-el="consent-settings"
           style={{ color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
           화면 분석 설정
         </a>

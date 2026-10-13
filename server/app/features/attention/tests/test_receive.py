@@ -1,4 +1,4 @@
-"""`POST /attention` 받기 — 검사·교차 사이트·크기·게이트·IP 10분 제한 (스펙 052 §3.4·§4).
+"""`POST /attention` 받기 — 검사·교차 사이트·크기·게이트·IP 10분 제한 (스펙 052 §3.4·§4, 상한은 061 의 16,384바이트).
 
 "더한 것 없음" 은 다음 10초 회차 뒤 Redis 해시로 본다 — 받기의 결과가 남는 곳은 거기뿐이다.
 """
@@ -120,10 +120,11 @@ async def test_cross_site_is_403_before_reading_and_missing_header_passes(
     assert rig.day("20261019") == {"landing|pc||pv": 2}
 
 
-async def test_body_over_4096_bytes_is_413(rig: Rig) -> None:
+async def test_body_over_16384_bytes_is_413(rig: Rig) -> None:
+    # 061 — 상한 16,384바이트(v1·v2 모두)
     body = beacon()
-    exact = body + b" " * (4096 - len(body))
-    assert len(exact) == 4096
+    exact = body + b" " * (16_384 - len(body))
+    assert len(exact) == 16_384
     assert (await rig.post(exact)).status_code == 204
     resp = await rig.post(exact + b" ")
     assert resp.status_code == 413 and resp.json()["error"]["code"] == "too_large"
