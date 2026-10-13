@@ -130,8 +130,8 @@ def test_strip_text_is_the_policy_consent_box_text() -> None:
     html = JS.split("const HTML = `", 1)[1].split("`", 1)[0]
     first = re.search(r'<div class="kt-c-body"[^>]*>\s*<p>(.*?)</p>', html, flags=re.S)
     assert first and _text(first.group(1)) == f"{head} {age}"
-    # 051 §3.3-4 — 영역 통계는 띠가 없는 페이지에서도 저장된 동의로 돈다(모든 페이지)
-    assert "화면 영역" in first.group(1) and "모든 페이지" in first.group(1)
+    # 051 §3.3-4 — KimpTrack 서버의 통계는 띠가 없는 페이지에서도 저장된 동의로 돈다(모든 페이지). 060 §3.3-4 — 영역과 요소
+    assert "화면의 영역과 요소" in first.group(1) and "모든 페이지" in first.group(1)
     rules = re.search(
         r"<details><summary>저장 규칙</summary><p>(.*?)</p></details>", html, flags=re.S
     )
