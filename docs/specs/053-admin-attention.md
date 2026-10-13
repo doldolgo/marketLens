@@ -1,6 +1,6 @@
 # 053 — admin-attention
 
-상태: DONE | 의존: **052 attention·042 admin-traffic(PR #107) 이 main 에 머지된 뒤**(피드 `/admin/attention`·`attention.js`·`data-area`, 042 의 답 줄 `p.answer` 꼴·node 확인 방식 `test_admin_traffic.py`). 041 의 절 설명 틀·036 의 부분 상태 칸을 쓴다. 043 과 따로 간다(§2 바꾸는 것).
+상태: DONE(화면은 065 — 덮어 보기 메시지는 065 §3.5 가 넓혔다) | 의존: **052 attention·042 admin-traffic(PR #107) 이 main 에 머지된 뒤**(피드 `/admin/attention`·`attention.js`·`data-area`, 042 의 답 줄 `p.answer` 꼴·node 확인 방식 `test_admin_traffic.py`). 041 의 절 설명 틀·036 의 부분 상태 칸을 쓴다. 043 과 따로 간다(§2 바꾸는 것).
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.

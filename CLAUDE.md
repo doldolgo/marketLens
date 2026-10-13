@@ -45,8 +45,8 @@ marketlens/
       shared/                 config·theme·format·ui 조각
       features/<name>/        기능 1개 = 폴더 1개: Tab.tsx api.ts types.ts
       App.tsx main.tsx
-    admin/                    관리자 화면(페이지 여섯·왼쪽 내비·공통 모듈·아이콘 묶음 icons.svg·vendor/ECharts, 빌드 없음 — 기능 폴더 규칙의 예외, 029·064·066)
-    scripts/                  랜딩 글꼴 서브셋 스크립트·글자 목록·관리자 화면 가짜 피드 서버(uv run, 빌드에 들지 않음 — 022·064·066)
+    admin/                    관리자 화면(페이지 여섯·왼쪽 내비·공통 모듈·아이콘 묶음 icons.svg·vendor/ECharts, 빌드 없음 — 기능 폴더 규칙의 예외, 029·064·065·066)
+    scripts/                  랜딩 글꼴 서브셋 스크립트·글자 목록·관리자 화면 가짜 피드 서버(uv run, 빌드에 들지 않음 — 022·064·065·066)
     nginx-admin.conf          관리자 server(:8081, 게시 안 함) 템플릿 — 전체 `/api` 분기·교차 사이트 403·접속 기록(029)
   caddy/                      Caddyfile — serve 박스 TLS 앞단·접속 로그 (디렉터리째 바인드, 023·027)
   ops/                        박스에 올리는 설정(앱 코드 아님) — cloudwatch/(에이전트 JSON)·canary/(Lambda 점검 스크립트) (027)
@@ -142,7 +142,7 @@ marketlens/
 | 062 | access-flows | DONE | 접속 흐름 — 짝(038)마다 그날 첫 페이지(entry)·마지막 페이지(exit)·페이지 수, `/admin/access` `visitors.flows`([channel, entry, exit, c, s] 40줄 + (기타))·`entries`·`exits`·`depthPages`. 064 가 그린다 (BE) |
 | 063 | aws-metrics | DONE | 수집기 `GET /admin/aws/series?range=6h·24h·7d·30d` — 상자 셋 CPU·네트워크 in/out·EBS·크레딧 잔량/사용/초과 과금·상태 검사·메모리·디스크·스왑 + WS 접속·canary 시계열(GetMetricData, 034 스레드·Slot 재사용, 새 권한 없음). 064 가 그린다 (BE) |
 | 064 | admin-v3 | DONE | 관리자 화면 v3 — 여러 페이지(개요·서버·트래픽, 화면은 065), ECharts 5.5.1 로컬 사본, 공통 머리·상태 점·글 최소(카드 = 제목 + 그림, '?' 툴팁), 개요 상태 띠(문제·주의 규칙), 서버 AWS 시계열(063)·수집·경보·비용·도구, 트래픽 흐름 sankey(062)·추이·열지도·어디서·누가·무엇을·문제·Clarity (web) |
-| 065 | admin-screens | TODO | 관리자 '화면' 페이지 — 실제 페이지 틀 위 영역·**요소**·스크롤 깊이 덮어 보기(지표 클릭·마우스 올림·보인 시간), 요소 순위·영역·떠난 곳·깊이 판, 상세 판 CSV, 새 창. attention.js 덮어 보기 메시지에 `mode`·`elements`·`depth`·focus `key`. 061·066 뒤 (web) |
+| 065 | admin-screens | DONE | 관리자 '화면' 페이지 — 실제 페이지 틀 위 영역·**요소**·스크롤 깊이 덮어 보기(지표 클릭·마우스 올림·보인 시간), 요소 순위·영역·떠난 곳·깊이 판, 상세 판 CSV, 새 창. attention.js 덮어 보기 메시지에 `mode`·`elements`·`depth`·focus `key`. 061·066 뒤 (web) |
 | 066 | admin-renewal | DONE | 관리자 화면 v4 — 레퍼런스 조사(`docs/admin-design-research.md`) 기반 리뉴얼: 왼쪽 세로 내비·페이지 여섯(개요·서버·트래픽·방문자·Clarity·화면)·조사 토큰(상자 색 고정·상태색 분리)·전역 기간·비교·**모든 차트 상세 판**(확대·이전 기간·통계·원자료·CSV)·도넛/게이지 → 목록·100% 띠. 067·068 계약 (web) |
 | 067 | access-ips | DONE | 가린 IP 대역(/24·/48)별 접속 — `/admin/access/ips`(거르기·정렬·쪽)·`/admin/access/ip`(시간별·종류·상태·브라우저·경로·짝 흐름·최근 100줄), 처리방침 v5((라) 대역별 조회, 이전 판 `privacy-20261009-2.html`) (BE·web) |
 | 068 | clarity-history | DONE | Clarity 날별 기록(`admin:clarity:day:*` 90일)·기기/유입 차원 호출(하루 8회 일정)·`/admin/clarity/history`·`dims`, AWS 시계열 `offset=prev`(이전 기간) (BE) |
