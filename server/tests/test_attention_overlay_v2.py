@@ -297,6 +297,13 @@ def test_element_values_are_checked_and_bad_entries_dropped() -> None:
     (card,) = [b for b in got["boxes"] if b["el"]]
     assert card["el"] == "hero|live:1"
     assert card["tag"]["text"] == "#1 · " + "가" * 80 + " · 표본 적음"
+    # 꼬리표 글은 textContent 로만 — HTML 조각이 글로 남고 요소가 생기지 않는다
+    xss = {**_el("hero", "live:1", 4, 1), "tag": "<img src=x onerror=alert(1)>"}
+    got = _one(
+        areas=AREAS, els=ELS, steps=[_values("element", elements=[xss]), "flush"]
+    )
+    (card,) = [b for b in got["boxes"] if b["el"]]
+    assert card["tags"] == ["#1 · <img src=x onerror=alert(1)>"]
 
 
 def test_modes_area_element_and_depth_and_no_mode_is_053() -> None:
