@@ -401,7 +401,9 @@ async def test_aws_calls_never_touch_the_default_executor_or_block_the_loop() ->
             *(timed(asyncio.to_thread(time.sleep, 0.05)) for _ in range(5)),
             timed(asyncio.sleep(0.01)),
         )
-        assert max(spent) < 0.5
+        # AWS 가 기본 실행기에서 돌면 다섯이 느린 가짜(gate 5초) 뒤에 줄을 서 5초 가까이 걸린다 — 2초면 그 회귀는 잡고,
+        # 느린 CI 러너의 스레드 기동 지연(0.5초 넘게 나온 적 있다)에는 흔들리지 않는다
+        assert max(spent) < 2.0
         assert slow.running == 1 and slow.threads == {"admin-aws_0"}
     finally:
         slow.gate.set()

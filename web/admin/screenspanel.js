@@ -111,7 +111,8 @@ function drawElements(app, c, send) {
             app.paint();
           }
         : null,
-    tail: c.elements.capped ? '그 밖은 피드 상한 300' : '',
+    // 화면 기록은 있는데 요소 값이 하나도 없으면(요소 수집 전 기록·고른 영역에 요소 없음) 빈 표 대신 한 줄 — 떠난 곳·깊이 판과 같은 꼴
+    tail: c.elements.capped ? '그 밖은 피드 상한 300' : !rows.length && c.row ? '요소 기록 없음' : '',
   });
   const keys = rows.filter((e) => e.state !== 'other');
   put('el-foot', `열쇠 ${int(keys.length)}개 · 지금 화면에 없음 ${int(keys.filter((e) => e.state === 'gone').length)}개`);
