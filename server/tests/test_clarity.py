@@ -209,7 +209,14 @@ def test_policy_admin_and_not_found_pages_never_load_clarity() -> None:
     파일 이름 글자 자체는 막지 않는다 — 방침 동의 스크립트 주석이 판 계약으로 `clarity.js` 를 말한다.
     """
     admin = sorted(p for p in (WEB / "admin").rglob("*") if p.is_file())
-    assert {p.name for p in admin} >= {"index.html", "admin.js", "admin.css"}
+    # 관리자 화면 v3(064) — 페이지 셋·모듈·스타일·차트 사본까지 모두 본다
+    assert {p.name for p in admin} >= {
+        "index.html",
+        "server.html",
+        "traffic.html",
+        "common.js",
+        "admin.css",
+    }
     for path in (WEB / "public/privacy.html", WEB / "public/404.html", *admin):
         text = path.read_text("utf-8")
         assert not re.search(r"""src=["'][^"']*clarity""", text), path.name
