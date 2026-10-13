@@ -30,25 +30,34 @@ def test_tab_change_ends_the_segment_and_starts_one_with_pv_1() -> None:
     )
     assert _bodies(got) == [
         {
-            "v": 1,
+            "v": 2,
             "page": "app-history",
             "device": "pc",
             "pv": 1,
             "a": {"header": [2000, 0, 1], "table": [2000, 2, 1]},
+            "e": [],
+            "d": None,
+            "x": None,
         },
         {
-            "v": 1,
+            "v": 2,
             "page": "app-gap",
             "device": "pc",
             "pv": 1,
             "a": {"header": [500, 0, 0], "table": [500, 0, 0]},
+            "e": [],
+            "d": None,
+            "x": None,
         },
         {
-            "v": 1,
+            "v": 2,
             "page": "app-gap",
             "device": "pc",
             "pv": 0,
             "a": {"header": [300, 0, 0], "table": [300, 0, 0]},
+            "e": [],
+            "d": None,
+            "x": None,
         },
     ]
 
@@ -75,9 +84,9 @@ def test_withdrawal_right_before_sending_drops_and_stops() -> None:
 
 def test_empty_sends_are_skipped_but_the_first_pv_goes_out() -> None:
     got = _one(ls=ON, areas=[], steps=["hide", "show", "hide", "pagehide"])
-    assert _bodies(got) == [
-        {"v": 1, "page": "landing", "device": "pc", "pv": 1, "a": {}}
-    ]
+    # 061 — pagehide 는 정적 페이지의 깊이(영역이 없어 떠난 곳은 null)를 구간에 한 번 싣는다
+    empty = {"v": 2, "page": "landing", "device": "pc", "a": {}, "e": [], "x": None}
+    assert _bodies(got) == [{**empty, "pv": 1, "d": None}, {**empty, "pv": 0, "d": 10}]
     # 영역 밖 클릭은 버린다
     got = _one(ls=ON, areas=[], steps=["hide", "show", "click:none:3", "hide"])
     assert len(got["sent"]) == 1

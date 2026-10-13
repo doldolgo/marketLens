@@ -1,4 +1,4 @@
-"""화면 영역 이용 통계 경로 — 받기 `POST /attention` 과 관리자 피드 `GET /admin/attention` (스펙 052 §3.4·§3.6).
+"""화면 이용 통계 경로 — 받기 `POST /attention` 과 관리자 피드 `GET /admin/attention` (스펙 052 §3.4·§3.6, 061).
 
 api 역할에만 포함한다(`main.py`). 공개 nginx 는 `= /api/attention`(POST 만) 하나를 열고, 관리자 피드는 관리자 nginx 의
 `= /svc/api/admin/attention` 으로만 닿는다(공개는 028 허용 목록 밖이라 404).
@@ -21,7 +21,7 @@ _ERRORS = {
 
 
 async def _read_capped(request: Request) -> bytes | None:
-    """몸통을 상한 + 1 바이트까지만 읽는다 — 넘으면 None. 배포에선 nginx 가 4k 로 먼저 자른다."""
+    """몸통을 상한 + 1 바이트까지만 읽는다 — 넘으면 None. 배포에선 nginx 가 16k 로 먼저 자른다(061)."""
     chunks: list[bytes] = []
     size = 0
     async for chunk in request.stream():
@@ -51,10 +51,11 @@ async def post_attention(request: Request) -> Response:
 
 @router.get("/admin/attention")
 async def get_admin_attention(
-    request: Request, days: str | None = None
+    request: Request, days: str | None = None, page: str | None = None
 ) -> JSONResponse:
-    """창 합계 — `days` 1·7·30·90(그 밖·없음은 7). 항상 200 상태 응답, 캐시하지 않게 (§3.6)."""
+    """창 합계 — `days` 1·7·30·90(그 밖·없음은 7), `page` 화면 이름(그 화면 행만 + 요소, 목록 밖은 없는 것과 같다).
+    항상 200 상태 응답, 캐시하지 않게 (052 §3.6·061 §3.6)."""
     state = request.app.state
     service: AttentionService = state.attention
-    body = await service.feed(days, getattr(state, "spreads_bus", None))
+    body = await service.feed(days, page, getattr(state, "spreads_bus", None))
     return JSONResponse(body, headers={"Cache-Control": "no-store"})

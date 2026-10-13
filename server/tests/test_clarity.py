@@ -190,8 +190,9 @@ def test_settings_link_sits_on_the_landing_footer_and_the_dashboard_header() -> 
             "</nav>", landing.index('<nav class="foot-nav"')
         )
     ]
+    # 061 — 설정 링크에는 화면 이용 통계의 요소 열쇠(data-el)가 붙는다
     assert re.search(
-        r'<a [^>]*href="/privacy"[^>]*>개인정보 처리방침</a>\s*<a href="/privacy#consent">화면 분석 설정</a>',
+        r'<a [^>]*href="/privacy"[^>]*>개인정보 처리방침</a>\s*<a href="/privacy#consent"[^>]*>화면 분석 설정</a>',
         nav,
     )
     app = (WEB / "src/App.tsx").read_text("utf-8")
