@@ -55,6 +55,10 @@ class QuoteSink:
         # 그런 경로가 생기면 같은 우주로 다시 불러도 그 행이 지워지지 않으니 이 가드를 다시 본다.
         if self._set_once and bases == self._universe:
             return 0
+        # 우주가 바뀌는 회차 — 미뤄 둔 호가(§3.4-1)를 바뀌기 전 우주로 먼저 반영한다. 받은 순간의 우주로 거르던 것과
+        # 같게 하려는 것이다: 빠지는 코인의 미룬 호가는 행이 됐다가 아래에서 지워지고, 새로 드는 코인의 미룬 호가(우주
+        # 밖이던 때 받은 것)는 행이 되지 않는다
+        self._store.settle()
         self._set_once = True
         self._universe = {b.upper() for b in bases}
         for key in [k for k in self._trades if k[1] not in self._universe]:
@@ -64,6 +68,13 @@ class QuoteSink:
     @property
     def universe(self) -> set[str]:
         return set(self._universe)
+
+    def accepts(self, key: str, quote: str) -> bool:
+        """이 호가가 행·시세가 될 수 있는가 — `orderbook` 의 첫 두 거르기와 같다(USDT/KRW 시세이거나 우주 안). `key` 는 대문자.
+
+        호가 반영을 미루는 커넥터(§3.4-1)가 받은 자리에서 본다 — 우주 밖 호가는 미룰 것도 파싱할 것도 없다.
+        """
+        return key in self._universe or (key == USDT and quote == KRW)
 
     # --- 메시지 (§3.4·§3.5) ---
 
@@ -134,7 +145,8 @@ class QuoteSink:
         if key not in self._universe or not 0.0 < price < math.inf:
             return
         self._trades[(exchange, key)] = (float(price), int(price_timestamp))
-        row = self._store.get(exchange, key)
+        # 미룬 호가를 반영하지 않고 지금 행에 싣는다 — 미룬 호가는 나중에 행을 만들 때 위에서 기억한 체결가를 싣는다
+        row = self._store.row(exchange, key)
         if row is not None:
             row.price = float(price)
             row.price_timestamp = int(price_timestamp)

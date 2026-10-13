@@ -2,8 +2,10 @@
 
 uvicorn 워커 1개 + 단일 이벤트 루프 전제라 잠금이 없다. 쓰기는 행 단위다 —
 거래소 단위 통째 교체는 없다(§3.5-4). 조회는 전부 동기(await 없음)다.
+스냅샷 호가 커넥터는 프레임 반영을 미룰 수 있다(§3.4-1) — 행·시세를 읽는 메서드가 읽기 직전에 미룬 것을 반영한다.
 """
 
+from collections.abc import Callable
 from datetime import datetime
 
 from app.core.models import PerpRow, Rate, Row, StreamState, Tick
@@ -30,6 +32,9 @@ class LiveStore:
         # 직전 행 없이 새로 생긴 (거래소, base 대문자) — 틱이 take_new_rows 로 가져가 입출금 캐시를 그 행에만
         # 반영한다(001 §3.6-1). 교체된 행은 물려받기로 이미 같은 3필드라 넣지 않는다. 키 수(≈2천)를 넘지 않는다
         self._new_keys: set[tuple[str, str]] = set()
+        # 커넥터가 미뤄 둔 시세 프레임을 반영하는 함수들 — 행·시세를 읽는 메서드가 읽기 전에 모두 부른다(001 §3.4-1).
+        # 커넥터는 미룬 프레임이 처음 생길 때 한 번만 등록하고, 부르면 목록에서 빠진다
+        self._deferred: list[Callable[[], None]] = []
 
     # --- 쓰기 (수집 경로만 부른다) ---
 
@@ -53,11 +58,32 @@ class LiveStore:
         for row in rows:
             self.put_row(row, now)
 
+    def defer(self, settle: Callable[[], None]) -> None:
+        """커넥터가 시세 프레임 반영을 미뤘다 — 다음 읽기 전에 `settle` 을 부른다 (001 §3.4-1).
+
+        커넥터는 미룬 프레임이 없다가 처음 생길 때 한 번만 등록한다(같은 함수를 두 번 넣지 않는다). 수신 경로가
+        초당 수천 번 지나는 자리라 여기서는 목록에 붙이기만 한다.
+        """
+        self._deferred.append(settle)
+
+    def settle(self) -> None:
+        """미뤄 둔 시세 프레임을 지금 전부 반영한다 — 읽기 메서드가 먼저 부르고, 우주가 바뀌기 직전에도 부른다.
+
+        반영 함수가 도는 동안 새로 등록된 것까지 비울 때까지 돈다. 반영은 동기라(await 없음) 그 사이 수신이 끼지 않는다.
+        """
+        while self._deferred:
+            pending, self._deferred = self._deferred, []
+            for settle in pending:
+                settle()
+
     def take_new_rows(self) -> dict[str, list[Row]]:
         """직전 호출 뒤 직전 행 없이 새로 생긴 행 — {거래소: [지금 행]} 을 돌려주고 비운다 (001 §3.6-1).
 
         행은 지금 표에서 키로 다시 찾는다 — 그 사이 교체됐으면 지금 행, 지워졌으면 빠진다. 틱 루프만 부른다.
+        미뤄 둔 프레임을 먼저 반영한다 — 그 반영이 새 행을 만들 수 있다.
         """
+        if self._deferred:
+            self.settle()
         keys = self._new_keys
         if not keys:
             return {}
@@ -139,10 +165,14 @@ class LiveStore:
         self._spark_json = fragments if fragments is not None else {}
 
     # --- 조회 (전부 동기) ---
+    # 행·시세를 읽는 메서드는 미뤄 둔 시세 프레임을 먼저 반영한다(001 §3.4-1) — 읽는 쪽(틱·표·분석 API·헬스)은 받은
+    # 프레임이 모두 반영된 상태를 본다. 싱크가 수신 경로에서 행을 찾는 `row` 만 반영하지 않는다(아래).
 
     def get_all(
         self, exchange: str | None = None, base: str | None = None
     ) -> list[Row]:
+        if self._deferred:
+            self.settle()
         base_key = base.upper() if base is not None else None
         out: list[Row] = []
         for ex, table in self._snapshots.items():
@@ -155,7 +185,19 @@ class LiveStore:
         return out
 
     def get(self, exchange: str, base: str) -> Row | None:
+        if self._deferred:
+            self.settle()
         return self._snapshots.get(exchange, {}).get(base.upper())
+
+    def row(self, exchange: str, key: str) -> Row | None:
+        """수신 경로 전용 — 미룬 프레임을 반영하지 않고 지금 행을 찾는다. `key` 는 이미 대문자.
+
+        싱크의 체결가(`QuoteSink.trade`)가 부른다. 여기서 반영하면 체결 프레임마다 미룬 호가를 전부 파싱하게 되어 미루는
+        뜻이 없어진다. 반영 전 행에 체결가를 실어도 결과가 같은 근거: 미룬 호가가 나중에 새 행을 만들 때 싱크가 기억한
+        마지막 체결가를 싣는다(001 §3.5-2).
+        """
+        table = self._snapshots.get(exchange)
+        return table.get(key) if table is not None else None
 
     def perp_row(self, source: str, base: str) -> PerpRow | None:
         return self._perp.get(source, {}).get(base.upper())
@@ -180,10 +222,14 @@ class LiveStore:
         return out
 
     def get_rate(self, exchange: str) -> Rate | None:
+        if self._deferred:
+            self.settle()
         return self._rates.get(exchange)
 
     def rates(self) -> dict[str, Rate]:
         """전체 시세 사본."""
+        if self._deferred:
+            self.settle()
         return dict(self._rates)
 
     def stream_state(self, exchange: str) -> StreamState | None:
@@ -213,4 +259,6 @@ class LiveStore:
         return self._spark_json
 
     def is_empty(self) -> bool:
+        if self._deferred:
+            self.settle()
         return not any(self._snapshots.values())

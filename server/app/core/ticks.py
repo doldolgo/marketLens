@@ -173,8 +173,12 @@ def build_tick(
                             dom_ex,
                             fx_ex,
                             base,
-                            premium_percent(buy_krw=fx_ask * rate_ask, sell_krw=dom_bid),
-                            premium_percent(buy_krw=dom_ask, sell_krw=fx_bid * rate_bid),
+                            premium_percent(
+                                buy_krw=fx_ask * rate_ask, sell_krw=dom_bid
+                            ),
+                            premium_percent(
+                                buy_krw=dom_ask, sell_krw=fx_bid * rate_bid
+                            ),
                             dom_row.price,
                             fx_row.price,
                             mid,
@@ -208,7 +212,9 @@ class _GcStats:
     """
 
     def __init__(self) -> None:
-        self.armed = False  # gc.callbacks 에 걸려 있는 동안만 True — 요약 줄에 GC 칸을 붙일지
+        self.armed = (
+            False  # gc.callbacks 에 걸려 있는 동안만 True — 요약 줄에 GC 칸을 붙일지
+        )
         self.in_tick = False  # TickLoop.run 이 tick() 을 부르는 동안 True
         self._started = 0.0
         # 칸 = 세대 × 2 + (0 틱 안, 1 틱 밖)
@@ -241,7 +247,9 @@ class _GcStats:
         if self._last_full is None:
             parts.append("2세대 수집 아직 없음")
         else:
-            parts.append(f"마지막 2세대 수집 뒤 {time.monotonic() - self._last_full:.0f}초")
+            parts.append(
+                f"마지막 2세대 수집 뒤 {time.monotonic() - self._last_full:.0f}초"
+            )
         self._count = [0] * 6
         self._ms = [0.0] * 6
         self._collected = [0, 0, 0]
@@ -423,6 +431,9 @@ class TickLoop:
     def tick(self, ts: int) -> Tick:
         """§3.6-2~5 — 동기. 틱 생성 → 슬롯·인계 → received_at → 판정. 단계마다 걸린 시간을 모은다."""
         started = lap = time.perf_counter()
+        # §3.4-1 — 커넥터가 미뤄 둔 호가 프레임을 먼저 반영한다(읽기 메서드도 하지만 단계 시간을 따로 보려고 여기서)
+        self._store.settle()
+        lap = self._lap("미룬 호가", lap)
         dw_failed: list[str] = []
         if self._wallet is not None:
             # 입출금 캐시를 행에 반영한다 — 메시지로 새로 생긴 행도 1초 안에 3필드를 갖는다
@@ -484,7 +495,9 @@ class TickLoop:
             for ex in EXCHANGES:
                 wallet.apply(self._store.get_all(exchange=ex), ex)
         else:
-            for ex in EXCHANGES:  # EXCHANGES 밖 거래소의 행은 전 행 경로처럼 건드리지 않는다
+            for (
+                ex
+            ) in EXCHANGES:  # EXCHANGES 밖 거래소의 행은 전 행 경로처럼 건드리지 않는다
                 rows = fresh.get(ex)
                 if rows:
                     wallet.apply(rows, ex)

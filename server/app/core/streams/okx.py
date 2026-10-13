@@ -80,6 +80,14 @@ _BYTES_TYPES = (bytes, bytearray)
 _JSON_DECODE = json.JSONDecoder().decode
 _BOOK_KEY = "orderbook:"  # 원문 싱크 key 머리 — 뒤에 instId (001 §3.7)
 _TRADE_KEY = "trade:"
+# 반영을 미루는 books5 스냅샷 프레임의 머리 (001 §3.4-1) — OKX 가 실제로 보내는 꼴(공백 없음, arg 가 맨 앞, arg 키 순서
+# channel·instId)일 때만 빠른 길로 가고, 그 밖의 꼴은 지금처럼 받은 자리에서 파싱한다. 머리 다음부터 첫 따옴표까지가 instId
+_BOOKS_HEAD = '{"arg":{"channel":"' + BOOKS_CHANNEL + '","instId":"'
+# 스냅샷의 호가 시각 `"ts":"<ms>"` — 프레임에 한 번만 있을 때만 글자로 읽는다(data 원소의 ts)
+_TS_MARK = '"ts":"'
+# 빈 북 하트비트 — asks·bids 가 둘 다 빈 배열. 받은 자리에서 하던 처리처럼 행을 건드리지 않는다
+_EMPTY_ASKS = '"asks":[]'
+_EMPTY_BIDS = '"bids":[]'
 
 
 def _now_ms() -> int:
@@ -174,6 +182,9 @@ class OkxStream:
         self._book_ts: dict[
             str, int
         ] = {}  # instId → 마지막으로 실은 호가 시각 — 더 오래된 스냅샷은 버린다 (§3.4)
+        # 반영을 미룬 스냅샷 — instId → (원문, 호가 시각, 수신 ms, 받은 때의 base), 심볼마다 호가 시각이 가장 늦은 1건
+        # (001 §3.4-1). 저장소가 읽기 전에 _settle 을 부른다
+        self._books_pending: dict[str, tuple[str, int, int, str]] = {}
         self._wake = asyncio.Event()  # set_universe 가 재조정 루프를 깨운다
         self._rebalance: asyncio.Task[None] | None = None
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다
@@ -322,6 +333,9 @@ class OkxStream:
             mine = mine_of[shard.index]
             if mine == shard.assigned:
                 continue
+            if not changed and self._books_pending:
+                # 빠지는 심볼의 미룬 스냅샷은 행을 지우기 전에 반영한다 — 받은 자리에서 반영하던 순서 그대로 (001 §3.4-1)
+                self._settle()
             changed = True
             for symbol in shard.assigned - mine:
                 base = self._base_of.get(symbol, symbol)
@@ -681,6 +695,10 @@ class OkxStream:
                 self._record(self.id, WS_SOURCE, at, text)
                 shard.pong_pending = False
                 continue
+            # 빠른 길 (001 §3.4-1) — books5 스냅샷은 파싱하지 않고 instId·호가 시각만 글자로 뽑아 원문을 남긴 뒤 심볼마다
+            # 호가 시각이 가장 늦은 프레임만 든다. 같은 초 안에 뒤 스냅샷이 덮는 프레임(2026-10-13 캡처 68%)은 끝내 파싱하지 않는다
+            if text.startswith(_BOOKS_HEAD) and self._defer(shard, text, at):
+                continue
             try:
                 msg = _JSON_DECODE(text)
             except ValueError:
@@ -719,6 +737,9 @@ class OkxStream:
                 continue  # 맵에 없는 심볼 — 버린다 (§3.4)
             try:
                 if channel == BOOKS_CHANNEL:
+                    if self._books_pending:
+                        # 빠른 길로 못 간 스냅샷 — 미룬 것을 먼저 반영해 받은 순서대로 호가 시각을 견준다
+                        self._settle()
                     self._on_books(symbol, base, msg["data"], at)
                 elif channel == TRADE_CHANNEL:
                     self._on_trade(base, msg["data"])
@@ -734,6 +755,66 @@ class OkxStream:
             last = self._state.last_message_at
             if last is None or at > last:
                 self._state.last_message_at = at
+
+    def _defer(self, shard: _Shard, text: str, at: int) -> bool:
+        """빠른 길 한 프레임 — 처리했으면 True, instId·호가 시각을 글자로 못 뽑으면 False(파싱하는 길로).
+
+        받은 자리에서 파싱해 처리하던 것과 결과가 같게 한다: 원문 key 는 `orderbook:<instId 원본>` 이고 행이 바뀌기 전에
+        남긴다. 맵에 없는 심볼은 시세로 세지 않고 버린다. 빈 북 하트비트와 이미 실은 것보다 오래된 스냅샷은 행을 바꾸지
+        않으므로 미루지 않고 수신만 센다. 미룬 것보다 호가 시각이 이르면 그대로 둔다(받은 순서로 처리했다면 이 프레임이
+        버려진다) — 같은 시각이면 뒤 것이 이긴다. 호가 시각이 프레임에 둘 이상이거나 정수가 아니면 파싱하는 길로 보낸다.
+        """
+        start = len(_BOOKS_HEAD)
+        end = text.find('"', start)
+        if end <= start or text[end + 1 : end + 2] != "}" or "\\" in text[start:end]:
+            return False
+        i = text.find(_TS_MARK, end)
+        if i < 0 or text.find(_TS_MARK, i + 1) >= 0:
+            return False
+        j = text.find('"', i + 6)
+        try:
+            ts = int(text[i + 6 : j])
+        except ValueError:
+            return False
+        symbol = text[start:end]
+        self._record(self.id, WS_SOURCE, at, text, _BOOK_KEY + symbol)
+        base = self._base_of.get(symbol)
+        if base is None:
+            return True  # 맵에 없는 심볼 — 버린다 (§3.4)
+        if ts >= self._book_ts.get(symbol, -1) and not (
+            _EMPTY_ASKS in text and _EMPTY_BIDS in text
+        ):
+            held = self._books_pending.get(symbol)
+            if held is None or ts >= held[1]:
+                if not self._books_pending:
+                    self._store.defer(self._settle)
+                self._books_pending[symbol] = (text, ts, at, base)
+        shard.state.last_message_at = at
+        shard.backoff = BACKOFF_START
+        last = self._state.last_message_at
+        if last is None or at > last:
+            self._state.last_message_at = at
+        return True
+
+    def _settle(self) -> None:
+        """미룬 스냅샷 반영 — 저장소가 읽기 직전에 부른다 (001 §3.4-1).
+
+        심볼마다 남은 스냅샷 하나를 받은 자리에서 하던 처리(`_on_books`) 그대로 행에 반영한다. base 는 받은 때의 맵으로
+        정한 것을 쓴다. 파싱·처리 실패는 무효 프레임으로 센다(원문·last_message_at 은 받은 자리에서 이미 남았다).
+        """
+        pending, self._books_pending = self._books_pending, {}
+        for symbol, (text, _ts, at, base) in pending.items():
+            try:
+                msg = _JSON_DECODE(text)
+            except ValueError:
+                msg = None
+            if not isinstance(msg, dict) or "event" in msg:
+                self.decode_failures += 1
+                continue
+            try:
+                self._on_books(symbol, base, msg["data"], at)
+            except (KeyError, TypeError, ValueError, IndexError):
+                self.decode_failures += 1
 
     def _on_event(self, shard: _Shard, msg: dict[str, Any]) -> None:
         """구독·해지 응답 — 시세로 세지 않는다. error 는 구독 거부, notice 는 업그레이드 통지 (§3.2)."""
