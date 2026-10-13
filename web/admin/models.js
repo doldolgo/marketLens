@@ -7,7 +7,8 @@ const HOUR = 3_600_000;
 const DAY = 86_400_000;
 export const RANGE_MS = Object.freeze({ '1h': HOUR, '6h': 6 * HOUR, '24h': DAY, '7d': 7 * DAY, '30d': 30 * DAY, '90d': 90 * DAY });
 
-// --- AWS 시계열(063) — 비교: 이전 기간 = 068 의 offset=prev(1시간은 6시간 응답 안에서), 지난주 같은 때 = 7일 창에서 잘라(24시간 이하) ---
+// --- AWS 시계열(063) — 비교: 이전 기간 = 068 의 offset=prev(1시간은 6시간 응답 안에서), 지난주 같은 때 = 7일 창의 이전 기간
+// (range=7d&offset=prev — 지금 7일 창은 [지금 − 7일, 지금] 이라 지난주 같은 때를 담지 않는다)에서 잘라(7일 이하) ---
 
 export const SERIES_RANGES = Object.freeze(['1h', '6h', '24h', '7d', '30d']);
 const SERIES_FEED = Object.freeze({ '1h': '6h', '6h': '6h', '24h': '24h', '7d': '7d', '30d': '30d' });
@@ -15,14 +16,13 @@ const SERIES_FEED = Object.freeze({ '1h': '6h', '6h': '6h', '24h': '24h', '7d': 
 const seen = { prevMissing: false };
 export const seriesCompare = (range) => {
   const known = Object.hasOwn(SERIES_FEED, range);
-  return { prev: known && (range === '1h' || !seen.prevMissing), week: known && range !== '30d' && (range !== '7d' || !seen.prevMissing) };
+  return { prev: known && (range === '1h' || !seen.prevMissing), week: known && range !== '30d' && !seen.prevMissing };
 };
 export function seriesReqs(range, cmp) {
   const base = SERIES_FEED[range] ?? '24h';
   const out = [req('series', { range: base })];
   if (cmp === 'prev' && range !== '1h') out.push(req('series', { range: base, offset: 'prev' }));
-  if (cmp === 'week' && ['1h', '6h', '24h'].includes(range)) out.push(req('series', { range: '7d' }));
-  if (cmp === 'week' && range === '7d') out.push(req('series', { range: '7d', offset: 'prev' }));
+  if (cmp === 'week' && range !== '30d') out.push(req('series', { range: '7d', offset: 'prev' }));
   return out;
 }
 // 고른 창의 시계열 — { ok, part, startMs, endMs, periodSec, boxes, cmpState(none·wait·ok·missing), deps, line(get) → { data, cmp } }.
@@ -60,11 +60,12 @@ export function seriesWindow(app, range, cmp) {
 }
 export const boxGet = (name, key) => (p) => list(p?.boxes).find((b) => isObj(b) && b.box === name)?.series?.[key];
 
-// --- 접속 요약(038) — 비교: 24시간은 7일 응답의 hourly 에서, 7일은 30일 응답에서 잘라 쓴다. 30일은 비교 없음 ---
+// --- 접속 요약(038) — 비교: 24시간의 이전 기간은 7일 응답의 hourly 에서, 7일은 30일 응답에서 잘라 쓴다(7일의 지난주 같은 때 = 이전 기간).
+// 24시간의 지난주 같은 때는 7일 창 밖이라 없다. 30일은 비교 없음 ---
 
 export const ACCESS_RANGES = Object.freeze(['24h', '7d', '30d']);
 const ACCESS_CMP = Object.freeze({ '24h': '7d', '7d': '30d' });
-export const accessCompare = (range) => ({ prev: Object.hasOwn(ACCESS_CMP, range), week: Object.hasOwn(ACCESS_CMP, range) });
+export const accessCompare = (range) => ({ prev: Object.hasOwn(ACCESS_CMP, range), week: range === '7d' });
 export function accessReqs(window, cmp) {
   const out = [req('access', { window })];
   if (cmp !== 'none' && Object.hasOwn(ACCESS_CMP, window)) out.push(req('access', { window: ACCESS_CMP[window] }));

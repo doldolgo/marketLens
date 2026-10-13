@@ -286,3 +286,30 @@ def test_range_and_compare_rewrite_the_address_and_call_only_the_new_feeds() -> 
         "disabled": [["week", "이 자료는 비교 없음"]],
     }
     assert got["ctrl"] == "/server.html?range=30d"  # Ctrl+X 는 비교 단축키가 아니다
+
+
+OVERVIEW_WEEK = (
+    RESPOND
+    + r"""
+const v = setup({ respond, search: '?cmp=week', buttons: BUTTONS })
+await page('overview.js', '?w=1')
+await flush()
+out.calls = v.s.calls.filter((c) => c.includes('/series') || c.includes('/access'))
+out.traffic = v.text('f-traffic')
+out.ws = v.text('d-ws')
+out.visit = v.text('d-visit')
+"""
+)
+
+
+def test_last_week_comes_from_the_previous_seven_days_and_traffic_has_none() -> None:
+    """066 §3.2 — 지난주 같은 때: AWS 는 7일 창의 이전 기간(`range=7d&offset=prev`)에서 잘라 쓴다(지금 7일 창은 담지 않는다).
+    접속 요약 24시간은 7일 창 밖이라 '이 자료는 비교 없음' — 7일 응답을 부르지 않는다."""
+    got = run_admin(OVERVIEW_WEEK, _payload())
+    assert sorted(got["calls"]) == [
+        "/api/admin/aws/series?range=24h",
+        "/api/admin/aws/series?range=7d&offset=prev",
+        "/svc/api/admin/access?window=24h",
+    ]
+    assert got["traffic"] == "이 자료는 비교 없음"
+    assert got["ws"].startswith("지난주 같은 때보다") and got["visit"] == ""

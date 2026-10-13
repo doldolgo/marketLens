@@ -5,7 +5,7 @@ import { $, dec1, el, int, kstDay, list, money, n0, num, once, partOf, pct, plai
 import { align, crop, deltaText, hourPoints, sumHours, valueAt } from './calc.js';
 import { blank, draw, lanesOption, sparkBarsOption, sparkOption, timeOption } from './charts.js';
 import { BOXES, BOX_ROLE, boxMark, cmpPhrase } from './names.js';
-import { ACCESS_RANGES, RANGE_MS, accessReqs, accessWindow, alertHours, boxGet, hourlySuccess, seriesCompare, seriesReqs, seriesWindow, todayVisitors } from './models.js';
+import { ACCESS_RANGES, RANGE_MS, accessCompare, accessReqs, accessWindow, alertHours, boxGet, hourlySuccess, seriesCompare, seriesReqs, seriesWindow, todayVisitors } from './models.js';
 import { collectLanes } from './ops.js';
 import { OPS_DETAILS } from './opsdetail.js';
 import { BOX_LEVELS, chip, recentAvg, worstMonthly } from './rules.js';
@@ -19,12 +19,12 @@ const ACCESS24 = req('access', { window: '24h' });
 const ACCESS7 = req('access', { window: '7d' });
 
 // 트래픽 창 — 접속 요약 24시간의 시간 칸을 고른 기간만큼(1·6시간은 겹치는 칸). 비교: 1·6시간의 이전 기간은 같은 응답 안에서,
-// 24시간의 이전 기간과 지난주 같은 때는 7일 응답에서 잘라 지금 축으로 민다
+// 24시간의 이전 기간은 7일 응답에서 잘라 지금 축으로 민다. 지난주 같은 때는 7일 창 밖이라 없다('이 자료는 비교 없음')
 export function trafficWindow(app) {
   const v = app.view;
   const main = app.entry(ACCESS24);
   const part = partOf(main);
-  const other = v.cmp === 'none' ? null : app.entry(ACCESS7);
+  const other = v.cmp === 'prev' ? app.entry(ACCESS7) : null;
   const out = { part, ok: usable(part), deps: [main, other] };
   if (!out.ok) return out;
   const L = RANGE_MS[v.range] ?? DAY;
@@ -35,8 +35,8 @@ export function trafficWindow(app) {
   let src = null;
   let by = 0;
   if (v.cmp === 'prev' && v.range !== '24h') [src, by] = [part, L];
-  else if (v.cmp !== 'none' && usable(op)) [src, by] = [op, v.cmp === 'week' ? 7 * DAY : L];
-  out.cmpState = v.cmp === 'none' ? 'none' : src ? 'ok' : op === undefined ? 'wait' : 'missing';
+  else if (v.cmp === 'prev' && usable(op)) [src, by] = [op, L];
+  out.cmpState = v.cmp === 'none' ? 'none' : src ? 'ok' : v.cmp === 'prev' && op === undefined ? 'wait' : 'missing';
   out.line = (key) => ({ data: crop(hourPoints(part.hourly, key), out.startMs, out.endMs), cmp: src ? align(hourPoints(src.hourly, key), out.startMs, out.endMs, by) : null });
   return out;
 }
@@ -86,7 +86,7 @@ function drawVisit(app) {
   tag('t-visit', visitors);
   const today = usable(t.part) ? todayVisitors(t.part) : null;
   bigNumber('v-visit', today ? int(today[0]) : '–', today ? `~ ${int(today[1])}` : '');
-  const seven = app.view.cmp === 'none' ? null : partOf(app.entry(ACCESS7));
+  const seven = app.view.cmp === 'prev' ? partOf(app.entry(ACCESS7)) : null;
   put('d-visit', t.ok ? visitDelta(t.part, usable(seven) ? seven : null, app.view.cmp) : '');
   $('d-visit').title = '오늘 지금까지의 사람 모양 페이지를 비교 날의 같은 시각까지와 견준다';
   once('c-visit', [...t.deps, app.view.range, app.view.cmp], () => {
@@ -238,7 +238,7 @@ function accessDetail(title, unit, build, related) {
     related,
     ranges: ACCESS_RANGES,
     range: () => '24h',
-    compare: (range) => ({ prev: range !== '30d', week: range !== '30d' }),
+    compare: accessCompare,
     needs: (app, pv) => [...accessReqs(pv.range, pv.cmp), ...seriesReqs(pv.range, pv.cmp)],
     model: (app, pv) => {
       const a = accessWindow(app, pv.range, pv.cmp);
@@ -274,7 +274,7 @@ start({
   ranges: ['1h', '6h', '24h'],
   range: '24h',
   compare: seriesCompare,
-  needs: (app) => [req('aws'), req('alerts'), ...seriesReqs(app.view.range, app.view.cmp), ACCESS24, ...(app.view.cmp === 'none' ? [] : [ACCESS7])],
+  needs: (app) => [req('aws'), req('alerts'), ...seriesReqs(app.view.range, app.view.cmp), ACCESS24, ...(app.view.cmp === 'prev' ? [ACCESS7] : [])],
   rules: (app) => ({
     aws: app.entry(req('aws')),
     series: app.entry(seriesReqs(app.view.range, 'none')[0]),

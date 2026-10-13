@@ -48,7 +48,8 @@ const W = (bodies, range, cmp) => { const w = models.seriesWindow(fakeApp(bodies
 const r = (range, extra) => models.seriesReqs(range, extra)
 out.reqs = [r('24h', 'prev'), r('1h', 'prev'), r('6h', 'week'), r('7d', 'week'), r('30d', 'none')].map((x) => x.map((q) => q.url))
 out.prev24 = W({ [r('24h', 'prev')[0].key]: series(END - 86400, END), [r('24h', 'prev')[1].key]: series(END - 2 * 86400 + 600, END - 86400 + 600, { offset: 'prev' }) }, '24h', 'prev')
-out.week6 = W({ [r('6h', 'week')[0].key]: series(END - 21600, END), [r('6h', 'week')[1].key]: series(END - 7 * 86400 - 3600, END - 6 * 86400) }, '6h', 'week')
+out.week6 = W({ [r('6h', 'week')[0].key]: series(END - 21600, END), [r('6h', 'week')[1].key]: series(END - 14 * 86400, END - 7 * 86400, { offset: 'prev' }) }, '6h', 'week')
+out.accessWeek = [models.accessCompare('7d'), models.accessReqs('7d', 'week').map((q) => q.url)]
 out.hour = W({ [r('1h', 'prev')[0].key]: series(END - 21600, END) }, '1h', 'prev')
 out.compareBefore = models.seriesCompare('24h')
 out.old = W({ [r('24h', 'prev')[0].key]: series(END - 86400, END), [r('24h', 'prev')[1].key]: series(END - 86400, END) }, '24h', 'prev')
@@ -122,8 +123,9 @@ def test_csv_text_quotes_formulas_korean_and_two_clocks(got: dict[str, Any]) -> 
 
 
 def test_comparison_lines_move_onto_the_current_axis(got: dict[str, Any]) -> None:
-    """066 §3.2 — 이전 기간 = 068 offset=prev(1시간은 6시간 응답 안에서), 지난주 같은 때 = 7일 창에서 잘라(24시간 이하). offset 을 모르는 서버
-    (068 전 — offset 키 없음)는 비교 없음이고 그 뒤 이 문서에서 offset 비교 단추가 꺼진다. 시각으로 맞춘다(배열 순서가 아니라)."""
+    """066 §3.2 — 이전 기간 = 068 offset=prev(1시간은 6시간 응답 안에서), 지난주 같은 때 = 7일 창의 이전 기간(offset=prev)에서 잘라
+    (7일 이하 — 지금 7일 창은 지난주 같은 때를 담지 않는다). offset 을 모르는 서버(068 전 — offset 키 없음)는 비교 없음이고 그 뒤 이 문서에서
+    offset 을 쓰는 비교 단추(이전 기간·지난주)가 꺼진다. 접속 요약 24시간의 지난주는 7일 창 밖이라 없다. 시각으로 맞춘다(배열 순서가 아니라)."""
     assert got["align"] == [[20, 2], [30, 3]]
     assert got["valueAt"] == [1, None]
     assert got["reqs"] == [
@@ -132,7 +134,10 @@ def test_comparison_lines_move_onto_the_current_axis(got: dict[str, Any]) -> Non
             "/api/admin/aws/series?range=24h&offset=prev",
         ],
         ["/api/admin/aws/series?range=6h"],
-        ["/api/admin/aws/series?range=6h", "/api/admin/aws/series?range=7d"],
+        [
+            "/api/admin/aws/series?range=6h",
+            "/api/admin/aws/series?range=7d&offset=prev",
+        ],
         [
             "/api/admin/aws/series?range=7d",
             "/api/admin/aws/series?range=7d&offset=prev",
@@ -150,9 +155,9 @@ def test_comparison_lines_move_onto_the_current_axis(got: dict[str, Any]) -> Non
     assert (
         prev["line"]["cmp"] == [[end - 86_400_000 + 600_000, 1], [end + 300_000, 2]][:1]
     )  # 창 밖(끝 뒤)은 잘린다
-    # 7일 응답의 (끝 − 7일 − 1시간) 점이 지금 축의 (끝 − 1시간)으로
+    # 7일 창 이전 기간의 (끝 − 7일 − 5분) 점이 지금 축의 (끝 − 5분)으로 — 창 밖 점은 잘린다
     assert got["week6"]["state"] == "ok" and got["week6"]["line"]["cmp"] == [
-        [end - 3_600_000, 1]
+        [end - 300_000, 2]
     ]
     hour = got["hour"]
     assert (hour["state"], hour["start"]) == ("ok", end - 3_600_000) and hour["line"][
@@ -162,9 +167,9 @@ def test_comparison_lines_move_onto_the_current_axis(got: dict[str, Any]) -> Non
     assert got["compareBefore"] == {"prev": True, "week": True}
     assert got["old"]["state"] == "missing" and got["old"]["line"]["cmp"] is None
     assert got["compareAfter"] == [
-        {"prev": False, "week": True},
-        {"prev": True, "week": True},
-        {"prev": False, "week": True},
+        {"prev": False, "week": False},
+        {"prev": True, "week": False},
+        {"prev": False, "week": False},
         {"prev": False, "week": False},
         {"prev": False, "week": False},
     ]
@@ -180,8 +185,16 @@ def test_comparison_lines_move_onto_the_current_axis(got: dict[str, Any]) -> Non
         121,
     ]  # 7일 응답의 마지막 하루 앞 칸(24시간 뒤로 민 것)
     assert access["compare"] == [
-        {"prev": True, "week": True},
+        {"prev": True, "week": False},
         {"prev": False, "week": False},
+    ]
+    # 7일의 지난주 같은 때 = 이전 기간(30일 응답에서)
+    assert got["accessWeek"] == [
+        {"prev": True, "week": True},
+        [
+            "/svc/api/admin/access?window=7d",
+            "/svc/api/admin/access?window=30d",
+        ],
     ]
 
 

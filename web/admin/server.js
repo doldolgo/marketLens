@@ -1,6 +1,6 @@
 // 서버 페이지(스펙 066 §3.3) — "어느 상자의 무엇이": 064 의 카드를 두 열로 + 위 상자 칩(collect·data·serve = 범례 겸 거르기 — 누르면
 // 그 상자만, 더 누르면 더하기·빼기, 주소 f=box:…). 시간 카드는 한 무리라 확대·십자선이 함께 움직인다(echarts.connect).
-// 기간 6시간·24시간·7일·30일, 비교 이전 기간(068 offset)·지난주 같은 때(7일 창에서 잘라).
+// 기간 6시간·24시간·7일·30일, 비교 이전 기간(068 offset)·지난주 같은 때(7일 창의 이전 기간에서 잘라).
 import { $, call, clean, el, int, isExpired, isObj, list, money, num, once, partOf, plainOf, pressed, put, req, stateWord, tag, usable } from './common.js';
 import { change, ms } from './calc.js';
 import { blank, budgetOption, draw, eventsOption, lanesOption, timeOption, unzoom } from './charts.js';
