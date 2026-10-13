@@ -88,8 +88,8 @@
 #   server/uv.lock 은 커밋하지 않고 끝에 지웠다. 브라우저·Docker 는 쓰지 않았다(지시 — nginx 설정은 고치지 않았다)
 cd server && uv sync --extra dev
 cd server && uv run --extra dev ruff check . && uv run --extra dev ruff format --check . && uv run --extra dev pytest -q -rs
-#   All checks passed! · 429 files already formatted · 2591 passed, 1 skipped(test_geo_perf — DBIP_DIR 없음, 065 와 무관)
-#   새 시험 27 — test_attention_overlay_v2.py 8 · test_admin_screens_calc.py 7 · test_admin_screens_page.py 7 · test_admin_screens_static.py 4 ·
+#   All checks passed! · 429 files already formatted · 2593 passed, 1 skipped(test_geo_perf — DBIP_DIR 없음, 065 와 무관)
+#   새 시험 29 — test_attention_overlay_v2.py 10 · test_admin_screens_calc.py 7 · test_admin_screens_page.py 7 · test_admin_screens_static.py 4 ·
 #   test_admin_fake.py 1(attention 응답), 고친 066 시험의 화면 경우(test_admin_xss·fake·pages·screen·scripts). 053 의 test_attention_overlay.py 8 은 손대지 않고 통과
 for f in web/admin/*.js web/public/attention.js; do node --check "$f"; done   # 29개 — node 18.12.0·26.4.0 둘 다 통과
 cd web && npm ci && npm run lint && npm run build   # oxlint 종료 0 · tsc -b && vite build ✓ (index 250.81 kB · gzip 78.53 kB — web/admin 은 빌드 밖)
@@ -100,6 +100,8 @@ uv run web/scripts/admin-fake-feeds.py --port 18999  # /screens.html·/screens.j
 #   attention.js — 상위 20 꼬리표·요소 글씨·ready 의 행 빼기·깊이 어둡기 칸·대시보드 깊이·tag 80자·focus 의 첫 요소·ready 300·화면 밖 건너뜀 /
 #   screensmodel·names — 단계 올림·m = 0 순위·행은 늘 있음·휴대폰 h·그릴 것만 싣기·거의 안 닿음 20%·깊이 j = 0·화면별 이름표 /
 #   screens.js — ready 전 보내지 않음·기기 바꿈 다시 띄우기·출처·창 검사·5초 무응답·대시보드 깊이 → 요소·숨김 about:blank·같은 값 다시 보내지 않음·다른 화면의 ready
+# 브라우저 확인(2026-10-14) 뒤 고친 넷의 변형 9개도 모두 실패: 꼬리표 세 번 밀기 상한·겹침 검사·열쇠마다 하나·순위 차례·요소 칠 0.10·
+#   focus 의 scrollIntoView·가로 가까운 쪽·스크롤 상자 scrollTop·판 행 title(이름 · 영역 · 열쇠)
 ```
 - 돌리지 않은 것: §4 마지막 줄(설계 세션 — 헤드리스 Chrome·053 의 시험 사본·가짜 피드). nginx 를 고치지 않아 `nginx -t` 는 없다.
 
@@ -120,7 +122,7 @@ uv run web/scripts/admin-fake-feeds.py --port 18999  # /screens.html·/screens.j
   1. §3.4 `EL_NAMES` 자리 문구를 '(screens.js 상수)' → '(화면 페이지의 이름표 상수 — `AREA_NAMES` 와 함께)' 로 고쳤다 — `screensnames.js` 하나에 JSON 꼴로 둘(정적 시험이 읽는다). (버림: screens.js 안 — 싣는 순간 페이지가 시작돼 node 시험이 이름표만 부를 수 없다.)
   2. ready 의 `elements` 는 크기 있는 요소가 하나라도 있을 때만 싣는다(053 꼴 그대로 — 053 시험이 ready 를 글자 그대로 본다). 없으면 관리자는 '지금 화면에 없음' 을 판정하지 않는다(옛 attention.js 와 같다). 요소 찾기는 문서 전체(`data-el` + 대화형)에서 부모의 가장 가까운 영역(세기는 영역마다 찾지만 영역이 겹치지 않아 같다)·1초 회차에 다시, 그리기는 그 목록에 `getBoundingClientRect` 만. (버림: 늘 빈 목록도 싣기.)
   3. 단계·순위는 지금 화면에 있는 요소끼리(ready 전에는 모두 — 053 §7 의 영역 규칙과 같다), 순위는 m > 0 인 것만(m = 0 은 '–', 단계 0 은 회색 점선만·꼬리표 없음). 지금 화면에 없는 요소는 같은 최대 대비 단계(5 에서 멈춤)·순위 없이 끝에. h 는 행에도 센다(문구대로 — 0.0초), v 만 행 '–'. (버림: 피드 전체로 순위 — 바뀐 옛 열쇠가 1위면 틀에 #1 이 없다; m = 0 에도 순위 — '#15 · 클릭 0'.)
-  4. 꼬리표 글 = '<이름> · 클릭 n · 100뷰당 x'·'<이름> · 마우스 올림 평균 n초'·'<이름> · 보인 시간 평균 n초'(페이지가 앞에 '#순위 · ', 표본 적음이면 뒤에 ' · 표본 적음'). 요소 꼬리표는 상자 위(위가 모자라면 상자 안 위), 상자는 넘침을 자르지 않는다. focus 받은 요소는 값이 없어도 2초 굵은 테두리. 값 꼴: mode 목록 밖 → area, elements 가 배열이 아니면 없음, depth 꼴이 틀리면 null, small 은 참거짓만.
+  4. 꼬리표 값(tag)은 고른 지표 값만 — 클릭 수(천 단위 쉼표)·'n.n초'(휴대폰 마우스 올림·행 보인 시간은 '–'), 페이지가 '#순위 값' 과 ' · 표본 적음' 을 붙인다. 꼬리표는 층에 따로(상자의 자식이 아니다) — 너비는 글자 수로 어림(숫자·영문 0.62em, 그 밖 1em, 좌우 5px), 높이는 글씨 × 1.3 + 2px. focus 받은 요소는 값이 없어도 2초 굵은 테두리. 값 꼴: mode 목록 밖 → area, elements 가 배열이 아니면 없음, depth 꼴이 틀리면 null, small 은 참거짓만.
   5. 깊이 보기: 영역 상자 없이 띠만(rgba(17,24,39,α)·칸 위 1px 점선), '끝까지 n%' 는 마지막 띠 아래 왼쪽, 도달은 소수 1자리로 보내고 꼬리표는 정수 %. 대시보드·꼴이 틀림·Σ = 0 이면 아무것도 그리지 않는다. 문서 높이 바뀜은 `ResizeObserver(documentElement)`(있을 때).
   6. 주소: `page` 기본 null(기본 화면을 따름 — 고르면 주소에 남아 그대로), `metric` 값 `clicks`·`hover`·`vis`, `mode` `element`·`area`·`depth`. 대시보드의 depth·휴대폰의 hover 는 그리면서 주소를 고쳐 쓴다(새로 부르지 않는다 — `setParams(…, quiet)`). 화면 칩 차례는 §3.1(정적 넷 → 탭 여섯), 같은 pv 면 앞, 응답이 없거나 실패·시행 전·모두 0 이면 랜딩, 응답을 기다리는 동안은 직전 화면.
   7. 부르기: 066 refresh 규칙 그대로 — 이미 받은 (기간, 화면)은 되돌아와도 곧바로 다시 부르지 않고 5분 회차가 부른다. 기본 화면이 page 없는 응답 뒤에 정해져 app.js 에 '받은 값으로 새 열쇠가 생기면 곧바로'(settle 뒤 — 새로고침을 기다리는 동안은 안 함)를 더했다, 느린 주기는 페이지가 `slowMs`(화면 5분).
@@ -128,12 +130,17 @@ uv run web/scripts/admin-fake-feeds.py --port 18999  # /screens.html·/screens.j
   9. 틀 칸: 폭 몫 `--fit` 에 더해 높이 `--stage-h`(창 높이 − 칸 위쪽 − 24px, 최소 480px)도 screens.js 가 준다 — 둘 다 common.js `frameVars` 한 곳(화면이 style 을 만지는 셋째 자리). 휴대폰 틀은 390 × 몫 폭으로 가운데. (버림: CSS 만 — 머리 높이가 줄바꿈으로 바뀐다.)
   10. '새 창으로 ↗' 은 `a`(target=_blank·rel=noopener) — app.js 가 그릴 때마다 href 를 지금 보기의 `urlOf`(relogin 표시 뺌)로. 066 정적 시험의 '새 창 없음'·href 자리에 이 하나만 예외. (버림: window.open 단추 — 링크 복사·가운데 누름이 안 된다.)
   11. 상세 판: 그래프가 없어 ECharts 를 싣지 않는다(정적 시험의 라이브러리 줄 예외). CSV 파일 이름은 스펙 그대로 판 셋이 같다. 떠난 곳·깊이 판은 한 표(구분·항목·영역 id·pv·몫·도달 — 깊이 줄 pv = 그 칸에서 멈춘 pv). 순위 칸은 CSV 에서 수(066 규칙).
-  12. 오른쪽 판: 탭은 066 분할 단추(`.seg`)·주소에 싣지 않음(기본 요소). 영역 칩은 표만 거른다(틀은 그대로) — 차례는 행의 영역(ms 큰 순) 뒤 요소에만 있는 영역, 바닥 줄 수는 거른 표 기준((기타) 뺌), 행 title 은 열쇠 원문, 강조는 마지막으로 누른 행. 깊이 판 문구: 대시보드 '탭 화면은 깊이 없음', 정적 페이지의 자료 없음·Σ = 0 '깊이 기록 없음', 계단 줄 이름 '0%'~'100%', '절반' 은 그 줄 아래 한 줄. 표본 적음은 머리 줄 ▲(0 < pv < 5)·판 바탕 한 줄·꼬리표.
+  12. 오른쪽 판: 탭은 066 분할 단추(`.seg`)·주소에 싣지 않음(기본 요소). 영역 칩은 표만 거른다(틀은 그대로) — 차례는 행의 영역(ms 큰 순) 뒤 요소에만 있는 영역, 바닥 줄 수는 거른 표 기준((기타) 뺌), 행 title 은 이름 · 영역 · 열쇠 원문(16), 강조는 마지막으로 누른 행. 깊이 판 문구: 대시보드 '탭 화면은 깊이 없음', 정적 페이지의 자료 없음·Σ = 0 '깊이 기록 없음', 계단 줄 이름 '0%'~'100%', '절반' 은 그 줄 아래 한 줄. 표본 적음은 머리 줄 ▲(0 < pv < 5)·판 바탕 한 줄·꼬리표.
   13. 피드의 `before_gate` 는 상태라 066 배지 규칙대로 unconfigured·before_gate 로 읽는다('연결 안 됨', code 없음). 기록 없는 화면·기기도 ok 면 값을 보낸다(영역 '기록 없음' 상자).
   14. 가짜 피드: ok·old·missing·expired 는 정상, problem 은 error(redis), empty 는 before_gate, nobands 는 기록 없음, bands 는 랜딩 요소 300(그중 (기타) 1), xss 는 `<img onerror>` 열쇠 + 영역 id 꼴이 아닌 항목. pv 는 랜딩 PC 가 가장 크게(기본 화면), 선선갭 PC 3(표본 적음), 휴대폰 몇 화면은 0.
   15. 함께 고친 다른 기능의 시험: 066 의 test_admin_screen(화면 페이지 상세 판·라이브러리 없음·기간 넷·새 창 예외)·test_admin_scripts(경로 표 attention·style/href 자리·틀 예외 둘·'처리방침' 이름표 하나)·test_admin_pages(부르는 경로·관리자 분기)·test_admin_xss·test_admin_fake(화면 경우), admin_dom 가짜. 053 의 test_attention_overlay.py 는 손대지 않았다.
+  16. 2026-10-14 브라우저 확인(설계 세션) 뒤 고친 넷 — 스펙 §3.5·§3.6·053 §3.4 문구를 먼저 고쳤다:
+      - 판 행 누름이 관리자 문서까지 굴렸다(scrollY 0 → 128 — 관리자와 공개 사이트가 같은 사이트라 scrollIntoView 가 조상 문서도 굴린다). focus(영역·요소 모두)는 틀 문서 안에서만 — 스크롤 상자 조상의 scrollTop(세로 가운데)·scrollLeft(가로 가까운 쪽 — scrollIntoView 의 기본 inline 과 같게, 넓은 행이 옆으로 밀리지 않게)를 안쪽부터, 마지막에 이 창의 window.scrollTo. scrollIntoView 는 부르지 않는다(053 시험의 그 단언만 window.scrollTo 로).
+      - 요소 상자가 큰 카드·차트를 가렸다(칠 0.34~0.5) — 요소 보기는 테두리가 단계를 말하고 칠은 같은 색 0.06~0.10. 영역 보기는 053 칠 그대로.
+      - 꼬리표가 겹치고 잘렸다 — '#순위 값' 으로 짧게(이름은 옆 표), (영역, 열쇠)마다 하나(화면에 보이는 첫 요소 위), 순위 차례로 놓고 겹치면 꼬리표 높이만큼 아래로 세 번까지·그래도 겹치면 그 꼬리표만 버림(상자는 둠). (버림: 문서 차례로 놓기 — 아래 순위가 자리를 먼저 차지한다.)
+      - 판 표가 360px 에서 두세 줄로 접혔다 — 판은 세 칸(순위 · 이름 한 줄(줄임표) + 흐린 둘째 줄에 영역 · 고른 지표 막대와 값), 행 title = 이름 · 영역 · 열쇠 원문. 영역 판도 세 칸(이름 앞 ▲ = 거의 안 닿음, title 에 도달률·100뷰당 클릭). 상세 판·CSV 는 칸 그대로. (버림: 영역 줄을 지우기 — 같은 이름이 영역 둘에 있다(app:history·nav:*).)
 - 남은 빚:
   - 브라우저 확인(설계 세션 — §4 마지막 줄): 랜딩·대시보드 스프레드·기록에서 요소 상자가 요소에 맞는지·상위 꼬리표 자리와 글씨·겹침, 랜딩 깊이 띠, 표 행 누름 → 그 요소, 새 창 주소가 같은 화면, 1440·1024·390 가로 넘침 0, CSP 위반 0. 로컬은 053 의 시험 사본(attention.js 의 `HOST`·`ADMIN_ORIGIN`, screens.js 의 `SITE_ORIGIN` 을 바꾼 커밋하지 않는 사본)으로.
-  - 가까운 요소가 여럿이면 상위 20 꼬리표가 겹칠 수 있다. 행이 많은 대시보드(스프레드)는 요소 찾기가 1초마다 문서 전체를 돈다 — 프레임 시간은 브라우저 확인에서.
+  - 꼬리표 너비는 글자 수로 어림한다 — 실제 폭과 달라 아주 가까운 꼬리표가 조금 겹치거나 덜 겹친 채 밀릴 수 있다. 행이 많은 대시보드(스프레드)는 요소 찾기가 1초마다 문서 전체를 돈다 — 프레임 시간은 브라우저 확인에서.
   - ready 의 elements 가 비면 판정하지 않는다 — 요소가 없는 화면(수집 상태 탭 등)은 피드의 옛 열쇠를 '지금 화면에 없음' 으로 가르지 못한다.
   - CSV 파일 이름이 판 셋에서 같다(스펙 그대로 — 브라우저가 (1) 을 붙인다).
