@@ -308,3 +308,50 @@ def test_multi_pane_charts_keep_legend_pane_titles_and_tick_labels_apart() -> No
         assert all(isinstance(t, int) for t in tops), chart  # 그릴 때 px 배치
         # 첫 칸 이름은 범례 줄(28px) 아래 자기 줄(26px)에 — 범례와 같은 줄에 앉지 않는다(판은 범례가 없다)
         assert tops[0] == (32 if "-detail-" in chart else 54), (chart, tops)
+
+
+END_LABELS = r"""
+const code = (await import('node:fs')).readFileSync(`${input.root}/web/admin/vendor/echarts-5.5.1.min.js`, 'utf8')
+const lib = { exports: {} }
+new Function('exports', 'module', code)(lib.exports, lib)
+const real = lib.exports
+setup({ visible: false, respond: () => [404, {}] })
+let size = [720, 320]
+globalThis.echarts = { init: () => real.init(null, null, { renderer: 'svg', ssr: true, width: size[0], height: size[1] }), registerTheme: real.registerTheme, connect: real.connect, format: real.format, graphic: real.graphic }
+const charts = await page('charts.js')
+const common = await page('common.js')
+const T0 = 1_800_000_000_000
+const H = 3_600_000
+const pts = (f) => Array.from({ length: 24 }, (_, i) => [T0 + i * H, f(i)])
+// 트래픽 큰 추이(사람 모양 페이지 · 스크립트가 돈 페이지)·Clarity 맞대기(세 선)와 같은 꼴 — 이름이 길다. 잘림은 범례 줄(28px — 넘치면
+// 넘김 단추로 자르는 칸) 아래의 글자만 본다
+const cases = {
+  trend: [{ name: '사람 모양 페이지', mark: 'acc', type: 'bar', data: pts((i) => 40 + i) }, { name: '스크립트가 돈 페이지', mark: 'c1', data: pts((i) => 20 + i) }],
+  match: [{ name: 'Clarity 세션', mark: 'acc', data: pts((i) => 30 + i) }, { name: '확인된 방문자', mark: 'c1', data: pts((i) => 28 + i) }, { name: '브라우저 모양 방문자', mark: 'c3', data: pts((i) => 50 + i) }],
+}
+out.charts = {}
+for (const [name, series] of Object.entries(cases)) {
+  for (const s of [[1150, 320], [560, 280], [326, 320]]) {
+    size = s
+    const id = `c-${name}-${s[0]}`
+    const chart = charts.draw(id, charts.timeOption({ startMs: T0, endMs: T0 + 24 * H, zoom: 'card', panes: [{ fmt: common.int }], series }))
+    const boxes = textBoxes(chart.renderToSVGString()).filter((b) => !/^\d+\/\d+$/.test(b.text))
+    out.charts[id] = { width: s[0], right: chart.getOption().grid[0].right, lines: series.map((x) => x.type !== 'bar'), count: series.map((x) => boxes.filter((b) => b.text === x.name).length), cut: boxes.filter((b) => b.y0 > 28 && (b.x1 > s[0] + 1 || b.x0 < -1)).map((b) => b.text), clashes: clashes(boxes) }
+  }
+}
+"""
+
+
+def test_end_labels_fit_inside_the_chart_or_give_way_to_the_legend() -> None:
+    """066 §3.1 차트 규칙 — 선 끝 이름표(계열 둘~넷)는 가장 긴 이름만큼 오른쪽 자리를 남겨 잘리지 않는다. 그 자리가 그림 폭의 30% 를
+    넘는 좁은 카드에서는 이름표를 끄고 범례만 둔다(트래픽 큰 추이 '스크립트가 돈 페이지'·Clarity 맞대기 '브라우저 모양 방문자')."""
+    got = run_admin(TEXT_BOXES + END_LABELS, {})
+    for chart, c in got["charts"].items():
+        assert c["cut"] == [] and c["clashes"] == [], (chart, c)
+        wide = c["width"] >= 560
+        # 넓으면 선은 범례 + 선 끝 이름표 = 두 번(막대는 이름표 없음), 좁으면 범례에 한 번(이름표 끔)
+        assert c["count"] == [2 if wide and line else 1 for line in c["lines"]], (
+            chart,
+            c,
+        )
+        assert c["right"] >= (100 if wide else 14), (chart, c)

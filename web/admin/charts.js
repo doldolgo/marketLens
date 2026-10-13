@@ -115,27 +115,47 @@ const live = new Map(); // 칸 id → { chart, box, shape, ro, layout }
 // + 다음 칸 이름, 아래 = 미니맵(판). 가로축 글자는 마지막 칸 안(containLabel)
 // 마지막 칸은 가로축 글자(containLabel 이 그 칸 안에서 뺀다)만큼 더 높게 — 칸마다 그림 높이가 같다. 눈금 수는 그림 높이에 맞춘다
 // (낮은 칸에 눈금 글자 넷이 들어가 서로 겹치지 않게)
-const LAYOUT = new WeakMap(); // option → { titles:[bool…], legend, detail, right }
-export const PX = Object.freeze({ legend: 28, title: 26, half: 9, edge: 6, gapTitled: 36, gap: 22, foot: 6, slider: 40, xLabels: 20 });
-export function placeGrids(spec, height) {
+const LAYOUT = new WeakMap(); // option → { titles:[bool…], legend, detail, right, labels:[이름…]|null, ends:[계열 순번…] }
+export const PX = Object.freeze({ legend: 28, title: 26, half: 9, edge: 6, gapTitled: 36, gap: 22, foot: 6, slider: 40, xLabels: 20, endPad: 16, endShare: 0.3 });
+// 눈금·선 끝 글자(11px) 폭 어림 — 한글 1em · 숫자·영문 0.6em · 띄어쓰기 0.3em · 점·쌍점 0.4em
+export const textWidth = (text, size = 11) =>
+  [...String(text ?? '')].reduce((w, ch) => w + size * (/[\uac00-\ud7a3]/.test(ch) ? 1 : /\s/.test(ch) ? 0.3 : /[·:,/.]/.test(ch) ? 0.4 : 0.6), 0);
+// 선 끝 이름표 자리 — 가장 긴 이름 + 여백을 오른쪽에 남긴다. 그림 폭의 30% 를 넘으면(좁은 카드) 이름표를 끄고 범례만 둔다
+export function endSpace(spec, width) {
+  if (!spec.labels?.length) return { right: spec.right, ends: null };
+  const need = Math.ceil(Math.max(...spec.labels.map((name) => textWidth(name)))) + PX.endPad;
+  return width > 0 && need <= width * PX.endShare ? { right: need, ends: true } : { right: 14, ends: false };
+}
+export function placeGrids(spec, height, width = 0) {
   const n = spec.titles.length;
+  const { right, ends } = endSpace(spec, width);
   const head = (spec.legend ? PX.legend : PX.edge) + (spec.titles[0] ? PX.title : PX.half);
   const gap = spec.titles.slice(1).some(Boolean) ? PX.gapTitled : PX.gap;
   const foot = PX.foot + (spec.detail ? PX.slider : 0);
   const h = Math.max(24, (height - head - foot - gap * (n - 1) - PX.xLabels) / n);
   return {
-    grid: spec.titles.map((_, i) => ({ left: 8, right: spec.right, top: Math.round(head + i * (h + gap)), height: Math.floor(h + (i === n - 1 ? PX.xLabels : 0)), containLabel: true })),
+    grid: spec.titles.map((_, i) => ({ left: 8, right, top: Math.round(head + i * (h + gap)), height: Math.floor(h + (i === n - 1 ? PX.xLabels : 0)), containLabel: true })),
     splits: spec.titles.map(() => (h >= 100 ? 3 : h >= 56 ? 2 : 1)),
+    ends,
   };
 }
 // 지금 칸 높이로 낸 배치 — 높이를 모르면(숨은 칸·시험의 가짜 차트) null 이고 option 의 퍼센트 배치를 그대로 쓴다
 function layoutOf(held) {
   const height = typeof held.chart.getHeight === 'function' ? held.chart.getHeight() : 0;
-  return held.layout && height > 0 ? placeGrids(held.layout, height) : null;
+  const width = typeof held.chart.getWidth === 'function' ? held.chart.getWidth() : 0;
+  return held.layout && height > 0 ? placeGrids(held.layout, height, width) : null;
 }
+// 선 끝 이름표가 있는 계열만 켜고 끈다(나머지 계열은 그대로 — 순번으로 합쳐진다)
+const endToggles = (held, on) => {
+  const ends = new Set(held.layout.ends);
+  return Array.from({ length: held.layout.count }, (_, i) => (ends.has(i) ? { endLabel: { show: on } } : {}));
+};
 function relayout(held) {
   const placed = layoutOf(held);
-  if (placed) held.chart.setOption({ grid: placed.grid, yAxis: placed.splits.map((splitNumber) => ({ splitNumber })) });
+  if (!placed) return;
+  const next = { grid: placed.grid, yAxis: placed.splits.map((splitNumber) => ({ splitNumber })) };
+  if (placed.ends !== null) next.series = endToggles(held, placed.ends);
+  held.chart.setOption(next);
 }
 
 export function dispose(id) {
@@ -191,6 +211,7 @@ export function draw(id, option, group) {
     list(option.yAxis).forEach((axis, i) => {
       axis.splitNumber = placed.splits[i];
     });
+    if (placed.ends === false) for (const i of held.layout.ends) if (option.series[i]?.endLabel) option.series[i].endLabel.show = false;
   }
   const grids = Array.isArray(option.grid) ? option.grid.length : option.grid ? 1 : 0;
   const shape = JSON.stringify([grids, list(option.series).map((s) => `${s.type}:${s.name ?? ''}`), list(option.dataZoom).length]);
@@ -368,6 +389,7 @@ export function timeOption(o) {
             itemStyle: { color: c },
             areaStyle: s.area ? { color: c, opacity: 0.1 } : undefined,
             endLabel: labels ? { show: true, formatter: '{a}', color: T['text-2'], fontSize: 11 } : undefined,
+            labelLayout: labels ? { moveOverlap: 'shiftY' } : undefined,
           };
     if (first && list(panes[i].refs).length) {
       item.markLine = {
@@ -436,7 +458,8 @@ export function timeOption(o) {
     }),
     series,
   };
-  LAYOUT.set(option, { titles: panes.map((p) => Boolean(p.title)), legend: Boolean(legendOn), detail, right: labels ? 64 : 14 });
+  const ends = series.flatMap((x, i) => (x.endLabel ? [i] : []));
+  LAYOUT.set(option, { titles: panes.map((p) => Boolean(p.title)), legend: Boolean(legendOn), detail, right: labels ? 64 : 14, labels: labels ? ends.map((i) => series[i].name) : null, ends, count: series.length });
   return option;
 }
 
