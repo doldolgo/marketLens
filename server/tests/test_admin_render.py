@@ -194,3 +194,39 @@ def test_status_lanes_draw_the_no_data_hatch() -> None:
     server = got["server.js"]
     assert server["failed"] == [] and server["errors"] == []
     assert server["drawn"]["page:c-checks"]["paths"] > 30  # 빗금 선들
+
+
+COUNT_TICKS = r"""
+const code = (await import('node:fs')).readFileSync(`${input.root}/web/admin/vendor/echarts-5.5.1.min.js`, 'utf8')
+const lib = { exports: {} }
+new Function('exports', 'module', code)(lib.exports, lib)
+const real = lib.exports
+setup({ visible: false, respond: () => [404, {}] })
+const charts = await page('charts.js')
+const common = await page('common.js')
+const T0 = 1_800_000_000_000
+const H = 3_600_000
+const texts = (option) => {
+  const c = real.init(null, null, { renderer: 'svg', ssr: true, width: 720, height: 200 })
+  c.setOption(option)
+  const svg = c.renderToSVGString()
+  c.dispose()
+  return [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1])
+}
+const pts = Array.from({ length: 24 }, (_, i) => [T0 + i * H, i === 5 ? 1 : 0])
+const one = (pane) => charts.timeOption({ startMs: T0, endMs: T0 + 24 * H, panes: [pane], series: [{ name: 'x', mark: 'bad', type: 'bar', data: pts }] })
+out.counts = texts(one({ title: '5xx', fmt: common.int })).filter((t) => /^\d+$/.test(t))
+const word = (v) => (v >= 1 ? '실패' : '정상')
+out.checks = texts(one({ fmt: word, axisFmt: word, max: 1, int: true })).filter((t) => t === '실패' || t === '정상')
+"""
+
+
+def test_count_axes_have_integer_ticks_without_repeated_labels() -> None:
+    """066 §3.1 차트 규칙 — 센 수의 세로축(5xx·canary 오류·접속·알림…)은 눈금이 정수라 값이 0·1 뿐이어도 '1, 1, 0' 처럼 같은 글자가
+    되풀이되지 않는다(진짜 ECharts 로 그려 축 글자를 센다). 상태 검사(정상 0·실패 1)도 같다."""
+    got = run_admin(COUNT_TICKS, {})
+    assert sorted(got["counts"]) == [
+        "0",
+        "1",
+    ]  # 고치기 전에는 ['0', '0', '1', '1', '1']
+    assert sorted(got["checks"]) == ["실패", "정상"]

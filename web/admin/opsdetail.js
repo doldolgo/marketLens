@@ -78,7 +78,7 @@ export const canaryPanes = (app, w) => ({
   ],
 });
 export const checkLines = (app, w) => ({
-  panes: [{ fmt: (v) => (num(v) === null ? '–' : v >= 1 ? '실패' : '정상'), axisFmt: (v) => (v >= 1 ? '실패' : '정상'), max: 1 }],
+  panes: [{ fmt: (v) => (num(v) === null ? '–' : v >= 1 ? '실패' : '정상'), axisFmt: (v) => (v >= 1 ? '실패' : '정상'), max: 1, int: true }],
   series: boxesOf(app, w).map((b) => ({ name: b.box, mark: boxMark(b.box), step: 'end', ...w.line(boxGet(b.box, 'statusFailed')) })),
 });
 

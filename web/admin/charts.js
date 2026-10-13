@@ -1,7 +1,7 @@
 // ECharts 5.5.1(vendor 사본 — 전역 echarts)를 감싼다(스펙 066 §3.1·조사 §6). 칸 id 마다 인스턴스 하나, 테마 'kt' 는 admin.css 의
 // CSS 변수에서 읽어 한 번 등록한다(CSS 가 하나의 원본). 툴팁 HTML 은 모두 tip() 하나를 지난다 — 피드 글자는 echarts.format.encodeHTML
 // (064 §3.1 보안). 축·범례·이름표 글자는 캔버스에 그려져 HTML 이 되지 않는다. 라이브러리를 못 불러오면 그림 칸에 한 줄.
-import { clean, el, hm, list, md, num, own, short } from './common.js';
+import { clean, el, hm, int, list, md, num, own, short } from './common.js';
 import { change, hasValue, signed } from './calc.js';
 
 // 토큰 — admin.css :root 와 같은 값(조사 §5). 문서의 CSS 변수를 읽지 못하면(시험·CSS 못 받음) 이 값을 쓴다
@@ -277,7 +277,7 @@ export function sparkBarsOption(data, mark, fmt) {
 }
 
 // 시간 그림 — 칸(panes) 여럿을 같은 시간 축 위아래로(둘째 y축 대신), 십자선 공유(axisPointer.link). 이전 기간은 점선·--text-3·낮은 z.
-// o = { startMs, endMs, panes:[{ title?, fmt, axisFmt?, min?, max?, refs?:[[y, 색 이름, 이름표]] }],
+// o = { startMs, endMs, panes:[{ title?, fmt, axisFmt?, min?, max?, int?(센 수 — 눈금도 정수), refs?:[[y, 색 이름, 이름표]] }],
 //       series:[{ name, mark, data, cmp?, type?:'line'|'bar', pane?, neg?(아래로 뒤집음), area?, step?, stack? }],
 //       areas?:[[from, to, 이름]](옅은 빨강 구간), zoom?:'card'|'detail', legend?, labels?(선 끝 이름표), daily?(날 칸 — 툴팁 머리는 날짜만) }
 export function timeOption(o) {
@@ -355,6 +355,8 @@ export function timeOption(o) {
         min: p.min ?? (neg(i) ? undefined : 0),
         max: p.max,
         splitNumber: n > 1 ? 2 : 3,
+        // 센 수(fmt 가 int 이거나 int 표시) — 눈금을 정수로(0.5 칸이 '1, 1, 0' 처럼 같은 글자로 겹치지 않게)
+        minInterval: p.int || p.fmt === int ? 1 : undefined,
         name: p.title ? clean(p.title) : undefined,
         nameLocation: 'end',
         nameGap: 8,
