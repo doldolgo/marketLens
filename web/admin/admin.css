@@ -1336,3 +1336,215 @@ button.lrow:hover {
   font-size: var(--fs-12);
 }
 
+/* — 차트 툴팁(echarts tooltip.className 'tt') — 글자는 encodeHTML 을 지난다. 값이 앞(굵게), 이름은 흐리게 — */
+.tt {
+  max-width: 320px;
+  white-space: normal !important;
+  font-variant-numeric: tabular-nums;
+}
+.tt-h {
+  margin-bottom: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.tt-r {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.6;
+}
+.tt-n {
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.tt-r b {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--text-1);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tt-k {
+  flex: none;
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text-3);
+}
+.tt-k.c1 {
+  background: var(--c1);
+}
+.tt-k.c2 {
+  background: var(--c2);
+}
+.tt-k.c3 {
+  background: var(--c3);
+}
+.tt-k.c4 {
+  background: var(--c4);
+}
+.tt-k.c5 {
+  background: var(--c5);
+}
+.tt-k.c6 {
+  background: var(--c6);
+}
+.tt-k.c7 {
+  background: var(--c7);
+}
+.tt-k.c8 {
+  background: var(--c8);
+}
+.tt-k.acc {
+  background: var(--accent);
+}
+.tt-k.ok {
+  background: var(--ok);
+}
+.tt-k.warn {
+  background: var(--warn);
+}
+.tt-k.bad {
+  background: var(--bad);
+}
+.tt-k.cmp {
+  background: repeating-linear-gradient(90deg, var(--text-3) 0 3px, transparent 3px 5px);
+}
+
+/* — 좁은 화면 — 1280 이상 3~4열 · 768~1279 2열(내비 아이콘만) · 768 미만 1열(☰ 시트, 상세 판은 화면 전체) — */
+@media (min-width: 1440px) {
+  .content {
+    gap: var(--sp-6);
+  }
+}
+@media (max-width: 1279px) {
+  :root {
+    --side: 56px;
+  }
+  .side {
+    padding: var(--sp-4) var(--sp-2);
+  }
+  .brand,
+  .nav a,
+  .side-foot > * {
+    justify-content: center;
+    padding: 0;
+  }
+  .brand span,
+  .brand small,
+  .nav span,
+  .side-foot span {
+    display: none;
+  }
+  .nav .mark {
+    position: absolute;
+    top: 6px;
+    right: 7px;
+    margin: 0;
+  }
+  .s3,
+  .s4,
+  .s6 {
+    grid-column: span 6;
+  }
+  .s8 {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 767px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .side {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 240px;
+    padding: var(--sp-4) var(--sp-3);
+    background: var(--surface);
+    box-shadow: var(--shadow-sheet);
+    visibility: hidden;
+    transform: translateX(-100%);
+  }
+  .app[data-menu="open"] .side {
+    visibility: visible;
+    transform: none;
+  }
+  .brand,
+  .nav a,
+  .side-foot > * {
+    justify-content: flex-start;
+    padding: 0 10px;
+  }
+  .brand span,
+  .brand small,
+  .nav span,
+  .side-foot span {
+    display: inline;
+  }
+  .nav .mark {
+    position: static;
+    margin-left: auto;
+  }
+  .top {
+    position: sticky;
+    top: 0;
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-height: 48px;
+    padding: 0 var(--sp-3);
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+  .top b {
+    font-weight: 600;
+  }
+  .head {
+    position: static;
+    padding: var(--sp-3) var(--sp-4);
+  }
+  .tools {
+    width: 100%;
+    margin-left: 0;
+  }
+  .filters {
+    padding: var(--sp-2) var(--sp-4) 0;
+  }
+  .notice {
+    margin: var(--sp-2) var(--sp-4) 0;
+  }
+  .content {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-3);
+    padding: var(--sp-4);
+  }
+  .s3,
+  .s4,
+  .s6,
+  .s8,
+  .s12 {
+    grid-column: 1 / -1;
+  }
+  .big {
+    font-size: 28px;
+  }
+  .sheet {
+    padding: 0;
+  }
+  .sheet-panel {
+    border: 0;
+    border-radius: 0;
+  }
+  .sheet-head {
+    padding: var(--sp-3) var(--sp-4);
+  }
+  .sheet-sub {
+    padding: var(--sp-2) var(--sp-4);
+  }
+  .sheet-body {
+    padding: var(--sp-3) var(--sp-4) var(--sp-6);
+  }
+}
