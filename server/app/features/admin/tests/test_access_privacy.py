@@ -169,6 +169,7 @@ def test_a_broken_rotated_file_keeps_no_user_agent_or_referrer_memo(
     assert len(tallies) == 2
     for tally in tallies:
         assert (tally._kinds, tally._traits, tally._refs) == ({}, {}, {})
-        assert tally._day[2] == b""  # 날 열쇠도 남기지 않는다
+        assert tally._key[1] == b""  # 날 열쇠도 남기지 않는다
+        assert (tally.bands._memo, tally.bands._paths) == ({}, {})  # 067 대역 메모도
         found = [x for x in _strings(tally) if "uniq" in x or "iPhone" in x]
         assert found == []

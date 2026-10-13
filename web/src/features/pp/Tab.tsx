@@ -89,15 +89,17 @@ export default function PpTab({ feed }: { feed: Feed }) {
     setSort((s) => (s.col === c ? { col: c, asc: !s.asc } : { col: c, asc: c === 'sym' }))
   }
 
-  const headers: Header[] = [['sym', '심볼', 'left'], ['gap', '가격갭', 'right'], ['fund', '펀딩갭', 'right']]
+  // 넷째 칸은 061 요소 열쇠(data-el)
+  const headers: Header[] = [['sym', '심볼', 'left', 'sort:sym'], ['gap', '가격갭', 'right', 'sort:gap'], ['fund', '펀딩갭', 'right', 'sort:fund']]
 
   return (
     <>
+      {/* data-el — 061 화면 이용 통계의 요소 열쇠(모양·동작과 무관) */}
       <div data-area="filters" style={bar}>
-        <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={searchInput} />
-        <NumField label="가격갭 임계값" value={thrP} step={0.1} onChange={setThrP} />
-        <NumField label="펀딩갭 임계값 · 연" value={thrF} step={5} onChange={setThrF} />
-        <ToggleBtn on={only} label="임계 초과만" onClick={() => setOnly(!only)} />
+        <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={searchInput} data-el="search" />
+        <NumField label="가격갭 임계값" value={thrP} step={0.1} onChange={setThrP} el="threshold-price" />
+        <NumField label="펀딩갭 임계값 · 연" value={thrF} step={5} onChange={setThrF} el="threshold-funding" />
+        <ToggleBtn on={only} label="임계 초과만" onClick={() => setOnly(!only)} el="only-over" />
         <span style={hint}>perp ↔ perp · 싼 쪽 롱 + 비싼 쪽 숏 · 펀딩비갭은 시간당 정규화</span>
         <span style={count}>{rows.length} / {all.length} 코인 표시</span>
       </div>

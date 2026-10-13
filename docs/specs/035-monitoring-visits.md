@@ -44,7 +44,7 @@
 | 부분 | 주기초 |
 |---|---|
 | access | 60 |
-| clarity | 14400 |
+| clarity | 21600 |
 | clarity.pages | 43200 |
 
 주기 값은 사람 확인 대상의 기본값이다(한도·부담과 신선도의 교환 — §3.4). access 는 창(038 — 24h·7d·30d)마다 따로 60초 칸이고 `access.log` 다시 읽기는 창 셋이 나눠 쓴다. Clarity 두 호출의 간격과 한도 셈은 040 §3.2.
@@ -59,7 +59,7 @@
 - 외부 계약(Microsoft Learn "Clarity Data Export API", 2026-10-01 확인 — 문서 갱신 2025-12-05): `GET https://www.clarity.ms/export-data/api/v1/project-live-insights?numOfDays=1`, 헤더 `Authorization: Bearer <토큰>`. `numOfDays` 1·2·3 = 최근 24·48·72시간(UTC), 차원 셋까지(040 의 페이지 호출이 `URL`·`Device` 둘을 쓴다). 응답은 `[{metricName, information: [행…]}]`, 1,000행까지·페이지 없음. **프로젝트당 하루 10회** — 넘으면 429 "Exceeded daily limit". 401 = 토큰 없음·틀림·만료, 403 = 권한 없음, 400 = 인자 오류. 토큰은 프로젝트 관리자가 Settings → Data Export 에서 만든다. 지표 이름(문서 철자): Scroll Depth·Engagement Time·Traffic·Popular Pages·Browser·Device·OS·Country/Region·Page Title·Referrer URL·Dead Click Count·Excessive Scroll·Rage Click Count·Quickback Click·Script Error Count·Error Click Count. **실제 응답의 `metricName` 은 공백·빗금 없는 CamelCase 다**(2026-10-02 첫 응답, §7): `Traffic`·`ScrollDepth`·`EngagementTime`·`PopularPages`·`Browser`·`Device`·`OS`·`Country`·`PageTitle`·`ReferrerUrl`·`DeadClickCount`·`ExcessiveScroll`·`RageClickCount`·`QuickbackClick`·`ScriptErrorCount`·`ErrorClickCount`. 문서가 행 모양을 적은 지표는 `Traffic` 하나(`totalSessionCount`·`totalBotSessionCount`·`distantUserCount` — 문자열 숫자, `PagesPerSessionPercentage` — 실수)다.
 - 이름 비교: 이름에 따라 다르게 다루는 곳(`Traffic` 고르기·`Referrer URL` 의 출처 줄이기)은 이름을 NFKC 로 바꾼 뒤(전각 → 반각) 소문자로, 영문자·숫자만 남겨 비교한다 — `ReferrerUrl`·`Referrer URL` 은 둘 다 `referrerurl`, `Traffic` 은 `traffic`. 실제 철자와 문서 철자가 모두 맞는다. `Traffic` 은 정확히 `traffic` 일 때, 출처 줄이기는 `referr`·`referer` 조각이 들어 있을 때 — 철자가 또 바뀌어도(`Referrer`·`Referer Url`·`Referring URL`) 경로가 남지 않는 쪽(닫힌 쪽)이고, 잘못 맞으면 그 지표의 경로만 잃는다. 응답의 `name` 은 받은 그대로 싣는다.
 - 설정: env `CLARITY_API_TOKEN`(serve 의 `server/.env`, 사람이 넣는 비밀). 없으면 `unconfigured`·호출 0. 프로젝트 ID 는 쓰지 않는다(토큰이 프로젝트에 묶여 있다).
-- 호출 규칙·기록·한도 지키기는 040 §3.2(기본 4시간·페이지×기기 12시간, Redis `admin:clarity`·`admin:clarity:pages`). core 공개 계약 `RedisBus.clarity_load() -> str | None`·`clarity_save(data: str) -> None` 은 그대로이고 040 이 페이지 기록 메서드 둘을 더한다.
+- 호출 규칙·기록·한도 지키기는 040 §3.2·068 §3.1(기본 6시간·페이지×기기 12시간·기기·유입 차원 24시간씩, Redis `admin:clarity`·`admin:clarity:pages`·`admin:clarity:dims`). core 공개 계약 `RedisBus.clarity_load() -> str | None`·`clarity_save(data: str) -> None` 은 그대로이고 040 이 페이지 기록 메서드 둘을 더한다.
 - 주소 줄이기(저장·응답 전): 행의 값과 키 중 주소 꼴 — 앞뒤 공백을 뗀 뒤 `<스킴>://`(대소문자 무관)·`/` 로 시작하거나, 공백 없이 `호스트.이름` 바로 뒤에 `/`·`?`·`#` — 은 지표 이름과 무관하게 쿼리·해시·사용자 정보를 뗀다 — 인기 페이지·페이지 주소에 광고 클릭 ID·utm·제3자 참조 주소의 쿼리가 실릴 수 있다. `Referrer URL`(실제 `ReferrerUrl`) 지표의 주소는 출처(`<스킴>://호스트[:포트]`, 스킴 없는 꼴은 `호스트[:포트]`)로 줄인다. 그 밖의 문자열 값은 200자에서 자른다. 표준 밖 `NaN`·`Infinity`·넘치는 실수는 null, 짝 없는 서로게이트는 `?` 로 — 응답·Redis 에 다시 쓸 수 있게. 대시보드 주소의 `tab` 남기기는 040 §3.3.
 - 응답(값 키·state·정규화·`pages`)은 040 §3.3~§3.5.
 - 토큰 절차(사람 — 033 의 런북 `clarity.md` 에 절 "Data Export 토큰(035)"): 032 게시·033 설치 뒤 발급(Settings → Data Export, 프로젝트 관리자) → serve `server/.env` 의 `CLARITY_API_TOKEN` → api 다시 띄우기 → 관리자 화면에서 확인. 교체(관리자 이탈 — Clarity 권장)·바로 부르기(키 하나 지우기·하루 한 번 — 040)·하루 10회 한도를 함께 적는다. `admin-access.md` 에는 그 절을 가리키는 한 줄만 둔다.

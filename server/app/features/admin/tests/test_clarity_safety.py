@@ -41,7 +41,7 @@ async def test_token_never_reaches_logs_redis_or_response(
     caplog.set_level(logging.DEBUG)
     w = World(Clarity((200, EXPORT), (401, {"token": TOKEN})))
     first = await w.get()
-    w.advance(4)
+    w.advance(6)
     second = await w.get()
     raw = fakeredis.FakeRedis(server=w.server).get("admin:clarity").decode()
     for text in (json.dumps(first), json.dumps(second), raw, caplog.text):
@@ -74,12 +74,21 @@ async def test_unreachable_redis_means_no_call_and_error_redis(
     assert "10.0.0.5" not in caplog.text
 
 
-async def test_failed_save_still_blocks_calls_for_four_hours() -> None:
+async def test_failed_save_still_blocks_calls_for_six_hours() -> None:
     class SaveFails:
         async def clarity_load(self) -> str | None:
             return None
 
         async def clarity_save(self, data: str) -> None:
+            raise ConnectionError("down")
+
+        async def clarity_dims_load(self, field: str) -> str | None:
+            return None
+
+        async def clarity_dims_save(self, field: str, data: str) -> None:
+            raise ConnectionError("down")
+
+        async def clarity_day_save(self, day: str, data: str, expire_at: int) -> None:
             raise ConnectionError("down")
 
         clarity_pages_load = clarity_load
@@ -91,7 +100,7 @@ async def test_failed_save_still_blocks_calls_for_four_hours() -> None:
     w.advance(1)
     body = await w.feeds.clarity(bus=store)
     assert body["state"] == "ok" and w.clarity.count("base") == 1
-    w.advance(3)
+    w.advance(5)
     await w.feeds.clarity(bus=store)
     assert w.clarity.count("base") == 2
 
@@ -259,11 +268,11 @@ async def test_a_list_without_any_metric_is_error_and_keeps_the_last_success(
 ) -> None:
     w = World(Clarity((200, EXPORT), (200, junk), (200, [])))
     ok = await w.get()
-    w.advance(4)
+    w.advance(6)
     body = await w.get()
     assert (body["state"], body["code"]) == ("error", "bad_data")  # 040 §3.5
     assert body["fetchedAt"] == ok["fetchedAt"] and body["traffic"] == ok["traffic"]
     assert w.stored()["values"]["traffic"] == ok["traffic"]
-    w.advance(4)
+    w.advance(6)
     empty = await w.get()  # 빈 목록 = 자료 없음 — 성공이다
     assert (empty["state"], empty["traffic"], empty["metrics"]) == ("ok", None, [])

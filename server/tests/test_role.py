@@ -1,5 +1,5 @@
 """프로세스 역할 계약 — ROLE=api 앱은 Influx 조회 경로 + /ws/spreads + GET /spreads(Redis 읽기)
-+ GET /landing(022) + GET /admin/status(029) + 관리자 피드 둘(035) + 화면 영역 통계 둘(052) 만 서빙하고 백그라운드
++ GET /landing(022) + GET /admin/status(029) + 관리자 피드 셋(035·068) + 화면 영역 통계 둘(052) + IP 대역 둘(067) 만 서빙하고 백그라운드
 태스크는 017 의 구독 태스크와 052 의 10초 묶음 쓰기 태스크다(스펙 016 §3.1·§4, 017 §4, 018 §3.4·§4, 029 §4, 035 §4, 052 §3.5).
 
 collector(기본) 의 전체 동작은 기존 테스트가 그대로 지킨다 — 여기서는 라우트 집합만 본다.
@@ -19,7 +19,8 @@ from app.core.config import get_settings
 from app.core.redis_bus import RedisBus
 from app.main import create_app
 
-# api 역할이 답하는 열두 경로 (016 §3.1 + 018 §3.4 + 022 §3.2 + 029 §3.4 + 035 §3.1 + 052 §3.4·§3.6) — 그 외는 전부 404
+# api 역할이 답하는 열다섯 경로 (016 §3.1 + 018 §3.4 + 022 §3.2 + 029 §3.4 + 035 §3.1 + 052 §3.4·§3.6 + 068 §3.2 + 067 §3.2·§3.3)
+# — 그 외는 전부 404
 API_ROUTES = {
     "/health",
     "/history/premium",
@@ -31,16 +32,22 @@ API_ROUTES = {
     "/admin/status",
     "/admin/access",
     "/admin/clarity",
+    "/admin/clarity/history",
     "/attention",
     "/admin/attention",
+    "/admin/access/ips",
+    "/admin/access/ip",
 }
-# 029·035·052 — api 에만 있는 경로. collector ⊇ api 단언의 예외
+# 029·035·052·068·067 — api 에만 있는 경로. collector ⊇ api 단언의 예외
 API_ONLY = {
     "/admin/status",
     "/admin/access",
     "/admin/clarity",
+    "/admin/clarity/history",
     "/attention",
     "/admin/attention",
+    "/admin/access/ips",
+    "/admin/access/ip",
 }
 # 034·063 — 수집기에만 있는 관리자 피드 셋(자격증명이 collect 박스 역할에만 있다)
 COLLECTOR_ADMIN = {"/admin/aws", "/admin/alerts", "/admin/aws/series"}
@@ -103,7 +110,10 @@ def test_api_role_serves_only_influx_routes_and_404s_the_rest(set_role) -> None:
     for path in (
         "/admin/access",
         "/admin/clarity",
-    ):  # 035 — 설정이 없으면 unconfigured 인 200
+        "/admin/clarity/history",
+        "/admin/access/ips",
+        "/admin/access/ip?band=203.0.113.0/24",
+    ):  # 035·068·067 — 설정이 없으면 unconfigured 인 200
         resp = client.get(path)
         assert resp.status_code == 200 and resp.json()["state"] == "unconfigured", path
     assert _paths(client.app) == API_ROUTES

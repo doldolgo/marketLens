@@ -21,6 +21,10 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
   `/admin/alerts` 가 읽는다 (034 §3.3)
 - 키 `admin:clarity` — Clarity 기본 요약의 마지막 시도·결과·마지막 성공 값 JSON, 만료 없음. api 의 `/admin/clarity` 가 읽고 쓴다 (035 §3.3·040 §3.2)
 - 키 `admin:clarity:pages` — Clarity 페이지×기기 묶음의 같은 모양 JSON(주소 없음), 만료 없음. 같은 api 경로가 읽고 쓴다 (040 §3.2)
+- 해시 `admin:clarity:dims` — Clarity 기기·유입 차원 호출의 기록 칸 둘(필드 `device`·`channel`, 값은 같은 모양 JSON — 주소 없음),
+  만료 없음. 같은 api 경로가 읽고 쓴다 (068 §3.1)
+- 키 `admin:clarity:day:<YYYYMMDD>` — Clarity 날별 기록 JSON(KST 날짜, 그날 마지막 기본 성공 값 + 그날 차원 값), EXPIREAT
+  그날 끝 + 90일. api 의 `/admin/clarity` 가 덮어쓰고 `/admin/clarity/history` 가 읽는다 (068 §3.2)
 - 키 `flow:eth:last_block` — 이더리움 감지기가 마지막으로 처리한 블록 번호 문자열, 만료 없음. 수집이 블록마다 쓰고
   연결(재연결) 직후 공백 재생의 시작점으로 읽는다 (050 §3.4)
 - 집합 `flow:eth:deposit_addrs`·`flow:eth:hot_wallets`·`flow:eth:internal` — 씨앗에 더한 업비트 주소(소문자), 만료 없음.
@@ -60,6 +64,11 @@ ALERT_LOG_MAX = 1000
 CLARITY_KEY = "admin:clarity"
 # 040 — 페이지×기기 묶음 호출의 기록. 기본 기록과 따로 둬 두 간격·결과·값이 서로를 덮지 않는다
 CLARITY_PAGES_KEY = "admin:clarity:pages"
+# 068 — 기기·유입 차원 호출 둘의 기록. 해시 하나에 칸이 호출마다 하나라 한 칸 쓰기가 다른 칸을 덮지 않고(읽고 고쳐
+# 쓰지 않는다), 키를 지우면 두 칸이 같이 사라진다
+CLARITY_DIMS_KEY = "admin:clarity:dims"
+# 068 — Clarity 날별 기록 `admin:clarity:day:<YYYYMMDD>`(KST 날짜)
+CLARITY_DAY_PREFIX = "admin:clarity:day:"
 # 050 — 이더리움 감지기. 마지막 처리 블록(재생 시작점)과 씨앗에 더한 주소 집합 셋 — 전부 만료 없음
 FLOW_LAST_BLOCK_KEY = "flow:eth:last_block"
 FLOW_DEPOSIT_ADDRS_KEY = "flow:eth:deposit_addrs"
@@ -240,6 +249,29 @@ class RedisBus:
     async def clarity_pages_save(self, data: str) -> None:
         """`SET admin:clarity:pages <JSON>` — 만료 없음 (040 §3.2). 실패는 예외."""
         await self._client.set(CLARITY_PAGES_KEY, data)
+
+    async def clarity_dims_load(self, field: str) -> str | None:
+        """`HGET admin:clarity:dims <field>` — 차원 호출 한 칸(`device`·`channel`)의 기록 JSON (068 §3.1). 없으면 None. 실패는 예외."""
+        value = await self._client.hget(CLARITY_DIMS_KEY, field)
+        return None if value is None else _text(value)
+
+    async def clarity_dims_save(self, field: str, data: str) -> None:
+        """`HSET admin:clarity:dims <field> <JSON>` — 그 칸만, 만료 없음 (068 §3.1). 실패는 예외."""
+        await self._client.hset(CLARITY_DIMS_KEY, field, data)
+
+    async def clarity_day_save(self, day: str, data: str, expire_at: int) -> None:
+        """`SET admin:clarity:day:<day> <JSON> EXAT <expire_at>` — 그날 칸을 덮어쓴다 (068 §3.2). 실패는 예외.
+
+        expire_at 은 epoch 초 — 그 KST 날의 끝 + 90일. 덮어쓸 때마다 같은 값이라 만료가 밀리지 않는다.
+        """
+        await self._client.set(CLARITY_DAY_PREFIX + day, data, exat=expire_at)
+
+    async def clarity_days_load(self, days: Sequence[str]) -> list[str | None]:
+        """`MGET admin:clarity:day:<day>…` 한 번 — 날 순서대로 기록 JSON, 없는 날은 None (068 §3.2). 실패는 예외."""
+        if not days:
+            return []
+        values = await self._client.mget([CLARITY_DAY_PREFIX + day for day in days])
+        return [None if v is None else _text(v) for v in values]
 
     async def flow_last_block_load(self) -> int | None:
         """`GET flow:eth:last_block` — 연결 직후 공백 재생의 시작점 (050 §3.4). 없으면 None(첫 기동 = head 부터). 실패는 예외."""

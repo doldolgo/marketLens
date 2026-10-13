@@ -36,13 +36,15 @@ export const vDivider = (
 )
 
 // ── 조작 조각 3종 (§3.6) ─────────────────────────────────────────────────
-export interface SegOpt { label: string; onClick: () => void; bg: string; color: string }
+// el — 061 화면 이용 통계의 요소 열쇠(data-el). 모양·동작과 무관하고, 주지 않으면 속성이 없다
+export interface SegOpt { label: string; onClick: () => void; bg: string; color: string; el?: string }
 
 /** 선택 상태 스타일을 만들어주는 헬퍼 — 활성은 neutral-900 배경 + accent-300 글자. */
-export const segOpt = (label: string, active: boolean, onClick: () => void): SegOpt => ({
+export const segOpt = (label: string, active: boolean, onClick: () => void, el?: string): SegOpt => ({
   label, onClick,
   bg: active ? 'var(--color-neutral-900)' : 'transparent',
   color: active ? 'var(--color-accent-300)' : 'var(--color-neutral-500)',
+  el,
 })
 
 /** 테두리 안에 버튼이 나란히 붙는 분절 버튼 그룹. */
@@ -50,7 +52,7 @@ export function Seg({ opts, pad = '5px 12px' }: { opts: SegOpt[]; pad?: string }
   return (
     <div style={{ display: 'flex', border: '1px solid var(--color-neutral-800)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
       {opts.map((o) => (
-        <button key={o.label} onClick={o.onClick} className="hv-txt"
+        <button key={o.label} onClick={o.onClick} className="hv-txt" data-el={o.el}
           style={{ appearance: 'none', border: 'none', font: 'inherit', fontSize: 12, padding: pad, cursor: 'pointer', background: o.bg, color: o.color }}>
           {o.label}
         </button>
@@ -60,11 +62,11 @@ export function Seg({ opts, pad = '5px 12px' }: { opts: SegOpt[]; pad?: string }
 }
 
 /** 숫자 입력 — 라벨 + 입력 + 단위(기본 %). 비숫자 입력은 0. */
-export function NumField({ label, value, step, onChange, unit = '%' }: {
-  label: string; value: number; step: number; onChange: (v: number) => void; unit?: string
+export function NumField({ label, value, step, onChange, unit = '%', el }: {
+  label: string; value: number; step: number; onChange: (v: number) => void; unit?: string; el?: string
 }) {
   return (
-    <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 12, color: 'var(--color-neutral-400)' }}>
+    <label data-el={el} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 12, color: 'var(--color-neutral-400)' }}>
       {label}
       <input className="input" type="number" step={step} value={value}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
@@ -75,9 +77,9 @@ export function NumField({ label, value, step, onChange, unit = '%' }: {
 }
 
 /** "임계 초과만" 류의 토글 버튼 — on 은 accent 테두리 + 옅은 accent 배경. */
-export function ToggleBtn({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) {
+export function ToggleBtn({ on, label, onClick, el }: { on: boolean; label: string; onClick: () => void; el?: string }) {
   return (
-    <button onClick={onClick} className="hv-bd"
+    <button onClick={onClick} className="hv-bd" data-el={el}
       style={{
         appearance: 'none', font: 'inherit', fontSize: 12, padding: '5px 12px', cursor: 'pointer',
         borderRadius: 'var(--radius-sm)',
@@ -144,7 +146,8 @@ export function gridHead(cols: string): CSSProperties {
 /** 헤더 셀 여백. */
 export const headCell: CSSProperties = { padding: '6px 8px' }
 
-export type Header = [key: string, label: string, align: 'left' | 'right']
+/** el — 061 요소 열쇠(정렬 머리 `sort:<열>`). */
+export type Header = [key: string, label: string, align: 'left' | 'right', el?: string]
 
 /** 정렬 가능한 sticky 헤더 — 활성 열은 accent-300 + ▾/▴. */
 export function GridHeader({ cols, headers, sortKey, sortDir, onSort }: {
@@ -152,8 +155,8 @@ export function GridHeader({ cols, headers, sortKey, sortDir, onSort }: {
 }) {
   return (
     <div style={{ ...gridHead(cols), position: 'sticky', top: 0, zIndex: 2, background: 'var(--color-bg)' }}>
-      {headers.map(([k, text, align]) => (
-        <button key={k} onClick={() => onSort(k)} className="hv-txt"
+      {headers.map(([k, text, align, el]) => (
+        <button key={k} onClick={() => onSort(k)} className="hv-txt" data-el={el}
           style={{
             appearance: 'none', background: 'none', border: 'none', font: 'inherit', fontSize: 10.5,
             letterSpacing: '0.07em', textTransform: 'uppercase', padding: '8px 8px', cursor: 'pointer',

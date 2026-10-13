@@ -1,5 +1,5 @@
 """수집기 관리자 피드 — `/admin/aws`·`/admin/alerts` 의 부분별 캐시·갱신·상태 (스펙 034 §3.1~§3.3)와
-`/admin/aws/series` 의 창마다 캐시 (063 §3.3 — 같은 스레드·같은 Slot 규칙).
+`/admin/aws/series` 의 (창, 이전 기간) 마다 캐시 (063 §3.3·068 §3.3 — 같은 스레드·같은 Slot 규칙).
 
 응답은 부분들이고 부분은 `{state, code, fetchedAt, refreshSec, …값 키}` 다. 갱신 규칙은 022 랜딩과 같은 모양이다 —
 요청이 왔을 때 비었거나 주기가 지났으면 갱신을 하나만 띄우고 3초까지 기다린 뒤, 늦으면 직전 결과(없으면 pending)를
@@ -47,9 +47,13 @@ SERIES_RANGES: dict[str, tuple[int, int, int]] = {
     "30d": (2_592_000, 10_800, 3_600),
 }
 SERIES_DEFAULT = "24h"
-# `range` 는 어느 상태에도 싣고(고른 창), 나머지는 값 키라 ok 가 아니면 null (034 §3.1)
+# 068 — 이전 기간(창을 그 길이만큼 앞으로). 목록 밖·없음은 지금 창이고, 지난 구간은 덜 바뀌어 갱신 주기를 두 배로
+SERIES_PREV = "prev"
+SERIES_PREV_REFRESH_FACTOR = 2
+# `range`·`offset` 은 어느 상태에도 싣고(고른 창 — 지금 창이면 offset null), 나머지는 값 키라 ok 가 아니면 null (034 §3.1)
 SERIES_KEYS = (
     "range",
+    "offset",
     "periodSec",
     "startTs",
     "endTs",
@@ -168,10 +172,11 @@ class AdminFeeds:
             for name, (refresh, _) in AWS_PARTS.items()
         }
         self._history = Slot(HISTORY_REFRESH_SEC, mono, wait_sec, classify)
-        # 063 — 창마다 캐시 한 칸. 읽기는 위 부분들과 같은 전용 스레드에서 차례로 돈다
+        # 063 — (창, 이전 기간인가) 마다 캐시 한 칸(068). 읽기는 위 부분들과 같은 전용 스레드에서 차례로 돈다
         self._series = {
-            name: Slot(refresh, mono, wait_sec, classify)
+            (name, prev): Slot(_series_refresh(refresh, prev), mono, wait_sec, classify)
             for name, (_, _, refresh) in SERIES_RANGES.items()
+            for prev in (False, True)
         }
         self._warn = Warner(mono)
 
@@ -197,17 +202,22 @@ class AdminFeeds:
 
     # --- /admin/aws/series (063) ---
 
-    async def aws_series(self, range_: str | None) -> dict[str, Any]:
-        """기간을 고르는 시계열 — 응답이 부분 하나다. 경고 이름은 창과 무관하게 `aws.series` 하나(10분에 1줄)."""
+    async def aws_series(
+        self, range_: str | None, offset: str | None = None
+    ) -> dict[str, Any]:
+        """기간을 고르는 시계열 — 응답이 부분 하나다. 경고 이름은 창·이전 기간과 무관하게 `aws.series` 하나(10분에 1줄).
+        `offset=prev` 면 창을 그 길이만큼 앞으로 옮긴 이전 기간(068 §3.3) — 꼴·주기·격자는 지금 창과 같다."""
         name = range_ if range_ in SERIES_RANGES else SERIES_DEFAULT
+        prev = offset == SERIES_PREV
         window, period, refresh = SERIES_RANGES[name]
         result = await self._aws_part(
             "aws.series",
-            self._series[name],
-            partial(self._reader.series, window, period),
+            self._series[(name, prev)],
+            partial(self._reader.series, window, period, window if prev else 0),
         )
-        body = render(result, refresh, SERIES_KEYS)
+        body = render(result, _series_refresh(refresh, prev), SERIES_KEYS)
         body["range"] = name  # 고른 창 — 목록 밖·없음이면 24h
+        body["offset"] = SERIES_PREV if prev else None  # 목록 밖·없음은 지금 창
         return body
 
     # --- /admin/alerts ---
@@ -290,6 +300,11 @@ class AdminFeeds:
     def close(self) -> None:
         """수집기 종료 때 — 대기 중인 읽기는 버리고 도는 읽기는 기다리지 않는다(데몬 스레드라 프로세스 종료도 안 기다린다)."""
         self._executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _series_refresh(refresh: int, prev: bool) -> int:
+    """창의 갱신 주기 — 이전 기간은 두 배(068 §3.3)."""
+    return refresh * SERIES_PREV_REFRESH_FACTOR if prev else refresh
 
 
 def _slack_item(line: str) -> dict[str, Any] | None:

@@ -2,6 +2,8 @@
 
 test_clarity.py 와 같은 방식이다. 영역은 (id, 문서 위 top, 높이) 이고 화면은 innerHeight 로 정한다 — 스크롤은 scrollY 를 바꿔
 getBoundingClientRect 를 옮긴다. 단계 문자열로 시계·입력·숨김·탭 바뀜·동의를 움직이고, 보낸 비콘(sendBeacon·fetch)을 본다.
+061 — 가짜 문서는 부모·자식이 있는 나무다: 요소(`els` — 영역이나 다른 요소 안, 태그·속성·글자·라벨의 control)와 attention.js 가
+쓰는 꼴의 선택자(태그·[속성]·[속성=값]·[속성^="값"]·:not·쉼표)를 흉내 내고, 누름(사람·스크립트·라벨)·마우스 올림을 보낸다.
 """
 
 import json
@@ -33,18 +35,67 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
   const fire = (bag, type, ev) => (bag[type] || []).slice().forEach((fn) => fn(ev || {}))
   const view = { w: c.w || 1280, h: c.h || 800 }
   let scrollY = 0
-  const elements = []
-  const make = (id, top, height) => {
-    const el = {
-      top, height, isConnected: true,
-      getAttribute: (n) => (n === 'data-area' ? id : null),
-      getBoundingClientRect() { const t = this.top - scrollY; return { top: t, bottom: t + this.height, height: this.height } },
-      closest() { return this },
+  // 선택자 — attention.js 가 쓰는 꼴만: 태그, [속성], [속성=값], [속성^="값"], :not(…), 쉼표 목록
+  const compound = (el, s) => {
+    let i = 0
+    const m = /^[a-z]+/.exec(s)
+    if (m) { if (el.tag !== m[0]) return false; i = m[0].length }
+    while (i < s.length) {
+      if (s.startsWith(':not(', i)) {
+        const end = s.lastIndexOf(')')
+        if (compound(el, s.slice(i + 5, end))) return false
+        i = end + 1
+      } else if (s[i] === '[') {
+        const end = s.indexOf(']', i)
+        const mm = /^([a-z-]+)(?:(\^?=)"?([^"]*)"?)?$/.exec(s.slice(i + 1, end))
+        if (!mm) throw new Error('selector ' + s)
+        const v = el.getAttribute(mm[1])
+        if (v === null || (mm[2] === '=' && v !== mm[3]) || (mm[2] === '^=' && !v.startsWith(mm[3]))) return false
+        i = end + 1
+      } else throw new Error('selector ' + s)
     }
-    elements.push(el)
-    return el
+    return true
   }
+  const selects = (el, sel) => sel.split(',').some((s) => compound(el, s.trim()))
+  // 가짜 요소 — 문서 위 (top, height), 부모·자식, 속성·글자, 라벨의 control
+  class El {
+    constructor(tag, attrs, top, height, text) {
+      Object.assign(this, { tag, attrs: attrs || {}, top, height, text: text || '', kids: [], parent: null, attached: true })
+    }
+    get tagName() { return this.tag.toUpperCase() }
+    get parentElement() { return this.parent }
+    get isConnected() { return this.attached && (this.parent ? this.parent.isConnected : this === root) }
+    get textContent() { return this.text + this.kids.map((k) => k.textContent).join('') }
+    getAttribute(n) { return Object.prototype.hasOwnProperty.call(this.attrs, n) ? String(this.attrs[n]) : null }
+    hasAttribute(n) { return this.getAttribute(n) !== null }
+    getBoundingClientRect() { const t = this.top - scrollY; return { top: t, bottom: t + this.height, height: this.height } }
+    append(k) { k.parent = this; this.kids.push(k); return k }
+    closest(sel) { for (let n = this; n; n = n.parent) if (selects(n, sel)) return n; return null }
+    querySelectorAll(sel) {
+      const out = []
+      const walk = (n) => { for (const k of n.kids) { if (selects(k, sel)) out.push(k); walk(k) } }
+      walk(this)
+      return out
+    }
+  }
+  const root = new El('html', {}, 0, 0)
+  const body = root.append(new El('body', {}, 0, 0))
+  const refs = new Map()
+  const areaEls = []
+  const make = (id, top, height) => { const el = body.append(new El('div', { 'data-area': id }, top, height)); areaEls.push(el); return el }
   for (const [id, top, height] of c.areas || []) make(id, top, height)
+  const byArea = (id) => areaEls.find((e) => e.getAttribute('data-area') === id)
+  const byRef = (r) => refs.get(r) || byArea(r)
+  // 요소 — { ref, in: 영역 id 나 다른 요소의 ref, tag, attrs, text, top, height, control: ref, later: true(attach 단계 전엔 떼어 둠) }
+  for (const e of c.els || []) {
+    const parent = byRef(e.in) || body
+    const el = new El(e.tag || 'button', e.attrs, e.top || 0, e.height === undefined ? 30 : e.height, e.text)
+    refs.set(e.ref, el)
+    if (e.later) { el.attached = false; el.parent = parent } else parent.append(el)
+  }
+  for (const e of c.els || []) if (e.control) refs.get(e.ref).control = refs.get(e.control)
+  const docH = c.docH || Math.max(view.h, ...[...areaEls, ...refs.values()].map((e) => e.top + e.height))
+  root.scrollHeight = docH
   const ios = []
   class IO {
     constructor(cb, opts) { this.cb = cb; this.opts = opts; this.els = new Set(); this.dead = false; ios.push(this) }
@@ -70,10 +121,11 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     setTimeout: (fn, ms) => { setTimeouts++; timers.push({ at: clock + ms, fn }); return setTimeouts },
     fetch: (url, opts) => { sent.push({ via: 'fetch', url, opts: { ...opts, body: undefined }, body: opts.body }); return Promise.resolve() },
   }
+  Object.defineProperty(window, 'scrollY', { get: () => scrollY })
   window.top = c.framed ? {} : window
   const document = {
-    visibilityState: 'visible', documentElement: {},
-    querySelectorAll: () => elements.filter((e) => e.isConnected),
+    visibilityState: 'visible', documentElement: root,
+    querySelectorAll: (sel) => root.querySelectorAll(sel),
     addEventListener: adder(bags.document),
   }
   let beacon = c.beacon === undefined ? true : c.beacon
@@ -81,7 +133,10 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     globalPrivacyControl: c.gpc ? true : undefined,
     sendBeacon: c.noBeacon ? undefined : (url, body) => { sent.push({ via: 'beacon', url, body }); return beacon },
   }
-  const location = { hostname: c.host || 'kimptrack.com', pathname: c.path || '/', search: c.search || '' }
+  const host = c.host || 'kimptrack.com'
+  const path = c.path || '/'
+  const search = c.search || ''
+  const location = { hostname: host, pathname: path, search, origin: 'https://' + host, href: 'https://' + host + path + search }
   new Function('window', 'document', 'navigator', 'location', 'Date', script)(window, document, navigator, location, FakeDate)
   const settle = () => {
     for (const io of ios) {
@@ -95,7 +150,8 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     rafs = []
     fs.forEach((f) => f(clock))
   }
-  const byId = (id) => elements.find((e) => e.getAttribute('data-area') === id)
+  const mutate = () => { for (const mo of mos) if (mo.on) mo.cb([]) }
+  const click = (target, trusted) => fire(bags.document, 'click', { target, isTrusted: trusted })
   const started = ios.length > 0
   const firstListens = listens
   settle()
@@ -109,21 +165,31 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     else if (kind === 'show') { document.visibilityState = 'visible'; fire(bags.document, 'visibilitychange') }
     else if (kind === 'pagehide') fire(bags.window, 'pagehide')
     else if (kind === 'click') {
-      const target = a === 'none' ? { closest: () => null } : byId(a)
-      for (let i = 0; i < Number(b || 1); i++) fire(bags.document, 'click', { target })
+      const target = a === 'none' ? { closest: () => null } : byRef(a)
+      for (let i = 0; i < Number(b || 1); i++) click(target, true)
     }
+    // 페이지 스크립트의 .click() — isTrusted false
+    else if (kind === 'scriptclick') click(byRef(a), false)
+    // 라벨을 누르면 브라우저가 라벨에 한 번, 이어서 그 입력칸에 한 번 누름을 보낸다(둘 다 사람이 누른 것)
+    else if (kind === 'labelclick') { const l = byRef(a); click(l, true); if (l.control) click(l.control, true) }
+    else if (kind === 'over') fire(bags.document, 'pointerover', { target: byRef(a), pointerType: b || 'mouse' })
+    else if (kind === 'leave') fire(bags.document, 'pointerout', { target: byRef(a), relatedTarget: null })
     else if (kind === 'tab') fire(bags.window, 'kt:tab', { detail: a })
     else if (kind === 'grant') { data.set('kt.analytics.v', NOTICE); data.set('kt.analytics', 'granted') }
     else if (kind === 'revoke') { data.set('kt.analytics', 'denied'); data.delete('kt.analytics.v') }
     else if (kind === 'clarity') fire(bags.window, 'kt:clarity')
     else if (kind === 'storage') fire(bags.window, 'storage', { key: 'kt.analytics' })
     else if (kind === 'beacon') beacon = a === 'true'
-    else if (kind === 'add') { make(a, Number(b), Number(d)); for (const mo of mos) if (mo.on) mo.cb([]) }
+    else if (kind === 'add') { make(a, Number(b), Number(d)); mutate() }
+    else if (kind === 'attach') { const el = refs.get(a); el.attached = true; el.parent.append(el); mutate() }
+    else if (kind === 'detach') { const el = refs.get(a); el.parent.kids = el.parent.kids.filter((k) => k !== el); el.attached = false; mutate() }
+    else if (kind === 'text') { refs.get(a).text = b; mutate() }
     else if (kind === 'timers') { const due = timers.filter((x) => x.at <= clock); timers = timers.filter((x) => x.at > clock); due.forEach((x) => x.fn()) }
     else throw new Error('step ' + step)
   }
   return {
     started, firstListens, listens, timers: timers.length, setTimeouts,
+    observed: ios.length ? ios[0].els.size : 0,
     sent: sent.map((s) => ({ via: s.via, url: s.url, opts: s.opts, bytes: Buffer.byteLength(s.body), body: JSON.parse(s.body) })),
   }
 }).map((r) => r)))
@@ -194,11 +260,14 @@ def test_without_consent_only_two_listeners_and_kt_clarity_turns_it_on() -> None
     )
     assert _bodies(got) == [
         {
-            "v": 1,
+            "v": 2,
             "page": "landing",
             "device": "pc",
             "pv": 1,
             "a": {"hero": [2000, 0, 1]},
+            "e": [],
+            "d": None,
+            "x": None,
         }
     ]
     # 다른 탭의 저장 → storage

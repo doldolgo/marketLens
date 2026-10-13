@@ -107,7 +107,7 @@ async def test_number_strings_and_integral_floats_read_as_numbers() -> None:
 async def test_wrong_bodies_are_bad_data_and_keep_the_last_success(junk: Any) -> None:
     w = World(Clarity((200, SESSIONS_EXPORT), (200, junk)))
     ok = await w.get()
-    w.advance(4)
+    w.advance(6)
     body = await w.get()
     assert (body["state"], body["code"]) == ("error", "bad_data")
     assert body["fetchedAt"] == ok["fetchedAt"]

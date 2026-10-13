@@ -12,7 +12,7 @@ from html.parser import HTMLParser
 from typing import get_type_hints
 
 from app.core.redis_bus import RedisBus
-from app.features.attention.models import PAGES, TABS
+from app.features.attention.models import MAX_BODY_BYTES, PAGES, TABS
 from tests.test_deploy import API, ROOT, _args, _locations, _public_server
 
 WEB = ROOT / "web"
@@ -97,8 +97,10 @@ def test_notice_version_is_the_clarity_one() -> None:
 
 
 def test_script_sends_nothing_but_the_beacon_and_keeps_no_visitor_state() -> None:
-    """좌표·글자·입력값·저장소 쓰기·쿠키·다른 주소 없음 (§2 하지 않는 것). 053 의 덮어 보기 부분(파일 끝)은 세지 않고
-    관리자 출처 하나와만 메시지를 주고받는다 — 꼬리표 글자를 textContent 로 쓰는 것 말고는 같은 금지를 따른다."""
+    """좌표·입력값·저장소 쓰기·쿠키·다른 주소 없음 (§2 하지 않는 것). 053 의 덮어 보기 부분(파일 끝)은 세지 않고
+    관리자 출처 하나와만 메시지를 주고받는다 — 꼬리표 글자를 textContent 로 쓰는 것 말고는 같은 금지를 따른다.
+    061 — 세는 부분은 요소 이름(자동 열쇠의 보이는 글자 앞 24자)을 읽는 한 곳에서만 textContent 를 쓰고, 그 글자는 숫자를
+    가리는 clean(…, true) 를 거친다(화면 글자의 숫자는 보내지 않는다)."""
     assert set(re.findall(r"[\"'](/api/[\w/-]*)", JS)) == {"/api/attention"}
     # 주소 글자는 덮어 보기의 관리자 출처 상수 하나뿐
     assert re.findall(r"https?://[^\s\"']*", JS) == ["https://admin.kimptrack.com"]
@@ -127,19 +129,20 @@ def test_script_sends_nothing_but_the_beacon_and_keeps_no_visitor_state() -> Non
         "screenX",
         "offsetX",
         "innerText",
-        "textContent",
         "innerHTML",
         ".value",
         "setInterval",
         "XMLHttpRequest",
     ):
         assert banned not in counting, banned
+    assert counting.count("textContent") == 1
+    assert "clean(el.textContent, true)" in counting
 
 
 # --- nginx·caddy (§3.2·§3.4·§3.6) ----------------------------------------------------
 
 
-def test_public_beacon_location_is_post_only_4k_and_passes_the_visitor_ip() -> None:
+def test_public_beacon_location_is_post_only_16k_and_passes_the_visitor_ip() -> None:
     block = _locations(_public_server())[("=", "/api/attention")]
     guards = [c for args, c in block if args[0] == "if"]
     assert [args for args, _ in block if args[0] == "if"] == [
@@ -148,7 +151,9 @@ def test_public_beacon_location_is_post_only_4k_and_passes_the_visitor_ip() -> N
     assert guards == [[(["return", "405"], None)]]
     # if 는 location 의 첫 줄 — 다른 지시어보다 먼저
     assert block[0][0][0] == "if"
-    assert _args(block, "client_max_body_size") == [["4k"]]
+    # 061 — 몸통 v2(요소) 상한 16,384바이트 = 앱의 MAX_BODY_BYTES
+    assert _args(block, "client_max_body_size") == [["16k"]]
+    assert MAX_BODY_BYTES == 16 * 1024
     assert _args(block, "proxy_pass") == [[API]]
     assert ["X-Client-IP", "$http_x_forwarded_for"] in _args(block, "proxy_set_header")
 
