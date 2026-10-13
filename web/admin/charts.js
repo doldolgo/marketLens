@@ -107,7 +107,36 @@ function ensureTheme(ec) {
   themed = true;
 }
 
-const live = new Map(); // 칸 id → { chart, box, shape, ro }
+const live = new Map(); // 칸 id → { chart, box, shape, ro, layout }
+
+// 시간 그림의 칸 배치(px) — 칸 높이를 알아야 범례·칸 이름·눈금 글자가 겹치지 않게 놓을 수 있어 그릴 때와 크기가 바뀔 때 셈한다
+// (퍼센트로 두면 낮은 카드에서 칸 이름이 범례·앞 칸 맨 아래 눈금 글자와 같은 줄에 앉았다). containLabel 은 세로축 글자를 가로로만
+// 비켜 주므로 위아래 자리는 여기서 남긴다: 위 = 범례 줄 + 첫 칸 이름(없으면 맨 위 눈금 글자 반), 칸 사이 = 앞 칸 맨 아래 눈금 글자 반
+// + 다음 칸 이름, 아래 = 미니맵(판). 가로축 글자는 마지막 칸 안(containLabel)
+// 마지막 칸은 가로축 글자(containLabel 이 그 칸 안에서 뺀다)만큼 더 높게 — 칸마다 그림 높이가 같다. 눈금 수는 그림 높이에 맞춘다
+// (낮은 칸에 눈금 글자 넷이 들어가 서로 겹치지 않게)
+const LAYOUT = new WeakMap(); // option → { titles:[bool…], legend, detail, right }
+export const PX = Object.freeze({ legend: 28, title: 26, half: 9, edge: 6, gapTitled: 36, gap: 22, foot: 6, slider: 40, xLabels: 20 });
+export function placeGrids(spec, height) {
+  const n = spec.titles.length;
+  const head = (spec.legend ? PX.legend : PX.edge) + (spec.titles[0] ? PX.title : PX.half);
+  const gap = spec.titles.slice(1).some(Boolean) ? PX.gapTitled : PX.gap;
+  const foot = PX.foot + (spec.detail ? PX.slider : 0);
+  const h = Math.max(24, (height - head - foot - gap * (n - 1) - PX.xLabels) / n);
+  return {
+    grid: spec.titles.map((_, i) => ({ left: 8, right: spec.right, top: Math.round(head + i * (h + gap)), height: Math.floor(h + (i === n - 1 ? PX.xLabels : 0)), containLabel: true })),
+    splits: spec.titles.map(() => (h >= 100 ? 3 : h >= 56 ? 2 : 1)),
+  };
+}
+// 지금 칸 높이로 낸 배치 — 높이를 모르면(숨은 칸·시험의 가짜 차트) null 이고 option 의 퍼센트 배치를 그대로 쓴다
+function layoutOf(held) {
+  const height = typeof held.chart.getHeight === 'function' ? held.chart.getHeight() : 0;
+  return held.layout && height > 0 ? placeGrids(held.layout, height) : null;
+}
+function relayout(held) {
+  const placed = layoutOf(held);
+  if (placed) held.chart.setOption({ grid: placed.grid, yAxis: placed.splits.map((splitNumber) => ({ splitNumber })) });
+}
 
 export function dispose(id) {
   const held = live.get(id);
@@ -146,10 +175,22 @@ export function draw(id, option, group) {
       ec.connect(group);
     }
     if (typeof ResizeObserver === 'function') {
-      held.ro = new ResizeObserver(() => chart.resize());
-      held.ro.observe(box);
+      const slot = held;
+      slot.ro = new ResizeObserver(() => {
+        chart.resize();
+        relayout(slot);
+      });
+      slot.ro.observe(box);
     }
     live.set(id, held);
+  }
+  held.layout = LAYOUT.get(option) ?? null;
+  const placed = layoutOf(held);
+  if (placed) {
+    option.grid = placed.grid;
+    list(option.yAxis).forEach((axis, i) => {
+      axis.splitNumber = placed.splits[i];
+    });
   }
   const grids = Array.isArray(option.grid) ? option.grid.length : option.grid ? 1 : 0;
   const shape = JSON.stringify([grids, list(option.series).map((s) => `${s.type}:${s.name ?? ''}`), list(option.dataZoom).length]);
@@ -167,7 +208,10 @@ if (typeof ResizeObserver !== 'function' && typeof window !== 'undefined') {
   let resizing = 0;
   window.addEventListener('resize', () => {
     clearTimeout(resizing);
-    resizing = setTimeout(() => live.forEach(({ chart }) => chart.resize()), 100);
+    resizing = setTimeout(() => live.forEach((held) => {
+      held.chart.resize();
+      relayout(held);
+    }), 100);
   });
 }
 
@@ -289,7 +333,7 @@ export function timeOption(o) {
   const labels = (o.labels ?? !detail) && shown.length > 1 && shown.length <= 4 && n === 1;
   const paneOf = (s) => Math.min(n - 1, Math.max(0, s.pane ?? 0));
   const neg = (i) => shown.some((s) => paneOf(s) === i && s.neg);
-  // 칸 배치(%) — 위(범례·첫 칸 이름) · 칸 사이 틈(다음 칸 이름) · 아래(축 글자·미니맵)
+  // 칸 배치 — 그릴 때 px 로 다시 셈한다(placeGrids). 높이를 모를 때의 퍼센트 배치: 위(범례·첫 칸 이름) · 칸 사이 틈 · 아래(미니맵)
   const head = legendOn || panes[0].title ? 12 : 5;
   const foot = detail ? 16 : 10;
   const gap = n > 1 ? 10 : 0;
@@ -344,7 +388,7 @@ export function timeOption(o) {
     const raw = num(p?.value?.[1]);
     return raw === null ? null : s.neg ? -raw : raw;
   };
-  return {
+  const option = {
     animation: false,
     grid: panes.map((_, i) => ({ left: 8, right: labels ? 64 : 14, top: `${head + i * (h + gap)}%`, height: `${h}%`, containLabel: true })),
     legend: legendOn ? { top: 0, right: 0, type: 'scroll', icon: 'roundRect', itemWidth: 12, itemHeight: 3, textStyle: { color: T['text-2'], fontSize: 12 }, data: shown.map((s) => s.name) } : undefined,
@@ -392,6 +436,8 @@ export function timeOption(o) {
     }),
     series,
   };
+  LAYOUT.set(option, { titles: panes.map((p) => Boolean(p.title)), legend: Boolean(legendOn), detail, right: labels ? 64 : 14 });
+  return option;
 }
 
 // 상태 띠 한 칸 — 정상은 얇고 옅게, 주의·끊김은 칸 높이 가득, 자료 없음은 점선 테두리 + 빗금(45°)
