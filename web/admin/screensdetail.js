@@ -1,7 +1,7 @@
 // 화면 페이지의 상세 판(스펙 065 §3.6 — 066 상세 판의 목록 꼴): 판마다 표 전체 — 정렬·찾기·CSV(kimptrack-screens-<화면>-<기기>-<range>.csv,
 // 066 CSV 규칙), 그래프 없음. 요소 표는 열쇠 원문 칸을 더한다. DOM 없음 — 표 칸은 글자·수만.
 import { int } from './common.js';
-import { DEVICE_NAME, METRIC_NAME, PERIOD_NAME, current, pageReq, screenName } from './screensmodel.js';
+import { DEVICE_NAME, METRIC_NAME, PERIOD_NAME, current, isDashboard, pageReq, screenName } from './screensmodel.js';
 import { areaName, elName } from './screensnames.js';
 
 const NO_CMP = () => ({ prev: false, week: false });
@@ -91,7 +91,7 @@ export const SCREEN_DETAILS = Object.freeze({
       : [];
     return {
       unit: unitOf(c, 'pagehide 로 끝난 페이지뷰'),
-      note: `떠난 곳: pagehide 로 끝난 pv ${int(x.total)}${x.share === null ? '' : ` — 전체 pv 의 ${x.share.toFixed(0)}%`} · 깊이: ${d === null ? '탭 화면은 깊이 없음' : d.total ? `${int(d.total)} pv 기준(pv = 가장 아래가 그 칸에서 멈춤, 도달 = 그 지점까지 내려옴)` : '깊이 기록 없음'}`,
+      note: `떠난 곳: pagehide 로 끝난 pv ${int(x.total)}${x.share === null ? '' : ` — 전체 pv 의 ${x.share.toFixed(0)}%`} · 깊이: ${isDashboard(c.page) ? '탭 화면은 깊이 없음' : d?.total ? `${int(d.total)} pv 기준(pv = 가장 아래가 그 칸에서 멈춤, 도달 = 그 지점까지 내려옴)` : '깊이 기록 없음'}`,
       table: {
         title: '떠난 곳·깊이 전체',
         columns: [

@@ -1,7 +1,7 @@
 // 화면 페이지의 오른쪽 판(스펙 065 §3.6) — 탭 셋: ① 요소(영역 칩 거르기·표·바닥 줄) ② 영역(053 순위 목록) ③ 떠난 곳·깊이.
 // 판마다 ⤢ → 066 상세 판(screensdetail.js). 행을 누르면 틀에 focus 를 보내고 그 행을 강조한다. 글자는 textContent·title 로만.
 import { $, button, clean, el, int, n0, once, pct, pressed, put, stateWord, tag, widthOf } from './common.js';
-import { METRIC_NAME, SMALL_PV, current, ui } from './screensmodel.js';
+import { METRIC_NAME, SMALL_PV, current, isDashboard, ui } from './screensmodel.js';
 import { areaName, elName } from './screensnames.js';
 
 const sec = (v) => (v === null ? '–' : `${v.toFixed(1)}초`);
@@ -170,7 +170,7 @@ function drawExits(c) {
   if (!box) return;
   if (!d || !d.total) {
     box.replaceChildren();
-    put('depth-note', d ? '깊이 기록 없음' : '탭 화면은 깊이 없음');
+    put('depth-note', isDashboard(c.page) ? '탭 화면은 깊이 없음' : '깊이 기록 없음');
     return;
   }
   box.replaceChildren(

@@ -182,6 +182,9 @@ export function overlayMessage(o) {
   };
 }
 
+// 052 피드의 before_gate 는 상태다 — 066 배지 규칙(시행 전도 다른 '연결 안 됨' 과 같고 code 는 싣지 않음)대로 unconfigured·before_gate 로 읽는다
+const asPart = (part) => (part?.state === 'before_gate' ? { ...part, state: 'unconfigured', code: 'before_gate' } : part);
+
 // 지금 보기 한 장(065 §3.2·§3.3) — 화면·기기·보기·지표(대시보드의 깊이는 요소, 휴대폰의 마우스 올림은 클릭), 고른 화면 응답의 부분 상태와
 // 그 화면 × 기기 행, 틀이 알린 ready(그 화면의 것만)로 센 요소·영역·떠난 곳·깊이
 export function current(app) {
@@ -192,7 +195,7 @@ export function current(app) {
   const metric = device === 'mobile' && app.view.p.metric === 'hover' ? 'clicks' : app.view.p.metric;
   const listEntry = app.entry(listReq(range));
   const entry = page ? app.entry(pageReq(range, page)) : listEntry;
-  const part = partOf(entry);
+  const part = asPart(partOf(entry));
   const ok = Boolean(page) && usable(part);
   const row = ok ? rowOf(part.rows, page, device) : null;
   const ready = ui.ready && ui.ready.page === page ? ui.ready : null;
