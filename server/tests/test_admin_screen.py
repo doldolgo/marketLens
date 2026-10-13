@@ -306,3 +306,50 @@ def test_links_are_fixed_addresses_and_none_opens_a_new_window() -> None:
     server = _text("web/admin/server.html")
     assert '<a href="/api/docs">' in server and '<a href="/api/redoc">' in server
     assert re.search(r'<input id="token" type="password" autocomplete="off"', server)
+
+
+def _rule(css: str, selector: str) -> str:
+    """admin.css 에서 선택자 하나의 맨 바깥(미디어 쿼리 밖) 규칙 몸."""
+    match = re.search(rf"^{re.escape(selector)} \{{\n(.*?)^\}}", css, re.S | re.M)
+    assert match, selector
+    return match.group(1)
+
+
+def test_controls_wrap_inside_their_own_box_on_narrow_screens() -> None:
+    """066 §3.4 — 360px 에도 가로 넘침 없음: 고르기(망 종류 여섯 등)·카드 안 탭·카드 머리는 자리가 모자라면 자기 상자 안에서
+    줄을 바꾸고, 입력 칸은 상자보다 넓어지지 않는다. 표는 카드 안 가로 스크롤(.scroll) 안에만 있다."""
+    css = _text("web/admin/admin.css")
+    for selector in (".seg", ".tabs", ".card-head"):
+        assert "flex-wrap: wrap;" in _rule(css, selector), selector
+    for selector in (".seg", ".tabs", ".input", ".search"):
+        assert "max-width: 100%;" in _rule(css, selector), selector
+    for page in PAGES:
+        html = _text(f"web/admin/{page}")
+        tables = re.findall(r"(.{0,22})<table\b", html)
+        assert all(before.endswith('<div class="scroll">') for before in tables), page
+
+
+def test_overview_box_table_spans_the_row_so_all_six_columns_show() -> None:
+    """066 §3.3 개요 상자 표(상자 | CPU·메모리·디스크 | 크레딧 | CPU 선) — 1280px 이상에서 안쪽 가로 스크롤 없이 여섯 칸이 다
+    보이게 한 줄 전체(s12). 옆에 있던 수집 원천 띠도 한 줄 전체(반쪽 카드 혼자 남지 않게). 안쪽 스크롤은 좁은 화면에서만."""
+    html = _text("web/admin/index.html")
+    for card in ("card-ex", "card-boxes"):
+        assert re.search(rf'<section class="card s12" id="{card}"', html), card
+
+
+def test_clarity_six_kpis_fill_whole_rows() -> None:
+    """066 §3.3 Clarity 큰 수 여섯 — 1280px 이상 한 줄 여섯, 768~1279px 셋씩 두 줄, 768px 아래 둘씩(5 + 1 로 하나가 남지 않게)."""
+    assert '<div class="kpis six s12"' in _text("web/admin/clarity.html")
+    css = _text("web/admin/admin.css")
+    assert "repeat(6, minmax(0, 1fr))" in _rule(css, ".kpis.six")
+    wide, narrow = css.split("@media (max-width: 1279px)")[1].split(
+        "@media (max-width: 767px)"
+    )
+    assert re.search(
+        r"\.kpis\.six \{\n\s+grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);",
+        wide,
+    )
+    assert re.search(
+        r"\.kpis\.six \{\n\s+grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);",
+        narrow,
+    )

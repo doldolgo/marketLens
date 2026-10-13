@@ -311,6 +311,10 @@ select {
   grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
   gap: inherit;
 }
+/* 큰 수 여섯(Clarity) — 1280px 이상 한 줄 여섯 · 768~1279 셋씩 두 줄 · 그 아래 둘씩(5 + 1 로 하나가 남지 않게) */
+.kpis.six {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
 .bar {
   display: flex;
   flex-wrap: wrap;
@@ -329,9 +333,11 @@ body[data-sheet="open"] {
   overflow: hidden;
 }
 
-/* — 단추 · 고르기 · 입력 — */
+/* — 단추 · 고르기 · 입력 — 고르기는 자리가 모자라면 자기 상자 안에서 줄을 바꾼다(360px 에도 가로 넘침 없음 — 066 §3.4) — */
 .seg {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--line);
@@ -425,6 +431,7 @@ body[data-sheet="open"] {
 }
 .input {
   min-width: 0;
+  max-width: 100%;
   min-height: 30px;
   padding: 0 10px;
   border: 1px solid var(--line);
@@ -440,6 +447,7 @@ body[data-sheet="open"] {
   position: relative;
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
 }
 .search .i {
   position: absolute;
@@ -661,6 +669,7 @@ body[data-sheet="open"] {
 }
 .card-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-height: 28px;
@@ -770,6 +779,8 @@ body[data-sheet="open"] {
 }
 .tabs {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 2px;
 }
 .tabs button {
@@ -794,9 +805,11 @@ body[data-sheet="open"] {
   font-weight: 600;
   line-height: 1.1;
   letter-spacing: -0.01em;
-  white-space: nowrap;
 }
+/* 좁은 타일에서는 덧붙인 값('/ 3,600초')만 다음 줄로 */
 .big small {
+  display: inline-block;
+  white-space: nowrap;
   margin-left: 4px;
   color: var(--text-3);
   font-size: var(--fs-14);
@@ -1168,7 +1181,7 @@ button.lrow:hover {
   border-bottom: 0;
 }
 .tbl tbody tr:hover td {
-  background: rgb(255 255 255 / 0.025);
+  background-image: linear-gradient(rgb(255 255 255 / 0.04), rgb(255 255 255 / 0.04));
 }
 .tbl .n {
   text-align: right;
@@ -1230,21 +1243,22 @@ button.lrow:hover {
   height: 22px;
   color: var(--accent);
 }
+/* 칸 진하기(페이지 × 기기 표) — 칸 전체 바탕을 한 색 다섯 단계로, 밝은 두 단계는 어두운 글 */
 .q1 {
-  background: rgb(24 79 149 / 0.5);
+  background-color: rgb(24 79 149 / 0.45);
 }
 .q2 {
-  background: rgb(37 106 191 / 0.6);
+  background-color: rgb(37 106 191 / 0.55);
 }
 .q3 {
-  background: rgb(57 135 229 / 0.7);
+  background-color: rgb(57 135 229 / 0.65);
 }
 .q4 {
-  background: var(--seq-4);
+  background-color: var(--seq-4);
   color: var(--bg);
 }
 .q5 {
-  background: var(--seq-5);
+  background-color: var(--seq-5);
   color: var(--bg);
 }
 .thin {
@@ -1533,6 +1547,9 @@ details.card > summary {
   .s8 {
     grid-column: 1 / -1;
   }
+  .kpis.six {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 @media (max-width: 767px) {
   .app {
@@ -1613,6 +1630,9 @@ details.card > summary {
   }
   .big {
     font-size: 28px;
+  }
+  .kpis.six {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .sheet {
     padding: 0;

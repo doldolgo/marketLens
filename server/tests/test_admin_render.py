@@ -194,3 +194,117 @@ def test_status_lanes_draw_the_no_data_hatch() -> None:
     server = got["server.js"]
     assert server["failed"] == [] and server["errors"] == []
     assert server["drawn"]["page:c-checks"]["paths"] > 30  # 빗금 선들
+
+
+COUNT_TICKS = r"""
+const code = (await import('node:fs')).readFileSync(`${input.root}/web/admin/vendor/echarts-5.5.1.min.js`, 'utf8')
+const lib = { exports: {} }
+new Function('exports', 'module', code)(lib.exports, lib)
+const real = lib.exports
+setup({ visible: false, respond: () => [404, {}] })
+const charts = await page('charts.js')
+const common = await page('common.js')
+const T0 = 1_800_000_000_000
+const H = 3_600_000
+const texts = (option) => {
+  const c = real.init(null, null, { renderer: 'svg', ssr: true, width: 720, height: 200 })
+  c.setOption(option)
+  const svg = c.renderToSVGString()
+  c.dispose()
+  return [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1])
+}
+const pts = Array.from({ length: 24 }, (_, i) => [T0 + i * H, i === 5 ? 1 : 0])
+const one = (pane) => charts.timeOption({ startMs: T0, endMs: T0 + 24 * H, panes: [pane], series: [{ name: 'x', mark: 'bad', type: 'bar', data: pts }] })
+out.counts = texts(one({ title: '5xx', fmt: common.int })).filter((t) => /^\d+$/.test(t))
+const word = (v) => (v >= 1 ? '실패' : '정상')
+out.checks = texts(one({ fmt: word, axisFmt: word, max: 1, int: true })).filter((t) => t === '실패' || t === '정상')
+"""
+
+
+def test_count_axes_have_integer_ticks_without_repeated_labels() -> None:
+    """066 §3.1 차트 규칙 — 센 수의 세로축(5xx·canary 오류·접속·알림…)은 눈금이 정수라 값이 0·1 뿐이어도 '1, 1, 0' 처럼 같은 글자가
+    되풀이되지 않는다(진짜 ECharts 로 그려 축 글자를 센다). 상태 검사(정상 0·실패 1)도 같다."""
+    got = run_admin(COUNT_TICKS, {})
+    assert sorted(got["counts"]) == [
+        "0",
+        "1",
+    ]  # 고치기 전에는 ['0', '0', '1', '1', '1']
+    assert sorted(got["checks"]) == ["실패", "정상"]
+
+
+# 진짜 ECharts SVG 의 글자 상자(어림 — 한글 1em·숫자/영문 0.6em·띄어쓰기 0.3em, dominant-baseline central)와 겹침
+TEXT_BOXES = r"""
+const textBoxes = (svg) => [...svg.matchAll(/<text([^>]*)>([^<]*)<\/text>/g)].map(([, attrs, text]) => {
+  const pick = (re) => Number(re.exec(attrs)?.[1] ?? 0)
+  const t = /translate\(([-\d.]+)[ ,]+([-\d.]+)\)/.exec(attrs)
+  const x = (t ? Number(t[1]) : 0) + pick(/\sx="([-\d.]+)"/)
+  const y = (t ? Number(t[2]) : 0) + pick(/\sy="([-\d.]+)"/)
+  const f = Number(/(\d+(?:\.\d+)?)px/.exec(attrs)?.[1] ?? 12)
+  const w = [...text].reduce((s, ch) => s + (/[가-힣]/.test(ch) ? f : /\s/.test(ch) ? f * 0.3 : /[·:,/.]/.test(ch) ? f * 0.4 : f * 0.6), 0)
+  const anchor = /text-anchor="(\w+)"/.exec(attrs)?.[1] ?? 'start'
+  const x0 = anchor === 'end' ? x - w : anchor === 'middle' ? x - w / 2 : x
+  return { text, x0, x1: x0 + w, y0: y - f / 2, y1: y + f / 2 }
+})
+const clashes = (boxes) => {
+  const out = []
+  boxes.forEach((a, i) => boxes.slice(i + 1).forEach((b) => {
+    if (a.x0 < b.x1 - 1 && b.x0 < a.x1 - 1 && a.y0 < b.y1 - 1 && b.y0 < a.y1 - 1) out.push(`${a.text} × ${b.text}`)
+  }))
+  return out
+}
+"""
+
+PANES = r"""
+const code = (await import('node:fs')).readFileSync(`${input.root}/web/admin/vendor/echarts-5.5.1.min.js`, 'utf8')
+const lib = { exports: {} }
+new Function('exports', 'module', code)(lib.exports, lib)
+const real = lib.exports
+setup({ visible: false, respond: () => [404, {}] })
+let size = [720, 320]
+globalThis.echarts = { init: () => real.init(null, null, { renderer: 'svg', ssr: true, width: size[0], height: size[1] }), registerTheme: real.registerTheme, connect: real.connect, format: real.format, graphic: real.graphic }
+const charts = await page('charts.js')
+const common = await page('common.js')
+const ops = await page('opsdetail.js')
+const S0 = 1_800_000_000
+const pts = (f) => Array.from({ length: 24 }, (_, i) => [S0 + i * 3600, f(i)])
+const box = { creditBalance: pts((i) => 120 - i), creditUsage: pts((i) => i / 10), surplusCharged: pts(() => 0), netIn: pts((i) => 2e5 + i * 1e4), netOut: pts((i) => 5e4 + i * 1e3), ebsRead: pts((i) => 1e4 * i), ebsWrite: pts(() => 3e4) }
+const part = { boxes: ['collect', 'data', 'serve'].map((name) => ({ box: name, series: box })), canary: { durationMs: pts((i) => 800 + 40 * i), errors: pts((i) => (i === 3 ? 1 : 0)) } }
+const w = { boxes: part.boxes, line: (get) => ({ data: (get(part) || []).map(([t, v]) => [t * 1000, v]), cmp: null }) }
+const app = { filters: () => [] }
+const traffic = { panes: [{ title: '사람 모양 페이지', fmt: common.int }, { title: '5xx', fmt: common.int }, { title: 'WS 접속', fmt: common.int }], series: [{ name: '사람 모양 페이지', mark: 'acc', type: 'bar', data: pts((i) => 40 + i).map(([t, v]) => [t * 1000, v]) }, { name: '5xx', mark: 'bad', type: 'bar', pane: 1, data: pts((i) => (i === 7 ? 1 : 0)).map(([t, v]) => [t * 1000, v]) }, { name: 'WS 접속', mark: 'c1', pane: 2, data: pts((i) => 3 + (i % 4)).map(([t, v]) => [t * 1000, v]) }] }
+// 카드 높이는 그 페이지의 칸 그대로(canary h200 · 크레딧·네트워크·디스크 입출력 h320 · 개요 트래픽 h360), 판은 큰 그림(55vh, 최소 300)
+const cases = {
+  canary: [ops.canaryPanes(app, w), 200],
+  credit: [ops.credits(app, w), 320],
+  net: [ops.mirrorPanes('netIn', 'netOut', '들어옴', '나감')(app, w), 320],
+  io: [ops.mirrorPanes('ebsRead', 'ebsWrite', '읽기', '쓰기')(app, w), 320],
+  traffic: [traffic, 360],
+}
+out.clashes = {}
+for (const [name, [build, h]] of Object.entries(cases)) {
+  for (const [zoom, sizes] of [['card', [[720, h], [360, h]]], ['detail', [[1200, 480], [360, 300]]]]) {
+    for (const s of sizes) {
+      size = s
+      const id = `c-${name}-${zoom}-${s.join('x')}`
+      const chart = charts.draw(id, charts.timeOption({ startMs: S0 * 1000, endMs: (S0 + 86400) * 1000, zoom, legend: zoom === 'detail' ? false : undefined, labels: zoom === 'detail' ? false : undefined, ...build }))
+      // 범례 쪽 넘김 글자('1/2')는 잘린 범례 칸 밖에 놓인다 — 잘린 칸 글자와의 겹침은 보이지 않는다
+      const found = clashes(textBoxes(chart.renderToSVGString()).filter((b) => !/^\d+\/\d+$/.test(b.text)))
+      if (found.length) out.clashes[id] = found
+      out.top ??= {}
+      out.top[id] = chart.getOption().grid.map((g) => g.top)
+    }
+  }
+}
+"""
+
+
+def test_multi_pane_charts_keep_legend_pane_titles_and_tick_labels_apart() -> None:
+    """066 §3.1 차트 규칙(064 빚) — 위아래 칸 그림(크레딧·canary·네트워크·디스크 입출력·개요 트래픽)은 칸을 px 로 놓아 범례 아래에
+    첫 칸 이름 자리를, 칸 사이에 '앞 칸 맨 아래 눈금 글자 + 다음 칸 이름' 자리를 남긴다 — 카드(200~360px)·판(미니맵) 높이, 넓은·좁은
+    폭에서 진짜 ECharts 가 그린 글자 상자가 하나도 겹치지 않는다."""
+    got = run_admin(TEXT_BOXES + PANES, {})
+    assert got["clashes"] == {}
+    for chart, tops in got["top"].items():
+        assert all(isinstance(t, int) for t in tops), chart  # 그릴 때 px 배치
+        # 첫 칸 이름은 범례 줄(28px) 아래 자기 줄(26px)에 — 범례와 같은 줄에 앉지 않는다(판은 범례가 없다)
+        assert tops[0] == (32 if "-detail-" in chart else 54), (chart, tops)
