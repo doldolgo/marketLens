@@ -718,19 +718,22 @@ body[data-sheet="open"] {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
+  max-width: 100%;
   margin-left: auto;
 }
+/* 상태 배지 — 좁은 타일(Clarity 둘씩)에서 긴 상태('불러오지 못함 · 12분 전 값')는 배지 안에서 줄을 바꾼다 */
 .tag {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-height: 22px;
+  max-width: 100%;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: 11px;
   background: var(--raised);
   color: var(--text-3);
   font-size: var(--fs-12);
-  white-space: nowrap;
 }
 .tag:empty {
   display: none;

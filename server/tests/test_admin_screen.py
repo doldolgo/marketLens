@@ -321,8 +321,9 @@ def test_controls_wrap_inside_their_own_box_on_narrow_screens() -> None:
     css = _text("web/admin/admin.css")
     for selector in (".seg", ".tabs", ".card-head"):
         assert "flex-wrap: wrap;" in _rule(css, selector), selector
-    for selector in (".seg", ".tabs", ".input", ".search"):
+    for selector in (".seg", ".tabs", ".input", ".search", ".end", ".tag"):
         assert "max-width: 100%;" in _rule(css, selector), selector
+    assert "nowrap" not in _rule(css, ".tag")  # 긴 상태 글은 배지 안에서 줄 바꿈
     for page in PAGES:
         html = _text(f"web/admin/{page}")
         tables = re.findall(r"(.{0,22})<table\b", html)
