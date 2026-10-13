@@ -52,7 +52,7 @@ await flush()
 const fire = (data, o = {}) => (v.winListeners.message || []).forEach((fn) => fn({ origin: o.origin ?? 'https://kimptrack.com', source: o.source ?? win, data }))
 const ready = (pg, areas, elements) => fire({ type: 'kt-attention-ready', v: 1, page: pg, areas, ...(elements ? { elements } : {}) })
 const pressedOf = (attr) => v.groups[attr].filter((b) => b.attrs['aria-pressed'] === 'true').map((b) => b.dataset[attr])
-const rows = (id) => (document.getElementById(id).kids[1]?.kids || []).map((tr) => ({ cls: tr.className, cells: tr.kids.map((td) => td.textContent), tr }))
+const rows = (id) => (document.getElementById(id).kids[1]?.kids || []).map((tr) => ({ cls: tr.className, cells: tr.kids.map((td) => td.textContent), title: tr.title, tr }))
 const snap = () => ({
   calls: [...v.s.calls], src: document.getElementById('frame').src ?? null, url: v.s.cleared.at(-1) ?? null, here: document.getElementById('here').attrs.href,
   device: pressedOf('device'), mode: pressedOf('mode'), metric: pressedOf('metric'), metricHidden: document.getElementById('metric-seg').hidden,
@@ -61,7 +61,8 @@ const snap = () => ({
   line: v.text('frame-line'), small: !document.getElementById('frame-small').hidden, stage: document.getElementById('stage').className,
   note: document.getElementById('frame-note').hidden ? null : v.text('frame-note'), panelNote: v.text('panel-note'),
   tags: [v.text('t-frame'), v.text('t-panel')], foot: v.text('el-foot'),
-  elements: rows('tbl-elements').map((r) => [r.cls, ...r.cells.slice(0, 3)]),
+  elements: rows('tbl-elements').map((r) => [r.cls, ...r.cells]),
+  titles: rows('tbl-elements').map((r) => r.title),
   posted: posted.map(([m, o]) => [m, o]),
 })
 """
@@ -204,7 +205,7 @@ out.silent = snap()
 ready('landing', ['top', 'hero', 'faq', 'events'], [['top', 'nav:kimp'], ['hero', 'live:1'], ['hero', 'app:history'], ['faq', 'faq:rate']])
 await flush()
 out.ready = snap()
-rows('tbl-elements').find((r) => r.cells[1] === '김프·역프란 링크').tr.fire('click')
+rows('tbl-elements').find((r) => r.tr.title.startsWith('김프·역프란 링크 · ')).tr.fire('click')
 await flush()
 out.focus = snap()
 v.click('panel', 'areas')
@@ -261,20 +262,26 @@ def test_ready_judges_absent_elements_and_rows_stay_present() -> None:
         "1",
     ]  # 클릭 수
     assert ready["foot"] == "열쇠 26개 · 지금 화면에 없음 20개"
+    # 판 표는 세 칸 — 순위 · 이름(한 줄 + 흐린 둘째 줄에 영역) · 고른 지표 막대와 값. 나머지 칸은 상세 판에
     assert ready["elements"][:6] == [
-        ["go", "#1", "김프·역프란 링크", "머리 막대"],
-        ["go", "#2", "환율은 무엇을 쓰나", "자주 묻는 질문"],
-        ["go", "#3", "김프 기록과 차트 링크", "첫 화면"],
-        ["go", "#4", "지금 가장 큰 경로 카드", "첫 화면"],
-        ["go", "#5", "사건 행 BTC", "지난 7일 사건"],
-        ["go", "–", "사건 행 ETH", "지난 7일 사건"],  # 행은 늘 있다
+        ["go", "#1", "김프·역프란 링크" + "머리 막대", "66"],
+        ["go", "#2", "환율은 무엇을 쓰나" + "자주 묻는 질문", "53"],
+        ["go", "#3", "김프 기록과 차트 링크" + "첫 화면", "42"],
+        ["go", "#4", "지금 가장 큰 경로 카드" + "첫 화면", "28"],
+        ["go", "#5", "사건 행 BTC" + "지난 7일 사건", "1"],
+        ["go", "–", "사건 행 ETH" + "지난 7일 사건", "0"],  # 행은 늘 있다
     ]
     assert {r[0] for r in ready["elements"][6:]} == {"gone"}
     assert ready["elements"][6] == [
         "gone",
         "–",
-        "링크 /kimp-history · 지금 화면에 없음",
-        "히스토리 분석",
+        "링크 /kimp-history" + "히스토리 분석 · 지금 화면에 없음",
+        "68",
+    ]
+    # 행 title = 이름 · 영역 · 열쇠 원문
+    assert ready["titles"][:2] == [
+        "김프·역프란 링크 · 머리 막대 · nav:kimp",
+        "환율은 무엇을 쓰나 · 자주 묻는 질문 · faq:rate",
     ]
     focus = got["focus"]
     assert focus["posted"][-1] == [
@@ -282,14 +289,13 @@ def test_ready_judges_absent_elements_and_rows_stay_present() -> None:
         SITE,
     ]
     assert [r[0] for r in focus["elements"][:2]] == ["on go", "go"]
-    assert got["areaRows"][0] == ["go", "#1", "머리 막대", "평균 5.4초", "87%", "25.8"]
+    # 영역 표도 세 칸 — 순위 · 이름 · 평균 보인 시간 막대와 값(도달률·100뷰당 클릭은 상세 판에)
+    assert got["areaRows"][0] == ["go", "#1", "머리 막대", "5.4초"]
     assert got["areaRows"][4] == [
         "gone",
         "–",
-        "히스토리 분석 · 지금 화면에 없음",
-        "평균 2.6초",
-        "23%",
-        "5.0",
+        "히스토리 분석" + "지금 화면에 없음",
+        "2.6초",
     ]
     assert got["areaFocus"] == [{"type": "kt-attention-focus", "id": "top"}, SITE]
     assert got["noElements"]["foot"] == "열쇠 26개 · 지금 화면에 없음 0개"
@@ -391,6 +397,11 @@ await flush()
 v.byId.get('sheet-csv').fire('click')
 await flush()
 out.exits = { name: v.s.downloads.at(-1)[0], lines: (await text(v.s.blobs.at(-1))).split('\r\n'), note: v.text('sheet-note') }
+document.getElementById('sheet-close').fire('click')
+await flush()
+v.click('detail', 'areas')
+await flush()
+out.areaHead = (document.getElementById('sheet-tbl').kids[0]?.kids[0]?.kids || []).map((th) => th.textContent)
 """
 
 
@@ -412,6 +423,18 @@ def test_detail_sheets_export_csv_with_the_raw_key_column() -> None:
     kinds = [line.split(",")[0] for line in got["exits"]["lines"][1:] if line]
     assert kinds == ["떠난 곳"] * 4 + ["깊이"] * 11
     assert got["exits"]["note"].startswith("떠난 곳: pagehide 로 끝난 pv ")
+    # 판 표는 세 칸이지만 상세 판은 칸을 모두(도달률·100뷰당 클릭 포함)
+    assert got["areaHead"] == [
+        "순위",
+        "영역",
+        "영역 id",
+        "평균 보인 시간(초)",
+        "도달률(%)",
+        "100뷰당 클릭",
+        "단계",
+        "거의 안 닿음",
+        "상태",
+    ]
 
 
 HIDE = r"""

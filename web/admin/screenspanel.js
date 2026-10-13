@@ -1,10 +1,10 @@
 // 화면 페이지의 오른쪽 판(스펙 065 §3.6) — 탭 셋: ① 요소(영역 칩 거르기·표·바닥 줄) ② 영역(053 순위 목록) ③ 떠난 곳·깊이.
-// 판마다 ⤢ → 066 상세 판(screensdetail.js). 행을 누르면 틀에 focus 를 보내고 그 행을 강조한다. 글자는 textContent·title 로만.
+// 판 폭 360px 에 맞춰 표는 세 칸(순위 · 이름 · 막대와 값) — 나머지 칸은 ⤢ 상세 판(screensdetail.js)과 CSV 에. 행을 누르면 틀에 focus 를
+// 보내고 그 행을 강조한다. 글자는 textContent·title 로만.
 import { $, button, clean, el, int, n0, once, pct, pressed, put, stateWord, tag, widthOf } from './common.js';
-import { METRIC_NAME, SMALL_PV, current, isDashboard, ui } from './screensmodel.js';
+import { METRIC_NAME, SMALL_PV, current, elementTag, isDashboard, ui } from './screensmodel.js';
 import { areaName, elName } from './screensnames.js';
 
-const sec = (v) => (v === null ? '–' : `${v.toFixed(1)}초`);
 const PANELS = Object.freeze(['elements', 'areas', 'exits']);
 
 // 단계 막대 — 값 ÷ 최대 폭, 덮어 보기와 같은 단계 색(lv0 = 보이기만)
@@ -16,10 +16,20 @@ function bar(cls, ratio, label) {
   box.title = clean(label);
   return box;
 }
-// 이름 칸 — 이름 + 흐린 꼬리(지금 화면에 없음·기록 없음)
-function nameCell(name, note) {
-  const box = el('span', null, name);
-  if (note) box.append(el('small', 'dim', ` · ${note}`));
+// 이름 칸 — 이름 한 줄(넘치면 줄임표) + 흐린 작은 둘째 줄(영역·지금 화면에 없음 등), 거의 안 닿음이면 이름 앞에 ▲
+function nameCell(name, sub, low = false) {
+  const box = el('span', 'scr-name');
+  const line = el('span', 'scr-line');
+  if (low) line.append(el('i', 'shape warn'));
+  line.append(clean(name));
+  box.append(line);
+  if (sub) box.append(el('small', 'scr-sub', sub));
+  return box;
+}
+// 값 칸 — 단계 막대(값 ÷ 최대 폭) + 그 값
+function valueCell(cls, ratio, label, text) {
+  const box = el('span', 'scr-val');
+  box.append(bar(cls, ratio, label), el('b', null, text));
   return box;
 }
 
@@ -27,7 +37,7 @@ function nameCell(name, note) {
 function grid(node, columns, rows, o) {
   if (!node) return;
   const head = el('tr');
-  for (const c of columns) head.append(el('th', c.num ? 'n' : null, c.label));
+  for (const c of columns) head.append(el('th', [c.num ? 'n' : '', c.cls ?? ''].join(' ').trim() || null, c.label));
   const thead = el('thead');
   thead.append(head);
   const tbody = el('tbody');
@@ -80,19 +90,19 @@ function drawElements(app, c, send) {
   const rows = ui.area ? all.filter((e) => e.area === ui.area) : all;
   put('el-head', `요소 · ${METRIC_NAME[c.metric]} 큰 순`);
   const max = c.elements.max;
+  const where = (e) => [areaName(c.page, e.area), e.state === 'gone' ? '지금 화면에 없음' : ''].filter(Boolean).join(' · ');
   const columns = [
     { label: '순위', cls: 'rank', text: (e) => (e.rank ? `#${e.rank}` : '–') },
-    { label: '이름', cell: (e) => nameCell(elName(c.page, e.key), e.state === 'gone' ? '지금 화면에 없음' : '') },
-    { label: '영역', text: (e) => areaName(c.page, e.area) },
-    { label: `${METRIC_NAME[c.metric]} 막대`, cell: (e) => bar(`lv${e.level ?? 0}`, max ? e.m / max : 0, e.level === null ? '단계 없음' : `단계 ${e.level}`) },
-    { label: '클릭', num: true, text: (e) => int(e.c) },
-    { label: '100뷰당', num: true, text: (e) => e.cRate.toFixed(1) },
-    { label: '마우스 올림', num: true, text: (e) => sec(e.h) },
-    { label: '보인 시간', num: true, text: (e) => sec(e.v) },
+    { label: '이름', cls: 'scr-namecell', cell: (e) => nameCell(elName(c.page, e.key), e.state === 'other' ? '' : where(e)) },
+    {
+      label: METRIC_NAME[c.metric],
+      cls: 'scr-valcell',
+      cell: (e) => valueCell(`lv${e.level ?? 0}`, max ? e.m / max : 0, e.level === null ? '단계 없음' : `단계 ${e.level}`, elementTag(e, c.metric)),
+    },
   ];
   grid($('tbl-elements'), columns, rows, {
     rowClass: (e) => [e.state === 'ok' ? '' : 'gone', ui.focus === `${e.area}|${e.key}` ? 'on' : ''].join(' ').trim(),
-    title: (e) => e.key,
+    title: (e) => [elName(c.page, e.key), areaName(c.page, e.area), e.key].join(' · '),
     onRow: (e) =>
       e.state === 'ok'
         ? () => {
@@ -107,34 +117,26 @@ function drawElements(app, c, send) {
   put('el-foot', `열쇠 ${int(keys.length)}개 · 지금 화면에 없음 ${int(keys.filter((e) => e.state === 'gone').length)}개`);
 }
 
-// ② 영역 — 053 순위 목록(이름·평균 보인 시간 막대·도달률·100뷰당 클릭·거의 안 닿음 ▲), 행 → focus(id)
+// ② 영역 — 053 순위 목록(순위 · 이름(거의 안 닿음 ▲) · 평균 보인 시간 막대와 그 값 — 도달률·100뷰당 클릭은 상세 판에), 행 → focus(id)
 function drawAreas(app, c, send) {
   const v = c.areas;
-  const time = (a) => {
-    const box = el('span', 'scr-time');
-    const words = a.state === 'none' ? '기록 없음' : `평균 ${a.t.toFixed(1)}초`;
-    box.append(bar(`lv${a.level}`, v.top ? a.ms / v.top : 0, `${words} · 단계 ${a.level}`), el('span', null, words));
-    return box;
-  };
-  const reach = (a) => {
-    const box = el('span', null, a.state === 'none' ? '–' : `${a.r}%`);
-    if (a.low && a.state !== 'none') box.append(el('i', 'shape warn'));
-    if (a.low && a.state !== 'none') box.title = '거의 안 닿음 — 도달 20% 미만';
-    return box;
-  };
+  const low = (a) => a.low && a.state !== 'none';
+  const sub = (a) => (a.state === 'gone' ? '지금 화면에 없음' : a.state === 'none' ? '기록 없음' : '');
   grid(
     $('tbl-areas'),
     [
       { label: '순위', cls: 'rank', text: (a) => (a.rank ? `#${a.rank}` : '–') },
-      { label: '영역', cell: (a) => nameCell(areaName(c.page, a.id), a.state === 'gone' ? '지금 화면에 없음' : '') },
-      { label: '평균 보인 시간', cell: time },
-      { label: '도달률', num: true, cell: reach },
-      { label: '100뷰당 클릭', num: true, text: (a) => (a.state === 'none' ? '–' : a.c.toFixed(1)) },
+      { label: '영역', cls: 'scr-namecell', cell: (a) => nameCell(areaName(c.page, a.id), sub(a), low(a)) },
+      {
+        label: '평균 보인 시간',
+        cls: 'scr-valcell',
+        cell: (a) => valueCell(`lv${a.level}`, v.top ? a.ms / v.top : 0, `단계 ${a.level}`, a.state === 'none' ? '–' : `${a.t.toFixed(1)}초`),
+      },
     ],
     [...v.ranked, ...v.blank, ...v.away],
     {
       rowClass: (a) => [a.state === 'gone' ? 'gone' : '', ui.focusArea === a.id ? 'on' : ''].join(' ').trim(),
-      title: (a) => a.id,
+      title: (a) => [areaName(c.page, a.id), a.id, ...(a.state === 'none' ? [] : [`도달 ${a.r}%`, `100뷰당 클릭 ${a.c.toFixed(1)}`]), ...(low(a) ? ['거의 안 닿음'] : [])].join(' · '),
       onRow: (a) =>
         a.state === 'gone'
           ? null

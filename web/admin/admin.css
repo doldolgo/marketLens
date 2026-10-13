@@ -1664,6 +1664,48 @@ details.card > summary {
   display: block;
   height: 100%;
 }
+/* 판 표 — 360px 에 세 칸(순위 · 이름 한 줄과 흐린 둘째 줄 · 막대와 값), 나머지 칸은 상세 판에 */
+.scr-tbl {
+  table-layout: fixed;
+}
+.scr-tbl .rank {
+  width: 3em;
+}
+.scr-tbl .scr-valcell {
+  width: 9em;
+}
+.scr-name,
+.scr-line,
+.scr-sub {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scr-sub {
+  color: var(--text-3);
+  font-size: var(--fs-11);
+}
+.scr-line .shape {
+  margin-right: 4px;
+}
+.scr-val {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.scr-val .scr-bar {
+  flex: none;
+  width: 48px;
+}
+.scr-val b {
+  min-width: 3.4em;
+  font-weight: 400;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .lv0 {
   background: var(--none);
 }
