@@ -50,7 +50,7 @@ for (const name of input.pages) {
 
 
 def test_scenarios_cover_the_new_feeds() -> None:
-    """066 §4 — 가짜 서버에 067·068 응답과 경우(대역 많음·대역 없음·XSS)를 더했다. old = 지금 운영(067·068 배포 전)."""
+    """066 §4 — 가짜 서버에 067·068 응답과 경우(대역 많음·대역 없음·XSS)를 더했다. old = 067·068 배포 전."""
     fake = _fake("ok")
     assert {
         "ok",

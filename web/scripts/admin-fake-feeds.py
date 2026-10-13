@@ -10,7 +10,7 @@
   피드 열둘(029·011·034·035·038·039·040·062·063 + 067 대역 둘·068 날별 기록 — 068 은 #133 의 실제 응답 꼴)과
   `POST /api/refresh` 를 지어낸 값으로 답한다. 표준 라이브러리만 쓰고 127.0.0.1 에만 붙는다. 실제 서버·AWS·Clarity 를 부르지 않는다.
 - 경우(--scenario, 돌던 중에는 `GET /__scenario/<이름>` 로 바꾼다):
-  ok(정상) · problem(빨강·주황 칩 여럿) · old(067·068 배포 전 — 지금 운영: 대역·날별 기록 404, offset 모름, Clarity dims 없음) ·
+  ok(정상) · problem(빨강·주황 칩 여럿) · old(067·068 배포 전 — 대역·날별 기록 404, offset 모름, Clarity dims 없음) ·
   missing(062·063·067·068 배포 전 — 시계열 404·흐름 키 없음) · empty(연결 안 됨 — AWS·Clarity·접속 로그 없음) ·
   bands(대역 많음 — 1,200개, 200행씩) · nobands(대역 없음) ·
   xss(글자 칸마다 `<img onerror>` — 글로만 보여야 한다) · expired(헬스가 401 비JSON — 로그인 만료 새로고침 한 번).
@@ -31,7 +31,7 @@ from urllib.parse import parse_qs, urlsplit
 ADMIN = Path(__file__).resolve().parent.parent / "admin"
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src https://kimptrack.com; frame-ancestors 'none'"
 SCENARIOS = ("ok", "problem", "old", "missing", "empty", "bands", "nobands", "xss", "expired")
-# 067·068 이 없는 서버(지금 운영·그보다 앞)
+# 067·068 이 없는 서버(배포 전·그보다 앞)
 PRE_068 = ("old", "missing")
 X = "<img src=x onerror=alert(1)>"
 BOXES = ("collect", "data", "serve")
