@@ -164,13 +164,14 @@ export function outageMinutes(body, now) {
   }
   return out;
 }
-// 시간 칸마다 알림 수 — 보낸 Slack 알림과 ALARM 으로 바뀐 경보. hours 칸, [[칸 가운데 ms, 수]] (064)
-export function alertHours(items, now, hours = 24) {
+// 시간 칸마다 알림 수 — 보낸 Slack 알림과 ALARM 으로 바뀐 경보(only 가 'slack'·'alarm' 이면 그것만). hours 칸, [[칸 가운데 ms, 수]] (064)
+export function alertHours(items, now, hours = 24, only = null) {
   const top = Math.floor(now / HOUR) * HOUR;
   const counts = new Map();
   for (let i = hours - 1; i >= 0; i -= 1) counts.set(top - i * HOUR, 0);
   for (const it of list(items).filter(isObj)) {
     if (!(it.source === 'slack' || (it.source === 'alarm' && it.toState === 'ALARM')) || num(it.at) === null) continue;
+    if (only && it.source !== only) continue;
     const hour = Math.floor(it.at / HOUR) * HOUR;
     if (counts.has(hour)) counts.set(hour, counts.get(hour) + 1);
   }
