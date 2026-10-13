@@ -59,7 +59,7 @@ class TabLoadGuard extends Component<{ children: ReactNode }, { failed: boolean 
 }
 
 export default function App() {
-  const { feed, now } = useFeed()
+  const { feed, now, staleTick } = useFeed()
   // 탭·선택 심볼은 URL 쿼리(?tab=&sym=)에 실려 새로고침해도 같은 화면 (002 §3.5).
   // URL 은 보이는 화면만 담는다 — sym 은 기록 탭이 활성일 때만 쓴다
   const [tab, setTab] = useUrlState<TabId>('tab', 'spread', oneOf(TABS.map(([id]) => id)))
@@ -218,7 +218,8 @@ export default function App() {
         </div>
       </div>
 
-      {wrap('spread', <SpreadsTab feed={feed} onPick={onPick} />)}
+      {/* 표는 행 배열(snapshot·delta 마다 새 배열)과 staleTick 만 받는다 — 1.5초 tick·수집 상태 폴링 리렌더에서 둘이 그대로면 건너뛴다 */}
+      {wrap('spread', <SpreadsTab rows={feed.spreads} staleTick={staleTick} onPick={onPick} />)}
       {historySeen && wrap('history', (
         <TabLoadGuard>
           <Suspense fallback={null}>

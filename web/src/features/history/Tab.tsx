@@ -85,13 +85,36 @@ const TimelineBar = memo(function TimelineBar({ title, left, width, color }: { t
   )
 })
 
-export default function HistoryTab({ now, selSym, onSelect, spreads, active }: {
+/** 선택 코인이 있는 해외 거래소(피드 기준, FX_CHOICES 순서). 피드가 아직 없으면 빈 배열 = 모름.
+ *  피드 행의 fx 는 표시명(exName, 'Bitget')이라 id 도 표시명으로 바꿔 비교한다 */
+function availableFxsOf(spreads: SpreadRow[], sym: string): string[] {
+  const has = new Set<string>()
+  for (const r of spreads) if (r.sym === sym) has.add(r.fx)
+  return REAL_FXS.filter((id) => has.has(exName(id)))
+}
+
+interface Props {
   now: number; selSym: string; onSelect: (sym: string) => void
   /** 스프레드 피드의 현재 행 — 선택 코인이 어느 해외 거래소에 있는지 알아내는 데만 쓴다 (014 §3.7). */
   spreads: SpreadRow[]
   /** 이 탭이 보이는 중 — 아닐 때는 사건·봉 60초 재조회를 멈춘다 (013 §3.5·014 §3.7). */
   active: boolean
-}) {
+}
+
+/**
+ * 셸은 delta(초당 1회)와 5초 수집 상태 폴링마다 다시 그리고, 그때마다 spreads 는 새 배열이다. 이 탭이 행에서 읽는 것은
+ * '선택 코인이 있는 해외 거래소' 목록 하나뿐이고 그 목록은 거의 바뀌지 않으므로, 목록이 같으면 탭 전체(순위표·타임라인·차트 카드)를
+ * 다시 그리지 않는다. 진행 중 사건의 지속 시간은 now 가 바뀌는 1.5초 tick 에 그대로 다시 그린다.
+ * 묶음: 이 탭이 spreads 에서 다른 값을 읽게 되면 이 비교도 같이 고친다.
+ */
+function sameProps(a: Props, b: Props): boolean {
+  return a.now === b.now && a.selSym === b.selSym && a.onSelect === b.onSelect && a.active === b.active
+    && (a.spreads === b.spreads || availableFxsOf(a.spreads, a.selSym).join() === availableFxsOf(b.spreads, b.selSym).join())
+}
+
+export default memo(HistoryTab, sameProps)
+
+function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
   // 방향·기간·거래소·정렬·차트 선택은 URL 쿼리(h.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색 입력은 Enter 전까지 임시라 제외
   const [dir, setDir] = useUrlState<Dir>('h.dir', 'kimp', oneOf(['kimp', 'reverse']))
   const [per, setPer] = useUrlState<Per>('h.per', '7d', oneOf(PERS))
@@ -108,12 +131,8 @@ export default function HistoryTab({ now, selSym, onSelect, spreads, active }: {
   // 접힌 해외 카드(URL h.fxc). 카드는 이 코인이 있는 해외 거래소마다 하나씩 항상 있고, 접기만 고른다. mock(MEXC)은 시안이라 기본 접힘
   const [collapsedFxs, setCollapsedFxs] = useUrlState<string[]>('h.fxc', FX_CHOICES.filter((f) => f.mock).map((f) => f.id), list(oneOf(FX_CHOICES.map((f) => f.id))))
   const toggleFx = (id: string) => setCollapsedFxs(collapsedFxs.includes(id) ? collapsedFxs.filter((x) => x !== id) : [...collapsedFxs, id])
-  // 선택 코인이 있는 해외 거래소(피드 기준, FX_CHOICES 순서). 피드가 아직 없으면 빈 배열 = 모름.
-  // 피드 행의 fx 는 표시명(exName, 'Bitget')이라 id 도 표시명으로 바꿔 비교한다
-  const availableFxs = useMemo(() => {
-    const has = new Set(spreads.filter((r) => r.sym === selSym).map((r) => r.fx))
-    return REAL_FXS.filter((id) => has.has(exName(id)))
-  }, [spreads, selSym])
+  // 선택 코인이 있는 해외 거래소 — 위 sameProps 와 같은 함수로 구한다
+  const availableFxs = useMemo(() => availableFxsOf(spreads, selSym), [spreads, selSym])
   const mockBase = REAL_FXS[0] // mock 카드의 재료 봉 — binance
   // 보여줄 카드 = 이 코인이 있는 해외 거래소(FX_CHOICES 순서). 피드가 아직 없으면 전부. mock 은 Binance 가 있을 때만
   const shownFxs = FX_CHOICES.map((f) => f.id).filter((id) => availableFxs.length === 0 || availableFxs.includes(isMockFx(id) ? mockBase : id))
