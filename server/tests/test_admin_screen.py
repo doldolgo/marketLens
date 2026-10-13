@@ -335,3 +335,21 @@ def test_overview_box_table_spans_the_row_so_all_six_columns_show() -> None:
     html = _text("web/admin/index.html")
     for card in ("card-ex", "card-boxes"):
         assert re.search(rf'<section class="card s12" id="{card}"', html), card
+
+
+def test_clarity_six_kpis_fill_whole_rows() -> None:
+    """066 §3.3 Clarity 큰 수 여섯 — 1280px 이상 한 줄 여섯, 768~1279px 셋씩 두 줄, 768px 아래 둘씩(5 + 1 로 하나가 남지 않게)."""
+    assert '<div class="kpis six s12"' in _text("web/admin/clarity.html")
+    css = _text("web/admin/admin.css")
+    assert "repeat(6, minmax(0, 1fr))" in _rule(css, ".kpis.six")
+    wide, narrow = css.split("@media (max-width: 1279px)")[1].split(
+        "@media (max-width: 767px)"
+    )
+    assert re.search(
+        r"\.kpis\.six \{\n\s+grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);",
+        wide,
+    )
+    assert re.search(
+        r"\.kpis\.six \{\n\s+grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);",
+        narrow,
+    )

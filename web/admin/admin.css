@@ -311,6 +311,10 @@ select {
   grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
   gap: inherit;
 }
+/* 큰 수 여섯(Clarity) — 1280px 이상 한 줄 여섯 · 768~1279 셋씩 두 줄 · 그 아래 둘씩(5 + 1 로 하나가 남지 않게) */
+.kpis.six {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
 .bar {
   display: flex;
   flex-wrap: wrap;
@@ -801,9 +805,11 @@ body[data-sheet="open"] {
   font-weight: 600;
   line-height: 1.1;
   letter-spacing: -0.01em;
-  white-space: nowrap;
 }
+/* 좁은 타일에서는 덧붙인 값('/ 3,600초')만 다음 줄로 */
 .big small {
+  display: inline-block;
+  white-space: nowrap;
   margin-left: 4px;
   color: var(--text-3);
   font-size: var(--fs-14);
@@ -1541,6 +1547,9 @@ details.card > summary {
   .s8 {
     grid-column: 1 / -1;
   }
+  .kpis.six {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 @media (max-width: 767px) {
   .app {
@@ -1621,6 +1630,9 @@ details.card > summary {
   }
   .big {
     font-size: 28px;
+  }
+  .kpis.six {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .sheet {
     padding: 0;
