@@ -72,10 +72,8 @@ export interface BandPoint { time: UTCTimestamp; value: number; color: string }
 
 /** 카드 한 장의 시리즈별 점. 키는 Chart.tsx 의 시리즈 표와 같다 — 가격 `fx`·`dom:{국내}`, 띠 `{fx|국내}:{deposit|withdraw}`. */
 export interface CardPoints {
-  /** 국내 1개일 때만 — 여럿이면 빈 배열(선이 맡는다). */
-  candle: CandlePoint[]
-  /** 국내 여럿일 때만 — 거래소별 김프 종가 선. */
-  prem: Map<Dom, LinePoint[]>
+  /** 국내 거래소별 김프 캔들 — 여럿이면 같은 판에 겹쳐 그린다. */
+  candle: Map<Dom, CandlePoint[]>
   price: Map<string, LinePoint[]>
   band: Map<string, BandPoint[]>
 }
@@ -86,23 +84,22 @@ export interface CardPoints {
  */
 export function cardPoints(S: PairSeries[], dir: Dir, palette: BandPalette, fromOf: (s: PairSeries) => number = () => 0): CardPoints {
   const axis = axisOf(S)
-  const single = S.length === 1
   const line = (s: PairSeries, value: (c: Candle1m) => number): LinePoint[] => {
     const cs = s.candles
     const out: LinePoint[] = []
     for (let i = fromOf(s); i < cs.length; i++) out.push({ time: toChartTime(cs[i].ts), value: value(cs[i]) })
     return out
   }
-  const candle: CandlePoint[] = []
-  if (single) {
-    const cs = axis.candles
-    for (let i = fromOf(axis); i < cs.length; i++) {
+  const candle = new Map<Dom, CandlePoint[]>()
+  for (const s of S) {
+    const cs = s.candles
+    const out: CandlePoint[] = []
+    for (let i = fromOf(s); i < cs.length; i++) {
       const c = cs[i]
-      candle.push({ time: toChartTime(c.ts), open: c.open, high: c.high, low: c.low, close: c.close })
+      out.push({ time: toChartTime(c.ts), open: c.open, high: c.high, low: c.low, close: c.close })
     }
+    candle.set(s.dom, out)
   }
-  const prem = new Map<Dom, LinePoint[]>()
-  if (!single) for (const s of S) prem.set(s.dom, line(s, (c) => c.close))
   const price = new Map<string, LinePoint[]>()
   price.set('fx', line(axis, (c) => c.usdt))
   for (const s of S) price.set(`dom:${s.dom}`, line(s, (c) => c.krw / c.fxRate))
@@ -125,7 +122,7 @@ export function cardPoints(S: PairSeries[], dir: Dir, palette: BandPalette, from
   }
   bandRow('fx', axis, true)
   for (const s of S) bandRow(s.dom, s, false)
-  return { candle, prem, price, band }
+  return { candle, price, band }
 }
 
 /**
