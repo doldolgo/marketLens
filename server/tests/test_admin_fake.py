@@ -1,77 +1,99 @@
-"""관리자 화면 v3 의 가짜 피드 서버(`web/scripts/admin-fake-feeds.py`, 스펙 064 §4 설계 세션 도구)와 페이지가 어긋나지 않는가.
+"""관리자 화면 v4 의 가짜 피드 서버(`web/scripts/admin-fake-feeds.py`, 스펙 064·066 §4 설계 세션 도구)와 페이지가 어긋나지 않는가.
 
-가짜 서버의 경우마다 피드 응답을 만들어 세 페이지를 node 로 그리고, 어느 카드도 '표시 오류'(그리다 예외)가 나지 않는지,
-정상 경우는 머리의 점이 '정상'·문제 경우는 '문제' 인지 본다. 서버를 띄우지 않는다(함수만 부른다).
+가짜 서버의 경우마다(067·068 배포 전 old·대역 많음·대역 없음 포함) 피드 응답을 만들어 페이지 여섯을 node 로 그리고(비교를 켠 보기도),
+어느 카드도 '표시 오류'(그리다 예외)가 나지 않는지, 내비 모양이 경우와 맞는지 본다. 서버를 띄우지 않는다(함수만 부른다).
 """
 
-import importlib.util
-from types import ModuleType
 from typing import Any
 
 import pytest
 
 from tests.admin_dom import run_admin
-from tests.test_deploy import ROOT
+from tests.test_admin_detail import FAST, SERIES, _fake, answers
 
-PLAIN = [
-    "/api/health",
-    "/svc/api/health",
-    "/svc/api/admin/status",
-    "/api/health/collect",
+URLS = [
+    *FAST,
     "/api/admin/aws",
     "/api/admin/alerts",
+    *SERIES,
+    *[f"/svc/api/admin/access?window={w}" for w in ("24h", "7d", "30d")],
+    "/svc/api/admin/access/ips?window=24h&sort=requests&limit=200&offset=0",
     "/svc/api/admin/clarity",
+    *[f"/svc/api/admin/clarity/history?days={d}" for d in (7, 30, 90)],
+]
+PAGES = [
+    "overview.js",
+    "server.js",
+    "traffic.js",
+    "visitors.js",
+    "insight.js",
+    "screens.js",
 ]
 SCENARIO = r"""
-const respond = (url) => {
-  const [path, query] = url.split('?')
-  const q = new URLSearchParams(query || '')
-  if (path === '/api/admin/aws/series') return input.series[q.get('range')]
-  if (path === '/svc/api/admin/access') return input.access[q.get('window')]
-  return input.feeds[path] || [404, { detail: 'Not Found' }]
-}
-for (const name of ['overview.js', 'server.js', 'traffic.js']) {
-  const v = setup({ respond, buttons: { range: ['6h', '24h', '7d', '30d'], window: ['24h', '7d', '30d'] } })
-  await page(name, `?s=${name}`)
-  await flush()
-  if (name === 'server.js') { v.click('range', '30d'); await flush() }
-  if (name === 'traffic.js') { v.click('window', '30d'); await flush() }
-  const shown = [...v.byId.entries()].filter(([id, n]) => id.startsWith('t-') && n.textContent)
-  out[name] = { errors: shown.filter(([, n]) => n.textContent === '표시 오류').map(([id]) => id), charts: v.s.charts.size, word: v.text('hdr-word') }
+const respond = (url) => input.answers[url] || [404, { detail: 'Not Found' }]
+for (const name of input.pages) {
+  for (const search of ['', '?cmp=prev']) {
+    const v = setup({ respond, search })
+    await page(name, `?s=${name}${search}`)
+    await flush()
+    const shown = [...v.byId.entries()].filter(([id, n]) => id.startsWith('t-') && n.textContent)
+    out[`${name}${search}`] = {
+      errors: shown.filter(([, n]) => n.textContent === '표시 오류').map(([id]) => id),
+      off: shown.filter(([, n]) => n.textContent === '연결 안 됨').map(([id]) => id),
+      charts: v.s.charts.size,
+      mark: document.getElementById('m-overview').className,
+      calls: v.s.calls.length,
+    }
+  }
 }
 """
 
 
-def _fake() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "admin_fake", ROOT / "web/scripts/admin-fake-feeds.py"
-    )
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def test_scenarios_cover_the_new_feeds() -> None:
+    """066 §4 — 가짜 서버에 067·068 응답과 경우(대역 많음·대역 없음·XSS)를 더했다. old = 지금 운영(067·068 배포 전)."""
+    fake = _fake("ok")
+    assert {
+        "ok",
+        "problem",
+        "old",
+        "missing",
+        "empty",
+        "bands",
+        "nobands",
+        "xss",
+        "expired",
+    } == set(fake.SCENARIOS)
+    assert set(fake.PRE_068) == {"old", "missing"}
 
 
 @pytest.mark.parametrize(
-    "scenario", ["ok", "problem", "missing", "empty", "xss", "expired"]
+    "scenario",
+    ["ok", "problem", "old", "missing", "empty", "bands", "nobands", "xss", "expired"],
 )
 def test_every_fake_scenario_draws_every_card_without_errors(scenario: str) -> None:
-    fake = _fake()
-    assert scenario in fake.SCENARIOS
-    fake.state["scenario"] = scenario
-    feeds = {path: list(fake.feed("GET", path, {}, {})) for path in PLAIN}
-    series = {r: list(fake.series(r)) for r in ("6h", "24h", "7d", "30d")}
-    access = {w: [200, fake.access(w)] for w in ("24h", "7d", "30d")}
     got: dict[str, Any] = run_admin(
-        SCENARIO, {"feeds": feeds, "series": series, "access": access}
+        SCENARIO, {"pages": PAGES, "answers": answers(scenario, URLS)}
     )
-    for page, result in got.items():
-        assert result["errors"] == [], (page, result)
-        if scenario in ("ok", "xss"):
-            assert result["word"] == "정상", (page, result)
+    for view, result in got.items():
+        assert result["errors"] == [], (view, result)
+        if scenario in ("ok", "xss", "bands", "nobands"):
+            assert result["mark"] == "mark", (
+                view,
+                result,
+            )  # 문제 없음 — 내비 모양 없음
         if scenario == "problem":
-            assert result["word"].startswith("문제"), (page, result)
+            assert result["mark"] == "mark shape bad", (view, result)
+        if scenario == "old":  # 067·068 이 없는 서버 — 그 카드만 '연결 안 됨'
+            if view.startswith("visitors.js"):
+                assert "t-bands" in result["off"], result
+            if view.startswith("insight.js"):
+                assert {"t-dims", "t-refs", "t-match"} <= set(result["off"]), result
     if scenario == "ok":
-        assert [
-            got[p]["charts"] for p in ("overview.js", "server.js", "traffic.js")
-        ] == [12, 12, 19]
+        assert {v: got[f"{v}"]["charts"] for v in PAGES} == {
+            "overview.js": 9,
+            "server.js": 12,
+            "traffic.js": 4,
+            "visitors.js": 0,
+            "insight.js": 7,
+            "screens.js": 0,
+        }
