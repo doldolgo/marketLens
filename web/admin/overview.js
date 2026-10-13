@@ -38,8 +38,6 @@ export function trafficWindow(app) {
   else if (v.cmp !== 'none' && usable(op)) [src, by] = [op, v.cmp === 'week' ? 7 * DAY : L];
   out.cmpState = v.cmp === 'none' ? 'none' : src ? 'ok' : op === undefined ? 'wait' : 'missing';
   out.line = (key) => ({ data: crop(hourPoints(part.hourly, key), out.startMs, out.endMs), cmp: src ? align(hourPoints(src.hourly, key), out.startMs, out.endMs, by) : null });
-  out.src = src;
-  out.by = by;
   return out;
 }
 
