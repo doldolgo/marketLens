@@ -127,7 +127,7 @@ export function table(node, columns, rows, o = {}) {
   for (const r of list(rows)) {
     const tr = el('tr', o.onRow ? 'go' : null);
     for (const c of columns) {
-      const td = el('td', [c.num ? 'n' : '', c.cls ?? ''].join(' ').trim() || null);
+      const td = el('td', [c.num ? 'n' : '', c.cls ?? '', c.tone?.(r) ?? ''].join(' ').trim() || null);
       if (c.cell) td.append(c.cell(r));
       else td.textContent = clean(c.fmt ? c.fmt(r[c.key], r) : (r[c.key] ?? '–'));
       tr.append(td);

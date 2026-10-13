@@ -89,8 +89,9 @@ function drawPages(app) {
     const rows = groupRows(pages);
     if (!rows.length) return node.replaceChildren(el('caption', 'empty', '자료 없음'));
     const max = Object.fromEntries(PAGE_COLS.map(([k]) => [k, Math.max(0, ...rows.map((r) => n0(r[k])))]));
-    const cell = (k, fmt) => (r) => el('span', `${shade(r[k], max[k])}${r.thin ? ' thin' : ''}`.trim() || null, fmt(r[k]));
-    return table(node, [{ key: 'page', label: '페이지' }, { key: 'device', label: '기기' }, ...PAGE_COLS.map(([k, label, fmt]) => ({ key: k, label, num: true, cell: cell(k, fmt) }))], rows, {
+    // 칸 진하기는 칸 전체 바탕(글 뒤 띠가 아니라 — 고른 글처럼 보이지 않게), 세션 3 미만 행은 흐리게
+    const tone = (k) => (r) => `${shade(r[k], max[k])}${r.thin ? ' thin' : ''}`.trim();
+    return table(node, [{ key: 'page', label: '페이지' }, { key: 'device', label: '기기' }, ...PAGE_COLS.map(([k, label, fmt]) => ({ key: k, label, num: true, fmt, tone: tone(k) }))], rows, {
       onRow: () => app.openDetail('pages'),
     });
   });
