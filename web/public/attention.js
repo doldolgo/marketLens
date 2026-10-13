@@ -718,8 +718,9 @@
       const seen = new Set()
       for (const [el, id, key] of found) {
         if (pairs.length >= MAX_ELEMENTS) break
+        if (key.indexOf("row:") === 0 || seen.has(id + "|" + key)) continue // 행은 재지 않는다(대시보드 표는 행이 많다)
         const r = el.getBoundingClientRect()
-        if (key.indexOf("row:") === 0 || seen.has(id + "|" + key) || !(r.width > 0 && r.height > 0)) continue
+        if (!(r.width > 0 && r.height > 0)) continue
         seen.add(id + "|" + key)
         pairs.push([id, key])
       }
