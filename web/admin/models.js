@@ -122,13 +122,14 @@ export function historyWindow(app, range, cmp, now) {
   out.firstMs = first ? first[0] : null;
   const cmpOn = cmp === 'prev' && Object.hasOwn(HISTORY_CMP, range);
   out.cmpState = cmpOn ? 'ok' : cmp === 'none' ? 'none' : 'missing';
+  // 날 칸은 [시작, 끝) — 끝(내일 00:00)의 칸은 창 밖
   out.line = (pick) => {
     const points = dailyLine(all, pick);
-    return { data: crop(points, out.startMs, out.endMs), cmp: cmpOn ? align(points, out.startMs, out.endMs, n * DAY) : null };
+    return { data: crop(points, out.startMs, out.endMs - 1), cmp: cmpOn ? align(points, out.startMs, out.endMs - 1, n * DAY) : null };
   };
   out.rows = all.filter((row) => {
     const t = dailyLine([row], () => 0)[0]?.[0];
-    return t !== undefined && t >= out.startMs && t <= out.endMs;
+    return t !== undefined && t >= out.startMs && t < out.endMs;
   });
   return out;
 }
