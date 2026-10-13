@@ -1,4 +1,4 @@
-"""접속 요약 — 창·게이트·회전 파일별 메모리 캐시·창 조립 (스펙 038 §3.1~§3.3·§3.6).
+"""접속 요약 — 창·게이트·회전 파일별 메모리 캐시·창 조립 (스펙 038 §3.1~§3.3·§3.6, 대역 목록 067 §3.2).
 
 읽는 계약(027·035): caddy 가 도메인 요청마다 JSON 한 줄을 `access.log` 에 쓰고, 하루 또는 50MiB 에서 회전해 gzip 된
 회전 파일 `access-<UTC 시각>-<size|time>.log.gz` 를 같은 디렉터리에 둔다(압축 중엔 같은 이름 `.log` 가 잠깐 함께 있고
@@ -23,7 +23,8 @@ from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from typing import IO, Any, NamedTuple
 
-from app.features.admin import geo_part
+from app.features.admin import access_bands, geo_part
+from app.features.admin.access_bands import IpsQuery
 from app.features.admin.access_classes import CLASSES
 from app.features.admin.access_hours import AT, COUNTS, LISTS, FileTally
 from app.features.admin.access_pairs import PairKeys, before_gate, visitors
@@ -290,6 +291,28 @@ class AccessLog:
         if current is None and not rotated:
             raise NoLogFile
         return current, rotated
+
+    def ips(
+        self,
+        name: str,
+        now: float,
+        query: IpsQuery,
+        geo: Callable[[], GeoTable | None] = _no_table,
+    ) -> tuple[dict[str, Any], list[str]]:
+        """067 — 창 하나의 대역 목록(거르기·정렬·쪽 뒤)과 깨진 회전 파일. 파일 캐시는 `summary` 와 같은 것을 나눠 쓰고
+        (회전 파일마다 한 번 읽어 대역 칸을 둔다), 나라·망 종류는 지금 올린 판으로 대역의 첫 주소를 찾는다."""
+        with self._lock:
+            table = geo()
+            broken = self._sync(now, table)
+            name = choose(name, now, self._gate)
+            start, end = bounds(name, now, self._gate)
+            ordered = sorted(self._files.values(), key=lambda e: e.mtime)
+            tallies = [e.tally.bands for e in ordered]
+            if self._current is not None:
+                tallies.append(self._current.bands)
+            cells = access_bands.spark_cells(name == DEFAULT_WINDOW, start, end)
+            values = access_bands.page(tallies, start, end, cells, query, table)
+            return {"window": name, **values}, broken
 
     def _assemble(
         self, name: str, now: float, table: GeoTable | None
