@@ -7,14 +7,16 @@
     uv run web/scripts/admin-fake-feeds.py [--port 18064] [--scenario ok]
 
 - `web/admin` 의 정적 파일을 `/` 에 관리자 nginx 와 같은 헤더(CSP·X-Frame-Options·Cache-Control)로 주고, 화면이 부르는
-  피드 열셋(029·011·034·035·038·039·040·062·063 + 067 대역 둘·068 날별 기록 — 068 은 #133 의 실제 응답 꼴 + 052·061 화면 이용 통계)과
+  피드 열다섯(029·011·034·035·038·039·040·062·063 + 067 대역 둘·068 날별 기록 — 068 은 #133 의 실제 응답 꼴 + 052·061 화면 이용 통계 + 069 IP 둘)과
   `POST /api/refresh` 를 지어낸 값으로 답한다. 표준 라이브러리만 쓰고 127.0.0.1 에만 붙는다. 실제 서버·AWS·Clarity 를 부르지 않는다.
   화면 페이지(065)의 틀은 실제 공개 사이트를 부른다 — 덮어 보기까지 보려면 065 §4 의 시험 사본(kimptrack.com 을 로컬에 묶음)으로.
 - 경우(--scenario, 돌던 중에는 `GET /__scenario/<이름>` 로 바꾼다):
   ok(정상) · problem(빨강·주황 칩 여럿, 화면 이용 통계는 Redis 실패 error) · old(067·068 배포 전 — 대역·날별 기록 404, offset 모름,
   Clarity dims 없음) · missing(062·063·067·068 배포 전 — 시계열 404·흐름 키 없음) · empty(연결 안 됨 — AWS·Clarity·접속 로그 없음,
   화면 이용 통계는 시행 전 before_gate) · bands(대역 많음 — 1,200개, 200행씩, 랜딩 요소 300개 + (기타)) · nobands(대역 없음, 화면 이용
-  기록 없음) · xss(글자 칸마다 `<img onerror>` — 글로만 보여야 한다, 요소 열쇠 하나도) · expired(헬스가 401 비JSON — 로그인 만료 새로고침 한 번).
+  기록 없음) · xss(글자 칸마다 `<img onerror>` — 글로만 보여야 한다, 요소 열쇠 하나도) · expired(헬스가 401 비JSON — 로그인 만료 새로고침 한 번) ·
+  noaddrs(069 배포 전 — IP 단위 addrs·addr 만 404, 대역은 그대로) · many(IP 1,200개 — 200행씩, IP 상세는 읽기 상한 partial).
+  069 IP 단위(070): old·missing·noaddrs 는 404, empty 는 연결 안 됨, nobands 는 IP 없음·since 없음, xss 는 근거·도시·망 사업자·PTR 에 `<img onerror>`.
 - 시각은 이 컴퓨터 시계다.
 """
 
@@ -31,9 +33,11 @@ from urllib.parse import parse_qs, urlsplit
 
 ADMIN = Path(__file__).resolve().parent.parent / "admin"
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src https://kimptrack.com; frame-ancestors 'none'"
-SCENARIOS = ("ok", "problem", "old", "missing", "empty", "bands", "nobands", "xss", "expired")
+SCENARIOS = ("ok", "problem", "old", "missing", "empty", "bands", "nobands", "xss", "expired", "noaddrs", "many")
 # 067·068 이 없는 서버(배포 전·그보다 앞)
 PRE_068 = ("old", "missing")
+# 069(IP 단위 addrs·addr)가 없는 서버 — 067·068 전 둘과, 067·068 만 있는 noaddrs
+PRE_069 = (*PRE_068, "noaddrs")
 X = "<img src=x onerror=alert(1)>"
 BOXES = ("collect", "data", "serve")
 PERIOD = {"6h": (21_600, 300), "24h": (86_400, 300), "7d": (604_800, 3600), "30d": (2_592_000, 10_800)}
@@ -453,6 +457,140 @@ def ip(query: dict) -> tuple[int, dict]:
                  "paths": [[txt(pth), 30 - k] for k, pth in enumerate(BAND_PAGES)], "pairs": pairs, "recent": recent}
 
 
+# 069 IP 단위(070 이 그린다) — 줄의 꼴(사람·검색 로봇·스캐너·의심·모름·운영자)마다 근거·점수·판정, 위치·망 사업자(null 섞임)
+ARCHETYPES = (
+    ("human", "telecom_kr", (("js", "자바스크립트가 돈 페이지 {js}번", -40), ("ws", "실시간 연결(WS) {ws}번", -30), ("assets", "정적 자원 요청 {a}번", -15), ("search_ref", "검색 엔진에서 들어온 페이지 1번", -10))),
+    ("googlebot", "cloud", (("ua_bot", "검색 로봇 이름(Googlebot)", 70), ("cloud", "데이터센터 망", 20), ("robots", "robots.txt 1번", 10))),
+    ("scanner", "cloud", (("probe", "탐색 경로 12번(/.env·/wp-login.php…)", 60), ("ua_tool", "자동화 도구 이름(python-requests)", 50), ("many_404", "404 가 14번 — 요청의 45%", 15))),
+    ("suspect", "cloud", (("no_js", "사람 모양 페이지 5번인데 자바스크립트 신호 0", 30), ("cloud", "데이터센터 망", 20))),
+    ("human", "telecom_kr", (("js", "자바스크립트가 돈 페이지 {js}번", -40), ("assets", "정적 자원 요청 {a}번", -15))),
+    ("unknown", "other", (("cloud", "데이터센터 망", 20),)),
+    ("operator", "telecom_kr", ()),
+    ("suspect", "telecom", (("burst", "1분에 요청 72번", 20), ("no_assets", "페이지 4번인데 정적 자원 0", 15), ("ua_many", "서로 다른 브라우저 정보 6개", 10))),
+)
+PLACES = {
+    "telecom_kr": (("KR", "Seoul", "Seoul", 4766, "Korea Telecom"), ("KR", "Gyeonggi-do", "Suwon", 9318, "SK Broadband Co Ltd"), ("KR", "Busan", None, 3786, "LG POWERCOMM")),
+    "cloud": (("US", "Virginia", "Ashburn", 16509, "Amazon.com, Inc."), ("US", "California", "Mountain View", 15169, "Google LLC"), ("SG", None, "Singapore", 14061, None)),
+    "telecom": (("JP", "Tokyo", "Tokyo", 2516, "KDDI CORPORATION"), ("DE", "Hesse", None, 3320, "Deutsche Telekom AG")),
+    "other": (("FR", None, None, None, None),),
+}
+
+
+def _seed(text: str) -> int:
+    """글자 → 늘 같은 수(파이썬 hash 는 프로세스마다 바뀐다)."""
+    return sum((k + 1) * ord(ch) for k, ch in enumerate(text))
+
+
+def _verdict(score: int, requests: int, kind: str) -> str:
+    if kind == "operator":
+        return "operator"
+    if requests < 3:
+        return "unknown"
+    return "bot" if score >= 60 else "suspect" if score >= 30 else "human"
+
+
+def _addrs(window: str) -> tuple[list[dict], int]:
+    """069 IP 행 — 경우마다 수(ok 40 · many 1,200 · nobands 0) + 가린 행(전체 저장 전 대역 여섯) + '(없음)'. 같은 창이면 같은 값."""
+    s = state["scenario"]
+    n = {"many": 1200, "nobands": 0}.get(s, 40)
+    now = int(time.time())
+    since = now - 3 * 86_400
+    span = WINDOW_SEC.get(window, 86_400)
+    slots = {"24h": 24, "7d": 8, "30d": 31}.get(window, 24)
+    out = []
+    for i in range(n + (7 if n else 0)):
+        rng = random.Random(f"addr:{window}:{i}")
+        kind, net, rules = ARCHETYPES[i % len(ARCHETYPES)]
+        masked = i >= n
+        ip = f"2001:db8:{i:x}::{i % 7 + 1:x}" if i % 11 == 10 else f"{(i * 37) % 223 + 1}.{(i * 11) % 256}.{(i * 53) % 256}.{0 if i % 13 == 12 else (i * 7) % 254 + 1}"
+        if masked:
+            ip = "(없음)" if i == n + 6 else f"{(i * 29) % 223 + 1}.{(i * 3) % 256}.{(i * 17) % 256}.0/24"
+        if ":" in ip:
+            net = "ipv6"
+        country, region, city, asn, org = rng.choice(PLACES.get(net, PLACES["other"])) if net != "ipv6" else (None, None, None, None, None)
+        requests = 2 if kind == "unknown" else int(rng.paretovariate(1.2) * 15) + 3
+        pages = 0 if kind in ("scanner", "googlebot") else int(requests * 0.4) + 1
+        js = int(pages * 0.7) if kind == "human" else 0
+        ws = 1 if kind == "human" and i % 2 == 0 else 0
+        reasons = [{"code": c, "text": txt(t.format(js=js, ws=ws, a=pages * 3) + (" (대역)" if masked else "")), "weight": w} for c, t, w in rules if not (c == "ws" and not ws)]
+        score = sum(r["weight"] for r in reasons)
+        kinds = dict.fromkeys(KINDS, 0)
+        kinds[{"googlebot": "search", "scanner": "scanner", "operator": "operator"}.get(kind, "browser")] = requests
+        first = (now - rng.randint(span // 2, span)) if masked else max(since, now - rng.randint(60, span))
+        last = min(since, first + 3600) if masked else rng.randint(first, now)
+        out.append({
+            "ip": txt(ip) if s == "xss" and i == 0 else ip,
+            "masked": masked and ip != "(없음)", "country": None if ip == "(없음)" else txt(country) if s == "xss" and i == 1 else country,
+            "region": region, "city": txt(city) if s == "xss" and city else city, "asn": asn, "org": txt(org) if s == "xss" and org else org, "net": None if ip == "(없음)" else net,
+            "requests": requests, "pages": pages, "js": js, "ws": ws, "kinds": kinds,
+            "status": {"2xx": requests - requests // 5, "3xx": 0, "4xx": requests // 5, "5xx": 0},
+            "first": first, "last": last,
+            "spark": [int(wave(now - k * (span // slots), requests / slots, requests / slots / 2)) for k in range(slots - 1, -1, -1)],
+            "topPaths": [[txt(BAND_PAGES[(i + k) % len(BAND_PAGES)]), max(1, requests // (k + 2))] for k in range(3)],
+            "topAgents": [[txt("Googlebot/2.1" if kind == "googlebot" else AGENTS[k]), max(1, requests // (k + 2))] for k in range(2)],
+            "score": None if kind == "operator" else score, "verdict": "unknown" if ip == "(없음)" else _verdict(score, requests, kind), "reasons": reasons,
+        })
+    return out, since
+
+
+def addrs(query: dict) -> tuple[int, dict]:
+    """069 GET /admin/access/addrs — 거르기(net·country·verdict 쉼표·q 앞부분·masked=0) 뒤 정렬(requests·pages·last·score 큰 순, 같으면 ip)·쪽."""
+    s = state["scenario"]
+    if s in PRE_069:
+        return 404, {"detail": "Not Found"}
+    pick = lambda k, d=None: (query.get(k) or [d])[0]  # noqa: E731
+    window = pick("window", "24h") if pick("window") in WINDOW_SEC else "24h"
+    if s == "empty":
+        return 200, {"state": "unconfigured", "code": "no_file", "window": window, "total": None, "since": None, "rows": None}
+    rows, since = _addrs(window)
+    for key in ("net", "country"):
+        if pick(key):
+            rows = [r for r in rows if r[key] == pick(key)]
+    if pick("verdict"):
+        rows = [r for r in rows if r["verdict"] in pick("verdict").split(",")]
+    if pick("q"):
+        rows = [r for r in rows if r["ip"].startswith(pick("q"))]
+    if pick("masked") == "0":
+        rows = [r for r in rows if not r["masked"]]
+    key = pick("sort") if pick("sort") in ("requests", "pages", "last", "score") else "requests"
+    rows.sort(key=lambda r: (-(r[key] if r[key] is not None else -1e9), r["ip"]))
+    limit = min(500, max(1, int(pick("limit", "200")))) if str(pick("limit", "200")).isdigit() else 200
+    offset = int(pick("offset", "0")) if str(pick("offset", "0")).isdigit() else 0
+    return 200, {"state": "ok", "code": None, "window": window, "total": len(rows), "since": since if s != "nobands" else None, "rows": rows[offset:offset + limit]}
+
+
+def addr(query: dict) -> tuple[int, dict]:
+    """069 GET /admin/access/addr — IP 하나(또는 가린 대역): 목록 값 + geo·verifiedCrawler·067 상세 값·recent 의 flags. 꼴이 틀리면 400 bad_ip."""
+    s = state["scenario"]
+    if s in PRE_069:
+        return 404, {"detail": "Not Found"}
+    ip_ = (query.get("ip") or [""])[0]
+    window = (query.get("window") or ["24h"])[0]
+    window = window if window in WINDOW_SEC else "24h"
+    if not re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}|[0-9a-f:]*:[0-9a-f:]*|(\d{1,3}\.){3}0/24|[0-9a-f]{1,4}(:[0-9a-f]{1,4}){0,2}::/48", ip_):
+        return 400, {"error": {"code": "bad_ip", "message": "ip 꼴이 아니다", "detail": None}}
+    rows, _ = _addrs(window)
+    found = next((r for r in rows if r["ip"] == ip_), None)
+    if found is None:  # 창 안에 없는 IP — 빈 행(수 0)
+        found = {"ip": ip_, "masked": "/" in ip_, "country": None, "region": None, "city": None, "asn": None, "org": None, "net": None, "requests": 0, "pages": 0,
+                 "js": 0, "ws": 0, "kinds": dict.fromkeys(KINDS, 0), "status": {}, "first": None, "last": None, "spark": [], "topPaths": [], "topAgents": [],
+                 "score": 0, "verdict": "unknown", "reasons": []}
+    _, band = ip({"band": ["1.2.3.0/24"], "window": [window]})
+    google = any(r["code"] == "ua_bot" for r in found["reasons"])
+    impostor = google and _seed(ip_) % 2 == 1  # 검색 로봇 이름 행의 절반은 주소 확인 실패
+    reasons = [*found["reasons"], {"code": "fake_crawler", "text": txt("검색 로봇 이름을 쓰지만 주소 확인 실패"), "weight": 30}] if impostor else found["reasons"]
+    score = None if found["score"] is None else sum(r["weight"] for r in reasons)
+    flags = (("probe", "404"), ("asset",), ("js",), ("ws",), (), ("404",))
+    recent = [{**r, "flags": list(flags[k % len(flags)])} for k, r in enumerate(band["recent"])]
+    lat, lon = {"Seoul": (37.5665, 126.978), "Suwon": (37.2636, 127.0286), "Ashburn": (39.0438, -77.4874), "Tokyo": (35.6895, 139.6917)}.get(found["city"] or "", (None, None))
+    ptr = ("crawl-66-249-66-1.googlebot.com" if google and not impostor else None) if google else (None if found["masked"] or found["org"] is None else f"host-{_seed(ip_) % 997}.example.net")
+    return 200, {**found, "reasons": reasons, "score": score, "partial": s == "many",
+                 "geo": {"country": found["country"], "region": found["region"], "city": found["city"], "lat": lat, "lon": lon, "asn": found["asn"],
+                         "org": found["org"], "net": found["net"], "ptr": txt(ptr) if s == "xss" and ptr else ptr, "approx": True},
+                 "verifiedCrawler": (not impostor) if google else None,
+                 **{k: band[k] for k in ("hourly", "agents", "paths", "pairs")}, "recent": recent}
+
+
 # 052·061 화면 이용 통계 — 화면마다 영역(052 목록)과 요소 열쇠(061 §7 목록 + 자동 열쇠 보기). 대시보드 영역은 공통 셋 + 탭 영역
 ATT_AREAS = {
     "landing": ("top", "hero", "analyze", "events", "kimp", "method", "faq", "foot"),
@@ -568,6 +706,8 @@ def feed(method: str, path: str, query: dict, body: dict) -> tuple[int, object] 
         "/svc/api/admin/access": lambda: (200, access(pick("window", "24h"))),
         "/svc/api/admin/access/ips": lambda: ips(query),
         "/svc/api/admin/access/ip": lambda: ip(query),
+        "/svc/api/admin/access/addrs": lambda: addrs(query),
+        "/svc/api/admin/access/addr": lambda: addr(query),
         "/svc/api/admin/clarity": lambda: (200, clarity()),
         "/svc/api/admin/clarity/history": lambda: history(pick("days", "30")),
         "/svc/api/admin/attention": lambda: (200, attention(query)),
