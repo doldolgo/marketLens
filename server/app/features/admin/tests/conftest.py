@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 import httpx
 import pytest
 
-from app.features.admin import geo_city_fetch, geo_fetch
+from app.features.admin import access_dns, geo_city_fetch, geo_fetch
 
 
 @pytest.fixture(autouse=True)
@@ -33,5 +33,14 @@ def no_real_transport(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", refuse_sync)
     monkeypatch.setattr(geo_fetch, "_daemon", no_thread)
     monkeypatch.setattr(geo_city_fetch, "_daemon", no_thread)  # 069 — City 받기·읽기
+
+    def no_dns(self: access_dns.SystemResolver, value: str) -> None:
+        used.append("시스템 DNS")
+        raise OSError("테스트는 DNS 를 묻지 않는다")
+
+    monkeypatch.setattr(
+        access_dns.SystemResolver, "ptr", no_dns
+    )  # 069 — 상세의 역방향 DNS
+    monkeypatch.setattr(access_dns.SystemResolver, "forward", no_dns)
     yield
     assert not used, f"가짜 transport 없이 실제 transport 를 썼다: {used}"
