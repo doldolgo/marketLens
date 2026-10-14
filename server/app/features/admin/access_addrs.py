@@ -121,9 +121,10 @@ class Addr:
         self.hours: dict[int, list[Any]] = {}
         self.paths: dict[str, int] = {}
         self.agents: dict[str, int] = {}
-        self.uas: set[int] = set()
-        self.names: dict[str, int] = {}
-        self.claims: set[str] = set()
+        # 드물게 쓰는 칸은 처음 쓰일 때 만든다 — 행이 5만인 파일에서 행마다 빈 dict·set 셋이면 ≈20MiB(§5)
+        self.uas: int | set[int] | None = None  # UA 해시 — 하나면 정수, 둘부터 set
+        self.names: dict[str, int] | None = None
+        self.claims: set[str] | None = None
         self.first = ts  # 파일 안 첫 줄 — 앞 줄 행을 캐시 전체의 since 로 가를 때
         self.minute = -1
         self.count = 0
@@ -207,11 +208,24 @@ class AddrTally:
         name, said = self._ua(judged, ua_kind)
         if name is not None:
             rec[UABOT] += 1
-            if name in row.names or len(row.names) < NAME_CAP:
-                row.names[name] = row.names.get(name, 0) + 1
-        row.claims.update(said)
-        if len(row.uas) < UA_CAP:
-            row.uas.add(hash(judged))
+            names = row.names
+            if names is None:
+                names = row.names = {}
+            if name in names or len(names) < NAME_CAP:
+                names[name] = names.get(name, 0) + 1
+        if said:
+            if row.claims is None:
+                row.claims = set()
+            row.claims.update(said)
+        h = hash(judged)
+        uas = row.uas
+        if uas is None:
+            row.uas = h
+        elif type(uas) is int:
+            if uas != h:
+                row.uas = {uas, h}
+        elif len(uas) < UA_CAP:  # type: ignore[arg-type]
+            uas.add(h)  # type: ignore[union-attr]
         short = path[:PATH_LIMIT]
         paths = row.paths
         if short in paths:
@@ -255,3 +269,17 @@ def fold(counts: dict[str, int], n: int) -> dict[str, int]:
     kept = dict(best)
     kept[OTHER] = kept.get(OTHER, 0) + sum(counts.values()) - sum(kept.values())
     return kept
+
+
+def merge(into: Any, row: Addr) -> None:
+    """파일 행의 UA 해시·봇 이름·로봇 주장을 창 값(`Rank`)에 더한다."""
+    uas = row.uas
+    if uas is not None and len(into.uas) < UA_CAP:
+        if type(uas) is int:
+            into.uas.add(uas)
+        else:
+            into.uas.update(uas)
+    if row.names:
+        into.names.update(row.names)
+    if row.claims:
+        into.claims.update(row.claims)

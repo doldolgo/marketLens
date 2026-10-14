@@ -16,8 +16,8 @@ from app.features.admin.access_addrs import (
     PEAK,
     REQ,
     SUMS,
-    UA_CAP,
     AddrTally,
+    merge,
 )
 from app.features.admin.access_addrs_rows import Rank, Where, row_values, signals, where
 from app.features.admin.access_bands import band_of
@@ -109,10 +109,7 @@ def _rank(
                 cells[FIRST] = min(cells[FIRST], rec[FIRST])
                 cells[LAST] = max(cells[LAST], rec[LAST])
             if acc is not None:
-                if len(acc.uas) < UA_CAP:
-                    acc.uas.update(row.uas)
-                acc.names.update(row.names)
-                acc.claims.update(row.claims)
+                merge(acc, row)
     return out
 
 

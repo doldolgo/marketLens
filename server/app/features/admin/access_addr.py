@@ -19,9 +19,9 @@ from app.features.admin.access_addrs import (
     LAST,
     PEAK,
     SUMS,
-    UA_CAP,
     AddrTally,
     classify,
+    merge,
 )
 from app.features.admin.access_addrs_rows import Rank, row_values, where
 from app.features.admin.access_bands import band_of, is_band, spark_cells
@@ -133,10 +133,7 @@ class AddrScan(BandScan):
                 c[FIRST] = min(c[FIRST], rec[FIRST])
                 c[LAST] = max(c[LAST], rec[LAST])
                 spark[(hour - origin) // size] += rec[0]
-            if len(acc.uas) < UA_CAP:
-                acc.uas.update(row.uas)
-            acc.names.update(row.names)
-            acc.claims.update(row.claims)
+            merge(acc, row)
         return acc, spark
 
     def values(self) -> dict[str, Any]:
