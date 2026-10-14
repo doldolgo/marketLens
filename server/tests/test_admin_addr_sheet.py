@@ -206,3 +206,153 @@ def test_where_panel_and_recent_flags(flow: dict[str, Any]) -> None:
     ]
     head, first = flow["csv"].lstrip("﻿").split("\r\n")[:2]
     assert head.endswith(",신호") and first.endswith(",탐색 404")
+
+
+SHEET = (
+    HARNESS
+    + r"""
+out.sheet = sheet()
+"""
+)
+IMPOSTOR = detail(
+    "203.0.113.9",
+    partial=True,
+    verifiedCrawler=False,
+    score=130,
+    verdict="bot",
+    reasons=[
+        {"code": "ua_bot", "text": "검색 로봇 이름(Yeti)", "weight": 70},
+        {
+            "code": "fake_crawler",
+            "text": "검색 로봇 이름을 쓰지만 주소 확인 실패",
+            "weight": 30,
+        },
+        {"code": "js", "text": "자바스크립트가 돈 페이지 1번", "weight": -40},
+    ],
+    geo={
+        "country": None,
+        "region": None,
+        "city": "Busan",
+        "lat": None,
+        "lon": 129.0,
+        "asn": 3786,
+        "org": None,
+        "net": None,
+        "ptr": None,
+        "approx": True,
+    },
+)
+
+
+def test_impostor_crawler_partial_and_null_geo() -> None:
+    """070 §3.3 — 이름만 검색 로봇('✕ 이름만 네이버 — 주소 확인 실패'), 사칭 근거 +30, 음수 근거는 사람 쪽 막대, partial = '일부만 읽음' 배지,
+    어디 칸의 null 은 '–'(도시는 '대략', 망 사업자 이름 없이 AS 만, 위도·경도 하나라도 없으면 '–')."""
+    got = _run(
+        SHEET,
+        {ADDR.format("203.0.113.9"): [200, IMPOSTOR]},
+        hash="#detail=addr%3A203.0.113.9",
+    )["sheet"]
+    assert got["open"] and got["tag"] == "일부만 읽음"
+    assert [r[0] for r in got["reasons"]] == ["+70", "+30", "−40"]
+    assert got["reasons"][2][2:] == ["fill neg", "57.1%"]
+    assert got["lines"] == [
+        ["score-line", "점수 130 → 봇(60 이상)"],
+        ["crawler bad", "✕ 이름만 네이버 — 주소 확인 실패"],
+    ]
+    assert got["where"] == [
+        "나라",
+        "–",
+        "지역",
+        "–",
+        "도시",
+        "Busan대략",
+        "망 사업자",
+        "AS3786",
+        "망 종류",
+        "–",
+        "역방향 DNS",
+        "–",
+        "위도 · 경도",
+        "–",
+    ]
+
+
+def test_bad_ip_is_one_line_inside_the_sheet() -> None:
+    """070 §3.3 — 400 bad_ip 는 페이지 실패가 아니라 판 안 한 줄(근거·어디 칸 없음)."""
+    got = _run(
+        SHEET,
+        {
+            ADDR.format("1.2.3.4"): [
+                400,
+                {"error": {"code": "bad_ip", "message": "x", "detail": None}},
+            ]
+        },
+        hash="#detail=addr%3A1.2.3.4",
+    )["sheet"]
+    assert got["open"] and got["tag"] == "불러오지 못함"
+    assert got["note"] == "이 IP 는 상세를 볼 수 없다 — IP 꼴이 아니다(bad_ip)"
+    assert got["reasons"] == [] and got["where"] == []
+
+
+def test_reason_ptr_and_org_text_never_become_html() -> None:
+    """070 §3.4 — 근거 글·PTR 이름·망 사업자·도시·경로·브라우저 정보는 textContent 로만(066 XSS 규칙)."""
+    evil = detail(
+        "203.0.113.66",
+        reasons=[{"code": "probe", "text": f"탐색 {X}", "weight": 60}],
+        geo={**IMPOSTOR["geo"], "org": X, "ptr": X, "city": X, "country": "KR"},
+        agents=[[X, 2]],
+        paths=[[X, 2]],
+        recent=[
+            {
+                "ts": NOW,
+                "path": X,
+                "status": 200,
+                "kind": X,
+                "browser": X,
+                "flags": [X, "js"],
+            }
+        ],
+    )
+    got = _run(
+        SHEET,
+        {ADDR.format("203.0.113.66"): [200, evil]},
+        hash="#detail=addr%3A203.0.113.66",
+    )["sheet"]
+    assert got["text"].count(X) >= 5 and got["tags"] == []
+    assert got["reasons"][0][1] == f"탐색 {X}"
+    assert got["flags"] == [[["JS", "flag"]]]  # 목록 밖 신호는 버린다
+
+
+MODEL = r"""
+setup({ visible: false, respond: () => [404, {}] })
+const m = await page('addrmodel.js')
+out.valid = ['1.2.3.4', '1.2.3.0', '203.0.113.0/24', '2001:db8::5', '::ffff:1.2.3.4', '2001:DB8::5', '1.2.3.256', '(없음)', '(기타)', 'a b'].map(m.validAddr)
+out.lines = ['bot', 'suspect', 'human', 'unknown', 'operator', 'nope'].map((v) => m.scoreLine(v === 'operator' ? null : 42.4, v))
+out.asn = [4766, '4766', 'AS15169', null, ''].map(m.asnText)
+"""
+
+
+def test_ip_check_score_lines_and_as_numbers() -> None:
+    """070 §3.3 — 상세를 부를 IP(IPv4·IPv6 소문자·067 대역, 모음 행 아님), 점수 줄의 문턱 글(069 §3.4), AS 번호 글."""
+    got = run_admin(MODEL)
+    assert got["valid"] == [
+        True,
+        True,
+        True,
+        True,
+        True,
+        False,
+        False,
+        False,
+        False,
+        False,
+    ]
+    assert got["lines"] == [
+        "점수 42 → 봇(60 이상)",
+        "점수 42 → 의심(30~59)",
+        "점수 42 → 사람(30 미만)",
+        "점수 42 → 모름(요청 3 미만)",
+        "점수 – → 운영자(운영자 흔적 — 점수 안 셈)",
+        "점수 42 → 모름(요청 3 미만)",
+    ]
+    assert got["asn"] == ["AS4766", "AS4766", "AS15169", "", ""]
