@@ -1824,7 +1824,7 @@ details.card > summary {
 #sheet-custom.flat {
   display: contents;
 }
-#sheet-custom.flat > .top {
+#sheet-custom.flat > .addr-top {
   order: -1;
 }
 .addr-head {

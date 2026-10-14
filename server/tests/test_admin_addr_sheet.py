@@ -170,8 +170,8 @@ def test_head_reasons_and_score_line(flow: dict[str, Any]) -> None:
     ]
     assert g["flat"] == "panel flat"
     assert g["panels"] == [
-        ["addr-verdict", "panel top"],
-        ["addr-where", "panel top"],
+        ["addr-verdict", "panel addr-top"],
+        ["addr-where", "panel addr-top"],
         ["grid2", "panel"],
     ]
     assert flow["copied"] == [["66.249.66.1"], "복사됨"]

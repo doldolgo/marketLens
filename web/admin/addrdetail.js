@@ -140,7 +140,7 @@ let credit = null;
 // 판 맨 위 두 칸(판정 근거·어디) + 그래프 아래 쓰임 칸. 사용자 칸 상자를 풀어(flat) 칸마다 격자 차례를 준다
 function addrParts(box, ip, part) {
   box.className = 'panel flat';
-  const verdict = el('section', 'panel top');
+  const verdict = el('section', 'panel addr-top');
   verdict.id = 'addr-verdict';
   const head = el('div', 'addr-head');
   const copy = button('btn', '복사');
@@ -179,7 +179,7 @@ function addrParts(box, ip, part) {
   const crawler = crawlerLine(part);
   if (crawler) verdict.append(el('p', `crawler ${crawler.ok ? 'ok' : 'bad'}`, crawler.text));
 
-  const where = el('section', 'panel top');
+  const where = el('section', 'panel addr-top');
   where.id = 'addr-where';
   const dl = el('dl', 'kv');
   for (const [k, v, small] of whereRows(part)) {
