@@ -1,6 +1,7 @@
-"""관리자 화면 v4 의 가짜 피드 서버(`web/scripts/admin-fake-feeds.py`, 스펙 064·066 §4 설계 세션 도구)와 페이지가 어긋나지 않는가.
+"""관리자 화면 v4 의 가짜 피드 서버(`web/scripts/admin-fake-feeds.py`, 스펙 064·066·070 §4 설계 세션 도구)와 페이지가 어긋나지 않는가.
 
-가짜 서버의 경우마다(067·068 배포 전 old·대역 많음·대역 없음 포함) 피드 응답을 만들어 페이지 여섯을 node 로 그리고(비교를 켠 보기도),
+가짜 서버의 경우마다(067·068 배포 전 old·대역 많음·대역 없음·069 배포 전 noaddrs·IP 많음 포함) 피드 응답을 만들어 페이지 여섯을 node 로
+그리고(비교를 켠 보기·방문자 대역 별 보기도),
 어느 카드도 '표시 오류'(그리다 예외)가 나지 않는지, 내비 모양이 경우와 맞는지 본다. 서버를 띄우지 않는다(함수만 부른다).
 """
 
@@ -18,6 +19,7 @@ URLS = [
     *SERIES,
     *[f"/svc/api/admin/access?window={w}" for w in ("24h", "7d", "30d")],
     "/svc/api/admin/access/ips?window=24h&sort=requests&limit=200&offset=0",
+    "/svc/api/admin/access/addrs?window=24h&sort=requests&limit=200&offset=0",
     "/svc/api/admin/clarity",
     *[f"/svc/api/admin/clarity/history?days={d}" for d in (7, 30, 90)],
     "/svc/api/admin/attention?days=7",
@@ -34,7 +36,7 @@ PAGES = [
 SCENARIO = r"""
 const respond = (url) => input.answers[url] || [404, { detail: 'Not Found' }]
 for (const name of input.pages) {
-  for (const search of ['', '?cmp=prev']) {
+  for (const search of ['', '?cmp=prev', ...(name === 'visitors.js' ? ['?view=band'] : [])]) {
     const v = setup({ respond, search })
     await page(name, `?s=${name}${search}`)
     await flush()
@@ -52,7 +54,8 @@ for (const name of input.pages) {
 
 
 def test_scenarios_cover_the_new_feeds() -> None:
-    """066 §4 — 가짜 서버에 067·068 응답과 경우(대역 많음·대역 없음·XSS)를 더했다. old = 067·068 배포 전."""
+    """066·070 §4 — 가짜 서버에 067·068·069 응답과 경우(대역 많음·대역 없음·XSS·IP 많음)를 더했다. old = 067·068 배포 전,
+    noaddrs = 069 만 배포 전(대역은 그대로)."""
     fake = _fake("ok")
     assert {
         "ok",
@@ -64,13 +67,28 @@ def test_scenarios_cover_the_new_feeds() -> None:
         "nobands",
         "xss",
         "expired",
+        "noaddrs",
+        "many",
     } == set(fake.SCENARIOS)
     assert set(fake.PRE_068) == {"old", "missing"}
+    assert set(fake.PRE_069) == {"old", "missing", "noaddrs"}
 
 
 @pytest.mark.parametrize(
     "scenario",
-    ["ok", "problem", "old", "missing", "empty", "bands", "nobands", "xss", "expired"],
+    [
+        "ok",
+        "problem",
+        "old",
+        "missing",
+        "empty",
+        "bands",
+        "nobands",
+        "xss",
+        "expired",
+        "noaddrs",
+        "many",
+    ],
 )
 def test_every_fake_scenario_draws_every_card_without_errors(scenario: str) -> None:
     got: dict[str, Any] = run_admin(
@@ -78,16 +96,20 @@ def test_every_fake_scenario_draws_every_card_without_errors(scenario: str) -> N
     )
     for view, result in got.items():
         assert result["errors"] == [], (view, result)
-        if scenario in ("ok", "xss", "bands", "nobands"):
+        if scenario in ("ok", "xss", "bands", "nobands", "noaddrs", "many"):
             assert result["mark"] == "mark", (
                 view,
                 result,
             )  # 문제 없음 — 내비 모양 없음
         if scenario == "problem":
             assert result["mark"] == "mark shape bad", (view, result)
+        if scenario in ("old", "noaddrs") and view.startswith("visitors.js"):
+            # 069 가 없는 서버 — IP 별은 큰 수·표가 '연결 안 됨', 대역 별은 067 이 있으면(noaddrs) 그대로 쓸 수 있다
+            if view == "visitors.js?view=band":
+                assert ("t-bands" in result["off"]) == (scenario == "old"), result
+            else:
+                assert {"t-addrs", "t-acount", "t-abot"} <= set(result["off"]), result
         if scenario == "old":  # 067·068 이 없는 서버 — 그 카드만 '연결 안 됨'
-            if view.startswith("visitors.js"):
-                assert "t-bands" in result["off"], result
             if view.startswith("insight.js"):
                 assert {"t-dims", "t-refs", "t-match"} <= set(result["off"]), result
         if scenario == "empty" and view.startswith(

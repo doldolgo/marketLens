@@ -159,7 +159,7 @@ def test_tooltip_html_is_built_in_one_function_from_escaped_text() -> None:
 
 
 def test_paths_table_polling_periods_and_no_copied_feed_periods() -> None:
-    """064 §3.1 + 066 — 부르는 경로는 common.js 표 하나(067 ips·ip, 068 history, 065 attention 더함), 빠른 10초·느린 60초(065 화면만
+    """064 §3.1 + 066 — 부르는 경로는 common.js 표 하나(067 ips·ip, 068 history, 065 attention, 069 addrs·addr 더함), 빠른 10초·느린 60초(065 화면만
     5분 — 페이지가 slowMs 로 준다), 피드 주기는 refreshSec 로만."""
     common = _script("common.js")
     table = re.search(
@@ -177,6 +177,8 @@ def test_paths_table_polling_periods_and_no_copied_feed_periods() -> None:
         "access": "/svc/api/admin/access",
         "ips": "/svc/api/admin/access/ips",
         "ip": "/svc/api/admin/access/ip",
+        "addrs": "/svc/api/admin/access/addrs",
+        "addr": "/svc/api/admin/access/addr",
         "clarity": "/svc/api/admin/clarity",
         "history": "/svc/api/admin/clarity/history",
         "attention": "/svc/api/admin/attention",

@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from tests.admin_dom import run_admin
-from tests.test_admin import _forward
+from tests.test_admin import _admin_route, _forward
 from tests.test_deploy import API, COLLECTOR
 
 NOW = 1_791_525_610_000  # 2026-10-09T06:00:10Z
@@ -121,9 +121,10 @@ EXPECTED_CALLS = {
         "/api/admin/aws/series?range=24h",
     ],
     "traffic.js": [*FAST, "/svc/api/admin/access?window=24h"],
+    # 070 — 기본 보기는 IP 별(069 addrs), 대역 별(067 ips)은 ?view=band
     "visitors.js": [
         *FAST,
-        "/svc/api/admin/access/ips?window=24h&sort=requests&limit=200&offset=0",
+        "/svc/api/admin/access/addrs?window=24h&sort=requests&limit=200&offset=0",
     ],
     "insight.js": [
         *FAST,
@@ -155,6 +156,11 @@ BACKEND = {
     "/svc/api/admin/attention": (API, "/admin/attention"),
     "/api/refresh": (COLLECTOR, "/refresh"),
 }
+# 069 의 정확 일치 location 둘 — 069 PR 이 nginx-admin.conf 에 더한다(그 전에는 관리자 server 의 정적 `location /` 로 간다)
+ADDR_BACKEND = {
+    "/svc/api/admin/access/addrs": (API, "/admin/access/addrs"),
+    "/svc/api/admin/access/addr": (API, "/admin/access/addr"),
+}
 FIRST_LOAD = (
     RESPOND
     + r"""
@@ -178,12 +184,17 @@ def test_each_page_calls_its_paths_once_and_every_path_has_an_admin_route() -> N
             len(got[name]["clock"]) == 8 and got[name]["clock"] == got[name]["updated"]
         ), name
     paths = {urlsplit(u).path for calls in EXPECTED_CALLS.values() for u in calls} | {
+        "/svc/api/admin/access/ips",
         "/svc/api/admin/access/ip",
+        "/svc/api/admin/access/addr",
         "/api/refresh",
     }
-    assert paths == set(BACKEND)
+    assert paths == set(BACKEND) | set(ADDR_BACKEND)
     for path, target in BACKEND.items():
         assert _forward(path) == target, path
+    for path, target in ADDR_BACKEND.items():
+        if _admin_route(path) != ("/",):  # 069 머지 뒤
+            assert _forward(path) == target, path
 
 
 ROUND_TRIP = r"""

@@ -106,7 +106,7 @@ export function meter(value, red, amber) {
 }
 
 // 표 — columns [{ key, label, num?, fmt?(값, 행), cell?(행) → 노드, sort?(false 면 정렬 안 함), cls? }], rows [객체].
-// o = { sort: { key, dir }, onSort(key), onRow(행), expand(행) → 노드 } — 머리 단추로 정렬, 행을 누르거나 Enter 면 onRow,
+// o = { sort: { key, dir }, onSort(key), onRow(행), expand(행) → 노드, rowTitle(행) → 글 } — 머리 단추로 정렬, 행을 누르거나 Enter 면 onRow,
 // expand 가 있으면 행을 눌러 그 아래 한 줄을 펼치고 접는다(최근 요청의 나머지 칸)
 export function table(node, columns, rows, o = {}) {
   if (!node) return;
@@ -126,6 +126,7 @@ export function table(node, columns, rows, o = {}) {
   const tbody = el('tbody');
   for (const r of list(rows)) {
     const tr = el('tr', o.onRow ? 'go' : null);
+    if (o.rowTitle) tr.title = clean(o.rowTitle(r));
     for (const c of columns) {
       const td = el('td', [c.num ? 'n' : '', c.cls ?? '', c.tone?.(r) ?? ''].join(' ').trim() || null);
       if (c.cell) td.append(c.cell(r));

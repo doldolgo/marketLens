@@ -49,7 +49,7 @@ async def test_real_band_feeds_draw_the_visitors_page_and_band_sheets() -> None:
     bands = [b["band"] for b in listing["bands"]]
     assert (listing["state"], listing["total"]) == ("ok", 3)
     assert bands == ["203.0.113.0/24", "192.0.2.0/24", "198.51.100.0/24"]
-    payload = {**NO_FEEDS, "pages": [["visitors.js", "", []]], "ips": listing}
+    payload = {**NO_FEEDS, "pages": [["visitors.js", "?view=band", []]], "ips": listing}
     got = run_admin(SCENARIO, {**payload, "ip": details, "openBands": bands[:2]})
     page = got["visitors.js"]
     assert page["failed"] == [] and page["errors"] == [], page

@@ -584,7 +584,7 @@ def addr(query: dict) -> tuple[int, dict]:
     recent = [{**r, "flags": list(flags[k % len(flags)])} for k, r in enumerate(band["recent"])]
     lat, lon = {"Seoul": (37.5665, 126.978), "Suwon": (37.2636, 127.0286), "Ashburn": (39.0438, -77.4874), "Tokyo": (35.6895, 139.6917)}.get(found["city"] or "", (None, None))
     ptr = ("crawl-66-249-66-1.googlebot.com" if google and not impostor else None) if google else (None if found["masked"] or found["org"] is None else f"host-{_seed(ip_) % 997}.example.net")
-    return 200, {**found, "reasons": reasons, "score": score, "partial": s == "many",
+    return 200, {"state": "ok", "code": None, "window": window, **found, "reasons": reasons, "score": score, "partial": s == "many",
                  "geo": {"country": found["country"], "region": found["region"], "city": found["city"], "lat": lat, "lon": lon, "asn": found["asn"],
                          "org": found["org"], "net": found["net"], "ptr": txt(ptr) if s == "xss" and ptr else ptr, "approx": True},
                  "verifiedCrawler": (not impostor) if google else None,
