@@ -44,6 +44,8 @@ API_FEEDS = {
     ("=", "/svc/api/admin/attention"),  # 052 — 화면 영역 이용 통계
     ("=", "/svc/api/admin/access/ips"),  # 067 — 가린 IP 대역 목록
     ("=", "/svc/api/admin/access/ip"),  # 067 — 대역 하나
+    ("=", "/svc/api/admin/access/addrs"),  # 069 — IP 하나 단위 목록
+    ("=", "/svc/api/admin/access/addr"),  # 069 — IP 하나
 }
 POLLING = (
     {
@@ -167,6 +169,8 @@ def test_admin_routes_every_api_path_like_before_the_allowlist() -> None:
         "/svc/api/admin/attention": (API, "/admin/attention"),
         "/svc/api/admin/access/ips": (API, "/admin/access/ips"),
         "/svc/api/admin/access/ip": (API, "/admin/access/ip"),
+        "/svc/api/admin/access/addrs": (API, "/admin/access/addrs"),
+        "/svc/api/admin/access/addr": (API, "/admin/access/addr"),
     }
     for path, target in expected.items():
         assert _forward(path) == target, path
@@ -242,6 +246,15 @@ def test_band_feeds_are_their_own_exact_locations_and_closed_publicly() -> None:
         assert _route(path) in DENY
 
 
+def test_address_feeds_are_their_own_exact_locations_and_closed_publicly() -> None:
+    """069 §3.5·§3.6 — 목록·상세는 정확 일치 둘로 api 에(접두가 겹치는 067 경로와 따로), 공개는 028 의 404 JSON."""
+    for path in ("/svc/api/admin/access/addrs", "/svc/api/admin/access/addr"):
+        assert _admin_route(path) == ("=", path)
+        assert _forward(path) == (API, path.removeprefix("/svc/api"))
+    for path in ("/api/admin/access/addrs", "/api/admin/access/addr"):
+        assert _route(path) in DENY
+
+
 def test_public_server_has_no_svc_branch_so_api_feeds_are_static_404() -> None:
     """공개 nginx(028)는 그대로 — `/svc/` 위치가 없어 두 경로는 `location /` 의 정적 파일 찾기(없으면 404)다."""
     public = _locations(_public_server())
@@ -253,6 +266,8 @@ def test_public_server_has_no_svc_branch_so_api_feeds_are_static_404() -> None:
         "/svc/api/admin/attention",
         "/svc/api/admin/access/ips",
         "/svc/api/admin/access/ip",
+        "/svc/api/admin/access/addrs",
+        "/svc/api/admin/access/addr",
     ):
         assert _route(path) == ("/",), path
         assert not _args(public[("/",)], "proxy_pass")
