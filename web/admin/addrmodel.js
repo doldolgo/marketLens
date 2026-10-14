@@ -102,11 +102,11 @@ export function crawlerLine(body) {
   return body.verifiedCrawler ? { ok: true, text: `✓ 주소 확인된 ${name} 로봇` } : { ok: false, text: `✕ 이름만 ${name} — 주소 확인 실패` };
 }
 
-// 어디 칸 — [이름, 값, 흐린 덧글]. 값이 없으면 '–'. 도시는 '대략'(통신사 거점일 수 있다), 위도·경도는 지도 없이 수만
+// 어디 칸(069 geo) — [이름, 값, 흐린 덧글]. 값이 없으면 '–'. 도시는 '대략'(통신사 거점일 수 있다), 위도·경도는 지도 없이 수만
 const fixed = (v) => (num(v) === null ? null : String(Math.round(v * 10_000) / 10_000));
 export function whereRows(body) {
   const g = isObj(body?.geo) ? body.geo : {};
-  const pick = (k) => g[k] ?? body?.[k] ?? null;
+  const pick = (k) => (Object.hasOwn(g, k) ? g[k] : body?.[k]) ?? null; // geo 가 있으면 그 값(null 포함), 없는 키만 목록 값
   const country = pick('country');
   const dash = (v) => (v === null || v === undefined || v === '' ? '–' : clean(v));
   const lat = fixed(g.lat);
