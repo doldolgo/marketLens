@@ -16,6 +16,7 @@ from typing import Any
 
 from app.features.admin import access_classes as lines
 from app.features.admin import access_traits
+from app.features.admin.access_addrs import is_asset
 from app.features.admin.access_bands import (
     STATUS_NAMES,
     agent_name,
@@ -97,7 +98,10 @@ class BandScan:
         self.agents: Counter[str] = Counter()
         # (IP, UA, KST 날) → [첫 페이지 시각, 첫 이름, 채널, 마지막 시각, 마지막 이름, 페이지 수, 특성] — 세는 동안만
         self.flows: dict[tuple[str, str, int], list[Any]] = {}
-        self.recent: list[tuple[float, int, str, int, str, Traits, str | None]] = []
+        # (시각, 줄 차례, 경로, 상태, 종류, 특성, 출처, 069 판정 표시)
+        self.recent: list[
+            tuple[float, int, str, int, str, Traits, str | None, tuple[str, ...]]
+        ] = []
         self._seq = 0
         self._bands: dict[str, str] = {}
         self._kinds: dict[str, str] = {}
@@ -120,10 +124,7 @@ class BandScan:
         if rec is None:
             return
         method, uri, status, _, ua, referer, ip = rec
-        band = self._bands.get(ip)
-        if band is None:
-            band = self._bands[ip] = band_of(ip)
-        if band != self.band:
+        if not self._match(ip, ts):
             return
         path, _, query = uri.partition("?")
         ref = lines.referrer(referer) if referer else None
@@ -134,9 +135,10 @@ class BandScan:
         if len(self._kinds) < MEMO_CAP:
             self._kinds[judged], self._traits[judged] = ua_kind, traits
         # 038 §3.4 — 운영자 흔적 > 탐색한 브라우저 모양(scanner) > UA 로 정한 종류
+        probe = lines.PROBE.search(path.lower()) is not None
         if operator:
             kind = "operator"
-        elif ua_kind == "browser" and lines.PROBE.search(path.lower()) is not None:
+        elif ua_kind == "browser" and probe:
             kind = "scanner"
         else:
             kind = ua_kind
@@ -159,6 +161,15 @@ class BandScan:
         self.paths[short] += 1
         self.agents[agent_name(traits)] += 1
         self._seq += 1
+        js_view = fetched and path in lines.JS_PATHS
+        upgraded = ws_path and status == 101
+        marks = (
+            ("probe", probe),
+            ("404", status == 404),
+            ("asset", fetched and is_asset(path)),
+            ("js", kind == "browser" and js_view),
+            ("ws", upgraded),
+        )
         item = (
             ts,
             self._seq,
@@ -167,14 +178,48 @@ class BandScan:
             kind,
             traits,
             None if ref is None else ref[0],
+            tuple(name for name, on in marks if on),
         )
         if len(self.recent) < RECENT:
             heapq.heappush(self.recent, item)
         else:
             heapq.heappushpop(self.recent, item)
+        self._seen(
+            ts,
+            ip,
+            (
+                path,
+                status,
+                kind,
+                ua_kind,
+                judged,
+                None if ref is None else ref[1],
+                agent_name(traits),
+            ),
+            (
+                kind == "browser" and page,
+                kind == "browser" and js_view,
+                upgraded,
+                ws_path,
+                probe,
+                fetched,
+            ),
+        )
         if page and ip and ts >= self.gate:
             # 069 — 짝은 가린 IP 로 센다(목록의 짝 수·038 과 같은 단위). 이 대역 줄만 오므로 대역 글자를 쓴다
             self._flow(ts, self.band, ua, path, query, ref, traits)
+
+    def _match(self, ip: str, ts: float) -> bool:
+        """이 줄이 고른 대역의 줄인가 — 줄의 IP 를 대역으로 다시 맞춘다(069 는 IP 하나·가린 줄만으로 바꾼다)."""
+        band = self._bands.get(ip)
+        if band is None:
+            band = self._bands[ip] = band_of(ip)
+        return band == self.band
+
+    def _seen(
+        self, ts: float, ip: str, line: tuple[Any, ...], flags: tuple[bool, ...]
+    ) -> None:
+        """고른 줄마다 — 069 가 IP 칸(`AddrTally.add` 와 같은 인자)을 센다."""
 
     def _flow(
         self,
@@ -246,7 +291,7 @@ class BandScan:
                     "device": t.device,
                     "referer": origin,
                 }
-                for ts, _, path, status, kind, t, origin in recent
+                for ts, _, path, status, kind, t, origin, _ in recent
             ],
         }
 
