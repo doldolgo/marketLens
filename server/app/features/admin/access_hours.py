@@ -6,7 +6,7 @@
 게이트 뒤 날의 짝을 처음 기록할 때만 DB-IP 판(039)으로 그 IP 의 /24 를 찾아 나라·망 종류를 짝 기록에 둔다.
 짝의 페이지 줄마다 그날 첫·마지막 페이지 이름과 페이지 수를 고친다(062 — 이름은 고정 글자, 경로·쿼리는 남기지 않는다).
 줄마다 가린 IP 대역 칸도 센다(067 `access_bands.py` — 대역은 가린 IP 글자 그대로, 짝은 038 해시만). 짝 해시는 늘 가린 IP
-(/24·/48)로 만든다 — 069 뒤 기록은 IP 전체다.
+(/24·/48)로 만든다 — 069 뒤 기록은 IP 전체다. 069 의 IP 하나 단위 칸(`access_addrs.py`)도 줄마다 센다.
 UA 원문은 세는 동안의 지역 변수에만 있고 남기지 않는다(UA·출처 판정 메모도 파일 읽기가 끝나면 — 깨진 파일로
 예외가 나도 — 버린다. UA 메모의 키는 판정이 보는 앞 1,024자, 출처는 512자를 넘으면 메모하지 않는다).
 세는 동안 따로 차례를 넘기지 않는다 — 인터프리터가 5ms 마다 GIL 을 넘겨 같은 프로세스의 이벤트 루프 지연은 측정상 ≤30ms(§5).
@@ -19,6 +19,7 @@ from urllib.parse import parse_qs
 
 from app.features.admin import access_classes as lines
 from app.features.admin import access_traits
+from app.features.admin.access_addrs import AddrTally
 from app.features.admin.access_bands import (
     BandTally,
     agent_name,
@@ -123,6 +124,7 @@ class FileTally:
         self.no_ts = 0  # ts 없는 줄
         self.broken = 0  # 깨진 회전 파일이면 1
         self.bands = BandTally()  # 067 — 가린 IP 대역 칸
+        self.addrs = AddrTally()  # 069 — IP 하나 단위 칸
         self._seq = 0
         self._kinds: dict[str, str] = {}
         self._traits: dict[str, Traits] = {}
@@ -145,6 +147,7 @@ class FileTally:
             self._day = _NO_DAY
             self._key = _NO_KEY
             self.bands.finish()
+            self.addrs.finish()
 
     def line(self, raw: str) -> None:
         ts = _line_ts(raw)
@@ -277,17 +280,33 @@ class FileTally:
                     pair,
                 )
         human = kind == "browser"
+        agent = agent_name(self._trait(judged))
         self.bands.add(
             ts,
             its - its % 3600,
             ip,
             path,
-            agent_name(self._trait(judged)),
+            agent,
             kind,
             status,
             (human and page, human and js_view, upgraded, ws_path),
             pair,
             mark,
+        )
+        self.addrs.add(
+            ts,
+            its - its % 3600,
+            ip,
+            (
+                path,
+                status,
+                kind,
+                ua_kind,
+                judged,
+                None if ref is None else ref[1],
+                agent,
+            ),
+            (human and page, human and js_view, upgraded, ws_path, probe, fetched),
         )
 
     def _lists(self, hour: Hour, judged: str, path: str, query: str, ref: Ref) -> None:
