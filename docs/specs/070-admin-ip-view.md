@@ -1,6 +1,6 @@
 # 070 — admin-ip-view
 
-상태: TODO | 의존: 066(관리자 틀·상세 판)·069(피드 `/admin/access/addrs`·`/admin/access/addr` — 머지 전이면 가짜 피드로 만들고 시험한다).
+상태: DONE | 의존: 066(관리자 틀·상세 판)·069(피드 `/admin/access/addrs`·`/admin/access/addr` — 머지 전이면 가짜 피드로 만들고 시험한다).
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -45,14 +45,37 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+cd server && uv sync --extra dev
+uv run --extra dev ruff check .            # All checks passed!
+uv run --extra dev ruff format --check .   # 431 files already formatted
+uv run --extra dev pytest -q               # 2611 passed, 1 skipped (새 test_admin_addrs 7·test_admin_addr_sheet 7, 고친 pages·detail·fake(경우 열하나 × 방문자 대역 별 보기)·xss(IP 별·대역 별)·screen·scripts·contract_visits)
+node --check web/admin/*.js                # 31 파일 통과
+cd web && npm ci && npm run lint && npm run build   # oxlint 0 · vite build 통과
+# 가짜 피드 서버 스모크(127.0.0.1:18070): /visitors.html 200 + CSP·X-Frame-Options DENY·no-store 그대로,
+# addrs ok(47행·since)·addr?ip=nope 400 bad_ip·/__scenario/noaddrs 뒤 addrs 404·ips 200, addrs.js·addrdetail.js·addrmodel.js text/javascript
 ```
+설계 세션 몫(헤드리스 Chrome — 방문자 1440·1024·390, IP 판, CSP 위반 0)은 하지 않았다(실행 세션은 브라우저를 쓰지 않는다).
 
 ## 6. 갱신할 문서
 - `docs/context/status.md`·`architecture.md`(방문자 페이지 IP 별)·`dev-setup.md`(가짜 피드 경우).
 - `CLAUDE.md` — 인덱스 070 DONE. `docs/specs/066-admin-renewal.md` §3.3 방문자 줄에 '070 — IP 별 기본'.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것:
+- 만든 것: `web/admin/addrmodel.js`(IP 검사·쪽 요청·큰 수·표 행·근거 차례·점수 줄·검색 로봇 줄·어디 칸 — DOM 없음)·`addrs.js`(IP 표·거르기·큰 수·since 줄)·`addrdetail.js`(IP 판 + 대역 판과 같이 쓰는 시간별 그래프·쓰임 칸·최근 요청 칸), `visitors.html`(보기 단추·IP 큰 수·IP 상자·since 줄·DB-IP 표시 둘)·`visitors.js`(보기 `view=ip|band`·두 보기 카드·판 `addr:`), `common.js`(경로 `addrs`·`addr`), `names.js`(`flagOf`·`countryName`), `ipmodel.js`(쪽 모으기 `loadedPages`), `ui.js`(표 `rowTitle`), `admin.css`(판정 배지 ◆·점수 막대·위치 줄임표·근거 막대·신호 칩·판 맨 위 칸), `web/scripts/admin-fake-feeds.py`(addrs·addr, 경우 noaddrs·many), 시험 `server/tests/test_admin_addrs.py`·`test_admin_addr_sheet.py` + 기존 admin 시험 일곱 고침, 문서(status·architecture·dev-setup·066 §3.3·CLAUDE.md).
 - 추측한 지점:
-- 남은 빚:
+  1. 판 머리 — 066 판 머리는 여섯 페이지가 같은 글자여야 한다(test_admin_screen). 그래서 IP(복사 단추)·판정 배지·점수는 판 맨 위 첫 줄(판정 근거 칸 머리)에 두고, 판 머리는 제목 IP·단위 위치 글·◀ ▶·기간·CSV 그대로. §3.3 글을 고쳤다. 버린 것: 여섯 페이지의 판 틀에 복사 자리 더하기(다른 페이지를 건드린다).
+  2. 판정 근거·어디 칸 '맨 위' — 판 몸 격자의 사용자 칸을 `display: contents` 로 풀어 두 칸만 차례 −1(그래프 위), 쓰임 칸은 그래프 아래. 버린 것: 공통 판 틀의 칸 차례 바꾸기.
+  3. 근거 차례 '가중치 큰 순' = 수 그대로 내림차순(+70 … −40, 같으면 code 글자 순), 행 title 의 '상위 셋' 도 같은 차례. 버린 것: |가중치| 큰 순.
+  4. 점수 막대 폭 = 점수 ÷ 100(0~1 에서 자름 — 음수는 0), 색은 판정 상태색. 운영자 ◆ 는 강조색(`--accent` — 066 상태 4색 밖), 모름 ○ 는 빈 원.
+  5. 위치 글 — 국기 + 도시(없으면 지역, 없으면 나라 이름) · 망 사업자(없으면 뺌), 다 없으면 '–'. 어디 칸은 geo 키가 있으면 그 값(null = '–'), geo 에 없는 키만 목록 값. '대략' 은 도시가 있고 `approx` 가 false 가 아닐 때, 위도·경도는 소수 넷째 자리·하나라도 없으면 '–', AS 번호는 수면 'AS' + 수.
+  6. 검색 로봇 이름 — 근거 글·브라우저 정보에서 Googlebot → Google, bingbot → Bing, Yeti → 네이버, Daum → Daum, 못 찾으면 '검색'. 버린 것: 069 응답에 이름 키 더하기(응답 키 — 069 몫).
+  7. 큰 수 'IP 수' = `total`(가린 대역 행 포함 — 단위 글 '가린 대역 포함'), 봇 판정·데이터센터 비율·오늘 처음 본 IP 는 불러온 행 기준(더 있으면 '≈'·'불러온 n개 기준' — 066 대역 규칙과 같음).
+  8. since 줄은 IP 별 보기에서만, KST, 초·ms 둘 다 받는다(first·last 도 067 처럼).
+  9. 거르기 — 망 종류·나라는 두 보기가 같은 주소 키로 같이 쓰고, 판정·가린 기록 빼기는 IP 별만, '봇만 있는 대역 빼기' 는 대역 별만(칩 줄에는 모두 보인다). 찾기 칸은 보기마다 따로(주소에 싣지 않음). 판정 여럿은 069 순서로 `verdict=bot,suspect`.
+  10. 판을 여는 행 — IPv4·IPv6(소문자 16진·콜론·IPv4 꼬리)·067 대역 꼴(가린 행). '(없음)'·'(기타)'·꼴 아닌 글은 열지 않는다(정규 꼴 검사는 서버 400 — 판 안 한 줄). 판정 열 정렬은 판정 이름 글자 순(불러온 행 안).
+  11. 신호 칩 — 069 flags 중 probe '탐색'(빨강)·404(주황)·asset '자원'·js 'JS'·ws 'WS', 목록 밖 값은 버림. CSV 에 '신호' 칸(글).
+  12. 복사 — `navigator.clipboard` 가 없거나 실패면 단추 글 '복사 안 됨'. 응답 ok 인데 IP 가 없으면 표 자리에 '자료 없음'.
+  13. 가짜 피드 — old·missing 은 addrs·addr 도 404(069 전이기도 하다), 새 경우 noaddrs(069 만 전 — 대역 별은 그대로)·many(IP 1,200·IP 판 partial). §4 를 고쳤다. 버린 것: old 의 뜻 바꾸기(067·068 전 시험이 기댄다).
+  14. 069 nginx 정확 일치 location 둘은 069 PR 몫 — test_admin_pages 는 그 둘이 아직 없으면(관리자 server 의 정적 `location /`) 분기 단언을 건너뛰고, 069 머지 뒤에는 저절로 단언한다.
+  15. 069 피드 코드가 아직 없다(PR #136 초안 — 이 세션 끝까지 머지 안 됨) — §3.1 계약과 069 스펙만으로 만들었고, addr 응답에도 067 상세처럼 `state`·`code`·`window` 가 있다고 봤다.
+- 남은 빚: 069 머지 뒤 진짜 피드 코드 응답으로 방문자 IP 별·IP 판을 그리는 대조 시험(066 의 test_admin_contract_visits 꼴)과 위 15 확인. 설계 세션 브라우저 확인(1440·1024·390, IP 판, CSP). '봇만 있는 대역 빼기' 칩이 IP 별에서도 칩 줄에 남는 것(동작 없음).
