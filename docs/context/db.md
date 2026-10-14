@@ -57,6 +57,7 @@
 ## 보존
 - Influx bucket retention 은 **무제한**. `dw_fail` 의 "최근 24시간" 은 쿼리 range(-24h) 로 처리한다 — retention 을 걸면 `premium` 까지 지워진다. 봉 계층은 버킷 retention 이 유통기한이다(1m 7일·5m 30일·1h 90일·4h 365일·1d 무제한). 초 단위 `premium` 은 아직 무제한.
 - Redis 는 옮기면 비운다(위). S3 는 lifecycle 미설정.
+- DB-IP City 캐시(069): serve 의 api 만 named volume `geo-cache`(`/var/lib/geo`)에 `city-YYYY-MM.bin` 하나(≈50MB — 머리·CRC32 뒤 구간 시작·끝·위치 번호 배열과 위치 표, 공개 자료라 방문자 정보 없음)를 둔다. 새 달 판을 다 만든 뒤 바꿔 달고 옛 달 파일은 지운다. 지우거나 깨져도 다음 IP 피드 요청이 다시 받는다. 접속 기록·IP 칸은 여기에도 다른 저장소에도 쓰지 않는다(메모리만).
 
 ## 쓰는 쪽
 - 틱 루프(001, 매초): 틱 생성 → LiveStore 슬롯 → 직전 틱을 009 인계기로.

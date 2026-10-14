@@ -61,6 +61,13 @@ def band_of(ip: str) -> str:
     return f"{ipaddress.IPv6Address(packed[:6] + bytes(10))}/48"
 
 
+def masked_ip(ip: str, band: str) -> str:
+    """짝 열쇠에 쓰는 가린 IP 글자 — 대역 글자에서 `/24`·`/48` 을 뗀 것(027 caddy 의 `ip_mask` 출력과 같은 글자).
+    069 뒤 기록은 IP 전체라, 전체 저장 전후 짝 수가 이어지게 늘 가린 글자로 해시한다. 풀 수 없는 글자는 그대로."""
+    address, slash, _ = band.partition("/")
+    return address if slash else ip
+
+
 def is_band(text: str) -> bool:
     """상세 조회의 `band` — 목록 응답의 글자 그대로인 IPv4 /24·IPv6 /48 꼴만 (§3.3)."""
     if len(text) > 64 or "/" not in text:
@@ -113,6 +120,13 @@ class BandTally:
         self._memo: dict[str, str] = {}
         self._paths: dict[str, str] = {}
 
+    def band(self, ip: str) -> str:
+        """IP 글자 → 대역 글자(읽는 동안 메모)."""
+        band = self._memo.get(ip)
+        if band is None:
+            band = self._memo[ip] = band_of(ip)
+        return band
+
     def add(
         self,
         ts: float,
@@ -128,9 +142,7 @@ class BandTally:
     ) -> None:
         """줄 하나 — `kind` 는 038 의 종류, `flags` 는 (사람 모양 페이지, JS 신호, WS 101, WS 경로), `pair` 는 038 의 짝 해시
         (IP 가 없거나 게이트 앞 줄이면 None)와 그 `mark`. 상태 칸은 038 과 같다 — 200~599 만, WS 경로의 5xx 는 넣지 않는다."""
-        band = self._memo.get(ip)
-        if band is None:
-            band = self._memo[ip] = band_of(ip)
+        band = self.band(ip)
         b = self.bands.get(band)
         if b is None:
             if len(self.bands) >= BAND_CAP:

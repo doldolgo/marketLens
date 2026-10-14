@@ -209,6 +209,7 @@ def test_compose_storage_containers_persist_and_match_dev_setup() -> None:
         "redis-data",
         "caddy-data",
         "caddy-config",
+        "geo-cache",  # 069 — api 의 DB-IP City 캐시 파일
     }
 
 

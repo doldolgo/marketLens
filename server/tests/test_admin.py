@@ -44,6 +44,8 @@ API_FEEDS = {
     ("=", "/svc/api/admin/attention"),  # 052 — 화면 영역 이용 통계
     ("=", "/svc/api/admin/access/ips"),  # 067 — 가린 IP 대역 목록
     ("=", "/svc/api/admin/access/ip"),  # 067 — 대역 하나
+    ("=", "/svc/api/admin/access/addrs"),  # 069 — IP 하나 단위 목록
+    ("=", "/svc/api/admin/access/addr"),  # 069 — IP 하나
 }
 POLLING = (
     {
@@ -167,6 +169,8 @@ def test_admin_routes_every_api_path_like_before_the_allowlist() -> None:
         "/svc/api/admin/attention": (API, "/admin/attention"),
         "/svc/api/admin/access/ips": (API, "/admin/access/ips"),
         "/svc/api/admin/access/ip": (API, "/admin/access/ip"),
+        "/svc/api/admin/access/addrs": (API, "/admin/access/addrs"),
+        "/svc/api/admin/access/addr": (API, "/admin/access/addr"),
     }
     for path, target in expected.items():
         assert _forward(path) == target, path
@@ -242,6 +246,15 @@ def test_band_feeds_are_their_own_exact_locations_and_closed_publicly() -> None:
         assert _route(path) in DENY
 
 
+def test_address_feeds_are_their_own_exact_locations_and_closed_publicly() -> None:
+    """069 §3.5·§3.6 — 목록·상세는 정확 일치 둘로 api 에(접두가 겹치는 067 경로와 따로), 공개는 028 의 404 JSON."""
+    for path in ("/svc/api/admin/access/addrs", "/svc/api/admin/access/addr"):
+        assert _admin_route(path) == ("=", path)
+        assert _forward(path) == (API, path.removeprefix("/svc/api"))
+    for path in ("/api/admin/access/addrs", "/api/admin/access/addr"):
+        assert _route(path) in DENY
+
+
 def test_public_server_has_no_svc_branch_so_api_feeds_are_static_404() -> None:
     """공개 nginx(028)는 그대로 — `/svc/` 위치가 없어 두 경로는 `location /` 의 정적 파일 찾기(없으면 404)다."""
     public = _locations(_public_server())
@@ -253,6 +266,8 @@ def test_public_server_has_no_svc_branch_so_api_feeds_are_static_404() -> None:
         "/svc/api/admin/attention",
         "/svc/api/admin/access/ips",
         "/svc/api/admin/access/ip",
+        "/svc/api/admin/access/addrs",
+        "/svc/api/admin/access/addr",
     ):
         assert _route(path) == ("/",), path
         assert not _args(public[("/",)], "proxy_pass")
@@ -468,7 +483,10 @@ def test_api_reads_caddy_logs_read_only_and_only_api_gets_the_dir() -> None:
     """035 §3.2 — api 에 caddy 로그 읽기 전용 바인드·`ACCESS_LOG_DIR`. 다른 서비스엔 없다(caddy 는 027 의 쓰기 바인드 그대로)."""
     services = _yaml("docker-compose.yml")["services"]
     api = services["api"]
-    assert api["volumes"] == ["./logs/caddy:/var/log/caddy:ro"]
+    assert api["volumes"] == [
+        "./logs/caddy:/var/log/caddy:ro",
+        "geo-cache:/var/lib/geo",  # 069 — DB-IP City 캐시 파일
+    ]
     assert api["environment"]["ACCESS_LOG_DIR"] == "/var/log/caddy"
     for name, svc in services.items():
         if name != "api":
@@ -482,6 +500,20 @@ def test_api_reads_caddy_logs_read_only_and_only_api_gets_the_dir() -> None:
     assert [ln for ln in example.splitlines() if "CLARITY_API_TOKEN" in ln] == [
         "# CLARITY_API_TOKEN="
     ]
+
+
+def test_only_the_serve_api_gets_the_geo_cache_volume() -> None:
+    """069 §3.3 — named volume `geo-cache` 와 `GEO_CACHE_DIR` 은 serve 프로필의 api 에만. server/.env 에는 두지 않는다."""
+    compose = _yaml("docker-compose.yml")
+    services = compose["services"]
+    assert services["api"]["profiles"] == ["serve"]
+    assert services["api"]["environment"]["GEO_CACHE_DIR"] == "/var/lib/geo"
+    assert "geo-cache" in compose["volumes"]
+    for name, svc in services.items():
+        if name != "api":
+            assert "GEO_CACHE_DIR" not in (svc.get("environment") or {}), name
+            assert not any("geo-cache" in str(v) for v in svc.get("volumes", [])), name
+    assert "GEO_CACHE_DIR" not in _text("server/.env.example")
 
 
 def test_root_path_only_on_collector_and_public_api_docs_stay_closed() -> None:

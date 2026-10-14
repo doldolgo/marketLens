@@ -3,8 +3,8 @@
 
 `router` 는 api 역할에만, `collector_router` 는 collector 역할에만 포함한다(`main.py`) — 다른 역할에서는 404 다.
 공개 nginx 는 028 허용 목록 밖이라 404, 관리자 nginx(:8081)가 정확 일치로 `/svc/api/admin/{status,access,clarity,
-clarity/history,access/ips,access/ip}` 와 `/api/admin/{aws,alerts,aws/series}` 를 넘긴다. 모두 항상 200 인 상태 응답이다 —
-대역 상세의 `band` 가 대역 꼴이 아닐 때의 400 만 예외다.
+clarity/history,access/ips,access/ip,access/addrs,access/addr}` 와 `/api/admin/{aws,alerts,aws/series}` 를 넘긴다. 모두 항상 200 인 상태 응답이다 —
+대역 상세의 `band` 가 대역 꼴이 아닐 때·IP 상세의 `ip` 가 주소·대역 꼴이 아닐 때의 400 만 예외다.
 """
 
 from typing import Annotated
@@ -12,6 +12,8 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
+from app.features.admin.access_addr import is_target
+from app.features.admin.access_addrs_page import addrs_query
 from app.features.admin.access_bands import ips_query, is_band
 from app.features.admin.feeds import AdminFeeds
 from app.features.admin.models import AdminStatusOut
@@ -20,7 +22,7 @@ from app.features.admin.visits import VisitFeeds
 
 router = APIRouter()
 collector_router = APIRouter()
-# 067 — 대역 응답은 가린 IP 대역을 싣는다. 브라우저·중간 캐시에 남지 않게
+# 067 — 대역 응답은 가린 IP 대역을, 069 응답은 IP 전체를 싣는다. 브라우저·중간 캐시에 남지 않게
 NO_STORE = {"Cache-Control": "no-store"}
 
 
@@ -80,6 +82,47 @@ async def get_admin_access_ip(
         )
     feeds: VisitFeeds = request.app.state.admin_visits
     return JSONResponse(await feeds.ip(band, window), headers=NO_STORE)
+
+
+@router.get("/admin/access/addrs")
+async def get_admin_access_addrs(
+    request: Request,
+    window: str | None = None,
+    net: str | None = None,
+    country: str | None = None,
+    verdict: str | None = None,
+    q: str | None = None,
+    masked: str | None = None,
+    sort: str | None = None,
+    limit: str | None = None,
+    offset: str | None = None,
+) -> JSONResponse:
+    """IP 하나 단위 접속 — IP 전체(배포 뒤 줄)·가린 대역(앞 줄) 행, 봇 판정·근거·위치, 거르기·정렬·쪽, 60초 캐시 (069 §3.5).
+    모양이 틀린 인자는 기본값이다(422 없음)."""
+    feeds: VisitFeeds = request.app.state.admin_visits
+    query = addrs_query(net, country, verdict, q, masked, sort, limit, offset)
+    return JSONResponse(await feeds.addrs(window, query), headers=NO_STORE)
+
+
+@router.get("/admin/access/addr")
+async def get_admin_access_addr(
+    request: Request, ip: str | None = None, window: str | None = None
+) -> JSONResponse:
+    """IP 하나(또는 목록의 가린 대역 글자)의 상세 — 목록 행 값·위치·역방향 DNS·검색 로봇 확인·시간별·최근 100줄 (069 §3.6)."""
+    if ip is None or not is_target(ip):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "code": "bad_ip",
+                    "message": "ip 는 IPv4·IPv6 주소(정규 글자) 또는 대역 목록의 글자(IPv4 /24·IPv6 /48)여야 합니다.",
+                    "detail": None,
+                }
+            },
+            headers=NO_STORE,
+        )
+    feeds: VisitFeeds = request.app.state.admin_visits
+    return JSONResponse(await feeds.addr(ip, window), headers=NO_STORE)
 
 
 @router.get("/admin/clarity")

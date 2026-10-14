@@ -280,6 +280,8 @@ WS 를 빼는 이유: serve 배포 때 열린 대시보드가 전부 재접속�
 - 되돌리기: 5-2 의 `fetch-config serve.json` 만 다시(로그 설정이 빠진다) → 지표 필터·경보 삭제. 로그 그룹을 지우려면 `aws logs delete-log-group`.
 - 2026-10-02 기록: 00:35Z 에 켰다. 위의 '하루 회전 파일을 본 뒤' 조건은 기다리지 않아(설계 세션 판단) 첫 `access.log`(09-29~, 1,927줄)가 보낸 때로 찍혔다 — 최대 3일 90일을 넘을 수 있다. 지표 필터·5xx 경보를 만들었고 경보 18개가 모두 OK. 자세한 것은 027 §7.
 
+- 069 뒤: caddy 접속 로그가 IP 전체(`request.remote_ip`·`request.client_ip`)를 남기므로 이 로그 그룹의 줄에도 IP 전체가 담긴다(처리방침 v6 2절 — 보관 90일 그대로, 설정 바꿀 것 없음). 배포(caddy reload) 앞 줄은 끝자리를 가린 그대로다. Logs Insights 결과·내보내기를 다른 곳에 붙여 넣지 않는다 — 방문자 IP 다.
+
 Logs Insights 저장 쿼리 3개(로그 그룹 `/marketlens/serve/caddy`, `aws logs put-query-definition --name <이름> --log-group-names /marketlens/serve/caddy --query-string '<쿼리>'`):
 - `marketlens/경로별 요청 수`:
   `parse request.uri /^(?<path>[^?]*)/ | stats count(*) as requests by path | sort requests desc | limit 50`

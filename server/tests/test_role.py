@@ -37,6 +37,8 @@ API_ROUTES = {
     "/admin/attention",
     "/admin/access/ips",
     "/admin/access/ip",
+    "/admin/access/addrs",
+    "/admin/access/addr",
 }
 # 029·035·052·068·067 — api 에만 있는 경로. collector ⊇ api 단언의 예외
 API_ONLY = {
@@ -48,6 +50,8 @@ API_ONLY = {
     "/admin/attention",
     "/admin/access/ips",
     "/admin/access/ip",
+    "/admin/access/addrs",
+    "/admin/access/addr",
 }
 # 034·063 — 수집기에만 있는 관리자 피드 셋(자격증명이 collect 박스 역할에만 있다)
 COLLECTOR_ADMIN = {"/admin/aws", "/admin/alerts", "/admin/aws/series"}
@@ -113,6 +117,8 @@ def test_api_role_serves_only_influx_routes_and_404s_the_rest(set_role) -> None:
         "/admin/clarity/history",
         "/admin/access/ips",
         "/admin/access/ip?band=203.0.113.0/24",
+        "/admin/access/addrs",
+        "/admin/access/addr?ip=203.0.113.7",
     ):  # 035·068·067 — 설정이 없으면 unconfigured 인 200
         resp = client.get(path)
         assert resp.status_code == 200 and resp.json()["state"] == "unconfigured", path

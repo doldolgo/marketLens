@@ -98,19 +98,13 @@ def _domain() -> list[Directive]:
     return _block(_caddyfile(), "kimptrack.com")
 
 
-# 지우기 규칙 — 접속 로그와 기본 로거가 똑같이 갖는다 (§3.2)
+# 지우기 규칙 — 접속 로그와 기본 로거가 똑같이 갖는다 (§3.2). IP 두 필드는 따로: 접속 로그는 그대로 두고(069 — IP 전체),
+# 기본 로거는 지운다(032)
+IP_FIELDS = ("request>remote_ip", "request>client_ip")
 SCRUB = [
     (["wrap", "json"], None),
     (["request>headers", "delete"], None),
     (["resp_headers", "delete"], None),
-    (
-        ["request>remote_ip", "ip_mask"],
-        [(["ipv4", "24"], None), (["ipv6", "48"], None)],
-    ),
-    (
-        ["request>client_ip", "ip_mask"],
-        [(["ipv4", "24"], None), (["ipv6", "48"], None)],
-    ),
     (
         ["request>uri", "query"],
         [
@@ -136,19 +130,21 @@ def test_access_log_snippet_writes_rotated_0644_file() -> None:
 
 
 def test_access_log_and_default_logger_share_the_scrub_rules() -> None:
-    """헤더 통째 삭제·IP 두 필드 /24·/48·검색어 세 키 삭제 (§3.2). 기본 로거(오류 줄)도 같되 IP 두 필드는
-    자르지 않고 지운다 — docker 로그가 처리방침의 90일보다 오래 남을 수 있다 (032 §3.5)."""
+    """헤더 통째 삭제·검색어 세 키 삭제 (§3.2). 도메인 접속 기록은 IP 두 필드를 자르지도 지우지도 않는다(069 §3.1 — IP
+    전체). 기본 로거(오류 줄)는 같은 규칙에 IP 두 필드를 지운다 — docker 로그가 처리방침의 90일보다 오래 남을 수 있다
+    (032 §3.5)."""
     access = _block(_block(_snippet(), "log"), "format", "filter")
     assert access == SCRUB
+    assert not [args for args, _ in access if args[0] in IP_FIELDS]
+    # 어느 블록에도 IP 자르기가 없다
+    for field in IP_FIELDS:
+        assert all(a[0] == "delete" for a in _all(_caddyfile(), field)), field
     default = _block(_block(_block(_caddyfile()), "log", "default"), "format", "filter")
-    ip_fields = ("request>remote_ip", "request>client_ip")
-    assert [(args, c) for args, c in default if args[0] not in ip_fields] == [
-        (args, c) for args, c in SCRUB if args[0] not in ip_fields
+    assert [(args, c) for args, c in default if args[0] not in IP_FIELDS] == SCRUB
+    assert [args for args, c in default if args[0] in IP_FIELDS] == [
+        [field, "delete"] for field in IP_FIELDS
     ]
-    assert [args for args, c in default if args[0] in ip_fields] == [
-        [field, "delete"] for field in ip_fields
-    ]
-    assert all(c is None for args, c in default if args[0] in ip_fields)
+    assert all(c is None for args, c in default if args[0] in IP_FIELDS)
 
 
 def test_access_log_appends_only_ua_and_origin_referer() -> None:

@@ -7,6 +7,7 @@
 import gzip
 import json
 import os
+import threading
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,8 +16,10 @@ from typing import Any
 import pytest
 
 from app.features.admin import access_cache
+from app.features.admin.access_addrs_page import addrs_query
 from app.features.admin.access_bands import ips_query
 from app.features.admin.access_cache import AccessLog
+from app.features.admin.access_dns import Dns
 from app.features.admin.visits import VisitFeeds
 
 # 2026-10-01T09:30:00Z — 시 경계에서 30분 지난 시각, 게이트 전. 창 = 시작 − 23시간 ~ 지금
@@ -144,6 +147,8 @@ class Feeds:
         self.t = 0.0
         self.timers: list[Timer] = []
         kw.setdefault("geo_start", parked)
+        # 069 — 상세의 역방향 DNS 는 가짜 해석기로(레코드 없음). 실제 해석기는 conftest 가 막는다
+        kw.setdefault("dns", Dns(Resolver(), timeout=0.2))
         self.feeds = VisitFeeds(
             access_dir=None if directory is None else str(directory),
             clarity_token=None,
@@ -167,3 +172,42 @@ class Feeds:
 
     async def ip(self, band: str, window: str | None = None) -> dict[str, Any]:
         return await self.feeds.ip(band, window)
+
+    async def addrs(self, window: str | None = None, **params: str) -> dict[str, Any]:
+        """069 IP 목록 — `params` 는 쿼리 글자 그대로(net·country·verdict·q·masked·sort·limit·offset)."""
+        return await self.feeds.addrs(window, addrs_query(**params))
+
+    async def addr(self, ip: str, window: str | None = None) -> dict[str, Any]:
+        return await self.feeds.addr(ip, window)
+
+
+class Resolver:
+    """가짜 DNS — `names` 는 IP → PTR 이름(없으면 레코드 없음), `addresses` 는 이름 → 정방향 주소들.
+    값이 `"slow"` 면 시간 초과를 흉내 내려고 `gate` 가 열릴 때까지 기다린다."""
+
+    def __init__(
+        self,
+        names: dict[str, str] | None = None,
+        addresses: dict[str, set[str]] | None = None,
+    ) -> None:
+        self.names = names or {}
+        self.addresses = addresses or {}
+        self.asked: list[str] = []
+        self.gate = threading.Event()
+
+    def ptr(self, ip: str) -> str | None:
+        self.asked.append(ip)
+        name = self.names.get(ip)
+        if name == "slow":
+            self.gate.wait(5)
+            return None
+        if name == "error":
+            raise OSError("resolver")
+        return name
+
+    def forward(self, name: str) -> set[str]:
+        self.asked.append(name)
+        found = self.addresses.get(name, set())
+        if "slow" in found:
+            self.gate.wait(5)
+        return found

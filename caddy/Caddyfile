@@ -13,9 +13,9 @@
 		protocols h1 h2
 	}
 	# 027 §3.2 — 기본 로거(오류 줄 — 예: 업스트림 502. docker 로그로 간다)에도 접속 로그와 같은 지우기 규칙.
-	# docker 로그에 원 IP·검색어가 남지 않게. 아래 access_log 조각의 format 과 같아야 한다(test_observability.py 가 본다).
-	# 032 — 단 IP 두 필드는 자르지 않고 지운다. 오류 줄에는 IP 가 필요 없고, docker 로그는 크기로만 회전해 방문이 적으면
-	# 처리방침의 90일보다 오래 남는다.
+	# docker 로그에 IP·검색어가 남지 않게. 아래 access_log 조각의 format 과 같아야 한다(test_observability.py 가 본다).
+	# 032 — 단 IP 두 필드는 지운다(069 뒤 접속 로그는 IP 전체를 남긴다). 오류 줄에는 IP 가 필요 없고, docker 로그는
+	# 크기로만 회전해 방문이 적으면 처리방침의 90일보다 오래 남는다.
 	log default {
 		format filter {
 			wrap json
@@ -69,15 +69,8 @@
 			# 응답 Location 에는 022 의 301 이 쿼리(검색어 포함)를 그대로 싣는다.
 			request>headers delete
 			resp_headers delete
-			# 두 필드는 지금 같은 값이라 하나만 자르면 원본이 남는다
-			request>remote_ip ip_mask {
-				ipv4 24
-				ipv6 48
-			}
-			request>client_ip ip_mask {
-				ipv4 24
-				ipv6 48
-			}
+			# 069 — IP 두 필드(remote_ip·client_ip)는 자르지 않는다. 관리자 화면이 IP 하나 단위로 봇 여부·위치를 본다
+			# (처리방침 v6). 그 전(027~068)에는 /24·/48 로 잘랐다 — reload 앞 줄은 가린 IP 그대로 남는다
 			# 스프레드·갭·선선갭 검색어. 나머지 키(utm_*·tab 등)는 어떤 주소로 들어왔는지 보려고 남긴다
 			request>uri query {
 				delete s.q
