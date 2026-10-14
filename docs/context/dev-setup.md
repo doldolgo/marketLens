@@ -79,6 +79,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 - `UVICORN_ROOT_PATH`: `server/.env` 에 두지 않는다 — compose 가 `server`(collect)에만 `/api` 를 준다(029, api 에는 안 준다). 관리자 페이지의 API 문서가 `/api/openapi.json` 을 부르게 하는 값이고, 접두 없는 경로(`localhost:8000/health`)는 그대로 라우팅된다. 로컬 uvicorn 은 비워 둔다.
 - `ADMIN_AWS_REGION`: 같은 방식이다 — `server/.env` 에 두지 않고 compose 가 `server`(collect)에만 `ap-northeast-2` 를 준다(034). 수집기 관리자 피드(`/admin/aws`·`/admin/alerts` 의 경보 이력)가 CloudWatch·Logs·Budgets 를 읽는 리전이고, 자격증명은 collect 박스 역할이다. 비면 AWS 를 부르지 않고 그 부분은 `unconfigured` — 로컬 uvicorn 은 비워 둔다.
 - `ACCESS_LOG_DIR`: 같은 방식이다 — `server/.env` 에 두지 않고 compose 가 `api` 에만 `/var/log/caddy`(호스트 `./logs/caddy` 읽기 전용 바인드)를 준다(035). api 의 `/admin/access` 가 그 디렉터리의 caddy 접속 로그를 읽는다. 비면 `unconfigured`·`no_file` — 로컬 uvicorn 은 비워 두고, 볼 때만 로그 디렉터리를 준다.
+- `GEO_CACHE_DIR`: 같은 방식이다 — compose 가 `api` 에만 `/var/lib/geo`(named volume `geo-cache`)를 준다(069). api 가 DB-IP City Lite(≈86MB gz)를 달마다 받아 그 디렉터리에 `city-YYYY-MM.bin`(≈50MB) 하나로 두고, 기동 때 그 파일을 읽어 올린다. 비면 City 를 받지도 읽지도 않는다(IP 피드의 `region`·`city` null) — 로컬 uvicorn 은 비워 둔다(볼 때만 빈 디렉터리를 준다).
 
 **API 키는 .env 에만. 코드·문서·커밋에 절대 넣지 않는다.**
 
@@ -103,7 +104,7 @@ curl -s localhost:8000/admin/aws
 ROLE=api uvicorn app.main:app --port 8001   # 다른 셸 — api 역할로 띄운다(8000 은 위의 수집기·vite 프록시)
 curl -s localhost:8001/admin/access
 ```
-035 — api 역할에만 있다(collector 404, `/admin/clarity` 도 같다). 로컬(`ACCESS_LOG_DIR` 없음)은 `state: "unconfigured"`·`code: "no_file"`(`?window=30d` 도 같다 — 로컬은 `unconfigured` 이고 `window`·`windows`·`gateAt` 은 실린다, 038), `/admin/clarity` 는 토큰이 없으면 `unconfigured`·`code: null` 이고(`pages`·`dims` 도 `unconfigured`, `refreshSec` 21600 — `/admin/clarity/history` 도 `unconfigured`·`days` 30) Redis·Clarity 를 부르지 않는다. 로그를 세어 보려면 `ACCESS_LOG_DIR=<caddy 로그 디렉터리>` 를 주고 띄운다. docker 통합 기동에서는 `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/access`(api 는 `./logs/caddy` 를 읽는다 — 로컬은 catch-all 만이라 거의 비어 있다, 027).
+069 — IP 하나 단위 피드 둘도 같은 api 에서 본다: `curl -s "localhost:8001/admin/access/addrs?window=24h&verdict=bot,suspect&masked=0"`·`curl -s "localhost:8001/admin/access/addr?ip=203.0.113.7"`(`ip` 가 주소·대역 꼴이 아니면 400 `bad_ip`, 상세만 역방향 DNS 를 묻는다). 035 — api 역할에만 있다(collector 404, `/admin/clarity` 도 같다). 로컬(`ACCESS_LOG_DIR` 없음)은 `state: "unconfigured"`·`code: "no_file"`(`?window=30d` 도 같다 — 로컬은 `unconfigured` 이고 `window`·`windows`·`gateAt` 은 실린다, 038), `/admin/clarity` 는 토큰이 없으면 `unconfigured`·`code: null` 이고(`pages`·`dims` 도 `unconfigured`, `refreshSec` 21600 — `/admin/clarity/history` 도 `unconfigured`·`days` 30) Redis·Clarity 를 부르지 않는다. 로그를 세어 보려면 `ACCESS_LOG_DIR=<caddy 로그 디렉터리>` 를 주고 띄운다. docker 통합 기동에서는 `docker exec marketlens-caddy wget -qO- http://web:8081/svc/api/admin/access`(api 는 `./logs/caddy` 를 읽는다 — 로컬은 catch-all 만이라 거의 비어 있다, 027).
 ```bash
 curl -s localhost:8000/spreads | head -c 600
 ```
