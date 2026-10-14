@@ -9,7 +9,7 @@
 DB-IP 판(039)이 바뀌면(처음 올림 포함) 캐시를 통째로 다시 만든다 — 짝 기록의 나라·망 종류는 기록할 때 찾은 값이고 IP 는
 남기지 않으므로 새 판으로 다시 찾으려면 줄을 다시 읽어야 한다.
 동기 함수뿐이다 — api 가 `asyncio.to_thread` 에서 부르고, 캐시 만들기는 잠금 하나로 프로세스에서 한 번에 하나다.
-저장소(Redis·디스크)에는 아무것도 쓰지 않는다.
+저장소(Redis·디스크)에는 아무것도 쓰지 않는다. 069 — 파일마다 IP 하나 단위 칸도 두고 `addrs` 가 창으로 묶는다.
 """
 
 import gzip
@@ -23,11 +23,13 @@ from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from typing import IO, Any, NamedTuple
 
-from app.features.admin import access_bands, geo_part
+from app.features.admin import access_addrs_page, access_bands, geo_part
+from app.features.admin.access_addrs_page import AddrsQuery
 from app.features.admin.access_bands import IpsQuery
 from app.features.admin.access_classes import CLASSES
 from app.features.admin.access_hours import AT, COUNTS, LISTS, FileTally
 from app.features.admin.access_pairs import PairKeys, before_gate, visitors
+from app.features.admin.geo_city import CityTable
 from app.features.admin.geo_table import GeoTable
 
 WINDOWS = {"24h": 24, "7d": 168, "30d": 720}  # 창 → 시 수
@@ -78,6 +80,10 @@ class Current(NamedTuple):
 
 
 def _no_table() -> GeoTable | None:
+    return None
+
+
+def _no_city() -> CityTable | None:
     return None
 
 
@@ -320,6 +326,40 @@ class AccessLog:
             cells = access_bands.spark_cells(name == DEFAULT_WINDOW, start, end)
             values = access_bands.page(tallies, start, end, cells, query, table)
             return {"window": name, **values}, broken
+
+    def addrs(
+        self,
+        name: str,
+        now: float,
+        query: AddrsQuery,
+        geo: Callable[[], GeoTable | None] = _no_table,
+        city: Callable[[], CityTable | None] = _no_city,
+    ) -> tuple[dict[str, Any], list[str]]:
+        """069 — 창 하나의 IP 목록(거르기·정렬·쪽 뒤)과 깨진 회전 파일. 파일 캐시·잠금은 요약·대역 목록과 나눠 쓰고, 전체 저장
+        시작 시각은 캐시한 파일 전체(읽는 범위)에서 찾는다."""
+        with self._lock:
+            table = geo()
+            broken = self._sync(now, table)
+            name = choose(name, now, self._gate)
+            start, end = bounds(name, now, self._gate)
+            ordered = sorted(self._files.values(), key=lambda e: e.mtime)
+            tallies = [e.tally.addrs for e in ordered]
+            if self._current is not None:
+                tallies.append(self._current.addrs)
+            since = access_addrs_page.since_of(tallies)
+            cells = access_bands.spark_cells(name == DEFAULT_WINDOW, start, end)
+            values = access_addrs_page.page(
+                tallies, since, start, end, cells, query, table, city()
+            )
+            return {"window": name, **values}, broken
+
+    def since(self) -> float | None:
+        """캐시가 아는 전체 저장 시작 시각 — 상세가 가린 꼴 줄을 가를 때 쓴다(캐시가 비었으면 None)."""
+        with self._lock:
+            tallies = [e.tally.addrs for e in self._files.values()]
+            if self._current is not None:
+                tallies.append(self._current.addrs)
+            return access_addrs_page.since_of(tallies)
 
     def _assemble(
         self, name: str, now: float, table: GeoTable | None
