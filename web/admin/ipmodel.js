@@ -30,22 +30,26 @@ export function ipsReqs(view, o) {
     req('ips', { window: view.range, net: f('net'), country: f('country'), q: q || undefined, bots: f('bots'), sort, limit: PAGE_ROWS, offset: i * PAGE_ROWS }),
   );
 }
-// 불러온 쪽들 → { part(첫 쪽), total, bands(대역 하나에 한 행 — 쪽이 겹치면 앞 쪽), deps }
-export function loadedBands(app, reqs) {
+// 불러온 쪽들 → { part(첫 쪽), total, rows(열쇠 하나에 한 행 — 쪽이 겹치면 앞 쪽), deps }. 067 대역은 bands·band, 069 IP 는 rows·ip
+export function loadedPages(app, reqs, listKey, idKey) {
   const entries = reqs.map((r) => app.entry(r));
   const part = partOf(entries[0]);
   const seen = new Set();
-  const bands = [];
+  const rows = [];
   for (const e of entries) {
     const p = partOf(e);
     if (!usable(p)) break;
-    for (const b of list(p.bands).filter(isObj)) {
-      if (seen.has(b.band)) continue;
-      seen.add(b.band);
-      bands.push(b);
+    for (const b of list(p[listKey]).filter(isObj)) {
+      if (seen.has(b[idKey])) continue;
+      seen.add(b[idKey]);
+      rows.push(b);
     }
   }
-  return { part, total: usable(part) ? num(part.total) : null, bands, deps: entries };
+  return { part, total: usable(part) ? num(part.total) : null, rows, deps: entries };
+}
+export function loadedBands(app, reqs) {
+  const { rows, ...rest } = loadedPages(app, reqs, 'bands', 'band');
+  return { ...rest, bands: rows };
 }
 
 // 큰 수 넷 — 대역 수(거르기 뒤 total) · 데이터센터 대역의 요청 비중 · 상위 10 대역의 요청 비중 · 오늘(KST) 처음 본 대역.

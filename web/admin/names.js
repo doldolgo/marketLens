@@ -148,13 +148,15 @@ export const cmpPhrase = (range, cmp) => (cmp === 'week' ? '지난주 같은 때
 
 // 나라 — 국기 그림 문자 + 브라우저의 한국어 지역 이름. 못 푸는 값(ZZ·(기타))은 글자 그대로
 const REGION = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['ko'], { type: 'region' }) : null;
-export function countryLabel(code) {
-  if (typeof code !== 'string' || !/^[A-Z]{2}$/.test(code) || code === 'ZZ') return clean(code);
-  let name = code;
+const isCode = (code) => typeof code === 'string' && /^[A-Z]{2}$/.test(code) && code !== 'ZZ';
+// 국기 그림 문자만(070 위치 칸 — '🇰🇷 서울 · KT'), 못 푸는 값은 빈 글자
+export const flagOf = (code) => (isCode(code) ? String.fromCodePoint(...[...code].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65)) : '');
+export function countryName(code) {
+  if (!isCode(code)) return clean(code);
   try {
-    name = REGION?.of(code) ?? code;
+    return REGION?.of(code) ?? code;
   } catch {
-    name = code;
+    return code;
   }
-  return `${String.fromCodePoint(...[...code].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65))} ${name}`;
 }
+export const countryLabel = (code) => (isCode(code) ? `${flagOf(code)} ${countryName(code)}` : clean(code));
