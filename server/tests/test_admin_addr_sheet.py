@@ -3,6 +3,7 @@
 ◀ ▶, 400 bad_ip 는 판 안 한 줄, partial 은 '일부만 읽음', XSS(근거 글·PTR·망 사업자).
 """
 
+import re
 from typing import Any
 
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from tests.admin_dom import run_admin
 from tests.test_admin_addrs import BUTTONS, LIST, NOW, X
 from tests.test_admin_detail import FAST, answers
+from tests.test_deploy import ROOT
 
 ADDR = "/svc/api/admin/access/addr?ip={}&window=24h"
 
@@ -356,3 +358,59 @@ def test_ip_check_score_lines_and_as_numbers() -> None:
         "점수 42 → 모름(요청 3 미만)",
     ]
     assert got["asn"] == ["AS4766", "AS4766", "AS15169", "", ""]
+
+
+def _rules(css: str) -> list[tuple[str, str]]:
+    """admin.css 의 (선택자, 몸) — 미디어 쿼리 안 규칙도 한 줄씩(중첩 한 단계)."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    return [
+        (sel.strip(), body) for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+    ]
+
+
+def test_ip_sheet_panels_are_not_hidden_by_any_css_rule() -> None:
+    """070 §3.3 — 판정 근거·어디 칸이 실제 브라우저에서 보인다(설계 세션 확인 2026-10-14: 칸 클래스 'top' 이 좁은 화면 머리 줄
+    `.top { display: none }` 과 겹쳐 두 칸이 사라졌다 — node 가짜 DOM 은 CSS 를 모른다). IP 판·표가 만드는 요소의 클래스마다 그 클래스를
+    고르는 규칙에 display: none 이 없고, 칸은 hidden 으로 만들지 않으며, 풀어 둔 사용자 칸(display: contents) 안 두 칸은 차례 −1."""
+    css = (ROOT / "web/admin/admin.css").read_text()
+    used: set[str] = set()
+    for name in ("addrdetail.js", "addrs.js"):
+        js = (ROOT / f"web/admin/{name}").read_text()
+        if name == "addrdetail.js":  # 판의 칸은 hidden 으로 만들지 않는다
+            assert ".hidden" not in js and "'hidden'" not in js
+        for classes in re.findall(r"\bel\('\w+', `?'?([\w -]+)", js):
+            used |= set(classes.split())
+    assert {
+        "panel",
+        "addr-top",
+        "reasons",
+        "reason",
+        "rbar",
+        "verdict",
+        "flags",
+        "flag",
+    } <= used
+    for sel, body in _rules(css):
+        if re.search(r"display:\s*none", body):
+            for part in sel.split(","):
+                last = part.strip().split()[-1] if part.strip() else ""
+                hit = set(re.findall(r"\.([\w-]+)", last))
+                assert not (hit and hit <= used), (sel, used & hit)
+    flat = dict(_rules(css))
+    assert "display: contents;" in flat["#sheet-custom.flat"]
+    assert "order: -1;" in flat["#sheet-custom.flat > .addr-top"]
+
+
+CLOSED = (
+    HARNESS
+    + r"""
+out.sheet = { open: !document.getElementById('sheet').hidden, calls: v.s.calls.filter((c) => c.includes('/addr?')) }
+"""
+)
+
+
+def test_an_invalid_ip_in_the_address_does_not_open_the_sheet() -> None:
+    """070 §3.3·066 §3.4 — 꼴이 아닌 IP(#detail=addr:nope)는 판을 열지 않고 부르지도 않는다(목록 밖 id 와 같음). 꼴은 맞는데 서버가
+    400 bad_ip 면 판 안 한 줄(test_bad_ip_is_one_line_inside_the_sheet)."""
+    got = _run(CLOSED, hash="#detail=addr%3Anope")["sheet"]
+    assert got == {"open": False, "calls": []}
