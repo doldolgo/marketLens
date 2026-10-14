@@ -33,7 +33,8 @@ from typing import Any
 import httpx
 
 from app.core import config
-from app.features.admin import access_ip
+from app.features.admin import access_addr, access_ip
+from app.features.admin.access_addrs_page import AddrsQuery
 from app.features.admin.access_bands import IpsQuery
 from app.features.admin.access_cache import (
     VALUE_KEYS,
@@ -45,6 +46,7 @@ from app.features.admin.access_cache import (
     gate_ts,
     window_values,
 )
+from app.features.admin.access_dns import Dns
 from app.features.admin.clarity import (
     ClarityStore,
     Record,
@@ -67,6 +69,7 @@ from app.features.admin.clarity_dims import DIMS_CALLS, DIMS_KEYS, parse_dims
 from app.features.admin.clarity_pages import parse_pages
 from app.features.admin.clarity_schedule import ClarityKind, DirectBudget
 from app.features.admin.clarity_values import parse_base
+from app.features.admin.geo_city_fetch import CityLoader
 from app.features.admin.geo_fetch import GeoLoader
 from app.features.admin.parts import (
     UNCONFIGURED,
@@ -93,6 +96,39 @@ PAGES_PARAMS = {"numOfDays": "3", "dimension1": "URL", "dimension2": "Device"}
 # 067 — 대역 목록(창·거르기·정렬·쪽마다)·상세(대역·창마다) 60초 칸. 칸이 이만큼 차면 가장 오래 안 부른 것부터 버린다
 BAND_SLOTS = 32
 IPS_KEYS = ("total", "bands")
+ADDRS_KEYS = ("total", "since", "rows")  # 069 §3.5
+# 069 §3.6 — 목록 행의 값(ip 는 머리에) + 위치·확인 + 067 상세 값 + partial
+ADDR_KEYS = (
+    "masked",
+    "country",
+    "region",
+    "city",
+    "asn",
+    "org",
+    "net",
+    "requests",
+    "pages",
+    "js",
+    "ws",
+    "kinds",
+    "status",
+    "first",
+    "last",
+    "spark",
+    "topPaths",
+    "topAgents",
+    "score",
+    "verdict",
+    "reasons",
+    "geo",
+    "verifiedCrawler",
+    "hourly",
+    "agents",
+    "paths",
+    "pairs",
+    "recent",
+    "partial",
+)
 IP_KEYS = (
     "partial",
     "country",
@@ -124,6 +160,10 @@ class VisitFeeds:
         schedule: Callable[[float, Callable[[], None]], Any] | None = None,
         geo_transport: httpx.BaseTransport | None = None,
         geo_start: Callable[[Callable[[], None]], Any] | None = None,
+        geo_cache_dir: str | None = None,
+        city_transport: httpx.BaseTransport | None = None,
+        city_start: Callable[[Callable[[], None]], Any] | None = None,
+        dns: Dns | None = None,
     ) -> None:
         self._dir = access_dir or None
         self._token = clarity_token or None
@@ -139,6 +179,9 @@ class VisitFeeds:
         self._log, self._access = self._fresh_access()
         self._ips: OrderedDict[tuple[str, IpsQuery], Slot] = OrderedDict()
         self._ip: OrderedDict[tuple[str, str], Slot] = OrderedDict()
+        # 069 — IP 하나 단위 목록·상세 칸(대역 칸과 같은 규칙)
+        self._addrs: OrderedDict[tuple[str, AddrsQuery], Slot] = OrderedDict()
+        self._addr: OrderedDict[tuple[str, str], Slot] = OrderedDict()
         self._scan_lock = threading.Lock()  # 상세 다시 읽기는 프로세스에서 한 번에 하나
         # 주기 0 — Clarity 의 캐시는 Redis 기록이고, 이 칸은 한 번에 하나·3초 기다림·직전 결과만 맡는다
         self._clarity = Slot(0, mono, wait_sec)
@@ -195,6 +238,17 @@ class VisitFeeds:
             transport=geo_transport,
             start=geo_start,
         )
+        # 069 — IP 상세의 역방향 DNS·검색 로봇 확인(24시간 메모리 캐시 — 1시간 비움과 무관, 방문 기록이 아닌 공개 이름)
+        self.dns = dns or Dns()
+        # 069 — DB-IP City 판(도시). 볼륨 파일·IP 피드가 챙길 때만 받는다. 039 판처럼 프로세스에 남는다
+        self.city = CityLoader(
+            geo_cache_dir,
+            clock=clock,
+            mono=mono,
+            warn=self._warn,
+            transport=city_transport,
+            start=city_start,
+        )
 
     # --- /admin/access ---
 
@@ -210,6 +264,7 @@ class VisitFeeds:
         self._idle = None
         self._log, self._access = self._fresh_access()
         self._ips, self._ip = OrderedDict(), OrderedDict()
+        self._addrs, self._addr = OrderedDict(), OrderedDict()
 
     def _touch(self) -> None:
         """접속 요청(요약·대역 목록·상세)마다 1시간 비움 타이머를 다시 건다."""
@@ -298,6 +353,93 @@ class VisitFeeds:
             "band": band,
         }
         return self._checked("access.ip", head, result, IP_KEYS)
+
+    # --- /admin/access/addrs (069) ---
+
+    async def addrs(self, window: str | None, query: AddrsQuery) -> dict[str, Any]:
+        """IP 하나 단위 목록 — `{state, code, window, total, since, rows}`. 파일 캐시는 요약(038)·대역(067)과 나눠 쓴다."""
+        now = self._clock()
+        name = choose(window, now, self._gate)
+        self._touch()
+        log = self._log
+        try:
+            slot = self._band_slot(self._addrs, (name, query))
+            result = await slot.get(lambda: self._load_addrs(log, name, query))
+        except Exception as exc:
+            result = self._failed("access.addrs", exc)
+        head = {"state": result.state, "code": result.code, "window": name}
+        return self._checked("access.addrs", head, result, ADDRS_KEYS)
+
+    async def _load_addrs(self, log: AccessLog, name: str, query: AddrsQuery) -> Result:
+        now = self._clock()
+        try:
+            values, broken = await asyncio.to_thread(
+                log.addrs,
+                name,
+                now,
+                query,
+                lambda: self.geo.table,
+                lambda: self.city.table,
+            )
+        except NoLogFile:
+            return Result("unconfigured", "no_file")
+        except Exception as exc:
+            return self._failed("access.addrs", exc)
+        if broken:
+            self._warn("access.addrs", broken[0])
+        self._ensure_places(now)
+        return Result("ok", None, int(now * 1000), values)
+
+    async def addr(self, ip: str, window: str | None) -> dict[str, Any]:
+        """IP 하나(또는 가린 대역)의 상세 — 창 안 파일을 그 행의 줄만 골라 다시 훑는다(요청이 있을 때만·한 번에 하나)."""
+        now = self._clock()
+        name = choose(window, now, self._gate)
+        self._touch()
+        log = self._log
+        try:
+            slot = self._band_slot(self._addr, (ip, name))
+            result = await slot.get(lambda: self._load_addr(log, ip, name))
+        except Exception as exc:
+            result = self._failed("access.addr", exc)
+        head = {"state": result.state, "code": result.code, "window": name, "ip": ip}
+        return self._checked("access.addr", head, result, ADDR_KEYS)
+
+    async def _load_addr(self, log: AccessLog, ip: str, name: str) -> Result:
+        now = self._clock()
+
+        def read() -> tuple[dict[str, Any], list[str]]:
+            since = (
+                log.since()
+            )  # 목록 캐시가 아는 전체 저장 시작 시각(비었으면 None — 훑기가 찾는다)
+            with self._scan_lock:
+                return access_addr.scan(
+                    self._dir,
+                    ip,
+                    name,
+                    now,
+                    self._gate,
+                    since,
+                    self.geo.table,
+                    self.city.table,
+                    self.dns,
+                )
+
+        try:
+            values, broken = await asyncio.to_thread(read)
+        except NoLogFile:
+            return Result("unconfigured", "no_file")
+        except Exception as exc:
+            return self._failed("access.addr", exc)
+        if broken:
+            self._warn("access.addr", broken[0])
+        self._ensure_places(now)
+        return Result("ok", None, int(now * 1000), values)
+
+    def _ensure_places(self, now: float) -> None:
+        """나라·망 종류(039)·City(069) 판 — 없거나 낡았으면 받기를 띄운다, 기다리지 않는다."""
+        if now >= self._gate:
+            self.geo.ensure()
+        self.city.ensure()
 
     def _scan(
         self, name: str, now: float, band: str, geo: Callable[[], Any]
