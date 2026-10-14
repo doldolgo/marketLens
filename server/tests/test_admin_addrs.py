@@ -235,3 +235,107 @@ def test_kpis_count_bot_and_datacenter_shares_and_today(first: dict[str, Any]) -
     """070 §3.2 — IP 수 = total, 봇 판정 = (봇+의심 요청) ÷ 불러온 요청, 데이터센터 요청 비율, 오늘(KST) 처음 본 IP. total 이 더 크면 어림(≈)."""
     assert first["kpis"] == ["7", "≈ 44%", "≈ 38%", "2"]
     assert first["deltas"] == ["불러온 5개 기준", "불러온 5개 기준"]
+
+
+def test_since_line_and_text_only(first: dict[str, Any]) -> None:
+    """070 §3.2·§3.4 — since 가 있으면 머리 아래 'IP 전체는 MM-DD HH:MM 부터 …'(KST), 없으면 숨김. 피드 글자는 글로만."""
+    text, hidden = first["since"]
+    assert (
+        not hidden
+        and text.startswith("IP 전체는 ")
+        and text.endswith(" 부터 — 그 전 기록은 대역(가림)으로 보인다")
+    )
+    assert len(text.split(" ")[2]) == 5  # MM-DD
+    assert X in first["cells"][4][3] and first["tags"] == []
+    none = _page(addrs={**LIST, "since": None})["first"]["since"]
+    assert none == ["", True]
+
+
+FILTERS = r"""
+const before = () => v.s.calls.length
+let n = before()
+v.click('verdict', 'suspect')
+await flush()
+v.click('verdict', 'bot')
+await flush()
+out.verdict = { calls: v.s.calls.slice(n), url: v.s.cleared.at(-1), pressed: v.groups.verdict.map((b) => b.attrs['aria-pressed']), chips: document.getElementById('filters').kids.map((c) => c.textContent) }
+n = before()
+document.getElementById('a-masked').fire('click')
+await flush()
+v.click('net', 'cloud')
+await flush()
+document.getElementById('a-q').fire('input', { target: { value: ' 66.249.' } })
+await flush()
+out.more = { calls: v.s.calls.slice(n), url: v.s.cleared.at(-1), masked: document.getElementById('a-masked').attrs['aria-pressed'], net: v.groups.net.map((b) => b.attrs['aria-pressed']) }
+n = before()
+const th = (label) => document.getElementById('tbl-addrs').kids[0].kids[0].kids.find((x) => x.textContent === label)
+th('점수').kids[0].fire('click')
+await flush()
+th('위치').kids[0].fire('click')
+await flush()
+const place = cells('tbl-addrs').map((c) => c[3])
+out.sort = { calls: v.s.calls.slice(n), place, desc: place.join() === [...place].sort((a, b) => b.localeCompare(a, 'ko')).join() }
+"""
+
+
+def test_filters_and_server_sort_become_the_addrs_query() -> None:
+    """070 §3.2 — 판정(여럿 — 069 순서로 쉼표)·가린 기록 빼기(masked=0)·망 종류·찾기(주소에 싣지 않음) → 부르는 주소, 거르기는 ?f=…
+    칩, 점수 머리는 서버 정렬(sort=score), 위치 머리는 불러온 행 안에서."""
+    got = _page(extra=FILTERS)
+    assert got["verdict"]["calls"] == [
+        "/svc/api/admin/access/addrs?window=24h&verdict=suspect&sort=requests&limit=200&offset=0",
+        "/svc/api/admin/access/addrs?window=24h&verdict=bot%2Csuspect&sort=requests&limit=200&offset=0",
+    ]
+    assert got["verdict"]["url"] == "/visitors.html?f=verdict%3Asuspect&f=verdict%3Abot"
+    assert got["verdict"]["pressed"] == ["true", "true", "false", "false", "false"]
+    assert got["verdict"]["chips"] == ["판정의심×", "판정봇×"]
+    assert got["more"]["calls"] == [
+        "/svc/api/admin/access/addrs?window=24h&verdict=bot%2Csuspect&masked=0&sort=requests&limit=200&offset=0",
+        "/svc/api/admin/access/addrs?window=24h&net=cloud&verdict=bot%2Csuspect&masked=0&sort=requests&limit=200&offset=0",
+        "/svc/api/admin/access/addrs?window=24h&net=cloud&verdict=bot%2Csuspect&q=66.249.&masked=0&sort=requests&limit=200&offset=0",
+    ]
+    assert "66.249" not in got["more"]["url"] and "masked%3A0" in got["more"]["url"]
+    assert got["more"]["masked"] == "true" and got["more"]["net"][3] == "true"
+    assert got["sort"]["calls"] == [
+        "/svc/api/admin/access/addrs?window=24h&net=cloud&verdict=bot%2Csuspect&q=66.249.&masked=0&sort=score&limit=200&offset=0"
+    ]
+    assert (
+        got["sort"]["desc"] and len(got["sort"]["place"]) == 5
+    )  # 부르지 않고 불러온 행 안에서 글자 내림차순
+
+
+VIEW = r"""
+let n = v.s.calls.length
+v.click('view', 'band')
+await flush()
+out.band = { calls: v.s.calls.slice(n), url: v.s.cleared.at(-1), hidden: ['kpis-ip', 'card-addrs', 'kpis-band', 'card-bands'].map((id) => document.getElementById(id).hidden), since: document.getElementById('since').hidden, view: v.groups.view.map((b) => b.attrs['aria-pressed']) }
+v.click('view', 'ip')
+await flush()
+out.back = { url: v.s.cleared.at(-1), hidden: ['kpis-ip', 'card-bands'].map((id) => document.getElementById(id).hidden) }
+"""
+
+
+def test_view_toggle_round_trips_in_the_address() -> None:
+    """070 §3.2 — 'IP 별 | 대역 별' 단추 = 주소 view(기본 ip 는 싣지 않음), 대역 별은 067 ips 를 부르고 since 줄을 숨긴다.
+    ?view=band 로 열면 처음부터 대역 별, 목록 밖 값은 기본(IP 별)."""
+    got = _page(extra=VIEW)
+    assert got["band"]["calls"] == [IPS]
+    assert got["band"]["url"] == "/visitors.html?view=band"
+    assert got["band"]["hidden"] == [True, True, False, False]
+    assert got["band"]["since"] and got["band"]["view"] == ["false", "true"]
+    assert got["back"] == {"url": "/visitors.html", "hidden": [False, True]}
+    band = _page(search="?view=band")["first"]
+    assert band["calls"] == [IPS] and band["hidden"] == [True, True, False, False]
+    odd = _page(search="?view=nope&f=verdict:bot&f=masked:1")["first"]
+    assert odd["calls"] == [
+        "/svc/api/admin/access/addrs?window=24h&verdict=bot&sort=requests&limit=200&offset=0"
+    ]
+
+
+def test_before_069_the_ip_view_is_an_empty_table_with_the_part_badge() -> None:
+    """070 §3.4 — 069 배포 전(404): IP 별은 066 부분 상태 배지('연결 안 됨')와 빈 표·큰 수 '–'. 대역 별은 그대로(test_admin_fake noaddrs)."""
+    got = _page(addrs={})  # 빈 dict = 404 로 답하게
+    first = got["first"]
+    assert first["cells"] == [] and first["kpis"] == ["–", "–", "–", "–"]
+    assert first["tag"] == "연결 안 됨" and first["caption"] == "연결 안 됨"
+    assert first["since"] == ["", True]
