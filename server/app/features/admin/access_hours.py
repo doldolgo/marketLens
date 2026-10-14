@@ -5,7 +5,8 @@
 메모리는 줄 수와 무관하다. 짝은 처리방침 v2 시행일(게이트) 뒤 줄에서만 만든다 — 게이트 앞 줄은 해시하지 않는다.
 게이트 뒤 날의 짝을 처음 기록할 때만 DB-IP 판(039)으로 그 IP 의 /24 를 찾아 나라·망 종류를 짝 기록에 둔다.
 짝의 페이지 줄마다 그날 첫·마지막 페이지 이름과 페이지 수를 고친다(062 — 이름은 고정 글자, 경로·쿼리는 남기지 않는다).
-줄마다 가린 IP 대역 칸도 센다(067 `access_bands.py` — 대역은 가린 IP 글자 그대로, 짝은 038 해시만).
+줄마다 가린 IP 대역 칸도 센다(067 `access_bands.py` — 대역은 가린 IP 글자 그대로, 짝은 038 해시만). 짝 해시는 늘 가린 IP
+(/24·/48)로 만든다 — 069 뒤 기록은 IP 전체다.
 UA 원문은 세는 동안의 지역 변수에만 있고 남기지 않는다(UA·출처 판정 메모도 파일 읽기가 끝나면 — 깨진 파일로
 예외가 나도 — 버린다. UA 메모의 키는 판정이 보는 앞 1,024자, 출처는 512자를 넘으면 메모하지 않는다).
 세는 동안 따로 차례를 넘기지 않는다 — 인터프리터가 5ms 마다 GIL 을 넘겨 같은 프로세스의 이벤트 루프 지연은 측정상 ≤30ms(§5).
@@ -18,7 +19,12 @@ from urllib.parse import parse_qs
 
 from app.features.admin import access_classes as lines
 from app.features.admin import access_traits
-from app.features.admin.access_bands import BandTally, agent_name, pair_mark
+from app.features.admin.access_bands import (
+    BandTally,
+    agent_name,
+    masked_ip,
+    pair_mark,
+)
 from app.features.admin.access_classes import CLASSES, Line
 from app.features.admin.access_flows import NPAGES_CAP, page_name
 from app.features.admin.access_pairs import (
@@ -251,7 +257,9 @@ class FileTally:
                 day = kst_day(ts)
                 key = self.keys.day_key(day)
                 self._key = day, key
-            pair, mark = pair_hash(key, ip, ua), pair_mark(day, its)
+            # 069 — 짝 열쇠는 가린 IP(/24·/48)로 — 기록이 IP 전체가 된 뒤에도 짝 수가 이어지게
+            masked = masked_ip(ip, self.bands.band(ip))
+            pair, mark = pair_hash(key, masked, ua), pair_mark(day, its)
             if ua_kind == "browser":
                 flags = (PROBED if probe else 0) | (OPERATED if operator else 0)
                 signal = js_view or upgraded

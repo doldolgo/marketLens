@@ -173,7 +173,8 @@ class BandScan:
         else:
             heapq.heappushpop(self.recent, item)
         if page and ip and ts >= self.gate:
-            self._flow(ts, ip, ua, path, query, ref, traits)
+            # 069 — 짝은 가린 IP 로 센다(목록의 짝 수·038 과 같은 단위). 이 대역 줄만 오므로 대역 글자를 쓴다
+            self._flow(ts, self.band, ua, path, query, ref, traits)
 
     def _flow(
         self,
