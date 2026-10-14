@@ -43,7 +43,12 @@ PAGES: dict[str, tuple[list[str], list[str]]] = {
             "durations",
         ],
     ),
+    # 070 — IP 별(기본): 근거 글·도시·망 사업자에 글자, 판은 근거·PTR·경로·브라우저 정보
     "visitors.js": (
+        ["/svc/api/admin/access/addrs?window=24h&sort=requests&limit=200&offset=0"],
+        [],
+    ),
+    "visitors.js?view=band": (
         ["/svc/api/admin/access/ips?window=24h&sort=requests&limit=200&offset=0"],
         [],
     ),
@@ -66,11 +71,18 @@ PAGES: dict[str, tuple[list[str], list[str]]] = {
 }
 
 TIP_TEXT = {"overview.js", "server.js", "traffic.js"}
-DOM_TEXT = {"server.js", "traffic.js", "visitors.js", "insight.js", "screens.js"}
+DOM_TEXT = {
+    "server.js",
+    "traffic.js",
+    "visitors.js",
+    "visitors.js?view=band",
+    "insight.js",
+    "screens.js",
+}
 
 SCENARIO = r"""
 const respond = (url) => input.answers[url] || [404, { detail: 'Not Found' }]
-const v = setup({ respond, buttons: { detail: input.details } })
+const v = setup({ respond, search: input.search, buttons: { detail: input.details } })
 document.getElementById('sheet').hidden = true
 await page(input.page)
 await flush()
@@ -105,10 +117,13 @@ for (const d of input.details) {
   await flush()
 }
 if (input.page === 'visitors.js') {
-  const rows = document.getElementById('tbl-bands').kids[1]?.kids || []
+  const rows = document.getElementById(input.search ? 'tbl-bands' : 'tbl-addrs').kids[1]?.kids || []
   // 글자를 넣은 대역은 대역 꼴이 아니라 열리지 않는다 — 꼴이 맞는 대역의 판(경로·브라우저 정보에 글자가 든다)
-  rows.find((tr) => !tr.kids[0].textContent.includes('<img') && tr.kids[0].textContent.includes('/'))?.fire('click')
+  // IP 별 — 글자를 넣은 IP 도 꼴이 아니라 열리지 않는다. 가린 행·모음 행이 아닌 IP 의 판(근거·위치·PTR·경로·브라우저 정보에 글자가 든다)
+  const ok = input.search ? (t) => t.includes('/') : (t) => !t.includes('대역') && !t.includes('(')
+  rows.find((tr) => !tr.kids[0].textContent.includes('<img') && ok(tr.kids[0].textContent))?.fire('click')
   await flush()
+  out.sheet = [document.getElementById('sheet-title').textContent, document.getElementById('sheet-custom').textContent]
   tooltips('ip')
 }
 const tagsOf = (n) => (typeof n === 'string' ? [] : [n.tag, ...n.kids.flatMap(tagsOf)])
@@ -122,13 +137,19 @@ out.text = [...v.byId.values()].map((n) => n.textContent).join('\n')
 def test_feed_text_never_becomes_html_in_tooltips_tables_or_the_page(page: str) -> None:
     feeds, details = PAGES[page]
     urls = [*FAST, *feeds]
+    name, _, search = page.partition("?")
     payload: dict[str, Any] = {
-        "page": page,
+        "page": name,
+        "search": f"?{search}" if search else "",
         "details": details,
         "x": X,
         "answers": answers("xss", urls),
     }
     if page == "visitors.js":
+        for row in payload["answers"][feeds[0]][1]["rows"]:
+            url = f"/svc/api/admin/access/addr?ip={row['ip'].replace('/', '%2F').replace(':', '%3A')}&window=24h"
+            payload["answers"].update(answers("xss", [url]))
+    if page == "visitors.js?view=band":
         bands = payload["answers"][feeds[0]][1]["bands"]
         for band in bands[:3]:
             url = f"/svc/api/admin/access/ip?band={band['band'].replace('/', '%2F').replace(':', '%3A')}&window=24h"
@@ -146,6 +167,9 @@ def test_feed_text_never_becomes_html_in_tooltips_tables_or_the_page(page: str) 
         assert escaped, page
     if page in DOM_TEXT:
         assert X in got["text"], page
+    if page == "visitors.js":  # IP 판이 열렸고 근거·위치 칸에 글자로 들어갔다
+        title, custom = got["sheet"]
+        assert title and "<img" not in title and X in custom, got["sheet"]
     assert not {"img", "script", "iframe", "object", "embed"} & set(got["tags"]), got[
         "tags"
     ]

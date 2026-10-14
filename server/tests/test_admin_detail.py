@@ -310,6 +310,7 @@ def test_band_detail_steps_without_stacking_history_and_shows_partial_and_bad_ba
         BAND_FLOW,
         {
             "page": "visitors.js",
+            "search": "?view=band",  # 070 — 대역 별 보기
             "answers": {**answers("ok", [*FAST, IPS]), **answers("bands", detail)},
         },
     )
@@ -322,7 +323,7 @@ def test_band_detail_steps_without_stacking_history_and_shows_partial_and_bad_ba
         and second["tag"] == "일부만 읽음"
     )
     assert second["pushed"] == [
-        f"/visitors.html#detail=ip%3A{got['bands'][1].replace('/', '%2F').replace(':', '%3A')}"
+        f"/visitors.html?view=band#detail=ip%3A{got['bands'][1].replace('/', '%2F').replace(':', '%3A')}"
     ]
     assert second["calls"][-1].startswith("/svc/api/admin/access/ip?band=") and second[
         "calls"
@@ -336,6 +337,7 @@ def test_band_detail_steps_without_stacking_history_and_shows_partial_and_bad_ba
         HASH_FLOW,
         {
             "page": "visitors.js",
+            "search": "?view=band",
             "hash": "#detail=ip%3A1.2.3.0%2F24",
             "answers": {
                 **answers("bands", [*FAST, IPS]),

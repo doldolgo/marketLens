@@ -8,7 +8,7 @@ export const FAST_MS = 10_000; // 빠른 묶음 — 029 의 네 경로, 보이�
 export const SLOW_MS = 60_000; // 느린 묶음 — 그 페이지가 쓰는 나머지, 보이는 동안만
 const XHR = Object.freeze({ 'X-Requested-With': 'XMLHttpRequest' });
 
-// 관리자 nginx 분기로 가는 경로(029·034·035·063 — 067 의 ips·ip 와 068 의 history 는 그 스펙이 정확 일치 location 을 더한다).
+// 관리자 nginx 분기로 가는 경로(029·034·035·063 — 067 의 ips·ip, 068 의 history, 069 의 addrs·addr 는 그 스펙이 정확 일치 location 을 더한다).
 // 화면이 부르는 곳은 이 표와 즉시 갱신(POST /api/refresh)뿐이다
 export const PATHS = Object.freeze({
   collector: '/api/health',
@@ -21,6 +21,8 @@ export const PATHS = Object.freeze({
   access: '/svc/api/admin/access',
   ips: '/svc/api/admin/access/ips',
   ip: '/svc/api/admin/access/ip',
+  addrs: '/svc/api/admin/access/addrs',
+  addr: '/svc/api/admin/access/addr',
   clarity: '/svc/api/admin/clarity',
   history: '/svc/api/admin/clarity/history',
   attention: '/svc/api/admin/attention',
