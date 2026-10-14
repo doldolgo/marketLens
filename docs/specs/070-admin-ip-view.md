@@ -48,7 +48,7 @@
 cd server && uv sync --extra dev
 uv run --extra dev ruff check .            # All checks passed!
 uv run --extra dev ruff format --check .   # 431 files already formatted
-uv run --extra dev pytest -q               # 2611 passed, 1 skipped (새 test_admin_addrs 7·test_admin_addr_sheet 7, 고친 pages·detail·fake(경우 열하나 × 방문자 대역 별 보기)·xss(IP 별·대역 별)·screen·scripts·contract_visits)
+uv run --extra dev pytest -q               # 2613 passed, 1 skipped (새 test_admin_addrs 7·test_admin_addr_sheet 9, 고친 pages·detail·fake(경우 열하나 × 방문자 대역 별 보기)·xss(IP 별·대역 별)·screen·scripts·contract_visits)
 node --check web/admin/*.js                # 31 파일 통과
 cd web && npm ci && npm run lint && npm run build   # oxlint 0 · vite build 통과
 # 가짜 피드 서버 스모크(127.0.0.1:18070): /visitors.html 200 + CSP·X-Frame-Options DENY·no-store 그대로,
@@ -77,5 +77,7 @@ cd web && npm ci && npm run lint && npm run build   # oxlint 0 · vite build 통
   12. 복사 — `navigator.clipboard` 가 없거나 실패면 단추 글 '복사 안 됨'. 응답 ok 인데 IP 가 없으면 표 자리에 '자료 없음'.
   13. 가짜 피드 — old·missing 은 addrs·addr 도 404(069 전이기도 하다), 새 경우 noaddrs(069 만 전 — 대역 별은 그대로)·many(IP 1,200·IP 판 partial). §4 를 고쳤다. 버린 것: old 의 뜻 바꾸기(067·068 전 시험이 기댄다).
   14. 069 nginx 정확 일치 location 둘은 069 PR 몫 — test_admin_pages 는 그 둘이 아직 없으면(관리자 server 의 정적 `location /`) 분기 단언을 건너뛰고, 069 머지 뒤에는 저절로 단언한다.
+  16. 꼴이 아닌 IP 가 주소에 오면(`#detail=addr:nope`) 판을 열지도 부르지도 않는다(066 §3.4 '목록 밖 id 는 무시' 와 같음). 꼴은 맞는데 서버가 400 `bad_ip` 면 판 안 한 줄('이 IP 는 상세를 볼 수 없다 — IP 꼴이 아니다(bad_ip)'). 가짜 피드로 보려면 화면 검사는 지나고 가짜 서버는 거절하는 `#detail=addr%3A%3A%3Affff%3A1.2.3.4`. 버린 것: 꼴이 아닌 글도 판을 열고 400 줄을 보이기(쓸모없는 호출).
+  17. 설계 세션 브라우저 확인(2026-10-14)에서 고친 것 — 판정 근거·어디 칸의 클래스 `top` 이 좁은 화면 머리 줄 `.top { display: none }` 과 겹쳐 실제 브라우저에서 두 칸이 사라졌다(node 가짜 DOM 은 CSS 를 모른다). 클래스를 `addr-top` 으로 바꾸고, IP 판·표가 만드는 클래스를 고르는 admin.css 규칙에 display: none 이 없는지 보는 정적 시험을 더했다.
   15. 069 피드 코드가 아직 없다(PR #136 초안 — 이 세션 끝까지 머지 안 됨) — §3.1 계약과 069 스펙만으로 만들었고, addr 응답에도 067 상세처럼 `state`·`code`·`window` 가 있다고 봤다.
 - 남은 빚: 069 머지 뒤 진짜 피드 코드 응답으로 방문자 IP 별·IP 판을 그리는 대조 시험(066 의 test_admin_contract_visits 꼴)과 위 15 확인. 설계 세션 브라우저 확인(1440·1024·390, IP 판, CSP). '봇만 있는 대역 빼기' 칩이 IP 별에서도 칩 줄에 남는 것(동작 없음).
