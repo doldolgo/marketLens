@@ -67,6 +67,7 @@ from app.features.admin.clarity_dims import DIMS_CALLS, DIMS_KEYS, parse_dims
 from app.features.admin.clarity_pages import parse_pages
 from app.features.admin.clarity_schedule import ClarityKind, DirectBudget
 from app.features.admin.clarity_values import parse_base
+from app.features.admin.geo_city_fetch import CityLoader
 from app.features.admin.geo_fetch import GeoLoader
 from app.features.admin.parts import (
     UNCONFIGURED,
@@ -124,6 +125,9 @@ class VisitFeeds:
         schedule: Callable[[float, Callable[[], None]], Any] | None = None,
         geo_transport: httpx.BaseTransport | None = None,
         geo_start: Callable[[Callable[[], None]], Any] | None = None,
+        geo_cache_dir: str | None = None,
+        city_transport: httpx.BaseTransport | None = None,
+        city_start: Callable[[Callable[[], None]], Any] | None = None,
     ) -> None:
         self._dir = access_dir or None
         self._token = clarity_token or None
@@ -194,6 +198,15 @@ class VisitFeeds:
             warn=self._warn,
             transport=geo_transport,
             start=geo_start,
+        )
+        # 069 — DB-IP City 판(도시). 볼륨 파일·IP 피드가 챙길 때만 받는다. 039 판처럼 프로세스에 남는다
+        self.city = CityLoader(
+            geo_cache_dir,
+            clock=clock,
+            mono=mono,
+            warn=self._warn,
+            transport=city_transport,
+            start=city_start,
         )
 
     # --- /admin/access ---

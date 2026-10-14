@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     admin_aws_region: str | None = None
     # 접속 요약이 읽는 caddy 로그 디렉터리(035) — compose 가 api 에만 준다(server/.env 에 두지 않는다). 비면 unconfigured
     access_log_dir: str | None = None
+    # DB-IP City 캐시 파일 디렉터리(069) — compose 가 serve 의 api 에만 named volume `geo-cache` 로 준다(server/.env 에 두지
+    # 않는다). 비면 City 를 받지도 읽지도 않는다(위치 칸 null)
+    geo_cache_dir: str | None = None
     # Clarity Data Export 토큰(035) — 사람이 serve 의 server/.env 에 넣는 비밀. 비면 Clarity 부분은 unconfigured·호출 0
     clarity_api_token: str | None = None
     # 이더리움 노드 주소 둘(050 §3.4) — WS 는 Transfer 로그·newHeads 구독, HTTP 는 공백 재생·블록 조회.

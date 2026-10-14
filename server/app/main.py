@@ -167,6 +167,8 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 052 — 받은 비콘의 하루 합계를 10초마다 같은 버스로
     attention: AttentionService = app.state.attention
     attention.start(bus)
+    # 069 — 볼륨에 DB-IP City 캐시 파일이 있으면 데몬 스레드가 읽어 올린다(받지 않는다·기다리지 않는다)
+    app.state.admin_visits.city.boot()
 
     def ws_connections() -> int:
         return hub.connections
@@ -642,6 +644,7 @@ def create_app() -> FastAPI:
         app.state.admin_visits = VisitFeeds(
             access_dir=settings.access_log_dir,
             clarity_token=settings.clarity_api_token,
+            geo_cache_dir=settings.geo_cache_dir,
         )
         app.include_router(admin_router)
         # 052 — 화면 영역 이용 통계(받기·관리자 피드). 메모리 합계·IP 셈 표·피드 캐시 자리라 앱마다 하나

@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 import httpx
 import pytest
 
-from app.features.admin import geo_fetch
+from app.features.admin import geo_city_fetch, geo_fetch
 
 
 @pytest.fixture(autouse=True)
@@ -32,5 +32,6 @@ def no_real_transport(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", refuse)
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", refuse_sync)
     monkeypatch.setattr(geo_fetch, "_daemon", no_thread)
+    monkeypatch.setattr(geo_city_fetch, "_daemon", no_thread)  # 069 — City 받기·읽기
     yield
     assert not used, f"가짜 transport 없이 실제 transport 를 썼다: {used}"
