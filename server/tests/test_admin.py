@@ -468,7 +468,10 @@ def test_api_reads_caddy_logs_read_only_and_only_api_gets_the_dir() -> None:
     """035 §3.2 — api 에 caddy 로그 읽기 전용 바인드·`ACCESS_LOG_DIR`. 다른 서비스엔 없다(caddy 는 027 의 쓰기 바인드 그대로)."""
     services = _yaml("docker-compose.yml")["services"]
     api = services["api"]
-    assert api["volumes"] == ["./logs/caddy:/var/log/caddy:ro"]
+    assert api["volumes"] == [
+        "./logs/caddy:/var/log/caddy:ro",
+        "geo-cache:/var/lib/geo",  # 069 — DB-IP City 캐시 파일
+    ]
     assert api["environment"]["ACCESS_LOG_DIR"] == "/var/log/caddy"
     for name, svc in services.items():
         if name != "api":
@@ -482,6 +485,20 @@ def test_api_reads_caddy_logs_read_only_and_only_api_gets_the_dir() -> None:
     assert [ln for ln in example.splitlines() if "CLARITY_API_TOKEN" in ln] == [
         "# CLARITY_API_TOKEN="
     ]
+
+
+def test_only_the_serve_api_gets_the_geo_cache_volume() -> None:
+    """069 §3.3 — named volume `geo-cache` 와 `GEO_CACHE_DIR` 은 serve 프로필의 api 에만. server/.env 에는 두지 않는다."""
+    compose = _yaml("docker-compose.yml")
+    services = compose["services"]
+    assert services["api"]["profiles"] == ["serve"]
+    assert services["api"]["environment"]["GEO_CACHE_DIR"] == "/var/lib/geo"
+    assert "geo-cache" in compose["volumes"]
+    for name, svc in services.items():
+        if name != "api":
+            assert "GEO_CACHE_DIR" not in (svc.get("environment") or {}), name
+            assert not any("geo-cache" in str(v) for v in svc.get("volumes", [])), name
+    assert "GEO_CACHE_DIR" not in _text("server/.env.example")
 
 
 def test_root_path_only_on_collector_and_public_api_docs_stay_closed() -> None:
