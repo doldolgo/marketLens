@@ -1750,6 +1750,165 @@ details.card > summary {
 }
 
 /* — 좁은 화면 — 1280 이상 3~4열 · 768~1279 2열(내비 아이콘만) · 768 미만 1열(☰ 시트, 상세 판은 화면 전체) — */
+/* — 방문자 IP 별(070) — 판정 배지(모양 + 글)·점수 막대·위치 줄임표·판정 근거 막대(봇 쪽 빨강·사람 쪽 청록)·신호 칩 — */
+.shape.op {
+  border-radius: 1px;
+  background: var(--accent);
+  box-shadow: none;
+  transform: rotate(45deg) scale(0.85);
+}
+.seg button .shape {
+  margin-right: 6px;
+}
+.since {
+  margin: var(--sp-3) var(--sp-6) 0;
+}
+.credit {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.credit a {
+  color: inherit;
+}
+.verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.vtag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+}
+.score {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.sbar {
+  position: relative;
+  width: 48px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--grid);
+}
+.sbar .fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--none);
+}
+.sbar .fill.bad {
+  background: var(--bad);
+}
+.sbar .fill.warn {
+  background: var(--warn);
+}
+.sbar .fill.ok {
+  background: var(--ok);
+}
+.tbl td.place {
+  max-width: 16em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* IP 상세 판 — 판 몸(격자)의 사용자 칸을 풀어 판정 근거·어디 칸을 맨 위로(그래프 위), 쓰임 칸은 그래프 아래 */
+#sheet-custom.flat {
+  display: contents;
+}
+#sheet-custom.flat > .top {
+  order: -1;
+}
+.addr-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.addr-ip {
+  font-size: var(--fs-16);
+  overflow-wrap: anywhere;
+}
+.reasons {
+  display: grid;
+  gap: 6px;
+}
+.reason {
+  display: grid;
+  grid-template-columns: 3.5em minmax(0, 1fr) minmax(56px, 28%);
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-13);
+}
+.reason .w {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.rbar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--grid);
+}
+.rbar .fill {
+  display: block;
+  height: 100%;
+}
+.rbar .fill.pos {
+  background: var(--bad);
+}
+.rbar .fill.neg {
+  background: var(--c3);
+}
+.score-line {
+  margin: var(--sp-3) 0 0;
+  font-weight: 600;
+}
+.crawler {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-13);
+}
+.crawler.ok {
+  color: var(--ok);
+}
+.crawler.bad {
+  color: var(--bad);
+}
+.kv small {
+  margin-left: 6px;
+  color: var(--text-3);
+}
+.flags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.flag {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--raised);
+  color: var(--text-2);
+  font-size: var(--fs-11);
+}
+.flag.bad {
+  background: rgb(224 105 125 / 0.2);
+  color: var(--text-1);
+}
+.flag.warn {
+  background: rgb(224 164 88 / 0.2);
+  color: var(--text-1);
+}
+
 @media (min-width: 1440px) {
   .content {
     gap: var(--sp-6);
@@ -1861,6 +2020,9 @@ details.card > summary {
     padding: var(--sp-2) var(--sp-4) 0;
   }
   .notice {
+    margin: var(--sp-2) var(--sp-4) 0;
+  }
+  .since {
     margin: var(--sp-2) var(--sp-4) 0;
   }
   .content {
