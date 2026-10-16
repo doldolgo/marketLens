@@ -1,8 +1,8 @@
 // 관리자 페이지 하나를 띄운다(스펙 066 §3.1) — 주소 상태(?range·cmp·f · #detail)·피드 부르기(빠른 10초·느린 60초, 보이는 동안만 —
-// 064 규칙 그대로)·머리(기간·비교·'10초마다 · 시각')·거르기 칩·내비 모양·단축키(X 비교 켜고 끄기, Esc 닫기)·상세 판 열고 닫기.
+// 064 규칙 그대로 + page.live 인 페이지만 지금 묶음 5초 — 074 '지금 보는 중')·머리(기간·비교·'10초마다 · 시각')·거르기 칩·내비 모양·단축키(X 비교 켜고 끄기, Esc 닫기)·상세 판 열고 닫기.
 // 카드 그리기는 페이지 모듈이 준 함수가 하고, 한 카드의 예외는 그 카드의 '표시 오류' 배지 하나로 끝난다.
 // 주소를 쓰는 곳은 urlOf() 하나 — 그 페이지의 고정 주소(page.home) + 검사한 값으로만 만든다(지금 경로를 쓰지 않는다 — 029).
-import { FAST, FAST_MS, SLOW_MS, $, button, clean, clock, el, notice, own, put, req, tagText } from './common.js';
+import { FAST, FAST_MS, LIVE_MS, SLOW_MS, $, button, clean, clock, el, notice, own, put, req, tagText } from './common.js';
 import { marks, problems } from './rules.js';
 import { mountDetail } from './detail.js';
 import { closeHelp, mountHelp } from './help.js';
@@ -16,6 +16,7 @@ const TONE_WORD = Object.freeze({ bad: '문제', warn: '주의' });
 
 // page = { id, home(고정 주소), ranges, range(기본), compare(range) → { prev, week }, filters({ 키: 값 검사 }), filterName(k, v),
 //   params({ 이름: [기본값, …허용 값] } — 그 페이지만의 주소 인자, 065), slowMs(느린 묶음 주기 — 없으면 60초, 065 화면은 5분),
+//   live(지금 묶음 5초를 돌린다 — needs 가운데 LIVE 경로만 그 묶음으로, 074),
 //   needs(app) → [req…](느린 묶음 — 받은 값에 따라 늘 수 있다), rules(app) → { 이름: 결과 }(띠 규칙), cards [[이름, 그리기]],
 //   details({ id: 판 }), wire(app) }
 export function start(page) {
@@ -59,17 +60,20 @@ export function start(page) {
     loadMissing();
   }
 
-  // 두 묶음은 따로 돈다. 같은 묶음은 앞선 호출이 끝나기 전에 다시 부르지 않고, 다음 호출은 앞선 호출을 시작한 때부터 잰다
-  const fast = { fast: true, every: FAST_MS, busy: false, timer: 0, started: 0 };
-  const slow = { fast: false, every: page.slowMs ?? SLOW_MS, busy: false, timer: 0, started: 0 };
+  // 묶음은 따로 돈다. 같은 묶음은 앞선 호출이 끝나기 전에 다시 부르지 않고, 다음 호출은 앞선 호출을 시작한 때부터 잰다.
+  // 지금 묶음(5초)은 page.live 인 페이지만 — LIVE 경로(req.live)는 느린 묶음에서 빼고 이 묶음으로 부른다
+  const fast = { pick: (r) => r.fast, every: FAST_MS, busy: false, timer: 0, started: 0 };
+  const slow = { pick: (r) => !r.fast && !r.live, every: page.slowMs ?? SLOW_MS, busy: false, timer: 0, started: 0 };
+  const live = { pick: (r) => r.live, every: LIVE_MS, busy: false, timer: 0, started: 0 };
+  const loops = page.live ? [fast, slow, live] : [fast, slow];
   async function run(loop) {
     clearTimeout(loop.timer);
     if (loop.busy || reloading || document.visibilityState !== 'visible') return;
     loop.busy = true;
     loop.started = Date.now();
     try {
-      const signals = await Promise.all([...needs().values()].filter((r) => r.fast === loop.fast).map(store.load));
-      if (loop.fast) lastFast = Date.now();
+      const signals = await Promise.all([...needs().values()].filter(loop.pick).map(store.load));
+      if (loop === fast) lastFast = Date.now();
       settle(signals);
     } finally {
       loop.busy = false;
@@ -292,14 +296,14 @@ export function start(page) {
     else detail.close();
     refresh();
   });
-  // 숨었다가 보이면 빠른 묶음은 곧바로, 느린 묶음은 마지막 호출에서 60초가 지났을 때만 곧바로(아니면 남은 만큼 뒤)
+  // 숨었다가 보이면 빠른·지금 묶음은 곧바로, 느린 묶음은 마지막 호출에서 60초가 지났을 때만 곧바로(아니면 남은 만큼 뒤)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') {
-      clearTimeout(fast.timer);
-      clearTimeout(slow.timer);
+      for (const loop of loops) clearTimeout(loop.timer);
       return;
     }
     run(fast);
+    if (page.live) run(live);
     if (!slow.busy) schedule(slow);
   });
 
@@ -308,5 +312,6 @@ export function start(page) {
   paint();
   run(fast);
   run(slow);
+  if (page.live) run(live);
   return app;
 }
