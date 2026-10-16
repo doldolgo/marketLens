@@ -1,4 +1,4 @@
-// 셸 레이아웃 — 헤더 + KPI 스트립 + 탭 6개 + 푸터 (스펙 002 §3.5, 구조는 docs/design/reference/App.tsx).
+// 셸 레이아웃 — 헤더 + KPI 스트립 + 탭 6개(공개 화면엔 5개 — 수집 상태 숨김) + 푸터 (스펙 002 §3.5, 구조는 docs/design/reference/App.tsx).
 // 탭은 한 번 마운트되면 언마운트하지 않고 숨긴다: 검색어·필터·드릴다운 상태가 전환 후에도 유지되어야 하기 때문.
 // 기록 탭만 처음 볼 때 마운트한다 — 그 코드(차트 라이브러리 포함)는 첫 화면 번들에서 빠져 처음 볼 때 받는다.
 import { Component, Suspense, lazy, memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
@@ -28,6 +28,10 @@ const TABS: [TabId, string][] = [
   ['spread', '실시간 스프레드'], ['history', '기록/통계'], ['gap', '선물–현물 갭'],
   ['pp', '선선갭'], ['health', '수집 상태'], ['flow', '입출금 레이더'],
 ]
+/** 공개 화면에서 숨긴 탭 — 단추·본문을 그리지 않고 `?tab=` 으로도 열리지 않는다(기본 탭으로). 수집 상태는 관리자 화면이 보여 준다.
+ * id 는 TabId 에 남긴다 — 화면 이용 통계(052)·접속 기록 집계가 지난 기록의 `app-health` 를 계속 읽는다 */
+const HIDDEN_TABS: ReadonlySet<TabId> = new Set(['health'])
+const SHOWN_TABS = TABS.filter(([id]) => !HIDDEN_TABS.has(id))
 
 // 시계·환율 표기 — 로캘·옵션을 주는 toLocale*String 은 부를 때마다 Intl 객체를 새로 만든다. 셸은 초마다 다시 그리므로 한 번만 만든다(출력 동일).
 const KST_CLOCK = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -62,7 +66,7 @@ export default function App() {
   const { feed, now, staleTick } = useFeed()
   // 탭·선택 심볼은 URL 쿼리(?tab=&sym=)에 실려 새로고침해도 같은 화면 (002 §3.5).
   // URL 은 보이는 화면만 담는다 — sym 은 기록 탭이 활성일 때만 쓴다
-  const [tab, setTab] = useUrlState<TabId>('tab', 'spread', oneOf(TABS.map(([id]) => id)))
+  const [tab, setTab] = useUrlState<TabId>('tab', 'spread', oneOf(SHOWN_TABS.map(([id]) => id)))
   // 셸이 공유 피드를 만든 직후 /ws/spreads 구독 시작 (스펙 017 §3.4), 그 옆에서 /health/collect 5초 폴링 (011 §3.6)
   useSpreadSocket(feed)
   useHealthPolling(feed)
@@ -144,7 +148,7 @@ export default function App() {
   const coinCount = new Set(feed.spreads.map((r) => r.sym)).size
   const clock = KST_CLOCK.format(now)
 
-  const wrap = (id: TabId, node: ReactNode) => <Pane key={id} active={tab === id}>{node}</Pane>
+  const wrap = (id: TabId, node: ReactNode) => HIDDEN_TABS.has(id) ? null : <Pane key={id} active={tab === id}>{node}</Pane>
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'var(--font-body)', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
@@ -159,7 +163,7 @@ export default function App() {
         </div>
         {/* data-el — 061 화면 이용 통계의 요소 열쇠(모양·동작과 무관). 처리방침·설정 링크는 영역 밖이라 052 규칙대로 세지 않는다 */}
         <div data-area="tabs" style={{ display: 'flex', gap: 'var(--space-2)', alignSelf: 'stretch', alignItems: 'stretch' }}>
-          {TABS.map(([id, text]) => (
+          {SHOWN_TABS.map(([id, text]) => (
             <button key={id} onClick={() => pickTab(id)} className="hv-txt" data-el={`tab:${id}`}
               style={{
                 appearance: 'none', background: 'none', border: 'none',
