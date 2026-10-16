@@ -1034,12 +1034,14 @@ button.kpi[aria-pressed="true"] {
   font-variant-numeric: tabular-nums;
 }
 
-/* — 문턱 눈금 막대(상자 표) — 정상은 회색, 문턱을 넘으면 그 상태색 + 모양 — */
+/* — 문턱 눈금 막대(상자 표) — 정상은 회색, 문턱을 넘으면 그 상태색 + 모양 —
+   수치는 막대 바로 오른쪽에 왼쪽 정렬로 붙인다(어느 막대의 값인지 보이게). 수치 칸은 '▲ 100%' 가 드는 고정 폭 —
+   행마다 막대 길이가 같아야 행끼리 비교된다 */
 .meters {
   display: grid;
-  grid-template-columns: minmax(56px, 1fr) 58px;
+  grid-template-columns: minmax(56px, 1fr) 4.2em;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 .meter {
   position: relative;
@@ -1074,7 +1076,7 @@ button.kpi[aria-pressed="true"] {
 .meters b {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 6px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
