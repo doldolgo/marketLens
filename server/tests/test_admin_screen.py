@@ -65,6 +65,8 @@ MODULES = (
     "screenspanel.js",
     "help.js",
     "replaymodel.js",
+    "replayframe.js",
+    "replayview.js",
 )
 SCRIPTS = (*MODULES, *(module for _, module, _ in PAGES.values()))
 VENDOR = "vendor/echarts-5.5.1.min.js"
