@@ -333,3 +333,166 @@ def test_closing_the_sheet_blanks_the_frame_and_stops_the_clock(
     got = flow["closed"]
     assert got["open"] is False and got["src"] == "about:blank"
     assert got["ticks"] == 0 and got["polls"] == 0
+
+
+EDGE = r"""
+out.edge = snap()
+out.calls = sessionCalls()
+"""
+
+
+@pytest.mark.parametrize(
+    ("status", "note", "tag"),
+    [
+        (
+            [
+                200,
+                {
+                    "state": "ok",
+                    "code": None,
+                    "meta": None,
+                    "batches": [],
+                    "next": 0,
+                    "more": False,
+                },
+            ],
+            "기록이 없거나 지났다(14일 보관)",
+            "",
+        ),
+        (
+            [400, {"error": {"code": "bad_sid", "message": "x", "detail": None}}],
+            "이 조각은 볼 수 없다 — 조각 id 꼴이 아니다(bad_sid)",
+            "불러오지 못함",
+        ),
+        (
+            [404, {"detail": "Not Found"}],
+            "이 서버에는 화면 기록 피드가 아직 없다",
+            "연결 안 됨",
+        ),
+        ([200, {"state": "error", "code": "redis"}], "", "불러오지 못함"),
+    ],
+)
+def test_missing_bad_absent_and_broken_sessions_are_one_line(
+    status: list, note: str, tag: str
+) -> None:
+    """§3.5 — 없음·만료(meta null) → '기록이 없거나 지났다(14일 보관)', 400 bad_sid · 404(피드 배포 전) · Redis 오류는 판 상태 배지와 한 줄.
+    틀은 띄우지 않는다."""
+    got = _run(EDGE, status=status)
+    edge = got["edge"]
+    assert edge["note"].endswith(note) and edge["tag"] == tag
+    assert edge["custom"] is True and edge["src"] is None
+    assert len(got["calls"]) == 1
+
+
+def test_a_cut_session_gets_the_front_only_badge() -> None:
+    """§3.5 — 묶음 1MB·3,600개 상한에 닿은 조각은 머리에 '앞부분만' 배지."""
+    got = _run(EDGE, session=_session(S0, n=3600))["edge"]
+    assert got["tag"] == "앞부분만" and got["tagCls"] == "tag warn"
+
+
+FOLLOW = r"""
+// 지금 보는 중의 행 → 따라 보기(마지막 사건 − 3초 = 대시보드 스프레드 화면)
+document.getElementById('tbl-rplive').kids[1].kids[0].fire('click')
+await flush()
+attach()
+ready('app-spread')
+out.open = { ...snap(), pushed: v.s.pushed, calls: sessionCalls(), polls: pending(2000) }
+// 2초 — after=next, 새 묶음 없음
+await tick(10)
+await fire(2000)
+out.none = { ...snap(), calls: sessionCalls().slice(-1), polls: pending(2000) }
+// 새 묶음 둘 — 다시 펴고 8초 넘게 뒤처졌으니 마지막 사건 − 3초로(갭 화면 — 틀을 다시 띄움), 1× 로 따라간다
+shown = 5
+await fire(2000)
+ready('app-gap')
+await tick(20)
+out.more = { ...snap(), calls: sessionCalls().slice(-1), rows: list().length }
+// 1× — 마지막 사건을 넘지 않는다
+await tick(200)
+out.caught = snap()
+// 30초 동안 새 묶음 없음 → 멈춤
+clock += 31_000
+await fire(2000)
+out.gone = { ...snap(), polls: pending(2000) }
+"""
+
+
+def test_follow_mode_polls_every_two_seconds_and_stops_after_thirty() -> None:
+    """§3.3 따라 보기 — 지금 보는 중에서 연 판은 2초마다 session?after=next 로 새 묶음을 받아 1× 로, 마지막 사건에서 3초 뒤를 따라간다.
+    머리 '● 따라 보는 중 · n초 늦음'(마지막 묶음을 서버가 받은 시각 + 그 뒤 흐른 시간 − 재생 시각). 30초 동안 새 묶음이 없으면
+    '방문자가 떠났거나 멈춤' 으로 바꾸고 받기를 멈춘다."""
+    got = _run(FOLLOW, session=_session(NOW - 45_000), shown=3, hash="")
+    first = got["open"]
+    assert first["pushed"] == [f"/visitors.html#detail=replay%3A{SID}"]
+    assert first["calls"] == [
+        f"/svc/api/admin/replay/session?sid={SID}&after=0",
+        f"/svc/api/admin/replay/session?sid={SID}&after=2",
+    ]
+    assert first["tag"] == "● 따라 보는 중 · 3초 늦음" and first["tagCls"] == "tag live"
+    assert first["time"].endswith("경과 0:26 / 전체 0:29") and first["polls"] == 1
+    assert got["none"]["calls"] == [f"/svc/api/admin/replay/session?sid={SID}&after=3"]
+    assert (
+        got["none"]["tag"] == "● 따라 보는 중 · 3초 늦음" and got["none"]["polls"] == 1
+    )
+    more = got["more"]
+    assert more["calls"] == [f"/svc/api/admin/replay/session?sid={SID}&after=3"]
+    assert more["src"] == f"{SITE}/app/?tab=gap&kt-replay=1"
+    assert more["rows"] == 9 and more["time"].endswith("경과 0:37 / 전체 0:39")
+    assert more["tag"] == "● 따라 보는 중 · 3초 늦음"
+    caught = got["caught"]
+    assert caught["time"].endswith("경과 0:39 / 전체 0:39") and caught["play"] == "❚❚"
+    gone = got["gone"]
+    assert gone["tag"] == "방문자가 떠났거나 멈춤" and gone["polls"] == 0
+
+
+DRAG = r"""
+document.getElementById('tbl-rplive').kids[1].kids[0].fire('click')
+await flush()
+attach()
+ready('app-gap')
+out.before = { tag: v.text('t-sheet'), polls: pending(2000) }
+const bar = v.byId.get('rp-bar')
+bar._width = 1000
+bar.fire('pointerdown', { clientX: 100, pointerId: 1 })
+out.after = { ...snap(), polls: pending(2000) }
+"""
+
+
+def test_dragging_back_leaves_follow_mode() -> None:
+    """§3.3 — 시간 막대를 뒤로 끌면 따라 보기를 끄고(받기 멈춤) 받은 만큼 재생으로."""
+    got = _run(DRAG, session=_session(NOW - 41_000), hash="")
+    assert (
+        got["before"]["tag"].startswith("● 따라 보는 중")
+        and got["before"]["polls"] == 1
+    )
+    after = got["after"]
+    assert after["tag"] == "" and after["polls"] == 0
+    assert after["time"].endswith("경과 0:03 / 전체 0:39")
+
+
+XSS = r"""
+out.x = snap()
+out.text = document.getElementById('sheet-custom').textContent + v.text('sheet-unit')
+const tagsOf = (n) => (typeof n === 'string' ? [] : [n.tag, ...n.kids.flatMap(tagsOf)])
+out.tags = [...new Set(tagsOf(document.getElementById('sheet-custom')))]
+"""
+
+
+def test_page_and_area_names_are_text_and_unknown_screens_are_not_framed() -> None:
+    """§4 XSS — 화면·영역 이름이 HTML 조각이면 사건 목록·머리에 글자 그대로(그림·스크립트 요소 없음), 화면 이름이 목록 밖이면 틀은
+    about:blank 에 '이 화면은 틀로 띄울 수 없다'."""
+    session = _session(S0, ip=X, page=X)
+    for b in session["batches"]:
+        b["ev"] = [
+            [*e[:4], X]
+            if e[1] == "c"
+            else [e[0], e[1], X, *e[3:]]
+            if e[1] in ("a", "e", "p")
+            else e
+            for e in b["ev"]
+        ]
+    got = _run(XSS, session=session)
+    assert got["x"]["src"] == "about:blank"
+    assert got["x"]["frameNote"] == "이 화면은 틀로 띄울 수 없다"
+    assert got["text"].count(X) >= 5
+    assert not {"img", "script", "object", "embed"} & set(got["tags"])
