@@ -8,6 +8,7 @@ test_deploy.py 와 같은 방식이다: Docker 없는 CI 에서 설정 파일을
 import json
 import re
 import shlex
+import subprocess
 
 from tests.test_deploy import (
     PUBLIC_API,
@@ -199,16 +200,18 @@ def test_only_domain_block_imports_access_log_with_referrer_policy() -> None:
     assert (["header", "Referrer-Policy", "strict-origin"], None) in domain
     catch_all = _block(tree, "http://")
     # 022 — IP 주소로 같은 본문이 색인되지 않게 noindex 만 덧붙인다(기록은 여전히 없다)
+    # 027 §3.8 — 두 reverse_proxy 모두 WebSocket 을 reload 때 1분 뒤 따로 닫는다
+    proxy = (["reverse_proxy", "web:80"], [(["stream_close_delay", "1m"], None)])
     assert catch_all == [
         (["header", "X-Robots-Tag", "noindex"], None),
-        (["reverse_proxy", "web:80"], None),
+        proxy,
     ]
     # www 는 apex 로 301 만 — 본문이 없어 기록하지 않는다 (022·023)
     www = _block(tree, "www.kimptrack.com,", "http://www.kimptrack.com")
     assert www == [(["redir", "https://kimptrack.com{uri}", "permanent"], None)]
     assert _all(tree, "import") == [["access_log"]]
     # 023 계약 그대로 — 두 블록 모두 nginx(web:80)로
-    assert (["reverse_proxy", "web:80"], None) in domain
+    assert proxy in domain
 
 
 def test_compose_binds_caddy_dir_and_host_log_dir() -> None:
@@ -251,7 +254,59 @@ PUBLIC_LOCATIONS = {("=", path) for path in PUBLIC_API} | {
     ("/app/",),
     ("/",),
 }
-CADDY_RELOAD = "docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile"
+CADDY_RELOAD = "timeout 120 docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile || rc=$?"
+
+
+# 007 §3 4-1 — reload 가 120초 안에 안 끝나면(124) 알리고 이어 가고, 그 밖의 실패는 배포 실패
+RELOAD_BLOCK = [
+    CADDY_RELOAD,
+    'if [ "${rc:-0}" -eq 124 ]; then',
+    'echo "caddy reload 가 120초 안에 끝나지 않았다 — 적용은 caddy 안에서 이어진다(027 §3.8), 배포는 이어 간다"',
+    'elif [ "${rc:-0}" -ne 0 ]; then',
+    'exit "$rc"',
+    "fi",
+]
+
+
+def test_serve_reload_is_bounded_and_only_a_timeout_carries_on() -> None:
+    """2026-10-16 — 멈춘 reload 가 ssh 10분 제한에 걸려 터널·prune 이 빠졌다. 120초 상한, 124 는 이어 가고 나머지는 실패.
+    블록을 `set -e` 셸에서 가짜 timeout(종료 코드만 돌려줌)으로 돌려 본다."""
+    script = _deploy_script("serve")
+    i = script.index(CADDY_RELOAD)
+    assert script[i : i + len(RELOAD_BLOCK)] == RELOAD_BLOCK
+    body = "\n".join(RELOAD_BLOCK)
+    for code, carries_on in ((0, True), (124, True), (1, False), (137, False)):
+        run = subprocess.run(
+            [
+                "sh",
+                "-c",
+                f"set -e\ntimeout() {{ return {code}; }}\n{body}\necho CARRIED_ON",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert ("CARRIED_ON" in run.stdout) == carries_on, (code, run)
+        assert run.returncode == (0 if carries_on else code), (code, run)
+        assert ("120초 안에 끝나지 않았다" in run.stdout) == (code == 124), code
+
+
+def test_caddy_does_not_hold_reload_on_open_websockets() -> None:
+    """027 §3.8 — 전역 grace_period 10s, reverse_proxy web:80 둘 다 stream_close_delay 1m(지연 0 이면 읽지 않는
+    WebSocket 하나가 reload 를 TCP 시간 초과까지 붙잡는다 — caddy 2.11.4 로컬 재현)."""
+    conf = (ROOT / "caddy/Caddyfile").read_text("utf-8")
+    lines = [
+        ln.strip()
+        for ln in conf.splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
+    glob = lines[: lines.index("}", lines.index("log default {"))]
+    assert lines[0] == "{" and "grace_period 10s" in glob
+    assert lines.count("grace_period 10s") == 1
+    starts = [i for i, ln in enumerate(lines) if ln == "reverse_proxy web:80 {"]
+    assert len(starts) == 2
+    for i in starts:
+        assert lines[i + 1 : i + 3] == ["stream_close_delay 1m", "}"], lines[i : i + 3]
 
 
 def test_public_nginx_turns_off_access_log_and_keeps_its_locations() -> None:

@@ -12,6 +12,8 @@
 	servers {
 		protocols h1 h2
 	}
+	# 027 §3.8 — 다시 읽기(reload)가 옛 서버의 일반 요청을 끝없이 기다리지 않게 하는 상한. 기본은 끝없음(eternal)
+	grace_period 10s
 	# 027 §3.2 — 기본 로거(오류 줄 — 예: 업스트림 502. docker 로그로 간다)에도 접속 로그와 같은 지우기 규칙.
 	# docker 로그에 IP·검색어가 남지 않게. 아래 access_log 조각의 format 과 같아야 한다(test_observability.py 가 본다).
 	# 032 — 단 IP 두 필드는 지운다(069 뒤 접속 로그는 IP 전체를 남긴다). 오류 줄에는 IP 가 필요 없고, docker 로그는
@@ -86,7 +88,11 @@ kimptrack.com {
 	import access_log
 	# 027 §3.2 — 브라우저 기본값은 같은 출처 요청에 전체 URL(검색어 포함)을 Referer 로 보낸다
 	header Referrer-Policy strict-origin
-	reverse_proxy web:80
+	reverse_proxy web:80 {
+		# 027 §3.8 — 다시 읽기 때 옛 설정의 WebSocket(대시보드 /ws/spreads)을 그 자리에서 닫지 않고 1분 뒤 따로 닫는다.
+		# 0(기본)이면 닫기 프레임을 기한 없이 동기로 써서, 읽지 않는 클라이언트 하나가 reload 를 TCP 시간 초과(11분)까지 붙잡는다
+		stream_close_delay 1m
+	}
 }
 
 # 023·022 — www 는 경로·쿼리를 들고 apex 로 301. 검색엔진이 두 호스트를 같은 본문의 사본으로 따로 모으지 않게
@@ -100,5 +106,8 @@ www.kimptrack.com, http://www.kimptrack.com {
 # 022 — 같은 본문이 IP 주소로 색인되지 않게 X-Robots-Tag noindex(로컬 확인에는 영향 없음)
 http:// {
 	header X-Robots-Tag "noindex"
-	reverse_proxy web:80
+	reverse_proxy web:80 {
+		# 위 도메인 블록과 같은 이유(027 §3.8)
+		stream_close_delay 1m
+	}
 }
