@@ -47,8 +47,14 @@
 - 브라우저: 가짜 피드 + 공개 페이지 시험 사본(065 §4 꼴 — 시험 사본의 관리자 출처를 바꿈)으로 재생·따라 보기·탭 바뀜·휴대폰 폭.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
+관리자 쪽(2026-10-16, node 22.23.3 — 소켓 시험은 샌드박스 밖에서):
 ```bash
-(실행 후 기록)
+cd server && ruff check . && ruff format --check .            # All checks passed · 455 files already formatted
+node --check web/admin/*.js                                     # 모두 통과
+pytest -q tests/test_admin*.py                                  # 197 passed (새 시험 38: replay_model 9 · replay_sheet 15 · replay_cards 9 · replay_static 4 · fake 1)
+pytest -q                                                       # 2788 passed, 1 skipped
+uv run web/scripts/admin-fake-feeds.py --port 18074 --scenario ok   # 브라우저: 지금 보는 중 → 따라 보기, 휴대폰 조각 크기 맞춤·숨김 칸, IP 판 절 —
+                                                                     # 틀은 운영 사이트가 frame-ancestors 로 막아 5초 한 줄(시험 사본으로 볼 것)
 ```
 
 ## 6. 갱신할 문서
@@ -56,6 +62,24 @@
 - `CLAUDE.md` — 스펙 인덱스 074 행.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것:
-- 추측한 지점 / 실행 중 함께 고친 스펙 절:
-- 남은 빚:
+관리자 쪽(`web/admin` — 틀 안 `replay.js` 재생 쪽은 따로 적는다):
+- 만든 것: `replaymodel.js`(묶음 → 서버 시계 사건·화면 조각·빈 시간 틈, 한 시각의 틀 메시지, 재생 시계, 막대 표시·사건 목록·카드 행 — DOM 없음) ·
+  `replayframe.js`(틀 — `SITE_ORIGIN` 한 상수, 주소 쓰기 한 곳, 준비 알림 검사, 5초 한 줄, 크기 맞춤) · `replayview.js`(시간 막대·조절 줄·사건 목록) ·
+  `replaysheet.js`(판 `replay` — 쪽 넘기기·재생·따라 보기·키보드) · `replaycards.js`(카드 둘·IP 판 절). 고친 것: `common.js`(PATHS 셋·`LIVE_MS` 5초·
+  `LIVE`·`frameVars` 틀 폭 `--fw`), `app.js`(page.live 인 페이지만 지금 묶음 5초 — 보일 때만), `detail.js`(판이 닫히거나 바뀌면 `leave()`),
+  `addrdetail.js`(절·sessions?ip 부르기), `visitors.html`·`visitors.js`, `admin.css`, 가짜 피드(`admin-fake-feeds.py` — 셋 + 경우), 시험.
+- 틀로 보내는 메시지: 재생 시각이 바뀔 때마다(재생 중 50ms 간격, 같은 상태는 다시 안 보냄) `{type:"kt-replay", v:1, x, y, touch, click, sy, els, area}` 를
+  `https://kimptrack.com` 으로, `kt-replay-ready`(출처·창·지금 띄운 화면·꼴)를 받은 틀에만.
+- 추측한 지점(스펙에 없어 정함): ① 피드 행에 `w`·`h` 가 없으면 첫 `r` 사건, 그것도 없으면 기기 기본값(PC 1280×800 · 휴대폰 390×844) — 073 행에
+  `w`·`h` 가 있으면 쓴다. ② `click` 은 재생으로 지난 구간 안의 누름에만 한 번 참(되감기·건너뛰기는 거짓), 그 메시지의 `x`·`y` 는 누른 자리.
+  ③ 커서는 숨김 구간·첫 포인터 전에는 null, 손가락 기기(`dev` mobile)는 마지막 움직임 뒤 1초까지만. ④ `sy` 는 마지막 `s`, 없으면 0(막 연 페이지 —
+  null 은 쓰지 않는다). ⑤ 영역 안 스크롤·보던 영역은 지금 화면 조각(`p` 사이) 안에서만 — 조각에서 본 (영역, n) 은 첫 사건 전 0, 영역 id 꼴만 보낸다.
+  ⑥ 사건 목록 '스크롤 크게' = 1초 안 이어진 한 번 굴림이 300px 이상(문서·영역 안 따로), `r` 은 목록에 넣지 않음, 1,500줄 상한. ⑦ 따라 보기를 끄는 것 —
+  뒤로 끌기(스펙)에 더해 멈춤·속도 바꿈. 끝에 닿으면 마지막 사건에서 멈춘다. 새 묶음 뒤 마지막 사건 − 3초보다 8초 넘게 뒤처졌으면(처음·숨었다
+  돌아옴) 그리로 건너뛴다. 'n초 늦음' = 마지막 묶음 `at` + 받은 뒤 흐른 시간 − 재생 시각. ⑧ '앞부분만' — 피드가 `truncated` 를 주면 그것, 아니면 묶음
+  3,600개 또는 `bytes` ≥ 1MB − 16KB 로 어림. ⑨ 관리자 문서가 숨으면 틀을 about:blank 로(대시보드 실시간 연결 — 065 와 같음)·재생·받기를 멈추고,
+  보이면 다시 띄워 준비까지 시계를 멈춘다. 판을 닫아도 about:blank. ⑩ 다 받으면 곧바로 재생(1×·건너뛰기 켬), 끝에서 ▶ 면 처음부터.
+  ⑪ 화면 기록 카드는 두 보기(IP 별·대역 별) 모두에, '지금 보는 중' 은 큰 수 아래·'화면 기록' 은 표 아래. 빈 문구 '화면 기록 없음 — 동의한 방문자만
+  기록되고 14일 보관한다'. ⑫ 좁은 화면 기준은 1279px 아래(사건 목록이 아래로).
+- 남은 빚: 관리자 nginx 정확 일치 셋(`/svc/api/admin/replay/{live,sessions,session}`)은 073 서버 쪽 PR 이 더한다 — `test_admin_pages` 는 그 location 이
+  생기면 경로를 대조한다. 실제 틀 재생(커서·스크롤이 맞게 겹치는지)은 공개 페이지 시험 사본(관리자 출처를 로컬로 바꿈)에서 확인할 것.
