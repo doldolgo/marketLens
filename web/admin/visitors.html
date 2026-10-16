@@ -47,53 +47,53 @@
         <main class="content" id="content">
           <div class="kpis s12" id="kpis-ip" aria-label="큰 수 — IP 별">
           <section class="card kpi" id="card-acount" aria-labelledby="h-acount">
-            <header class="card-head"><h2 id="h-acount">IP 수</h2><span class="unit">가린 대역 포함</span><span class="help" title="거르기 뒤 행 수. 전체 저장 전 기록은 가린 대역 한 행으로 센다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-acount"></span></span></header>
+            <header class="card-head"><h2 id="h-acount">IP 수</h2><span class="unit">가린 대역 포함</span><span class="help" title="고른 기간 서버 기록에 나온 서로 다른 IP 수(거르기 적용 뒤).&#10;IP 전체 저장 전 기록은 끝자리를 가린 대역 한 줄로 센다. 한 사람이 IP 여럿을 쓰기도 한다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-acount"></span></span></header>
             <div class="big" id="v-acount">–</div>
             <div class="delta" id="d-acount"></div>
           </section>
           <section class="card kpi" id="card-abot" aria-labelledby="h-abot">
-            <header class="card-head"><h2 id="h-abot">봇 판정</h2><span class="unit">요청 비율</span><span class="help" title="판정이 봇·의심인 행의 요청 ÷ 불러온 행의 요청."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-abot"></span></span></header>
+            <header class="card-head"><h2 id="h-abot">봇 판정</h2><span class="unit">요청 비율</span><span class="help" title="판정이 봇·의심인 IP 가 보낸 요청의 비율(불러온 행 기준).&#10;판정은 근거(브라우저 정보·데이터센터·폭주·404 등) 점수의 합 — 행을 누르면 근거를 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-abot"></span></span></header>
             <div class="big" id="v-abot">–</div>
             <div class="delta" id="d-abot"></div>
           </section>
           <section class="card kpi" id="card-adc" aria-labelledby="h-adc">
-            <header class="card-head"><h2 id="h-adc">데이터센터</h2><span class="unit">요청 비율</span><span class="help" title="망 종류가 데이터센터인 행의 요청 ÷ 불러온 행의 요청."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-adc"></span></span></header>
+            <header class="card-head"><h2 id="h-adc">데이터센터</h2><span class="unit">요청 비율</span><span class="help" title="AWS·구글 클라우드 같은 데이터센터 망 IP 가 보낸 요청의 비율(불러온 행 기준).&#10;사람은 보통 통신사 망에서 온다 — 높으면 봇·수집기가 많다는 뜻."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-adc"></span></span></header>
             <div class="big" id="v-adc">–</div>
             <div class="delta" id="d-adc"></div>
           </section>
           <section class="card kpi" id="card-anew" aria-labelledby="h-anew">
-            <header class="card-head"><h2 id="h-anew">오늘 처음 본 IP</h2><span class="unit">창 안</span><span class="help" title="창 안에서 처음 본 때가 오늘(KST)인 행."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-anew"></span></span></header>
+            <header class="card-head"><h2 id="h-anew">오늘 처음 본 IP</h2><span class="unit">창 안</span><span class="help" title="고른 기간 안에서 처음 나타난 때가 오늘(KST)인 IP 수.&#10;갑자기 많으면 새 봇이 붙었거나 공유·광고로 새 방문이 늘어난 것."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-anew"></span></span></header>
             <div class="big" id="v-anew">–</div>
             <div class="delta" id="d-anew"></div>
           </section>
           </div>
           <div class="kpis s12" id="kpis-band" aria-label="큰 수 — 대역 별" hidden>
           <section class="card kpi" id="card-count" aria-labelledby="h-count">
-            <header class="card-head"><h2 id="h-count">대역 수</h2><span class="unit">IPv4 /24 · IPv6 /48</span><span class="help" title="거르기 뒤 대역 수."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-count"></span></span></header>
+            <header class="card-head"><h2 id="h-count">대역 수</h2><span class="unit">IPv4 /24 · IPv6 /48</span><span class="help" title="끝자리를 가린 IP 대역(IPv4 /24 · IPv6 /48)의 수(거르기 뒤).&#10;같은 회사·통신사의 가까운 주소는 한 대역으로 묶인다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-count"></span></span></header>
             <div class="big" id="v-count">–</div>
             <div class="delta" id="d-count"></div>
           </section>
           <section class="card kpi" id="card-dc" aria-labelledby="h-dc">
-            <header class="card-head"><h2 id="h-dc">데이터센터 대역</h2><span class="unit">요청 비중</span><span class="help" title="망 종류가 데이터센터인 대역의 요청 ÷ 불러온 대역의 요청."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-dc"></span></span></header>
+            <header class="card-head"><h2 id="h-dc">데이터센터 대역</h2><span class="unit">요청 비중</span><span class="help" title="데이터센터 망 대역이 보낸 요청의 비중(불러온 대역 기준).&#10;사람은 보통 통신사 망에서 온다 — 높으면 봇·수집기가 많다는 뜻."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-dc"></span></span></header>
             <div class="big" id="v-dc">–</div>
             <div class="delta" id="d-dc"></div>
  
           </section>
           <section class="card kpi" id="card-top" aria-labelledby="h-top">
-            <header class="card-head"><h2 id="h-top">상위 10 대역</h2><span class="unit">요청 비중</span><span class="help" title="요청이 많은 10 대역의 요청 ÷ 불러온 대역의 요청."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-top"></span></span></header>
+            <header class="card-head"><h2 id="h-top">상위 10 대역</h2><span class="unit">요청 비중</span><span class="help" title="요청이 가장 많은 10 대역이 전체 요청에서 차지하는 비중.&#10;높으면 소수 대역(대개 봇)이 요청을 몰아 보낸다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-top"></span></span></header>
             <div class="big" id="v-top">–</div>
             <div class="delta" id="d-top"></div>
  
           </section>
           <section class="card kpi" id="card-new" aria-labelledby="h-new">
-            <header class="card-head"><h2 id="h-new">오늘 처음 본 대역</h2><span class="unit">창 안</span><span class="help" title="창 안에서 처음 본 때가 오늘(KST)인 대역."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-new"></span></span></header>
+            <header class="card-head"><h2 id="h-new">오늘 처음 본 대역</h2><span class="unit">창 안</span><span class="help" title="고른 기간 안에서 처음 나타난 때가 오늘(KST)인 대역 수.&#10;갑자기 많으면 새 봇이나 새 유입을 의심한다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-new"></span></span></header>
             <div class="big" id="v-new">–</div>
             <div class="delta" id="d-new"></div>
  
           </section>
           </div>
           <section class="card s12" id="card-addrs" aria-labelledby="h-addrs">
-            <header class="card-head"><h2 id="h-addrs">IP</h2><span class="unit">판정 · 위치 · 행을 누르면 상세</span><span class="help" title="서버 접속 기록의 IP 마다 요청·판정(봇·사람)과 근거·위치. 전체 저장 전 기록은 가린 대역으로 보인다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-addrs"></span></span></header>
+            <header class="card-head"><h2 id="h-addrs">IP</h2><span class="unit">판정 · 위치 · 행을 누르면 상세</span><span class="help" title="서버 접속 기록의 IP 마다 요청 수·판정(봇·의심·사람)·근거·위치·망 사업자.&#10;행을 누르면 판정 근거·시간별 요청·최근 요청을 본다. IP 전체 저장 전 기록은 가린 대역으로 보인다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-addrs"></span></span></header>
             <div class="bar">
               <div class="seg" role="group" aria-label="판정" id="verdict-seg"><button type="button" data-verdict="bot" aria-pressed="false"><i class="shape bad"></i>봇</button><button type="button" data-verdict="suspect" aria-pressed="false"><i class="shape warn"></i>의심</button><button type="button" data-verdict="human" aria-pressed="false"><i class="shape ok"></i>사람</button><button type="button" data-verdict="unknown" aria-pressed="false"><i class="shape none"></i>모름</button><button type="button" data-verdict="operator" aria-pressed="false"><i class="shape op"></i>운영자</button></div>
               <div class="seg" role="group" aria-label="망 종류" id="a-net-seg"><button type="button" data-net="" aria-pressed="true">전체</button><button type="button" data-net="telecom_kr" aria-pressed="false">국내 통신사</button><button type="button" data-net="telecom" aria-pressed="false">해외 통신사</button><button type="button" data-net="cloud" aria-pressed="false">데이터센터</button><button type="button" data-net="other" aria-pressed="false">그 밖</button><button type="button" data-net="ipv6" aria-pressed="false">IPv6</button></div>
@@ -106,7 +106,7 @@
             <p class="credit"><a href="https://db-ip.com" rel="noreferrer">IP Geolocation by DB-IP</a></p>
           </section>
           <section class="card s12" id="card-bands" aria-labelledby="h-bands" hidden>
-            <header class="card-head"><h2 id="h-bands">IP 대역</h2><span class="unit">가린 대역 그대로 · 행을 누르면 상세</span><span class="help" title="서버 접속 기록의 끝자리를 가린 IP 대역(IPv4 /24 · IPv6 /48)마다 요청·사람/봇·브라우저. 원 IP·브라우저 원문은 없다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-bands"></span></span></header>
+            <header class="card-head"><h2 id="h-bands">IP 대역</h2><span class="unit">가린 대역 그대로 · 행을 누르면 상세</span><span class="help" title="끝자리를 가린 IP 대역(IPv4 /24 · IPv6 /48)마다 요청·사람 모양 페이지·봇 비율.&#10;IP 전체 저장 전 기록도 보이는 보기. 원 IP·브라우저 원문은 없다. 행을 누르면 상세."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-bands"></span></span></header>
             <div class="bar">
               <div class="seg" role="group" aria-label="망 종류" id="net-seg"><button type="button" data-net="" aria-pressed="true">전체</button><button type="button" data-net="telecom_kr" aria-pressed="false">국내 통신사</button><button type="button" data-net="telecom" aria-pressed="false">해외 통신사</button><button type="button" data-net="cloud" aria-pressed="false">데이터센터</button><button type="button" data-net="other" aria-pressed="false">그 밖</button><button type="button" data-net="ipv6" aria-pressed="false">IPv6</button></div>
               <select class="input" id="country" aria-label="나라"><option value="">모든 나라</option></select>

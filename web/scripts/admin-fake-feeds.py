@@ -16,6 +16,7 @@
   화면 이용 통계는 시행 전 before_gate) · bands(대역 많음 — 1,200개, 200행씩, 랜딩 요소 300개 + (기타)) · nobands(대역 없음, 화면 이용
   기록 없음) · xss(글자 칸마다 `<img onerror>` — 글로만 보여야 한다, 요소 열쇠 하나도) · expired(헬스가 401 비JSON — 로그인 만료 새로고침 한 번) ·
   noaddrs(069 배포 전 — IP 단위 addrs·addr 만 404, 대역은 그대로) · many(IP 1,200개 — 200행씩, IP 상세는 읽기 상한 partial).
+  noclarity(071 — Clarity 는 붙어 있는데 최근 24시간 세션 0, 화면 이용 통계는 그대로 — 운영 2026-10-16 의 모양, 진단 줄이 뜬다).
   069 IP 단위(070): old·missing·noaddrs 는 404, empty 는 연결 안 됨, nobands 는 IP 없음·since 없음, xss 는 근거·도시·망 사업자·PTR 에 `<img onerror>`.
 - 시각은 이 컴퓨터 시계다.
 """
@@ -33,7 +34,7 @@ from urllib.parse import parse_qs, urlsplit
 
 ADMIN = Path(__file__).resolve().parent.parent / "admin"
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src https://kimptrack.com; frame-ancestors 'none'"
-SCENARIOS = ("ok", "problem", "old", "missing", "empty", "bands", "nobands", "xss", "expired", "noaddrs", "many")
+SCENARIOS = ("ok", "problem", "old", "missing", "empty", "bands", "nobands", "xss", "expired", "noaddrs", "many", "noclarity")
 # 067·068 이 없는 서버(배포 전·그보다 앞)
 PRE_068 = ("old", "missing")
 # 069(IP 단위 addrs·addr)가 없는 서버 — 067·068 전 둘과, 067·068 만 있는 noaddrs
@@ -295,6 +296,12 @@ def clarity() -> dict:
     rng = random.Random(7)
     summary = {"scrollDepth": 47.3, "totalSec": 212.0, "activeSec": 64.0, "signals": _signals(rng)}
     now = int(time.time() * 1000)
+    if s == "noclarity":
+        zero = {"sessions": 0, "sessionPct": 0.0, "pageViews": 0, "count": 0}
+        return part(21_600, nextAt=now + 3 * 3_600_000, numOfDays=1, traffic={"sessions": 0, "botSessions": 0, "users": None, "pagesPerSession": None},
+                    summary={"scrollDepth": None, "totalSec": None, "activeSec": None, "signals": {k: dict(zero) for k in _signals(rng)}},
+                    countries=[], metrics=[], pages=part(43_200, nextAt=now + 9 * 3_600_000, numOfDays=3, rowsIn=0, rowLimitHit=False, groups=[]),
+                    dims={"state": "ok", "code": None, "fetchedAt": now - 5 * 3_600_000, "refreshSec": 86_400, **dict.fromkeys(("device", "browser", "os", "channel", "source", "country"), [])})
     kinds = ("landing", "app:spread", "app:history", "app:gap", "privacy", "other")
     groups = []
     for i, page in enumerate(kinds):

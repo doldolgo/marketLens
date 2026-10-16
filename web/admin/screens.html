@@ -44,6 +44,16 @@
         <div class="filters" id="filters" hidden></div>
         <p id="notice" class="notice" role="alert" hidden></p>
         <main class="content" id="content">
+          <details class="guide s12" id="scr-guide" open>
+            <summary>이 페이지 쓰는 법</summary>
+            <ol>
+              <li>동의한 방문자가 보낸 <b>화면 이용 통계</b>(우리 서버 수집 — Clarity 아님)를 실제 페이지 위에 겹쳐 그린다. 동의한 사람만이라 수가 작다.</li>
+              <li>아래 칩에서 <b>화면</b>(랜딩·대시보드 탭·정적 페이지들)과 <b>기기</b>(PC·휴대폰)를 고른다.</li>
+              <li><b>보기</b> — 요소(단추·링크마다) · 영역(덩어리마다) · 깊이(어디까지 내려왔나). <b>지표</b> — 클릭 · 마우스 올림(PC) · 보인 시간.</li>
+              <li>진할수록 많다. 빗금은 거의 안 닿은 곳이고, '표본 적음' 이 뜨면 숫자를 믿지 않는다.</li>
+              <li>오른쪽 표의 행을 누르면 그 요소로 화면이 움직이고, ⤢ 로 전체 표와 CSV 를 본다.</li>
+            </ol>
+          </details>
           <div class="scr-pick s12" aria-label="고르기">
             <div class="scr-pages" id="pick-page" role="group" aria-label="화면"></div>
             <div class="seg" role="group" aria-label="기기"><button type="button" data-device="pc" aria-pressed="true">PC</button><button type="button" data-device="mobile" aria-pressed="false">휴대폰</button></div>
@@ -52,7 +62,7 @@
           </div>
           <div class="scr-body s12">
           <section class="card scr-main" id="card-frame" aria-labelledby="h-frame">
-            <header class="card-head"><h2 id="h-frame">실제 화면</h2><span class="unit" id="frame-line"></span><span class="scr-small" id="frame-small" hidden><i class="shape warn"></i>표본 적음</span><span class="help" title="실제 페이지를 틀로 띄워 그 위에 값을 그린다. 누름은 막혀 있고 화면은 위의 고르기로만 바꾼다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-frame"></span></span></header>
+            <header class="card-head"><h2 id="h-frame">실제 화면</h2><span class="unit" id="frame-line"></span><span class="scr-small" id="frame-small" hidden><i class="shape warn"></i>표본 적음</span><span class="help" title="실제 페이지를 틀로 띄우고 그 위에 동의한 방문자의 화면 이용 통계(우리 서버 수집, Clarity 아님)를 칠한 것.&#10;진할수록 많고 빗금은 거의 안 닿은 곳. 틀 안은 누를 수 없고 화면은 위 고르기로 바꾼다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-frame"></span></span></header>
             <div class="scr-stagewrap" id="stage-wrap">
               <div class="scr-stage pc" id="stage">
                 <iframe id="frame" title="실제 화면 덮어 보기" sandbox="allow-scripts allow-same-origin" referrerpolicy="strict-origin" loading="lazy"></iframe>
@@ -64,20 +74,20 @@
             <header class="card-head"><h2 id="h-panel">값</h2><div class="seg" role="group" aria-label="판"><button type="button" data-panel="elements" aria-pressed="true">요소</button><button type="button" data-panel="areas" aria-pressed="false">영역</button><button type="button" data-panel="exits" aria-pressed="false">떠난 곳·깊이</button></div><span class="end"><span class="tag" id="t-panel"></span></span></header>
             <p class="note" id="panel-note"></p>
             <div class="scr-panel" id="panel-elements">
-              <div class="panel-head"><span id="el-head">요소</span><span class="help" title="클릭·100뷰당 클릭·평균 마우스 올림(PC)·평균 보인 시간. 행을 누르면 틀에서 그 요소로 간다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="elements" aria-label="요소 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
+              <div class="panel-head"><span id="el-head">요소</span><span class="help" title="단추·링크·탭 같은 요소마다 클릭 수·100번 볼 때 클릭·평균 마우스 올림(PC)·평균 보인 시간.&#10;행을 누르면 틀에서 그 요소로 간다. 위 칩으로 영역을 골라 거른다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="elements" aria-label="요소 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
               <div class="kchips" id="el-areas" role="group" aria-label="영역으로 거르기"></div>
               <div class="scroll"><table class="tbl scr-tbl" id="tbl-elements"></table></div>
               <div class="list-foot"><span id="el-foot"></span></div>
             </div>
             <div class="scr-panel" id="panel-areas" hidden>
-              <div class="panel-head"><span>영역 · 평균 보인 시간 큰 순</span><span class="help" title="평균 보인 시간·도달률(1초 이상 보인 페이지뷰 몫)·100뷰당 클릭. ▲ 는 도달 20% 미만."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="areas" aria-label="영역 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
+              <div class="panel-head"><span>영역 · 평균 보인 시간 큰 순</span><span class="help" title="페이지의 덩어리(머리·표·차트…)마다 평균 보인 시간·도달률(1초 이상 보인 페이지 보기의 몫)·100번 볼 때 클릭.&#10;▲ 는 도달 20% 미만 — 거의 안 보는 곳."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="areas" aria-label="영역 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
               <div class="scroll"><table class="tbl scr-tbl" id="tbl-areas"></table></div>
             </div>
             <div class="scr-panel" id="panel-exits" hidden>
-              <div class="panel-head"><span>떠난 곳</span><span class="help" title="페이지를 떠날 때(pagehide) 가장 크게 보이던 영역."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="exits" aria-label="떠난 곳·깊이 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
+              <div class="panel-head"><span>떠난 곳</span><span class="help" title="방문자가 페이지를 떠날 때 화면에 가장 크게 보이던 영역.&#10;한 영역에 몰리면 거기서 흥미를 잃었거나 찾던 것을 보고 떠난 것."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="exits" aria-label="떠난 곳·깊이 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
               <div class="list" id="l-exits"></div>
               <p class="note" id="exit-note"></p>
-              <div class="panel-head"><span>깊이</span><span class="help" title="그 지점까지 내려온 페이지뷰 비율 — 정적 페이지만."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span></div>
+              <div class="panel-head"><span>깊이</span><span class="help" title="페이지를 그 지점(%)까지 내려온 페이지 보기의 비율 — 랜딩 같은 정적 페이지만.&#10;계단이 크게 떨어지는 지점이 많이 떠나는 곳이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span></div>
               <div class="list stairs" id="l-depth"></div>
               <p class="note" id="depth-note"></p>
             </div>
