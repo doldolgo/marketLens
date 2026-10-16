@@ -1,7 +1,8 @@
 // 셸 레이아웃 — 헤더 + KPI 스트립 + 탭 6개(공개 화면엔 5개 — 수집 상태 숨김) + 푸터 (스펙 002 §3.5, 구조는 docs/design/reference/App.tsx).
 // 탭은 한 번 마운트되면 언마운트하지 않고 숨긴다: 검색어·필터·드릴다운 상태가 전환 후에도 유지되어야 하기 때문.
 // 기록 탭만 처음 볼 때 마운트한다 — 그 코드(차트 라이브러리 포함)는 첫 화면 번들에서 빠져 처음 볼 때 받는다.
-import { Component, Suspense, lazy, memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+// 폭 1079px 이하 두 줄 헤더·폰 KPI·폰 푸터·문서 스크롤은 072 — 넓은 화면은 참조 원본 그대로.
+import { Component, Suspense, lazy, memo, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import FlowTab from './features/flow/Tab'
 import GapTab from './features/gap/Tab'
 import { useHealthPolling } from './features/health/api'
@@ -12,8 +13,9 @@ import SpreadsTab from './features/spreads/Tab'
 import { CLARITY_READY, clarityEvent, clarityTag } from './shared/clarity'
 import { useFeed } from './shared/feed'
 import { exName, fmtPct, pctColor } from './shared/format'
-import { Empty, kicker, vDivider } from './shared/ui'
+import { Empty, card, kicker, vDivider } from './shared/ui'
 import { UrlActive, discardParams, dropParams, oneOf, symbol, useUrlState } from './shared/urlState'
+import { SCREEN_H, TAB_BAR_H, useViewport } from './shared/viewport'
 
 const HistoryTab = lazy(() => import('./features/history/Tab'))
 
@@ -32,6 +34,8 @@ const TABS: [TabId, string][] = [
  * id 는 TabId 에 남긴다 — 화면 이용 통계(052)·접속 기록 집계가 지난 기록의 `app-health` 를 계속 읽는다 */
 const HIDDEN_TABS: ReadonlySet<TabId> = new Set(['health'])
 const SHOWN_TABS = TABS.filter(([id]) => !HIDDEN_TABS.has(id))
+/** 폰 탭 이름 — 다섯 칸이 같은 폭으로 한 줄에 들어가게 (072 §3.2). id·순서는 그대로 */
+const PHONE_LABEL: Record<TabId, string> = { spread: '스프레드', history: '기록', gap: '현선갭', pp: '선선갭', health: '수집', flow: '입출금' }
 
 // 시계·환율 표기 — 로캘·옵션을 주는 toLocale*String 은 부를 때마다 Intl 객체를 새로 만든다. 셸은 초마다 다시 그리므로 한 번만 만든다(출력 동일).
 const KST_CLOCK = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -62,8 +66,63 @@ class TabLoadGuard extends Component<{ children: ReactNode }, { failed: boolean 
   }
 }
 
+/** 좁은 헤더의 메뉴 항목 — 넓은 헤더의 두 링크와 같은 주소·새 탭·요소 열쇠 (032·033). */
+const MENU_LINKS: [href: string, text: string, el: string][] = [
+  ['/privacy', '개인정보 처리방침', 'privacy'],
+  ['/privacy#consent', '화면 분석 설정', 'consent-settings'],
+]
+const menuItem: CSSProperties = { display: 'block', padding: '0 var(--space-6)', lineHeight: '44px', fontSize: 14, color: 'var(--color-neutral-300)', textDecoration: 'none', whiteSpace: 'nowrap' }
+
+/**
+ * 좁은 헤더 첫 줄 오른쪽 끝 메뉴(072 §3.2) — 넓은 헤더에서는 늘 보이던 처리방침·화면 분석 설정 링크를 담는다.
+ * 밖을 누르거나 Esc·링크를 누르면 닫힌다. 링크처럼 화면 이용 통계 영역 밖이다.
+ */
+function HeaderMenu() {
+  const [open, setOpen] = useState(false)
+  const boxRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => { if (!boxRef.current?.contains(e.target as Node)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+  return (
+    <div ref={boxRef} style={{ position: 'relative', flex: 'none' }}>
+      <button type="button" aria-label="메뉴" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(!open)} className="hv-txt" data-el="menu"
+        style={{ appearance: 'none', background: open ? 'var(--color-neutral-900)' : 'none', border: 'none', borderRadius: 'var(--radius-sm)', width: 36, height: 36, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--color-neutral-400)', padding: 0 }}>
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+          <path d="M3 5h12M3 9h12M3 13h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      </button>
+      {open && (
+        <div role="menu" style={{ ...card, boxShadow: 'var(--shadow-md)', position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 30, padding: 'var(--space-1) 0' }}>
+          {/* 032 — 방침은 새 탭으로. 열어 둔 대시보드의 WebSocket 을 끊지 않게 */}
+          {MENU_LINKS.map(([href, text, el]) => (
+            <a key={el} role="menuitem" href={href} target="_blank" rel="noopener" className="hv-txt" data-el={el} style={menuItem} onClick={() => setOpen(false)}>
+              {text}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function App() {
   const { feed, now, staleTick } = useFeed()
+  // 072 — 화면 구간. 문서 스크롤 구간에서는 전역 `body { overflow: hidden }`(index.css — 디자인 원본 복사본이라 고치지 않는다)을
+  // 이 셸이 풀어 문서가 스크롤되게 한다(휴대폰은 문서가 스크롤돼야 주소창이 접힌다)
+  const vp = useViewport()
+  useEffect(() => {
+    if (!vp.docScroll) return
+    document.body.style.overflow = 'visible'
+    return () => { document.body.style.overflow = '' }
+  }, [vp.docScroll])
   // 탭·선택 심볼은 URL 쿼리(?tab=&sym=)에 실려 새로고침해도 같은 화면 (002 §3.5).
   // URL 은 보이는 화면만 담는다 — sym 은 기록 탭이 활성일 때만 쓴다
   const [tab, setTab] = useUrlState<TabId>('tab', 'spread', oneOf(SHOWN_TABS.map(([id]) => id)))
@@ -150,77 +209,134 @@ export default function App() {
 
   const wrap = (id: TabId, node: ReactNode) => HIDDEN_TABS.has(id) ? null : <Pane key={id} active={tab === id}>{node}</Pane>
 
+  // 로고 + 깜빡이는 점 + 상태 글 — 넓은 헤더와 좁은 헤더 첫 줄이 같이 쓴다. 폰은 점만(072 §3.2)
+  const brand = (
+    <div data-area="header" style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)', flex: 'none' }}>
+      <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 600, fontSize: 16, letterSpacing: '-0.01em' }}>Kimp<span style={{ color: 'var(--color-accent)' }}>Track</span></span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--color-neutral-500)' }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-ok)', animation: 'tr-pulse 1.6s ease-in-out infinite' }} />{!vp.phone && '실시간 수집 중'}
+      </span>
+    </div>
+  )
+  const clockNode = (
+    <div style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-500)', fontSize: 12, whiteSpace: 'nowrap' }}>
+      {clock} KST
+    </div>
+  )
+  // 탭 단추 — 넓은 헤더는 줄 높이를 채우는 단추, 좁은 헤더 둘째 줄은 폰이면 같은 폭 다섯 칸·짧은 이름(072 §3.2)
+  const tabButtons = SHOWN_TABS.map(([id, text]) => (
+    <button key={id} onClick={() => pickTab(id)} className="hv-txt" data-el={`tab:${id}`} aria-current={tab === id ? 'page' : undefined}
+      style={{
+        appearance: 'none', background: 'none', border: 'none',
+        borderBottom: `2px solid ${tab === id ? 'var(--color-accent)' : 'transparent'}`,
+        color: tab === id ? 'var(--color-text)' : 'var(--color-neutral-500)',
+        font: 'inherit', fontSize: 13, padding: vp.phone ? '0 2px' : '0 var(--space-4)', cursor: 'pointer',
+        whiteSpace: 'nowrap', ...(vp.phone ? { flex: '1 1 0', minWidth: 0 } : { flex: 'none' }),
+      }}>
+      {vp.phone ? PHONE_LABEL[id] : text}
+    </button>
+  ))
+  // 문서 스크롤 구간에서 화면 위에 붙는 줄(탭 줄, 넓은 헤더면 헤더 전체)
+  const sticky: CSSProperties = vp.docScroll ? { position: 'sticky', top: 0, zIndex: 10, background: 'var(--color-bg)' } : {}
+  // 탭 묶음 — 넓은 헤더에서는 한 줄 헤더 안, 좁은 헤더에서는 둘째 줄 전체(폰이 아니면 넘칠 때 가로 스크롤, 막대 숨김).
+  // data-area·data-el 은 화면 안에서 하나뿐이어야 하므로(061 계약 테스트) 상자는 하나를 두고 자리·모양만 바꾼다
+  // data-el — 061 화면 이용 통계의 요소 열쇠(모양·동작과 무관). 처리방침·설정 링크·메뉴는 영역 밖이라 052 규칙대로 세지 않는다
+  const tabsBar = (
+    <div data-area="tabs" style={vp.compact
+      ? { display: 'flex', alignItems: 'stretch', gap: vp.phone ? 0 : 'var(--space-2)', height: TAB_BAR_H, padding: vp.phone ? '0 var(--space-1)' : '0 var(--space-2)', borderBottom: '1px solid var(--color-divider)', overflowX: 'auto', scrollbarWidth: 'none', flex: 'none', ...sticky }
+      : { display: 'flex', gap: 'var(--space-2)', alignSelf: 'stretch', alignItems: 'stretch' }}>
+      {tabButtons}
+    </div>
+  )
+  const btcKpis: [string, number][] = [['BTC 김프 · 순방향', btcFwd], ['BTC 김프 · 역방향', btcRev]]
+
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'var(--font-body)', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
+    <div style={{ ...(vp.docScroll ? { minHeight: SCREEN_H } : { height: SCREEN_H }), display: 'flex', flexDirection: 'column', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'var(--font-body)', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
 
       {/* 헤더: 타이틀 + LIVE + 탭 + 시계. data-area 는 052 화면 영역 이용 통계의 영역(로고·상태 덩어리와 탭 묶음 — 줄 전체에 달면 둘을 품는다) */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-8)', padding: '0 var(--space-6)', borderBottom: '1px solid var(--color-divider)', height: 52, flex: 'none' }}>
-        <div data-area="header" style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>
-          <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 600, fontSize: 16, letterSpacing: '-0.01em' }}>Kimp<span style={{ color: 'var(--color-accent)' }}>Track</span></span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--color-neutral-500)' }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-ok)', animation: 'tr-pulse 1.6s ease-in-out infinite' }} />실시간 수집 중
-          </span>
+      {!vp.compact ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-8)', padding: '0 var(--space-6)', borderBottom: '1px solid var(--color-divider)', height: 52, flex: 'none', ...sticky }}>
+          {brand}
+          {tabsBar}
+          {/* 032 — 방침은 새 탭으로. 열어 둔 대시보드의 WebSocket 을 끊지 않게. 푸터가 아닌 이유: 입출금 레이더 탭은 셸 푸터를 그리지 않는다 */}
+          <a href="/privacy" target="_blank" rel="noopener" className="hv-txt" data-el="privacy"
+            style={{ marginLeft: 'auto', color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
+            개인정보 처리방침
+          </a>
+          {/* 033 — 동의 창은 한 번 고르면 다시 뜨지 않으므로 바꾸러 가는 길을 늘 둔다(철회가 동의보다 어렵지 않게). 방침과 같은 모양·새 탭 */}
+          <a href="/privacy#consent" target="_blank" rel="noopener" className="hv-txt" data-el="consent-settings"
+            style={{ color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
+            화면 분석 설정
+          </a>
+          {clockNode}
         </div>
-        {/* data-el — 061 화면 이용 통계의 요소 열쇠(모양·동작과 무관). 처리방침·설정 링크는 영역 밖이라 052 규칙대로 세지 않는다 */}
-        <div data-area="tabs" style={{ display: 'flex', gap: 'var(--space-2)', alignSelf: 'stretch', alignItems: 'stretch' }}>
-          {SHOWN_TABS.map(([id, text]) => (
-            <button key={id} onClick={() => pickTab(id)} className="hv-txt" data-el={`tab:${id}`}
-              style={{
-                appearance: 'none', background: 'none', border: 'none',
-                borderBottom: `2px solid ${tab === id ? 'var(--color-accent)' : 'transparent'}`,
-                color: tab === id ? 'var(--color-text)' : 'var(--color-neutral-500)',
-                font: 'inherit', fontSize: 13, padding: '0 var(--space-4)', cursor: 'pointer',
-              }}>
-              {text}
-            </button>
-          ))}
-        </div>
-        {/* 032 — 방침은 새 탭으로. 열어 둔 대시보드의 WebSocket 을 끊지 않게. 푸터가 아닌 이유: 입출금 레이더 탭은 셸 푸터를 그리지 않는다 */}
-        <a href="/privacy" target="_blank" rel="noopener" className="hv-txt" data-el="privacy"
-          style={{ marginLeft: 'auto', color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
-          개인정보 처리방침
-        </a>
-        {/* 033 — 동의 창은 한 번 고르면 다시 뜨지 않으므로 바꾸러 가는 길을 늘 둔다(철회가 동의보다 어렵지 않게). 방침과 같은 모양·새 탭 */}
-        <a href="/privacy#consent" target="_blank" rel="noopener" className="hv-txt" data-el="consent-settings"
-          style={{ color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
-          화면 분석 설정
-        </a>
-        <div style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-500)', fontSize: 12 }}>
-          {clock} KST
-        </div>
-      </div>
+      ) : (
+        <>
+          {/* 좁은 헤더 첫 줄 — 로고·상태 / 시계·메뉴(두 링크는 메뉴 안). 문서 스크롤 때 함께 스크롤돼 사라진다 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', padding: '0 var(--space-2) 0 var(--space-4)', height: 44, flex: 'none' }}>
+            {brand}
+            <div style={{ marginLeft: 'auto' }}>{clockNode}</div>
+            <HeaderMenu />
+          </div>
+          {/* 둘째 줄 — 탭 */}
+          {tabsBar}
+        </>
+      )}
 
-      {/* KPI 스트립 — 카드가 아닌 flex 스트립, 블록 사이 세로 그라디언트 선 */}
-      <div data-area="kpi" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-8)', padding: 'var(--space-4) var(--space-6)', borderBottom: '1px solid var(--color-divider)', flex: 'none', overflowX: 'auto' }}>
-        <div style={{ flex: 'none' }}>
-          <div style={{ ...kicker, marginBottom: 2 }}>USDT/KRW 암묵환율</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>
-            <span style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums' }}>
-              {hasRate ? '₩' + RATE_1.format(feed.rate) : '–'}
-            </span>
-          </div>
-        </div>
-        {vDivider}
-        <div style={{ flex: 'none' }}>
-          <div style={{ ...kicker, marginBottom: 2 }}>BTC 김프 · 순방향</div>
-          <div style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums', color: pctColor(btcFwd) }}>{fmtPct(btcFwd)}</div>
-        </div>
-        <div style={{ flex: 'none' }}>
-          <div style={{ ...kicker, marginBottom: 2 }}>BTC 김프 · 역방향</div>
-          <div style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums', color: pctColor(btcRev) }}>{fmtPct(btcRev)}</div>
-        </div>
-        {vDivider}
-        <div style={{ flex: 'none' }}>
-          <div style={{ ...kicker, marginBottom: 2 }}>수집 상태</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)', fontSize: 14 }}>
-            <span>{healthValue}</span>
-            <span style={{ fontSize: 11, color: 'var(--color-neutral-500)' }}>{healthSub}</span>
-          </div>
-        </div>
-        <div style={{ flex: 'none', marginLeft: 'auto', textAlign: 'right' }}>
-          <div style={{ ...kicker, marginBottom: 2 }}>추적 페어</div>
-          <div style={{ fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{coinCount}개 코인 · {feed.spreads.length} 페어</div>
-        </div>
+      {/* KPI 스트립 — 카드가 아닌 flex 스트립, 블록 사이 세로 그라디언트 선. 폰은 3칸 격자 + 한 줄(072 §3.3), 좁은 헤더 구간은 줄바꿈 허용 */}
+      <div data-area="kpi" style={vp.phone
+        ? { padding: 'var(--space-3) var(--space-4)', borderBottom: '1px solid var(--color-divider)', flex: 'none' }
+        : { display: 'flex', alignItems: 'center', gap: 'var(--space-8)', padding: 'var(--space-4) var(--space-6)', borderBottom: '1px solid var(--color-divider)', flex: 'none', overflowX: 'auto', ...(vp.compact ? { flexWrap: 'wrap', rowGap: 'var(--space-3)' } : null) }}>
+        {vp.phone ? (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 'var(--space-3)' }}>
+              <div>
+                <div style={{ ...kicker, marginBottom: 2 }}>USDT/KRW 암묵환율</div>
+                <div style={{ fontSize: 16 }}>{hasRate ? '₩' + RATE_1.format(feed.rate) : '–'}</div>
+              </div>
+              {btcKpis.map(([text, v]) => (
+                <div key={text}>
+                  <div style={{ ...kicker, marginBottom: 2 }}>{text}</div>
+                  <div style={{ fontSize: 16, color: pctColor(v) }}>{fmtPct(v)}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '2px var(--space-4)', marginTop: 'var(--space-2)', fontSize: 11, color: 'var(--color-neutral-500)' }}>
+              <span>수집 {healthValue}{feed.health && (downNames.length || staleN) ? ` · ${healthSub}` : ''}</span>
+              <span>{coinCount}개 코인 · {feed.spreads.length} 페어</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ flex: 'none' }}>
+              <div style={{ ...kicker, marginBottom: 2 }}>USDT/KRW 암묵환율</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>
+                <span style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums' }}>
+                  {hasRate ? '₩' + RATE_1.format(feed.rate) : '–'}
+                </span>
+              </div>
+            </div>
+            {vDivider}
+            {btcKpis.map(([text, v]) => (
+              <div key={text} style={{ flex: 'none' }}>
+                <div style={{ ...kicker, marginBottom: 2 }}>{text}</div>
+                <div style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums', color: pctColor(v) }}>{fmtPct(v)}</div>
+              </div>
+            ))}
+            {vDivider}
+            <div style={{ flex: 'none' }}>
+              <div style={{ ...kicker, marginBottom: 2 }}>수집 상태</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)', fontSize: 14 }}>
+                <span>{healthValue}</span>
+                <span style={{ fontSize: 11, color: 'var(--color-neutral-500)' }}>{healthSub}</span>
+              </div>
+            </div>
+            <div style={{ flex: 'none', marginLeft: 'auto', textAlign: 'right' }}>
+              <div style={{ ...kicker, marginBottom: 2 }}>추적 페어</div>
+              <div style={{ fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{coinCount}개 코인 · {feed.spreads.length} 페어</div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* 표는 행 배열(snapshot·delta 마다 새 배열)과 staleTick 만 받는다 — 1.5초 tick·수집 상태 폴링 리렌더에서 둘이 그대로면 건너뛴다 */}
@@ -237,12 +353,12 @@ export default function App() {
       {wrap('health', <HealthTab feed={feed} now={now} />)}
       {wrap('flow', <FlowTab active={tab === 'flow'} />)}
 
-      {/* 푸터 — 입출금 레이더 탭은 FlowTab 이 자체 푸터를 그림 */}
+      {/* 푸터 — 입출금 레이더 탭은 FlowTab 이 자체 푸터를 그림. 폰은 세 문구를 세로로, 좁은 헤더 구간은 줄바꿈 허용(072 §3.3) */}
       {tab !== 'flow' && (
-        <div style={{ flex: 'none', display: 'flex', gap: 'var(--space-6)', padding: 'var(--space-2) var(--space-6)', borderTop: '1px solid var(--color-divider)', fontSize: 11, color: 'var(--color-neutral-600)' }}>
+        <div style={{ flex: 'none', display: 'flex', gap: vp.phone ? 2 : 'var(--space-6)', padding: vp.phone ? 'var(--space-3) var(--space-4)' : 'var(--space-2) var(--space-6)', borderTop: '1px solid var(--color-divider)', fontSize: 11, color: 'var(--color-neutral-600)', ...(vp.phone ? { flexDirection: 'column' } : vp.compact ? { flexWrap: 'wrap', rowGap: 2 } : null) }}>
           <span>암묵환율 = 국내 거래소 USDT/KRW 최우선 매도호가(ask) 기준</span>
           <span>순방향 = 해외 매수 → 국내 매도 · 역방향 = 국내 매수 → 해외 매도</span>
-          <span style={{ marginLeft: 'auto' }}>수집 실패 값은 보간 없이 –로 표시</span>
+          <span style={vp.phone ? undefined : { marginLeft: 'auto' }}>수집 실패 값은 보간 없이 –로 표시</span>
         </div>
       )}
     </div>
