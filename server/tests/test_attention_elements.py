@@ -19,7 +19,10 @@ COMMON = [
     "tab:*",
     "privacy",
     "consent-settings",
-]  # 처리방침·설정 링크는 영역 밖(052) — 세지 않는다
+    "menu",
+]  # 처리방침·설정 링크·좁은 헤더 메뉴 단추(072)는 영역 밖(052) — 세지 않는다
+# 폰 조작(072) — 필터 펼치기 단추·정렬 줄(고르기·방향). 정렬 줄이 있는 탭마다 같은 세 열쇠
+PHONE = ["filter-toggle", "sort:col", "sort:dir"]
 DASHBOARD = {
     "spread": (
         ["features/spreads/Tab.tsx"],
@@ -30,6 +33,7 @@ DASHBOARD = {
             "search",
             *("dom:all", "dom:upbit", "dom:bithumb", "threshold", "only-over"),
             *("only-io", "only-net", "view:kimp", "view:rev", "fx:all", "fx:*"),
+            *PHONE,
         ],
     ),
     "history": (
@@ -40,6 +44,7 @@ DASHBOARD = {
             *("dir:*", "period:*", "dom:all", "dom:upbit", "dom:bithumb"),
             *("fx:all", "fx:*", "search", "row:*"),
             *("chart-dom:all", "chart-dom:*", "interval:*", "fold:*", "card:*"),
+            *PHONE,
         ],
     ),
     "gap": (
@@ -47,6 +52,7 @@ DASHBOARD = {
         [
             *("sort:sym", "sort:price", "sort:gap", "sort:funding", "search"),
             *("mode:entry", "mode:exit", "threshold", "only-over"),
+            *PHONE,
         ],
     ),
     "pp": (
@@ -54,6 +60,7 @@ DASHBOARD = {
         [
             *("sort:sym", "sort:gap", "sort:fund", "search"),
             *("threshold-price", "threshold-funding", "only-over"),
+            *PHONE,
         ],
     ),
     "health": (["features/health/Tab.tsx"], []),
@@ -124,15 +131,16 @@ def test_dashboard_keys_match_the_list_and_are_unique_per_screen() -> None:
         )
         for key in found:
             assert VALUE.fullmatch(key.removesuffix("*").rstrip(":")), (tab, key)
-    # 공유 조각은 받은 값을 그대로 단다 — 열쇠 글자를 박지 않는다
+    # 공유 조각은 받은 값을 그대로 단다 — 열쇠 글자를 박지 않는다(Seg·NumField·ToggleBtn·GridHeader + 072 의 FoldButton·SortBar 둘)
     assert _source("shared/ui.tsx") == []
     assert (
         len(
             re.findall(
-                r"data-el=\{(?:o\.el|el)\}", (SRC / "shared/ui.tsx").read_text("utf-8")
+                r"data-el=\{(?:o\.el|el|els\?\.\[[01]\])\}",
+                (SRC / "shared/ui.tsx").read_text("utf-8"),
             )
         )
-        == 4
+        == 7
     )
 
 

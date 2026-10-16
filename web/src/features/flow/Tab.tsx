@@ -1,9 +1,14 @@
 // 입출금 레이더 탭 — 업비트 이더리움 ERC-20 입출금 실데이터 (스펙 050 §3.8). 위 = 코인별 순유입 표, 아래 = 최근 전송 표.
 // 두 경로를 탭이 보이는 동안만 5초마다 부른다(api.ts). 실패하면 직전 표를 두고 바 1 우측에 HTTP 상태를 적는다.
+// 폰(폭 719px 이하)은 머리 줄 없는 2줄 카드 행, 검색 칸은 다음 줄 전체 폭 (072 §3.4·§3.5).
 import { useState, type CSSProperties } from 'react'
 import { fmtAgo, fmtKrw, fmtQty, fmtTime } from '../../shared/format'
-import { Empty, Pill, Seg, bar, card, gridHead, gridRow, headCell, kicker, searchInput, segOpt, type PillTone } from '../../shared/ui'
+import {
+  Empty, Pill, Seg, bar, bodyScroll, card, cardLeft, cardRight, cardRow, cardSub, gridHead, gridRow, headCell, kicker, phoneBar, phoneSearch,
+  searchInput, segOpt, type PillTone,
+} from '../../shared/ui'
 import { oneOf, useUrlState } from '../../shared/urlState'
+import { useViewport } from '../../shared/viewport'
 import { useNetflow, useRecent } from './api'
 import type { FlowDir, FlowFeed, FlowWindow, NetflowRow, RecentRow } from './types'
 
@@ -140,6 +145,52 @@ function NetRow({ r, asOf, onCoin }: { r: NetflowRow; asOf: number; onCoin: (sym
   )
 }
 
+/** tx 해시 링크 — 넓은 행과 폰 카드가 같이 쓴다(061 열쇠 `tx` 는 화면 안에서 하나뿐). 새 창 — 열어 둔 대시보드의 WebSocket 을 끊지 않게 */
+function TxLink({ hash, size }: { hash: string; size: number }) {
+  return (
+    <a href={`https://etherscan.io/tx/${hash}`} target="_blank" rel="noopener" className="hv-txt" title={hash} data-el="tx"
+      style={{ fontFamily: 'ui-monospace, monospace', fontSize: size, color: 'var(--color-neutral-400)', textDecoration: 'none' }}>
+      {shortHex(hash)}
+    </a>
+  )
+}
+
+/** 폰 순유입 행 — 1줄 = 코인 / 순유입 수량, 2줄 = 입금·출금 / 원화·최근 (072 §3.5). */
+function NetCard({ r, asOf, onCoin }: { r: NetflowRow; asOf: number; onCoin: (sym: string) => void }) {
+  return (
+    <div className="hv-row4" data-el={`row:${r.symbol}`} style={cardRow({ rule: 6 })}>
+      <button className="hv-txt" onClick={() => onCoin(r.symbol)} style={{ ...textBtn, padding: 0, fontSize: 14, fontWeight: 600 }}>{r.symbol}</button>
+      <span style={{ ...cardRight, fontSize: 13, color: netColor(r.netAmount) }}>{signedQty(r.netAmount)}</span>
+      <span style={cardSub}>입금 {countCell(r.inCount, r.inAmount)} · 출금 {countCell(r.outCount, r.outAmount)}</span>
+      <span style={{ ...cardRight, fontSize: 11, gap: 4 }}>
+        <span style={{ color: r.netKrw === null ? 'var(--color-neutral-600)' : 'var(--color-neutral-300)' }}>{netKrwText(r.netKrw)}</span>
+        <span style={{ color: 'var(--color-neutral-500)' }}>· {fmtAgo(Math.max(0, asOf - r.lastTs))}</span>
+      </span>
+    </div>
+  )
+}
+
+/** 폰 최근 전송 행 — 1줄 = 방향·코인·수량 / 원화, 2줄 = 시각·주소 → 상대 / tx (072 §3.5). */
+function RecentCard({ r }: { r: RecentRow }) {
+  return (
+    <div className="hv-row4" style={cardRow({ rule: 6 })}>
+      <div style={cardLeft}>
+        <Pill tone={dirTone(r.dir)}>{dirLabel(r.dir)}</Pill>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{r.symbol}</span>
+        <span style={{ ...cardSub, color: 'var(--color-neutral-300)' }}>{fmtQty(r.amount)}</span>
+      </div>
+      <span style={{ ...krwStyle(r.krw), padding: 0, fontSize: 13 }}>{krwText(r.krw)}</span>
+      <span style={{ ...cardSub, fontFamily: 'ui-monospace, monospace', fontSize: 10.5 }}>
+        {fmtTime(r.ts * 1000)} · <span title={r.addr}>{shortHex(r.addr)}</span> → <span title={r.counterparty}>{shortHex(r.counterparty)}</span>
+      </span>
+      <span style={{ ...cardRight, gap: 6 }}>
+        {!r.confirmed && <Pill tone="neutral">확정 전</Pill>}
+        <TxLink hash={r.txHash} size={11} />
+      </span>
+    </div>
+  )
+}
+
 function RecentRowView({ r }: { r: RecentRow }) {
   return (
     <div className="hv-row4" style={gridRow(RECENT_COLS, { height: 36, rule: 6 })}>
@@ -151,11 +202,7 @@ function RecentRowView({ r }: { r: RecentRow }) {
       <span style={mono} title={r.addr}>{shortHex(r.addr)}</span>
       <span style={mono} title={r.counterparty}>{shortHex(r.counterparty)}</span>
       <span style={{ ...cell, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-        {/* 새 창 — 열어 둔 대시보드의 WebSocket 을 끊지 않게 */}
-        <a href={`https://etherscan.io/tx/${r.txHash}`} target="_blank" rel="noopener" className="hv-txt" title={r.txHash} data-el="tx"
-          style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11.5, color: 'var(--color-neutral-400)', textDecoration: 'none' }}>
-          {shortHex(r.txHash)}
-        </a>
+        <TxLink hash={r.txHash} size={11.5} />
         {!r.confirmed && <Pill tone="neutral">확정 전</Pill>}
       </span>
     </div>
@@ -163,6 +210,7 @@ function RecentRowView({ r }: { r: RecentRow }) {
 }
 
 export default function FlowTab({ active }: { active: boolean }) {
+  const { phone, docScroll } = useViewport()
   // 창·방향은 URL 쿼리(f.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색은 URL 에 싣지 않는다(033 — Clarity 가 주소를 통째로 싣는다)
   const [win, setWin] = useUrlState<FlowWindow>('f.win', '1h', oneOf(['1h', '6h', '24h']))
   const [dir, setDir] = useUrlState<FlowDir>('f.dir', 'all', oneOf(['all', 'in', 'out']))
@@ -186,42 +234,53 @@ export default function FlowTab({ active }: { active: boolean }) {
     setSym(upper)
   }
 
+  const status = (
+    <span style={{ marginLeft: phone ? 0 : 'auto', display: 'inline-flex', alignItems: 'center', gap: 'var(--space-4)', ...(phone ? { flexBasis: '100%' } : null) }}>
+      {errorStatus !== null && <span style={{ fontSize: 12, color: 'var(--color-warn)' }}>불러오지 못했습니다 (HTTP {errorStatus})</span>}
+      <FeedStatus feed={feed} />
+    </span>
+  )
+
   return (
     <>
-      {/* 바 1: 창 · 방향 · 코인 검색 · 우측 오류 문구 + 피드 상태 */}
-      <div data-area="filters" style={bar}>
+      {/* 바 1: 창 · 방향 · 코인 검색 · 우측 오류 문구 + 피드 상태. 폰은 검색 칸이 다음 줄 전체 폭, 상태는 그 아래 */}
+      <div data-area="filters" style={phone ? phoneBar : bar}>
         <Seg opts={WINDOWS.map(([id, l, el]) => segOpt(l, win === id, () => setWin(id), el))} />
         <Seg opts={DIRS.map(([id, l, el]) => segOpt(l, dir === id, () => setDir(id), el))} />
         <input className="input" placeholder="코인 심볼 입력 후 Enter" value={q} data-el="search"
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') applySearch(q) }}
-          style={{ ...searchInput, width: 200 }} />
-        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 'var(--space-4)' }}>
-          {errorStatus !== null && <span style={{ fontSize: 12, color: 'var(--color-warn)' }}>불러오지 못했습니다 (HTTP {errorStatus})</span>}
-          <FeedStatus feed={feed} />
-        </span>
+          enterKeyHint="search"
+          style={phone ? { ...phoneSearch, flexBasis: '100%' } : { ...searchInput, width: 200 }} />
+        {status}
       </div>
 
       {/* 본문 — 표 둘이라 TableFrame 대신 자체 스크롤 영역에 카드 둘 */}
-      <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        <div style={{ maxWidth: 1240, margin: '0 auto', padding: 'var(--space-4) var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+      <div style={bodyScroll(docScroll)}>
+        <div style={{ maxWidth: 1240, margin: '0 auto', padding: phone ? 'var(--space-3)' : 'var(--space-4) var(--space-6)', display: 'flex', flexDirection: 'column', gap: phone ? 'var(--space-3)' : 'var(--space-4)' }}>
 
           {/* 순유입 표 — data-area 는 052 화면 영역 이용 통계의 영역 */}
           <div data-area="table" style={{ ...card, padding: '0 0 var(--space-2)' }}>
             <TableTitle>{`코인별 순유입 · 최근 ${winLabel(win)} · ${netRows.length}종`}</TableTitle>
-            <div style={{ overflowX: 'auto' }}>
-              <div style={{ minWidth: NET_MIN }}>
-                <div style={gridHead(NET_COLS)}>
-                  <span style={headCell}>코인</span>
-                  <span style={headCell}>입금</span>
-                  <span style={headCell}>출금</span>
-                  <span style={{ ...headCell, textAlign: 'right' }}>순유입</span>
-                  <span style={{ ...headCell, textAlign: 'right' }}>원화</span>
-                  <span style={{ ...headCell, textAlign: 'right' }}>최근</span>
-                </div>
-                {netRows.map((r) => <NetRow key={r.symbol} r={r} asOf={asOf} onCoin={applySearch} />)}
+            {phone ? (
+              <div style={{ borderTop: '1px solid var(--color-neutral-800)' }}>
+                {netRows.map((r) => <NetCard key={r.symbol} r={r} asOf={asOf} onCoin={applySearch} />)}
               </div>
-            </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <div style={{ minWidth: NET_MIN }}>
+                  <div style={gridHead(NET_COLS)}>
+                    <span style={headCell}>코인</span>
+                    <span style={headCell}>입금</span>
+                    <span style={headCell}>출금</span>
+                    <span style={{ ...headCell, textAlign: 'right' }}>순유입</span>
+                    <span style={{ ...headCell, textAlign: 'right' }}>원화</span>
+                    <span style={{ ...headCell, textAlign: 'right' }}>최근</span>
+                  </div>
+                  {netRows.map((r) => <NetRow key={r.symbol} r={r} asOf={asOf} onCoin={applySearch} />)}
+                </div>
+              </div>
+            )}
             {netflow.data === null && <Empty size={12}>조회 중…</Empty>}
             {netflow.data !== null && netRows.length === 0 && <Empty size={12}>이 창에 업비트 ERC-20 입출금 없음</Empty>}
           </div>
@@ -229,21 +288,27 @@ export default function FlowTab({ active }: { active: boolean }) {
           {/* 최근 전송 표 */}
           <div data-area="table-2" style={{ ...card, padding: '0 0 var(--space-2)' }}>
             <TableTitle>최근 전송 · 24시간 안 최신순 · 최대 100행</TableTitle>
-            <div style={{ overflowX: 'auto' }}>
-              <div style={{ minWidth: RECENT_MIN }}>
-                <div style={gridHead(RECENT_COLS)}>
-                  <span style={{ padding: '6px 8px 6px 0' }}>시각</span>
-                  <span style={headCell}>방향</span>
-                  <span style={headCell}>코인</span>
-                  <span style={{ ...headCell, textAlign: 'right' }}>수량</span>
-                  <span style={{ ...headCell, textAlign: 'right' }}>원화</span>
-                  <span style={headCell}>주소</span>
-                  <span style={headCell}>상대</span>
-                  <span style={headCell}>tx</span>
-                </div>
-                {recentRows.map((r, i) => <RecentRowView key={i} r={r} />)}
+            {phone ? (
+              <div style={{ borderTop: '1px solid var(--color-neutral-800)' }}>
+                {recentRows.map((r, i) => <RecentCard key={i} r={r} />)}
               </div>
-            </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <div style={{ minWidth: RECENT_MIN }}>
+                  <div style={gridHead(RECENT_COLS)}>
+                    <span style={{ padding: '6px 8px 6px 0' }}>시각</span>
+                    <span style={headCell}>방향</span>
+                    <span style={headCell}>코인</span>
+                    <span style={{ ...headCell, textAlign: 'right' }}>수량</span>
+                    <span style={{ ...headCell, textAlign: 'right' }}>원화</span>
+                    <span style={headCell}>주소</span>
+                    <span style={headCell}>상대</span>
+                    <span style={headCell}>tx</span>
+                  </div>
+                  {recentRows.map((r, i) => <RecentRowView key={i} r={r} />)}
+                </div>
+              </div>
+            )}
             {recent.data === null && <Empty size={12}>조회 중…</Empty>}
             {recent.data !== null && recentRows.length === 0 && <Empty size={12}>해당 조건의 전송 없음</Empty>}
           </div>
@@ -251,10 +316,10 @@ export default function FlowTab({ active }: { active: boolean }) {
         </div>
       </div>
 
-      {/* 전용 푸터 — flow 탭에서는 셸 푸터를 대체한다 (§3.8) */}
-      <footer style={{ flex: 'none', display: 'flex', gap: 'var(--space-6)', padding: 'var(--space-2) var(--space-6)', borderTop: '1px solid var(--color-divider)', fontSize: 11, color: 'var(--color-neutral-600)', flexWrap: 'wrap' }}>
+      {/* 전용 푸터 — flow 탭에서는 셸 푸터를 대체한다 (§3.8). 폰은 두 문구를 세로로(072 §3.3) */}
+      <footer style={{ flex: 'none', display: 'flex', gap: phone ? 2 : 'var(--space-6)', padding: phone ? 'var(--space-3) var(--space-4)' : 'var(--space-2) var(--space-6)', borderTop: '1px solid var(--color-divider)', fontSize: 11, color: 'var(--color-neutral-600)', flexWrap: 'wrap', ...(phone ? { flexDirection: 'column' } : null) }}>
         <span>업비트 · 이더리움 네트워크 ERC-20 {countText(feed?.contracts)}종 · 블록 2개 확정 전은 '확정 전'</span>
-        <span style={{ marginLeft: 'auto', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+        <span style={phone ? { fontVariantNumeric: 'tabular-nums' } : { marginLeft: 'auto', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
           입금주소 {countText(feed?.depositAddrs)} · 핫월렛 {countText(feed?.hotWallets)} · 자동 확장
         </span>
       </footer>

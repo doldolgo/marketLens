@@ -24,6 +24,10 @@ const AREA_NAMES = {
 const EL_NAMES = {
   "privacy": "개인정보 처리방침 링크",
   "consent-settings": "화면 분석 설정 링크",
+  "menu": "메뉴 단추(좁은 화면)",
+  "filter-toggle": "필터 펼치기(폰)",
+  "sort:col": "정렬 열 고르기(폰)",
+  "sort:dir": "정렬 방향(폰)",
   "search": "심볼 검색칸",
   "app-flow|search": "코인 심볼 입력칸",
   "threshold": "하이라이트 임계값",
