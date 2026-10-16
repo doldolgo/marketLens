@@ -13,7 +13,7 @@ METRICS = "127.0.0.1:2000"
 SECRET = "cloudflared-token"
 TOKEN_PATH = "/run/secrets/cloudflared-token"
 SERVE_UP = "docker compose --profile serve --env-file .env --env-file server/.env up -d --build"
-CADDY_RELOAD = "docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile"
+CADDY_RELOAD = "timeout 120 docker exec marketlens-caddy caddy reload --config /etc/caddy/Caddyfile || rc=$?"
 TOKEN_CHECK = "if [ -s secrets/cloudflared-token ]; then"
 TUNNEL_UP = (
     "docker compose --profile tunnel --env-file .env --env-file server/.env up -d"
