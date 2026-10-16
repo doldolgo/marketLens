@@ -85,7 +85,7 @@ cd server && python -m pytest -q app/features/spreads/tests/test_gauge.py   # �
   - 고친 것: `server/app/core/redis_bus.py`(`replay_load`·`replay_append`·`replay_mark_cut`·`replay_recent`·`replay_ip`·`replay_metas`·`replay_batches`, 키 설명), `server/app/main.py`(api 역할에만 서비스·라우터 — 태스크 없음), `web/nginx.conf`(`= /api/replay`·`= /replay.js`, CSP 설명 글), `web/nginx-admin.conf`(정확 일치 셋), `caddy/Caddyfile`(로그 제외 +1), 계약 테스트 넷(§5), 새 `server/tests/test_replay.py`.
   - 대시보드의 `/app/replay.js` 는 `/app/` alias(no-store)가 그대로 준다 — `/app/attention.js` 와 같다(설정 변경 없음).
 - 추측한 지점(스펙이 말하지 않아 정한 것 — §1~§4 는 고치지 않았다):
-  - 몸통 키는 `v`·`sid`·`seq`·`page`·`dev`·`w`·`h`·`ev` 여덟(§3.4 의 '일곱' 은 `v` 를 뺀 수로 읽었다), `v` 는 정수 1 만.
+  - 몸통 키는 `v`·`sid`·`seq`·`page`·`dev`·`w`·`h`·`ev` 여덟(§3.4 를 실행 뒤 '여덟' 로 고쳤다), `v` 는 정수 1 만.
   - 사건 `e` 의 n 은 0~199(기록 쪽이 200번째부터 보내지 않는다), `r` 의 w·h 는 몸통 w·h 와 같은 1~20,000, `c` 의 영역은 `""` 또는 영역 id, `e`·`a` 의 영역은 영역 id 만.
   - 머리 해시에 스펙 목록 밖 필드 셋을 더했다 — `seq`(마지막으로 받은 묶음 번호 — 다시 온 비콘 판정), `now`(지금 화면 — `live` 행의 `now` 를 묶음을 풀지 않고 답하려고), `cut`(조각 상한 1MB·3,600 으로 묶음을 버렸으면 `1` — 074 §3.5 '앞부분만' 배지).
   - 피드 행 = `{sid, ip, dev, page, pages, now, first, last, n, clicks, w, h, cut}` — §3.6 꼴에 `w`·`h`(074 의 틀 크기)·`cut` 을 더했고 `pages` 는 JSON 배열. 피드 셋 모두 `code`(null·`redis`)를 늘 싣는다(052 피드 꼴).
