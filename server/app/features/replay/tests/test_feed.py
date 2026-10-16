@@ -146,7 +146,8 @@ async def test_session_returns_the_head_and_the_stored_batches(rig: Rig) -> None
     rig.clock.now = NOON + 2
     await rig.post(body(seq=1, ev=[[2000, "p", "app-flow"]]))
     got = await _json(rig, "session", sid=SID)
-    assert list(got) == ["state", "code", "meta", "batches", "next", "more"]
+    assert list(got) == ["state", "code", "meta", "batches", "next", "more", "archived"]
+    assert got["archived"] is False
     assert (got["state"], got["code"], got["next"], got["more"]) == (
         "ok",
         None,
@@ -199,6 +200,7 @@ async def test_unknown_or_expired_session_has_null_meta(rig: Rig) -> None:
         "batches": [],
         "next": 3,
         "more": False,
+        "archived": False,
     }
 
 
@@ -248,6 +250,7 @@ async def test_redis_failure_is_state_error_code_redis_on_all_three(
         "batches": [],
         "next": 2,
         "more": False,
+        "archived": False,
     }
 
 
