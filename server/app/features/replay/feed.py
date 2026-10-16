@@ -51,27 +51,44 @@ def _dumps(value: object) -> str:
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
 
 
-def session_body(
-    meta: dict[str, str], sid: str, blobs: Sequence[bytes], start: int, total: int
+def page_body(
+    head: dict[str, Any] | None,
+    lines: Sequence[bytes],
+    start: int,
+    total: int,
+    archived: bool,
 ) -> bytes:
-    """`{state, code, meta, batches, next, more}` 바이트 — 묶음은 푼 JSON 을 쉼표로 잇는다. 머리가 없으면 묶음도 없다."""
-    head = row(sid, meta)
-    if head is None:
-        blobs, total = [], 0
-    nxt = start + len(blobs)
-    batches = b",".join(zlib.decompress(blob) for blob in blobs)
+    """`{state, code, meta, batches, next, more, archived}` 바이트 — 묶음은 이미 푼 JSON 줄을 쉼표로 잇는다(다시 파싱하지 않는다).
+    078 의 수집기 archive 피드도 같은 꼴로 쓴다."""
+    nxt = start + len(lines)
     return b"".join(
         (
             b'{"state":"ok","code":null,"meta":',
             _dumps(head).encode(),
             b',"batches":[',
-            batches,
+            b",".join(lines),
             b'],"next":',
             str(nxt).encode(),
             b',"more":',
             b"true" if nxt < total else b"false",
+            b',"archived":',
+            b"true" if archived else b"false",
             b"}",
         )
+    )
+
+
+def session_body(
+    meta: dict[str, str], sid: str, blobs: Sequence[bytes], start: int, total: int
+) -> bytes:
+    """`{state, code, meta, batches, next, more, archived}` 바이트 — 묶음은 푼 JSON 을 쉼표로 잇는다. 머리가 없으면 묶음도 없다.
+    머리에 `arch` 가 있고 Redis 묶음이 비었으면(14일이 지나 S3 에만 있다) `archived` true — 관리자는 수집기 archive 로 다시 받는다(078 §3.3)."""
+    head = row(sid, meta)
+    if head is None:
+        blobs, total = [], 0
+    archived = head is not None and "arch" in meta and total == 0
+    return page_body(
+        head, [zlib.decompress(blob) for blob in blobs], start, total, archived
     )
 
 
@@ -134,5 +151,6 @@ class ReplayFeed:
             "batches": [],
             "next": start,
             "more": False,
+            "archived": False,
         }
         return _dumps(failed).encode()

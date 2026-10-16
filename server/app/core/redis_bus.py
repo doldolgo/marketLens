@@ -85,6 +85,8 @@ REPLAY_EVENTS_PREFIX = "rp:e:"
 REPLAY_IP_PREFIX = "rp:ip:"
 REPLAY_RECENT_KEY = "rp:recent"
 REPLAY_DAY_PREFIX = "rp:b:"
+# 078 — S3 로 옮길 차례(keep 조각 sid → last). 수집기가 3시간 조용한 조각을 옮기고 뺀다
+REPLAY_TODO_KEY = "rp:todo"
 
 
 def want_key(table: str) -> str:
@@ -353,37 +355,39 @@ class RedisBus:
         blob: bytes,
         day: str,
         ttl_sec: int,
-        cutoff_ms: int,
     ) -> None:
-        """묶음 하나를 MULTI 한 번으로 (073 §3.5) — 머리 `HSET`, 묶음 `RPUSH`, `rp:ip:<meta ip>` 에 sid → first,
-        `rp:recent` 에 sid → last(두 집합은 cutoff_ms 보다 작은 점수를 지운다), `rp:b:<day>` 에 묶음 바이트를 더하고 다섯 키
-        모두 `EXPIRE ttl_sec`. meta 는 머리 전체(`ip`·`first`·`last` 필수 — 호출자가 새 값을 다 셈한다). 실패는 예외."""
+        """묶음 하나를 MULTI 한 번으로 (073 §3.5·078 §3.1) — 머리 `HSET`, 묶음 `RPUSH`, `rp:ip:<meta ip>` 에 sid → first,
+        `rp:recent` 에 sid → last, `rp:b:<day>` 에 묶음 바이트를 더한다. 묶음·그날 키는 `EXPIRE ttl_sec`, 두 집합은 만료·잘라내기
+        없이 `PERSIST`(앞 코드가 단 만료를 걷는다). 머리는 `keep` 이 1 이면 만료 없이 두고 `rp:todo` 에 sid → last 를 넣으며,
+        아니면 `EXPIRE ttl_sec`. meta 는 머리 전체(`ip`·`first`·`last` 필수 — 호출자가 새 값을 다 셈한다). 실패는 예외."""
         ip_key = REPLAY_IP_PREFIX + meta["ip"]
-        keys = (
-            REPLAY_META_PREFIX + sid,
-            REPLAY_EVENTS_PREFIX + sid,
-            ip_key,
-            REPLAY_RECENT_KEY,
-            REPLAY_DAY_PREFIX + day,
-        )
+        meta_key = REPLAY_META_PREFIX + sid
+        keep = meta.get("keep") == "1"
         async with self._client.pipeline(transaction=True) as pipe:
-            pipe.hset(keys[0], mapping=dict(meta))
-            pipe.rpush(keys[1], blob)
+            pipe.hset(meta_key, mapping=dict(meta))
+            pipe.rpush(REPLAY_EVENTS_PREFIX + sid, blob)
             pipe.zadd(ip_key, {sid: int(meta["first"])})
-            pipe.zremrangebyscore(ip_key, "-inf", f"({cutoff_ms}")
             pipe.zadd(REPLAY_RECENT_KEY, {sid: int(meta["last"])})
-            pipe.zremrangebyscore(REPLAY_RECENT_KEY, "-inf", f"({cutoff_ms}")
-            pipe.incrby(keys[4], len(blob))
-            for key in keys:
+            pipe.incrby(REPLAY_DAY_PREFIX + day, len(blob))
+            for key in (REPLAY_EVENTS_PREFIX + sid, REPLAY_DAY_PREFIX + day):
                 pipe.expire(key, ttl_sec)
+            pipe.persist(ip_key)
+            pipe.persist(REPLAY_RECENT_KEY)
+            if keep:
+                pipe.persist(meta_key)
+                pipe.zadd(REPLAY_TODO_KEY, {sid: int(meta["last"])})
+            else:
+                pipe.expire(meta_key, ttl_sec)
             await pipe.execute()
 
-    async def replay_mark_cut(self, sid: str, ttl_sec: int) -> None:
-        """`HSET rp:m:<sid> cut 1` + `EXPIRE` — 조각 상한(1MB·묶음 수)으로 묶음을 버렸다는 표시 (073 §3.5). 실패는 예외."""
+    async def replay_mark_cut(self, sid: str, ttl_sec: int | None) -> None:
+        """`HSET rp:m:<sid> cut 1` — 조각 상한(1MB·묶음 수)으로 묶음을 버렸다는 표시 (073 §3.5). ttl_sec 가 None(keep 조각,
+        078 §3.1)이면 만료를 달지 않는다. 실패는 예외."""
         key = REPLAY_META_PREFIX + sid
         async with self._client.pipeline(transaction=False) as pipe:
             pipe.hset(key, "cut", "1")
-            pipe.expire(key, ttl_sec)
+            if ttl_sec is not None:
+                pipe.expire(key, ttl_sec)
             await pipe.execute()
 
     async def replay_recent(self, min_ms: int | None, limit: int) -> list[str]:
@@ -425,6 +429,59 @@ class RedisBus:
             list(blobs),
             int(total),
         )
+
+    async def replay_todo(self, max_ms: int, limit: int) -> list[tuple[str, int]]:
+        """`ZRANGEBYSCORE rp:todo -inf <max_ms> WITHSCORES LIMIT 0 <limit>` — last 가 max_ms 이하인 옮길 조각, 오래된 순
+        (078 §3.2). 실패는 예외."""
+        found = await self._client.zrangebyscore(
+            REPLAY_TODO_KEY, "-inf", max_ms, start=0, num=limit, withscores=True
+        )
+        return [(_text(sid), int(score)) for sid, score in found]
+
+    async def replay_todo_oldest(self) -> int | None:
+        """`ZRANGE rp:todo 0 0 WITHSCORES` — 가장 오래 기다린 조각의 last, 비었으면 None (078 §3.2). 실패는 예외."""
+        found = await self._client.zrange(REPLAY_TODO_KEY, 0, 0, withscores=True)
+        return int(found[0][1]) if found else None
+
+    async def replay_dump(self, sid: str) -> tuple[dict[str, str], list[bytes]]:
+        """`HGETALL rp:m:<sid>` + `LRANGE rp:e:<sid> 0 -1` 한 왕복 — 옮길 조각의 머리와 누른 묶음 전부 (078 §3.2). 실패는 예외."""
+        async with self._client.pipeline(transaction=False) as pipe:
+            pipe.hgetall(REPLAY_META_PREFIX + sid)
+            pipe.lrange(REPLAY_EVENTS_PREFIX + sid, 0, -1)
+            meta, blobs = await pipe.execute()
+        return {_text(k): _text(v) for k, v in meta.items()}, list(blobs)
+
+    async def replay_archived(self, sid: str, last: int, count: int) -> bool:
+        """옮긴 뒤 (078 §3.2) — `rp:todo` 의 점수가 읽은 last 와 같으면 `ZREM` 하고 머리에 `arch=<count>`, True. 그 사이 묶음이
+        와 점수가 바뀌었으면 아무것도 하지 않고 False(다음 차례에 다시 통째로 옮긴다). 읽기와 쓰기 사이는 원자가 아니다 — 3시간
+        조용했던 조각이라 그 틈에 묶음이 올 일이 없다(replay.js 조각 상한 2시간). 실패는 예외."""
+        score = await self._client.zscore(REPLAY_TODO_KEY, sid)
+        if score is None or int(score) != last:
+            return False
+        async with self._client.pipeline(transaction=True) as pipe:
+            pipe.zrem(REPLAY_TODO_KEY, sid)
+            pipe.hset(REPLAY_META_PREFIX + sid, "arch", str(count))
+            await pipe.execute()
+        return True
+
+    async def replay_drop_todo(self, sid: str) -> None:
+        """`ZREM rp:todo sid` — 머리가 없는 조각(옮길 것이 없다) (078 §3.2). 실패는 예외."""
+        await self._client.zrem(REPLAY_TODO_KEY, sid)
+
+    async def replay_forget(self, ip: str) -> list[dict[str, str]]:
+        """IP 하나의 화면 이동 기록을 지운다 (078 §3.6) — `rp:ip:<ip>` 의 sid 마다 머리(지우기 전 값을 돌려준다 — 호출자가 S3 키를
+        셈한다)·묶음·`rp:recent`·`rp:todo` 항목, 그리고 그 집합. 실패는 예외."""
+        ip_key = REPLAY_IP_PREFIX + ip
+        sids = [_text(v) for v in await self._client.zrange(ip_key, 0, -1)]
+        metas = await self.replay_metas(sids)
+        async with self._client.pipeline(transaction=True) as pipe:
+            for sid in sids:
+                pipe.delete(REPLAY_META_PREFIX + sid, REPLAY_EVENTS_PREFIX + sid)
+                pipe.zrem(REPLAY_RECENT_KEY, sid)
+                pipe.zrem(REPLAY_TODO_KEY, sid)
+            pipe.delete(ip_key)
+            await pipe.execute()
+        return [{**meta, "sid": sid} for sid, meta in zip(sids, metas, strict=True)]
 
     async def subscribe(self, channel: str = CHANNEL) -> Subscription:
         """채널 구독 연결을 새로 연다 — 여기서 실제 연결이 일어나므로 실패는 예외. 한 연결은 한 채널만 (048 §3.4)."""

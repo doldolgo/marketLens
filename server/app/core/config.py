@@ -55,6 +55,10 @@ PRIVACY_V4_EFFECTIVE = "2026-10-09"
 # 처리방침 v7 이 시행되는 날(KST 날짜) — 스펙 076 §3.1. 뜻은 '화면 이동 기록(073)을 받기 시작하는 날' 이다. 073 의 api 가
 # 이 날 00:00 Asia/Seoul 전에 온 묶음을 저장하지 않는 게이트로 읽는다. test_privacy 가 방침 HTML 의 시행일과 묶는다
 PRIVACY_V7_EFFECTIVE = "2026-10-16"
+# 처리방침 v8 이 시행되는 날(KST 날짜, v7 과 같은 날 두 번째 판) — 스펙 078 §3.7. 뜻은 '화면 이동 기록을 서비스를 끝낼 때까지
+# 두기 시작하는 날' 이다. 073 의 api 가 조각 머리를 처음 만들 때 이 날 00:00 Asia/Seoul 이후면 `keep` 을 단다(078 §3.1 — 그 전
+# 코드·판으로 받은 조각은 14일). test_privacy 가 방침 HTML 의 시행일과 묶는다. 위 v7 상수(받기 게이트)는 그대로다
+PRIVACY_V8_EFFECTIVE = "2026-10-16"
 
 
 class Settings(BaseSettings):
