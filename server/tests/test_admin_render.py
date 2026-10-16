@@ -56,6 +56,7 @@ DETAILS = {
         "countries",
         "dims",
         "refs",
+        "recs",  # 077 — 그림 없는 목록 판
     ],
 }
 SCENARIO = r"""

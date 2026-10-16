@@ -59,6 +59,7 @@ MODULES = (
     "addrdetail.js",
     "addrs.js",
     "insightdetail.js",
+    "insightrec.js",
     "screensnames.js",
     "screensmodel.js",
     "screensdetail.js",

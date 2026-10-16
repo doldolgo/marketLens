@@ -135,6 +135,7 @@ EXPECTED_CALLS = {
         "/svc/api/admin/attention?days=1",
         "/svc/api/admin/clarity/history?days=30",
         "/svc/api/admin/access?window=30d",
+        "/svc/api/admin/clarity/recordings?days=3",  # 077 — 녹화 카드(기본 3일)
     ],
     # 065 — page 없는 응답(화면 칩 pv)이 기본 화면을 정하면 곧바로 그 화면 하나(피드가 없으면 첫 화면 랜딩)
     "screens.js": [
@@ -157,6 +158,7 @@ BACKEND = {
     "/svc/api/admin/access/ip": (API, "/admin/access/ip"),
     "/svc/api/admin/clarity": (API, "/admin/clarity"),
     "/svc/api/admin/clarity/history": (API, "/admin/clarity/history"),
+    "/svc/api/admin/clarity/recordings": (API, "/admin/clarity/recordings"),  # 077
     "/svc/api/admin/attention": (API, "/admin/attention"),
     "/api/refresh": (COLLECTOR, "/refresh"),
 }

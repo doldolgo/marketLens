@@ -24,6 +24,7 @@ URLS = [
     "/svc/api/admin/access/addrs?window=24h&sort=requests&limit=200&offset=0",
     "/svc/api/admin/clarity",
     *[f"/svc/api/admin/clarity/history?days={d}" for d in (7, 30, 90)],
+    "/svc/api/admin/clarity/recordings?days=3",  # 077 — 녹화 카드
     "/svc/api/admin/attention?days=1",  # 071 — Clarity 진단 줄
     "/svc/api/admin/attention?days=7",
     "/svc/api/admin/attention?days=7&page=landing",
