@@ -1,6 +1,6 @@
 """관리자 화면 재생 정적 단언(스펙 074 §3.1·§3.3·§3.4) — 틀 주소·postMessage 대상·받는 출처는 replayframe.js 의 SITE_ORIGIN 한 상수
 (065 screens.js 와 같은 값), 틀 주소를 쓰는 곳 하나, 틀 속성(053 그대로)·누를 수 없는 틀, 방문자 페이지 카드 둘의 '?' 두 줄(뜻 줄에
-'동의한 방문자만, 14일 보관'), 5초 묶음은 방문자 페이지 하나. 그리기·부르기는 node 시험(test_admin_replay_*)이 본다.
+'동의한 방문자만, 서비스 종료까지 보관'), 5초 묶음은 방문자 페이지 하나. 그리기·부르기는 node 시험(test_admin_replay_*)이 본다.
 """
 
 import re
@@ -56,7 +56,7 @@ def test_frame_attributes_and_the_frame_cannot_be_touched() -> None:
 
 
 def test_visitors_page_has_the_two_cards_with_consent_and_retention_in_help() -> None:
-    """§3.1 — 카드 '지금 보는 중'·'화면 기록'(표는 가로 스크롤 상자 안, 찾기 칸), '?' 는 071 두 줄이고 뜻 줄에 '동의한 방문자만, 14일 보관'."""
+    """§3.1 — 카드 '지금 보는 중'·'화면 기록'(표는 가로 스크롤 상자 안, 찾기 칸), '?' 는 071 두 줄이고 뜻 줄에 '동의한 방문자만, 서비스 종료까지 보관'."""
     for card, title in (("rplive", "지금 보는 중"), ("replay", "화면 기록")):
         head = re.search(
             rf'<section class="card s12" id="card-{card}" aria-labelledby="h-{card}">\s*<header class="card-head"><h2 id="h-{card}">{title}</h2>'
@@ -65,7 +65,7 @@ def test_visitors_page_has_the_two_cards_with_consent_and_retention_in_help() ->
         )
         assert head, card
         what, how = head.group(1).split("&#10;")
-        assert "동의한 방문자만, 14일 보관" in what, card
+        assert "동의한 방문자만, 서비스 종료까지 보관" in what, card
         assert 0 < len(what) <= 120 and 0 < len(how) <= 120
         assert (
             f'<div class="scroll"><table class="tbl" id="tbl-{card}"></table></div>'

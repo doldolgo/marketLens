@@ -9,7 +9,7 @@ export const SLOW_MS = 60_000; // 느린 묶음 — 그 페이지가 쓰는 나�
 export const LIVE_MS = 5_000; // 지금 묶음 — 074 '지금 보는 중' 하나(page.live 인 페이지만), 보이는 동안만
 const XHR = Object.freeze({ 'X-Requested-With': 'XMLHttpRequest' });
 
-// 관리자 nginx 분기로 가는 경로(029·034·035·063 — 067 의 ips·ip, 068 의 history, 069 의 addrs·addr, 073 의 replay 셋, 077 의 recordings 는 그 스펙이 정확 일치 location 을 더한다).
+// 관리자 nginx 분기로 가는 경로(029·034·035·063 — 067 의 ips·ip, 068 의 history, 069 의 addrs·addr, 073 의 replay 셋, 077 의 recordings, 078 의 replayArchive(수집기) 는 그 스펙이 정확 일치 location 을 더한다).
 // 화면이 부르는 곳은 이 표와 즉시 갱신(POST /api/refresh)뿐이다
 export const PATHS = Object.freeze({
   collector: '/api/health',
@@ -31,6 +31,7 @@ export const PATHS = Object.freeze({
   replayLive: '/svc/api/admin/replay/live',
   replaySessions: '/svc/api/admin/replay/sessions',
   replaySession: '/svc/api/admin/replay/session',
+  replayArchive: '/api/admin/replay/archive',
 });
 export const FAST = Object.freeze(['collector', 'api', 'status', 'collect']);
 // 지금 묶음(LIVE_MS)으로 부르는 경로 — 074 '지금 보는 중'

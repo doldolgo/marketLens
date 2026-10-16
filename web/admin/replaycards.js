@@ -57,7 +57,7 @@ export function drawSessions(app) {
     const all = sessionRows(part.rows);
     if (!all.length) {
       put('replay-count', '');
-      return node.replaceChildren(el('caption', 'empty', '화면 기록 없음 — 동의한 방문자만 기록되고 14일 보관한다'));
+      return node.replaceChildren(el('caption', 'empty', '화면 기록 없음 — 동의한 방문자만 기록되고 서비스 종료까지 보관한다'));
     }
     const rows = sortRows(all.filter((r) => matches(r, ['ip', 'pages'], ui.q)), ui.sort.key, ui.sort.dir);
     table(node, SESSION_COLUMNS, rows, {
@@ -113,7 +113,7 @@ export function ipReplaySection(app, ip) {
     box.append(el('p', 'empty', '이 IP 의 화면 기록 없음 — 동의한 방문만 기록된다'));
     return box;
   }
-  head.append(el('span', 'unit', `${int(rows.length)}개 조각 · 동의한 방문자만, 14일 보관`));
+  head.append(el('span', 'unit', `${int(rows.length)}개 조각 · 동의한 방문자만, 서비스 종료까지 보관`));
   const scroll = el('div', 'scroll');
   const tbl = el('table', 'tbl');
   scroll.append(tbl);

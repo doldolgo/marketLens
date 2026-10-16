@@ -199,7 +199,7 @@ out.empty = { live: caption('tbl-rplive'), sessions: caption('tbl-replay'), tags
             [200, {"state": "ok", "code": None, "ip": None, "rows": []}],
             {
                 "live": "지금 기록 중인 방문 없음 — 동의한 방문자만 기록된다",
-                "sessions": "화면 기록 없음 — 동의한 방문자만 기록되고 14일 보관한다",
+                "sessions": "화면 기록 없음 — 동의한 방문자만 기록되고 서비스 종료까지 보관한다",
                 "tags": ["", ""],
             },
         ),
@@ -272,7 +272,7 @@ def test_ip_sheet_has_a_replay_section_below_where() -> None:
     )
     sheet = got["sheet"]
     assert sheet["panels"] == ["addr-verdict", "addr-where", "addr-replay", "grid2"]
-    assert sheet["head"] == "화면 기록1개 조각 · 동의한 방문자만, 14일 보관"
+    assert sheet["head"] == "화면 기록1개 조각 · 동의한 방문자만, 서비스 종료까지 보관"
     assert sheet["rows"] == [["10-15 01:48:20", "랜딩", "PC", "1분", "4", "재생 ▶"]]
     assert sheet["calls"][-1] == f"{SESSIONS}?ip=66.249.66.1"
     assert got["replay"] == {
