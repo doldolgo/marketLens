@@ -36,6 +36,7 @@ FEEDS = {
     ("=", "/api/admin/aws"),
     ("=", "/api/admin/alerts"),
     ("=", "/api/admin/aws/series"),
+    ("=", "/api/admin/replay/archive"),  # 078 — 옮긴 화면 이동 기록
 }
 API_FEEDS = {
     ("=", "/svc/api/admin/access"),
@@ -167,6 +168,7 @@ def test_admin_routes_every_api_path_like_before_the_allowlist() -> None:
         "/api/admin/aws": (COLLECTOR, "/admin/aws"),
         "/api/admin/alerts": (COLLECTOR, "/admin/alerts"),
         "/api/admin/aws/series": (COLLECTOR, "/admin/aws/series"),  # 063
+        "/api/admin/replay/archive": (COLLECTOR, "/admin/replay/archive"),  # 078
         "/svc/api/admin/access": (API, "/admin/access"),
         "/svc/api/admin/clarity": (API, "/admin/clarity"),
         "/svc/api/admin/clarity/history": (API, "/admin/clarity/history"),  # 068
@@ -220,6 +222,14 @@ def test_series_feed_has_its_own_exact_location_and_stays_closed_publicly() -> N
     path = "/api/admin/aws/series"
     assert _admin_route(path) == ("=", path)
     assert _forward(path) == (COLLECTOR, "/admin/aws/series")
+    assert _route(path) in DENY
+
+
+def test_replay_archive_is_a_collector_exact_location_closed_publicly() -> None:
+    """078 §3.4 — 옮긴 화면 이동 기록은 수집기(S3 자격이 collect 박스에만), 정확 일치(쿼리는 따라감), 공개는 028 의 404 JSON."""
+    path = "/api/admin/replay/archive"
+    assert _admin_route(path) == ("=", path)
+    assert _forward(path) == (COLLECTOR, "/admin/replay/archive")
     assert _route(path) in DENY
 
 

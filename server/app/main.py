@@ -92,6 +92,8 @@ from app.features.history.router import events_router as history_events_router
 from app.features.history.router import router as history_router
 from app.features.landing.router import router as landing_router
 from app.features.landing.service import LandingService
+from app.features.replay.archive import ArchiveFeed, Archiver
+from app.features.replay.router import collector_router as replay_collector_router
 from app.features.replay.router import router as replay_router
 from app.features.replay.service import ReplayService
 from app.features.spreads.gauge import start_ws_gauge
@@ -392,6 +394,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     if influx is not None:
         flusher = Flusher(stream=tick_stream, writer=influx)
         flusher.start()
+    # 078 — 화면 이동 기록 S3 옮기기(10분마다)·옮긴 조각 피드. 버킷 자격이 collect 박스 역할에만 있어 수집기다.
+    # 원문 아카이브와 같은 업로더(없으면 옮기지 않고 피드는 s3_off)
+    replay_archiver = Archiver(bus=bus, store=uploader)
+    replay_archiver.start()
+    app.state.replay_archive = ArchiveFeed(store=uploader)
 
     # 5. 050 — 이더리움 ERC-20 입출금 감지기. Influx·Redis 가 준비된 뒤, ETH_WS_URL·ETH_HTTP_URL 둘 다 있을 때만.
     # 씨앗 읽기 실패는 기동 실패다(감지기 없이 뜨면 거짓 0 이 쌓인다 — 050 §3.2). Redis 추가분은 start 가 합친다.
@@ -444,6 +451,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await asyncio.gather(*(s.aclose() for s in streams))
         if eth_flow is not None:
             await eth_flow.aclose()  # 050 — 태스크 취소·소켓 닫기(2초 상한)
+        await (
+            replay_archiver.aclose()
+        )  # 078 — 옮기던 조각은 rp:todo 에 남아 다음 기동에 다시
         if archive is not None:
             # 스트림이 닫힌 뒤 — 마지막 프레임까지 담아 5초 안에서 올린다 (010 §3.6)
             await archive.aclose()
@@ -668,6 +678,9 @@ def create_app() -> FastAPI:
         # 부분별 캐시·전용 스레드 자리라 앱마다 하나 — 스레드는 첫 AWS 호출 때 생긴다
         app.state.admin_feeds = AdminFeeds(region=settings.admin_aws_region)
         app.include_router(admin_collector_router)
+        # 078 — 옮긴 화면 이동 기록 피드. 업로더는 기동(lifespan)이 꽂는다 — 그 전·버킷 없음은 s3_off
+        app.state.replay_archive = ArchiveFeed(store=None)
+        app.include_router(replay_collector_router)
 
     return app
 

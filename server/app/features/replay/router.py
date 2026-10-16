@@ -1,16 +1,20 @@
-"""화면 이동 기록 경로 — 받기 `POST /replay` 와 관리자 피드 `GET /admin/replay/{live,sessions,session}` (스펙 073 §3.4·§3.6).
+"""화면 이동 기록 경로 — 받기 `POST /replay` 와 관리자 피드 `GET /admin/replay/{live,sessions,session}` (스펙 073 §3.4·§3.6),
+수집기의 옮긴 조각 피드 `GET /admin/replay/archive` (078 §3.4).
 
-api 역할에만 포함한다(`main.py`). 공개 nginx 는 `= /api/replay`(POST 만) 하나를 열고, 관리자 피드는 관리자 nginx 의
-`= /svc/api/admin/replay/{live,sessions,session}` 셋으로만 닿는다(공개는 028 허용 목록 밖이라 404).
+`router` 는 api 역할에만, `collector_router` 는 수집기 역할에만 포함한다(`main.py`). 공개 nginx 는 `= /api/replay`(POST 만)
+하나를 열고, 관리자 피드는 관리자 nginx 의 `= /svc/api/admin/replay/{live,sessions,session}` 셋과 `= /api/admin/replay/archive`
+(수집기)로만 닿는다(공개는 028 허용 목록 밖이라 404).
 """
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
+from app.features.replay.archive import ArchiveFeed
 from app.features.replay.models import MAX_BODY_BYTES, SID, valid_ip_query
 from app.features.replay.service import ReplayService
 
 router = APIRouter()
+collector_router = APIRouter()
 
 NO_STORE = {"Cache-Control": "no-store"}
 # 오류 응답 — 앱 공통 모양 `{"error":{code,message,detail}}` (architecture.md 계약 규칙)
@@ -95,4 +99,17 @@ async def get_admin_replay_session(
     state = request.app.state
     service: ReplayService = state.replay
     body = await service.session(sid, after, getattr(state, "spreads_bus", None))
+    return Response(body, media_type="application/json", headers=NO_STORE)
+
+
+@collector_router.get("/admin/replay/archive")
+async def get_admin_replay_archive(
+    request: Request, sid: str | None = None, after: str | None = None
+) -> Response:
+    """S3 로 옮긴 조각 하나 — 073 session 과 같은 꼴(`archived` true). 잘못된 sid 는 400 `bad_sid` (078 §3.4)."""
+    if sid is None or not SID.fullmatch(sid):
+        return _error("bad_sid", NO_STORE)
+    state = request.app.state
+    feed: ArchiveFeed = state.replay_archive
+    body = await feed.session(sid, after, getattr(state, "spreads_bus", None))
     return Response(body, media_type="application/json", headers=NO_STORE)

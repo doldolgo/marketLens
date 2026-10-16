@@ -119,7 +119,7 @@ def test_api_role_serves_only_influx_routes_and_404s_the_rest(set_role) -> None:
     assert (
         client.get("/orderbook/upbit", params={"symbol": "BTC/KRW"}).status_code == 404
     )
-    for path in COLLECTOR_ADMIN:  # 034 — api 에는 없다
+    for path in (*COLLECTOR_ADMIN, "/admin/replay/archive"):  # 034·078 — api 에는 없다
         assert client.get(path).status_code == 404, path
     for path in (
         "/admin/access",
@@ -219,6 +219,11 @@ def test_collector_is_default_and_keeps_full_route_set(set_role) -> None:  # noq
     client = TestClient(app)
     for path in COLLECTOR_ADMIN:
         assert client.get(path).status_code == 200, path
+    # 078 — 옮긴 화면 이동 기록 피드는 수집기에만. 기동 전(업로더 없음)은 s3_off 상태 응답, sid 꼴이 틀리면 400
+    assert "/admin/replay/archive" in paths
+    got = client.get("/admin/replay/archive", params={"sid": "0123456789abcdef"})
+    assert got.status_code == 200 and got.json()["code"] == "s3_off"
+    assert client.get("/admin/replay/archive").status_code == 400
     assert any(p.startswith("/orderbook") for p in paths)
     assert _ws_paths(app) == {
         "/ws/spreads",
