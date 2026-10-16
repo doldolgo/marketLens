@@ -2035,6 +2035,189 @@ details.card > summary {
   color: var(--text-1);
 }
 
+/* 화면 재생 판(074 §3.3) — 왼쪽 틀(조각의 화면 크기 --fw 를 칸에 맞춰 --fit 만큼 줄임, 늘리지 않음)·시간 막대·조절 줄, 오른쪽 사건 목록.
+   틀은 누를 수 없다(관리자가 움직이지 않게 — 화면은 재생이 정한다). 좁은 화면에서는 사건 목록이 아래로 */
+.rp {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+  align-items: start;
+  gap: var(--sp-4);
+}
+.rp-main {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.rp-wrap {
+  min-width: 0;
+}
+.rp-stage {
+  position: relative;
+  width: calc(var(--fw, 1280px) * var(--fit, 1));
+  max-width: 100%;
+  height: var(--stage-h, 480px);
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.rp-stage iframe {
+  display: block;
+  width: var(--fw, 1280px);
+  height: calc(var(--stage-h, 480px) / var(--fit, 1));
+  border: 0;
+  transform: scale(var(--fit, 1));
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.rp-note {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: rgb(18 20 32 / 0.9);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+}
+.rp-shade {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  background: rgb(18 20 32 / 0.72);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+}
+/* 시간 막대 — 숨김 구간 회색 칸 · 화면 바뀜 세로 눈금 · 누름 빨간 점 · 지난 만큼(아래 줄) · 지금 자리 */
+.rp-bar {
+  position: relative;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--grid);
+  cursor: pointer;
+  touch-action: none;
+}
+.rp-marks {
+  position: absolute;
+  inset: 0;
+}
+.rp-marks i,
+.rp-fill,
+.rp-head {
+  position: absolute;
+  display: block;
+}
+.rp-hide {
+  top: 0;
+  bottom: 0;
+  background: rgb(142 146 164 / 0.35);
+}
+.rp-tick {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text-2);
+}
+.rp-dot {
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: var(--bad);
+}
+.rp-fill {
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--accent);
+}
+.rp-head {
+  top: -3px;
+  bottom: -3px;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--text-1);
+}
+.rp-ctl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+}
+.rp-play {
+  min-width: 44px;
+  justify-content: center;
+}
+.rp-ctl .btn[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.rp-time {
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  font-variant-numeric: tabular-nums;
+}
+.rp-side {
+  min-width: 0;
+}
+.rp-list {
+  display: grid;
+  gap: 2px;
+  max-height: 70vh;
+  overflow: auto;
+}
+.rp-ev {
+  display: grid;
+  grid-template-columns: 5.4em 6.6em minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  text-align: left;
+  cursor: pointer;
+}
+.rp-ev:hover {
+  background: var(--raised);
+}
+.rp-ev[aria-current="true"] {
+  background: var(--raised);
+  color: var(--text-1);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.rp-ev b {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.rp-ev[data-kind="c"] b {
+  color: var(--bad);
+}
+.rp-ev span:last-child {
+  overflow-wrap: anywhere;
+}
+.rp-go {
+  color: var(--accent);
+  white-space: nowrap;
+}
+/* 따라 보기 배지 — 글에 ● 가 있어 앞 모양은 쓰지 않는다 */
+.tag.live {
+  color: var(--text-1);
+  background: rgb(95 191 143 / 0.16);
+}
+.tag.live::before {
+  content: none;
+}
+
 @media (min-width: 1440px) {
   .content {
     gap: var(--sp-6);
@@ -2043,6 +2226,12 @@ details.card > summary {
 @media (max-width: 1279px) {
   :root {
     --side: 56px;
+  }
+  .rp {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rp-list {
+    max-height: 40vh;
   }
   .side {
     padding: var(--sp-4) var(--sp-2);

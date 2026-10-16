@@ -43,9 +43,13 @@ PAGES: dict[str, tuple[list[str], list[str]]] = {
             "durations",
         ],
     ),
-    # 070 — IP 별(기본): 근거 글·도시·망 사업자에 글자, 판은 근거·PTR·경로·브라우저 정보
+    # 070 — IP 별(기본): 근거 글·도시·망 사업자에 글자, 판은 근거·PTR·경로·브라우저 정보. 074 — 화면 기록 카드 둘·IP 판 절(IP·화면 이름)
     "visitors.js": (
-        ["/svc/api/admin/access/addrs?window=24h&sort=requests&limit=200&offset=0"],
+        [
+            "/svc/api/admin/access/addrs?window=24h&sort=requests&limit=200&offset=0",
+            "/svc/api/admin/replay/live",
+            "/svc/api/admin/replay/sessions",
+        ],
         [],
     ),
     "visitors.js?view=band": (
@@ -149,6 +153,11 @@ def test_feed_text_never_becomes_html_in_tooltips_tables_or_the_page(page: str) 
         for row in payload["answers"][feeds[0]][1]["rows"]:
             url = f"/svc/api/admin/access/addr?ip={row['ip'].replace('/', '%2F').replace(':', '%3A')}&window=24h"
             payload["answers"].update(answers("xss", [url]))
+            if "/" not in row["ip"]:
+                rp = (
+                    f"/svc/api/admin/replay/sessions?ip={row['ip'].replace(':', '%3A')}"
+                )
+                payload["answers"].update(answers("xss", [rp]))
     if page == "visitors.js?view=band":
         bands = payload["answers"][feeds[0]][1]["bands"]
         for band in bands[:3]:

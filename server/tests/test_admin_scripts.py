@@ -26,24 +26,21 @@ def _every() -> str:
     return "".join(_script(name) for name in SCRIPTS)
 
 
-# 065 화면만의 예외 — 틀로 보내는 postMessage 한 곳(대상 출처 SITE_ORIGIN)과 틀 주소(.src) 한 곳, 공개 사이트 출처 글자 하나
+# 065 화면·074 재생 판만의 예외 — 틀로 보내는 postMessage 한 곳(대상 출처 SITE_ORIGIN)과 틀 주소(.src) 한 곳, 공개 사이트 출처 글자 하나
 FRAME = {"postMessage": 1, ".src": 1}
+FRAMED = ("screens.js", "replayframe.js")
 
 
 def test_scripts_never_parse_html_store_data_or_open_windows() -> None:
     """064 §3.1 — 금지 글자 없음, 스크립트 안 바깥 주소 없음, 요청은 call() 의 fetch 하나(헤더 X-Requested-With).
-    065 화면(screens.js)만 틀 예외 둘과 출처 상수 하나(test_admin_screens_static 이 자리를 본다)."""
+    065 화면(screens.js)·074 재생 틀(replayframe.js)만 틀 예외 둘과 출처 상수 하나(test_admin_screens_static·test_admin_replay_sheet 가 자리를 본다)."""
     for name in SCRIPTS:
         js = _script(name)
         for banned in BANNED:
-            want = FRAME.get(banned, 0) if name == "screens.js" else 0
+            want = FRAME.get(banned, 0) if name in FRAMED else 0
             assert js.count(banned) == want, (name, banned)
         # SVG 이름공간(요소를 만드는 글자)만 — 바깥 주소가 아니다. 화면은 공개 사이트 출처 상수 하나
-        site = (
-            "const SITE_ORIGIN = 'https://kimptrack.com';"
-            if name == "screens.js"
-            else ""
-        )
+        site = "const SITE_ORIGIN = 'https://kimptrack.com';" if name in FRAMED else ""
         assert js.count(site) == 1 or not site, name
         assert not re.search(
             r"https?://",
@@ -60,7 +57,7 @@ def test_scripts_never_parse_html_store_data_or_open_windows() -> None:
 
 
 def test_style_links_and_addresses_are_written_in_fixed_places_only() -> None:
-    """style 은 막대 폭·자리 도움 둘(비율 수만)과 틀 칸의 CSS 변수 둘(065 — 몫·높이 수만), 링크 주소는 jump()(고정 표)·download()
+    """style 은 막대 폭·자리 도움 둘(비율 수만)과 틀 칸의 CSS 변수 셋(065 — 몫·높이, 074 — 틀 폭, 수만), 링크 주소는 jump()(고정 표)·download()
     (Blob 주소)·'새 창으로'(065 — app.js 가 urlOf() 로 만든 이 페이지 주소) 셋, 주소 상태(쌓기·바꾸기·뒤로·새로고침)는 app.js 하나에서
     urlOf() 로 만든 그 페이지의 고정 주소로만(066 §3.1·§3.2 — 지금 경로를 쓰지 않는다, 029)."""
     every = _every()
@@ -78,8 +75,13 @@ def test_style_links_and_addresses_are_written_in_fixed_places_only() -> None:
         and "node.style.left = ratioPct(ratio);" in common
         and "const s = node.style;" in common
     )
-    assert re.findall(r"\bs\.setProperty\('([\w-]+)'", common) == ["--fit", "--stage-h"]
-    assert every.count("setProperty(") == 2
+    # 074 재생 판 — 틀 폭(조각의 화면 폭)
+    assert re.findall(r"\bs\.setProperty\('([\w-]+)'", common) == [
+        "--fit",
+        "--stage-h",
+        "--fw",
+    ]
+    assert every.count("setProperty(") == 3
     assert every.count("setAttribute('href'") == 3
     assert (
         "const url = urlOf(page, view);" in app
@@ -163,8 +165,8 @@ def test_tooltip_html_is_built_in_one_function_from_escaped_text() -> None:
 
 
 def test_paths_table_polling_periods_and_no_copied_feed_periods() -> None:
-    """064 §3.1 + 066 — 부르는 경로는 common.js 표 하나(067 ips·ip, 068 history, 065 attention, 069 addrs·addr 더함), 빠른 10초·느린 60초(065 화면만
-    5분 — 페이지가 slowMs 로 준다), 피드 주기는 refreshSec 로만."""
+    """064 §3.1 + 066 — 부르는 경로는 common.js 표 하나(067 ips·ip, 068 history, 065 attention, 069 addrs·addr, 073 replay 셋 더함), 빠른 10초·느린 60초
+    (065 화면만 5분 — 페이지가 slowMs 로 준다, 074 지금 보는 중만 5초 — page.live), 피드 주기는 refreshSec 로만."""
     common = _script("common.js")
     table = re.search(
         r"export const PATHS = Object\.freeze\(\{(.*?)\}\);", common, flags=re.S
@@ -186,10 +188,16 @@ def test_paths_table_polling_periods_and_no_copied_feed_periods() -> None:
         "clarity": "/svc/api/admin/clarity",
         "history": "/svc/api/admin/clarity/history",
         "attention": "/svc/api/admin/attention",
+        "replayLive": "/svc/api/admin/replay/live",
+        "replaySessions": "/svc/api/admin/replay/sessions",
+        "replaySession": "/svc/api/admin/replay/session",
     }
     assert re.search(r"\bFAST_MS = 10_000;", common) and re.search(
         r"\bSLOW_MS = 60_000;", common
     )
+    # 074 — 지금 보는 중 하나만 5초(page.live 인 페이지만)
+    assert re.search(r"\bLIVE_MS = 5_000;", common)
+    assert "export const LIVE = Object.freeze(['replayLive']);" in common
     assert (
         "export const FAST = Object.freeze(['collector', 'api', 'status', 'collect']);"
         in common

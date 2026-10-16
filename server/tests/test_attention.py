@@ -208,18 +208,21 @@ def test_landing_and_dashboard_load_attention_right_after_clarity() -> None:
 
 
 def test_static_pages_load_only_attention_js_as_a_file_in_the_head() -> None:
+    # 073 — 화면 이동 기록 replay.js 가 그 뒤에 하나 더(같은 동의·같은 출처)
     for page in ("privacy", "kimp-chart", "kimp-history"):
         html = (PUBLIC / STATIC_PAGES[page]).read_text("utf-8")
         head = html[: html.index("</head>")]
         files = re.findall(r"<script\b[^>]*\bsrc=\"([^\"]*)\"", html)
-        assert files == ["/attention.js"], page
+        assert files == ["/attention.js", "/replay.js"], page
         assert '<script defer src="/attention.js"></script>' in head, page
+        assert '<script defer src="/replay.js"></script>' in head, page
         assert "clarity.js" not in "".join(_script_tags(html)), page
 
 
 def test_old_policy_copies_and_404_load_no_script() -> None:
     for path in (*PUBLIC.glob("privacy-*.html"), PUBLIC / "404.html"):
-        assert "attention.js" not in path.read_text("utf-8"), path.name
+        text = path.read_text("utf-8")
+        assert "attention.js" not in text and "replay.js" not in text, path.name
 
 
 # --- 영역 (§3.1) ----------------------------------------------------------------------

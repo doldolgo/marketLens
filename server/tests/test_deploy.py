@@ -387,6 +387,8 @@ PUBLIC_API = {
     "/api/ws/gap": API,  # 048 — spreads 바로 다음, 같은 모양
     # 052 — 화면 영역 이용 통계 비콘(POST 만 — 그 밖의 메서드는 nginx 405)
     "/api/attention": API,
+    # 073 — 화면 이동 기록 묶음(같은 모양 — POST 만)
+    "/api/replay": API,
 }
 PROXY_HEADERS = (
     ["Host", "$http_host"],

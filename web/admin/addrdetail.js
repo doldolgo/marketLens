@@ -1,6 +1,7 @@
 // IP 상세 판(스펙 070 §3.3 — 069 /admin/access/addr): 머리 줄(IP·복사·판정 배지·점수) · 판정 근거(가중치 큰 순, 봇 쪽 빨강·사람 쪽
 // 청록 막대, 점수 줄, 확인된/사칭 검색 로봇) · 어디(나라·지역·도시 '대략'·망 사업자·AS·망 종류·역방향 DNS·위도·경도, DB-IP 표시) — 판 맨 위,
-// 그 아래 067 대역 판과 같은 것(시간별 요청·종류·상태 띠·브라우저 정보·경로 상위·짝의 첫/마지막 페이지·최근 요청 100줄 + 신호 칩).
+// '어디' 아래 화면 기록 절(074 §3.2 — 그 IP 의 조각, 가린 대역은 없음), 그 아래 067 대역 판과 같은 것(시간별 요청·종류·상태 띠·브라우저 정보·
+// 경로 상위·짝의 첫/마지막 페이지·최근 요청 100줄 + 신호 칩).
 // 대역 판(visitors.js)과 같이 쓰는 조각(시간별 그래프·쓰임 칸)도 여기 둔다.
 import { $, button, clean, el, int, kstText, list, num, partOf, req, usable, widthOf } from './common.js';
 import { cellPoints } from './calc.js';
@@ -8,6 +9,7 @@ import { RANGE_MS } from './models.js';
 import { IP_RANGES, kindItems, pairList, statusItems } from './ipmodel.js';
 import { FLAG_NAME, FLAG_TONE, VERDICT_NAME, VERDICT_TONE, badIp, crawlerLine, placeText, reasonRows, recentAddrRows, scoreLine, validAddr, verdictOf, whereRows } from './addrmodel.js';
 import { bar100s, table, topList } from './ui.js';
+import { ipReplayEntry, ipReplayNeeds, ipReplaySection } from './replaycards.js';
 
 // 판정 배지 — 모양 + 글(■ 봇 · ▲ 의심 · ● 사람 · ○ 모름 · ◆ 운영자)
 export function verdictBadge(verdict) {
@@ -102,7 +104,7 @@ export function addrDetail(orderOf) {
     accepts: validAddr,
     ranges: IP_RANGES,
     range: (r) => (IP_RANGES.includes(r) ? r : '24h'),
-    needs: (app, pv, ip) => [addrReq(ip, pv.range)],
+    needs: (app, pv, ip) => [addrReq(ip, pv.range), ...ipReplayNeeds(ip)],
     model: (app, pv, ip) => addrModel(app, pv, ip, orderOf()),
   };
 }
@@ -113,7 +115,7 @@ function addrModel(app, pv, ip, order) {
   const at = order.indexOf(ip);
   const base = {
     part,
-    deps: [entry],
+    deps: [entry, ipReplayEntry(app, ip)],
     title: clean(ip),
     unit: usable(part) ? placeText(part) : '',
     nav: { prev: at > 0 ? `addr:${order[at - 1]}` : null, next: at >= 0 && at < order.length - 1 ? `addr:${order[at + 1]}` : null },
@@ -124,7 +126,7 @@ function addrModel(app, pv, ip, order) {
   return {
     ...base,
     ...hourlyTime(app, pv, part),
-    custom: (box) => addrParts(box, ip, part),
+    custom: (box) => addrParts(app, box, ip, part),
     table: {
       title: '최근 요청(100)',
       sort: { key: 'ts', dir: 'desc' },
@@ -137,8 +139,8 @@ function addrModel(app, pv, ip, order) {
 }
 
 let credit = null;
-// 판 맨 위 두 칸(판정 근거·어디) + 그래프 아래 쓰임 칸. 사용자 칸 상자를 풀어(flat) 칸마다 격자 차례를 준다
-function addrParts(box, ip, part) {
+// 판 맨 위 칸(판정 근거·어디·화면 기록 — 가린 대역은 앞 둘) + 그래프 아래 쓰임 칸. 사용자 칸 상자를 풀어(flat) 칸마다 격자 차례를 준다
+function addrParts(app, box, ip, part) {
   box.className = 'panel flat';
   const verdict = el('section', 'panel addr-top');
   verdict.id = 'addr-verdict';
@@ -193,6 +195,7 @@ function addrParts(box, ip, part) {
 
   const usage = el('section', 'panel');
   usage.append(usageHolder());
-  box.replaceChildren(verdict, where, usage);
+  const replay = ipReplaySection(app, ip);
+  box.replaceChildren(verdict, where, ...(replay ? [replay] : []), usage);
   fillUsage(part);
 }

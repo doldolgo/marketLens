@@ -6,9 +6,10 @@
 
 export const FAST_MS = 10_000; // 빠른 묶음 — 029 의 네 경로, 보이는 동안만
 export const SLOW_MS = 60_000; // 느린 묶음 — 그 페이지가 쓰는 나머지, 보이는 동안만
+export const LIVE_MS = 5_000; // 지금 묶음 — 074 '지금 보는 중' 하나(page.live 인 페이지만), 보이는 동안만
 const XHR = Object.freeze({ 'X-Requested-With': 'XMLHttpRequest' });
 
-// 관리자 nginx 분기로 가는 경로(029·034·035·063 — 067 의 ips·ip, 068 의 history, 069 의 addrs·addr 는 그 스펙이 정확 일치 location 을 더한다).
+// 관리자 nginx 분기로 가는 경로(029·034·035·063 — 067 의 ips·ip, 068 의 history, 069 의 addrs·addr, 073 의 replay 셋은 그 스펙이 정확 일치 location 을 더한다).
 // 화면이 부르는 곳은 이 표와 즉시 갱신(POST /api/refresh)뿐이다
 export const PATHS = Object.freeze({
   collector: '/api/health',
@@ -26,8 +27,13 @@ export const PATHS = Object.freeze({
   clarity: '/svc/api/admin/clarity',
   history: '/svc/api/admin/clarity/history',
   attention: '/svc/api/admin/attention',
+  replayLive: '/svc/api/admin/replay/live',
+  replaySessions: '/svc/api/admin/replay/sessions',
+  replaySession: '/svc/api/admin/replay/session',
 });
 export const FAST = Object.freeze(['collector', 'api', 'status', 'collect']);
+// 지금 묶음(LIVE_MS)으로 부르는 경로 — 074 '지금 보는 중'
+export const LIVE = Object.freeze(['replayLive']);
 // 025 — 헬스의 503 도 상태 응답이다(본문을 읽는다)
 export const HEALTH = Object.freeze(['collector', 'api']);
 
@@ -37,7 +43,7 @@ export function req(name, query = {}) {
   for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== null && v !== '') q.set(k, String(v));
   const s = q.toString();
   const url = s ? `${PATHS[name]}?${s}` : PATHS[name];
-  return Object.freeze({ name, url, key: url, fast: FAST.includes(name) });
+  return Object.freeze({ name, url, key: url, fast: FAST.includes(name), live: LIVE.includes(name) });
 }
 
 class Expired extends Error {}
@@ -190,11 +196,12 @@ export function widthOf(node, ratio) {
 export function leftOf(node, ratio) {
   node.style.left = ratioPct(ratio);
 }
-// 틀 칸(065 화면) — 실제 페이지를 줄이는 몫(0~1, 늘리지 않는다)과 칸 높이(px) 두 수만 CSS 변수로
-export function frameVars(node, fit, height) {
+// 틀 칸(065 화면·074 재생) — 실제 페이지를 줄이는 몫(0~1, 늘리지 않는다)과 칸 높이(px), 재생은 틀 폭(px — 조각의 화면 폭)까지 수만 CSS 변수로
+export function frameVars(node, fit, height, width) {
   const s = node.style;
   s.setProperty('--fit', String(Math.round(Math.min(1, Math.max(0.05, num(fit) ?? 1)) * 10000) / 10000));
   s.setProperty('--stage-h', `${Math.round(Math.max(0, num(height) ?? 0))}px`);
+  if (width !== undefined) s.setProperty('--fw', `${Math.round(Math.min(20_000, Math.max(1, num(width) ?? 1)))}px`);
 }
 
 // CSV 내려받기(066 §3.2) — 브라우저에서 만든 Blob 의 주소만 링크로 쓴다(서버 호출 없음)
