@@ -135,13 +135,16 @@ export function Pill({ tone, children, style }: { tone: PillTone; children: Reac
  */
 export function TableFrame({ minWidth, area, children }: { minWidth: number; area?: string; children: ReactNode }) {
   const { phone, docScroll } = useViewport()
-  // area — 052 화면 영역 이용 통계의 영역 id(data-area). 표 상자 자체에 단다
-  if (phone) return <div data-area={area}>{children}</div>
+  // area — 052 화면 영역 이용 통계의 영역 id(data-area). 표 상자 자체에 단다 — 어느 폭에서나 같은 상자 하나
+  const box = (
+    <div data-area={area} style={phone ? undefined : { maxWidth: 1080, margin: '0 auto', flex: 1, minWidth: 0, overflowX: 'auto', overflowY: docScroll ? 'hidden' : 'auto', borderLeft: '1px solid var(--color-divider)', borderRight: '1px solid var(--color-divider)' }}>
+      {phone ? children : <div style={{ minWidth }}>{children}</div>}
+    </div>
+  )
+  if (phone) return box
   return (
     <div style={docScroll ? { padding: '0 var(--space-6)' } : { flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center', padding: '0 var(--space-6)' }}>
-      <div data-area={area} style={{ maxWidth: 1080, margin: '0 auto', flex: 1, minWidth: 0, overflowX: 'auto', overflowY: docScroll ? 'hidden' : 'auto', borderLeft: '1px solid var(--color-divider)', borderRight: '1px solid var(--color-divider)' }}>
-        <div style={{ minWidth }}>{children}</div>
-      </div>
+      {box}
     </div>
   )
 }
@@ -273,10 +276,10 @@ export const foldPanel: CSSProperties = {
   padding: 'var(--space-2) 0 var(--space-1)',
 }
 
-/** `필터` 단추 — 기본값과 다른 필터 수를 작은 숫자로 붙인다(0 이면 없음). 펼침 상태는 호출부 메모리. */
-export function FoldButton({ open, active, onClick }: { open: boolean; active: number; onClick: () => void }) {
+/** `필터` 단추 — 기본값과 다른 필터 수를 작은 숫자로 붙인다(0 이면 없음). 펼침 상태는 호출부 메모리. el — 061 요소 열쇠(호출부가 준다) */
+export function FoldButton({ open, active, onClick, el }: { open: boolean; active: number; onClick: () => void; el?: string }) {
   return (
-    <button type="button" onClick={onClick} className="hv-bd" data-el="filters" aria-expanded={open}
+    <button type="button" onClick={onClick} className="hv-bd" data-el={el} aria-expanded={open}
       style={{
         appearance: 'none', font: 'inherit', fontSize: 12, padding: '0 10px', minHeight: 34, cursor: 'pointer', flex: 'none',
         display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 'var(--radius-sm)',
@@ -297,10 +300,10 @@ export function FoldButton({ open, active, onClick }: { open: boolean; active: n
 
 /**
  * 폰 정렬 줄 — 열 머리 줄 대신(§3.5). 고르기 = 그 열 머리를 누른 것, 방향 단추 = 지금 열 머리를 다시 누른 것.
- * 문서 스크롤에서 탭 줄 바로 아래에 붙는다. right 는 오른쪽 끝(표시 건수).
+ * 문서 스크롤에서 탭 줄 바로 아래에 붙는다. right 는 오른쪽 끝(표시 건수). els — 061 요소 열쇠 [고르기, 방향 단추](호출부가 준다)
  */
-export function SortBar({ headers, sortKey, sortDir, onSort, right }: {
-  headers: Header[]; sortKey: string; sortDir: number; onSort: (k: string) => void; right?: ReactNode
+export function SortBar({ headers, sortKey, sortDir, onSort, right, els }: {
+  headers: Header[]; sortKey: string; sortDir: number; onSort: (k: string) => void; right?: ReactNode; els?: readonly [string, string]
 }) {
   return (
     <div style={{
@@ -311,13 +314,13 @@ export function SortBar({ headers, sortKey, sortDir, onSort, right }: {
       {/* 열 이름이 길면(갭 탭 `진입 갭 · 현물 → 선물`) 고르기 칸이 줄어든다 — 줄이 꺾이지 않게. 16px 는 iOS 확대 막기 */}
       <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0, flex: '0 1 auto', whiteSpace: 'nowrap' }}>
         정렬
-        <select value={headers.some(([k]) => k === sortKey) ? sortKey : ''} onChange={(e) => onSort(e.target.value)} data-el="sort"
+        <select value={headers.some(([k]) => k === sortKey) ? sortKey : ''} onChange={(e) => onSort(e.target.value)} data-el={els?.[0]}
           style={{ font: 'inherit', fontSize: 16, color: 'var(--color-accent-300)', background: 'var(--color-surface)', border: '1px solid var(--color-neutral-800)', borderRadius: 'var(--radius-sm)', padding: '4px 6px', minHeight: 30, minWidth: 0, maxWidth: '100%', textOverflow: 'ellipsis' }}>
           {!headers.some(([k]) => k === sortKey) && <option value="" disabled>–</option>}
           {headers.map(([k, text]) => <option key={k} value={k}>{text}</option>)}
         </select>
       </label>
-      <button type="button" onClick={() => onSort(sortKey)} className="hv-bd-txt" data-el="sort:dir"
+      <button type="button" onClick={() => onSort(sortKey)} className="hv-bd-txt" data-el={els?.[1]}
         style={{ appearance: 'none', font: 'inherit', fontSize: 12, padding: '0 10px', minHeight: 30, cursor: 'pointer', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-neutral-800)', background: 'transparent', color: 'var(--color-neutral-300)', flex: 'none', whiteSpace: 'nowrap' }}>
         {sortDir < 0 ? '내림차순 ▾' : '오름차순 ▴'}
       </button>

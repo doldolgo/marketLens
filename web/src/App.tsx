@@ -238,6 +238,16 @@ export default function App() {
   ))
   // 문서 스크롤 구간에서 화면 위에 붙는 줄(탭 줄, 넓은 헤더면 헤더 전체)
   const sticky: CSSProperties = vp.docScroll ? { position: 'sticky', top: 0, zIndex: 10, background: 'var(--color-bg)' } : {}
+  // 탭 묶음 — 넓은 헤더에서는 한 줄 헤더 안, 좁은 헤더에서는 둘째 줄 전체(폰이 아니면 넘칠 때 가로 스크롤, 막대 숨김).
+  // data-area·data-el 은 화면 안에서 하나뿐이어야 하므로(061 계약 테스트) 상자는 하나를 두고 자리·모양만 바꾼다
+  // data-el — 061 화면 이용 통계의 요소 열쇠(모양·동작과 무관). 처리방침·설정 링크·메뉴는 영역 밖이라 052 규칙대로 세지 않는다
+  const tabsBar = (
+    <div data-area="tabs" style={vp.compact
+      ? { display: 'flex', alignItems: 'stretch', gap: vp.phone ? 0 : 'var(--space-2)', height: TAB_BAR_H, padding: vp.phone ? '0 var(--space-1)' : '0 var(--space-2)', borderBottom: '1px solid var(--color-divider)', overflowX: 'auto', scrollbarWidth: 'none', flex: 'none', ...sticky }
+      : { display: 'flex', gap: 'var(--space-2)', alignSelf: 'stretch', alignItems: 'stretch' }}>
+      {tabButtons}
+    </div>
+  )
   const btcKpis: [string, number][] = [['BTC 김프 · 순방향', btcFwd], ['BTC 김프 · 역방향', btcRev]]
 
   return (
@@ -247,10 +257,7 @@ export default function App() {
       {!vp.compact ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-8)', padding: '0 var(--space-6)', borderBottom: '1px solid var(--color-divider)', height: 52, flex: 'none', ...sticky }}>
           {brand}
-          {/* data-el — 061 화면 이용 통계의 요소 열쇠(모양·동작과 무관). 처리방침·설정 링크는 영역 밖이라 052 규칙대로 세지 않는다 */}
-          <div data-area="tabs" style={{ display: 'flex', gap: 'var(--space-2)', alignSelf: 'stretch', alignItems: 'stretch' }}>
-            {tabButtons}
-          </div>
+          {tabsBar}
           {/* 032 — 방침은 새 탭으로. 열어 둔 대시보드의 WebSocket 을 끊지 않게. 푸터가 아닌 이유: 입출금 레이더 탭은 셸 푸터를 그리지 않는다 */}
           <a href="/privacy" target="_blank" rel="noopener" className="hv-txt" data-el="privacy"
             style={{ marginLeft: 'auto', color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
@@ -271,64 +278,66 @@ export default function App() {
             <div style={{ marginLeft: 'auto' }}>{clockNode}</div>
             <HeaderMenu />
           </div>
-          {/* 둘째 줄 — 탭. 폰이 아니면 원래 이름이고 넘치면 가로 스크롤(막대 숨김) */}
-          <div data-area="tabs" style={{ display: 'flex', alignItems: 'stretch', gap: vp.phone ? 0 : 'var(--space-2)', height: TAB_BAR_H, padding: vp.phone ? '0 var(--space-1)' : '0 var(--space-2)', borderBottom: '1px solid var(--color-divider)', overflowX: 'auto', scrollbarWidth: 'none', flex: 'none', ...sticky }}>
-            {tabButtons}
-          </div>
+          {/* 둘째 줄 — 탭 */}
+          {tabsBar}
         </>
       )}
 
-      {/* KPI 스트립 — 카드가 아닌 flex 스트립, 블록 사이 세로 그라디언트 선. 폰은 3칸 격자 + 한 줄(072 §3.3) */}
-      {vp.phone ? (
-        <div data-area="kpi" style={{ padding: 'var(--space-3) var(--space-4)', borderBottom: '1px solid var(--color-divider)', flex: 'none' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 'var(--space-3)' }}>
-            <div>
-              <div style={{ ...kicker, marginBottom: 2 }}>USDT/KRW 암묵환율</div>
-              <div style={{ fontSize: 16 }}>{hasRate ? '₩' + RATE_1.format(feed.rate) : '–'}</div>
+      {/* KPI 스트립 — 카드가 아닌 flex 스트립, 블록 사이 세로 그라디언트 선. 폰은 3칸 격자 + 한 줄(072 §3.3), 좁은 헤더 구간은 줄바꿈 허용 */}
+      <div data-area="kpi" style={vp.phone
+        ? { padding: 'var(--space-3) var(--space-4)', borderBottom: '1px solid var(--color-divider)', flex: 'none' }
+        : { display: 'flex', alignItems: 'center', gap: 'var(--space-8)', padding: 'var(--space-4) var(--space-6)', borderBottom: '1px solid var(--color-divider)', flex: 'none', overflowX: 'auto', ...(vp.compact ? { flexWrap: 'wrap', rowGap: 'var(--space-3)' } : null) }}>
+        {vp.phone ? (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 'var(--space-3)' }}>
+              <div>
+                <div style={{ ...kicker, marginBottom: 2 }}>USDT/KRW 암묵환율</div>
+                <div style={{ fontSize: 16 }}>{hasRate ? '₩' + RATE_1.format(feed.rate) : '–'}</div>
+              </div>
+              {btcKpis.map(([text, v]) => (
+                <div key={text}>
+                  <div style={{ ...kicker, marginBottom: 2 }}>{text}</div>
+                  <div style={{ fontSize: 16, color: pctColor(v) }}>{fmtPct(v)}</div>
+                </div>
+              ))}
             </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '2px var(--space-4)', marginTop: 'var(--space-2)', fontSize: 11, color: 'var(--color-neutral-500)' }}>
+              <span>수집 {healthValue}{feed.health && (downNames.length || staleN) ? ` · ${healthSub}` : ''}</span>
+              <span>{coinCount}개 코인 · {feed.spreads.length} 페어</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ flex: 'none' }}>
+              <div style={{ ...kicker, marginBottom: 2 }}>USDT/KRW 암묵환율</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>
+                <span style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums' }}>
+                  {hasRate ? '₩' + RATE_1.format(feed.rate) : '–'}
+                </span>
+              </div>
+            </div>
+            {vDivider}
             {btcKpis.map(([text, v]) => (
-              <div key={text}>
+              <div key={text} style={{ flex: 'none' }}>
                 <div style={{ ...kicker, marginBottom: 2 }}>{text}</div>
-                <div style={{ fontSize: 16, color: pctColor(v) }}>{fmtPct(v)}</div>
+                <div style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums', color: pctColor(v) }}>{fmtPct(v)}</div>
               </div>
             ))}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '2px var(--space-4)', marginTop: 'var(--space-2)', fontSize: 11, color: 'var(--color-neutral-500)' }}>
-            <span>수집 {healthValue}{feed.health && (downNames.length || staleN) ? ` · ${healthSub}` : ''}</span>
-            <span>{coinCount}개 코인 · {feed.spreads.length} 페어</span>
-          </div>
-        </div>
-      ) : (
-        <div data-area="kpi" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-8)', padding: 'var(--space-4) var(--space-6)', borderBottom: '1px solid var(--color-divider)', flex: 'none', overflowX: 'auto', ...(vp.compact ? { flexWrap: 'wrap', rowGap: 'var(--space-3)' } : null) }}>
-          <div style={{ flex: 'none' }}>
-            <div style={{ ...kicker, marginBottom: 2 }}>USDT/KRW 암묵환율</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>
-              <span style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums' }}>
-                {hasRate ? '₩' + RATE_1.format(feed.rate) : '–'}
-              </span>
+            {vDivider}
+            <div style={{ flex: 'none' }}>
+              <div style={{ ...kicker, marginBottom: 2 }}>수집 상태</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)', fontSize: 14 }}>
+                <span>{healthValue}</span>
+                <span style={{ fontSize: 11, color: 'var(--color-neutral-500)' }}>{healthSub}</span>
+              </div>
             </div>
-          </div>
-          {vDivider}
-          {btcKpis.map(([text, v]) => (
-            <div key={text} style={{ flex: 'none' }}>
-              <div style={{ ...kicker, marginBottom: 2 }}>{text}</div>
-              <div style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums', color: pctColor(v) }}>{fmtPct(v)}</div>
+            <div style={{ flex: 'none', marginLeft: 'auto', textAlign: 'right' }}>
+              <div style={{ ...kicker, marginBottom: 2 }}>추적 페어</div>
+              <div style={{ fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{coinCount}개 코인 · {feed.spreads.length} 페어</div>
             </div>
-          ))}
-          {vDivider}
-          <div style={{ flex: 'none' }}>
-            <div style={{ ...kicker, marginBottom: 2 }}>수집 상태</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)', fontSize: 14 }}>
-              <span>{healthValue}</span>
-              <span style={{ fontSize: 11, color: 'var(--color-neutral-500)' }}>{healthSub}</span>
-            </div>
-          </div>
-          <div style={{ flex: 'none', marginLeft: 'auto', textAlign: 'right' }}>
-            <div style={{ ...kicker, marginBottom: 2 }}>추적 페어</div>
-            <div style={{ fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{coinCount}개 코인 · {feed.spreads.length} 페어</div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
 
       {/* 표는 행 배열(snapshot·delta 마다 새 배열)과 staleTick 만 받는다 — 1.5초 tick·수집 상태 폴링 리렌더에서 둘이 그대로면 건너뛴다 */}
       {wrap('spread', <SpreadsTab rows={feed.spreads} staleTick={staleTick} onPick={onPick} />)}

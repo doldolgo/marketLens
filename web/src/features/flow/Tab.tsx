@@ -145,6 +145,16 @@ function NetRow({ r, asOf, onCoin }: { r: NetflowRow; asOf: number; onCoin: (sym
   )
 }
 
+/** tx 해시 링크 — 넓은 행과 폰 카드가 같이 쓴다(061 열쇠 `tx` 는 화면 안에서 하나뿐). 새 창 — 열어 둔 대시보드의 WebSocket 을 끊지 않게 */
+function TxLink({ hash, size }: { hash: string; size: number }) {
+  return (
+    <a href={`https://etherscan.io/tx/${hash}`} target="_blank" rel="noopener" className="hv-txt" title={hash} data-el="tx"
+      style={{ fontFamily: 'ui-monospace, monospace', fontSize: size, color: 'var(--color-neutral-400)', textDecoration: 'none' }}>
+      {shortHex(hash)}
+    </a>
+  )
+}
+
 /** 폰 순유입 행 — 1줄 = 코인 / 순유입 수량, 2줄 = 입금·출금 / 원화·최근 (072 §3.5). */
 function NetCard({ r, asOf, onCoin }: { r: NetflowRow; asOf: number; onCoin: (sym: string) => void }) {
   return (
@@ -175,11 +185,7 @@ function RecentCard({ r }: { r: RecentRow }) {
       </span>
       <span style={{ ...cardRight, gap: 6 }}>
         {!r.confirmed && <Pill tone="neutral">확정 전</Pill>}
-        {/* 새 창 — 열어 둔 대시보드의 WebSocket 을 끊지 않게 */}
-        <a href={`https://etherscan.io/tx/${r.txHash}`} target="_blank" rel="noopener" className="hv-txt" title={r.txHash} data-el="tx"
-          style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, color: 'var(--color-neutral-400)', textDecoration: 'none' }}>
-          {shortHex(r.txHash)}
-        </a>
+        <TxLink hash={r.txHash} size={11} />
       </span>
     </div>
   )
@@ -196,11 +202,7 @@ function RecentRowView({ r }: { r: RecentRow }) {
       <span style={mono} title={r.addr}>{shortHex(r.addr)}</span>
       <span style={mono} title={r.counterparty}>{shortHex(r.counterparty)}</span>
       <span style={{ ...cell, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-        {/* 새 창 — 열어 둔 대시보드의 WebSocket 을 끊지 않게 */}
-        <a href={`https://etherscan.io/tx/${r.txHash}`} target="_blank" rel="noopener" className="hv-txt" title={r.txHash} data-el="tx"
-          style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11.5, color: 'var(--color-neutral-400)', textDecoration: 'none' }}>
-          {shortHex(r.txHash)}
-        </a>
+        <TxLink hash={r.txHash} size={11.5} />
         {!r.confirmed && <Pill tone="neutral">확정 전</Pill>}
       </span>
     </div>

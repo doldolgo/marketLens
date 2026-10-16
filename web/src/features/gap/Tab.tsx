@@ -77,28 +77,30 @@ export default function GapTab({ active, now }: { active: boolean; now: number }
 
   return (
     <>
-      {phone ? (
-        <div data-area="filters" style={phoneBar}>
-          {searchEl}
-          {modeSeg}
-          <FoldButton open={foldOpen} active={Number(thr !== THR_DEFAULT) + Number(only)} onClick={() => setFoldOpen(!foldOpen)} />
-          {foldOpen && <div style={foldPanel}>{thrField}{onlyBtn}{signHint}</div>}
-        </div>
-      ) : (
-        <div data-area="filters" style={bar}>
-          {searchEl}
-          <span style={label}>기준 보기</span>
-          {modeSeg}
-          {thrField}
-          {onlyBtn}
-          {signHint}
-          <span style={count}>{rows.length} / {all.length} 코인 표시</span>
-        </div>
-      )}
+      {/* 바 상자는 하나 — 영역·열쇠는 화면 안에서 하나뿐(061). 폰은 검색·기준·필터 단추 한 줄 + 펼친 묶음 */}
+      <div data-area="filters" style={phone ? phoneBar : bar}>
+        {searchEl}
+        {phone ? (
+          <>
+            {modeSeg}
+            <FoldButton open={foldOpen} active={Number(thr !== THR_DEFAULT) + Number(only)} onClick={() => setFoldOpen(!foldOpen)} el="filter-toggle" />
+            {foldOpen && <div style={foldPanel}>{thrField}{onlyBtn}{signHint}</div>}
+          </>
+        ) : (
+          <>
+            <span style={label}>기준 보기</span>
+            {modeSeg}
+            {thrField}
+            {onlyBtn}
+            {signHint}
+            <span style={count}>{rows.length} / {all.length} 코인 표시</span>
+          </>
+        )}
+      </div>
 
       <TableFrame minWidth={760} area="table">
         {phone
-          ? <SortBar headers={headers} sortKey={sort.col} sortDir={mul} onSort={clickSort} right={`${rows.length} / ${all.length} 코인`} />
+          ? <SortBar headers={headers} sortKey={sort.col} sortDir={mul} onSort={clickSort} right={`${rows.length} / ${all.length} 코인`} els={['sort:col', 'sort:dir']} />
           : <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={mul} onSort={clickSort} />}
         {all.length === 0 && <Empty>백엔드에서 갭 표를 받는 중입니다…</Empty>}
         {rows.map((r) => {

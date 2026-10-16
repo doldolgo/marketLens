@@ -308,11 +308,14 @@ export default memo(function SpreadsTab({ rows, onPick }: Props) {
 
   return (
     <>
+      {/* 필터바 — 넓은 바는 2행을 flexBasis 100% 로 같은 바 안에서 줄을 바꾼다. 폰은 검색·보기·필터 단추 한 줄 + 펼친 묶음.
+          영역·열쇠는 화면 안에서 하나뿐이어야 하므로(061) 바 상자는 하나다 */}
+      <div data-area="filters" style={phone ? phoneBar : bar}>
       {phone ? (
-        <div data-area="filters" style={phoneBar}>
+        <>
           {searchEl}
           {viewSeg}
-          <FoldButton open={foldOpen} active={activeN} onClick={() => setFoldOpen(!foldOpen)} />
+          <FoldButton open={foldOpen} active={activeN} onClick={() => setFoldOpen(!foldOpen)} el="filter-toggle" />
           {foldOpen && (
             <div style={foldPanel}>
               <span style={label}>기준 국내 거래소</span>
@@ -327,10 +330,9 @@ export default memo(function SpreadsTab({ rows, onPick }: Props) {
               {fxChecks}
             </div>
           )}
-        </div>
+        </>
       ) : (
-        // 필터바 — 2행은 flexBasis 100% 로 같은 바 안에서 줄을 바꾼다
-        <div data-area="filters" style={bar}>
+        <>
           {searchEl}
           <span style={label}>기준 국내 거래소</span>
           {domSeg}
@@ -351,12 +353,13 @@ export default memo(function SpreadsTab({ rows, onPick }: Props) {
             {vDivider}
             {fxChecks}
           </div>
-        </div>
+        </>
       )}
+      </div>
 
       <TableFrame minWidth={1040} area="table">
         {phone
-          ? <SortBar headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} right={`${coins.length} / ${all.length} 코인`} />
+          ? <SortBar headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} right={`${coins.length} / ${all.length} 코인`} els={['sort:col', 'sort:dir']} />
           : <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} />}
         {rows.length === 0 && <Empty>백엔드에서 스프레드를 받는 중입니다…</Empty>}
         {rows.length > 0 && coins.length === 0 && <Empty>조건에 맞는 코인이 없습니다. 필터를 넓혀 보세요.</Empty>}

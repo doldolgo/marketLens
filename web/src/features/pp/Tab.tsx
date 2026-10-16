@@ -109,26 +109,28 @@ export default function PpTab({ feed }: { feed: Feed }) {
 
   return (
     <>
-      {phone ? (
-        <div data-area="filters" style={phoneBar}>
-          {searchEl}
-          <FoldButton open={foldOpen} active={Number(thrP !== THR_P) + Number(thrF !== THR_F) + Number(only)} onClick={() => setFoldOpen(!foldOpen)} />
-          {foldOpen && <div style={foldPanel}>{thrPField}{thrFField}{onlyBtn}{pairHint}</div>}
-        </div>
-      ) : (
-        <div data-area="filters" style={bar}>
-          {searchEl}
-          {thrPField}
-          {thrFField}
-          {onlyBtn}
-          {pairHint}
-          <span style={count}>{rows.length} / {all.length} 코인 표시</span>
-        </div>
-      )}
+      {/* 바 상자는 하나 — 영역·열쇠는 화면 안에서 하나뿐(061). 폰은 검색·필터 단추 한 줄 + 펼친 묶음 */}
+      <div data-area="filters" style={phone ? phoneBar : bar}>
+        {searchEl}
+        {phone ? (
+          <>
+            <FoldButton open={foldOpen} active={Number(thrP !== THR_P) + Number(thrF !== THR_F) + Number(only)} onClick={() => setFoldOpen(!foldOpen)} el="filter-toggle" />
+            {foldOpen && <div style={foldPanel}>{thrPField}{thrFField}{onlyBtn}{pairHint}</div>}
+          </>
+        ) : (
+          <>
+            {thrPField}
+            {thrFField}
+            {onlyBtn}
+            {pairHint}
+            <span style={count}>{rows.length} / {all.length} 코인 표시</span>
+          </>
+        )}
+      </div>
 
       <TableFrame minWidth={760} area="table">
         {phone
-          ? <SortBar headers={headers} sortKey={sort.col} sortDir={mul} onSort={clickSort} right={`${rows.length} / ${all.length} 코인`} />
+          ? <SortBar headers={headers} sortKey={sort.col} sortDir={mul} onSort={clickSort} right={`${rows.length} / ${all.length} 코인`} els={['sort:col', 'sort:dir']} />
           : <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={mul} onSort={clickSort} />}
         {rows.map((r) => {
           const p = r.pair

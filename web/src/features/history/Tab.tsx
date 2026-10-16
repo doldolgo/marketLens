@@ -274,11 +274,13 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
 
         {/* 방향 서브탭 + 표 필터바 (§3.5) — 아래 표·우측 column 에만 걸린다. 차트 설정은 맨 아래 차트 툴바에 따로.
             data-area 는 052 화면 영역 이용 통계의 영역(필터 둘·표·요약·로그·차트) */}
+        {/* 필터 상자는 하나 — 영역·열쇠는 화면 안에서 하나뿐(061). 폰은 방향·검색·필터 단추 한 줄 + 펼친 묶음 + 건수 줄 */}
+        <div data-area="filters" style={{ display: 'flex', alignItems: 'center', gap: phone ? 'var(--space-3)' : 'var(--space-4)', flexWrap: 'wrap' }}>
         {phone ? (
-          <div data-area="filters" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+          <>
             <Seg opts={dirOpts} pad="6px 14px" />
             {searchEl}
-            <FoldButton open={foldOpen} active={Number(per !== PER_DEFAULT) + Number(dom !== null) + Number(fxf !== null)} onClick={() => setFoldOpen(!foldOpen)} />
+            <FoldButton open={foldOpen} active={Number(per !== PER_DEFAULT) + Number(dom !== null) + Number(fxf !== null)} onClick={() => setFoldOpen(!foldOpen)} el="filter-toggle" />
             {foldOpen && (
               <div style={foldPanel}>
                 {perGroup}
@@ -288,9 +290,9 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
               </div>
             )}
             <span style={{ ...hint, flexBasis: '100%' }}>{PER_LABEL[per]} · {events.length}건{loadingNote}</span>
-          </div>
+          </>
         ) : (
-          <div data-area="filters" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+          <>
             <Seg opts={dirOpts} pad="6px 16px" />
             {perGroup}
             {domGroup}
@@ -300,8 +302,9 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
               {eventDef} · 기간 내 {events.length}건
               {loadingNote}
             </span>
-          </div>
+          </>
         )}
+        </div>
 
         {/* 표 | 요약·로그 두 칸 — 폭 1079px 이하는 한 칸으로 쌓는다 (072 §3.6) */}
         <div style={{ display: 'grid', gridTemplateColumns: compact ? 'minmax(0, 1fr)' : '3fr 2fr', gap: 'var(--space-4)', alignItems: 'start' }}>
@@ -312,7 +315,7 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
             {phone ? (
               // 폰 — 정렬 줄 + 3줄 카드 행: 티커·상태 / 최대 스프레드, 횟수·지속 / 평균 스프레드, 네트워크·최신 (072 §3.5)
               <>
-                <SortBar headers={SORT_HEADERS} sortKey={sortKey} sortDir={sortDir} onSort={(k) => onSort(k as SortKey)} />
+                <SortBar headers={SORT_HEADERS} sortKey={sortKey} sortDir={sortDir} onSort={(k) => onSort(k as SortKey)} els={['sort:col', 'sort:dir']} />
                 {rank.map((x) => (
                   <button key={x.sym} onClick={() => onSelect(x.sym)} className="hv-row" data-el={`row:${x.sym}`}
                     style={{
