@@ -1,4 +1,4 @@
-"""S3 업로더 — 거래소 원문 아카이브의 연결·쓰기 (스펙 010 §3.3).
+"""S3 업로더 — 거래소 원문 아카이브의 연결·쓰기 (스펙 010 §3.3), 화면 이동 기록 옮기기의 읽기·지우기 (078 §3.2·§3.4·§3.6).
 
 core 에서 boto3 를 import 하는 곳은 이 모듈뿐이다(관리자 AWS 읽기는 admin 기능 안 — 034). 아카이브(core.raw_archive)는 `put(key, body)` 시그니처에만
 의존하고, 테스트는 같은 시그니처의 fake 를 꽂는다(실제 S3 를 만지지 않는다).
@@ -43,3 +43,15 @@ class S3Uploader:
             ContentType=CONTENT_TYPE,
             ContentEncoding=CONTENT_ENCODING,
         )
+
+    def get(self, key: str) -> bytes | None:
+        """`GetObject` 1회 — 몸통 바이트 그대로(gzip 을 풀지 않는다). 객체가 없으면 None, 그 밖 실패는 예외."""
+        try:
+            resp = self._client.get_object(Bucket=self.bucket, Key=key)
+        except self._client.exceptions.NoSuchKey:
+            return None
+        return resp["Body"].read()
+
+    def delete(self, key: str) -> None:
+        """`DeleteObject` 1회 — 없는 키도 성공이다(S3 규칙). 실패는 예외."""
+        self._client.delete_object(Bucket=self.bucket, Key=key)

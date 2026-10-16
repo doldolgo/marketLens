@@ -47,8 +47,15 @@ def test_admin_feeds_are_three_exact_api_locations_and_closed_publicly() -> None
 def test_redis_bus_replay_methods_are_async_with_these_parameters() -> None:
     expected = {
         "replay_load": ["sid", "day"],
-        "replay_append": ["sid", "meta", "blob", "day", "ttl_sec", "cutoff_ms"],
+        "replay_append": ["sid", "meta", "blob", "day", "ttl_sec"],
         "replay_mark_cut": ["sid", "ttl_sec"],
+        # 078 — S3 옮기기·IP 지우기
+        "replay_todo": ["max_ms", "limit"],
+        "replay_todo_oldest": [],
+        "replay_dump": ["sid"],
+        "replay_archived": ["sid", "last", "count"],
+        "replay_drop_todo": ["sid"],
+        "replay_forget": ["ip"],
         "replay_recent": ["min_ms", "limit"],
         "replay_ip": ["ip", "limit"],
         "replay_metas": ["sids"],

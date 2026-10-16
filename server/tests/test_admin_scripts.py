@@ -210,6 +210,7 @@ def test_paths_table_polling_periods_and_no_copied_feed_periods() -> None:
         "replayLive": "/svc/api/admin/replay/live",
         "replaySessions": "/svc/api/admin/replay/sessions",
         "replaySession": "/svc/api/admin/replay/session",
+        "replayArchive": "/api/admin/replay/archive",  # 078 — 수집기
     }
     assert re.search(r"\bFAST_MS = 10_000;", common) and re.search(
         r"\bSLOW_MS = 60_000;", common

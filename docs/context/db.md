@@ -38,12 +38,14 @@
 - 키 **`flow:eth:last_block`**(050) — 마지막으로 처리한 이더리움 블록 번호 문자열, 만료 없음. 쓰는 쪽 수집의 전송 감지기(블록마다), 읽는 쪽 같은 감지기의 (재)연결 직후 공백 재생(7,200블록까지)
 - 집합 **`flow:eth:deposit_addrs`**·**`flow:eth:hot_wallets`**·**`flow:eth:internal`**(050) — 씨앗 CSV 에 더한 주소(소문자), 만료 없음. 쓰는 쪽 감지기(가스 지갑 수신자·sweep 목적지·내부 이동 목적지를 발견 즉시), 읽는 쪽 감지기 기동 시 씨앗과 합침
 - 해시 **`attn:d:<YYYYMMDD>`**(052·061) — 화면 이용 통계의 KST 하루 합계. 필드 영역 `<page>|<device>|<area>|<m>`(`m` = `ms`·`clicks`·`seen`)와 페이지뷰 `<page>|<device>||pv`, 요소(061) `<page>|<device>|<area>|e|<열쇠>|<c·h·v>`(클릭·마우스 올림 ms·보인 ms — 열쇠는 1~64자·`|` 없음)·떠난 곳 `<page>|<device>|<area>|x`(pagehide 로 끝난 pv 수)·깊이 `<page>|<device>||d<0~10>`(그 10% 칸에서 멈춘 pv 수, 정적 페이지 넷만), 값은 정수 합(HINCRBY — 0 은 쓰지 않는다). 요소·떠난 곳·깊이는 `PRIVACY_V4_EFFECTIVE` 0시 뒤에만 쓴다. 만료는 `EXPIREAT` 그 KST 날의 끝(다음 날 00:00 KST) + 90일 — 쓸 때마다 같은 값이라 밀리지 않고, 관리자 피드의 90일 창(오늘 포함)은 모두 살아 있다. 쓰는 쪽 api(받은 비콘을 메모리에 더해 두고 10초마다 날마다 한 파이프라인 HINCRBY 묶음 + EXPIREAT, 실패하면 메모리에 두고 다음 회차 — 쌓인 필드가 2만을 넘으면 버리고 WARNING, 끌 때 한 번 더), 읽는 쪽 api 의 `GET /admin/attention`(창 안 날마다 HGETALL 한 파이프라인, days 마다 60초 캐시). 영역은 하루 ≈900 필드(화면 10 × 기기 2 × 영역 ≈15 × 3 + pv), 요소는 (날, 화면, 기기)마다 서로 다른 (영역, 열쇠) 300개까지(api 메모리로 세고 넘는 새 열쇠는 `(기타)` — 다시 뜨면 새로 센다)라 상한이 하루 18,000 필드 — 실제로는 누르거나 보인 것만이라 훨씬 적다(noeviction). IP 는 Redis 에 없다(api 메모리의 10분 셈 표뿐).
-- 화면 이동 기록(073) — 동의한 방문자가 페이지를 연 한 번(조각, `sid` = 16자 소문자 16진)마다. 키는 모두 만료 = 마지막 쓰기 + 14일(쓸 때마다 `EXPIRE`). 쓰는 쪽 api 의 `POST /replay`(묶음마다 곧바로 — 머리·그날 합을 한 왕복 읽고 MULTI 한 번), 읽는 쪽 api 의 `GET /admin/replay/{live,sessions,session}`.
-  - 해시 **`rp:m:<sid>`** — 조각 머리. `ip`(첫 묶음의 IP 정규 글자, 못 읽으면 `(없음)`)·`dev`·`w`·`h`·`page`(첫 묶음의 값)·`pages`(지나간 화면 이름, 쉼표, 차례대로 중복 없음 — `p` 사건이 더한다)·`now`(지금 화면 = 마지막 `p`, 없으면 page)·`first`·`last`(서버가 받은 epoch ms)·`n`(묶음 수)·`bytes`(누른 바이트 합)·`clicks`(`c` 사건 수)·`seq`(마지막으로 받은 묶음 번호 — 같거나 앞선 seq 는 버린다)·`cut`(조각 상한으로 묶음을 버렸으면 `1`, 없으면 필드 없음).
+- 화면 이동 기록(073·078) — 동의한 방문자가 페이지를 연 한 번(조각, `sid` = 16자 소문자 16진)마다. 보관(078): `PRIVACY_V8_EFFECTIVE` 0시 뒤에 머리를 만든 조각은 머리에 `keep=1` — 머리 만료 없음(서비스를 끝낼 때까지), 그 전 조각은 머리도 마지막 쓰기 + 14일. 묶음·그날 키는 늘 마지막 쓰기 + 14일, 두 정렬 집합은 만료 없음. 쓰는 쪽 api 의 `POST /replay`(묶음마다 곧바로 — 머리·그날 합을 한 왕복 읽고 MULTI 한 번), 읽는 쪽 api 의 `GET /admin/replay/{live,sessions,session}`, 수집기의 S3 옮기기(10분마다)와 `GET /admin/replay/archive`.
+  - 해시 **`rp:m:<sid>`** — 조각 머리. `ip`(첫 묶음의 IP 정규 글자, 못 읽으면 `(없음)`)·`dev`·`w`·`h`·`page`(첫 묶음의 값)·`pages`(지나간 화면 이름, 쉼표, 차례대로 중복 없음 — `p` 사건이 더한다)·`now`(지금 화면 = 마지막 `p`, 없으면 page)·`first`·`last`(서버가 받은 epoch ms)·`n`(묶음 수)·`bytes`(누른 바이트 합)·`clicks`(`c` 사건 수)·`seq`(마지막으로 받은 묶음 번호 — 같거나 앞선 seq 는 버린다)·`cut`(조각 상한으로 묶음을 버렸으면 `1`, 없으면 필드 없음)·`keep`(078 — 서비스를 끝낼 때까지 둘 조각이면 `1`)·`arch`(078 — S3 로 옮긴 묶음 수).
   - 리스트 **`rp:e:<sid>`** — 묶음마다 `{"at":받은 ms,"seq","ev"}` JSON(구분자 공백 없음)을 zlib 레벨 6 으로 누른 바이트, 받은 차례.
-  - 정렬 집합 **`rp:ip:<ip>`**(sid → first)·**`rp:recent`**(sid → last) — 쓸 때 14일보다 오래된 점수(받은 ms − 14일 미만)를 지운다. 조각은 첫 IP 의 집합에만 든다.
+  - 정렬 집합 **`rp:ip:<ip>`**(sid → first)·**`rp:recent`**(sid → last) — 만료·잘라내기 없음(쓸 때마다 `PERSIST`, 078). 머리가 만료된 sid 는 피드가 뺀다. 조각은 첫 IP 의 집합에만 든다.
+  - 정렬 집합 **`rp:todo`**(078, sid → last) — S3 로 옮길 keep 조각. 수집기가 last 가 3시간 지난 것을 옮기고 뺀다(점수가 읽은 last 와 같을 때만).
   - 정수 **`rp:b:<YYYYMMDD>`**(KST) — 그날 쓴 누른 바이트 합(INCRBY).
-  - 상한: 그날 8MiB(누른 바이트 — 넘을 묶음은 버린다)·조각마다 1MiB·묶음 3,600. 14일 × 8MiB = 112MiB 가 최악 — `maxmemory 600mb`·noeviction 의 시세 키를 밀어내지 않는 몫.
+  - 상한: 그날 8MiB(누른 바이트 — 넘을 묶음은 버린다)·조각마다 1MiB·묶음 3,600. 묶음은 14일 × 8MiB = 112MiB 가 최악 — `maxmemory 600mb`·noeviction 의 시세 키를 밀어내지 않는 몫. keep 머리·집합은 조각마다 수백 바이트씩 쌓인다(조각 1,000/일이면 연 약 200MB — status 빚).
+  - S3(078): 010 과 같은 버킷의 `replay/<YYYY>/<MM>/<DD>/<sid>.ndjson.gz`(first 의 KST 날) — gzip JSON Lines, 첫 줄 머리(해시 그대로), 다음 줄부터 묶음 `{"at","seq","ev"}` 그대로. 쓰고 읽는 쪽은 수집기(collect 박스 역할 — serve 엔 자격이 없다).
 - env `REDIS_URL`(기본 `redis://localhost:6379/0`, compose 안에서는 `redis://redis:6379/0` — server·api 둘 다). Redis 가 없어도 앱은 뜬다 — 인계된 틱은 버려지고(경고 로그) 원문은 S3 에 있어 재생 가능하다.
 
 ## S3 원문 아카이브
@@ -62,7 +64,7 @@
 
 ## 보존
 - Influx bucket retention 은 **무제한**. `dw_fail` 의 "최근 24시간" 은 쿼리 range(-24h) 로 처리한다 — retention 을 걸면 `premium` 까지 지워진다. 봉 계층은 버킷 retention 이 유통기한이다(1m 7일·5m 30일·1h 90일·4h 365일·1d 무제한). 초 단위 `premium` 은 아직 무제한.
-- Redis 는 옮기면 비운다(위). 화면 이동 기록 `rp:*` 는 마지막 쓰기 + 14일에 Redis 가 지운다(073). S3 는 lifecycle 미설정.
+- Redis 는 옮기면 비운다(위). 화면 이동 기록(078): keep 조각은 서비스를 끝낼 때까지 — 머리·집합은 Redis 에, 묶음은 S3 `replay/` 에(Redis 묶음은 마지막 쓰기 + 14일), 그 전 조각은 `rp:*` 가 14일 뒤 사라진다. IP 로 지우기는 `scripts/replay_forget.py`(런북 clarity.md). S3 는 lifecycle 미설정.
 - DB-IP City 캐시(069): serve 의 api 만 named volume `geo-cache`(`/var/lib/geo`)에 `city-YYYY-MM.bin` 하나(≈50MB — 머리·CRC32 뒤 구간 시작·끝·위치 번호 배열과 위치 표, 공개 자료라 방문자 정보 없음)를 둔다. 새 달 판을 다 만든 뒤 바꿔 달고 옛 달 파일은 지운다. 지우거나 깨져도 다음 IP 피드 요청이 다시 받는다. 접속 기록·IP 칸은 여기에도 다른 저장소에도 쓰지 않는다(메모리만).
 
 ## 쓰는 쪽

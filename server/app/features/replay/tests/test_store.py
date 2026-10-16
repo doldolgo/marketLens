@@ -17,7 +17,9 @@ SID_CAP = 1024 * 1024
 NOON_MS = int(NOON * 1000)
 
 
-async def test_one_batch_writes_five_keys_that_expire_in_14_days(rig: Rig) -> None:
+async def test_one_batch_writes_five_keys_and_only_the_two_sets_never_expire(
+    rig: Rig,
+) -> None:
     ev = [[0, "m", 10, 20], [150, "c", 11, 21, "table"], [900, "s", 300]]
     assert (await rig.post(body(ev=ev))).status_code == 204
     assert rig.keys() == [
@@ -27,8 +29,10 @@ async def test_one_batch_writes_five_keys_that_expire_in_14_days(rig: Rig) -> No
         f"rp:m:{SID}",
         "rp:recent",
     ]
+    # 078 §3.1 — keep 이 아닌 조각(v8 전)의 머리·묶음·그날 키는 14일, 두 집합은 만료 없음(keep 조각이 IP 로 찾혀야 한다)
     for key in rig.keys():
-        assert rig.redis.ttl(key) == KEEP_SEC, key
+        want = -1 if key in ("rp:recent", f"rp:ip:{IP}") else KEEP_SEC
+        assert rig.redis.ttl(key) == want, key
     (blob,) = rig.redis.lrange(f"rp:e:{SID}", 0, -1)
     assert rig.batches() == [{"at": NOON_MS, "seq": 0, "ev": ev}]
     assert zlib.decompress(blob) == (
@@ -177,14 +181,13 @@ async def test_sid_cap_3600_batches_drops_and_marks_the_session_cut(
     assert len(rig.batches()) == 2
 
 
-async def test_writing_trims_scores_older_than_14_days(rig: Rig) -> None:
+async def test_writing_never_trims_or_expires_the_two_sets(rig: Rig) -> None:
+    """078 §3.1 — 14일 넘은 점수도 그대로(keep 조각), 앞 코드가 단 만료는 걷는다(PERSIST)."""
     cutoff = NOON_MS - KEEP_SEC * 1000
     for key in ("rp:recent", f"rp:ip:{IP}"):
-        rig.redis.zadd(key, {"old": cutoff - 1, "edge": cutoff})
+        rig.redis.zadd(key, {"old": cutoff - 1})
+        rig.redis.expire(key, 60)
     await rig.post(body())
     for key in ("rp:recent", f"rp:ip:{IP}"):
-        assert rig.redis.zrange(key, 0, -1) == [b"edge", SID.encode()], key
-    # 다른 IP 의 집합은 그 IP 의 묶음이 올 때 다듬는다
-    rig.redis.zadd("rp:ip:198.51.100.1", {"old": cutoff - 1})
-    await rig.post(body(seq=1))
-    assert rig.redis.zrange("rp:ip:198.51.100.1", 0, -1) == [b"old"]
+        assert rig.redis.zrange(key, 0, -1) == [b"old", SID.encode()], key
+        assert rig.redis.ttl(key) == -1, key

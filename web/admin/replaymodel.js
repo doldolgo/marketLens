@@ -31,6 +31,8 @@ export const validSid = (sid) => typeof sid === 'string' && SID.test(sid);
 export const liveReq = () => req('replayLive');
 export const sessionsReq = (ip) => req('replaySessions', ip ? { ip } : {});
 export const sessionReq = (sid, after) => req('replaySession', { sid, after });
+// 078 — S3 로 옮긴 조각(수집기). session 이 archived 라고 하면 같은 sid 를 이 경로로 처음부터 다시 받는다
+export const archiveReq = (sid, after) => req('replayArchive', { sid, after });
 
 // 틀 주소의 경로(사이트 출처는 판 모듈이 붙인다) — 정적 화면은 그 경로, 대시보드는 /app/?tab=<탭>. 모르는 화면은 null(띄우지 않음)
 export function framePath(page) {

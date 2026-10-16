@@ -1,11 +1,12 @@
 // 화면 재생 판(스펙 074 §3.3·§3.5) — 방문자 페이지의 상세 판 `#detail=replay:<sid>`. 왼쪽 틀(replayframe.js)·시간 막대·조절 줄, 오른쪽
 // 사건 목록(replayview.js). 재생 시각이 바뀔 때마다 그 시각의 상태를 메시지 하나로 틀에 보낸다(틀은 받은 상태만 그린다).
-// 조각은 073 session 을 next 로 끝까지 받고, 따라 보기(지금 보는 중에서 연 판)는 2초마다 after=next 로 새 묶음을 받아 마지막 사건 3초 뒤를
+// 조각은 073 session 을 next 로 끝까지 받고(14일이 지나 S3 로 옮긴 조각이면 — session 의 archived — 078 archive 로 처음부터 다시),
+// 따라 보기(지금 보는 중에서 연 판)는 2초마다 after=next 로 새 묶음을 받아 마지막 사건 3초 뒤를
 // 1× 로 따라간다. 이 부르기는 store 의 묶음(10초·60초)과 따로다 — 쪽 넘기기·2초 받기는 이 판만의 주기라 call() 을 직접 쓴다(만료 신호는 app 으로).
 import { call, el, isExpired, isObj, kstText, list, num, tagText } from './common.js';
 import {
   FOLLOW_POLL_MS, FOLLOW_STOP_MS, SEEK_MS,
-  advance, barMarks, devName, eventRows, followTarget, frameState, lagSec, sessionReq, timeText, timeline, truncated, validSid,
+  advance, archiveReq, barMarks, devName, eventRows, followTarget, frameState, lagSec, sessionReq, timeText, timeline, truncated, validSid,
 } from './replaymodel.js';
 import { createFrame } from './replayframe.js';
 import { createView } from './replayview.js';
@@ -66,7 +67,7 @@ export function wireReplay() {
 
 function createPlayer(app, sid, followMode) {
   // phase: loading · ready · missing(없음·만료) · off(피드 없음 — 404) · error
-  const st = { phase: 'loading', part: undefined, bad: '', meta: null, batches: [], seq: -1, next: 0, latestAt: null, recvAt: 0, lastNew: 0 };
+  const st = { phase: 'loading', part: undefined, bad: '', meta: null, batches: [], seq: -1, next: 0, latestAt: null, recvAt: 0, lastNew: 0, archived: false };
   // follow: on · gone(떠났거나 멈춤) · null. 재생은 다 받으면 곧바로
   const play = { tl: null, rows: [], T: null, playing: true, speed: 1, skip: true, follow: followMode ? 'on' : null, timer: 0, poll: 0, last: 0, dead: false };
   const me = { sid, frame: null, view: null, box: null, root: null };
@@ -75,7 +76,7 @@ function createPlayer(app, sid, followMode) {
 
   async function fetchPage(after) {
     try {
-      const { status, body } = await call(sessionReq(sid, after).url);
+      const { status, body } = await call((st.archived ? archiveReq : sessionReq)(sid, after).url);
       if (status === 404) return { off: true };
       if (status !== 200 || !isObj(body)) {
         const code = typeof body?.error?.code === 'string' ? body.error.code.slice(0, 40) : '';
@@ -111,6 +112,12 @@ function createPlayer(app, sid, followMode) {
       if (got.off) return settle('off', NO_FEED);
       if (got.part) return settle('error', got.part, got.code);
       if (!isObj(got.body.meta)) return settle('missing', OK);
+      // 078 — Redis 엔 머리만 남고 묶음은 S3 에 있다. 끝난 조각이라 따라 보기는 없다
+      if (got.body.archived === true && !st.archived) {
+        Object.assign(st, { archived: true, next: 0 });
+        play.follow = null;
+        continue;
+      }
       absorb(got.body);
       if (got.body.more !== true) break;
     }
@@ -180,7 +187,7 @@ function createPlayer(app, sid, followMode) {
     return null;
   }
   function note() {
-    if (st.phase === 'missing') return '기록이 없거나 지났다(14일 보관)';
+    if (st.phase === 'missing') return '기록이 없거나 지났다';
     if (st.phase === 'off') return '이 서버에는 화면 기록 피드가 아직 없다';
     if (st.bad === 'bad_sid') return '이 조각은 볼 수 없다 — 조각 id 꼴이 아니다(bad_sid)';
     return '';

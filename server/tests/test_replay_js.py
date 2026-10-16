@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from tests.test_deploy import ROOT
-from tests.test_privacy import NOTICE
+from tests.test_privacy import NOTICE, OLD
 
 JS = (ROOT / "web/public/replay.js").read_text("utf-8")
 ON = {"kt.analytics": "granted", "kt.analytics.v": NOTICE}
@@ -189,6 +189,9 @@ MOVES = [["move", 10, 10], ["wait", 2000]]
         {
             "ls": {"kt.analytics": "granted", "kt.analytics.v": "2026-10-09-2"}
         },  # 예전 판
+        {
+            "ls": {"kt.analytics": "granted", "kt.analytics.v": OLD}
+        },  # 바로 앞 판(078 — v7 의 2026-10-16)
         {"ls": ON, "gpc": True},
         {"ls": ON, "host": "www.kimptrack.com"},
         {"ls": ON, "framed": True},
@@ -394,7 +397,7 @@ def test_script_writes_no_storage_or_cookie_and_posts_to_one_path() -> None:
         ADMIN,
         "http://www.w3.org/2000/svg",
     ]
-    assert 'const NOTICE_VERSION = "2026-10-16"' in JS
+    assert f'const NOTICE_VERSION = "{NOTICE}"' in JS and NOTICE == "2026-10-16-2"
     got = one(ls=ON, steps=MOVES + [["click", 1, 1], ["pagehide"]])
     assert got["writes"] == []
 

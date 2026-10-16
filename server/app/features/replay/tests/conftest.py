@@ -20,6 +20,9 @@ from app.main import create_app
 
 KST = ZoneInfo("Asia/Seoul")
 EFFECTIVE = "2026-10-18"
+# 078 §3.1 — 073 시험은 keep 이 없는 조각(v8 전)을 본다. keep 조각은 `kept` 짝(keep 기준 = 받기 게이트 다음 날 — 경계를 따로 본다)
+NO_KEEP = "2099-01-01"
+KEEP_FROM = "2026-10-19"
 SID = "0123456789abcdef"
 IP = "203.0.113.7"
 KEEP_SEC = 14 * 86_400
@@ -107,9 +110,24 @@ def api_app(monkeypatch: pytest.MonkeyPatch) -> Iterator[FastAPI]:
 
 @pytest.fixture
 async def rig(api_app: FastAPI) -> AsyncIterator[Rig]:
+    async for made in _rig(api_app, NO_KEEP):
+        yield made
+
+
+@pytest.fixture
+async def kept(api_app: FastAPI) -> AsyncIterator[Rig]:
+    """078 — 새 조각마다 keep(서비스를 끝낼 때까지)."""
+    async for made in _rig(api_app, KEEP_FROM):
+        yield made
+
+
+async def _rig(api_app: FastAPI, keep_effective: str) -> AsyncIterator[Rig]:
     clock = Clock()
     service = ReplayService(
-        clock=clock.time, mono=clock.monotonic, privacy_effective=EFFECTIVE
+        clock=clock.time,
+        mono=clock.monotonic,
+        privacy_effective=EFFECTIVE,
+        keep_effective=keep_effective,
     )
     server = fakeredis.FakeServer()
     bus = RedisBus(fakeredis.aioredis.FakeRedis(server=server))

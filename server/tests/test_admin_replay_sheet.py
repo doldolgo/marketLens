@@ -88,9 +88,17 @@ const respond = (url) => {
   if (path === '/svc/api/admin/replay/session') {
     if (input.status) return input.status
     const after = Number(q.get('after') || 0)
+    // 078 — 14일이 지나 S3 로 옮긴 조각: 머리만 있고 묶음은 없다
+    if (input.archived) return [200, { state: 'ok', code: null, meta: S.meta, batches: [], next: after, more: false, archived: true }]
     const all = S.batches.slice(0, shown)
     const part = all.slice(after, after + input.page)
-    return [200, { state: 'ok', code: null, meta: S.meta, batches: part, next: after + part.length, more: after + part.length < all.length }]
+    return [200, { state: 'ok', code: null, meta: S.meta, batches: part, next: after + part.length, more: after + part.length < all.length, archived: false }]
+  }
+  if (path === '/api/admin/replay/archive') {
+    if (input.archiveStatus) return input.archiveStatus
+    const after = Number(q.get('after') || 0)
+    const part = S.batches.slice(after, after + input.page)
+    return [200, { state: 'ok', code: null, meta: S.meta, batches: part, next: after + part.length, more: after + part.length < S.batches.length, archived: true }]
   }
   if (path === '/svc/api/admin/replay/live') return [200, { state: 'ok', code: null, now: clock, rows: [S.meta] }]
   return [404, { detail: 'Not Found' }]
@@ -356,7 +364,7 @@ out.calls = sessionCalls()
                     "more": False,
                 },
             ],
-            "기록이 없거나 지났다(14일 보관)",
+            "기록이 없거나 지났다",
             "",
         ),
         (
@@ -375,13 +383,41 @@ out.calls = sessionCalls()
 def test_missing_bad_absent_and_broken_sessions_are_one_line(
     status: list, note: str, tag: str
 ) -> None:
-    """§3.5 — 없음·만료(meta null) → '기록이 없거나 지났다(14일 보관)', 400 bad_sid · 404(피드 배포 전) · Redis 오류는 판 상태 배지와 한 줄.
+    """§3.5 — 없음·만료(meta null) → '기록이 없거나 지났다', 400 bad_sid · 404(피드 배포 전) · Redis 오류는 판 상태 배지와 한 줄.
     틀은 띄우지 않는다."""
     got = _run(EDGE, status=status)
     edge = got["edge"]
     assert edge["note"].endswith(note) and edge["tag"] == tag
     assert edge["custom"] is True and edge["src"] is None
     assert len(got["calls"]) == 1
+
+
+ARCHIVED = r"""
+out.edge = snap()
+out.calls = v.s.calls.filter((c) => c.includes('/replay/session?') || c.includes('/replay/archive?'))
+"""
+
+
+def test_an_archived_session_reloads_from_the_archive_feed() -> None:
+    """078 §3.5 — session 이 archived(머리만·묶음 없음)면 같은 조각을 수집기 archive 로 처음부터 다시 받아 그대로 재생한다."""
+    got = _run(ARCHIVED, archived=True)
+    assert got["calls"] == [
+        f"/svc/api/admin/replay/session?sid={SID}&after=0",
+        f"/api/admin/replay/archive?sid={SID}&after=0",
+        f"/api/admin/replay/archive?sid={SID}&after=2",
+        f"/api/admin/replay/archive?sid={SID}&after=4",
+    ]
+    edge = got["edge"]
+    assert edge["tag"] == "" and edge["src"] == f"{SITE}/app/?tab=spread&kt-replay=1"
+    assert edge["time"] == "02:47:20 KST · 경과 0:00 / 전체 0:39"
+
+
+def test_archive_feed_missing_on_the_server_is_one_line() -> None:
+    """078 §3.5 — 수집기에 archive 가 아직 없으면(404) '연결 안 됨' 한 줄, 틀은 띄우지 않는다."""
+    got = _run(ARCHIVED, archived=True, archiveStatus=[404, {"detail": "Not Found"}])
+    edge = got["edge"]
+    assert edge["note"].endswith("이 서버에는 화면 기록 피드가 아직 없다")
+    assert edge["tag"] == "연결 안 됨" and edge["src"] is None
 
 
 def test_a_cut_session_gets_the_front_only_badge() -> None:
