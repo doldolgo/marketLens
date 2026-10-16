@@ -7,6 +7,8 @@
 //            방향 경로에 안 드는 줄(김프면 해외 입금·국내 출금)은 흐리게 — "지금 봐야 할 두 줄"이 먼저 보이게
 //   카드끼리 시간축·십자선 연동(ChartSync): 한 카드에서 줌·드래그·마우스 이동이 전 카드에 같이 간다.
 // 휠 줌·드래그 이동은 라이브러리 기본. 왼쪽 끝에 가까워지면 onNeedOlder 로 과거를 더 달라고 한다.
+// 터치의 세로 끌기는 잡지 않는다 — 문서가 스크롤되는 좁은 화면에서 차트 위를 쓸어도 페이지가 내려가게 (072 §3.7).
+// 폰(폭 719px 이하)은 차트 높이·카드 여백을 줄이고 툴바 안내를 짧게 한다.
 // 차트 객체는 ref 에 두고 데이터가 바뀔 때만 채운다 — 셸의 매초 리렌더가 캔버스를 다시 그리지 않게.
 // 채울 점 배열은 chartData.ts(순수 함수)가 만든다.
 import {
@@ -16,6 +18,7 @@ import {
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { exName, fmtKrw, fmtPct, fmtTime, fmtUsdt, pctColor } from '../../shared/format'
 import { Pill, Seg, card, hint, kicker, type SegOpt } from '../../shared/ui'
+import { useViewport } from '../../shared/viewport'
 import { FX_CHOICES, INITIAL_BARS, exchangeStates } from './candles'
 import {
   alpha, appendStart, axisOf, axisTimes, bandDimmed, bandPalette, cardPoints, fromChartTime, shadePoints, toChartTime,
@@ -31,6 +34,8 @@ const EXIT_PCT = 0.5
 /** 왼쪽 끝에서 이만큼(봉 개수) 안으로 들어오면 과거 요청. */
 const LOAD_MORE_MARGIN = 30
 const CHART_H = 460
+/** 폰 차트 높이 — 판 비율은 같고 전체만 줄인다 (072 §3.7) */
+const CHART_H_PHONE = 360
 /** 판 높이 비율 — 가격 판, 입출금 줄 2개짜리 판 1개. 김프 판이 나머지. */
 const PRICE_SHARE = 0.24
 const BAND_SHARE = 0.09
@@ -167,6 +172,7 @@ export interface ToolbarProps {
 }
 
 export function ChartToolbar(p: ToolbarProps) {
+  const { phone } = useViewport()
   const toggle = <T extends string>(list: T[], all: T[], v: T, set: (l: T[]) => void) => {
     const next = list.includes(v) ? list.filter((x) => x !== v) : all.filter((x) => x === v || list.includes(x))
     if (next.length > 0) set(next) // 최소 1개는 남긴다 — 빈 차트는 의미가 없어서
@@ -195,8 +201,8 @@ export function ChartToolbar(p: ToolbarProps) {
   }))
   return (
     // data-area — 052 화면 영역 이용 통계의 영역(기록 탭의 두 번째 필터 줄)
-    <div data-area="filters-2" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-8)', flexWrap: 'wrap' }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-4)' }}>
+    <div data-area="filters-2" style={{ display: 'flex', alignItems: 'center', gap: phone ? 'var(--space-3) var(--space-6)' : 'var(--space-8)', flexWrap: 'wrap' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap', maxWidth: '100%' }}>
         <span style={{ fontFamily: 'var(--font-heading)', fontSize: 18, fontWeight: 500 }}>{p.sym}</span>
         <span style={{ fontSize: 12, color: dirColor(p.dir) }}>{DIR_LABEL[p.dir]} {INTERVAL_LABEL[p.interval]}봉</span>
         <Seg opts={intervalOpts} pad="5px 9px" />
@@ -204,7 +210,11 @@ export function ChartToolbar(p: ToolbarProps) {
       {group('국내', DOMS, p.doms, exName, p.onDoms)}
       {p.loading && <Pill tone="accent">불러오는 중…</Pill>}
       {p.errorStatus != null && <Pill tone="warn">차트를 불러오지 못했습니다 (HTTP {p.errorStatus})</Pill>}
-      <span style={{ ...hint, marginLeft: 'auto' }}>이 코인이 있는 해외 거래소마다 차트 1개(카드 오른쪽 접기) · 휠 = 줌 · 드래그 = 이동 · 왼쪽 끝으로 끌면 과거 로드 (모든 차트 같이 움직임)</span>
+      <span style={{ ...hint, marginLeft: phone ? 0 : 'auto' }}>
+        {phone
+          ? '두 손가락으로 확대 · 끌어서 이동 · 왼쪽 끝까지 끌면 과거 불러오기'
+          : '이 코인이 있는 해외 거래소마다 차트 1개(카드 오른쪽 접기) · 휠 = 줌 · 드래그 = 이동 · 왼쪽 끝으로 끌면 과거 로드 (모든 차트 같이 움직임)'}
+      </span>
     </div>
   )
 }
@@ -275,12 +285,13 @@ function CardHeader(p: { fx: string; dir: Dir; doms: string; mock: boolean; righ
 }
 
 export default function FxChartCard(p: CardProps) {
+  const { phone } = useViewport()
   // 접힌 카드는 헤더만 — 차트 훅을 태우지 않게 본체 컴포넌트를 따로 둔다(훅은 조건부로 못 부른다)
   if (p.collapsed) {
     const mock = FX_CHOICES.find((f) => f.id === p.fx)?.mock === true
     // data-el — 061 요소 열쇠: 카드(차트 위 누름·마우스 올림·보인 시간) · 접기 단추
     return (
-      <div data-el={`card:${p.fx}`} style={{ ...card, padding: 'var(--space-4) var(--space-8)' }}>
+      <div data-el={`card:${p.fx}`} style={{ ...card, padding: phone ? 'var(--space-4)' : 'var(--space-4) var(--space-8)' }}>
         <CardHeader fx={p.fx} dir={p.dir} doms={p.series.map((s) => exName(s.dom)).join('·')} mock={mock} collapsed onToggle={p.onToggle} />
       </div>
     )
@@ -289,6 +300,7 @@ export default function FxChartCard(p: CardProps) {
 }
 
 function FxChartBody(p: CardProps) {
+  const { phone } = useViewport()
   const boxRef = useRef<HTMLDivElement>(null)
   const refs = useRef<Refs | null>(null)
   const seriesRef = useRef<PairSeries[]>([])
@@ -324,6 +336,8 @@ function FxChartBody(p: CardProps) {
       // rightBarStaysOnScroll: 휠 확대·축소 때 오른쪽 끝 봉을 고정하고 왼쪽만 늘고 준다(트레이딩뷰와 같다) — 기본값은 마우스 위치 기준
       timeScale: { borderColor: border, timeVisible: true, secondsVisible: false, rightOffset: 4, rightBarStaysOnScroll: true },
       crosshair: { mode: 0 }, // 0 = Normal(자유) — 캔들 자석 없이 봉 단위로 읽는다
+      // 터치 세로 끌기는 페이지 스크롤에 양보 — 나머지(휠·마우스 끌기·가로 터치 끌기)는 기본값 그대로 (072 §3.7)
+      handleScroll: { vertTouchDrag: false },
       localization: { locale: 'ko-KR', timeFormatter: (t: number) => fmtTime(fromChartTime(t) * 1000) },
     })
     // 사건 음영: 판 0 위에 겹치는 히스토그램(자기 축 없음, 위아래 여백 0 → 판 전체 높이)
@@ -522,13 +536,15 @@ function FxChartBody(p: CardProps) {
   const st = (okv: boolean | null, dim: boolean) => (
     <b style={{ ...num, opacity: dim ? 0.45 : 1, color: okv == null ? 'var(--color-neutral-500)' : okv ? 'var(--color-neutral-300)' : 'var(--color-up)' }}>{okv == null ? '모름' : okv ? '가능' : '막힘'}</b>
   )
+  // 읽기 줄 칸 사이 — 폰은 줄이 여러 번 꺾이므로 줄 간격을 좁힌다
+  const readGap = phone ? '3px var(--space-4)' : 'var(--space-6)'
   const fxRelevant = p.dir === 'kimp' ? 'withdraw' : 'deposit'
   const dwCell = (label: string, deposit: boolean | null, withdraw: boolean | null, relevant: 'deposit' | 'withdraw') => (
     <span>{label} 입금 {st(deposit, relevant !== 'deposit')} · 출금 {st(withdraw, relevant !== 'withdraw')}</span>
   )
 
   return (
-    <div data-el={`card:${p.fx}`} style={{ ...card, padding: 'var(--space-6) var(--space-8) var(--space-6)' }}>
+    <div data-el={`card:${p.fx}`} style={{ ...card, padding: phone ? 'var(--space-4) var(--space-3)' : 'var(--space-6) var(--space-8) var(--space-6)' }}>
       <div style={{ marginBottom: 'var(--space-3)' }}>
         <CardHeader fx={p.fx} dir={p.dir} doms={S.map((s) => exName(s.dom)).join('·')} mock={mock}
           right={single ? '캔들' : '국내 거래소별 캔들 — 채움 상승 · 테두리 하락'} collapsed={false} onToggle={p.onToggle} />
@@ -537,7 +553,7 @@ function FxChartBody(p: CardProps) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 11.5, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-300)', marginBottom: 'var(--space-4)', minHeight: 36 }}>
         {ts == null ? <span style={hint}>데이터 없음</span> : (
           <>
-          <div style={{ display: 'flex', gap: 'var(--space-6)', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: readGap, flexWrap: 'wrap' }}>
             <span style={{ color: 'var(--color-neutral-500)' }}>{fmtTime(ts * 1000)}</span>
             {single && c0 && (
               <>
@@ -559,7 +575,7 @@ function FxChartBody(p: CardProps) {
             })}
             {c0 && <span style={{ color: 'var(--color-neutral-500)' }}>USDT {fmtKrw(c0.fxRate)}원</span>}
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-6)', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: readGap, flexWrap: 'wrap' }}>
             <span style={{ color: 'var(--color-neutral-500)' }}>입출금</span>
             {c0 && (() => { const e = exchangeStates(c0, p.dir); return dwCell(fxLabel(p.fx), e.fxDeposit, e.fxWithdraw, fxRelevant) })()}
             {S.map((s) => {
@@ -581,8 +597,8 @@ function FxChartBody(p: CardProps) {
       </div>
 
       {/* 캔버스 좌우 여백 — 카드 테두리에 붙지 않게 */}
-      <div style={{ position: 'relative', padding: '0 var(--space-4)' }}>
-        <div ref={boxRef} style={{ width: '100%', height: CHART_H }} />
+      <div style={{ position: 'relative', padding: phone ? 0 : '0 var(--space-4)' }}>
+        <div ref={boxRef} style={{ width: '100%', height: phone ? CHART_H_PHONE : CHART_H }} />
         {S.every((s) => s.candles.length === 0) && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', color: 'var(--color-neutral-500)', fontSize: 12 }}>
             {emptyText(p.loading, p.emptyHint)}

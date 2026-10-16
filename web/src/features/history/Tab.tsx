@@ -2,10 +2,15 @@
 // 표·우측 column 은 /history/events 전 코인 조회(방향·기간·국내 거래소가 쿼리, 심볼·해외 거래소는 클라이언트에서 거른다).
 // 차트 음영은 선택 심볼만 차트 범위로 따로 조회 — 표 필터와 차트 설정은 서로 독립(맨 위 표 설정 → 표 → 차트 설정 → 차트 순서).
 // 참조 디자인(docs/design/reference/tabs/HistoryTab.tsx)의 김프/역프 열 분리 대신 서브탭 — 한 화면은 한 방향만.
+// 폭 1079px 이하는 표·요약 두 칸을 한 칸으로 쌓고, 폰(719px 이하)은 필터 접기·정렬 줄·카드 행 (072 §3.4~§3.6).
 import { memo, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { exName, fmtAgo, fmtPct, fmtTime, pctColor } from '../../shared/format'
-import { Empty, Pill, Seg, card, hint, kicker, searchInput, type SegOpt } from '../../shared/ui'
+import {
+  Empty, FoldButton, Pill, Seg, SortBar, bodyScroll, card, cardLeft, cardRight, cardRow, cardSub, foldPanel, hint, kicker, phoneSearch, searchInput,
+  type Header, type SegOpt,
+} from '../../shared/ui'
 import { alias, isSymbol, list, oneOf, useUrlState, type Codec } from '../../shared/urlState'
+import { useViewport } from '../../shared/viewport'
 import { useCandles, useEvents } from './api'
 import { FX_CHOICES, REAL_FXS, RES_OF_INTERVAL, RES_SEC, isMockFx, neededChunks } from './candles'
 import FxChartCard, { ChartSync, ChartToolbar } from './Chart'
@@ -26,6 +31,8 @@ function emptyHintFor(sym: string, fx: string, availableFxs: string[]): string |
 }
 
 type Per = '1h' | '4h' | '8h' | '12h' | '24h' | '3d' | '7d' | '30d' | '90d'
+/** 기본 기간 — 폰 필터 단추의 숫자(072 §3.4)도 이 값과 견준다 */
+const PER_DEFAULT: Per = '7d'
 const PERS: Per[] = ['1h', '4h', '8h', '12h', '24h', '3d', '7d', '30d', '90d']
 const PER_LABEL: Record<Per, string> = {
   '1h': '1시간', '4h': '4시간', '8h': '8시간', '12h': '12시간', '24h': '24시간',
@@ -51,6 +58,8 @@ const HEADERS: [SortKey, string, string][] = [
   ['avgDur', '평균 지속', 'sort:avgdur'], ['maxPct', '최대 스프레드', 'sort:maxpct'], ['avgPct', '평균 스프레드', 'sort:avgpct'],
   ['net', '네트워크', 'sort:net'], ['last', '최신', 'sort:last'],
 ]
+/** 폰 정렬 줄의 열 목록 — 넓은 표의 정렬 가능한 열 전부(티커 + HEADERS) */
+const SORT_HEADERS: Header[] = [['sym', '티커', 'left'], ...HEADERS.map(([k, text]): Header => [k, text, 'right'])]
 /** 표 정렬 URL 표기 `열:asc|desc` — 열은 HEADERS 의 키만. */
 const SORT_CODEC: Codec<{ key: SortKey; dir: number }> = {
   parse: (s) => {
@@ -117,9 +126,12 @@ function sameProps(a: Props, b: Props): boolean {
 export default memo(HistoryTab, sameProps)
 
 function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
+  const { phone, compact, docScroll } = useViewport()
+  // 폰 필터 접기 — 메모리만, 기본 접힘 (072 §3.4)
+  const [foldOpen, setFoldOpen] = useState(false)
   // 방향·기간·거래소·정렬·차트 선택은 URL 쿼리(h.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색 입력은 Enter 전까지 임시라 제외
   const [dir, setDir] = useUrlState<Dir>('h.dir', 'kimp', oneOf(['kimp', 'reverse']))
-  const [per, setPer] = useUrlState<Per>('h.per', '7d', oneOf(PERS))
+  const [per, setPer] = useUrlState<Per>('h.per', PER_DEFAULT, oneOf(PERS))
   const [dom, setDom] = useUrlState<Dom | null>('h.dom', null, alias([['all', null], ['upbit', 'upbit'], ['bithumb', 'bithumb']]))
   // 표의 해외 거래소 필터 — API 에 fx 파라미터가 없어 응답을 클라이언트에서 거른다. 차트 카드 선택(h.fx)과는 별개
   const [fxf, setFxf] = useUrlState<string | null>('h.fxf', null, alias([['all', null], ...REAL_FXS.map((id): [string, string | null] => [id, id])]))
@@ -226,48 +238,106 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
     el,
   })
   // 필터 앞 작은 제목 — 차트 툴바의 `국내`·`해외` 와 같은 모양이라 두 설정 줄이 같은 문법으로 읽힌다
+  // 폰은 묶음이 줄 폭을 넘지 않게 하고 분절 버튼이 그 안에서 가로로 스크롤된다(기간 9개, 072 §3.4)
   const group = (title: string, body: ReactNode) => (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-      <span style={{ ...hint, fontSize: 11 }}>{title}</span>{body}
+    <span style={phone ? { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, maxWidth: '100%' } : { display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ ...hint, fontSize: 11, flex: 'none' }}>{title}</span>{body}
     </span>
   )
+  const perGroup = group('기간', <Seg opts={PERS.map((p) => seg(PER_LABEL[p], per === p, () => setPer(p), `period:${p}`))} />)
+  const domGroup = group('국내', <Seg opts={[
+    seg('전체', dom === null, () => setDom(null), 'dom:all'),
+    seg('업비트', dom === 'upbit', () => setDom('upbit'), 'dom:upbit'),
+    seg('빗썸', dom === 'bithumb', () => setDom('bithumb'), 'dom:bithumb'),
+  ]} />)
+  const fxGroup = group('해외', <Seg opts={[
+    seg('전체', fxf === null, () => setFxf(null), 'fx:all'),
+    ...REAL_FXS.map((id) => seg(exName(id), fxf === id, () => setFxf(id), `fx:${id}`)),
+  ]} />)
+  const searchEl = (
+    <input className="input" placeholder="심볼 검색 → Enter" value={q} style={phone ? phoneSearch : searchInput} data-el="search" enterKeyHint="search"
+      onChange={(e) => setQ(e.target.value.toUpperCase())}
+      onKeyDown={(e) => {
+        const s = q.trim().toUpperCase()
+        if (e.key === 'Enter' && isSymbol(s)) { onSelect(s); setQ('') }
+      }} />
+  )
+  const eventDef = <>사건 = 원값 {DIR_LABEL[dir]} 1.0% 진입 → 0.5% 이탈, 1분 이하 제외</>
+  const loadingNote = loading && <span style={{ color: 'var(--color-accent-300)', marginLeft: 8 }}>조회 중…</span>
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-      {/* 폭 92% 가운데 정렬 — 양옆에 여백을 조금 둬 차트 카드가 화면 끝까지 꽉 차지 않게. 필터바·표도 같이 좁혀 줄을 맞춘다 */}
-      <div style={{ width: '92%', margin: '0 auto', padding: 'var(--space-6) 0', display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+    <div style={bodyScroll(docScroll)}>
+      {/* 폭 92% 가운데 정렬 — 양옆에 여백을 조금 둬 차트 카드가 화면 끝까지 꽉 차지 않게. 필터바·표도 같이 좁혀 줄을 맞춘다. 폰은 화면 폭 전체 */}
+      <div style={phone
+        ? { padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }
+        : { width: '92%', margin: '0 auto', padding: 'var(--space-6) 0', display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
 
         {/* 방향 서브탭 + 표 필터바 (§3.5) — 아래 표·우측 column 에만 걸린다. 차트 설정은 맨 아래 차트 툴바에 따로.
             data-area 는 052 화면 영역 이용 통계의 영역(필터 둘·표·요약·로그·차트) */}
-        <div data-area="filters" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-          <Seg opts={dirOpts} pad="6px 16px" />
-          {group('기간', <Seg opts={PERS.map((p) => seg(PER_LABEL[p], per === p, () => setPer(p), `period:${p}`))} />)}
-          {group('국내', <Seg opts={[
-            seg('전체', dom === null, () => setDom(null), 'dom:all'),
-            seg('업비트', dom === 'upbit', () => setDom('upbit'), 'dom:upbit'),
-            seg('빗썸', dom === 'bithumb', () => setDom('bithumb'), 'dom:bithumb'),
-          ]} />)}
-          {group('해외', <Seg opts={[
-            seg('전체', fxf === null, () => setFxf(null), 'fx:all'),
-            ...REAL_FXS.map((id) => seg(exName(id), fxf === id, () => setFxf(id), `fx:${id}`)),
-          ]} />)}
-          <input className="input" placeholder="심볼 검색 → Enter" value={q} style={searchInput} data-el="search"
-            onChange={(e) => setQ(e.target.value.toUpperCase())}
-            onKeyDown={(e) => {
-              const s = q.trim().toUpperCase()
-              if (e.key === 'Enter' && isSymbol(s)) { onSelect(s); setQ('') }
-            }} />
-          <span style={{ ...hint, marginLeft: 'auto' }}>
-            사건 = 원값 {DIR_LABEL[dir]} 1.0% 진입 → 0.5% 이탈, 1분 이하 제외 · 기간 내 {events.length}건
-            {loading && <span style={{ color: 'var(--color-accent-300)', marginLeft: 8 }}>조회 중…</span>}
-          </span>
-        </div>
+        {phone ? (
+          <div data-area="filters" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Seg opts={dirOpts} pad="6px 14px" />
+            {searchEl}
+            <FoldButton open={foldOpen} active={Number(per !== PER_DEFAULT) + Number(dom !== null) + Number(fxf !== null)} onClick={() => setFoldOpen(!foldOpen)} />
+            {foldOpen && (
+              <div style={foldPanel}>
+                {perGroup}
+                {domGroup}
+                {fxGroup}
+                <span style={hint}>{eventDef}</span>
+              </div>
+            )}
+            <span style={{ ...hint, flexBasis: '100%' }}>{PER_LABEL[per]} · {events.length}건{loadingNote}</span>
+          </div>
+        ) : (
+          <div data-area="filters" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+            <Seg opts={dirOpts} pad="6px 16px" />
+            {perGroup}
+            {domGroup}
+            {fxGroup}
+            {searchEl}
+            <span style={{ ...hint, marginLeft: 'auto' }}>
+              {eventDef} · 기간 내 {events.length}건
+              {loadingNote}
+            </span>
+          </div>
+        )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 'var(--space-4)', alignItems: 'start' }}>
+        {/* 표 | 요약·로그 두 칸 — 폭 1079px 이하는 한 칸으로 쌓는다 (072 §3.6) */}
+        <div style={{ display: 'grid', gridTemplateColumns: compact ? 'minmax(0, 1fr)' : '3fr 2fr', gap: 'var(--space-4)', alignItems: 'start' }}>
 
           {/* 좌: 티커별 사건 표 */}
           <div data-area="table" style={{ ...card, padding: 'var(--space-4) 0' }}>
-            <div style={{ ...kicker, padding: '0 var(--space-6) var(--space-2)' }}>티커별 {DIR_LABEL[dir]} 사건 · {PER_LABEL[per]} — 열 클릭으로 정렬</div>
+            <div style={{ ...kicker, padding: '0 var(--space-6) var(--space-2)' }}>티커별 {DIR_LABEL[dir]} 사건 · {PER_LABEL[per]}{phone ? '' : ' — 열 클릭으로 정렬'}</div>
+            {phone ? (
+              // 폰 — 정렬 줄 + 3줄 카드 행: 티커·상태 / 최대 스프레드, 횟수·지속 / 평균 스프레드, 네트워크·최신 (072 §3.5)
+              <>
+                <SortBar headers={SORT_HEADERS} sortKey={sortKey} sortDir={sortDir} onSort={(k) => onSort(k as SortKey)} />
+                {rank.map((x) => (
+                  <button key={x.sym} onClick={() => onSelect(x.sym)} className="hv-row" data-el={`row:${x.sym}`}
+                    style={{
+                      ...cardRow({ rule: 5 }), width: '100%', appearance: 'none', border: 'none', font: 'inherit', color: 'inherit', cursor: 'pointer', textAlign: 'left',
+                      borderBottom: '1px solid color-mix(in srgb, #e9e9ed 5%, transparent)',
+                      background: x.sym === selSym ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)' : 'transparent',
+                    }}>
+                    <span style={cardLeft}>
+                      <span style={{ fontWeight: 600, fontSize: 14, color: x.sym === selSym ? 'var(--color-accent-300)' : 'var(--color-text)' }}>{x.sym}</span>
+                      <StatusPill since={x.ongoingSince} nowSec={nowSec} />
+                    </span>
+                    <span style={cardRight}>
+                      <span style={{ fontSize: 10, color: 'var(--color-neutral-500)' }}>최대</span>
+                      <span style={{ fontSize: 14, fontWeight: 600, color }}>{fmtPct(x.maxPct)}</span>
+                    </span>
+                    <span style={cardSub}>{x.cnt}회 · 최대 {fmtDur(x.maxDur)} · 평균 {x.avgDur != null ? fmtDur(x.avgDur) : '–'}</span>
+                    <span style={{ ...cardRight, fontSize: 11.5 }}>
+                      <span style={{ fontSize: 10, color: 'var(--color-neutral-500)' }}>평균</span>
+                      <span style={{ color }}>{fmtPct(x.avgPct)}</span>
+                    </span>
+                    <span style={cardSub} title={x.net ?? undefined}>{x.net ?? NET_NONE} · {fmtAgo(nowSec - x.last)}</span>
+                  </button>
+                ))}
+              </>
+            ) : (
             <div style={{ overflowX: 'auto' }}>
               <div style={{ minWidth: 800 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: RANK_GRID, padding: '0 var(--space-6)', borderBottom: '1px solid var(--color-neutral-800)' }}>
@@ -309,19 +379,23 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
                 ))}
               </div>
             </div>
+            )}
             {result?.kind === 'error' && <Empty size={12}>기록을 불러오지 못했습니다 (HTTP {result.status})</Empty>}
             {result?.kind !== 'error' && rank.length === 0 && !loading && <Empty size={12}>기간 내 사건 없음</Empty>}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
             {/* 우: 선택 심볼 요약 + 타임라인 1줄 */}
-            <div data-area="summary" style={{ ...card, padding: 'var(--space-6)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
+            <div data-area="summary" style={{ ...card, padding: phone ? 'var(--space-4)' : 'var(--space-6)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
                 <span style={{ fontFamily: 'var(--font-heading)', fontSize: 22, fontWeight: 500 }}>{selSym}</span>
                 <StatusPill since={sum.ongoingSince} nowSec={nowSec} />
-                <span style={{ ...hint, marginLeft: 'auto' }}>왼쪽 표에서 티커를 클릭해 선택</span>
+                {/* 한 칸으로 쌓이면 표가 위에 있다 */}
+                <span style={{ ...hint, marginLeft: 'auto' }}>{compact ? '위 표에서 티커를 눌러 선택' : '왼쪽 표에서 티커를 클릭해 선택'}</span>
               </div>
-              <div style={{ display: 'flex', gap: 'var(--space-8)', flexWrap: 'wrap', marginBottom: 'var(--space-6)' }}>
+              <div style={phone
+                ? { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }
+                : { display: 'flex', gap: 'var(--space-8)', flexWrap: 'wrap', marginBottom: 'var(--space-6)' }}>
                 {([
                   ['총 사건', sum.total ? `${sum.total}건` : '–'],
                   ['평균 지속', sum.avgDur != null ? fmtDur(sum.avgDur) : '–'],
@@ -360,6 +434,27 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
             {/* 우: 사건 로그 — 최근 20건 */}
             <div data-area="list" style={{ ...card, padding: 'var(--space-2) 0' }}>
               <div style={{ ...kicker, padding: 'var(--space-4) var(--space-6) var(--space-2)' }}>사건 로그 · {selSym} 최근 20건</div>
+              {phone ? (
+                // 폰 — 머리 줄 없이 2줄 카드: 거래소·네트워크 / 최대 스프레드, 시작 → 종료 · 지속 (072 §3.5)
+                <div style={{ borderTop: '1px solid var(--color-neutral-800)' }}>
+                  {mine.slice(0, 20).map((e) => (
+                    <div key={`${e.dom}-${e.fx}-${e.startTs}`} style={{
+                      ...cardRow({ rule: 6 }),
+                      background: e.ongoing ? 'color-mix(in srgb, var(--color-accent) 6%, transparent)' : 'transparent',
+                    }}>
+                      <span style={cardLeft}>
+                        <Pill tone="neutral">{exName(e.dom)} · {exName(e.fx)}</Pill>
+                        <span style={{ ...cardSub, color: 'var(--color-neutral-300)' }} title={netPath(e.dir, e.netDom, e.netFx)}>{netPath(e.dir, e.netDom, e.netFx)}</span>
+                      </span>
+                      <span style={{ ...cardRight, fontSize: 13, fontWeight: 500, color }}>{fmtPct(e.maxPercent)}</span>
+                      <span style={{ ...cardSub, gridColumn: '1 / -1' }}>
+                        {fmtTime(e.startTs * 1000)} → <span style={{ color: e.ongoing ? 'var(--color-accent-300)' : undefined }}>{e.ongoing ? '진행 중' : fmtTime((e.endTs ?? e.startTs) * 1000)}</span> · {fmtDur(durationOf(e, nowSec))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+              <>
               <div style={{ display: 'grid', gridTemplateColumns: LOG_GRID, padding: '0 var(--space-6)', borderBottom: '1px solid var(--color-neutral-800)', fontSize: 10.5, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--color-neutral-600)' }}>
                 <span style={{ padding: '6px 8px 6px 0' }}>거래소</span>
                 <span style={{ padding: '6px 8px', textAlign: 'right' }}>시작</span>
@@ -384,6 +479,8 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
                   <span style={{ ...numCell, paddingRight: 0, color: 'var(--color-neutral-300)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={netPath(e.dir, e.netDom, e.netFx)}>{netPath(e.dir, e.netDom, e.netFx)}</span>
                 </div>
               ))}
+              </>
+              )}
               {mine.length === 0 && <Empty size={12}>기간 내 사건 없음</Empty>}
             </div>
           </div>

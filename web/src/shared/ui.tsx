@@ -1,7 +1,9 @@
 // 공용 UI 조각 — docs/design/reference/ui.tsx 이식 + 탭마다 중복돼 있던
 // kicker·card·세로선·grid 표·거래소/상태 배지를 여기 한 번만 둔다 (스펙 002 §3.2, §3.6).
 // 스타일은 인라인 style 객체 + CSS 변수만. 흐린 글자는 neutral-500/600 램프 — color-mix 재해석 금지.
+// 폰 조각(필터 접기·정렬 줄·카드 행)과 좁은 화면 표 틀은 072 — 구간은 shared/viewport 가 정한다.
 import type { CSSProperties, ReactNode } from 'react'
+import { TAB_BAR_H, useViewport } from './viewport'
 
 /** 10px 대문자 소제목 (KPI 라벨·카드 제목). */
 export const kicker: CSSProperties = {
@@ -47,13 +49,13 @@ export const segOpt = (label: string, active: boolean, onClick: () => void, el?:
   el,
 })
 
-/** 테두리 안에 버튼이 나란히 붙는 분절 버튼 그룹. */
+/** 테두리 안에 버튼이 나란히 붙는 분절 버튼 그룹. 글자는 꺾지 않는다 — 자리가 모자라면 묶음 안에서 가로로 스크롤된다 (072 §3.4). */
 export function Seg({ opts, pad = '5px 12px' }: { opts: SegOpt[]; pad?: string }) {
   return (
-    <div style={{ display: 'flex', border: '1px solid var(--color-neutral-800)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', maxWidth: '100%', border: '1px solid var(--color-neutral-800)', borderRadius: 'var(--radius-sm)', overflowX: 'auto', overflowY: 'hidden', scrollbarWidth: 'none' }}>
       {opts.map((o) => (
         <button key={o.label} onClick={o.onClick} className="hv-txt" data-el={o.el}
-          style={{ appearance: 'none', border: 'none', font: 'inherit', fontSize: 12, padding: pad, cursor: 'pointer', background: o.bg, color: o.color }}>
+          style={{ appearance: 'none', border: 'none', font: 'inherit', fontSize: 12, padding: pad, cursor: 'pointer', background: o.bg, color: o.color, flex: 'none', whiteSpace: 'nowrap' }}>
           {o.label}
         </button>
       ))}
@@ -61,16 +63,17 @@ export function Seg({ opts, pad = '5px 12px' }: { opts: SegOpt[]; pad?: string }
   )
 }
 
-/** 숫자 입력 — 라벨 + 입력 + 단위(기본 %). 비숫자 입력은 0. */
+/** 숫자 입력 — 라벨 + 입력 + 단위(기본 %). 비숫자 입력은 0. 폰은 16px — 그보다 작으면 iOS 가 누를 때 화면을 확대한다 (072). */
 export function NumField({ label, value, step, onChange, unit = '%', el }: {
   label: string; value: number; step: number; onChange: (v: number) => void; unit?: string; el?: string
 }) {
+  const { phone } = useViewport()
   return (
     <label data-el={el} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 12, color: 'var(--color-neutral-400)' }}>
       {label}
       <input className="input" type="number" step={step} value={value}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-        style={{ width: 62, fontSize: 12, padding: '5px 8px', fontVariantNumeric: 'tabular-nums', textAlign: 'right' }} />
+        style={{ width: phone ? 72 : 62, fontSize: phone ? 16 : 12, padding: phone ? '4px 8px' : '5px 8px', fontVariantNumeric: 'tabular-nums', textAlign: 'right' }} />
       <span>{unit}</span>
     </label>
   )
@@ -124,16 +127,28 @@ export function Pill({ tone, children, style }: { tone: PillTone; children: Reac
 }
 
 // ── grid 표 (§3.2) ───────────────────────────────────────────────────────
-/** 표 바깥 프레임 — 가운데 정렬, 최대 1080, 좌우 선, 자체 스크롤. */
+/**
+ * 표 바깥 프레임 — 가운데 정렬, 최대 1080, 좌우 선, 자체 스크롤.
+ * 화면이 minWidth 보다 좁으면 표 상자 안에서 가로로 스크롤되고 왼쪽부터 보인다(072 §3.6 — minWidth 를 상자 자신에 걸면
+ * 가운데 정렬 때문에 왼쪽 열이 잘려 닿을 수 없었다). 폰은 열 없는 카드 행이라 틀 없이 문서 흐름에 놓인다(§3.5).
+ * 문서 스크롤 구간에서는 세로 스크롤을 문서에 맡기고 가로만 상자 안에서 한다.
+ */
 export function TableFrame({ minWidth, area, children }: { minWidth: number; area?: string; children: ReactNode }) {
+  const { phone, docScroll } = useViewport()
+  // area — 052 화면 영역 이용 통계의 영역 id(data-area). 표 상자 자체에 단다
+  if (phone) return <div data-area={area}>{children}</div>
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center', padding: '0 var(--space-6)' }}>
-      {/* area — 052 화면 영역 이용 통계의 영역 id(data-area). 표 상자 자체에 단다 */}
-      <div data-area={area} style={{ minWidth, maxWidth: 1080, flex: 1, overflow: 'auto', borderLeft: '1px solid var(--color-divider)', borderRight: '1px solid var(--color-divider)' }}>
-        {children}
+    <div style={docScroll ? { padding: '0 var(--space-6)' } : { flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center', padding: '0 var(--space-6)' }}>
+      <div data-area={area} style={{ maxWidth: 1080, margin: '0 auto', flex: 1, minWidth: 0, overflowX: 'auto', overflowY: docScroll ? 'hidden' : 'auto', borderLeft: '1px solid var(--color-divider)', borderRight: '1px solid var(--color-divider)' }}>
+        <div style={{ minWidth }}>{children}</div>
       </div>
     </div>
   )
+}
+
+/** 탭 본문의 스크롤 상자 — 넓은 화면은 남은 높이를 채우고 자체 스크롤, 문서 스크롤 구간은 문서에 맡긴다 (072 §3.1). */
+export function bodyScroll(docScroll: boolean): CSSProperties {
+  return docScroll ? {} : { flex: 1, overflow: 'auto', minHeight: 0 }
 }
 
 /** 정렬 불가 헤더 행(로그·레이더 표) — sticky 없이 10.5px uppercase. */
@@ -241,3 +256,90 @@ export function Chip(props: {
   }
   return <span style={base}>{props.children}</span>
 }
+
+// ── 폰 조각 (072 §3.4·§3.5) ─────────────────────────────────────────────
+/** 폰 컨트롤 바 — 넓은 바와 같은 선·줄바꿈, 여백만 좁게. 접힌 필터는 이 바 안에서 다음 줄(전체 폭)로 펼쳐진다. */
+export const phoneBar: CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-4)',
+  borderBottom: '1px solid var(--color-divider)', flex: 'none', flexWrap: 'wrap',
+}
+
+/** 폰 검색 칸 — 늘 보이는 줄의 남는 폭을 다 쓴다. 16px 아래 글자는 iOS 가 누를 때 화면을 확대하므로 16px. */
+export const phoneSearch: CSSProperties = { flex: '1 1 120px', minWidth: 0, width: 'auto', fontSize: 16, padding: '6px 10px', minHeight: 34 }
+
+/** 펼친 필터 묶음 — 바의 다음 줄 전체. 안의 조작은 줄바꿈하며 놓인다. */
+export const foldPanel: CSSProperties = {
+  flexBasis: '100%', minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px var(--space-4)',
+  padding: 'var(--space-2) 0 var(--space-1)',
+}
+
+/** `필터` 단추 — 기본값과 다른 필터 수를 작은 숫자로 붙인다(0 이면 없음). 펼침 상태는 호출부 메모리. */
+export function FoldButton({ open, active, onClick }: { open: boolean; active: number; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="hv-bd" data-el="filters" aria-expanded={open}
+      style={{
+        appearance: 'none', font: 'inherit', fontSize: 12, padding: '0 10px', minHeight: 34, cursor: 'pointer', flex: 'none',
+        display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 'var(--radius-sm)',
+        border: `1px solid ${open || active ? 'var(--color-accent)' : 'var(--color-neutral-800)'}`,
+        background: open ? 'color-mix(in srgb, var(--color-accent) 12%, transparent)' : 'transparent',
+        color: open || active ? 'var(--color-accent-300)' : 'var(--color-neutral-400)',
+      }}>
+      필터
+      {active > 0 && (
+        <span style={{ minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8, background: 'var(--color-accent-700)', color: 'var(--color-accent-100)', fontSize: 10, lineHeight: '16px', textAlign: 'center' }}>
+          {active}
+        </span>
+      )}
+      <span aria-hidden style={{ fontSize: 9 }}>{open ? '▴' : '▾'}</span>
+    </button>
+  )
+}
+
+/**
+ * 폰 정렬 줄 — 열 머리 줄 대신(§3.5). 고르기 = 그 열 머리를 누른 것, 방향 단추 = 지금 열 머리를 다시 누른 것.
+ * 문서 스크롤에서 탭 줄 바로 아래에 붙는다. right 는 오른쪽 끝(표시 건수).
+ */
+export function SortBar({ headers, sortKey, sortDir, onSort, right }: {
+  headers: Header[]; sortKey: string; sortDir: number; onSort: (k: string) => void; right?: ReactNode
+}) {
+  return (
+    <div style={{
+      position: 'sticky', top: TAB_BAR_H, zIndex: 2, display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
+      padding: 'var(--space-2) var(--space-4)', background: 'var(--color-bg)', borderBottom: '1px solid var(--color-neutral-800)',
+      fontSize: 12, color: 'var(--color-neutral-500)',
+    }}>
+      {/* 열 이름이 길면(갭 탭 `진입 갭 · 현물 → 선물`) 고르기 칸이 줄어든다 — 줄이 꺾이지 않게. 16px 는 iOS 확대 막기 */}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0, flex: '0 1 auto', whiteSpace: 'nowrap' }}>
+        정렬
+        <select value={headers.some(([k]) => k === sortKey) ? sortKey : ''} onChange={(e) => onSort(e.target.value)} data-el="sort"
+          style={{ font: 'inherit', fontSize: 16, color: 'var(--color-accent-300)', background: 'var(--color-surface)', border: '1px solid var(--color-neutral-800)', borderRadius: 'var(--radius-sm)', padding: '4px 6px', minHeight: 30, minWidth: 0, maxWidth: '100%', textOverflow: 'ellipsis' }}>
+          {!headers.some(([k]) => k === sortKey) && <option value="" disabled>–</option>}
+          {headers.map(([k, text]) => <option key={k} value={k}>{text}</option>)}
+        </select>
+      </label>
+      <button type="button" onClick={() => onSort(sortKey)} className="hv-bd-txt" data-el="sort:dir"
+        style={{ appearance: 'none', font: 'inherit', fontSize: 12, padding: '0 10px', minHeight: 30, cursor: 'pointer', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-neutral-800)', background: 'transparent', color: 'var(--color-neutral-300)', flex: 'none', whiteSpace: 'nowrap' }}>
+        {sortDir < 0 ? '내림차순 ▾' : '오름차순 ▴'}
+      </button>
+      {right && <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-600)', whiteSpace: 'nowrap', flex: 'none' }}>{right}</span>}
+    </div>
+  )
+}
+
+/** 폰 카드 행 — 왼쪽 이름·보조값 / 오른쪽 큰 값, 줄마다 두 칸. hot·stale 은 넓은 표의 행과 같은 규칙. */
+export function cardRow(o: { hot?: boolean; stale?: boolean; rule?: number } = {}): CSSProperties {
+  return {
+    display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', columnGap: 'var(--space-4)', rowGap: 4,
+    padding: 'var(--space-3) var(--space-4)',
+    borderBottom: `1px solid color-mix(in srgb, #e9e9ed ${o.rule ?? 7}%, transparent)`,
+    background: o.hot ? 'color-mix(in srgb, var(--color-accent) 8%, transparent)' : 'transparent',
+    opacity: o.stale ? 0.45 : 1,
+  }
+}
+
+/** 카드 행 왼쪽 칸 — 한 줄로 놓고 넘치면 말줄임. */
+export const cardLeft: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }
+/** 카드 행 오른쪽 칸 — 오른쪽 정렬. */
+export const cardRight: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }
+/** 카드 행 보조 글자(11px 흐림). */
+export const cardSub: CSSProperties = { fontSize: 11, color: 'var(--color-neutral-500)', fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }

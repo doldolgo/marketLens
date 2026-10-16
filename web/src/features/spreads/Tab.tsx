@@ -1,14 +1,16 @@
 // 실시간 스프레드 탭 — 코인 1개 = 행 1개 집계 표 (스펙 003 §3.5, 구조는 docs/design/reference/tabs/SpreadTab.tsx).
+// 폰(폭 719px 이하)은 필터 접기·정렬 줄·2줄 카드 행 (072 §3.4·§3.5).
 import { memo, useState, type CSSProperties } from 'react'
 import { HIGHLIGHT_PCT } from '../../shared/config'
 import { fmtKrw, fmtPct, fmtUsdt, pctColor } from '../../shared/format'
 import { FX_EXS } from '../../shared/mock'
 import type { IoState, SpreadRow } from '../../shared/types'
 import {
-  Empty, GridHeader, gridRow, NumField, Seg, segOpt, SymCell, TableFrame, ToggleBtn,
-  bar, count, exTag, hint, label, searchInput, vDivider, type Header,
+  Empty, FoldButton, GridHeader, gridRow, NumField, Seg, segOpt, SortBar, SymCell, TableFrame, ToggleBtn,
+  bar, cardLeft, cardRight, cardRow, cardSub, count, exTag, foldPanel, hint, label, phoneBar, phoneSearch, searchInput, vDivider, type Header,
 } from '../../shared/ui'
 import { alias, bool, num, oneOf, sortOf, useUrlState, type Codec } from '../../shared/urlState'
+import { useViewport } from '../../shared/viewport'
 import { aggregateCoins, slipText, sortCoins, type CoinRow, type DomFilter, type SortCol, type View } from './coins'
 
 /** 꺼진 해외 거래소 Record ↔ 쉼표 목록. FX_EXS 밖 이름은 버린다. */
@@ -159,6 +161,56 @@ const CoinLine = memo(function CoinLine(p: LineProps & { onPick: (sym: string) =
   )
 })
 
+// 폰 카드 행 스타일 — 넓은 행과 같은 이유로 모듈에서 한 번만 만든다. 1줄 = 심볼·변동율·국내가격 / 슬리피지·김프,
+// 2줄 = 해외 → 국내 거래소·네트워크 / 입출금 (072 §3.5). 해외가격(USD)은 폰에서 뺀다
+const CARD_H = 63
+const cardStyle = (hot: boolean, stale: boolean): CSSProperties => (
+  { ...cardRow({ hot, stale }), cursor: 'pointer', contentVisibility: 'auto', containIntrinsicSize: `auto ${CARD_H}px` }
+)
+const CARD_STYLE = [[cardStyle(false, false), cardStyle(false, true)], [cardStyle(true, false), cardStyle(true, true)]] as const
+const cardSym = (hot: boolean): CSSProperties => ({ fontWeight: 600, fontSize: 14, color: hot ? 'var(--color-accent-300)' : 'var(--color-text)', flex: 'none' })
+const CARD_SYM = [cardSym(false), cardSym(true)] as const
+const cardChgs = new Map<string, CSSProperties>()
+function cardChg(color: string): CSSProperties {
+  let st = cardChgs.get(color)
+  if (!st) cardChgs.set(color, (st = { fontSize: 11.5, fontVariantNumeric: 'tabular-nums', color, flex: 'none' }))
+  return st
+}
+const arrow: CSSProperties = { fontSize: 10, color: 'var(--color-neutral-600)', flex: 'none' }
+const cardNet: CSSProperties = { ...cardSub, marginLeft: 2 }
+
+const CoinCard = memo(function CoinCard(p: LineProps & { onPick: (sym: string) => void }) {
+  return (
+    <div onClick={() => p.onPick(p.sym)} className="hv-row" data-el={`row:${p.sym}`} style={CARD_STYLE[p.hot ? 1 : 0][p.stale ? 1 : 0]}>
+      <div style={cardLeft}>
+        <span style={CARD_SYM[p.hot ? 1 : 0]}>{p.sym}</span>
+        <span style={cardChg(p.chgColor)}>{p.chgText}</span>
+        <span style={cardSub}>{p.priceText}</span>
+      </div>
+      <div style={cardRight}>
+        <span style={slipStyle}>{p.slipText}</span>
+        <span style={valTextStyle(p.valColor)}>{p.valText}</span>
+      </div>
+      <div style={cardLeft}>
+        <span style={EX_TAG}>{p.fxEx}</span>
+        <span style={arrow}>→</span>
+        <span style={EX_TAG}>{p.domEx}</span>
+        <span style={cardNet}>{p.net}</span>
+      </div>
+      <div style={cardRight}>
+        {p.netDiff ? (
+          <span style={TAG_SHUT}>네트워크 다름</span>
+        ) : (
+          <>
+            <span style={ioTag(p.wd)}>{ioLabel('출금', p.wd)}</span>
+            <span style={ioTag(p.dep)}>{ioLabel('입금', p.dep)}</span>
+          </>
+        )}
+      </div>
+    </div>
+  )
+})
+
 /**
  * 표는 셸의 리렌더(1.5초 tick·5초 수집 상태 폴링·매초 delta) 가운데 아래 셋이 그대로인 것은 건너뛴다(memo 얕은 비교).
  * 표가 피드에서 읽는 것은 행 배열(값)과, 그 행의 age 로 내리는 stale 판정뿐이다 — 판정이 바뀌는 tick 에는 staleTick 이 오른다.
@@ -174,6 +226,9 @@ interface Props {
 }
 
 export default memo(function SpreadsTab({ rows, onPick }: Props) {
+  const { phone } = useViewport()
+  // 폰 필터 접기 — 메모리만, 기본 접힘 (072 §3.4)
+  const [foldOpen, setFoldOpen] = useState(false)
   // 필터·정렬은 URL 쿼리(s.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색어는 메모리만 — Clarity 가 주소를 통째로 싣는다 (033)
   const [q, setQ] = useState('')
   const [domFilter, setDomFilter] = useUrlState<DomFilter>('s.dom', 'all', alias([['all', 'all'], ['upbit', '업비트'], ['bithumb', '빗썸']]))
@@ -219,49 +274,95 @@ export default memo(function SpreadsTab({ rows, onPick }: Props) {
     ['val', view === 'kimp' ? '김프' : '역프', 'right', 'sort:val'], ['io', '입출금', 'right', 'sort:io'], ['net', '네트워크', 'right', 'sort:net'],
   ]
 
+  // 조작 조각 — 넓은 바와 폰 바가 같은 조각을 다른 순서로 놓는다. data-el 은 061 요소 열쇠(모양·동작과 무관)
+  const searchEl = <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={phone ? phoneSearch : searchInput} data-el="search" />
+  const domSeg = <Seg opts={[['all', '모두', 'dom:all'], ['업비트', '업비트', 'dom:upbit'], ['빗썸', '빗썸', 'dom:bithumb']].map(([id, l, el]) => segOpt(l, domFilter === id, () => setDomFilter(id as DomFilter), el))} />
+  const thrField = <NumField label="하이라이트 임계값" value={thr} step={0.1} onChange={setThr} el="threshold" />
+  const onlyThrBtn = <ToggleBtn on={onlyThr} label="임계 초과만" onClick={() => setOnlyThr(!onlyThr)} el="only-over" />
+  const ioCheck = (
+    <label data-el="only-io" style={{ ...fxCheck, color: onlyIo ? 'var(--color-accent-300)' : 'var(--color-neutral-300)' }}>
+      <input type="checkbox" checked={onlyIo} style={checkbox} onChange={() => setOnlyIo(!onlyIo)} />입출금 열림
+    </label>
+  )
+  const netCheck = (
+    <label data-el="only-net" style={{ ...fxCheck, color: onlyNet ? 'var(--color-accent-300)' : 'var(--color-neutral-300)' }}>
+      <input type="checkbox" checked={onlyNet} style={checkbox} onChange={() => setOnlyNet(!onlyNet)} />네트워크 같음
+    </label>
+  )
+  const viewSeg = <Seg pad="4px 10px" opts={[['kimp', '김프 기준', 'view:kimp'], ['rev', '역프 기준', 'view:rev']].map(([id, l, el]) => segOpt(l, view === id, () => switchView(id as View), el))} />
+  // 차감은 항상 적용된다 — 가격 기준 세그먼트도, 체결 규모 선택지도 없다 (§3.5, 017 로 $1,000 고정)
+  const sizeHint = <span style={hint}>$1,000 호가창 시장가 체결 기준 · 매수·매도 양측 슬리피지 차감</span>
+  const fxAllCheck = (
+    <label data-el="fx:all" style={{ ...fxCheck, color: fxAllOn ? 'var(--color-accent-300)' : 'var(--color-neutral-400)' }}>
+      <input type="checkbox" checked={fxAllOn} style={checkbox}
+        onChange={() => setFxOff(fxAllOn ? Object.fromEntries(FX_EXS.map((fx) => [fx, true])) : {})} />모두
+    </label>
+  )
+  const fxChecks = FX_EXS.map((fx) => (
+    <label key={fx} data-el={`fx:${fx.toLowerCase().replace(/[^a-z0-9]/g, '')}`} style={{ ...fxCheck, color: fxOff[fx] ? 'var(--color-neutral-600)' : 'var(--color-neutral-300)' }}>
+      <input type="checkbox" checked={!fxOff[fx]} style={checkbox} onChange={() => setFxOff({ ...fxOff, [fx]: !fxOff[fx] })} />{fx}
+    </label>
+  ))
+  // 폰 필터 단추의 숫자 — 기본값과 다른 필터 수 (072 §3.4)
+  const activeN = Number(domFilter !== 'all') + Number(thr !== HIGHLIGHT_PCT) + Number(onlyThr) + Number(onlyIo) + Number(onlyNet) + Number(!fxAllOn)
+
   return (
     <>
-      {/* 필터바 — 2행은 flexBasis 100% 로 같은 바 안에서 줄을 바꾼다. data-el 은 061 요소 열쇠(모양·동작과 무관) */}
-      <div data-area="filters" style={bar}>
-        <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={searchInput} data-el="search" />
-        <span style={label}>기준 국내 거래소</span>
-        <Seg opts={[['all', '모두', 'dom:all'], ['업비트', '업비트', 'dom:upbit'], ['빗썸', '빗썸', 'dom:bithumb']].map(([id, l, el]) => segOpt(l, domFilter === id, () => setDomFilter(id as DomFilter), el))} />
-        <NumField label="하이라이트 임계값" value={thr} step={0.1} onChange={setThr} el="threshold" />
-        <ToggleBtn on={onlyThr} label="임계 초과만" onClick={() => setOnlyThr(!onlyThr)} el="only-over" />
-        <label data-el="only-io" style={{ ...fxCheck, color: onlyIo ? 'var(--color-accent-300)' : 'var(--color-neutral-300)' }}>
-          <input type="checkbox" checked={onlyIo} style={checkbox} onChange={() => setOnlyIo(!onlyIo)} />입출금 열림
-        </label>
-        <label data-el="only-net" style={{ ...fxCheck, color: onlyNet ? 'var(--color-accent-300)' : 'var(--color-neutral-300)' }}>
-          <input type="checkbox" checked={onlyNet} style={checkbox} onChange={() => setOnlyNet(!onlyNet)} />네트워크 같음
-        </label>
-        <span style={count}>{coins.length} / {all.length} 코인 표시</span>
-        <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-          <span style={label}>기준 보기</span>
-          <Seg pad="4px 10px" opts={[['kimp', '김프 기준', 'view:kimp'], ['rev', '역프 기준', 'view:rev']].map(([id, l, el]) => segOpt(l, view === id, () => switchView(id as View), el))} />
-          {vDivider}
-          {/* 차감은 항상 적용된다 — 가격 기준 세그먼트도, 체결 규모 선택지도 없다 (§3.5, 017 로 $1,000 고정) */}
-          <span style={label}>체결 규모</span>
-          <span style={hint}>$1,000 호가창 시장가 체결 기준 · 매수·매도 양측 슬리피지 차감</span>
-          {vDivider}
-          <span style={label}>비교 해외 거래소</span>
-          <label data-el="fx:all" style={{ ...fxCheck, color: fxAllOn ? 'var(--color-accent-300)' : 'var(--color-neutral-400)' }}>
-            <input type="checkbox" checked={fxAllOn} style={checkbox}
-              onChange={() => setFxOff(fxAllOn ? Object.fromEntries(FX_EXS.map((fx) => [fx, true])) : {})} />모두
-          </label>
-          {vDivider}
-          {FX_EXS.map((fx) => (
-            <label key={fx} data-el={`fx:${fx.toLowerCase().replace(/[^a-z0-9]/g, '')}`} style={{ ...fxCheck, color: fxOff[fx] ? 'var(--color-neutral-600)' : 'var(--color-neutral-300)' }}>
-              <input type="checkbox" checked={!fxOff[fx]} style={checkbox} onChange={() => setFxOff({ ...fxOff, [fx]: !fxOff[fx] })} />{fx}
-            </label>
-          ))}
+      {phone ? (
+        <div data-area="filters" style={phoneBar}>
+          {searchEl}
+          {viewSeg}
+          <FoldButton open={foldOpen} active={activeN} onClick={() => setFoldOpen(!foldOpen)} />
+          {foldOpen && (
+            <div style={foldPanel}>
+              <span style={label}>기준 국내 거래소</span>
+              {domSeg}
+              {thrField}
+              {onlyThrBtn}
+              {ioCheck}
+              {netCheck}
+              <span style={{ ...label, flexBasis: '100%' }}>체결 규모 {sizeHint}</span>
+              <span style={label}>비교 해외 거래소</span>
+              {fxAllCheck}
+              {fxChecks}
+            </div>
+          )}
         </div>
-      </div>
+      ) : (
+        // 필터바 — 2행은 flexBasis 100% 로 같은 바 안에서 줄을 바꾼다
+        <div data-area="filters" style={bar}>
+          {searchEl}
+          <span style={label}>기준 국내 거래소</span>
+          {domSeg}
+          {thrField}
+          {onlyThrBtn}
+          {ioCheck}
+          {netCheck}
+          <span style={count}>{coins.length} / {all.length} 코인 표시</span>
+          <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+            <span style={label}>기준 보기</span>
+            {viewSeg}
+            {vDivider}
+            <span style={label}>체결 규모</span>
+            {sizeHint}
+            {vDivider}
+            <span style={label}>비교 해외 거래소</span>
+            {fxAllCheck}
+            {vDivider}
+            {fxChecks}
+          </div>
+        </div>
+      )}
 
       <TableFrame minWidth={1040} area="table">
-        <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} />
+        {phone
+          ? <SortBar headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} right={`${coins.length} / ${all.length} 코인`} />
+          : <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={dir} onSort={clickSort} />}
         {rows.length === 0 && <Empty>백엔드에서 스프레드를 받는 중입니다…</Empty>}
         {rows.length > 0 && coins.length === 0 && <Empty>조건에 맞는 코인이 없습니다. 필터를 넓혀 보세요.</Empty>}
-        {coins.map((c) => <CoinLine key={c.sym} {...lineProps(c, thr)} onPick={onPick} />)}
+        {phone
+          ? coins.map((c) => <CoinCard key={c.sym} {...lineProps(c, thr)} onPick={onPick} />)
+          : coins.map((c) => <CoinLine key={c.sym} {...lineProps(c, thr)} onPick={onPick} />)}
       </TableFrame>
     </>
   )
