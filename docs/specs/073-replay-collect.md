@@ -61,8 +61,16 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 2026-10-16, worktree marketLens-073srv (feat/073-replay-server) — 서버 쪽만. venv 는 메인 체크아웃의 server/.venv(python 3.12.13)
+cd server && python -m ruff check .                 # All checks passed!
+cd server && python -m ruff format --check .        # 462 files already formatted
+cd server && python -m pytest -q                    # 2799 passed, 1 skipped, 6 failed — 실패 여섯은 test_gauge.py 의 UDP bind(샌드박스가 막음)
+cd server && python -m pytest -q app/features/spreads/tests/test_gauge.py   # 샌드박스 밖 15 passed
+#   새 테스트: app/features/replay/tests/(test_receive 19·test_store 8·test_feed 23) · tests/test_replay.py(계약 5)
+#   고친 계약: tests/test_deploy.py(PUBLIC_API +/api/replay)·test_observability.py(로그 제외 +/api/replay, 공개 location +/replay.js)
+#   ·test_admin.py(관리자 피드 셋 — 기록 끔·교차 사이트·rewrite·공개 404)·test_role.py(api 경로 넷)
 ```
+- 하지 않은 것(설계 세션 몫): `nginx -t`(공개·관리자 nginx 를 고쳤다)·`caddy validate`(로그 제외 경로), 로컬 Docker·브라우저 확인. web 쪽(`public/replay.js`·페이지마다 싣는 줄·node 테스트)은 다른 실행 세션이 한다.
 
 ## 6. 갱신할 문서
 - `docs/context/status.md` — 새 행 `| replay | server: POST /replay(동의한 방문자 조각 묶음 2초)·Redis rp:* 14일·관리자 피드 live·sessions·session | web: public/replay.js 기록 | 동의자만·화면 글자 없음 |`.
@@ -71,6 +79,21 @@
 - `CLAUDE.md` — 스펙 인덱스 073 행.
 
 ## 7. 실행 보고 (실행 세션이 채움)
+서버 쪽 실행 세션(2026-10-16)의 보고다. `public/replay.js` 와 페이지의 `<script>` 줄은 web 쪽 세션이 쓴다.
 - 만든 것:
-- 추측한 지점 / 실행 중 함께 고친 스펙 절:
+  - 새 기능 폴더 `server/app/features/replay/` — `models.py`(052 와 같은 화면 이름·영역 꼴, 몸통·사건 검사 `parse_batch`, IP 읽기), `service.py`(받기·게이트·IP 10분 600·조각 잠금·상한·Redis 쓰기·30초 WARNING), `feed.py`(피드 셋), `router.py`, `tests/`(conftest·test_receive·test_store·test_feed).
+  - 고친 것: `server/app/core/redis_bus.py`(`replay_load`·`replay_append`·`replay_mark_cut`·`replay_recent`·`replay_ip`·`replay_metas`·`replay_batches`, 키 설명), `server/app/main.py`(api 역할에만 서비스·라우터 — 태스크 없음), `web/nginx.conf`(`= /api/replay`·`= /replay.js`, CSP 설명 글), `web/nginx-admin.conf`(정확 일치 셋), `caddy/Caddyfile`(로그 제외 +1), 계약 테스트 넷(§5), 새 `server/tests/test_replay.py`.
+  - 대시보드의 `/app/replay.js` 는 `/app/` alias(no-store)가 그대로 준다 — `/app/attention.js` 와 같다(설정 변경 없음).
+- 추측한 지점(스펙이 말하지 않아 정한 것 — §1~§4 는 고치지 않았다):
+  - 몸통 키는 `v`·`sid`·`seq`·`page`·`dev`·`w`·`h`·`ev` 여덟(§3.4 의 '일곱' 은 `v` 를 뺀 수로 읽었다), `v` 는 정수 1 만.
+  - 사건 `e` 의 n 은 0~199(기록 쪽이 200번째부터 보내지 않는다), `r` 의 w·h 는 몸통 w·h 와 같은 1~20,000, `c` 의 영역은 `""` 또는 영역 id, `e`·`a` 의 영역은 영역 id 만.
+  - 머리 해시에 스펙 목록 밖 필드 셋을 더했다 — `seq`(마지막으로 받은 묶음 번호 — 다시 온 비콘 판정), `now`(지금 화면 — `live` 행의 `now` 를 묶음을 풀지 않고 답하려고), `cut`(조각 상한 1MB·3,600 으로 묶음을 버렸으면 `1` — 074 §3.5 '앞부분만' 배지).
+  - 피드 행 = `{sid, ip, dev, page, pages, now, first, last, n, clicks, w, h, cut}` — §3.6 꼴에 `w`·`h`(074 의 틀 크기)·`cut` 을 더했고 `pages` 는 JSON 배열. 피드 셋 모두 `code`(null·`redis`)를 늘 싣는다(052 피드 꼴).
+  - 순서: `live`·`sessions`(ip 없음)는 last 늦은 순(`rp:recent`), `sessions?ip=` 는 first 늦은 순(`rp:ip:<ip>`). 머리가 만료돼 집합에만 남은 sid 는 행에서 뺀다(그만큼 행이 적을 수 있다).
+  - `sessions?ip=` 는 정규 글자 IPv4·IPv6 또는 `(없음)` 만 받는다(빈 값·대문자 IPv6·대역은 400 `bad_ip`). `session?after=` 가 0~9 숫자 1~9자가 아니면 0.
+  - IP 10분 제한은 `(없음)` 도 한 키로 센다(052 는 헤더가 없으면 건너뛴다). 조각은 첫 묶음의 IP 집합에만 든다(뒤 묶음의 IP 가 달라도).
+  - 상한은 MiB(그날 8×1024×1024·조각 1,048,576) — 쓰면 넘게 되는 묶음을 버린다(상한을 넘지 않는다). 60초 경계는 `now − last ≤ 60,000` 이면 든다.
+  - 같은 조각의 묶음 둘이 동시에 오면(숨길 때의 비콘과 2초 묶음) 읽기·쓰기 사이에 섞이지 않게 조각마다 메모리 잠금을 건다.
 - 남은 빚:
+  - `nginx -t`·`caddy validate`·브라우저·배포 뒤 확인은 하지 않았다(§5). 조각 잠금은 api 워커 1개 안에서만 맞다.
+  - web 쪽이 정적 페이지에 `/replay.js` 를 실으면 `tests/test_attention.py` 의 '정적 페이지의 파일 스크립트는 `/attention.js` 하나'·`test_privacy`·`test_kimp_pages` 의 같은 단언을 그 세션이 고친다.
