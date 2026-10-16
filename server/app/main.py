@@ -2,7 +2,7 @@
 
 /health 와 틱 루프는 기능 폴더가 아니라 여기(시스템) 소관이다.
 메모리가 진실이므로 uvicorn 워커는 1개여야 한다 — 워커가 둘이면 서로 다른 메모리를 본다.
-프로세스 역할은 ROLE(016) — collector(기본) 는 아래 전체, api 는 Influx 조회·표 구독·화면 영역 통계(`_api_lifespan`).
+프로세스 역할은 ROLE(016) — collector(기본) 는 아래 전체, api 는 Influx 조회·표 구독·화면 영역 통계·화면 이동 기록(`_api_lifespan`).
 시작 순서(collector): 010 원문 아카이브(S3_BUCKET 있을 때) → Influx·Redis 연결 확인 → 마켓 우주·스트림 기동(국내 2 +
 해외 3곳 샤드) → 011 이력 복원 → 013 사건 복원 → 014 봉 버킷·롤업 기준점 → 009 spark 복원 → 틱 루프 → 009 인계
 보내기 태스크·017 게시기·허브·flusher → 050 이더리움 감지기(env 둘 다 있을 때) → GC 정리(001 §3.1 — 두 역할 모두 yield 직전).
@@ -92,6 +92,8 @@ from app.features.history.router import events_router as history_events_router
 from app.features.history.router import router as history_router
 from app.features.landing.router import router as landing_router
 from app.features.landing.service import LandingService
+from app.features.replay.router import router as replay_router
+from app.features.replay.service import ReplayService
 from app.features.spreads.gauge import start_ws_gauge
 from app.features.spreads.hub import SpreadsHub
 from app.features.spreads.push import SpreadsPublisher
@@ -148,7 +150,8 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     거래소·S3 에 연결하지 않고 기동 복원도 없다 — 하나라도 하면 collector 와 같은 measurement 를
     중복으로 쓰거나(collect_fail·premium_event·롤업) 거래소를 이중 구독한다. Redis 는 표 구독과 키 읽기, 그리고 052 의
-    화면 영역 통계 해시(`attn:d:*`) 쓰기에 쓴다(스트림 `ticks` 는 안 읽는다). 백그라운드 태스크는 그 구독 태스크 + 052 의
+    화면 영역 통계 해시(`attn:d:*`) 쓰기와 073 의 화면 이동 기록(`rp:*` — 요청마다 곧바로) 읽기·쓰기에 쓴다(스트림 `ticks` 는
+    안 읽는다). 백그라운드 태스크는 그 구독 태스크 + 052 의
     10초 묶음 쓰기 태스크(끌 때 한 번 더 보낸다) + 알림(025)·게이지(027) 각각 설정이 있을 때만.
     """
     _start_notifier(app)
@@ -629,7 +632,7 @@ def create_app() -> FastAPI:
 
     # api 역할은 Influx 만 읽는 네 경로 + 017 의 /ws/spreads + 018 의 GET /spreads(Redis 읽기)
     # + 022 의 GET /landing(Redis·Influx 읽기) + 029 의 GET /admin/status·035 의 /admin/access·clarity
-    # + 052 의 POST /attention·GET /admin/attention — /history/events 는 진행 중
+    # + 052 의 POST /attention·GET /admin/attention + 073 의 POST /replay·GET /admin/replay/* — /history/events 는 진행 중
     # 사건을 메모리에서 읽으므로 제외 (016 §3.1, 018 §3.4)
     app.include_router(history_router)
     app.include_router(spreads_ws_router)
@@ -650,6 +653,10 @@ def create_app() -> FastAPI:
         # 052 — 화면 영역 이용 통계(받기·관리자 피드). 메모리 합계·IP 셈 표·피드 캐시 자리라 앱마다 하나
         app.state.attention = AttentionService()
         app.include_router(attention_router)
+        # 073 — 화면 이동 기록(받기·관리자 피드 셋). 묶음마다 곧바로 같은 버스(spreads_bus)로 쓴다 — 태스크 없음.
+        # IP 셈 표·조각 잠금 자리라 앱마다 하나
+        app.state.replay = ReplayService()
+        app.include_router(replay_router)
     else:
         app.include_router(spreads_refresh_router)
         app.include_router(analysis_router)
