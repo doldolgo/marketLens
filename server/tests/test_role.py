@@ -39,6 +39,10 @@ API_ROUTES = {
     "/admin/access/ip",
     "/admin/access/addrs",
     "/admin/access/addr",
+    "/replay",  # 073
+    "/admin/replay/live",
+    "/admin/replay/sessions",
+    "/admin/replay/session",
 }
 # 029·035·052·068·067 — api 에만 있는 경로. collector ⊇ api 단언의 예외
 API_ONLY = {
@@ -52,6 +56,10 @@ API_ONLY = {
     "/admin/access/ip",
     "/admin/access/addrs",
     "/admin/access/addr",
+    "/replay",  # 073
+    "/admin/replay/live",
+    "/admin/replay/sessions",
+    "/admin/replay/session",
 }
 # 034·063 — 수집기에만 있는 관리자 피드 셋(자격증명이 collect 박스 역할에만 있다)
 COLLECTOR_ADMIN = {"/admin/aws", "/admin/alerts", "/admin/aws/series"}

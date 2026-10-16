@@ -46,6 +46,9 @@ API_FEEDS = {
     ("=", "/svc/api/admin/access/ip"),  # 067 — 대역 하나
     ("=", "/svc/api/admin/access/addrs"),  # 069 — IP 하나 단위 목록
     ("=", "/svc/api/admin/access/addr"),  # 069 — IP 하나
+    ("=", "/svc/api/admin/replay/live"),  # 073 — 화면 이동 기록: 지금 보는 중
+    ("=", "/svc/api/admin/replay/sessions"),  # 073 — 조각 목록
+    ("=", "/svc/api/admin/replay/session"),  # 073 — 조각 하나
 }
 POLLING = (
     {
@@ -171,6 +174,9 @@ def test_admin_routes_every_api_path_like_before_the_allowlist() -> None:
         "/svc/api/admin/access/ip": (API, "/admin/access/ip"),
         "/svc/api/admin/access/addrs": (API, "/admin/access/addrs"),
         "/svc/api/admin/access/addr": (API, "/admin/access/addr"),
+        "/svc/api/admin/replay/live": (API, "/admin/replay/live"),  # 073
+        "/svc/api/admin/replay/sessions": (API, "/admin/replay/sessions"),
+        "/svc/api/admin/replay/session": (API, "/admin/replay/session"),
     }
     for path, target in expected.items():
         assert _forward(path) == target, path
@@ -268,6 +274,9 @@ def test_public_server_has_no_svc_branch_so_api_feeds_are_static_404() -> None:
         "/svc/api/admin/access/ip",
         "/svc/api/admin/access/addrs",
         "/svc/api/admin/access/addr",
+        "/svc/api/admin/replay/live",  # 073
+        "/svc/api/admin/replay/sessions",
+        "/svc/api/admin/replay/session",
     ):
         assert _route(path) == ("/",), path
         assert not _args(public[("/",)], "proxy_pass")
