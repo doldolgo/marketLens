@@ -866,7 +866,7 @@ def _rp_row(spec: dict) -> dict | None:
     show = txt if state["scenario"] == "xss" else (lambda v: v)
     return {"sid": spec["sid"], "ip": show(spec["ip"]), "dev": spec["dev"], "page": show(spec["page"]), "pages": [show(p) for p in pages],
             "now": show(now_page), "first": batches[0]["at"], "last": batches[-1]["at"], "n": len(batches),
-            "clicks": sum(1 for e in flat if e[1] == "c"), "w": spec["w"], "h": spec["h"], "bytes": 180 * len(flat)}
+            "clicks": sum(1 for e in flat if e[1] == "c"), "w": spec["w"], "h": spec["h"], "cut": False}
 
 
 def _rp_state() -> dict | None:

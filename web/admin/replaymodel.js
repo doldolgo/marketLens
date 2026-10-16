@@ -252,8 +252,8 @@ export function followTarget(tl, T) {
 // 늦음(초) — 방문자 시각(마지막 묶음을 서버가 받은 시각 + 그 뒤 흐른 시간) − 재생 시각
 export const lagSec = (latestAt, sinceMs, T) => Math.max(0, Math.round((latestAt + Math.max(0, sinceMs) - T) / 1000));
 
-// 묶음 1MB·3,600개 상한에 닿아 끝이 잘린 조각(§3.5 '앞부분만') — 피드가 truncated 를 주면 그것, 아니면 묶음 수·바이트로 어림
-export const truncated = (meta) => meta?.truncated === true || (num(meta?.n) ?? 0) >= CUT_BATCHES || (num(meta?.bytes) ?? 0) >= CUT_BYTES;
+// 묶음 1MB·3,600개 상한에 닿아 끝이 잘린 조각(§3.5 '앞부분만') — 피드(073)의 cut, 없으면(옛 응답) 묶음 수·바이트로 어림
+export const truncated = (meta) => meta?.cut === true || (num(meta?.n) ?? 0) >= CUT_BATCHES || (num(meta?.bytes) ?? 0) >= CUT_BYTES;
 
 // --- 글 ------------------------------------------------------------------------------------------
 

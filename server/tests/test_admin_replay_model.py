@@ -92,7 +92,7 @@ out.rowAt = [m.rowAt(m.eventRows(tl), input.t0), m.rowAt(m.eventRows(tl), input.
 out.paths = ['app-gap', 'app-flow', 'landing', 'privacy', 'kimp-chart', 'kimp-history', 'app-nope', input.x, null].map(m.framePath)
 out.text = [m.timeText(tl, input.t0 + 65_000), m.mss(3_725_000), m.clockText(null)]
 out.follow = [m.followTarget(tl, null) - input.t0, m.followTarget(tl, input.t0 + 25_000) - input.t0, m.followTarget(tl, input.t0 + 10_000) - input.t0, m.lagSec(input.t0 + 32_000, 1_400, input.t0 + 29_000)]
-out.cut = [m.truncated({ n: 3600 }), m.truncated({ bytes: 1_040_000 }), m.truncated({ truncated: true }), m.truncated({ n: 12, bytes: 4000 }), m.truncated(null)]
+out.cut = [m.truncated({ n: 3600 }), m.truncated({ bytes: 1_040_000 }), m.truncated({ cut: true }), m.truncated({ n: 12, bytes: 4000 }), m.truncated(null)]
 const rows = [
   { sid: '0123456789abcdef', ip: '203.0.113.7', dev: 'pc', page: 'app-spread', pages: ['app-spread', 'app-gap'], now: 'app-gap', first: input.t0, last: input.t0 + 95_000, n: 9, clicks: 3 },
   { sid: 'nope', ip: input.x, dev: input.x, page: input.x, pages: `landing,${input.x}`, now: null, first: null, last: null, clicks: null },
@@ -235,7 +235,7 @@ def test_event_list_leaves_out_moves_and_names_areas(got: dict[str, Any]) -> Non
 
 def test_frame_address_time_text_follow_and_truncation(got: dict[str, Any]) -> None:
     """§3.3 틀 주소(대시보드는 /app/?tab=<탭>&kt-replay=1, 모르는 화면은 띄우지 않음), 시각 글, 따라 보기(마지막 사건 − 3초, 8초 넘게
-    뒤처지면 건너뜀, 늦음 = 마지막 묶음 at + 받은 뒤 흐른 시간 − 재생 시각), §3.5 '앞부분만'(3,600 묶음·1MB 근처·truncated)."""
+    뒤처지면 건너뜀, 늦음 = 마지막 묶음 at + 받은 뒤 흐른 시간 − 재생 시각), §3.5 '앞부분만'(3,600 묶음·1MB 근처·cut)."""
     assert got["paths"] == [
         "/app/?tab=gap&kt-replay=1",
         "/app/?tab=flow&kt-replay=1",
