@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- KimpTrack 관리자 v4 — Clarity(스펙 066 §3.3 — 동의한 방문자는 어떻게 쓰나). web nginx 관리자 server(:8081)가 준다. 빌드 없음·비밀값 없음.
-     인라인 스크립트·스타일 없음(CSP). 값은 insight.js 가 채운다(040 요약 + 068 날별 기록).
+     인라인 스크립트·스타일 없음(CSP). 값은 insight.js 가 채운다(040 요약 + 068 날별 기록 + 077 녹화 목록).
      틀(왼쪽 내비·머리·상세 판)은 여섯 페이지가 같은 글자다. 아이콘은 icons.svg 묶음(<use href>). -->
 <html lang="ko">
   <head>
@@ -85,8 +85,12 @@
             <div class="chart spark" id="c-active"></div>
           </section>
           </div>
+          <section class="card s12" id="card-recs" aria-labelledby="h-recs">
+            <header class="card-head"><h2 id="h-recs"><button type="button" class="t" data-detail="recs">녹화</button></h2><span class="unit">Clarity · 최근 순 100</span><span class="help" title="Clarity 가 동의한 방문마다 남긴 녹화 목록 — 재생은 링크로 Clarity 에서 본다(로그인 필요).&#10;행을 누르면 페이지·클릭 시간선. IP 는 Clarity 가 주지 않아 방문자 페이지와 잇지 못한다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-recs" role="group" aria-label="녹화 기간"></span><span class="end"><span class="tag" id="t-recs"></span><button type="button" class="ibtn" data-detail="recs" aria-label="녹화 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <div class="scroll"><table class="tbl" id="tbl-recs"></table></div>
+          </section>
           <section class="card s6" id="card-signals" aria-labelledby="h-signals">
-            <header class="card-head"><h2 id="h-signals"><button type="button" class="t" data-detail="signals">불만 신호</button></h2><span class="unit">신호가 있던 세션 % · 전날 대비</span><span class="help" title="Clarity 가 찾은 불편 신호(반응 없는 클릭·연타·과한 스크롤·빠른 뒤로·스크립트 오류·오류 클릭)가 있던 세션의 비율.&#10;막대는 가장 큰 신호 대비 길이, 오른쪽은 전날 대비 %p. 높은 신호는 'Clarity 열기'에서 녹화로 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-signals"></span><button type="button" class="ibtn" data-detail="signals" aria-label="불만 신호 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-signals"><button type="button" class="t" data-detail="signals">불만 신호</button></h2><span class="unit">신호가 있던 세션 % · 전날 대비</span><span class="help" title="Clarity 가 찾은 불편 신호(반응 없는 클릭·연타·과한 스크롤·빠른 뒤로·스크립트 오류·오류 클릭)가 있던 세션의 비율.&#10;막대는 가장 큰 신호 대비 길이, 오른쪽은 전날 대비 %p. 신호가 난 방문은 위 '녹화' 카드에서 재생해 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-signals"></span><button type="button" class="ibtn" data-detail="signals" aria-label="불만 신호 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="list deltas" id="l-signals"></div>
           </section>
           <section class="card s6" id="card-match" aria-labelledby="h-match">

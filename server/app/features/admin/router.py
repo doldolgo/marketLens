@@ -3,7 +3,7 @@
 
 `router` 는 api 역할에만, `collector_router` 는 collector 역할에만 포함한다(`main.py`) — 다른 역할에서는 404 다.
 공개 nginx 는 028 허용 목록 밖이라 404, 관리자 nginx(:8081)가 정확 일치로 `/svc/api/admin/{status,access,clarity,
-clarity/history,access/ips,access/ip,access/addrs,access/addr}` 와 `/api/admin/{aws,alerts,aws/series}` 를 넘긴다. 모두 항상 200 인 상태 응답이다 —
+clarity/history,clarity/recordings,access/ips,access/ip,access/addrs,access/addr}` 와 `/api/admin/{aws,alerts,aws/series}` 를 넘긴다. 모두 항상 200 인 상태 응답이다 —
 대역 상세의 `band` 가 대역 꼴이 아닐 때·IP 상세의 `ip` 가 주소·대역 꼴이 아닐 때의 400 만 예외다.
 """
 
@@ -132,6 +132,15 @@ async def get_admin_clarity(request: Request) -> JSONResponse:
     state = request.app.state
     feeds: VisitFeeds = state.admin_visits
     return JSONResponse(await feeds.clarity(bus=getattr(state, "spreads_bus", None)))
+
+
+@router.get("/admin/clarity/recordings")
+async def get_admin_clarity_recordings(
+    request: Request, days: str | None = None
+) -> JSONResponse:
+    """Clarity 녹화 목록 — `days` 1·3·7·30(목록 밖·없음은 3), 시작 최근 순 100개, 창마다 30분 캐시 (077 §3.2)."""
+    feeds: VisitFeeds = request.app.state.admin_visits
+    return JSONResponse(await feeds.clarity_recordings(days), headers=NO_STORE)
 
 
 @router.get("/admin/clarity/history")

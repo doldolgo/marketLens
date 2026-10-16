@@ -1,6 +1,6 @@
 // Clarity 페이지(스펙 066 §3.3 — 새): 040 요약(최근 24시간) + 068 날별 기록·차원. 큰 수 여섯(+ 날별 작은 선·전날 대비) · 불만 신호 여섯 ·
 // 맞대기(Clarity 세션 vs 우리 방문자 — 038 visitors.days) · 페이지 × 기기 표(040 pages.groups, 칸 진하기) · 나라 · 기기·브라우저·OS 100% 띠 ·
-// 유입(Channel·Source). 머리에 '마지막 받음 n시간 전 · 다음 HH:MM'. Clarity 는 IP·개인 단위 자료를 주지 않는다(방문자 페이지로 안내).
+// 유입(Channel·Source) · 녹화 목록(077 — insightrec.js). 머리에 '마지막 받음 n시간 전 · 다음 HH:MM'. Clarity 는 IP·개인 단위 자료를 주지 않는다(방문자 페이지로 안내).
 // 이 파일 이름에 'clarity' 를 쓰지 않는다 — 관리자 파일이 Clarity 태그를 싣지 않는다는 033 의 글자 검사(src=…clarity)와 겹치지 않게.
 import { $, ago, el, hm, int, isObj, n0, num, once, partOf, pct, put, stateWord, tag, usable, widthOf } from './common.js';
 import { change, deltaText } from './calc.js';
@@ -8,6 +8,7 @@ import { blank, draw, sparkOption, timeOption } from './charts.js';
 import { SIGNALS } from './names.js';
 import { HISTORY_RANGES, historyCompare, historyReqs, historyWindow } from './models.js';
 import { ATTN_TODAY, CLARITY, INSIGHT_DETAILS, KPIS, PAGE_COLS, dimItems, dimsOf, groupRows, diagOf, lastTwo, matchModel, matchNeeds, okBase, shade, state } from './insightdetail.js';
+import { REC_DETAILS, drawRecs, recReq } from './insightrec.js';
 import { bar100s, bigNumber, table, tabs, topList } from './ui.js';
 import { start } from './app.js';
 
@@ -141,11 +142,12 @@ start({
   ranges: HISTORY_RANGES,
   range: '30d',
   compare: historyCompare,
-  needs: (app) => [CLARITY, ATTN_TODAY, ...historyReqs(app.view.range, app.view.cmp), ...matchNeeds(app.view.range)],
+  needs: (app) => [CLARITY, ATTN_TODAY, ...historyReqs(app.view.range, app.view.cmp), ...matchNeeds(app.view.range), recReq()],
   cards: [
     ['head', drawHead],
     ['diag', drawDiag],
     ['kpis', drawKpis],
+    ['recs', drawRecs],
     ['signals', drawSignals],
     ['match', drawMatch],
     ['pages', drawPages],
@@ -153,5 +155,5 @@ start({
     ['dims', drawDims],
     ['refs', drawRefs],
   ],
-  details: INSIGHT_DETAILS,
+  details: { ...INSIGHT_DETAILS, ...REC_DETAILS },
 });

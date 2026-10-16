@@ -1,5 +1,5 @@
 """관리자 화면 v4 스크립트·스타일 정적 단언(스펙 066 §4 정적 · 064 §3.1 보안 규칙) — 피드 글자는 textContent·title 로만(HTML 해석
-없음), 저장소·새 창·주소 쓰기는 정해진 곳에만(주소 상태는 app.js 하나, 링크는 jump()·download() 둘, style 은 폭·자리 도움 둘),
+없음), 저장소·새 창·주소 쓰기는 정해진 곳에만(주소 상태는 app.js 하나, 링크는 jump()·download()·clarityLink() 셋(077), style 은 폭·자리 도움 둘),
 요청은 call() 하나, 경로 표, 토큰(조사 §5 그대로)·상자 색 고정, 도넛·반원 게이지 없음(예산 게이지 하나만), 게이트 문구 없음.
 """
 
@@ -39,8 +39,13 @@ def test_scripts_never_parse_html_store_data_or_open_windows() -> None:
         for banned in BANNED:
             want = FRAME.get(banned, 0) if name in FRAMED else 0
             assert js.count(banned) == want, (name, banned)
-        # SVG 이름공간(요소를 만드는 글자)만 — 바깥 주소가 아니다. 화면은 공개 사이트 출처 상수 하나
-        site = "const SITE_ORIGIN = 'https://kimptrack.com';" if name in FRAMED else ""
+        # SVG 이름공간(요소를 만드는 글자)만 — 바깥 주소가 아니다. 화면은 공개 사이트 출처 상수 하나,
+        # common.js 는 Clarity 재생 링크의 출처 상수 하나(077 — clarityLink() 가 주소 앞부분을 견준다)
+        site = {
+            "screens.js": "const SITE_ORIGIN = 'https://kimptrack.com';",
+            "replayframe.js": "const SITE_ORIGIN = 'https://kimptrack.com';",
+            "common.js": "const CLARITY_ORIGIN = 'https://clarity.microsoft.com/';",
+        }.get(name, "")
         assert js.count(site) == 1 or not site, name
         assert not re.search(
             r"https?://",
@@ -58,7 +63,7 @@ def test_scripts_never_parse_html_store_data_or_open_windows() -> None:
 
 def test_style_links_and_addresses_are_written_in_fixed_places_only() -> None:
     """style 은 막대 폭·자리 도움 둘(비율 수만)과 틀 칸의 CSS 변수 셋(065 — 몫·높이, 074 — 틀 폭, 수만), 링크 주소는 jump()(고정 표)·download()
-    (Blob 주소)·'새 창으로'(065 — app.js 가 urlOf() 로 만든 이 페이지 주소) 셋, 주소 상태(쌓기·바꾸기·뒤로·새로고침)는 app.js 하나에서
+    (Blob 주소)·'새 창으로'(065 — app.js 가 urlOf() 로 만든 이 페이지 주소)·clarityLink()(077 — Clarity 출처·허용 글자만) 넷, 주소 상태(쌓기·바꾸기·뒤로·새로고침)는 app.js 하나에서
     urlOf() 로 만든 그 페이지의 고정 주소로만(066 §3.1·§3.2 — 지금 경로를 쓰지 않는다, 029)."""
     every = _every()
     common = _script("common.js")
@@ -82,7 +87,7 @@ def test_style_links_and_addresses_are_written_in_fixed_places_only() -> None:
         "--fw",
     ]
     assert every.count("setProperty(") == 3
-    assert every.count("setAttribute('href'") == 3
+    assert every.count("setAttribute('href'") == 4
     assert (
         "const url = urlOf(page, view);" in app
         and "if (here && here.getAttribute('href') !== url) here.setAttribute('href', url);"
@@ -96,6 +101,19 @@ def test_style_links_and_addresses_are_written_in_fixed_places_only() -> None:
         "link.setAttribute('href', url);" in common
         and every.count("URL.createObjectURL(") == 1
     )
+    # 077 — Clarity 재생 링크: 출처 상수로 시작하고 허용 글자만·500자 이하일 때만, 같은 탭·noreferrer
+    assert "link.setAttribute('href', href);" in common
+    assert (
+        "typeof v === 'string' && v.length <= 500 && v.startsWith(CLARITY_ORIGIN) && CLARITY_REST.test(v.slice(CLARITY_ORIGIN.length)) ? v : null;"
+        in common
+    )
+    assert (
+        "const CLARITY_REST = /^[A-Za-z0-9/_.~%-]*(?:\\?[A-Za-z0-9=&_.~%:-]*)?$/;"
+        in common
+    )
+    assert (
+        every.count("clarityHref(") == 1
+    )  # clarityLink() 안 하나 — 다른 곳은 이 검사로 링크를 만들지 않는다
     assert (
         "const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));"
         in common
@@ -187,6 +205,7 @@ def test_paths_table_polling_periods_and_no_copied_feed_periods() -> None:
         "addr": "/svc/api/admin/access/addr",
         "clarity": "/svc/api/admin/clarity",
         "history": "/svc/api/admin/clarity/history",
+        "recordings": "/svc/api/admin/clarity/recordings",
         "attention": "/svc/api/admin/attention",
         "replayLive": "/svc/api/admin/replay/live",
         "replaySessions": "/svc/api/admin/replay/sessions",

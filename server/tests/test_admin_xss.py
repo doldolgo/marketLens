@@ -61,8 +61,9 @@ PAGES: dict[str, tuple[list[str], list[str]]] = {
             "/svc/api/admin/clarity",
             *[f"/svc/api/admin/clarity/history?days={d}" for d in (7, 30, 90)],
             "/svc/api/admin/access?window=30d",
+            "/svc/api/admin/clarity/recordings?days=3",  # 077 — 제목·클릭 글자
         ],
-        ["sessions", "signals", "match", "pages", "countries", "dims", "refs"],
+        ["sessions", "signals", "match", "pages", "countries", "dims", "refs", "recs"],
     ),
     # 065 — 요소 열쇠 하나가 `<img onerror>`(이름표는 열쇠 그대로 — 표·판에 글로만), 영역 id 꼴이 아닌 항목은 버린다
     "screens.js": (
