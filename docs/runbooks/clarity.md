@@ -1,4 +1,4 @@
-# Microsoft Clarity — 대시보드 설정·켜고 끄기·삭제 요청·Data Export 토큰 (스펙 033·035·040·068, 사람용)
+# Microsoft Clarity — 대시보드 설정·켜고 끄기·삭제 요청·Data Export 토큰·화면 이동 기록 지우기 (스펙 033·035·040·068·078, 사람용)
 
 랜딩(`/`)과 대시보드(`/app/`)의 화면 이용을 Microsoft Clarity 로 본다. **동의 방식**이다 — 처음 들어온 방문자에게 뜨는 동의 창(모달)이나 처리방침의 동의 관리(`/privacy#consent`)에서 수집·이용·Microsoft 제공·미국 이전 세 칸에 모두 동의해 저장한 방문자만 Clarity 태그를 받는다. 설정은 레포의 `web/public/clarity.js` 머리 세 값(프로젝트 ID·켤 페이지·안내 판)이 전부이고, 나머지는 Clarity 대시보드에서 사람이 한다.
 
@@ -62,3 +62,9 @@ Clarity 는 한 사람분만 지울 수 없다. 철회한 방문자가 이미 �
 - **바로 부르기**(토큰을 바꿨거나 간격을 기다리지 않을 때) 키 셋 가운데 필요한 것만 지운다 — data 박스에서 기본 요약 `docker exec marketlens-redis redis-cli DEL admin:clarity`(1회), 페이지×기기 묶음 `… DEL admin:clarity:pages`(1회), 기기·유입 차원 `… DEL admin:clarity:dims`(칸 둘이라 2회 — 하나만이면 `… HDEL admin:clarity:dims device` 또는 `channel`). 다음 관리자 페이지 요청이 곧바로 부른다. api 는 종류마다 24시간에 한 번, 모두 합쳐 24시간에 두 번(사람 몫)만 곧바로 부르고, 넘으면 기록을 되살리고 간격을 따른다 — 그래서 키를 몇 번 지워도 하루 10회를 넘지 않고, `admin:clarity:dims` 하나로 사람 몫 2회를 다 쓴다. 이 '24시간에 한 번' 은 api 프로세스 하나의 기억이라 api 를 다시 만들면(교체·끄기·배포) 풀린다 — 다시 만든 api 는 그날 한 바로 부르기를 모르고, 첫 요청 전에 지운 키로 부른 호출은 바로 부르기로 세지도 않는다(그 뒤 한 번 더 지우면 또 곧바로 부른다). 그날 이미 바로 부르기를 했으면 api 를 다시 만든 뒤에는 지우지 말고 `nextAt` 을 기다린다(지우면 그날 10회를 넘어 429 로 끝날 수 있다).
 - **교체**(관리자 이탈 — Clarity 권장 — 또는 유출 의심): 새 토큰 발급(2) → serve `server/.env` 값 교체(3) → api 다시 만들기(4) → Data Export 화면에서 옛 토큰 삭제 → 바로 확인하려면 '바로 부르기'(그날 이미 했으면 하지 않는다 — 다시 만든 api 는 그 기억이 없다). 간격은 Redis 값이라 교체해도 유지된다.
 - **끄기**: serve `server/.env` 에서 `CLARITY_API_TOKEN` 줄을 지우고 api 다시 만들기 → '연결 안 됨'(날별 추이도). 남은 집계(최대 7일치 숫자와 쿼리를 뗀 페이지 주소·출처, 페이지 종류×기기 묶음, 기기·유입 목록)는 data 박스에서 `docker exec marketlens-redis redis-cli DEL admin:clarity admin:clarity:pages admin:clarity:dims` 로, 날별 기록(90일치 숫자·목록 — 주소 없음)은 `docker exec marketlens-redis sh -c "redis-cli --scan --pattern 'admin:clarity:day:*' | xargs -r redis-cli DEL"` 로 지운다(두면 그날 끝 + 90일에 저절로 지워진다) — 토큰이 없으면 api 가 그 키를 읽지도 지우지도 않는다.
+
+## 7. 화면 이동 기록 지우기(078 — 처리방침 8절)
+화면 이동 기록(073)은 Clarity 가 아니라 KimpTrack 서버에 있다 — 최근 14일 몫은 data 박스 Redis(`rp:*`), 그 뒤는 S3 `replay/`. 지우는 쪽은 Redis 와 S3 자격이 둘 다 닿는 collect 박스의 수집기 컨테이너다.
+- **IP 하나 지우기**(삭제 요청): 먼저 셈만 — `docker exec marketlens-server python -m scripts.replay_forget --ip <IP> --dry-run` → 조각 수·S3 객체 수가 맞으면 `--dry-run` 없이 다시. S3 를 먼저 지우고 실패하면 Redis 는 그대로 두고 멈춘다(다시 실행하면 된다). 찍는 것은 수뿐이다.
+- **옮기기 확인**(배포 뒤 처음 한 번): 동의한 방문이 생기고 3시간 + 10분 뒤 수집기 로그에 `화면 이동 기록 옮기기` WARNING 이 없고, `docker exec marketlens-redis redis-cli ZCARD rp:todo` 가 줄었는지 본다. `S3 쓰기 실패: ClientError` 면 collect 박스 역할(`marketlens-s3-snapshot`)에 `replay/` 쓰기 권한이 없는 것이다 — 역할 정책에 `s3:PutObject`·`GetObject`·`DeleteObject`(`replay/*`)를 더한다(사람). 7일 넘게 못 옮기면 ERROR 가 Slack 으로 온다(14일이 지나면 Redis 묶음이 사라진다).
+- **서비스를 끝낼 때**: S3 `replay/` 접두를 통째로 지우고(`aws s3 rm s3://<버킷>/replay/ --recursive`), data 박스에서 `docker exec marketlens-redis sh -c "redis-cli --scan --pattern 'rp:*' | xargs -r redis-cli DEL"`.
