@@ -33,6 +33,7 @@ API_ROUTES = {
     "/admin/access",
     "/admin/clarity",
     "/admin/clarity/history",
+    "/admin/clarity/recordings",  # 077
     "/attention",
     "/admin/attention",
     "/admin/access/ips",
@@ -50,6 +51,7 @@ API_ONLY = {
     "/admin/access",
     "/admin/clarity",
     "/admin/clarity/history",
+    "/admin/clarity/recordings",  # 077
     "/attention",
     "/admin/attention",
     "/admin/access/ips",
@@ -123,6 +125,7 @@ def test_api_role_serves_only_influx_routes_and_404s_the_rest(set_role) -> None:
         "/admin/access",
         "/admin/clarity",
         "/admin/clarity/history",
+        "/admin/clarity/recordings",  # 077
         "/admin/access/ips",
         "/admin/access/ip?band=203.0.113.0/24",
         "/admin/access/addrs",

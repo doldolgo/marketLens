@@ -34,6 +34,7 @@ import httpx
 
 from app.core import config
 from app.features.admin import access_addr, access_ip
+from app.features.admin import clarity_recordings as recordings
 from app.features.admin.access_addrs_page import AddrsQuery
 from app.features.admin.access_bands import IpsQuery
 from app.features.admin.access_cache import (
@@ -228,6 +229,10 @@ class VisitFeeds:
         self._stored: dict[ClarityKind, Record] = {}
         self._history = {
             n: Slot(HISTORY_REFRESH_SEC, mono, wait_sec) for n in HISTORY_DAYS.values()
+        }
+        # 077 — Clarity 녹화 목록, 창(1·3·7·30일)마다 30분 칸(요청이 있을 때만 부른다)
+        self._recordings = {
+            n: Slot(recordings.REFRESH_SEC, mono, wait_sec) for n in recordings.DAYS
         }
         self._warn = Warner(mono)
         # 039 — DB-IP 판. 1시간 비움(§3.3)과 무관하게 프로세스에 남는다(방문자 정보가 아닌 공개 자료)
@@ -699,6 +704,32 @@ class VisitFeeds:
         except Exception as exc:
             return self._failed("clarity.history", exc)
         return Result("ok", None, now_ms, {"rows": rows})
+
+    async def clarity_recordings(self, days: str | None) -> dict[str, Any]:
+        """Clarity 녹화 목록(077 §3.2) — 창(1·3·7·30일, 목록 밖·없음은 3)마다 30분 칸. 토큰이 없으면 부르지 않는다."""
+        n = recordings.days_of(days)
+        if self._token is None:
+            result = UNCONFIGURED
+        else:
+            try:
+                result = await self._recordings[n].get(lambda: self._load_recordings(n))
+            except Exception as exc:
+                result = self._failed("clarity.recordings", exc)
+        body = render(result, recordings.REFRESH_SEC, recordings.KEYS)
+        body["days"] = n  # 고른 창 — 어느 상태에도
+        return self._writable(
+            "clarity.recordings", body, recordings.KEYS, keep=("days",)
+        )
+
+    async def _load_recordings(self, n: int) -> Result:
+        now_ms = int(self._clock() * 1000)
+        state, code, values = await recordings.fetch(
+            self._token or "", self._transport, recordings.request_body(now_ms, n)
+        )
+        if state != "ok":
+            self._warn("clarity.recordings", code or state)
+            return Result(state, code)
+        return Result("ok", None, now_ms, values)
 
     # --- 공통 ---
 
