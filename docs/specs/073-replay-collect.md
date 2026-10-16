@@ -1,6 +1,6 @@
 # 073 — replay-collect
 
-상태: IN_PROGRESS | 의존: 076(처리방침 v7·동의 안내 판 `2026-10-16` — 시행일 상수 `PRIVACY_V7_EFFECTIVE`)·052(동의 판정·비콘 경로 꼴·IP 10분 제한)·028(공개 `/api` 허용 목록)·029(관리자 nginx)
+상태: DONE | 의존: 076(처리방침 v7·동의 안내 판 `2026-10-16` — 시행일 상수 `PRIVACY_V7_EFFECTIVE`)·052(동의 판정·비콘 경로 꼴·IP 10분 제한)·028(공개 `/api` 허용 목록)·029(관리자 nginx)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -61,6 +61,16 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
+# 설계 세션 — 합친 브랜치(feat/072-replay: 073·074·076 + main) 2026-10-16
+cd server && ruff check . && ruff format --check . && pytest -q   # All checks passed · 467 files · 2866 passed, 1 skipped(소켓 시험은 샌드박스 밖)
+cd web && npm run lint && npm run build                          # 경고 0 · 빌드 성공
+docker run nginx:1.27-alpine … nginx -t                          # 공개·관리자 템플릿 envsubst 뒤 syntax ok / test is successful
+docker run caddy:2-alpine caddy validate                         # Valid configuration
+# 끝까지(로컬): redis-server :6472 + 진짜 api(ROLE=api, :8073) + 공개 페이지 시험 사본(kimptrack.localhost:8072 — replay.js 의 HOST·
+# ADMIN_ORIGIN 만 바꿈) + 관리자 사본(admin.kimptrack.localhost:18072 — replayframe.js 의 SITE_ORIGIN 만 바꿈, 재생 피드는 진짜 api 로)
+#   동의 값을 넣은 랜딩·대시보드에서 움직임 → /admin/replay/live·sessions 에 조각(대시보드는 pages app-spread→app-gap, 탭 단추 누름)
+#   → 방문자 페이지 '지금 보는 중'·'화면 기록' 행 → 재생 판: 실제 페이지 틀에 손가락 커서·스크롤 1000px·보던 영역 테두리·숨김 가림막,
+#   사건 목록 눌러 옮기기, 콘솔 오류 0. 예전 판(2026-10-09-2) 동의자에게 동의 창이 v7 글로 다시 뜸
 # 2026-10-16, worktree marketLens-073srv (feat/073-replay-server) — 서버 쪽만. venv 는 메인 체크아웃의 server/.venv(python 3.12.13)
 cd server && python -m ruff check .                 # All checks passed!
 cd server && python -m ruff format --check .        # 462 files already formatted

@@ -1,6 +1,6 @@
 # 076 — privacy-v7
 
-상태: IN_PROGRESS | 의존: 069(처리방침 v6 — 지금 판)·060(같은 날 두 번째 판·이전 판 사본 꼴·'시행일 = PR 올린 날')·033(동의 창)·052(동의 판정·안내 판 값 네 곳)
+상태: DONE | 의존: 069(처리방침 v6 — 지금 판)·060(같은 날 두 번째 판·이전 판 사본 꼴·'시행일 = PR 올린 날')·033(동의 창)·052(동의 판정·안내 판 값 네 곳)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -47,7 +47,17 @@
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
-(실행 후 기록)
+# 설계 세션 — 합친 브랜치(feat/072-replay: 073·074·076 + main) 2026-10-16
+cd server && ruff check . && ruff format --check . && pytest -q   # All checks passed · 467 files · 2866 passed, 1 skipped(소켓 시험은 샌드박스 밖)
+cd web && npm run lint && npm run build                          # 경고 0 · 빌드 성공
+docker run nginx:1.27-alpine … nginx -t                          # 공개·관리자 템플릿 envsubst 뒤 syntax ok / test is successful
+docker run caddy:2-alpine caddy validate                         # Valid configuration
+# 끝까지(로컬): redis-server :6472 + 진짜 api(ROLE=api, :8073) + 공개 페이지 시험 사본(kimptrack.localhost:8072 — replay.js 의 HOST·
+# ADMIN_ORIGIN 만 바꿈) + 관리자 사본(admin.kimptrack.localhost:18072 — replayframe.js 의 SITE_ORIGIN 만 바꿈, 재생 피드는 진짜 api 로)
+#   동의 값을 넣은 랜딩·대시보드에서 움직임 → /admin/replay/live·sessions 에 조각(대시보드는 pages app-spread→app-gap, 탭 단추 누름)
+#   → 방문자 페이지 '지금 보는 중'·'화면 기록' 행 → 재생 판: 실제 페이지 틀에 손가락 커서·스크롤 1000px·보던 영역 테두리·숨김 가림막,
+#   사건 목록 눌러 옮기기, 콘솔 오류 0. 예전 판(2026-10-09-2) 동의자에게 동의 창이 v7 글로 다시 뜸
+cd server && pytest -q tests/test_privacy.py tests/test_clarity*.py tests/test_attention*.py tests/test_replay_js.py   # 134 passed(076 머지 전), 합친 뒤 189 passed
 ```
 
 ## 6. 갱신할 문서
@@ -56,6 +66,6 @@
 - `CLAUDE.md` — 스펙 인덱스 076 행.
 
 ## 7. 실행 보고 (실행 세션이 채움)
-- 만든 것:
-- 추측한 지점 / 실행 중 함께 고친 스펙 절:
-- 남은 빚:
+- 만든 것: `public/privacy.html`(v7 — 시행일 2026-10-16, 변경 안내·한눈에 보기·동의 상자·1·2(새 소제목 '화면 이동 기록 — KimpTrack 서버'·표 한 행·처리 근거)·3·7·8·9절·12절 이력과 대조표 23행), `public/privacy-20261014-2.html`(v6 사본 — v5 사본의 머리·스타일·동의 절 꼴을 그대로 써서 만듦), `public/clarity.js`(동의 창 글·판·`kt-replay` 틀 막기), `public/attention.js`(판), `public/sitemap.xml`, `core/config.py` `PRIVACY_V7_EFFECTIVE`, `tests/test_privacy.py`(판 해시·사본 해시·변경 안내·대조표 이름 목록·`REPLAY_FACTS`).
+- 추측한 지점 / 실행 중 함께 고친 스펙 절: 번호 — 072 를 #141(반응형)이 먼저 써서 076 으로 옮김(075 는 이 브랜치 위에 쌓인 GA 세션의 privacy-v8). '한눈에 보기' 의 '둘 다 동의한 경우에만' → '모두 동의한 경우에만'(셋이 됨). 7절 행태정보의 '수집하는 사업자' 에 KimpTrack 을 더함(v3 부터 빠져 있던 것). '방문자 정보가 가지 않는 곳' 의 'InfluxDB·Redis' → 'InfluxDB' 와 Redis 문장 분리.
+- 남은 빚: 법률 확인(사람) — 머지 = 게시. 머지가 2026-10-16 보다 늦으면 시행일(`<time>` 넷·머리·sitemap·`PRIVACY_V7_EFFECTIVE`·test_privacy `EFFECTIVE`)을 그날로.
