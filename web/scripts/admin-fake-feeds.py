@@ -7,7 +7,8 @@
     uv run web/scripts/admin-fake-feeds.py [--port 18064] [--scenario ok]
 
 - `web/admin` 의 정적 파일을 `/` 에 관리자 nginx 와 같은 헤더(CSP·X-Frame-Options·Cache-Control)로 주고, 화면이 부르는
-  피드 열여덟(029·011·034·035·038·039·040·062·063 + 067 대역 둘·068 날별 기록 — 068 은 #133 의 실제 응답 꼴 + 052·061 화면 이용 통계 + 069 IP 둘 + 073 화면 기록 셋)과
+  피드 열아홉(029·011·034·035·038·039·040·062·063 + 067 대역 둘·068 날별 기록 — 068 은 #133 의 실제 응답 꼴 + 052·061 화면 이용 통계 + 069 IP 둘 + 073 화면 기록 셋
+  + 077 Clarity 녹화 목록 — 2026-10-16 실제 응답을 077 대로 다듬은 꼴)과
   `POST /api/refresh` 를 지어낸 값으로 답한다. 표준 라이브러리만 쓰고 127.0.0.1 에만 붙는다. 실제 서버·AWS·Clarity 를 부르지 않는다.
   화면 페이지(065)의 틀은 실제 공개 사이트를 부른다 — 덮어 보기까지 보려면 065 §4 의 시험 사본(kimptrack.com 을 로컬에 묶음)으로.
 - 경우(--scenario, 돌던 중에는 `GET /__scenario/<이름>` 로 바꾼다):
@@ -21,6 +22,8 @@
   073·074 화면 기록(live·sessions·session): old·missing·noaddrs 는 404, empty 는 연결 안 됨, problem 은 Redis 실패 error, nobands 는 조각 없음,
   many 는 지금 보는 중 12·지난 조각 200(상한), xss 는 IP·화면·영역 이름에 `<img onerror>`(화면 이름이 틀려 틀은 띄우지 않는다). 그 밖은 지금 보는 중
   하나(시간이 가면 묶음이 늘어난다 — 따라 보기)·랜딩 PC·대시보드 휴대폰 대본 + 지난 조각 9. 없는 sid 는 meta null, 꼴이 틀리면 400 bad_sid.
+  077 Clarity 녹화 목록(recordings): old·missing·noaddrs 는 404, empty 는 연결 안 됨, problem 은 error http_429, nobands·noclarity 는 녹화 없음,
+  many 는 100(상한), xss 는 제목·클릭 글자에 `<img onerror>`·재생 링크 둘이 Clarity 밖 주소(화면이 링크로 만들지 않아야 한다). 그 밖은 기간마다 몇 개.
 - 시각은 이 컴퓨터 시계다.
 """
 
@@ -353,6 +356,55 @@ def history(days: str) -> tuple[int, dict]:
             "dims": dims,
         })
     return 200, {"state": "ok", **head, "rows": rows}
+
+
+# 077 — 녹화 하나의 지나간 페이지 대본: (주소, 제목, 머문 ms, [(클릭 글자, 페이지 안 초)…])
+REC_PAGES = (
+    ("https://kimptrack.com/", "김프 실시간 — KimpTrack", 21_000, [("대시보드 열기", 18)]),
+    ("https://kimptrack.com/app/?tab=spread", "KimpTrack", 30_340, [("기록/통계", 30)]),
+    ("https://kimptrack.com/app/?tab=history", "KimpTrack", 44_000, [("BTC", 6), ("7일", 15)]),
+    ("https://kimptrack.com/kimp-chart", "김프 차트 보는 법 — KimpTrack", 12_000, []),
+    ("https://kimptrack.com/privacy", "개인정보 처리방침 — KimpTrack", 9_000, [("동의 철회", 7)]),
+    ("https://kimptrack.com/app/?tab=gap", "KimpTrack", 15_000, [("선물–현물 갭", 2)]),
+)
+REC_SCRIPTS = ((0, 1, 2), (1,), (0, 4), (3, 2), (1, 5, 2), (0,), (1, 2))
+
+
+def _rec(i: int, start: int) -> dict:
+    """녹화 하나 — 077 §3.2 의 행 꼴. xss 는 제목·클릭 글자에 HTML 조각, 0·1 번 링크는 Clarity 밖 주소."""
+    rng = random.Random(i)
+    at, timeline = 0, []
+    for k in REC_SCRIPTS[i % len(REC_SCRIPTS)]:
+        url, title, stay, clicks = REC_PAGES[k]
+        stay = int(stay * rng.uniform(0.5, 1.6))
+        events = [{"type": "Click", "text": txt(t), "atSec": at + min(s, stay // 1000)} for t, s in clicks]
+        timeline.append({"url": url, "title": txt(title), "atSec": at, "stayMs": stay, "loadMs": rng.randint(250, 1400),
+                         "referrer": "https://www.google.com" if not timeline and i % 3 == 0 else None, "events": events})
+        at += stay // 1000
+    total = at + rng.randint(0, 20)
+    link = f"https://clarity.microsoft.com/player/fakeproject/fakeuser{i}/fakesession{i}"
+    if state["scenario"] == "xss" and i < 2:
+        link = ("javascript:alert(1)", f'https://clarity.microsoft.com/player/x"><img src=x onerror=alert(1)>')[i]
+    return {"startedAt": start, "totalSec": total, "activeSec": max(1, int(total * rng.uniform(0.3, 1.0))),
+            "pages": len(timeline), "clicks": sum(len(p["events"]) for p in timeline), "link": link, "timeline": timeline}
+
+
+def recordings(days: str) -> tuple[int, dict]:
+    """077 GET /admin/clarity/recordings — days 1·3·7·30(목록 밖은 3), 시작 최근 순, 창마다 30분 캐시라 받은 때가 조금 전."""
+    s = state["scenario"]
+    if s in PRE_069:
+        return 404, {"detail": "Not Found"}
+    n = {"1": 1, "3": 3, "7": 7, "30": 30}.get(days, 3)
+    now = int(time.time() * 1000)
+    head = {"code": None, "fetchedAt": now - 4 * 60_000, "refreshSec": 1800}
+    if s == "empty":
+        return 200, {"state": "unconfigured", **head, "fetchedAt": None, "rows": None, "days": n}
+    if s == "problem":
+        return 200, {"state": "error", **head, "code": "http_429", "fetchedAt": None, "rows": None, "days": n}
+    count = 0 if s in ("nobands", "noclarity") else 100 if s == "many" else {1: 3, 3: 7, 7: 12, 30: 26}[n]
+    step = n * 86_400_000 // (count + 1) if count else 0
+    rows = [_rec(i, now - 4 * 60_000 - (i + 1) * step) for i in range(count)]
+    return 200, {"state": "ok", **head, "rows": rows, "days": n}
 
 
 NETS = ("telecom_kr", "telecom", "cloud", "other")
@@ -952,6 +1004,7 @@ def feed(method: str, path: str, query: dict, body: dict) -> tuple[int, object] 
         "/svc/api/admin/access/addr": lambda: addr(query),
         "/svc/api/admin/clarity": lambda: (200, clarity()),
         "/svc/api/admin/clarity/history": lambda: history(pick("days", "30")),
+        "/svc/api/admin/clarity/recordings": lambda: recordings(pick("days", "3")),
         "/svc/api/admin/attention": lambda: (200, attention(query)),
         "/svc/api/admin/replay/live": lambda: replay_live(query),
         "/svc/api/admin/replay/sessions": lambda: replay_sessions(query),
