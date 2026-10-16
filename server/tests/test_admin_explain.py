@@ -85,7 +85,7 @@ out.metricNow = td.METRIC_NAME.now
 
 // Clarity 진단 줄
 const ins = await page('insightdetail.js')
-const clarity = (sessions, state = 'ok') => ({ state, numOfDays: 1, traffic: { sessions } })
+const clarity = (sessions, state = 'ok') => ({ state, numOfDays: 1, fetchedAt: 1792112161257, traffic: { sessions } })
 const attn = (pvs, state = 'ok') => ({ state, rows: pvs.map((pv) => ({ pv })) })
 out.diag = [
   ins.diagOf(clarity(0), attn([3, 4])),
@@ -208,9 +208,14 @@ def test_traffic_pane_is_named_dashboard_concurrent(got: dict[str, Any]) -> None
 
 
 def test_clarity_diagnosis_line(got: dict[str, Any]) -> None:
+    """071 §3.6 — 경고가 아니라 안내: 받은 시각과 두 수를 그대로, 어긋났다고 단정하지 않는다(토큰 탓을 하지 않는다)."""
     missed, empty, *hidden = got["diag"]
-    assert missed["tone"] == "warn" and "오늘 페이지 보기 7회" in missed["text"]
-    assert "API 토큰" in missed["text"]
-    assert empty["tone"] is None and "값이 비는 게 정상" in empty["text"]
+    assert missed["tone"] is None and "받은 최근 24시간 세션은 0" in missed["text"]
+    assert (
+        "오늘 페이지 보기 7회" in missed["text"]
+        and "바로 견주지 못한다" in missed["text"]
+    )
+    assert "토큰" not in missed["text"] and "안 잡혔다" not in missed["text"]
+    assert empty["tone"] is None and "비는 게 정상" in empty["text"]
     assert hidden == [None] * 6
     assert got["attnUrl"] == "/svc/api/admin/attention?days=1"
