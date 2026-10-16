@@ -31,6 +31,9 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
   수집이 블록마다 자가 확장으로 더하고 기동 때 씨앗에 합친다 (050 §3.2)
 - 해시 `attn:d:<YYYYMMDD>` — 화면 영역 이용 통계의 KST 하루 합계, 필드 `<page>|<device>|<area>|<ms|clicks|seen>`·페이지뷰
   `<page>|<device>||pv`, 값은 정수 합, EXPIREAT 그날 끝 + 90일. api 가 10초 묶음으로 더하고 api 의 `/admin/attention` 이 읽는다 (052 §3.5)
+- 화면 이동 기록 `rp:*` (073 §3.5) — 해시 `rp:m:<sid>`(조각 머리), 리스트 `rp:e:<sid>`(zlib 로 누른 묶음 JSON),
+  정렬 집합 `rp:ip:<ip>`(sid → first ms)·`rp:recent`(sid → last ms), 정수 `rp:b:<YYYYMMDD>`(KST 그날 누른 바이트 합).
+  모두 만료 = 마지막 쓰기 + 14일. api 가 묶음마다 곧바로 쓰고 api 의 `/admin/replay/*` 가 읽는다
 """
 
 import time
@@ -76,6 +79,12 @@ FLOW_HOT_WALLETS_KEY = "flow:eth:hot_wallets"
 FLOW_INTERNAL_KEY = "flow:eth:internal"
 # 052 — 화면 영역 이용 통계 하루 합계 해시 `attn:d:<YYYYMMDD>`(KST 날짜)
 ATTENTION_PREFIX = "attn:d:"
+# 073 — 화면 이동 기록. 조각(sid)마다 머리 해시·묶음 리스트, IP 별·최근 정렬 집합, KST 날마다 누른 바이트 합
+REPLAY_META_PREFIX = "rp:m:"
+REPLAY_EVENTS_PREFIX = "rp:e:"
+REPLAY_IP_PREFIX = "rp:ip:"
+REPLAY_RECENT_KEY = "rp:recent"
+REPLAY_DAY_PREFIX = "rp:b:"
 
 
 def want_key(table: str) -> str:
@@ -327,6 +336,95 @@ class RedisBus:
             day: {_text(k): int(_text(v)) for k, v in raw.items()}
             for day, raw in zip(days, found, strict=True)
         }
+
+    async def replay_load(self, sid: str, day: str) -> tuple[dict[str, str], int]:
+        """`HGETALL rp:m:<sid>` + `GET rp:b:<day>` 한 왕복 — 묶음을 쓰기 전 조각 머리와 그날 바이트 합 (073 §3.5).
+        조각이 없으면 빈 dict, 그날 키가 없으면 0. 실패는 예외."""
+        async with self._client.pipeline(transaction=False) as pipe:
+            pipe.hgetall(REPLAY_META_PREFIX + sid)
+            pipe.get(REPLAY_DAY_PREFIX + day)
+            meta, used = await pipe.execute()
+        return {_text(k): _text(v) for k, v in meta.items()}, int(used or 0)
+
+    async def replay_append(
+        self,
+        sid: str,
+        meta: Mapping[str, str],
+        blob: bytes,
+        day: str,
+        ttl_sec: int,
+        cutoff_ms: int,
+    ) -> None:
+        """묶음 하나를 MULTI 한 번으로 (073 §3.5) — 머리 `HSET`, 묶음 `RPUSH`, `rp:ip:<meta ip>` 에 sid → first,
+        `rp:recent` 에 sid → last(두 집합은 cutoff_ms 보다 작은 점수를 지운다), `rp:b:<day>` 에 묶음 바이트를 더하고 다섯 키
+        모두 `EXPIRE ttl_sec`. meta 는 머리 전체(`ip`·`first`·`last` 필수 — 호출자가 새 값을 다 셈한다). 실패는 예외."""
+        ip_key = REPLAY_IP_PREFIX + meta["ip"]
+        keys = (
+            REPLAY_META_PREFIX + sid,
+            REPLAY_EVENTS_PREFIX + sid,
+            ip_key,
+            REPLAY_RECENT_KEY,
+            REPLAY_DAY_PREFIX + day,
+        )
+        async with self._client.pipeline(transaction=True) as pipe:
+            pipe.hset(keys[0], mapping=dict(meta))
+            pipe.rpush(keys[1], blob)
+            pipe.zadd(ip_key, {sid: int(meta["first"])})
+            pipe.zremrangebyscore(ip_key, "-inf", f"({cutoff_ms}")
+            pipe.zadd(REPLAY_RECENT_KEY, {sid: int(meta["last"])})
+            pipe.zremrangebyscore(REPLAY_RECENT_KEY, "-inf", f"({cutoff_ms}")
+            pipe.incrby(keys[4], len(blob))
+            for key in keys:
+                pipe.expire(key, ttl_sec)
+            await pipe.execute()
+
+    async def replay_mark_cut(self, sid: str, ttl_sec: int) -> None:
+        """`HSET rp:m:<sid> cut 1` + `EXPIRE` — 조각 상한(1MB·묶음 수)으로 묶음을 버렸다는 표시 (073 §3.5). 실패는 예외."""
+        key = REPLAY_META_PREFIX + sid
+        async with self._client.pipeline(transaction=False) as pipe:
+            pipe.hset(key, "cut", "1")
+            pipe.expire(key, ttl_sec)
+            await pipe.execute()
+
+    async def replay_recent(self, min_ms: int | None, limit: int) -> list[str]:
+        """`ZREVRANGEBYSCORE rp:recent +inf <min_ms> LIMIT 0 <limit>` — last 가 min_ms 이상인 sid, 최근 순 (073 §3.6).
+        min_ms 가 None 이면 전부. 실패는 예외."""
+        low = "-inf" if min_ms is None else min_ms
+        found = await self._client.zrevrangebyscore(
+            REPLAY_RECENT_KEY, "+inf", low, start=0, num=limit
+        )
+        return [_text(v) for v in found]
+
+    async def replay_ip(self, ip: str, limit: int) -> list[str]:
+        """`ZREVRANGE rp:ip:<ip> 0 <limit-1>` — 그 IP 의 sid, first 가 늦은 순 (073 §3.6). 없으면 빈 목록. 실패는 예외."""
+        found = await self._client.zrevrange(REPLAY_IP_PREFIX + ip, 0, limit - 1)
+        return [_text(v) for v in found]
+
+    async def replay_metas(self, sids: Sequence[str]) -> list[dict[str, str]]:
+        """`HGETALL rp:m:<sid>` 를 sid 마다 한 파이프라인으로 — 순서대로, 만료된 조각은 빈 dict (073 §3.6). 실패는 예외."""
+        if not sids:
+            return []
+        async with self._client.pipeline(transaction=False) as pipe:
+            for sid in sids:
+                pipe.hgetall(REPLAY_META_PREFIX + sid)
+            found = await pipe.execute()
+        return [{_text(k): _text(v) for k, v in raw.items()} for raw in found]
+
+    async def replay_batches(
+        self, sid: str, start: int, count: int
+    ) -> tuple[dict[str, str], list[bytes], int]:
+        """`HGETALL rp:m:<sid>` + `LRANGE rp:e:<sid> start start+count-1` + `LLEN` 한 왕복 — 머리·누른 묶음 바이트·전체 묶음 수
+        (073 §3.6). 없으면 (빈 dict, [], 0). 실패는 예외."""
+        async with self._client.pipeline(transaction=False) as pipe:
+            pipe.hgetall(REPLAY_META_PREFIX + sid)
+            pipe.lrange(REPLAY_EVENTS_PREFIX + sid, start, start + count - 1)
+            pipe.llen(REPLAY_EVENTS_PREFIX + sid)
+            meta, blobs, total = await pipe.execute()
+        return (
+            {_text(k): _text(v) for k, v in meta.items()},
+            list(blobs),
+            int(total),
+        )
 
     async def subscribe(self, channel: str = CHANNEL) -> Subscription:
         """채널 구독 연결을 새로 연다 — 여기서 실제 연결이 일어나므로 실패는 예외. 한 연결은 한 채널만 (048 §3.4)."""

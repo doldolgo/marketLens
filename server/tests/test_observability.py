@@ -31,6 +31,7 @@ NOLOG_PATHS = {
     "/api/flow/netflow",
     "/api/flow/recent",
     "/api/attention",  # 052 — 화면 영역 통계 비콘
+    "/api/replay",  # 073 — 화면 이동 기록 묶음
 }
 CANARY_UA = "KimpTrack-Canary/1"
 
@@ -244,6 +245,7 @@ PUBLIC_LOCATIONS = {("=", path) for path in PUBLIC_API} | {
     ("=", "/app/kimp-history.html"),
     ("=", "/clarity.js"),
     ("=", "/attention.js"),  # 052
+    ("=", "/replay.js"),  # 073
     ("/app/assets/",),
     ("=", "/app/index.html"),
     ("/app/",),

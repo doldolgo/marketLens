@@ -38,6 +38,12 @@
 - 키 **`flow:eth:last_block`**(050) — 마지막으로 처리한 이더리움 블록 번호 문자열, 만료 없음. 쓰는 쪽 수집의 전송 감지기(블록마다), 읽는 쪽 같은 감지기의 (재)연결 직후 공백 재생(7,200블록까지)
 - 집합 **`flow:eth:deposit_addrs`**·**`flow:eth:hot_wallets`**·**`flow:eth:internal`**(050) — 씨앗 CSV 에 더한 주소(소문자), 만료 없음. 쓰는 쪽 감지기(가스 지갑 수신자·sweep 목적지·내부 이동 목적지를 발견 즉시), 읽는 쪽 감지기 기동 시 씨앗과 합침
 - 해시 **`attn:d:<YYYYMMDD>`**(052·061) — 화면 이용 통계의 KST 하루 합계. 필드 영역 `<page>|<device>|<area>|<m>`(`m` = `ms`·`clicks`·`seen`)와 페이지뷰 `<page>|<device>||pv`, 요소(061) `<page>|<device>|<area>|e|<열쇠>|<c·h·v>`(클릭·마우스 올림 ms·보인 ms — 열쇠는 1~64자·`|` 없음)·떠난 곳 `<page>|<device>|<area>|x`(pagehide 로 끝난 pv 수)·깊이 `<page>|<device>||d<0~10>`(그 10% 칸에서 멈춘 pv 수, 정적 페이지 넷만), 값은 정수 합(HINCRBY — 0 은 쓰지 않는다). 요소·떠난 곳·깊이는 `PRIVACY_V4_EFFECTIVE` 0시 뒤에만 쓴다. 만료는 `EXPIREAT` 그 KST 날의 끝(다음 날 00:00 KST) + 90일 — 쓸 때마다 같은 값이라 밀리지 않고, 관리자 피드의 90일 창(오늘 포함)은 모두 살아 있다. 쓰는 쪽 api(받은 비콘을 메모리에 더해 두고 10초마다 날마다 한 파이프라인 HINCRBY 묶음 + EXPIREAT, 실패하면 메모리에 두고 다음 회차 — 쌓인 필드가 2만을 넘으면 버리고 WARNING, 끌 때 한 번 더), 읽는 쪽 api 의 `GET /admin/attention`(창 안 날마다 HGETALL 한 파이프라인, days 마다 60초 캐시). 영역은 하루 ≈900 필드(화면 10 × 기기 2 × 영역 ≈15 × 3 + pv), 요소는 (날, 화면, 기기)마다 서로 다른 (영역, 열쇠) 300개까지(api 메모리로 세고 넘는 새 열쇠는 `(기타)` — 다시 뜨면 새로 센다)라 상한이 하루 18,000 필드 — 실제로는 누르거나 보인 것만이라 훨씬 적다(noeviction). IP 는 Redis 에 없다(api 메모리의 10분 셈 표뿐).
+- 화면 이동 기록(073) — 동의한 방문자가 페이지를 연 한 번(조각, `sid` = 16자 소문자 16진)마다. 키는 모두 만료 = 마지막 쓰기 + 14일(쓸 때마다 `EXPIRE`). 쓰는 쪽 api 의 `POST /replay`(묶음마다 곧바로 — 머리·그날 합을 한 왕복 읽고 MULTI 한 번), 읽는 쪽 api 의 `GET /admin/replay/{live,sessions,session}`.
+  - 해시 **`rp:m:<sid>`** — 조각 머리. `ip`(첫 묶음의 IP 정규 글자, 못 읽으면 `(없음)`)·`dev`·`w`·`h`·`page`(첫 묶음의 값)·`pages`(지나간 화면 이름, 쉼표, 차례대로 중복 없음 — `p` 사건이 더한다)·`now`(지금 화면 = 마지막 `p`, 없으면 page)·`first`·`last`(서버가 받은 epoch ms)·`n`(묶음 수)·`bytes`(누른 바이트 합)·`clicks`(`c` 사건 수)·`seq`(마지막으로 받은 묶음 번호 — 같거나 앞선 seq 는 버린다)·`cut`(조각 상한으로 묶음을 버렸으면 `1`, 없으면 필드 없음).
+  - 리스트 **`rp:e:<sid>`** — 묶음마다 `{"at":받은 ms,"seq","ev"}` JSON(구분자 공백 없음)을 zlib 레벨 6 으로 누른 바이트, 받은 차례.
+  - 정렬 집합 **`rp:ip:<ip>`**(sid → first)·**`rp:recent`**(sid → last) — 쓸 때 14일보다 오래된 점수(받은 ms − 14일 미만)를 지운다. 조각은 첫 IP 의 집합에만 든다.
+  - 정수 **`rp:b:<YYYYMMDD>`**(KST) — 그날 쓴 누른 바이트 합(INCRBY).
+  - 상한: 그날 8MiB(누른 바이트 — 넘을 묶음은 버린다)·조각마다 1MiB·묶음 3,600. 14일 × 8MiB = 112MiB 가 최악 — `maxmemory 600mb`·noeviction 의 시세 키를 밀어내지 않는 몫.
 - env `REDIS_URL`(기본 `redis://localhost:6379/0`, compose 안에서는 `redis://redis:6379/0` — server·api 둘 다). Redis 가 없어도 앱은 뜬다 — 인계된 틱은 버려지고(경고 로그) 원문은 S3 에 있어 재생 가능하다.
 
 ## S3 원문 아카이브
@@ -56,7 +62,7 @@
 
 ## 보존
 - Influx bucket retention 은 **무제한**. `dw_fail` 의 "최근 24시간" 은 쿼리 range(-24h) 로 처리한다 — retention 을 걸면 `premium` 까지 지워진다. 봉 계층은 버킷 retention 이 유통기한이다(1m 7일·5m 30일·1h 90일·4h 365일·1d 무제한). 초 단위 `premium` 은 아직 무제한.
-- Redis 는 옮기면 비운다(위). S3 는 lifecycle 미설정.
+- Redis 는 옮기면 비운다(위). 화면 이동 기록 `rp:*` 는 마지막 쓰기 + 14일에 Redis 가 지운다(073). S3 는 lifecycle 미설정.
 - DB-IP City 캐시(069): serve 의 api 만 named volume `geo-cache`(`/var/lib/geo`)에 `city-YYYY-MM.bin` 하나(≈50MB — 머리·CRC32 뒤 구간 시작·끝·위치 번호 배열과 위치 표, 공개 자료라 방문자 정보 없음)를 둔다. 새 달 판을 다 만든 뒤 바꿔 달고 옛 달 파일은 지운다. 지우거나 깨져도 다음 IP 피드 요청이 다시 받는다. 접속 기록·IP 칸은 여기에도 다른 저장소에도 쓰지 않는다(메모리만).
 
 ## 쓰는 쪽
@@ -74,7 +80,7 @@
 - `features/history` 의 `/history/premium`(1주만)·`/history/streaks`(창 7일 이하)·`/history/streaks/bulk`(창 1시간 이하)·`/history/events`(`premium_event` 닫힌 사건(응답 필드 7개만 pivot) + 메모리의 진행 중)·`/history/candles`(`res` 의 계층 버킷 하나, 요청당 1,440창 상한, 진행 중 창 없음) — 앞의 셋은 동시 1개(돌고 있으면 429)이고 셋 모두 `premium` 을 pivot 없이 (코인, 방향) 줄기로 흘려 읽는다(005 §3.4 — premium 은 두 줄기를 시각으로 잇는다), 사건·봉은 같은 조회 키를 공유 캐시로 한 번만 읽는다(사건 60초·64MB, 봉 청크 30초·끝난 청크 600초·256키·32MB, 2026-09-28) — 그리고 `features/landing` 의 `/landing`(022 — `candles_1m` 에서 1위 경로 1시간·`premium_event` 7일 요약(점을 올리지 않고 Flux 가 접은 수백 행), 둘 다 60초 캐시) 만. 다른 조회 API 는 DB 를 0회 접근한다(메모리가 진실). 저장소 불가 시 `/history/*` 는 503 `storage_unavailable`, `/landing` 은 200 에 그 부분만 null.
 - `features/flow` 의 `/flow/netflow`(창 1h·6h·24h 코인별 합산)·`/flow/recent`(24시간 안 최신 500행까지) — `chain_flow`, `removed` 제외(050).
 - 기동 시 1회: `collect_fail` 24시간 복원(011, 3초 상한), 열린 사건 복원(013 — Redis `premium_events:open` 먼저, 없거나 실패하면 `premium_event` 7일 안 `end_ts 0` 두 단계 조회(두 단계 모두 7일 창·CSV), 3초 상한 — 600초 넘게 못 본 사건은 `last_ts` 로 닫아 쓴다), spark 용 `premium` 최근 30분 1분 버킷 집계(009, 10초 상한·CSV), 롤업 따라잡기 기준점 — 계층마다 위 버킷 가장 늦은 점·아래 계층들 가장 오래된 점(014, 계층당 3초 상한). 복원 조회는 모두 HTTP 요청 타임아웃을 자기 상한과 같게 걸어 상한에서 끊긴다. 롤업 회차는 아래 계층 버킷을 창 단위로 읽는다.
-- Redis 스트림 `ticks` 는 flusher 만 읽는다. 키 `premium_events:open` 은 수집의 기동 복원만 읽는다. 채널 `spreads`·키 `spreads:latest` 는 api 의 구독 허브(채널은 접속자가 있을 때만)와 `GET /spreads`(두 역할, 018)·`GET /landing`(두 역할, 5초 캐시, 022)이, 키 `spreads:want` 는 api 만 쓰고 아무도 읽지 않는다(017, 2026-09-26). `collect:heartbeat` 는 collector 가 매초 쓰고 api 의 `/health` 가 읽는다(025). `alerts:log` 는 두 역할의 알림기가 쓰고 수집기 `/admin/alerts` 가 읽는다(034). `admin:clarity`·`admin:clarity:pages`·`admin:clarity:dims` 는 api 의 `/admin/clarity` 만 읽고 쓰고, `admin:clarity:day:*` 는 같은 경로가 쓰고 `/admin/clarity/history` 가 읽는다(035·040·068). S3 를 읽는 코드는 없다.
+- Redis 스트림 `ticks` 는 flusher 만 읽는다. 키 `premium_events:open` 은 수집의 기동 복원만 읽는다. 채널 `spreads`·키 `spreads:latest` 는 api 의 구독 허브(채널은 접속자가 있을 때만)와 `GET /spreads`(두 역할, 018)·`GET /landing`(두 역할, 5초 캐시, 022)이, 키 `spreads:want` 는 api 만 쓰고 아무도 읽지 않는다(017, 2026-09-26). `collect:heartbeat` 는 collector 가 매초 쓰고 api 의 `/health` 가 읽는다(025). `alerts:log` 는 두 역할의 알림기가 쓰고 수집기 `/admin/alerts` 가 읽는다(034). `admin:clarity`·`admin:clarity:pages`·`admin:clarity:dims` 는 api 의 `/admin/clarity` 만 읽고 쓰고, `admin:clarity:day:*` 는 같은 경로가 쓰고 `/admin/clarity/history` 가 읽는다(035·040·068). `rp:*` 는 api 의 `POST /replay` 가 쓰고(쓰기 전 머리·그날 합 읽기) `/admin/replay/*` 가 읽는다(073). S3 를 읽는 코드는 없다.
 
 ## 로컬 접속
 - dev compose 로 Influx 2.7 과 Redis 7 을 띄운다. env 는 `INFLUX_URL`(기본 `http://localhost:8086`)·`INFLUX_TOKEN`·`REDIS_URL`.
