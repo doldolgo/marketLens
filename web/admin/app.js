@@ -5,6 +5,7 @@
 import { FAST, FAST_MS, SLOW_MS, $, button, clean, clock, el, notice, own, put, req, tagText } from './common.js';
 import { marks, problems } from './rules.js';
 import { mountDetail } from './detail.js';
+import { closeHelp, mountHelp } from './help.js';
 import { createStore } from './store.js';
 import { CMPS, cmpOpen, detailOK, readView, urlOf } from './view.js';
 
@@ -262,12 +263,15 @@ export function start(page) {
   }
 
   detail = mountDetail(app);
+  mountHelp();
   for (const b of document.querySelectorAll('[data-range]')) b.addEventListener('click', () => app.setRange(b.dataset.range));
   for (const b of document.querySelectorAll('[data-cmp]')) b.addEventListener('click', () => app.setCmp(b.dataset.cmp));
   for (const b of document.querySelectorAll('[data-detail]')) b.addEventListener('click', () => app.openDetail(b.dataset.detail));
   $('menu-btn')?.addEventListener('click', () => menu(!menuOpen));
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape') {
+      // '?' 말풍선이 떠 있으면 그것만 닫는다(071 §3.1)
+      if (closeHelp()) return;
       if (view.detail) app.closeDetail();
       else if (menuOpen) menu(false);
       return;
