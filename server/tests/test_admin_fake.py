@@ -22,6 +22,7 @@ URLS = [
     "/svc/api/admin/access/addrs?window=24h&sort=requests&limit=200&offset=0",
     "/svc/api/admin/clarity",
     *[f"/svc/api/admin/clarity/history?days={d}" for d in (7, 30, 90)],
+    "/svc/api/admin/attention?days=1",  # 071 — Clarity 진단 줄
     "/svc/api/admin/attention?days=7",
     "/svc/api/admin/attention?days=7&page=landing",
 ]
@@ -47,6 +48,7 @@ for (const name of input.pages) {
       charts: v.s.charts.size,
       mark: document.getElementById('m-overview').className,
       calls: v.s.calls.length,
+      diag: v.byId.has('clarity-diag') && !v.byId.get('clarity-diag').hidden ? v.text('clarity-diag') : null,
     }
   }
 }
@@ -69,6 +71,7 @@ def test_scenarios_cover_the_new_feeds() -> None:
         "expired",
         "noaddrs",
         "many",
+        "noclarity",
     } == set(fake.SCENARIOS)
     assert set(fake.PRE_068) == {"old", "missing"}
     assert set(fake.PRE_069) == {"old", "missing", "noaddrs"}
@@ -88,6 +91,7 @@ def test_scenarios_cover_the_new_feeds() -> None:
         "expired",
         "noaddrs",
         "many",
+        "noclarity",
     ],
 )
 def test_every_fake_scenario_draws_every_card_without_errors(scenario: str) -> None:
@@ -96,7 +100,15 @@ def test_every_fake_scenario_draws_every_card_without_errors(scenario: str) -> N
     )
     for view, result in got.items():
         assert result["errors"] == [], (view, result)
-        if scenario in ("ok", "xss", "bands", "nobands", "noaddrs", "many"):
+        if scenario in (
+            "ok",
+            "xss",
+            "bands",
+            "nobands",
+            "noaddrs",
+            "many",
+            "noclarity",
+        ):
             assert result["mark"] == "mark", (
                 view,
                 result,
@@ -116,6 +128,12 @@ def test_every_fake_scenario_draws_every_card_without_errors(scenario: str) -> N
             "screens.js"
         ):  # 화면 이용 통계 시행 전(before_gate)
             assert {"t-frame", "t-panel"} <= set(result["off"]), result
+    # 071 §3.6 — 진단 줄은 Clarity 세션 0 이고 화면 이용 통계가 있는 운영 모양에서만
+    diag = got["insight.js"]["diag"]
+    if scenario == "noclarity":
+        assert diag and "세션 0" in diag and "API 토큰" in diag, diag
+    elif scenario not in ("problem", "empty"):
+        assert diag is None, (scenario, diag)
     if scenario == "ok":
         assert {v: got[f"{v}"]["charts"] for v in PAGES} == {
             "overview.js": 9,

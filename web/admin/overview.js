@@ -200,7 +200,7 @@ function drawBoxes(app) {
   });
 }
 
-// 트래픽 — 위아래 세 칸(사람 모양 페이지 · 5xx · WS 접속), 십자선 공유(둘째 y축 대신 — 066 §3.1). 점선은 비교 기간
+// 트래픽 — 위아래 세 칸(사람 모양 페이지 · 5xx · 대시보드 동시 접속), 십자선 공유(둘째 y축 대신 — 066 §3.1). 점선은 비교 기간
 function drawTraffic(app) {
   const t = trafficWindow(app);
   const w = seriesWindow(app, app.view.range, app.view.cmp);
@@ -219,11 +219,11 @@ function drawTraffic(app) {
       startMs: t.startMs,
       endMs: t.endMs,
       zoom: 'card',
-      panes: [{ title: '사람 모양 페이지', fmt: int }, { title: '5xx', fmt: int }, { title: 'WS 접속', fmt: int }],
+      panes: [{ title: '사람 모양 페이지', fmt: int }, { title: '5xx', fmt: int }, { title: '대시보드 동시 접속', fmt: int }],
       series: [
         { name: '사람 모양 페이지', mark: 'acc', type: 'bar', pane: 0, ...pages },
         { name: '5xx', mark: 'bad', type: 'bar', pane: 1, ...t.line('errors') },
-        { name: 'WS 접속', mark: 'c1', pane: 2, data: crop(ws.data, t.startMs, t.endMs), cmp: ws.cmp ? crop(ws.cmp, t.startMs, t.endMs) : null },
+        { name: '대시보드 동시 접속', mark: 'c1', pane: 2, data: crop(ws.data, t.startMs, t.endMs), cmp: ws.cmp ? crop(ws.cmp, t.startMs, t.endMs) : null },
       ],
     }), GROUP);
   });
@@ -254,15 +254,15 @@ const DETAILS = {
     panes: [{ fmt: int }],
     series: [{ name: '사람 모양 페이지', mark: 'acc', type: 'bar', ...a.hours('humanPages') }, { name: '스크립트가 돈 페이지', mark: 'c1', ...a.hours('jsViews') }],
   }), ['traffic']),
-  traffic: accessDetail('트래픽', '시간별 · 사람 모양 페이지 · 5xx · WS 접속', (app, pv, a) => {
+  traffic: accessDetail('트래픽', '시간별 · 사람 모양 페이지 · 5xx · 대시보드 동시 접속', (app, pv, a) => {
     const w = seriesWindow(app, pv.range, pv.cmp);
     const ws = w.ok ? w.line((p) => p?.wsClients) : { data: [], cmp: null };
     return {
-      panes: [{ title: '사람 모양 페이지', fmt: int }, { title: '5xx', fmt: int }, { title: 'WS 접속', fmt: int }],
+      panes: [{ title: '사람 모양 페이지', fmt: int }, { title: '5xx', fmt: int }, { title: '대시보드 동시 접속', fmt: int }],
       series: [
         { name: '사람 모양 페이지', mark: 'acc', type: 'bar', pane: 0, ...a.hours('humanPages') },
         { name: '5xx', mark: 'bad', type: 'bar', pane: 1, ...a.hours('errors') },
-        { name: 'WS 접속', mark: 'c1', pane: 2, ...ws },
+        { name: '대시보드 동시 접속', mark: 'c1', pane: 2, ...ws },
       ],
     };
   }, ['visit', 'ws']),

@@ -129,6 +129,8 @@ EXPECTED_CALLS = {
     "insight.js": [
         *FAST,
         "/svc/api/admin/clarity",
+        # 071 §3.6 — 진단 줄이 오늘 화면 이용 통계와 견준다
+        "/svc/api/admin/attention?days=1",
         "/svc/api/admin/clarity/history?days=30",
         "/svc/api/admin/access?window=30d",
     ],

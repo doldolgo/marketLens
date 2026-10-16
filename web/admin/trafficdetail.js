@@ -1,6 +1,6 @@
 // 트래픽 그림 option 과 상세 판(스펙 066 §3.2·§3.3) — 큰 추이(고른 지표)·흐름·목록 넷(전체 — 찾기·정렬·CSV)·누가·요일×시간·응답 상태·
 // WS 연결 시간. 카드의 탭·지표는 state 하나에 두고(traffic.js 가 바꾼다) 판이 같은 값을 읽는다.
-import { clean, int, isObj, kstText, list, n0, num, partOf, pct, usable } from './common.js';
+import { clean, el, int, isObj, kstText, list, n0, num, partOf, pct, usable, widthOf } from './common.js';
 import { colsOption, heatOption, sankeyOption, tip } from './charts.js';
 import { channelName, pageName } from './names.js';
 import { ACCESS_RANGES, accessCompare, accessReqs, accessWindow, seriesReqs, seriesWindow } from './models.js';
@@ -8,7 +8,7 @@ import { LISTS, WEEKDAY, WS_BUCKETS, denomOf, flowGraph, heatGrid, whoGroups } f
 
 export const state = { metric: 'visitors', tabs: { src: 'channels', geo: 'countries', ends: 'entries', what: 'paths' } };
 export const tabOf = (name) => LISTS[name].find((t) => t[0] === state.tabs[name]) ?? LISTS[name][0];
-export const METRIC_NAME = Object.freeze({ visitors: '방문자', pages: '사람 모양 페이지', now: 'WS 접속', bots: '요청 · 사람 모양 페이지', errors: '5xx' });
+export const METRIC_NAME = Object.freeze({ visitors: '방문자', pages: '사람 모양 페이지', now: '대시보드 동시 접속', bots: '요청 · 사람 모양 페이지', errors: '5xx' });
 const NO_CMP = () => ({ prev: false, week: false });
 
 // 큰 추이 — 고른 지표의 시간 그림(24시간은 시간별, 7·30일의 방문자는 날별). 점선 = 비교 기간(지금 축으로 민 것)
@@ -29,11 +29,68 @@ export function trendModel(app, range, cmp, which) {
   } else {
     const w = seriesWindow(app, range, cmp);
     out.deps = [...a.deps, ...w.deps];
-    out.series = [{ name: 'WS 접속', mark: 'acc', area: true, ...(w.ok ? w.line((p) => p?.wsClients) : { data: [], cmp: null }) }];
+    out.series = [{ name: '대시보드 동시 접속', mark: 'acc', area: true, ...(w.ok ? w.line((p) => p?.wsClients) : { data: [], cmp: null }) }];
   }
   return out;
 }
 export const trendNeeds = (range, cmp, which) => [...accessReqs(range, cmp), ...(which === 'now' ? seriesReqs(range, cmp) : [])];
+
+// '누가' 판(071 §3.4) — 묶음 넷을 위아래로: 제목 · 분모 글 · 한 줄 설명 · 항목(막대 = 묶음 안 비율, 수 내림차순, 0 은 뺌).
+// 요청 종류만 분모가 모든 요청이다(봇 포함) — 나머지 셋은 브라우저 모양 방문자(없으면 사람 모양 페이지)
+const WHO_NOTE = Object.freeze({
+  devices: '방문자가 쓴 기기 — 화면 크기가 아니라 브라우저 정보로 가른다.',
+  os: '방문자의 운영체제.',
+  browsers: '방문자의 브라우저 — 카카오톡·네이버 같은 앱 안 브라우저는 따로 센다.',
+  classes: '서버에 온 모든 요청을 보낸 쪽의 종류 — 사람 브라우저 모양만 방문자로 센다.',
+});
+export const CLASS_NOTE = Object.freeze({
+  browser: '크롬·사파리 같은 브라우저 이름표 — 위장 봇도 섞인다',
+  search: '구글·네이버 같은 검색 로봇',
+  ai: 'GPTBot·ClaudeBot 같은 AI 학습·검색 로봇',
+  preview: '카카오톡·슬랙 등에 링크를 붙였을 때 미리보기를 만드는 요청',
+  tool: 'curl·파이썬·헤드리스 브라우저·감시 도구',
+  scanner: '취약점을 찾는 요청(/.env·/wp-login.php 등)과 이름 없는 봇',
+  operator: '관리자 화면·로컬 시험에서 온 요청',
+  unknown: '브라우저 정보가 빈 요청',
+});
+export function whoSections(part) {
+  return whoGroups(part).map((g) => {
+    const items = g.items.filter((it) => n0(it.value) > 0).sort((x, y) => y.value - x.value);
+    const total = items.reduce((sum, it) => sum + it.value, 0);
+    const unit = g.note === '모든 요청' ? `모든 요청 ${int(total)}건 기준` : g.note === '방문자' ? `브라우저 모양 방문자 ${int(total)}명 기준` : `사람 모양 페이지 ${int(total)}건 기준`;
+    return {
+      id: g.id,
+      name: g.name,
+      unit,
+      note: WHO_NOTE[g.id] ?? '',
+      items: items.map((it) => ({ ...it, share: total ? (it.value / total) * 100 : null, desc: g.id === 'classes' ? (CLASS_NOTE[it.key] ?? '') : '' })),
+    };
+  });
+}
+function drawWho(box, sections) {
+  const wrap = el('div', 'who');
+  wrap.append(
+    ...sections.map((g) => {
+      const sec = el('div', 'who-group');
+      const head = el('div', 'who-head');
+      head.append(el('b', null, g.name), el('span', 'dim', g.unit));
+      const holder = el('div', 'list');
+      for (const it of g.items) {
+        const row = el('div', it.desc ? 'lrow two' : 'lrow');
+        const bar = el('i', 'bg');
+        widthOf(bar, (it.share ?? 0) / 100);
+        const name = el('span', 'nm');
+        name.append(el('span', null, it.name));
+        if (it.desc) name.append(el('small', null, it.desc));
+        row.append(bar, name, el('span', 'v', int(it.value)), el('span', 'p', it.share === null ? '' : pct(it.share, 0)));
+        holder.append(row);
+      }
+      sec.append(head, el('p', 'who-note', g.note), g.items.length ? holder : el('p', 'empty', '자료 없음'));
+      return sec;
+    }),
+  );
+  box.replaceChildren(wrap);
+}
 
 export function flowOption(flows) {
   const graph = flowGraph(flows);
@@ -147,12 +204,15 @@ export const TRAFFIC_DETAILS = Object.freeze({
   ends: listDetail('ends', '첫 · 마지막 페이지'),
   what: listDetail('what', '무엇을'),
   who: accessDetail('누가', '기기 · OS · 브라우저 · 요청 종류', (app, pv, a) => {
-    const rows = whoGroups(a.part).flatMap((g) => {
-      const total = g.items.reduce((s, it) => s + n0(it.value), 0);
-      return g.items.filter((it) => it.value > 0).map((it) => ({ group: g.name, name: it.name, value: it.value, share: total ? (it.value / total) * 100 : null }));
-    });
+    const sections = whoSections(a.part);
+    const rows = sections.flatMap((g, gi) =>
+      g.items.map((it) => ({ group: g.name, name: it.name, value: it.value, share: it.share, order: gi * 1e12 - it.value })),
+    );
     const columns = [{ key: 'group', label: '묶음' }, { key: 'name', label: '이름' }, { key: 'value', label: '수', num: true, fmt: int }, { key: 'share', label: '묶음 안 비율', num: true, fmt: (v) => pct(v, 1) }];
-    return { table: { title: '전체', columns, rows, sort: { key: 'value', dir: 'desc' }, search: ['group', 'name'] } };
+    return {
+      custom: (box) => drawWho(box, sections),
+      table: { title: '전체', columns, rows, sort: { key: 'order', dir: 'asc' }, search: ['group', 'name'] },
+    };
   }),
   heat: accessDetail('요일 × 시간', '스크립트가 돈 페이지 · 이 브라우저 시간대', (app, pv, a) => {
     const { grid, option } = heatModel(a.part);

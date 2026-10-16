@@ -7,7 +7,7 @@ import { change, deltaText } from './calc.js';
 import { blank, draw, sparkOption, timeOption } from './charts.js';
 import { SIGNALS } from './names.js';
 import { HISTORY_RANGES, historyCompare, historyReqs, historyWindow } from './models.js';
-import { CLARITY, INSIGHT_DETAILS, KPIS, PAGE_COLS, dimItems, dimsOf, groupRows, lastTwo, matchModel, matchNeeds, okBase, shade, state } from './insightdetail.js';
+import { ATTN_TODAY, CLARITY, INSIGHT_DETAILS, KPIS, PAGE_COLS, dimItems, dimsOf, groupRows, diagOf, lastTwo, matchModel, matchNeeds, okBase, shade, state } from './insightdetail.js';
 import { bar100s, bigNumber, table, tabs, topList } from './ui.js';
 import { start } from './app.js';
 
@@ -16,6 +16,17 @@ const baseOf = (app) => partOf(app.entry(CLARITY));
 function drawHead(app) {
   const part = baseOf(app);
   put('clarity-when', okBase(part) ? `마지막 받음 ${ago(part.fetchedAt)}${num(part.nextAt) !== null ? ` · 다음 ${hm(part.nextAt)}` : ''}` : '');
+}
+
+// 진단 줄(071 §3.6) — Clarity 가 0 일 때 왜 비었는지 한 줄
+function drawDiag(app) {
+  once('clarity-diag', [app.entry(CLARITY), app.entry(ATTN_TODAY)], () => {
+    const box = $('clarity-diag');
+    if (!box) return;
+    const d = diagOf(baseOf(app), partOf(app.entry(ATTN_TODAY)));
+    box.hidden = !d;
+    box.replaceChildren(...(d ? [...(d.tone ? [el('i', `shape ${d.tone}`)] : []), el('span', null, d.text)] : []));
+  });
 }
 
 // 큰 수 여섯 — 값은 최근 24시간 요약, 선은 날별 기록(점선 = 같은 길이의 앞 구간), 배지는 전날 대비
@@ -130,9 +141,10 @@ start({
   ranges: HISTORY_RANGES,
   range: '30d',
   compare: historyCompare,
-  needs: (app) => [CLARITY, ...historyReqs(app.view.range, app.view.cmp), ...matchNeeds(app.view.range)],
+  needs: (app) => [CLARITY, ATTN_TODAY, ...historyReqs(app.view.range, app.view.cmp), ...matchNeeds(app.view.range)],
   cards: [
     ['head', drawHead],
+    ['diag', drawDiag],
     ['kpis', drawKpis],
     ['signals', drawSignals],
     ['match', drawMatch],
