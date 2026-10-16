@@ -171,9 +171,11 @@ def test_head_reasons_and_score_line(flow: dict[str, Any]) -> None:
         ["crawler ok", "✓ 주소 확인된 Google 로봇"],
     ]
     assert g["flat"] == "panel flat"
+    # 074 §3.2 — '어디' 아래 화면 기록 절(맨 위 칸과 같은 차례 −1)
     assert g["panels"] == [
         ["addr-verdict", "panel addr-top"],
         ["addr-where", "panel addr-top"],
+        ["addr-replay", "panel addr-top rp-ip"],
         ["grid2", "panel"],
     ]
     assert flow["copied"] == [["66.249.66.1"], "복사됨"]

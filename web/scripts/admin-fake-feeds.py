@@ -7,7 +7,7 @@
     uv run web/scripts/admin-fake-feeds.py [--port 18064] [--scenario ok]
 
 - `web/admin` 의 정적 파일을 `/` 에 관리자 nginx 와 같은 헤더(CSP·X-Frame-Options·Cache-Control)로 주고, 화면이 부르는
-  피드 열다섯(029·011·034·035·038·039·040·062·063 + 067 대역 둘·068 날별 기록 — 068 은 #133 의 실제 응답 꼴 + 052·061 화면 이용 통계 + 069 IP 둘)과
+  피드 열여덟(029·011·034·035·038·039·040·062·063 + 067 대역 둘·068 날별 기록 — 068 은 #133 의 실제 응답 꼴 + 052·061 화면 이용 통계 + 069 IP 둘 + 073 화면 기록 셋)과
   `POST /api/refresh` 를 지어낸 값으로 답한다. 표준 라이브러리만 쓰고 127.0.0.1 에만 붙는다. 실제 서버·AWS·Clarity 를 부르지 않는다.
   화면 페이지(065)의 틀은 실제 공개 사이트를 부른다 — 덮어 보기까지 보려면 065 §4 의 시험 사본(kimptrack.com 을 로컬에 묶음)으로.
 - 경우(--scenario, 돌던 중에는 `GET /__scenario/<이름>` 로 바꾼다):
@@ -18,6 +18,9 @@
   noaddrs(069 배포 전 — IP 단위 addrs·addr 만 404, 대역은 그대로) · many(IP 1,200개 — 200행씩, IP 상세는 읽기 상한 partial).
   noclarity(071 — Clarity 는 붙어 있는데 최근 24시간 세션 0, 화면 이용 통계는 그대로 — 운영 2026-10-16 의 모양, 진단 줄이 뜬다).
   069 IP 단위(070): old·missing·noaddrs 는 404, empty 는 연결 안 됨, nobands 는 IP 없음·since 없음, xss 는 근거·도시·망 사업자·PTR 에 `<img onerror>`.
+  073·074 화면 기록(live·sessions·session): old·missing·noaddrs 는 404, empty 는 연결 안 됨, problem 은 Redis 실패 error, nobands 는 조각 없음,
+  many 는 지금 보는 중 12·지난 조각 200(상한), xss 는 IP·화면·영역 이름에 `<img onerror>`(화면 이름이 틀려 틀은 띄우지 않는다). 그 밖은 지금 보는 중
+  하나(시간이 가면 묶음이 늘어난다 — 따라 보기)·랜딩 PC·대시보드 휴대폰 대본 + 지난 조각 9. 없는 sid 는 meta null, 꼴이 틀리면 400 bad_sid.
 - 시각은 이 컴퓨터 시계다.
 """
 
@@ -496,6 +499,13 @@ def _verdict(score: int, requests: int, kind: str) -> str:
     return "bot" if score >= 60 else "suspect" if score >= 30 else "human"
 
 
+def _addr_ip(i: int) -> str:
+    """069 IP 행 i 의 주소(열한 번째마다 IPv6) — 074 화면 기록 조각도 같은 IP 를 쓴다."""
+    if i % 11 == 10:
+        return f"2001:db8:{i:x}::{i % 7 + 1:x}"
+    return f"{(i * 37) % 223 + 1}.{(i * 11) % 256}.{(i * 53) % 256}.{0 if i % 13 == 12 else (i * 7) % 254 + 1}"
+
+
 def _addrs(window: str) -> tuple[list[dict], int]:
     """069 IP 행 — 경우마다 수(ok 40 · many 1,200 · nobands 0) + 가린 행(전체 저장 전 대역 여섯) + '(없음)'. 같은 창이면 같은 값."""
     s = state["scenario"]
@@ -509,7 +519,7 @@ def _addrs(window: str) -> tuple[list[dict], int]:
         rng = random.Random(f"addr:{window}:{i}")
         kind, net, rules = ARCHETYPES[i % len(ARCHETYPES)]
         masked = i >= n
-        ip = f"2001:db8:{i:x}::{i % 7 + 1:x}" if i % 11 == 10 else f"{(i * 37) % 223 + 1}.{(i * 11) % 256}.{(i * 53) % 256}.{0 if i % 13 == 12 else (i * 7) % 254 + 1}"
+        ip = _addr_ip(i)
         if masked:
             ip = "(없음)" if i == n + 6 else f"{(i * 29) % 223 + 1}.{(i * 3) % 256}.{(i * 17) % 256}.0/24"
         if ":" in ip:
@@ -695,6 +705,231 @@ def attention(query: dict) -> dict:
     return {**body, "rows": [r for r in rows if r]}
 
 
+# 073·074 화면 기록 — 조각(sid)마다 사건 대본(t = 조각 시작부터 ms)을 짓고 2초 창마다 묶음 하나(받은 시각 at = 창 끝 + 80ms, 빈 창은 보내지
+# 않는다). 랜딩 PC(스크롤·누름·20초 숨김·화면 크기 바뀜)·대시보드 휴대폰(손가락 끌기·영역 안 스크롤·탭 바꿈 둘)·지금 보는 중 하나(시간이 가면
+# 묶음이 늘어난다 — 따라 보기) + 지난 조각들. IP 는 069 IP 행과 같은 주소.
+RP_PAGES = tuple(ATT_AREAS)
+RP_WINDOW = 2_000
+RP_CACHE: dict[tuple, list] = {}
+
+
+def _rp_move(ev: list, t0: int, t1: int, a: tuple[int, int], b: tuple[int, int], step: int = 150) -> None:
+    for t in range(t0, t1, step):
+        f = (t - t0) / (t1 - t0)
+        ev.append([t, "m", round(a[0] + (b[0] - a[0]) * f + 18 * math.sin(t / 290)), round(a[1] + (b[1] - a[1]) * f)])
+
+
+def _rp_scroll(ev: list, t0: int, frm: int, to: int, steps: int) -> None:
+    for k in range(steps):
+        ev.append([t0 + k * 200, "s", round(frm + (to - frm) * (k + 1) / steps)])
+
+
+def _rp_swipe(ev: list, t0: int, area: str, top0: int, top1: int, x: int = 200) -> None:
+    for k in range(8):
+        ev.append([t0 + k * 100, "m", x, 620 - k * 40])
+        ev.append([t0 + k * 100 + 50, "e", area, 0, top0 + (top1 - top0) * (k + 1) // 8])
+
+
+def _rp_landing() -> list:
+    """랜딩 PC 95초 — 첫 화면 누름 · 사건 표로 스크롤 · 20초 숨김 · 질문으로 스크롤 · 누름 둘 · 화면 크기 바뀜 · 위로 스크롤."""
+    ev: list = [[300, "a", "hero"]]
+    _rp_move(ev, 0, 4000, (640, 300), (720, 520))
+    ev.append([4100, "c", 720, 520, "hero"])
+    _rp_move(ev, 4200, 7000, (720, 520), (900, 400))
+    _rp_scroll(ev, 8000, 0, 900, 15)
+    ev.append([11200, "a", "events"])
+    _rp_move(ev, 11500, 15000, (600, 300), (500, 450))
+    ev.append([15200, "c", 500, 450, "events"])
+    ev += [[18000, "v", 0], [38000, "v", 1]]
+    _rp_move(ev, 38500, 41000, (500, 450), (640, 600))
+    _rp_scroll(ev, 42000, 900, 2600, 20)
+    ev.append([46200, "a", "faq"])
+    _rp_move(ev, 46500, 52000, (640, 600), (300, 350))
+    ev.append([52200, "c", 300, 350, "faq"])
+    _rp_move(ev, 52400, 58000, (300, 350), (320, 520))
+    ev.append([58200, "c", 320, 520, "faq"])
+    ev.append([65000, "r", 1280, 720])
+    _rp_move(ev, 66000, 72000, (320, 520), (1000, 120))
+    _rp_scroll(ev, 80000, 2600, 0, 15)
+    ev.append([83200, "a", "hero"])
+    _rp_move(ev, 84000, 95000, (1000, 120), (640, 360))
+    return ev
+
+
+def _rp_dash() -> list:
+    """대시보드 휴대폰 80초 — 김프 표 끌기 · 탭 누름 → 기록 탭 · 사건 로그 끌기 · 탭 누름 → 갭 탭 · 12초 숨김 · 필터 누름."""
+    ev: list = [[200, "a", "table"]]
+    _rp_swipe(ev, 2000, "table", 0, 600)
+    _rp_swipe(ev, 6000, "table", 600, 1400)
+    ev += [[10000, "m", 120, 150], [10050, "c", 120, 150, "tabs"], [10300, "p", "app-history"], [10800, "a", "list"]]
+    _rp_swipe(ev, 14000, "list", 0, 900, x=180)
+    ev += [[20000, "m", 200, 500], [20050, "c", 200, 500, "table"]]
+    _rp_scroll(ev, 24000, 0, 420, 4)
+    ev += [[30000, "m", 300, 150], [30050, "c", 300, 150, "tabs"], [30300, "p", "app-gap"], [30800, "a", "table"]]
+    _rp_swipe(ev, 36000, "table", 0, 700)
+    ev += [[45000, "v", 0], [57000, "v", 1]]
+    _rp_swipe(ev, 60000, "table", 700, 200)
+    ev += [[70000, "m", 200, 700], [70050, "c", 200, 700, "filters"], [80000, "a", "filters"]]
+    return ev
+
+
+def _rp_wander(sid: str, page: str, dur: int) -> list:
+    """그 밖 조각 — 초마다 같은 난수(조각·초)로 포인터가 떠돌고 가끔 누름·스크롤·영역 바뀜, 80초마다 20초 쉼(빈 시간). 대시보드는 5분마다 탭."""
+    ev: list = []
+    dash = page.startswith("app-")
+    tabs = [p for p in RP_PAGES if p.startswith("app-")]
+    cur = page
+    for sec in range(dur // 1000):
+        if (sec // 20) % 4 == 3:
+            continue
+        rng = random.Random(f"{sid}:{sec}")
+        base = sec * 1000
+        for k in range(rng.randint(3, 7)):
+            t = base + k * 140
+            ev.append([t, "m", round(640 + 420 * math.sin(t / 2300)), round(400 + 260 * math.cos(t / 1700))])
+        areas = ATT_AREAS[cur]
+        if sec % 7 == 3:
+            ev.append([base + 900, "c", round(640 + 420 * math.sin(base / 2300)), 400, rng.choice(areas)])
+        if sec % 10 == 0:
+            ev.append([base + 950, "a", areas[(sec // 10) % len(areas)]])
+        if sec % 13 == 5:
+            ev.append([base + 500, "s", rng.randint(0, 3000)])
+        if dash and sec % 4 == 1:
+            ev.append([base + 600, "e", "table", 0, rng.randint(0, 2000)])
+        if dash and sec and sec % 300 == 0:
+            cur = tabs[(tabs.index(cur) + 1) % len(tabs)]
+            ev.append([base + 980, "p", cur])
+    return ev
+
+
+def _rp_specs() -> list[dict]:
+    """조각 목록 — 경우마다(ok 셋 + 지난 9 · many 지금 12 + 지난 230 · nobands·empty 없음). 시각은 이 컴퓨터 시계(지금 보는 중은 시작이 25분마다 돈다)."""
+    s = state["scenario"]
+    if s in ("nobands", "empty"):
+        return []
+    now = int(time.time() * 1000)
+    live_start = now - ((now // 1000) % 1500 + 120) * 1000
+    specs = [
+        {"sid": "a1b2c3d4e5f60718", "ip": _addr_ip(1), "dev": "pc", "page": "app-spread", "w": 1440, "h": 900, "start": live_start, "dur": None, "script": "wander"},
+        {"sid": "c0ffee0000000001", "ip": _addr_ip(1), "dev": "pc", "page": "landing", "w": 1280, "h": 800, "start": now - 3 * 3_600_000, "dur": 95_000, "script": "landing"},
+        {"sid": "c0ffee0000000002", "ip": _addr_ip(2), "dev": "mobile", "page": "app-spread", "w": 390, "h": 844, "start": now - 26 * 3_600_000, "dur": 80_000, "script": "dash"},
+    ]
+    many = s == "many"
+    for k in range(230 if many else 9):
+        rng = random.Random(f"rp:{k}")
+        mobile = rng.random() < 0.4
+        specs.append({"sid": f"{0xbeef0000 + k:016x}", "ip": _addr_ip(3 + k % 37), "dev": "mobile" if mobile else "pc", "page": rng.choice(RP_PAGES),
+                      "w": 390 if mobile else 1280, "h": 844 if mobile else 800, "start": now - rng.randint(4 * 3_600_000, 13 * 86_400_000),
+                      "dur": rng.randint(20, 90 if many else 300) * 1000, "script": "wander"})
+    for k in range(11 if many else 0):  # 지금 보는 중 여럿
+        specs.append({"sid": f"{0x11ee0000 + k:016x}", "ip": _addr_ip(12 + k), "dev": "pc", "page": RP_PAGES[k % len(RP_PAGES)], "w": 1280, "h": 800,
+                      "start": now - (k + 2) * 60_000, "dur": None, "script": "wander"})
+    return specs
+
+
+def _rp_batches(spec: dict) -> list[dict]:
+    """조각의 묶음들 — 지금 보는 중은 지금까지 끝난 2초 창만. xss 는 영역·화면 이름에 `<img onerror>`."""
+    now = int(time.time() * 1000)
+    dur = spec["dur"] if spec["dur"] is not None else now - spec["start"]
+    key = (state["scenario"], spec["sid"], spec["start"], dur // RP_WINDOW)
+    if key in RP_CACHE:
+        return RP_CACHE[key]
+    script = spec["script"]
+    events = _rp_landing() if script == "landing" else _rp_dash() if script == "dash" else _rp_wander(spec["sid"], spec["page"], dur)
+    if state["scenario"] == "xss":
+        events = [[*e[:4], X] if e[1] == "c" else [e[0], e[1], X, *e[3:]] if e[1] in ("a", "e") else [e[0], "p", txt(e[2])] if e[1] == "p" else e for e in events]
+    events.sort(key=lambda e: e[0])
+    batches: list[dict] = []
+    for e in events:
+        k = e[0] // RP_WINDOW
+        if (k + 1) * RP_WINDOW + 80 > dur:
+            break
+        if not batches or batches[-1]["k"] != k:
+            batches.append({"k": k, "at": spec["start"] + (k + 1) * RP_WINDOW + 80, "seq": len(batches), "ev": []})
+        batches[-1]["ev"].append(e)
+    out = [{"at": b["at"], "seq": b["seq"], "ev": b["ev"]} for b in batches]
+    RP_CACHE[key] = out
+    return out
+
+
+def _rp_row(spec: dict) -> dict | None:
+    """073 §3.6 행 — 묶음이 하나도 없으면(막 시작) None."""
+    batches = _rp_batches(spec)
+    if not batches:
+        return None
+    flat = [e for b in batches for e in b["ev"]]
+    pages = [spec["page"]]
+    for e in flat:
+        if e[1] == "p" and e[2] not in pages:
+            pages.append(e[2])
+    now_page = next((e[2] for e in reversed(flat) if e[1] == "p"), spec["page"])
+    show = txt if state["scenario"] == "xss" else (lambda v: v)
+    return {"sid": spec["sid"], "ip": show(spec["ip"]), "dev": spec["dev"], "page": show(spec["page"]), "pages": [show(p) for p in pages],
+            "now": show(now_page), "first": batches[0]["at"], "last": batches[-1]["at"], "n": len(batches),
+            "clicks": sum(1 for e in flat if e[1] == "c"), "w": spec["w"], "h": spec["h"], "bytes": 180 * len(flat)}
+
+
+def _rp_state() -> dict | None:
+    """경우별 상태 — empty 는 연결 안 됨, problem 은 Redis 실패, 그 밖 ok."""
+    s = state["scenario"]
+    if s == "empty":
+        return {"state": "unconfigured", "code": None}
+    if s == "problem":
+        return {"state": "error", "code": "redis"}
+    return None
+
+
+def replay_live(query: dict) -> tuple[int, dict]:
+    """073 GET /admin/replay/live — last 가 60초 안인 조각, 최근 순 50개."""
+    if state["scenario"] in PRE_069:
+        return 404, {"detail": "Not Found"}
+    now = int(time.time() * 1000)
+    off_ = _rp_state()
+    if off_:
+        return 200, {**off_, "now": now, "rows": []}
+    rows = [r for r in (_rp_row(sp) for sp in _rp_specs() if sp["dur"] is None) if r and now - r["last"] <= 60_000]
+    rows.sort(key=lambda r: -r["last"])
+    return 200, {"state": "ok", "code": None, "now": now, "rows": rows[:50]}
+
+
+def replay_sessions(query: dict) -> tuple[int, dict]:
+    """073 GET /admin/replay/sessions(?ip=) — 그 IP(없으면 모든 IP)의 조각 최근 순 200개, 꼴이 아닌 ip 는 400 bad_ip."""
+    if state["scenario"] in PRE_069:
+        return 404, {"detail": "Not Found"}
+    ip_ = (query.get("ip") or [None])[0]
+    if ip_ is not None and not re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}|[0-9a-f:]*:[0-9a-f:]*", ip_):
+        return 400, {"error": {"code": "bad_ip", "message": "ip 꼴이 아니다", "detail": None}}
+    off_ = _rp_state()
+    if off_:
+        return 200, {**off_, "ip": ip_, "rows": []}
+    specs = [sp for sp in _rp_specs() if ip_ is None or sp["ip"] == ip_]
+    rows = [r for r in (_rp_row(sp) for sp in specs) if r]
+    rows.sort(key=lambda r: -(r["first"] if ip_ else r["last"]))
+    return 200, {"state": "ok", "code": None, "ip": ip_, "rows": rows[:200]}
+
+
+def replay_session(query: dict) -> tuple[int, dict]:
+    """073 GET /admin/replay/session?sid=&after= — 묶음 after 번째부터 600개, next·more. 없는 조각은 meta null, 꼴이 아닌 sid 는 400 bad_sid."""
+    if state["scenario"] in PRE_069:
+        return 404, {"detail": "Not Found"}
+    sid = (query.get("sid") or [""])[0]
+    if not re.fullmatch(r"[0-9a-f]{16}", sid):
+        return 400, {"error": {"code": "bad_sid", "message": "sid 꼴이 아니다", "detail": None}}
+    after = (query.get("after") or ["0"])[0]
+    after = int(after) if after.isdigit() else 0
+    off_ = _rp_state()
+    if off_:
+        return 200, {**off_, "meta": None, "batches": [], "next": after, "more": False}
+    spec = next((sp for sp in _rp_specs() if sp["sid"] == sid), None)
+    row = _rp_row(spec) if spec else None
+    if row is None:
+        return 200, {"state": "ok", "code": None, "meta": None, "batches": [], "next": after, "more": False}
+    batches = _rp_batches(spec)
+    part = batches[after:after + 600]
+    nxt = after + len(part)
+    return 200, {"state": "ok", "code": None, "meta": row, "batches": part, "next": nxt, "more": nxt < len(batches)}
+
+
 def feed(method: str, path: str, query: dict, body: dict) -> tuple[int, object] | None:
     if method == "POST" and path == "/api/refresh":
         if not body.get("token"):
@@ -718,6 +953,9 @@ def feed(method: str, path: str, query: dict, body: dict) -> tuple[int, object] 
         "/svc/api/admin/clarity": lambda: (200, clarity()),
         "/svc/api/admin/clarity/history": lambda: history(pick("days", "30")),
         "/svc/api/admin/attention": lambda: (200, attention(query)),
+        "/svc/api/admin/replay/live": lambda: replay_live(query),
+        "/svc/api/admin/replay/sessions": lambda: replay_sessions(query),
+        "/svc/api/admin/replay/session": lambda: replay_session(query),
     }
     return table[path]() if method == "GET" and path in table else None
 

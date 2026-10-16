@@ -16,7 +16,7 @@ const STEP = 200; // 원자료·목록 표는 200행씩
 //   needs(app, pv, arg) → [req…], model(app, pv, arg) → { part, deps, title?, unit?, note?, nav?, span?, related?,
 //   time?: { startMs, endMs, panes, series, areas, empty }, chart?(시간 축 없는 option), table?: { title, columns, rows, sort, search, onRow, file? },
 //   custom?(상자, ctx) },
-//   related?: [판 id…], accepts?(arg) }
+//   related?: [판 id…], accepts?(arg), leave?()(그 판이 닫히거나 다른 판으로 바뀔 때 — 074 재생 판이 틀·주기를 멈춘다) }
 // 그 판을 연 카드의 '?' 뜻 줄(071 §3.3) — 판 id 의 앞부분(':' 앞) = 카드 제목 id 'h-<id>' 와 같은 머리 안의 '?'. 없으면 ''
 function meaningOf(full) {
   const base = String(full ?? '').split(':')[0];
@@ -47,6 +47,7 @@ export function mountDetail(app) {
   function open(full) {
     const [p] = providerOf(full);
     if (!p) return;
+    if (id !== null && id !== full) providerOf(id)[0]?.leave?.();
     const same = id !== null && providerOf(id)[0] === p;
     if (id === null) opener = document.activeElement ?? null;
     const range = same ? pv.range : p.ranges?.includes(app.view.range) ? app.view.range : (p.range?.(app.view.range) ?? p.ranges?.[0] ?? null);
@@ -65,6 +66,7 @@ export function mountDetail(app) {
   }
   function close() {
     if (id === null) return;
+    providerOf(id)[0]?.leave?.();
     id = null;
     pv = null;
     model = null;

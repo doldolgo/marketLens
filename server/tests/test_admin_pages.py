@@ -121,10 +121,12 @@ EXPECTED_CALLS = {
         "/api/admin/aws/series?range=24h",
     ],
     "traffic.js": [*FAST, "/svc/api/admin/access?window=24h"],
-    # 070 — 기본 보기는 IP 별(069 addrs), 대역 별(067 ips)은 ?view=band
+    # 070 — 기본 보기는 IP 별(069 addrs), 대역 별(067 ips)은 ?view=band. 074 — 화면 기록(느린 묶음)·지금 보는 중(지금 묶음 5초)
     "visitors.js": [
         *FAST,
         "/svc/api/admin/access/addrs?window=24h&sort=requests&limit=200&offset=0",
+        "/svc/api/admin/replay/sessions",
+        "/svc/api/admin/replay/live",
     ],
     "insight.js": [
         *FAST,
@@ -163,6 +165,12 @@ ADDR_BACKEND = {
     "/svc/api/admin/access/addrs": (API, "/admin/access/addrs"),
     "/svc/api/admin/access/addr": (API, "/admin/access/addr"),
 }
+# 073 의 정확 일치 location 셋 — 073 서버 쪽이 nginx-admin.conf 에 더한다(같은 PR — 그 전에는 정적 `location /`)
+REPLAY_BACKEND = {
+    "/svc/api/admin/replay/live": (API, "/admin/replay/live"),
+    "/svc/api/admin/replay/sessions": (API, "/admin/replay/sessions"),
+    "/svc/api/admin/replay/session": (API, "/admin/replay/session"),
+}
 FIRST_LOAD = (
     RESPOND
     + r"""
@@ -189,13 +197,14 @@ def test_each_page_calls_its_paths_once_and_every_path_has_an_admin_route() -> N
         "/svc/api/admin/access/ips",
         "/svc/api/admin/access/ip",
         "/svc/api/admin/access/addr",
+        "/svc/api/admin/replay/session",
         "/api/refresh",
     }
-    assert paths == set(BACKEND) | set(ADDR_BACKEND)
+    assert paths == set(BACKEND) | set(ADDR_BACKEND) | set(REPLAY_BACKEND)
     for path, target in BACKEND.items():
         assert _forward(path) == target, path
-    for path, target in ADDR_BACKEND.items():
-        if _admin_route(path) != ("/",):  # 069 머지 뒤
+    for path, target in {**ADDR_BACKEND, **REPLAY_BACKEND}.items():
+        if _admin_route(path) != ("/",):  # 069·073 머지 뒤
             assert _forward(path) == target, path
 
 

@@ -2,6 +2,7 @@
 // 대역 별: 큰 수 넷 · 거르기(망 종류·나라·봇 뺌 — 주소 f=…, 찾기는 주소에 싣지 않음) · 대역 표(머리 눌러 정렬 — 요청·사람 모양 페이지·
 // 마지막은 서버가, 그 밖은 불러온 행 안에서 · 200행씩) · 행 → 대역 상세 판(시간별 요청 · 종류·상태 띠 · 브라우저 정보·경로 상위 ·
 // 첫/마지막 페이지 · 최근 요청 100줄 펼치기 · ◀ 이전/다음 ▶). 망 종류·나라 거르기는 두 보기가 같이 쓴다.
+// 두 보기 모두 화면 기록(074 — replaycards.js): 지금 보는 중(지금 묶음 5초 — page.live)·화면 기록(느린 60초), 행 → 재생 판(replaysheet.js).
 import { $, button, el, int, num, once, partOf, pct, pressed, put, req, stateWord, tag, usable, widthOf } from './common.js';
 import { sortRows } from './calc.js';
 import { countryLabel, netName } from './names.js';
@@ -10,6 +11,8 @@ import { VERDICT_NAME } from './addrmodel.js';
 import { RECENT_COLUMNS, addrDetail, fillUsage, hourlyTime, recentMore, usageHolder } from './addrdetail.js';
 import { addrOrder, addrsOf, drawAddrFilters, drawAddrKpis, drawAddrTable, drawSince, verdictOK, wireAddrs } from './addrs.js';
 import { bigNumber, sparkSvg, table } from './ui.js';
+import { drawLive, drawSessions, replayNeeds, wireReplayCards } from './replaycards.js';
+import { replayDetail, wireReplay } from './replaysheet.js';
 import { start } from './app.js';
 
 // 화면 상태(주소 밖) — 찾기 글자(대역이 주소·접속 기록에 남지 않게), 불러온 쪽 수, 정렬
@@ -208,6 +211,8 @@ function wire(app) {
     app.refresh();
   });
   for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => app.setParams({ view: b.dataset.view }));
+  wireReplayCards(app);
+  wireReplay();
 }
 
 const FILTER_NAME = {
@@ -226,7 +231,8 @@ start({
   params: { view: VIEWS },
   filters: { net: (v) => NETS.includes(v), country: (v) => /^[A-Z]{2}$/.test(v), bots: (v) => v === '0', verdict: verdictOK, masked: (v) => v === '0' },
   filterName: (k, v) => FILTER_NAME[k]?.(v) ?? [k, v],
-  needs: (app) => (isBand(app) ? reqsOf(app) : addrsOf(app)),
+  needs: (app) => [...(isBand(app) ? reqsOf(app) : addrsOf(app)), ...replayNeeds()],
+  live: true,
   cards: [
     ['view', drawView],
     ['count', onlyIn(true, drawKpis)],
@@ -235,9 +241,12 @@ start({
     ['afilters', onlyIn(false, drawAddrFilters)],
     ['bands', onlyIn(true, drawTable)],
     ['addrs', onlyIn(false, drawAddrTable)],
+    ['rplive', drawLive],
+    ['replay', drawSessions],
   ],
   details: {
     addr: addrDetail(addrOrder),
+    replay: replayDetail,
     ip: {
       title: 'IP 대역',
       accepts: validBand,
