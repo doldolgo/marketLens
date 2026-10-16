@@ -1,8 +1,10 @@
 // 화면 재생의 값 계산(스펙 074 §3.3·§3.5) — 073 피드의 묶음을 서버 시계에 맞춘 사건으로 펴고, 빈 시간 건너뛰기 시계·한 시각의 틀 상태
 // (틀로 보낼 메시지)·시간 막대 표시·사건 목록·카드 행을 만든다. DOM 없음(node 시험이 바로 부른다).
 // 사건(073 §3.2): [t,"m",x,y] · [t,"c",x,y,영역] · [t,"s",y] · [t,"e",영역,n,top] · [t,"r",w,h] · [t,"v",0|1] · [t,"p",화면] · [t,"a",영역].
-import { isObj, list, num, own, req } from './common.js';
-import { SCREEN_PAGES, isDashboard, validArea } from './screensmodel.js';
+import { ago, clean, int, isObj, kstText, list, num, own, pad, req } from './common.js';
+import { pageName } from './names.js';
+import { DEVICE_NAME, SCREEN_PAGES, isDashboard, validArea } from './screensmodel.js';
+import { areaName } from './screensnames.js';
 
 export const IDLE_GAP_MS = 5_000; // 빈 시간 건너뛰기 — 사건 사이 이보다 긴 틈을
 export const IDLE_PLAY_MS = 1_000; // 이 길이로 재생한다
@@ -252,3 +254,105 @@ export const lagSec = (latestAt, sinceMs, T) => Math.max(0, Math.round((latestAt
 
 // 묶음 1MB·3,600개 상한에 닿아 끝이 잘린 조각(§3.5 '앞부분만') — 피드가 truncated 를 주면 그것, 아니면 묶음 수·바이트로 어림
 export const truncated = (meta) => meta?.truncated === true || (num(meta?.n) ?? 0) >= CUT_BATCHES || (num(meta?.bytes) ?? 0) >= CUT_BYTES;
+
+// --- 글 ------------------------------------------------------------------------------------------
+
+export const clockText = (ms) => (num(ms) === null ? '--:--:--' : kstText(ms, true).slice(11));
+export const mss = (ms) => {
+  const s = Math.max(0, Math.floor((num(ms) ?? 0) / 1000));
+  return `${Math.floor(s / 60)}:${pad(s % 60)}`;
+};
+// 조절 줄 글 — HH:MM:SS KST · 경과 m:ss / 전체 m:ss
+export const timeText = (tl, T) => `${clockText(T)} KST · 경과 ${mss(T - tl.start)} / 전체 ${mss(tl.end - tl.start)}`;
+export const devName = (dev) => own(DEVICE_NAME, dev) ?? (typeof dev === 'string' && dev ? clean(dev) : '–');
+// 지나간 화면들(073 — 배열, 쉼표 글자도 받는다)
+export const pagesOf = (row) => (Array.isArray(row?.pages) ? row.pages : typeof row?.pages === 'string' ? row.pages.split(',') : []).filter((p) => typeof p === 'string' && p);
+
+// 시간 막대 — 0~1 자리: 누름(점)·화면 바뀜(눈금)·숨김 구간([자리, 폭])
+export function barMarks(tl) {
+  const span = tl.end - tl.start;
+  const at = (T) => (span > 0 ? (T - tl.start) / span : 0);
+  return {
+    clicks: tl.clicks.map((c) => at(c.at)),
+    pages: tl.chunks.slice(1).map((c) => at(c.from)),
+    hides: tl.hides.map(([a, b]) => [at(a), span > 0 ? (b - a) / span : 0]),
+  };
+}
+
+// 한 번 굴림 묶기 — 열쇠(문서 하나 · 영역 안 요소마다)별로 사건 사이 1초 안이면 한 번, 그 전 값에서 마지막 값까지 300px 이상만
+function scrollRuns(events, keyOf, valueOf, rowOf) {
+  const out = [];
+  const before = new Map(); // 열쇠 → 이번 굴림 전 값(처음은 0 — 막 연 페이지)
+  const open = new Map();
+  const close = (k) => {
+    const r = open.get(k);
+    open.delete(k);
+    if (Math.abs(r.to - r.from) >= BIG_SCROLL_PX) out.push(rowOf(r));
+  };
+  for (const e of events) {
+    const k = keyOf(e);
+    if (open.has(k) && e.at - open.get(k).end > SCROLL_RUN_MS) close(k);
+    if (!open.has(k)) open.set(k, { at: e.at, from: before.get(k) ?? 0, to: 0, end: 0, e });
+    const r = open.get(k);
+    r.to = valueOf(e);
+    r.end = e.at;
+    before.set(k, r.to);
+  }
+  for (const k of [...open.keys()]) close(k);
+  return out;
+}
+
+// 사건 목록(§3.3) — 움직임은 빼고 누름·스크롤 크게(문서·영역 안)·화면 바뀜·숨김/보임·보던 영역. 영역은 071 이름표(모르면 id). 시각 순
+export function eventRows(tl) {
+  const where = (T, id) => (id ? areaName(pageAt(tl, T), id) : '–');
+  const row = (at, kind, name, detail) => ({ at, kind, name, detail, time: clockText(at) });
+  const move = (r) => `${r.to > r.from ? '아래로' : '위로'} ${int(Math.abs(r.to - r.from))}px`;
+  const rows = [];
+  for (const e of tl.events) {
+    if (e.k === 'c') rows.push(row(e.at, 'c', '누름', where(e.at, e.area)));
+    else if (e.k === 'p') rows.push(row(e.at, 'p', '화면 바뀜', pageName(e.page)));
+    else if (e.k === 'v') rows.push(row(e.at, 'v', e.on ? '보임' : '숨김', e.on ? '탭이 다시 보임' : '탭을 숨김'));
+    else if (e.k === 'a') rows.push(row(e.at, 'a', '보던 영역', where(e.at, e.area)));
+  }
+  rows.push(...scrollRuns(tl.scrolls, () => 's', (e) => e.y, (r) => row(r.at, 's', '스크롤', move(r))));
+  const inner = tl.events.filter((e) => e.k === 'e');
+  rows.push(...scrollRuns(inner, (e) => `${e.area}|${e.n}`, (e) => e.top, (r) => row(r.at, 'e', '영역 안 스크롤', `${where(r.at, r.e.area)} · ${move(r)}`)));
+  return rows.sort((a, b) => a.at - b.at);
+}
+// 지금 시각의 목록 줄(at ≤ T 인 마지막, 없으면 -1)
+export const rowAt = (rows, T) => lastIndex(rows, T);
+
+// --- 카드 행(§3.1·§3.2) -------------------------------------------------------------------------------
+
+const lenSec = (r) => (num(r?.first) !== null && num(r?.last) !== null ? Math.max(0, (r.last - r.first) / 1000) : null);
+// 지금 보는 중 — IP · 지금 화면 · 기기 · 머문 시간(last − first) · 마지막 움직임 'n초 전'(서버 now 기준)
+export function liveRows(rows, now) {
+  return list(rows)
+    .filter(isObj)
+    .map((r) => ({
+      sid: r.sid,
+      open: validSid(r.sid),
+      ip: clean(r.ip ?? '–'),
+      now: pageName(typeof r.now === 'string' && r.now ? r.now : (r.page ?? '–')),
+      dev: devName(r.dev),
+      stay: lenSec(r),
+      last: num(r.last),
+      ago: ago(num(r.last), now),
+    }));
+}
+// 화면 기록 — 시작 KST · IP · 지나간 화면들 · 기기 · 길이 · 누름 수
+export function sessionRows(rows) {
+  return list(rows)
+    .filter(isObj)
+    .map((r) => ({
+      sid: r.sid,
+      open: validSid(r.sid),
+      first: num(r.first),
+      start: num(r.first) === null ? '–' : kstText(r.first, true).slice(5),
+      ip: clean(r.ip ?? '–'),
+      pages: (pagesOf(r).length ? pagesOf(r) : [r.page ?? '–']).map((p) => pageName(p)).join(' → '),
+      dev: devName(r.dev),
+      len: lenSec(r),
+      clicks: num(r.clicks),
+    }));
+}
