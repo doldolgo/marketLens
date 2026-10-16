@@ -27,21 +27,23 @@ export function lastTwo(rows, pick) {
 // 요약의 값은 마지막 성공(040 — error 여도 값이 있으면 그린다)
 export const okBase = (part) => usable(part, 'numOfDays');
 
-// 진단 줄(071 §3.6) — Clarity 최근 24시간 세션이 0 일 때만. 화면 이용 통계(052, days=1 = 오늘 KST)는 Clarity 와 같은 동의로 돈다 —
-// 그 페이지 보기가 있는데 Clarity 가 0 이면 Clarity 쪽에서 못 받은 것. 어느 피드든 ok 가 아니면 줄을 숨긴다(null)
+// 안내 줄(071 §3.6) — Clarity 최근 24시간 세션이 0 일 때만. Clarity 요약은 받은 시각(fetchedAt) 앞 24시간의 한 장면이고(6시간마다,
+// 이 페이지를 열 때만 다시 받는다), 화면 이용 통계(052, days=1 = 오늘 KST)는 시각 없는 날짜별 합이라 둘을 바로 견주지 못한다 —
+// 어긋났다고 단정하지 않고 받은 시각과 두 수를 그대로 알린다. 어느 피드든 ok 가 아니면 줄을 숨긴다(null)
 export const ATTN_TODAY = req('attention', { days: 1 });
 export function diagOf(clarity, attn) {
   if (clarity?.state !== 'ok' || clarity.why || attn?.state !== 'ok' || attn.why) return null;
   const sessions = num(clarity.traffic?.sessions);
   if (sessions === null || sessions > 0) return null;
   const pv = list(attn.rows).reduce((sum, r) => sum + n0(r?.pv), 0);
+  const when = kstText(clarity.fetchedAt);
   if (pv > 0) {
     return {
-      tone: 'warn',
-      text: `Clarity 가 최근 24시간 세션 0 을 돌려줬다. 같은 동의로 도는 화면 이용 통계는 오늘 페이지 보기 ${int(pv)}회 — 동의한 방문이 있었는데 Clarity 에 안 잡혔다. Clarity 열기에서 최근 녹화가 있는지, API 토큰이 이 사이트 프로젝트의 것인지 확인한다.`,
+      tone: null,
+      text: `Clarity 가 ${when} 에 받은 최근 24시간 세션은 0 이다 — 그 뒤의 방문은 다음 받기(6시간마다, 이 페이지를 열 때)에 들어간다. 같은 동의로 도는 화면 이용 통계는 오늘 페이지 보기 ${int(pv)}회(시각 없는 날짜별 합이라 Clarity 의 24시간과 바로 견주지 못한다). 지난 기록은 Clarity 열기에서 본다.`,
     };
   }
-  return { tone: null, text: '최근 동의한 방문이 없다(Clarity 세션 0 · 화면 이용 통계 0) — 값이 비는 게 정상이다. 동의한 방문자가 있어야 쌓인다.' };
+  return { tone: null, text: `Clarity 가 ${when} 에 받은 최근 24시간 세션 0 · 오늘 화면 이용 통계 0 — 동의한 방문이 없어 비는 게 정상이다. 지난 기록은 Clarity 열기에서 본다.` };
 }
 
 // 맞대기 — Clarity 세션(동의한 방문자만) vs 우리 방문자(서버 기록, 날마다 셈). 둘의 비 = 동의 비율의 어림

@@ -135,7 +135,7 @@ def test_every_fake_scenario_draws_every_card_without_errors(scenario: str) -> N
     # 071 §3.6 — 진단 줄은 Clarity 세션 0 이고 화면 이용 통계가 있는 운영 모양에서만
     diag = got["insight.js"]["diag"]
     if scenario == "noclarity":
-        assert diag and "세션 0" in diag and "API 토큰" in diag, diag
+        assert diag and "세션은 0" in diag and "토큰" not in diag, diag
     elif scenario not in ("problem", "empty"):
         assert diag is None, (scenario, diag)
     if scenario == "ok":
