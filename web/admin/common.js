@@ -2,14 +2,14 @@
 // 빌드 없음: 브라우저가 ES 모듈로 바로 읽는다(CSP script-src 'self' — oxlint·vite 대상이 아니다, 029·036).
 // 차례: 경로·요청 → 글자·수·시각 도구 → DOM 도구 → 부분 상태 표 → 다시 그리기 판단.
 // 보안: 서버·방문자가 정한 글자는 textContent·title 로만 넣는다(innerHTML 없음). 주소를 쓰는 곳은 app.js(그 페이지의 고정
-// 주소)·rules.js 의 jump()(고정 표)·이 파일의 download()(브라우저가 만든 Blob 주소)뿐이다.
+// 주소)·rules.js 의 jump()(고정 표)·이 파일의 download()(브라우저가 만든 Blob 주소)·clarityLink()(Clarity 출처·허용 글자만, 077)뿐이다.
 
 export const FAST_MS = 10_000; // 빠른 묶음 — 029 의 네 경로, 보이는 동안만
 export const SLOW_MS = 60_000; // 느린 묶음 — 그 페이지가 쓰는 나머지, 보이는 동안만
 export const LIVE_MS = 5_000; // 지금 묶음 — 074 '지금 보는 중' 하나(page.live 인 페이지만), 보이는 동안만
 const XHR = Object.freeze({ 'X-Requested-With': 'XMLHttpRequest' });
 
-// 관리자 nginx 분기로 가는 경로(029·034·035·063 — 067 의 ips·ip, 068 의 history, 069 의 addrs·addr, 073 의 replay 셋은 그 스펙이 정확 일치 location 을 더한다).
+// 관리자 nginx 분기로 가는 경로(029·034·035·063 — 067 의 ips·ip, 068 의 history, 069 의 addrs·addr, 073 의 replay 셋, 077 의 recordings 는 그 스펙이 정확 일치 location 을 더한다).
 // 화면이 부르는 곳은 이 표와 즉시 갱신(POST /api/refresh)뿐이다
 export const PATHS = Object.freeze({
   collector: '/api/health',
@@ -26,6 +26,7 @@ export const PATHS = Object.freeze({
   addr: '/svc/api/admin/access/addr',
   clarity: '/svc/api/admin/clarity',
   history: '/svc/api/admin/clarity/history',
+  recordings: '/svc/api/admin/clarity/recordings',
   attention: '/svc/api/admin/attention',
   replayLive: '/svc/api/admin/replay/live',
   replaySessions: '/svc/api/admin/replay/sessions',
@@ -214,6 +215,23 @@ export function download(name, text) {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+// Clarity 재생 링크(077 §3.3) — 피드가 준 주소는 Clarity 출처로 시작하고 허용 글자만·500자 이하일 때만 쓴다(서버 검사를 한 번 더).
+// 같은 탭·noreferrer(036 §3.8). 못 쓰는 주소면 null
+const CLARITY_ORIGIN = 'https://clarity.microsoft.com/';
+const CLARITY_REST = /^[A-Za-z0-9/_.~%-]*(?:\?[A-Za-z0-9=&_.~%:-]*)?$/;
+export const clarityHref = (v) =>
+  typeof v === 'string' && v.length <= 500 && v.startsWith(CLARITY_ORIGIN) && CLARITY_REST.test(v.slice(CLARITY_ORIGIN.length)) ? v : null;
+export function clarityLink(text, v) {
+  const href = clarityHref(v);
+  if (href === null) return null;
+  const link = el('a', 'out', text);
+  link.setAttribute('href', href);
+  link.setAttribute('rel', 'noreferrer');
+  // 표 행 안에서 눌러도 행(상세 판 열기)은 움직이지 않는다
+  for (const type of ['click', 'keydown']) link.addEventListener(type, (ev) => ev.stopPropagation());
+  return link;
 }
 
 export function notice(text) {
