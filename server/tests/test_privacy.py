@@ -124,7 +124,7 @@ SHARED_SENTENCES = (
     "만 14세 미만은 동의하지 마세요.",
 )
 # 바로 앞 판의 동의 상자에서 바뀐 문장 — 사본은 동의 절에 세 칸의 알릴 사항만 남겨(037 §3.3) 이 문장들이 없어 대조표의
-# '동의 관리' 행 '이전 판' 칸을 여기와 맞춘다(얼려 둔 글자). 072(v7) — 질문에 화면 이동 기록, 저장 규칙에 그 이름을 더했다
+# '동의 관리' 행 '이전 판' 칸을 여기와 맞춘다(얼려 둔 글자). 076(v7) — 질문에 화면 이동 기록, 저장 규칙에 그 이름을 더했다
 PREVIOUS_CONSENT_TEXT: tuple[str, ...] = (
     "랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? "
     "Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 또 KimpTrack 서버가 모든 페이지(랜딩·대시보드·처리방침·검색어 페이지)에서 "
@@ -140,7 +140,7 @@ ELEMENT_ITEMS = (
     "영역 안의 요소(단추·링크·탭·입력칸·표의 코인 행 같은 것 — 입력한 글자·화면의 숫자는 빼고)별 클릭 수·마우스를 올려 둔 "
     "시간·화면에 보인 시간, 페이지를 떠날 때 보던 영역과 그 페이지에서 내려온 깊이"
 )
-# 072 §3.3 — 수집·이용 칸 항목 끝(KimpTrack 서버 통계 뒤)의 화면 이동 기록 — 033 의 동의 창에도 같은 글
+# 076 §3.3 — 수집·이용 칸 항목 끝(KimpTrack 서버 통계 뒤)의 화면 이동 기록 — 033 의 동의 창에도 같은 글
 REPLAY_ITEMS = (
     "페이지를 열 때마다 화면 이름·기기 종류·화면 크기, 마우스·손가락의 위치와 움직임, 누른 위치와 그곳의 영역 이름, 스크롤 위치, "
     "가장 크게 보던 영역, 탭을 숨기거나 다시 연 일·대시보드 탭을 바꾼 일과 그 시각, IP 주소(입력한 글자·누른 키·화면의 글자와 숫자는 빼고)"
@@ -292,7 +292,7 @@ NOTICE_DIGESTS = {
     "2026-10-01": "7ee34255a0120818e76ffc210a12eb5cd556773eb6b06462a62cebb4a4bc6bc1",
     "2026-10-09": "a32da2cb07e8dd922855849ed03198d918a7c36891b7339a65d830941705cb9b",  # 051 — 화면 영역 이용 통계(KimpTrack 서버)
     "2026-10-09-2": "738a2acbd578635e944e5c2e040911c8621616c5852b2c7b3a60a65b3ec7ede5",  # 060 — 화면 요소·떠날 때 보던 곳·깊이
-    "2026-10-16": "7f7b822e5c299c40db5516b773d8a3007a9a39b9978dde07181653cb8f43e2a2",  # 072 — 화면 이동 기록(14일·IP)
+    "2026-10-16": "7f7b822e5c299c40db5516b773d8a3007a9a39b9978dde07181653cb8f43e2a2",  # 076 — 화면 이동 기록(14일·IP)
 }
 # 바로 앞 판 — 이 판의 동의로는 켜지 않고 다시 묻는다 (060 §3.6 — 2026-10-09 의 granted 는 '정하지 않음'). 판 값의 글자 순이
 # 아니라 NOTICE_DIGESTS 에 더한 차례로 고른다
@@ -339,7 +339,7 @@ CONSENT_CASES = [
 # fmt: on
 # §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(동의 상자의 국외 이전 칸과 같은 이름) + 근거
 TRANSFER_TERMS = CONSENT_CELLS[2][2] | {"근거"}
-# 072 §3.3 — 맨 위 변경 안내 상자가 말하는 것(새 날의 시행 문장, 바뀌는 것 하나 — 화면 이동 기록, 동의를 다시 묻는다)
+# 076 §3.3 — 맨 위 변경 안내 상자가 말하는 것(새 날의 시행 문장, 바뀌는 것 하나 — 화면 이동 기록, 동의를 다시 묻는다)
 CHANGE_NOTICE_SAYS = (
     "그 전날까지는 2026년 10월 14일 판(이날 두 번째 판)을 따릅니다",
     "바뀌는 것:",
@@ -356,7 +356,7 @@ CHANGE_NOTICE_SAYS = (
     "이미 동의한 방문자에게도 다시 묻고",
     "12절 대조표",
 )
-# 072 — 변경 안내의 링크 둘: 바로 앞 판(10월 14일 두 번째 판)과 대조. 그 앞 판들은 12절 이력에서 잇는다
+# 076 — 변경 안내의 링크 둘: 바로 앞 판(10월 14일 두 번째 판)과 대조. 그 앞 판들은 12절 이력에서 잇는다
 CHANGE_NOTICE_LINKS = (
     'href="/privacy-20261014-2.html"',
     'href="#s12"',
@@ -370,7 +370,7 @@ CHANGE_RULE = (
 EFFECTIVE_SENTENCE = (
     "부터 시행하며, 그 전날까지는 2026년 10월 14일 판(이날 두 번째 판)을 따릅니다."
 )
-NTH_TODAY = ""  # 072 — 새 날의 판이라 머리 시행일 뒤 차례가 없다
+NTH_TODAY = ""  # 076 — 새 날의 판이라 머리 시행일 뒤 차례가 없다
 V7_HISTORY = (
     " — 화면 이동 기록(KimpTrack 서버, 동의한 방문자만 — 마우스 위치·누른 곳·스크롤과 IP 주소, 14일, 관리자 화면에서 다시 보기)"
     "·동의 안내 판 올림"
@@ -529,7 +529,7 @@ ARCHIVED_TEXT = {
     "privacy-20261009-2.html": "16d05bd15d313fb5fd620de7f94bb4ba3951cf9b88faac38f4d902d8e0cc52d6",
     # 069 — 2026년 10월 14일 먼저 게시한 판(v5 — 067)
     "privacy-20261014.html": "10964bbe2c0cb783021d3cac9a283bed58bc1f5a8201bb235b02215ac3ce2738",
-    # 072 — 2026년 10월 14일 두 번째 판(v6 — 069)
+    # 076 — 2026년 10월 14일 두 번째 판(v6 — 069)
     "privacy-20261014-2.html": "91d4c67d02af4c5b8500091be57abc7bece2e35712e6c6343066cb1817adc9c5",
 }
 # 사본마다 그 판의 동의 안내 판 — 10월 11일 판은 시행 전에 바뀌어 안내 판을 올리지 않았다
@@ -978,7 +978,7 @@ def test_consent_box_splits_three_consents_before_the_buttons() -> None:
     # 060 §3.3-4 — 항목 끝은 'KimpTrack 서버:' 뒤에 2절과 같은 항목(요소·떠날 때 보던 곳·깊이) — Clarity 항목 뒤에 둔다
     kimptrack = collect["항목"].split(". KimpTrack 서버: ")
     assert len(kimptrack) == 2 and "sessionStorage _cltk" in kimptrack[0]
-    # 072 §3.3 — 그 뒤에 화면 이동 기록의 항목(2절과 같은 낱말 — 입력한 글자·누른 키·화면 글자는 빼고)
+    # 076 §3.3 — 그 뒤에 화면 이동 기록의 항목(2절과 같은 낱말 — 입력한 글자·누른 키·화면 글자는 빼고)
     stats, replay = kimptrack[1].split(". KimpTrack 서버의 화면 이동 기록: ")
     assert "1초 이상 보였는지" in stats and stats.endswith(ELEMENT_ITEMS)
     assert replay == REPLAY_ITEMS
@@ -1144,7 +1144,7 @@ def test_effective_date_ties_the_four_times_and_the_history() -> None:
     times = re.findall(r'<time datetime="([^"]*)">([^<]*)</time>', html)
     assert times == [(EFFECTIVE, _korean(EFFECTIVE))] * 4
     tag = f'<time datetime="{EFFECTIVE}">'
-    # 같은 날 둘째 판이면 머리 시행일 뒤에 차례를 적는다(060 꼴 — 069). 072 는 새 날이라 차례가 없다
+    # 같은 날 둘째 판이면 머리 시행일 뒤에 차례를 적는다(060 꼴 — 069). 076 는 새 날이라 차례가 없다
     assert (
         f'<p class="meta">시행일 {tag}{_korean(EFFECTIVE)}</time>{NTH_TODAY}</p>'
         in html
@@ -1159,7 +1159,7 @@ def test_effective_date_ties_the_four_times_and_the_history() -> None:
     items = _history(html)
     assert items[0].startswith(tag)
     assert _text(items[0]) == f"{_korean(EFFECTIVE)}{V7_HISTORY}"
-    # 같은 날 두 번째 판(v6 — 069)의 항목은 날짜 뒤 차례와 그 판의 사본 링크(072 — `-2`)
+    # 같은 날 두 번째 판(v6 — 069)의 항목은 날짜 뒤 차례와 그 판의 사본 링크(076 — `-2`)
     v6 = [i for i in items[1:] if _text(i).startswith(V6_HISTORY)]
     assert len(v6) == 1 and 'href="/privacy-20261014-2.html">그 판 보기</a>' in v6[0]
     # 같은 날 먼저 게시한 판(v5 — 067)의 항목은 차례 없이 그 판의 사본 링크(`privacy-20261014.html`)
@@ -1194,7 +1194,7 @@ def test_effective_date_ties_the_four_times_and_the_history() -> None:
 
 
 def test_change_notice_comes_first_and_names_what_changes() -> None:
-    """맨 위 변경 안내 — 머리 시행일 줄 바로 아래, 소개 문단 앞. 시행 문장·바뀌는 것 하나·동의를 다시 물음·링크 둘 (067 §3.4·072 §3.3)."""
+    """맨 위 변경 안내 — 머리 시행일 줄 바로 아래, 소개 문단 앞. 시행 문장·바뀌는 것 하나·동의를 다시 물음·링크 둘 (067 §3.4·076 §3.3)."""
     html, page = _read(PUBLIC / "privacy.html")
     assert "변경 안내" in page.h2
     start = html.index('id="changes"')
@@ -1281,7 +1281,7 @@ def test_body_sections_state_the_screen_use_facts() -> None:
     assert len(re.findall(r"<li>", devices)) == 5 and "영역" not in devices
 
 
-# 072 §3.2 — 본문 절마다 화면 이동 기록(KimpTrack 서버)의 사실 — 받는 것·받지 않는 것·IP·14일·쓰임(재생·따라 보기)·근거·지우는 길
+# 076 §3.2 — 본문 절마다 화면 이동 기록(KimpTrack 서버)의 사실 — 받는 것·받지 않는 것·IP·14일·쓰임(재생·따라 보기)·근거·지우는 길
 REPLAY_FACTS = {
     "glance": ("화면 이동 기록", "14일"),
     "consent-title": (
@@ -1316,7 +1316,7 @@ REPLAY_FACTS = {
 
 
 def test_body_sections_state_the_replay_facts() -> None:
-    """072 §3.2·§3.3 — 화면 이동 기록을 동의 상자·한눈에 보기·1·2·3·7·8·9절이 빠짐없이 말하고, 2절 소제목은 화면 이용 통계와
+    """076 §3.2·§3.3 — 화면 이동 기록을 동의 상자·한눈에 보기·1·2·3·7·8·9절이 빠짐없이 말하고, 2절 소제목은 화면 이용 통계와
     Clarity 사이, 서버 상수 `PRIVACY_V7_EFFECTIVE` 는 이 판의 시행일이다."""
     html, _ = _read(PUBLIC / "privacy.html")
     body = _without_diff(html)
@@ -1365,7 +1365,7 @@ def test_diff_table_rows_match_both_versions() -> None:
         assert new in restored, (section, new)
         restored = restored.replace(new, "" if added else old)
     assert " ".join(restored.split()) == " ".join(expected.split())
-    # 072 §3.3 — 바뀐 문장마다 한 행: 동의 상자 여섯(질문·저장 규칙·수집·이용 칸의 항목·목적·보유 기간·칸 끝 줄)과 본문 —
+    # 076 §3.3 — 바뀐 문장마다 한 행: 동의 상자 여섯(질문·저장 규칙·수집·이용 칸의 항목·목적·보유 기간·칸 끝 줄)과 본문 —
     # 화면 이동 기록을 더한 곳마다. 지운 문장은 없다
     names = {row[0]: row for row in rows}
     assert list(names) == [
