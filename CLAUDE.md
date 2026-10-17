@@ -47,7 +47,7 @@ marketlens/
       features/<name>/        기능 1개 = 폴더 1개: Tab.tsx api.ts types.ts
       App.tsx main.tsx
     admin/                    관리자 화면(페이지 여섯·왼쪽 내비·공통 모듈·아이콘 묶음 icons.svg·vendor/ECharts, 빌드 없음 — 기능 폴더 규칙의 예외, 029·064·065·066)
-    scripts/                  랜딩 글꼴 서브셋 스크립트·글자 목록·관리자 화면 가짜 피드 서버(uv run, 빌드에 들지 않음 — 022·064·065·066)
+    scripts/                  랜딩 글꼴 서브셋 스크립트·글자 목록·아이콘 PNG·ICO 만들기·미리보기 그림 원본·관리자 화면 가짜 피드 서버(uv run, 빌드에 들지 않음 — 022·064·065·066)
     nginx-admin.conf          관리자 server(:8081, 게시 안 함) 템플릿 — 전체 `/api` 분기·교차 사이트 403·접속 기록(029)
   caddy/                      Caddyfile — serve 박스 TLS 앞단·접속 로그 (디렉터리째 바인드, 023·027)
   ops/                        박스에 올리는 설정(앱 코드 아님) — cloudwatch/(에이전트 JSON)·canary/(Lambda 점검 스크립트) (027)
