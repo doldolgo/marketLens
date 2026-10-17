@@ -106,6 +106,8 @@ export interface HealthExchange {
   successRate1h: number
   openOutage: HealthOutage | null
   lastError: HealthLastError | null
+  /** 24시간 안의 짧은 재연결(5초 이하 network) 수 — outages 에서는 접는다 (080 §3.2). */
+  reconnects24h: number
 }
 
 export interface HealthData {
@@ -114,7 +116,7 @@ export interface HealthData {
   successRate1h: number
   /** 거래소 3곳 고정 순서 upbit·bithumb·binance. */
   exchanges: HealthExchange[]
-  /** 24시간 구간 전부(진행 중 포함), startedAt 내림차순. */
+  /** 24시간 구간(진행 중 포함, 짧은 재연결 제외 — 080), startedAt 내림차순. */
   outages: HealthOutage[]
 }
 

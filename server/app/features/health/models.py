@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 RATE_1H = "successRate1h"
+RECONNECTS_24H = "reconnects24h"
 
 
 class _Out(BaseModel):
@@ -46,6 +47,8 @@ class ExchangeHealthOut(_Out):
     success_rate_1h: float = Field(serialization_alias=RATE_1H)
     open_outage: OutageOut | None
     last_error: LastErrorOut | None
+    # 080 §3.2 — 24시간 안의 닫힌 짧은 재연결 수. 목록(outages)에서는 접는다
+    reconnects_24h: int = Field(serialization_alias=RECONNECTS_24H)
 
 
 class CollectHealthResponse(_Out):

@@ -20,6 +20,8 @@ from app.core.streams.hyperliquid_perp import (
     INFO_URL,
     PING_CHECK_INTERVAL,
     PONG_TIMEOUT,
+    ROTATE_AFTER,
+    ROTATE_RETRY,
     SHARDS,
     SUBSCRIBE_INTERVAL,
     SUBSCRIPTION_LIMIT,
@@ -153,20 +155,28 @@ def rest(
 
 
 class HlSleeps(Sleeps):
-    """핑 점검 간격·pong 대기는 표를 줄 때만 진행한다 — 가짜 sleep 이 즉시 돌아오면 핑 루프가 폭주한다."""
+    """핑 점검 간격·pong 대기·교대 타이머는 표를 줄 때만 진행한다 — 가짜 sleep 이 즉시 돌아오면 핑 루프가 폭주하고
+    교대가 곧바로 일어난다 (080 §3.1)."""
 
     def __init__(self) -> None:
         super().__init__()
         self._ping = asyncio.Semaphore(0)
+        self._rotate = asyncio.Semaphore(0)
 
     def release_ping(self, n: int = 1) -> None:
         for _ in range(n):
             self._ping.release()
 
+    def release_rotate(self, n: int = 1) -> None:
+        for _ in range(n):
+            self._rotate.release()
+
     async def __call__(self, seconds: float) -> None:
         self.values.append(seconds)
         if seconds in (PING_CHECK_INTERVAL, PONG_TIMEOUT):
             await self._ping.acquire()
+        elif seconds in (ROTATE_AFTER, ROTATE_RETRY):
+            await self._rotate.acquire()
         else:
             await asyncio.sleep(0)
 
@@ -227,7 +237,14 @@ def backoffs(sleeps: Sleeps) -> list[float]:
     return [
         v
         for v in sleeps.values
-        if v not in (SUBSCRIBE_INTERVAL, PING_CHECK_INTERVAL, PONG_TIMEOUT)
+        if v
+        not in (
+            SUBSCRIBE_INTERVAL,
+            PING_CHECK_INTERVAL,
+            PONG_TIMEOUT,
+            ROTATE_AFTER,
+            ROTATE_RETRY,
+        )
     ]
 
 
@@ -691,3 +708,186 @@ async def test_aclose_cancels_tasks_and_closes_all_sockets() -> None:
     assert all(s.closed for s in socks)
     state = store.stream_state(SRC)
     assert state is not None and not state.connected and state.subscribed == 0
+
+
+# --- 소켓 교대 (080 §3.1) ---
+
+
+class BlockingSendSocket(ClosableGatedSocket):
+    """send 가 `gate` 를 열 때까지 멈추는 소켓 — 교대가 구독하는 도중을 붙잡는다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate = asyncio.Event()
+        self.sending = asyncio.Event()
+
+    async def send(self, data: str) -> None:
+        self.sending.set()
+        await self.gate.wait()
+        await super().send(data)
+
+
+class HookSendSocket(ClosableGatedSocket):
+    """첫 send 에서 `hook` 을 부른다 — 교대 도중 옛 소켓이 닫히는 순간을 만든다."""
+
+    def __init__(self, hook: Any) -> None:
+        super().__init__()
+        self._hook = hook
+
+    async def send(self, data: str) -> None:
+        if self._hook is not None:
+            hook, self._hook = self._hook, None
+            await hook()
+        await super().send(data)
+
+
+async def settle() -> None:
+    for _ in range(20):
+        await asyncio.sleep(0)
+
+
+async def test_socket_rotates_after_150_minutes_without_a_gap() -> None:
+    first, second = ClosableGatedSocket(), ClosableGatedSocket()
+    sleeps = HlSleeps()
+    stream, connector, _, _, clock, store = await build([first, second], sleep=sleeps)
+    stream.start()
+    await until(first.subscribed)
+    first.push(bbo(ts=T0))
+    await until(first.delivered)
+    assert sleeps.values.count(ROTATE_AFTER) == 1  # 연결과 함께 150분 타이머
+    sleeps.release_rotate()
+    await until(second.subscribed)
+    await settle()
+    assert connector.urls == [WS_URL, WS_URL]  # 처음 + 교대 — 끊김 재연결이 없다
+    assert sent_subs(second) == [("bbo", "kPEPE"), ("activeAssetCtx", "kPEPE")]
+    assert first.closed and not second.closed
+    assert backoffs(sleeps) == []
+    assert sleeps.values.count(ROTATE_AFTER) == 2  # 다음 교대도 150분 뒤
+    state = store.stream_state(SRC)
+    assert state is not None and state.connected and state.subscribed == 1
+    assert stream.judge(clock.now + 1_000).ok  # type: ignore[union-attr]
+    # 교대 뒤 시세는 새 소켓에서 들어온다
+    second.push(bbo(bid=("0.004", "1"), ask=("0.0041", "1"), ts=T0 + 5_000))
+    await until(second.delivered)
+    row = store.perp_row(SRC, "PEPE")
+    assert row is not None and row.bid == 0.004 / 1000 and row.quote_ts == T0 + 5_000
+    # 핑은 새 소켓으로
+    clock.now = T0 + 31_000
+    sleeps.release_ping()
+    await settle()
+    assert json.loads(second.sent[-1]) == {"method": "ping"}
+    assert not any("ping" in s for s in first.sent)
+    await stream.aclose()
+
+
+async def test_rotation_open_failure_keeps_the_old_socket_and_retries_in_five_minutes() -> (
+    None
+):
+    first, second = ClosableGatedSocket(), ClosableGatedSocket()
+    sleeps = HlSleeps()
+    stream, connector, _, _, clock, _ = await build(
+        [first, OSError("refused"), second], sleep=sleeps
+    )
+    stream.start()
+    await until(first.subscribed)
+    first.push(bbo())
+    await until(first.delivered)
+    sleeps.release_rotate()
+    await settle()
+    assert connector.urls == [WS_URL, WS_URL] and not first.closed
+    assert sleeps.values[-1] == ROTATE_RETRY  # 5분 뒤 다시
+    assert stream.judge(clock.now).ok  # type: ignore[union-attr]
+    sleeps.release_rotate()
+    await until(second.subscribed)
+    await settle()
+    assert connector.urls == [WS_URL] * 3 and first.closed
+    assert backoffs(sleeps) == []
+    await stream.aclose()
+
+
+async def test_new_socket_closing_during_subscribe_keeps_the_old_one() -> None:
+    first = ClosableGatedSocket()
+    dead = FakeSocket([])  # 열리자마자 서버가 닫는다
+    sleeps = HlSleeps()
+    stream, connector, _, _, clock, _ = await build([first, dead], sleep=sleeps)
+    stream.start()
+    await until(first.subscribed)
+    first.push(bbo())
+    await until(first.delivered)
+    sleeps.release_rotate()
+    await settle()
+    assert dead.closed and not first.closed
+    assert connector.urls == [WS_URL, WS_URL]
+    assert sleeps.values[-1] == ROTATE_RETRY
+    assert backoffs(sleeps) == []
+    assert stream.judge(clock.now).ok  # type: ignore[union-attr]
+    await stream.aclose()
+
+
+async def test_old_socket_closing_mid_rotation_still_hands_over() -> None:
+    first = ClosableGatedSocket()
+    second = HookSendSocket(
+        first.close
+    )  # 새 소켓 첫 구독 순간 옛 소켓이 닫힌다(Expired 가 앞당겨짐)
+    sleeps = HlSleeps()
+    stream, connector, _, _, clock, store = await build([first, second], sleep=sleeps)
+    stream.start()
+    await until(first.subscribed)
+    first.push(bbo())
+    await until(first.delivered)
+    sleeps.release_rotate()
+    await until(second.subscribed)
+    await settle()
+    assert connector.urls == [WS_URL, WS_URL]  # 끊김 재연결 없이 새 소켓으로
+    assert backoffs(sleeps) == []
+    state = store.stream_state(SRC)
+    assert state is not None and state.connected
+    assert stream.judge(clock.now).ok  # type: ignore[union-attr]
+    await stream.aclose()
+
+
+async def test_rotation_is_skipped_when_two_sets_would_pass_the_ip_cap(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    names = coins_for(PEPE_SHARD, 260)  # 한 샤드 520 구독 — 겹치면 1,040 > 1,000
+    first = ClosableGatedSocket()
+    sleeps = HlSleeps()
+    stream, connector, _, _, _, _ = await build(
+        [first, ClosableGatedSocket()], names=names, sleep=sleeps
+    )
+    stream.start()
+    for _ in range(5_000):  # 처음 구독 520개를 다 보내야 150분 타이머가 선다
+        if ROTATE_AFTER in sleeps.values:
+            break
+        await asyncio.sleep(0)
+    with caplog.at_level(logging.WARNING, logger="marketlens.stream.hyperliquid_perp"):
+        sleeps.release_rotate()
+        await settle()
+    assert connector.urls == [WS_URL]  # 새 소켓을 열지 않는다
+    assert sleeps.values[-1] == ROTATE_RETRY
+    assert any("교대 건너뜀" in r.getMessage() for r in caplog.records)
+    await stream.aclose()
+
+
+async def test_rotations_take_turns_across_shards() -> None:
+    names = coins_for(0, 1) + coins_for(1, 1)
+    a, b = GatedSocket(), GatedSocket()
+    blocked, free = BlockingSendSocket(), ClosableGatedSocket()
+    sleeps = HlSleeps()
+    stream, connector, _, _, _, _ = await build(
+        [a, b, blocked, free], names=names, sleep=sleeps
+    )
+    stream.start()
+    await until(a.subscribed)
+    await until(b.subscribed)
+    sleeps.release_rotate(2)  # 두 샤드가 함께 150분
+    await until(blocked.sending)
+    await settle()
+    assert (
+        len(connector.urls) == 3
+    )  # 둘째 교대는 첫 교대가 끝날 때까지 새 소켓을 열지 않는다
+    blocked.gate.set()
+    await until(free.subscribed)
+    await settle()
+    assert len(connector.urls) == 4 and a.closed and b.closed
+    await stream.aclose()

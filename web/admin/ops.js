@@ -6,6 +6,9 @@ import { exName, kindName } from './names.js';
 const DAY = 86_400_000;
 const cut = (text, n) => (clean(text).length > n ? `${clean(text).slice(0, n)}…` : clean(text));
 
+// 짧은 재연결(080 — 5초 안에 다시 붙은 끊김)은 끊김 목록에 없다. 띠 툴팁에 24시간 횟수만 — 0·없음(080 전 서버)이면 줄 없음
+const reconnectTip = (ex) => (num(ex.reconnects24h) > 0 ? [['', '재연결 24h', `${int(ex.reconnects24h)}회 · 5초 이하`]] : []);
+
 // 수집 원천 띠 — 원천마다 24시간(정상 바탕 + 실패 구간). 오른쪽 글 = 마지막 성공 · 1시간 성공률. 성공한 적 없는 원천은 자료 없음
 export function collectLanes(body, now) {
   const start = now - DAY;
@@ -14,7 +17,7 @@ export function collectLanes(body, now) {
   const segs = exchanges.map((ex, row) =>
     num(ex.lastSuccessAt) === null
       ? { row, from: start, to: now, tone: 'none', head: exName(ex.exchange), tip: [['', '자료 없음', '성공 기록 없음']] }
-      : { row, from: start, to: now, tone: 'ok', head: exName(ex.exchange), tip: [['ok', '1시간 성공률', pct(ex.successRate1h)], ['', '마지막 성공', ago(ex.lastSuccessAt, now)]] },
+      : { row, from: start, to: now, tone: 'ok', head: exName(ex.exchange), tip: [['ok', '1시간 성공률', pct(ex.successRate1h)], ['', '마지막 성공', ago(ex.lastSuccessAt, now)], ...reconnectTip(ex)] },
   );
   for (const o of list(body?.outages).filter((x) => isObj(x) && num(x.startedAt) !== null)) {
     const row = ids.indexOf(o.exchange);
