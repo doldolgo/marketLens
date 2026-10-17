@@ -1,4 +1,5 @@
-"""화면 분석(Clarity) 계약 — clarity.js·두 HTML·셸·nginx 를 파일로 읽어 단언하고, clarity.js 를 node 로 돌린다 (스펙 033 §4).
+"""화면 분석(Clarity)·방문 통계(GA4) 계약 — clarity.js·두 HTML·셸·nginx 를 파일로 읽어 단언하고, clarity.js 를 node 로 돌린다
+(스펙 033 §4·075 §4).
 
 동의 방식이다: 세 칸에 모두 동의해 지금 판으로 저장한 방문자만 태그를 받는다(032 와 같은 값 계약). 띠 글자가 032 방침 동의
 상자와 어긋나거나, 처리방침 게시 전에 ID 가 들어가거나, 띠가 타이머·외부 자원을 만들게 되면 여기서 멈춘다. 실제 브라우저의
@@ -29,15 +30,22 @@ WEB = ROOT / "web"
 JS = (WEB / "public/clarity.js").read_text("utf-8")
 PRIVACY = (WEB / "public/privacy.html").read_text("utf-8")
 TAG = "https://www.clarity.ms/tag/"
-# 띠 안에서 바깥을 가리키는 주소는 둘뿐 — 띠는 외부 자원을 부르지 않는다 (§3.3)
+# 075 — GA4 태그(측정 ID 를 붙인다)
+GA_TAG = "https://www.googletagmanager.com/gtag/js?id="
+# 띠 안에서 바깥을 가리키는 주소는 셋뿐 — 띠는 외부 자원을 부르지 않는다 (§3.3, 075 — Google 개인정보처리방침)
 MS_PRIVACY = "https://privacy.microsoft.com/ko-kr/privacystatement"
 MS_INQUIRY = "https://go.microsoft.com/fwlink/?linkid=2126612"
+G_PRIVACY = "https://policies.google.com/privacy?hl=ko"
 MUST = (
     "consentv2", "ad_Storage", "analytics_Storage", '"granted"', '"denied"', "globalPrivacyControl",
     "kt.analytics", "kt.analytics.v", "_clck", "_clsk", "_cltk", "DOMContentLoaded", TAG, "storage",
     "location.reload", "dialog", "aria-modal", "inert", "aria-label", "checkbox", "label", "/privacy#consent", "_blank",
     "noopener", "kt:clarity", "선택한 대로 저장", "모두 거부", "<details>", "<summary", "내용 보기",
     "저장 규칙", "data-nosnippet", "pageshow", "persisted", "stopImmediatePropagation",
+    # 075 — GA: 대기열·동의 신호 넷·끈 신호 둘·검색어 뺀 주소·쿠키 기간·쿠키 이름
+    "GA_ID", "dataLayer", "gtag", "ad_storage", "ad_user_data", "ad_personalization", "analytics_storage",
+    "allow_google_signals: false", "allow_ad_personalization_signals: false", "page_location", "cookie_expires",
+    "_ga", "_ga_", GA_TAG,
 )  # fmt: skip
 MUST_NOT = (
     "setInterval", "setTimeout", "requestAnimationFrame", "Observer", "resolvedOptions", "Europe/",
@@ -55,6 +63,10 @@ def _clarity_id() -> str:
     return json.loads(_const("CLARITY_ID"))
 
 
+def _ga_id() -> str:
+    return json.loads(_const("GA_ID"))
+
+
 def _strip_cells() -> list[str]:
     """띠 HTML 의 세 칸(체크 상자가 있는 칸) — 칸마다 label 과 <dl>."""
     html = JS.split("const HTML = `", 1)[1].split("`", 1)[0]
@@ -70,6 +82,9 @@ def _strip_cells() -> list[str]:
 
 def test_settings_are_one_id_a_page_list_and_the_notice_version() -> None:
     assert re.fullmatch(r"[A-Za-z0-9]{0,32}", _clarity_id())
+    # 075 — GA 측정 ID 는 비었거나 G-<영문 대문자·숫자>, 쿠키 기간은 2개월(60일)
+    assert re.fullmatch(r"(G-[A-Z0-9]{4,16})?", _ga_id())
+    assert _const("GA_COOKIE_SECONDS") == "60 * 24 * 60 * 60"
     pages = json.loads(_const("PAGES"))
     assert pages and set(pages) <= {"landing", "app"}
     # 032 동의 관리 스크립트의 판과 같다 — 다르면 한쪽의 동의가 다른 쪽에서 '정하지 않음' 이다
@@ -93,6 +108,20 @@ def test_an_id_needs_the_published_consent_policy() -> None:
         assert text in PRIVACY, text
 
 
+def test_a_ga_id_needs_the_policy_that_names_google_analytics() -> None:
+    """075 §4 — GA 측정 ID 가 들어 있으면 방침이 Google Analytics 를 알리는 판이다 — 2절 소절·받는 자 Google LLC·국외 이전 절."""
+    if not _ga_id():
+        return
+    assert "〔" not in PRIVACY
+    for text in (
+        "<h3>방문 통계 — Google Analytics</h3>",
+        "Microsoft Corporation(미국), Google LLC(미국)",
+        "<h3>Google LLC — 방문 통계(Google Analytics)</h3>",
+        "_ga_*",
+    ):
+        assert text in PRIVACY, text
+
+
 # --- clarity.js 글자 (§3.2~§3.5) ----------------------------------------------------
 
 
@@ -101,12 +130,15 @@ def test_file_has_the_consent_contract_and_no_timers_or_regional_guessing() -> N
         assert text in JS, text
     for text in MUST_NOT:
         assert text not in JS, text
-    # 폐기 예정인 옛 동의 API 를 부르지 않는다 — consentv2 만
-    assert not re.search(r"""\(\s*["']consent["']""", JS)
+    # 폐기 예정인 Clarity 의 옛 동의 API 를 부르지 않는다 — consentv2 만(075 의 gtag("consent", "default") 는 GA 의 동의 신호다)
+    assert not re.search(r"""clarity\(\s*["']consent["']""", JS)
+    assert re.search(r'gtag\(\s*"consent",\s*"default"', JS)
     assert set(re.findall(r"https?://[^\s\"'`<>]+", JS)) == {
         TAG,
+        GA_TAG,
         MS_PRIVACY,
         MS_INQUIRY,
+        G_PRIVACY,
     }
     # 중요한 내용 표시 — 032 와 같이 20% 크게·굵게·밑줄 (§3.3)
     assert re.search(
@@ -268,6 +300,8 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     // defer 로 실리면 readyState 는 이미 interactive 이고 DOMContentLoaded 전이다
     readyState: c.defer ? 'interactive' : 'loading', currentScript: c.defer ? { defer: true } : null, createElement: el,
     set cookie(line) { cookies.push(line) },
+    // 'jar' 는 이 문서가 처음 받은 쿠키 이름(075 — _ga_<기호> 는 이름을 읽어 지운다)
+    get cookie() { return (c.jar || []).map((n) => n + '=1').join('; ') },
     head: { appendChild: (e) => head.push(e) },
     body: { get firstChild() { return body[0] || null }, get children() { return body }, insertBefore: (e) => body.unshift(e) },
     // 'bar' 면 스크롤 막대가 있는 문서(창 폭 > 문서 폭)
@@ -282,7 +316,10 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
   }
   // 'framed' 면 틀 안(window.top 이 다른 창), search 는 053 덮어 보기 표시
   window.top = c.framed ? {} : window
-  const location = { hostname: c.host || 'kimptrack.com', pathname: c.path || '/', search: c.search || '', reload: () => reloads++ }
+  const location = {
+    hostname: c.host || 'kimptrack.com', origin: 'https://' + (c.host || 'kimptrack.com'), pathname: c.path || '/',
+    search: c.search || '', hash: c.hash || '', reload: () => reloads++,
+  }
   class Event { constructor(type) { this.type = type } }
   new Function('window', 'document', 'navigator', 'location', 'Event', script)(
     window, document, c.gpc ? { globalPrivacyControl: true } : {}, location, Event)
@@ -294,6 +331,8 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     stored: data.get('kt.analytics') ?? null, v: data.get('kt.analytics.v') ?? null,
     strip: strip() ? { first: body[0] === strip(), ...strip().attrs, links: strip().anchors.map((a) => a.target + '|' + a.rel) } : null,
     queue: window.clarity ? window.clarity.q.map((a) => Array.from(a)) : null,
+    // 075 — GA 대기열(gtag 호출마다 arguments 하나). js 의 Date 는 'date' 로
+    layer: window.dataLayer ? window.dataLayer.map((a) => Array.from(a).map((x) => x instanceof Date ? 'date' : x)) : null,
     tags: head.filter((e) => e.tag === 'script').map((e) => [e.src, e.async]),
     style: head.filter((e) => e.tag === 'style').length, fired, reloads, stopped, capture,
     inert: page.map((e) => !!e.inert), html: { ...document.documentElement.style },
@@ -322,7 +361,7 @@ CONSENT = ["consentv2", {"ad_Storage": "denied", "analytics_Storage": "granted"}
 TAG_ID = [[TAG + _clarity_id(), True]]
 
 
-def _run(cases: list[dict]) -> list[dict]:
+def _run(cases: list[dict], script: str = JS) -> list[dict]:
     node = shutil.which("node")
     if node is None:
         if os.environ.get("CI"):
@@ -330,7 +369,7 @@ def _run(cases: list[dict]) -> list[dict]:
         pytest.skip("node 가 없어 clarity.js 를 돌리지 못한다")
     done = subprocess.run(
         [node, "-e", HARNESS],
-        input=json.dumps([JS, cases]),
+        input=json.dumps([script, cases]),
         capture_output=True,
         text=True,
         timeout=30,
@@ -426,7 +465,8 @@ def test_undecided_visitor_gets_the_modal_after_the_document_is_parsed() -> None
         # 랜딩은 같은 탭, 대시보드는 띠 안 링크 모두 새 탭
         assert set(strip["links"]) == {"|"}, ls
     links = _one(path="/app/", steps=["ready"])["last"]["strip"]["links"]
-    assert len(links) == 6 and set(links) == {"_blank|noopener"}
+    # 075 — 국외 이전 칸의 Google 개인정보처리방침 링크가 하나 늘었다
+    assert len(links) == 7 and set(links) == {"_blank|noopener"}
     # 스크롤 막대가 있던 문서는 그 자리를 남긴다(막대가 사라져 페이지가 옆으로 밀리지 않게), 없던 문서는 건드리지 않는다
     assert (
         _one(bar=True, steps=["ready"])["last"]["html"]["scrollbarGutter"] == "stable"
@@ -612,3 +652,166 @@ def test_back_forward_restore_rechecks_the_choice() -> None:
     assert (refused["last"]["strip"], refused["last"]["queue"]) == (None, None)
     assert unchanged["last"]["strip"] is not None
     assert (gpc["last"]["queue"], gpc["last"]["tags"]) == (None, [])
+
+
+# --- 075 — GA4 를 같은 동의로 (§3.2·§3.3) ----------------------------------------------
+# 레포의 GA 측정 ID 는 사람이 넣는다(비면 꺼짐) — 동작은 시험 ID 를 넣은 사본으로 본다. Clarity ID 만 비운 사본은 GA 만 켠 경우
+TEST_GA = "G-TEST123"
+GA_JS = JS.replace('const GA_ID = ""', f'const GA_ID = "{TEST_GA}"', 1)
+GA_ONLY_JS = GA_JS.replace(
+    f"const CLARITY_ID = {_const('CLARITY_ID')}", 'const CLARITY_ID = ""', 1
+)
+NONE_JS = JS.replace(
+    f"const CLARITY_ID = {_const('CLARITY_ID')}", 'const CLARITY_ID = ""', 1
+)
+GA_CONSENT = [
+    "consent",
+    "default",
+    {
+        "ad_storage": "denied",
+        "ad_user_data": "denied",
+        "ad_personalization": "denied",
+        "analytics_storage": "granted",
+    },
+]
+GA_CONFIG = {
+    "allow_google_signals": False,
+    "allow_ad_personalization_signals": False,
+    "cookie_expires": 60 * 24 * 60 * 60,
+}
+GA_TAG_ID = [GA_TAG + TEST_GA, True]
+
+
+def test_the_repo_ga_id_is_empty_until_a_person_fills_it() -> None:
+    """075 §3.1 — 측정 ID 가 비어 있으면 GA 는 하지 않는다. ID 를 넣는 PR 이 켜기다(이 테스트는 그 PR 에서 함께 고친다)."""
+    assert _ga_id() == "", (
+        "GA 측정 ID 를 넣었다면 이 테스트를 지우고 방침 게시·법률 확인을 PR 본문에 적는다"
+    )
+    assert GA_JS != JS and GA_ONLY_JS != GA_JS and NONE_JS != JS
+
+
+def test_ga_waits_for_consent_and_sends_no_request_before() -> None:
+    """정하지 않음·거부·GPC·저장소 예외·www·덮어 보기 틀 — GA 대기열도 태그도 없다(동의 전 Google 요청 0)."""
+    cases = [
+        {"steps": ["ready"]},
+        {"ls": {"kt.analytics": "denied"}, "steps": ["ready"]},
+        {"gpc": True, "ls": ON, "steps": ["ready"]},
+        {"fail": ["get"], "steps": ["ready"]},
+        {"ls": {**ON, "kt.analytics.v": OLD}, "steps": ["ready"]},
+        {"host": "www.kimptrack.com", "ls": ON, "steps": ["ready"]},
+        {"ls": ON, "search": "?kt-overlay=1", "framed": True, "steps": ["ready"]},
+        {"ls": ON, "search": "?kt-replay=1", "framed": True, "steps": ["ready"]},
+    ]
+    for case, got in zip(cases, _run(cases, GA_JS), strict=True):
+        last = got["last"]
+        assert last["layer"] is None, case
+        assert not [t for t in last["tags"] if t[0].startswith(GA_TAG)], case
+
+
+def test_agreed_visitor_gets_ga_consent_first_then_config_and_tag_after_parsing() -> (
+    None
+):
+    """동의 신호(광고 셋 거부·분석 허용)가 곧바로 첫 항목, config·태그는 DOMContentLoaded 뒤 — 주소는 검색어·# 를 뺀 주소, Google
+    신호·광고 개인화 신호 끔, 쿠키 2개월. Clarity 대기열·태그도 그대로 (§3.2)."""
+    for defer in (False, True):
+        got = _run(
+            [
+                {
+                    "ls": ON,
+                    "path": "/app/",
+                    "search": "?tab=history&sym=BTC",
+                    "hash": "#x",
+                    "defer": defer,
+                    "steps": ["ready"],
+                }
+            ],
+            GA_JS,
+        )[0]
+        assert got["first"]["layer"] == [GA_CONSENT] and got["first"]["tags"] == [], (
+            defer
+        )
+        last = got["last"]
+        assert last["layer"][:2] == [GA_CONSENT, ["js", "date"]], defer
+        name, ga_id, config = last["layer"][2]
+        assert (name, ga_id) == ("config", TEST_GA), defer
+        assert config == {**GA_CONFIG, "page_location": "https://kimptrack.com/app/"}, (
+            defer
+        )
+        assert len(last["layer"]) == 3, defer
+        assert last["tags"] == [*TAG_ID, GA_TAG_ID], defer
+        assert last["queue"] == [CONSENT] and last["fired"] == [], defer
+
+
+def test_ga_only_shows_the_modal_and_loads_ga_alone() -> None:
+    """Clarity ID 만 비면 동의 창은 뜨고 동의하면 GA 만 돈다 — Clarity 대기열·태그·kt:clarity 없음. 둘 다 비면 아무것도 없다 (§3.8)."""
+    undecided, agree, saved = _run(
+        [
+            {"steps": ["ready"]},
+            {"ls": ON, "steps": ["ready"]},
+            {"steps": ["ready", *ALL, "click:kt-c-save"]},
+        ],
+        GA_ONLY_JS,
+    )
+    assert undecided["last"]["strip"] is not None and undecided["last"]["layer"] is None
+    for got in (agree, saved):
+        last = got["last"]
+        assert (last["queue"], last["tags"], last["fired"]) == (None, [GA_TAG_ID], [])
+        assert last["layer"][0] == GA_CONSENT
+    (nothing,) = _run([{"ls": ON, "steps": ["ready"]}], NONE_JS)
+    last = nothing["last"]
+    assert (
+        last["strip"],
+        last["queue"],
+        last["layer"],
+        last["tags"],
+        last["listens"],
+    ) == (
+        None,
+        None,
+        None,
+        [],
+        False,
+    )
+
+
+def test_saving_consent_loads_ga_at_once_and_other_tabs_follow() -> None:
+    """동의 창의 [선택한 대로 저장]·다른 탭의 동의 — 그 자리에서 GA 대기열·태그 (§3.2·033 §3.5)."""
+    saved, other = _run(
+        [
+            {"steps": ["ready", *ALL, "click:kt-c-save"]},
+            {
+                "steps": [
+                    "ready",
+                    f"other:kt.analytics.v={NOTICE}",
+                    "other:kt.analytics=granted",
+                ]
+            },
+        ],
+        GA_JS,
+    )
+    for got in (saved, other):
+        last = got["last"]
+        assert last["layer"][0] == GA_CONSENT and last["layer"][2][0] == "config"
+        assert last["tags"] == [*TAG_ID, GA_TAG_ID] and last["fired"] == ["kt:clarity"]
+
+
+def test_documents_that_do_not_load_forget_ga_cookies() -> None:
+    """부르지 않는 문서는 남은 GA 쿠키 _ga 와 _ga_<기호>(이름을 읽어 찾는다)를 두 꼴(도메인 없이·kimptrack.com)로 지운다 (§3.3)."""
+    for js in (JS, GA_JS):
+        got = _run(
+            [
+                {
+                    "ls": {"kt.analytics": "denied"},
+                    "jar": ["_ga", "_ga_ABC123", "_gid", "x"],
+                    "steps": ["ready"],
+                }
+            ],
+            js,
+        )[0]["last"]
+        for name in ("_ga", "_ga_ABC123"):
+            lines = [ln for ln in got["cookies"] if ln.startswith(f"{name}=;")]
+            assert len(lines) == 2 and all(
+                "Max-Age=0" in ln and "path=/" in ln for ln in lines
+            ), name
+            assert sum(ln.endswith("; domain=kimptrack.com") for ln in lines) == 1, name
+        assert not [ln for ln in got["cookies"] if ln.startswith(("_gid=", "x="))]
