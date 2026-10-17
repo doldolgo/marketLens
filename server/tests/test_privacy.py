@@ -8,6 +8,8 @@
 v5(067)는 서버 접속 기록에 관리자 화면의 IP 대역별 보기(2절 (라))를 더한다 — 동의 대상이 아니라 안내 판은 그대로다.
 v7(076)은 화면 이동 기록을 더했고, v8(078 — 같은 날 두 번째 판)은 그 기록의 보유 기간(서비스를 끝낼 때까지)과 두는 곳
 (Redis + Amazon S3)만 바꿔 안내 판을 올린다(`PRIVACY_V8_EFFECTIVE`). 받는 것·Clarity·화면 이용 통계의 글은 그대로다.
+v9(075 — 새 날의 판)는 같은 세 칸 동의로 방문 통계를 Google Analytics(Google LLC, 미국)로도 보내 안내 판을 올린다 — 제공·국외 이전
+칸의 받는 자에 Google 을 더하고, Clarity·화면 이용 통계·화면 이동 기록의 글은 그대로다. 서버 게이트가 없어 시행일 상수도 없다.
 실제로 브라우저에서 CSP·버튼을 보는 검증은 스펙 §5 의 로컬 Docker·브라우저 명령이다.
 """
 
@@ -41,7 +43,7 @@ from tests.test_deploy import (
 
 PUBLIC = ROOT / "web/public"
 CANONICAL = "https://kimptrack.com/privacy"
-EFFECTIVE = "2026-10-16"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1·067 §3.4)
+EFFECTIVE = "2026-10-17"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1·067 §3.4)
 # 052 — 같은 출처 스크립트 /attention.js 하나('self')와 그 비콘(connect-src 'self'). 세 정적 페이지가 같은 문자열이다.
 # 053 — 틀에는 자기 출처와 관리자 화면(덮어 보기)만
 CSP = (
@@ -84,6 +86,8 @@ MUST_SAY = (
     "_clck",
     "_clsk",
     "_cltk",
+    "_ga",  # 075 — Google Analytics 쿠키(동의한 경우에만, 철회하면 지움)
+    'href="https://policies.google.com/privacy?hl=ko"',
     "Safari",
     "7일",
     "운영 알림",  # §3.4-6 — 알림에 방문자 정보가 가지 않는다(025 제안·034 가 이 문장에 기댄다)
@@ -115,8 +119,22 @@ MUST_NOT_SAY = (
 )
 # §3.3 — 033 의 띠와 같은 문장(머리·셋 모두 규칙·나이). 동의 상자 안 세 칸보다 앞에 있다. 051 §3.3-4 — 머리 질문에
 # KimpTrack 서버의 통계(모든 페이지), 셋 모두 규칙에 'Clarity와 KimpTrack 영역 통계가 돕니다'. 060 §3.3-4 — 그 통계를 화면의
-# 영역과 요소·마우스를 올려 둔 시간·떠날 때 보던 곳으로. 076 — 화면 이동 기록, 078 — 그 기록을 서비스를 끝낼 때까지 둔다
+# 영역과 요소·마우스를 올려 둔 시간·떠날 때 보던 곳으로. 076 — 화면 이동 기록, 078 — 그 기록을 서비스를 끝낼 때까지 둔다.
+# 075 — 방문 통계를 Google Analytics(미국)로 보내는 물음 둘, 저장 규칙에 'Clarity·Google Analytics와'
 SHARED_SENTENCES = (
+    "랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? "
+    "Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 랜딩과 대시보드의 방문 통계(본 페이지·머문 시간·들어온 길)를 "
+    "Google Analytics(미국)로 보내도 될까요? Google의 광고·제품 개선에는 쓰지 않게 설정해 보냅니다. 또 KimpTrack 서버가 모든 페이지(랜딩·대시보드·처리방침·검색어 페이지)에서 "
+    "화면의 영역과 요소(단추·링크 같은 것)별로 보인 시간·클릭 수·마우스를 올려 둔 시간과 떠날 때 보던 곳을 하루 합계로 모으고, "
+    "방문마다 마우스·손가락 위치와 누른 곳·스크롤을 시각·IP 주소와 함께 모아 서비스를 끝낼 때까지 두고 운영자가 그 방문을 다시 보거나 "
+    "지금 보는 방문을 따라 보는 데 써도 될까요? 동의하지 않아도 모든 기능을 그대로 씁니다.",
+    "세 가지에 모두 동의하고 [선택한 대로 저장]을 누른 경우에만 Clarity·Google Analytics와 KimpTrack 영역 통계·화면 이동 기록이 돕니다 — "
+    "Clarity는 셋이 다 있어야 돌아가므로 하나라도 빠지면 거부로 저장합니다.",
+    "만 14세 미만은 동의하지 마세요.",
+)
+# 바로 앞 판의 동의 상자에서 바뀐 문장 — 사본은 동의 절에 세 칸의 알릴 사항만 남겨(037 §3.3) 이 문장들이 없어 대조표의
+# '동의 관리' 행 '이전 판' 칸을 여기와 맞춘다(얼려 둔 글자). 075(v9) — 질문·저장 규칙과 상자 아래 철회 문단의 지우는 쿠키
+PREVIOUS_CONSENT_TEXT: tuple[str, ...] = (
     "랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? "
     "Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 또 KimpTrack 서버가 모든 페이지(랜딩·대시보드·처리방침·검색어 페이지)에서 "
     "화면의 영역과 요소(단추·링크 같은 것)별로 보인 시간·클릭 수·마우스를 올려 둔 시간과 떠날 때 보던 곳을 하루 합계로 모으고, "
@@ -124,19 +142,19 @@ SHARED_SENTENCES = (
     "지금 보는 방문을 따라 보는 데 써도 될까요? 동의하지 않아도 모든 기능을 그대로 씁니다.",
     "세 가지에 모두 동의하고 [선택한 대로 저장]을 누른 경우에만 Clarity와 KimpTrack 영역 통계·화면 이동 기록이 돕니다 — Clarity는 셋이 다 "
     "있어야 돌아가므로 하나라도 빠지면 거부로 저장합니다.",
-    "만 14세 미만은 동의하지 마세요.",
-)
-# 바로 앞 판의 동의 상자에서 바뀐 문장 — 사본은 동의 절에 세 칸의 알릴 사항만 남겨(037 §3.3) 이 문장들이 없어 대조표의
-# '동의 관리' 행 '이전 판' 칸을 여기와 맞춘다(얼려 둔 글자). 078(v8) — 질문의 화면 이동 기록 '14일 동안' 만 바뀌었다(저장 규칙은 그대로)
-PREVIOUS_CONSENT_TEXT: tuple[str, ...] = (
-    "랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? "
-    "Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 또 KimpTrack 서버가 모든 페이지(랜딩·대시보드·처리방침·검색어 페이지)에서 "
-    "화면의 영역과 요소(단추·링크 같은 것)별로 보인 시간·클릭 수·마우스를 올려 둔 시간과 떠날 때 보던 곳을 하루 합계로 모으고, "
-    "방문마다 마우스·손가락 위치와 누른 곳·스크롤을 시각·IP 주소와 함께 14일 동안 모아 운영자가 그 방문을 다시 보거나 지금 보는 방문을 "
-    "따라 보는 데 써도 될까요? 동의하지 않아도 모든 기능을 그대로 씁니다.",
+    "이 사이트의 Clarity 쿠키 _clck·_clsk를 지웁니다.",
 )
 # 051 §3.3-4·060 §3.3-4 — '수집·이용' 칸 끝 한 줄(화면 이용 통계는 Microsoft 에 가지 않고 국내에) — 033 의 동의 창에도 같은 글
-COLLECT_NOTE = "화면 이용 통계와 화면 이동 기록은 Microsoft에 가지 않고 국내(AWS 서울 리전)의 KimpTrack 서버에 둡니다."
+COLLECT_NOTE = "화면 이용 통계와 화면 이동 기록은 Microsoft·Google에 가지 않고 국내(AWS 서울 리전)의 KimpTrack 서버에 둡니다."
+# 075 — 세 칸의 항목에 Clarity 항목 뒤로 더한 Google Analytics 항목(033 의 동의 창에도 같은 글), 받는 자의 보유 기간
+GA_ITEMS = (
+    "Google Analytics: 페이지 주소(검색어는 뺌)·페이지 제목·이전 페이지 주소, 페이지를 본 일·끝 가까이(90%) 내려 본 일·"
+    "밖으로 나가는 링크를 누른 일·머문 시간, 기기 종류·브라우저·운영체제·화면 크기·언어, IP 주소(대략의 나라·도시 추정에 쓰고 "
+    "저장하지 않음), Google Analytics가 브라우저와 방문을 알아보는 쿠키 _ga·_ga_*"
+)
+GA_PERIOD = (
+    "Google Analytics의 기록은 2개월(사람을 가리키지 않는 합계 보고서는 기간 없이 남음)"
+)
 # 060 §3.3-3 — 수집·이용 칸 항목 끝·2절이 함께 적는 KimpTrack 서버의 새 항목(요소·떠날 때 보던 곳·깊이)
 ELEMENT_ITEMS = (
     "영역 안의 요소(단추·링크·탭·입력칸·표의 코인 행 같은 것 — 입력한 글자·화면의 숫자는 빼고)별 클릭 수·마우스를 올려 둔 "
@@ -168,7 +186,7 @@ CONSENT_CELLS = (
     ),
     (
         "an-provide",
-        "(선택) 화면 이용 기록을 Microsoft에 제공하는 데 동의합니다",
+        "(선택) 화면 이용 기록을 Microsoft·Google에 제공하는 데 동의합니다",
         {
             "받는 자",
             "받는 자의 목적",
@@ -297,6 +315,8 @@ NOTICE_DIGESTS = {
     "2026-10-16": "7f7b822e5c299c40db5516b773d8a3007a9a39b9978dde07181653cb8f43e2a2",  # 076 — 화면 이동 기록(14일·IP)
     # 078 — 같은 날 두 번째 판: 화면 이동 기록을 서비스를 끝낼 때까지(수집·이용 칸 보유 기간)
     "2026-10-16-2": "b83a3bc62e98cc2fa0163589d24eb9c3801d1d7c912e51f129120625bc1a9a7a",
+    # 075 — Google Analytics(받는 자에 Google LLC, 세 칸의 항목·목적·보유 기간)
+    "2026-10-17": "9e3e5fc026394d9a13010ccbec89428dcf53ffbf545d6cc4cbe4d9090b2ffb8b",
 }
 # 바로 앞 판 — 이 판의 동의로는 켜지 않고 다시 묻는다 (060 §3.6 — 2026-10-09 의 granted 는 '정하지 않음'). 판 값의 글자 순이
 # 아니라 NOTICE_DIGESTS 에 더한 차례로 고른다
@@ -343,23 +363,28 @@ CONSENT_CASES = [
 # fmt: on
 # §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(동의 상자의 국외 이전 칸과 같은 이름) + 근거
 TRANSFER_TERMS = CONSENT_CELLS[2][2] | {"근거"}
-# 078 §3.7 — 맨 위 변경 안내 상자가 말하는 것(같은 날 두 번째 판의 시행 문장, 바뀌는 것 하나 — 화면 이동 기록의 보유 기간과
-# 두는 곳, 받는 것은 그대로, 동의를 다시 묻는다)
+# 075 §3.6 — 맨 위 변경 안내 상자가 말하는 것(새 날의 시행 문장, 바뀌는 것 하나 — 방문 통계를 Google Analytics 로, 동의 칸은
+# 그대로 셋이고 받는 자에 Google LLC, 동의를 다시 묻는다)
 CHANGE_NOTICE_SAYS = (
-    "같은 날 먼저 게시한 판(2026년 10월 16일 판)을 바꿉니다",
+    "그 전날까지는 2026년 10월 16일 판(이날 두 번째 판)을 따릅니다",
     "바뀌는 것:",
-    "화면 이동 기록을 14일이 아니라 서비스를 끝낼 때까지 두고, 서비스를 끝내면 지웁니다",
-    "AWS 서울 리전의 KimpTrack 서버 저장소(Redis — 최근 14일 몫)와 같은 리전의 파일 저장소(Amazon S3)",
-    "(2절 화면 이동 기록)",
-    "받는 것·쓰임·처리 근거는 그대로",
-    "국외로 옮기거나 Microsoft에 보내지 않습니다",
+    "방문 통계를 Google Analytics(Google LLC, 미국)로도 보냅니다",
+    "본 페이지·머문 시간·들어온 길",
+    "IP 주소는 저장하지 않음",
+    "Google이 2개월 동안 둡니다",
+    "(2절 방문 통계)",
+    "페이지 주소의 검색어는 빼고",
+    "광고용 저장·광고 개인화·Google 신호는 끈 채",
+    "동의 칸은 그대로 셋이고",
+    "받는 자에 Google LLC를 더했습니다",
     "동의 안내의 판을 올립니다",
     "이미 동의한 방문자에게도 다시 묻고",
+    "Clarity·Google Analytics·화면 이용 통계·화면 이동 기록",
     "12절 대조표",
 )
-# 078 — 변경 안내의 링크 둘: 바로 앞 판(10월 16일 먼저 게시한 판 — v7)과 대조. 그 앞 판들은 12절 이력에서 잇는다
+# 075 — 변경 안내의 링크 둘: 바로 앞 판(10월 16일 두 번째 판 — v8)과 대조. 그 앞 판들은 12절 이력에서 잇는다
 CHANGE_NOTICE_LINKS = (
-    'href="/privacy-20261016.html"',
+    'href="/privacy-20261016-2.html"',
     'href="#s12"',
 )
 # 060 §3.3-8 — 12절 규칙(7일 전 게시 약속과 그 단서는 지웠다)·시행 문장(067 — 그 전날까지는 앞 판)·이력 첫 항목
@@ -367,12 +392,14 @@ CHANGE_RULE = (
     "이 방침을 바꿀 때는 시행일과 바뀐 문장의 전후 대조를 이 페이지에 알리고 이전 판을 남깁니다. "
     "동의를 받아 하는 처리가 늘면 바뀐 안내로 다시 동의를 받고, 그 동의를 받은 때부터 합니다."
 )
-# 069·078 — 같은 날 두 번째 판(060 의 v4 꼴): 머리 시행일 뒤·12절 시행 문장·이력 첫 항목에 차례
+# 075 — 새 날의 판(076 꼴): 12절 시행 문장은 '그 전날까지는 앞 판', 머리 시행일 뒤 차례는 없다
 EFFECTIVE_SENTENCE = (
-    "부터 시행하며(이날 두 번째 판), 같은 날 먼저 게시한 판을 바꿉니다."
+    "부터 시행하며, 그 전날까지는 2026년 10월 16일 판(이날 두 번째 판)을 따릅니다."
 )
-NTH_TODAY = "(이날 두 번째 판)"
-V8_HISTORY = "(두 번째 판) — 화면 이동 기록: 보유 기간을 서비스를 끝낼 때까지로·두는 곳에 파일 저장소(Amazon S3)·동의 안내 판 올림"
+NTH_TODAY = ""
+V9_HISTORY = " — 방문 통계(Google Analytics, 동의한 방문자만 — 본 페이지·머문 시간·들어온 길, Google LLC(미국)에 제공·이전, 2개월)·동의 안내 판 올림"
+# 078 — 같은 날 두 번째 판(v8)의 이력 항목(다음 판에서도 남는다 — 사본 `privacy-20261016-2.html`)
+V8_HISTORY = "2026년 10월 16일(두 번째 판) — 화면 이동 기록: 보유 기간을 서비스를 끝낼 때까지로·두는 곳에 파일 저장소(Amazon S3)·동의 안내 판 올림"
 # 076 — 같은 날 먼저 게시한 판(v7)의 이력 항목(다음 판에서도 남는다 — 사본 `privacy-20261016.html`). 그 판이 알린 14일 그대로
 V7_HISTORY = (
     "2026년 10월 16일 — 화면 이동 기록(KimpTrack 서버, 동의한 방문자만 — 마우스 위치·누른 곳·스크롤과 IP 주소, 14일, 관리자 화면에서 "
@@ -471,7 +498,7 @@ SCREEN_USE_FACTS = {
     "consent-title": (
         "화면의 영역과 요소(단추·링크 같은 것)별로 보인 시간·클릭 수·마우스를 올려 둔 시간과 떠날 때 보던 곳을 하루 합계로",
         "모든 페이지(랜딩·대시보드·처리방침·검색어 페이지)",
-        "Clarity와 KimpTrack 영역 통계·화면 이동 기록이 돕니다",
+        "Clarity·Google Analytics와 KimpTrack 영역 통계·화면 이동 기록이 돕니다",
     ),
     "s1": (
         "어느 화면 영역·요소를 많이·적게 보고 누르는지, 어디서 떠나는지",
@@ -536,6 +563,8 @@ ARCHIVED_TEXT = {
     "privacy-20261014-2.html": "91d4c67d02af4c5b8500091be57abc7bece2e35712e6c6343066cb1817adc9c5",
     # 078 — 2026년 10월 16일 먼저 게시한 판(v7 — 076)
     "privacy-20261016.html": "b103b08cebd06fa356d769e54e17ccc1de07719ae7b6604c0b5bae7007c632bd",
+    # 075 — 2026년 10월 16일 두 번째 판(v8 — 078)
+    "privacy-20261016-2.html": "c47bf94483846faf9c8b8b6ef5f8312f2e87e7cabd8da69fef9236a6b6cdc9ba",
 }
 # 사본마다 그 판의 동의 안내 판 — 10월 11일 판은 시행 전에 바뀌어 안내 판을 올리지 않았다
 ARCHIVED_NOTICE = {
@@ -546,6 +575,7 @@ ARCHIVED_NOTICE = {
     "privacy-20261014.html": "2026-10-09-2",
     "privacy-20261014-2.html": "2026-10-09-2",
     "privacy-20261016.html": "2026-10-16",
+    "privacy-20261016-2.html": "2026-10-16-2",
 }
 # 바로 앞 판의 사본 — 대조표가 맞대는 판. 파일 이름(시행일) 순이 아니라 게시한 차례의 끝이다(060 — 10월 9일 판(v3)은
 # 10월 11일 판보다 나중에 게시했다)
@@ -879,8 +909,8 @@ def test_notice_version_is_shown_and_is_the_last_digest_key() -> None:
     assert NOTICE == list(NOTICE_DIGESTS)[-1]
     # 051 §3.2 — v3 이 판 2026-10-09 를 열었고, 060 이 같은 날 두 번째 판을 더했다(예전 판 해시는 지우지 않는다)
     assert PRIVACY_V3_EFFECTIVE in NOTICE_DIGESTS
-    # 078 — 같은 날 두 번째 판(v7 의 판 2026-10-16 다음)
-    assert NOTICE == "2026-10-16-2" and OLD == "2026-10-16"
+    # 075 — 새 날의 판(v8 의 판 2026-10-16-2 다음)
+    assert NOTICE == "2026-10-17" and OLD == "2026-10-16-2"
 
 
 def test_notice_version_is_tied_to_the_notice_text() -> None:
@@ -895,7 +925,8 @@ def test_notice_version_is_tied_to_the_notice_text() -> None:
 
 def test_consent_script_shows_the_stored_value_and_the_buttons_write_it() -> None:
     """동의 관리 스크립트를 node 로 돌린다 — 상태 글자·보이는 요소·칸·저장값·판·쿠키가 실제 저장값과 같다 (§3.3)."""
-    cookies = ["_clck", "_clsk", "other"]
+    # 075 — GA 쿠키 _ga 와 측정 ID 에 따라 이름이 다른 _ga_<기호> 도 거부·철회 때 지운다
+    cookies = ["_clck", "_clsk", "_ga", "_ga_TEST123", "other"]
     results = _run_consent_script(
         [{**case, "cookies": cookies} for _, case, *_ in CONSENT_CASES]
     )
@@ -920,12 +951,12 @@ def test_withdrawal_expires_clarity_cookies_in_both_domain_shapes() -> None:
             {
                 "stored": "granted",
                 "v": NOTICE,
-                "cookies": ["_clck"],
+                "cookies": ["_clck", "_ga_TEST123"],
                 "steps": ["click:an-withdraw"],
             }
         ]
     )
-    for name in ("_clck", "_clsk"):
+    for name in ("_clck", "_clsk", "_ga", "_ga_TEST123"):
         lines = [line for line in got["writes"] if line.startswith(f"{name}=;")]
         assert all("Max-Age=0" in line and "path=/" in line for line in lines), name
         assert any("domain=" not in line for line in lines), name
@@ -979,8 +1010,15 @@ def test_consent_box_splits_three_consents_before_the_buttons() -> None:
     assert collect["목적"] == (
         "KimpTrack의 화면 이용 분석 — 어떤 화면·기능이 쓰이고 어디서 막히는지 알아 서비스를 고치기, "
         "어느 영역·요소를 많이·적게 보고 누르는지, 어디서 떠나는지 알아 화면을 고치기, "
-        "운영자가 IP 주소별로 방문의 움직임을 다시 보거나 지금 보는 방문을 따라 보며 어디서 막히는지 알아 화면을 고치기"
+        "운영자가 IP 주소별로 방문의 움직임을 다시 보거나 지금 보는 방문을 따라 보며 어디서 막히는지 알아 화면을 고치기, "
+        "어느 페이지를 얼마나 오래 보고 어디서 들어오는지 알아 서비스를 고치기(방문 통계)"
     )
+    # 075 — 세 칸의 항목마다 Clarity 항목 바로 뒤에 Google Analytics 항목(같은 글자)
+    for notes in (collect, provide, transfer):
+        assert f"sessionStorage _cltk). {GA_ITEMS}" in notes["항목"] or notes[
+            "항목"
+        ].endswith(f"sessionStorage _cltk). {GA_ITEMS}"), notes["항목"][:40]
+    assert "방문 통계 2개월(Google Analytics" in collect["보유 기간"]
     # 051 §3.3-4 — 수집·이용 칸에만 KimpTrack 서버의 통계(항목·보유 기간·칸 끝 국내 보관 한 줄). 제공·국외 이전 칸은 그대로.
     # 060 §3.3-4 — 항목 끝은 'KimpTrack 서버:' 뒤에 2절과 같은 항목(요소·떠날 때 보던 곳·깊이) — Clarity 항목 뒤에 둔다
     kimptrack = collect["항목"].split(". KimpTrack 서버: ")
@@ -1005,14 +1043,22 @@ def test_consent_box_splits_three_consents_before_the_buttons() -> None:
         assert "녹화 30일" in period and "최대 9개월" in period, period
     for period in (provide["받는 자의 보유 기간"], transfer["목적·보유 기간"]):
         assert "Microsoft 개인정보처리방침이 정한 기간" in period, period
-    assert provide["받는 자"] == "Microsoft Corporation(미국)"
+    assert provide["받는 자"] == "Microsoft Corporation(미국), Google LLC(미국)"
     assert "Microsoft Advertising" in provide["받는 자의 목적"]
+    assert "Google의 광고·제품 개선에는 쓰지 않게" in provide["받는 자의 목적"]
+    for period in (provide["받는 자의 보유 기간"], transfer["목적·보유 기간"]):
+        assert period.endswith(GA_PERIOD), period
     assert transfer["국가·시기·방법"].startswith("미국 — ")
     for word in ("수시로", "브라우저", "전송"):
         assert word in transfer["국가·시기·방법"], word
     assert transfer["받는 자·연락처"].startswith("Microsoft Corporation, ")
     assert "Redmond" in transfer["받는 자·연락처"]
     assert INQUIRY in raw[2]["받는 자·연락처"]
+    assert "Google LLC, 1600 Amphitheatre Parkway" in transfer["받는 자·연락처"]
+    assert (
+        'href="https://policies.google.com/privacy?hl=ko"' in raw[2]["받는 자·연락처"]
+    )
+    assert "Microsoft·Google 서버로" in transfer["국가·시기·방법"]
     assert "Microsoft Advertising" in transfer["목적·보유 기간"]
 
 
@@ -1039,17 +1085,24 @@ def test_clarity_rests_on_consent_for_collection_provision_and_transfer() -> Non
     assert "프로젝트의 기록을 통째로 지우고" in _section(html, "s8")
     provision = _section(html, "s4")
     dls = re.findall(r"<dl[^>]*>(.*?)</dl>", provision, flags=re.S)
-    assert len(dls) == 1 and _terms(dls[0]) == PROVISION_TERMS
+    # 075 — 받는 자마다 한 묶음(Microsoft·Google)
+    assert len(dls) == 2 and all(_terms(dl) == PROVISION_TERMS for dl in dls)
+    assert [_notes(dl)["받는 자"] for dl in dls] == [
+        "Microsoft Corporation(미국)",
+        "Google LLC(미국)",
+    ]
     assert "제17조 제1항 제1호" in provision and "제17조 제1항 제2호" not in provision
     assert "불이익이 없습니다" in provision
     groups = re.findall(
         r"<h3>(.*?)</h3>\s*<dl[^>]*>(.*?)</dl>", _section(html, "s6"), flags=re.S
     )
     microsoft = [body for name, body in groups if name.startswith("Microsoft")]
-    assert len(microsoft) == 1
-    basis = re.search(r"<dt>근거</dt><dd>(.*?)</dd>", microsoft[0]).group(1)
-    assert "제28조의8 제1항 제1호" in basis and "제3호" not in basis
-    assert "불이익이 없습니다" in microsoft[0]
+    analytics = [body for name, body in groups if "Google Analytics" in name]
+    assert len(microsoft) == 1 and len(analytics) == 1
+    for group in (microsoft[0], analytics[0]):
+        basis = re.search(r"<dt>근거</dt><dd>(.*?)</dd>", group).group(1)
+        assert "제28조의8 제1항 제1호" in basis and "제3호" not in basis
+        assert "불이익이 없습니다" in group
 
 
 def test_behavioral_information_has_the_guideline_items() -> None:
@@ -1063,6 +1116,7 @@ def test_behavioral_information_has_the_guideline_items() -> None:
     )
     assert block and _terms(block.group(1)) == BEHAVIOR_TERMS
     assert "Microsoft Corporation" in block.group(1) and "광고" in block.group(1)
+    assert "Google LLC(미국)" in block.group(1)
 
 
 def test_every_overseas_recipient_lists_the_five_items() -> None:
@@ -1166,7 +1220,10 @@ def test_effective_date_ties_the_four_times_and_the_history() -> None:
     )
     items = _history(html)
     assert items[0].startswith(tag)
-    assert _text(items[0]) == f"{_korean(EFFECTIVE)}{V8_HISTORY}"
+    assert _text(items[0]) == f"{_korean(EFFECTIVE)}{V9_HISTORY}"
+    # 같은 날 두 번째 판(v8 — 078)의 항목은 날짜 뒤 차례와 그 판의 사본 링크(075 — `-2`)
+    v8 = [i for i in items[1:] if _text(i).startswith(V8_HISTORY)]
+    assert len(v8) == 1 and 'href="/privacy-20261016-2.html">그 판 보기</a>' in v8[0]
     # 같은 날 먼저 게시한 판(v7 — 076)의 항목은 차례 없이 그 판의 사본 링크(`privacy-20261016.html`) — 그 판이 알린 14일 그대로
     v7 = [i for i in items[1:] if _text(i).startswith(V7_HISTORY)]
     assert len(v7) == 1 and 'href="/privacy-20261016.html">그 판 보기</a>' in v7[0]
@@ -1205,7 +1262,7 @@ def test_effective_date_ties_the_four_times_and_the_history() -> None:
 
 
 def test_change_notice_comes_first_and_names_what_changes() -> None:
-    """맨 위 변경 안내 — 머리 시행일 줄 바로 아래, 소개 문단 앞. 시행 문장·바뀌는 것 하나·동의를 다시 물음·링크 둘 (067 §3.4·078 §3.7)."""
+    """맨 위 변경 안내 — 머리 시행일 줄 바로 아래, 소개 문단 앞. 시행 문장·바뀌는 것 하나·동의를 다시 물음·링크 둘 (067 §3.4·075 §3.6)."""
     html, page = _read(PUBLIC / "privacy.html")
     assert "변경 안내" in page.h2
     start = html.index('id="changes"')
@@ -1219,11 +1276,11 @@ def test_change_notice_comes_first_and_names_what_changes() -> None:
     for word in CHANGE_NOTICE_SAYS:
         assert word in text, word
     assert text.startswith(
-        f"변경 안내 이 판은 {_korean(EFFECTIVE)}부터 시행합니다 — 같은 날 먼저 게시한 판("
+        f"변경 안내 이 판은 {_korean(EFFECTIVE)}부터 시행합니다 — 그 전날까지는 "
     )
     # 바뀌는 것은 하나라 번호 목록이 없다. 다시 묻는다는 문장은 바뀌는 것 뒤
     assert "<li>" not in notice
-    assert text.index("(2절 화면 이동 기록)") < text.index("다시 묻고")
+    assert text.index("(2절 방문 통계)") < text.index("다시 묻고")
 
 
 def test_body_sections_state_the_v2_facts() -> None:
@@ -1287,9 +1344,9 @@ def test_body_sections_state_the_screen_use_facts() -> None:
         if _text(item).startswith(f"{_korean(PRIVACY_V3_EFFECTIVE)} — ")
     ]
     assert OLD_NAME in v3
-    # 7절 저장 장치 목록은 그대로 — 영역 통계는 쿠키·브라우저 저장소를 쓰지 않는다 (051 §3.3-8)
+    # 7절 저장 장치 목록 — 영역 통계는 쿠키·브라우저 저장소를 쓰지 않는다 (051 §3.3-8). 075 가 GA 쿠키 둘을 더했다
     devices = re.search(r"<ul>(.*?)</ul>", _section(body, "s7"), flags=re.S).group(1)
-    assert len(re.findall(r"<li>", devices)) == 5 and "영역" not in devices
+    assert len(re.findall(r"<li>", devices)) == 7 and "영역" not in devices
 
 
 # 078 §3.7 — 2절 화면 이동 기록의 두는 곳(보유 기간·저장 장소)과 3절 파기 문장
@@ -1350,8 +1407,8 @@ REPLAY_FACTS = {
 
 def test_body_sections_state_the_replay_facts() -> None:
     """076 §3.2·§3.3·078 §3.7 — 화면 이동 기록을 동의 상자·한눈에 보기·1·2·3·7·8·9절이 빠짐없이 말하고, 2절 소제목은 화면 이용
-    통계와 Clarity 사이. 서버 상수 `PRIVACY_V8_EFFECTIVE`(keep 기준)는 이 판의 시행일, `PRIVACY_V7_EFFECTIVE`(받기 게이트)는 바로 앞
-    판(v7 — 같은 날 먼저 게시한 판)의 시행일이다."""
+    통계와 Clarity 사이. 서버 상수 `PRIVACY_V8_EFFECTIVE`(keep 기준)는 바로 앞 판(v8 — 사본 `privacy-20261016-2.html`)의 시행일,
+    `PRIVACY_V7_EFFECTIVE`(받기 게이트)는 같은 날이다. 075(v9)는 서버 게이트가 없어 상수를 더하지 않는다."""
     html, _ = _read(PUBLIC / "privacy.html")
     body = _without_diff(html)
     for label, words in REPLAY_FACTS.items():
@@ -1364,10 +1421,9 @@ def test_body_sections_state_the_replay_facts() -> None:
         < s2.index("<h3>화면 이동 기록 — KimpTrack 서버</h3>")
         < s2.index("<h3>화면 이용 기록 — Microsoft Clarity</h3>")
     )
-    assert PRIVACY_V8_EFFECTIVE == EFFECTIVE
     y, m, d, nth = re.fullmatch(ARCHIVE_NAME, PREVIOUS).groups()
-    assert PREVIOUS == "privacy-20261016.html" and nth is None
-    assert PRIVACY_V7_EFFECTIVE == f"{y}-{m}-{d}" <= PRIVACY_V8_EFFECTIVE
+    assert PREVIOUS == "privacy-20261016-2.html" and nth == "2"
+    assert PRIVACY_V7_EFFECTIVE == PRIVACY_V8_EFFECTIVE == f"{y}-{m}-{d}" < EFFECTIVE
 
 
 def test_diff_table_rows_match_both_versions() -> None:
@@ -1402,67 +1458,124 @@ def test_diff_table_rows_match_both_versions() -> None:
         assert new in restored, (section, new)
         restored = restored.replace(new, "" if added else old)
     assert " ".join(restored.split()) == " ".join(expected.split())
-    # 078 §3.7 — 바뀐 문장마다 한 행: 동의 상자 둘(질문·수집·이용 칸 보유 기간)과 본문 — 화면 이동 기록의 보유 기간·두는 곳을
-    # 적은 곳마다, 9절은 새 저장소의 공개 차단 한 문장. 지운 문장은 없다
+    # 075 §3.6 — 바뀐 문장마다 한 행: 동의 상자(질문·저장 규칙·세 칸·상자 아래 철회 문단)와 본문 — Google Analytics 를 더한
+    # 곳마다. 지운 문장은 없다
     names = {row[0]: row for row in rows}
     assert list(names) == [
         "동의 관리 — 질문",
+        "동의 관리 — 저장 규칙",
+        "동의 관리 — 세 칸의 항목",
+        "동의 관리 — 수집·이용 목적",
         "동의 관리 — 수집·이용 보유 기간",
+        "동의 관리 — 수집·이용 칸 끝",
+        "동의 관리 — 제공 칸",
+        "동의 관리 — 제공 받는 자",
+        "동의 관리 — 제공 받는 자의 목적",
+        "동의 관리 — 받는 자의 보유 기간",
+        "동의 관리 — 이전 받는 자·연락처",
+        "동의 관리 — 이전 국가·시기·방법",
+        "동의 관리 — 이전 목적·보유 기간",
+        "동의 관리 — 철회 때 지우는 쿠키",
+        "동의 관리 — Google Analytics 기록 지우기",
         "한눈에 보기 화면 분석",
+        "한눈에 보기 동의 세 가지",
+        "1절 목적",
         "2절 보유 기간 표",
-        "2절 화면 이동 기록 — 두는 곳",
-        "2절 방문자 정보가 가지 않는 곳",
+        "2절 방문 통계 — 소제목",
+        "2절 방문 통계 — 받는 것",
+        "2절 방문 통계 — 받는 곳·쓰임",
+        "2절 방문 통계 — 두는 기간",
+        "2절 처리 근거",
         "3절 파기",
+        "4절 제3자 제공",
+        "4절 받는 자 — Google LLC",
+        "6절 국외 이전 — Google Analytics",
+        "7절 쿠키 _ga",
+        "7절 쿠키 _ga_*",
+        "7절 행태정보 — 수집 항목",
         "7절 행태정보 — 수집 방법",
+        "7절 행태정보 — 목적",
         "7절 행태정보 — 보유 기간",
+        "7절 행태정보 — 수집하는 사업자",
+        "8절 권리 행사",
+        "9절 안전성 확보 조치",
     ]
-    assert names["2절 화면 이동 기록 — 두는 곳"][2] == REPLAY_STORE
-    assert names["3절 파기"][2] == REPLAY_DESTRUCTION
+    assert names["동의 관리 — 세 칸의 항목"][2] == GA_ITEMS
+    assert names["동의 관리 — 수집·이용 칸 끝"][2] == COLLECT_NOTE
     assert not [row for row in rows if REMOVED in row[1:3]]
     for sentence in PREVIOUS_CONSENT_TEXT:
         assert [row for row in rows if row[1] == sentence], sentence
-    # 받는 것은 그대로다 — 이 판이 더한 문장(이 판 칸)은 받는 것을 말하지 않는다(사람 결정 2026-10-16)
-    for _, old, new, _ in rows:
-        for word in ("입력", "누른 키", "글자"):
-            assert (word in new) == (word in old) or old == ADDED and word not in new, (
-                word,
-                new,
-            )
+    # 이 판이 바꾼 문장은 모두 Google Analytics(방문 통계)에 관한 것이다 — 다른 기록의 글은 그대로(아래 테스트)
+    for name, _, new, _ in rows:
+        assert "Google" in new or "방문 통계" in new, name
 
 
-def test_v8_changes_only_the_replay_period_and_place() -> None:
-    """078 §3.7 — v8 은 화면 이동 기록의 보유 기간(14일 → 서비스를 끝낼 때까지)과 두는 곳(+ Amazon S3)만 바꾼다. 본문(대조표 밖)의
-    그 기록 문장에는 '14일' 꼴의 보유 기간이 없고 '서비스를 끝낼 때까지'·S3 가 있으며, Clarity(Microsoft)의 녹화 30일·9개월과
-    화면 이용 통계의 90일, 받는 것(동의 상자 항목·2절 받는 것)은 바로 앞 판(v7 사본)과 같은 글자다."""
+# 075 §3.5 — 본문 절마다 방문 통계(Google Analytics)의 사실 — 받는 것·받지 않는 것·받는 곳·쓰임·끈 설정·2개월·쿠키·근거·지우는 길
+GA_FACTS = {
+    "glance": ("Google Analytics로 방문 통계를 보며", "Microsoft·Google 제공"),
+    "consent-title": (
+        "Google Analytics(미국)로 보내도 될까요?",
+        "Google Analytics 쿠키 _ga·_ga_*를 지웁니다",
+        "쿠키 _ga의 값을 알려 주면 그 브라우저의 기록만",
+        "지우는 시점은 Google 기준입니다",
+    ),
+    "s1": ("방문 통계 — Google Analytics, 동의한 방문자만",),
+    "s2": (
+        "방문 통계 — Google Analytics",
+        "방문 통계(Google Analytics — 동의한 경우만) 2개월",
+        "페이지 주소(검색어와 # 뒤는 뺌)",
+        "IP 주소는 저장하지 않음",
+        "입력한 글자·마우스 위치·화면 내용은 받지 않고",
+        "받는 곳은 Google LLC(미국)입니다",
+        "광고용 저장·광고 개인화·Google 신호를 끈 채 보내고",
+        "데이터 공유 설정을 모두 꺼",
+        "Google이 2개월 동안 두고 그 뒤 지웁니다",
+        "합계 보고서(날짜별 방문 수 같은 것)는 기간 없이 남습니다",
+        "쿠키는 마지막 방문부터 2개월",
+        "방문 통계(Google Analytics)도 같은 세 가지 동의로 처리합니다",
+    ),
+    "s3": (
+        "Google Analytics 기록은 Google이 보관하며, 2개월이 지나면 Google이 지웁니다",
+    ),
+    "s4": ("방문 통계는 Google에 제공됩니다", "Google LLC(미국)"),
+    "s6": (
+        "Google LLC — 방문 통계(Google Analytics)",
+        "Google 서버로 네트워크를 통해 전송",
+    ),
+    "s7": (
+        "쿠키 _ga — Google Analytics",
+        "쿠키 _ga_* — Google Analytics",
+        "마지막 방문부터 2개월",
+        "Google LLC(미국)",
+    ),
+    "s8": ("Google Analytics 기록은 쿠키 _ga의 값을 알려 주면",),
+    "s9": ("Google Analytics에는 페이지 주소의 검색어를 빼고",),
+}
+
+
+def test_v9_adds_google_analytics_and_keeps_the_other_records() -> None:
+    """075 §3.5·§3.6 — v9 는 방문 통계(Google Analytics)를 본문 절마다 알리고, 2절의 소절은 Clarity 소절 바로 뒤. Clarity·화면 이용
+    통계·화면 이동 기록의 2절 소절과 보유 기간 표의 다른 행, 동의 상자의 거부 칸은 바로 앞 판(v8 사본)과 같은 글자다. 화면 이동
+    기록의 지난 보유 기간 꼴('14일')은 12절 이력 밖에 없다(078)."""
     html, _ = _read(PUBLIC / "privacy.html")
     archived, _ = _read(PUBLIC / PREVIOUS)
     body = _without_diff(html)
+    for label, words in GA_FACTS.items():
+        text = _text(_section(body, label))
+        for word in words:
+            assert word in text, (label, word)
+    s2 = _section(body, "s2")
+    assert (
+        s2.index("<h3>화면 이용 기록 — Microsoft Clarity</h3>")
+        < s2.index("<h3>방문 통계 — Google Analytics</h3>")
+        < s2.index("<h3>관리자 접속 기록(운영자만)</h3>")
+    )
     visible = _text(_body(body))
-    # 지난 보유 기간 꼴은 본문에 없다 — 12절 이력의 v7 항목(그 판이 알린 '14일')과 변경 안내의 '14일이 아니라' 는 뺀다
     history = " ".join(_text(item) for item in _history(html))
-    notice = _text(_change_notice(html))
-    rest = visible.replace(history, "").replace(notice, "")
+    rest = visible.replace(history, "")
     for old in REPLAY_OLD_PERIODS:
         assert old not in rest, old
-    # 화면 이동 기록을 말하는 본문 문장마다 — '최근 14일 몫'(Redis 가 쥐는 몫, 두는 곳의 낱말)을 빼면 '14일' 이 없다
-    sentences = [
-        sentence
-        for label in ("glance", "consent-title", "s2", "s3", "s7", "s9")
-        for sentence in re.split(r"(?<=[.?])\s", _text(_section(body, label)))
-        if "화면 이동 기록" in sentence
-    ]
-    assert len(sentences) >= 8, sentences
-    for sentence in sentences:
-        assert "14일" not in sentence.replace("최근 14일 몫", ""), sentence
-    for label in ("glance", "consent-title", "s2", "s3", "s7"):
-        assert "서비스를 끝낼 때까지" in _text(_section(body, label)) or (
-            "서비스를 끝내면" in _text(_section(body, label))
-        ), label
-    # 9절(안전성)은 그대로 — v8 은 새 안전 조치 문장을 더하지 않는다(보관 기간·저장 장소만 — 사람 결정 2026-10-16)
-    for label in ("s2", "s3"):
-        assert "Amazon S3" in _text(_section(body, label)), label
 
-    # 2절 보유 기간 표 — 화면 이동 기록 행만 바뀌고 Clarity(30일·9개월)·화면 이용 통계(하루 합계 90일)·나머지 행은 그대로
     def periods(page: str) -> dict[str, str]:
         table = re.search(
             r'<table class="tbl">(.*?)</table>', _section(page, "s2"), re.S
@@ -1475,42 +1588,14 @@ def test_v8_changes_only_the_replay_period_and_place() -> None:
         }
 
     now, before = periods(html), periods(archived)
-    assert list(now) == list(before)
-    replay = "화면 이동 기록(동의한 경우만)"
-    assert (before[replay], now[replay]) == ("14일", "서비스를 끝낼 때까지")
-    assert {k: v for k, v in now.items() if k != replay} == {
-        k: v for k, v in before.items() if k != replay
-    }
+    ga = "방문 통계(Google Analytics — 동의한 경우만)"
+    assert now.pop(ga) == "2개월"
+    assert now == before
     assert (
-        now["화면 녹화(Clarity — 동의한 경우만)"]
-        == "30일 — 히트맵·즐겨찾기·표본 녹화·라벨은 최대 9개월"
+        list(periods(html)).index(ga)
+        == list(periods(html)).index("화면 녹화(Clarity — 동의한 경우만)") + 1
     )
-    assert now["화면 이용 통계(동의한 경우만)"] == "하루 합계 90일"
-    # 동의 상자 — 제공·국외 이전 칸은 글자 그대로, 수집·이용 칸은 보유 기간의 화면 이동 기록만 바뀐다(항목·목적·칸 끝 줄 그대로)
-    cells = _consent_box(html)[1]
-    old_cells = re.findall(
-        r"<dl[^>]*>(.*?)</dl>", _section(archived, "consent-title"), re.S
-    )
-    new_notes = [
-        _notes(re.search(r"<dl[^>]*>(.*?)</dl>", c, re.S).group(1)) for c in cells
-    ]
-    old_notes = [_notes(dl) for dl in old_cells]
-    assert new_notes[1:] == old_notes[1:]
-    for term in ("항목", "목적", "거부 권리·불이익"):
-        assert new_notes[0][term] == old_notes[0][term], term
-    assert new_notes[0]["보유 기간"] == old_notes[0]["보유 기간"].replace(
-        "화면 이동 기록은 마지막 기록부터 14일",
-        "화면 이동 기록은 서비스를 끝낼 때까지(끝내면 지움)",
-    )
-    assert (
-        "녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월(Clarity)"
-        in new_notes[0]["보유 기간"]
-    )
-    assert "KimpTrack 서버: 하루 합계로만 90일" in new_notes[0]["보유 기간"]
-    assert [_text(n) for n in _cell_notes(cells[0])] == [COLLECT_NOTE]
-    assert COLLECT_NOTE in _text(_section(archived, "consent-title"))
 
-    # 2절의 화면 이용 통계·Clarity 소절과 화면 이동 기록의 받는 것·보내는 때 문단은 v7 그대로
     def block(page: str, title: str) -> str:
         s2 = _section(_without_diff(page), "s2")
         start = s2.index(f"<h3>{title}</h3>")
@@ -1518,16 +1603,30 @@ def test_v8_changes_only_the_replay_period_and_place() -> None:
 
     for title in (
         "화면 이용 통계 — KimpTrack 서버",
+        "화면 이동 기록 — KimpTrack 서버",
         "화면 이용 기록 — Microsoft Clarity",
     ):
         assert block(html, title) == block(archived, title), title
-    replay_now = block(html, "화면 이동 기록 — KimpTrack 서버")
-    replay_before = block(archived, "화면 이동 기록 — KimpTrack 서버")
-    assert replay_now.replace(REPLAY_STORE, "") == replay_before.replace(
-        "AWS 서울 리전의 KimpTrack 서버 저장소(Redis)에 마지막 기록부터 14일 동안 두고, 그 뒤 저장소가 스스로 지웁니다. "
-        "Microsoft를 포함해 다른 곳으로 보내지 않습니다.",
-        "",
+    # 동의 상자 — 칸마다 거부 칸은 그대로, 수집·이용 칸의 Clarity·KimpTrack 항목은 그대로(사이에 Google Analytics 항목만)
+    cells = _consent_box(html)[1]
+    old_cells = re.findall(
+        r"<dl[^>]*>(.*?)</dl>", _section(archived, "consent-title"), re.S
     )
+    new_notes = [
+        {
+            t: _text(v)
+            for t, v in _notes(
+                re.search(r"<dl[^>]*>(.*?)</dl>", c, re.S).group(1)
+            ).items()
+        }
+        for c in cells
+    ]
+    old_notes = [{t: _text(v) for t, v in _notes(dl).items()} for dl in old_cells]
+    for new, old in zip(new_notes, old_notes, strict=True):
+        assert list(new) == list(old)
+        for term in ("거부 권리·불이익", "거부 방법·절차·효과"):
+            assert new.get(term) == old.get(term), term
+        assert new["항목"].replace(f". {GA_ITEMS}", "") == old["항목"]
 
 
 def test_section_12_rule_drops_the_seven_day_promise() -> None:

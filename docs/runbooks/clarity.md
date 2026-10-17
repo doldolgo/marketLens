@@ -1,6 +1,6 @@
 # Microsoft Clarity — 대시보드 설정·켜고 끄기·삭제 요청·Data Export 토큰·화면 이동 기록 지우기 (스펙 033·035·040·068·078, 사람용)
 
-랜딩(`/`)과 대시보드(`/app/`)의 화면 이용을 Microsoft Clarity 로 본다. **동의 방식**이다 — 처음 들어온 방문자에게 뜨는 동의 창(모달)이나 처리방침의 동의 관리(`/privacy#consent`)에서 수집·이용·Microsoft 제공·미국 이전 세 칸에 모두 동의해 저장한 방문자만 Clarity 태그를 받는다. 설정은 레포의 `web/public/clarity.js` 머리 세 값(프로젝트 ID·켤 페이지·안내 판)이 전부이고, 나머지는 Clarity 대시보드에서 사람이 한다.
+랜딩(`/`)과 대시보드(`/app/`)의 화면 이용을 Microsoft Clarity 로 본다. **동의 방식**이다 — 처음 들어온 방문자에게 뜨는 동의 창(모달)이나 처리방침의 동의 관리(`/privacy#consent`)에서 수집·이용·Microsoft 제공·미국 이전 세 칸에 모두 동의해 저장한 방문자만 Clarity 태그를 받는다. 설정은 레포의 `web/public/clarity.js` 머리 세 값(프로젝트 ID·켤 페이지·안내 판)이 전부이고, 나머지는 Clarity 대시보드에서 사람이 한다. Google Analytics 4 도 같은 동의·같은 파일로 돈다(075) — `google-analytics.md`.
 
 ## 1. 켜는 순서
 1. 032 처리방침이 게시돼 있다 — `https://kimptrack.com/privacy` 가 열리고 '화면 분석 동의 관리' 절이 있다. 032 §7 의 법률 확인을 끝냈다.

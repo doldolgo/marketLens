@@ -34,6 +34,7 @@ marketlens/
       cloudwatch.md           CloudWatch 에이전트·경보·canary·로그 전송 설치 (사람용, 027)
       admin-access.md         관리자 페이지 Cloudflare Access·Tunnel 설정 기록·토큰 교체·접속 기록 회전 (사람용, 030)
       clarity.md              Clarity 대시보드 설정·켜고 끄기·삭제 요청(프로젝트 통째 삭제) (사람용, 033)
+      google-analytics.md     GA4 속성 만들기·방침에 맞춘 설정값·켜고 끄기·삭제 요청 (사람용, 075)
   server/                     FastAPI 앱 (Python 3.12)
     app/
       core/                   공유 인프라 — 스트림 커넥터·메모리 저장소(LiveStore)·perp 행 맵·틱 루프·김프 계산·망 매칭·Influx·Redis·S3 클라이언트 (모듈 이름은 개발 후 architecture.md "현재 구조"에)
@@ -152,6 +153,7 @@ marketlens/
 | 072 | responsive | DONE | 대시보드 좁은 화면 배치 — 폭·높이 세 구간(폰 ≤719·좁은 헤더 ≤1079·문서 스크롤 = 폰 또는 높이 ≤560, 공유 훅 하나), 두 줄 헤더·메뉴(처리방침·화면 분석 설정)·폰 탭 짧은 이름, 폰 KPI 3칸 격자·필터 접기·정렬 줄·카드 행, 좁은 폭 표 틀 왼쪽부터·기록 탭 한 칸 쌓기, 차트 터치 세로 끌기는 페이지 스크롤. 넓은 화면(≥1080)은 그대로, 관리자 화면 제외 (web) |
 | 073 | replay-collect | DONE | 화면 이동 기록 수집 — `public/replay.js`(동의자만, 조각 sid·사건 m·c·s·e·r·v·p·a, 2초 묶음), api `POST /replay`(공개 허용 +1·검사·게이트·IP 10분 600·그날 8MB·조각 1MB), Redis `rp:*` 14일, 관리자 피드 `live`·`sessions`·`session` (BE·web·인프라) |
 | 074 | admin-replay | DONE | 관리자 방문자 페이지 '지금 보는 중'·'화면 기록'·IP 판 '화면 기록', 재생 판(실제 페이지 틀 + 커서·누름·스크롤, 속도·빈 시간 건너뛰기·시간 막대·사건 목록, 따라 보기 2초), `replay.js` 재생 쪽(kt-replay=1) (web) |
+| 075 | privacy-v9-ga | DONE | 처리방침 v9(2026-10-17) — Google Analytics 4(방문 통계: 본 페이지·머문 시간·유입 경로, `clarity.js` 안에서 Clarity 와 같은 세 칸 동의자만·동의 전 Google 요청 0·광고 신호 거부·Google 신호 끔·검색어 뺀 주소·쿠키 2개월), 받는 자·국외 이전에 Google LLC, GA 보관 2개월, 안내 판 올림(다시 묻기), 이전 판 `privacy-20261016-2.html`, 서버 상수 없음, 측정 ID 가 든 PR 머지 = 켜기(지금 비어 있음), 런북 google-analytics.md. 078 위 (web) |
 | 076 | privacy-v7 | DONE | 처리방침 v7 — 화면 이동 기록(동의한 방문의 마우스·손가락 위치·누른 곳·스크롤·보던 영역·탭 바꿈 + 시각·IP, KimpTrack 서버 14일, 관리자 재생), 동의 창·방침 동의 상자 글, 안내 판 `2026-10-16`(다시 묻기), `PRIVACY_V7_EFFECTIVE`, 이전 판 `privacy-20261014-2.html`. 법률 확인 뒤 머지 = 게시 (web·BE) |
 | 077 | clarity-recordings | DONE | Clarity 녹화 목록 — api `GET /admin/clarity/recordings?days=1·3·7·30`(Clarity MCP 서버의 녹화 경로, 040 토큰, 창마다 30분 메모리 캐시·실패도, 행 = 시작·길이·페이지·클릭·재생 링크(Clarity 출처·허용 글자만)·페이지별 시간선(주소 줄이기·클릭 글자)), 관리자 nginx 정확 일치 +1, Clarity 페이지 카드 '녹화'(기간 탭·최근 10행)·목록 판 `recs`·녹화 판 `rec:<행 번호>`(시간선·Clarity 에서 재생 ↗). 영상·IP 는 Clarity 가 주지 않는다 (BE·web·인프라) |
 | 078 | replay-archive | DONE | 화면 이동 기록 서비스 종료까지 보관(사람 결정 2026-10-16) — v8 뒤 조각은 머리 `keep`·만료 없음, 수집기가 10분마다 3시간 조용한 조각을 S3 `replay/…ndjson.gz` 로(collect 박스 자격), 수집기 `GET /admin/replay/archive`(관리자 nginx 정확 일치 +1)·api `session` 의 `archived`·관리자 재생 판이 옮긴 조각을 archive 로, IP 지우기 스크립트, 처리방침 v8(보관 기간·저장 장소만, 안내 판 `2026-10-16-2`) (BE·web·인프라) |
