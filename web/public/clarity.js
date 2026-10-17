@@ -19,12 +19,16 @@
   // 보던 곳·내려온 깊이까지 넓어진다(061). 2026-10-16 판(076): 같은 동의로 KimpTrack 서버가 방문마다 화면 이동 기록(마우스·손가락
   // 위치·누른 곳·스크롤 + 시각·IP, 14일 — 073)을 모아 운영자가 다시 본다(074) — replay.js 의 판도 함께 올린다. 2026-10-16-2 판
   // (078 — 같은 날 두 번째 판): 그 기록을 서비스를 끝낼 때까지 두고 S3 에도 옮긴다(보유 기간·두는 곳만 바뀜). 2026-10-17 판(075):
-  // 같은 동의로 Google Analytics 4 가 방문 통계를 받는다(받는 자에 Google LLC)
-  const NOTICE_VERSION = "2026-10-17"
+  // 같은 동의로 Google Analytics 4 가 방문 통계를 받는다(받는 자에 Google LLC). 2026-10-17-2 판(079 — 같은 날 두 번째 판): 동의 창의
+  // [모두 거부]를 [하루 동안 안 보기]로 바꾸고 [모두 동의]를 더했다 — 동의 상자의 저장 규칙·거부 방법 글이 바뀌었다
+  const NOTICE_VERSION = "2026-10-17-2"
 
   const HOST = "kimptrack.com" // www 는 apex 로 301 이고 저장값이 출처마다 따로라 이 호스트 하나만
   const KEY = "kt.analytics"
   const VKEY = "kt.analytics.v"
+  // 079 — [하루 동안 안 보기]·일부만 체크한 저장의 다시 물을 시각(epoch ms 글자). 값은 later
+  const UKEY = "kt.analytics.until"
+  const LATER_MS = 86_400_000
   const BOXES = ["kt-c-collect", "kt-c-provide", "kt-c-transfer"]
 
   // 동의 창 글자 — 032 방침 동의 상자와 같은 글자다(server/tests/test_clarity.py 가 privacy.html 에서 읽어 맞춘다).
@@ -59,15 +63,15 @@
 <dt>국가·시기·방법</dt><dd>미국 — 동의한 뒤 랜딩·대시보드를 보는 동안 수시로, 방문자의 브라우저가 Microsoft·Google 서버로 네트워크를 통해 전송</dd>
 <dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>). Google Analytics: 페이지 주소(검색어는 뺌)·페이지 제목·이전 페이지 주소, 페이지를 본 일·끝 가까이(90%) 내려 본 일·밖으로 나가는 링크를 누른 일·머문 시간, 기기 종류·브라우저·운영체제·화면 크기·언어, IP 주소(대략의 나라·도시 추정에 쓰고 저장하지 않음), Google Analytics가 브라우저와 방문을 알아보는 쿠키 <code>_ga</code>·<code>_ga_*</code></dd>
 <dt>목적·보유 기간</dt><dd><strong class="key">KimpTrack의 화면 이용 분석과 Microsoft Advertising 제공 등 Microsoft 자신의 목적 — Clarity의 기록은 녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월, Microsoft 자신의 목적에 쓰는 정보는 Microsoft 개인정보처리방침이 정한 기간. KimpTrack의 방문 통계와 Google의 서비스 운영·보호 — Google Analytics의 기록은 2개월(사람을 가리키지 않는 합계 보고서는 기간 없이 남음)</strong></dd>
-<dt>거부 방법·절차·효과</dt><dd>이 칸에 체크하지 않거나 [모두 거부]를 누르면 이전되지 않습니다. 동의한 뒤에는 처리방침의 “화면 분석 동의 관리”(<a class="link" href="/privacy#consent">/privacy#consent</a>)에서 [동의 철회]를 누르면 그 뒤로 이전되지 않습니다. 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
+<dt>거부 방법·절차·효과</dt><dd>이 칸에 체크하지 않으면 이전되지 않습니다. 동의한 뒤에는 처리방침의 “화면 분석 동의 관리”(<a class="link" href="/privacy#consent">/privacy#consent</a>)에서 [동의 철회]를 누르면 그 뒤로 이전되지 않습니다. 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
 </dl></details>
 </div>
 <div class="kt-c-cell">
 <a class="link" href="/privacy#consent">처리방침에서 자세히 보기</a>
-<details><summary>저장 규칙</summary><p>세 가지에 모두 동의하고 [선택한 대로 저장]을 누른 경우에만 Clarity·Google Analytics와 KimpTrack 영역 통계·화면 이동 기록이 돕니다 — Clarity는 셋이 다 있어야 돌아가므로 하나라도 빠지면 거부로 저장합니다.</p></details>
+<details><summary>저장 규칙</summary><p>세 가지에 모두 동의하고 저장한 경우에만 Clarity·Google Analytics와 KimpTrack 영역 통계·화면 이동 기록이 돕니다 — Clarity는 셋이 다 있어야 돌아가므로 하나라도 빠지면 분석하지 않고, 하루 동안 묻지 않다가 다시 묻습니다.</p></details>
 </div>
 </div>
-<div class="kt-c-actions"><button type="button" id="kt-c-save">선택한 대로 저장</button><button type="button" id="kt-c-deny">모두 거부</button></div>`
+<div class="kt-c-actions"><button type="button" id="kt-c-all" class="kt-c-primary">모두 동의</button><button type="button" id="kt-c-save">선택한 대로 저장</button><button type="button" id="kt-c-later">하루 동안 안 보기</button></div>`
 
   // 색은 랜딩 토큰 복사(032 동의 상자와 같은 surface·accent), 글꼴은 시스템 글꼴(032 방침과 같은 목록) — 랜딩 서브셋 글꼴에 없는
   // 글자가 섞이지 않고 대시보드의 웹 글꼴을 기다리지 않게. 화면 가운데 모달 — 어두운 배경이 페이지를 덮고 창은 최대 720px.
@@ -96,13 +100,15 @@
 #kt-consent dd{color:#cfd3e5}
 #kt-consent code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:1em;color:#f3f5fe}
 #kt-consent .key{font-size:1.2em;font-weight:700;color:#e9e9ed;text-decoration:underline;text-decoration-color:#9184d9;text-underline-offset:4px}
-#kt-consent .kt-c-actions{flex:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;max-width:404px;padding:12px 20px 16px}
+#kt-consent .kt-c-actions{flex:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;max-width:596px;padding:12px 20px 16px}
 #kt-consent button{height:44px;padding:0 8px;border:1px solid #9184d9;border-radius:8px;background:none;color:#9184d9;font:inherit;font-weight:600;line-height:1;white-space:nowrap;cursor:pointer}
 #kt-consent button:hover{background:rgba(145,132,217,.12)}
+#kt-consent button.kt-c-primary{background:#9184d9;color:#14151f}
+#kt-consent button.kt-c-primary:hover{background:#a397e3}
 #kt-consent :focus-visible{outline:2px solid #9184d9;outline-offset:2px;border-radius:4px}
 #kt-consent .kt-c-body:focus-visible{outline-offset:-2px}
 #kt-consent .kt-c-box:focus{outline:none}
-@media (max-width:599px){#kt-consent .kt-c-body{padding:12px 14px 2px}#kt-consent .kt-c-actions{max-width:none;padding:8px 14px}#kt-consent details>dl,#kt-consent details>p{margin-left:0}#kt-consent dl{grid-template-columns:minmax(0,1fr);gap:0}#kt-consent dd+dt{margin-top:8px}}
+@media (max-width:599px){#kt-consent .kt-c-body{padding:12px 14px 2px}#kt-consent .kt-c-actions{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;max-width:none;padding:8px 14px}#kt-consent button.kt-c-primary{grid-column:1/-1}#kt-consent details>dl,#kt-consent details>p{margin-left:0}#kt-consent dl{grid-template-columns:minmax(0,1fr);gap:0}#kt-consent dd+dt{margin-top:8px}}
 `
 
   // 하나라도 걸리면 부르지 않는 조건의 앞 셋(§3.2) — ID·호스트·페이지. 여기서 빠진 문서는 듣지도 않는다(storage·pageshow)
@@ -127,20 +133,29 @@
     }
   }
 
-  // 지금 값 — "on"(지금 판의 granted) · "denied" · "undecided"(없음·그 밖의 값·판이 다르거나 없는 granted — 032 의 '정하지 않음')
+  // 지금 값 — "on"(지금 판의 granted) · "denied"(판이 있는 denied — 처리방침의 [모두 거부]·[동의 철회]) · "later"(다시 물을 시각이
+  // 아직 안 온 later — 지금부터 24시간 안) · "undecided"(그 밖 — 없음·다른 판의 granted·판 없는 예전 denied·지난 later, 079 §3.1)
   // · "blocked"(GPC 이거나 저장소를 읽다 예외 — 고른 값을 저장할 수 없다). GPC 는 granted 보다 앞선다
   const judge = () => {
     if (navigator.globalPrivacyControl === true) return "blocked"
     let value
     let version
+    let until
     try {
       value = window.localStorage.getItem(KEY)
       version = window.localStorage.getItem(VKEY)
+      until = window.localStorage.getItem(UKEY)
     } catch (e) {
       return "blocked"
     }
     if (value === "granted" && version === NOTICE_VERSION) return "on"
-    return value === "denied" ? "denied" : "undecided"
+    if (value === "denied" && version) return "denied"
+    if (value === "later" && until) {
+      const at = Number(until)
+      const now = Date.now()
+      if (at > now && at <= now + LATER_MS) return "later"
+    }
+    return "undecided"
   }
 
   // 부르지 않는 문서는 예전 방문에서 남은 Clarity·GA 저장값을 지운다 — 쿠키는 도메인 속성 없이 한 번, 이 호스트로 한 번(.kimptrack.com).
@@ -238,12 +253,14 @@
     if (style) style.remove()
   }
 
-  // [모두 거부] — denied 를 쓰고 판을 지운 뒤 동의 창을 닫는다. 아무것도 부르지 않는다(쓰기 예외여도 창만 닫는다)
-  const refuse = () => {
+  // [하루 동안 안 보기](079 §3.2) — 다시 물을 시각을 먼저 쓰고(다른 탭이 later 를 볼 때 시각이 이미 맞게) later 를 쓴 뒤 판을 지우고
+  // 동의 창을 닫는다. 아무것도 부르지 않는다(쓰기 예외여도 창만 닫는다 — 값이 그대로면 다음 페이지에서 다시 묻는다)
+  const postpone = () => {
     try {
-      window.localStorage.setItem(KEY, "denied")
+      window.localStorage.setItem(UKEY, String(Date.now() + LATER_MS))
+      window.localStorage.setItem(KEY, "later")
     } catch (e) {
-      // 저장하지 못해도 창은 닫는다 — 값이 그대로면 다음 페이지에서 다시 묻는다
+      // 위와 같다
     }
     try {
       window.localStorage.removeItem(VKEY)
@@ -253,9 +270,10 @@
     closeModal()
   }
 
-  // [선택한 대로 저장] — 셋 다 체크해야 동의. 판을 먼저 써서 다른 탭이 granted 를 볼 때 판이 이미 맞게, 쓰기가 예외면 부르지 않는다
+  // [선택한 대로 저장] — 셋 다 체크해야 동의, 하나라도 빠지면 하루 동안 안 보기와 같다(079 — 완전 거부는 처리방침에서만).
+  // 판을 먼저 써서 다른 탭이 granted 를 볼 때 판이 이미 맞게, 쓰기가 예외면 부르지 않는다
   const save = () => {
-    if (!BOXES.every((id) => modal.querySelector("#" + id).checked)) return refuse()
+    if (!BOXES.every((id) => modal.querySelector("#" + id).checked)) return postpone()
     let stored = false
     try {
       window.localStorage.setItem(VKEY, NOTICE_VERSION)
@@ -264,14 +282,25 @@
     } catch (e) {
       // 동의를 저장할 수 없으면 이어 갈 수 없다
     }
+    try {
+      window.localStorage.removeItem(UKEY)
+    } catch (e) {
+      // 남아도 granted 가 앞선다
+    }
     closeModal()
     if (stored) load(true)
   }
 
+  // [모두 동의] — 세 칸을 체크로 보이고 [선택한 대로 저장]과 같은 일
+  const agreeAll = () => {
+    for (const id of BOXES) modal.querySelector("#" + id).checked = true
+    save()
+  }
+
   // 동의 창(§3.3) — <body> 의 첫 자식, #root 밖이라 React 트리를 다시 그리지 않는다. 모달이다 — 뒤 페이지의 형제 요소를 모두
   // inert 로 막고(누르기·초점·스크린 리더) 문서 스크롤을 멈추고, 초점을 카드(.kt-c-box, tabindex -1)로 옮긴다 — 스크립트가 옮긴
-  // 초점에도 크롬은 :focus-visible 테두리를 그리므로 카드는 테두리 없이 받고, 다음 Tab 부터 글 영역·칸·버튼에 테두리가 보인다. 닫기(×)·Esc 는 없다 — 두 버튼
-  // 가운데 하나를 골라야 닫힌다. 대시보드에서는 창 안의 링크를 모두 새 탭으로 — 열어 둔 WebSocket 을 끊지 않게
+  // 초점에도 크롬은 :focus-visible 테두리를 그리므로 카드는 테두리 없이 받고, 다음 Tab 부터 글 영역·칸·버튼에 테두리가 보인다. 닫기(×)·Esc 는 없다 — 세 버튼
+  // ([모두 동의]·[선택한 대로 저장]·[하루 동안 안 보기], 079) 가운데 하나를 골라야 닫힌다. 대시보드에서는 창 안의 링크를 모두 새 탭으로 — 열어 둔 WebSocket 을 끊지 않게
   const openModal = () => {
     if (loaded || modal || judge() !== "undecided") return
     const style = document.createElement("style")
@@ -291,8 +320,9 @@
         a.rel = "noopener"
       }
     }
+    el.querySelector("#kt-c-all").addEventListener("click", guard(agreeAll))
     el.querySelector("#kt-c-save").addEventListener("click", guard(save))
-    el.querySelector("#kt-c-deny").addEventListener("click", guard(refuse))
+    el.querySelector("#kt-c-later").addEventListener("click", guard(postpone))
     document.body.insertBefore(el, document.body.firstChild)
     modal = el
     for (const sib of Array.from(document.body.children)) {
@@ -309,9 +339,9 @@
   }
 
   // 다른 탭 반영(§3.5) — 부른 문서는 켜는 값이 아니게 되면 곧바로 한 번 새로고침(숨은 탭도), 부르지 않은 문서는 켜는 값이 되면
-  // 동의 창을 닫고 그 자리에서 부른다(GPC 면 그대로), 창이 떠 있는데 denied 가 되면 창만 닫는다
+  // 동의 창을 닫고 그 자리에서 부른다(GPC 면 그대로), 창이 떠 있는데 denied·later 가 되면 창만 닫는다
   const onStorage = (event) => {
-    if (event.key !== KEY && event.key !== VKEY && event.key !== null) return
+    if (event.key !== KEY && event.key !== VKEY && event.key !== UKEY && event.key !== null) return
     const now = judge()
     if (loaded) {
       if (now !== "on" && !reloading) {
@@ -323,7 +353,7 @@
     if (now === "on") {
       closeModal()
       load(true)
-    } else if (now === "denied") closeModal()
+    } else if (now === "denied" || now === "later") closeModal()
   }
 
   // 뒤로 가기 캐시(bfcache)에서 돌아온 문서(§3.5) — 캐시에 든 동안 바뀐 값의 storage 이벤트는 오지 않거나 복원 뒤에 늦게 온다

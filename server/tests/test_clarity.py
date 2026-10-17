@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -40,7 +41,7 @@ MUST = (
     "consentv2", "ad_Storage", "analytics_Storage", '"granted"', '"denied"', "globalPrivacyControl",
     "kt.analytics", "kt.analytics.v", "_clck", "_clsk", "_cltk", "DOMContentLoaded", TAG, "storage",
     "location.reload", "dialog", "aria-modal", "inert", "aria-label", "checkbox", "label", "/privacy#consent", "_blank",
-    "noopener", "kt:clarity", "선택한 대로 저장", "모두 거부", "<details>", "<summary", "내용 보기",
+    "noopener", "kt:clarity", "선택한 대로 저장", "모두 동의", "하루 동안 안 보기", "kt.analytics.until", "<details>", "<summary", "내용 보기",
     "저장 규칙", "data-nosnippet", "pageshow", "persisted", "stopImmediatePropagation",
     # 075 — GA: 대기열·동의 신호 넷·끈 신호 둘·검색어 뺀 주소·쿠키 기간·쿠키 이름
     "GA_ID", "dataLayer", "gtag", "ad_storage", "ad_user_data", "ad_personalization", "analytics_storage",
@@ -328,7 +329,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
   body.push(...page)
   const strip = () => body.find((e) => e.id === 'kt-consent')
   const snap = () => ({
-    stored: data.get('kt.analytics') ?? null, v: data.get('kt.analytics.v') ?? null,
+    stored: data.get('kt.analytics') ?? null, v: data.get('kt.analytics.v') ?? null, until: data.get('kt.analytics.until') ?? null,
     strip: strip() ? { first: body[0] === strip(), ...strip().attrs, links: strip().anchors.map((a) => a.target + '|' + a.rel) } : null,
     queue: window.clarity ? window.clarity.q.map((a) => Array.from(a)) : null,
     // 075 — GA 대기열(gtag 호출마다 arguments 하나). js 의 Date 는 'date' 로
@@ -358,6 +359,14 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
 ALL = ["check:kt-c-collect", "check:kt-c-provide", "check:kt-c-transfer"]
 ON = {"kt.analytics": "granted", "kt.analytics.v": NOTICE}
 CONSENT = ["consentv2", {"ad_Storage": "denied", "analytics_Storage": "granted"}]
+DAY_MS = 86_400_000
+
+
+def _ms(offset: int = 0) -> str:
+    """지금(epoch ms) + offset 의 글자 — `kt.analytics.until` 값 (079 §3.1)."""
+    return str(int(time.time() * 1000) + offset)
+
+
 TAG_ID = [[TAG + _clarity_id(), True]]
 
 
@@ -433,12 +442,19 @@ def test_admin_overlay_frame_gets_neither_clarity_nor_the_modal() -> None:
 
 @with_id
 def test_undecided_visitor_gets_the_modal_after_the_document_is_parsed() -> None:
-    """없음·그 밖의 값·예전 판·판 없는 granted = 정하지 않음 — 남은 저장값을 지우고 DOMContentLoaded 뒤 동의 창 (§3.2·§3.3)."""
+    """없음·그 밖의 값·예전 판·판 없는 granted = 정하지 않음 — 남은 저장값을 지우고 DOMContentLoaded 뒤 동의 창 (§3.2·§3.3).
+    079 §3.1 — 판 없는 예전 denied(예전 동의 창의 [모두 거부])·지난 later·시각이 없거나 숫자가 아니거나 24시간보다 먼 later 도."""
     for ls in (
         {},
         {"kt.analytics": "off"},
         {**ON, "kt.analytics.v": OLD},
         {"kt.analytics": "granted"},
+        {"kt.analytics": "denied"},
+        {"kt.analytics": "later", "kt.analytics.until": "1"},
+        {"kt.analytics": "later", "kt.analytics.until": _ms(-1000)},
+        {"kt.analytics": "later"},
+        {"kt.analytics": "later", "kt.analytics.until": "soon"},
+        {"kt.analytics": "later", "kt.analytics.until": _ms(2 * DAY_MS)},
     ):
         got = _one(ls=ls, steps=["ready"])
         assert got["first"]["strip"] is None and got["first"]["forgot"], ls
@@ -480,9 +496,12 @@ def test_undecided_visitor_gets_the_modal_after_the_document_is_parsed() -> None
 
 @with_id
 def test_refused_blocked_and_unreadable_visitors_get_nothing() -> None:
-    """denied·GPC(granted 여도)·저장소 예외 — 띠도 대기열도 없고 남은 쿠키·_cltk 를 지운다 (§3.2)."""
+    """판 있는 denied(처리방침의 [모두 거부]·[동의 철회])·아직 안 지난 later(079)·GPC(granted 여도)·저장소 예외 — 띠도 대기열도
+    없고 남은 쿠키·_cltk 를 지운다 (§3.2)."""
     for case in (
-        {"ls": {"kt.analytics": "denied"}},
+        {"ls": {"kt.analytics": "denied", "kt.analytics.v": OLD}},
+        {"ls": {"kt.analytics": "denied", "kt.analytics.v": NOTICE}},
+        {"ls": {"kt.analytics": "later", "kt.analytics.until": _ms(3_600_000)}},
         {"gpc": True},
         {"gpc": True, "ls": ON},
         {"fail": ["get"]},
@@ -513,32 +532,50 @@ def test_agreed_visitor_queues_consent_first_and_gets_the_tag_after_parsing() ->
 
 @with_id
 def test_strip_buttons_write_the_choice() -> None:
-    """[선택한 대로 저장] 셋 모두 → 판·granted·곧바로 태그와 kt:clarity, 하나라도 빠지면·[모두 거부] → denied (§3.3)."""
-    agree, partial, deny, broken = _run(
+    """079 §3.2 — [모두 동의] → 세 칸 체크·판·granted·곧바로 태그와 kt:clarity, [선택한 대로 저장] 셋 모두 → 같음, 하나라도
+    빠지면·[하루 동안 안 보기] → later·다시 물을 시각 = 지금 + 24시간·판 없음, 저장 실패면 창만 닫음. 버튼은 셋, [모두 동의]가 먼저."""
+    before = int(time.time() * 1000)
+    agree_all, agree, partial, later, broken = _run(
         [
+            {"steps": ["ready", "click:kt-c-all"]},
             {"steps": ["ready", *ALL, "click:kt-c-save"]},
-            {"steps": ["ready", *ALL[:2], "click:kt-c-save"]},
-            {"ls": {"kt.analytics.v": OLD}, "steps": ["ready", "click:kt-c-deny"]},
+            {
+                "ls": {"kt.analytics.v": OLD},
+                "steps": ["ready", *ALL[:2], "click:kt-c-save"],
+            },
+            {
+                "ls": {"kt.analytics.v": OLD},
+                "steps": ["ready", *ALL, "click:kt-c-later"],
+            },
             {"fail": ["set"], "steps": ["ready", *ALL, "click:kt-c-save"]},
         ]
     )
-    last = agree["last"]
-    assert (last["stored"], last["v"], last["strip"], last["style"]) == (
-        "granted",
-        NOTICE,
-        None,
-        0,
-    )
+    after = int(time.time() * 1000)
+    for got in (agree_all, agree):
+        last = got["last"]
+        assert (
+            last["stored"],
+            last["v"],
+            last["until"],
+            last["strip"],
+            last["style"],
+        ) == (
+            "granted",
+            NOTICE,
+            None,
+            None,
+            0,
+        )
+        assert (last["queue"], last["tags"], last["fired"]) == (
+            [CONSENT],
+            TAG_ID,
+            ["kt:clarity"],
+        )
     # 닫으면 뒤 페이지가 돌아온다 — 어느 버튼이든, 저장에 실패해도
-    for got in (agree, partial, deny, broken):
+    for got in (agree_all, agree, partial, later, broken):
         assert got["last"]["inert"] == [False, False]
         assert got["last"]["html"] == {"overflow": "", "scrollbarGutter": ""}
-    assert (last["queue"], last["tags"], last["fired"]) == (
-        [CONSENT],
-        TAG_ID,
-        ["kt:clarity"],
-    )
-    for got in (partial, deny):
+    for got in (partial, later):
         last = got["last"]
         assert (
             last["stored"],
@@ -546,13 +583,34 @@ def test_strip_buttons_write_the_choice() -> None:
             last["strip"],
             last["queue"],
             last["tags"],
-        ) == ("denied", None, None, None, [])
+        ) == (
+            "later",
+            None,
+            None,
+            None,
+            [],
+        )
+        assert before + DAY_MS <= int(last["until"]) <= after + DAY_MS
     last = broken["last"]
     assert (last["stored"], last["strip"], last["queue"], last["tags"]) == (
         None,
         None,
         None,
         [],
+    )
+    # 버튼 줄 — [모두 동의](채운 강조)·[선택한 대로 저장]·[하루 동안 안 보기], [모두 거부]는 없다
+    html = JS.split("const HTML = `", 1)[1].split("`", 1)[0]
+    actions = re.search(r'<div class="kt-c-actions">(.*?)</div>', html, flags=re.S)
+    assert actions and re.findall(
+        r'id="(kt-c-\w+)"[^>]*>([^<]+)<', actions.group(1)
+    ) == [
+        ("kt-c-all", "모두 동의"),
+        ("kt-c-save", "선택한 대로 저장"),
+        ("kt-c-later", "하루 동안 안 보기"),
+    ]
+    assert (
+        'class="kt-c-primary"' in actions.group(1)
+        and "모두 거부" not in JS.split("const CSS")[0].split("const HTML")[1]
     )
 
 
@@ -577,7 +635,13 @@ def test_other_tabs_reload_on_withdrawal_and_load_on_consent() -> None:
                     "other:kt.analytics=granted",
                 ]
             },
-            {"steps": ["ready", "other:kt.analytics=denied"]},
+            {
+                "steps": [
+                    "ready",
+                    f"other:kt.analytics.v={NOTICE}",
+                    "other:kt.analytics=denied",
+                ]
+            },
             {
                 "gpc": True,
                 "steps": [
@@ -600,6 +664,21 @@ def test_other_tabs_reload_on_withdrawal_and_load_on_consent() -> None:
     assert (refused["last"]["strip"], refused["last"]["queue"]) == (None, None)
     assert (gpc["last"]["queue"], gpc["last"]["reloads"]) == (None, 0)
     assert other_key["last"]["strip"] is not None and other_key["last"]["queue"] is None
+    # 079 — 다른 탭에서 [하루 동안 안 보기] → 창만 지운다. 판 없는 denied(예전 값)는 창을 그대로 둔다
+    later, legacy = _run(
+        [
+            {
+                "steps": [
+                    "ready",
+                    f"other:kt.analytics.until={_ms(DAY_MS)}",
+                    "other:kt.analytics=later",
+                ]
+            },
+            {"steps": ["ready", "other:kt.analytics=denied"]},
+        ]
+    )
+    assert (later["last"]["strip"], later["last"]["queue"]) == (None, None)
+    assert legacy["last"]["strip"] is not None
 
 
 @with_id
@@ -634,7 +713,14 @@ def test_back_forward_restore_rechecks_the_choice() -> None:
             {"ls": ON, "steps": ["ready", "back"]},
             {"ls": ON, "steps": ["ready", "quiet:kt.analytics=denied", "show"]},
             {"steps": ["ready", *agree]},
-            {"steps": ["ready", "quiet:kt.analytics=denied", "back"]},
+            {
+                "steps": [
+                    "ready",
+                    f"quiet:kt.analytics.v={NOTICE}",
+                    "quiet:kt.analytics=denied",
+                    "back",
+                ]
+            },
             {"steps": ["ready", "back"]},
             {"gpc": True, "steps": ["ready", *agree]},
         ]
