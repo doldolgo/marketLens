@@ -5,7 +5,7 @@
 // 스크롤·영역)만 그린다. 번들 밖 정적 파일이라 oxlint 대상이 아니다(node --check). 예외를 밖으로 던지지 않는다.
 ;(() => {
   // 지금 안내 판 — clarity.js·attention.js·방침 동의 스크립트와 같은 값(076). 판을 올리는 PR 은 이 값도 함께 올린다
-  const NOTICE_VERSION = "2026-10-17"
+  const NOTICE_VERSION = "2026-10-17-2"
 
   const HOST = "kimptrack.com"
   // 재생 틀을 띄우는 관리자 화면의 출처 — 이 출처의 메시지만 받고 이 출처로만 보낸다(053 과 같은 값).
