@@ -25,7 +25,7 @@
   - 하이라이트 임계값 `1.5`% — 공통 하이라이트의 기본 기준. stale 기준 `5`초 — 마지막 수신 후 이 시간이 지나면 행을 흐리게 그린다.
   - mock tick `1.5`초 — 셸 전체의 심장 박동. 시계·age·mock 흔들림이 전부 이 주기를 따른다.
   - 스프레드 표는 폴링하지 않는다(017 WebSocket 구독) — 무응답 재연결 `10`초·재연결 백오프 `1`→`30`초(첫 표 전에는 `3`초까지)는 017 이, 수집 상태 폴링 `5`초는 011 이, 기록 탭 사건·차트 재조회 `60`초는 013·014 가 쓰고 셸은 값만 들고 있다. 색 규약 `한국식` — §3.3.
-- 문서 제목 `KimpTrack`(제품 표시명 — 도메인 kimptrack.com 에 맞춤, 부제 없음), `lang="ko"`. favicon 은 보라 번개 모양 SVG.
+- 문서 제목 `KimpTrack`(제품 표시명 — 도메인 kimptrack.com 에 맞춤, 부제 없음), `lang="ko"`. favicon 은 브랜드 마크(김치 항아리 속 스프레드, 022 §3.6) SVG. 헤더 워드마크 앞에 같은 마크(`shared/ui` 의 `BrandMark`).
 - 스타일은 인라인 style 객체 + CSS 변수만. 스타일 라이브러리·라우터·상태관리 라이브러리 없음.
 
 ### 3.2 디자인 토큰·화면 원본
@@ -192,7 +192,7 @@ curl -s localhost:5173 | grep -o "<title>[^<]*</title>"   # <title>KimpTrack</ti
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-  - `web/` 프로젝트(Vite + React 19 + TypeScript strict, oxlint, `index.html` 제목·`lang="ko"`·보라 번개 favicon, `vite.config.ts` 의 `/api` 프록시·접두사 제거).
+  - `web/` 프로젝트(Vite + React 19 + TypeScript strict, oxlint, `index.html` 제목·`lang="ko"`·favicon, `vite.config.ts` 의 `/api` 프록시·접두사 제거).
   - `web/src/shared/` — `theme.css`·`index.css`(`docs/design/` 원본 복사), `config.ts`(§3.1 상수·`API_BASE`), `types.ts`(`FeedStatus`·`IoState`·`SpreadRow`·mock 타입), `feed.ts`(공유 피드 생성·통째 교체·1.5초 tick·`useFeed`), `format.ts`(§3.3 포맷 8종·`pctColor`·`exName`), `rand.ts`(문자열 시드 결정론 난수), `mock.ts`(§3.6 마켓·§3.10 레이더·`events`), `ui.tsx`(kicker·card·세로선·grid 표·배지·분절·숫자 입력·토글).
   - `web/src/App.tsx`(헤더·탭 6개·KPI 스트립·탭 숨김·푸터), `main.tsx`, `features/gap/Tab.tsx`·`features/pp/Tab.tsx`·`features/flow/Tab.tsx`(mock 탭 3종). `features/spreads`·`features/history`·`features/health` 는 003·005·011 이 채웠다.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절:

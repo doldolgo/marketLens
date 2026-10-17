@@ -13,7 +13,7 @@ import SpreadsTab from './features/spreads/Tab'
 import { CLARITY_READY, clarityEvent, clarityTag } from './shared/clarity'
 import { useFeed } from './shared/feed'
 import { exName, fmtPct, pctColor } from './shared/format'
-import { Empty, card, kicker, vDivider } from './shared/ui'
+import { BrandMark, Empty, card, kicker, vDivider } from './shared/ui'
 import { UrlActive, discardParams, dropParams, oneOf, symbol, useUrlState } from './shared/urlState'
 import { SCREEN_H, TAB_BAR_H, useViewport } from './shared/viewport'
 
@@ -209,10 +209,10 @@ export default function App() {
 
   const wrap = (id: TabId, node: ReactNode) => HIDDEN_TABS.has(id) ? null : <Pane key={id} active={tab === id}>{node}</Pane>
 
-  // 로고 + 깜빡이는 점 + 상태 글 — 넓은 헤더와 좁은 헤더 첫 줄이 같이 쓴다. 폰은 점만(072 §3.2)
+  // 마크·로고 + 깜빡이는 점 + 상태 글 — 넓은 헤더와 좁은 헤더 첫 줄이 같이 쓴다. 폰은 점만(072 §3.2)
   const brand = (
     <div data-area="header" style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)', flex: 'none' }}>
-      <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 600, fontSize: 16, letterSpacing: '-0.01em' }}>Kimp<span style={{ color: 'var(--color-accent)' }}>Track</span></span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, alignSelf: 'center' }}><BrandMark /><span style={{ fontFamily: 'var(--font-heading)', fontWeight: 600, fontSize: 16, letterSpacing: '-0.01em' }}>Kimp<span style={{ color: 'var(--color-accent)' }}>Track</span></span></span>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--color-neutral-500)' }}>
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-ok)', animation: 'tr-pulse 1.6s ease-in-out infinite' }} />{!vp.phone && '실시간 수집 중'}
       </span>

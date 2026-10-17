@@ -1,9 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg">
   <!-- KimpTrack 관리자 아이콘 묶음(스펙 066 §2) — 페이지가 <use href="icons.svg#이름"> 으로만 쓴다(같은 출처, 글꼴 아이콘·CDN 없음).
        직접 그린 24×24 단순 도형이고 색은 currentColor(둘레 글자색)를 따른다. 새 아이콘은 이 파일에만 더한다. -->
+  <!-- 브랜드 마크(김치 항아리 속 스프레드, favicon.svg 의 32 격자를 3/4 로) — 몸통은 옅게, 뚜껑·스프레드 선·두 점은 진하게 -->
   <symbol id="logo" viewBox="0 0 24 24">
-    <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" fill="currentColor" opacity=".2"/>
-    <path d="M6.5 15l3.2-3.6 3 2.4 4.8-6.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="scale(.75)" fill="currentColor">
+      <path d="M12.2 9.6 L 19.8 9.6 C 25.6 11 27 16.4 25.4 21.4 C 24.2 25.2 20.6 26.8 16 26.8 C 11.4 26.8 7.8 25.2 6.6 21.4 C 5 16.4 6.4 11 12.2 9.6 Z" opacity=".24"/>
+      <rect x="10.6" y="5.6" width="10.8" height="2.8" rx="1.4"/>
+      <line x1="14.6" y1="21.2" x2="24" y2="21.2" stroke="currentColor" stroke-width="1.4" stroke-dasharray="1.5 1.7" stroke-linecap="round" opacity=".7"/>
+      <line x1="11.2" y1="21.2" x2="20.6" y2="14.2" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="11.2" cy="21.2" r="2.4"/>
+      <circle cx="20.6" cy="14.2" r="2.4"/>
+    </g>
   </symbol>
   <symbol id="overview" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
     <rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/>

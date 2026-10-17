@@ -2,8 +2,31 @@
 // kicker·card·세로선·grid 표·거래소/상태 배지를 여기 한 번만 둔다 (스펙 002 §3.2, §3.6).
 // 스타일은 인라인 style 객체 + CSS 변수만. 흐린 글자는 neutral-500/600 램프 — color-mix 재해석 금지.
 // 폰 조각(필터 접기·정렬 줄·카드 행)과 좁은 화면 표 틀은 072 — 구간은 shared/viewport 가 정한다.
-import type { CSSProperties, ReactNode } from 'react'
+import { useId, type CSSProperties, type ReactNode } from 'react'
 import { TAB_BAR_H, useViewport } from './viewport'
+
+/** 브랜드 마크 — 김치 항아리 속 스프레드(public/favicon.svg 의 32 격자에서 바탕 타일을 뺀 모양). 색은 currentColor,
+ *  항아리 안의 선·점은 마스크로 뚫어 어떤 바탕에서도 보인다. 마스크 id 는 넓은·좁은 헤더가 함께 그려도 겹치지 않게 useId. */
+export function BrandMark({ size = 18 }: { size?: number }) {
+  const id = useId()
+  return (
+    <svg width={size} height={size} viewBox="5 5 22 22" aria-hidden="true" focusable="false" style={{ flex: 'none', color: 'var(--color-accent)' }}>
+      <mask id={id}>
+        <rect x="5" y="5" width="22" height="22" fill="#fff" />
+        <g stroke="#000" fill="none" strokeLinecap="round">
+          <line x1="14.6" y1="21.2" x2="24" y2="21.2" strokeWidth="1.3" strokeDasharray="1.5 1.7" />
+          <line x1="11.2" y1="21.2" x2="20.6" y2="14.2" strokeWidth="2.1" />
+        </g>
+        <circle cx="11.2" cy="21.2" r="2.3" />
+        <circle cx="20.6" cy="14.2" r="2.3" />
+      </mask>
+      <g fill="currentColor" mask={`url(#${id})`}>
+        <rect x="10.6" y="5.6" width="10.8" height="2.8" rx="1.4" />
+        <path d="M12.2 9.6 L 19.8 9.6 C 25.6 11 27 16.4 25.4 21.4 C 24.2 25.2 20.6 26.8 16 26.8 C 11.4 26.8 7.8 25.2 6.6 21.4 C 5 16.4 6.4 11 12.2 9.6 Z" />
+      </g>
+    </svg>
+  )
+}
 
 /** 10px 대문자 소제목 (KPI 라벨·카드 제목). */
 export const kicker: CSSProperties = {
