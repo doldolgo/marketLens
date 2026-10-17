@@ -94,7 +94,8 @@
 ```
 - `exchanges` 는 001·045 의 거래소 6곳 고정 순서(`upbit`, `bithumb`, `binance`, `bybit`, `bitget`, `okx`) 뒤에 perp 원천 4개(`binance_perp`, `bybit_perp`, `bitget_perp`, `hyperliquid_perp` — 046 §3.8·047, 표시명 `Binance perp`·`Hyperliquid` 등). `state`: 마지막 성공 후 경과 `< 5초` → `ok`, `5초 이상 60초 미만` → `stale`, `60초 이상` 또는 기동 후 성공 0회 → `down`. `markets` = 메모리 스냅샷의 그 거래소 행 수(perp 원천은 우주 안 심볼 수 — 046 §3.8). `openOutage` = 진행 중 구간(모양은 `outages` 항목과 같음), 없으면 null. `lastError` = 가장 최근 구간의 최신 실패(진행 중이면 그것), 24시간 안에 없으면 null.
 - `successRate1h` = `(1 − 최근 3600초 창과 겹치는 구간들의 겹친 초 합 / 3600) × 100`, 소수 1자리. 거래소별로 계산하고 최상위는 `exchanges` 전체(현물 6 + perp 4) 평균. 틱이 1초 고정이라 지속 초 ≈ 실패 틱 수다. 기동 후 1시간 미만이어도 창은 그대로 3600초다 — 꺼져 있던 시간은 복원된 진행 중 구간(§3.4)과 겹치는 만큼만 실패로 센다.
-- `outages` = 메모리의 24시간 구간 전부(진행 중 포함), `startedAt` 내림차순. 시각은 전부 epoch ms.
+- `outages` = 메모리의 24시간 구간(진행 중 포함, 짧은 재연결 제외 — 아래 줄), `startedAt` 내림차순. 시각은 전부 epoch ms.
+- 짧은 재연결(5초 이하·맞닿지 않은 `network` 구간)은 `outages`·`openOutage`·`lastError` 에서 빠지고 거래소별 `reconnects24h` 로만 센다 — 080 §3.2. `successRate1h` 는 모든 구간으로 센다.
 
 ### 3.6 FE — 폴링과 피드
 - `features/health/` 안의 훅 하나가 `GET ${API_BASE}/health/collect` 를 **5초**마다 폴링한다(003 패턴: 즉시 1회·재진입 방지·실패 시 직전 유지). 폴링 상수는 셸 config 에 `HEALTH_POLL_MS = 5000` 으로 둔다.
@@ -111,6 +112,7 @@
 2. **거래소 카드(3열 격자, `exchanges` 길이만큼 — 줄이 늘어난다)**. 상단 상태색 테두리. 이름 + `● 수집 중` / `◌ 지연` / `✕ 끊김`. `마지막 수신` 경과 표기(ok 아니면 주황, 성공 0회면 `–`). `수집 마켓 N`. `성공률 1h`(`99` 이하 주황). `최근 에러` = `lastError` 의 `HH:mm:ss · {유형 라벨} · HTTP {statusCode}`(statusCode null 이면 생략), 없으면 `–`. 진행 중 구간이 있으면 빨강으로 `진행 중 · ×{count}회`.
 3. **타임라인 `실패 구간 · 최근 24시간`**. `exchanges` 길이만큼 트랙. 막대 = 구간(`startedAt`~`endedAt`, 진행 중이면 `now` 까지), 색은 `banned`·`rate_limit` 빨강, 그 외 주황. 1분 미만 구간도 최소 2px. 호버 `HH:mm – HH:mm · {유형 라벨} · HTTP {statusCode} · ×{count}회`. 축 눈금 5개 — 24시간 창(`now − 24h` ~ `now`)을 5등분한 1/5·2/5·3/5·4/5 지점에 그 지점 시각의 `HH:00`(분은 버림), 우측 끝에 `지금`. 좌측 끝에 `serverStartedAt` 위치 세로 점선(24시간 안이면).
 4. **로그 `최근 실패 구간`**. 열 `시각 거래소 유형 내용`, `startedAt` 내림차순 최대 50행. 유형 칩 라벨: `timeout` 타임아웃, `network` 연결 실패, `rate_limit` rate limit, `banned` 차단, `unavailable` 거래소 오류, `bad_request` 요청 오류, `bad_response` 응답 오류, `stale_stream` 스트림 정체. 칩 색은 `banned`·`rate_limit` 빨강, 그 외 주황. 내용 = `HTTP {statusCode} · {message 앞 120자}` + ` · ×{count}회 · {지속}`(지속 = `endedAt − startedAt` 경과 표기, 진행 중이면 `진행 중`). `retryAfterSec` 있으면 ` · Retry-After {n}s`. 맨 끝(가장 오래된 쪽)에 회색 칩 `서버 시작` 행 1개 = `serverStartedAt`, 내용 `이력 복원 후 수집 시작`. 구간이 없으면 `최근 24시간 실패 없음`.
+5. 짧은 재연결(080 §3.3) — 카드의 `재연결 24h` 줄, 로그의 회색 `재연결` 행 1개.
 
 ## 4. 검증
 BE(네트워크 없음, 커넥터·Influx 는 fake):
