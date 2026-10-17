@@ -1,10 +1,15 @@
-// KimpTrack 화면 분석(Microsoft Clarity) — 설정 한 곳·동의 창(모달)·불러올지 판단 (스펙 033).
-// 동의 방식(032 §3.3 과 같은 값 계약): 수집·이용·Microsoft 제공·미국 이전 세 칸에 모두 동의해 저장한 방문자만 태그를 받는다.
+// KimpTrack 화면 분석(Microsoft Clarity)·방문 통계(Google Analytics 4) — 설정 한 곳·동의 창(모달)·불러올지 판단 (스펙 033·075).
+// 동의 방식(032 §3.3 과 같은 값 계약): 수집·이용·Microsoft·Google 제공·미국 이전 세 칸에 모두 동의해 저장한 방문자만 태그를 받는다.
 // 번들 밖 정적 파일이라 oxlint 대상이 아니다(node --check). 예외를 밖으로 던지지 않는다 — 실패하면 동의 창·Clarity 만 없고 페이지는 그대로다.
 ;(() => {
   // ── 설정 한 곳 (§3.1) ──────────────────────────────────────────────────────────────
   // 프로젝트 ID(공개 값 — 페이지 소스에 그대로 보인다). 빈 문자열이면 아무것도 하지 않는다 — 끄기는 이 값을 비우는 PR
   const CLARITY_ID = "yqqzmx15ps"
+  // 075 — GA4 측정 ID(`G-` 로 시작하는 공개 값). 빈 문자열이면 GA 만 하지 않는다 — 켜기는 이 값을 넣는 PR, 끄기는 비우는 PR.
+  // 두 ID 가 다 비어야 동의 창도 없다
+  const GA_ID = ""
+  // GA 쿠키(_ga·_ga_<기호>)를 두는 기간(초) — 마지막 방문부터 2개월(60일). GA 속성의 데이터 보관 2개월과 같게(075 §3.4)
+  const GA_COOKIE_SECONDS = 60 * 24 * 60 * 60
   // 켤 페이지 — 랜딩(/)과 대시보드(/app/). 대시보드만 끄려면 "app" 을 뺀다
   const PAGES = ["landing", "app"]
   // 지금 안내 판 — privacy.html 동의 스크립트의 VERSION 과 같다(테스트가 본다). 받는 자·항목·목적·보유 기간이 바뀌면 그 PR 이
@@ -13,8 +18,9 @@
   // KimpTrack 서버의 화면 영역 이용 통계(052)도 함께 돈다. 2026-10-09-2 판(060 — 같은 날 두 번째 판): 그 통계가 화면 요소·떠날 때
   // 보던 곳·내려온 깊이까지 넓어진다(061). 2026-10-16 판(076): 같은 동의로 KimpTrack 서버가 방문마다 화면 이동 기록(마우스·손가락
   // 위치·누른 곳·스크롤 + 시각·IP, 14일 — 073)을 모아 운영자가 다시 본다(074) — replay.js 의 판도 함께 올린다. 2026-10-16-2 판
-  // (078 — 같은 날 두 번째 판): 그 기록을 서비스를 끝낼 때까지 두고 S3 에도 옮긴다(보유 기간·두는 곳만 바뀜)
-  const NOTICE_VERSION = "2026-10-16-2"
+  // (078 — 같은 날 두 번째 판): 그 기록을 서비스를 끝낼 때까지 두고 S3 에도 옮긴다(보유 기간·두는 곳만 바뀜). 2026-10-17 판(075):
+  // 같은 동의로 Google Analytics 4 가 방문 통계를 받는다(받는 자에 Google LLC)
+  const NOTICE_VERSION = "2026-10-17"
 
   const HOST = "kimptrack.com" // www 는 apex 로 301 이고 저장값이 출처마다 따로라 이 호스트 하나만
   const KEY = "kt.analytics"
@@ -25,40 +31,40 @@
   // 처음엔 접힌 짧은 창(§3.3): 머리 문장(나이 문장을 붙인다)·세 칸(체크 상자·칸 제목·'내용 보기')·방침 링크와 '저장 규칙'·버튼 줄.
   // 알릴 사항 전문은 칸마다, 셋 모두 규칙은 '저장 규칙' 의 <details> 로 펼친다 — 모바일에서도 접힌 창이 한 화면에 들게
   const HTML = `<div class="kt-c-body" tabindex="0">
-<p>랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 또 KimpTrack 서버가 모든 페이지(랜딩·대시보드·처리방침·검색어 페이지)에서 화면의 영역과 요소(단추·링크 같은 것)별로 보인 시간·클릭 수·마우스를 올려 둔 시간과 떠날 때 보던 곳을 하루 합계로 모으고, 방문마다 마우스·손가락 위치와 누른 곳·스크롤을 시각·IP 주소와 함께 모아 서비스를 끝낼 때까지 두고 운영자가 그 방문을 다시 보거나 지금 보는 방문을 따라 보는 데 써도 될까요? 동의하지 않아도 모든 기능을 그대로 씁니다. 만 14세 미만은 동의하지 마세요.</p>
+<p>랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 랜딩과 대시보드의 방문 통계(본 페이지·머문 시간·들어온 길)를 Google Analytics(미국)로 보내도 될까요? Google의 광고·제품 개선에는 쓰지 않게 설정해 보냅니다. 또 KimpTrack 서버가 모든 페이지(랜딩·대시보드·처리방침·검색어 페이지)에서 화면의 영역과 요소(단추·링크 같은 것)별로 보인 시간·클릭 수·마우스를 올려 둔 시간과 떠날 때 보던 곳을 하루 합계로 모으고, 방문마다 마우스·손가락 위치와 누른 곳·스크롤을 시각·IP 주소와 함께 모아 서비스를 끝낼 때까지 두고 운영자가 그 방문을 다시 보거나 지금 보는 방문을 따라 보는 데 써도 될까요? 동의하지 않아도 모든 기능을 그대로 씁니다. 만 14세 미만은 동의하지 마세요.</p>
 <div class="kt-c-cell">
 <label><input type="checkbox" id="kt-c-collect" /><span>(선택) 화면 이용 기록의 수집·이용에 동의합니다</span></label>
 <details><summary aria-label="수집·이용 동의 내용 보기">내용 보기</summary><dl>
-<dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>). KimpTrack 서버: 화면 이름·기기 종류(휴대폰·PC)·영역 이름별로 화면에 보인 시간·1초 이상 보였는지·클릭 수, 영역 안의 요소(단추·링크·탭·입력칸·표의 코인 행 같은 것 — 입력한 글자·화면의 숫자는 빼고)별 클릭 수·마우스를 올려 둔 시간·화면에 보인 시간, 페이지를 떠날 때 보던 영역과 그 페이지에서 내려온 깊이. KimpTrack 서버의 화면 이동 기록: 페이지를 열 때마다 화면 이름·기기 종류·화면 크기, 마우스·손가락의 위치와 움직임, 누른 위치와 그곳의 영역 이름, 스크롤 위치, 가장 크게 보던 영역, 탭을 숨기거나 다시 연 일·대시보드 탭을 바꾼 일과 그 시각, IP 주소(입력한 글자·누른 키·화면의 글자와 숫자는 빼고)</dd>
-<dt>목적</dt><dd>KimpTrack의 화면 이용 분석 — 어떤 화면·기능이 쓰이고 어디서 막히는지 알아 서비스를 고치기, 어느 영역·요소를 많이·적게 보고 누르는지, 어디서 떠나는지 알아 화면을 고치기, 운영자가 IP 주소별로 방문의 움직임을 다시 보거나 지금 보는 방문을 따라 보며 어디서 막히는지 알아 화면을 고치기</dd>
-<dt>보유 기간</dt><dd><strong class="key">녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월(Clarity). KimpTrack 서버: 하루 합계로만 90일, 화면 이동 기록은 서비스를 끝낼 때까지(끝내면 지움)</strong></dd>
+<dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>). Google Analytics: 페이지 주소(검색어는 뺌)·페이지 제목·이전 페이지 주소, 페이지를 본 일·끝 가까이(90%) 내려 본 일·밖으로 나가는 링크를 누른 일·머문 시간, 기기 종류·브라우저·운영체제·화면 크기·언어, IP 주소(대략의 나라·도시 추정에 쓰고 저장하지 않음), Google Analytics가 브라우저와 방문을 알아보는 쿠키 <code>_ga</code>·<code>_ga_*</code>. KimpTrack 서버: 화면 이름·기기 종류(휴대폰·PC)·영역 이름별로 화면에 보인 시간·1초 이상 보였는지·클릭 수, 영역 안의 요소(단추·링크·탭·입력칸·표의 코인 행 같은 것 — 입력한 글자·화면의 숫자는 빼고)별 클릭 수·마우스를 올려 둔 시간·화면에 보인 시간, 페이지를 떠날 때 보던 영역과 그 페이지에서 내려온 깊이. KimpTrack 서버의 화면 이동 기록: 페이지를 열 때마다 화면 이름·기기 종류·화면 크기, 마우스·손가락의 위치와 움직임, 누른 위치와 그곳의 영역 이름, 스크롤 위치, 가장 크게 보던 영역, 탭을 숨기거나 다시 연 일·대시보드 탭을 바꾼 일과 그 시각, IP 주소(입력한 글자·누른 키·화면의 글자와 숫자는 빼고)</dd>
+<dt>목적</dt><dd>KimpTrack의 화면 이용 분석 — 어떤 화면·기능이 쓰이고 어디서 막히는지 알아 서비스를 고치기, 어느 영역·요소를 많이·적게 보고 누르는지, 어디서 떠나는지 알아 화면을 고치기, 운영자가 IP 주소별로 방문의 움직임을 다시 보거나 지금 보는 방문을 따라 보며 어디서 막히는지 알아 화면을 고치기, 어느 페이지를 얼마나 오래 보고 어디서 들어오는지 알아 서비스를 고치기(방문 통계)</dd>
+<dt>보유 기간</dt><dd><strong class="key">녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월(Clarity). 방문 통계 2개월(Google Analytics — 사람을 가리키지 않는 합계 보고서는 기간 없이 남음). KimpTrack 서버: 하루 합계로만 90일, 화면 이동 기록은 서비스를 끝낼 때까지(끝내면 지움)</strong></dd>
 <dt>거부 권리·불이익</dt><dd>동의하지 않을 수 있고, 동의한 뒤에도 처리방침의 “화면 분석 동의 관리”(<a class="link" href="/privacy#consent">/privacy#consent</a>)에서 [동의 철회]를 눌러 언제든 철회할 수 있습니다. 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
 </dl>
-<p class="note">화면 이용 통계와 화면 이동 기록은 Microsoft에 가지 않고 국내(AWS 서울 리전)의 KimpTrack 서버에 둡니다.</p></details>
+<p class="note">화면 이용 통계와 화면 이동 기록은 Microsoft·Google에 가지 않고 국내(AWS 서울 리전)의 KimpTrack 서버에 둡니다.</p></details>
 </div>
 <div class="kt-c-cell">
-<label><input type="checkbox" id="kt-c-provide" /><span>(선택) 화면 이용 기록을 Microsoft에 제공하는 데 동의합니다</span></label>
-<details><summary aria-label="Microsoft 제공 동의 내용 보기">내용 보기</summary><dl>
-<dt>받는 자</dt><dd><strong class="key">Microsoft Corporation(미국)</strong></dd>
-<dt>받는 자의 목적</dt><dd><strong class="key">Clarity로 KimpTrack에 화면 이용 분석을 제공하고, Microsoft Advertising 제공 등 Microsoft 자신의 목적에 씁니다</strong></dd>
-<dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>)</dd>
-<dt>받는 자의 보유 기간</dt><dd><strong class="key">Clarity의 기록은 녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월. Microsoft 자신의 목적에 쓰는 정보는 <a class="link" href="https://privacy.microsoft.com/ko-kr/privacystatement">Microsoft 개인정보처리방침</a>이 정한 기간</strong></dd>
+<label><input type="checkbox" id="kt-c-provide" /><span>(선택) 화면 이용 기록을 Microsoft·Google에 제공하는 데 동의합니다</span></label>
+<details><summary aria-label="Microsoft·Google 제공 동의 내용 보기">내용 보기</summary><dl>
+<dt>받는 자</dt><dd><strong class="key">Microsoft Corporation(미국), Google LLC(미국)</strong></dd>
+<dt>받는 자의 목적</dt><dd><strong class="key">Microsoft — Clarity로 KimpTrack에 화면 이용 분석을 제공하고, Microsoft Advertising 제공 등 Microsoft 자신의 목적에 씁니다. Google — Google Analytics로 KimpTrack에 방문 통계를 제공하고 그 서비스를 운영·보호하는 데 쓰며, KimpTrack은 Google의 광고·제품 개선에는 쓰지 않게 설정해 보냅니다</strong></dd>
+<dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>). Google Analytics: 페이지 주소(검색어는 뺌)·페이지 제목·이전 페이지 주소, 페이지를 본 일·끝 가까이(90%) 내려 본 일·밖으로 나가는 링크를 누른 일·머문 시간, 기기 종류·브라우저·운영체제·화면 크기·언어, IP 주소(대략의 나라·도시 추정에 쓰고 저장하지 않음), Google Analytics가 브라우저와 방문을 알아보는 쿠키 <code>_ga</code>·<code>_ga_*</code></dd>
+<dt>받는 자의 보유 기간</dt><dd><strong class="key">Clarity의 기록은 녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월. Microsoft 자신의 목적에 쓰는 정보는 <a class="link" href="https://privacy.microsoft.com/ko-kr/privacystatement">Microsoft 개인정보처리방침</a>이 정한 기간. Google Analytics의 기록은 2개월(사람을 가리키지 않는 합계 보고서는 기간 없이 남음)</strong></dd>
 <dt>거부 권리·불이익</dt><dd>동의하지 않을 수 있고, 동의한 뒤에도 처리방침의 “화면 분석 동의 관리”(<a class="link" href="/privacy#consent">/privacy#consent</a>)에서 [동의 철회]를 눌러 언제든 철회할 수 있습니다. 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
 </dl></details>
 </div>
 <div class="kt-c-cell">
 <label><input type="checkbox" id="kt-c-transfer" /><span>(선택) 화면 이용 기록을 미국으로 이전하는 데 동의합니다</span></label>
 <details><summary aria-label="미국 이전 동의 내용 보기">내용 보기</summary><dl>
-<dt>받는 자·연락처</dt><dd><strong class="key">Microsoft Corporation, One Microsoft Way, Redmond, WA 98052, USA — <a class="link" href="https://go.microsoft.com/fwlink/?linkid=2126612">개인정보 문의</a></strong></dd>
-<dt>국가·시기·방법</dt><dd>미국 — 동의한 뒤 랜딩·대시보드를 보는 동안 수시로, 방문자의 브라우저가 Microsoft 서버로 네트워크를 통해 전송</dd>
-<dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>)</dd>
-<dt>목적·보유 기간</dt><dd><strong class="key">KimpTrack의 화면 이용 분석과 Microsoft Advertising 제공 등 Microsoft 자신의 목적 — Clarity의 기록은 녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월, Microsoft 자신의 목적에 쓰는 정보는 Microsoft 개인정보처리방침이 정한 기간</strong></dd>
+<dt>받는 자·연락처</dt><dd><strong class="key">Microsoft Corporation, One Microsoft Way, Redmond, WA 98052, USA — <a class="link" href="https://go.microsoft.com/fwlink/?linkid=2126612">개인정보 문의</a>. Google LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA — <a class="link" href="https://policies.google.com/privacy?hl=ko">Google 개인정보처리방침</a></strong></dd>
+<dt>국가·시기·방법</dt><dd>미국 — 동의한 뒤 랜딩·대시보드를 보는 동안 수시로, 방문자의 브라우저가 Microsoft·Google 서버로 네트워크를 통해 전송</dd>
+<dt>항목</dt><dd>페이지 주소(검색어는 뺌)·이전 페이지 주소·누른 링크의 주소, 클릭·스크롤·마우스 움직임·화면 크기, 화면 내용(입력칸은 늘 가림), 보고 있는 탭과 기록 탭에서 고른 코인 이름·탭을 바꾼 일, 기기·브라우저·운영체제, IP 주소(대략의 위치 추정에 쓰임), Clarity가 브라우저와 방문을 알아보는 쿠키 <code>_clck</code>·<code>_clsk</code>와 탭 ID(sessionStorage <code>_cltk</code>). Google Analytics: 페이지 주소(검색어는 뺌)·페이지 제목·이전 페이지 주소, 페이지를 본 일·끝 가까이(90%) 내려 본 일·밖으로 나가는 링크를 누른 일·머문 시간, 기기 종류·브라우저·운영체제·화면 크기·언어, IP 주소(대략의 나라·도시 추정에 쓰고 저장하지 않음), Google Analytics가 브라우저와 방문을 알아보는 쿠키 <code>_ga</code>·<code>_ga_*</code></dd>
+<dt>목적·보유 기간</dt><dd><strong class="key">KimpTrack의 화면 이용 분석과 Microsoft Advertising 제공 등 Microsoft 자신의 목적 — Clarity의 기록은 녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월, Microsoft 자신의 목적에 쓰는 정보는 Microsoft 개인정보처리방침이 정한 기간. KimpTrack의 방문 통계와 Google의 서비스 운영·보호 — Google Analytics의 기록은 2개월(사람을 가리키지 않는 합계 보고서는 기간 없이 남음)</strong></dd>
 <dt>거부 방법·절차·효과</dt><dd>이 칸에 체크하지 않거나 [모두 거부]를 누르면 이전되지 않습니다. 동의한 뒤에는 처리방침의 “화면 분석 동의 관리”(<a class="link" href="/privacy#consent">/privacy#consent</a>)에서 [동의 철회]를 누르면 그 뒤로 이전되지 않습니다. 거부·철회해도 서비스 이용에 불이익이 없습니다.</dd>
 </dl></details>
 </div>
 <div class="kt-c-cell">
 <a class="link" href="/privacy#consent">처리방침에서 자세히 보기</a>
-<details><summary>저장 규칙</summary><p>세 가지에 모두 동의하고 [선택한 대로 저장]을 누른 경우에만 Clarity와 KimpTrack 영역 통계·화면 이동 기록이 돕니다 — Clarity는 셋이 다 있어야 돌아가므로 하나라도 빠지면 거부로 저장합니다.</p></details>
+<details><summary>저장 규칙</summary><p>세 가지에 모두 동의하고 [선택한 대로 저장]을 누른 경우에만 Clarity·Google Analytics와 KimpTrack 영역 통계·화면 이동 기록이 돕니다 — Clarity는 셋이 다 있어야 돌아가므로 하나라도 빠지면 거부로 저장합니다.</p></details>
 </div>
 </div>
 <div class="kt-c-actions"><button type="button" id="kt-c-save">선택한 대로 저장</button><button type="button" id="kt-c-deny">모두 거부</button></div>`
@@ -101,12 +107,12 @@
 
   // 하나라도 걸리면 부르지 않는 조건의 앞 셋(§3.2) — ID·호스트·페이지. 여기서 빠진 문서는 듣지도 않는다(storage·pageshow)
   const page = location.pathname === "/" ? "landing" : location.pathname.indexOf("/app/") === 0 ? "app" : ""
-  if (!CLARITY_ID || location.hostname !== HOST || PAGES.indexOf(page) < 0) return
-  // 053·074 — 관리자 덮어 보기·재생으로 틀 안에 뜬 페이지(attention.js·replay.js 와 같은 조건)는 Clarity 도 동의 창도 없다
+  if ((!CLARITY_ID && !GA_ID) || location.hostname !== HOST || PAGES.indexOf(page) < 0) return
+  // 053·074 — 관리자 덮어 보기·재생으로 틀 안에 뜬 페이지(attention.js·replay.js 와 같은 조건)는 Clarity·GA 도 동의 창도 없다
   const frameAsk = new URLSearchParams(location.search)
   if ((frameAsk.get("kt-overlay") === "1" || frameAsk.get("kt-replay") === "1") && window.top !== window) return
 
-  let loaded = false // 이 문서에서 Clarity 를 불렀다 — 두 번 부르지 않는다
+  let loaded = false // 이 문서에서 Clarity·GA 를 불렀다 — 두 번 부르지 않는다
   let modal = null
   let blocked = [] // 동의 창이 inert 로 막은 형제 요소 — 닫을 때 되돌린다
   let scrollWas = ["", ""] // 열기 전 <html> 의 overflow·scrollbar-gutter
@@ -137,9 +143,15 @@
     return value === "denied" ? "denied" : "undecided"
   }
 
-  // 부르지 않는 문서는 예전 방문에서 남은 Clarity 저장값을 지운다 — 쿠키는 도메인 속성 없이 한 번, 이 호스트로 한 번(.kimptrack.com)
+  // 부르지 않는 문서는 예전 방문에서 남은 Clarity·GA 저장값을 지운다 — 쿠키는 도메인 속성 없이 한 번, 이 호스트로 한 번(.kimptrack.com).
+  // GA 의 _ga_<기호> 는 측정 ID 에 따라 이름이 달라 지금 쿠키에서 _ga_ 로 시작하는 이름을 모두 찾는다(075 §3.3)
   const forget = () => {
-    for (const name of ["_clck", "_clsk"]) {
+    const names = ["_clck", "_clsk", "_ga"]
+    for (const pair of String(document.cookie || "").split(";")) {
+      const name = pair.split("=")[0].trim()
+      if (name.indexOf("_ga_") === 0) names.push(name)
+    }
+    for (const name of names) {
       const gone = name + "=; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/"
       document.cookie = gone
       document.cookie = gone + "; domain=" + HOST
@@ -159,27 +171,57 @@
     else fn()
   }
 
+  const addTag = (src) => {
+    const tag = document.createElement("script")
+    tag.async = true
+    tag.src = src
+    document.head.appendChild(tag)
+  }
+
   // 부른다(§3.4) — 표준 대기열 함수를 곧바로 만들고 첫 호출로 동의 신호(광고 저장 거부·분석 허용)를 넣는다.
   // 파일이 실행될 때 이미 켜는 값이면 태그는 DOMContentLoaded 뒤(셸의 첫 URL 정리가 끝난 뒤 첫 주소를 읽게),
-  // 동의 창의 저장·다른 탭의 동의로 부를 때(late)는 곧바로 넣고 셸이 지금 화면의 태그를 두게 kt:clarity 를 한 번 보낸다
+  // 동의 창의 저장·다른 탭의 동의로 부를 때(late)는 곧바로 넣고 셸이 지금 화면의 태그를 두게 kt:clarity 를 한 번 보낸다.
+  // 075 — GA 도 같은 때: 동의 신호(광고 셋 거부·분석 허용)를 config 보다 먼저 대기열(dataLayer)에 넣고, config 는 태그를 넣을 때
+  // 그때의 주소로 — 페이지 주소는 검색어(?)·# 를 뺀 주소, Google 신호·광고 개인화 신호 끔, 쿠키 2개월
   const load = (late) => {
     if (loaded) return
     loaded = true
-    window.clarity =
-      window.clarity ||
-      function () {
-        ;(window.clarity.q = window.clarity.q || []).push(arguments)
+    if (CLARITY_ID) {
+      window.clarity =
+        window.clarity ||
+        function () {
+          ;(window.clarity.q = window.clarity.q || []).push(arguments)
+        }
+      window.clarity("consentv2", { ad_Storage: "denied", analytics_Storage: "granted" })
+    }
+    if (GA_ID) {
+      window.dataLayer = window.dataLayer || []
+      window.gtag = function () {
+        window.dataLayer.push(arguments)
       }
-    window.clarity("consentv2", { ad_Storage: "denied", analytics_Storage: "granted" })
+      window.gtag("consent", "default", {
+        ad_storage: "denied",
+        ad_user_data: "denied",
+        ad_personalization: "denied",
+        analytics_storage: "granted",
+      })
+    }
     const inject = () => {
-      const tag = document.createElement("script")
-      tag.async = true
-      tag.src = "https://www.clarity.ms/tag/" + CLARITY_ID
-      document.head.appendChild(tag)
+      if (CLARITY_ID) addTag("https://www.clarity.ms/tag/" + CLARITY_ID)
+      if (GA_ID) {
+        window.gtag("js", new Date())
+        window.gtag("config", GA_ID, {
+          page_location: location.origin + location.pathname,
+          allow_google_signals: false,
+          allow_ad_personalization_signals: false,
+          cookie_expires: GA_COOKIE_SECONDS,
+        })
+        addTag("https://www.googletagmanager.com/gtag/js?id=" + GA_ID)
+      }
     }
     if (!late) return whenReady(inject)
     inject()
-    window.dispatchEvent(new Event("kt:clarity"))
+    if (CLARITY_ID) window.dispatchEvent(new Event("kt:clarity"))
   }
 
   // 닫을 때 뒤 페이지를 되돌린다 — 이 창이 막은 형제 요소의 inert 와 문서 스크롤
