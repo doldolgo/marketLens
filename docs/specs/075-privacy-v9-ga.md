@@ -94,4 +94,4 @@ cd web && npm ci && npm run lint && npm run build   # Node 22 — lint 경고 �
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것: `web/public/clarity.js`(GA_ID·쿠키 기간·GA 대기열과 태그·`_ga`·`_ga_*` 지우기·두 ID 가 다 비어야 아무것도 안 함·동의 창 글), `web/public/privacy.html`(v9 본문·동의 상자·대조표 37행·철회 때 GA 쿠키 지우기·판), `web/public/privacy-20261016-2.html`(v8 사본), `attention.js`·`replay.js` 판, `sitemap.xml`, `server/tests/test_privacy.py`·`test_clarity.py`(GA 동작 여섯 — 시험 ID 를 넣은 사본으로)·`test_replay_js.py`, 런북 `google-analytics.md`.
 - 추측한 지점 / 실행 중 함께 고친 스펙 절: 시행일·판 값은 PR 날로 2026-10-17(새 날 — 3.7 의 '같은 날이면 -3' 은 해당 없음). 3.4·3.8 — '페이지 변경(브라우저 기록)' 을 끄는 것으로 고쳤다(대시보드 주소의 쿼리가 GA 로 그대로 가지 않게). Google 은 3.7 대로 제공·국외 이전 동의 쪽에 두고 5절(위탁)은 그대로. 쿠키 `_ga_<기호>` 는 측정 ID 마다 이름이 달라 지금 쿠키에서 `_ga_` 로 시작하는 이름을 찾아 지운다. Clarity ID 가 빈 채 GA 만 켜지면 `kt:clarity` 는 보내지 않는다.
-- 남은 빚: 측정 ID 가 비어 있어 GA 는 꺼진 채다 — ID 를 넣는 PR 에서 test_clarity 의 `test_the_repo_ga_id_is_empty_until_a_person_fills_it` 를 지운다. 법률 확인 세 가지(3.7)는 사람. 대시보드 탭 바꿈·버튼 이벤트는 범위 밖.
+- 남은 빚: 처리방침 v9 는 측정 ID 없이 먼저 머지됐고(2026-10-17), ID(`G-RJ732XDRKM`)는 뒤따른 PR 로 넣었다 — 그 PR 이 test_clarity 의 '빈 ID' 테스트를 실제 파일이 그 ID 로 GA 를 부르는지 보는 테스트로 바꿨다. 법률 확인 세 가지(3.7)는 사람. 대시보드 탭 바꿈·버튼 이벤트는 범위 밖.

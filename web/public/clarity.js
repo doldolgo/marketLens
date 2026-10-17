@@ -7,7 +7,7 @@
   const CLARITY_ID = "yqqzmx15ps"
   // 075 — GA4 측정 ID(`G-` 로 시작하는 공개 값). 빈 문자열이면 GA 만 하지 않는다 — 켜기는 이 값을 넣는 PR, 끄기는 비우는 PR.
   // 두 ID 가 다 비어야 동의 창도 없다
-  const GA_ID = ""
+  const GA_ID = "G-RJ732XDRKM"
   // GA 쿠키(_ga·_ga_<기호>)를 두는 기간(초) — 마지막 방문부터 2개월(60일). GA 속성의 데이터 보관 2개월과 같게(075 §3.4)
   const GA_COOKIE_SECONDS = 60 * 24 * 60 * 60
   // 켤 페이지 — 랜딩(/)과 대시보드(/app/). 대시보드만 끄려면 "app" 을 뺀다

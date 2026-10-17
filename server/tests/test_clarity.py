@@ -370,7 +370,11 @@ def _ms(offset: int = 0) -> str:
 TAG_ID = [[TAG + _clarity_id(), True]]
 
 
-def _run(cases: list[dict], script: str = JS) -> list[dict]:
+# 위 Clarity 동작 테스트는 GA 를 끈 사본으로 돈다 — GA 는 아래 075 절이 시험 ID 를 넣은 사본으로 따로 본다
+CLARITY_ONLY_JS = JS.replace(f"const GA_ID = {_const('GA_ID')}", 'const GA_ID = ""', 1)
+
+
+def _run(cases: list[dict], script: str = CLARITY_ONLY_JS) -> list[dict]:
     node = shutil.which("node")
     if node is None:
         if os.environ.get("CI"):
@@ -741,13 +745,13 @@ def test_back_forward_restore_rechecks_the_choice() -> None:
 
 
 # --- 075 — GA4 를 같은 동의로 (§3.2·§3.3) ----------------------------------------------
-# 레포의 GA 측정 ID 는 사람이 넣는다(비면 꺼짐) — 동작은 시험 ID 를 넣은 사본으로 본다. Clarity ID 만 비운 사본은 GA 만 켠 경우
+# 동작은 시험 ID 를 넣은 사본으로 본다(레포의 ID 와 상관없이). Clarity ID 만 비운 사본은 GA 만 켠 경우
 TEST_GA = "G-TEST123"
-GA_JS = JS.replace('const GA_ID = ""', f'const GA_ID = "{TEST_GA}"', 1)
+GA_JS = CLARITY_ONLY_JS.replace('const GA_ID = ""', f'const GA_ID = "{TEST_GA}"', 1)
 GA_ONLY_JS = GA_JS.replace(
     f"const CLARITY_ID = {_const('CLARITY_ID')}", 'const CLARITY_ID = ""', 1
 )
-NONE_JS = JS.replace(
+NONE_JS = CLARITY_ONLY_JS.replace(
     f"const CLARITY_ID = {_const('CLARITY_ID')}", 'const CLARITY_ID = ""', 1
 )
 GA_CONSENT = [
@@ -768,12 +772,17 @@ GA_CONFIG = {
 GA_TAG_ID = [GA_TAG + TEST_GA, True]
 
 
-def test_the_repo_ga_id_is_empty_until_a_person_fills_it() -> None:
-    """075 §3.1 — 측정 ID 가 비어 있으면 GA 는 하지 않는다. ID 를 넣는 PR 이 켜기다(이 테스트는 그 PR 에서 함께 고친다)."""
-    assert _ga_id() == "", (
-        "GA 측정 ID 를 넣었다면 이 테스트를 지우고 방침 게시·법률 확인을 PR 본문에 적는다"
+def test_the_repo_file_loads_its_ga_id_for_agreed_visitors() -> None:
+    """075 §3.1 — 레포의 측정 ID 가 들어 있다(켜짐). 실제 파일 그대로 — 동의한 방문자는 Clarity 태그 뒤에 그 ID 의 GA 태그를 받고,
+    정하지 않은 방문자는 Google 요청이 없다."""
+    assert _ga_id(), (
+        "GA 측정 ID 가 비었다 — 끄는 PR 이면 이 테스트를 '빈 ID' 단언으로 바꾼다"
     )
-    assert GA_JS != JS and GA_ONLY_JS != GA_JS and NONE_JS != JS
+    assert len({JS, CLARITY_ONLY_JS, GA_JS, GA_ONLY_JS, NONE_JS}) == 5
+    agreed, undecided = _run([{"ls": ON, "steps": ["ready"]}, {"steps": ["ready"]}], JS)
+    assert agreed["last"]["tags"] == [*TAG_ID, [GA_TAG + _ga_id(), True]]
+    assert agreed["last"]["layer"][2][:2] == ["config", _ga_id()]
+    assert undecided["last"]["layer"] is None and undecided["last"]["tags"] == []
 
 
 def test_ga_waits_for_consent_and_sends_no_request_before() -> None:
