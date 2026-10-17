@@ -134,6 +134,7 @@ def test_response_shape_fixed_exchange_order_and_open_outage_in_both(
         "url",
         "retryAfterSec",
     }
+    assert [e["reconnects24h"] for e in body["exchanges"]] == [0] * 10  # 080 §3.2
 
 
 @pytest.mark.parametrize(
@@ -222,7 +223,9 @@ def test_outages_sorted_by_started_at_desc_and_last_error_is_latest() -> None:
     fail(t, "upbit", now_ms - 100 * SEC, kind="unavailable", status=503)
     close(t, "upbit", now_ms - 90 * SEC)
     fail(t, "binance", now_ms - 200 * SEC, kind="network")
-    close(t, "binance", now_ms - 199 * SEC)
+    close(
+        t, "binance", now_ms - 190 * SEC
+    )  # 10초 — 짧은 재연결(5초 이하)이 아니다 (080)
     out = build_collect_health(LiveStore(), t, T0, now_ms)
     assert [(o.exchange, o.kind) for o in out.outages] == [
         ("upbit", "unavailable"),
@@ -271,3 +274,78 @@ def test_perp_source_markets_is_the_subscribed_symbol_count_and_its_outage_is_li
     assert by_id["bybit_perp"]["openOutage"]["kind"] == "stale_stream"
     assert by_id["hyperliquid_perp"]["markets"] == 0  # 047 — 넷째 자리
     assert [o["exchange"] for o in body["outages"]] == ["bybit_perp"]
+
+
+# --- 짧은 재연결 (080 §3.2) ---
+
+
+def test_one_second_network_outage_is_folded_and_counted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    t = OutageTracker()
+    now_ms = T0 + HOUR
+    fail(t, "okx", now_ms - 100 * SEC, kind="network")
+    close(t, "okx", now_ms - 99 * SEC)  # 1초
+    fail(t, "okx", now_ms - 50 * SEC, kind="network")
+    close(t, "okx", now_ms - 45 * SEC)  # 5초 — 경계 포함
+    body = (
+        make_client(LiveStore(), t, now_ms, monkeypatch).get("/health/collect").json()
+    )
+    okx = {e["exchange"]: e for e in body["exchanges"]}["okx"]
+    assert body["outages"] == []
+    assert okx["lastError"] is None and okx["openOutage"] is None
+    assert okx["reconnects24h"] == 2
+    # 잃은 초는 성공률에 그대로 센다 — 6초 / 3600
+    assert okx["successRate1h"] == round((1 - 6 / 3600) * 100, 1)
+
+
+def test_six_second_network_outage_is_listed() -> None:
+    t = OutageTracker()
+    now_ms = T0 + HOUR
+    fail(t, "okx", now_ms - 100 * SEC, kind="network")
+    close(t, "okx", now_ms - 94 * SEC)
+    out = build_collect_health(LiveStore(), t, T0, now_ms)
+    assert [(o.exchange, o.kind) for o in out.outages] == [("okx", "network")]
+    okx = out.exchanges[5]
+    assert okx.reconnects_24h == 0 and okx.last_error is not None
+
+
+@pytest.mark.parametrize(
+    "kind", ["stale_stream", "timeout", "rate_limit", "banned", "unavailable"]
+)
+def test_short_outages_of_other_kinds_stay_listed(kind: str) -> None:
+    t = OutageTracker()
+    now_ms = T0 + HOUR
+    fail(t, "bybit", now_ms - 100 * SEC, kind=kind)
+    close(t, "bybit", now_ms - 99 * SEC)
+    out = build_collect_health(LiveStore(), t, T0, now_ms)
+    assert [o.kind for o in out.outages] == [kind]
+    assert out.exchanges[3].reconnects_24h == 0
+
+
+def test_network_piece_touching_a_kind_switch_stays_listed() -> None:
+    # timeout 1초 → network 1초(kind 전환으로 맞닿음) → 복구: 더 긴 장애의 조각이라 접지 않는다
+    t = OutageTracker()
+    now_ms = T0 + HOUR
+    fail(t, "binance", now_ms - 100 * SEC, kind="timeout")
+    fail(t, "binance", now_ms - 99 * SEC, kind="network")
+    close(t, "binance", now_ms - 98 * SEC)
+    out = build_collect_health(LiveStore(), t, T0, now_ms)
+    assert [o.kind for o in out.outages] == ["network", "timeout"]
+    assert out.exchanges[2].reconnects_24h == 0
+
+
+def test_open_network_outage_shows_only_after_five_seconds() -> None:
+    t = OutageTracker()
+    now_ms = T0 + HOUR
+    t.record_success("upbit", now_ms - 4 * SEC)
+    fail(t, "upbit", now_ms - 3 * SEC, kind="network")
+    out = build_collect_health(LiveStore(), t, T0, now_ms)
+    up = out.exchanges[0]
+    assert up.open_outage is None and out.outages == [] and up.last_error is None
+    assert up.reconnects_24h == 0  # 진행 중은 세지 않는다
+    assert up.success_rate_1h < 100.0  # 성공률은 진행 중 3초도 센다
+    out = build_collect_health(LiveStore(), t, T0, now_ms + 3 * SEC)  # 6초째
+    up = out.exchanges[0]
+    assert up.open_outage is not None and up.open_outage.kind == "network"
+    assert [o.exchange for o in out.outages] == ["upbit"]
