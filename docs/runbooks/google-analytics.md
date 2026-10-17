@@ -3,9 +3,9 @@
 랜딩(`/`)과 대시보드(`/app/`)의 방문 통계를 GA4 로 본다. Clarity 와 **같은 동의**다 — 동의 창이나 처리방침의 동의 관리(`/privacy#consent`)에서 세 칸에 모두 동의해 저장한 방문자만 Google 태그를 받고, 동의 전에는 Google 요청이 하나도 없다. 레포 쪽 설정은 `web/public/clarity.js` 머리의 GA 측정 ID 하나이고, 나머지는 GA 관리 화면에서 사람이 한다. **아래 2절의 값은 처리방침 v9 가 사실로 적는 값이다 — 바꾸면 방침도 고친다.**
 
 ## 1. 켜는 순서
-1. 처리방침 v7(076)·v8(078)이 머지·게시돼 있다.
-2. 아래 2절로 속성을 만들고 측정 ID(`G-…`)를 받는다.
-3. ID 를 075 PR 의 `clarity.js` `GA_ID` 에 넣고, 같은 PR 에서 `server/tests/test_clarity.py` 의 `test_the_repo_ga_id_is_empty_until_a_person_fills_it` 를 지운다. **075 PR 의 머지가 곧 켜기다** — 머지 = 방침 v9 게시이므로 PR 본문의 법률 확인 항목을 끝낸 뒤 머지한다.
+1. 처리방침 v9(075 — Google Analytics 를 알리는 판)가 게시돼 있다(2026-10-17 머지).
+2. 아래 2절로 속성을 만들고 측정 ID(`G-…`)를 받는다 — 지금 속성의 ID 는 `G-RJ732XDRKM`.
+3. ID 를 `clarity.js` 의 `GA_ID` 에 넣는 PR 을 머지·배포한다 — **이 머지가 곧 켜기다.** 판은 올리지 않는다(방침 글이 그대로라 동의 창이 다시 뜨지 않는다). 2절 설정을 먼저 끝낸다 — 방침이 그 값을 사실로 적는다.
 4. 배포 뒤 3절로 확인한다.
 
 ## 2. 속성 만들기와 설정 (analytics.google.com → 관리)
@@ -26,7 +26,7 @@
 5. GPC 를 보내는 브라우저(Brave)·[모두 거부]·`www.kimptrack.com` 에서는 Google 요청이 0건이다.
 
 ## 4. 끄기
-`clarity.js` 의 GA 측정 ID 를 빈 문자열로 바꾸는 PR 을 머지·배포한다. 다음 페이지 로드부터 아무도 태그를 받지 않는다(파일은 no-cache). 오래 끌 생각이면 방침에서 Google Analytics 를 빼는 PR 도 따로 낸다.
+`clarity.js` 의 GA 측정 ID 를 빈 문자열로 바꾸는 PR 을 머지·배포한다(`test_clarity.py` 의 `test_the_repo_file_loads_its_ga_id_for_agreed_visitors` 도 '빈 ID' 단언으로 바꾼다). 다음 페이지 로드부터 아무도 태그를 받지 않는다(파일은 no-cache). 오래 끌 생각이면 방침에서 Google Analytics 를 빼는 PR 도 따로 낸다.
 
 ## 5. 삭제 요청이 왔을 때 (방침 8절)
 - GA 기록은 이름·연락처가 없어 한 사람분을 찾기 어렵다. 요청자가 `_ga` 쿠키 값을 알려 주면 GA → 탐색 → 사용자 탐색기에서 그 클라이언트 ID 를 찾아 **사용자 삭제** 를 누른다.
