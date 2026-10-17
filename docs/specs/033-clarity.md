@@ -45,7 +45,7 @@
 | 판 | 다름 |
 
 - 호스트는 www 없는 `kimptrack.com` 하나다. `www.kimptrack.com` 은 apex 로 301(022·023)이라 문서가 열리지 않지만 저장값이 출처마다 따로라 조건으로도 막는다. localhost·탄력 IP 직접 접속·`admin.kimptrack.com` 도 이 조건으로 빠진다.
-- 페이지: 경로가 정확히 `/` 면 `landing`, `/app/` 로 시작하면 `app`. 처리방침·관리자·404 파일은 `clarity.js` 를 싣지 않는다(조건과 이중).
+- 페이지: 경로가 정확히 `/` 면 `landing`, `/app/` 로 시작하면 `app`. 처리방침·검색어 페이지 둘(`/kimp-chart`·`/kimp-history`)도 `<head>` 에 `/clarity.js` 를 싣는다(사람 요청 2026-10-17) — 켜는 페이지가 아니라 파일은 이 판단에서 곧바로 끝나고(Clarity·GA·동의 창·쿠키 정리·듣기 모두 없음), 받아 간 줄만 서버 기록의 '확인' 신호가 된다(038). 관리자·404 파일은 싣지 않는다.
 - GPC: `navigator.globalPrivacyControl === true` 면 부르지 않고 동의 창도 띄우지 않는다 — 값이 `granted` 여도. Clarity 도 GPC 면 시작하지 않지만(clarity-js 0.8.71) 스크립트를 받는 순간 방문자 IP 가 Microsoft 로 가므로 아예 받지 않는다. DNT 는 보지 않는다(폐기된 신호이고 Clarity 도 따르지 않는다 — Clarity FAQ).
 - 동의값(032 §3.3 계약 복사): localStorage 키 셋 — `kt.analytics`·동의한 안내 판 `kt.analytics.v`·다시 물을 시각 `kt.analytics.until`(079). **`kt.analytics` 가 `granted` 이고 `kt.analytics.v` 가 지금 판(§3.1)과 같을 때만 부른다.** `later`(하루 동안 안 보기·일부만 체크한 저장 — 079)·`denied`(처리방침의 거부·철회)·없음(아직 정하지 않음 — **기본 꺼짐**)·그 밖의 값·판이 다르거나 없는 `granted` 면 부르지 않는다. 저장소를 읽다 예외가 나면 부르지 않고 동의 창도 띄우지 않는다(고른 값을 저장할 수 없다). 값을 쓰는 곳은 032 방침의 동의 관리와 이 파일의 동의 창 둘이다 — 동의 창은 `granted`(판과 함께)·`later`(시각과 함께), 방침은 그 둘과 `denied`(그때의 판과 함께, 079).
 - 부르지 않을 때(GPC·켜는 값 아님·저장소 예외)는 예전 방문에서 남은 Clarity 저장값을 지운다: 쿠키 `_clck`·`_clsk`(도메인 `.kimptrack.com` 과 호스트 전용 두 모양 모두), sessionStorage `_cltk`.

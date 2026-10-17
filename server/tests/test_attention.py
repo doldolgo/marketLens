@@ -207,16 +207,15 @@ def test_landing_and_dashboard_load_attention_right_after_clarity() -> None:
         assert sum("attention.js" in t for t in tags) == 1, name
 
 
-def test_static_pages_load_only_attention_js_as_a_file_in_the_head() -> None:
-    # 073 — 화면 이동 기록 replay.js 가 그 뒤에 하나 더(같은 동의·같은 출처)
+def test_static_pages_load_three_same_origin_files_in_the_head() -> None:
+    # 033(2026-10-17) clarity.js — 받기만 한다(서버 기록의 '확인' 신호), 그 뒤 attention.js, 073 replay.js(같은 동의·같은 출처)
     for page in ("privacy", "kimp-chart", "kimp-history"):
         html = (PUBLIC / STATIC_PAGES[page]).read_text("utf-8")
         head = html[: html.index("</head>")]
         files = re.findall(r"<script\b[^>]*\bsrc=\"([^\"]*)\"", html)
-        assert files == ["/attention.js", "/replay.js"], page
-        assert '<script defer src="/attention.js"></script>' in head, page
-        assert '<script defer src="/replay.js"></script>' in head, page
-        assert "clarity.js" not in "".join(_script_tags(html)), page
+        assert files == ["/clarity.js", "/attention.js", "/replay.js"], page
+        for src in files:
+            assert f'<script defer src="{src}"></script>' in head, (page, src)
 
 
 def test_old_policy_copies_and_404_load_no_script() -> None:

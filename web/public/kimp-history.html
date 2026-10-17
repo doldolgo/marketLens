@@ -13,7 +13,9 @@
   <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <meta name="theme-color" content="#161826" />
-  <!-- 052 — 화면 영역 이용 통계(동의한 방문자만). 같은 출처 스크립트는 이 하나뿐이다(CSP script-src 'self') -->
+  <!-- 033 — clarity.js 를 싣기만 한다(켜는 페이지는 랜딩·대시보드 — 여기선 Clarity·GA·동의 창 없이 곧바로 끝난다). 받아 간 줄이 서버 기록의 '확인' 신호다(038) -->
+  <script defer src="/clarity.js"></script>
+  <!-- 052 — 화면 영역 이용 통계(동의한 방문자만). 같은 출처 스크립트는 clarity.js·attention.js·replay.js 셋이다(CSP script-src 'self') -->
   <script defer src="/attention.js"></script>
   <script defer src="/replay.js"></script>
   <meta property="og:type" content="website" />
