@@ -45,6 +45,7 @@ from app.core.contracts import noop_record
 from app.core.day_open import DayOpenBook
 from app.core.errors import ExchangeError
 from app.core.eth_flow import EthFlowDetector, load_seeds
+from app.core.heap_trim import HeapTrimmer, load_malloc_trim
 from app.core.heartbeat import HeartbeatSink
 from app.core.influx import InfluxClient
 from app.core.live_store import LiveStore
@@ -431,9 +432,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         perps=perps,
     )
     _settle_gc()
+    # 001 §3.1 — 60초마다 glibc 힙의 빈 페이지를 돌려준다(MB 단위 본문을 매초 만들고 버려 생기는 단편화)
+    heap_trim = HeapTrimmer(trim=load_malloc_trim())
+    heap_trim.start()
     try:
         yield
     finally:
+        await heap_trim.aclose()
         await ticks.aclose()  # 슬롯의 마지막 틱을 인계한다
         # 013 — 쓰기 태스크를 멈추기 전에 열린 사건 사본 저장 1회·미전송 점 쓰기 1회(총 3초 상한)
         await events.final_round()
