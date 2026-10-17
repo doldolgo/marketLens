@@ -1,4 +1,4 @@
-// 수집 상태 탭 — /health/collect 실데이터 (스펙 011 §3.8). 카드 4개: 요약·거래소 3장·24시간 타임라인·로그.
+// 수집 상태 탭 — /health/collect 실데이터 (스펙 011 §3.8, 짧은 재연결 080 §3.3). 카드 4개: 요약·거래소 3장·24시간 타임라인·로그.
 import { exName, fmtAgo, fmtHm, fmtHms } from '../../shared/format'
 import type { Feed, HealthData, HealthExchange, HealthOutage, HealthState, OutageKind } from '../../shared/types'
 import { Chip } from '../../shared/ui'
@@ -60,6 +60,9 @@ function ExCard({ ex, now }: { ex: HealthExchange; now: number }) {
         <span style={{ textAlign: 'right' }}>
           {err ? `${fmtHms(err.at)} · ${KIND_LABELS[err.kind]}${httpText(err.statusCode)}` : '–'}
         </span>
+        {/* 080 §3.3 — 5초 안에 다시 붙은 끊김은 목록 대신 횟수로 */}
+        <span style={{ color: 'var(--color-neutral-600)' }}>재연결 24h</span>
+        <span style={{ textAlign: 'right' }}>{ex.reconnects24h > 0 ? `${ex.reconnects24h}회` : '–'}</span>
       </div>
       {ex.openOutage && (
         <div style={{ marginTop: 8, fontSize: 12, color: 'var(--color-up)' }}>진행 중 · ×{ex.openOutage.count}회</div>
@@ -159,8 +162,18 @@ const logRowStyle = {
   borderRadius: 'var(--radius-sm)',
 } as const
 
+/** 접은 짧은 재연결 행의 내용 — 합과 거래소별 횟수(많은 순) (080 §3.3). 없으면 null. */
+function reconnectLine(data: HealthData): string | null {
+  const per = data.exchanges.filter((e) => e.reconnects24h > 0).sort((a, b) => b.reconnects24h - a.reconnects24h)
+  const total = per.reduce((s, e) => s + e.reconnects24h, 0)
+  if (total === 0) return null
+  const parts = per.map((e) => `${exName(e.exchange)} ${e.reconnects24h}`).join(' · ')
+  return `5초 안에 다시 붙은 연결 끊김 ${total}회 · 목록에서 접음 · ${parts}`
+}
+
 function Log({ data }: { data: HealthData }) {
   const rows = data.outages.slice(0, LOG_MAX) // 이미 startedAt 내림차순
+  const reconnects = reconnectLine(data)
   return (
     <div data-area="list" style={cardStyle}>
       <div style={{ ...kicker, marginBottom: 10 }}>최근 실패 구간</div>
@@ -178,6 +191,16 @@ function Log({ data }: { data: HealthData }) {
             </span>
           </div>
         ))}
+        {reconnects !== null && (
+          <div className="hv-row4" style={logRowStyle}>
+            <span style={{ color: 'var(--color-neutral-500)' }}>24h</span>
+            <span style={{ color: 'var(--color-neutral-500)' }}>전체</span>
+            <Chip tone="neutral">재연결</Chip>
+            <span style={{ color: 'var(--color-neutral-500)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {reconnects}
+            </span>
+          </div>
+        )}
         {/* 맨 끝(가장 오래된 쪽) 서버 시작 행 */}
         <div className="hv-row4" style={logRowStyle}>
           <span style={{ color: 'var(--color-neutral-500)' }}>{fmtHms(data.serverStartedAt)}</span>

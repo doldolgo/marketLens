@@ -117,6 +117,7 @@ def collect() -> dict:
             "successRate1h": 88.4 if down else 97.3 if stale else 100.0,
             "openOutage": outages[0] if down else None,
             "lastError": None,
+            "reconnects24h": {"okx": 14, "bitget": 9, "bybit": 5}.get(ex, 0),  # 080 짧은 재연결
         })
     rate = round(sum(r["successRate1h"] for r in rows) / len(rows), 1)
     return {"serverStartedAt": now - 30 * 3_600_000, "fetchedAt": now, "successRate1h": rate, "exchanges": rows, "outages": outages}
