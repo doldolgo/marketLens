@@ -60,6 +60,12 @@ PONG_TIMEOUT = 10.0  # 이 안에 pong 이 없으면 끊고 재연결 — 조용
 BACKOFF_START = 1.0
 BACKOFF_MAX = 30.0
 CLOSE_TIMEOUT = 2.0  # 종료 시 취소 + 소켓 3개 동시 close 합계 상한
+# 080 §3.1 — 서버는 연결 168~180분에 `1000 Expired` 로 닫는다(2026-10-17 실측). 그 전에 새 소켓으로 갈아탄다
+ROTATE_AFTER = 150 * 60.0
+ROTATE_RETRY = 5 * 60.0  # 교대 실패·건너뜀 뒤 다시 시도까지
+IP_SUBSCRIPTION_CAP = (
+    1_000  # IP 당 구독 한도(문서 원문) — 교대 중 두 벌이 이 안이어야 한다
+)
 _PING = json.dumps({"method": "ping"})
 _BBO = "bbo"
 _CTX = "activeAssetCtx"
@@ -148,6 +154,8 @@ class HyperliquidPerpStream:
         # 직전 set_universe 가 끝까지 배정을 맞춘 (코인 맵 객체, 우주 사본) — 같은 맵·같은 우주면 배정 계산을 건너뛴다 (§3.3)
         self._applied: tuple[dict[str, str], frozenset[str]] | None = None
         self._wake = asyncio.Event()  # set_universe 가 재조정 루프를 깨운다
+        # 교대는 스트림 전체에서 한 번에 하나 — 세 샤드가 같이 구독하면 메시지 한도를 넘는다 (080 §3.1)
+        self._rotating = asyncio.Lock()
         self._rebalance: asyncio.Task[None] | None = None
         self.decode_failures = 0  # 버린 무효 프레임 수 — 그 자체로 실패가 아니다
         # 직전에 맵까지 만든 200 응답 본문 — 시각 필드가 없어 전체를 비교한다. 같으면 파싱·맵 재생성을 건너뛴다 (§3.2)
@@ -455,7 +463,7 @@ class HyperliquidPerpStream:
                 )  # 구독 시각 = 첫 묶음을 다 보낸 시각
                 self._publish()
                 shard.ping_task = asyncio.create_task(self._run_ping(shard, ws))
-                await self._pump(shard, ws)
+                await self._serve(shard, ws)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -489,6 +497,111 @@ class HyperliquidPerpStream:
             )
             await self._sleep(shard.backoff)
             shard.backoff = min(shard.backoff * 2, BACKOFF_MAX)
+
+    async def _serve(self, shard: _Shard, ws: Any) -> None:
+        """펌프를 돌리다 소켓 나이가 150분이 되면 새 소켓으로 갈아탄다 (080 §3.1). 펌프 예외는 그대로 올린다."""
+        pump = asyncio.create_task(self._pump(shard, ws))
+        wait = ROTATE_AFTER
+        try:
+            while True:
+                timer = asyncio.create_task(self._sleep(wait))
+                try:
+                    await asyncio.wait(
+                        {pump, timer}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                finally:
+                    timer.cancel()
+                if pump.done():
+                    pump.result()  # 끊김 — 예외가 _run_shard 의 보통 재연결로 간다
+                    return
+                pump, rotated = await self._rotate(shard, pump)
+                wait = ROTATE_AFTER if rotated else ROTATE_RETRY
+        finally:
+            await _cancel(pump)
+
+    async def _rotate(
+        self, shard: _Shard, pump: "asyncio.Task[None]"
+    ) -> "tuple[asyncio.Task[None], bool]":
+        """새 소켓 열기 → 수신 시작 → 배정 전부 구독 → 바꿔 타기 → 옛 소켓 닫기 (080 §3.1).
+
+        돌려주는 것 = (이제 돌아가는 펌프, 갈아탔는가). 실패면 옛 펌프를 그대로 돌려준다.
+        교대 중 옛 소켓이 먼저 닫혀도 새 소켓 구독이 끝나면 갈아탄다 — 옛 오류는 구간이 되지 않는다.
+        """
+        async with self._rotating:
+            if pump.done():
+                return pump, False  # 차례를 기다리는 동안 끊겼다 — 보통의 재연결로
+            need = SUBS_PER_COIN * (
+                sum(len(s.subscribed) for s in self._shards) + len(shard.assigned)
+            )
+            if need > IP_SUBSCRIPTION_CAP:
+                logger.warning(
+                    "Hyperliquid 샤드 %d 소켓 교대 건너뜀 — 겹치는 동안 구독 %d개가 한도 %d 를 넘는다",
+                    shard.index,
+                    need,
+                    IP_SUBSCRIPTION_CAP,
+                )
+                return pump, False
+            began = time.monotonic()
+            try:
+                new_ws = await self._open()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "Hyperliquid 샤드 %d 소켓 교대 실패(열기) — %.0f분 뒤 다시: %r",
+                    shard.index,
+                    ROTATE_RETRY / 60,
+                    exc,
+                )
+                return pump, False
+            # 구독을 보내는 동안에도 읽는다 — 밀린 프레임으로 서버가 끊지 않게
+            new_pump = asyncio.create_task(self._pump(shard, new_ws))
+            old_ws: Any = None
+            swapped = False
+            try:
+                async with shard.lock:
+                    wanted = set(shard.assigned)
+                    await self._send_each(new_ws, "subscribe", sorted(wanted))
+                    if new_pump.done():
+                        raise ConnectionError("구독 중 새 소켓이 닫혔다")
+                    old_ws, shard.ws = shard.ws, new_ws
+                    shard.subscribed = wanted
+                    shard.state.subscribed = len(wanted)
+                    shard.state.connected_since = self._clock()  # 새 구독 시각
+                    swapped = True
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "Hyperliquid 샤드 %d 소켓 교대 실패(구독) — 옛 소켓을 그대로 쓴다, %.0f분 뒤 다시: %r",
+                    shard.index,
+                    ROTATE_RETRY / 60,
+                    exc,
+                )
+            finally:
+                if not swapped:
+                    await _cancel(new_pump)
+                    with contextlib.suppress(Exception):
+                        await new_ws.close()
+            if not swapped:
+                return pump, False
+            await self._stop_ping(shard)
+            shard.pong_pending = False
+            shard.pong_timed_out = False
+            shard.last_rx_at = self._clock()
+            shard.ping_task = asyncio.create_task(self._run_ping(shard, new_ws))
+            self._publish()
+            await _cancel(pump)
+            if old_ws is not None:
+                with contextlib.suppress(Exception):
+                    await old_ws.close()
+            logger.info(
+                "Hyperliquid 샤드 %d 소켓 교대 — 구독 %d종목, %.1f초",
+                shard.index,
+                len(wanted),
+                time.monotonic() - began,
+            )
+            return new_pump, True
 
     async def _run_rebalance(self) -> None:
         """set_universe 가 깨우거나 60초마다 — 연결된 샤드의 구독 차이를 맞춘다."""
@@ -570,23 +683,24 @@ class HyperliquidPerpStream:
             wanted = set(shard.assigned)
             drop = sorted(shard.subscribed - wanted)
             add = sorted(wanted - shard.subscribed)
-            for method, coins in (("unsubscribe", drop), ("subscribe", add)):
-                for coin in coins:
-                    for kind in (_BBO, _CTX):
-                        await ws.send(
-                            json.dumps(
-                                {
-                                    "method": method,
-                                    "subscription": {"type": kind, "coin": coin},
-                                }
-                            )
-                        )
-                        await self._sleep(SUBSCRIBE_INTERVAL)
+            await self._send_each(ws, "unsubscribe", drop)
+            await self._send_each(ws, "subscribe", add)
             if shard.ws is not ws:
                 return  # 보내는 도중 소켓이 바뀌었다 — 죽은 소켓의 구독을 새 소켓 것으로 세지 않는다
             shard.subscribed = wanted
             shard.state.subscribed = len(wanted)
             self._publish()
+
+    async def _send_each(self, ws: Any, method: str, coins: list[str]) -> None:
+        """코인마다 bbo·activeAssetCtx 두 메시지 — 한 메시지에 구독 하나, 초당 20개 (§3.3)."""
+        for coin in coins:
+            for kind in (_BBO, _CTX):
+                await ws.send(
+                    json.dumps(
+                        {"method": method, "subscription": {"type": kind, "coin": coin}}
+                    )
+                )
+                await self._sleep(SUBSCRIBE_INTERVAL)
 
     async def _pump(self, shard: _Shard, ws: Any) -> None:
         while True:
@@ -686,6 +800,13 @@ class HyperliquidPerpStream:
             mark=_float_or_none(ctx.get("markPx")),
             funding_interval_h=FUNDING_INTERVAL_H,
         )
+
+
+async def _cancel(task: "asyncio.Task[Any]") -> None:
+    """태스크를 취소하고 끝날 때까지 — 이미 끝난 태스크의 예외도 여기서 거둔다."""
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        await task
 
 
 def _level(level: object) -> tuple[float, float]:
