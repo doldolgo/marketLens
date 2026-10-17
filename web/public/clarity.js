@@ -104,15 +104,15 @@
 #kt-consent dd{color:#cfd3e5}
 #kt-consent code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:1em;color:#f3f5fe}
 #kt-consent .key{font-size:1.2em;font-weight:700;color:#e9e9ed;text-decoration:underline;text-decoration-color:#9184d9;text-underline-offset:4px}
-#kt-consent .kt-c-actions{flex:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;max-width:596px;padding:12px 20px 16px}
+#kt-consent .kt-c-actions{flex:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px;max-width:596px;padding:12px 20px 16px}
 #kt-consent button{height:44px;padding:0 8px;border:1px solid #9184d9;border-radius:8px;background:none;color:#9184d9;font:inherit;font-weight:600;line-height:1;white-space:nowrap;cursor:pointer}
 #kt-consent button:hover{background:rgba(145,132,217,.12)}
-#kt-consent button.kt-c-primary{background:#9184d9;color:#14151f}
+#kt-consent button.kt-c-primary{grid-column:1/-1;background:#9184d9;color:#14151f}
 #kt-consent button.kt-c-primary:hover{background:#a397e3}
 #kt-consent :focus-visible{outline:2px solid #9184d9;outline-offset:2px;border-radius:4px}
 #kt-consent .kt-c-body:focus-visible{outline-offset:-2px}
 #kt-consent .kt-c-box:focus{outline:none}
-@media (max-width:599px){#kt-consent .kt-c-body{padding:12px 14px 2px}#kt-consent .kt-c-actions{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;max-width:none;padding:8px 14px}#kt-consent button.kt-c-primary{grid-column:1/-1}#kt-consent details>dl,#kt-consent details>p{margin-left:0}#kt-consent dl{grid-template-columns:minmax(0,1fr);gap:0}#kt-consent dd+dt{margin-top:8px}}
+@media (max-width:599px){#kt-consent .kt-c-body{padding:12px 14px 2px}#kt-consent .kt-c-actions{gap:8px 12px;max-width:none;padding:8px 14px}#kt-consent details>dl,#kt-consent details>p{margin-left:0}#kt-consent dl{grid-template-columns:minmax(0,1fr);gap:0}#kt-consent dd+dt{margin-top:8px}}
 `
 
   // 하나라도 걸리면 부르지 않는 조건의 앞 셋(§3.2) — ID·호스트·페이지. 여기서 빠진 문서는 듣지도 않는다(storage·pageshow)

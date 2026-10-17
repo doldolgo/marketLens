@@ -110,14 +110,14 @@ def test_an_id_needs_the_published_consent_policy() -> None:
 
 
 def test_a_ga_id_needs_the_policy_that_names_google_analytics() -> None:
-    """075 §4 — GA 측정 ID 가 들어 있으면 방침이 Google Analytics 를 알리는 판이다 — 2절 소절·받는 자 Google LLC·국외 이전 절."""
+    """075 §4 — GA 측정 ID 가 들어 있으면 방침이 Google Analytics 를 알리는 판이다 — 2절 소절·받는 자 Google LLC·국외 이전 묶음."""
     if not _ga_id():
         return
     assert "〔" not in PRIVACY
     for text in (
         "<h3>방문 통계 — Google Analytics</h3>",
         "Microsoft Corporation(미국), Google LLC(미국)",
-        "<h3>Google LLC — 방문 통계(Google Analytics)</h3>",
+        "<h4>Google LLC — 방문 통계(Google Analytics)</h4>",
         "_ga_*",
     ):
         assert text in PRIVACY, text

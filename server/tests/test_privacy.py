@@ -61,14 +61,15 @@ SECTIONS = [
     "3. 개인정보의 파기",
     "4. 개인정보의 제3자 제공",
     "5. 개인정보 처리의 위탁",
-    "6. 개인정보의 국외 이전",
-    "7. 자동으로 수집하는 장치의 설치·운영과 거부",
-    "8. 정보주체의 권리와 행사 방법",
-    "9. 개인정보의 안전성 확보 조치",
-    "10. 개인정보 보호책임자",
-    "11. 권익침해 구제 방법",
-    "12. 개인정보 처리방침의 변경",
+    "6. 자동으로 수집하는 장치의 설치·운영과 거부",
+    "7. 정보주체의 권리와 행사 방법",
+    "8. 개인정보의 안전성 확보 조치",
+    "9. 개인정보 보호책임자",
+    "10. 권익침해 구제 방법",
+    "11. 개인정보 처리방침의 변경",
 ]
+# 국외 이전(제28조의8 제2항 — 처리위탁·보관의 근거가 '방침에 공개'라 지우지 않는다)은 절이 아니라 5절 아래 접힌 묶음
+# `<details id="abroad">` 다(사람 결정 2026-10-17). 절의 id·data-area 는 예전 이름(s7~s12) 그대로 — 영역 통계 기록과 맞춘다
 # 자원을 부르는 <link rel> — canonical 과 <a href> 는 주소일 뿐 요청을 만들지 않는다
 RESOURCE_RELS = {
     "stylesheet",
@@ -153,13 +154,13 @@ TRANSFER_REFUSAL = (
     "이 칸에 체크하지 않거나 [모두 거부]를 누르면 이전되지 않습니다.",
     "이 칸에 체크하지 않으면 이전되지 않습니다.",
 )
-# 079 §3.3 — 상자 아래 저장값 문단에서 바뀐 문장(이 판) — 대조표 '동의 관리 — 저장값' 행의 '이 판' 칸과 같은 글자
+# 079 §3.3 — 상자 아래 저장값 문단
 STORAGE_RULE = (
     "여기서나 랜딩·대시보드에 뜨는 안내에서 하나라도 빠진 채 저장하면 later와 다시 물을 시각 kt.analytics.until(저장한 때부터 24시간 뒤)을 "
     "저장하고 판을 지웁니다 — 그 안내의 [하루 동안 안 보기]도 같은 값을 저장하며, 그동안은 분석하지 않다가 24시간이 지나면 다시 묻습니다. "
     "[모두 거부]·[동의 철회]를 누르면 denied와 그때 안내의 판 kt.analytics.v를 저장하고, 그 뒤로는 다시 묻지 않습니다. 저장하지 못하면 "
     "값을 지워 정하지 않은 상태로 돌립니다. 여기서 하나라도 빼고 저장하거나 [모두 거부]·[동의 철회]를 누르면 이 사이트의 Clarity 쿠키 "
-    "_clck·_clsk와 Google Analytics 쿠키 _ga·_ga_*를 지웁니다. 이 판 전에 판 없이 저장된 denied(예전 안내의 [모두 거부]나 여기서 누른 "
+    "_clck·_clsk와 Google Analytics 쿠키 _ga·_ga_*를 지웁니다. 안내의 판 없이 저장된 예전 denied(예전 안내의 [모두 거부]나 여기서 누른 "
     "[모두 거부]·[동의 철회])는 정하지 않은 것으로 보고 다시 묻습니다."
 )
 # 079 §3.4 — 7절 저장 장치 목록의 localStorage 줄(이전 판, 이 판)
@@ -443,10 +444,7 @@ CHANGE_NOTICE_LINKS = (
     'href="#s12"',
 )
 # 060 §3.3-8 — 12절 규칙(7일 전 게시 약속과 그 단서는 지웠다)·시행 문장(067 — 그 전날까지는 앞 판)·이력 첫 항목
-CHANGE_RULE = (
-    "이 방침을 바꿀 때는 시행일과 바뀐 문장의 전후 대조를 이 페이지에 알리고 이전 판을 남깁니다. "
-    "동의를 받아 하는 처리가 늘면 바뀐 안내로 다시 동의를 받고, 그 동의를 받은 때부터 합니다."
-)
+CHANGE_RULE = "방침이 바뀌면 이 페이지에 새 시행일을 적고, 동의받은 내용이 바뀌면 랜딩·대시보드에서 다시 묻습니다."
 # 079 — 같은 날 두 번째 판(060 의 v4·069·078 꼴): 머리 시행일 뒤·12절 시행 문장·이력 첫 항목에 차례
 EFFECTIVE_SENTENCE = (
     "부터 시행하며(이날 두 번째 판), 같은 날 먼저 게시한 판을 바꿉니다."
@@ -482,7 +480,7 @@ ACCESS_BANDS = (
 )
 # 069 §3.7 — 2절 서버 접속 기록 (라): IP 주소별 보기·봇 판단·대략의 위치·망 사업자·역방향 DNS(관리자만·밖으로 보내지 않음)
 ACCESS_ADDRS = (
-    "(라) 운영자는 보안(봇·스캐너 대응)과 장애 확인을 위해 관리자 화면에서 IP 주소별로(이 판 시행 전 기록과 대역 보기는 끝자리를 "
+    "(라) 운영자는 보안(봇·스캐너 대응)과 장애 확인을 위해 관리자 화면에서 IP 주소별로(IP 전체를 남기기 전 기록과 대역 보기는 끝자리를 "
     "가린 IP 대역별로) 접속 기록(시각·연 경로(쿼리 뺌)·응답·요청을 보낸 쪽의 종류·브라우저 정보에서 뽑은 기기·OS·브라우저 이름·"
     "들어온 출처의 사이트 주소)을 모아 보거나 시간순으로 볼 수 있습니다. 또 요청 수·연 경로·응답·스크립트 신호·망 같은 근거로 자동 "
     "요청(봇)인지 판단하고, 공개 IP 위치 자료(DB-IP Lite — 서버가 받아 두고 찾습니다)로 대략의 나라·지역·도시와 망 사업자 이름을, "
@@ -495,7 +493,7 @@ FULL_IP_FACTS = {
     "s2": (
         "시각, IP 주소 전체, 접속 포트",
         "두 곳 모두 IP 주소 전체가 담기고",
-        "이 판을 시행하기 전에 남은 줄에는 IP 앞부분만 있습니다",
+        "IP 전체를 남기기 전의 줄에는 IP 앞부분만 있습니다",
         "(라)의 관리자 화면은 망 사업자 이름을 보입니다",
     ),
     "s8": ("쓰던 IP 주소와 대략의 시각을 알려 주어야",),
@@ -547,12 +545,6 @@ V2_FACTS = {
         "보낸 때부터 90일",
     ),
     "s3": ("며칠 걸릴 수 있습니다",),
-    # 060 §3.3-8 — 12절의 변경 규칙은 v4 가 바꿨다. v2 의 사실로 남는 것은 이력의 CloudWatch 사실 줄
-    "s12": (
-        "보낸 시각으로 찍혀",
-        "최대 3일",
-        "줄마다 골라 지울 수 없어",
-    ),
 }
 # 051 §3.3·060 §3.3 — 본문 절(변경 안내·대조표 밖)마다 화면 이용 통계(KimpTrack 서버)의 사실. v3 의 영역 통계에 v4 가 요소·떠날 때
 # 보던 곳·깊이를 더하고 이름을 '화면 이용 통계' 로 바꿨다
@@ -594,7 +586,6 @@ SCREEN_USE_FACTS = {
     "s9": (
         "화면 이용 통계는 영역·요소 이름과 숫자만 보내고, 화면의 글자·입력값·좌표는 보내지 않습니다",
     ),
-    "s12": ("2026년 10월 1일 판이 적은 90일",),
 }
 # 060 §3.3 — 이름을 바꾼 뒤 본문(대조표 밖)에 남으면 안 되는 옛 이름. 12절 이력의 v3 항목은 그 판이 쓴 이름 그대로라 뺀다
 OLD_NAME = "화면 영역 이용 통계"
@@ -709,7 +700,13 @@ def _read(path: Path) -> tuple[str, _Page]:
 
 
 def _section(html: str, label: str) -> str:
-    """`<section aria-labelledby="…">` 하나의 본문."""
+    """`<section aria-labelledby="…">` 하나의 본문. "s6" 은 5절 아래 접힌 국외 이전 묶음이다."""
+    if label == "s6":
+        found = re.search(
+            r'<details class="more" id="abroad">(.*?)</details>', html, re.S
+        )
+        assert found, "국외 이전 묶음이 없다"
+        return found.group(1)
     start = re.search(rf'<section[^>]* aria-labelledby="{label}"', html)
     assert start, label
     body = html[start.start() :]
@@ -778,11 +775,6 @@ def _korean(day: str) -> str:
     return f"{d.year}년 {d.month}월 {d.day}일"
 
 
-def _without_diff(html: str) -> str:
-    """12절 대조표를 뺀 글 — 두 판의 문장이 함께 있는 곳은 대조표뿐이다 (037 §4)."""
-    return re.sub(DIFF_TABLE, "", html, flags=re.S)
-
-
 def _body(html: str) -> str:
     """방문자가 보는 글 — <body> 안에서 스크립트를 뺀 것."""
     body = html[html.index("<body>") : html.index("</body>")]
@@ -797,32 +789,6 @@ def _body_sections(html: str) -> str:
     return " ".join(
         [_text(lead.group(1)), *(_text(_section(html, label)) for label in labels)]
     )
-
-
-def _change_notice(html: str) -> str:
-    found = re.search(
-        r'<aside class="notice" id="changes"[^>]*>(.*?)</aside>', html, re.S
-    )
-    assert found, "변경 안내 상자가 없다 (037 §3.2-2)"
-    return found.group(1)
-
-
-def _history(html: str) -> list[str]:
-    """12절 변경 이력의 항목(최신 위)."""
-    found = re.search(r'<ul class="history">(.*?)</ul>', _section(html, "s12"), re.S)
-    assert found, "12절에 변경 이력이 없다"
-    return re.findall(r"<li>(.*?)</li>", found.group(1), flags=re.S)
-
-
-def _diff_rows(html: str) -> list[list[str]]:
-    """12절 대조표의 행 — [절, 이전 판, 이 판, 바뀐 점] 의 태그 뗀 글자 (037 §3.2-6)."""
-    table = re.search(DIFF_TABLE, _section(html, "s12"), flags=re.S)
-    assert table, "12절에 대조표가 없다"
-    body = table.group(0)[table.group(0).index("<tbody>") :]
-    return [
-        [_text(cell) for cell in re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", row, re.S)]
-        for row in re.findall(r"<tr>(.*?)</tr>", body, flags=re.S)
-    ]
 
 
 def _run_consent_script(cases: list[dict]) -> list[dict]:
@@ -1143,7 +1109,7 @@ def test_withdrawal_deletion_is_stated_under_the_box_and_in_section_3() -> None:
     section = _section(html, "consent-title")
     under_box = section[section.rindex("</div>") :]
     assert DELETION in under_box
-    assert '<a class="link" href="#s10">10절</a>의 메일로 요청' in under_box
+    assert '<a class="link" href="#s10">9절</a>의 메일로 요청' in under_box
     destruction = _section(html, "s3")
     assert "운영자가 Clarity 프로젝트의 기록을 통째로 지웁니다" in destruction
     for part in (under_box, destruction):
@@ -1168,7 +1134,7 @@ def test_clarity_rests_on_consent_for_collection_provision_and_transfer() -> Non
     assert "제17조 제1항 제1호" in provision and "제17조 제1항 제2호" not in provision
     assert "불이익이 없습니다" in provision
     groups = re.findall(
-        r"<h3>(.*?)</h3>\s*<dl[^>]*>(.*?)</dl>", _section(html, "s6"), flags=re.S
+        r"<h4>(.*?)</h4>\s*<dl[^>]*>(.*?)</dl>", _section(html, "s6"), flags=re.S
     )
     microsoft = [body for name, body in groups if name.startswith("Microsoft")]
     analytics = [body for name, body in groups if "Google Analytics" in name]
@@ -1196,7 +1162,7 @@ def test_behavioral_information_has_the_guideline_items() -> None:
 def test_every_overseas_recipient_lists_the_five_items() -> None:
     html, _ = _read(PUBLIC / "privacy.html")
     section = _section(html, "s6")
-    groups = re.findall(r"<h3>(.*?)</h3>\s*<dl[^>]*>(.*?)</dl>", section, flags=re.S)
+    groups = re.findall(r"<h4>(.*?)</h4>\s*<dl[^>]*>(.*?)</dl>", section, flags=re.S)
     assert len(groups) >= 5
     for name, body in groups:
         assert _terms(body) == TRANSFER_TERMS, name
@@ -1205,12 +1171,9 @@ def test_every_overseas_recipient_lists_the_five_items() -> None:
 def test_archived_versions_are_static_and_external_free() -> None:
     """이전 판 privacy-<시행일>.html 은 location / 로 CSP 없이 나간다 — 스크립트 없는 정적 사본이고, 검색에는 지금 판만
     나오며, 그 판에서 방문자가 무엇에 동의했는지(세 칸의 알릴 사항)를 입력칸 없이 보여 준다 (032 §3.6·037 §3.3)."""
-    now, _ = _read(PUBLIC / "privacy.html")
-    linked = re.findall(r'href="/(privacy-\d{8}(?:-\d+)?\.html)"', now)
-    assert linked, "지금 판이 이전 판으로 잇지 않는다"
     paths = sorted(PUBLIC.glob("privacy-*.html"))
-    # 이력의 옛 판마다 사본이 있고, 사본마다 이력에서 잇고, 얼려 둔 글자의 값이 있다
-    assert {path.name for path in paths} == set(linked) == set(ARCHIVED_TEXT)
+    # 옛 판마다 얼려 둔 글자의 값이 있다. 지금 판은 이전 판으로 잇지 않는다(사람 결정 2026-10-17)
+    assert {path.name for path in paths} == set(ARCHIVED_TEXT)
     for path in paths:
         html, page = _read(path)
         found = re.fullmatch(ARCHIVE_NAME, path.name)
@@ -1273,111 +1236,58 @@ def test_v4_constant_is_the_element_stats_day_before_this_version() -> None:
     assert PRIVACY_V2_EFFECTIVE < FIRST_LOG_DAY < PRIVACY_V4_EFFECTIVE
 
 
-def test_effective_date_ties_the_four_times_and_the_history() -> None:
-    """시행일은 머리·변경 안내·12절 시행 문장·이력 첫 항목의 <time> 넷과 sitemap(아래)에 같고, 한 곳만 고치면 멈춘다 (037 §3.1)."""
+def test_effective_date_ties_the_two_times() -> None:
+    """시행일은 머리와 11절 시행 문장의 <time> 둘과 sitemap(아래)에 같고, 한 곳만 고치면 멈춘다 (037 §3.1)."""
     html, _ = _read(PUBLIC / "privacy.html")
     assert EFFECTIVE >= PRIVACY_V3_EFFECTIVE
     times = re.findall(r'<time datetime="([^"]*)">([^<]*)</time>', html)
-    assert times == [(EFFECTIVE, _korean(EFFECTIVE))] * 4
+    assert times == [(EFFECTIVE, _korean(EFFECTIVE))] * 2
     tag = f'<time datetime="{EFFECTIVE}">'
-    # 같은 날 둘째 판이면 머리 시행일 뒤에 차례를 적는다(060 꼴 — 069·078)
-    assert (
-        f'<p class="meta">시행일 {tag}{_korean(EFFECTIVE)}</time>{NTH_TODAY}</p>'
-        in html
-    )
-    assert tag in _change_notice(html)
+    assert f'<p class="meta">시행일 {tag}{_korean(EFFECTIVE)}</time></p>' in html
     rule = re.search(r"<p>(.*?)</p>", _section(html, "s12"), flags=re.S).group(1)
-    assert tag in rule and "부터 시행" in rule
+    assert tag in rule
     assert (
-        _text(rule)
-        == f"이 방침은 {_korean(EFFECTIVE)}{EFFECTIVE_SENTENCE} {CHANGE_RULE}"
+        _text(rule) == f"이 방침은 {_korean(EFFECTIVE)}부터 시행합니다. {CHANGE_RULE}"
     )
-    items = _history(html)
-    assert items[0].startswith(tag)
-    assert _text(items[0]) == f"{_korean(EFFECTIVE)}{V10_HISTORY}"
-    # 같은 날 먼저 게시한 판(v9 — 075)의 항목은 차례 없이 그 판의 사본 링크(079 — `privacy-20261017.html`)
-    v9 = [i for i in items[1:] if _text(i).startswith(V9_HISTORY)]
-    assert len(v9) == 1 and 'href="/privacy-20261017.html">그 판 보기</a>' in v9[0]
-    # 같은 날 두 번째 판(v8 — 078)의 항목은 날짜 뒤 차례와 그 판의 사본 링크(075 — `-2`)
-    v8 = [i for i in items[1:] if _text(i).startswith(V8_HISTORY)]
-    assert len(v8) == 1 and 'href="/privacy-20261016-2.html">그 판 보기</a>' in v8[0]
-    # 같은 날 먼저 게시한 판(v7 — 076)의 항목은 차례 없이 그 판의 사본 링크(`privacy-20261016.html`) — 그 판이 알린 14일 그대로
-    v7 = [i for i in items[1:] if _text(i).startswith(V7_HISTORY)]
-    assert len(v7) == 1 and 'href="/privacy-20261016.html">그 판 보기</a>' in v7[0]
-    # 같은 날 두 번째 판(v6 — 069)의 항목은 날짜 뒤 차례와 그 판의 사본 링크(076 — `-2`)
-    v6 = [i for i in items[1:] if _text(i).startswith(V6_HISTORY)]
-    assert len(v6) == 1 and 'href="/privacy-20261014-2.html">그 판 보기</a>' in v6[0]
-    # 같은 날 먼저 게시한 판(v5 — 067)의 항목은 차례 없이 그 판의 사본 링크(`privacy-20261014.html`)
-    v5 = [i for i in items[1:] if _text(i).startswith(V5_HISTORY)]
-    assert len(v5) == 1 and 'href="/privacy-20261014.html">그 판 보기</a>' in v5[0]
-    # 같은 날 두 번째 판(v4 — 060)의 항목은 날짜 뒤 차례와 그 판의 사본 링크(067 — `-2`)
-    v4 = [i for i in items if _text(i).startswith(V4_HISTORY)]
-    assert len(v4) == 1 and 'href="/privacy-20261009-2.html">그 판 보기</a>' in v4[0]
-    # v3 가 열린 날의 항목도 다음 판에서 남는다 — 052 의 게이트가 그날을 읽는다 (051 §3.3-10). 060 — 그 판의 사본 링크
-    v3 = [
-        i for i in items if _text(i).startswith(f"{_korean(PRIVACY_V3_EFFECTIVE)} — ")
-    ]
-    assert len(v3) == 1
-    for word in V3_HISTORY_SAYS:
-        assert word in _text(v3[0]), word
-    assert 'href="/privacy-20261009.html">그 판 보기</a>' in v3[0]
-    # v2 판(시행 전에 바뀜)의 항목은 다음 판에서도 이력에 남는다 — 그 판이 알린 접속 기록 쓰임새를 038·039 가 연다
-    v2 = f"{_korean(V2_DAY)} — "
-    opened = [item for item in items if _text(item).startswith(v2)]
-    assert len(opened) == 1
-    # 그 항목의 설명(아래 사실 문단 앞) — 무엇이 바뀌었는지 (037 §3.2-6)
-    headline = _text(opened[0].split("<p>")[0])
-    for word in V2_HISTORY_SAYS:
-        assert word in headline, word
-    # 지금 판을 뺀 항목마다 그 판의 사본 링크 — 같은 날 둘째 판부터는 이름에 `-<차례>`(067)
-    for item in items[1:]:
-        y, m, d, word = re.match(
-            r"(\d{4})년 (\d{1,2})월 (\d{1,2})일(?:\((\S+) 번째 판\))?", _text(item)
-        ).groups()
-        nth = "" if word is None else f"-{ORDINALS[word]}"
-        assert f'href="/privacy-{y}{int(m):02d}{int(d):02d}{nth}.html"' in item, item
 
 
-def test_change_notice_comes_first_and_names_what_changes() -> None:
-    """맨 위 변경 안내 — 머리 시행일 줄 바로 아래, 소개 문단 앞. 시행 문장·바뀌는 것 하나·동의를 다시 물음·링크 둘 (067 §3.4·079 §3.4)."""
+def test_page_has_no_change_notice_history_or_diff() -> None:
+    """사람 결정 2026-10-17 — 바뀌면 동의를 다시 묻는 것으로 갈음하고, 변경 안내·변경 이력·전후 대조·이전 판 링크는 싣지 않는다.
+    060 이 지운 7일 전 게시 약속도 없다."""
     html, page = _read(PUBLIC / "privacy.html")
-    assert "변경 안내" in page.h2
-    start = html.index('id="changes"')
-    assert html.index('<p class="meta">시행일') < start < html.index('<p class="lead">')
-    notice = _change_notice(html)
-    assert f'href="/{PREVIOUS}"' in notice
-    assert re.findall(r'href="([^"]*)"', notice) == [
-        link.split('"')[1] for link in CHANGE_NOTICE_LINKS
-    ]
-    text = _text(notice)
-    for word in CHANGE_NOTICE_SAYS:
-        assert word in text, word
-    assert text.startswith(
-        f"변경 안내 이 판은 {_korean(EFFECTIVE)}부터 시행합니다 — 같은 날 먼저 게시한 판("
-    )
-    # 바뀌는 것은 하나라 번호 목록이 없다. 동의를 다시 묻는다는 문장은 바뀌는 것 뒤
-    assert "<li>" not in notice
-    assert text.index("보유 기간은 그대로입니다") < text.index(
-        "이미 동의한 방문자에게도 다시 묻고"
-    )
+    assert "변경 안내" not in page.h2
+    assert 'id="changes"' not in html and 'class="history"' not in html
+    assert '<table class="tbl diff">' not in html
+    assert not re.search(r'href="/privacy-\d{8}', html)
+    visible = _text(_body(html))
+    for gone in (
+        "이전 판",
+        "이 판",
+        "바뀐 점",
+        "전후 대조",
+        "그 판 보기",
+        "7일 전",
+        "7×24",
+    ):
+        assert gone not in visible, gone
 
 
 def test_body_sections_state_the_v2_facts() -> None:
     """본문 절마다 v2 의 사실 — 변경 안내·대조표가 아닌 곳에서. 지난 판 문장은 대조표에만 남는다 (037 §3.2)."""
     html, _ = _read(PUBLIC / "privacy.html")
     for label, words in V2_FACTS.items():
-        text = _text(_without_diff(_section(html, label)))
+        text = _text(_section(html, label))
         for word in words:
             assert word in text, (label, word)
     # (라) — 관리자 화면의 IP 주소별 보기(069 §3.7). 060 이 지운 시작 날짜 문장은 없다(남아 있는 기록 전체를 쓴다).
     # '(라)' 는 문단 머리와 (나)가 가리키는 곳 두 번
-    s2 = _text(_section(_without_diff(html), "s2"))
+    s2 = _text(_section(html, "s2"))
     assert "(다)" in s2 and ACCESS_ADDRS in s2 and s2.count("(라)") == 2
     assert "이 쓰임새를 시작하는 날" not in s2
-    assert SECURITY_PURPOSE in _text(_section(_without_diff(html), "s1"))
+    assert SECURITY_PURPOSE in _text(_section(html, "s1"))
     # (다) — 062 가 짝에 붙이는 그날 첫·마지막 페이지 이름과 페이지 수(게이트를 당겨 v4 시행일부터 돈다 — 060 §7)
-    assert ACCESS_FLOW_ITEMS in _text(_section(_without_diff(html), "s2"))
-    outside = _without_diff(html)
+    assert ACCESS_FLOW_ITEMS in _text(_section(html, "s2"))
+    outside = html
     assert "24시간 요약" not in outside
     assert "90일이 지나면 지웁니다" not in outside
     visible = _text(_body(html))
@@ -1389,7 +1299,7 @@ def test_body_sections_state_the_full_ip_facts() -> None:
     """069 §3.7 — 본문 절마다 IP 전체 저장의 사실(대조표 밖), v5 까지의 '가린 IP' 문장은 대조표에만. 1절 목적은 067 의 보안
     목적 그대로(바꾸지 않음)."""
     html, _ = _read(PUBLIC / "privacy.html")
-    body = _without_diff(html)
+    body = html
     for label, words in FULL_IP_FACTS.items():
         text = _text(_section(body, label))
         for word in words:
@@ -1403,7 +1313,7 @@ def test_body_sections_state_the_full_ip_facts() -> None:
 def test_body_sections_state_the_screen_use_facts() -> None:
     """본문 절마다 화면 이용 통계의 사실 — 무엇을(영역·요소·떠날 때 보던 곳·깊이)·어떻게·얼마 동안·근거·파기 (051 §3.3·060 §3.3)."""
     html, _ = _read(PUBLIC / "privacy.html")
-    body = _without_diff(html)
+    body = html
     for label, words in SCREEN_USE_FACTS.items():
         text = _text(_section(body, label))
         for word in words:
@@ -1414,15 +1324,8 @@ def test_body_sections_state_the_screen_use_facts() -> None:
     assert s2.index("<h3>화면 이용 통계 — KimpTrack 서버</h3>") < s2.index(
         "<h3>화면 이용 기록 — Microsoft Clarity</h3>"
     )
-    # 옛 이름은 대조표 밖에서는 12절 이력의 v3 항목(그 판이 쓴 이름)에만 남는다
-    visible = _text(_body(body))
-    assert visible.count(OLD_NAME) == 1
-    (v3,) = [
-        _text(item)
-        for item in _history(html)
-        if _text(item).startswith(f"{_korean(PRIVACY_V3_EFFECTIVE)} — ")
-    ]
-    assert OLD_NAME in v3
+    # 옛 이름은 남지 않는다(변경 이력을 싣지 않는다 — 2026-10-17)
+    assert OLD_NAME not in _text(_body(body))
     # 7절 저장 장치 목록 — 영역 통계는 쿠키·브라우저 저장소를 쓰지 않는다 (051 §3.3-8). 075 가 GA 쿠키 둘을 더했다
     devices = re.search(r"<ul>(.*?)</ul>", _section(body, "s7"), flags=re.S).group(1)
     assert len(re.findall(r"<li>", devices)) == 7 and "영역" not in devices
@@ -1490,7 +1393,7 @@ def test_body_sections_state_the_replay_facts() -> None:
     `PRIVACY_V7_EFFECTIVE`(받기 게이트)는 같은 날이다. 075(v9)·079(v10)는 서버 게이트가 없어 상수를 더하지 않는다 — 바로 앞 판
     (v9 — 사본 `privacy-20261017.html`)은 지금 판과 같은 날 먼저 게시한 판이다."""
     html, _ = _read(PUBLIC / "privacy.html")
-    body = _without_diff(html)
+    body = html
     for label, words in REPLAY_FACTS.items():
         text = _text(_section(body, label))
         for word in words:
@@ -1504,71 +1407,6 @@ def test_body_sections_state_the_replay_facts() -> None:
     y, m, d, nth = re.fullmatch(ARCHIVE_NAME, PREVIOUS).groups()
     assert PREVIOUS == "privacy-20261017.html" and nth is None
     assert PRIVACY_V7_EFFECTIVE == PRIVACY_V8_EFFECTIVE < f"{y}-{m}-{d}" == EFFECTIVE
-
-
-def test_diff_table_rows_match_both_versions() -> None:
-    """대조표의 '이전 판' 은 바로 앞 판 사본 본문에, '이 판' 은 지금 판 본문(대조표 밖)에 그대로 있고, 지금 판의 소개 문단·
-    한눈에 보기·1~11절에서 행마다 '이 판' 을 '이전 판' 으로 되돌리면(새로 넣은 문장은 빼면) 사본과 같다 — 바뀐 문장을 빠짐없이
-    싣는다 (037 §3.2-6·051 §3.3-10). 동의 관리 행은 사본에 상자 문장이 없어 얼려 둔 앞 판 문장과 맞추고 지금 판 동의 절에서 찾는다."""
-    html, _ = _read(PUBLIC / "privacy.html")
-    archived, _ = _read(PUBLIC / PREVIOUS)
-    rows = _diff_rows(html)
-    assert rows and all(len(row) == 4 for row in rows), rows
-    now = _text(_without_diff(_body(html)))
-    consent = _text(_section(_without_diff(html), "consent-title"))
-    before = _text(_body(archived))
-    restored = _body_sections(html)
-    expected = _body_sections(archived)
-    for section, old, new, why in rows:
-        assert why, section
-        added, removed = old == ADDED, new == REMOVED
-        assert not (added and removed), section
-        # 지운 문장(060 §3.3-5)은 지금 판 본문에 없고 사본에만 있다
-        assert (removed and old not in now) or (new and new in now), (section, new)
-        assert added or old in before or old in PREVIOUS_CONSENT_TEXT, (section, old)
-        if section.startswith("동의 관리"):
-            assert removed or new in consent, (section, new)
-            continue  # 동의 절은 사본과 모양이 달라 되돌려 맞대는 범위 밖이다
-        if section.startswith("12절"):
-            continue  # 12절은 시행 문장·이력도 판마다 달라 되돌려 맞대는 범위 밖이다 — 전후 글자만 본다
-        if removed:
-            assert old in expected, (section, old)
-            expected = expected.replace(old, "")  # 지운 문장은 사본 쪽에서 빼고 맞댄다
-            continue
-        assert new in restored, (section, new)
-        restored = restored.replace(new, "" if added else old)
-    assert " ".join(restored.split()) == " ".join(expected.split())
-    # 079 §3.4 — 바뀐 문장마다 한 행: 동의 상자 셋(저장 규칙·국외 이전 칸 거부 방법·상자 아래 저장값)과 7절 저장 장치 목록의
-    # localStorage 줄. 지운 문장·새로 넣은 문장은 없다
-    names = {row[0]: row for row in rows}
-    assert list(names) == [
-        "동의 관리 — 저장 규칙",
-        "동의 관리 — 국외 이전 거부 방법",
-        "동의 관리 — 저장값",
-        "7절 localStorage kt.analytics",
-    ]
-    assert names["동의 관리 — 저장 규칙"][1:3] == [
-        PREVIOUS_CONSENT_TEXT[0],
-        SHARED_SENTENCES[1],
-    ]
-    assert names["동의 관리 — 국외 이전 거부 방법"][1:3] == list(TRANSFER_REFUSAL)
-    assert names["동의 관리 — 저장값"][1:3] == [PREVIOUS_CONSENT_TEXT[1], STORAGE_RULE]
-    assert names["7절 localStorage kt.analytics"][1:3] == list(LOCAL_STORAGE_LINE)
-    assert not [row for row in rows if REMOVED in row[1:3] or ADDED in row[1:3]]
-    for sentence in PREVIOUS_CONSENT_TEXT:
-        assert [row for row in rows if row[1] == sentence], sentence
-    # 받는 자·항목·보유 기간은 그대로다 — 바뀐 문장은 받는 곳·받는 것·두는 기간을 새로 말하거나 빼지 않는다(079 §3.4)
-    for _, old, new, _ in rows:
-        for word in (
-            "Microsoft",
-            "보유 기간",
-            "항목",
-            "IP 주소",
-            "입력",
-            "개월",
-            "90일",
-        ):
-            assert (word in new) == (word in old), (word, new)
 
 
 # 075 §3.5 — 본문 절마다 방문 통계(Google Analytics)의 사실 — 받는 것·받지 않는 것·받는 곳·쓰임·끈 설정·2개월·쿠키·근거·지우는 길
@@ -1627,7 +1465,7 @@ def _periods(page: str) -> dict[str, str]:
 
 def _s2_block(page: str, title: str) -> str:
     """2절 소절 하나(소제목부터 다음 소제목 앞까지)의 태그 뗀 글자 — 대조표 밖."""
-    s2 = _section(_without_diff(page), "s2")
+    s2 = _section(page, "s2")
     start = s2.index(f"<h3>{title}</h3>")
     return _text(s2[start : s2.index("<h3>", start + 4)])
 
@@ -1637,7 +1475,7 @@ def test_body_sections_state_the_google_analytics_facts() -> None:
     행 바로 뒤(2개월). v9 가 바꾼 글자는 그 판의 사본(`privacy-20261017.html`)이 얼려 두었다. 화면 이동 기록의 지난 보유 기간
     꼴('14일')은 12절 이력 밖에 없다(078)."""
     html, _ = _read(PUBLIC / "privacy.html")
-    body = _without_diff(html)
+    body = html
     for label, words in GA_FACTS.items():
         text = _text(_section(body, label))
         for word in words:
@@ -1649,69 +1487,11 @@ def test_body_sections_state_the_google_analytics_facts() -> None:
         < s2.index("<h3>관리자 접속 기록(운영자만)</h3>")
     )
     visible = _text(_body(body))
-    history = " ".join(_text(item) for item in _history(html))
-    rest = visible.replace(history, "")
     for old in REPLAY_OLD_PERIODS:
-        assert old not in rest, old
+        assert old not in visible, old
     periods = list(_periods(html).items())
     ga = ("방문 통계(Google Analytics — 동의한 경우만)", "2개월")
     assert periods[periods.index(ga) - 1][0] == "화면 녹화(Clarity — 동의한 경우만)"
-
-
-def test_v10_changes_only_the_consent_buttons_and_storage_rule() -> None:
-    """079 §3.4 — v10 은 동의 창 버튼·저장 규칙의 글만 바꾼다. 받는 자·항목·목적·보유 기간(동의 상자 세 칸의 알릴 사항·칸 끝 줄,
-    2절 보유 기간 표·소절)은 바로 앞 판(v9 사본)과 같은 글자이고, 국외 이전 칸의 거부 방법 첫 문장만 [모두 거부]가 빠졌다. 머리
-    질문은 v9 가 알린 그대로다. 본문(대조표 밖)에는 일부만 체크한 저장을 거부로 저장한다는 문장과 칸의 [모두 거부] 문장이 없다."""
-    html, _ = _read(PUBLIC / "privacy.html")
-    archived, _ = _read(PUBLIC / PREVIOUS)
-    assert _periods(html) == _periods(archived)
-    for title in (
-        "화면 이용 통계 — KimpTrack 서버",
-        "화면 이동 기록 — KimpTrack 서버",
-        "화면 이용 기록 — Microsoft Clarity",
-        "방문 통계 — Google Analytics",
-    ):
-        assert _s2_block(html, title) == _s2_block(archived, title), title
-    cells = _consent_box(html)[1]
-    new_notes = [
-        _notes(re.search(r"<dl[^>]*>(.*?)</dl>", c, re.S).group(1)) for c in cells
-    ]
-    old_section = _section(archived, "consent-title")
-    old_notes = [
-        _notes(dl) for dl in re.findall(r"<dl[^>]*>(.*?)</dl>", old_section, re.S)
-    ]
-    assert [re.search(r"<span>(.*?)</span>", c).group(1) for c in cells] == (
-        re.findall(r"<h3>(.*?)</h3>", old_section)
-    )
-    old_refusal, new_refusal = TRANSFER_REFUSAL
-    refusal = old_notes[2]["거부 방법·절차·효과"]
-    assert refusal.startswith(old_refusal)
-    old_notes[2]["거부 방법·절차·효과"] = refusal.replace(old_refusal, new_refusal)
-    assert new_notes == old_notes
-    assert _cell_notes(cells[0]) == _cell_notes(old_section)
-    # 머리 질문 — v9 가 대조표에 실은 '이 판' 그대로
-    v9 = {row[0]: row for row in _diff_rows(archived)}
-    assert v9["동의 관리 — 질문"][2] == SHARED_SENTENCES[0]
-    visible = _text(_without_diff(_body(html)))
-    for gone in (
-        "거부로 저장",
-        old_refusal,
-        "하나라도 빠진 채 저장하거나 [모두 거부]",
-        LOCAL_STORAGE_LINE[0],
-    ):
-        assert gone not in visible, gone
-
-
-def test_section_12_rule_drops_the_seven_day_promise() -> None:
-    """060 §3.3-8 — 12절 규칙은 '시행일과 전후 대조를 알리고 이전 판을 남긴다·동의 처리가 늘면 다시 동의' 이고, 7일 전 게시
-    약속과 그 단서는 본문(대조표 밖) 어디에도 없다 — 그 약속을 지운 v4 의 대조표(사본 `privacy-20261009-2.html`)에만 남는다."""
-    html, _ = _read(PUBLIC / "privacy.html")
-    visible = _text(_without_diff(_body(html)))
-    assert CHANGE_RULE in _text(_section(_without_diff(html), "s12"))
-    for gone in ("7일 전", "7×24", "늘거나 새로 생기면", "새로 동의를 받아서만"):
-        assert gone not in visible, gone
-    v4, _ = _read(PUBLIC / "privacy-20261009-2.html")
-    assert "7일 전까지" in _text(re.search(DIFF_TABLE, v4, flags=re.S).group(0))
 
 
 # --- 링크·sitemap (§3.2) ------------------------------------------------------------

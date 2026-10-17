@@ -30,10 +30,10 @@ STATIC_AREAS = {
     "landing": ["top", "hero", "analyze", "events", "kimp", "method", "faq", "foot"],
     "privacy": [
         "top",
-        "changes",
-        "glance",
         "consent",
-        *(f"s{n}" for n in range(1, 13)),
+        "glance",
+        # s6(국외 이전)은 5절 안의 접힌 묶음이 되어 영역이 아니다 — id·이름은 예전 기록과 맞게 그대로
+        *(f"s{n}" for n in range(1, 13) if n != 6),
         "foot",
     ],
     "kimp-chart": ["top", "what", "read", "coins", "faq", "foot"],
