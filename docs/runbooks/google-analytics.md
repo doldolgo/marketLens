@@ -21,6 +21,7 @@
 ## 3. 켠 뒤 확인
 1. 새 크롬 프로필로 `https://kimptrack.com` — 동의 창이 뜨고, 개발자 도구 네트워크에 `googletagmanager.com`·`google-analytics.com` 요청이 0건이다.
 2. 세 칸 모두 체크하고 [선택한 대로 저장] — `www.googletagmanager.com/gtag/js?id=G-…` 와 `…google-analytics.com/g/collect` 요청이 생기고, 쿠키 `_ga`·`_ga_<기호>`(도메인 `.kimptrack.com`, 만료 약 2개월 뒤)가 생긴다. `g/collect` 요청의 `dl`(페이지 주소)에 `?`·`#` 뒤가 없고, `gcs` 값이 `G101`(광고 거부·분석 허용) 꼴이다.
+   - 이어서 `https://kimptrack.com/?q=test` 로 들어가면 Google 요청이 0건이다(검색어 꼴 쿼리가 있는 주소에서는 `clarity.js` 가 GA 를 부르지 않는다 — Clarity 요청은 있다).
 3. GA → 보고서 → 실시간에 1명이 보인다.
 4. `/privacy#consent` 에서 [동의 철회] → `_ga` 쿠키가 지워지고, 다음 페이지부터 Google 요청이 0건이다.
 5. GPC 를 보내는 브라우저(Brave)·[모두 거부]·`www.kimptrack.com` 에서는 Google 요청이 0건이다.

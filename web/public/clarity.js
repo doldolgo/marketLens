@@ -10,6 +10,10 @@
   const GA_ID = "G-RJ732XDRKM"
   // GA 쿠키(_ga·_ga_<기호>)를 두는 기간(초) — 마지막 방문부터 2개월(60일). GA 속성의 데이터 보관 2개월과 같게(075 §3.4)
   const GA_COOKIE_SECONDS = 60 * 24 * 60 * 60
+  // GA4 향상된 측정의 '사이트 검색' 이 검색어로 읽는 쿼리 키(GA 기본값). GA 는 page_location 을 깎아도 실제 주소에서 이 키를 읽어
+  // view_search_results 로 보낸다 — 이 사이트는 이 키들을 쓰지 않으므로, 주소에 하나라도 있으면 그 문서에서는 GA 를 부르지 않는다.
+  // GA 화면의 사이트 검색 설정과 상관없이 검색어가 Google 로 가지 않게(075 §3.2)
+  const GA_SEARCH_KEYS = ["q", "s", "search", "query", "keyword"]
   // 켤 페이지 — 랜딩(/)과 대시보드(/app/). 대시보드만 끄려면 "app" 을 뺀다
   const PAGES = ["landing", "app"]
   // 지금 안내 판 — privacy.html 동의 스크립트의 VERSION 과 같다(테스트가 본다). 받는 자·항목·목적·보유 기간이 바뀌면 그 PR 이
@@ -201,6 +205,8 @@
   const load = (late) => {
     if (loaded) return
     loaded = true
+    const query = new URLSearchParams(location.search)
+    const ga = !!GA_ID && !GA_SEARCH_KEYS.some((key) => query.has(key))
     if (CLARITY_ID) {
       window.clarity =
         window.clarity ||
@@ -209,7 +215,7 @@
         }
       window.clarity("consentv2", { ad_Storage: "denied", analytics_Storage: "granted" })
     }
-    if (GA_ID) {
+    if (ga) {
       window.dataLayer = window.dataLayer || []
       window.gtag = function () {
         window.dataLayer.push(arguments)
@@ -223,7 +229,7 @@
     }
     const inject = () => {
       if (CLARITY_ID) addTag("https://www.clarity.ms/tag/" + CLARITY_ID)
-      if (GA_ID) {
+      if (ga) {
         window.gtag("js", new Date())
         window.gtag("config", GA_ID, {
           page_location: location.origin + location.pathname,

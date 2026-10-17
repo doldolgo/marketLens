@@ -46,7 +46,7 @@ MUST = (
     # 075 — GA: 대기열·동의 신호 넷·끈 신호 둘·검색어 뺀 주소·쿠키 기간·쿠키 이름
     "GA_ID", "dataLayer", "gtag", "ad_storage", "ad_user_data", "ad_personalization", "analytics_storage",
     "allow_google_signals: false", "allow_ad_personalization_signals: false", "page_location", "cookie_expires",
-    "_ga", "_ga_", GA_TAG,
+    "_ga", "_ga_", GA_TAG, "GA_SEARCH_KEYS",
 )  # fmt: skip
 MUST_NOT = (
     "setInterval", "setTimeout", "requestAnimationFrame", "Observer", "resolvedOptions", "Europe/",
@@ -910,3 +910,30 @@ def test_documents_that_do_not_load_forget_ga_cookies() -> None:
             ), name
             assert sum(ln.endswith("; domain=kimptrack.com") for ln in lines) == 1, name
         assert not [ln for ln in got["cookies"] if ln.startswith(("_gid=", "x="))]
+
+
+def test_ga_stays_off_on_addresses_with_search_like_query_keys() -> None:
+    """075 §3.2 — GA 사이트 검색이 검색어로 읽는 쿼리 키(q·s·search·query·keyword)가 주소에 있으면 동의했어도 그 문서에서는 GA 를
+    부르지 않는다(동의 창 저장으로 켤 때도). Clarity 는 그대로 돈다. 이름이 비슷한 이 사이트의 키(s.io·tab·sym·utm_*)는 막지 않는다."""
+    blocked = [
+        "?q=btc",
+        "?s=1",
+        "?search=x",
+        "?query=x",
+        "?keyword=x",
+        "?tab=history&q=eth",
+    ]
+    allowed = ["?s.io=1&tab=history", "?tab=history&sym=BTC", "?utm_source=x", ""]
+    cases = [{"ls": ON, "search": q, "steps": ["ready"]} for q in blocked + allowed]
+    cases.append({"search": "?q=btc", "steps": ["ready", *ALL, "click:kt-c-save"]})
+    got = _run(cases, GA_JS)
+    for q, result in zip(
+        blocked + ["?q=btc (저장)"], got[: len(blocked)] + got[-1:], strict=True
+    ):
+        last = result["last"]
+        assert last["layer"] is None, q
+        assert last["tags"] == TAG_ID and last["queue"] == [CONSENT], q
+    for q, result in zip(allowed, got[len(blocked) : -1], strict=True):
+        last = result["last"]
+        assert last["tags"] == [*TAG_ID, GA_TAG_ID], q
+        assert last["layer"][0] == GA_CONSENT, q
