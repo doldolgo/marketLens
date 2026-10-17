@@ -80,11 +80,9 @@ const lineItems = (rows, name) => rows2(rows).map(([key, v]) => ({ key, name: na
 const visitorsOf = (a) => okPart(a?.visitors);
 const geoOf = (a) => okPart(a?.geo);
 
-// 망 종류 — 국내 통신사 행이 없는 창의 telecom 은 국내·해외를 합친 값일 수 있다(039 — KR 이 (기타)로 묶임)
+// 망 종류 — 서버가 묶지 않아(039, 2026-10-17) telecom 은 늘 해외 통신사, telecom_kr 은 국내 통신사다
 function networks(g) {
-  const rows = rows3(g.networks);
-  const hasKr = rows.some(([key]) => key === 'telecom_kr');
-  return rows.map(([key, c, s]) => ({ key, name: key === 'telecom' && !hasKr ? '통신사' : netName(key), value: s, c, mark: netMark(key) }));
+  return rows3(g.networks).map(([key, c, s]) => ({ key, name: netName(key), value: s, c, mark: netMark(key) }));
 }
 const DEPTH = [['1', '1쪽'], ['2', '2쪽'], ['3-5', '3~5쪽'], ['6+', '6쪽 이상']];
 

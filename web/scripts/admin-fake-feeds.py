@@ -267,7 +267,7 @@ def access(window: str) -> dict:
                 classes={k: {"requests": int(req * a), "pages": int(totals["pages"] * b)} for k, (a, b) in classes.items()},
                 visitors=_visitors(start, now, s != "missing"),
                 geo={"state": "ok", "code": None, "month": time.strftime("%Y-%m"), "loadedAt": (now - 3600) * 1000, "sinceTs": start,
-                     "countries": [[txt("KR"), 30, 90], ["US", 4, 31], ["JP", 2, 9], ["SG", 0, 12], ["(기타)", 1, 14]],
+                     "countries": [[txt("KR"), 30, 90], ["US", 4, 31], ["SG", 0, 12], ["JP", 2, 9], ["DE", 0, 3], ["VN", 1, 2], ["BR", 0, 1], ["(기타)", 0, 2]],
                      "networks": [["telecom_kr", 28, 70], ["cloud", 2, 41], ["telecom", 5, 22], ["unknown", 0, 3]], "ipv6": 2},
                 paths=top(("/", "/app/", "/kimp-chart", "/privacy", "/kimp-history")), tabs=top(("spread", "history", "gap", "flow")),
                 referrers=top(("https://www.google.com", "https://search.naver.com", "https://t.co")), utmSources=top(("kakao",)),
