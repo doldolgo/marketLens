@@ -8,6 +8,9 @@
 v5(067)는 서버 접속 기록에 관리자 화면의 IP 대역별 보기(2절 (라))를 더한다 — 동의 대상이 아니라 안내 판은 그대로다.
 v7(076)은 화면 이동 기록을 더했고, v8(078 — 같은 날 두 번째 판)은 그 기록의 보유 기간(서비스를 끝낼 때까지)과 두는 곳
 (Redis + Amazon S3)만 바꿔 안내 판을 올린다(`PRIVACY_V8_EFFECTIVE`). 받는 것·Clarity·화면 이용 통계의 글은 그대로다.
+v9(079)는 동의 창의 버튼([모두 거부] → [하루 동안 안 보기]·[모두 동의])과 저장 규칙(일부만 체크한 저장은 `later` — 24시간 뒤
+다시 묻기, 판 있는 `denied` 만 다시 묻지 않기)을 바꿔 동의 상자의 글이 달라져 안내 판을 올린다(`PRIVACY_V9_EFFECTIVE` — 서버
+게이트 없음). 받는 자·항목·목적·보유 기간은 그대로다.
 실제로 브라우저에서 CSP·버튼을 보는 검증은 스펙 §5 의 로컬 Docker·브라우저 명령이다.
 """
 
@@ -29,6 +32,7 @@ from app.core.config import (
     PRIVACY_V4_EFFECTIVE,
     PRIVACY_V7_EFFECTIVE,
     PRIVACY_V8_EFFECTIVE,
+    PRIVACY_V9_EFFECTIVE,
 )
 from tests.test_deploy import (
     PUBLIC_API,
@@ -41,7 +45,7 @@ from tests.test_deploy import (
 
 PUBLIC = ROOT / "web/public"
 CANONICAL = "https://kimptrack.com/privacy"
-EFFECTIVE = "2026-10-16"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1·067 §3.4)
+EFFECTIVE = "2026-10-17"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1·067 §3.4)
 # 052 — 같은 출처 스크립트 /attention.js 하나('self')와 그 비콘(connect-src 'self'). 세 정적 페이지가 같은 문자열이다.
 # 053 — 틀에는 자기 출처와 관리자 화면(덮어 보기)만
 CSP = (
@@ -99,6 +103,9 @@ MUST_SAY = (
     "철회하면 그 탭이 한 번 새로고침되어 분석을 멈추고, 동의하면 그 탭에서도 분석을 시작합니다",
     "kt.analytics.v",  # §3.3 — 동의한 안내의 판
     "나이를 확인하지 않",  # §3.4-2 — 만 14세 미만(사람 확인 §7)
+    # 079 §3.1 — 하루 동안 묻지 않음(later)과 다시 물을 시각
+    "later",
+    "kt.analytics.until",
 )
 # 동의 방식(사람 결정 2026-10-01)과 맞지 않는 문장 — 페이지에 있으면 거짓이다
 # 파기는 날수 기한을 약속하지 않는다(§3.5 — '90일 뒤 지웁니다' 같은 단정 없음), Microsoft 의 자기 목적 이용은
@@ -115,25 +122,31 @@ MUST_NOT_SAY = (
 )
 # §3.3 — 033 의 띠와 같은 문장(머리·셋 모두 규칙·나이). 동의 상자 안 세 칸보다 앞에 있다. 051 §3.3-4 — 머리 질문에
 # KimpTrack 서버의 통계(모든 페이지), 셋 모두 규칙에 'Clarity와 KimpTrack 영역 통계가 돕니다'. 060 §3.3-4 — 그 통계를 화면의
-# 영역과 요소·마우스를 올려 둔 시간·떠날 때 보던 곳으로. 076 — 화면 이동 기록, 078 — 그 기록을 서비스를 끝낼 때까지 둔다
+# 영역과 요소·마우스를 올려 둔 시간·떠날 때 보던 곳으로. 076 — 화면 이동 기록, 078 — 그 기록을 서비스를 끝낼 때까지 둔다.
+# 079 — 셋 모두 규칙: 동의 창에 [모두 동의]가 생겨 '저장한', 하나라도 빠지면 거부가 아니라 하루 동안 묻지 않다가 다시 묻는다
 SHARED_SENTENCES = (
     "랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? "
     "Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 또 KimpTrack 서버가 모든 페이지(랜딩·대시보드·처리방침·검색어 페이지)에서 "
     "화면의 영역과 요소(단추·링크 같은 것)별로 보인 시간·클릭 수·마우스를 올려 둔 시간과 떠날 때 보던 곳을 하루 합계로 모으고, "
     "방문마다 마우스·손가락 위치와 누른 곳·스크롤을 시각·IP 주소와 함께 모아 서비스를 끝낼 때까지 두고 운영자가 그 방문을 다시 보거나 "
     "지금 보는 방문을 따라 보는 데 써도 될까요? 동의하지 않아도 모든 기능을 그대로 씁니다.",
-    "세 가지에 모두 동의하고 [선택한 대로 저장]을 누른 경우에만 Clarity와 KimpTrack 영역 통계·화면 이동 기록이 돕니다 — Clarity는 셋이 다 "
-    "있어야 돌아가므로 하나라도 빠지면 거부로 저장합니다.",
+    "세 가지에 모두 동의하고 저장한 경우에만 Clarity와 KimpTrack 영역 통계·화면 이동 기록이 돕니다 — Clarity는 셋이 다 "
+    "있어야 돌아가므로 하나라도 빠지면 분석하지 않고, 하루 동안 묻지 않다가 다시 묻습니다.",
     "만 14세 미만은 동의하지 마세요.",
 )
 # 바로 앞 판의 동의 상자에서 바뀐 문장 — 사본은 동의 절에 세 칸의 알릴 사항만 남겨(037 §3.3) 이 문장들이 없어 대조표의
-# '동의 관리' 행 '이전 판' 칸을 여기와 맞춘다(얼려 둔 글자). 078(v8) — 질문의 화면 이동 기록 '14일 동안' 만 바뀌었다(저장 규칙은 그대로)
+# '동의 관리' 행 '이전 판' 칸을 여기와 맞춘다(얼려 둔 글자). 079(v9) — 셋 모두 규칙과 상자 아래 저장값 문장(국외 이전 칸의 거부 방법은
+# 사본에 남아 사본과 맞춘다)
 PREVIOUS_CONSENT_TEXT: tuple[str, ...] = (
-    "랜딩과 대시보드의 화면 이용 기록(클릭·스크롤 등)을 Microsoft Clarity(미국)로 보내 서비스 개선에 써도 될까요? "
-    "Microsoft는 이 기록을 광고 등 자기 목적에도 씁니다. 또 KimpTrack 서버가 모든 페이지(랜딩·대시보드·처리방침·검색어 페이지)에서 "
-    "화면의 영역과 요소(단추·링크 같은 것)별로 보인 시간·클릭 수·마우스를 올려 둔 시간과 떠날 때 보던 곳을 하루 합계로 모으고, "
-    "방문마다 마우스·손가락 위치와 누른 곳·스크롤을 시각·IP 주소와 함께 14일 동안 모아 운영자가 그 방문을 다시 보거나 지금 보는 방문을 "
-    "따라 보는 데 써도 될까요? 동의하지 않아도 모든 기능을 그대로 씁니다.",
+    "세 가지에 모두 동의하고 [선택한 대로 저장]을 누른 경우에만 Clarity와 KimpTrack 영역 통계·화면 이동 기록이 돕니다 — Clarity는 셋이 다 "
+    "있어야 돌아가므로 하나라도 빠지면 거부로 저장합니다.",
+    "하나라도 빠진 채 저장하거나 [모두 거부]·[동의 철회]를 누르면 denied를 저장하고(저장하지 못하면 값을 지워 정하지 않은 상태로 "
+    "돌립니다) 판을 지우며, 이 사이트의 Clarity 쿠키 _clck·_clsk를 지웁니다.",
+)
+# 079 §3.4 — 국외 이전 칸 '거부 방법·절차·효과' 의 첫 문장(동의 창에서 [모두 거부]가 빠져 버튼 이름 없이)
+TRANSFER_REFUSAL = (
+    "이 칸에 체크하지 않거나 [모두 거부]를 누르면 이전되지 않습니다.",
+    "이 칸에 체크하지 않으면 이전되지 않습니다.",
 )
 # 051 §3.3-4·060 §3.3-4 — '수집·이용' 칸 끝 한 줄(화면 이용 통계는 Microsoft 에 가지 않고 국내에) — 033 의 동의 창에도 같은 글
 COLLECT_NOTE = "화면 이용 통계와 화면 이동 기록은 Microsoft에 가지 않고 국내(AWS 서울 리전)의 KimpTrack 서버에 둡니다."
@@ -154,8 +167,9 @@ MICROSOFT_KEEPS = (
     "Microsoft가 자기 목적에 쓰는 정보는 이것으로 지워지지 않으며 Microsoft에 직접 요청할 수 있습니다"
     f"({INQUIRY})"
 )
-# §3.3 — 상태 줄의 다섯 글자(스크립트가 그린다)
+# §3.3 — 상태 줄의 다섯 글자(스크립트가 그린다). 079 §3.3 — 아직 안 지난 later 는 '하루 동안 묻지 않음 — <다시 물을 날짜·시각 KST>'
 STATES = ("정하지 않음", "동의함", "거부함", "GPC로 거부", "저장할 수 없음")
+LATER_PREFIX = "하루 동안 묻지 않음 — "
 # §3.3 — 동의 세 칸(법 제22조 제1항 — 나눠 각각 받는다): 체크 상자 id, 체크 글자, 그 동의의 알릴 사항
 # (수집·이용 제15조 제2항 · 제3자 제공 제17조 제2항 · 국외 이전 제28조의8 제2항 — 033 의 띠와 같은 글자),
 # 눈에 띄게 적는 중요한 내용(제22조 제2항·시행령 제17조 제3항 — 보유 기간, 받는 자와 그 목적·보유 기간)
@@ -218,16 +232,27 @@ BEHAVIOR_TERMS = {
     "거부 방법",
 }
 # §3.3 — 동의 관리 스크립트를 node 로 돌리는 가짜 브라우저. 표준 입력의 [스크립트, 경우들] 을 받아 경우마다 새로 돌리고,
-# 칸 체크·버튼 클릭·다른 탭의 storage 이벤트(키 하나·저장소 비우기) 뒤의 저장값·판·쿠키·상태 글자·보이는·체크된·막힌 요소를 JSON 으로 낸다.
-# 라이브러리 없음.
-HARNESS = r"""
+# 칸 체크·버튼 클릭·다른 탭의 storage 이벤트(키 하나·저장소 비우기) 뒤의 저장값·판·다시 물을 시각·쿠키·상태 글자·보이는·체크된·막힌
+# 요소를 JSON 으로 낸다. 시계는 CLOCK 에 멈춰 있다(079 — later 의 24시간과 상태 줄의 KST 시각). 라이브러리 없음.
+CLOCK = 1_800_000_000_000  # 2027-01-15 08:00 UTC = 17:00 KST
+LATER_MS = 86_400_000
+LATER = str(CLOCK + LATER_MS)
+LATER_STATE = "하루 동안 묻지 않음 — 1월 16일 17:00 뒤 다시 물음"
+HARNESS = (
+    r"""
 const [script, cases] = JSON.parse(require('fs').readFileSync(0, 'utf8'))
 const KEY = 'kt.analytics'
 const VKEY = 'kt.analytics.v'
+const UKEY = 'kt.analytics.until'
+const clock = """
+    + str(CLOCK)
+    + r"""
+class FakeDate extends Date { static now() { return clock } }
 const out = cases.map((c) => {
   const data = new Map()
   if (c.stored !== undefined) data.set(KEY, c.stored)
   if (c.v !== undefined) data.set(VKEY, c.v)
+  if (c.until !== undefined) data.set(UKEY, c.until)
   const fail = new Set(c.fail || [])
   const localStorage = {
     getItem: (k) => { if (fail.has('get')) throw new Error('get'); return data.has(k) ? data.get(k) : null },
@@ -256,8 +281,8 @@ const out = cases.map((c) => {
   const listeners = {}
   const window = { localStorage, addEventListener: (type, fn) => { listeners[type] = fn } }
   const navigator = c.gpc ? { globalPrivacyControl: true } : {}
-  new Function('window', 'document', 'navigator', 'location', script)(
-    window, document, navigator, { hostname: 'kimptrack.com' })
+  new Function('window', 'document', 'navigator', 'location', 'Date', script)(
+    window, document, navigator, { hostname: 'kimptrack.com' }, FakeDate)
   for (const step of c.steps || []) {
     const at = step.indexOf(':')
     const kind = step.slice(0, at), arg = step.slice(at + 1)
@@ -270,12 +295,14 @@ const out = cases.map((c) => {
   const ids = (pick) => Object.keys(els).filter((id) => pick(els[id])).sort()
   return {
     stored: data.has(KEY) ? data.get(KEY) : null, v: data.has(VKEY) ? data.get(VKEY) : null,
+    until: data.has(UKEY) ? data.get(UKEY) : null,
     cookies: [...jar].sort(), writes, state: el('an-value').textContent,
     shown: ids((e) => !e.hidden), checked: ids((e) => e.checked), disabled: ids((e) => e.disabled),
   }
 })
 process.stdout.write(JSON.stringify(out))
 """
+)
 
 
 def _notice_version() -> str:
@@ -297,6 +324,8 @@ NOTICE_DIGESTS = {
     "2026-10-16": "7f7b822e5c299c40db5516b773d8a3007a9a39b9978dde07181653cb8f43e2a2",  # 076 — 화면 이동 기록(14일·IP)
     # 078 — 같은 날 두 번째 판: 화면 이동 기록을 서비스를 끝낼 때까지(수집·이용 칸 보유 기간)
     "2026-10-16-2": "b83a3bc62e98cc2fa0163589d24eb9c3801d1d7c912e51f129120625bc1a9a7a",
+    # 079 — 국외 이전 칸 거부 방법에서 [모두 거부]를 뺌(동의 창에 그 버튼이 없다 — 받는 자·항목·목적·보유 기간은 그대로)
+    "2026-10-17": "c43e7ffc73baa3b1b26cefa6f834f15bc21fa69fb4152974653f7f030fd06657",
 }
 # 바로 앞 판 — 이 판의 동의로는 켜지 않고 다시 묻는다 (060 §3.6 — 2026-10-09 의 granted 는 '정하지 않음'). 판 값의 글자 순이
 # 아니라 NOTICE_DIGESTS 에 더한 차례로 고른다
@@ -310,56 +339,71 @@ STATUS_IDS = {"an-state", "an-actions", "an-gpc", "an-nostore", "an-stuck"}
 UNDECIDED = {"an-state", "an-actions", "an-deny"}
 AGREED = UNDECIDED | {"an-withdraw"}
 ALL = [f"check:{box}" for box in BOXES]
-# (이름, 경우, 뒤의 저장값, 뒤의 판, 상태 글자, 보이는 상태 요소, 쿠키를 지웠나) — 경우: stored·v 처음 값(없으면 키 없음),
-# gpc, fail(get·set·remove 예외, set:<키> 는 그 키만), steps(check:·uncheck:<칸 id> · click:<버튼 id> · other:<키>=<다른 탭이 쓴 값>
-# · clear: 다른 탭이 저장소를 비움)
+# (이름, 경우, 뒤의 저장값, 뒤의 판, 뒤의 다시 물을 시각, 상태 글자, 보이는 상태 요소, 쿠키를 지웠나) — 경우: stored·v·until 처음 값
+# (없으면 키 없음), gpc, fail(get·set·remove 예외, set:<키> 는 그 키만), steps(check:·uncheck:<칸 id> · click:<버튼 id>
+# · other:<키>=<다른 탭이 쓴 값> · clear: 다른 탭이 저장소를 비움). 079 — 하나라도 빠진 저장은 later(지금 + 24시간)·판 지움,
+# [모두 거부]·[동의 철회]는 denied + 지금 판, 판 없는 예전 denied·지났거나 24시간보다 먼 later 는 정하지 않음
 # fmt: off
 CONSENT_CASES = [
-    ("값 없음", {}, None, None, "정하지 않음", UNDECIDED, False),
-    ("지금 판의 동의", {"stored": "granted", "v": NOTICE}, "granted", NOTICE, "동의함", AGREED, False),
-    ("예전 판의 동의 — 다시 묻는다", {"stored": "granted", "v": OLD}, "granted", OLD, "정하지 않음", UNDECIDED, False),
-    ("판 없는 동의", {"stored": "granted"}, "granted", None, "정하지 않음", UNDECIDED, False),
-    ("거부", {"stored": "denied"}, "denied", None, "거부함", UNDECIDED, False),
-    ("그 밖의 값", {"stored": "off"}, "off", None, "정하지 않음", UNDECIDED, False),
-    ("GPC 가 동의보다 앞선다", {"stored": "granted", "v": NOTICE, "gpc": True}, "granted", NOTICE, "GPC로 거부", {"an-state", "an-gpc"}, False),
-    ("읽기 예외", {"fail": ["get"]}, None, None, "저장할 수 없음", {"an-state", "an-nostore"}, False),
-    ("세 칸 모두 체크하고 저장", {"steps": [*ALL, "click:an-save"]}, "granted", NOTICE, "동의함", AGREED, False),
-    ("한 칸 빠지면 거부", {"steps": [*ALL[:2], "click:an-save"]}, "denied", None, "거부함", UNDECIDED, True),
-    ("칸 없이 저장", {"steps": ["click:an-save"]}, "denied", None, "거부함", UNDECIDED, True),
-    ("[모두 거부]", {"steps": [*ALL, "click:an-deny"]}, "denied", None, "거부함", UNDECIDED, True),
-    ("거부 뒤 세 칸 동의", {"stored": "denied", "steps": [*ALL, "click:an-save"]}, "granted", NOTICE, "동의함", AGREED, False),
-    ("예전 판 동의를 지금 판으로", {"stored": "granted", "v": OLD, "steps": [*ALL, "click:an-save"]}, "granted", NOTICE, "동의함", AGREED, False),
-    ("[동의 철회]", {"stored": "granted", "v": NOTICE, "steps": ["click:an-withdraw"]}, "denied", None, "거부함", UNDECIDED, True),
-    ("동의한 칸 하나를 빼고 저장 — 철회", {"stored": "granted", "v": NOTICE, "steps": ["uncheck:an-transfer", "click:an-save"]}, "denied", None, "거부함", UNDECIDED, True),
-    ("쓰기 예외의 저장 — 실제 값 그대로", {"fail": ["set"], "steps": [*ALL, "click:an-save"]}, None, None, "정하지 않음", UNDECIDED, False),
-    ("판을 못 쓰면 동의도 쓰지 않는다", {"fail": ["set:kt.analytics.v"], "steps": [*ALL, "click:an-save"]}, None, None, "정하지 않음", UNDECIDED, False),
-    ("쓰기 예외의 [동의 철회] — 값과 판을 지운다", {"stored": "granted", "v": NOTICE, "fail": ["set"], "steps": ["click:an-withdraw"]}, None, None, "정하지 않음", UNDECIDED, True),
-    ("지우기도 예외 — 동의가 남았다고 알린다", {"stored": "granted", "v": NOTICE, "fail": ["set", "remove"], "steps": ["click:an-withdraw"]}, "granted", NOTICE, "동의함", AGREED | {"an-stuck"}, True),
-    ("다른 탭의 동의", {"steps": [f"other:kt.analytics.v={NOTICE}", "other:kt.analytics=granted"]}, "granted", NOTICE, "동의함", AGREED, False),
-    ("다른 탭의 철회", {"stored": "granted", "v": NOTICE, "steps": ["other:kt.analytics=denied"]}, "denied", NOTICE, "거부함", UNDECIDED, False),
-    ("다른 탭이 판을 바꿈", {"stored": "granted", "v": NOTICE, "steps": [f"other:kt.analytics.v={OLD}"]}, "granted", OLD, "정하지 않음", UNDECIDED, False),
-    ("다른 탭이 저장소를 비움", {"stored": "granted", "v": NOTICE, "steps": ["clear:"]}, None, None, "정하지 않음", UNDECIDED, False),
+    ("값 없음", {}, None, None, None, "정하지 않음", UNDECIDED, False),
+    ("지금 판의 동의", {"stored": "granted", "v": NOTICE}, "granted", NOTICE, None, "동의함", AGREED, False),
+    ("예전 판의 동의 — 다시 묻는다", {"stored": "granted", "v": OLD}, "granted", OLD, None, "정하지 않음", UNDECIDED, False),
+    ("판 없는 동의", {"stored": "granted"}, "granted", None, None, "정하지 않음", UNDECIDED, False),
+    ("판 있는 거부", {"stored": "denied", "v": NOTICE}, "denied", NOTICE, None, "거부함", UNDECIDED, False),
+    ("예전 판의 거부도 거부", {"stored": "denied", "v": OLD}, "denied", OLD, None, "거부함", UNDECIDED, False),
+    ("판 없는 예전 거부 — 다시 묻는다", {"stored": "denied"}, "denied", None, None, "정하지 않음", UNDECIDED, False),
+    ("하루 동안 묻지 않는 중", {"stored": "later", "until": LATER}, "later", None, LATER, LATER_STATE, UNDECIDED, False),
+    ("지난 later — 다시 묻는다", {"stored": "later", "until": str(CLOCK)}, "later", None, str(CLOCK), "정하지 않음", UNDECIDED, False),
+    ("시각 없는 later", {"stored": "later"}, "later", None, None, "정하지 않음", UNDECIDED, False),
+    ("숫자가 아닌 시각", {"stored": "later", "until": "soon"}, "later", None, "soon", "정하지 않음", UNDECIDED, False),
+    ("24시간보다 먼 시각", {"stored": "later", "until": str(CLOCK + LATER_MS + 1)}, "later", None, str(CLOCK + LATER_MS + 1), "정하지 않음", UNDECIDED, False),
+    ("그 밖의 값", {"stored": "off"}, "off", None, None, "정하지 않음", UNDECIDED, False),
+    ("GPC 가 동의보다 앞선다", {"stored": "granted", "v": NOTICE, "gpc": True}, "granted", NOTICE, None, "GPC로 거부", {"an-state", "an-gpc"}, False),
+    ("읽기 예외", {"fail": ["get"]}, None, None, None, "저장할 수 없음", {"an-state", "an-nostore"}, False),
+    ("세 칸 모두 체크하고 저장", {"steps": [*ALL, "click:an-save"]}, "granted", NOTICE, None, "동의함", AGREED, False),
+    ("한 칸 빠지면 하루 동안 묻지 않음", {"steps": [*ALL[:2], "click:an-save"]}, "later", None, LATER, LATER_STATE, UNDECIDED, True),
+    ("칸 없이 저장", {"steps": ["click:an-save"]}, "later", None, LATER, LATER_STATE, UNDECIDED, True),
+    ("[모두 거부] — 판과 함께", {"steps": [*ALL, "click:an-deny"]}, "denied", NOTICE, None, "거부함", UNDECIDED, True),
+    ("하루 동안 묻지 않는 중의 [모두 거부] — 시각을 지운다", {"stored": "later", "until": LATER, "steps": ["click:an-deny"]}, "denied", NOTICE, None, "거부함", UNDECIDED, True),
+    ("거부 뒤 세 칸 동의", {"stored": "denied", "v": NOTICE, "steps": [*ALL, "click:an-save"]}, "granted", NOTICE, None, "동의함", AGREED, False),
+    ("하루 동안 묻지 않는 중의 세 칸 동의 — 시각을 지운다", {"stored": "later", "until": LATER, "steps": [*ALL, "click:an-save"]}, "granted", NOTICE, None, "동의함", AGREED, False),
+    ("예전 판 동의를 지금 판으로", {"stored": "granted", "v": OLD, "steps": [*ALL, "click:an-save"]}, "granted", NOTICE, None, "동의함", AGREED, False),
+    ("[동의 철회] — 판과 함께", {"stored": "granted", "v": NOTICE, "steps": ["click:an-withdraw"]}, "denied", NOTICE, None, "거부함", UNDECIDED, True),
+    ("동의한 칸 하나를 빼고 저장 — 끄고 하루 뒤 다시 묻는다", {"stored": "granted", "v": NOTICE, "steps": ["uncheck:an-transfer", "click:an-save"]}, "later", None, LATER, LATER_STATE, UNDECIDED, True),
+    ("쓰기 예외의 저장 — 실제 값 그대로", {"fail": ["set"], "steps": [*ALL, "click:an-save"]}, None, None, None, "정하지 않음", UNDECIDED, False),
+    ("판을 못 쓰면 동의도 쓰지 않는다", {"fail": ["set:kt.analytics.v"], "steps": [*ALL, "click:an-save"]}, None, None, None, "정하지 않음", UNDECIDED, False),
+    ("시각을 못 쓰면 later 도 쓰지 않는다", {"fail": ["set:kt.analytics.until"], "steps": ["click:an-save"]}, None, None, None, "정하지 않음", UNDECIDED, True),
+    ("쓰기 예외의 일부 저장 — 동의를 지운다", {"stored": "granted", "v": NOTICE, "fail": ["set"], "steps": ["uncheck:an-transfer", "click:an-save"]}, None, None, None, "정하지 않음", UNDECIDED, True),
+    ("쓰기 예외의 [동의 철회] — 값과 판을 지운다", {"stored": "granted", "v": NOTICE, "fail": ["set"], "steps": ["click:an-withdraw"]}, None, None, None, "정하지 않음", UNDECIDED, True),
+    ("지우기도 예외 — 동의가 남았다고 알린다", {"stored": "granted", "v": NOTICE, "fail": ["set", "remove"], "steps": ["click:an-withdraw"]}, "granted", NOTICE, None, "동의함", AGREED | {"an-stuck"}, True),
+    ("다른 탭의 동의", {"steps": [f"other:kt.analytics.v={NOTICE}", "other:kt.analytics=granted"]}, "granted", NOTICE, None, "동의함", AGREED, False),
+    ("다른 탭의 철회", {"stored": "granted", "v": NOTICE, "steps": ["other:kt.analytics=denied"]}, "denied", NOTICE, None, "거부함", UNDECIDED, False),
+    ("다른 탭의 하루 동안 안 보기", {"steps": [f"other:kt.analytics.until={LATER}", "other:kt.analytics=later"]}, "later", None, LATER, LATER_STATE, UNDECIDED, False),
+    ("다른 탭이 판을 바꿈", {"stored": "granted", "v": NOTICE, "steps": [f"other:kt.analytics.v={OLD}"]}, "granted", OLD, None, "정하지 않음", UNDECIDED, False),
+    ("다른 탭이 저장소를 비움", {"stored": "granted", "v": NOTICE, "steps": ["clear:"]}, None, None, None, "정하지 않음", UNDECIDED, False),
 ]
 # fmt: on
 # §3.4-6 절 — 받는 곳마다 법 제28조의8 제2항 다섯 가지(동의 상자의 국외 이전 칸과 같은 이름) + 근거
 TRANSFER_TERMS = CONSENT_CELLS[2][2] | {"근거"}
-# 078 §3.7 — 맨 위 변경 안내 상자가 말하는 것(같은 날 두 번째 판의 시행 문장, 바뀌는 것 하나 — 화면 이동 기록의 보유 기간과
-# 두는 곳, 받는 것은 그대로, 동의를 다시 묻는다)
+# 079 §3.4 — 맨 위 변경 안내 상자가 말하는 것(새 날의 시행 문장, 바뀌는 것 하나 — 동의 창의 버튼과 저장 규칙, 판 없는 예전 거부를
+# 다시 묻는다, 받는 것은 그대로, 동의 상자의 글이 바뀌어 동의를 다시 묻는다)
 CHANGE_NOTICE_SAYS = (
-    "같은 날 먼저 게시한 판(2026년 10월 16일 판)을 바꿉니다",
+    "그 전날까지는 2026년 10월 16일 판(이날 두 번째 판)을 따릅니다",
     "바뀌는 것:",
-    "화면 이동 기록을 14일이 아니라 서비스를 끝낼 때까지 두고, 서비스를 끝내면 지웁니다",
-    "AWS 서울 리전의 KimpTrack 서버 저장소(Redis — 최근 14일 몫)와 같은 리전의 파일 저장소(Amazon S3)",
-    "(2절 화면 이동 기록)",
-    "받는 것·쓰임·처리 근거는 그대로",
-    "국외로 옮기거나 Microsoft에 보내지 않습니다",
-    "동의 안내의 판을 올립니다",
+    "[모두 동의]·[선택한 대로 저장]·[하루 동안 안 보기]",
+    "[모두 거부]가 빠집니다",
+    "아래 “화면 분석 동의 관리”의 [모두 거부]·[동의 철회]로 합니다",
+    "하나라도 빼고 저장하거나 [하루 동안 안 보기]를 누르면 분석하지 않고, 24시간 동안 묻지 않다가 다시 묻습니다",
+    "아래에서 [모두 거부]·[동의 철회]를 누르면 다시 묻지 않습니다",
+    "이 판을 시행하기 전에 저장한 거부는 안내의 판이 함께 저장되지 않아 정하지 않은 것으로 보고 다시 묻습니다",
+    "받는 것·받는 곳·쓰임·보유 기간은 그대로입니다",
+    "동의 상자의 글이 바뀌어 동의 안내의 판을 올립니다",
     "이미 동의한 방문자에게도 다시 묻고",
     "12절 대조표",
 )
-# 078 — 변경 안내의 링크 둘: 바로 앞 판(10월 16일 먼저 게시한 판 — v7)과 대조. 그 앞 판들은 12절 이력에서 잇는다
+# 079 — 변경 안내의 링크 둘: 바로 앞 판(10월 16일 두 번째 판 — v8)과 대조. 그 앞 판들은 12절 이력에서 잇는다
 CHANGE_NOTICE_LINKS = (
-    'href="/privacy-20261016.html"',
+    'href="/privacy-20261016-2.html"',
     'href="#s12"',
 )
 # 060 §3.3-8 — 12절 규칙(7일 전 게시 약속과 그 단서는 지웠다)·시행 문장(067 — 그 전날까지는 앞 판)·이력 첫 항목
@@ -367,12 +411,20 @@ CHANGE_RULE = (
     "이 방침을 바꿀 때는 시행일과 바뀐 문장의 전후 대조를 이 페이지에 알리고 이전 판을 남깁니다. "
     "동의를 받아 하는 처리가 늘면 바뀐 안내로 다시 동의를 받고, 그 동의를 받은 때부터 합니다."
 )
-# 069·078 — 같은 날 두 번째 판(060 의 v4 꼴): 머리 시행일 뒤·12절 시행 문장·이력 첫 항목에 차례
+# 079 — 새 날의 판(076 꼴): 12절 시행 문장은 그 전날까지 따르는 앞 판(같은 날 두 번째 판), 머리 시행일 뒤 차례는 없다
 EFFECTIVE_SENTENCE = (
-    "부터 시행하며(이날 두 번째 판), 같은 날 먼저 게시한 판을 바꿉니다."
+    "부터 시행하며, 그 전날까지는 2026년 10월 16일 판(이날 두 번째 판)을 따릅니다."
 )
-NTH_TODAY = "(이날 두 번째 판)"
-V8_HISTORY = "(두 번째 판) — 화면 이동 기록: 보유 기간을 서비스를 끝낼 때까지로·두는 곳에 파일 저장소(Amazon S3)·동의 안내 판 올림"
+NTH_TODAY = ""
+V9_HISTORY = (
+    " — 화면 분석 동의 안내: 버튼을 [모두 동의]·[선택한 대로 저장]·[하루 동안 안 보기]로·하나라도 빼고 저장하면 24시간 뒤 다시 물음·"
+    "판 없이 저장된 예전 거부도 다시 물음·동의 안내 판 올림"
+)
+# 078 — 같은 날 두 번째 판(v8)의 이력 항목(다음 판에서도 남는다 — 사본 `privacy-20261016-2.html`)
+V8_HISTORY = (
+    "2026년 10월 16일(두 번째 판) — 화면 이동 기록: 보유 기간을 서비스를 끝낼 때까지로·두는 곳에 파일 저장소(Amazon S3)·"
+    "동의 안내 판 올림"
+)
 # 076 — 같은 날 먼저 게시한 판(v7)의 이력 항목(다음 판에서도 남는다 — 사본 `privacy-20261016.html`). 그 판이 알린 14일 그대로
 V7_HISTORY = (
     "2026년 10월 16일 — 화면 이동 기록(KimpTrack 서버, 동의한 방문자만 — 마우스 위치·누른 곳·스크롤과 IP 주소, 14일, 관리자 화면에서 "
@@ -536,6 +588,8 @@ ARCHIVED_TEXT = {
     "privacy-20261014-2.html": "91d4c67d02af4c5b8500091be57abc7bece2e35712e6c6343066cb1817adc9c5",
     # 078 — 2026년 10월 16일 먼저 게시한 판(v7 — 076)
     "privacy-20261016.html": "b103b08cebd06fa356d769e54e17ccc1de07719ae7b6604c0b5bae7007c632bd",
+    # 079 — 2026년 10월 16일 두 번째 판(v8 — 078)
+    "privacy-20261016-2.html": "c47bf94483846faf9c8b8b6ef5f8312f2e87e7cabd8da69fef9236a6b6cdc9ba",
 }
 # 사본마다 그 판의 동의 안내 판 — 10월 11일 판은 시행 전에 바뀌어 안내 판을 올리지 않았다
 ARCHIVED_NOTICE = {
@@ -546,6 +600,7 @@ ARCHIVED_NOTICE = {
     "privacy-20261014.html": "2026-10-09-2",
     "privacy-20261014-2.html": "2026-10-09-2",
     "privacy-20261016.html": "2026-10-16",
+    "privacy-20261016-2.html": "2026-10-16-2",
 }
 # 바로 앞 판의 사본 — 대조표가 맞대는 판. 파일 이름(시행일) 순이 아니라 게시한 차례의 끝이다(060 — 10월 9일 판(v3)은
 # 10월 11일 판보다 나중에 게시했다)
@@ -867,7 +922,8 @@ def test_page_states_the_consent_contract_and_required_notices() -> None:
     script = "".join(page.scripts)
     for state in STATES:
         assert f"'{state}'" in script, state
-    assert "'granted'" in script and "'denied'" in script
+    assert f"'{LATER_PREFIX}'" in script
+    assert "'granted'" in script and "'denied'" in script and "'later'" in script
 
 
 def test_notice_version_is_shown_and_is_the_last_digest_key() -> None:
@@ -879,8 +935,8 @@ def test_notice_version_is_shown_and_is_the_last_digest_key() -> None:
     assert NOTICE == list(NOTICE_DIGESTS)[-1]
     # 051 §3.2 — v3 이 판 2026-10-09 를 열었고, 060 이 같은 날 두 번째 판을 더했다(예전 판 해시는 지우지 않는다)
     assert PRIVACY_V3_EFFECTIVE in NOTICE_DIGESTS
-    # 078 — 같은 날 두 번째 판(v7 의 판 2026-10-16 다음)
-    assert NOTICE == "2026-10-16-2" and OLD == "2026-10-16"
+    # 079 — 새 날의 판(v8 의 판 2026-10-16-2 다음)
+    assert NOTICE == "2026-10-17" and OLD == "2026-10-16-2"
 
 
 def test_notice_version_is_tied_to_the_notice_text() -> None:
@@ -899,10 +955,15 @@ def test_consent_script_shows_the_stored_value_and_the_buttons_write_it() -> Non
     results = _run_consent_script(
         [{**case, "cookies": cookies} for _, case, *_ in CONSENT_CASES]
     )
-    for (name, _, stored, version, state, shown, cleared), got in zip(
+    for (name, _, stored, version, until, state, shown, cleared), got in zip(
         CONSENT_CASES, results, strict=True
     ):
-        assert (got["stored"], got["v"], got["state"]) == (stored, version, state), name
+        assert (got["stored"], got["v"], got["until"], got["state"]) == (
+            stored,
+            version,
+            until,
+            state,
+        ), name
         visible = set(got["shown"])
         if "an-actions" not in visible:
             visible -= {"an-deny"}
@@ -1146,13 +1207,15 @@ def test_v4_constant_is_the_element_stats_day_before_this_version() -> None:
 
 
 def test_effective_date_ties_the_four_times_and_the_history() -> None:
-    """시행일은 머리·변경 안내·12절 시행 문장·이력 첫 항목의 <time> 넷과 sitemap(아래)에 같고, 한 곳만 고치면 멈춘다 (037 §3.1)."""
+    """시행일은 머리·변경 안내·12절 시행 문장·이력 첫 항목의 <time> 넷과 sitemap(아래)에 같고, 한 곳만 고치면 멈춘다 (037 §3.1).
+    서버 상수 `PRIVACY_V9_EFFECTIVE`(079 — 게이트 없음)도 이 날이다."""
     html, _ = _read(PUBLIC / "privacy.html")
     assert EFFECTIVE >= PRIVACY_V3_EFFECTIVE
+    assert PRIVACY_V9_EFFECTIVE == EFFECTIVE
     times = re.findall(r'<time datetime="([^"]*)">([^<]*)</time>', html)
     assert times == [(EFFECTIVE, _korean(EFFECTIVE))] * 4
     tag = f'<time datetime="{EFFECTIVE}">'
-    # 같은 날 둘째 판이면 머리 시행일 뒤에 차례를 적는다(060 꼴 — 069·078)
+    # 같은 날 둘째 판이면 머리 시행일 뒤에 차례를 적는다(060 꼴 — 069·078). 079 는 새 날이라 차례가 없다
     assert (
         f'<p class="meta">시행일 {tag}{_korean(EFFECTIVE)}</time>{NTH_TODAY}</p>'
         in html
@@ -1166,7 +1229,10 @@ def test_effective_date_ties_the_four_times_and_the_history() -> None:
     )
     items = _history(html)
     assert items[0].startswith(tag)
-    assert _text(items[0]) == f"{_korean(EFFECTIVE)}{V8_HISTORY}"
+    assert _text(items[0]) == f"{_korean(EFFECTIVE)}{V9_HISTORY}"
+    # 같은 날 두 번째 판(v8 — 078)의 항목은 날짜 뒤 차례와 그 판의 사본 링크(079 — `-2`)
+    v8 = [i for i in items[1:] if _text(i).startswith(V8_HISTORY)]
+    assert len(v8) == 1 and 'href="/privacy-20261016-2.html">그 판 보기</a>' in v8[0]
     # 같은 날 먼저 게시한 판(v7 — 076)의 항목은 차례 없이 그 판의 사본 링크(`privacy-20261016.html`) — 그 판이 알린 14일 그대로
     v7 = [i for i in items[1:] if _text(i).startswith(V7_HISTORY)]
     assert len(v7) == 1 and 'href="/privacy-20261016.html">그 판 보기</a>' in v7[0]
@@ -1205,7 +1271,7 @@ def test_effective_date_ties_the_four_times_and_the_history() -> None:
 
 
 def test_change_notice_comes_first_and_names_what_changes() -> None:
-    """맨 위 변경 안내 — 머리 시행일 줄 바로 아래, 소개 문단 앞. 시행 문장·바뀌는 것 하나·동의를 다시 물음·링크 둘 (067 §3.4·078 §3.7)."""
+    """맨 위 변경 안내 — 머리 시행일 줄 바로 아래, 소개 문단 앞. 시행 문장·바뀌는 것 하나·동의를 다시 물음·링크 둘 (067 §3.4·079 §3.4)."""
     html, page = _read(PUBLIC / "privacy.html")
     assert "변경 안내" in page.h2
     start = html.index('id="changes"')
@@ -1219,11 +1285,13 @@ def test_change_notice_comes_first_and_names_what_changes() -> None:
     for word in CHANGE_NOTICE_SAYS:
         assert word in text, word
     assert text.startswith(
-        f"변경 안내 이 판은 {_korean(EFFECTIVE)}부터 시행합니다 — 같은 날 먼저 게시한 판("
+        f"변경 안내 이 판은 {_korean(EFFECTIVE)}부터 시행합니다 — 그 전날까지는 "
     )
-    # 바뀌는 것은 하나라 번호 목록이 없다. 다시 묻는다는 문장은 바뀌는 것 뒤
+    # 바뀌는 것은 하나라 번호 목록이 없다. 동의를 다시 묻는다는 문장은 바뀌는 것 뒤
     assert "<li>" not in notice
-    assert text.index("(2절 화면 이동 기록)") < text.index("다시 묻고")
+    assert text.index("보유 기간은 그대로입니다") < text.index(
+        "이미 동의한 방문자에게도 다시 묻고"
+    )
 
 
 def test_body_sections_state_the_v2_facts() -> None:
@@ -1350,8 +1418,8 @@ REPLAY_FACTS = {
 
 def test_body_sections_state_the_replay_facts() -> None:
     """076 §3.2·§3.3·078 §3.7 — 화면 이동 기록을 동의 상자·한눈에 보기·1·2·3·7·8·9절이 빠짐없이 말하고, 2절 소제목은 화면 이용
-    통계와 Clarity 사이. 서버 상수 `PRIVACY_V8_EFFECTIVE`(keep 기준)는 이 판의 시행일, `PRIVACY_V7_EFFECTIVE`(받기 게이트)는 바로 앞
-    판(v7 — 같은 날 먼저 게시한 판)의 시행일이다."""
+    통계와 Clarity 사이. 서버 상수 `PRIVACY_V8_EFFECTIVE`(keep 기준)는 바로 앞 판(v8 — 사본 `privacy-20261016-2.html`)의 시행일,
+    `PRIVACY_V7_EFFECTIVE`(받기 게이트)는 같은 날 먼저 게시한 판(v7)의 시행일이고, 지금 판(v9 — 079)은 그 뒤다."""
     html, _ = _read(PUBLIC / "privacy.html")
     body = _without_diff(html)
     for label, words in REPLAY_FACTS.items():
@@ -1364,10 +1432,9 @@ def test_body_sections_state_the_replay_facts() -> None:
         < s2.index("<h3>화면 이동 기록 — KimpTrack 서버</h3>")
         < s2.index("<h3>화면 이용 기록 — Microsoft Clarity</h3>")
     )
-    assert PRIVACY_V8_EFFECTIVE == EFFECTIVE
     y, m, d, nth = re.fullmatch(ARCHIVE_NAME, PREVIOUS).groups()
-    assert PREVIOUS == "privacy-20261016.html" and nth is None
-    assert PRIVACY_V7_EFFECTIVE == f"{y}-{m}-{d}" <= PRIVACY_V8_EFFECTIVE
+    assert PREVIOUS == "privacy-20261016-2.html" and nth == "2"
+    assert PRIVACY_V7_EFFECTIVE == PRIVACY_V8_EFFECTIVE == f"{y}-{m}-{d}" < EFFECTIVE
 
 
 def test_diff_table_rows_match_both_versions() -> None:
@@ -1402,43 +1469,94 @@ def test_diff_table_rows_match_both_versions() -> None:
         assert new in restored, (section, new)
         restored = restored.replace(new, "" if added else old)
     assert " ".join(restored.split()) == " ".join(expected.split())
-    # 078 §3.7 — 바뀐 문장마다 한 행: 동의 상자 둘(질문·수집·이용 칸 보유 기간)과 본문 — 화면 이동 기록의 보유 기간·두는 곳을
-    # 적은 곳마다, 9절은 새 저장소의 공개 차단 한 문장. 지운 문장은 없다
+    # 079 §3.4 — 바뀐 문장마다 한 행: 동의 상자 셋(셋 모두 규칙·국외 이전 칸 거부 방법·상자 아래 저장값)과 7절 저장 장치 목록의
+    # localStorage 줄. 지운 문장·새로 넣은 문장은 없다
     names = {row[0]: row for row in rows}
     assert list(names) == [
-        "동의 관리 — 질문",
-        "동의 관리 — 수집·이용 보유 기간",
-        "한눈에 보기 화면 분석",
-        "2절 보유 기간 표",
-        "2절 화면 이동 기록 — 두는 곳",
-        "2절 방문자 정보가 가지 않는 곳",
-        "3절 파기",
-        "7절 행태정보 — 수집 방법",
-        "7절 행태정보 — 보유 기간",
+        "동의 관리 — 저장 규칙",
+        "동의 관리 — 국외 이전 거부 방법",
+        "동의 관리 — 저장값",
+        "7절 자동 수집 장치 — localStorage",
     ]
-    assert names["2절 화면 이동 기록 — 두는 곳"][2] == REPLAY_STORE
-    assert names["3절 파기"][2] == REPLAY_DESTRUCTION
-    assert not [row for row in rows if REMOVED in row[1:3]]
+    assert names["동의 관리 — 저장 규칙"][1:3] == [
+        PREVIOUS_CONSENT_TEXT[0],
+        SHARED_SENTENCES[1],
+    ]
+    assert names["동의 관리 — 국외 이전 거부 방법"][1:3] == list(TRANSFER_REFUSAL)
+    assert names["동의 관리 — 저장값"][1] == PREVIOUS_CONSENT_TEXT[1]
+    assert not [row for row in rows if REMOVED in row[1:3] or ADDED in row[1:3]]
     for sentence in PREVIOUS_CONSENT_TEXT:
         assert [row for row in rows if row[1] == sentence], sentence
-    # 받는 것은 그대로다 — 이 판이 더한 문장(이 판 칸)은 받는 것을 말하지 않는다(사람 결정 2026-10-16)
+    # 받는 자·항목·보유 기간은 그대로다 — 바뀐 문장은 그것들을 새로 말하거나 빼지 않는다(079 §3.4)
     for _, old, new, _ in rows:
-        for word in ("입력", "누른 키", "글자"):
-            assert (word in new) == (word in old) or old == ADDED and word not in new, (
-                word,
-                new,
-            )
+        for word in (
+            "Microsoft",
+            "보유 기간",
+            "항목",
+            "IP 주소",
+            "입력",
+            "누른 키",
+            "글자",
+        ):
+            assert (word in new) == (word in old), (word, new)
 
 
-def test_v8_changes_only_the_replay_period_and_place() -> None:
-    """078 §3.7 — v8 은 화면 이동 기록의 보유 기간(14일 → 서비스를 끝낼 때까지)과 두는 곳(+ Amazon S3)만 바꾼다. 본문(대조표 밖)의
-    그 기록 문장에는 '14일' 꼴의 보유 기간이 없고 '서비스를 끝낼 때까지'·S3 가 있으며, Clarity(Microsoft)의 녹화 30일·9개월과
-    화면 이용 통계의 90일, 받는 것(동의 상자 항목·2절 받는 것)은 바로 앞 판(v7 사본)과 같은 글자다."""
+def _periods(page: str) -> dict[str, str]:
+    """2절 보유 기간 표 — {기록: 보유 기간} (태그 뗀 글자)."""
+    table = re.search(r'<table class="tbl">(.*?)</table>', _section(page, "s2"), re.S)
+    return {
+        _text(name): _text(value)
+        for name, value in re.findall(
+            r"<th scope=\"row\">(.*?)</th>\s*<td>(.*?)</td>", table.group(1), re.S
+        )
+    }
+
+
+def test_v9_changes_only_the_consent_buttons_and_storage_rule() -> None:
+    """079 §3.4 — v9 는 동의 창 버튼·저장 규칙의 글만 바꾼다. 받는 자·항목·목적·보유 기간(동의 상자 세 칸의 알릴 사항·칸 끝 줄,
+    2절 보유 기간 표)은 바로 앞 판(v8 사본)과 같은 글자이고, 국외 이전 칸의 거부 방법 첫 문장만 [모두 거부]가 빠졌다. 머리 질문은
+    v8 이 알린 그대로다. 본문(대조표 밖)에는 일부만 체크한 저장을 거부로 저장한다는 문장과 칸의 [모두 거부] 문장이 없다."""
     html, _ = _read(PUBLIC / "privacy.html")
     archived, _ = _read(PUBLIC / PREVIOUS)
+    assert _periods(html) == _periods(archived)
+    cells = _consent_box(html)[1]
+    new_notes = [
+        _notes(re.search(r"<dl[^>]*>(.*?)</dl>", c, re.S).group(1)) for c in cells
+    ]
+    old_section = _section(archived, "consent-title")
+    old_notes = [
+        _notes(dl) for dl in re.findall(r"<dl[^>]*>(.*?)</dl>", old_section, re.S)
+    ]
+    assert [re.search(r"<span>(.*?)</span>", c).group(1) for c in cells] == (
+        re.findall(r"<h3>(.*?)</h3>", old_section)
+    )
+    old_refusal, new_refusal = TRANSFER_REFUSAL
+    refusal = old_notes[2]["거부 방법·절차·효과"]
+    assert refusal.startswith(old_refusal)
+    old_notes[2]["거부 방법·절차·효과"] = refusal.replace(old_refusal, new_refusal)
+    assert new_notes == old_notes
+    assert [_text(n) for n in _cell_notes(cells[0])] == [COLLECT_NOTE]
+    assert COLLECT_NOTE in _text(old_section)
+    # 머리 질문 — v8 이 대조표에 실은 '이 판' 그대로
+    v8 = {row[0]: row for row in _diff_rows(archived)}
+    assert v8["동의 관리 — 질문"][2] == SHARED_SENTENCES[0]
+    visible = _text(_without_diff(_body(html)))
+    for gone in (
+        "거부로 저장",
+        old_refusal,
+        "하나라도 빠진 채 저장하거나 [모두 거부]",
+        "동의(granted)·거부(denied) 선택",
+    ):
+        assert gone not in visible, gone
+
+
+def test_replay_period_sentences_say_until_the_service_ends() -> None:
+    """078 §3.7 — 본문(대조표 밖)의 화면 이동 기록 문장에는 '14일' 꼴의 보유 기간이 없고 '서비스를 끝낼 때까지'·S3 가 있으며,
+    2절 보유 기간 표는 Clarity(Microsoft)의 녹화 30일·9개월, 화면 이용 통계의 하루 합계 90일, 화면 이동 기록의 서비스를 끝낼 때까지다."""
+    html, _ = _read(PUBLIC / "privacy.html")
     body = _without_diff(html)
     visible = _text(_body(body))
-    # 지난 보유 기간 꼴은 본문에 없다 — 12절 이력의 v7 항목(그 판이 알린 '14일')과 변경 안내의 '14일이 아니라' 는 뺀다
+    # 지난 보유 기간 꼴은 본문에 없다 — 12절 이력의 v7 항목(그 판이 알린 '14일')과 변경 안내는 뺀다
     history = " ".join(_text(item) for item in _history(html))
     notice = _text(_change_notice(html))
     rest = visible.replace(history, "").replace(notice, "")
@@ -1462,72 +1580,14 @@ def test_v8_changes_only_the_replay_period_and_place() -> None:
     for label in ("s2", "s3"):
         assert "Amazon S3" in _text(_section(body, label)), label
 
-    # 2절 보유 기간 표 — 화면 이동 기록 행만 바뀌고 Clarity(30일·9개월)·화면 이용 통계(하루 합계 90일)·나머지 행은 그대로
-    def periods(page: str) -> dict[str, str]:
-        table = re.search(
-            r'<table class="tbl">(.*?)</table>', _section(page, "s2"), re.S
-        )
-        return {
-            _text(name): _text(value)
-            for name, value in re.findall(
-                r"<th scope=\"row\">(.*?)</th>\s*<td>(.*?)</td>", table.group(1), re.S
-            )
-        }
-
-    now, before = periods(html), periods(archived)
-    assert list(now) == list(before)
-    replay = "화면 이동 기록(동의한 경우만)"
-    assert (before[replay], now[replay]) == ("14일", "서비스를 끝낼 때까지")
-    assert {k: v for k, v in now.items() if k != replay} == {
-        k: v for k, v in before.items() if k != replay
-    }
+    # 2절 보유 기간 표 — Clarity(30일·9개월)·화면 이용 통계(하루 합계 90일)·화면 이동 기록(서비스를 끝낼 때까지)
+    now = _periods(html)
+    assert now["화면 이동 기록(동의한 경우만)"] == "서비스를 끝낼 때까지"
     assert (
         now["화면 녹화(Clarity — 동의한 경우만)"]
         == "30일 — 히트맵·즐겨찾기·표본 녹화·라벨은 최대 9개월"
     )
     assert now["화면 이용 통계(동의한 경우만)"] == "하루 합계 90일"
-    # 동의 상자 — 제공·국외 이전 칸은 글자 그대로, 수집·이용 칸은 보유 기간의 화면 이동 기록만 바뀐다(항목·목적·칸 끝 줄 그대로)
-    cells = _consent_box(html)[1]
-    old_cells = re.findall(
-        r"<dl[^>]*>(.*?)</dl>", _section(archived, "consent-title"), re.S
-    )
-    new_notes = [
-        _notes(re.search(r"<dl[^>]*>(.*?)</dl>", c, re.S).group(1)) for c in cells
-    ]
-    old_notes = [_notes(dl) for dl in old_cells]
-    assert new_notes[1:] == old_notes[1:]
-    for term in ("항목", "목적", "거부 권리·불이익"):
-        assert new_notes[0][term] == old_notes[0][term], term
-    assert new_notes[0]["보유 기간"] == old_notes[0]["보유 기간"].replace(
-        "화면 이동 기록은 마지막 기록부터 14일",
-        "화면 이동 기록은 서비스를 끝낼 때까지(끝내면 지움)",
-    )
-    assert (
-        "녹화 30일, 히트맵·즐겨찾기·표본 녹화·라벨 최대 9개월(Clarity)"
-        in new_notes[0]["보유 기간"]
-    )
-    assert "KimpTrack 서버: 하루 합계로만 90일" in new_notes[0]["보유 기간"]
-    assert [_text(n) for n in _cell_notes(cells[0])] == [COLLECT_NOTE]
-    assert COLLECT_NOTE in _text(_section(archived, "consent-title"))
-
-    # 2절의 화면 이용 통계·Clarity 소절과 화면 이동 기록의 받는 것·보내는 때 문단은 v7 그대로
-    def block(page: str, title: str) -> str:
-        s2 = _section(_without_diff(page), "s2")
-        start = s2.index(f"<h3>{title}</h3>")
-        return _text(s2[start : s2.index("<h3>", start + 4)])
-
-    for title in (
-        "화면 이용 통계 — KimpTrack 서버",
-        "화면 이용 기록 — Microsoft Clarity",
-    ):
-        assert block(html, title) == block(archived, title), title
-    replay_now = block(html, "화면 이동 기록 — KimpTrack 서버")
-    replay_before = block(archived, "화면 이동 기록 — KimpTrack 서버")
-    assert replay_now.replace(REPLAY_STORE, "") == replay_before.replace(
-        "AWS 서울 리전의 KimpTrack 서버 저장소(Redis)에 마지막 기록부터 14일 동안 두고, 그 뒤 저장소가 스스로 지웁니다. "
-        "Microsoft를 포함해 다른 곳으로 보내지 않습니다.",
-        "",
-    )
 
 
 def test_section_12_rule_drops_the_seven_day_promise() -> None:

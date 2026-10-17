@@ -246,7 +246,12 @@ def test_without_consent_only_two_listeners_and_kt_clarity_turns_it_on() -> None
         {},
         {"ls": {"kt.analytics": "denied"}},
         {"ls": {**ON, "kt.analytics.v": "2026-10-01"}},  # 예전 판
-        {"ls": {**ON, "kt.analytics.v": OLD}},  # 바로 앞 판(060 — 2026-10-09)
+        {"ls": {**ON, "kt.analytics.v": OLD}},  # 바로 앞 판(079 — v8 의 2026-10-16-2)
+        # 079 — v8 의 동의는 다시 묻는다
+        {"ls": {**ON, "kt.analytics.v": "2026-10-16-2"}},
+        # 079 — 처리방침의 [모두 거부]·[동의 철회](판 있는 denied)와 아직 안 지난 later(하루 동안 안 보기)
+        {"ls": {"kt.analytics": "denied", "kt.analytics.v": NOTICE}},
+        {"ls": {"kt.analytics": "later", "kt.analytics.until": "1800043200000"}},
         {"ls": ON, "gpc": True},
         {"ls": ON, "lsFail": True},
     ):
