@@ -918,8 +918,10 @@ def test_page_loads_nothing_external_and_scripts_make_no_requests() -> None:
     styles = "".join(re.findall(r"<style\b.*?</style>", html, flags=re.S))
     assert "@import" not in styles and "url(" not in styles
     assert page.scripts, "동의 관리 버튼 스크립트가 없다"
-    # 인라인만 — 같은 출처 파일은 052 의 /attention.js 와 073 의 /replay.js 둘(CSP 'self' 는 그 둘을 위해 연다)
+    # 인라인 말고 같은 출처 파일은 셋 — 033 의 /clarity.js(2026-10-17, 이 페이지에선 받기만 하고 끝난다 — 서버 기록의 '확인'
+    # 신호), 052 의 /attention.js, 073 의 /replay.js(CSP 'self' 는 그 셋을 위해 연다)
     assert [src for tag, src in page.srcs if tag == "script"] == [
+        "/clarity.js",
         "/attention.js",
         "/replay.js",
     ]

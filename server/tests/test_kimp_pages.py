@@ -111,7 +111,9 @@ def test_each_page_loads_nothing_external_and_only_history_calls_the_api() -> No
         html, page = _read(PUBLIC / f"{slug}.html")
         _assert_no_external_resources(slug, page)
         scripts = "".join(page.scripts)
-        assert "WebSocket" not in scripts and "clarity" not in html, slug
+        # clarity.js 는 파일로만(033 — 2026-10-17, 받기만 한다). Clarity 주소·인라인 호출은 없다
+        assert "WebSocket" not in scripts and "clarity" not in scripts, slug
+        assert "clarity.ms" not in html, slug
         if slug == "kimp-history":
             assert "fetch('/api/landing'" in scripts
             assert "data-nosnippet" in html  # 실시간 사건 표는 스니펫에서 뺀다

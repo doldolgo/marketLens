@@ -237,11 +237,15 @@ def test_settings_link_sits_on_the_landing_footer_and_the_dashboard_header() -> 
     )
 
 
-def test_policy_admin_and_not_found_pages_never_load_clarity() -> None:
-    """방침·404·관리자 파일 전부는 clarity.js 를 싣지 않고(src) Clarity 주소도 없다 (§4).
-
-    파일 이름 글자 자체는 막지 않는다 — 방침 동의 스크립트 주석이 판 계약으로 `clarity.js` 를 말한다.
-    """
+def test_policy_and_search_pages_load_the_file_once_but_404_and_admin_never() -> None:
+    """방침·검색어 페이지 둘은 `/clarity.js` 를 한 번 싣는다(2026-10-17 — 받기만 하고 곧바로 끝난다, 서버 기록의 '확인' 신호).
+    404·관리자 파일 전부는 싣지 않고(src) Clarity 주소도 없다 (§4)."""
+    for name in ("privacy.html", "kimp-chart.html", "kimp-history.html"):
+        text = (WEB / "public" / name).read_text("utf-8")
+        assert re.findall(r"""src=["']([^"']*clarity[^"']*)""", text) == [
+            "/clarity.js"
+        ], name
+        assert "clarity.ms" not in text, name
     admin = sorted(p for p in (WEB / "admin").rglob("*") if p.is_file())
     # 관리자 화면 v3(064) — 페이지 셋·모듈·스타일·차트 사본까지 모두 본다
     assert {p.name for p in admin} >= {
@@ -251,7 +255,7 @@ def test_policy_admin_and_not_found_pages_never_load_clarity() -> None:
         "common.js",
         "admin.css",
     }
-    for path in (WEB / "public/privacy.html", WEB / "public/404.html", *admin):
+    for path in (WEB / "public/404.html", *admin):
         text = path.read_text("utf-8")
         assert not re.search(r"""src=["'][^"']*clarity""", text), path.name
         assert "clarity.ms" not in text, path.name
@@ -402,12 +406,20 @@ with_id = pytest.mark.skipif(not _clarity_id(), reason="ID 가 비어 있다")
 
 @with_id
 def test_other_hosts_pages_do_nothing_at_all() -> None:
-    """www·localhost·처리방침 경로는 띠·대기열·쿠키 정리·듣기 모두 없다 (§3.2)."""
+    """www·localhost·처리방침·검색어 페이지 경로는 띠·대기열·쿠키 정리·듣기 모두 없다 (§3.2) — 그 페이지들은 파일을 받기만 한다
+    (2026-10-17, 서버 기록의 '확인' 신호 — 동의·GPC·저장값과 상관없이)."""
     for case in (
         {"host": "www.kimptrack.com"},
         {"host": "localhost"},
         {"path": "/privacy"},
+        {"path": "/kimp-chart"},
+        {"path": "/kimp-history"},
         {"path": "/404.html"},
+        {"path": "/privacy", "ls": ON},
+        {
+            "path": "/kimp-chart",
+            "ls": {"kt.analytics": "granted", "kt.analytics.v": OLD},
+        },
     ):
         got = _one(**case, steps=["ready"])["last"]
         assert (
