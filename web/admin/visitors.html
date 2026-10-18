@@ -94,7 +94,7 @@
           </section>
           </div>
           <section class="card s12" id="card-rplive" aria-labelledby="h-rplive">
-            <header class="card-head"><h2 id="h-rplive">지금 보는 중</h2><span class="unit">60초 안 · 5초마다 · 행을 누르면 따라 보기</span><span class="help" title="화면 분석에 동의한 방문자 가운데 지금(60초 안) 움직임 기록이 들어온 방문. 동의한 방문자만, 서비스 종료까지 보관.&#10;행을 누르면 그 방문을 몇 초 늦게 따라 본다. 머문 시간은 첫 기록부터 마지막 기록까지, 5초마다 다시 읽는다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-rplive"></span></span></header>
+            <header class="card-head"><h2 id="h-rplive">지금 보는 중</h2><span class="unit">60초 안 · 5초마다 · 행을 누르면 따라 보기</span><span class="help" title="지금(60초 안) 움직임이 들어오는 방문이다. 봇을 가려내려고 동의와 관계없이 모든 방문을 기록하고(서비스 종료까지 보관), 동의 칸에 화면 분석 동의 여부를 보인다.&#10;행을 누르면 그 화면을 2~3초 늦게 따라 본다. 머문 시간 = 첫 기록부터 마지막 기록까지, 5초마다 새로 읽는다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-rplive"></span></span></header>
             <div class="scroll"><table class="tbl" id="tbl-rplive"></table></div>
           </section>
           <section class="card s12" id="card-addrs" aria-labelledby="h-addrs">
@@ -111,7 +111,7 @@
             <p class="credit"><a href="https://db-ip.com" rel="noreferrer">IP Geolocation by DB-IP</a></p>
           </section>
           <section class="card s12" id="card-bands" aria-labelledby="h-bands" hidden>
-            <header class="card-head"><h2 id="h-bands">IP 대역</h2><span class="unit">가린 대역 그대로 · 행을 누르면 상세</span><span class="help" title="끝자리를 가린 IP 대역(IPv4 /24 · IPv6 /48)마다 요청·사람 모양 페이지·봇 비율.&#10;IP 전체 저장 전 기록도 보이는 보기. 원 IP·브라우저 원문은 없다. 행을 누르면 상세."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-bands"></span></span></header>
+            <header class="card-head"><h2 id="h-bands">IP 대역</h2><span class="unit">가린 대역 그대로 · 행을 누르면 상세</span><span class="help" title="끝자리를 가린 IP 대역(IPv4 /24 · IPv6 /48)마다 요청·브라우저로 연 페이지·봇 비율.&#10;IP 전체 저장 전 기록도 보이는 보기. 원 IP·브라우저 원문은 없다. 행을 누르면 상세."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-bands"></span></span></header>
             <div class="bar">
               <div class="seg" role="group" aria-label="망 종류" id="net-seg"><button type="button" data-net="" aria-pressed="true">전체</button><button type="button" data-net="telecom_kr" aria-pressed="false">국내 통신사</button><button type="button" data-net="telecom" aria-pressed="false">해외 통신사</button><button type="button" data-net="cloud" aria-pressed="false">데이터센터</button><button type="button" data-net="other" aria-pressed="false">그 밖</button><button type="button" data-net="ipv6" aria-pressed="false">IPv6</button></div>
               <select class="input" id="country" aria-label="나라"><option value="">모든 나라</option></select>
@@ -122,9 +122,9 @@
             <div class="list-foot"><span id="bands-count"></span><button type="button" class="linkbtn" id="bands-more" hidden>200행 더 보기</button></div>
           </section>
           <section class="card s12" id="card-replay" aria-labelledby="h-replay">
-            <header class="card-head"><h2 id="h-replay">화면 기록</h2><span class="unit">최근 200 · 행을 누르면 재생</span><span class="help" title="페이지를 한 번 연 것(조각)마다 마우스·손가락 위치·누름·스크롤·보던 영역·탭 바꿈. 동의한 방문자만, 서비스 종료까지 보관.&#10;행을 누르면 지금 공개 페이지 위에 그때 움직임을 다시 본다. 화면 글자는 모으지 않아 글은 지금 페이지 것이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-replay"></span></span></header>
+            <header class="card-head"><h2 id="h-replay">화면 기록</h2><span class="unit">최근 200 · 행을 누르면 재생</span><span class="help" title="페이지를 한 번 열 때마다 남긴 마우스·손가락 위치, 누른 곳, 스크롤, 탭 바꿈이다. 봇 판별을 위해 모든 방문을 기록하고 서비스 종료까지 보관한다.&#10;동의 칸: 동의 / 미동의(거부함·하루 동안 안 보기·답 안 함 = 동의 창에 아무 답이 없음, 봇에 흔함·GPC 거부). 행을 누르면 그때 움직임을 다시 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-replay"></span></span></header>
             <div class="bar">
-              <label class="search"><svg class="i" aria-hidden="true"><use href="icons.svg#search"/></svg><input class="input" id="rp-q" type="search" placeholder="IP · 화면 찾기" autocomplete="off" spellcheck="false" aria-label="화면 기록 찾기" /></label>
+              <label class="search"><svg class="i" aria-hidden="true"><use href="icons.svg#search"/></svg><input class="input" id="rp-q" type="search" placeholder="IP · 화면 · 동의 찾기" autocomplete="off" spellcheck="false" aria-label="화면 기록 찾기" /></label>
             </div>
             <div class="scroll"><table class="tbl" id="tbl-replay"></table></div>
             <div class="list-foot"><span id="replay-count"></span></div>

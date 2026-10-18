@@ -45,12 +45,12 @@
         <main class="content" id="content">
           <div class="kpis s12" aria-label="큰 수 — 누르면 아래 큰 추이의 지표가 바뀐다">
             <button type="button" class="card kpi" data-metric="visitors" aria-pressed="true">
-              <span class="card-head"><span class="kpi-name" id="h-visitors">방문자</span><span class="unit">확인 ~ 브라우저 모양</span><span class="help" title="고른 기간에 온 방문자 — 확인(스크립트가 돈)~브라우저 모양(봇 섞임) 범위, 날마다 따로 센 합.&#10;같은 사람이 이틀 오면 2 라 사람 수가 아니다. 타일을 누르면 아래 추이가 이 지표로 바뀐다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-visitors"></span></span></span>
+              <span class="card-head"><span class="kpi-name" id="h-visitors">방문자</span><span class="unit">확인 ~ 최대</span><span class="help" title="고른 기간에 온 방문자 — 확인(스크립트가 돈) ~ 최대(브라우저로 온 수, 봇 섞임) 범위, 날마다 따로 센 합.&#10;같은 사람이 이틀 오면 2 라 사람 수가 아니다. 타일을 누르면 아래 추이가 이 지표로 바뀐다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-visitors"></span></span></span>
               <span class="big" id="v-visitors">–</span>
               <span class="delta" id="d-visitors"></span>
             </button>
             <button type="button" class="card kpi" data-metric="pages" aria-pressed="false">
-              <span class="card-head"><span class="kpi-name" id="h-pages">사람 모양 페이지</span><span class="unit">요청</span><span class="help" title="브라우저처럼 보이는 요청이 연 페이지 수(랜딩·대시보드·정적 페이지 모두).&#10;브라우저인 척하는 봇이 섞여 실제보다 크다. 타일을 누르면 아래 추이가 이 지표로 바뀐다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-pages"></span></span></span>
+              <span class="card-head"><span class="kpi-name" id="h-pages">브라우저로 연 페이지</span><span class="unit">요청</span><span class="help" title="일반 브라우저로 온 요청이 연 페이지 수(랜딩·대시보드·정적 페이지 모두).&#10;브라우저인 척하는 봇이 섞여 실제보다 크다. 타일을 누르면 아래 추이가 이 지표로 바뀐다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-pages"></span></span></span>
               <span class="big" id="v-pages">–</span>
               <span class="delta" id="d-pages"></span>
             </button>
@@ -60,7 +60,7 @@
               <span class="delta" id="d-now"></span>
             </button>
             <button type="button" class="card kpi" data-metric="bots" aria-pressed="false">
-              <span class="card-head"><span class="kpi-name" id="h-bots">봇 비율</span><span class="unit">요청</span><span class="help" title="전체 요청 가운데 스캐너·자동화 도구가 보낸 요청의 비율.&#10;공개 사이트는 원래 높다(취약점을 찾는 봇). 갑자기 오르면 방문자 페이지에서 그 IP 를 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-bots"></span></span></span>
+              <span class="card-head"><span class="kpi-name" id="h-bots">봇 비율</span><span class="unit">요청</span><span class="help" title="전체 요청 가운데 그 밖 봇·스캐너와 자동화 도구가 보낸 요청의 비율.&#10;공개 사이트는 원래 높다(취약점을 찾는 봇). 갑자기 오르면 방문자 페이지에서 그 IP 를 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-bots"></span></span></span>
               <span class="big" id="v-bots">–</span>
               <span class="delta" id="d-bots"></span>
             </button>
@@ -76,11 +76,11 @@
           <p class="card-foot" id="f-trend"></p>
           </section>
           <section class="card s12" id="card-flows" aria-labelledby="h-flows">
-            <header class="card-head"><h2 id="h-flows"><button type="button" class="t" data-detail="flows">흐름</button></h2><span class="unit">들어온 길 → 첫 페이지 → 마지막 페이지</span><span class="help" title="방문자가 어디서 들어와(들어온 길) 어느 페이지를 처음 열고(첫 페이지) 어디서 끝냈는지(마지막 페이지).&#10;띠가 굵을수록 그 길로 간 방문자가 많다(브라우저 모양, 날마다 셈). 드문 길은 (기타), 마우스를 올리면 이어진 띠가 밝아진다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-flows"></span><button type="button" class="ibtn" data-detail="flows" aria-label="흐름 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-flows"><button type="button" class="t" data-detail="flows">흐름</button></h2><span class="unit">들어온 길 → 첫 페이지 → 마지막 페이지</span><span class="help" title="방문자가 어디서 들어와(들어온 길) 어느 페이지를 처음 열고(첫 페이지) 어디서 끝냈는지(마지막 페이지).&#10;띠가 굵을수록 그 길로 간 방문자가 많다(브라우저로 온 방문자, 날마다 셈). 드문 길은 (기타), 마우스를 올리면 이어진 띠가 밝아진다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-flows"></span><button type="button" class="ibtn" data-detail="flows" aria-label="흐름 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="chart h420" id="c-flows"></div>
           </section>
           <section class="card s6" id="card-src" aria-labelledby="h-src">
-            <header class="card-head"><h2 id="h-src"><button type="button" class="t" data-detail="src">들어온 길</button></h2><span class="unit">브라우저 모양 방문자</span><span class="help" title="방문자가 그날 첫 페이지를 열 때 어디서 왔는지 — 직접·검색·소셜·다른 사이트 링크·사이트 안 이동·캠페인(utm).&#10;직접 = 주소를 치거나 북마크·메신저에서 연 것, 사이트 안 이동 = 우리 페이지의 링크를 눌러 온 것."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-src" role="group" aria-label="들어온 길 목록"></span><span class="end"><span class="tag" id="t-src"></span><button type="button" class="ibtn" data-detail="src" aria-label="들어온 길 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-src"><button type="button" class="t" data-detail="src">들어온 길</button></h2><span class="unit">브라우저로 온 방문자</span><span class="help" title="방문자가 그날 첫 페이지를 열 때 어디서 왔는지 — 직접·검색·소셜·다른 사이트 링크·사이트 안 이동·캠페인(utm).&#10;직접 = 주소를 치거나 북마크·메신저에서 연 것, 사이트 안 이동 = 우리 페이지의 링크를 눌러 온 것."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-src" role="group" aria-label="들어온 길 목록"></span><span class="end"><span class="tag" id="t-src"></span><button type="button" class="ibtn" data-detail="src" aria-label="들어온 길 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="list" id="l-src"></div>
           </section>
           <section class="card s6" id="card-geo" aria-labelledby="h-geo">
@@ -89,15 +89,15 @@
             <p class="dim"><a href="https://db-ip.com" rel="noreferrer">IP Geolocation by DB-IP</a></p>
           </section>
           <section class="card s6" id="card-ends" aria-labelledby="h-ends">
-            <header class="card-head"><h2 id="h-ends"><button type="button" class="t" data-detail="ends">첫 · 마지막 페이지</button></h2><span class="unit">브라우저 모양 방문자</span><span class="help" title="방문자가 그날 처음 연 페이지와 마지막으로 연 페이지, 그날 연 페이지 수.&#10;탭으로 첫 페이지·마지막 페이지·본 페이지 수를 바꾼다. 페이지 수 1 이 많으면 한 장만 보고 떠난 방문이 많다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-ends" role="group" aria-label="첫 · 마지막 페이지 목록"></span><span class="end"><span class="tag" id="t-ends"></span><button type="button" class="ibtn" data-detail="ends" aria-label="첫 · 마지막 페이지 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-ends"><button type="button" class="t" data-detail="ends">첫 · 마지막 페이지</button></h2><span class="unit">브라우저로 온 방문자</span><span class="help" title="방문자가 그날 처음 연 페이지와 마지막으로 연 페이지, 그날 연 페이지 수.&#10;탭으로 첫 페이지·마지막 페이지·본 페이지 수를 바꾼다. 페이지 수 1 이 많으면 한 장만 보고 떠난 방문이 많다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-ends" role="group" aria-label="첫 · 마지막 페이지 목록"></span><span class="end"><span class="tag" id="t-ends"></span><button type="button" class="ibtn" data-detail="ends" aria-label="첫 · 마지막 페이지 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="list" id="l-ends"></div>
           </section>
           <section class="card s6" id="card-what" aria-labelledby="h-what">
-            <header class="card-head"><h2 id="h-what"><button type="button" class="t" data-detail="what">무엇을</button></h2><span class="unit">사람 모양 페이지</span><span class="help" title="많이 열린 페이지 주소와, 대시보드를 열 때 처음 보인 탭.&#10;사람 모양 페이지 기준(봇 섞임). 대시보드 안에서 탭을 바꾼 것은 서버 기록에 없어 세지 않는다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-what" role="group" aria-label="무엇을 목록"></span><span class="end"><span class="tag" id="t-what"></span><button type="button" class="ibtn" data-detail="what" aria-label="무엇을 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-what"><button type="button" class="t" data-detail="what">무엇을</button></h2><span class="unit">브라우저로 연 페이지</span><span class="help" title="많이 열린 페이지 주소와, 대시보드를 열 때 처음 보인 탭.&#10;브라우저로 연 페이지 기준(봇 섞임). 대시보드 안에서 탭을 바꾼 것은 서버 기록에 없어 세지 않는다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-what" role="group" aria-label="무엇을 목록"></span><span class="end"><span class="tag" id="t-what"></span><button type="button" class="ibtn" data-detail="what" aria-label="무엇을 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="list" id="l-what"></div>
           </section>
           <section class="card s6" id="card-who" aria-labelledby="h-who">
-            <header class="card-head"><h2 id="h-who"><button type="button" class="t" data-detail="who">누가</button></h2><span class="unit">100% 띠 · 다섯 조각 + 기타</span><span class="help" title="방문자의 기기·OS·브라우저와, 서버에 온 모든 요청을 보낸 쪽의 종류(사람 브라우저·검색 로봇·스캐너…).&#10;띠 하나가 100% 이고 조각이 그 몫이다. 요청 종류만 분모가 모든 요청(봇 포함)이라 나머지 셋과 다르다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-who"></span><button type="button" class="ibtn" data-detail="who" aria-label="누가 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-who"><button type="button" class="t" data-detail="who">누가</button></h2><span class="unit">100% 띠 · 다섯 조각 + 기타</span><span class="help" title="방문자의 기기·OS·브라우저와, 서버에 온 모든 요청을 보낸 쪽의 종류(일반 브라우저·검색 로봇·AI 로봇·봇…).&#10;띠 하나가 100% 이고 조각이 그 몫이다. 요청 종류만 분모가 모든 요청(봇 포함)이라 나머지 셋과 다르다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-who"></span><button type="button" class="ibtn" data-detail="who" aria-label="누가 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="b100s" id="b-who"></div>
           </section>
           <section class="card s6" id="card-heat" aria-labelledby="h-heat">

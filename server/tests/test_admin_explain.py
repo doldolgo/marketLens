@@ -80,7 +80,7 @@ const visitors = {
 const part = { state: 'ok', visitors, classes: { browser: { requests: 60 }, scanner: { requests: 30 }, search: { requests: 10 }, ai: { requests: 0 } }, devices: [], browsers: [] }
 out.who = td.whoSections(part)
 out.whoNoVisitors = td.whoSections({ state: 'ok', classes: {}, devices: [['desktop', 4]], browsers: [['chrome', 4]] }).map((g) => [g.id, g.unit, g.items.length])
-out.classNotes = Object.keys(td.CLASS_NOTE)
+out.classNotes = Object.keys((await page('names.js')).CLASS_NOTE)
 out.metricNow = td.METRIC_NAME.now
 
 // Clarity 진단 줄
@@ -163,12 +163,12 @@ def test_who_sections_have_their_own_denominator_and_explanations(
 ) -> None:
     devices, os_, browsers, classes = got["who"]
     assert [g["id"] for g in got["who"]] == ["devices", "os", "browsers", "classes"]
-    assert devices["unit"] == "브라우저 모양 방문자 9명 기준"
+    assert devices["unit"] == "브라우저로 온 방문자 9명 기준"
     assert [(i["key"], i["value"], round(i["share"], 1)) for i in devices["items"]] == [
         ("desktop", 6, 66.7),
         ("mobile", 3, 33.3),
     ]  # 0 인 태블릿은 빠진다
-    assert os_["unit"] == "브라우저 모양 방문자 9명 기준"
+    assert os_["unit"] == "브라우저로 온 방문자 9명 기준"
     assert [i["key"] for i in browsers["items"]] == ["chrome", "kakaotalk"]
     assert classes["unit"] == "모든 요청 100건 기준"
     assert [(i["key"], i["share"]) for i in classes["items"]] == [
@@ -196,9 +196,9 @@ def test_who_falls_back_to_page_counts_without_visitor_values(
     got: dict[str, Any],
 ) -> None:
     assert got["whoNoVisitors"] == [
-        ["devices", "사람 모양 페이지 4건 기준", 1],
-        ["os", "브라우저 모양 방문자 0명 기준", 0],
-        ["browsers", "사람 모양 페이지 4건 기준", 1],
+        ["devices", "브라우저로 연 페이지 4건 기준", 1],
+        ["os", "브라우저로 온 방문자 0명 기준", 0],
+        ["browsers", "브라우저로 연 페이지 4건 기준", 1],
         ["classes", "모든 요청 0건 기준", 0],
     ]
 

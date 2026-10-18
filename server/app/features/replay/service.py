@@ -75,9 +75,9 @@ def next_meta(
     size: int,
     keep: bool = False,
 ) -> dict[str, str]:
-    """이 묶음을 더한 조각 머리 전체. 첫 묶음이면 ip·dev·w·h·page·first 를 이 묶음에서 정하고(keep 이면 `keep=1` — 078 §3.1,
-    머리를 만든 뒤에는 바꾸지 않는다), `p` 사건은 `pages`(차례대로·중복 없음)와 지금 화면 `now` 를, `c` 사건은 `clicks` 를
-    늘린다. `seq` 는 마지막으로 받은 묶음 번호."""
+    """이 묶음을 더한 조각 머리 전체. 첫 묶음이면 ip·dev·w·h·page·first·첫 동의 상태 `cs0` 를 이 묶음에서 정하고(keep 이면
+    `keep=1` — 078 §3.1, 머리를 만든 뒤에는 바꾸지 않는다), `p` 사건은 `pages`(차례대로·중복 없음)와 지금 화면 `now` 를, `c` 사건은
+    `clicks` 를 늘린다. `seq` 는 마지막으로 받은 묶음 번호, `cs` 는 마지막 묶음의 동의 상태."""
     if "first" in meta:
         base = meta
     else:
@@ -93,6 +93,7 @@ def next_meta(
             "n": "0",
             "bytes": "0",
             "clicks": "0",
+            "cs0": batch.consent,
             **({"keep": "1"} if keep else {}),
         }
     pages = base["pages"].split(",")
@@ -114,6 +115,7 @@ def next_meta(
         "n": str(int(base["n"]) + 1),
         "bytes": str(int(base["bytes"]) + size),
         "clicks": str(int(base["clicks"]) + clicks),
+        "cs": batch.consent,
     }
 
 

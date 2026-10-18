@@ -59,7 +59,7 @@ export function matchModel(app, range) {
   out.series = [
     { name: 'Clarity 세션', mark: 'acc', data: h.line((r) => r?.traffic?.sessions).data },
     { name: '확인된 방문자', mark: 'c1', data: a.ok ? clip(a.days('confirmed').data) : [] },
-    { name: '브라우저 모양 방문자', mark: 'c3', data: a.ok ? clip(a.days('shaped').data) : [] },
+    { name: '브라우저로 온 방문자', mark: 'c3', data: a.ok ? clip(a.days('shaped').data) : [] },
   ];
   return out;
 }

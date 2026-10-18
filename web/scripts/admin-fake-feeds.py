@@ -411,6 +411,25 @@ def recordings(days: str) -> tuple[int, dict]:
 NETS = ("telecom_kr", "telecom", "cloud", "other")
 KINDS = ("browser", "search", "ai", "preview", "tool", "scanner", "operator", "unknown")
 BAND_PAGES = ("/", "/app/", "/kimp-chart", "/privacy", "/kimp-history", "/wp-login.php", "/.env")
+# 067·069 최근 요청 줄 — (경로, 상태, 종류, 출처, 069 flags). 한 번의 방문(페이지 → 함께 받은 그림·글꼴·스크립트·API·실시간 연결·탭 아이콘)과
+# 페이지 없이 부른 봇 줄이 섞여 082 '페이지·파일' 배지 셋이 다 보인다
+RECENT_LINES = (
+    ("/", 200, "browser", "https://www.google.com", ()),
+    ("/landing/spreads-1020.webp", 200, "browser", "https://kimptrack.com", ("asset",)),
+    ("/landing/fonts/kimptrack-sans-15d63017.woff2", 200, "browser", "https://kimptrack.com", ("asset",)),
+    ("/clarity.js", 200, "browser", "https://kimptrack.com", ("js",)),
+    ("/app/", 200, "browser", "https://kimptrack.com", ()),
+    ("/app/assets/index-3f2a9c.js", 304, "browser", "https://kimptrack.com", ("asset",)),
+    ("/api/history/candles", 200, "browser", "https://kimptrack.com", ()),
+    ("/api/ws/spreads", 101, "browser", None, ("ws",)),
+    ("/favicon.svg", 200, "browser", None, ("asset",)),
+    ("/robots.txt", 200, "search", None, ()),
+    ("/kimp-chart", 200, "search", None, ()),
+    ("/wp-login.php", 404, "scanner", None, ("probe", "404")),
+    ("/.env", 404, "tool", None, ("probe", "404")),
+    ("/privacy", 200, "operator", "https://admin.kimptrack.com", ()),
+    ("/kimp-history", 502, "unknown", None, ()),
+)
 AGENTS = ("desktop·windows·chrome", "mobile·ios·safari", "(기타)", "mobile·android·samsung", "desktop·macos·safari", "tablet·ios·safari")
 WINDOW_SEC = {"24h": 86_400, "7d": 604_800, "30d": 2_592_000}
 
@@ -509,9 +528,10 @@ def ip(query: dict) -> tuple[int, dict]:
     recent = []
     for k in range(100):
         at -= rng.randint(30, 400)  # 최근 순
-        recent.append({"ts": at, "path": txt(BAND_PAGES[k % len(BAND_PAGES)]), "status": (200, 200, 404, 200, 502)[k % 5], "kind": KINDS[k % 3 * 2],
-                       "browser": txt(("chrome", "safari", "")[k % 3]), "os": ("windows", "ios", "")[k % 3], "device": ("desktop", "mobile", "")[k % 3],
-                       "referer": ("https://www.google.com", None, "https://t.co")[k % 3]})
+        path, status, kind, referer, _ = RECENT_LINES[k % len(RECENT_LINES)]
+        person = kind in ("browser", "operator")
+        recent.append({"ts": at, "path": txt(path), "status": status, "kind": kind, "browser": txt(("chrome", "safari")[k % 2]) if person else "",
+                       "os": ("windows", "ios")[k % 2] if person else "", "device": ("desktop", "mobile")[k % 2] if person else "", "referer": referer})
     pairs = [{"entry": txt(("landing", "app-spread", "privacy")[k % 3]), "exit": ("app-history", "landing", "kimp-chart")[k % 3], "npages": k % 6 + 1,
               "device": ("desktop", "mobile")[k % 2], "os": ("windows", "ios")[k % 2], "browser": ("chrome", "safari")[k % 2], "channel": ("direct", "search", "social")[k % 3]}
              for k in range(12)]
@@ -525,7 +545,7 @@ ARCHETYPES = (
     ("human", "telecom_kr", (("js", "자바스크립트가 돈 페이지 {js}번", -40), ("ws", "실시간 연결(WS) {ws}번", -30), ("assets", "정적 자원 요청 {a}번", -15), ("search_ref", "검색 엔진에서 들어온 페이지 1번", -10))),
     ("googlebot", "cloud", (("ua_bot", "검색 로봇 이름(Googlebot)", 70), ("cloud", "데이터센터 망", 20), ("robots", "robots.txt 1번", 10))),
     ("scanner", "cloud", (("probe", "탐색 경로 12번(/.env·/wp-login.php…)", 60), ("ua_tool", "자동화 도구 이름(python-requests)", 50), ("many_404", "404 가 14번 — 요청의 45%", 15))),
-    ("suspect", "cloud", (("no_js", "사람 모양 페이지 5번인데 자바스크립트 신호 0", 30), ("cloud", "데이터센터 망", 20))),
+    ("suspect", "cloud", (("no_js", "페이지 5번인데 JS 신호 0", 30), ("cloud", "데이터센터 망", 20))),
     ("human", "telecom_kr", (("js", "자바스크립트가 돈 페이지 {js}번", -40), ("assets", "정적 자원 요청 {a}번", -15))),
     ("unknown", "other", (("cloud", "데이터센터 망", 20),)),
     ("operator", "telecom_kr", ()),
@@ -650,8 +670,7 @@ def addr(query: dict) -> tuple[int, dict]:
     impostor = google and _seed(ip_) % 2 == 1  # 검색 로봇 이름 행의 절반은 주소 확인 실패
     reasons = [*found["reasons"], {"code": "fake_crawler", "text": txt("검색 로봇 이름을 쓰지만 주소 확인 실패"), "weight": 30}] if impostor else found["reasons"]
     score = None if found["score"] is None else sum(r["weight"] for r in reasons)
-    flags = (("probe", "404"), ("asset",), ("js",), ("ws",), (), ("404",))
-    recent = [{**r, "flags": list(flags[k % len(flags)])} for k, r in enumerate(band["recent"])]
+    recent = [{**r, "flags": list(RECENT_LINES[k % len(RECENT_LINES)][4])} for k, r in enumerate(band["recent"])]
     lat, lon = {"Seoul": (37.5665, 126.978), "Suwon": (37.2636, 127.0286), "Ashburn": (39.0438, -77.4874), "Tokyo": (35.6895, 139.6917)}.get(found["city"] or "", (None, None))
     ptr = ("crawl-66-249-66-1.googlebot.com" if google and not impostor else None) if google else (None if found["masked"] or found["org"] is None else f"host-{_seed(ip_) % 997}.example.net")
     return 200, {"state": "ok", "code": None, "window": window, **found, "reasons": reasons, "score": score, "partial": s == "many",
@@ -905,6 +924,16 @@ def _rp_batches(spec: dict) -> list[dict]:
     return out
 
 
+# 073 §3.4 의 c — 조각마다 정해진 동의 상태(답 안 함이 가장 흔하다). 동의 가운데 절반은 조각 중간에 동의한 것(처음은 답 안 함)
+RP_CONSENTS = ("unset", "granted", "unset", "later", "denied", "gpc", "granted")
+
+
+def _rp_consent(sid: str) -> tuple[str, str]:
+    i = sum(map(ord, sid))
+    now = RP_CONSENTS[i % len(RP_CONSENTS)]
+    return now, "unset" if now == "granted" and i % 2 else now
+
+
 def _rp_row(spec: dict) -> dict | None:
     """073 §3.6 행 — 묶음이 하나도 없으면(막 시작) None."""
     batches = _rp_batches(spec)
@@ -917,9 +946,11 @@ def _rp_row(spec: dict) -> dict | None:
             pages.append(e[2])
     now_page = next((e[2] for e in reversed(flat) if e[1] == "p"), spec["page"])
     show = txt if state["scenario"] == "xss" else (lambda v: v)
+    consent, consent_first = _rp_consent(spec["sid"])
     return {"sid": spec["sid"], "ip": show(spec["ip"]), "dev": spec["dev"], "page": show(spec["page"]), "pages": [show(p) for p in pages],
             "now": show(now_page), "first": batches[0]["at"], "last": batches[-1]["at"], "n": len(batches),
-            "clicks": sum(1 for e in flat if e[1] == "c"), "w": spec["w"], "h": spec["h"], "cut": False}
+            "clicks": sum(1 for e in flat if e[1] == "c"), "w": spec["w"], "h": spec["h"], "cut": False,
+            "consent": consent, "consentFirst": consent_first}
 
 
 def _rp_state() -> dict | None:

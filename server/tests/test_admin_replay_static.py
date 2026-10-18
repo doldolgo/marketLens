@@ -65,7 +65,8 @@ def test_visitors_page_has_the_two_cards_with_consent_and_retention_in_help() ->
         )
         assert head, card
         what, how = head.group(1).split("&#10;")
-        assert "동의한 방문자만, 서비스 종료까지 보관" in what, card
+        # 073 §3.1 — 동의와 관계없이 모든 방문을 기록, 078 — 서비스 종료까지 보관
+        assert "모든 방문을 기록" in what and "서비스 종료까지 보관" in what, card
         assert 0 < len(what) <= 120 and 0 < len(how) <= 120
         assert (
             f'<div class="scroll"><table class="tbl" id="tbl-{card}"></table></div>'

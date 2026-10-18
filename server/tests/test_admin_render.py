@@ -117,7 +117,7 @@ NEEDLES = [
     "잔량",
     "주의 75%",
     "들어온 길",
-    "사람 모양 페이지",
+    "브라우저로 연 페이지",
 ]
 
 
@@ -173,7 +173,9 @@ def test_real_echarts_draws_every_chart_and_detail_sheet(
             and "Slack" in server["page:c-alarms"]["has"]
         )
         assert {"랜딩", "들어온 길"} <= set(traffic["page:c-flows"]["has"])
-        assert "사람 모양 페이지" in overview["traffic:c-sheet"]["has"]  # 판의 칸 이름
+        assert (
+            "브라우저로 연 페이지" in overview["traffic:c-sheet"]["has"]
+        )  # 판의 칸 이름
         sheets = {k.split(":")[0] for k in server if k.endswith(":c-sheet")}
         assert sheets == set(DETAILS["server.js"]) - {"cost"}  # 비용 판은 예산 표만
 
@@ -272,7 +274,7 @@ const box = { creditBalance: pts((i) => 120 - i), creditUsage: pts((i) => i / 10
 const part = { boxes: ['collect', 'data', 'serve'].map((name) => ({ box: name, series: box })), canary: { durationMs: pts((i) => 800 + 40 * i), errors: pts((i) => (i === 3 ? 1 : 0)) } }
 const w = { boxes: part.boxes, line: (get) => ({ data: (get(part) || []).map(([t, v]) => [t * 1000, v]), cmp: null }) }
 const app = { filters: () => [] }
-const traffic = { panes: [{ title: '사람 모양 페이지', fmt: common.int }, { title: '5xx', fmt: common.int }, { title: 'WS 접속', fmt: common.int }], series: [{ name: '사람 모양 페이지', mark: 'acc', type: 'bar', data: pts((i) => 40 + i).map(([t, v]) => [t * 1000, v]) }, { name: '5xx', mark: 'bad', type: 'bar', pane: 1, data: pts((i) => (i === 7 ? 1 : 0)).map(([t, v]) => [t * 1000, v]) }, { name: 'WS 접속', mark: 'c1', pane: 2, data: pts((i) => 3 + (i % 4)).map(([t, v]) => [t * 1000, v]) }] }
+const traffic = { panes: [{ title: '브라우저로 연 페이지', fmt: common.int }, { title: '5xx', fmt: common.int }, { title: 'WS 접속', fmt: common.int }], series: [{ name: '브라우저로 연 페이지', mark: 'acc', type: 'bar', data: pts((i) => 40 + i).map(([t, v]) => [t * 1000, v]) }, { name: '5xx', mark: 'bad', type: 'bar', pane: 1, data: pts((i) => (i === 7 ? 1 : 0)).map(([t, v]) => [t * 1000, v]) }, { name: 'WS 접속', mark: 'c1', pane: 2, data: pts((i) => 3 + (i % 4)).map(([t, v]) => [t * 1000, v]) }] }
 // 카드 높이는 그 페이지의 칸 그대로(canary h200 · 크레딧·네트워크·디스크 입출력 h320 · 개요 트래픽 h360), 판은 큰 그림(55vh, 최소 300)
 const cases = {
   canary: [ops.canaryPanes(app, w), 200],
@@ -324,11 +326,11 @@ const common = await page('common.js')
 const T0 = 1_800_000_000_000
 const H = 3_600_000
 const pts = (f) => Array.from({ length: 24 }, (_, i) => [T0 + i * H, f(i)])
-// 트래픽 큰 추이(사람 모양 페이지 · 스크립트가 돈 페이지)·Clarity 맞대기(세 선)와 같은 꼴 — 이름이 길다. 잘림은 범례 줄(28px — 넘치면
+// 트래픽 큰 추이(브라우저로 연 페이지 · 스크립트가 돈 페이지)·Clarity 맞대기(세 선)와 같은 꼴 — 이름이 길다. 잘림은 범례 줄(28px — 넘치면
 // 넘김 단추로 자르는 칸) 아래의 글자만 본다
 const cases = {
-  trend: [{ name: '사람 모양 페이지', mark: 'acc', type: 'bar', data: pts((i) => 40 + i) }, { name: '스크립트가 돈 페이지', mark: 'c1', data: pts((i) => 20 + i) }],
-  match: [{ name: 'Clarity 세션', mark: 'acc', data: pts((i) => 30 + i) }, { name: '확인된 방문자', mark: 'c1', data: pts((i) => 28 + i) }, { name: '브라우저 모양 방문자', mark: 'c3', data: pts((i) => 50 + i) }],
+  trend: [{ name: '브라우저로 연 페이지', mark: 'acc', type: 'bar', data: pts((i) => 40 + i) }, { name: '스크립트가 돈 페이지', mark: 'c1', data: pts((i) => 20 + i) }],
+  match: [{ name: 'Clarity 세션', mark: 'acc', data: pts((i) => 30 + i) }, { name: '확인된 방문자', mark: 'c1', data: pts((i) => 28 + i) }, { name: '브라우저로 온 방문자', mark: 'c3', data: pts((i) => 50 + i) }],
 }
 out.charts = {}
 for (const [name, series] of Object.entries(cases)) {
@@ -345,7 +347,7 @@ for (const [name, series] of Object.entries(cases)) {
 
 def test_end_labels_fit_inside_the_chart_or_give_way_to_the_legend() -> None:
     """066 §3.1 차트 규칙 — 선 끝 이름표(계열 둘~넷)는 가장 긴 이름만큼 오른쪽 자리를 남겨 잘리지 않는다. 그 자리가 그림 폭의 30% 를
-    넘는 좁은 카드에서는 이름표를 끄고 범례만 둔다(트래픽 큰 추이 '스크립트가 돈 페이지'·Clarity 맞대기 '브라우저 모양 방문자')."""
+    넘는 좁은 카드에서는 이름표를 끄고 범례만 둔다(트래픽 큰 추이 '스크립트가 돈 페이지'·Clarity 맞대기 '브라우저로 온 방문자')."""
     got = run_admin(TEXT_BOXES + END_LABELS, {})
     for chart, c in got["charts"].items():
         assert c["cut"] == [] and c["clashes"] == [], (chart, c)

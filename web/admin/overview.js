@@ -41,7 +41,7 @@ export function trafficWindow(app) {
   return out;
 }
 
-// 오늘 방문자 배지 — 오늘(KST) 지금까지의 사람 모양 페이지를 비교 날의 같은 시각까지와(이전 기간 = 어제, 지난주 = 7일 전)
+// 오늘 방문자 배지 — 오늘(KST) 지금까지의 브라우저로 연 페이지를 비교 날의 같은 시각까지와(이전 기간 = 어제, 지난주 = 7일 전)
 export function visitDelta(part, src, cmp) {
   if (!src || cmp === 'none') return '';
   const end = n0(part.endTs);
@@ -88,11 +88,11 @@ function drawVisit(app) {
   bigNumber('v-visit', today ? int(today[0]) : '–', today ? `~ ${int(today[1])}` : '');
   const seven = app.view.cmp === 'prev' ? partOf(app.entry(ACCESS7)) : null;
   put('d-visit', t.ok ? visitDelta(t.part, usable(seven) ? seven : null, app.view.cmp) : '');
-  $('d-visit').title = '오늘 지금까지의 사람 모양 페이지를 비교 날의 같은 시각까지와 견준다';
+  $('d-visit').title = '오늘 지금까지의 브라우저로 연 페이지를 비교 날의 같은 시각까지와 견준다';
   once('c-visit', [...t.deps, app.view.range, app.view.cmp], () => {
     if (!t.ok) return blank('c-visit', stateWord(t.part));
     const { data, cmp } = t.line('humanPages');
-    return draw('c-visit', sparkOption(data, 'acc', (v) => `사람 모양 페이지 ${int(v)}`, cmp));
+    return draw('c-visit', sparkOption(data, 'acc', (v) => `브라우저로 연 페이지 ${int(v)}`, cmp));
   });
 }
 
@@ -200,7 +200,7 @@ function drawBoxes(app) {
   });
 }
 
-// 트래픽 — 위아래 세 칸(사람 모양 페이지 · 5xx · 대시보드 동시 접속), 십자선 공유(둘째 y축 대신 — 066 §3.1). 점선은 비교 기간
+// 트래픽 — 위아래 세 칸(브라우저로 연 페이지 · 5xx · 대시보드 동시 접속), 십자선 공유(둘째 y축 대신 — 066 §3.1). 점선은 비교 기간
 function drawTraffic(app) {
   const t = trafficWindow(app);
   const w = seriesWindow(app, app.view.range, app.view.cmp);
@@ -214,14 +214,14 @@ function drawTraffic(app) {
     const pages = t.line('humanPages');
     const phrase = cmpPhrase(app.view.range, app.view.cmp);
     const sum = (pts) => list(pts).reduce((s, p) => s + n0(p[1]), 0);
-    put('f-traffic', pages.cmp ? deltaText(sum(pages.data), sum(pages.cmp), `사람 모양 페이지 합 — ${phrase}`) : t.cmpState === 'missing' ? '이 자료는 비교 없음' : '');
+    put('f-traffic', pages.cmp ? deltaText(sum(pages.data), sum(pages.cmp), `브라우저로 연 페이지 합 — ${phrase}`) : t.cmpState === 'missing' ? '이 자료는 비교 없음' : '');
     return draw('c-traffic', timeOption({
       startMs: t.startMs,
       endMs: t.endMs,
       zoom: 'card',
-      panes: [{ title: '사람 모양 페이지', fmt: int }, { title: '5xx', fmt: int }, { title: '대시보드 동시 접속', fmt: int }],
+      panes: [{ title: '브라우저로 연 페이지', fmt: int }, { title: '5xx', fmt: int }, { title: '대시보드 동시 접속', fmt: int }],
       series: [
-        { name: '사람 모양 페이지', mark: 'acc', type: 'bar', pane: 0, ...pages },
+        { name: '브라우저로 연 페이지', mark: 'acc', type: 'bar', pane: 0, ...pages },
         { name: '5xx', mark: 'bad', type: 'bar', pane: 1, ...t.line('errors') },
         { name: '대시보드 동시 접속', mark: 'c1', pane: 2, data: crop(ws.data, t.startMs, t.endMs), cmp: ws.cmp ? crop(ws.cmp, t.startMs, t.endMs) : null },
       ],
@@ -250,17 +250,17 @@ function accessDetail(title, unit, build, related) {
 }
 const DETAILS = {
   ...OPS_DETAILS,
-  visit: accessDetail('방문 추이', '시간별 · 사람 모양 페이지 · 스크립트가 돈 페이지', (app, pv, a) => ({
+  visit: accessDetail('방문 추이', '시간별 · 브라우저로 연 페이지 · 스크립트가 돈 페이지', (app, pv, a) => ({
     panes: [{ fmt: int }],
-    series: [{ name: '사람 모양 페이지', mark: 'acc', type: 'bar', ...a.hours('humanPages') }, { name: '스크립트가 돈 페이지', mark: 'c1', ...a.hours('jsViews') }],
+    series: [{ name: '브라우저로 연 페이지', mark: 'acc', type: 'bar', ...a.hours('humanPages') }, { name: '스크립트가 돈 페이지', mark: 'c1', ...a.hours('jsViews') }],
   }), ['traffic']),
-  traffic: accessDetail('트래픽', '시간별 · 사람 모양 페이지 · 5xx · 대시보드 동시 접속', (app, pv, a) => {
+  traffic: accessDetail('트래픽', '시간별 · 브라우저로 연 페이지 · 5xx · 대시보드 동시 접속', (app, pv, a) => {
     const w = seriesWindow(app, pv.range, pv.cmp);
     const ws = w.ok ? w.line((p) => p?.wsClients) : { data: [], cmp: null };
     return {
-      panes: [{ title: '사람 모양 페이지', fmt: int }, { title: '5xx', fmt: int }, { title: '대시보드 동시 접속', fmt: int }],
+      panes: [{ title: '브라우저로 연 페이지', fmt: int }, { title: '5xx', fmt: int }, { title: '대시보드 동시 접속', fmt: int }],
       series: [
-        { name: '사람 모양 페이지', mark: 'acc', type: 'bar', pane: 0, ...a.hours('humanPages') },
+        { name: '브라우저로 연 페이지', mark: 'acc', type: 'bar', pane: 0, ...a.hours('humanPages') },
         { name: '5xx', mark: 'bad', type: 'bar', pane: 1, ...a.hours('errors') },
         { name: '대시보드 동시 접속', mark: 'c1', pane: 2, ...ws },
       ],

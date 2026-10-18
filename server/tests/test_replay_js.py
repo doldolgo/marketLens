@@ -154,13 +154,13 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
 """
 
 
-def run(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def run(cases: list[dict[str, Any]], script: str = JS) -> list[dict[str, Any]]:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node 가 없다")
     done = subprocess.run(
         [node, "-e", HARNESS],
-        input=json.dumps([JS, cases]),
+        input=json.dumps([script, cases]),
         capture_output=True,
         text=True,
         timeout=60,
@@ -173,6 +173,11 @@ def one(**case: Any) -> dict[str, Any]:
     return run([case])[0]
 
 
+# 073 §3.1 — 동의자만 기록하던 동작으로 되돌리는 스위치(RECORD_ALL = false)
+CONSENT_ONLY = JS.replace("const RECORD_ALL = true", "const RECORD_ALL = false")
+assert CONSENT_ONLY != JS
+
+
 def bodies(got: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         b["body"] for group in got["events"] if isinstance(group, list) for b in group
@@ -182,35 +187,68 @@ def bodies(got: dict[str, Any]) -> list[dict[str, Any]]:
 MOVES = [["move", 10, 10], ["wait", 2000]]
 
 
+# 동의 저장값 → 묶음의 c (clarity.js 의 판정과 같다 — 079 §3.1). 시계는 1800000000000 에서 시작한다
+CONSENT_CASES = [
+    ({}, "unset"),  # 동의 창에 답하지 않음
+    (
+        {"ls": {"kt.analytics": "granted", "kt.analytics.v": "2026-10-09-2"}},
+        "unset",
+    ),  # 예전 판
+    (
+        {"ls": {"kt.analytics": "granted", "kt.analytics.v": OLD}},
+        "unset",
+    ),  # 바로 앞 판(NOTICE_DIGESTS 의 차례)
+    # 079 — 같은 날 먼저 게시한 판(v9 — 075)·v8 의 동의는 다시 묻는다
+    ({"ls": {"kt.analytics": "granted", "kt.analytics.v": "2026-10-17"}}, "unset"),
+    ({"ls": {"kt.analytics": "granted", "kt.analytics.v": "2026-10-16-2"}}, "unset"),
+    # 079 — 처리방침의 [모두 거부]·[동의 철회](판 있는 denied), 판 없는 예전 거부는 정하지 않음
+    ({"ls": {"kt.analytics": "denied", "kt.analytics.v": NOTICE}}, "denied"),
+    ({"ls": {"kt.analytics": "denied"}}, "unset"),
+    # 하루 동안 안 보기 — 아직 안 지남·지남·24시간보다 먼 미래
+    ({"ls": {"kt.analytics": "later", "kt.analytics.until": "1800043200000"}}, "later"),
+    ({"ls": {"kt.analytics": "later", "kt.analytics.until": "1799999999999"}}, "unset"),
+    ({"ls": {"kt.analytics": "later", "kt.analytics.until": "1800090000000"}}, "unset"),
+    ({"ls": ON, "gpc": True}, "gpc"),  # GPC 는 동의보다 앞선다
+    ({"ls": ON}, "granted"),
+]
+
+
+@pytest.mark.parametrize(("case", "consent"), CONSENT_CASES)
+def test_every_visit_is_recorded_with_its_consent_state(
+    case: dict[str, Any], consent: str
+) -> None:
+    got = one(**case, steps=MOVES + [["take"]])
+    (body,) = bodies(got)
+    assert body["c"] == consent
+    assert body["ev"] == [[0, "m", 10, 10]]
+
+
 @pytest.mark.parametrize(
     "case",
     [
-        {},  # 동의 없음
-        {
-            "ls": {"kt.analytics": "granted", "kt.analytics.v": "2026-10-09-2"}
-        },  # 예전 판
-        {
-            "ls": {"kt.analytics": "granted", "kt.analytics.v": OLD}
-        },  # 바로 앞 판(NOTICE_DIGESTS 의 차례)
-        {
-            "ls": {"kt.analytics": "granted", "kt.analytics.v": "2026-10-17"}
-        },  # 079 — 같은 날 먼저 게시한 판(v9 — 075)의 동의는 다시 묻는다
-        {
-            "ls": {"kt.analytics": "granted", "kt.analytics.v": "2026-10-16-2"}
-        },  # 079 — v8 의 동의도 다시 묻는다
-        # 079 — 처리방침의 [모두 거부]·[동의 철회](판 있는 denied)와 아직 안 지난 later(하루 동안 안 보기)
-        {"ls": {"kt.analytics": "denied", "kt.analytics.v": NOTICE}},
-        {"ls": {"kt.analytics": "later", "kt.analytics.until": "1800043200000"}},
-        {"ls": ON, "gpc": True},
         {"ls": ON, "host": "www.kimptrack.com"},
         {"ls": ON, "framed": True},
         {"ls": ON, "path": "/nope"},
+        {"host": "www.kimptrack.com"},
+        {"framed": True},
+        {"path": "/nope"},
     ],
 )
-def test_nothing_is_sent_without_consent_or_outside_the_site(
+def test_nothing_is_sent_outside_the_site(case: dict[str, Any]) -> None:
+    got = one(**case, steps=MOVES + [["click", 5, 5], ["pagehide"], ["take"]])
+    assert bodies(got) == []
+
+
+@pytest.mark.parametrize(
+    "case", [c for c, consent in CONSENT_CASES if consent != "granted"]
+)
+def test_the_consent_only_switch_sends_nothing_without_consent(
     case: dict[str, Any],
 ) -> None:
-    got = one(**case, steps=MOVES + [["click", 5, 5], ["pagehide"], ["take"]])
+    got = run(
+        [{**case, "steps": MOVES + [["click", 5, 5], ["pagehide"], ["take"]]}],
+        CONSENT_ONLY,
+    )[0]
     assert bodies(got) == []
 
 
@@ -223,8 +261,9 @@ def test_a_batch_every_two_seconds_with_the_header() -> None:
     (b,) = second
     assert b["how"] == "beacon" and b["url"] == "/api/replay"
     body = b["body"]
-    assert set(body) == {"v", "sid", "seq", "page", "dev", "w", "h", "ev"}
+    assert set(body) == {"v", "sid", "seq", "page", "dev", "w", "h", "c", "ev"}
     assert body["v"] == 1 and body["seq"] == 0 and body["page"] == "landing"
+    assert body["c"] == "granted"
     assert body["dev"] == "pc" and (body["w"], body["h"]) == (1280, 800)
     assert re.fullmatch(r"[0-9a-f]{16}", body["sid"])
     assert body["ev"] == [[0, "m", 10, 10]]
@@ -359,25 +398,67 @@ def test_600_events_flush_at_once_and_pagehide_sends_everything() -> None:
     )
 
 
-def test_withdrawn_consent_stops_and_drops() -> None:
+def test_withdrawn_consent_keeps_recording_and_says_denied() -> None:
     got = one(
         ls=ON,
         steps=[
             ["move", 10, 10],
-            ["consent", {"kt.analytics": "denied"}, "storage"],
             ["wait", 2000],
+            ["consent", {"kt.analytics": "denied"}, "storage"],
             ["move", 99, 99],
             ["wait", 2000],
             ["take"],
         ],
     )
-    assert bodies(got) == []
+    first, second = bodies(got)
+    assert (first["c"], second["c"]) == ("granted", "denied")
+    assert first["sid"] == second["sid"] and second["seq"] == 1
 
 
-def test_consent_turned_on_mid_page_starts_recording() -> None:
-    got = one(steps=[["move", 1, 1], ["consent", ON], ["move", 20, 20], ["wait", 2000]])
-    (body,) = bodies(got)
-    assert body["ev"] == [[0, "m", 20, 20]]
+def test_consent_given_mid_page_changes_the_state_of_the_same_segment() -> None:
+    got = one(
+        steps=[
+            ["move", 1, 1],
+            ["wait", 2000],
+            ["consent", ON],
+            ["move", 20, 20],
+            ["wait", 2000],
+        ]
+    )
+    first, second = bodies(got)
+    assert (first["c"], second["c"]) == ("unset", "granted")
+    assert first["sid"] == second["sid"]
+    assert first["ev"] == [[0, "m", 1, 1]]
+
+
+def test_the_consent_only_switch_stops_on_withdrawal_and_starts_on_consent() -> None:
+    withdrawn, given = run(
+        [
+            {
+                "ls": ON,
+                "steps": [
+                    ["move", 10, 10],
+                    ["consent", {"kt.analytics": "denied"}, "storage"],
+                    ["wait", 2000],
+                    ["move", 99, 99],
+                    ["wait", 2000],
+                    ["take"],
+                ],
+            },
+            {
+                "steps": [
+                    ["move", 1, 1],
+                    ["consent", ON],
+                    ["move", 20, 20],
+                    ["wait", 2000],
+                ]
+            },
+        ],
+        CONSENT_ONLY,
+    )
+    assert bodies(withdrawn) == []
+    (body,) = bodies(given)
+    assert body["ev"] == [[0, "m", 20, 20]] and body["c"] == "granted"
 
 
 def test_a_segment_ends_after_two_hours() -> None:
