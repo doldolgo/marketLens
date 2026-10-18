@@ -6,7 +6,7 @@
 import { $, button, download, int, kstText, list, num, own, pressed, put, tag, tagText } from './common.js';
 import { csvName, hasValue, matches, sortRows, toCsv } from './calc.js';
 import { blank, chartOf, dispose, draw, timeOption } from './charts.js';
-import { helpLines } from './help.js';
+import { helpWhat } from './help.js';
 import { RANGE_NAME } from './names.js';
 import { csvValue, rawTable, relatedButtons, seriesChips, statTable } from './tables.js';
 import { table } from './ui.js';
@@ -17,12 +17,12 @@ const STEP = 200; // 원자료·목록 표는 200행씩
 //   time?: { startMs, endMs, panes, series, areas, empty }, chart?(시간 축 없는 option), table?: { title, columns, rows, sort, search, onRow, file? },
 //   custom?(상자, ctx) },
 //   related?: [판 id…], accepts?(arg), leave?()(그 판이 닫히거나 다른 판으로 바뀔 때 — 074 재생 판이 틀·주기를 멈춘다) }
-// 그 판을 연 카드의 '?' 뜻 줄(071 §3.3) — 판 id 의 앞부분(':' 앞) = 카드 제목 id 'h-<id>' 와 같은 머리 안의 '?'. 없으면 ''
+// 그 판을 연 카드의 '?' 보여 주는 것 칸(071 §3.3) — 판 id 의 앞부분(':' 앞) = 카드 제목 id 'h-<id>' 와 같은 머리 안의 '?'. 없으면 ''
 function meaningOf(full) {
   const base = String(full ?? '').split(':')[0];
   const help = $(`h-${base}`)?.parentElement?.querySelector?.('.help');
   if (!help) return '';
-  return helpLines(help.dataset?.help ?? help.getAttribute?.('title'))[0] ?? '';
+  return helpWhat(help.dataset?.help ?? help.getAttribute?.('title'));
 }
 
 export function mountDetail(app) {
@@ -127,7 +127,7 @@ export function mountDetail(app) {
       b.hidden = !m.nav;
       b.disabled = !target;
     }
-    // 071 §3.3 — 카드 '?' 의 뜻 줄을 맨 앞에, 판 자신의 안내는 그 뒤에
+    // 071 §3.3 — 카드 '?' 의 보여 주는 것 칸을 맨 앞에, 판 자신의 안내는 그 뒤에
     put('sheet-note', [meaningOf(id), m.note].filter(Boolean).join(' — '));
   }
 

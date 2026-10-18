@@ -62,7 +62,14 @@
           </div>
           <div class="scr-body s12">
           <section class="card scr-main" id="card-frame" aria-labelledby="h-frame">
-            <header class="card-head"><h2 id="h-frame">실제 화면</h2><span class="unit" id="frame-line"></span><span class="scr-small" id="frame-small" hidden><i class="shape warn"></i>표본 적음</span><span class="help" title="실제 페이지를 틀로 띄우고 그 위에 동의한 방문자의 화면 이용 통계(우리 서버 수집, Clarity 아님)를 칠한 것.&#10;진할수록 많고 빗금은 거의 안 닿은 곳. 틀 안은 누를 수 없고 화면은 위 고르기로 바꾼다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-frame"></span></span></header>
+            <header class="card-head"><h2 id="h-frame">실제 화면</h2><span class="unit" id="frame-line"></span><span class="scr-small" id="frame-small" hidden><i class="shape warn"></i>표본 적음</span><span class="help" title="보여 주는 것: 지금 공개 사이트의 실제 페이지를 틀로 띄우고, 그 위에 동의한 방문자의 화면 이용 통계를 색으로 겹쳐 그린 것.
+낱말 뜻:
+· 화면 이용 통계 — 화면마다 요소·영역이 보인 시간과 누른 횟수를 우리 서버가 모은 것(Clarity 아님)
+· pv — 페이지 보기 한 번. 페이지를 열거나 대시보드 탭을 바꿀 때마다 1
+· 표본 적음 — 고른 화면·기기·기간의 pv 가 5 미만이라 색·순위가 쉽게 흔들림
+· 빗금 — 영역 보기에서 도달률 20% 미만인 곳(거의 아무도 안 본 곳)
+자료 출처: 동의한 방문자의 브라우저가 페이지를 숨기거나 떠날 때 보낸 값을 우리 서버가 하루(KST) 합계로 90일 둔다. 시각 없는 날짜별 합이고 글자·입력값·좌표는 모으지 않는다. 틀은 지금 페이지라 그때 모양과 다를 수 있다.
+읽는 법: 진할수록(옅은 파랑 → 노랑 → 주황 → 빨강) 많다. 깊이 보기는 회색 띠가 진할수록 적게 닿은 곳이다. 틀 안은 누를 수 없고 스크롤만 된다 — 화면·기기·보기는 위 고르기로 바꾼다. 방문자가 페이지를 떠나야 값이 오므로 방금 방문은 몇 분 늦게 든다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-frame"></span></span></header>
             <div class="scr-stagewrap" id="stage-wrap">
               <div class="scr-stage pc" id="stage">
                 <iframe id="frame" title="실제 화면 덮어 보기" sandbox="allow-scripts allow-same-origin" referrerpolicy="strict-origin" loading="lazy"></iframe>
@@ -74,20 +81,48 @@
             <header class="card-head"><h2 id="h-panel">값</h2><div class="seg" role="group" aria-label="판"><button type="button" data-panel="elements" aria-pressed="true">요소</button><button type="button" data-panel="areas" aria-pressed="false">영역</button><button type="button" data-panel="exits" aria-pressed="false">떠난 곳·깊이</button></div><span class="end"><span class="tag" id="t-panel"></span></span></header>
             <p class="note" id="panel-note"></p>
             <div class="scr-panel" id="panel-elements">
-              <div class="panel-head"><span id="el-head">요소</span><span class="help" title="단추·링크·탭 같은 요소마다 클릭 수·100번 볼 때 클릭·평균 마우스 올림(PC)·평균 보인 시간.&#10;행을 누르면 틀에서 그 요소로 간다. 위 칩으로 영역을 골라 거른다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="elements" aria-label="요소 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
+              <div class="panel-head"><span id="el-head">요소</span><span class="help" title="보여 주는 것: 단추·링크·탭 같은 요소마다 고른 지표(클릭·마우스 올림·보인 시간)를 큰 순으로 늘어놓은 표.
+낱말 뜻:
+· 요소 — 단추·링크·탭·표의 행처럼 누를 수 있는 화면 조각 하나
+· 클릭 — 고른 기간에 누른 횟수의 합
+· 마우스 올림 — 페이지 보기 한 번에 마우스를 올려 둔 평균 초(PC 만, 0.3초 미만은 버림)
+· 보인 시간 — 페이지 보기 한 번에 화면에 보인 평균 초
+· 열쇠 — 요소를 가르는 이름표. 하루 300개를 넘으면 나머지는 (기타)로 묶인다
+· 지금 화면에 없음 — 기록은 있지만 지금 페이지에서는 사라진 요소
+자료 출처: 화면 이용 통계(우리 서버가 모은 값, Clarity 아님 — 화면 분석에 동의한 방문자만, 하루(KST) 합계로 90일). 평균은 그 화면의 모든 페이지 보기로 나눈 값이라 요소가 안 보인 보기도 들어간다. 표의 행(코인 줄)은 누른 횟수만 센다.
+읽는 법: 행을 누르면 틀이 그 요소로 움직인다. 위 칩으로 영역을 골라 거른다. 많이 눌릴 줄 알았던 단추가 아래쪽에 있으면 눈에 덜 띄는 것이다. ⤢ 로 전체 표와 CSV 를 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="elements" aria-label="요소 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
               <div class="kchips" id="el-areas" role="group" aria-label="영역으로 거르기"></div>
               <div class="scroll"><table class="tbl scr-tbl" id="tbl-elements"></table></div>
               <div class="list-foot"><span id="el-foot"></span></div>
             </div>
             <div class="scr-panel" id="panel-areas" hidden>
-              <div class="panel-head"><span>영역 · 평균 보인 시간 큰 순</span><span class="help" title="페이지의 덩어리(머리·표·차트…)마다 평균 보인 시간·도달률(1초 이상 보인 페이지 보기의 몫)·100번 볼 때 클릭.&#10;▲ 는 도달 20% 미만 — 거의 안 보는 곳."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="areas" aria-label="영역 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
+              <div class="panel-head"><span>영역 · 평균 보인 시간 큰 순</span><span class="help" title="보여 주는 것: 페이지의 큰 덩어리(첫 화면·김프 표·필터 바 등)마다 평균 보인 시간을 큰 순으로 늘어놓은 표.
+낱말 뜻:
+· 영역 — 페이지를 몇 덩어리로 나눈 한 부분
+· 평균 보인 시간 — 그 영역이 화면에 보인 시간의 합 ÷ 페이지 보기 수
+· 도달률 — 그 영역이 1초 이상 보인 페이지 보기의 몫
+· 100번 볼 때 클릭 — 페이지 보기 100번마다 그 영역 안에서 누른 횟수
+· ▲ — 도달률 20% 미만, 거의 안 보는 곳
+자료 출처: 화면 이용 통계(우리 서버가 모은 값, Clarity 아님 — 화면 분석에 동의한 방문자만, 하루(KST) 합계로 90일). 보인 시간은 그 영역이 화면에 충분히(대개 절반 넘게) 나와 있고 탭이 보이며 5분 안에 움직임이 있었을 때만 쌓인다.
+읽는 법: 행에 마우스를 올리면 도달률과 100번 볼 때 클릭이 보인다. 아래쪽 영역의 도달률이 낮은 것은 흔하다 — 중요한 영역에 ▲ 가 붙으면 위로 올릴지 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="areas" aria-label="영역 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
               <div class="scroll"><table class="tbl scr-tbl" id="tbl-areas"></table></div>
             </div>
             <div class="scr-panel" id="panel-exits" hidden>
-              <div class="panel-head"><span>떠난 곳</span><span class="help" title="방문자가 페이지를 떠날 때 화면에 가장 크게 보이던 영역.&#10;한 영역에 몰리면 거기서 흥미를 잃었거나 찾던 것을 보고 떠난 것."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="exits" aria-label="떠난 곳·깊이 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
+              <div class="panel-head"><span>떠난 곳</span><span class="help" title="보여 주는 것: 방문자가 페이지를 떠날 때 화면을 가장 많이 차지하던 영역의 몫.
+낱말 뜻:
+· 떠난 곳 — 창을 닫거나 다른 주소로 가거나 새로고침할 때 화면에 가장 크게 보이던 영역
+· pagehide — 브라우저가 페이지를 떠날 때 내는 신호. 탭만 숨기거나 대시보드 탭을 바꾼 것은 들지 않는다
+자료 출처: 화면 이용 통계(우리 서버가 모은 값, Clarity 아님 — 화면 분석에 동의한 방문자만, 하루(KST) 합계로 90일). 떠날 때 한 번만 보내고, 휴대폰에서 앱을 그냥 닫는 것처럼 신호가 안 오면 빠진다 — 그래서 아래 줄의 'pagehide 로 끝난 pv' 가 전체 pv 보다 작다.
+읽는 법: 한 영역에 몰리면 거기서 흥미를 잃었거나 찾던 것을 보고 떠난 것이다. 첫 화면에 몰리면 첫 화면만 보고 떠난 방문이 많다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><button type="button" class="ibtn" data-detail="exits" aria-label="떠난 곳·깊이 표 전체 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></div>
               <div class="list" id="l-exits"></div>
               <p class="note" id="exit-note"></p>
-              <div class="panel-head"><span>깊이</span><span class="help" title="페이지를 그 지점(%)까지 내려온 페이지 보기의 비율 — 랜딩 같은 정적 페이지만.&#10;계단이 크게 떨어지는 지점이 많이 떠나는 곳이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span></div>
+              <div class="panel-head"><span>깊이</span><span class="help" title="보여 주는 것: 페이지를 위에서부터 몇 % 까지 내려 본 페이지 보기가 얼마나 되는지의 계단(랜딩 같은 정적 페이지만).
+낱말 뜻:
+· 깊이 — 페이지 전체 길이 가운데 화면 맨 아래가 닿은 가장 깊은 곳(10% 단위)
+· 도달 — 그 깊이나 더 아래까지 내려 본 페이지 보기의 몫
+· 절반이 여기 전에 떠남 — 도달이 처음으로 50% 아래로 떨어진 줄
+자료 출처: 화면 이용 통계(우리 서버가 모은 값, Clarity 아님 — 화면 분석에 동의한 방문자만, 하루(KST) 합계로 90일). 페이지를 떠날 때 한 번 보내는 값이라 그 신호가 없으면 빠진다. 첫 화면은 이미 닿은 것으로 센다. 대시보드 탭은 한 화면 안에서 움직여 깊이가 없다.
+읽는 법: 계단이 크게 떨어지는 곳에서 많이 떠난다. 중요한 내용이 그 아래에 있으면 위로 올릴지 본다. 'n pv 기준' 의 n 이 작으면 흔들리는 값이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span></div>
               <div class="list stairs" id="l-depth"></div>
               <p class="note" id="depth-note"></p>
             </div>
