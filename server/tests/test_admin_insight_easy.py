@@ -7,6 +7,10 @@ from typing import Any
 import pytest
 
 from tests.admin_dom import run_admin
+from tests.test_admin_detail import answers
+from tests.test_admin_fake import URLS
+from tests.test_admin_screen import _rule
+from tests.test_deploy import _text
 
 MODEL = r"""
 setup({ visible: false, respond: () => [404, {}] })
@@ -203,3 +207,111 @@ def test_match_and_list_sentences(got: dict[str, Any]) -> None:
         "가장 많은 기기는 Mobile(60%) · 브라우저는 Chrome(100%).",
         "",
     ]
+
+
+DRAW = r"""
+const respond = (url) => input.answers[url] || [404, { detail: 'Not Found' }]
+const v = setup({ respond })
+await page('insight.js', `?s=${input.tag}`)
+await flush()
+const kidsOf = (n) => n.kids.filter((k) => typeof k !== 'string')
+const cls = (n) => n.className
+const sigs = kidsOf(document.getElementById('l-signals'))
+out.signals = sigs.map((row) => {
+  const cells = kidsOf(row).find((k) => cls(k) === 'sig-foot')?.kids.find((k) => typeof k !== 'string' && cls(k).startsWith('cells'))
+  return cells ? [cells.kids.length, cells.kids.filter((c) => cls(c) === 'on').length, cls(cells)] : cls(row)
+})
+const places = kidsOf(document.getElementById('l-pages'))
+out.places = places.map((row) => [cls(row), kidsOf(row).length])
+const first = places[1]
+out.first = first ? { shape: kidsOf(kidsOf(first)[2]).find((k) => cls(k) === 'pshape')?.kids.length, visits: kidsOf(kidsOf(kidsOf(first)[1]).find((k) => cls(k).startsWith('pbar')))[0]?.style.width, title: first.title } : null
+out.say = Object.fromEntries(['say-signals', 'say-pages', 'say-match', 'say-countries', 'say-dims', 'say-refs', 'say-scroll', 'say-active', 'say-sessions'].map((id) => {
+  const n = document.getElementById(id)
+  return [id, n ? [n.hidden, n.textContent.length > 0, n.kids.length] : null]
+}))
+if (first) first.fire('click')
+out.sheet = document.getElementById('sheet').hidden
+"""
+
+
+def test_cards_draw_hundred_cells_page_rows_and_sentences() -> None:
+    """가짜 피드(ok)로 그린 Clarity 페이지 — 신호 줄 여섯에 칸 100(색칠 = 반올림 %), 페이지 × 기기는 머리 + 12줄 + '전체 보기'(15칸),
+    줄마다 칸 다섯·페이지 모양 열 칸·첫 줄 방문 막대 100%, 카드 한 문장이 보이고, 줄을 누르면 상세 판."""
+    got = run_admin(DRAW, {"answers": answers("ok", URLS), "tag": "ok"})
+    assert len(got["signals"]) == 6 and all(
+        n == 100 and 0 <= on <= 100 and c.startswith("cells ")
+        for n, on, c in got["signals"]
+    )
+    assert got["places"][0] == ["prow phead", 5]
+    assert [c for c, _ in got["places"][1:13]] == [
+        c for c, _ in got["places"][1:13] if c in ("prow", "prow thin")
+    ]
+    assert (
+        all(n == 5 for _, n in got["places"][1:13])
+        and got["places"][13][0] == "list-foot"
+        and len(got["places"]) == 14
+    )
+    assert (
+        got["first"]["shape"] == 10
+        and got["first"]["visits"] == "100%"
+        and "휴대폰 랜딩" in got["first"]["title"]
+    )
+    say = got["say"]
+    for key in (
+        "say-signals",
+        "say-match",
+        "say-countries",
+        "say-dims",
+        "say-refs",
+        "say-scroll",
+        "say-active",
+    ):
+        assert say[key][:2] == [False, True], key
+    assert say["say-pages"][0] is False and 1 <= say["say-pages"][2] <= 3
+    assert say["say-sessions"] == [True, False, 0]  # 세션 타일은 한 줄이 없다
+    assert got["sheet"] is False
+
+
+def test_cards_hide_sentences_when_not_connected() -> None:
+    """Clarity 연결 안 됨(empty) — 그림 자리에 상태 글, 카드 한 문장은 숨긴다."""
+    got = run_admin(DRAW, {"answers": answers("empty", URLS), "tag": "empty"})
+    for key in (
+        "say-signals",
+        "say-pages",
+        "say-countries",
+        "say-dims",
+        "say-refs",
+        "say-scroll",
+        "say-active",
+    ):
+        assert got["say"][key][0] is True, key
+    assert got["places"] == [["empty", 0]] and got["signals"] == ["empty"]
+
+
+def test_clarity_page_static_keys_and_shapes() -> None:
+    """정적 — 카드 한 문장 자리(신호·맞대기·나라·기기·유입·스크롤·활성 시간은 <p>, 페이지 × 기기는 <ul>), 그림 열쇠 줄 둘,
+    100칸은 두 줄 × 쉰 칸(위아래 먼저), 페이지 모양은 열 칸, 좁은 화면은 머리 줄을 숨기고 칸 이름을 보인다."""
+    html = _text("web/admin/clarity.html")
+    for key in ("signals", "match", "countries", "dims", "refs"):
+        assert f'<p class="say" id="say-{key}" hidden></p>' in html, key
+    for key in ("scroll", "active"):
+        assert f'<p class="say small" id="say-{key}" hidden></p>' in html, key
+    assert '<ul class="say" id="say-pages" hidden></ul>' in html
+    assert (
+        '<div class="sigs" id="l-signals"></div>' in html
+        and '<div class="places" id="l-pages"></div>' in html
+    )
+    assert html.count('<p class="keys">') == 2 and "tbl-pages" not in html
+    css = _text("web/admin/admin.css")
+    cells = _rule(css, ".cells")
+    assert (
+        "grid-auto-flow: column;" in cells
+        and "grid-template-columns: repeat(50, minmax(0, 1fr));" in cells
+        and "grid-template-rows: repeat(2, 5px);" in cells
+    )
+    assert "grid-template-rows: repeat(10, 2px);" in _rule(css, ".pshape")
+    narrow = css.split("@media (max-width: 767px)")[1]
+    assert (
+        ".prow.phead {\n    display: none;" in narrow
+        and ".pc .plabel {\n    display: block;" in narrow
+    )
