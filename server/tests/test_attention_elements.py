@@ -18,9 +18,8 @@ SRC = WEB / "src"
 COMMON = [
     "tab:*",
     "privacy",
-    "consent-settings",
     "menu",
-]  # 처리방침·설정 링크·좁은 헤더 메뉴 단추(072)는 영역 밖(052) — 세지 않는다
+]  # 처리방침 링크·좁은 헤더 메뉴 단추(072)는 영역 밖(052) — 세지 않는다. 화면 분석 설정 링크는 2026-10-18 에 뺐다(033)
 # 폰 조작(072) — 필터 펼치기 단추·정렬 줄(고르기·방향). 정렬 줄이 있는 탭마다 같은 세 열쇠
 PHONE = ["filter-toggle", "sort:col", "sort:dir"]
 DASHBOARD = {
@@ -81,7 +80,6 @@ STATIC = {
         *(("faq", f"faq:{q}") for q in ("cost", "reverse-term", "chart")),
         ("foot", "app:history"),
         *(("foot", f"nav:{s}") for s in ("kimp", "method", "faq")),
-        ("foot", "consent-settings"),
     ],
     "privacy": [],
     "kimp-chart": [

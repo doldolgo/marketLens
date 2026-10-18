@@ -3,7 +3,7 @@
 가짜 환경과 단계 문자열은 test_attention_js.py 의 것을 쓴다.
 """
 
-from tests.test_attention_js import HERO, ON, _bodies, _one, _run
+from tests.test_attention_js import CONSENT_ONLY, HERO, ON, _bodies, _one, _run
 
 
 def test_tab_change_ends_the_segment_and_starts_one_with_pv_1() -> None:
@@ -63,23 +63,35 @@ def test_tab_change_ends_the_segment_and_starts_one_with_pv_1() -> None:
 
 
 def test_withdrawal_right_before_sending_drops_and_stops() -> None:
-    got = _one(
-        ls=ON,
-        areas=HERO,
-        steps=[
-            "t:1000",
-            "revoke",
-            "hide",  # 보내기 직전 판정 — 버리고 멈춘다
-            "grant",
-            "clarity",
-            "show",
-            "move",
-            "t:1000",
-            "hide",
-            "pagehide",
+    """RECORD_ALL 을 끈 동의 방식 사본 — 보내기 직전에 철회면 버리고 멈춘다."""
+    (got,) = _run(
+        [
+            {
+                "ls": ON,
+                "areas": HERO,
+                "steps": [
+                    "t:1000",
+                    "revoke",
+                    "hide",  # 보내기 직전 판정 — 버리고 멈춘다
+                    "grant",
+                    "clarity",
+                    "show",
+                    "move",
+                    "t:1000",
+                    "hide",
+                    "pagehide",
+                ],
+            }
         ],
+        CONSENT_ONLY,
     )
     assert got["sent"] == []
+
+
+def test_withdrawal_does_not_stop_counting_when_recording_all() -> None:
+    """052 §3.1 — RECORD_ALL: 철회해도 이어 센다."""
+    got = _one(ls=ON, areas=HERO, steps=["t:1000", "revoke", "hide"])
+    assert _bodies(got) and _bodies(got)[0]["a"] == {"hero": [1000, 0, 1]}
 
 
 def test_empty_sends_are_skipped_but_the_first_pv_goes_out() -> None:

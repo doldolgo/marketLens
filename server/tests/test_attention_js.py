@@ -17,6 +17,9 @@ from tests.test_deploy import ROOT
 from tests.test_privacy import NOTICE, OLD
 
 JS = (ROOT / "web/public/attention.js").read_text("utf-8")
+# 052 §3.1 — 레포 파일은 동의와 관계없이 모두를 센다(RECORD_ALL, 사람 결정 2026-10-18). 동의 방식은 스위치를 끈 사본으로 본다
+CONSENT_ONLY = JS.replace("const RECORD_ALL = true", "const RECORD_ALL = false", 1)
+assert CONSENT_ONLY != JS
 # 지금 안내 판(NOTICE)과 바로 앞 판(OLD)은 방침 동의 스크립트·clarity.js 와 같은 값이다(060 §3.2 — 판은 NOTICE_DIGESTS 의 마지막 키)
 ON = {"kt.analytics": "granted", "kt.analytics.v": NOTICE}
 
@@ -196,7 +199,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
 """.replace("NOTICE", json.dumps(NOTICE))
 
 
-def _run(cases: list[dict]) -> list[dict]:
+def _run(cases: list[dict], script: str = JS) -> list[dict]:
     node = shutil.which("node")
     if node is None:
         if os.environ.get("CI"):
@@ -204,7 +207,7 @@ def _run(cases: list[dict]) -> list[dict]:
         pytest.skip("node 가 없어 attention.js 를 돌리지 못한다")
     done = subprocess.run(
         [node, "-e", HARNESS],
-        input=json.dumps([JS, cases]),
+        input=json.dumps([script, cases]),
         capture_output=True,
         text=True,
         timeout=60,
@@ -241,7 +244,32 @@ def test_other_hosts_frames_overlay_and_unknown_pages_do_nothing() -> None:
         assert (got["listens"], got["started"], got["sent"]) == (0, False, []), case
 
 
+NOT_GRANTED = (
+    {},
+    {"ls": {"kt.analytics": "denied"}},
+    {"ls": {**ON, "kt.analytics.v": "2026-10-01"}},  # 예전 판
+    {"ls": {"kt.analytics": "denied", "kt.analytics.v": NOTICE}},
+    {"ls": {"kt.analytics": "later", "kt.analytics.until": "1800043200000"}},
+    {"ls": ON, "gpc": True},
+    {"ls": ON, "lsFail": True},
+)
+
+
+def test_every_visitor_is_counted_regardless_of_consent() -> None:
+    """052 §3.1 — RECORD_ALL(2026-10-18): 동의하지 않은 방문자(정하지 않음·거부·하루 동안 안 보기·GPC·저장소 예외)도 동의한 방문자와
+    같은 몸통을 보낸다."""
+    agreed = _bodies(_one(ls=ON, areas=HERO, steps=["t:2000", "hide"]))
+    assert agreed and agreed[0]["a"] == {"hero": [2000, 0, 1]}
+    for case, got in zip(
+        NOT_GRANTED,
+        _run([{"areas": HERO, **c, "steps": ["t:2000", "hide"]} for c in NOT_GRANTED]),
+        strict=True,
+    ):
+        assert got["started"] is not False and _bodies(got) == agreed, case
+
+
 def test_without_consent_only_two_listeners_and_kt_clarity_turns_it_on() -> None:
+    """RECORD_ALL 을 끈 동의 방식 사본 — 동의가 아니면 듣기 둘만, 같은 탭·다른 탭의 동의가 켠다."""
     for case in (
         {},
         {"ls": {"kt.analytics": "denied"}},
@@ -256,14 +284,22 @@ def test_without_consent_only_two_listeners_and_kt_clarity_turns_it_on() -> None
         {"ls": ON, "gpc": True},
         {"ls": ON, "lsFail": True},
     ):
-        got = _one(areas=HERO, **case, steps=["t:5000", "hide"])
+        got = _run(
+            [{"areas": HERO, **case, "steps": ["t:5000", "hide"]}], CONSENT_ONLY
+        )[0]
         assert (got["firstListens"], got["started"], got["sent"]) == (2, False, []), (
             case
         )
     # 같은 탭의 띠 저장 → kt:clarity → 그 순간부터 센다
-    got = _one(
-        areas=HERO, steps=["t:5000", "grant", "clarity", "settle", "t:2000", "hide"]
-    )
+    got = _run(
+        [
+            {
+                "areas": HERO,
+                "steps": ["t:5000", "grant", "clarity", "settle", "t:2000", "hide"],
+            }
+        ],
+        CONSENT_ONLY,
+    )[0]
     assert _bodies(got) == [
         {
             "v": 2,
@@ -277,10 +313,16 @@ def test_without_consent_only_two_listeners_and_kt_clarity_turns_it_on() -> None
         }
     ]
     # 다른 탭의 저장 → storage
-    got = _one(areas=HERO, steps=["grant", "storage", "settle", "t:700", "hide"])
+    got = _run(
+        [{"areas": HERO, "steps": ["grant", "storage", "settle", "t:700", "hide"]}],
+        CONSENT_ONLY,
+    )[0]
     assert _bodies(got)[0]["a"] == {"hero": [700, 0, 0]}
     # 동의가 아닌 채로 온 이벤트는 켜지 않는다
-    got = _one(areas=HERO, steps=["clarity", "storage", "t:700", "hide"])
+    got = _run(
+        [{"areas": HERO, "steps": ["clarity", "storage", "t:700", "hide"]}],
+        CONSENT_ONLY,
+    )[0]
     assert got["sent"] == []
 
 

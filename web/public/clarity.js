@@ -1,5 +1,6 @@
 // KimpTrack 화면 분석(Microsoft Clarity)·방문 통계(Google Analytics 4) — 설정 한 곳·동의 창(모달)·불러올지 판단 (스펙 033·075).
-// 동의 방식(032 §3.3 과 같은 값 계약): 수집·이용·Microsoft·Google 제공·미국 이전 세 칸에 모두 동의해 저장한 방문자만 태그를 받는다.
+// TRACK_ALL(사람 결정 2026-10-18): 동의 창 없이 모든 방문자에게 Clarity·GA 를 켠다. 끄면(false) 동의 방식 — 수집·이용·Microsoft·Google
+// 제공·미국 이전 세 칸에 모두 동의해 저장한 방문자만 태그를 받는다(032 §3.3 과 같은 값 계약).
 // 번들 밖 정적 파일이라 oxlint 대상이 아니다(node --check). 예외를 밖으로 던지지 않는다 — 실패하면 동의 창·Clarity 만 없고 페이지는 그대로다.
 ;(() => {
   // ── 설정 한 곳 (§3.1) ──────────────────────────────────────────────────────────────
@@ -16,6 +17,9 @@
   const GA_SEARCH_KEYS = ["q", "s", "search", "query", "keyword"]
   // 켤 페이지 — 랜딩(/)과 대시보드(/app/). 대시보드만 끄려면 "app" 을 뺀다
   const PAGES = ["landing", "app"]
+  // 동의와 관계없이 모든 방문자(GPC 포함)에게 켜고 동의 창을 띄우지 않는다(033 §3.2 — 사람 결정 2026-10-18).
+  // false 면 동의 방식(동의 창·지금 판의 granted 만)으로 돌아간다
+  const TRACK_ALL = true
   // 지금 안내 판 — privacy.html 동의 스크립트의 VERSION 과 같다(테스트가 본다). 받는 자·항목·목적·보유 기간이 바뀌면 그 PR 이
   // 네 곳(이 값·privacy.html 스크립트·방침의 보이는 판 글자·052 의 attention.js)을 함께 올린다 — 예전 판의 granted 는
   // '정하지 않음' 이라 동의 창이 다시 묻는다. 판 값은 같은지만 본다(날짜 꼴이 아니어도 된다). 2026-10-09 판(051): 같은 동의로
@@ -385,13 +389,17 @@
   }
 
   try {
-    if (judge() === "on") load(false)
+    // TRACK_ALL — 동의 창·저장값을 보지 않고 곧바로 부른다(다른 탭의 철회·뒤로 가기 처리도 없다)
+    if (TRACK_ALL) load(false)
     else {
-      forget()
-      whenReady(openModal)
+      if (judge() === "on") load(false)
+      else {
+        forget()
+        whenReady(openModal)
+      }
+      window.addEventListener("storage", guard(onStorage))
+      window.addEventListener("pageshow", guard(onPageShow), true)
     }
-    window.addEventListener("storage", guard(onStorage))
-    window.addEventListener("pageshow", guard(onPageShow), true)
   } catch (e) {
     // 위와 같다
   }

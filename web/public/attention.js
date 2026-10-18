@@ -1,6 +1,6 @@
 // KimpTrack 화면 이용 통계 — 화면마다 data-area 영역의 보인 시간·1초 이상 보임·클릭 수(스펙 052)와 영역 안 요소별 클릭 수·마우스를
 // 올려 둔 시간·보인 시간, 페이지를 떠날 때 보던 영역·내려온 깊이(스펙 061)를 세어 숨길 때 보낸다.
-// 화면 분석에 동의한 방문자만(clarity.js 와 같은 판정 — 지금 판의 granted·GPC 아님). 영역·요소 이름과 숫자만 보낸다 — 입력값·화면 글자의
+// 동의와 관계없이 모든 방문자(RECORD_ALL — 사람 결정 2026-10-18, 끄면 clarity.js 와 같은 판정의 동의자만). 영역·요소 이름과 숫자만 보낸다 — 입력값·화면 글자의
 // 숫자(가격 등)·좌표·마우스 경로는 보내지 않고, 쿠키·저장소에 아무것도 쓰지 않는다(방문자 식별 없음). 번들 밖 정적 파일이라 oxlint
 // 대상이 아니다(node --check). 예외를 밖으로 던지지 않는다 — 실패하면 통계만 없고 페이지는 그대로다.
 ;(() => {
@@ -12,6 +12,8 @@
   // 덮어 보기(053)로 이 페이지를 틀에 띄우는 관리자 화면의 출처 — 이 출처의 메시지만 받고 이 출처로만 보낸다.
   // 로컬 확인은 커밋하지 않는 시험 사본에서 이 값과 위 HOST 를 바꾼다(033 §4 의 시험 사본과 같은 방식)
   const ADMIN_ORIGIN = "https://admin.kimptrack.com"
+  // 동의와 관계없이 모든 방문자를 센다(052 §3.1 — 사람 결정 2026-10-18). false 면 지금 판에 동의한 방문자만
+  const RECORD_ALL = true
   const KEY = "kt.analytics"
   const VKEY = "kt.analytics.v"
   const BEACON_URL = "/api/attention"
@@ -89,6 +91,7 @@
       return false
     }
   }
+  const recording = () => RECORD_ALL || consented()
 
   // ── 열쇠 (061 §3.1) ──────────────────────────────────────────────────────────────────────
 
@@ -545,7 +548,7 @@
     const t = Date.now()
     account(t)
     endHover(t)
-    if (!consented()) return stop()
+    if (!recording()) return stop()
     const a = {}
     let any = false
     for (const id of Object.keys(seg.pend)) {
@@ -599,7 +602,7 @@
   }
 
   const start = () => {
-    if (started || !consented()) return
+    if (started || !recording()) return
     started = true
     lastInput = Date.now() // 페이지 연 때(또는 동의가 켜진 때)도 입력이다
     docVisible = document.visibilityState === "visible"
@@ -623,9 +626,9 @@
   }
 
   try {
-    if (consented()) start()
+    if (recording()) start()
     else {
-      // 동의만 아니면 듣기 둘 — 같은 탭의 띠 저장(clarity.js 의 kt:clarity)과 다른 탭의 저장. 켜지면 그 순간부터 센다
+      // RECORD_ALL 이 아니고 동의도 아니면 듣기 둘 — 같은 탭의 띠 저장(clarity.js 의 kt:clarity)과 다른 탭의 저장. 켜지면 그 순간부터 센다
       window.addEventListener("kt:clarity", guard(start))
       window.addEventListener("storage", guard(start))
     }

@@ -25,6 +25,7 @@
 
 ### 3.2 브라우저에서 세기 (`attention.js`)
 - 켜지는 조건(모두): 호스트가 `kimptrack.com`, 틀 안이 아님(`window.top === window` — 틀 안이면 053 덮어 보기 말고는 아무것도 하지 않는다), 주소에 `kt-overlay=1` 없음, 지금 화면이 §3.1 목록 안, 동의 상태 '켬'(`localStorage` `kt.analytics` = `granted` 이고 `kt.analytics.v` = 지금 판 D, GPC 없음 — clarity.js 와 같은 판정, `NOTICE_VERSION` 값을 복사하고 test_clarity 가 묶는다). 저장소를 읽다 예외면 끔.
+- **2026-10-18 사람 결정 — `RECORD_ALL = true`: 동의 상태와 관계없이 모든 방문자를 센다**(위 조건 가운데 동의 상태 '켬' 을 보지 않고, 보내기 직전 판정도 하지 않는다). 아래 두 줄은 `RECORD_ALL = false` 로 되돌렸을 때의 동작이다. 처리방침 본문은 고치지 않는다.
 - 동의 상태만 '켬' 이 아니면 리스너 둘만 단다 — 같은 탭의 띠 저장(`kt:clarity` 이벤트)과 다른 탭의 저장(`storage`). 그때 다시 판정해 '켬' 이면 그 순간부터 센다. 나머지 조건이 아니면 아무것도 하지 않는다.
 - 싣는 곳: 랜딩·대시보드는 clarity.js 바로 다음 `<script defer src="/attention.js">`(대시보드는 vite base 로 `/app/attention.js` 가 된다 — clarity.js 와 같다), 처리방침·검색어 페이지 둘은 `<head>` 에 같은 줄 하나(이 셋도 그 앞에 `/clarity.js` 를 싣는다 — 033, 2026-10-17, 받기만 한다). 공개 nginx: `location = /attention.js` 를 clarity.js 의 location 과 같은 꼴(no-cache)로, `/app/attention.js` 는 기존 `location /app/` 그대로.
 - 정적 페이지 CSP(032·044): 세 페이지 CSP 의 `script-src` 에 `'self'`, `connect-src 'self'`(없으면 더함 — 비콘은 connect-src 를 따른다). 053 이 같은 문자열의 `frame-ancestors` 를 바꾼다.
