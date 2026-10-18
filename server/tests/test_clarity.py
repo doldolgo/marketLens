@@ -28,7 +28,10 @@ from tests.test_privacy import (
 )
 
 WEB = ROOT / "web"
-JS = (WEB / "public/clarity.js").read_text("utf-8")
+REPO_JS = (WEB / "public/clarity.js").read_text("utf-8")
+# 033 §3.2 — 레포 파일은 동의 창 없이 모두에게 켠다(TRACK_ALL, 사람 결정 2026-10-18). 아래 동의 방식 시험은 스위치를 끈 사본으로 돈다
+JS = REPO_JS.replace("const TRACK_ALL = true", "const TRACK_ALL = false", 1)
+assert JS != REPO_JS
 PRIVACY = (WEB / "public/privacy.html").read_text("utf-8")
 TAG = "https://www.clarity.ms/tag/"
 # 075 — GA4 태그(측정 ID 를 붙인다)
@@ -216,24 +219,17 @@ def test_landing_and_dashboard_load_the_file_once_and_unmask() -> None:
     assert '<body data-clarity-unmask="true">' in landing
 
 
-def test_settings_link_sits_on_the_landing_footer_and_the_dashboard_header() -> None:
+def test_no_settings_link_and_the_policy_hides_consent_controls() -> None:
+    """033 §3.2 — 동의 창 없이 모두에게 켜므로(2026-10-18) 랜딩 바닥·대시보드 헤더·메뉴의 '화면 분석 설정' 링크가 없고, 처리방침의
+    동의 관리 절(#consent)은 hidden 이다(본문 글은 그대로)."""
     landing = (WEB / "public/landing.html").read_text("utf-8")
-    nav = landing[
-        landing.index('<nav class="foot-nav"') : landing.index(
-            "</nav>", landing.index('<nav class="foot-nav"')
-        )
-    ]
-    # 061 — 설정 링크에는 화면 이용 통계의 요소 열쇠(data-el)가 붙는다
-    assert re.search(
-        r'<a [^>]*href="/privacy"[^>]*>개인정보 처리방침</a>\s*<a href="/privacy#consent"[^>]*>화면 분석 설정</a>',
-        nav,
-    )
     app = (WEB / "src/App.tsx").read_text("utf-8")
-    link = re.search(r'<a href="/privacy#consent"([^>]*)>\s*화면 분석 설정\s*</a>', app)
+    for text in (landing, app):
+        assert "/privacy#consent" not in text and "consent-settings" not in text
+    assert '<a class="foot-privacy" href="/privacy">개인정보 처리방침</a>' in landing
     assert (
-        link
-        and 'target="_blank"' in link.group(1)
-        and 'rel="noopener"' in link.group(1)
+        '<section id="consent" aria-labelledby="consent-title" data-area="consent" hidden>'
+        in PRIVACY
     )
 
 
@@ -949,3 +945,63 @@ def test_ga_stays_off_on_addresses_with_search_like_query_keys() -> None:
         last = result["last"]
         assert last["tags"] == [*TAG_ID, GA_TAG_ID], q
         assert last["layer"][0] == GA_CONSENT, q
+
+
+# --- 033 §3.2 TRACK_ALL — 레포 파일 그대로(사람 결정 2026-10-18: 동의 창 없이 모든 방문자에게 Clarity·GA) ---------------------------
+
+EVERYONE = (
+    {},  # 정하지 않음
+    {"ls": {"kt.analytics": "denied", "kt.analytics.v": NOTICE}},  # 판 있는 거부
+    {"ls": {"kt.analytics": "later", "kt.analytics.until": _ms(3_600_000)}},
+    {"ls": {"kt.analytics": "granted", "kt.analytics.v": OLD}},  # 예전 판 동의
+    {"gpc": True},
+    {"fail": ["get"]},
+    {"ls": ON},
+)
+
+
+@with_id
+def test_track_all_loads_clarity_and_ga_for_every_visitor_without_the_modal() -> None:
+    """동의 상태와 관계없이 랜딩·대시보드에서 동의 창 없이 대기열 첫 항목에 동의 신호(광고 거부·분석 허용), DOMContentLoaded 뒤 Clarity·GA
+    태그를 넣는다. 남은 쿠키를 지우지 않고 다른 탭·뒤로 가기를 듣지 않는다(철회 버튼이 없다)."""
+    cases = [{**c, "path": p} for c in EVERYONE for p in ("/", "/app/")]
+    got = _run([{**c, "steps": ["ready"]} for c in cases], REPO_JS)
+    for case, result in zip(cases, got, strict=True):
+        first, last = result["first"], result["last"]
+        assert first["queue"] == [CONSENT] and first["tags"] == [], case
+        assert last["strip"] is None and last["inert"] == [False, False], case
+        assert last["tags"] == [*TAG_ID, [GA_TAG + _ga_id(), True]], case
+        assert last["layer"][0] == GA_CONSENT, case
+        assert last["layer"][2][:2] == ["config", _ga_id()], case
+        assert not last["forgot"] and last["listens"] is False, case
+
+
+@with_id
+def test_track_all_still_skips_other_pages_and_admin_frames() -> None:
+    """모두에게 켜도 www·처리방침·검색어 페이지와 관리자 덮어 보기·재생 틀에서는 아무것도 하지 않는다."""
+    cases = [
+        {"host": "www.kimptrack.com"},
+        {"path": "/privacy"},
+        {"path": "/kimp-chart"},
+        {"search": "?kt-overlay=1", "framed": True},
+        {"path": "/app/", "search": "?kt-replay=1", "framed": True},
+    ]
+    got = _run([{**c, "steps": ["ready"]} for c in cases], REPO_JS)
+    for case, result in zip(cases, got, strict=True):
+        last = result["last"]
+        assert (last["strip"], last["queue"], last["tags"], last["listens"]) == (
+            None,
+            None,
+            [],
+            False,
+        ), case
+
+
+@with_id
+def test_track_all_keeps_ga_off_on_search_like_addresses() -> None:
+    """075 §3.2 그대로 — 검색어 쿼리 키가 있는 주소에서는 GA 를 부르지 않고 Clarity 만."""
+    (got,) = _run([{"search": "?q=btc", "steps": ["ready"]}], REPO_JS)
+    last = got["last"]
+    assert (
+        last["layer"] is None and last["tags"] == TAG_ID and last["queue"] == [CONSENT]
+    )

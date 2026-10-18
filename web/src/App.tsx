@@ -66,15 +66,14 @@ class TabLoadGuard extends Component<{ children: ReactNode }, { failed: boolean 
   }
 }
 
-/** 좁은 헤더의 메뉴 항목 — 넓은 헤더의 두 링크와 같은 주소·새 탭·요소 열쇠 (032·033). */
+/** 좁은 헤더의 메뉴 항목 — 넓은 헤더의 링크와 같은 주소·새 탭·요소 열쇠 (032). 화면 분석 설정 링크는 없다 — 동의 창 없이 모두에게 켠다(033, 2026-10-18). */
 const MENU_LINKS: [href: string, text: string, el: string][] = [
   ['/privacy', '개인정보 처리방침', 'privacy'],
-  ['/privacy#consent', '화면 분석 설정', 'consent-settings'],
 ]
 const menuItem: CSSProperties = { display: 'block', padding: '0 var(--space-6)', lineHeight: '44px', fontSize: 14, color: 'var(--color-neutral-300)', textDecoration: 'none', whiteSpace: 'nowrap' }
 
 /**
- * 좁은 헤더 첫 줄 오른쪽 끝 메뉴(072 §3.2) — 넓은 헤더에서는 늘 보이던 처리방침·화면 분석 설정 링크를 담는다.
+ * 좁은 헤더 첫 줄 오른쪽 끝 메뉴(072 §3.2) — 넓은 헤더에서는 늘 보이던 처리방침 링크를 담는다.
  * 밖을 누르거나 Esc·링크를 누르면 닫힌다. 링크처럼 화면 이용 통계 영역 밖이다.
  */
 function HeaderMenu() {
@@ -262,11 +261,6 @@ export default function App() {
           <a href="/privacy" target="_blank" rel="noopener" className="hv-txt" data-el="privacy"
             style={{ marginLeft: 'auto', color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
             개인정보 처리방침
-          </a>
-          {/* 033 — 동의 창은 한 번 고르면 다시 뜨지 않으므로 바꾸러 가는 길을 늘 둔다(철회가 동의보다 어렵지 않게). 방침과 같은 모양·새 탭 */}
-          <a href="/privacy#consent" target="_blank" rel="noopener" className="hv-txt" data-el="consent-settings"
-            style={{ color: 'var(--color-neutral-500)', fontSize: 12, textDecoration: 'none' }}>
-            화면 분석 설정
           </a>
           {clockNode}
         </div>
