@@ -97,9 +97,10 @@
 낱말 뜻:
 · 스크롤 깊이 — 페이지 전체 길이 가운데 화면에 나왔던 가장 아래 지점의 비율
 자료 출처: 세션 카드와 같은 Clarity 받기(6시간마다, 최근 24시간). 첫 화면을 넣고 세는지 같은 Clarity 의 자세한 셈법은 운영에서 아직 확인하지 못했다.
-읽는 법: 낮으면 위쪽만 보고 떠난다는 뜻이다 — 중요한 내용을 위로 올릴지 본다. 페이지별 값은 아래 '페이지 × 기기', 우리 서버가 센 깊이는 화면 페이지의 '깊이' 에서 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-scroll"></span><button type="button" class="ibtn" data-detail="scroll" aria-label="평균 스크롤 깊이 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+읽는 법: 숫자 아래 한 문장이 '첫 화면 근처에서 멈춘다'처럼 어디쯤인지 말로 풀어 준다. 낮으면 위쪽만 보고 떠난다는 뜻이다 — 중요한 내용을 위로 올릴지 본다. 페이지별 값은 아래 '페이지 × 기기', 우리 서버가 센 깊이는 화면 페이지의 '깊이' 에서 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-scroll"></span><button type="button" class="ibtn" data-detail="scroll" aria-label="평균 스크롤 깊이 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="big" id="v-scroll">–</div>
             <div class="delta" id="d-scroll"></div>
+            <p class="say small" id="say-scroll" hidden></p>
             <div class="chart spark" id="c-scroll"></div>
           </section>
           <section class="card kpi" id="card-active" aria-labelledby="h-active">
@@ -108,9 +109,10 @@
 · 활성 — 스크롤·클릭·입력 같은 움직임이 있던 시간
 · 전체 — 페이지를 열어 둔 시간. 다른 창을 보고 있어도 든다
 자료 출처: 세션 카드와 같은 Clarity 받기(6시간마다, 최근 24시간). 단위(초)와 세션 평균인지 합인지는 Clarity 첫 응답으로 짐작한 것이라 운영 확인이 남았다.
-읽는 법: 전체에 비해 활성이 작으면 띄워 두고 지켜본 것이다 — 시세를 켜 두고 보는 대시보드는 원래 그렇다. 랜딩에서 활성이 아주 짧으면 읽지 않고 떠난 방문이 많다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-active"></span><button type="button" class="ibtn" data-detail="active" aria-label="활성 시간 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+읽는 법: 숫자 아래 한 문장이 '머문 n 중 m 동안 움직였다'로 풀어 준다. 전체에 비해 활성이 작으면 띄워 두고 지켜본 것이다 — 시세를 켜 두고 보는 대시보드는 원래 그렇다. 랜딩에서 활성이 아주 짧으면 읽지 않고 떠난 방문이 많다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-active"></span><button type="button" class="ibtn" data-detail="active" aria-label="활성 시간 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="big" id="v-active">–</div>
             <div class="delta" id="d-active"></div>
+            <p class="say small" id="say-active" hidden></p>
             <div class="chart spark" id="c-active"></div>
           </section>
           </div>
@@ -127,18 +129,20 @@
             <div class="scroll"><table class="tbl" id="tbl-recs"></table></div>
           </section>
           <section class="card s6" id="card-signals" aria-labelledby="h-signals">
-            <header class="card-head"><h2 id="h-signals"><button type="button" class="t" data-detail="signals">불만 신호</button></h2><span class="unit">신호가 있던 세션 % · 전날 대비</span><span class="help" title="보여 주는 것: 최근 24시간 세션 가운데 아래 불편 신호가 한 번이라도 난 세션의 비율(%), 여섯 가지.
+            <header class="card-head"><h2 id="h-signals"><button type="button" class="t" data-detail="signals">불만 신호</button></h2><span class="unit">신호가 있던 세션 % · 전날 대비</span><span class="help" title="보여 주는 것: 최근 24시간 방문(세션) 가운데 아래 불편 신호가 한 번이라도 난 방문이 100번 중 몇 번인지, 여섯 가지와 그 등급.
 낱말 뜻:
-· 죽은 클릭 — 눌렀는데 아무 반응이 없는 곳을 누름
-· 분노 클릭 — 같은 곳을 짧은 시간에 여러 번 연달아 누름
-· 과한 스크롤 — 무엇을 찾듯 위아래로 빠르게 오래 스크롤함
-· 빠른 뒤로 — 페이지를 열자마자 앞 페이지로 돌아감
-· 스크립트 오류 — 페이지의 자바스크립트가 오류를 냄
-· 오류 클릭 — 누른 바로 뒤에 스크립트 오류가 남
-· %p — 비율끼리의 차이(10% 에서 12% 가 되면 +2%p)
-자료 출처: 세션 카드와 같은 Clarity 받기(6시간마다, 최근 24시간). 신호마다의 판정 기준은 Clarity(마이크로소프트)가 정한 것이다. 오른쪽 ▲▼ 는 날별 기록의 마지막 두 값의 차이.
-읽는 법: 막대는 여섯 가운데 가장 큰 값에 견준 길이다. 갑자기 오른 신호가 있으면 위 '녹화' 카드에서 그 방문을 재생해 어디서 막혔는지 본다. 동의한 방문이 적은 날은 몇 세션만으로도 크게 흔들린다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-signals"></span><button type="button" class="ibtn" data-detail="signals" aria-label="불만 신호 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
-            <div class="list deltas" id="l-signals"></div>
+· 죽은 클릭 — 눌렀는데 화면에 아무 변화가 없었다(글자·그림을 단추로 알고 누를 때 생긴다)
+· 분노 클릭 — 같은 곳을 짧은 시간에 여러 번 연달아 눌렀다(눌러도 반응이 없어 답답할 때)
+· 과한 스크롤 — 페이지를 위아래로 오래 오르내렸다(찾는 내용이 잘 안 보일 때)
+· 빠른 뒤로 가기 — 다른 페이지로 갔다가 곧바로 되돌아왔다(간 곳이 기대와 달랐을 때)
+· 스크립트 오류 · 오류 클릭 — 페이지의 자바스크립트가 오류를 냈다 · 누른 바로 그때 오류가 났다
+· 방문 100칸 — 칸 하나 = 방문 1번, 색칠한 칸 = 그 신호가 나온 방문
+· 좋음 · 주의 · 나쁨 — 신호마다 정한 문턱(줄 아래 'n번부터 주의 · m번부터 나쁨')으로 가른 등급
+자료 출처: 세션 카드와 같은 Clarity 받기(6시간마다, 최근 24시간). 신호는 Clarity(마이크로소프트)가 판정하고, 등급 문턱은 Clarity 가 기준을 주지 않아 우리가 어림으로 정했다. '전날' 은 날별 기록의 마지막 두 값.
+읽는 법: 맨 위 한 문장이 가장 눈에 띄는 신호를 말해 준다. 주의·나쁨이 뜬 신호는 위 '녹화' 카드에서 그 방문을 재생해 어디서 막혔는지 본다. 방문이 20번 아래면 한두 번에도 크게 흔들리고, 0 이면 등급을 비운다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-signals"></span><button type="button" class="ibtn" data-detail="signals" aria-label="불만 신호 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <p class="say" id="say-signals" hidden></p>
+            <p class="keys"><span><i class="cells-key"></i>칸 100개 = 방문 100번, 색칠한 칸 = 그 신호가 나온 방문</span><span><i class="shape ok"></i>좋음</span><span><i class="shape warn"></i>주의</span><span><i class="shape bad"></i>나쁨 — 문턱은 신호마다 다르다(줄 아래에 적었다)</span></p>
+            <div class="sigs" id="l-signals"></div>
           </section>
           <section class="card s6" id="card-match" aria-labelledby="h-match">
             <header class="card-head"><h2 id="h-match"><button type="button" class="t" data-detail="match">맞대기</button></h2><span class="unit">Clarity 세션 vs 우리 방문자 · 날별</span><span class="help" title="보여 주는 것: 날마다 Clarity 세션 수와 우리 서버가 센 방문자 수를 한 그림에 겹친 것.
@@ -147,23 +151,29 @@
 · 확인된 방문자 — 서버 접속 기록에서 그날 페이지의 스크립트가 실제로 돈 흔적이 있는 방문자(사람 수의 아래쪽 어림)
 · 브라우저로 온 방문자 — 브라우저 이름표를 단 방문자 전부(봇이 섞인 위쪽 어림)
 자료 출처: Clarity 날별 기록(위 카드들과 같은 값)과 서버 접속 기록(caddy — serve 상자 웹 서버의 기록, 최근 30일까지). 방문자는 날마다(KST) 따로 센 수라 이틀 온 사람은 두 번 든다.
-읽는 법: Clarity 세션 ÷ 확인된 방문자 가 대략 화면 분석 동의 비율이다. 두 값은 재는 창이 달라(받은 때 앞 24시간 · 달력 하루) 날마다 꼭 맞지는 않는다. 방문자는 있는데 Clarity 가 계속 0 이면 수집 문제를 의심한다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-match"></span><button type="button" class="ibtn" data-detail="match" aria-label="맞대기 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+읽는 법: Clarity 세션 ÷ 확인된 방문자 가 대략 화면 분석 동의 비율이다(그림 위 한 문장이 '100명 중 약 k명' 으로 풀어 준다). 재는 창이 달라(받은 때 앞 24시간 · 달력 하루) 날마다 꼭 맞지는 않고, Clarity 만 계속 0 이면 수집 문제다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-match"></span><button type="button" class="ibtn" data-detail="match" aria-label="맞대기 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <p class="say" id="say-match" hidden></p>
             <div class="chart h280" id="c-match"></div>
           </section>
           <section class="card s12" id="card-pages" aria-labelledby="h-pages">
-            <header class="card-head"><h2 id="h-pages"><button type="button" class="t" data-detail="pages">페이지 × 기기</button></h2><span class="unit">최근 72시간 · 세션 가중 평균</span><span class="help" title="보여 주는 것: 최근 72시간 Clarity 세션을 페이지 종류 × 기기로 나눠, 줄마다 세션 수와 스크롤 깊이·활성 시간·불만 신호 여섯의 평균을 보인 표.
+            <header class="card-head"><h2 id="h-pages"><button type="button" class="t" data-detail="pages">페이지 × 기기</button></h2><span class="unit">최근 72시간 · 세션 가중 평균</span><span class="help" title="보여 주는 것: 최근 72시간 Clarity 방문을 페이지 종류 × 기기로 나눠, 줄마다 방문 수·어디까지 내려봤나·머문 시간 중 움직인 시간·눈에 띄는 불만 신호를 그림으로 보인 목록(방문 많은 순 12줄).
 낱말 뜻:
-· 페이지 × 기기 — 랜딩·대시보드 탭 같은 페이지 종류와 휴대폰·태블릿·데스크톱을 짝지은 줄
-· 세션 가중 평균 — 세션이 많은 주소일수록 더 크게 쳐서 낸 평균
-· 대시보드 그 밖 · 그 밖 페이지 — 이름표가 없는 대시보드 주소 · 그 밖의 주소
-자료 출처: Clarity 를 주소·기기로 나눠 12시간마다(이 페이지를 열 때) 받고 페이지 종류로 묶은 값. Clarity 는 랜딩과 대시보드에서만 돌아 김프 차트 같은 정적 페이지 줄은 거의 빈다.
-읽는 법: 칸이 진할수록 그 열에서 큰 값이다(열마다 따로 다섯 단계). 세션 3 미만인 줄은 숫자를 흐리게 보인다 — 한두 번의 방문이라 믿기 어렵다. 같은 페이지의 휴대폰·데스크톱 줄을 견주어 기기마다 불편한 곳을 찾는다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-pages"></span><button type="button" class="ibtn" data-detail="pages" aria-label="페이지 × 기기 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
-            <div class="scroll"><table class="tbl" id="tbl-pages"></table></div>
+· 어디까지 내려봤나 — 페이지를 위에서부터 10% 씩 열 칸으로 그려, 평균으로 내려본 데까지 밝힌 것
+· 머문 시간 중 움직인 시간 — 옅은 띠가 머문 시간, 그 안 진한 몫이 스크롤·클릭·입력을 한 시간
+· 눈에 띄는 불만 신호 — 0 보다 큰 신호 가운데 첫째(등급 모양 + 100번 중 n번)
+· 세션 가중 평균 — 방문이 많은 주소일수록 더 크게 쳐서 낸 평균
+· 표본 적음 — 방문 3번 미만이라 흐리게 보인 줄
+자료 출처: Clarity 를 주소·기기로 나눠 12시간마다(이 페이지를 열 때) 받고 랜딩·대시보드 탭 같은 페이지 종류로 묶은 값. Clarity 는 랜딩과 대시보드에서만 돌아 김프 차트 같은 정적 페이지 줄은 거의 빈다.
+읽는 법: 맨 위 항목(셋까지)이 가장 많이 본 줄의 깊이·덜 내려보는 줄·오래 움직인 줄·불만 신호가 눈에 띄는 줄을 말해 준다. 같은 페이지의 휴대폰·데스크톱 줄을 견주고, 줄을 누르면 숫자 표가 열린다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-pages"></span><button type="button" class="ibtn" data-detail="pages" aria-label="페이지 × 기기 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <ul class="say" id="say-pages" hidden></ul>
+            <p class="keys"><span><i class="pshape-key"></i>페이지 그림 = 위에서부터 10% 씩 열 칸, 밝은 칸 = 평균으로 내려본 데까지</span><span><i class="time-key"></i>시간 띠 = 옅은 곳이 머문 시간, 진한 곳이 그중 스크롤·클릭·입력을 한 시간</span><span>흐린 줄 = 방문 3번 미만이라 믿기 어렵다 · 줄을 누르면 숫자 표</span></p>
+            <div class="places" id="l-pages"></div>
           </section>
           <section class="card s4" id="card-countries" aria-labelledby="h-countries">
             <header class="card-head"><h2 id="h-countries"><button type="button" class="t" data-detail="countries">나라</button></h2><span class="unit">세션 · 최근 24시간</span><span class="help" title="보여 주는 것: 최근 24시간 Clarity 세션을 나라별로 센 것.
 자료 출처: 세션 카드와 같은 Clarity 받기(6시간마다, 최근 24시간, 20나라까지). 나라 이름은 Clarity 가 준 글자 그대로이고, 동의한 방문만 든다.
-읽는 법: 트래픽 페이지 '어디서'(서버 기록 — 봇을 포함한 모든 요청)보다 훨씬 작은 게 정상이다. 여기 나온 나라는 동의 창에 답한 사람이라 대부분 실제 사람이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-countries"></span><button type="button" class="ibtn" data-detail="countries" aria-label="나라 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+읽는 법: 그림 위 한 문장이 가장 많은 나라와 그 몫을 말해 준다. 트래픽 페이지 '어디서'(서버 기록 — 봇을 포함한 모든 요청)보다 훨씬 작은 게 정상이다. 여기 나온 나라는 동의 창에 답한 사람이라 대부분 실제 사람이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-countries"></span><button type="button" class="ibtn" data-detail="countries" aria-label="나라 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <p class="say" id="say-countries" hidden></p>
             <div class="list" id="l-countries"></div>
           </section>
           <section class="card s4" id="card-dims" aria-labelledby="h-dims">
@@ -173,7 +183,8 @@
 · OS — 운영체제(Windows·macOS·Android·iOS 등)
 · 기타 — 상위 다섯 밖을 모은 것
 자료 출처: Clarity 를 기기·브라우저·OS 로 나눠 하루 한 번(이 페이지를 열 때 받은 지 24시간이 지났으면) 받은 값. 이름은 Clarity 글자 그대로(PC·Mobile·Chrome…)이고, 동의한 방문만 든다.
-읽는 법: 트래픽 페이지 '누가' 와 견주면 그쪽은 서버 기록(봇 섞임), 이쪽은 동의한 사람만이다. 휴대폰 몫이 크면 화면 페이지에서 휴대폰 화면을 먼저 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-dims"></span><button type="button" class="ibtn" data-detail="dims" aria-label="기기 · 브라우저 · OS 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+읽는 법: 그림 위 한 문장이 기기·브라우저·OS 마다 첫째와 그 몫을 말해 준다. 트래픽 페이지 '누가' 와 견주면 그쪽은 서버 기록(봇 섞임), 이쪽은 동의한 사람만이다. 휴대폰 몫이 크면 화면 페이지에서 휴대폰 화면을 먼저 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-dims"></span><button type="button" class="ibtn" data-detail="dims" aria-label="기기 · 브라우저 · OS 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <p class="say" id="say-dims" hidden></p>
             <div class="b100s" id="b-dims"></div>
           </section>
           <section class="card s4" id="card-refs" aria-labelledby="h-refs">
@@ -182,7 +193,8 @@
 · Channel — 들어온 경로 종류(직접·검색·소셜·다른 사이트 링크 등, Clarity 가 가른 이름)
 · Source — 들어오기 바로 전 사이트 이름(google·naver 등)
 자료 출처: Clarity 를 경로·출처로 나눠 하루 한 번(이 페이지를 열 때 받은 지 24시간이 지났으면) 받은 값. 이름은 Clarity 글자 그대로이고, 동의한 방문만 든다.
-읽는 법: 트래픽 페이지 '들어온 길'(서버 기록)과 견준다. 이쪽은 수가 작지만 봇이 거의 없다. 광고·공유를 한 날은 그 출처가 늘었는지 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-refs" role="group" aria-label="유입 목록"></span><span class="end"><span class="tag" id="t-refs"></span><button type="button" class="ibtn" data-detail="refs" aria-label="유입 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+읽는 법: 그림 위 한 문장이 가장 많은 경로와 그 몫을 말해 준다. 트래픽 페이지 '들어온 길'(서버 기록)과 견준다. 이쪽은 수가 작지만 봇이 거의 없다. 광고·공유를 한 날은 그 출처가 늘었는지 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-refs" role="group" aria-label="유입 목록"></span><span class="end"><span class="tag" id="t-refs"></span><button type="button" class="ibtn" data-detail="refs" aria-label="유입 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <p class="say" id="say-refs" hidden></p>
             <div class="list" id="l-refs"></div>
           </section>
         </main>

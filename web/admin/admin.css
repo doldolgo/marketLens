@@ -1258,12 +1258,265 @@ button.lrow:hover {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-/* 셋째 칸이 증감('▲ 12.3%p')인 목록(불만 신호) — 잘리지 않게 고정 폭 */
-.deltas .lrow {
-  grid-template-columns: minmax(0, 1fr) auto 7em;
+/* — Clarity 쉽게 읽기(066 §3.5) — 카드 한 문장 · 그림 열쇠 줄 · 불만 신호 줄(100칸) · 페이지 × 기기 줄 — */
+.say {
+  margin: 0;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  line-height: 1.55;
 }
-.deltas .lrow .p {
-  overflow: visible;
+.say[hidden] {
+  display: none;
+}
+.say.small {
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 1.4;
+}
+ul.say {
+  display: grid;
+  gap: 2px;
+  padding-left: 1.2em;
+}
+.keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.keys > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cells-key,
+.pshape-key,
+.time-key {
+  display: inline-block;
+  flex: none;
+  border-radius: 2px;
+}
+.cells-key {
+  width: 18px;
+  height: 8px;
+  background: linear-gradient(90deg, var(--c1) 0 33%, var(--grid) 33% 100%);
+}
+.pshape-key {
+  width: 8px;
+  height: 14px;
+  background: linear-gradient(var(--c3) 0 50%, var(--grid) 50% 100%);
+}
+.time-key {
+  width: 22px;
+  height: 8px;
+  background: linear-gradient(90deg, var(--c7) 0 40%, rgb(144 133 233 / 0.3) 40% 100%);
+}
+.sigs {
+  display: grid;
+}
+.sig {
+  display: grid;
+  gap: 4px;
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--line);
+}
+.sig-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px var(--sp-2);
+  font-size: var(--fs-14);
+}
+.sig-head b {
+  font-weight: 600;
+}
+.lvl {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+}
+.lvl.warn {
+  color: var(--warn);
+}
+.lvl.bad {
+  color: var(--bad);
+}
+.sig-n {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.sig-plain {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 1.45;
+}
+.sig-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--sp-3);
+}
+.sig-was {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+/* 방문 100칸 — 두 줄 × 쉰 칸, 위아래로 먼저 채워 막대처럼 자란다 */
+.cells {
+  display: grid;
+  flex: 1 1 260px;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(2, 5px);
+  grid-template-columns: repeat(50, minmax(0, 1fr));
+  gap: 2px;
+  min-width: 0;
+  max-width: 420px;
+}
+.cells > i {
+  display: block;
+  border-radius: 1px;
+  background: var(--grid);
+}
+.cells > i.on {
+  background: var(--c1);
+}
+.cells.warn > i.on {
+  background: var(--warn);
+}
+.cells.bad > i.on {
+  background: var(--bad);
+}
+.cells > i.part {
+  background: rgb(57 135 229 / 0.45);
+}
+/* 페이지 × 기기 줄 — 이름 · 방문 막대 · 페이지 모양 · 시간 띠 · 눈에 띄는 신호 */
+.places {
+  display: grid;
+  gap: 2px;
+}
+.prow {
+  display: grid;
+  grid-template-columns: minmax(130px, 1.1fr) minmax(110px, 1fr) minmax(120px, 0.8fr) minmax(170px, 1.4fr) minmax(130px, 1fr);
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: 44px;
+  padding: 4px var(--sp-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-13);
+  text-align: left;
+}
+button.prow {
+  cursor: pointer;
+}
+button.prow:hover {
+  background: rgb(255 255 255 / 0.03);
+}
+.prow.phead {
+  min-height: 0;
+  padding-bottom: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.pc {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.pc.c0 {
+  display: grid;
+  row-gap: 0;
+}
+.pc.c4 {
+  display: grid;
+  grid-template-areas: "l l" "s n" "s v";
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 6px;
+  row-gap: 0;
+}
+.pc b,
+.pc small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pc b {
+  font-weight: 600;
+}
+.pc small {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.pc.c4 > .plabel {
+  grid-area: l;
+}
+.pc.c4 > .shape {
+  grid-area: s;
+}
+.pc.c4 > b {
+  grid-area: n;
+}
+.pc.c4 > small:not(.plabel) {
+  grid-area: v;
+}
+.plabel {
+  display: none;
+}
+.pv {
+  flex: none;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pbar {
+  flex: 1 1 auto;
+  min-width: 40px;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--grid);
+}
+.pbar .fill {
+  display: block;
+  height: 100%;
+  background: rgb(57 135 229 / 0.7);
+}
+.pbar.time .fill {
+  background: rgb(144 133 233 / 0.3);
+}
+.pbar .act {
+  display: block;
+  height: 100%;
+  background: var(--c7);
+}
+/* 페이지 모양 — 위에서부터 10% 씩 열 칸, 밝은 칸 = 평균으로 내려본 데까지 */
+.pshape {
+  display: grid;
+  flex: none;
+  grid-template-rows: repeat(10, 2px);
+  gap: 1px;
+  width: 16px;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+}
+.pshape > i {
+  display: block;
+  background: var(--grid);
+}
+.pshape > i.on {
+  background: var(--c3);
 }
 .list-foot {
   display: flex;
@@ -1423,24 +1676,6 @@ button.lrow:hover {
   width: 96px;
   height: 22px;
   color: var(--accent);
-}
-/* 칸 진하기(페이지 × 기기 표) — 칸 전체 바탕을 한 색 다섯 단계로, 밝은 두 단계는 어두운 글 */
-.q1 {
-  background-color: rgb(24 79 149 / 0.45);
-}
-.q2 {
-  background-color: rgb(37 106 191 / 0.55);
-}
-.q3 {
-  background-color: rgb(57 135 229 / 0.65);
-}
-.q4 {
-  background-color: var(--seq-4);
-  color: var(--bg);
-}
-.q5 {
-  background-color: var(--seq-5);
-  color: var(--bg);
 }
 .thin {
   opacity: 0.45;
@@ -2437,6 +2672,39 @@ details.card > summary {
   }
   .kpis.six {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .prow.phead {
+    display: none;
+  }
+  .prow {
+    grid-template-areas: "n s" "v d" "t t";
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px var(--sp-3);
+    padding: var(--sp-2);
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+  }
+  .pc.c0 {
+    grid-area: n;
+  }
+  .pc.c1 {
+    grid-area: v;
+  }
+  .pc.c2 {
+    grid-area: d;
+  }
+  .pc.c3 {
+    grid-area: t;
+  }
+  .pc.c4 {
+    grid-area: s;
+  }
+  .pc {
+    flex-wrap: wrap;
+  }
+  .pc .plabel {
+    display: block;
+    flex: 0 0 100%;
   }
   .sheet {
     padding: 0;

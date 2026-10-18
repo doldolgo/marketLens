@@ -133,10 +133,19 @@ export const SIGNALS = Object.freeze([
   ['deadClick', '죽은 클릭'],
   ['rageClick', '분노 클릭'],
   ['excessiveScroll', '과한 스크롤'],
-  ['quickback', '빠른 뒤로'],
+  ['quickback', '빠른 뒤로 가기'],
   ['scriptError', '스크립트 오류'],
   ['errorClick', '오류 클릭'],
 ]);
+// 불만 신호 쉬운 풀이(066 §3.3) — 이름 아래 한 줄, 무엇을 했을 때 잡히는지와 왜 생기는지
+export const SIGNAL_PLAIN = Object.freeze({
+  deadClick: '눌렀는데 화면에 아무 변화가 없었다 — 글자·그림을 단추로 알고 누를 때 생긴다',
+  rageClick: '같은 곳을 짧은 시간에 여러 번 연달아 눌렀다 — 눌러도 반응이 없어 답답할 때 생긴다',
+  excessiveScroll: '페이지를 위아래로 오래 오르내렸다 — 찾는 내용이 잘 안 보일 때 생긴다',
+  quickback: '다른 페이지로 갔다가 곧바로 되돌아왔다 — 간 곳이 기대와 달랐을 때 생긴다',
+  scriptError: '페이지의 자바스크립트가 오류를 냈다 — 화면 일부가 안 그려졌을 수 있다',
+  errorClick: '누른 바로 그때 자바스크립트 오류가 났다 — 그 단추가 고장 났을 수 있다',
+});
 export const CLARITY_PAGE = Object.freeze({
   landing: '랜딩',
   'app:spread': '대시보드 스프레드',
