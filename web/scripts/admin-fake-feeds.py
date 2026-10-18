@@ -905,6 +905,16 @@ def _rp_batches(spec: dict) -> list[dict]:
     return out
 
 
+# 073 §3.4 의 c — 조각마다 정해진 동의 상태(답 안 함이 가장 흔하다). 동의 가운데 절반은 조각 중간에 동의한 것(처음은 답 안 함)
+RP_CONSENTS = ("unset", "granted", "unset", "later", "denied", "gpc", "granted")
+
+
+def _rp_consent(sid: str) -> tuple[str, str]:
+    i = sum(map(ord, sid))
+    now = RP_CONSENTS[i % len(RP_CONSENTS)]
+    return now, "unset" if now == "granted" and i % 2 else now
+
+
 def _rp_row(spec: dict) -> dict | None:
     """073 §3.6 행 — 묶음이 하나도 없으면(막 시작) None."""
     batches = _rp_batches(spec)
@@ -917,9 +927,11 @@ def _rp_row(spec: dict) -> dict | None:
             pages.append(e[2])
     now_page = next((e[2] for e in reversed(flat) if e[1] == "p"), spec["page"])
     show = txt if state["scenario"] == "xss" else (lambda v: v)
+    consent, consent_first = _rp_consent(spec["sid"])
     return {"sid": spec["sid"], "ip": show(spec["ip"]), "dev": spec["dev"], "page": show(spec["page"]), "pages": [show(p) for p in pages],
             "now": show(now_page), "first": batches[0]["at"], "last": batches[-1]["at"], "n": len(batches),
-            "clicks": sum(1 for e in flat if e[1] == "c"), "w": spec["w"], "h": spec["h"], "cut": False}
+            "clicks": sum(1 for e in flat if e[1] == "c"), "w": spec["w"], "h": spec["h"], "cut": False,
+            "consent": consent, "consentFirst": consent_first}
 
 
 def _rp_state() -> dict | None:

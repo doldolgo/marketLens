@@ -6,7 +6,7 @@
 import { call, el, isExpired, isObj, kstText, list, num, tagText } from './common.js';
 import {
   FOLLOW_POLL_MS, FOLLOW_STOP_MS, SEEK_MS,
-  advance, archiveReq, barMarks, devName, eventRows, followTarget, frameState, lagSec, sessionReq, timeText, timeline, truncated, validSid,
+  advance, archiveReq, barMarks, consentText, devName, eventRows, followTarget, frameState, lagSec, sessionReq, timeText, timeline, truncated, validSid,
 } from './replaymodel.js';
 import { createFrame } from './replayframe.js';
 import { createView } from './replayview.js';
@@ -196,7 +196,7 @@ function createPlayer(app, sid, followMode) {
     const m = st.meta;
     if (!isObj(m)) return '';
     const first = num(m.first) ?? play.tl?.start ?? null;
-    return [typeof m.ip === 'string' ? m.ip : '–', devName(m.dev), first === null ? '–' : `${kstText(first, true)} KST`].join(' · ');
+    return [typeof m.ip === 'string' ? m.ip : '–', devName(m.dev), first === null ? '–' : `${kstText(first, true)} KST`, consentText(m)].join(' · ');
   }
 
   // --- 붙이기 · 그리기 ----------------------------------------------------------------------------------

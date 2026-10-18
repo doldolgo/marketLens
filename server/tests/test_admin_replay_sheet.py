@@ -219,11 +219,12 @@ def flow() -> dict[str, Any]:
 def test_sheet_loads_every_page_and_frames_the_dashboard_tab(
     flow: dict[str, Any],
 ) -> None:
-    """§3.3 — 판 머리 '화면 재생' · 'IP · 기기 · 시작 KST', 073 session 을 after=next 로 more 가 끝날 때까지, 틀 = 공개 사이트 그 화면 +
+    """§3.3 — 판 머리 '화면 재생' · 'IP · 기기 · 시작 KST · 동의', 073 session 을 after=next 로 more 가 끝날 때까지, 틀 = 공개 사이트 그 화면 +
     kt-replay=1(대시보드 /app/?tab=), 크기 = 조각의 화면 크기(w×h), 칸 맞춤 변수(늘리지 않음 — 창 높이 900 에서 몫 640/900)."""
     got = flow["load"]
     assert got["open"] and got["title"] == "화면 재생" and got["custom"] is False
-    assert got["unit"] == "203.0.113.7 · PC · 2026-10-15 02:47:22 KST"
+    # 동의 키가 없는 머리 = 동의한 방문만 기록하던 때의 조각
+    assert got["unit"] == "203.0.113.7 · PC · 2026-10-15 02:47:22 KST · 동의"
     assert got["calls"] == [
         f"/svc/api/admin/replay/session?sid={SID}&after=0",
         f"/svc/api/admin/replay/session?sid={SID}&after=2",
