@@ -727,12 +727,12 @@ body[data-sheet="open"] {
   width: 15px;
   height: 15px;
 }
-/* '?' 말풍선(071) — 뜻 · 읽는 법 두 단락. 위치는 help.js 가 화면 안으로 맞춘다 */
+/* '?' 말풍선(071) — 칸 넷(보여 주는 것 · 낱말 뜻 · 자료 출처 · 읽는 법). 자리·높이는 help.js 가 화면 안으로 맞추고, 길면 안 칸이 스크롤한다.
+   ::before 는 '?' 와 말풍선 사이 틈을 덮는 보이지 않는 다리 — 마우스로 연 말풍선에 마우스를 옮기는 동안 닫히지 않게 */
 .help-pop {
   position: fixed;
   z-index: 70;
-  max-width: min(340px, calc(100vw - 16px));
-  padding: var(--sp-2) var(--sp-3);
+  width: min(400px, calc(100vw - 16px));
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
   background: var(--raised);
@@ -740,25 +740,66 @@ body[data-sheet="open"] {
   color: var(--text-1);
   font-size: var(--fs-13);
   font-weight: 400;
-  line-height: 1.5;
+  line-height: 1.55;
   text-align: left;
   white-space: normal;
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
+.help-pop::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -8px;
+  height: 8px;
+}
+.help-pop[data-side="above"]::before {
+  top: auto;
+  bottom: -8px;
+}
 .help-pop[hidden] {
   display: none;
 }
-.help-pop p {
+.help-body {
+  max-height: 600px; /* help.js MAX_H 와 같은 값 */
+  padding: var(--sp-3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.help-part + .help-part {
+  margin-top: var(--sp-3);
+}
+.help-part h3 {
+  margin: 0 0 2px;
+  color: var(--accent);
+  font-size: var(--fs-12);
+  font-weight: 600;
+}
+.help-part p {
   margin: 0;
 }
-.help-pop p + p {
-  margin-top: var(--sp-1);
+.help-part ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
-.help-pop b {
-  margin-right: 6px;
-  color: var(--accent);
+.help-part li {
+  padding-left: 10px;
+  text-indent: -10px;
+}
+.help-part li::before {
+  content: "· ";
+  color: var(--text-3);
+}
+.help-part li + li {
+  margin-top: 2px;
+}
+.help-part li b {
   font-weight: 600;
+}
+.help-part li span {
+  color: var(--text-2);
 }
 .end {
   display: inline-flex;

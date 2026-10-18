@@ -48,57 +48,106 @@
         <main class="content" id="content">
           <div class="kpis s12" id="kpis-ip" aria-label="큰 수 — IP 별">
           <section class="card kpi" id="card-acount" aria-labelledby="h-acount">
-            <header class="card-head"><h2 id="h-acount">IP 수</h2><span class="unit">가린 대역 포함</span><span class="help" title="고른 기간 서버 기록에 나온 서로 다른 IP 수(거르기 적용 뒤).&#10;IP 전체 저장 전 기록은 끝자리를 가린 대역 한 줄로 센다. 한 사람이 IP 여럿을 쓰기도 한다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-acount"></span></span></header>
+            <header class="card-head"><h2 id="h-acount">IP 수</h2><span class="unit">가린 대역 포함</span><span class="help" title="보여 주는 것: 고른 기간 서버 접속 기록에 나온 서로 다른 IP 수(위 거르기를 적용한 뒤).
+낱말 뜻:
+· IP — 인터넷에서 기기가 쓰는 주소. 한 사람이 여러 IP 를 쓰기도(휴대폰 망) 하고, 한 IP 를 여럿이 쓰기도(회사·카페) 한다
+· 가린 대역 — IP 전체를 남기기 전(2026-10-14 전) 기록은 끝자리를 가린 묶음(IPv4 /24 · IPv6 /48) 한 줄로 든다
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄)을 IP 마다 묶어 60초마다 다시 센다. 시세 폴링 같은 잦은 요청과 바깥 점검은 기록하지 않는다.
+읽는 법: 사람 수가 아니다 — 같은 사람의 IPv4·IPv6 도 두 줄이다. 봇이 몰리는 날은 크게 는다. 아래 표는 200행씩 불러온다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-acount"></span></span></header>
             <div class="big" id="v-acount">–</div>
             <div class="delta" id="d-acount"></div>
           </section>
           <section class="card kpi" id="card-abot" aria-labelledby="h-abot">
-            <header class="card-head"><h2 id="h-abot">봇 판정</h2><span class="unit">요청 비율</span><span class="help" title="판정이 봇·의심인 IP 가 보낸 요청의 비율(불러온 행 기준).&#10;판정은 근거(브라우저 정보·데이터센터·폭주·404 등) 점수의 합 — 행을 누르면 근거를 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-abot"></span></span></header>
+            <header class="card-head"><h2 id="h-abot">봇 판정</h2><span class="unit">요청 비율</span><span class="help" title="보여 주는 것: 판정이 봇·의심인 IP 가 보낸 요청이 전체 요청에서 차지하는 비율.
+낱말 뜻:
+· 판정 — IP 마다 근거 점수를 더해 봇(60 이상)·의심(30~59)·사람(30 미만)으로 가른 것. 요청 3번 미만은 모름, 관리자 화면에서 온 것은 운영자
+· 근거 — 봇 이름을 밝힘(+70)·탐색 경로(+60)·도구 모양(+50)·페이지만 열고 스크립트 신호 없음(+30)·데이터센터 망(+20) 등은 더하고, 스크립트 신호(−40)·실시간 연결(−30)·그림·글꼴 받기(−15)는 뺀다
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄). 지금 불러온 행으로만 계산한다 — 다 불러오지 않았으면 앞에 ≈ 와 '불러온 n개 기준' 이 붙는다.
+읽는 법: 공개 사이트는 봇 몫이 원래 크다. 행을 누르면 그 IP 의 근거를 하나씩 본다. 다시 온 사람은 그림을 브라우저에 저장해 두어 '정적 자원 0' 근거가 붙을 수 있다 — 점수는 어림이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-abot"></span></span></header>
             <div class="big" id="v-abot">–</div>
             <div class="delta" id="d-abot"></div>
           </section>
           <section class="card kpi" id="card-adc" aria-labelledby="h-adc">
-            <header class="card-head"><h2 id="h-adc">데이터센터</h2><span class="unit">요청 비율</span><span class="help" title="AWS·구글 클라우드 같은 데이터센터 망 IP 가 보낸 요청의 비율(불러온 행 기준).&#10;사람은 보통 통신사 망에서 온다 — 높으면 봇·수집기가 많다는 뜻."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-adc"></span></span></header>
+            <header class="card-head"><h2 id="h-adc">데이터센터</h2><span class="unit">요청 비율</span><span class="help" title="보여 주는 것: 데이터센터 망 IP 가 보낸 요청이 전체 요청에서 차지하는 비율.
+낱말 뜻:
+· 데이터센터 — AWS·구글 클라우드처럼 서버를 빌려주는 회사의 주소. 사람은 보통 집·휴대폰 통신사 망에서 온다
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄)의 IP 를 무료 IP 위치 자료(DB-IP Lite, 달마다 새로 받음)의 망 주인 목록에서 찾아 가른다. 지금 불러온 행으로만 계산한다 — 다 불러오지 않았으면 앞에 ≈ 와 '불러온 n개 기준' 이 붙는다.
+읽는 법: 높으면 봇·수집기가 많다는 뜻이다. VPN 을 쓰는 사람도 데이터센터로 보일 수 있다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-adc"></span></span></header>
             <div class="big" id="v-adc">–</div>
             <div class="delta" id="d-adc"></div>
           </section>
           <section class="card kpi" id="card-anew" aria-labelledby="h-anew">
-            <header class="card-head"><h2 id="h-anew">오늘 처음 본 IP</h2><span class="unit">창 안</span><span class="help" title="고른 기간 안에서 처음 나타난 때가 오늘(KST)인 IP 수.&#10;갑자기 많으면 새 봇이 붙었거나 공유·광고로 새 방문이 늘어난 것."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-anew"></span></span></header>
+            <header class="card-head"><h2 id="h-anew">오늘 처음 본 IP</h2><span class="unit">창 안</span><span class="help" title="보여 주는 것: 고른 기간 안에서 처음 나타난 때가 오늘(KST 0시 뒤)인 IP 수.
+낱말 뜻:
+· 오늘 처음 본 — 고른 기간 안의 첫 요청이 오늘인 것. 기간 앞에 왔던 IP 도 기간 안에서 처음이면 든다
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄). 지금 불러온 행으로만 센다(≈ 표시 없음).
+읽는 법: 갑자기 많으면 새 봇이 붙었거나 공유·광고로 새 방문이 는 것이다. 기간을 길게(7일·30일) 잡을수록 '정말 처음' 에 가깝다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-anew"></span></span></header>
             <div class="big" id="v-anew">–</div>
             <div class="delta" id="d-anew"></div>
           </section>
           </div>
           <div class="kpis s12" id="kpis-band" aria-label="큰 수 — 대역 별" hidden>
           <section class="card kpi" id="card-count" aria-labelledby="h-count">
-            <header class="card-head"><h2 id="h-count">대역 수</h2><span class="unit">IPv4 /24 · IPv6 /48</span><span class="help" title="끝자리를 가린 IP 대역(IPv4 /24 · IPv6 /48)의 수(거르기 뒤).&#10;같은 회사·통신사의 가까운 주소는 한 대역으로 묶인다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-count"></span></span></header>
+            <header class="card-head"><h2 id="h-count">대역 수</h2><span class="unit">IPv4 /24 · IPv6 /48</span><span class="help" title="보여 주는 것: 끝자리를 가린 IP 대역의 수(위 거르기를 적용한 뒤).
+낱말 뜻:
+· 대역 — IP 끝자리를 가려 묶은 것. IPv4 는 /24(앞 세 자리가 같은 256개), IPv6 는 /48
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄)의 IP 를 대역으로 잘라 묶어 60초마다 다시 센다. IP 전체를 남기기 전(2026-10-14 전) 기록도 함께 보인다.
+읽는 법: 같은 회사·통신사의 가까운 주소는 한 대역으로 묶여 IP 수보다 작다. 이 보기에는 원래 IP 와 브라우저 정보 원문이 없다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-count"></span></span></header>
             <div class="big" id="v-count">–</div>
             <div class="delta" id="d-count"></div>
           </section>
           <section class="card kpi" id="card-dc" aria-labelledby="h-dc">
-            <header class="card-head"><h2 id="h-dc">데이터센터 대역</h2><span class="unit">요청 비중</span><span class="help" title="데이터센터 망 대역이 보낸 요청의 비중(불러온 대역 기준).&#10;사람은 보통 통신사 망에서 온다 — 높으면 봇·수집기가 많다는 뜻."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-dc"></span></span></header>
+            <header class="card-head"><h2 id="h-dc">데이터센터 대역</h2><span class="unit">요청 비중</span><span class="help" title="보여 주는 것: 데이터센터 망 대역이 보낸 요청이 전체 요청에서 차지하는 비중.
+낱말 뜻:
+· 데이터센터 — AWS·구글 클라우드처럼 서버를 빌려주는 회사의 주소. 사람은 보통 집·휴대폰 통신사 망에서 온다
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄). 대역 첫 주소를 무료 IP 위치 자료(DB-IP Lite, 달마다 새로 받음)의 망 주인 목록에서 찾는다. 지금 불러온 행으로만 계산한다 — 다 불러오지 않았으면 앞에 ≈ 와 '불러온 n개 기준' 이 붙는다.
+읽는 법: 높으면 봇·수집기가 많다는 뜻이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-dc"></span></span></header>
             <div class="big" id="v-dc">–</div>
             <div class="delta" id="d-dc"></div>
  
           </section>
           <section class="card kpi" id="card-top" aria-labelledby="h-top">
-            <header class="card-head"><h2 id="h-top">상위 10 대역</h2><span class="unit">요청 비중</span><span class="help" title="요청이 가장 많은 10 대역이 전체 요청에서 차지하는 비중.&#10;높으면 소수 대역(대개 봇)이 요청을 몰아 보낸다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-top"></span></span></header>
+            <header class="card-head"><h2 id="h-top">상위 10 대역</h2><span class="unit">요청 비중</span><span class="help" title="보여 주는 것: 요청이 가장 많은 10 대역이 전체 요청에서 차지하는 비중.
+낱말 뜻:
+· 대역 — IP 끝자리를 가려 묶은 것. IPv4 는 /24(앞 세 자리가 같은 256개), IPv6 는 /48
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄). 지금 불러온 행으로만 계산한다 — 다 불러오지 않았으면 앞에 ≈ 와 '불러온 n개 기준' 이 붙는다.
+읽는 법: 높으면 소수 대역(대개 봇)이 요청을 몰아 보낸다는 뜻이다. 아래 표를 요청 순으로 보면 그 대역들이 맨 위에 있다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-top"></span></span></header>
             <div class="big" id="v-top">–</div>
             <div class="delta" id="d-top"></div>
  
           </section>
           <section class="card kpi" id="card-new" aria-labelledby="h-new">
-            <header class="card-head"><h2 id="h-new">오늘 처음 본 대역</h2><span class="unit">창 안</span><span class="help" title="고른 기간 안에서 처음 나타난 때가 오늘(KST)인 대역 수.&#10;갑자기 많으면 새 봇이나 새 유입을 의심한다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-new"></span></span></header>
+            <header class="card-head"><h2 id="h-new">오늘 처음 본 대역</h2><span class="unit">창 안</span><span class="help" title="보여 주는 것: 고른 기간 안에서 처음 나타난 때가 오늘(KST 0시 뒤)인 대역 수.
+낱말 뜻:
+· 대역 — IP 끝자리를 가려 묶은 것. IPv4 는 /24(앞 세 자리가 같은 256개), IPv6 는 /48
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄). 지금 불러온 대역으로만 센다(≈ 표시 없음).
+읽는 법: 갑자기 많으면 새 봇이나 새 유입을 의심한다. 기간을 길게 잡을수록 '정말 처음' 에 가깝다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-new"></span></span></header>
             <div class="big" id="v-new">–</div>
             <div class="delta" id="d-new"></div>
  
           </section>
           </div>
           <section class="card s12" id="card-rplive" aria-labelledby="h-rplive">
-            <header class="card-head"><h2 id="h-rplive">지금 보는 중</h2><span class="unit">60초 안 · 5초마다 · 행을 누르면 따라 보기</span><span class="help" title="지금(60초 안) 움직임이 들어오는 방문이다. 봇을 가려내려고 동의와 관계없이 모든 방문을 기록하고(서비스 종료까지 보관), 동의 칸에 화면 분석 동의 여부를 보인다.&#10;행을 누르면 그 화면을 2~3초 늦게 따라 본다. 머문 시간 = 첫 기록부터 마지막 기록까지, 5초마다 새로 읽는다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-rplive"></span></span></header>
+            <header class="card-head"><h2 id="h-rplive">지금 보는 중</h2><span class="unit">60초 안 · 5초마다 · 행을 누르면 따라 보기</span><span class="help" title="보여 주는 것: 지금(60초 안) 화면 움직임이 들어오는 방문 목록.
+낱말 뜻:
+· 동의 — 그 방문이 화면 분석에 동의했는지(동의 / 미동의)
+· 머문 시간 — 첫 기록부터 마지막 기록까지
+· 따라 보기 — 행을 누르면 그 화면을 2~3초 늦게 따라 본다
+자료 출처: 방문자 브라우저가 화면 이동 기록(마우스·손가락 위치·누름·스크롤·탭 바꿈)을 2초마다 묶어 보내면 우리 서버가 받아 둔다. 봇을 가려내려고 동의와 관계없이 모든 방문을 기록하고(서비스 종료까지 보관), 이 카드는 5초마다 새로 읽는다.
+읽는 법: 행을 누르면 그 화면을 2~3초 늦게 따라 본다. 비어 있으면 지금 화면을 움직이는 방문이 없는 것이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-rplive"></span></span></header>
             <div class="scroll"><table class="tbl" id="tbl-rplive"></table></div>
           </section>
           <section class="card s12" id="card-addrs" aria-labelledby="h-addrs">
-            <header class="card-head"><h2 id="h-addrs">IP</h2><span class="unit">판정 · 위치 · 행을 누르면 상세</span><span class="help" title="서버 접속 기록의 IP 마다 요청 수·판정(봇·의심·사람)·근거·위치·망 사업자.&#10;행을 누르면 판정 근거·시간별 요청·최근 요청을 본다. IP 전체 저장 전 기록은 가린 대역으로 보인다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-addrs"></span></span></header>
+            <header class="card-head"><h2 id="h-addrs">IP</h2><span class="unit">판정 · 위치 · 행을 누르면 상세</span><span class="help" title="보여 주는 것: 서버 접속 기록의 IP 마다 요청 수·판정·점수·위치·망 사업자를 늘어놓은 표.
+낱말 뜻:
+· 판정 — ■봇 ▲의심 ●사람 ○모름(요청 3번 미만) ◆운영자(관리자 화면에서 온 요청)
+· 점수 — 근거 점수의 합. 60 이상 봇, 30~59 의심, 30 미만 사람(빼는 근거가 많으면 0 아래도 된다)
+· 위치 — 나라 국기·도시(대략)·망 사업자
+· 브라우저로 연 페이지 — 그 IP 가 브라우저 이름표로 연 페이지 수
+· 추이 — 24시간은 시간별, 7일·30일은 날별 요청
+· 대역 표시 — IP 전체를 남기기 전(2026-10-14 전) 기록은 끝자리를 가린 대역 한 줄로 보인다
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄)을 IP 마다 묶어 60초마다 다시 센다. 위치·망은 무료 IP 위치 자료(DB-IP Lite, 달마다 새로 받음)로 찾은 값이라 나라는 대략이고 도시는 통신사 거점일 수 있다.
+읽는 법: 행에 마우스를 올리면 근거 셋, 누르면 판정 근거·어디·시간별 요청·최근 요청(100)이 열린다. 거르기로 봇·데이터센터를 빼면 사람 쪽만 남는다. 200행씩 불러온다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-addrs"></span></span></header>
             <div class="bar">
               <div class="seg" role="group" aria-label="판정" id="verdict-seg"><button type="button" data-verdict="bot" aria-pressed="false"><i class="shape bad"></i>봇</button><button type="button" data-verdict="suspect" aria-pressed="false"><i class="shape warn"></i>의심</button><button type="button" data-verdict="human" aria-pressed="false"><i class="shape ok"></i>사람</button><button type="button" data-verdict="unknown" aria-pressed="false"><i class="shape none"></i>모름</button><button type="button" data-verdict="operator" aria-pressed="false"><i class="shape op"></i>운영자</button></div>
               <div class="seg" role="group" aria-label="망 종류" id="a-net-seg"><button type="button" data-net="" aria-pressed="true">전체</button><button type="button" data-net="telecom_kr" aria-pressed="false">국내 통신사</button><button type="button" data-net="telecom" aria-pressed="false">해외 통신사</button><button type="button" data-net="cloud" aria-pressed="false">데이터센터</button><button type="button" data-net="other" aria-pressed="false">그 밖</button><button type="button" data-net="ipv6" aria-pressed="false">IPv6</button></div>
@@ -111,7 +160,14 @@
             <p class="credit"><a href="https://db-ip.com" rel="noreferrer">IP Geolocation by DB-IP</a></p>
           </section>
           <section class="card s12" id="card-bands" aria-labelledby="h-bands" hidden>
-            <header class="card-head"><h2 id="h-bands">IP 대역</h2><span class="unit">가린 대역 그대로 · 행을 누르면 상세</span><span class="help" title="끝자리를 가린 IP 대역(IPv4 /24 · IPv6 /48)마다 요청·브라우저로 연 페이지·봇 비율.&#10;IP 전체 저장 전 기록도 보이는 보기. 원 IP·브라우저 원문은 없다. 행을 누르면 상세."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-bands"></span></span></header>
+            <header class="card-head"><h2 id="h-bands">IP 대역</h2><span class="unit">가린 대역 그대로 · 행을 누르면 상세</span><span class="help" title="보여 주는 것: 끝자리를 가린 IP 대역마다 요청·브라우저로 연 페이지·짝 수·봇 %·5xx 를 늘어놓은 표.
+낱말 뜻:
+· 대역 — IP 끝자리를 가려 묶은 것. IPv4 는 /24(앞 세 자리가 같은 256개), IPv6 는 /48
+· 짝 수 — 날마다(KST) 대역 + 브라우저 정보가 다른 것을 따로 센 수(봇 포함)
+· 봇 % — 그 밖 봇·스캐너·자동화 도구·AI 로봇·검색 로봇이 보낸 요청의 몫. 트래픽 페이지 '봇 비율'(그 밖 봇·스캐너와 자동화 도구만)과 다르다
+· 처음 ~ 마지막 — 고른 기간 안의 첫·마지막 요청 시각(KST)
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄)을 대역마다 묶어 60초마다 다시 센다. IP 전체를 남기기 전 기록도 들고, 원래 IP 와 브라우저 정보 원문은 없다. 나라·망은 대역 첫 주소로 찾는다.
+읽는 법: 봇 % 가 높고 브라우저로 연 페이지가 0 인 대역은 봇 대역이다. '봇만 있는 대역 빼기' 로 사람이 섞인 대역만 남긴다. 행을 누르면 시간별·종류·경로·최근 요청을 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-bands"></span></span></header>
             <div class="bar">
               <div class="seg" role="group" aria-label="망 종류" id="net-seg"><button type="button" data-net="" aria-pressed="true">전체</button><button type="button" data-net="telecom_kr" aria-pressed="false">국내 통신사</button><button type="button" data-net="telecom" aria-pressed="false">해외 통신사</button><button type="button" data-net="cloud" aria-pressed="false">데이터센터</button><button type="button" data-net="other" aria-pressed="false">그 밖</button><button type="button" data-net="ipv6" aria-pressed="false">IPv6</button></div>
               <select class="input" id="country" aria-label="나라"><option value="">모든 나라</option></select>
@@ -122,7 +178,13 @@
             <div class="list-foot"><span id="bands-count"></span><button type="button" class="linkbtn" id="bands-more" hidden>200행 더 보기</button></div>
           </section>
           <section class="card s12" id="card-replay" aria-labelledby="h-replay">
-            <header class="card-head"><h2 id="h-replay">화면 기록</h2><span class="unit">최근 200 · 행을 누르면 재생</span><span class="help" title="페이지를 한 번 열 때마다 남긴 마우스·손가락 위치, 누른 곳, 스크롤, 탭 바꿈이다. 봇 판별을 위해 모든 방문을 기록하고 서비스 종료까지 보관한다.&#10;동의 칸: 동의 / 미동의(거부함·하루 동안 안 보기·답 안 함 = 동의 창에 아무 답이 없음, 봇에 흔함·GPC 거부). 행을 누르면 그때 움직임을 다시 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-replay"></span></span></header>
+            <header class="card-head"><h2 id="h-replay">화면 기록</h2><span class="unit">최근 200 · 행을 누르면 재생</span><span class="help" title="보여 주는 것: 페이지를 한 번 열 때마다 남긴 마우스·손가락 위치, 누른 곳, 스크롤, 탭 바꿈의 목록(최근 200).
+낱말 뜻:
+· 동의 — 동의 / 미동의(거부함·하루 동안 안 보기·답 안 함·GPC 거부). 답 안 함 = 동의 창에 아무 답이 없음, 봇에 흔하다
+· 화면 — 그 기록에서 지나간 화면(랜딩·대시보드 탭 등)
+· 길이 · 누름 — 첫 기록부터 마지막 기록까지 · 누른 횟수
+자료 출처: 방문자 브라우저가 보낸 화면 이동 기록을 우리 서버가 받아 둔다. 봇 판별을 위해 모든 방문을 기록하고 서비스 종료까지 보관한다(조용해진 지 3시간 지난 기록은 S3 로 옮긴다). 화면 글자는 모으지 않고, 60초마다 새로 읽는다.
+읽는 법: 행을 누르면 지금 공개 페이지 위에 그때 움직임을 다시 본다 — 글은 지금 페이지 것이다. 답 안 함 은 봇에 흔하니 IP 판정과 함께 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-replay"></span></span></header>
             <div class="bar">
               <label class="search"><svg class="i" aria-hidden="true"><use href="icons.svg#search"/></svg><input class="input" id="rp-q" type="search" placeholder="IP · 화면 · 동의 찾기" autocomplete="off" spellcheck="false" aria-label="화면 기록 찾기" /></label>
             </div>

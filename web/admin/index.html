@@ -46,46 +46,98 @@
           <section class="band wait s12" id="band" aria-label="지금 상태" aria-live="polite"><span class="band-word"><i class="shape" id="band-shape"></i><span id="band-word">확인 중</span></span><div class="chips" id="chips"></div></section>
           <div class="kpis s12" aria-label="큰 수">
           <section class="card kpi" id="card-ws" aria-labelledby="h-ws">
-            <header class="card-head"><h2 id="h-ws"><button type="button" class="t" data-detail="ws">지금 접속</button></h2><span class="unit">WS 연결</span><span class="help" title="지금 열려 있는 대시보드(/app) 탭 수 — 실시간 표를 받는 WebSocket 연결이라 랜딩만 본 사람은 들지 않는다. 사람 수가 아니다.&#10;큰 수는 지금 값, 선은 고른 기간의 5분마다 최댓값. 한 사람이 탭 둘을 열면 2, 0 이면 지금 대시보드를 보는 사람이 없다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-ws"></span><button type="button" class="ibtn" data-detail="ws" aria-label="지금 접속 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-ws"><button type="button" class="t" data-detail="ws">지금 접속</button></h2><span class="unit">WS 연결</span><span class="help" title="보여 주는 것: 지금 열려 있는 대시보드(/app) 브라우저 탭 수(큰 수)와 고른 기간의 흐름(선). 사람 수가 아니다 — 한 사람이 탭 둘을 열면 2 다.
+낱말 뜻:
+· WS 연결 — 대시보드가 실시간 시세 표를 받으려고 서버와 열어 두는 연결(WebSocket). 대시보드 탭 하나에 하나
+· 어제 같은 때보다 — 지금 값을 비교 기간 같은 시각의 값과 견준 증감(비교를 켰을 때만)
+자료 출처: 지금 값은 api(serve 상자)가 들고 있는 실시간 표 연결 수를 10초마다 읽고, 선은 같은 수를 CloudWatch 가 모은 칸별 최댓값(24시간까지 5분·7일 1시간·30일 3시간 칸)이다. 랜딩만 본 사람은 들지 않고, 탭을 숨겨 둬도 센다.
+읽는 법: 0 이면 지금 대시보드를 보는 사람이 없다. 5분마다 바깥 점검(canary)이 1초 남짓 연결을 하나 열어 잠깐 1 이 될 수 있다. 큰 수는 있는데 선만 끊기면 serve 상자의 CloudWatch 에이전트를, 둘 다 멈추면 api 를 의심한다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-ws"></span><button type="button" class="ibtn" data-detail="ws" aria-label="지금 접속 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="big" id="v-ws">–</div>
             <div class="delta" id="d-ws"></div>
             <div class="chart spark" id="c-ws"></div>
           </section>
           <section class="card kpi" id="card-visit" aria-labelledby="h-visit">
-            <header class="card-head"><h2 id="h-visit"><button type="button" class="t" data-detail="visit">오늘 방문자</button></h2><span class="unit">확인 ~ 최대</span><span class="help" title="오늘(KST) 온 방문자 수의 범위 — 확인(스크립트가 실제로 돈 브라우저)이 아래쪽, 최대(브라우저로 온 수 — 브라우저인 척하는 봇 섞임)가 위쪽.&#10;실제 사람 수는 두 수 사이, 대개 확인 쪽에 가깝다. 선은 시간별 브라우저로 연 페이지 수."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-visit"></span><button type="button" class="ibtn" data-detail="visit" aria-label="오늘 방문자 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-visit"><button type="button" class="t" data-detail="visit">오늘 방문자</button></h2><span class="unit">확인 ~ 최대</span><span class="help" title="보여 주는 것: 오늘(KST 0시부터 지금까지) 온 방문자 수의 범위 — 큰 수가 확인(아래쪽 어림), 옆 ~ 수가 최대(위쪽 어림). 실제 사람은 그 사이다.
+낱말 뜻:
+· 방문자 — 하루 동안 같은 IP 앞부분 + 같은 브라우저 정보를 한 명으로 센 것
+· 확인 — 그중 페이지 스크립트가 실제로 돈 흔적(clarity.js 받기나 대시보드 실시간 연결)이 있는 방문자
+· 최대 — 브라우저로 온 방문자 전부. 브라우저인 척하는 봇이 섞인다
+· 브라우저로 연 페이지 — 일반 브라우저로 온 요청이 연 페이지 수. 선과 비교 배지는 이 값이다
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄)을 60초마다 다시 읽어 센다. 탐색 경로(/.env 같은 주소)를 건드린 방문자와 운영자 접속은 빼고, 관리자 화면·바깥 점검·시세 폴링은 기록되지 않는다.
+읽는 법: 실제 사람은 대개 확인 쪽에 가깝다 — 최대 가운데 많은 수가 위장 봇이다. 광고 차단기로 스크립트를 막은 사람은 확인에서 빠진다. 선은 방문자가 아니라 시간별 브라우저로 연 페이지이고, 비교 배지는 오늘 지금까지의 페이지 수를 어제 같은 시각까지와 견준다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-visit"></span><button type="button" class="ibtn" data-detail="visit" aria-label="오늘 방문자 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="big" id="v-visit">–</div>
             <div class="delta" id="d-visit"></div>
             <div class="chart spark" id="c-visit"></div>
           </section>
           <section class="card kpi" id="card-rate" aria-labelledby="h-rate">
-            <header class="card-head"><h2 id="h-rate"><button type="button" class="t" data-detail="collect">수집 성공률</button></h2><span class="unit">1시간</span><span class="help" title="최근 1시간 거래소 시세 수집이 성공한 비율 — 모든 수집 원천(거래소·시장 연결)의 평균.&#10;100% 가 정상. 떨어지면 아래 '수집 원천' 줄에서 빨간 칸이 있는 거래소를 찾는다. 선은 시간별 성공률."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-rate"></span><button type="button" class="ibtn" data-detail="collect" aria-label="수집 성공률 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-rate"><button type="button" class="t" data-detail="collect">수집 성공률</button></h2><span class="unit">1시간</span><span class="help" title="보여 주는 것: 최근 1시간 동안 거래소 시세 수집이 끊기지 않고 돈 시간의 비율(%), 수집 원천 열 곳의 평균.
+낱말 뜻:
+· 수집 원천 — 시세를 받아 오는 곳 열(현물 거래소 여섯 — 업비트·빗썸·바이낸스·바이빗·비트겟·OKX, perp 넷)
+· perp — 만기 없는 선물(무기한 선물). 바이낸스·바이빗·비트겟 perp 와 Hyperliquid
+· 끊김 — 1초마다 보는 수집이 실패한 구간(연결 끊김·30초 넘게 새 시세 없음·거래소 오류 등). 3번 연달아 성공하면 닫힌다
+자료 출처: 수집기(collect 상자)가 원천마다 지난 3600초 가운데 끊김과 겹친 초를 빼서 낸 값을 10초마다 읽는다. 한 곳이 6분 끊기면 그곳은 90%, 전체는 99.0% 다. 선은 이 브라우저가 끊김 목록으로 다시 계산한 시간별 값이다.
+읽는 법: 100% 가 정상이고 99% 아래면 주황이다. 떨어지면 아래 '수집 원천' 줄에서 빨간 칸이 있는 거래소를 찾는다. 5초 이하 짧은 재연결은 큰 수에는 들고 선·줄에서는 빠져, 선이 조금 높게 보일 수 있다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-rate"></span><button type="button" class="ibtn" data-detail="collect" aria-label="수집 성공률 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="big" id="v-rate">–</div>
             <div class="delta" id="d-rate"></div>
             <div class="chart spark" id="c-rate"></div>
           </section>
           <section class="card kpi" id="card-alarm" aria-labelledby="h-alarm">
-            <header class="card-head"><h2 id="h-alarm"><button type="button" class="t" data-detail="alarms">경보</button></h2><span class="unit">CloudWatch</span><span class="help" title="AWS CloudWatch 경보 가운데 지금 울리고(ALARM) 있는 수 / 전체 경보 수.&#10;0 이 정상. 막대는 시간별로 나간 알림(Slack 알림·ALARM 으로 바뀐 경보) 수."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-alarm"></span><button type="button" class="ibtn" data-detail="alarms" aria-label="경보 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-alarm"><button type="button" class="t" data-detail="alarms">경보</button></h2><span class="unit">CloudWatch</span><span class="help" title="보여 주는 것: AWS CloudWatch 경보 가운데 지금 울리고 있는(ALARM) 수 / 전체 경보 수. 아래 막대는 시간별로 나간 알림 수.
+낱말 뜻:
+· CloudWatch — AWS 의 감시 서비스. 상자 지표를 모으고 문턱을 넘으면 경보를 울린다
+· 경보 — 상태 검사·CPU 크레딧·메모리·디스크·바깥 점검·5xx 에 걸어 둔 CloudWatch 경보 18개(이름이 marketlens- 로 시작)
+· ALARM · OK — 문턱을 넘어 울리는 중 · 정상. '데이터 부족' 은 울림으로 세지 않는다
+· 알림 — Slack 으로 간 메시지(수집 끊김·복구·오류·서버 기동)와 ALARM 으로 바뀐 경보
+자료 출처: 수집기가 CloudWatch 경보 목록을 60초마다 읽고, 알림은 Redis 에 남긴 Slack 기록과 경보 이력(최근 7일)에서 센다. 같은 알림은 10분에 한 번만 보낸다.
+읽는 법: 0(OK)이 정상이다. 막대가 생기면 서버 페이지 '경보' 카드에서 무엇이었는지 본다. 배포·재시작 때마다 '기동' 알림이 하나씩 생기는 것은 정상이다(그 뒤 1시간 상태 띠에 'Slack 알림' 주의가 뜬다)."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-alarm"></span><button type="button" class="ibtn" data-detail="alarms" aria-label="경보 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="big" id="v-alarm">–</div>
             <div class="delta" id="d-alarm"></div>
             <div class="chart spark" id="c-alarm"></div>
           </section>
           <section class="card kpi" id="card-cost" aria-labelledby="h-cost">
-            <header class="card-head"><h2 id="h-cost"><button type="button" class="t" data-detail="cost">이번 달 비용</button></h2><span class="unit">실제 / 예산</span><span class="help" title="이번 달 AWS 실제 사용액 / 예산 한도 — 예산이 여럿이면 한도 대비 가장 많이 쓴 것.&#10;막대 눈금이 예산 100% 이고 넘으면 빨강. 달 초에 작게 시작해 달 말까지 늘어나는 것이 정상."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-cost"></span><button type="button" class="ibtn" data-detail="cost" aria-label="이번 달 비용 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-cost"><button type="button" class="t" data-detail="cost">이번 달 비용</button></h2><span class="unit">실제 / 예산</span><span class="help" title="보여 주는 것: 이번 달 AWS 실제 사용액 / 예산 한도, 아래 줄은 AWS 가 내다본 월말 금액. 예산이 여럿이면 한도 대비 가장 많이 쓴 것.
+낱말 뜻:
+· 실제 — 이달 1일부터 지금까지 쓴 금액
+· 예측 — 이대로 가면 월말에 될 거라고 AWS 가 계산한 금액
+· 한도 — 우리가 정한 달 예산
+자료 출처: AWS 예산(Budgets) 값을 수집기가 6시간마다 읽는다. AWS 가 하루 몇 번만 고쳐 쓰므로 반나절쯤 늦을 수 있고, 달이 바뀐 직후엔 지난달 값이 잠깐 남는다. 항목별 내역은 조직 정책으로 막혀 볼 수 없다.
+읽는 법: 막대 채움이 실제, 안쪽 눈금이 예측, 오른쪽 끝이 한도 100% 다. 실제가 한도를 넘으면 빨강, 예측만 넘으면 주황. 달 초에 작게 시작해 달 말까지 느는 것이 정상이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-cost"></span><button type="button" class="ibtn" data-detail="cost" aria-label="이번 달 비용 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="big" id="v-cost">–</div>
             <div class="delta" id="d-cost"></div>
             <div class="meter-box" id="m-cost"></div>
           </section>
           </div>
           <section class="card s12" id="card-ex" aria-labelledby="h-ex">
-            <header class="card-head"><h2 id="h-ex"><button type="button" class="t" data-detail="collect">수집 원천</button></h2><span class="unit">24시간 · 마지막 성공 · 1시간 성공률</span><span class="help" title="거래소·시장마다 최근 24시간 시세 수집이 끊긴 적이 있는지. 오른쪽은 마지막으로 받은 때와 1시간 성공률.&#10;옅은 가는 줄 = 정상, 칸 가득 빨강 = 끊긴 구간, 빗금 = 자료 없음(그 시간에 수집기가 없었음)."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-ex"></span><button type="button" class="ibtn" data-detail="collect" aria-label="수집 원천 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-ex"><button type="button" class="t" data-detail="collect">수집 원천</button></h2><span class="unit">24시간 · 마지막 성공 · 1시간 성공률</span><span class="help" title="보여 주는 것: 수집 원천 열 곳마다 최근 24시간 동안 시세 수집이 끊긴 구간, 오른쪽에 마지막으로 받은 때 · 1시간 성공률.
+낱말 뜻:
+· 수집 원천 — 시세를 받아 오는 곳 열(현물 거래소 여섯 — 업비트·빗썸·바이낸스·바이빗·비트겟·OKX, perp 넷)
+· perp — 만기 없는 선물(무기한 선물). 바이낸스·바이빗·비트겟 perp 와 Hyperliquid
+· 마지막 성공 — 그 원천에서 마지막으로 시세를 제대로 받은 때
+· 끊긴 구간 — 연결 끊김·30초 넘게 새 시세 없음·거래소 오류 등으로 수집이 실패한 동안
+· 빗금 — 수집기가 다시 켜진 뒤 그 원천에서 아직 한 번도 받지 못함
+자료 출처: 수집기(collect 상자)가 메모리에 든 24시간 끊김 목록(재시작하면 Influx 기록에서 되살림)을 10초마다 읽고, 그림은 1분마다 다시 그린다. 5초 이하 짧은 재연결은 그리지 않고 툴팁에 횟수만 센다.
+읽는 법: 옅은 가는 줄 = 정상, 칸 가득 빨강 = 끊긴 구간(마우스를 올리면 종류·시각·내용). 수집기가 꺼져 있던 시간은 따로 그리지 않는다. 60초 넘는 끊김은 Slack 알림도 함께 간다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-ex"></span><button type="button" class="ibtn" data-detail="collect" aria-label="수집 원천 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="chart h320" id="c-ex"></div>
           </section>
           <section class="card s12" id="card-boxes" aria-labelledby="h-boxes">
-            <header class="card-head"><h2 id="h-boxes"><button type="button" class="t" data-detail="cpu">상자</button></h2><span class="unit">최근 15분 평균 · CPU 선</span><span class="help" title="서버 세 대(collect 수집기·data 저장소·serve 화면과 API)의 최근 15분 CPU·메모리·디스크 사용률과 CPU 크레딧.&#10;막대 위 세로 눈금 둘은 주의·문제 문턱 — 넘으면 막대가 주황·빨강. 오른쪽 선은 고른 기간의 CPU."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-boxes"></span><button type="button" class="ibtn" data-detail="cpu" aria-label="상자 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-boxes"><button type="button" class="t" data-detail="cpu">상자</button></h2><span class="unit">최근 15분 평균 · CPU 선</span><span class="help" title="보여 주는 것: 서버 세 대(상자)의 최근 15분 평균 CPU·메모리·디스크 사용률과 CPU 크레딧, 오른쪽은 고른 기간의 CPU 선.
+낱말 뜻:
+· 상자 — AWS 에서 빌린 서버(EC2) 한 대. collect = 시세 수집기, data = 저장소(Influx·Redis), serve = 사이트와 API(caddy·web·api)
+· 크레딧 — 버스트형 상자(data·serve)가 쌓아 두는 CPU 여유분. collect 는 크레딧이 없는 종류라 – 로 보인다
+· 문턱 — 막대 위 세로 눈금 둘. 앞이 주의, 뒤가 문제(CPU 75·90, 메모리 80·90, 디스크 75·85)
+자료 출처: 수집기가 CloudWatch 에서 읽은 상자 지표(EC2 CPU, 상자 안 에이전트가 보낸 메모리·디스크). 5분 칸이라 가장 최근 칸이 비어 15분 평균이 두 칸으로만 날 수 있다.
+읽는 법: 막대가 눈금을 넘으면 주황·빨강이고 위 상태 띠에도 뜬다. 크레딧은 30 아래면 주의, 10 아래면 문제다. 행을 누르면 서버 페이지 CPU 상세가 열린다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-boxes"></span><button type="button" class="ibtn" data-detail="cpu" aria-label="상자 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="scroll"><table class="tbl" id="tbl-boxes"></table></div>
           </section>
           <section class="card s12" id="card-traffic" aria-labelledby="h-traffic">
-            <header class="card-head"><h2 id="h-traffic"><button type="button" class="t" data-detail="traffic">트래픽</button></h2><span class="unit">시간별 · 브라우저로 연 페이지 · 5xx · 대시보드 동시 접속</span><span class="help" title="시간별 브라우저로 연 페이지(한 시간에 열린 페이지, 봇 섞임) · 서버 오류(5xx) · 대시보드 동시 접속(5분 최댓값).&#10;단위가 달라 견주지 않는다 — 랜딩만 보고 가면 동시 접속은 0 이라 페이지 수보다 작은 게 정상. 점선은 비교 기간."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-traffic"></span><button type="button" class="ibtn" data-detail="traffic" aria-label="트래픽 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+            <header class="card-head"><h2 id="h-traffic"><button type="button" class="t" data-detail="traffic">트래픽</button></h2><span class="unit">시간별 · 브라우저로 연 페이지 · 5xx · 대시보드 동시 접속</span><span class="help" title="보여 주는 것: 시간별 브라우저로 연 페이지 · 서버 오류(5xx) · 대시보드 동시 접속을 위아래 세 칸으로 나란히 그린 것.
+낱말 뜻:
+· 브라우저로 연 페이지 — 일반 브라우저로 온 요청이 한 시간에 연 페이지 수(랜딩·정적 페이지 포함, 위장 봇 섞임)
+· 5xx — 서버가 오류로 답한 요청 수(대시보드 실시간 연결의 재접속 실패는 뺌)
+· 대시보드 동시 접속 — 그 순간 열려 있던 대시보드 탭 수의 5분 최댓값
+· 점선 — 비교 기간(이전 기간)을 지금 축에 겹친 것
+자료 출처: 페이지·5xx 는 서버 접속 기록(caddy)의 시간별 칸(60초마다 다시 읽음), 동시 접속은 CloudWatch 가 모은 연결 수다. 접속 기록에는 지난주 같은 때 비교가 없어 '이 자료는 비교 없음' 이 뜬다.
+읽는 법: 단위가 달라 세 칸을 서로 견주지 않는다 — 랜딩만 보고 가면 동시 접속은 0 이라 페이지 수보다 작은 게 정상이다. 5xx 막대가 솟으면 배포 시각과 겹치는지 본다. 십자선은 세 칸이 함께 움직인다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-traffic"></span><button type="button" class="ibtn" data-detail="traffic" aria-label="트래픽 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="chart h360" id="c-traffic"></div>
           <p class="card-foot" id="f-traffic"></p>
           </section>

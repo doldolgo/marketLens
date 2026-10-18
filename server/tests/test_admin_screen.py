@@ -258,7 +258,7 @@ def test_icons_are_one_local_sprite_and_every_use_points_into_it() -> None:
 
 
 def test_pages_load_the_library_then_their_module_without_inline_code() -> None:
-    """064 §3.1 그대로 — 인라인 스크립트·스타일·on* 없음(CSP 'self'), 라이브러리(defer) 뒤에 그 페이지의 ES 모듈 하나. 설명은 '?' title 두 줄(071)."""
+    """064 §3.1 그대로 — 인라인 스크립트·스타일·on* 없음(CSP 'self'), 라이브러리(defer) 뒤에 그 페이지의 ES 모듈 하나. 설명은 '?' title 칸 넷(071)."""
     for page, (_, module, sheet) in PAGES.items():
         html = _text(f"web/admin/{page}")
         scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, flags=re.S)
@@ -270,13 +270,7 @@ def test_pages_load_the_library_then_their_module_without_inline_code() -> None:
         assert re.search(r"\son\w+\s*=", html) is None and "<form" not in html, page
         assert html.count('<link rel="stylesheet" href="admin.css" />') == 1, page
         assert "이 절 읽는 법" not in html and "이 칸 뜻" not in html, page
-        # 071 §3.2 — '?' 글은 두 줄(뜻 · 읽는 법, `&#10;` 로 나눔), 줄마다 120자 이하
-        for title in re.findall(r'<span class="help" title="([^"]*)">', html):
-            lines = title.split("&#10;")
-            assert len(lines) == 2 and all(0 < len(line) <= 120 for line in lines), (
-                page,
-                title,
-            )
+        # '?' 글의 칸 규칙(071 §3.2)은 test_admin_explain.py 가 본다
 
 
 def _anchors(html: str) -> list[dict[str, str]]:

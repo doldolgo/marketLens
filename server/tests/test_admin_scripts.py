@@ -70,11 +70,16 @@ def test_style_links_and_addresses_are_written_in_fixed_places_only() -> None:
     rules = _script("rules.js")
     app = _script("app.js")
     view = _script("view.js")
-    # + '?' 말풍선 자리 둘(071 §3.1 — 화면 안으로 민 top·left 픽셀)
-    assert every.count(".style") == 5
-    assert _script("help.js").count(
-        ".style"
-    ) == 2 and "pop.style.top = `${top}px`;" in _script("help.js")
+    # + '?' 말풍선 자리 셋(071 §3.1 — 화면 안으로 민 top·left 픽셀과 안 칸 높이 픽셀)
+    assert every.count(".style") == 6
+    help_js = _script("help.js")
+    assert help_js.count(".style") == 3
+    assert (
+        "pop.style.top = `${place.top}px`;" in help_js
+        and "pop.style.left = `${place.left}px`;" in help_js
+        and "body.style.maxHeight = place.height >= natural ? '' : `${Math.max(0, place.height - chrome)}px`;"
+        in help_js
+    )
     assert (
         "node.style.width = ratioPct(ratio);" in common
         and "node.style.left = ratioPct(ratio);" in common

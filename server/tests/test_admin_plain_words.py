@@ -8,6 +8,7 @@ import pytest
 from tests.admin_dom import run_admin
 from tests.test_admin_addr_sheet import ADDR, HARNESS, _run, detail
 from tests.test_admin_addrs import NOW
+from tests.test_admin_explain import _problems
 from tests.test_admin_screen import PAGES, SCRIPTS
 from tests.test_admin_scripts import _script
 from tests.test_deploy import _text
@@ -124,7 +125,7 @@ out.badges = kids('sheet-tbl')[1].kids.filter((tr) => tr.className !== 'rowmore'
 const e = { target: helpOf(ths[2]), stopPropagation() { this.stopped = true }, preventDefault() {} }
 ;(v.docListeners.click || []).forEach((fn) => fn(e))
 const pop = document.getElementById('help-pop')
-out.pop = { stopped: e.stopped === true, hidden: pop.hidden, paras: pop.kids.map((p) => p.kids[0].textContent) }
+out.pop = { stopped: e.stopped === true, hidden: pop.hidden, paras: pop.kids[0].kids.map((p) => p.kids[0].textContent) }
 out.sortAfter = kids('sheet-tbl')[0].kids[0].kids.map((th) => th.getAttribute('aria-sort'))
 document.getElementById('sheet-csv').fire('click')
 await flush()
@@ -164,22 +165,21 @@ def test_ip_sheet_recent_table_has_the_page_file_badges(sheet: dict[str, Any]) -
 
 
 def test_column_help_marks_follow_the_071_rules(sheet: dict[str, Any]) -> None:
-    """082 §3.2·§3.3 — '페이지·파일'·'종류' 칸 머리만 '?'(정렬 단추 뒤 형제 — 단추 안이 아니다), 두 줄·줄마다 120자 이하, 단추 역할,
-    누르면 말풍선(뜻·읽는 법)이 열리고 정렬은 그대로."""
+    """082 §3.2·§3.3 — '페이지·파일'·'종류' 칸 머리만 '?'(정렬 단추 뒤 형제 — 단추 안이 아니다), 글은 071 §3.2 칸 넷, 단추 역할,
+    누르면 말풍선(보여 주는 것·낱말 뜻·자료 출처·읽는 법)이 열리고 정렬은 그대로."""
     helps = {h[0]: h for h in sheet["head"] if h[1] is not None}
     assert set(helps) == {"페이지·파일", "종류"}
     for _, text, at, first in helps.values():
-        lines = text.split("\n")
-        assert len(lines) == 2 and all(0 < len(x) <= 120 for x in lines), lines
+        assert _problems(text) == [], _problems(text)
         assert at == 1 and first == "button"
-    assert helps["페이지·파일"][1].startswith("직접 연 페이지 = ")
-    assert "따로 부른 파일 = " in helps["페이지·파일"][1]
-    assert "운영자 접속" in helps["종류"][1]
+    for word in ("· 직접 연 페이지 — ", "· 함께 받은 파일 — ", "· 따로 부른 파일 — "):
+        assert word in helps["페이지·파일"][1], word
+    assert "· 운영자 접속 · 브라우저 정보 없음 — " in helps["종류"][1]
     assert sheet["helpAttrs"] == ["button", "0", "설명", "false"]
     assert sheet["pop"] == {
         "stopped": True,
         "hidden": False,
-        "paras": ["뜻", "읽는 법"],
+        "paras": ["보여 주는 것", "낱말 뜻", "자료 출처", "읽는 법"],
     }
     assert sheet["sortAfter"] == [
         "descending",
