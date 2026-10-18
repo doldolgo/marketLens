@@ -26,10 +26,15 @@ PAGE_BATCHES = 600
 _AFTER = re.compile(r"[0-9]{1,9}")
 
 
+# 동의 상태가 없는 머리 — 동의한 방문만 기록하던 때(2026-10-18 전)의 조각이다
+LEGACY_CONSENT = "granted"
+
+
 def row(sid: str, meta: dict[str, str]) -> dict[str, Any] | None:
-    """조각 머리 → 피드 행. 머리가 없으면(만료) None."""
+    """조각 머리 → 피드 행. 머리가 없으면(만료) None. `consent` 는 마지막 묶음의 동의 상태, `consentFirst` 는 첫 묶음의 것."""
     if "first" not in meta:
         return None
+    consent = meta.get("cs", LEGACY_CONSENT)
     return {
         "sid": sid,
         "ip": meta["ip"],
@@ -44,6 +49,8 @@ def row(sid: str, meta: dict[str, str]) -> dict[str, Any] | None:
         "w": int(meta["w"]),
         "h": int(meta["h"]),
         "cut": meta.get("cut") == "1",
+        "consent": consent,
+        "consentFirst": meta.get("cs0", consent),
     }
 
 

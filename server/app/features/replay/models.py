@@ -26,8 +26,13 @@ SID = re.compile(r"[0-9a-f]{16}")
 # IP 를 읽을 수 없는 묶음의 IP 자리 — `rp:ip:(없음)` 으로 모인다
 NO_IP = "(없음)"
 
-# 몸통 키 — `v` 는 1 하나
+# 몸통 키 — `v` 는 1 하나. `c`(그 방문의 화면 분석 동의 상태)는 있어도 없어도 된다 — 동의자만 기록하던 예전 replay.js(열린 탭에
+# 남은 것)는 `c` 없이 보내고, 그 묶음은 지금 판에 동의한 방문의 것이라 `granted` 로 본다
 KEYS = frozenset({"v", "sid", "seq", "page", "dev", "w", "h", "ev"})
+CONSENT_KEY = "c"
+# replay.js 의 동의 상태 다섯 — 지금 판의 동의·판 있는 거부·하루 동안 안 보기·정하지 않음·GPC
+CONSENTS = ("granted", "denied", "later", "unset", "gpc")
+LEGACY_CONSENT = "granted"
 MAX_BODY_BYTES = 16_384
 MAX_SEQ = 3_599
 MAX_EVENTS = 600
@@ -100,16 +105,20 @@ class Batch:
     w: int
     h: int
     ev: list[list[object]]
+    consent: str = LEGACY_CONSENT
 
 
 def parse_batch(body: bytes) -> Batch | None:
-    """§3.4 ③ — 어긋나면 None(400 `bad_replay`). 키 여덟 그대로·`v` 1 만 받는다."""
+    """§3.4 ③ — 어긋나면 None(400 `bad_replay`). 키 여덟 그대로(+ 고를 수 있는 `c`)·`v` 1 만 받는다."""
     try:
         data = json.loads(body)
     except (ValueError, RecursionError):
         # 깨진 UTF-8·JSON, 몸통 안의 깊은 중첩(파이썬 재귀 한도) 모두 400
         return None
-    if not isinstance(data, dict) or set(data) != KEYS:
+    if not isinstance(data, dict) or set(data) - {CONSENT_KEY} != KEYS:
+        return None
+    consent = data.get(CONSENT_KEY, LEGACY_CONSENT)
+    if not isinstance(consent, str) or consent not in CONSENTS:
         return None
     if type(data["v"]) is not int or data["v"] != 1:
         return None
@@ -125,7 +134,9 @@ def parse_batch(body: bytes) -> Batch | None:
         return None
     if not all(_event(ev) for ev in events):
         return None
-    return Batch(sid=sid, seq=seq, page=page, dev=dev, w=w, h=h, ev=events)
+    return Batch(
+        sid=sid, seq=seq, page=page, dev=dev, w=w, h=h, ev=events, consent=consent
+    )
 
 
 def client_ip(header: str | None) -> str:

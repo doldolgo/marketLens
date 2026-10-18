@@ -10,9 +10,17 @@ import { table } from './ui.js';
 const ui = { q: '', sort: { key: 'first', dir: 'desc' } };
 export const replayNeeds = () => [liveReq(), sessionsReq()];
 const secs = (v) => (num(v) === null ? '–' : span(v));
+// 동의 칸 — 채운 점 = 화면 분석에 동의, 빈 점 = 미동의(거부함·하루 동안 안 보기·답 안 함·GPC)
+const consentCell = (r) => {
+  const box = el('span', 'verdict');
+  box.append(el('i', `shape ${r.agreed ? 'ok' : 'none'}`), el('span', null, r.consent));
+  return box;
+};
+const CONSENT_COLUMN = { key: 'consent', label: '동의', cell: consentCell };
 
 const LIVE_COLUMNS = [
   { key: 'ip', label: 'IP', cls: 'mono' },
+  CONSENT_COLUMN,
   { key: 'now', label: '지금 화면' },
   { key: 'dev', label: '기기' },
   { key: 'stay', label: '머문 시간', num: true, fmt: secs },
@@ -28,7 +36,7 @@ export function drawLive(app) {
     const node = $('tbl-rplive');
     if (!usable(part)) return node.replaceChildren(el('caption', 'empty', stateWord(part)));
     const rows = liveRows(part.rows, num(part.now) ?? app.now());
-    if (!rows.length) return node.replaceChildren(el('caption', 'empty', '지금 기록 중인 방문 없음 — 동의한 방문자만 기록된다'));
+    if (!rows.length) return node.replaceChildren(el('caption', 'empty', '지금 화면을 움직이는 방문 없음'));
     table(node, LIVE_COLUMNS, rows, { onRow: (r) => r.open && openReplay(app, r.sid, true) });
     return rows;
   });
@@ -37,6 +45,7 @@ export function drawLive(app) {
 const SESSION_COLUMNS = [
   { key: 'first', label: '시작(KST)', cls: 'mono', fmt: (v, r) => r.start },
   { key: 'ip', label: 'IP', cls: 'mono' },
+  CONSENT_COLUMN,
   { key: 'pages', label: '화면' },
   { key: 'dev', label: '기기' },
   { key: 'len', label: '길이', num: true, fmt: secs },
@@ -57,9 +66,9 @@ export function drawSessions(app) {
     const all = sessionRows(part.rows);
     if (!all.length) {
       put('replay-count', '');
-      return node.replaceChildren(el('caption', 'empty', '화면 기록 없음 — 동의한 방문자만 기록되고 서비스 종료까지 보관한다'));
+      return node.replaceChildren(el('caption', 'empty', '화면 기록 없음 — 모든 방문을 기록하고 서비스 종료까지 보관한다'));
     }
-    const rows = sortRows(all.filter((r) => matches(r, ['ip', 'pages'], ui.q)), ui.sort.key, ui.sort.dir);
+    const rows = sortRows(all.filter((r) => matches(r, ['ip', 'pages', 'consent'], ui.q)), ui.sort.key, ui.sort.dir);
     table(node, SESSION_COLUMNS, rows, {
       sort: ui.sort,
       onSort: (key) => {
@@ -88,6 +97,7 @@ export const ipReplayEntry = (app, ip) => (masked(ip) ? null : app.entry(session
 
 const IP_COLUMNS = [
   { key: 'first', label: '시작(KST)', cls: 'mono', fmt: (v, r) => r.start },
+  CONSENT_COLUMN,
   { key: 'pages', label: '화면' },
   { key: 'dev', label: '기기' },
   { key: 'len', label: '길이', num: true, fmt: secs },
@@ -110,10 +120,11 @@ export function ipReplaySection(app, ip) {
   }
   const rows = sessionRows(part.rows);
   if (!rows.length) {
-    box.append(el('p', 'empty', '이 IP 의 화면 기록 없음 — 동의한 방문만 기록된다'));
+    box.append(el('p', 'empty', '이 IP 의 화면 기록 없음'));
     return box;
   }
-  head.append(el('span', 'unit', `${int(rows.length)}개 조각 · 동의한 방문자만, 서비스 종료까지 보관`));
+  const agreed = rows.filter((r) => r.agreed).length;
+  head.append(el('span', 'unit', `${int(rows.length)}개 조각 · 동의 ${int(agreed)} · 미동의 ${int(rows.length - agreed)} · 서비스 종료까지 보관`));
   const scroll = el('div', 'scroll');
   const tbl = el('table', 'tbl');
   scroll.append(tbl);

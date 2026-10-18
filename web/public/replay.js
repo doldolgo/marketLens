@@ -1,5 +1,6 @@
-// KimpTrack 화면 이동 기록(스펙 073) — 동의한 방문자의 마우스·손가락 위치, 누른 곳, 스크롤, 보던 영역, 탭 바꿈을 시각과 함께
-// 2초마다 묶어 /api/replay 로 보낸다. 화면 분석에 동의한 방문자만(attention.js·clarity.js 와 같은 판정 — 지금 판의 granted·GPC 아님).
+// KimpTrack 화면 이동 기록(스펙 073) — 방문자의 마우스·손가락 위치, 누른 곳, 스크롤, 보던 영역, 탭 바꿈을 시각과 함께
+// 2초마다 묶어 /api/replay 로 보낸다. 봇 판별·차단을 위해 동의와 관계없이 모든 방문을 기록하고(사람 결정 2026-10-18, RECORD_ALL),
+// 묶음마다 그 방문의 화면 분석 동의 상태(c — clarity.js 와 같은 판정)를 함께 보낸다. 관리자 화면이 그 상태를 보여 준다.
 // 입력값·누른 키·화면 글자·그림은 보내지 않고, 쿠키·저장소에 아무것도 쓰지 않는다(조각 번호는 메모리에만).
 // 재생 쪽(스펙 074 §3.4): 관리자 화면이 이 페이지를 kt-replay=1 틀로 띄우면 기록하지 않고, 관리자가 보낸 그 시각의 상태(커서·누름·
 // 스크롤·영역)만 그린다. 번들 밖 정적 파일이라 oxlint 대상이 아니다(node --check). 예외를 밖으로 던지지 않는다.
@@ -11,8 +12,12 @@
   // 재생 틀을 띄우는 관리자 화면의 출처 — 이 출처의 메시지만 받고 이 출처로만 보낸다(053 과 같은 값).
   // 로컬 확인은 커밋하지 않는 시험 사본에서 이 값과 위 HOST 를 바꾼다(065 §4 의 시험 사본)
   const ADMIN_ORIGIN = "https://admin.kimptrack.com"
+  // 동의와 관계없이 모든 방문을 기록한다(봇 판별·차단 — 073 §3.1). false 면 지금 판에 동의한 방문자만 기록한다
+  const RECORD_ALL = true
   const KEY = "kt.analytics"
   const VKEY = "kt.analytics.v"
+  const UKEY = "kt.analytics.until" // 079 — later 의 다시 물을 시각(epoch ms 글자)
+  const LATER_MS = 86400000
   const POST_URL = "/api/replay"
   // 화면 이름 — attention.js 와 같은 목록(052)
   const TABS = ["spread", "history", "gap", "pp", "health", "flow"]
@@ -56,14 +61,31 @@
     // 다른 출처의 틀 — 틀 안이다
   }
 
-  const consented = () => {
-    if (navigator.globalPrivacyControl === true) return false
+  // 화면 분석 동의 상태(073 §3.4 의 c) — clarity.js 의 판정과 같은 값: granted(지금 판의 동의) · denied(판 있는 거부) ·
+  // later(하루 동안 안 보기 — 다시 물을 시각 전) · unset(정하지 않음 — 없음·다른 판·지난 later·판 없는 예전 거부, 저장소를 못 읽음) ·
+  // gpc(GPC 신호 — 동의보다 앞선다)
+  const consentState = () => {
+    if (navigator.globalPrivacyControl === true) return "gpc"
+    let value
+    let version
+    let until
     try {
-      return window.localStorage.getItem(KEY) === "granted" && window.localStorage.getItem(VKEY) === NOTICE_VERSION
+      value = window.localStorage.getItem(KEY)
+      version = window.localStorage.getItem(VKEY)
+      until = window.localStorage.getItem(UKEY)
     } catch (e) {
-      return false
+      return "unset"
     }
+    if (value === "granted" && version === NOTICE_VERSION) return "granted"
+    if (value === "denied" && version) return "denied"
+    if (value === "later" && until) {
+      const at = Number(until)
+      const now = Date.now()
+      if (at > now && at <= now + LATER_MS) return "later"
+    }
+    return "unset"
   }
+  const recording = () => RECORD_ALL || consentState() === "granted"
 
   const clip = (n, hi) => Math.max(0, Math.min(hi, Math.round(Number(n) || 0)))
   const areaIdOf = (el) => {
@@ -259,7 +281,7 @@
 
   // 묶음 하나 — 몸통이 16,384바이트를 넘으면 넘는 사건은 다음 묶음으로 미룬다
   const batch = () => {
-    const head = { v: 1, sid: rec.sid, seq: rec.seq, page: rec.page, dev: rec.dev, w: rec.w, h: rec.h, ev: [] }
+    const head = { v: 1, sid: rec.sid, seq: rec.seq, page: rec.page, dev: rec.dev, w: rec.w, h: rec.h, c: consentState(), ev: [] }
     let total = bytes(JSON.stringify(head))
     let n = 0
     for (; n < rec.ev.length && n < MAX_EV; n++) {
@@ -273,10 +295,10 @@
     return JSON.stringify(head)
   }
 
-  // 보내기 — 직전에 동의를 다시 본다. all 이면(숨김·떠남) 쌓인 것을 모두, 아니면 한 묶음
+  // 보내기 — 직전에 기록 조건을 다시 본다(RECORD_ALL 이 아니면 동의가 꺼질 때 멈춘다). all 이면(숨김·떠남) 쌓인 것을 모두, 아니면 한 묶음
   const flush = (all) => {
     if (!rec || !rec.ev.length) return
-    if (!consented()) return stop()
+    if (!recording()) return stop()
     do {
       if (rec.seq >= MAX_SEQ) return end()
       post(batch())
@@ -299,7 +321,7 @@
   }
 
   const start = () => {
-    if (rec || !consented()) return
+    if (rec || !recording()) return
     rec = {
       sid: sidOf(),
       t0: Date.now(),
@@ -335,8 +357,8 @@
   }
 
   try {
-    if (consented()) start()
-    // 동의가 페이지 중간에 켜지면 그때부터 — 같은 탭의 저장(clarity.js 의 kt:clarity)과 다른 탭의 저장
+    if (recording()) start()
+    // RECORD_ALL 이 아니면 동의가 페이지 중간에 켜질 때부터 — 같은 탭의 저장(clarity.js 의 kt:clarity)과 다른 탭의 저장
     window.addEventListener("kt:clarity", guard(start))
     window.addEventListener("storage", guard(start))
   } catch (e) {
