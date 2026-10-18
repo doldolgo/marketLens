@@ -65,14 +65,14 @@ export function matchModel(app, range) {
 }
 export const matchNeeds = (range) => [...historyReqs(range, 'none'), ...accessReqs(accessRange(range), 'none')];
 
-// 페이지 × 기기(040 pages.groups) — 열: 세션 · 스크롤 · 활성 초 · 신호 여섯. 칸 진하기 = 그 열 최댓값 대비 다섯 단계
+// 페이지 × 기기(040 pages.groups) 상세 표의 열 — 방문(세션) · 스크롤 깊이 · 머문 초 · 움직인 초 · 신호 여섯(신호가 있던 방문 %)
 export const PAGE_COLS = Object.freeze([
-  ['sessions', '세션', int],
-  ['scrollDepth', '스크롤', (v) => pct(v, 0)],
-  ['activeSec', '활성 초', int],
+  ['sessions', '방문(세션)', int],
+  ['scrollDepth', '스크롤 깊이', (v) => pct(v, 0)],
+  ['totalSec', '머문 초', int],
+  ['activeSec', '움직인 초', int],
   ...SIGNALS.map(([key, name]) => [`${key}Pct`, name, (v) => pct(v, 1)]),
 ]);
-export const shade = (v, max) => (num(v) === null || !(max > 0) || v <= 0 ? '' : `q${Math.min(5, Math.max(1, Math.ceil((v / max) * 5)))}`);
 // 세션 3 미만 칸은 흐리게(표본 적음)
 export const groupRows = (part) =>
   list(part?.groups)

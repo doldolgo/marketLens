@@ -150,29 +150,6 @@ def test_every_fake_scenario_draws_every_card_without_errors(scenario: str) -> N
         }
 
 
-SHADES = r"""
-const respond = (url) => input.answers[url] || [404, { detail: 'Not Found' }]
-const v = setup({ respond })
-await page('insight.js', '?shade=1')
-await flush()
-const body = document.getElementById('tbl-pages').kids[1]?.kids || []
-const cells = body.flatMap((tr) => tr.kids)
-out.cells = cells.map((td) => [td.className, td.kids.map((k) => (typeof k === 'string' ? 'text' : k.className))])
-"""
-
-
-def test_clarity_page_table_shades_whole_cells() -> None:
-    """066 §3.3 Clarity 페이지 × 기기 — 칸 진하기(다섯 단계)는 칸 전체 바탕이다. 글 뒤 띠(안쪽 span)로 칠하면 고른 글처럼 보였다."""
-    got = run_admin(SHADES, {"answers": answers("ok", URLS)})
-    shaded = [
-        cls
-        for cls, _ in got["cells"]
-        if any(f"q{i}" in cls.split() for i in range(1, 6))
-    ]
-    assert len(shaded) >= 5, got["cells"][:12]
-    assert all(kids in ([], ["text"]) for _, kids in got["cells"]), got["cells"][:12]
-
-
 def test_attention_answers_cover_page_or_not_300_keys_mobile_gate_and_xss() -> None:
     """065 §4 — 가짜 서버의 attention 응답: page 없음(행만 — 요소 없음)·page 있음(그 화면 행 + 요소), bands 는 랜딩 요소 300(그중 (기타)),
     휴대폰 행은 마우스 올림 0, empty 는 before_gate(행 빔), problem 은 error·redis, xss 는 `<img onerror>` 열쇠."""
