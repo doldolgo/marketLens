@@ -1,5 +1,5 @@
 // 방문자 페이지(스펙 066 §3.3 · 070): 보기 둘 — 'IP 별'(기본, 069 IP 전체 — addrs.js·addrdetail.js)·'대역 별'(067 가린 대역, 주소 view=band).
-// 대역 별: 큰 수 넷 · 거르기(망 종류·나라·봇 뺌 — 주소 f=…, 찾기는 주소에 싣지 않음) · 대역 표(머리 눌러 정렬 — 요청·사람 모양 페이지·
+// 대역 별: 큰 수 넷 · 거르기(망 종류·나라·봇 뺌 — 주소 f=…, 찾기는 주소에 싣지 않음) · 대역 표(머리 눌러 정렬 — 요청·브라우저로 연 페이지·
 // 마지막은 서버가, 그 밖은 불러온 행 안에서 · 200행씩) · 행 → 대역 상세 판(시간별 요청 · 종류·상태 띠 · 브라우저 정보·경로 상위 ·
 // 첫/마지막 페이지 · 최근 요청 100줄 펼치기 · ◀ 이전/다음 ▶). 망 종류·나라 거르기는 두 보기가 같이 쓴다.
 // 두 보기 모두 화면 기록(074 — replaycards.js): 지금 보는 중(지금 묶음 5초 — page.live)·화면 기록(느린 60초), 행 → 재생 판(replaysheet.js).
@@ -93,7 +93,7 @@ const COLUMNS = [
       return box;
     },
   },
-  { key: 'pages', label: '사람 모양 페이지', num: true, fmt: int },
+  { key: 'pages', label: '브라우저로 연 페이지', num: true, fmt: int },
   { key: 'pairs', label: '짝 수', num: true, fmt: int },
   { key: 'botPct', label: '봇 %', num: true, fmt: (v) => pct(v, 0) },
   { key: 'fives', label: '5xx', num: true, fmt: int },
@@ -159,7 +159,7 @@ function ipModel(app, pv, band) {
     table: {
       title: '최근 요청(100)',
       sort: { key: 'ts', dir: 'desc' },
-      search: ['path', 'kind', 'browser'],
+      search: ['path', 'howText', 'kind', 'browser'],
       rows: recentRows(part.recent),
       columns: RECENT_COLUMNS,
       expand: recentMore,

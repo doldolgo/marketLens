@@ -2,13 +2,13 @@
 // WS 연결 시간. 카드의 탭·지표는 state 하나에 두고(traffic.js 가 바꾼다) 판이 같은 값을 읽는다.
 import { clean, el, int, isObj, kstText, list, n0, num, partOf, pct, usable, widthOf } from './common.js';
 import { colsOption, heatOption, sankeyOption, tip } from './charts.js';
-import { channelName, pageName } from './names.js';
+import { CLASS_NOTE, channelName, pageName } from './names.js';
 import { ACCESS_RANGES, accessCompare, accessReqs, accessWindow, seriesReqs, seriesWindow } from './models.js';
 import { LISTS, WEEKDAY, WS_BUCKETS, denomOf, flowGraph, heatGrid, whoGroups } from './trafficmodel.js';
 
 export const state = { metric: 'visitors', tabs: { src: 'channels', geo: 'countries', ends: 'entries', what: 'paths' } };
 export const tabOf = (name) => LISTS[name].find((t) => t[0] === state.tabs[name]) ?? LISTS[name][0];
-export const METRIC_NAME = Object.freeze({ visitors: '방문자', pages: '사람 모양 페이지', now: '대시보드 동시 접속', bots: '요청 · 사람 모양 페이지', errors: '5xx' });
+export const METRIC_NAME = Object.freeze({ visitors: '방문자', pages: '브라우저로 연 페이지', now: '대시보드 동시 접속', bots: '요청 · 브라우저로 연 페이지', errors: '5xx' });
 const NO_CMP = () => ({ prev: false, week: false });
 
 // 큰 추이 — 고른 지표의 시간 그림(24시간은 시간별, 7·30일의 방문자는 날별). 점선 = 비교 기간(지금 축으로 민 것)
@@ -19,11 +19,11 @@ export function trendModel(app, range, cmp, which) {
   const hourly = (name, key, mark, type) => ({ name, mark, type, ...a.hours(key) });
   if (which === 'visitors' && range !== '24h') {
     out.daily = true;
-    out.series = [{ name: '브라우저 모양 방문자', mark: 'acc', type: 'bar', ...a.days('shaped') }, { name: '확인된 방문자', mark: 'c1', ...a.days('confirmed'), cmp: null }, { name: '다시 온', mark: 'c3', ...a.days('returning'), cmp: null }];
+    out.series = [{ name: '브라우저로 온 방문자', mark: 'acc', type: 'bar', ...a.days('shaped') }, { name: '확인된 방문자', mark: 'c1', ...a.days('confirmed'), cmp: null }, { name: '다시 온', mark: 'c3', ...a.days('returning'), cmp: null }];
   } else if (which === 'visitors' || which === 'pages') {
-    out.series = [hourly('사람 모양 페이지', 'humanPages', 'acc', 'bar'), { ...hourly('스크립트가 돈 페이지', 'jsViews', 'c1'), cmp: null }].slice(0, which === 'pages' ? 1 : 2);
+    out.series = [hourly('브라우저로 연 페이지', 'humanPages', 'acc', 'bar'), { ...hourly('스크립트가 돈 페이지', 'jsViews', 'c1'), cmp: null }].slice(0, which === 'pages' ? 1 : 2);
   } else if (which === 'bots') {
-    out.series = [hourly('요청', 'requests', 'c1'), hourly('사람 모양 페이지', 'humanPages', 'acc')];
+    out.series = [hourly('요청', 'requests', 'c1'), hourly('브라우저로 연 페이지', 'humanPages', 'acc')];
   } else if (which === 'errors') {
     out.series = [hourly('5xx', 'errors', 'bad', 'bar'), { ...hourly('WS 재접속 실패', 'wsErrors', 'c8', 'bar'), cmp: null }];
   } else {
@@ -36,28 +36,18 @@ export function trendModel(app, range, cmp, which) {
 export const trendNeeds = (range, cmp, which) => [...accessReqs(range, cmp), ...(which === 'now' ? seriesReqs(range, cmp) : [])];
 
 // '누가' 판(071 §3.4) — 묶음 넷을 위아래로: 제목 · 분모 글 · 한 줄 설명 · 항목(막대 = 묶음 안 비율, 수 내림차순, 0 은 뺌).
-// 요청 종류만 분모가 모든 요청이다(봇 포함) — 나머지 셋은 브라우저 모양 방문자(없으면 사람 모양 페이지)
+// 요청 종류만 분모가 모든 요청이다(봇 포함) — 나머지 셋은 브라우저로 온 방문자(없으면 브라우저로 연 페이지)
 const WHO_NOTE = Object.freeze({
   devices: '방문자가 쓴 기기 — 화면 크기가 아니라 브라우저 정보로 가른다.',
   os: '방문자의 운영체제.',
   browsers: '방문자의 브라우저 — 카카오톡·네이버 같은 앱 안 브라우저는 따로 센다.',
-  classes: '서버에 온 모든 요청을 보낸 쪽의 종류 — 사람 브라우저 모양만 방문자로 센다.',
-});
-export const CLASS_NOTE = Object.freeze({
-  browser: '크롬·사파리 같은 브라우저 이름표 — 위장 봇도 섞인다',
-  search: '구글·네이버 같은 검색 로봇',
-  ai: 'GPTBot·ClaudeBot 같은 AI 학습·검색 로봇',
-  preview: '카카오톡·슬랙 등에 링크를 붙였을 때 미리보기를 만드는 요청',
-  tool: 'curl·파이썬·헤드리스 브라우저·감시 도구',
-  scanner: '취약점을 찾는 요청(/.env·/wp-login.php 등)과 이름 없는 봇',
-  operator: '관리자 화면·로컬 시험에서 온 요청',
-  unknown: '브라우저 정보가 빈 요청',
+  classes: '서버에 온 모든 요청을 보낸 쪽의 종류 — 일반 브라우저만 방문자로 센다.',
 });
 export function whoSections(part) {
   return whoGroups(part).map((g) => {
     const items = g.items.filter((it) => n0(it.value) > 0).sort((x, y) => y.value - x.value);
     const total = items.reduce((sum, it) => sum + it.value, 0);
-    const unit = g.note === '모든 요청' ? `모든 요청 ${int(total)}건 기준` : g.note === '방문자' ? `브라우저 모양 방문자 ${int(total)}명 기준` : `사람 모양 페이지 ${int(total)}건 기준`;
+    const unit = g.note === '모든 요청' ? `모든 요청 ${int(total)}건 기준` : g.note === '방문자' ? `브라우저로 온 방문자 ${int(total)}명 기준` : `브라우저로 연 페이지 ${int(total)}건 기준`;
     return {
       id: g.id,
       name: g.name,
@@ -99,8 +89,8 @@ export function flowOption(flows) {
     heads: ['들어온 길', '첫 페이지', '마지막 페이지'],
     nodes: graph.nodes,
     links: graph.links,
-    tipNode: (label, v) => tip(label, [['acc', '브라우저 모양', int(v)]]),
-    tipLink: (from, to, d) => tip(`${from} → ${to}`, [['acc', '브라우저 모양', int(d?.value)], ['c1', '확인', int(d?.c)]]),
+    tipNode: (label, v) => tip(label, [['acc', '브라우저로 온', int(v)]]),
+    tipLink: (from, to, d) => tip(`${from} → ${to}`, [['acc', '브라우저로 온', int(d?.value)], ['c1', '확인', int(d?.c)]]),
   });
 }
 export function heatModel(a) {
@@ -159,7 +149,7 @@ const listDetail = (name, title) =>
     const withC = items.some((it) => it.c !== undefined);
     const columns = [{ key: 'name', label: cur[1] }];
     if (withC) columns.push({ key: 'c', label: '확인', num: true, fmt: int });
-    columns.push({ key: 'value', label: cur[4] === '방문자' ? '브라우저 모양' : cur[4], num: true, fmt: int }, { key: 'share', label: '비율', num: true, fmt: (v) => pct(v, 1) });
+    columns.push({ key: 'value', label: cur[4] === '방문자' ? '브라우저로 온' : cur[4], num: true, fmt: int }, { key: 'share', label: '비율', num: true, fmt: (v) => pct(v, 1) });
     const rows = items.map((it) => ({ ...it, share: num(denom) > 0 ? (it.value / denom) * 100 : null }));
     return { title: head, deps, table: { title: cur[1], columns, rows, sort: { key: 'value', dir: 'desc' }, search: ['name'] } };
   });
@@ -194,7 +184,7 @@ export const TRAFFIC_DETAILS = Object.freeze({
           { key: 'entry', label: '첫 페이지' },
           { key: 'exit', label: '마지막 페이지' },
           { key: 'c', label: '확인', num: true, fmt: int },
-          { key: 's', label: '브라우저 모양', num: true, fmt: int },
+          { key: 's', label: '브라우저로 온', num: true, fmt: int },
         ],
       },
     };

@@ -93,7 +93,7 @@ export function accessWindow(app, window, cmp) {
   return out;
 }
 
-// 오늘(KST — 응답 endTs 가 든 날) 방문자 [확인, 브라우저 모양]. visitors 가 ok 가 아니면 null(064)
+// 오늘(KST — 응답 endTs 가 든 날) 방문자 [확인, 브라우저로 온]. visitors 가 ok 가 아니면 null(064)
 export function todayVisitors(a) {
   const v = a?.visitors;
   if (!isObj(v) || v.state !== 'ok') return null;
