@@ -2,7 +2,7 @@
 // 대역은 접속 기록의 가린 IP 그대로(IPv4 /24 · IPv6 /48 — 원 IP·짝 열쇠·UA 원문은 피드에 없다). 대역 글자는 주소 쿼리에 싣지 않는다.
 // 067 #132 의 실제 꼴: band 는 '1.2.3.0/24'·'2001:db8:1::/48' 처럼 접미까지 든 글자, '(없음)'·'(기타)' 행은 모음이라 상세가 없다.
 import { clean, isObj, kstDay, kstText, list, n0, num, own, partOf, req, usable } from './common.js';
-import { CLASS_NAME, STATUS_KEYS, classMark, countryLabel, netName } from './names.js';
+import { CLASS_NAME, HOW_NAME, STATUS_KEYS, classMark, countryLabel, netName } from './names.js';
 
 export const IP_RANGES = Object.freeze(['24h', '7d', '30d']);
 // 거르기에 쓰는 망 종류 — IPv6 대역은 'ipv6'(DB-IP 는 IPv4 만 찾는다)
@@ -93,17 +93,32 @@ export function bandRows(bands) {
 export const kindItems = (kinds) => Object.keys(CLASS_NAME).map((k) => ({ key: k, name: CLASS_NAME[k], value: n0(kinds?.[k]), mark: classMark(k) }));
 export const statusItems = (status) => STATUS_KEYS.filter(([k]) => k !== 'ws5xx').map(([key, name, mark]) => ({ key, name, value: n0(status?.[key]), mark }));
 export const pairList = (rows) => list(rows).filter((r) => Array.isArray(r) && typeof r[0] === 'string').map(([name, n]) => ({ key: name, name: clean(name), value: n0(n) }));
+// 경로 → '페이지·파일'(082 §3.2) — 위에서 먼저 맞은 것: 끝 조각에 점이 없고 /api/ 밖이면 직접 연 페이지, 출처가 있으면 함께 받은 파일,
+// 출처를 싣지 않는 브라우저 요청(실시간 연결·탭 아이콘)도 함께 받은 파일, 나머지는 따로 부른 파일. '/' 로 시작하지 않으면 null
+const ICON_HEADS = Object.freeze(['/favicon.', '/apple-touch-icon']);
+export function pathHow(path, kind, referer) {
+  if (typeof path !== 'string' || !path.startsWith('/')) return null;
+  if (!path.slice(path.lastIndexOf('/') + 1).includes('.') && !path.startsWith('/api/')) return 'page';
+  if (typeof referer === 'string' && referer) return 'with';
+  const quiet = path.startsWith('/api/ws/') || path === '/icon-192.png' || ICON_HEADS.some((h) => path.startsWith(h));
+  return kind === 'browser' && quiet ? 'with' : 'alone';
+}
 export const recentRows = (recent) =>
   list(recent)
     .filter(isObj)
     .slice(0, 100)
-    .map((r) => ({
-      ts: toMs(r.ts),
-      path: clean(r.path),
-      status: num(r.status),
-      kind: own(CLASS_NAME, r.kind) ?? clean(r.kind),
-      browser: clean(r.browser),
-      os: clean(r.os),
-      device: clean(r.device),
-      referer: clean(r.referer),
-    }));
+    .map((r) => {
+      const how = pathHow(r.path, r.kind, r.referer);
+      return {
+        ts: toMs(r.ts),
+        path: clean(r.path),
+        how,
+        howText: how ? HOW_NAME[how] : '–',
+        status: num(r.status),
+        kind: own(CLASS_NAME, r.kind) ?? clean(r.kind),
+        browser: clean(r.browser),
+        os: clean(r.os),
+        device: clean(r.device),
+        referer: clean(r.referer),
+      };
+    });

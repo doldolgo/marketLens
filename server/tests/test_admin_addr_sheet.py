@@ -202,7 +202,15 @@ def test_where_panel_and_recent_flags(flow: dict[str, Any]) -> None:
         "37.5665, 126.978",
     ]
     assert g["credit"] == "dbip-sheet"
-    assert g["table"] == ["시각(KST)", "경로", "상태", "종류", "브라우저", "신호"]
+    assert g["table"] == [
+        "시각(KST)",
+        "경로",
+        "페이지·파일",  # 082 §3.2
+        "상태",
+        "종류",
+        "브라우저",
+        "신호",
+    ]
     assert g["flags"] == [
         [["탐색", "flag bad"], ["404", "flag warn"]],
         [["자원", "flag"], ["JS", "flag"]],
@@ -356,7 +364,7 @@ def test_ip_check_score_lines_and_as_numbers() -> None:
         "점수 42 → 의심(30~59)",
         "점수 42 → 사람(30 미만)",
         "점수 42 → 모름(요청 3 미만)",
-        "점수 – → 운영자(운영자 흔적 — 점수 안 셈)",
+        "점수 – → 운영자(운영자 접속 — 점수 안 셈)",
         "점수 42 → 모름(요청 3 미만)",
     ]
     assert got["asn"] == ["AS4766", "AS4766", "AS15169", "", ""]

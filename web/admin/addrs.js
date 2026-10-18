@@ -1,5 +1,5 @@
 // 방문자 'IP 별' 보기(스펙 070 §3.2 — 069 /admin/access/addrs): 큰 수 넷 · 'IP 전체는 … 부터' 줄 · 거르기(판정 여럿·망 종류·나라·
-// 가린 기록 빼기 — 주소 f=…, 찾기는 주소에 싣지 않음) · IP 표(판정 배지·점수 막대·위치·요청 막대·사람 모양 페이지·마지막·작은 선,
+// 가린 기록 빼기 — 주소 f=…, 찾기는 주소에 싣지 않음) · IP 표(판정 배지·점수 막대·위치·요청 막대·브라우저로 연 페이지·마지막·작은 선,
 // 행 title 에 근거 상위 셋, 머리 눌러 정렬 — 요청·페이지·마지막·점수는 서버가, 그 밖은 불러온 행 안에서 · 200행씩) · 행 → IP 상세 판.
 import { $, el, int, kstText, num, once, pct, pressed, put, stateWord, tag, usable, widthOf } from './common.js';
 import { sortRows } from './calc.js';
@@ -98,7 +98,7 @@ const COLUMNS = [
       return box;
     },
   },
-  { key: 'pages', label: '사람 모양 페이지', num: true, fmt: int },
+  { key: 'pages', label: '브라우저로 연 페이지', num: true, fmt: int },
   { key: 'last', label: '마지막', fmt: (v) => (num(v) === null ? '–' : kstText(v).slice(5)) },
   { key: 'spark', label: '추이', sort: false, cell: (r) => sparkSvg(r.spark) },
 ];

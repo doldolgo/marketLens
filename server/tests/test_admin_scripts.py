@@ -224,7 +224,11 @@ def test_paths_table_polling_periods_and_no_copied_feed_periods() -> None:
     )
     for name in SCRIPTS:
         if name != "common.js":
-            expected = ["/api/refresh"] if name == "server.js" else []
+            # server.js 는 즉시 갱신 POST 하나, ipmodel.js 는 최근 요청 경로의 앞부분 견주기 둘(082 §3.2 — 부르는 경로가 아니다)
+            expected = {
+                "server.js": ["/api/refresh"],
+                "ipmodel.js": ["/api/", "/api/ws/"],
+            }.get(name, [])
             assert re.findall(r"'(/(?:api|svc)/[^']*)'", _script(name)) == expected, (
                 name
             )

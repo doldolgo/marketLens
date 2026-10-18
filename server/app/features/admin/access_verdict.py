@@ -72,7 +72,7 @@ def reasons(s: Signals, *, fake_crawler: bool = False) -> list[tuple[str, str]]:
         out.append(("probe", f"탐색 경로 {s.probes}번{shown}"))
     tools = k.get("tool", 0) + k.get("scanner", 0)
     if tools:
-        out.append(("ua_tool", f"도구·스캐너 모양 요청 {tools}번"))
+        out.append(("ua_tool", f"자동화 도구·봇·스캐너 요청 {tools}번"))
     if s.pages >= PAGES_MIN and not s.js:
         out.append(("no_js", f"페이지 {s.pages}번인데 JS 신호 0"))
     if s.net == "cloud":
@@ -87,7 +87,7 @@ def reasons(s: Signals, *, fake_crawler: bool = False) -> list[tuple[str, str]]:
     if s.robots:
         out.append(("robots", f"robots.txt {s.robots}번"))
     if s.agents >= UA_MANY:
-        out.append(("ua_many", f"서로 다른 UA {s.agents}개"))
+        out.append(("ua_many", f"서로 다른 브라우저 정보 {s.agents}개"))
     if s.js:
         out.append(("js", f"JS 신호 {s.js}번"))
     if s.ws:

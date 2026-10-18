@@ -2034,6 +2034,45 @@ details.card > summary {
   background: rgb(224 164 88 / 0.2);
   color: var(--text-1);
 }
+/* 최근 요청 '페이지·파일' 배지(082 §3.2) — 좋고 나쁨이 아니라서 상태색을 쓰지 않는다. 직접 연 페이지만 강조색 */
+.how {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: var(--fs-11);
+  white-space: nowrap;
+}
+.how.page {
+  background: rgb(145 132 217 / 0.22);
+  color: var(--text-1);
+}
+.how.with {
+  background: var(--raised);
+  color: var(--text-3);
+}
+.how.alone {
+  border-color: var(--text-3);
+  border-style: dashed;
+  color: var(--text-1);
+}
+/* 표 칸 머리 '?'(082 §3.3) — 칸 이름 뒤. 스크립트가 만든 '?' 라 아이콘(icons.svg#help) 대신 같은 꼴(원 + ?)을 CSS 로 그린다 */
+.help.qmark {
+  box-sizing: border-box;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid currentColor;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+.help.qmark::before {
+  content: "?";
+}
+.tbl th .help {
+  margin-left: 4px;
+  vertical-align: -2px;
+}
 
 /* 화면 재생 판(074 §3.3) — 왼쪽 틀(조각의 화면 크기 --fw 를 칸에 맞춰 --fit 만큼 줄임, 늘리지 않음)·시간 막대·조절 줄, 오른쪽 사건 목록.
    틀은 누를 수 없다(관리자가 움직이지 않게 — 화면은 재생이 정한다). 좁은 화면에서는 사건 목록이 아래로 */

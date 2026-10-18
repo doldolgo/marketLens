@@ -2,6 +2,7 @@
 // 글자는 textContent 로만 넣고, 막대 폭·자리는 비율 수만(widthOf·leftOf) 쓴다.
 import { $, button, clean, el, int, leftOf, list, num, pct, pressed, svg, widthOf } from './common.js';
 import { split100, topRows } from './calc.js';
+import { helpNode } from './help.js';
 
 // 큰 수 — 값 + 작은 단위 글. 문턱을 넘은 값만 상태색과 모양(▲ 주의 · ■ 문제)
 export function bigNumber(id, text, sub, tone) {
@@ -119,6 +120,7 @@ export function table(node, columns, rows, o = {}) {
       th.append(b);
       if (o.sort?.key === c.key) th.setAttribute('aria-sort', o.sort.dir === 'asc' ? 'ascending' : 'descending');
     } else th.textContent = clean(c.label);
+    if (c.help) th.append(helpNode(c.help)); // 칸 설명(082 §3.3) — 눌러도 정렬 단추가 아니다(help.js 가 잡기 단계에서 받는다)
     head.append(th);
   }
   const thead = el('thead');

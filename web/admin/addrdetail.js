@@ -19,7 +19,7 @@ export function verdictBadge(verdict) {
   return box;
 }
 
-// 시간별 요청 그래프(067 hourly — 요청 막대 · 사람 모양 페이지·JS·오류) — 대역·IP 판이 같이 쓴다
+// 시간별 요청 그래프(067 hourly — 요청 막대 · 브라우저로 연 페이지·JS·오류) — 대역·IP 판이 같이 쓴다
 export function hourlyTime(app, pv, part) {
   const endMs = app.now();
   const startMs = endMs - (RANGE_MS[pv.range] ?? RANGE_MS['24h']);
@@ -30,10 +30,10 @@ export function hourlyTime(app, pv, part) {
     time: {
       startMs,
       endMs,
-      panes: [{ title: '요청', fmt: int }, { title: '사람 모양 페이지 · JS · 오류', fmt: int }],
+      panes: [{ title: '요청', fmt: int }, { title: '브라우저로 연 페이지 · JS · 오류', fmt: int }],
       series: [
         { name: '요청', mark: 'acc', type: 'bar', data: pts('requests') },
-        { name: '사람 모양 페이지', mark: 'c1', pane: 1, data: pts('pages') },
+        { name: '브라우저로 연 페이지', mark: 'c1', pane: 1, data: pts('pages') },
         { name: 'JS 신호', mark: 'c3', pane: 1, data: pts('js') },
         { name: '오류', mark: 'bad', pane: 1, type: 'bar', data: pts('errors') },
       ],
@@ -75,12 +75,20 @@ export function fillUsage(part) {
   ], rows);
 }
 
-// 최근 요청 표의 칸(067 대역 판과 같음) + 신호 칩
+// 최근 요청 표의 칸(067 대역 판과 같음) + 신호 칩. '페이지·파일'·'종류' 칸 머리의 '?' 는 082 §3.2 의 두 줄
+const HOW_HELP =
+  '직접 연 페이지 = 주소창에 치거나 링크를 눌러 연 페이지. 함께 받은 파일 = 그 페이지가 열리며 저절로 받은 스크립트·그림·글꼴·API·실시간 연결.\n' +
+  '따로 부른 파일 = 페이지 없이 파일만 부른 요청 — robots.txt 를 읽는 검색 로봇, .env·.php 를 찾는 스캐너가 흔하다. 경로와 출처(행을 누르면 보인다)로 가른다.';
+const KIND_HELP =
+  '이 요청을 보낸 쪽 — 브라우저 정보(UA)로 가른다. 일반 브라우저·검색 로봇·AI 로봇·링크 미리보기·자동화 도구·그 밖 봇·스캐너·운영자 접속·브라우저 정보 없음.\n' +
+  '일반 브라우저에도 브라우저인 척하는 봇이 섞인다 — 판정 근거와 같이 본다. 운영자 접속은 관리자 화면·Clarity·로컬 시험에서 띄운 요청이다.';
+const howBadge = (r) => (r.how ? el('span', `how ${r.how}`, r.howText) : el('span', 'dim', '–'));
 export const RECENT_COLUMNS = Object.freeze([
   { key: 'ts', label: '시각(KST)', fmt: (v) => kstText(v, true) },
   { key: 'path', label: '경로', cls: 'mono' },
+  { key: 'howText', label: '페이지·파일', cell: howBadge, help: HOW_HELP },
   { key: 'status', label: '상태', num: true },
-  { key: 'kind', label: '종류' },
+  { key: 'kind', label: '종류', help: KIND_HELP },
   { key: 'browser', label: '브라우저' },
 ]);
 export function recentMore(r) {
@@ -130,7 +138,7 @@ function addrModel(app, pv, ip, order) {
     table: {
       title: '최근 요청(100)',
       sort: { key: 'ts', dir: 'desc' },
-      search: ['path', 'kind', 'browser', 'flagText'],
+      search: ['path', 'howText', 'kind', 'browser', 'flagText'],
       rows: recentAddrRows(part.recent),
       columns: [...RECENT_COLUMNS, { key: 'flagText', label: '신호', sort: false, cell: flagChips, csv: (r) => r.flagText }],
       expand: recentMore,
