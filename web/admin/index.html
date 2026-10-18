@@ -57,14 +57,14 @@
             <div class="chart spark" id="c-ws"></div>
           </section>
           <section class="card kpi" id="card-visit" aria-labelledby="h-visit">
-            <header class="card-head"><h2 id="h-visit"><button type="button" class="t" data-detail="visit">오늘 방문자</button></h2><span class="unit">확인 ~ 브라우저 모양</span><span class="help" title="보여 주는 것: 오늘(KST 0시부터 지금까지) 온 방문자 수의 범위 — 큰 수가 확인(아래쪽 어림), 옆 ~ 수가 브라우저 모양(위쪽 어림). 실제 사람은 그 사이다.
+            <header class="card-head"><h2 id="h-visit"><button type="button" class="t" data-detail="visit">오늘 방문자</button></h2><span class="unit">확인 ~ 최대</span><span class="help" title="보여 주는 것: 오늘(KST 0시부터 지금까지) 온 방문자 수의 범위 — 큰 수가 확인(아래쪽 어림), 옆 ~ 수가 최대(위쪽 어림). 실제 사람은 그 사이다.
 낱말 뜻:
 · 방문자 — 하루 동안 같은 IP 앞부분 + 같은 브라우저 정보를 한 명으로 센 것
 · 확인 — 그중 페이지 스크립트가 실제로 돈 흔적(clarity.js 받기나 대시보드 실시간 연결)이 있는 방문자
-· 브라우저 모양 — 브라우저 이름표를 단 방문자 전부. 브라우저인 척하는 봇이 섞인다
-· 사람 모양 페이지 — 브라우저처럼 보이는 요청이 연 페이지 수. 선과 비교 배지는 이 값이다
-자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄)을 60초마다 다시 읽어 센다. 탐색 경로(/.env 같은 주소)를 건드린 방문자와 운영자 흔적은 빼고, 관리자 화면·바깥 점검·시세 폴링은 기록되지 않는다.
-읽는 법: 실제 사람은 대개 확인 쪽에 가깝다 — 브라우저 모양 가운데 많은 수가 위장 봇이다. 광고 차단기로 스크립트를 막은 사람은 확인에서 빠진다. 선은 방문자가 아니라 시간별 사람 모양 페이지이고, 비교 배지는 오늘 지금까지의 페이지 수를 어제 같은 시각까지와 견준다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-visit"></span><button type="button" class="ibtn" data-detail="visit" aria-label="오늘 방문자 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+· 최대 — 브라우저로 온 방문자 전부. 브라우저인 척하는 봇이 섞인다
+· 브라우저로 연 페이지 — 일반 브라우저로 온 요청이 연 페이지 수. 선과 비교 배지는 이 값이다
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄)을 60초마다 다시 읽어 센다. 탐색 경로(/.env 같은 주소)를 건드린 방문자와 운영자 접속은 빼고, 관리자 화면·바깥 점검·시세 폴링은 기록되지 않는다.
+읽는 법: 실제 사람은 대개 확인 쪽에 가깝다 — 최대 가운데 많은 수가 위장 봇이다. 광고 차단기로 스크립트를 막은 사람은 확인에서 빠진다. 선은 방문자가 아니라 시간별 브라우저로 연 페이지이고, 비교 배지는 오늘 지금까지의 페이지 수를 어제 같은 시각까지와 견준다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-visit"></span><button type="button" class="ibtn" data-detail="visit" aria-label="오늘 방문자 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="big" id="v-visit">–</div>
             <div class="delta" id="d-visit"></div>
             <div class="chart spark" id="c-visit"></div>
@@ -130,9 +130,9 @@
             <div class="scroll"><table class="tbl" id="tbl-boxes"></table></div>
           </section>
           <section class="card s12" id="card-traffic" aria-labelledby="h-traffic">
-            <header class="card-head"><h2 id="h-traffic"><button type="button" class="t" data-detail="traffic">트래픽</button></h2><span class="unit">시간별 · 사람 모양 페이지 · 5xx · 대시보드 동시 접속</span><span class="help" title="보여 주는 것: 시간별 사람 모양 페이지 · 서버 오류(5xx) · 대시보드 동시 접속을 위아래 세 칸으로 나란히 그린 것.
+            <header class="card-head"><h2 id="h-traffic"><button type="button" class="t" data-detail="traffic">트래픽</button></h2><span class="unit">시간별 · 브라우저로 연 페이지 · 5xx · 대시보드 동시 접속</span><span class="help" title="보여 주는 것: 시간별 브라우저로 연 페이지 · 서버 오류(5xx) · 대시보드 동시 접속을 위아래 세 칸으로 나란히 그린 것.
 낱말 뜻:
-· 사람 모양 페이지 — 브라우저처럼 보이는 요청이 한 시간에 연 페이지 수(랜딩·정적 페이지 포함, 위장 봇 섞임)
+· 브라우저로 연 페이지 — 일반 브라우저로 온 요청이 한 시간에 연 페이지 수(랜딩·정적 페이지 포함, 위장 봇 섞임)
 · 5xx — 서버가 오류로 답한 요청 수(대시보드 실시간 연결의 재접속 실패는 뺌)
 · 대시보드 동시 접속 — 그 순간 열려 있던 대시보드 탭 수의 5분 최댓값
 · 점선 — 비교 기간(이전 기간)을 지금 축에 겹친 것

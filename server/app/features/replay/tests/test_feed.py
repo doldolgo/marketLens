@@ -24,6 +24,8 @@ ROW_KEYS = [
     "w",
     "h",
     "cut",
+    "consent",
+    "consentFirst",
 ]
 
 
@@ -69,6 +71,8 @@ async def test_live_keeps_sessions_seen_in_the_last_60_seconds_newest_first(
         "w": 1280,
         "h": 800,
         "cut": False,
+        "consent": "granted",
+        "consentFirst": "granted",
     }
     rig.clock.now = NOON + 62.001
     assert (await _json(rig, "live"))["rows"] == []

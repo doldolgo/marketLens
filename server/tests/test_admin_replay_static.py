@@ -3,8 +3,10 @@
 '동의한 방문자만, 서비스 종료까지 보관'), 5초 묶음은 방문자 페이지 하나. 그리기·부르기는 node 시험(test_admin_replay_*)이 본다.
 """
 
+import html
 import re
 
+from tests.test_admin_explain import _parts, _problems
 from tests.test_admin_screen import PAGES
 from tests.test_admin_scripts import _script
 from tests.test_deploy import _text
@@ -56,7 +58,8 @@ def test_frame_attributes_and_the_frame_cannot_be_touched() -> None:
 
 
 def test_visitors_page_has_the_two_cards_with_consent_and_retention_in_help() -> None:
-    """§3.1 — 카드 '지금 보는 중'·'화면 기록'(표는 가로 스크롤 상자 안, 찾기 칸), '?' 는 071 두 줄이고 뜻 줄에 '동의한 방문자만, 서비스 종료까지 보관'."""
+    """§3.1 — 카드 '지금 보는 중'·'화면 기록'(표는 가로 스크롤 상자 안, 찾기 칸), '?' 는 071 칸 넷이고 자료 출처 칸에 '모든 방문을 기록'·'서비스 종료까지 보관',
+    낱말 뜻 칸에 동의 칸의 뜻."""
     for card, title in (("rplive", "지금 보는 중"), ("replay", "화면 기록")):
         head = re.search(
             rf'<section class="card s12" id="card-{card}" aria-labelledby="h-{card}">\s*<header class="card-head"><h2 id="h-{card}">{title}</h2>'
@@ -64,9 +67,13 @@ def test_visitors_page_has_the_two_cards_with_consent_and_retention_in_help() ->
             HTML,
         )
         assert head, card
-        what, how = head.group(1).split("&#10;")
-        assert "동의한 방문자만, 서비스 종료까지 보관" in what, card
-        assert 0 < len(what) <= 120 and 0 < len(how) <= 120
+        text = html.unescape(head.group(1))
+        assert _problems(text) == [], (card, _problems(text))
+        parts = {p["key"]: p for p in _parts(text)}
+        # 073 §3.1 — 동의와 관계없이 모든 방문을 기록, 078 — 서비스 종료까지 보관
+        source = parts["source"]["text"]
+        assert "모든 방문을 기록" in source and "서비스 종료까지 보관" in source, card
+        assert [w for w, _ in parts["words"]["items"]][0] == "동의", card
         assert (
             f'<div class="scroll"><table class="tbl" id="tbl-{card}"></table></div>'
             in HTML

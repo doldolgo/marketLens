@@ -128,7 +128,13 @@
           </section>
           </div>
           <section class="card s12" id="card-rplive" aria-labelledby="h-rplive">
-            <header class="card-head"><h2 id="h-rplive">지금 보는 중</h2><span class="unit">60초 안 · 5초마다 · 행을 누르면 따라 보기</span><span class="help" title="화면 분석에 동의한 방문자 가운데 지금(60초 안) 움직임 기록이 들어온 방문. 동의한 방문자만, 서비스 종료까지 보관.&#10;행을 누르면 그 방문을 몇 초 늦게 따라 본다. 머문 시간은 첫 기록부터 마지막 기록까지, 5초마다 다시 읽는다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-rplive"></span></span></header>
+            <header class="card-head"><h2 id="h-rplive">지금 보는 중</h2><span class="unit">60초 안 · 5초마다 · 행을 누르면 따라 보기</span><span class="help" title="보여 주는 것: 지금(60초 안) 화면 움직임이 들어오는 방문 목록.
+낱말 뜻:
+· 동의 — 그 방문이 화면 분석에 동의했는지(동의 / 미동의)
+· 머문 시간 — 첫 기록부터 마지막 기록까지
+· 따라 보기 — 행을 누르면 그 화면을 2~3초 늦게 따라 본다
+자료 출처: 방문자 브라우저가 화면 이동 기록(마우스·손가락 위치·누름·스크롤·탭 바꿈)을 2초마다 묶어 보내면 우리 서버가 받아 둔다. 봇을 가려내려고 동의와 관계없이 모든 방문을 기록하고(서비스 종료까지 보관), 이 카드는 5초마다 새로 읽는다.
+읽는 법: 행을 누르면 그 화면을 2~3초 늦게 따라 본다. 비어 있으면 지금 화면을 움직이는 방문이 없는 것이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-rplive"></span></span></header>
             <div class="scroll"><table class="tbl" id="tbl-rplive"></table></div>
           </section>
           <section class="card s12" id="card-addrs" aria-labelledby="h-addrs">
@@ -137,7 +143,7 @@
 · 판정 — ■봇 ▲의심 ●사람 ○모름(요청 3번 미만) ◆운영자(관리자 화면에서 온 요청)
 · 점수 — 근거 점수의 합. 60 이상 봇, 30~59 의심, 30 미만 사람(빼는 근거가 많으면 0 아래도 된다)
 · 위치 — 나라 국기·도시(대략)·망 사업자
-· 사람 모양 페이지 — 그 IP 가 브라우저 이름표로 연 페이지 수
+· 브라우저로 연 페이지 — 그 IP 가 브라우저 이름표로 연 페이지 수
 · 추이 — 24시간은 시간별, 7일·30일은 날별 요청
 · 대역 표시 — IP 전체를 남기기 전(2026-10-14 전) 기록은 끝자리를 가린 대역 한 줄로 보인다
 자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄)을 IP 마다 묶어 60초마다 다시 센다. 위치·망은 무료 IP 위치 자료(DB-IP Lite, 달마다 새로 받음)로 찾은 값이라 나라는 대략이고 도시는 통신사 거점일 수 있다.
@@ -154,14 +160,14 @@
             <p class="credit"><a href="https://db-ip.com" rel="noreferrer">IP Geolocation by DB-IP</a></p>
           </section>
           <section class="card s12" id="card-bands" aria-labelledby="h-bands" hidden>
-            <header class="card-head"><h2 id="h-bands">IP 대역</h2><span class="unit">가린 대역 그대로 · 행을 누르면 상세</span><span class="help" title="보여 주는 것: 끝자리를 가린 IP 대역마다 요청·사람 모양 페이지·짝 수·봇 %·5xx 를 늘어놓은 표.
+            <header class="card-head"><h2 id="h-bands">IP 대역</h2><span class="unit">가린 대역 그대로 · 행을 누르면 상세</span><span class="help" title="보여 주는 것: 끝자리를 가린 IP 대역마다 요청·브라우저로 연 페이지·짝 수·봇 %·5xx 를 늘어놓은 표.
 낱말 뜻:
 · 대역 — IP 끝자리를 가려 묶은 것. IPv4 는 /24(앞 세 자리가 같은 256개), IPv6 는 /48
 · 짝 수 — 날마다(KST) 대역 + 브라우저 정보가 다른 것을 따로 센 수(봇 포함)
-· 봇 % — 스캐너·자동화 도구·AI 수집기·검색엔진이 보낸 요청의 몫. 트래픽 페이지 '봇 비율'(스캐너·자동화 도구만)과 다르다
+· 봇 % — 그 밖 봇·스캐너·자동화 도구·AI 로봇·검색 로봇이 보낸 요청의 몫. 트래픽 페이지 '봇 비율'(그 밖 봇·스캐너와 자동화 도구만)과 다르다
 · 처음 ~ 마지막 — 고른 기간 안의 첫·마지막 요청 시각(KST)
 자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄)을 대역마다 묶어 60초마다 다시 센다. IP 전체를 남기기 전 기록도 들고, 원래 IP 와 브라우저 정보 원문은 없다. 나라·망은 대역 첫 주소로 찾는다.
-읽는 법: 봇 % 가 높고 사람 모양 페이지가 0 인 대역은 봇 대역이다. '봇만 있는 대역 빼기' 로 사람이 섞인 대역만 남긴다. 행을 누르면 시간별·종류·경로·최근 요청을 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-bands"></span></span></header>
+읽는 법: 봇 % 가 높고 브라우저로 연 페이지가 0 인 대역은 봇 대역이다. '봇만 있는 대역 빼기' 로 사람이 섞인 대역만 남긴다. 행을 누르면 시간별·종류·경로·최근 요청을 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-bands"></span></span></header>
             <div class="bar">
               <div class="seg" role="group" aria-label="망 종류" id="net-seg"><button type="button" data-net="" aria-pressed="true">전체</button><button type="button" data-net="telecom_kr" aria-pressed="false">국내 통신사</button><button type="button" data-net="telecom" aria-pressed="false">해외 통신사</button><button type="button" data-net="cloud" aria-pressed="false">데이터센터</button><button type="button" data-net="other" aria-pressed="false">그 밖</button><button type="button" data-net="ipv6" aria-pressed="false">IPv6</button></div>
               <select class="input" id="country" aria-label="나라"><option value="">모든 나라</option></select>
@@ -172,9 +178,15 @@
             <div class="list-foot"><span id="bands-count"></span><button type="button" class="linkbtn" id="bands-more" hidden>200행 더 보기</button></div>
           </section>
           <section class="card s12" id="card-replay" aria-labelledby="h-replay">
-            <header class="card-head"><h2 id="h-replay">화면 기록</h2><span class="unit">최근 200 · 행을 누르면 재생</span><span class="help" title="페이지를 한 번 연 것(조각)마다 마우스·손가락 위치·누름·스크롤·보던 영역·탭 바꿈. 동의한 방문자만, 서비스 종료까지 보관.&#10;행을 누르면 지금 공개 페이지 위에 그때 움직임을 다시 본다. 화면 글자는 모으지 않아 글은 지금 페이지 것이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-replay"></span></span></header>
+            <header class="card-head"><h2 id="h-replay">화면 기록</h2><span class="unit">최근 200 · 행을 누르면 재생</span><span class="help" title="보여 주는 것: 페이지를 한 번 열 때마다 남긴 마우스·손가락 위치, 누른 곳, 스크롤, 탭 바꿈의 목록(최근 200).
+낱말 뜻:
+· 동의 — 동의 / 미동의(거부함·하루 동안 안 보기·답 안 함·GPC 거부). 답 안 함 = 동의 창에 아무 답이 없음, 봇에 흔하다
+· 화면 — 그 기록에서 지나간 화면(랜딩·대시보드 탭 등)
+· 길이 · 누름 — 첫 기록부터 마지막 기록까지 · 누른 횟수
+자료 출처: 방문자 브라우저가 보낸 화면 이동 기록을 우리 서버가 받아 둔다. 봇 판별을 위해 모든 방문을 기록하고 서비스 종료까지 보관한다(조용해진 지 3시간 지난 기록은 S3 로 옮긴다). 화면 글자는 모으지 않고, 60초마다 새로 읽는다.
+읽는 법: 행을 누르면 지금 공개 페이지 위에 그때 움직임을 다시 본다 — 글은 지금 페이지 것이다. 답 안 함 은 봇에 흔하니 IP 판정과 함께 본다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-replay"></span></span></header>
             <div class="bar">
-              <label class="search"><svg class="i" aria-hidden="true"><use href="icons.svg#search"/></svg><input class="input" id="rp-q" type="search" placeholder="IP · 화면 찾기" autocomplete="off" spellcheck="false" aria-label="화면 기록 찾기" /></label>
+              <label class="search"><svg class="i" aria-hidden="true"><use href="icons.svg#search"/></svg><input class="input" id="rp-q" type="search" placeholder="IP · 화면 · 동의 찾기" autocomplete="off" spellcheck="false" aria-label="화면 기록 찾기" /></label>
             </div>
             <div class="scroll"><table class="tbl" id="tbl-replay"></table></div>
             <div class="list-foot"><span id="replay-count"></span></div>

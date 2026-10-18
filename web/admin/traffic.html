@@ -45,20 +45,20 @@
         <main class="content" id="content">
           <div class="kpis s12" aria-label="큰 수 — 누르면 아래 큰 추이의 지표가 바뀐다">
             <button type="button" class="card kpi" data-metric="visitors" aria-pressed="true">
-              <span class="card-head"><span class="kpi-name" id="h-visitors">방문자</span><span class="unit">확인 ~ 브라우저 모양</span><span class="help" title="보여 주는 것: 고른 기간에 온 방문자 수의 범위 — 큰 수가 확인(아래쪽 어림), 옆 ~ 수가 브라우저 모양(위쪽 어림). 실제 사람은 그 사이다.
+              <span class="card-head"><span class="kpi-name" id="h-visitors">방문자</span><span class="unit">확인 ~ 최대</span><span class="help" title="보여 주는 것: 고른 기간에 온 방문자 수의 범위 — 큰 수가 확인(아래쪽 어림), 옆 ~ 수가 최대(위쪽 어림). 실제 사람은 그 사이다.
 낱말 뜻:
 · 방문자 — 하루(KST) 동안 같은 IP 앞부분 + 같은 브라우저 정보를 한 명으로 센 것. 날마다 따로 세어 더한다
 · 확인 — 그중 페이지 스크립트가 실제로 돈 흔적(clarity.js 받기나 대시보드 실시간 연결)이 있는 방문자
-· 브라우저 모양 — 브라우저 이름표를 단 방문자 전부. 브라우저인 척하는 봇이 섞인다
-자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)을 60초마다 다시 읽어 센다. 탐색 경로(/.env 같은 주소)를 건드린 방문자와 운영자 흔적은 뺀다. 같은 IP 앞부분(/24)·같은 브라우저를 쓰는 두 사람은 한 명으로 든다.
+· 최대 — 브라우저로 온 방문자 전부. 브라우저인 척하는 봇이 섞인다
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)을 60초마다 다시 읽어 센다. 탐색 경로(/.env 같은 주소)를 건드린 방문자와 운영자 접속은 뺀다. 같은 IP 앞부분(/24)·같은 브라우저를 쓰는 두 사람은 한 명으로 든다.
 읽는 법: 같은 사람이 이틀 오면 2 라 사람 수가 아니라 '날마다 센 방문 수' 로 본다. 광고 차단기가 스크립트를 막은 사람은 확인에서 빠진다. 타일을 누르면 아래 추이가 이 지표로 바뀐다(24시간은 시간별 페이지 수로 그린다)."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-visitors"></span></span></span>
               <span class="big" id="v-visitors">–</span>
               <span class="delta" id="d-visitors"></span>
             </button>
             <button type="button" class="card kpi" data-metric="pages" aria-pressed="false">
-              <span class="card-head"><span class="kpi-name" id="h-pages">사람 모양 페이지</span><span class="unit">요청</span><span class="help" title="보여 주는 것: 고른 기간에 브라우저 이름표를 단 요청이 연 페이지 수(랜딩·대시보드·정적 페이지 모두).
+              <span class="card-head"><span class="kpi-name" id="h-pages">브라우저로 연 페이지</span><span class="unit">요청</span><span class="help" title="보여 주는 것: 고른 기간에 브라우저 이름표를 단 요청이 연 페이지 수(랜딩·대시보드·정적 페이지 모두).
 낱말 뜻:
-· 사람 모양 페이지 — 브라우저처럼 보이는 요청이 페이지 주소를 제대로 연 횟수. 그림·글꼴 같은 파일은 빼고 센다
+· 브라우저로 연 페이지 — 일반 브라우저로 온 요청이 페이지 주소를 제대로 연 횟수. 그림·글꼴 같은 파일은 빼고 센다
 · 요청 — 서버에 온 요청 한 줄. 이 타일은 그중 페이지만 센다
 자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터). 새로고침·다시 열기도 매번 하나로 든다. 브라우저인 척하는 봇이 섞여 실제보다 크다.
 읽는 법: 사람 수가 아니라 열린 페이지 수다. 실제 브라우저로 본 페이지는 추이의 '스크립트가 돈 페이지'(위장 봇이 거의 없다)와 견준다. 타일을 누르면 아래 추이가 이 지표로 바뀐다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-pages"></span></span></span>
@@ -75,13 +75,13 @@
               <span class="delta" id="d-now"></span>
             </button>
             <button type="button" class="card kpi" data-metric="bots" aria-pressed="false">
-              <span class="card-head"><span class="kpi-name" id="h-bots">봇 비율</span><span class="unit">요청</span><span class="help" title="보여 주는 것: 고른 기간 서버에 온 모든 요청 가운데 스캐너·자동화 도구가 보낸 요청의 비율.
+              <span class="card-head"><span class="kpi-name" id="h-bots">봇 비율</span><span class="unit">요청</span><span class="help" title="보여 주는 것: 고른 기간 서버에 온 모든 요청 가운데 그 밖 봇·스캐너와 자동화 도구가 보낸 요청의 비율.
 낱말 뜻:
-· 스캐너 — 취약점을 찾는 요청(/.env·/wp-login.php 같은 주소), 이름에 bot·crawl 이 든 이름 모를 봇, 브라우저 아닌 이름표
+· 그 밖 봇·스캐너 — 취약점을 찾는 요청(/.env·/wp-login.php 같은 주소)과 검색 로봇·AI 로봇 목록에 없는 봇
 · 자동화 도구 — curl·파이썬·헤드리스 브라우저·감시 도구처럼 프로그램이 보낸 요청
 · 요청 — 페이지·그림·API 를 가리지 않고 서버에 온 요청 한 줄
-자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)의 요청마다 브라우저 정보(User-Agent)로 종류를 가른 값. 검색엔진·AI 수집기·링크 미리보기는 이 비율에 넣지 않는다. 시세 폴링 같은 잦은 요청은 원래 기록하지 않는다.
-읽는 법: 공개 사이트는 원래 높다(취약점을 찾는 봇이 늘 돈다). 갑자기 오르면 방문자 페이지에서 그 IP 를 본다. 방문자 페이지의 '봇 판정'·대역 '봇 %' 와는 세는 법이 다르다. 추이는 비율이 아니라 요청 수와 사람 모양 페이지 수를 그린다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-bots"></span></span></span>
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)의 요청마다 브라우저 정보(User-Agent)로 종류를 가른 값. 검색 로봇·AI 로봇·링크 미리보기는 이 비율에 넣지 않는다. 시세 폴링 같은 잦은 요청은 원래 기록하지 않는다.
+읽는 법: 공개 사이트는 원래 높다(취약점을 찾는 봇이 늘 돈다). 갑자기 오르면 방문자 페이지에서 그 IP 를 본다. 방문자 페이지의 '봇 판정'·대역 '봇 %' 와는 세는 법이 다르다. 추이는 비율이 아니라 요청 수와 브라우저로 연 페이지 수를 그린다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-bots"></span></span></span>
               <span class="big" id="v-bots">–</span>
               <span class="delta" id="d-bots"></span>
             </button>
@@ -96,14 +96,14 @@
             </button>
           </div>
           <section class="card s12" id="card-trend" aria-labelledby="h-trend">
-            <header class="card-head"><h2 id="h-trend"><button type="button" class="t" data-detail="trend"><span id="trend-title">방문자</span></button></h2><span class="unit">고른 지표 · 점선은 비교 기간</span><span class="help" title="보여 주는 것: 위에서 고른 큰 수 하나(방문자·사람 모양 페이지·지금 접속·봇 비율·5xx)를 시간에 따라 그린 것.
+            <header class="card-head"><h2 id="h-trend"><button type="button" class="t" data-detail="trend"><span id="trend-title">방문자</span></button></h2><span class="unit">고른 지표 · 점선은 비교 기간</span><span class="help" title="보여 주는 것: 위에서 고른 큰 수 하나(방문자·브라우저로 연 페이지·지금 접속·봇 비율·5xx)를 시간에 따라 그린 것.
 낱말 뜻:
 · 스크립트가 돈 페이지 — 페이지가 열릴 때 받는 작은 파일(clarity.js — 동의와 관계없이 받는다)의 요청 수. 위장 봇은 거의 받지 않는다
 · 다시 온 — 확인된 방문자 가운데 그날 첫 페이지를 브라우저에 남은 사본으로 연(전에 와 본) 방문자
 · 대시보드 동시 접속 — 칸마다 열려 있던 대시보드 탭 수의 최댓값
 · 점선 — 비교 기간(이전 기간·지난주 같은 때)을 지금 축에 겹친 것
 자료 출처: 방문자·페이지·봇·5xx 는 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)의 시간별 칸, 동시 접속은 CloudWatch 가 모은 연결 수다. 24시간 창은 시간별 방문자 값이 없어 시간별 페이지 수로 그리고, 7일·30일은 날별 방문자다.
-읽는 법: 위 타일을 누르면 지표가 바뀐다. 봇을 고르면 비율 대신 요청 수와 사람 모양 페이지 수를 함께 그린다 — 둘이 함께 오르면 사람, 요청만 오르면 봇이다. 막대에 마우스를 올리면 그 시각 값이 보인다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-trend"></span><button type="button" class="ibtn" data-detail="trend" aria-label="방문자 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+읽는 법: 위 타일을 누르면 지표가 바뀐다. 봇을 고르면 비율 대신 요청 수와 브라우저로 연 페이지 수를 함께 그린다 — 둘이 함께 오르면 사람, 요청만 오르면 봇이다. 막대에 마우스를 올리면 그 시각 값이 보인다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-trend"></span><button type="button" class="ibtn" data-detail="trend" aria-label="방문자 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="chart h320" id="c-trend"></div>
           <p class="card-foot" id="f-trend"></p>
           </section>
@@ -114,12 +114,12 @@
 · 첫 페이지 · 마지막 페이지 — 그날 처음·마지막으로 연 페이지. 한 장만 봤으면 둘이 같다
 · 대시보드 ○○ — 대시보드를 그 탭으로 처음 연 것(들어온 뒤 탭을 바꾼 것은 서버가 모른다)
 · (기타) — 굵은 길 40개 밖의 드문 길을 모은 것
-자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터). 날마다(KST) 브라우저 모양 방문자마다 첫·마지막 페이지를 잇고, 자정을 넘긴 방문은 두 번 든다. 탐색 경로를 건드린 방문자와 운영자 흔적은 뺀다.
-읽는 법: 띠가 굵을수록 그 길로 간 방문자가 많다. 마우스를 올리면 이어진 띠가 밝아지고 브라우저 모양·확인 수가 보인다. 랜딩 → 랜딩 이 굵으면 랜딩만 보고 떠난 방문이 많다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-flows"></span><button type="button" class="ibtn" data-detail="flows" aria-label="흐름 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터). 날마다(KST) 브라우저로 온 방문자마다 첫·마지막 페이지를 잇고, 자정을 넘긴 방문은 두 번 든다. 탐색 경로를 건드린 방문자와 운영자 접속은 뺀다.
+읽는 법: 띠가 굵을수록 그 길로 간 방문자가 많다. 마우스를 올리면 이어진 띠가 밝아지고 브라우저로 온·확인 수가 보인다. 랜딩 → 랜딩 이 굵으면 랜딩만 보고 떠난 방문이 많다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-flows"></span><button type="button" class="ibtn" data-detail="flows" aria-label="흐름 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="chart h420" id="c-flows"></div>
           </section>
           <section class="card s6" id="card-src" aria-labelledby="h-src">
-            <header class="card-head"><h2 id="h-src"><button type="button" class="t" data-detail="src">들어온 길</button></h2><span class="unit">브라우저 모양 방문자</span><span class="help" title="보여 주는 것: 방문자가 그날 첫 페이지를 열 때 어디서 왔는지. 탭으로 채널·출처 사이트·캠페인 이름(utm)을 바꿔 본다.
+            <header class="card-head"><h2 id="h-src"><button type="button" class="t" data-detail="src">들어온 길</button></h2><span class="unit">브라우저로 온 방문자</span><span class="help" title="보여 주는 것: 방문자가 그날 첫 페이지를 열 때 어디서 왔는지. 탭으로 채널·출처 사이트·캠페인 이름(utm)을 바꿔 본다.
 낱말 뜻:
 · 직접 — 주소를 치거나 즐겨찾기·메신저 링크로 바로 연 것(어디서 왔는지 정보가 없음)
 · 앱 안 브라우저 — 카카오톡·네이버 같은 앱 안에서 연 것
@@ -127,7 +127,7 @@
 · 다른 사이트 링크 · 사이트 안 이동 — 그 밖의 바깥 사이트 · 우리 페이지의 링크를 눌러 온 것
 · 캠페인(utm) — 주소에 utm_source 를 붙인 광고·공유 링크로 온 것
 · 첫 페이지 기록 없음 — 그날 페이지 줄 없이 스크립트·실시간 연결만 남은 방문자
-자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)의 이전 페이지 주소(사이트 주소만 남긴다)와 utm_source. 채널은 브라우저 모양 방문자 수, 출처·utm 은 사람 모양 페이지 수로 센다. 목록은 상위 20개 어림이다.
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)의 이전 페이지 주소(사이트 주소만 남긴다)와 utm_source. 채널은 브라우저로 온 방문자 수, 출처·utm 은 브라우저로 연 페이지 수로 센다. 목록은 상위 20개 어림이다.
 읽는 법: 광고·공유를 한 날은 그 채널·utm 이 늘었는지 본다. 직접이 큰 것은 흔하다 — 메신저처럼 출처를 숨기는 곳에서 연 링크는 직접으로 든다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-src" role="group" aria-label="들어온 길 목록"></span><span class="end"><span class="tag" id="t-src"></span><button type="button" class="ibtn" data-detail="src" aria-label="들어온 길 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="list" id="l-src"></div>
           </section>
@@ -138,27 +138,27 @@
 · 데이터센터 — AWS·구글 클라우드처럼 서버를 빌려주는 곳. 사람은 거의 여기서 오지 않는다
 · 그 밖 · 모름 — 회사·학교 같은 곳 · 주인 정보를 찾지 못한 주소
 · (기타) — IP 로 나라를 찾지 못한 방문자
-자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)의 IP 앞부분(/24)을 무료 IP 위치 자료(DB-IP Lite)에서 찾는다. 브라우저 모양 방문자 수로 센다. IPv6 방문자는 두 탭 어디에도 들지 않아 합이 100% 보다 작을 수 있다.
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)의 IP 앞부분(/24)을 무료 IP 위치 자료(DB-IP Lite)에서 찾는다. 브라우저로 온 방문자 수로 센다. IPv6 방문자는 두 탭 어디에도 들지 않아 합이 100% 보다 작을 수 있다.
 읽는 법: 데이터센터 망이 크면 봇·수집기가 많다는 뜻이다. 나라는 대략이다(통신사가 다른 나라 주소를 쓰기도 한다). 행을 누르면 상세 판이 열린다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-geo" role="group" aria-label="어디서 목록"></span><span class="end"><span class="tag" id="t-geo"></span><button type="button" class="ibtn" data-detail="geo" aria-label="어디서 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="list" id="l-geo"></div>
             <p class="dim"><a href="https://db-ip.com" rel="noreferrer">IP Geolocation by DB-IP</a></p>
           </section>
           <section class="card s6" id="card-ends" aria-labelledby="h-ends">
-            <header class="card-head"><h2 id="h-ends"><button type="button" class="t" data-detail="ends">첫 · 마지막 페이지</button></h2><span class="unit">브라우저 모양 방문자</span><span class="help" title="보여 주는 것: 방문자가 그날 처음 연 페이지·마지막으로 연 페이지, 그리고 그날 연 페이지 수의 나눔.
+            <header class="card-head"><h2 id="h-ends"><button type="button" class="t" data-detail="ends">첫 · 마지막 페이지</button></h2><span class="unit">브라우저로 온 방문자</span><span class="help" title="보여 주는 것: 방문자가 그날 처음 연 페이지·마지막으로 연 페이지, 그리고 그날 연 페이지 수의 나눔.
 낱말 뜻:
 · 첫 페이지 · 마지막 페이지 — 그날(KST) 처음·마지막으로 연 페이지(랜딩·대시보드 ○○·김프 차트 등)
 · 본 페이지 수 — 그날 연 페이지 수를 1쪽·2쪽·3~5쪽·6쪽 이상으로 나눈 것(새로고침도 한 쪽)
-자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터). 브라우저 모양 방문자 수로 센다. 페이지 줄 없이 스크립트·실시간 연결만 남은 방문자도 분모에 들어 합이 100% 보다 작을 수 있다. 대시보드 안에서 탭을 바꾼 것은 서버가 모른다.
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터). 브라우저로 온 방문자 수로 센다. 페이지 줄 없이 스크립트·실시간 연결만 남은 방문자도 분모에 들어 합이 100% 보다 작을 수 있다. 대시보드 안에서 탭을 바꾼 것은 서버가 모른다.
 읽는 법: 1쪽이 많으면 한 장만 보고 떠난 방문이 많다. 마지막 페이지가 랜딩이면 대시보드로 넘어가지 않은 것이다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-ends" role="group" aria-label="첫 · 마지막 페이지 목록"></span><span class="end"><span class="tag" id="t-ends"></span><button type="button" class="ibtn" data-detail="ends" aria-label="첫 · 마지막 페이지 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="list" id="l-ends"></div>
           </section>
           <section class="card s6" id="card-what" aria-labelledby="h-what">
-            <header class="card-head"><h2 id="h-what"><button type="button" class="t" data-detail="what">무엇을</button></h2><span class="unit">사람 모양 페이지</span><span class="help" title="보여 주는 것: 많이 열린 페이지 주소와, 대시보드를 처음 열 때 보인 탭.
+            <header class="card-head"><h2 id="h-what"><button type="button" class="t" data-detail="what">무엇을</button></h2><span class="unit">브라우저로 연 페이지</span><span class="help" title="보여 주는 것: 많이 열린 페이지 주소와, 대시보드를 처음 열 때 보인 탭.
 낱말 뜻:
 · 경로 — 주소에서 ? 뒤를 뺀 부분(/·/app/·/kimp-chart 등)
 · 대시보드 탭 — 대시보드 주소의 ?tab= 값. 없으면 실시간 스프레드로 센다
-자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)의 사람 모양 페이지(봇 섞임)로 센다. 대시보드 안에서 탭을 바꾸는 것은 서버에 요청이 가지 않아 세지 않는다 — 그건 화면 페이지(화면 이용 통계)에서 본다.
-읽는 법: 몫은 사람 모양 페이지 전체 대비다. 같은 페이지를 새로고침해도 매번 든다. 행을 누르면 상세 판이 열린다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-what" role="group" aria-label="무엇을 목록"></span><span class="end"><span class="tag" id="t-what"></span><button type="button" class="ibtn" data-detail="what" aria-label="무엇을 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)의 브라우저로 연 페이지(봇 섞임)로 센다. 대시보드 안에서 탭을 바꾸는 것은 서버에 요청이 가지 않아 세지 않는다 — 그건 화면 페이지(화면 이용 통계)에서 본다.
+읽는 법: 몫은 브라우저로 연 페이지 전체 대비다. 같은 페이지를 새로고침해도 매번 든다. 행을 누르면 상세 판이 열린다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="tabs" id="tabs-what" role="group" aria-label="무엇을 목록"></span><span class="end"><span class="tag" id="t-what"></span><button type="button" class="ibtn" data-detail="what" aria-label="무엇을 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="list" id="l-what"></div>
           </section>
           <section class="card s6" id="card-who" aria-labelledby="h-who">
@@ -166,10 +166,10 @@
 낱말 뜻:
 · 100% 띠 — 띠 하나가 전체이고 조각 길이가 그 몫(상위 다섯 + 기타)
 · 기기 — 데스크톱·휴대폰·태블릿. 화면 크기가 아니라 브라우저 정보로 가른다
-· 요청 종류 — 사람 브라우저 모양·검색엔진·AI 수집기·링크 미리보기·자동화 도구·스캐너·운영자 흔적·이름 없음
-· 운영자 흔적 — 관리자 화면·로컬 시험에서 온 요청
-자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)의 브라우저 정보(User-Agent). 기기·OS·브라우저는 브라우저 모양 방문자 수, 요청 종류만 모든 요청 수(봇 포함)로 센다.
-읽는 법: 요청 종류는 분모가 달라 나머지 셋과 바로 견주지 않는다. 사람 브라우저 모양 몫이 작으면 요청 대부분이 봇이라는 뜻이다. ⤢ 로 열면 묶음마다 항목 설명이 있다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-who"></span><button type="button" class="ibtn" data-detail="who" aria-label="누가 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
+· 요청 종류 — 일반 브라우저·검색 로봇·AI 로봇·링크 미리보기·자동화 도구·그 밖 봇·스캐너·운영자 접속·브라우저 정보 없음
+· 운영자 접속 — 운영자가 관리자 화면·Clarity·로컬 시험에서 띄운 요청(방문자로 세지 않는다)
+자료 출처: 서버 접속 기록(caddy — serve 상자의 웹 서버가 요청마다 남기는 줄, 2026-09-29 부터)의 브라우저 정보(User-Agent). 기기·OS·브라우저는 브라우저로 온 방문자 수, 요청 종류만 모든 요청 수(봇 포함)로 센다.
+읽는 법: 요청 종류는 분모가 달라 나머지 셋과 바로 견주지 않는다. 일반 브라우저 몫이 작으면 요청 대부분이 봇이라는 뜻이다. ⤢ 로 열면 묶음마다 항목 설명이 있다."><svg class="i" aria-hidden="true"><use href="icons.svg#help"/></svg></span><span class="end"><span class="tag" id="t-who"></span><button type="button" class="ibtn" data-detail="who" aria-label="누가 상세 보기" title="상세 보기"><svg class="i" aria-hidden="true"><use href="icons.svg#expand"/></svg></button></span></header>
             <div class="b100s" id="b-who"></div>
           </section>
           <section class="card s6" id="card-heat" aria-labelledby="h-heat">

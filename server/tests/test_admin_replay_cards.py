@@ -44,11 +44,21 @@ LIVE_ROWS = [
         page="app-spread",
         pages=["app-spread", "app-gap"],
         now="app-gap",
+        consent="unset",
+        consentFirst="unset",
     ),
-    row("0000000000000bad"[:15] + "z", X, NOW - 9_000, NOW - 8_000, now=X),
+    row("0000000000000bad"[:15] + "z", X, NOW - 9_000, NOW - 8_000, now=X, consent=X),
 ]
 SESSION_ROWS = [
-    row("c0ffee0000000001", "66.249.66.1", NOW - 3_600_000, NOW - 3_505_000, clicks=4),
+    row(
+        "c0ffee0000000001",
+        "66.249.66.1",
+        NOW - 3_600_000,
+        NOW - 3_505_000,
+        clicks=4,
+        consent="denied",
+        consentFirst="denied",
+    ),
     row(
         "c0ffee0000000002",
         "203.0.113.7",
@@ -58,7 +68,10 @@ SESSION_ROWS = [
         page="app-spread",
         pages=["app-spread", "app-history", "app-gap"],
         clicks=2,
+        consent="granted",
+        consentFirst="unset",
     ),
+    # 동의 키가 없는 행 — 동의한 방문만 기록하던 때의 조각
     row("c0ffee0000000003", X, NOW - 9_000_000, NOW - 8_700_000, pages=[X], clicks=0),
 ]
 HARNESS = (
@@ -106,13 +119,16 @@ await fire(5000)
 out.again = replayCalls().slice(2)
 // 머리 '길이' 눌러 정렬(큰 순 → 작은 순), 찾기
 const head = () => document.getElementById('tbl-replay').kids[0].kids[0].kids
-head()[4].kids[0].fire('click')
-out.sorted = cells('tbl-replay').map((r) => r[4])
-head()[4].kids[0].fire('click')
-out.sortedUp = cells('tbl-replay').map((r) => r[4])
+head()[5].kids[0].fire('click')
+out.sorted = cells('tbl-replay').map((r) => r[5])
+head()[5].kids[0].fire('click')
+out.sortedUp = cells('tbl-replay').map((r) => r[5])
 const q = document.getElementById('rp-q')
 q.fire('input', { target: { value: '기록' } })
 out.found = { rows: cells('tbl-replay').map((r) => r[1]), count: v.text('replay-count') }
+// 동의 칸으로 찾기 — '거부' 는 미동의(거부함) 조각 하나
+q.fire('input', { target: { value: '거부' } })
+out.foundConsent = { rows: cells('tbl-replay').map((r) => r[1]), count: v.text('replay-count') }
 q.fire('input', { target: { value: '' } })
 // 행 → 재생 판(따라 보기 아님)
 document.getElementById('tbl-replay').kids[1].kids[0].fire('click')
@@ -135,34 +151,35 @@ def cards() -> dict[str, Any]:
 
 
 def test_live_card_rows_and_five_second_cadence(cards: dict[str, Any]) -> None:
-    """§3.1 지금 보는 중 — 행 = IP · 지금 화면 · 기기 · 머문 시간(last − first) · 마지막 움직임 'n초 전'(서버 now 기준). 처음 한 번 부르고
+    """§3.1 지금 보는 중 — 행 = IP · 동의 · 지금 화면 · 기기 · 머문 시간(last − first) · 마지막 움직임 'n초 전'(서버 now 기준). 처음 한 번 부르고
     5초 묶음(지금 묶음 — 이 카드 하나)으로 다시 부른다. 화면 기록은 느린 묶음."""
     first = cards["first"]
     assert first["calls"] == [SESSIONS, LIVE]
     assert first["liveTimers"] == 1
     assert first["live"] == [
-        ["203.0.113.7", "대시보드 갭", "휴대폰", "2분", "4초 전"],
-        [X, X, "PC", "1초", "8초 전"],
+        ["203.0.113.7", "미동의(답 안 함)", "대시보드 갭", "휴대폰", "2분", "4초 전"],
+        [X, "미동의(답 안 함)", X, "PC", "1초", "8초 전"],
     ]
     assert first["tags"] == ["", ""]
     assert cards["again"] == [LIVE]
 
 
 def test_sessions_card_rows_sort_find_and_open(cards: dict[str, Any]) -> None:
-    """§3.1 화면 기록 — 최근 조각 표(시작 KST · IP · 지나간 화면들 · 기기 · 길이 · 누름 수), 머리 눌러 정렬, IP·화면 찾기, 행 → 재생 판
+    """§3.1 화면 기록 — 최근 조각 표(시작 KST · IP · 동의 · 지나간 화면들 · 기기 · 길이 · 누름 수), 머리 눌러 정렬, IP·화면·동의 찾기, 행 → 재생 판
     (`#detail=replay:<sid>` — 따라 보기 아님)."""
     first = cards["first"]
     assert first["sessions"] == [
-        ["10-15 01:48:20", "66.249.66.1", "랜딩", "PC", "1분", "4"],
+        ["10-15 01:48:20", "66.249.66.1", "미동의(거부함)", "랜딩", "PC", "1분", "4"],
         [
             "10-15 00:48:20",
             "203.0.113.7",
+            "미동의(답 안 함) → 동의",
             "대시보드 스프레드 → 대시보드 기록 → 대시보드 갭",
             "휴대폰",
             "1분",
             "2",
         ],
-        ["10-15 00:18:20", X, X, "PC", "5분", "0"],
+        ["10-15 00:18:20", X, "동의", X, "PC", "5분", "0"],
     ]
     assert first["count"] == "3 / 3개 조각"
     assert cards["sorted"] == ["5분", "1분", "1분"] and cards["sortedUp"] == [
@@ -171,6 +188,7 @@ def test_sessions_card_rows_sort_find_and_open(cards: dict[str, Any]) -> None:
         "5분",
     ]
     assert cards["found"] == {"rows": ["203.0.113.7"], "count": "1 / 3개 조각"}
+    assert cards["foundConsent"] == {"rows": ["66.249.66.1"], "count": "1 / 3개 조각"}
     opened = cards["opened"]
     # 길이 작은 순으로 정렬된 표의 첫 행(80초 — 대시보드 휴대폰 조각)
     assert opened["pushed"] == ["/visitors.html#detail=replay%3Ac0ffee0000000002"]
@@ -198,8 +216,8 @@ out.empty = { live: caption('tbl-rplive'), sessions: caption('tbl-replay'), tags
             [200, {"state": "ok", "code": None, "now": NOW, "rows": []}],
             [200, {"state": "ok", "code": None, "ip": None, "rows": []}],
             {
-                "live": "지금 기록 중인 방문 없음 — 동의한 방문자만 기록된다",
-                "sessions": "화면 기록 없음 — 동의한 방문자만 기록되고 서비스 종료까지 보관한다",
+                "live": "지금 화면을 움직이는 방문 없음",
+                "sessions": "화면 기록 없음 — 모든 방문을 기록하고 서비스 종료까지 보관한다",
                 "tags": ["", ""],
             },
         ),
@@ -215,7 +233,7 @@ out.empty = { live: caption('tbl-rplive'), sessions: caption('tbl-replay'), tags
     ],
 )
 def test_empty_and_unavailable_cards(live: list, sessions: list, want: dict) -> None:
-    """§3.1 — 조각이 없으면 빈 문구(동의한 방문자만), Redis 오류·피드 배포 전(404)은 카드 상태 배지와 같은 글."""
+    """§3.1 — 조각이 없으면 빈 문구(모든 방문을 기록), Redis 오류·피드 배포 전(404)은 카드 상태 배지와 같은 글."""
     got = _run(EMPTY, {LIVE: live, SESSIONS: sessions})
     assert got["empty"] == want
 
@@ -263,7 +281,7 @@ def _sheet(row_index: int, ip: str, sessions: list | None) -> Any:
 
 
 def test_ip_sheet_has_a_replay_section_below_where() -> None:
-    """§3.2 — IP 판의 '어디' 아래 그 IP 의 조각(sessions?ip=) 표(시작 · 화면 · 기기 · 길이 · 누름 · [재생]), 행 → 재생 판."""
+    """§3.2 — IP 판의 '어디' 아래 그 IP 의 조각(sessions?ip=) 표(시작 · 동의 · 화면 · 기기 · 길이 · 누름 · [재생]), 머리에 동의·미동의 수, 행 → 재생 판."""
     rows = [r for r in SESSION_ROWS if r["ip"] == "66.249.66.1"]
     got = _sheet(
         1,
@@ -272,8 +290,12 @@ def test_ip_sheet_has_a_replay_section_below_where() -> None:
     )
     sheet = got["sheet"]
     assert sheet["panels"] == ["addr-verdict", "addr-where", "addr-replay", "grid2"]
-    assert sheet["head"] == "화면 기록1개 조각 · 동의한 방문자만, 서비스 종료까지 보관"
-    assert sheet["rows"] == [["10-15 01:48:20", "랜딩", "PC", "1분", "4", "재생 ▶"]]
+    assert (
+        sheet["head"] == "화면 기록1개 조각 · 동의 0 · 미동의 1 · 서비스 종료까지 보관"
+    )
+    assert sheet["rows"] == [
+        ["10-15 01:48:20", "미동의(거부함)", "랜딩", "PC", "1분", "4", "재생 ▶"]
+    ]
     assert sheet["calls"][-1] == f"{SESSIONS}?ip=66.249.66.1"
     assert got["replay"] == {
         "pushed": "/visitors.html#detail=replay%3Ac0ffee0000000001",
@@ -282,13 +304,13 @@ def test_ip_sheet_has_a_replay_section_below_where() -> None:
 
 
 def test_ip_sheet_section_says_when_there_is_nothing() -> None:
-    """§3.2 — 조각이 없으면 '이 IP 의 화면 기록 없음 — 동의한 방문만 기록된다'."""
+    """§3.2 — 조각이 없으면 '이 IP 의 화면 기록 없음'."""
     got = _sheet(
         1,
         "66.249.66.1",
         [200, {"state": "ok", "code": None, "ip": "66.249.66.1", "rows": []}],
     )
-    assert got["sheet"]["empty"] == "이 IP 의 화면 기록 없음 — 동의한 방문만 기록된다"
+    assert got["sheet"]["empty"] == "이 IP 의 화면 기록 없음"
 
 
 def test_masked_band_rows_have_no_replay_section() -> None:

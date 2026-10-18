@@ -327,7 +327,22 @@ export const rowAt = (rows, T) => lastIndex(rows, T);
 // --- 카드 행(§3.1·§3.2) -------------------------------------------------------------------------------
 
 const lenSec = (r) => (num(r?.first) !== null && num(r?.last) !== null ? Math.max(0, (r.last - r.first) / 1000) : null);
-// 지금 보는 중 — IP · 지금 화면 · 기기 · 머문 시간(last − first) · 마지막 움직임 'n초 전'(서버 now 기준)
+
+// 화면 분석 동의 상태(073 §3.4 의 c) — 피드 행의 consent(마지막 묶음)·consentFirst(첫 묶음). 키가 없는 행은 동의한 방문만 기록하던 때의
+// 조각이라 동의로 보고, 모르는 값은 답 안 함으로 본다
+const CONSENTS = Object.freeze(['granted', 'denied', 'later', 'unset', 'gpc']);
+export const CONSENT_NAME = Object.freeze({ granted: '동의', denied: '거부함', later: '하루 동안 안 보기', unset: '답 안 함', gpc: 'GPC 거부' });
+export const consentOf = (v) => (v === undefined || v === null ? 'granted' : CONSENTS.includes(v) ? v : 'unset');
+const consentWord = (c) => (c === 'granted' ? '동의' : `미동의(${CONSENT_NAME[c]})`);
+// '동의' · '미동의(답 안 함)' — 조각 안에서 바뀌었으면 '미동의(답 안 함) → 동의'
+export function consentText(row) {
+  const now = consentOf(row?.consent);
+  const first = row?.consentFirst === undefined || row?.consentFirst === null ? now : consentOf(row.consentFirst);
+  return first === now ? consentWord(now) : `${consentWord(first)} → ${consentWord(now)}`;
+}
+const consentCols = (r) => ({ consent: consentText(r), agreed: consentOf(r.consent) === 'granted' });
+
+// 지금 보는 중 — IP · 동의 · 지금 화면 · 기기 · 머문 시간(last − first) · 마지막 움직임 'n초 전'(서버 now 기준)
 export function liveRows(rows, now) {
   return list(rows)
     .filter(isObj)
@@ -340,9 +355,10 @@ export function liveRows(rows, now) {
       stay: lenSec(r),
       last: num(r.last),
       ago: ago(num(r.last), now),
+      ...consentCols(r),
     }));
 }
-// 화면 기록 — 시작 KST · IP · 지나간 화면들 · 기기 · 길이 · 누름 수
+// 화면 기록 — 시작 KST · IP · 동의 · 지나간 화면들 · 기기 · 길이 · 누름 수
 export function sessionRows(rows) {
   return list(rows)
     .filter(isObj)
@@ -356,5 +372,6 @@ export function sessionRows(rows) {
       dev: devName(r.dev),
       len: lenSec(r),
       clicks: num(r.clicks),
+      ...consentCols(r),
     }));
 }

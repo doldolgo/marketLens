@@ -8,8 +8,8 @@ import { PAGE_ROWS, recentRows, toMs, validBand } from './ipmodel.js';
 export const VERDICTS = Object.freeze(['bot', 'suspect', 'human', 'unknown', 'operator']);
 export const VERDICT_NAME = Object.freeze({ bot: '봇', suspect: '의심', human: '사람', unknown: '모름', operator: '운영자' });
 export const VERDICT_TONE = Object.freeze({ bot: 'bad', suspect: 'warn', human: 'ok', unknown: 'none', operator: 'op' });
-// 점수 줄의 문턱 글(069 §3.4 — 60 이상 봇·30~59 의심·30 미만 사람·요청 3 미만 모름·운영자 흔적은 점수를 세지 않음)
-const VERDICT_RULE = Object.freeze({ bot: '60 이상', suspect: '30~59', human: '30 미만', unknown: '요청 3 미만', operator: '운영자 흔적 — 점수 안 셈' });
+// 점수 줄의 문턱 글(069 §3.4 — 60 이상 봇·30~59 의심·30 미만 사람·요청 3 미만 모름·운영자 접속은 점수를 세지 않음)
+const VERDICT_RULE = Object.freeze({ bot: '60 이상', suspect: '30~59', human: '30 미만', unknown: '요청 3 미만', operator: '운영자 접속 — 점수 안 셈' });
 export const verdictOf = (v) => (VERDICTS.includes(v) ? v : 'unknown');
 // 서버가 정렬하는 열(069 sort) — 그 밖 열은 불러온 행 안에서
 export const ADDR_SORT = Object.freeze(['requests', 'pages', 'last', 'score']);

@@ -94,9 +94,10 @@ out.text = [m.timeText(tl, input.t0 + 65_000), m.mss(3_725_000), m.clockText(nul
 out.follow = [m.followTarget(tl, null) - input.t0, m.followTarget(tl, input.t0 + 25_000) - input.t0, m.followTarget(tl, input.t0 + 10_000) - input.t0, m.lagSec(input.t0 + 32_000, 1_400, input.t0 + 29_000)]
 out.cut = [m.truncated({ n: 3600 }), m.truncated({ bytes: 1_040_000 }), m.truncated({ cut: true }), m.truncated({ n: 12, bytes: 4000 }), m.truncated(null)]
 const rows = [
-  { sid: '0123456789abcdef', ip: '203.0.113.7', dev: 'pc', page: 'app-spread', pages: ['app-spread', 'app-gap'], now: 'app-gap', first: input.t0, last: input.t0 + 95_000, n: 9, clicks: 3 },
-  { sid: 'nope', ip: input.x, dev: input.x, page: input.x, pages: `landing,${input.x}`, now: null, first: null, last: null, clicks: null },
+  { sid: '0123456789abcdef', ip: '203.0.113.7', dev: 'pc', page: 'app-spread', pages: ['app-spread', 'app-gap'], now: 'app-gap', first: input.t0, last: input.t0 + 95_000, n: 9, clicks: 3, consent: 'granted', consentFirst: 'unset' },
+  { sid: 'nope', ip: input.x, dev: input.x, page: input.x, pages: `landing,${input.x}`, now: null, first: null, last: null, clicks: null, consent: input.x },
 ]
+out.consent = [{}, { consent: 'granted' }, { consent: 'denied' }, { consent: 'later' }, { consent: 'unset' }, { consent: 'gpc' }, { consent: 'gpc', consentFirst: 'granted' }, { consent: 'denied', consentFirst: null }].map(m.consentText)
 out.live = m.liveRows(rows, input.t0 + 101_000)
 out.sessions = m.sessionRows(rows)
 out.reqs = [m.liveReq().url, m.sessionsReq().url, m.sessionsReq('2001:db8::5').url, m.sessionReq('0123456789abcdef', 600).url, m.liveReq().live, m.sessionsReq().live]
@@ -269,8 +270,16 @@ def test_card_rows_and_requests(got: dict[str, Any]) -> None:
         "stay": 95,
         "last": T0 + 95_000,
         "ago": "6초 전",
+        "consent": "미동의(답 안 함) → 동의",
+        "agreed": True,
     }
     assert live[1]["open"] is False and live[1]["ip"] == X and live[1]["now"] == X
+    # 모르는 동의 값은 답 안 함
+    assert (live[1]["consent"], live[1]["agreed"]) == ("미동의(답 안 함)", False)
+    assert (sessions_consent := [r["consent"] for r in got["sessions"]]) == [
+        "미동의(답 안 함) → 동의",
+        "미동의(답 안 함)",
+    ], sessions_consent
     assert live[1]["dev"] == X and live[1]["stay"] is None and live[1]["ago"] == "–"
     sessions = got["sessions"]
     assert sessions[0]["start"] == "10-15 02:46:40"
@@ -296,3 +305,17 @@ def test_area_and_page_strings_stay_text_and_never_reach_the_frame(
     assert xss["rows"] == [X, X, X, f"{X} · 아래로 900px"]
     assert xss["state"]["area"] == "" and xss["state"]["els"] == []
     assert xss["page"] == X
+
+
+def test_consent_text_names_every_state(got: dict[str, Any]) -> None:
+    """073 §3.4 의 c — 동의·미동의(사유), 조각 안에서 바뀌면 처음 → 지금. 키가 없으면 동의한 방문만 기록하던 때의 조각(동의)."""
+    assert got["consent"] == [
+        "동의",
+        "동의",
+        "미동의(거부함)",
+        "미동의(하루 동안 안 보기)",
+        "미동의(답 안 함)",
+        "미동의(GPC 거부)",
+        "동의 → 미동의(GPC 거부)",
+        "미동의(거부함)",
+    ]

@@ -192,7 +192,7 @@ def test_table_rows_show_verdict_badges_places_and_masked_bands(
         "점수",
         "위치",
         "요청",
-        "사람 모양 페이지",
+        "브라우저로 연 페이지",
         "마지막",
         "추이",
     ]

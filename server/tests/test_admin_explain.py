@@ -118,7 +118,7 @@ const visitors = {
 const part = { state: 'ok', visitors, classes: { browser: { requests: 60 }, scanner: { requests: 30 }, search: { requests: 10 }, ai: { requests: 0 } }, devices: [], browsers: [] }
 out.who = td.whoSections(part)
 out.whoNoVisitors = td.whoSections({ state: 'ok', classes: {}, devices: [['desktop', 4]], browsers: [['chrome', 4]] }).map((g) => [g.id, g.unit, g.items.length])
-out.classNotes = Object.keys(td.CLASS_NOTE)
+out.classNotes = Object.keys((await page('names.js')).CLASS_NOTE)
 out.metricNow = td.METRIC_NAME.now
 
 // Clarity 진단 줄
@@ -256,12 +256,12 @@ def test_who_sections_have_their_own_denominator_and_explanations(
 ) -> None:
     devices, os_, browsers, classes = got["who"]
     assert [g["id"] for g in got["who"]] == ["devices", "os", "browsers", "classes"]
-    assert devices["unit"] == "브라우저 모양 방문자 9명 기준"
+    assert devices["unit"] == "브라우저로 온 방문자 9명 기준"
     assert [(i["key"], i["value"], round(i["share"], 1)) for i in devices["items"]] == [
         ("desktop", 6, 66.7),
         ("mobile", 3, 33.3),
     ]  # 0 인 태블릿은 빠진다
-    assert os_["unit"] == "브라우저 모양 방문자 9명 기준"
+    assert os_["unit"] == "브라우저로 온 방문자 9명 기준"
     assert [i["key"] for i in browsers["items"]] == ["chrome", "kakaotalk"]
     assert classes["unit"] == "모든 요청 100건 기준"
     assert [(i["key"], i["share"]) for i in classes["items"]] == [
@@ -289,9 +289,9 @@ def test_who_falls_back_to_page_counts_without_visitor_values(
     got: dict[str, Any],
 ) -> None:
     assert got["whoNoVisitors"] == [
-        ["devices", "사람 모양 페이지 4건 기준", 1],
-        ["os", "브라우저 모양 방문자 0명 기준", 0],
-        ["browsers", "사람 모양 페이지 4건 기준", 1],
+        ["devices", "브라우저로 연 페이지 4건 기준", 1],
+        ["os", "브라우저로 온 방문자 0명 기준", 0],
+        ["browsers", "브라우저로 연 페이지 4건 기준", 1],
         ["classes", "모든 요청 0건 기준", 0],
     ]
 
@@ -320,8 +320,6 @@ HEADS = ("보여 주는 것", "낱말 뜻", "자료 출처", "읽는 법")
 NEEDED = {"보여 주는 것", "자료 출처", "읽는 법"}
 LINE_MAX = 180
 TOTAL_MAX = 900
-# 081(화면 이동 기록 일괄 수집 — 다른 브랜치)이 새 글을 쓰는 중인 두 카드 — 071 첫 판의 두 줄 꼴이 남아 있다(§7 남은 빚)
-LEGACY = {("visitors.html", "h-rplive"), ("visitors.html", "h-replay")}
 # 페이지마다 '?' 수의 바닥 — 카드가 빠지지 않게(066 의 카드 + 화면 페이지 판 머리)
 AT_LEAST = {
     "index.html": 8,
@@ -340,6 +338,24 @@ def _helps(page: str) -> list[tuple[str, str]]:
     for m in re.finditer(r'<span class="help" title="([^"]*)">', src):
         ids = re.findall(r'id="([^"]+)"', src[max(0, m.start() - 800) : m.start()])
         out.append((ids[-1] if ids else "", html.unescape(m.group(1))))
+    return out
+
+
+KEYS = dict(zip(HEADS, ("what", "words", "source", "how"), strict=True))
+
+
+def _parts(text: str) -> list[dict[str, Any]]:
+    """칸 규칙을 지킨 글 → [{key, text, items: [(낱말, 뜻)…]}] — help.js helpParts 와 같은 나누기(정적 시험용)."""
+    out: list[dict[str, Any]] = []
+    for line in (x.strip() for x in text.split("\n")):
+        head = next((h for h in HEADS if line.startswith(f"{h}:")), None)
+        if head:
+            out.append(
+                {"key": KEYS[head], "text": line[len(head) + 1 :].strip(), "items": []}
+            )
+        elif line.startswith("· ") and out:
+            word, _, meaning = line[2:].partition(" — ")
+            out[-1]["items"].append((word, meaning))
     return out
 
 
@@ -390,8 +406,6 @@ def test_every_help_text_follows_the_four_part_rule() -> None:
         helps = _helps(page)
         assert len(helps) >= AT_LEAST[page], page
         for at, text in helps:
-            if (page, at) in LEGACY:
-                continue
             assert _problems(text) == [], (page, at, _problems(text))
 
 

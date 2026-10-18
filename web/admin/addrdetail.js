@@ -19,7 +19,7 @@ export function verdictBadge(verdict) {
   return box;
 }
 
-// 시간별 요청 그래프(067 hourly — 요청 막대 · 사람 모양 페이지·JS·오류) — 대역·IP 판이 같이 쓴다
+// 시간별 요청 그래프(067 hourly — 요청 막대 · 브라우저로 연 페이지·JS·오류) — 대역·IP 판이 같이 쓴다
 export function hourlyTime(app, pv, part) {
   const endMs = app.now();
   const startMs = endMs - (RANGE_MS[pv.range] ?? RANGE_MS['24h']);
@@ -30,10 +30,10 @@ export function hourlyTime(app, pv, part) {
     time: {
       startMs,
       endMs,
-      panes: [{ title: '요청', fmt: int }, { title: '사람 모양 페이지 · JS · 오류', fmt: int }],
+      panes: [{ title: '요청', fmt: int }, { title: '브라우저로 연 페이지 · JS · 오류', fmt: int }],
       series: [
         { name: '요청', mark: 'acc', type: 'bar', data: pts('requests') },
-        { name: '사람 모양 페이지', mark: 'c1', pane: 1, data: pts('pages') },
+        { name: '브라우저로 연 페이지', mark: 'c1', pane: 1, data: pts('pages') },
         { name: 'JS 신호', mark: 'c3', pane: 1, data: pts('js') },
         { name: '오류', mark: 'bad', pane: 1, type: 'bar', data: pts('errors') },
       ],
@@ -75,12 +75,32 @@ export function fillUsage(part) {
   ], rows);
 }
 
-// 최근 요청 표의 칸(067 대역 판과 같음) + 신호 칩
+// 최근 요청 표의 칸(067 대역 판과 같음) + 신호 칩. '페이지·파일'·'종류' 칸 머리의 '?'(082 §3.2·§3.3) 글은 071 칸 넷(보여 주는 것·낱말 뜻·자료 출처·읽는 법)
+const HOW_HELP =
+  '보여 주는 것: 이 요청이 주소를 직접 연 페이지인지, 어떤 페이지가 열리며 따라온 파일인지, 페이지 없이 따로 부른 파일인지.\n' +
+  '낱말 뜻:\n' +
+  '· 직접 연 페이지 — 주소창에 치거나 링크를 눌러 연 페이지\n' +
+  '· 함께 받은 파일 — 그 페이지가 열리며 저절로 받은 스크립트·그림·글꼴·API·실시간 연결\n' +
+  '· 따로 부른 파일 — 페이지 없이 파일만 부른 요청(robots.txt 를 읽는 검색 로봇, .env·.php 를 찾는 스캐너가 흔하다)\n' +
+  '자료 출처: 서버 접속 기록(caddy)의 경로와 출처(이 요청을 부른 페이지의 사이트 주소)로 가른다 — 행을 누르면 출처가 보인다.\n' +
+  '읽는 법: 사람의 방문은 직접 연 페이지 하나 뒤에 함께 받은 파일이 여럿 따라온다. 따로 부른 파일만 줄줄이 있으면 봇이다. 좋고 나쁨이 아니라 모양이라 상태색은 쓰지 않는다.';
+const KIND_HELP =
+  '보여 주는 것: 이 요청을 보낸 쪽의 종류 — 브라우저 정보(UA)로 가른다.\n' +
+  '낱말 뜻:\n' +
+  '· 일반 브라우저 — 크롬·사파리 같은 보통 브라우저. 사람이 대부분이지만 브라우저인 척하는 봇도 섞인다\n' +
+  '· 검색 로봇 · AI 로봇 — 구글·네이버 같은 검색엔진의 로봇 · GPTBot·ClaudeBot 같은 AI 학습·검색 로봇\n' +
+  '· 링크 미리보기 · 자동화 도구 — 카카오톡·슬랙에 링크를 붙였을 때의 미리보기 · curl·파이썬 같은 프로그램\n' +
+  '· 그 밖 봇·스캐너 — 취약점을 찾는 요청(/.env·/wp-login.php 등)과 위 목록에 없는 봇\n' +
+  '· 운영자 접속 · 브라우저 정보 없음 — 운영자가 관리자 화면·Clarity·로컬 시험에서 띄운 요청 · 브라우저 정보를 비워 보낸 요청\n' +
+  '자료 출처: 서버 접속 기록(caddy)의 브라우저 정보(User-Agent) 글자를 이름 목록과 견줘 줄마다 가른다. 보낸 쪽이 스스로 밝힌 이름이라 속일 수 있다.\n' +
+  '읽는 법: 일반 브라우저에도 브라우저인 척하는 봇이 섞인다 — 위 판정 근거와 같이 본다. 운영자 접속은 방문자로 세지 않는다.';
+const howBadge = (r) => (r.how ? el('span', `how ${r.how}`, r.howText) : el('span', 'dim', '–'));
 export const RECENT_COLUMNS = Object.freeze([
   { key: 'ts', label: '시각(KST)', fmt: (v) => kstText(v, true) },
   { key: 'path', label: '경로', cls: 'mono' },
+  { key: 'howText', label: '페이지·파일', cell: howBadge, help: HOW_HELP },
   { key: 'status', label: '상태', num: true },
-  { key: 'kind', label: '종류' },
+  { key: 'kind', label: '종류', help: KIND_HELP },
   { key: 'browser', label: '브라우저' },
 ]);
 export function recentMore(r) {
@@ -130,7 +150,7 @@ function addrModel(app, pv, ip, order) {
     table: {
       title: '최근 요청(100)',
       sort: { key: 'ts', dir: 'desc' },
-      search: ['path', 'kind', 'browser', 'flagText'],
+      search: ['path', 'howText', 'kind', 'browser', 'flagText'],
       rows: recentAddrRows(part.recent),
       columns: [...RECENT_COLUMNS, { key: 'flagText', label: '신호', sort: false, cell: flagChips, csv: (r) => r.flagText }],
       expand: recentMore,

@@ -67,16 +67,29 @@ export const PAGE_NAME = Object.freeze({
   'kimp-history': '김프 기록',
 });
 export const NET_NAME = Object.freeze({ telecom_kr: '국내 통신사', telecom: '해외 통신사', cloud: '데이터센터', other: '그 밖', unknown: '모름', ipv6: 'IPv6' });
+// 요청 종류(038 §3.4 의 키 → 082 §3.1 이름) — 처음 보는 사람이 무슨 접근인지 알 이름, 아래는 '누가' 판의 흐린 설명
 export const CLASS_NAME = Object.freeze({
-  browser: '사람 브라우저 모양',
-  search: '검색엔진',
-  ai: 'AI 수집기',
+  browser: '일반 브라우저',
+  search: '검색 로봇',
+  ai: 'AI 로봇',
   preview: '링크 미리보기',
   tool: '자동화 도구',
-  scanner: '스캐너',
-  operator: '운영자 흔적',
-  unknown: '이름 없음',
+  scanner: '그 밖 봇·스캐너',
+  operator: '운영자 접속',
+  unknown: '브라우저 정보 없음',
 });
+export const CLASS_NOTE = Object.freeze({
+  browser: '크롬·사파리 같은 보통 브라우저로 온 요청 — 사람이 대부분이지만 브라우저인 척하는 봇도 섞인다',
+  search: '구글·네이버 같은 검색엔진이 페이지를 읽어 가는 로봇',
+  ai: 'GPTBot·ClaudeBot 같은 AI 학습·검색 로봇',
+  preview: '카카오톡·슬랙 등에 링크를 붙였을 때 미리보기를 만드는 요청',
+  tool: 'curl·파이썬·헤드리스 브라우저·감시 도구 같은 프로그램',
+  scanner: '취약점을 찾는 요청(/.env·/wp-login.php 등)과 위 목록에 없는 봇',
+  operator: '운영자가 관리자 화면·Clarity·로컬 시험에서 띄운 요청 — 방문자로 세지 않는다',
+  unknown: '자기가 무엇인지(브라우저 정보)를 비워 보낸 요청',
+});
+// 최근 요청 경로의 '페이지·파일' 배지(082 §3.2) — 주소를 직접 연 페이지 · 그 페이지가 열리며 함께 받은 파일 · 페이지 없이 따로 부른 파일
+export const HOW_NAME = Object.freeze({ page: '직접 연 페이지', with: '함께 받은 파일', alone: '따로 부른 파일' });
 export const DEVICE_NAME = Object.freeze({ desktop: '데스크톱', mobile: '휴대폰', tablet: '태블릿' });
 export const OS_NAME = Object.freeze({ windows: 'Windows', macos: 'macOS', ios: 'iOS', android: 'Android', linux: 'Linux', chromeos: 'ChromeOS', other: '그 밖' });
 export const BROWSER_NAME = Object.freeze({

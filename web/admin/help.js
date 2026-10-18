@@ -76,15 +76,26 @@ function inPop(node) {
   return false;
 }
 
+const roleOf = (h) => {
+  h.setAttribute('role', 'button');
+  h.setAttribute('tabindex', '0');
+  h.setAttribute('aria-label', '설명');
+  h.setAttribute('aria-expanded', 'false');
+};
 // title → data-help(한 번). 키보드로 닿게 단추 역할을 준다
 function adopt(h) {
   if (!h || h.dataset.help !== undefined) return;
   h.dataset.help = h.getAttribute('title') ?? '';
   h.removeAttribute('title');
-  h.setAttribute('role', 'button');
-  h.setAttribute('tabindex', '0');
-  h.setAttribute('aria-label', '설명');
-  h.setAttribute('aria-expanded', 'false');
+  roleOf(h);
+}
+
+// 스크립트가 만드는 '?'(082 §3.3 — 표 칸 머리). 같은 말풍선·키보드 규칙. 스크립트는 아이콘 묶음을 부르지 않아(064) 꼴은 CSS 가 그린다(qmark)
+export function helpNode(text) {
+  const h = el('span', 'help qmark');
+  h.dataset.help = String(text ?? '');
+  roleOf(h);
+  return h;
 }
 
 // 칸 하나 — 굵은 칸 이름, 글, 낱말 목록(낱말은 굵게). 글자는 모두 글로만 넣는다

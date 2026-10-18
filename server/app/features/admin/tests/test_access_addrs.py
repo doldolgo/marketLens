@@ -155,8 +155,8 @@ def test_signal_counts_reach_the_reasons(tmp_path: Path) -> None:
     assert reasons["probe"] == "탐색 경로 12번(/.env)"
     assert reasons["many_404"] == "404 17번(요청의 94%)"
     assert reasons["robots"] == "robots.txt 1번"
-    assert reasons["ua_many"] == "서로 다른 UA 6개"
-    assert reasons["ua_tool"] == "도구·스캐너 모양 요청 18번"
+    assert reasons["ua_many"] == "서로 다른 브라우저 정보 6개"
+    assert reasons["ua_tool"] == "자동화 도구·봇·스캐너 요청 18번"
     assert row["verdict"] == "bot" and row["score"] == 60 + 50 + 15 + 10 + 10
 
 

@@ -2,6 +2,8 @@
 
 import zlib
 
+import pytest
+
 from app.features.replay.tests.conftest import (
     IP,
     KEEP_SEC,
@@ -53,6 +55,9 @@ async def test_one_batch_writes_five_keys_and_only_the_two_sets_never_expire(
         "n": "1",
         "bytes": str(len(blob)),
         "clicks": "1",
+        # c 가 없는 몸통(동의자만 기록하던 예전 replay.js)은 지금 판의 동의로 본다
+        "cs0": "granted",
+        "cs": "granted",
     }
     assert rig.redis.zrange(f"rp:ip:{IP}", 0, -1, withscores=True) == [
         (SID.encode(), NOON_MS)
@@ -191,3 +196,29 @@ async def test_writing_never_trims_or_expires_the_two_sets(rig: Rig) -> None:
     for key in ("rp:recent", f"rp:ip:{IP}"):
         assert rig.redis.zrange(key, 0, -1) == [b"old", SID.encode()], key
         assert rig.redis.ttl(key) == -1, key
+
+
+# --- 동의 상태 (073 §3.4·§3.5 — 동의와 관계없이 모든 방문을 기록하고 묶음마다 그 방문의 동의 상태를 싣는다) ---------------
+
+
+@pytest.mark.parametrize("consent", ["granted", "denied", "later", "unset", "gpc"])
+async def test_every_consent_state_is_stored(rig: Rig, consent: str) -> None:
+    assert (await rig.post(body(c=consent))).status_code == 204
+    meta = rig.meta()
+    assert (meta["cs0"], meta["cs"]) == (consent, consent)
+    assert len(rig.batches()) == 1
+
+
+async def test_first_consent_stays_and_the_last_batch_sets_the_current_one(
+    rig: Rig,
+) -> None:
+    # 동의 창에 답하지 않던 방문이 중간에 [모두 동의] — 첫 상태는 그대로, 지금 상태는 마지막 묶음의 것
+    await rig.post(body(c="unset"))
+    rig.clock.now = NOON + 2
+    await rig.post(body(seq=1, c="granted", ev=[[2000, "v", 1]]))
+    meta = rig.meta()
+    assert (meta["cs0"], meta["cs"]) == ("unset", "granted")
+    rig.clock.now = NOON + 4
+    # c 없는 묶음(예전 replay.js)은 granted
+    await rig.post(body(seq=2, ev=[[4000, "v", 1]]))
+    assert (rig.meta()["cs0"], rig.meta()["cs"]) == ("unset", "granted")
