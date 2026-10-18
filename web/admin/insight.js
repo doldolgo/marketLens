@@ -1,15 +1,38 @@
-// Clarity 페이지(스펙 066 §3.3 — 새): 040 요약(최근 24시간) + 068 날별 기록·차원. 큰 수 여섯(+ 날별 작은 선·전날 대비) · 불만 신호 여섯 ·
-// 맞대기(Clarity 세션 vs 우리 방문자 — 038 visitors.days) · 페이지 × 기기 표(040 pages.groups, 칸 진하기) · 나라 · 기기·브라우저·OS 100% 띠 ·
-// 유입(Channel·Source) · 녹화 목록(077 — insightrec.js). 머리에 '마지막 받음 n시간 전 · 다음 HH:MM'. Clarity 는 IP·개인 단위 자료를 주지 않는다(방문자 페이지로 안내).
+// Clarity 페이지(스펙 066 §3.3 — 새): 040 요약(최근 24시간) + 068 날별 기록·차원. 큰 수 여섯(+ 날별 작은 선·전날 대비·스크롤·시간 한 줄) ·
+// 불만 신호 여섯(쉬운 풀이·좋음/주의/나쁨·방문 100칸·전날) · 맞대기(Clarity 세션 vs 우리 방문자 — 038 visitors.days) · 페이지 × 기기 줄
+// (040 pages.groups — 방문 막대·페이지 모양 스크롤·머문/움직인 시간 띠·가장 잦은 신호) · 나라 · 기기·브라우저·OS 100% 띠 · 유입(Channel·Source) ·
+// 녹화 목록(077 — insightrec.js). 카드마다 데이터로 만든 한 문장(그림은 insightviz.js). 머리에 '마지막 받음 n시간 전 · 다음 HH:MM'.
+// Clarity 는 IP·개인 단위 자료를 주지 않는다(방문자 페이지로 안내).
 // 이 파일 이름에 'clarity' 를 쓰지 않는다 — 관리자 파일이 Clarity 태그를 싣지 않는다는 033 의 글자 검사(src=…clarity)와 겹치지 않게.
-import { $, ago, el, hm, int, isObj, n0, num, once, partOf, pct, put, stateWord, tag, usable, widthOf } from './common.js';
-import { change, deltaText } from './calc.js';
+import { $, ago, el, hm, int, num, once, partOf, put, stateWord, tag, usable } from './common.js';
+import { deltaText } from './calc.js';
 import { blank, draw, sparkOption, timeOption } from './charts.js';
-import { SIGNALS } from './names.js';
 import { HISTORY_RANGES, historyCompare, historyReqs, historyWindow } from './models.js';
-import { ATTN_TODAY, CLARITY, INSIGHT_DETAILS, KPIS, PAGE_COLS, dimItems, dimsOf, groupRows, diagOf, lastTwo, matchModel, matchNeeds, okBase, shade, state } from './insightdetail.js';
+import {
+  ATTN_TODAY,
+  CLARITY,
+  INSIGHT_DETAILS,
+  KPIS,
+  diagOf,
+  dimItems,
+  dimsOf,
+  dimsSay,
+  kpiSay,
+  lastTwo,
+  matchModel,
+  matchNeeds,
+  matchSay,
+  okBase,
+  pagesModel,
+  pagesSay,
+  signalModel,
+  signalSay,
+  state,
+  topSay,
+} from './insightdetail.js';
 import { REC_DETAILS, drawRecs, recReq } from './insightrec.js';
-import { bar100s, bigNumber, table, tabs, topList } from './ui.js';
+import { placeList, say, sayLines, signalList } from './insightviz.js';
+import { bar100s, bigNumber, tabs, topList } from './ui.js';
 import { start } from './app.js';
 
 const baseOf = (app) => partOf(app.entry(CLARITY));
@@ -41,6 +64,7 @@ function drawKpis(app) {
     bigNumber(`v-${id}`, fmt(now), total === null ? '' : `/ ${int(total)}초`);
     const [last, before] = h.ok ? lastTwo(h.rows, pick) : [null, null];
     put(`d-${id}`, deltaText(last, before, '전날'));
+    say(`say-${id}`, kpiSay(id, part));
     once(`c-${id}`, [...h.deps, app.view.range, app.view.cmp], () => {
       if (!h.ok) return blank(`c-${id}`, stateWord(h.part));
       const line = h.line(pick);
@@ -49,34 +73,20 @@ function drawKpis(app) {
   }
 }
 
-// 불만 신호 여섯 — 신호가 있던 세션 %(글 뒤 막대 = 가장 큰 신호 대비) · 전날 대비(%p)
-export function signalRows(part, rows) {
-  const signals = isObj(part?.summary?.signals) ? part.summary.signals : {};
-  return SIGNALS.map(([key, name]) => {
-    const [last, before] = lastTwo(rows, (r) => r?.summary?.signals?.[key]?.sessionPct);
-    const d = change(last, before);
-    return { key, name, value: num(signals[key]?.sessionPct), delta: d.diff === null ? '' : `${d.diff > 0 ? '▲' : d.diff < 0 ? '▼' : '–'} ${Math.abs(d.diff).toFixed(1)}%p` };
-  });
-}
+// 불만 신호 여섯 — 줄마다 이름·등급·쉬운 풀이·방문 100칸(색칠 = 그 신호가 나온 방문)·전날, 위에 한 문장
 function drawSignals(app) {
   const part = baseOf(app);
   const h = historyWindow(app, app.view.range, 'none', app.now());
   tag('t-signals', part);
   once('l-signals', [app.entry(CLARITY), ...h.deps], () => {
     const box = $('l-signals');
-    if (!okBase(part)) return box.replaceChildren(el('p', 'empty', stateWord(part)));
-    const rows = signalRows(part, h.ok ? h.rows : []);
-    const max = Math.max(0, ...rows.map((r) => r.value ?? 0));
-    return box.replaceChildren(
-      ...rows.map((r) => {
-        const row = el('div', 'lrow');
-        const bar = el('i', 'bg');
-        widthOf(bar, max ? (r.value ?? 0) / max : 0);
-        row.append(bar, el('span', null, r.name), el('span', 'v', pct(r.value)), el('span', 'p', r.delta));
-        row.title = `${r.name} · 신호가 있던 세션 ${pct(r.value)}${r.delta ? ` · 전날보다 ${r.delta}` : ''}`;
-        return row;
-      }),
-    );
+    if (!okBase(part)) {
+      say('say-signals', '');
+      return box.replaceChildren(el('p', 'empty', stateWord(part)));
+    }
+    const m = signalModel(part, h.ok ? h.rows : []);
+    say('say-signals', signalSay(m));
+    return signalList(box, m);
   });
 }
 
@@ -84,42 +94,45 @@ function drawMatch(app) {
   const m = matchModel(app, app.view.range);
   tag('t-match', m.part);
   once('c-match', [...m.deps, app.view.range], () => {
-    if (!m.ok) return blank('c-match', stateWord(m.part));
+    if (!m.ok) {
+      say('say-match', '');
+      return blank('c-match', stateWord(m.part));
+    }
+    say('say-match', matchSay(m.series));
     if (!m.series.some((s) => s.data.length)) return blank('c-match', '기록 쌓는 중');
     return draw('c-match', timeOption({ startMs: m.startMs, endMs: m.endMs, daily: true, panes: [{ fmt: int }], series: m.series }));
   });
 }
 
-// 페이지 × 기기 — 칸 진하기 = 그 열 최댓값 대비 다섯 단계, 세션 3 미만 행은 흐리게
+// 페이지 × 기기 — 줄마다 방문 막대·페이지 모양 스크롤 깊이·머문/움직인 시간 띠·가장 잦은 신호(방문 3번 미만 줄은 흐리게), 위에 답 셋까지
 function drawPages(app) {
   const base = baseOf(app);
   const pages = okBase(base) ? partOf({ body: base }, 'pages') : base;
   tag('t-pages', pages);
-  once('tbl-pages', [app.entry(CLARITY)], () => {
-    const node = $('tbl-pages');
-    if (!usable(pages, 'groups')) return node.replaceChildren(el('caption', 'empty', stateWord(pages)));
-    const rows = groupRows(pages);
-    if (!rows.length) return node.replaceChildren(el('caption', 'empty', '자료 없음'));
-    const max = Object.fromEntries(PAGE_COLS.map(([k]) => [k, Math.max(0, ...rows.map((r) => n0(r[k])))]));
-    // 칸 진하기는 칸 전체 바탕(글 뒤 띠가 아니라 — 고른 글처럼 보이지 않게), 세션 3 미만 행은 흐리게
-    const tone = (k) => (r) => `${shade(r[k], max[k])}${r.thin ? ' thin' : ''}`.trim();
-    return table(node, [{ key: 'page', label: '페이지' }, { key: 'device', label: '기기' }, ...PAGE_COLS.map(([k, label, fmt]) => ({ key: k, label, num: true, fmt, tone: tone(k) }))], rows, {
-      onRow: () => app.openDetail('pages'),
-    });
+  once('l-pages', [app.entry(CLARITY)], () => {
+    const box = $('l-pages');
+    const rows = usable(pages, 'groups') ? pagesModel(pages) : [];
+    sayLines('say-pages', pagesSay(rows));
+    if (!usable(pages, 'groups')) return box.replaceChildren(el('p', 'empty', stateWord(pages)));
+    if (!rows.length) return box.replaceChildren(el('p', 'empty', '자료 없음'));
+    return placeList(box, rows, { n: 12, onPick: () => app.openDetail('pages'), more: () => app.openDetail('pages') });
   });
 }
 
 function drawCountries(app) {
   const part = baseOf(app);
   tag('t-countries', part);
-  once('l-countries', [app.entry(CLARITY)], () =>
-    topList('l-countries', okBase(part) ? dimItems(part.countries) : [], { n: 6, fmt: int, more: () => app.openDetail('countries'), empty: okBase(part) ? '자료 없음' : stateWord(part) }),
-  );
+  once('l-countries', [app.entry(CLARITY)], () => {
+    const items = okBase(part) ? dimItems(part.countries) : [];
+    say('say-countries', topSay(items, '가장 많은 나라는'));
+    topList('l-countries', items, { n: 6, fmt: int, more: () => app.openDetail('countries'), empty: okBase(part) ? '자료 없음' : stateWord(part) });
+  });
 }
 function drawDims(app) {
   const dims = dimsOf(baseOf(app));
   tag('t-dims', dims);
   once('b-dims', [app.entry(CLARITY)], () => {
+    say('say-dims', usable(dims) ? dimsSay(dims) : '');
     if (!usable(dims)) return $('b-dims').replaceChildren(el('p', 'empty', stateWord(dims)));
     return bar100s('b-dims', [['device', '기기'], ['browser', '브라우저'], ['os', 'OS']].map(([k, name]) => ({ name, note: '세션', items: dimItems(dims[k]), fmt: int, onPick: () => app.openDetail('dims') })));
   });
@@ -131,9 +144,11 @@ function drawRefs(app) {
     state.refTab = k;
     app.paint();
   });
-  once('l-refs', [app.entry(CLARITY), state.refTab], () =>
-    topList('l-refs', usable(dims) ? dimItems(dims[state.refTab]) : [], { n: 6, fmt: int, more: () => app.openDetail('refs'), empty: usable(dims) ? '자료 없음' : stateWord(dims) }),
-  );
+  once('l-refs', [app.entry(CLARITY), state.refTab], () => {
+    const items = usable(dims) ? dimItems(dims[state.refTab]) : [];
+    say('say-refs', topSay(items, state.refTab === 'source' ? '가장 많이 들어온 출처는' : '가장 많이 들어온 길은'));
+    topList('l-refs', items, { n: 6, fmt: int, more: () => app.openDetail('refs'), empty: usable(dims) ? '자료 없음' : stateWord(dims) });
+  });
 }
 
 start({

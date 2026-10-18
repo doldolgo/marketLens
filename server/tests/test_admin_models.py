@@ -1,4 +1,4 @@
-"""관리자 화면 v4 의 모델 계산 (스펙 066 §4 node) — IP 대역(067 #132 꼴: 쪽 요청·큰 수·표 행·대역 검사)·Clarity 날별 선·칸 진하기,
+"""관리자 화면 v4 의 모델 계산 (스펙 066 §4 node) — IP 대역(067 #132 꼴: 쪽 요청·큰 수·표 행·대역 검사)·Clarity 날별 선,
 그리고 064 에서 이어받은 계산(바이트·오늘 방문자·시간별 성공률·알림·봇 비율·예산·흐름·툴팁 글자·이름표). 공개 함수만 부른다.
 """
 
@@ -29,7 +29,6 @@ const hw = models.historyWindow(fakeApp({ [hq[0].key]: { state: 'ok', rows: days
 out.history = { reqs: [hq, models.historyReqs('90d', 'prev'), models.historyReqs('30d', 'none')].map((x) => x.map((q) => q.url)), line: hw.line((row) => row.traffic.sessions), first: hw.firstMs, rows: hw.rows.length }
 out.daily = [calc.dayMs('2026-10-14'), calc.dayMs('20261014'), calc.dayMs('bad'), calc.dailyLine([{ date: '2026-10-15', v: 2 }, { date: '2026-10-14', v: 'x' }, { date: 'nope', v: 3 }], (row) => row.v)]
 out.lastTwo = [ins.lastTwo([{ v: 1 }, { v: 4 }], (x) => x.v), ins.lastTwo([{ v: 1 }], (x) => x.v)]
-out.shade = [ins.shade(0, 10), ins.shade(1, 10), ins.shade(10, 10), ins.shade(5, 0), ins.shade(null, 3)]
 // IP 대역(067 #132 꼴) — 쪽 요청, 큰 수, 표 행(모음 행은 상세 없음), 대역 검사
 out.ips = ip.ipsReqs({ range: '7d', f: [['net', 'cloud'], ['bots', '0']] }, { q: ' 1.2.', pages: 2, sort: 'botPct' }).map((q) => q.url)
 const band = (b, n, extra = {}) => ({ band: b, requests: n, net: 'telecom_kr', country: 'KR', first: END - 10, last: END, status: { '5xx': 1 }, spark: [1, 2], ...extra })
@@ -95,8 +94,8 @@ def test_ip_band_requests_kpis_and_rows(got: dict[str, Any]) -> None:
     assert got["valid"] == [True, False, False, True, False, False, False]
 
 
-def test_clarity_daily_lines_and_shading(got: dict[str, Any]) -> None:
-    """066 §3.3 Clarity(068 history) — 날 'YYYY-MM-DD'(KST) → 그날 00:00, 창 안만·같은 길이의 앞 구간은 지금 축으로, 전날 대비, 칸 진하기 다섯 단계."""
+def test_clarity_daily_lines(got: dict[str, Any]) -> None:
+    """066 §3.3 Clarity(068 history) — 날 'YYYY-MM-DD'(KST) → 그날 00:00, 창 안만·같은 길이의 앞 구간은 지금 축으로, 전날 대비."""
     history = got["history"]
     assert history["reqs"] == [
         ["/svc/api/admin/clarity/history?days=30"],
@@ -120,7 +119,6 @@ def test_clarity_daily_lines_and_shading(got: dict[str, Any]) -> None:
         [[tokyo, None], [tokyo + 86_400_000, 2]],
     ]
     assert got["lastTwo"] == [[4, 1], [1, None]]
-    assert got["shade"] == ["", "q1", "q5", "", ""]
 
 
 def test_access_day_points_stay_inside_the_window(got: dict[str, Any]) -> None:
