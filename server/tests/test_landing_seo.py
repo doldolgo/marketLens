@@ -22,6 +22,7 @@ DESCRIPTION = (
 H1 = "실시간 김프·역프, 실제로 옮길 수 있는지까지"
 MODIFIED = "2026-10-14"
 OG_IMAGE = "https://kimptrack.com/landing/og-v4.png"
+ICON_VERSION = "2"  # 아이콘 주소의 ?v= — 2 = 김치 항아리 마크(2026-10-17)
 
 
 class _Page(HTMLParser):
@@ -243,8 +244,34 @@ def test_icons_are_absolute_and_exist() -> None:
     assert sorted(link["rel"] for link in icons) == ["apple-touch-icon", "icon"]
     for link in icons:
         assert link["href"].startswith(SITE)
-        assert (PUBLIC / link["href"].removeprefix(SITE)).is_file()
+        assert (PUBLIC / link["href"].removeprefix(SITE).split("?")[0]).is_file()
     assert (PUBLIC / "favicon.ico").is_file()
+
+
+def test_every_page_asks_for_the_same_icon_version() -> None:
+    """브라우저는 탭 아이콘을 주소로 기억해 같은 주소면 다시 받지 않는다 — 마크를 바꾸면 모든 페이지의 `?v=` 를 함께 올린다.
+    얼려 둔 처리방침 사본(privacy-YYYYMMDD*.html)은 보지 않는다."""
+    pages = [ROOT / "web/index.html"] + [
+        PUBLIC / name
+        for name in (
+            "landing.html",
+            "404.html",
+            "kimp-chart.html",
+            "kimp-history.html",
+            "privacy.html",
+        )
+    ]
+    for path in pages:
+        page = _Page()
+        page.feed(path.read_text())
+        icons = [
+            link["href"]
+            for link in page.links
+            if link.get("rel") in ("icon", "apple-touch-icon")
+        ]
+        assert icons, path.name
+        for href in icons:
+            assert href.endswith(f"?v={ICON_VERSION}"), (path.name, href)
 
 
 def test_png_images_have_the_declared_size() -> None:
