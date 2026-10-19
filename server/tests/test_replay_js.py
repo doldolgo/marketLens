@@ -91,7 +91,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
   const posted = []
   const scrolls = []
   const document = {
-    visibilityState: 'visible',
+    visibilityState: c.hidden ? 'hidden' : 'visible',
     readyState: c.readyState || 'interactive',
     documentElement: root,
     body,
@@ -104,8 +104,9 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
   const self = {}
   const parent = { postMessage: (m, o) => posted.push([m, o]) }
   const window = Object.assign(self, {
-    innerWidth: c.w || 1280,
-    innerHeight: c.h || 800,
+    innerWidth: 'w' in c ? c.w : 1280,
+    innerHeight: 'h' in c ? c.h : 800,
+    screen: c.screen ? { width: c.screen } : undefined,
     localStorage,
     addEventListener: adder(bags.window),
     setTimeout: (fn, ms) => addTimer(fn, ms || 0, 0),
@@ -140,6 +141,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
     else if (op === 'show') { document.visibilityState = 'visible'; fire(bags.document, 'visibilitychange') }
     else if (op === 'tab') fire(bags.window, 'kt:tab', { detail: a[0] })
     else if (op === 'resize') { window.innerWidth = a[0]; window.innerHeight = a[1]; fire(bags.window, 'resize') }
+    else if (op === 'size') { window.innerWidth = a[0]; window.innerHeight = a[1] } // resize 이벤트 없이 크기만 생김
     else if (op === 'pagehide') fire(bags.window, 'pagehide')
     else if (op === 'consent') { for (const [k, v] of Object.entries(a[0])) v === null ? data.delete(k) : data.set(k, v); fire(bags.window, a[1] || 'kt:clarity') }
     else if (op === 'take') events.push(take())
@@ -369,6 +371,80 @@ def test_tab_change_area_change_visibility_and_resize() -> None:
     assert {b["body"]["page"] for b in sent} == {"app-gap"}
     kinds = [e[1:] for e in ev]
     assert kinds == [["a", "table"], ["p", "app-history"], ["r", 1000, 700], ["v", 0]]
+
+
+def test_a_page_opened_hidden_sends_size_zero_and_the_real_size_when_shown() -> None:
+    """073 §3.2·§3.3 — 숨은 채 열린 페이지(뒤 탭·미리 띄우기)는 크기를 못 재 머리 w·h 가 0(1 로 바꾸지 않는다), 처음 보일 때 r 로 실제 크기.
+    기기는 기기 화면 폭으로 정한다(폭 0 을 휴대폰으로 보지 않는다)."""
+    got = one(
+        w=0,
+        h=0,
+        hidden=True,
+        screen=1920,
+        steps=[
+            ["wait", 5000],  # 숨은 동안 — 사건 없음·보내지 않음
+            ["size", 1440, 900],
+            ["show"],
+            ["wait", 2000],
+            ["resize", 1440, 900],  # 같은 크기 — 다시 남기지 않는다
+            ["wait", 2000],
+        ],
+    )
+    (body,) = bodies(got)
+    assert (body["w"], body["h"], body["dev"]) == (0, 0, "pc")
+    assert body["ev"] == [[5000, "v", 1], [5000, "r", 1440, 900]]
+
+
+def test_a_size_that_appears_without_any_event_is_noted_within_a_second() -> None:
+    """배치 전 인앱 브라우저 — 보이는데 폭·높이 0 이고 크기가 생겨도 resize 가 오지 않으면 1초마다 다시 재 r 로 남긴다(잰 뒤로는 resize 만)."""
+    got = one(
+        w=0,
+        h=0,
+        screen=390,
+        steps=[
+            ["wait", 500],
+            ["size", 538, 820],
+            ["wait", 1500],
+            ["size", 600, 820],  # 이미 잰 뒤 — 다시 재지 않는다
+            ["wait", 2000],
+        ],
+    )
+    (body,) = bodies(got)
+    assert (body["w"], body["h"], body["dev"]) == (0, 0, "mobile")
+    assert body["ev"] == [[1000, "r", 538, 820]]
+
+
+@pytest.mark.parametrize(
+    ("case", "dev"),
+    [
+        ({"w": 0, "h": 0, "screen": 390}, "mobile"),
+        ({"w": 0, "h": 0, "screen": 1920}, "pc"),
+        ({"w": 0, "h": 0}, "pc"),  # 기기 화면 폭도 없음
+        ({"w": 390, "h": 844, "screen": 1920}, "mobile"),  # 잰 폭이 앞선다
+    ],
+)
+def test_device_falls_back_to_the_screen_width_when_the_page_has_no_size(
+    case: dict[str, Any], dev: str
+) -> None:
+    got = one(**case, steps=MOVES)
+    (body,) = bodies(got)
+    assert body["dev"] == dev
+
+
+def test_resize_to_zero_is_not_recorded() -> None:
+    """r 은 0 을 싣지 않는다(서버 꼴 1~20,000) — 0 으로 줄었다 같은 크기로 돌아오면 r 없음, 다른 크기면 그 값."""
+    got = one(
+        steps=[
+            ["resize", 0, 0],
+            ["wait", 600],
+            ["resize", 1280, 800],
+            ["wait", 600],
+            ["resize", 1000, 700],
+            ["wait", 2000],
+        ]
+    )
+    (body,) = bodies(got)
+    assert [e[1:] for e in body["ev"]] == [["r", 1000, 700]]
 
 
 def test_no_empty_batches_and_seq_counts_up() -> None:

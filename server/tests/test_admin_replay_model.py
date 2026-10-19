@@ -1,5 +1,5 @@
 """관리자 화면 재생의 값 계산(스펙 074 §3.3·§3.5·§4 node) — 서버 시계 맞추기(at − 마지막 t + t)·사건 꼴 검사, 빈 시간 건너뛰기·속도,
-한 시각의 틀 상태(커서·누름 한 번·숨김·손가락·스크롤·영역 안 스크롤·보던 영역·화면·화면 크기), 시간 막대 표시, 사건 목록(움직임 빼고·
+한 시각의 틀 상태(커서·누름 한 번·숨김·손가락·스크롤·영역 안 스크롤·보던 영역·화면·화면 크기 — 모르는·작은 크기 포함), 시간 막대 표시, 사건 목록(움직임 빼고·
 스크롤 크게·이름표), 틀 주소, 따라 보기(3초 뒤·늦음), '앞부분만', 카드 행·XSS(글자는 그대로 글로). `web/admin/replaymodel.js` 를 node 로 부른다.
 """
 
@@ -86,6 +86,16 @@ out.state = {
 }
 const touch = m.timeline({ ...input.meta, dev: 'mobile', w: undefined }, input.batches)
 out.touch = [m.frameState(touch, input.t0 + 2_150).message, m.frameState(touch, input.t0 + 3_500).message.x, touch.base]
+// 화면 크기를 모르는 머리(숨은 채 열린 페이지 — 예전 replay.js 는 1×1, 지금은 0×0)·한 변이 작은 머리 — 첫 정상 r, 그것도 없으면 기기 기본값.
+// 작은 r(1×1·0×0)은 건너뛴다
+const tiny = (meta, ev) => m.timeline({ ...input.meta, ...meta }, [{ at: input.t0 + 2_000, seq: 0, ev }])
+const shown = tiny({ w: 1, h: 1, dev: 'mobile' }, [[0, 'v', 1], [500, 'r', 1, 1], [900, 'r', 538, 820], [1_200, 'r', 600, 900], [1_500, 'r', 0, 0], [2_000, 'v', 0]])
+const never = tiny({ w: 1, h: 1, dev: 'mobile' }, [[0, 'v', 1], [2_000, 'v', 0]])
+out.tiny = {
+  base: [shown.base, never.base, tiny({ w: 0, h: 0, dev: 'pc' }, [[0, 'm', 5, 5]]).base, tiny({ w: 1440, h: 99 }, [[0, 'm', 5, 5]]).base],
+  at: [0, 600, 1_000, 1_300, 1_600].map((d) => m.viewAt(shown, shown.start + d)),
+  frame: [m.frameState(shown, shown.start + 100).view, m.frameState(never, never.start + 500).view],
+}
 out.marks = m.barMarks(tl)
 out.rows = m.eventRows(tl).map((r) => [r.at - input.t0, r.kind, r.name, r.detail, r.time])
 out.rowAt = [m.rowAt(m.eventRows(tl), input.t0), m.rowAt(m.eventRows(tl), input.t0 + 1_400)]
@@ -199,11 +209,21 @@ def test_frame_state_is_the_message_for_one_moment(got: dict[str, Any]) -> None:
 
 
 def test_touch_devices_show_a_finger_only_briefly(got: dict[str, Any]) -> None:
-    """§3.4 — 손가락 기기(dev mobile)는 touch 참, 마지막 움직임 뒤 1초가 지나면 커서 null(손을 뗀 뒤 남은 원은 거짓). 화면 크기가 없으면 기기 기본값."""
+    """§3.4 — 손가락 기기(dev mobile)는 touch 참, 마지막 움직임 뒤 1초가 지나면 커서 null(손을 뗀 뒤 남은 원은 거짓). 머리에 화면 크기가
+    없으면 처음부터 첫 r 의 크기."""
     msg, later, base = got["touch"]
     assert msg["touch"] is True and (msg["x"], msg["y"]) == (300, 300)
     assert later is None
-    assert base == [390, 844]
+    assert base == [1280, 800]
+
+
+def test_unknown_or_tiny_view_size_never_shrinks_the_frame(got: dict[str, Any]) -> None:
+    """§3.3 틀 크기 — 머리 w·h 의 한 변이 100px 보다 작으면(숨은 채 열린 페이지의 1×1·0×0) 모름: 첫 정상 r, 없으면 기기 기본값(휴대폰
+    390×844 · PC 1280×800). 작은 r 은 건너뛰어 앞 크기를 그대로 둔다 — 틀이 1px 이 되어 ▶ 만 돌고 화면이 비는 일이 없다."""
+    tiny = got["tiny"]
+    assert tiny["base"] == [[538, 820], [390, 844], [1280, 800], [1280, 800]]
+    assert tiny["at"] == [[538, 820], [538, 820], [538, 820], [600, 900], [600, 900]]
+    assert tiny["frame"] == [[538, 820], [390, 844]]
 
 
 def test_bar_marks_show_clicks_page_changes_and_hidden_spans(

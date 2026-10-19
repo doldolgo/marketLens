@@ -29,6 +29,8 @@
   ])
   const AREA_ID = /^[a-z][a-z0-9-]{0,31}$/
   const MOBILE_WIDTH = 768
+  // 화면 크기의 한 변이 이보다 작으면 아직 못 잰 것으로 본다 — 숨은 채 열린 페이지(뒤 탭·미리 띄우기·배치 전 인앱 브라우저)는 0
+  const MIN_VIEW = 100
 
   const MOVE_MS = 100 // 포인터 위치는 0.1초에 한 번까지
   const MOVE_PX = 4 // 직전 보낸 위치에서 이만큼 움직였을 때만
@@ -214,16 +216,31 @@
     throttle(key.k, SCROLL_MS, () => [0, "e", key.id, key.n, clip(t.scrollTop, MAX_SCROLL)])
   }
 
+  // 화면 크기 r — 직전에 남긴 크기(머리 또는 r)와 다를 때만. 0 은 남기지 않는다(못 잰 크기 — 잴 수 있게 되면 그때 r)
+  const sizeEvent = () => {
+    const w = clip(window.innerWidth, MAX_XY)
+    const h = clip(window.innerHeight, MAX_XY)
+    if (!w || !h || (w === rec.vw && h === rec.vh)) return null
+    rec.vw = w
+    rec.vh = h
+    return [0, "r", w, h]
+  }
+  const noteSize = () => {
+    const ev = sizeEvent()
+    if (ev) push(ev)
+  }
+
   const onResize = () => {
     if (!rec) return
-    throttle("r", RESIZE_MS, () => [0, "r", clip(window.innerWidth, MAX_XY) || 1, clip(window.innerHeight, MAX_XY) || 1])
+    throttle("r", RESIZE_MS, sizeEvent)
   }
 
   const onVisibility = () => {
     if (!rec) return
     const shown = document.visibilityState === "visible"
     push([0, "v", shown ? 1 : 0])
-    if (!shown) flush(true)
+    if (shown) noteSize() // 숨은 채 열렸으면 처음 보일 때 실제 크기
+    else flush(true)
   }
 
   const onTab = (event) => {
@@ -239,6 +256,8 @@
   // 가장 크게 보이는 영역 — 보이는 높이 기준, 같으면 문서에서 앞의 것. 바뀌었을 때만
   const lookArea = () => {
     if (!rec || document.visibilityState !== "visible") return
+    // 아직 못 잰 크기면 1초마다 다시 잰다 — 크기가 생겨도 resize·visibilitychange 가 오지 않는 브라우저가 있다
+    if (rec.vw < MIN_VIEW || rec.vh < MIN_VIEW) noteSize()
     let best = ""
     let most = 0
     const vh = window.innerHeight
@@ -320,17 +339,35 @@
     pending.clear()
   }
 
+  // 기기 — 052 와 같은 768px 기준. 화면 폭을 못 재면(숨은 채 열림) 기기 화면(screen) 폭으로, 그것도 없으면 pc
+  const devOf = (w) => {
+    let wide = w
+    if (wide < MIN_VIEW) {
+      try {
+        wide = clip(window.screen && window.screen.width, MAX_XY)
+      } catch (e) {
+        wide = 0
+      }
+    }
+    return wide >= MIN_VIEW && wide < MOBILE_WIDTH ? "mobile" : "pc"
+  }
+
   const start = () => {
     if (rec || !recording()) return
+    // 머리 w·h 는 잰 그대로 — 숨은 채 열렸으면 0(모름, 관리자 재생은 첫 r 이나 기기 기본값을 쓴다)
+    const w = clip(window.innerWidth, MAX_XY)
+    const h = clip(window.innerHeight, MAX_XY)
     rec = {
       sid: sidOf(),
       t0: Date.now(),
       seq: 0,
       page: firstPage,
       now: firstPage,
-      dev: window.innerWidth < MOBILE_WIDTH ? "mobile" : "pc",
-      w: clip(window.innerWidth, MAX_XY) || 1,
-      h: clip(window.innerHeight, MAX_XY) || 1,
+      dev: devOf(w),
+      w,
+      h,
+      vw: w, // 직전에 남긴 크기(머리 또는 r)
+      vh: h,
       ev: [],
       ended: false,
       lastAt: new Map(),

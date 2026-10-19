@@ -24,6 +24,8 @@ const MAX_ELS = 40; // 틀로 보내는 영역 안 스크롤 짝 상한
 const CUT_BYTES = 1_048_576 - 16_384; // 조각 1MB 상한에서 묶음 하나(16KB)가 더 들어가지 못한 크기
 const CUT_BATCHES = 3_600;
 const DEFAULT_VIEW = Object.freeze({ pc: [1280, 800], mobile: [390, 844] });
+// 화면 크기의 한 변이 이보다 작으면 모름 — 숨은 채 열린 페이지는 0×0(예전 replay.js 는 1×1)을 머리에 싣는다. 그대로 쓰면 틀이 1px 이 된다
+const MIN_VIEW = 100;
 const STATIC_PATH = Object.freeze({ landing: '/', privacy: '/privacy', 'kimp-chart': '/kimp-chart', 'kimp-history': '/kimp-history' });
 const SID = /^[0-9a-f]{16}$/;
 
@@ -113,14 +115,17 @@ function lastIndex(arr, T) {
 }
 const lastAt = (arr, T) => arr[lastIndex(arr, T)] ?? null;
 
-const viewOf = (meta, dev) => {
-  const w = whole(meta?.w, 1, MAX_COORD);
-  const h = whole(meta?.h, 1, MAX_COORD);
-  return w && h ? [w, h] : DEFAULT_VIEW[dev];
+const known = (w, h) => w !== null && h !== null && w >= MIN_VIEW && h >= MIN_VIEW;
+// 처음 화면 크기 — 머리 w·h, 모르면(없음·작음) 조각의 첫 정상 r, 그것도 없으면 기기 기본값
+const viewOf = (meta, dev, views) => {
+  const w = whole(meta?.w, 0, MAX_COORD);
+  const h = whole(meta?.h, 0, MAX_COORD);
+  if (known(w, h)) return [w, h];
+  return views.length ? [views[0].w, views[0].h] : DEFAULT_VIEW[dev];
 };
 
 // 조각 하나의 재생 자료 — 사건, 시작·끝, 화면 조각(p 로 나뉜 구간 — 영역 안 스크롤·보던 영역은 그 구간 안에서만), 종류별 배열,
-// 숨김 구간, 빈 시간 틈. 화면 크기는 meta.w·h(있으면), 없으면 기기 기본값 — r 사건이 오면 그 값
+// 숨김 구간, 빈 시간 틈. 화면 크기는 viewOf 로 시작해 r 사건이 오면 그 값(작은 r 은 건너뛴다)
 export function timeline(meta, batches) {
   const events = alignEvents(batches);
   const dev = meta?.dev === 'mobile' ? 'mobile' : 'pc';
@@ -142,6 +147,7 @@ export function timeline(meta, batches) {
     }
   }
   if (off !== null) hides.push([off, end]);
+  const views = kind('r').filter((e) => known(e.w, e.h));
   const tl = {
     meta,
     dev,
@@ -150,11 +156,11 @@ export function timeline(meta, batches) {
     end,
     events,
     chunks,
-    base: viewOf(meta, dev),
+    base: viewOf(meta, dev, views),
     pointer: kind('m', 'c'),
     clicks: kind('c'),
     scrolls: kind('s'),
-    views: kind('r'),
+    views,
     vis: kind('v'),
     looks: kind('a'),
     hides,

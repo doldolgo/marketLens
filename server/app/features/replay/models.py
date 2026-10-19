@@ -128,7 +128,8 @@ def parse_batch(body: bytes) -> Batch | None:
         return None
     if page not in PAGES or dev not in DEVICES:
         return None
-    if not (_int_in(w, 1, MAX_XY) and _int_in(h, 1, MAX_XY)):
+    # 머리 w·h 의 0 은 모름 — 숨은 채 열린 페이지는 크기를 못 잰다(잴 수 있게 되면 r 사건이 온다). r 은 1 부터
+    if not (_int_in(w, 0, MAX_XY) and _int_in(h, 0, MAX_XY)):
         return None
     if not isinstance(events, list) or not 1 <= len(events) <= MAX_EVENTS:
         return None
