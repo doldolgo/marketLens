@@ -36,7 +36,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
   let listens = 0
   const adder = (bag) => (type, fn) => { listens++; (bag[type] = bag[type] || []).push(fn) }
   const fire = (bag, type, ev) => (bag[type] || []).slice().forEach((fn) => fn(ev || {}))
-  const view = { w: c.w || 1280, h: c.h || 800 }
+  const view = { w: 'w' in c ? c.w : 1280, h: c.h || 800 } // w 0 = 숨은 채 열린 페이지
   let scrollY = 0
   // 선택자 — attention.js 가 쓰는 꼴만: 태그, [속성], [속성=값], [속성^="값"], :not(…), 쉼표 목록
   const compound = (el, s) => {
@@ -118,6 +118,7 @@ process.stdout.write(JSON.stringify(cases.map((c) => {
   const sent = []
   const window = {
     innerWidth: view.w, innerHeight: view.h, localStorage,
+    screen: c.screen ? { width: c.screen } : undefined,
     addEventListener: adder(bags.window),
     IntersectionObserver: IO, MutationObserver: MO,
     requestAnimationFrame: (fn) => { rafs.push(fn); return rafs.length },

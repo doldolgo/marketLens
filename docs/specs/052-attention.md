@@ -34,7 +34,7 @@
 - **보인 시간**: 보임이면서 문서가 보이는 동안(`visibilityState` visible)이면서 마지막 입력(페이지 연 때·포인터 움직임·누름·휠·스크롤·키·터치) 뒤 5분 안일 때만 쌓는다.
 - **클릭**: 문서 `click`(캡처)에서 대상의 가장 가까운 `[data-area]` 하나에 1. 영역 밖 클릭은 버린다.
 - 상한은 **구간 전체**(여러 번 보내도 합)에서 영역당 시간 600,000ms·클릭 50. '1초 이상 보임'(seen)은 구간에서 영역의 누적 시간이 1,000ms 를 넘은 첫 순간 1(구간당 한 번).
-- **기기**: 구간 시작 때 `innerWidth < 768` 이면 `mobile`, 아니면 `pc`. 구간 중 폭이 바뀌어도 그대로.
+- **기기**: 구간 시작 때 `innerWidth < 768` 이면 `mobile`, 아니면 `pc`. 숨은 채 열린 페이지(뒤 탭으로 열기·미리 띄우기·배치 전 인앱 브라우저)는 폭이 0 이라, 폭이 100px 미만이면 기기 화면 폭 `screen.width` 로 정하고 그것도 100px 미만이거나 없으면 `pc`(073 과 같은 규칙). 구간 중 폭이 바뀌어도 그대로.
 
 ### 3.3 보내기
 - 때: 문서가 숨겨질 때(`visibilitychange` → hidden)·`pagehide`·구간 끝. 보내기 직전에 동의를 다시 판정해 '켬' 이 아니면 버리고 멈춘다(같은 탭·다른 탭 철회 모두). 보낸 뒤 보낸 몫을 0 으로(구간 합 상한·이미 보낸 seen 은 기억) 다시 보이면 같은 구간을 이어 센다. 페이지뷰(pv)는 구간의 첫 보냄에만 1.
@@ -72,7 +72,7 @@
 - 서버(`features/attention/tests/`): 검사 ③ 어긋남마다 400·더한 것 없음 / 403 cross_site / 413 / D 전 204·더한 것 없음(시계 바꿔서) / 같은 IP 121번째 204·더한 것 없음, 10분 뒤 다시 받음 / X-Client-IP 없으면 제한 없음 / 10초 묶음 보냄·실패 뒤 다시·2만 넘으면 버림·끌 때 보냄(가짜 Redis) / 날짜 경계 23:59:59·00:00:00 KST 의 키와 EXPIREAT 값 / 피드 days 1·7·30·90·잘못된 값(→7)·D 로 자름·before_gate·redis 실패·ms 큰 순·60초 캐시.
 - 계약: 화면 이름 목록 = `TabId` 여섯 + 정적 넷(App.tsx 를 읽어 대조), 공개 nginx 허용 목록 테스트에 `/api/attention`(POST 만·405), `location = /attention.js`, 관리자 nginx 의 `= /svc/api/admin/attention`, caddy 로그 제외에 경로, 정적 페이지 CSP 문자열(test_privacy·test_kimp_pages 의 기대값을 새 문자열로), `RedisBus` 두 메서드 시그니처.
 - 웹 정적: 랜딩·대시보드는 attention.js 가 clarity.js 바로 뒤, 세 정적 페이지는 `<script src>` 가 `/clarity.js`·`/attention.js`·`/replay.js` 셋뿐(033·073, 나머지는 인라인 — 032·044 규칙), 정적 페이지 HTML 의 `data-area` 가 id 꼴·겹침 없음·품음 없음·≤ 40, App.tsx 가 `kt:tab` 을 낸다, `NOTICE_VERSION` 값이 clarity.js 와 같다.
-- `attention.js` node 실행(가짜 window·document·IntersectionObserver·시계 — test_clarity 와 같은 방식): 다른 호스트·틀 안·`kt-overlay=1` 이면 리스너 0 / 동의 아님이면 리스너 둘, `kt:clarity` 뒤 켜짐 / 보임 규칙(작은 영역 50%·3,000px 영역이 화면 절반·40px) / 숨김·5분 무입력 동안 안 쌓임 / 구간 합 상한(두 번 보내도) / seen 한 번 / 탭 바뀜이 구간을 끊고 pv 1·같은 id 무시 / 두 번째 보냄 pv 0 / 보내기 직전 철회면 안 보냄 / 빈 구간 안 보냄 / sendBeacon false 면 fetch 한 번 / 몸통 4,096바이트 안 / `/app/xyz?tab=bad` → `app-spread`.
+- `attention.js` node 실행(가짜 window·document·IntersectionObserver·시계 — test_clarity 와 같은 방식): 다른 호스트·틀 안·`kt-overlay=1` 이면 리스너 0 / 동의 아님이면 리스너 둘, `kt:clarity` 뒤 켜짐 / 보임 규칙(작은 영역 50%·3,000px 영역이 화면 절반·40px) / 숨김·5분 무입력 동안 안 쌓임 / 구간 합 상한(두 번 보내도) / seen 한 번 / 탭 바뀜이 구간을 끊고 pv 1·같은 id 무시 / 두 번째 보냄 pv 0 / 보내기 직전 철회면 안 보냄 / 빈 구간 안 보냄 / 기기 767·768px, 폭 0 이면 screen 폭(390 → mobile·1920 → pc·없음 → pc) / sendBeacon false 면 fetch 한 번 / 몸통 4,096바이트 안 / `/app/xyz?tab=bad` → `app-spread`.
 - 기존: `cd server && ruff check . && ruff format --check . && pytest -q`, `cd web && npm run lint && npm run build`, `node --check web/public/attention.js`.
 - 설계 세션(머지 전, 로컬 Docker — 033 §4 처럼 `kimptrack.com` 을 로컬에 묶은 헤드리스 Chrome): 동의 저장값을 넣고 랜딩을 스크롤·대시보드 탭을 바꾼 뒤 탭을 숨기면 `/api/attention` 204 와 Redis 필드가 늘고, 동의를 지우면 요청 0, 처리방침·검색어 페이지에서 CSP 위반 0. 배포 뒤: D 전 비콘은 204·Redis 빈칸, D 뒤 첫 동의 방문의 필드.
 
