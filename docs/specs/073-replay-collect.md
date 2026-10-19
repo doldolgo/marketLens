@@ -28,7 +28,7 @@
 - `c` 누름 `[t,"c",x,y,영역]` — click 이벤트의 위치와 가장 가까운 `data-area` id(없으면 `""`).
 - `s` 문서 스크롤 `[t,"s",y]` — `scrollY` 정수, 200ms 에 한 번까지(마지막 값은 반드시 보냄).
 - `e` 영역 안 스크롤 `[t,"e",영역,n,top]` — 스크롤된 요소가 `data-area` 안이면 그 영역 id, 그 영역 안 스크롤되는 요소(`scrollHeight > clientHeight + 1` 이고 overflow-y 가 auto·scroll) 가운데 문서 순서 번호 n(0부터), `scrollTop` 정수. 요소마다 200ms 에 한 번까지.
-- `r` 화면 크기 `[t,"r",w,h]` — `innerWidth`·`innerHeight` 가 바뀔 때(500ms 묶음).
+- `r` 화면 크기 `[t,"r",w,h]` — `innerWidth`·`innerHeight` 가 직전에 남긴 크기(머리 `w`·`h` 또는 앞 `r`)와 다를 때(500ms 묶음). 0 은 싣지 않는다. 숨은 채 열린 페이지(뒤 탭으로 열기·미리 띄우기·배치 전 인앱 브라우저 — 크기 0)는 처음 보일 때(`v` 1 과 같은 시각) 잰 크기를 남기고, 그때도 못 재면(한 변 < 100px) 보이는 동안 1초마다 다시 재 크기가 생기면 남긴다(크기가 생겨도 resize·visibilitychange 가 오지 않는 브라우저가 있다).
 - `v` 보임 `[t,"v",0|1]` — 탭이 숨으면 0, 다시 보이면 1.
 - `p` 화면 바뀜 `[t,"p",화면]` — 대시보드 탭이 바뀔 때(`kt:tab`, 052 의 화면 이름 `app-<탭>`).
 - `a` 보던 영역 `[t,"a",영역]` — 1초마다 화면에 가장 크게 보이는 `data-area`(보이는 높이 기준)를 보고 바뀌었을 때만.
@@ -36,10 +36,10 @@
 
 ### 3.3 보내기
 - 2초마다 쌓인 사건이 있으면 한 묶음을 보낸다. 탭이 숨을 때·`pagehide` 에는 곧바로. 사건이 없으면 보내지 않는다.
-- 몸통(JSON, text/plain, sendBeacon — 실패하면 fetch keepalive 한 번, 다시 보내지 않음): `{"v":1,"sid","seq","page","dev","w","h","c","ev":[…]}` — `seq` 0부터 묶음마다 +1, `page` 이 조각의 첫 화면, `dev` `pc`·`mobile`(052 와 같은 768px 기준), `w`·`h` 조각 시작 때 화면 크기, `c` 보낼 때의 동의 상태(§3.1). 16,384바이트 이하 — 넘으면 넘는 사건을 다음 묶음으로 미룬다. 한 묶음 사건 600개까지.
+- 몸통(JSON, text/plain, sendBeacon — 실패하면 fetch keepalive 한 번, 다시 보내지 않음): `{"v":1,"sid","seq","page","dev","w","h","c","ev":[…]}` — `seq` 0부터 묶음마다 +1, `page` 이 조각의 첫 화면, `dev` `pc`·`mobile`(052 와 같은 768px 기준 — 폭을 못 재면(한 변 < 100px) 기기 화면 폭 `screen.width` 로, 그것도 없으면 `pc`), `w`·`h` 조각 시작 때 잰 화면 크기 그대로(숨은 채 열렸으면 0 = 모름 — 1 로 바꾸지 않는다. 실제 크기는 §3.2 의 `r`), `c` 보낼 때의 동의 상태(§3.1). 16,384바이트 이하 — 넘으면 넘는 사건을 다음 묶음으로 미룬다. 한 묶음 사건 600개까지.
 
 ### 3.4 `POST /replay` (api — 공개 nginx `= /api/replay`, POST 만, 16k)
-- 검사 순서·응답은 052 비콘과 같은 꼴: ① `Sec-Fetch-Site` 가 있고 `same-origin` 이 아니면 403 `cross_site`(몸통을 읽지 않음) ② 16,384바이트 넘으면 413 `too_large` ③ 모양이 틀리면 400 `bad_replay` — 키가 정확히 `c` 를 뺀 위 여덟(`v`=1 포함)이고 `c` 는 있어도 없어도 된다(동의자만 기록하던 예전 replay.js — 열린 탭에 남은 것 — 는 `c` 없이 보내고, 그 묶음은 `granted` 로 본다), `c` 가 있으면 §3.1 의 다섯 글자 가운데 하나, `sid` 16진 16자, `seq` 0~3,599, `page` 052 화면 이름, `dev` 둘 중 하나, `w`·`h` 1~20,000, `ev` 1~600개이고 사건마다 §3.2 꼴(t 0~7,200,000, 모르는 종류·자리 수 틀림·범위 밖은 몸통 전체 거절).
+- 검사 순서·응답은 052 비콘과 같은 꼴: ① `Sec-Fetch-Site` 가 있고 `same-origin` 이 아니면 403 `cross_site`(몸통을 읽지 않음) ② 16,384바이트 넘으면 413 `too_large` ③ 모양이 틀리면 400 `bad_replay` — 키가 정확히 `c` 를 뺀 위 여덟(`v`=1 포함)이고 `c` 는 있어도 없어도 된다(동의자만 기록하던 예전 replay.js — 열린 탭에 남은 것 — 는 `c` 없이 보내고, 그 묶음은 `granted` 로 본다), `c` 가 있으면 §3.1 의 다섯 글자 가운데 하나, `sid` 16진 16자, `seq` 0~3,599, `page` 052 화면 이름, `dev` 둘 중 하나, `w`·`h` 0~20,000(0 = 모름), `ev` 1~600개이고 사건마다 §3.2 꼴(t 0~7,200,000, 모르는 종류·자리 수 틀림·범위 밖은 몸통 전체 거절).
 - 받은 것은 204. 아래는 검사를 통과해도 **버린다**(204): KST `PRIVACY_V7_EFFECTIVE` 00:00 전, IP 10분 창 600묶음 초과(052 의 고정 창 꼴), 그날 저장 바이트 상한 넘음, 그 조각 바이트 상한 넘음.
 - IP = `X-Client-IP` 의 첫 값(쉼표 앞, 공백 제거)을 IPv4·IPv6 로 읽은 정규 글자. 읽을 수 없으면 `(없음)`.
 
@@ -59,8 +59,8 @@
 - Redis 가 없거나 실패하면 `state` `error`·`code` `redis`(052 피드 꼴).
 
 ## 4. 검증
-- node(`replay.js`, 가짜 window): 틀 안·다른 호스트·목록 밖 경로에서 아무것도 안 보냄 / 동의 저장값마다 `c`(다섯 — 판 다름·판 없는 거부·지난·먼 later 는 `unset`, GPC 는 동의보다 앞섬) / 동의를 철회하거나 주면 같은 조각에서 `c` 만 바뀜 / `RECORD_ALL` 거짓이면 동의자만(아니면 아무것도 안 보냄·철회면 멈춤·중간 동의면 그때부터) / 포인터 100ms·4px 거르기 / 누름의 영역 / 스크롤 200ms·마지막 값 / 영역 안 스크롤 n / 탭 바뀜 p / 보던 영역 a 는 바뀔 때만 / 2초 묶음·숨을 때 곧바로·빈 묶음 없음 / 16KB·600개 넘으면 다음 묶음 / 동의가 꺼지면 멈춤 / 2시간 끝 / 저장소·쿠키 안 씀 / 보내는 주소는 `/api/replay` 하나.
-- server: 검사 순서(403·413·400 경계값 — 키·sid·seq·`c`(모르는 글자·대문자·숫자·null·목록)·종류별 자리 수·범위), 동의 상태 다섯 저장·`cs0` 는 첫 묶음 그대로·`cs` 는 마지막·`c` 없는 묶음은 granted, 게이트 전 버림, IP 600 초과 버림, 그날 8MB·조각 1MB 상한, 같은 seq 다시 옴, Redis 키 모양·만료·`pages` 차례·`clicks`, IP 읽기(쉼표·IPv6·없음), 피드 셋(60초 경계·순서·200개·after/next/more·만료 조각 meta null·bad_ip·bad_sid·redis 오류).
+- node(`replay.js`, 가짜 window): 틀 안·다른 호스트·목록 밖 경로에서 아무것도 안 보냄 / 동의 저장값마다 `c`(다섯 — 판 다름·판 없는 거부·지난·먼 later 는 `unset`, GPC 는 동의보다 앞섬) / 동의를 철회하거나 주면 같은 조각에서 `c` 만 바뀜 / `RECORD_ALL` 거짓이면 동의자만(아니면 아무것도 안 보냄·철회면 멈춤·중간 동의면 그때부터) / 포인터 100ms·4px 거르기 / 누름의 영역 / 스크롤 200ms·마지막 값 / 영역 안 스크롤 n / 탭 바뀜 p / 보던 영역 a 는 바뀔 때만 / 숨은 채 시작하면 머리 w·h 0·처음 보일 때 r, 크기가 이벤트 없이 생기면 1초 안에 r, 0 으로 줄었다 같은 크기로 돌아오면 r 없음, 폭 0 의 기기는 screen 폭 / 2초 묶음·숨을 때 곧바로·빈 묶음 없음 / 16KB·600개 넘으면 다음 묶음 / 동의가 꺼지면 멈춤 / 2시간 끝 / 저장소·쿠키 안 씀 / 보내는 주소는 `/api/replay` 하나.
+- server: 검사 순서(403·413·400 경계값 — 머리 w·h 0 은 받고 r 은 1 부터, 키·sid·seq·`c`(모르는 글자·대문자·숫자·null·목록)·종류별 자리 수·범위), 동의 상태 다섯 저장·`cs0` 는 첫 묶음 그대로·`cs` 는 마지막·`c` 없는 묶음은 granted, 게이트 전 버림, IP 600 초과 버림, 그날 8MB·조각 1MB 상한, 같은 seq 다시 옴, Redis 키 모양·만료·`pages` 차례·`clicks`, IP 읽기(쉼표·IPv6·없음), 피드 셋(60초 경계·순서·200개·after/next/more·만료 조각 meta null·bad_ip·bad_sid·redis 오류).
 - 정적: 모든 페이지에 replay.js 한 줄, 공개 nginx `= /api/replay` POST 만·16k·`X-Client-IP`, `= /replay.js` no-cache, 관리자 nginx 정확 일치 셋, caddy 로그 제외, 허용 목록 대조 테스트.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
@@ -83,6 +83,12 @@ cd server && python -m pytest -q app/features/spreads/tests/test_gauge.py   # �
 #   새 테스트: app/features/replay/tests/(test_receive 19·test_store 8·test_feed 23) · tests/test_replay.py(계약 5)
 #   고친 계약: tests/test_deploy.py(PUBLIC_API +/api/replay)·test_observability.py(로그 제외 +/api/replay, 공개 location +/replay.js)
 #   ·test_admin.py(관리자 피드 셋 — 기록 끔·교차 사이트·rewrite·공개 404)·test_role.py(api 경로 넷)
+# 2026-10-19, worktree marketLens-replay-size (fix/replay-tiny-view) — 숨은 채 열린 페이지의 크기(머리 0·처음 보일 때 r·dev 는 screen 폭), 서버 머리 w·h 0 받음
+cd server && python -m ruff check . && python -m ruff format --check .   # All checks passed! · 481 files already formatted
+node --check web/public/replay.js                                     # 통과 (node 22.23.3)
+cd server && python -m pytest -q                                      # 3114 passed, 2 skipped, 6 failed — 실패 여섯은 test_gauge.py UDP bind(샌드박스)
+cd server && python -m pytest -q app/features/spreads/tests/test_gauge.py   # 샌드박스 밖 15 passed
+#   새 시험: tests/test_replay_js.py(숨은 채 시작·이벤트 없이 생긴 크기·폭 0 의 기기 넷·0 으로 줄어든 resize), test_receive.py(머리 w·h 0)
 ```
 - 하지 않은 것(설계 세션 몫): `nginx -t`(공개·관리자 nginx 를 고쳤다)·`caddy validate`(로그 제외 경로), 로컬 Docker·브라우저 확인. web 쪽(`public/replay.js`·페이지마다 싣는 줄·node 테스트)은 다른 실행 세션이 한다.
 
@@ -100,7 +106,7 @@ cd server && python -m pytest -q app/features/spreads/tests/test_gauge.py   # �
   - 대시보드의 `/app/replay.js` 는 `/app/` alias(no-store)가 그대로 준다 — `/app/attention.js` 와 같다(설정 변경 없음).
 - 추측한 지점(스펙이 말하지 않아 정한 것 — §1~§4 는 고치지 않았다):
   - 몸통 키는 `v`·`sid`·`seq`·`page`·`dev`·`w`·`h`·`ev` 여덟(§3.4 를 실행 뒤 '여덟' 로 고쳤다), `v` 는 정수 1 만.
-  - 사건 `e` 의 n 은 0~199(기록 쪽이 200번째부터 보내지 않는다), `r` 의 w·h 는 몸통 w·h 와 같은 1~20,000, `c` 의 영역은 `""` 또는 영역 id, `e`·`a` 의 영역은 영역 id 만.
+  - 사건 `e` 의 n 은 0~199(기록 쪽이 200번째부터 보내지 않는다), `r` 의 w·h 는 1~20,000(몸통 w·h 는 2026-10-19 부터 0~20,000 — 0 은 모름), `c` 의 영역은 `""` 또는 영역 id, `e`·`a` 의 영역은 영역 id 만.
   - 머리 해시에 스펙 목록 밖 필드 셋을 더했다 — `seq`(마지막으로 받은 묶음 번호 — 다시 온 비콘 판정), `now`(지금 화면 — `live` 행의 `now` 를 묶음을 풀지 않고 답하려고), `cut`(조각 상한 1MB·3,600 으로 묶음을 버렸으면 `1` — 074 §3.5 '앞부분만' 배지).
   - 피드 행 = `{sid, ip, dev, page, pages, now, first, last, n, clicks, w, h, cut, consent, consentFirst}` — §3.6 꼴에 `w`·`h`(074 의 틀 크기)·`cut` 을 더했고 `pages` 는 JSON 배열(`consent`·`consentFirst` 는 2026-10-18 — §3.6). 피드 셋 모두 `code`(null·`redis`)를 늘 싣는다(052 피드 꼴).
   - 순서: `live`·`sessions`(ip 없음)는 last 늦은 순(`rp:recent`), `sessions?ip=` 는 first 늦은 순(`rp:ip:<ip>`). 머리가 만료돼 집합에만 남은 sid 는 행에서 뺀다(그만큼 행이 적을 수 있다).

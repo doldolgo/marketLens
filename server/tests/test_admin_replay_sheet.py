@@ -421,6 +421,32 @@ def test_archive_feed_missing_on_the_server_is_one_line() -> None:
     assert edge["tag"] == "연결 안 됨" and edge["src"] is None
 
 
+@pytest.mark.parametrize(
+    ("meta", "size"),
+    [
+        # 예전 replay.js(1×1)·지금 replay.js(0×0)의 숨은 채 열린 페이지 — 첫 r(31초)의 크기
+        ({"w": 1, "h": 1}, ["1280", "800"]),
+        ({"w": 0, "h": 0}, ["1280", "800"]),
+    ],
+)
+def test_a_session_opened_hidden_frames_at_its_first_real_size(
+    meta: dict[str, Any], size: list[str]
+) -> None:
+    """§3.3 틀 크기 — 머리 w·h 가 작으면(한 변 < 100px, 숨은 채 열린 페이지의 1×1·0×0) 모름: 처음부터 첫 정상 r 의 크기로 띄운다.
+    틀이 1px 이면 ▶·시간 막대만 돌고 화면이 빈다(2026-10-19 운영 조각 셋)."""
+    got = _run(EDGE, session=_session(S0, **meta))["edge"]
+    assert got["size"] == size and got["stage"]["--fw"] == f"{size[0]}px"
+
+
+def test_a_session_with_no_size_at_all_frames_at_the_device_default() -> None:
+    """머리도 작고 정상 r 도 없으면(숨은 채 열렸다 보이고 숨음 — v 1·v 0 뿐) 기기 기본값(휴대폰 390×844)."""
+    session = _session(S0, w=1, h=1, dev="mobile")
+    for b in session["batches"]:
+        b["ev"] = [e for e in b["ev"] if e[1] != "r"] or [[0, "v", 1]]
+    got = _run(EDGE, session=session)["edge"]
+    assert got["size"] == ["390", "844"] and got["stage"]["--fw"] == "390px"
+
+
 def test_a_cut_session_gets_the_front_only_badge() -> None:
     """§3.5 — 묶음 1MB·3,600개 상한에 닿은 조각은 머리에 '앞부분만' 배지."""
     got = _run(EDGE, session=_session(S0, n=3600))["edge"]

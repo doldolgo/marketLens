@@ -52,7 +52,7 @@ BAD = {
     "기기": body(dev="tablet"),
     "기기 대문자": body(dev="PC"),
     "기기 객체": body(dev={}),
-    "w 0": body(w=0),
+    "w 음수": body(w=-1),
     "h 20001": body(h=20_001),
     "w 실수": body(w=1280.5),
     "h true": body(h=True),
@@ -144,9 +144,11 @@ async def test_boundary_values_of_every_kind_are_accepted(rig: Rig) -> None:
     )
     assert len(content) <= 16_384
     assert (await rig.post(content)).status_code == 204
-    assert (await rig.post(body(dev="mobile", w=1, h=1))).status_code == 204
+    # 머리 w·h 0 = 모름(숨은 채 열린 페이지) — r 은 1 부터
+    assert (await rig.post(body(dev="mobile", w=0, h=0))).status_code == 204
     assert rig.batches("ffffffffffffffff")[0]["ev"] == edge + filler
     assert rig.meta()["dev"] == "mobile"
+    assert (rig.meta()["w"], rig.meta()["h"]) == ("0", "0")
 
 
 async def test_cross_site_is_403_before_reading_and_missing_header_passes(
