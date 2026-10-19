@@ -158,6 +158,19 @@ def test_device_is_fixed_at_segment_start_by_width() -> None:
     assert _bodies(_one(ls=ON, w=768, steps=["hide"]))[0]["device"] == "pc"
 
 
+def test_device_falls_back_to_the_screen_width_when_the_page_has_no_width() -> None:
+    """숨은 채 열린 페이지(뒤 탭·미리 띄우기·배치 전 인앱 브라우저)는 폭 0 — 기기 화면 폭으로, 없으면 pc (073 과 같은 규칙)."""
+    cases = [
+        ({"w": 0, "screen": 390}, "mobile"),
+        ({"w": 0, "screen": 1920}, "pc"),
+        ({"w": 0}, "pc"),  # 기기 화면 폭도 없음
+        ({"w": 0, "screen": 50}, "pc"),  # 기기 화면 폭도 못 잼
+        ({"w": 390, "screen": 1920}, "mobile"),  # 잰 폭이 앞선다
+    ]
+    results = _run([{"ls": ON, **case, "steps": ["hide"]} for case, _ in cases])
+    assert [_bodies(r)[0]["device"] for r in results] == [dev for _, dev in cases]
+
+
 def test_late_areas_are_found_by_the_mutation_observer_at_most_once_a_second() -> None:
     got = _one(
         ls=ON,

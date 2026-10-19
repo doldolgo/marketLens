@@ -33,6 +33,7 @@
   const IDLE_MS = 300000 // 마지막 입력 뒤 5분이 지나면 쌓지 않는다
   const MIN_PX = 40
   const MOBILE_WIDTH = 768
+  const MIN_VIEW = 100 // 폭이 이보다 작으면 못 잰 것(숨은 채 열림 — 뒤 탭으로 열기·미리 띄우기·배치 전 인앱 브라우저는 0)
   const SCAN_MS = 1000 // 늦게 생기는 영역·요소 찾기는 1초에 한 번까지
 
   // 요소(061) — 영역 안에서 사람이 누르거나 보는 낱낱. 열쇠는 data-el 이 먼저, 없으면 대화형 요소의 <종류>:<이름>
@@ -238,12 +239,25 @@
   let docVisible = true
   let hover = null // 지금 마우스가 머문 추적 요소 { ek, at }
 
+  // 기기 — 768px 기준. 폭을 못 재면(숨은 채 열림) 기기 화면(screen) 폭으로, 그것도 없으면 pc (073 replay.js 와 같은 규칙)
+  const deviceOf = () => {
+    let wide = Number(window.innerWidth) || 0
+    if (wide < MIN_VIEW) {
+      try {
+        wide = Number(window.screen && window.screen.width) || 0
+      } catch (e) {
+        wide = 0
+      }
+    }
+    return wide >= MIN_VIEW && wide < MOBILE_WIDTH ? "mobile" : "pc"
+  }
+
   // 구간 하나 — 기기는 시작 때 폭으로 정하고 구간 중에는 그대로. total·clicks 는 구간 전체 합(상한), pend 는 아직 안 보낸 몫.
   // els 는 요소별 (아직 안 보낸 c·h·v, 구간 합 tc·th·tv), keys 는 추적하는 "영역|열쇠"(200개까지). 추적 요소는 구간마다 새로 찾는다
   const begin = (page) => {
     seg = {
       page,
-      device: window.innerWidth < MOBILE_WIDTH ? "mobile" : "pc",
+      device: deviceOf(),
       pvSent: false,
       total: {},
       clicks: {},
