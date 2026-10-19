@@ -11,7 +11,8 @@
 - apple-touch-icon.png(180) 는 모서리를 둥글리지 않은 꽉 찬 사각형·불투명 RGB — iOS 가 제 모양으로 깎는다.
 - favicon.ico 는 16·32·48 세 장.
 - 마크를 바꾸려면 favicon.svg 만 고치고 이 스크립트를 다시 돌린다. 머리줄 마크(랜딩·처리방침·검색어 페이지·대시보드·관리자)와
-  미리보기 그림(og-image.html)은 같은 좌표를 손으로 옮겨 둔 것이라 함께 고친다.
+  미리보기 그림(og-image.html)은 같은 좌표를 손으로 옮겨 둔 것이라 함께 고친다. 페이지의 아이콘 주소 `?v=` 도 하나 올린다 —
+  브라우저는 같은 주소의 탭 아이콘을 다시 받지 않는다(test_landing_seo 의 ICON_VERSION).
 """
 
 from __future__ import annotations
