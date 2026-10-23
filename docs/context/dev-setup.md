@@ -122,7 +122,7 @@ async def main():
 asyncio.run(main())
 EOF
 ```
-접속 직후 바로 `snapshot`(행 수 = `/spreads` 와 같음 — 수집이 매 틱 표를 만들어 `spreads:latest` 가 늘 살아 있다, `waiting` 은 수집 기동 직후뿐), 이후 매초 `delta`(바뀐 행만, 평상시 30~50%)·빈 초는 `heartbeat` 면 정상 (017).
+접속 직후 바로 `snapshot`(행 수 = `/spreads` 와 같음 — 수집이 매 틱 표를 만들어 `spreads:latest` 가 늘 살아 있다, `waiting` 은 수집 기동 직후뿐), 이후 매초 `delta`(바뀐 행만, 평상시 30~70%)·빈 초는 `heartbeat` 면 정상 (017). 주소에 `?v=2` 를 붙이면(브라우저가 붙는 주소) `delta` 대신 바뀐 필드만 싣는 `patch` 가 온다.
 ```bash
 docker compose -f docker-compose.dev.yml exec redis redis-cli GET gap:latest | head -c 400
 ```
