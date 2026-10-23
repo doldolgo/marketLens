@@ -30,17 +30,17 @@ Influx 를 읽는 무거운 조회(`/history/premium`·`/history/streaks`·`/his
 - `ROLE` 이 둘 중 하나가 아니면 **설정을 읽는 시점에** 실패한다(앱 객체를 만들기 전, lifespan 이 아니다 — 설정 오류 메시지에 허용값 둘을 적는다). 잘못 뜬 채로 조용히 수집이 두 벌 돌지 않게. 설정은 지금처럼 env 에서 읽되 모르는 키는 무시하는 규칙이라, `ROLE` 은 명시적 설정 항목이어야 검사가 된다.
 
 ### 3.2 compose
-컨테이너 5개. 기존 4개(`server`·`web`·`influxdb`·`redis`)는 이름·설정 그대로 두고 `api` 를 더한다.
+compose 의 컨테이너는 일곱 — `server`·`api`·`web`·`caddy`(023)·`influxdb`·`redis`·`cloudflared`(030, profile `tunnel`)다. 이 스펙이 더한 것은 `api` 다. 로컬 통합 기동(`COMPOSE_PROFILES=collect,data,serve`, dev-setup.md)은 cloudflared 를 뺀 여섯이 한 망에 뜨고, EC2 는 박스마다 자기 profile 만 띄운다(021 — serve 는 `api`·`web`·`caddy` + 토큰 파일이 있을 때 `cloudflared`).
 
 | 서비스 | 역할 |
 |---|---|
 | `server` | `collector` |
 | `api` | `api` |
 
-- `api` 는 `server` 와 **같은 빌드 컨텍스트·같은 이미지**다. `ROLE=api` 만 `environment` 로 준다. `server/.env` 를 같은 `env_file` 로 주입하고 `INFLUX_URL`·`REDIS_URL` 을 server 와 같은 `DATA_HOST` 치환식으로 덮는다(021 — 둘 다 data 박스를 본다, 기본값은 서비스 이름). `REDIS_URL` 은 017 의 구독용(안 덮으면 env_file 의 로컬 값을 컨테이너 안에서 쓴다). 컨테이너명 `marketlens-api`, 로그 상한 `json-file` 50MB × 3, `restart: unless-stopped`, 호스트 포트 없음, `depends_on` 없음(021 — 저장소는 다른 박스).
+- `api` 는 `server` 와 **같은 빌드 컨텍스트·같은 이미지**다. `environment` 로 `ROLE=api` 와 api 쪽 기능의 경로 셋 — `STATSD_ADDR`(027 게이지, 이름은 `extra_hosts` 로 호스트 게이트웨이)·`ACCESS_LOG_DIR`(035, caddy 접속 로그 읽기 전용 바인드 `./logs/caddy`)·`GEO_CACHE_DIR`(069, named volume `geo-cache`) — 을 준다. `server/.env` 를 같은 `env_file` 로 주입하고 `INFLUX_URL`·`REDIS_URL` 을 server 와 같은 `DATA_HOST` 치환식으로 덮는다(021 — 둘 다 data 박스를 본다, 기본값은 서비스 이름). `REDIS_URL` 은 017 의 구독용(안 덮으면 env_file 의 로컬 값을 컨테이너 안에서 쓴다). 컨테이너명 `marketlens-api`, 로그 상한 `json-file` 50MB × 3, `restart: unless-stopped`, 호스트 포트 없음, `depends_on` 없음(021 — 저장소는 다른 박스).
 - `server` 에는 `ROLE` 을 주지 않는다(기본값). 주면 `collector` 여야 한다.
-- `web` 은 `server`·`api` 둘 다에 `depends_on`.
-- 호스트에 여는 포트는 여전히 web 하나.
+- `depends_on` 은 어느 서비스에도 없다(021 — 의존 대상이 다른 박스에 있다). `web` 도 `server`·`api` 를 기다리지 않는다.
+- 호스트에 여는 포트는 caddy 의 `${WEB_PORT:-80}`·443(023)과 박스 간 포트 `server` 8000·`redis` 6379·`influxdb` 8086(021 — 보안그룹이 막는다)이다. `web`·`api` 는 열지 않는다.
 - dev compose(`docker-compose.dev.yml`)는 안 바뀐다 — 로컬은 프로세스 하나로 돈다.
 
 ### 3.3 nginx 경로 분기
@@ -53,7 +53,7 @@ Influx 를 읽는 무거운 조회(`/history/premium`·`/history/streaks`·`/his
 - `proxy_read_timeout` 은 손대지 않는다(기본 60초). 긴 조회는 005 §3.4 의 창 상한(streaks 7일·bulk 1시간·premium 1주)과 동시 1개 게이트가 막는다.
 
 ### 3.4 배포
-deploy 워크플로(007)는 안 바뀐다. `up -d --build` 가 `api` 도 같이 빌드·기동한다. 같은 컨텍스트라 빌드 캐시를 공유해 두 번째 빌드는 즉시 끝난다.
+배포(007·021)는 박스마다 자기 profile 을 `up -d --build` 한다 — `api` 는 serve 박스에서 `web`·`caddy` 와 함께, `server` 는 collect 박스에서 같은 `server/Dockerfile` 로 따로 빌드한다.
 
 ### 3.5 엣지
 - `api` 에서 Influx 토큰이 없으면 `/history/*` 503 — 005 와 같다. `/health` 는 Influx 와 무관하다(025 §3.5 판정).
@@ -67,12 +67,12 @@ deploy 워크플로(007)는 안 바뀐다. `up -d --build` 가 `api` 도 같이 
 - `ROLE` 없음 = `collector` = 오늘과 같은 라우트 집합(기존 테스트 전부 그대로 통과)
 - `ROLE=foo` 는 설정을 읽는 순간 실패(앱 객체 생성 전)
 - 두 역할 모두 기동을 마치면 GC 세대 임계가 (2000, 10, 10) 이고 기동 객체가 얼려져 있다
-- compose 계약(`tests/test_deploy.py` 갱신): 컨테이너 5개·고정 이름, `api` 는 `ROLE=api` + `env_file` + `INFLUX_URL` 덮어쓰기 + `REDIS_URL` 없음 + 로그 상한 + 호스트 포트 없음, `server` 에 `ROLE` 없음, `web` 이 둘 다 `depends_on`, 호스트 노출은 web 하나. README 의 컨테이너 수 문구 검사는 5개 기준으로
+- compose 계약(`tests/test_deploy.py`): 컨테이너 일곱·고정 이름, `api` 는 `server` 와 같은 빌드 + `ROLE=api` + `env_file` + `INFLUX_URL`·`REDIS_URL` 을 server 와 같은 `DATA_HOST` 치환식으로 덮어쓰기 + 로그 상한 + 호스트 포트 없음, `server` 에 `ROLE` 없음, 어느 서비스에도 `depends_on` 없음, 호스트 노출은 caddy `${WEB_PORT:-80}`·443 과 박스 간 포트 셋(server 8000·redis 6379·influxdb 8086). README 의 컨테이너 수 문구 검사는 로컬 여섯·배포 일곱 기준으로
 - nginx 계약: 공개 허용 경로가 §3.3 대로 `api:8000`·수집기(`${COLLECT_HOST}:8000`)로 나뉘어 가고 접두가 떼지며(`/api/history/events` 는 수집기로), 공개 `/api` 의 나머지는 028 허용 목록 계약(전부 정확 일치·목록 밖 404 JSON·정규식 location 없음)
 - `/history/events` 라우터 분리 뒤 005 의 기존 테스트가 전부 그대로 통과(경로·응답 무변경)
-- 007 §4 검증 항목 전부 재통과(4컨테이너 → 5컨테이너로 문구만)
-- 수동: 로컬 `WEB_PORT=8080 docker compose --env-file server/.env up -d --build` 후 `curl localhost:8080/api/history/candles?base=BTC` 가 `api` 컨테이너 로그에, `curl localhost:8080/api/history/events` 가 `server` 로그에 찍힌다. `docker compose stop api` 뒤 `/api/history/candles` 는 502/504(수 초~60초 뒤), `/api/history/events`·`/api/health` 는 그대로 답한다. `docker compose start api` 후 복구
-- 수동(EC2): 배포 후 `docker stats` 에서 `marketlens-api` 가 뜨고 `marketlens-server` CPU 가 배포 전과 같다(수집 부하는 그대로여야 한다)
+- 007 §4 검증 항목 전부 재통과
+- 수동: 로컬 `COMPOSE_PROFILES=collect,data,serve WEB_PORT=8080 docker compose --env-file server/.env up -d --build`(dev-setup.md docker 통합 기동 — 여섯 컨테이너, 아래 `stop`·`start` 에도 같은 `COMPOSE_PROFILES=…` 를 앞에 붙인다) 후 `curl localhost:8080/api/history/candles?base=BTC` 가 `api` 컨테이너 로그에, `curl localhost:8080/api/history/events` 가 `server` 로그에 찍힌다. `docker compose stop api` 뒤 `/api/history/candles` 는 502/504(수 초~60초 뒤), `/api/history/events`·`/api/health` 는 그대로 답한다. `docker compose start api` 후 복구
+- 수동(EC2): 배포 후 serve 박스 `docker stats` 에 `marketlens-api` 가 뜨고, collect 박스의 `marketlens-server` CPU 가 배포 전과 같다(수집 부하는 그대로여야 한다 — 둘은 다른 박스, 021)
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
