@@ -3,13 +3,13 @@
 **3대 구성(021)은 `ec2-split.md` 가 절차다. 이 문서는 박스 공통 준비(도커·env 작성 규칙·IAM·Secrets 형식)만 적는다.**
 
 스펙 007 이 전제하는 서버 상태. 한 번만 하고, 이후 배포는 GitHub Actions 가 한다.
-**이 EC2 의 기존 marketlens-be·fe 컨테이너는 2026-09-04 에 정지했다(`docker compose stop`, 폴더·코드는 남아 있다). 이 레포의 web 이 :80 을 쓴다.**
+**이 EC2 의 기존 marketlens-be·fe 컨테이너는 2026-09-04 에 정지했다(`docker compose stop`, 폴더·코드는 남아 있다). serve 박스에서는 이 레포의 caddy 가 :80·:443 을 쓴다(023).**
 
 1. Docker Engine + compose plugin 은 이미 있다(기존 스택이 쓴다). 배포 계정이 `docker` 그룹인지 확인.
-2. 인바운드는 박스별(`ec2-split.md` 1번 표): serve 80·443·22, collect 8000(serve 그룹에서만)·22, data 6379·8086(collect·serve 그룹에서만)·22. 22 는 내 IP.
+2. 인바운드는 박스별(`ec2-split.md` 1번 표): serve 80·443·22, collect 8000(serve 그룹에서만)·22, data 6379·8086(collect·serve 그룹에서만)·22. 22 는 전체(0.0.0.0/0) — 배포 워크플로(GitHub Actions 러너, 동적 IP)가 세 박스에 SSH 로 붙어야 해서 내 IP 로 좁히지 못한다. 키 인증만 받는다.
 3. `git clone <repo> ~/marketlens` — 기존 `~/marketlens-be`·`~/marketlens-fe` 와 별개 폴더.
 4. `~/marketlens/server/.env` 작성 (git 에 없음):
-   - `INFLUX_URL`·`REDIS_URL` — `server/.env.example` 의 기본값(localhost) 그대로 둔다. compose 가 `environment` 로 `http://influxdb:8086`·`redis://redis:6379/0` 을 덮어쓰므로 컨테이너 안에서는 이 값이 쓰이지 않는다(007 §3).
+   - `INFLUX_URL`·`REDIS_URL` — `server/.env.example` 의 기본값(localhost) 그대로 둔다. compose 가 `environment` 로 `http://${DATA_HOST:-influxdb}:8086`·`redis://${DATA_HOST:-redis}:6379/0` 을 덮어쓰므로 컨테이너 안에서는 이 값이 쓰이지 않는다(007 §3·021).
    - `INFLUX_TOKEN`, `REFRESH_TOKEN` — `openssl rand -hex 32`. `INFLUX_TOKEN` 은 Influx **첫 기동 전**에 정해야 한다 (setup 이 그 값을 admin 토큰으로 쓴다).
    - 거래소 키는 선택 — 같은 계정을 쓰면 기존 `~/marketlens-be/.env` 의 `UPBIT_*`·`BINANCE_*` 값을 복사해도 된다(업비트 허용 목록에 EC2 IP 는 이미 등록돼 있다).
    - `S3_BUCKET=marketlens-spreads-snapshot` — 거래소 원문 아카이브(010, 접두사 `raw/`). AWS 키는 넣지 않는다(아래 IAM 역할).
@@ -20,4 +20,4 @@
 5-3. CloudWatch Agent 역할 (027 — 순서·확인은 `cloudwatch.md`): data·serve 는 역할을 붙이기 **전에** 인스턴스 메타데이터를 토큰 필수·hop 1 로 둔다(`--http-tokens required --http-put-response-hop-limit 1` — 컨테이너가 역할 자격증명에 못 닿게) → 역할 `marketlens-cwagent`(관리형 정책 `CloudWatchAgentServerPolicy`). collect 는 hop 2 그대로 두고 `marketlens-s3-snapshot` 에 같은 정책을 더한다. 역할 부착은 콘솔 관리자(CLI 사용자는 `iam:PassRole` 이 없다).
 6. GitHub 설정(관리자): Secrets `EC2_HOST_DATA`·`EC2_HOST_COLLECT`·`EC2_HOST_SERVE`(박스별 공인 IP)·`EC2_USER`·`EC2_SSH_KEY` 다섯, main branch protection(PR 필수, required checks `server`·`web`, force-push 금지).
 7. main 푸시 → Actions 로그 확인 → EC2 안에서 `curl localhost:80/api/health`.
-8. 배포 직후 백필 1회 (005 §3.5) — Influx 가 호스트에 안 열려 있으므로 **컨테이너 안에서** 돌린다: collect 박스에서 `cd ~/marketlens && docker compose --profile collect exec server <백필 실행 명령 — dev-setup.md 백필 절>`. 업비트 초봉이 3개월 롤링이라 미룰수록 과거를 잃는다.
+8. 배포 직후 백필 1회 (005 §3.5) — 수집기 이미지·설정(`DATA_HOST` 로 덮인 Influx 주소)을 그대로 쓰도록 **컨테이너 안에서** 돌린다: collect 박스에서 `cd ~/marketlens && docker compose --profile collect exec server <백필 실행 명령 — dev-setup.md 백필 절>`. 업비트 초봉이 3개월 롤링이라 미룰수록 과거를 잃는다.

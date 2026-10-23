@@ -27,19 +27,21 @@
 - 공개 nginx(:80)의 정확 일치 위치. `= /<slug>` 는 `try_files /<slug>.html =404` 에 머리 둘을 `always` 로 붙인다 — `Cache-Control: no-cache`(고치면 다음 방문에 바로, 그대로면 304)와 CSP. `/app/<slug>.html` 을 막는 이유는 032 와 같다(dist 의 파일이 `/app/` alias 로 CSP 없이 200 으로 나간다). 정규식 위치는 두지 않는다(028).
 - 모양 — 본문은 내용 폭(최대 1120px) 가운데의 한 칸 578px(17px 기준 34em — 글자가 큰 h1·h2 도 같은 왼쪽 선에 서도록 px). 절 위 구분선도 그 폭으로 가운데에 긋고, 화면 그림·코인 바로 가기는 880px·지난 7일 사건 표는 48em 까지 넓혀 가운데에 둔다(2026-10-09 사람 요구 — 왼쪽으로 치우쳐 보임).
 - 버튼(기록 탭으로 가는 둘 — 상단 바·첫 절)은 랜딩과 같다 — 보라를 채우고 글자는 배경색·700(대비 5.4:1, 흰 글자는 3.2:1 이라 쓰지 않는다), 올렸을 때·눌렀을 때 바탕은 보라 단계 400·500 — 올렸을 때 색은 마우스 기기만(072 §3.9, 페이지의 다른 hover 도 같다). 상단 바 40px·15px, 첫 절 56px·18px(720px 미만은 줄 폭을 다 쓰고 옆 글 링크는 다음 줄).
-- CSP — kimp-chart 는 privacy 와 같은 값(`default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`). kimp-history 는 `/api/landing` 을 부르므로 `connect-src 'self'` 를 더한 값. 그 밖의 요청(외부 글꼴·그림·WebSocket)은 둘 다 막힌다.
+- CSP — 두 페이지 모두 privacy(032)와 같은 값 `default-src 'none'; connect-src 'self'; img-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self' https://admin.kimptrack.com`. `script-src 'self'` 는 `<head>` 의 같은 출처 파일 셋(§3.2) 몫이고, `connect-src 'self'` 로 kimp-history 의 `/api/landing` 과 그 파일들의 비콘(`/api/attention`·`/api/replay`)이 나간다. 틀(`frame-ancestors`)은 자기 출처와 관리자 화면뿐이다 — 관리자 화면의 덮어 보기(053·065, `kt-overlay=1`)와 재생(074, `kt-replay=1`)이 이 페이지를 틀로 띄운다. 그 밖의 요청(외부 글꼴·그림·스크립트·WebSocket)은 막힌다.
 
 ### 3.2 공통 — 검색 구성
 - `lang="ko"`, `<title>`·`og:title` 은 **검색어가 앞, 브랜드가 뒤**(022 §3.6 과 같은 결정), 60자 이내. `description`·`og:description` 은 검색어를 담은 한 문장 110자 이내. '김프가'(경쟁 사이트 이름)와 수익을 약속하는 말(이득·이익·수익·차익·무위험)은 제목·설명에 쓰지 않는다 — 본문에서는 "수익이 난다는 뜻이 아닙니다" 처럼 부정하는 자리에만.
 - `<meta name="robots" content="index, follow, max-image-preview:large">`, canonical·`og:url` 은 `https://kimptrack.com/<slug>`, 아이콘은 처리방침과 같은 상대 경로 두 줄(`/favicon.ico?v=2`·`/apple-touch-icon.png?v=2` — CSP `img-src 'self'` 가 어느 호스트에서나 통하게, `?v=` 는 022 §3.6 의 마크 판), `og:image` 는 랜딩의 `og-v4.png`(페이지 전용 그림은 만들지 않는다).
 - JSON-LD 한 블록 — `WebPage`(url, name = title, description = description, inLanguage ko-KR, `isPartOf` = 랜딩의 `#website`, `primaryImageOfPage` = `landing/history.png` 2040×1230, `dateModified`). 평점·리뷰 없음.
 - h1 하나(검색어로 시작), h2 셋 이상. 글꼴은 시스템 글꼴(랜딩의 서브셋 글꼴은 이 페이지 글자를 담지 않는다), 색 값은 랜딩과 같은 토큰. 외부 자원은 하나도 부르지 않는다.
+- `<head>` 에 같은 출처 스크립트 파일 셋을 이 차례로 `defer` 로 싣는다 — `/clarity.js`(033 — 이 페이지는 Clarity·GA 를 켜는 화면 밖이라 파일은 아무것도 부르지 않고 끝나고, 받아 간 줄만 서버 기록의 '확인' 신호가 된다 — 038)·`/attention.js`(052·061 화면 이용 통계)·`/replay.js`(073 화면 이동 기록). 그 밖의 스크립트는 페이지 안 인라인뿐이다.
+- 머리 막대·본문 h2 절마다·바닥에 `data-area`(052), 자동 열쇠(링크 경로·글자)가 없거나 겹치는 링크·질문과 사건 표의 코인 행(`row:<심볼>`)에 `data-el`(061)을 단다 — 화면 이용 통계의 이름일 뿐 모양·동작과 무관하다. 절을 바꾸면 영역 id 도 함께 `server/tests/test_attention.py` 목록과 053 이름표(`AREA_NAMES`)를, 링크·질문을 더하거나 바꾸면 `data-el` 도 함께 065 이름표(`EL_NAMES` — 둘 다 `web/admin/screensnames.js`)와 `server/tests/test_attention_elements.py` 목록을 고친다.
 - 바닥 — 바로 가기(첫 화면·실시간 김프 표·다른 검색어 페이지·`/#kimp`·개인정보 처리방침), 참고값 안내 한 줄(랜딩과 같은 문장), "설명을 마지막으로 고친 날" `<time>`. 두 페이지의 `<time>`·`WebPage.dateModified`·sitemap `lastmod` 가 같은 날짜다 — 설명 글을 실제로 고칠 때만 올린다.
 - 서로 링크한다(차트 ↔ 히스토리), 둘 다 `/app/?tab=history` 로 보낸다. 랜딩은 바닥 나브 두 칸과 질문과 답 "김프 차트와 과거 기록도 볼 수 있나요?" 의 답에서 두 페이지로 링크한다.
 
 ### 3.3 kimp-chart — "김프 차트"
 - 제목 "김프 차트 - 실시간·과거 김치프리미엄 봉 차트 | KimpTrack", h1 "김프 차트 — 실시간·과거 김치프리미엄 봉 차트".
-- 본문은 전부 정적(스크립트 없음): 볼 수 있는 것(봉 종류 8개 1분·3분·5분·15분·30분·1시간·4시간·1일 — KST 벽시계 정렬, 해외 거래소별 카드·국내 1개 캔들·2개 선, 김프·역프 따로, 입출금 띠, 시간축·십자선 연동, 사건 음영 — 014·015·024 의 동작 그대로) · 랜딩의 기록 탭 스크린샷(`landing/history*.{png,webp}` 재사용) · 읽는 법(봉 = 맨 위 호가 원값의 OHLC, 환율 = USDT 호가, 띠가 막힘이면 옮길 수 없던 값, 보관 1분 7일·5분 30일·1시간 90일·4시간 1년·일봉 무제한 — 014 §3.4) · 코인별 바로 가기 여섯(`/app/?tab=history&sym=BTC` 등 — 심볼은 다섯 거래소에 다 있는 것) · 질문과 답 넷(실시간인가·가격 차트와 차이·거래소 앱·트레이딩뷰와 차이·수수료).
+- 본문은 전부 정적(페이지 스크립트 없음 — §3.2 의 같은 출처 파일 셋만): 볼 수 있는 것(봉 종류 8개 1분·3분·5분·15분·30분·1시간·4시간·1일 — KST 벽시계 정렬, 해외 거래소별 카드·국내 1개 캔들·2개 선, 김프·역프 따로, 입출금 띠, 시간축·십자선 연동, 사건 음영 — 014·015·024 의 동작 그대로) · 랜딩의 기록 탭 스크린샷(`landing/history*.{png,webp}` 재사용) · 읽는 법(봉 = 맨 위 호가 원값의 OHLC, 환율 = USDT 호가, 띠가 막힘이면 옮길 수 없던 값, 보관 1분 7일·5분 30일·1시간 90일·4시간 1년·일봉 무제한 — 014 §3.4) · 코인별 바로 가기 여섯(`/app/?tab=history&sym=BTC` 등 — 심볼은 다섯 거래소에 다 있는 것) · 질문과 답 넷(실시간인가·가격 차트와 차이·거래소 앱·트레이딩뷰와 차이·수수료).
 - 실시간 값은 넣지 않는다 — 검색 결과에 '지금 값' 으로 남지 않게.
 
 ### 3.4 kimp-history — "김프 히스토리"
@@ -48,8 +50,8 @@
 - 정적 본문: 남는 것(사건 기준 1.0% 진입·0.5% 이탈·1분 초과 — 013, 항목, 기간 선택 1h·4h·8h·12h·24h·3d 와 필터, 과거 김프 기록은 봉 차트로) · 보는 법 네 단계 · 질문과 답 셋(얼마나 과거까지·왜 실시간 표보다 큰가·돈을 번다는 뜻인가 — 아니요).
 
 ## 4. 검증
-- nginx: `= /kimp-chart`·`= /kimp-history` 가 `try_files /<slug>.html =404` + 머리 둘(no-cache·각자의 CSP)뿐이다 / `/<slug>.html`·`/app/<slug>.html` 은 `301 /<slug>` / `/<slug>/` 는 루트 location(404) / 정규식 location 없음·공개 `/api` 허용 목록은 그대로(028).
-- 페이지: title 이 검색어로 시작·60자 이내, description 에 검색어·110자 이내, '김프가'·수익 약속 없음, robots index, og·canonical 이 `/<slug>`, h1 하나(검색어로 시작)·h2 셋 이상, JSON-LD WebPage 가 보이는 값과 같고 그림 파일이 있음, 외부 자원 0, kimp-history 의 스크립트만 `/api/landing` 을 부르고(WebSocket·clarity 없음) 실시간 자리는 `data-nosnippet`, 서로·대시보드 기록 탭·첫 화면·처리방침 링크, `<time>`·`dateModified`·sitemap `lastmod` 같음.
+- nginx: `= /kimp-chart`·`= /kimp-history` 가 `try_files /<slug>.html =404` + 머리 둘(no-cache·§3.1 의 CSP)뿐이다 / `/<slug>.html`·`/app/<slug>.html` 은 `301 /<slug>` / `/<slug>/` 는 루트 location(404) / 정규식 location 없음·공개 `/api` 허용 목록은 그대로(028).
+- 페이지: title 이 검색어로 시작·60자 이내, description 에 검색어·110자 이내, '김프가'·수익 약속 없음, robots index, og·canonical 이 `/<slug>`, h1 하나(검색어로 시작)·h2 셋 이상, JSON-LD WebPage 가 보이는 값과 같고 그림 파일이 있음, 외부 자원 0, `<script src>` 는 `/clarity.js`·`/attention.js`·`/replay.js` 셋뿐, 인라인 스크립트는 kimp-history 의 것만 `/api/landing` 을 부르고(WebSocket·Clarity 주소 없음) 실시간 자리는 `data-nosnippet`, 서로·대시보드 기록 탭·첫 화면·처리방침 링크, `<time>`·`dateModified`·sitemap `lastmod` 같음.
 - 랜딩: 바닥 나브와 질문과 답에 두 링크. `test_landing_seo.py` 의 sitemap 단언은 loc 네 줄(`/`·`/kimp-chart`·`/kimp-history`·`/privacy`).
 - 수동: 로컬 dist 를 띄워 두 페이지를 1200px·390px 로 본다(표가 차고 가로 스크롤 없음) / 머지·배포 뒤 `curl -sI https://kimptrack.com/kimp-chart`(200·no-cache·CSP)·`/kimp-history`·`/kimp-chart.html`(301) 과 사이트맵.
 

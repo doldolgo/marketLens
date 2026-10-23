@@ -24,10 +24,10 @@ EC2 1대에 몰린 컨테이너 5개를 **역할별 EC2 3대**(수집 · 데이�
 | data | t4g.small |
 | serve | t4g.micro |
 
-- **collect** — 컨테이너 `server`(016 의 `collector` 역할) 하나. 거래소 WebSocket·마켓 우주·틱 루프·Redis 인계·flusher·원문 S3 아카이브·입출금 조회를 전부 맡는다. IAM 인스턴스 프로파일 `marketlens-s3-snapshot`(010 의 원문 업로드 주체)은 **이 박스에만** 붙이고 IMDS hop limit 2(ec2-setup.md 5-2). 컨테이너 포트 8000 을 호스트에 공개한다 — serve 의 nginx 가 사설 IP 로 붙기 위해서다. 탄력 IP 를 하나 붙인다 — 업비트 API 키가 IP 허용 목록이라 공인 IP 가 고정돼야 한다(t4g.small 실측에서 새 IP 는 401).
+- **collect** — 컨테이너 `server`(016 의 `collector` 역할) 하나. 거래소 WebSocket·마켓 우주·틱 루프·Redis 인계·flusher·원문 S3 아카이브·입출금 조회를 전부 맡는다. IAM 인스턴스 프로파일 `marketlens-s3-snapshot`(010 의 원문 업로드 주체)은 **이 박스에만** 붙이고 IMDS hop limit 2(ec2-setup.md 5-2). 이 역할에는 CloudWatch 에이전트 정책(027)·관리자 읽기 인라인 정책 `marketlens-admin-read`(034)·화면 이동 기록 `replay/*` 쓰기 인라인 정책 `marketlens-replay-archive`(078)도 붙는다. data·serve 는 에이전트 정책만 든 역할 `marketlens-cwagent` 를 붙이고 IMDS 를 토큰 필수·hop 1 로 둔다 — 컨테이너가 역할 자격증명에 닿지 못하게(027). 컨테이너 포트 8000 을 호스트에 공개한다 — serve 의 nginx 가 사설 IP 로 붙기 위해서다. 탄력 IP 를 하나 붙인다 — 업비트 API 키가 IP 허용 목록이라 공인 IP 가 고정돼야 한다(t4g.small 실측에서 새 IP 는 401).
 - **data** — `redis` + `influxdb`. 6379·8086 을 호스트에 공개한다. 스왑 1GB. 근거: 2026-09-07 기간 지정 없는 `/history/streaks/bulk` 가 Influx 를 2.4GB 까지 키워 OOM 4회. 상한을 넘는 쿼리는 Influx 가 거부하고(503 으로 전파) 프로세스는 살아야 한다.
   - **메모리 상한(2026-09-28 사람 결정).** Influx env: 쿼리 1개 256MB(`INFLUXD_QUERY_MEMORY_BYTES`)·동시 2개(`INFLUXD_QUERY_CONCURRENCY`)·전체 512MB(`INFLUXD_QUERY_MAX_MEMORY_BYTES` — Influx 는 전체 = 동시 × 1개 를 요구한다)·쓰기 캐시 256MB(`INFLUXD_STORAGE_CACHE_MAX_MEMORY_SIZE`)·Go 힙 목표 `GOMEMLIMIT` 700MiB, 컨테이너 `mem_limit` 1300m 에 `memswap_limit` 도 같은 값(Influx 는 스왑을 쓰지 않는다 — 안 걸면 docker 가 같은 양의 스왑을 더 허락해 상한에서 재시작되지 않고 박스 스왑을 먼저 먹는다). Redis 는 `--maxmemory 600mb --maxmemory-policy noeviction` — 넘치면 키를 지우지 않고 쓰기만 거부한다(009 인계기는 그 틱을 버리고 경고). 쿼리 상한이 세는 메모리는 실제 힙의 1/3~1/4 이고 256MB 에서 거부되는 쿼리도 힙을 +0.8GB 올려 내려놓지 않아, 쿼리 몫만으로는 박스를 지키지 못한다(무거운 조회 3개 겹침에 Influx 1.85~2.72GB). 이 설정에서 같은 조합은 0.83~1.16GB 이고 무거운 조회 벽시계는 +9~25% 다. 박스 예산은 **Influx 1,300MiB + Redis 600MiB = 1.9GiB ≤ 2GiB** — 둘이 동시에 상한에 닿을 때 모자라는 OS·Redis 몫은 스왑 1GB 가 받고, Influx 는 상한을 넘으면 스왑 없이 컨테이너만 재시작된다(1m 봉은 014 미전송 20분, 초 단위는 Redis 3시간이 버틴다). 동시 2 는 무거운 조회가 있을 때 대시보드 조회를 큐에서 기다리게 한다(2 vCPU 라 동시 3 도 처리량을 늘리지 못한다).
-- **serve** — `api`(016 의 `api` 역할) + `web`(nginx). 기존 탄력 IP `3.34.104.16` 을 이 박스로 옮긴다. 호스트에 여는 포트는 `WEB_PORT`(80) 하나.
+- **serve** — `api`(016 의 `api` 역할) + `web`(nginx) + `caddy`(023) + `cloudflared`(030 — profile `tunnel`, 토큰 파일이 있을 때만 뜬다. Cloudflare 로 밖으로만 나가는 연결이라 인바운드 포트가 없다). 기존 탄력 IP `3.34.104.16` 을 이 박스로 옮긴다. 호스트에 여는 포트는 caddy 의 `WEB_PORT`(80)·443(023). 스왑 1GB(027). `api` 는 caddy 접속 로그 디렉터리(호스트 `logs/caddy`)를 읽기 전용으로 읽고(035), 관리자 접속 피드가 판을 필요로 할 때 download.db-ip.com 에서 공개 자료 DB-IP Lite 월판 세 파일을 받는다(달마다 한 번) — Country·ASN 은 메모리에만(039), City 는 named volume `geo-cache` 에 이진 파일 하나로(069).
 
 보안그룹은 3개, 규칙은 최소다. 셀 한 토큰, 의미는 아래 문장으로.
 
@@ -35,16 +35,16 @@ EC2 1대에 몰린 컨테이너 5개를 **역할별 EC2 3대**(수집 · 데이�
 |---|---|
 | collect | 8000·22 |
 | data | 6379·8086·22 |
-| serve | 80·22 |
+| serve | 80·443·22 |
 
-8000 은 serve 보안그룹에서만, 6379·8086 은 collect·serve 보안그룹에서만, 22 와 80 은 전체 — 22 는 배포 워크플로(GitHub Actions 러너, 동적 IP)가 붙어야 해서 좁힐 수 없고 키 인증만 받는다. 아웃바운드는 전부 열어 둔다(거래소·S3·apt·Docker Hub).
+8000 은 serve 보안그룹에서만, 6379·8086 은 collect·serve 보안그룹에서만, 22·80·443 은 전체 — 22 는 배포 워크플로(GitHub Actions 러너, 동적 IP)가 붙어야 해서 좁힐 수 없고 키 인증만 받는다. 아웃바운드는 전부 열어 둔다(거래소·S3·apt·Docker Hub).
 
 ### 3.2 compose
-파일은 루트 `docker-compose.yml` 하나 그대로이고 서비스 5개·컨테이너 이름·이미지·로그 상한(`json-file` 50MB×3)·`restart: unless-stopped`·볼륨 이름(`influxdb-data`·`redis-data`, 프로젝트명 `marketlens`)도 그대로다. 바뀌는 것:
-- 서비스마다 profile 하나: `server` → `collect`, `redis`·`influxdb` → `data`, `api`·`web` → `serve`. **`depends_on` 은 전부 없앤다** — 의존 대상이 다른 박스에 있다. 각 박스는 `docker compose --profile <역할> --env-file .env --env-file server/.env up -d --build` 로 자기 profile 만 띄운다. profile 을 안 주면 아무것도 안 뜬다(실수로 5개가 한 박스에 뜨지 않게).
-- 박스 간 주소는 **루트 `.env`(비밀 아님)** 의 두 키로 준다. `DATA_HOST` = data 박스 사설 IP, `COLLECT_HOST` = collect 박스 사설 IP. compose 는 `server`·`api` 의 `INFLUX_URL` 을 `http://${DATA_HOST:-influxdb}:8086`, `REDIS_URL` 을 `redis://${DATA_HOST:-redis}:6379/0` 으로 덮고, `web` 에 `COLLECT_HOST`(기본 `server`)를 준다. 기본값이 서비스 이름이라 **키를 안 주면 007 의 한 박스 동작 그대로** 다 — 로컬 통합 기동은 `COMPOSE_PROFILES=collect,data,serve` 로 예전처럼 5개가 한 망에 뜬다. `server/.env` 는 007 대로 비밀만 든다(`INFLUX_URL`·`REDIS_URL` 의 localhost 값은 컨테이너 안에서 계속 덮인다).
-- 호스트 포트: `server` 8000, `redis` 6379, `influxdb` 8086 을 공개한다(위 보안그룹이 막는다). `web` 은 `${WEB_PORT:-80}:80` 그대로(023 부터는 caddy 가 이 포트와 443 을 잡고 web 은 비공개), `api` 는 비공개.
-- `web` 은 nginx 설정을 템플릿으로 두고 기동 시 **`COLLECT_HOST` 하나만** 치환한다 — `location /api/` 의 업스트림이 `http://<COLLECT_HOST>:8000/` 이 된다. nginx 자체 변수(`$http_host`·`$http_upgrade` 등)는 치환 대상이 아니어야 한다. 방식은 nginx 공식 이미지의 templates 기능: `web/nginx.conf` 를 `/etc/nginx/templates/default.conf.template` 로 넣고, compose 가 `NGINX_ENVSUBST_FILTER=^COLLECT_HOST$` 를 줘 치환 변수를 그 하나로 제한한다. 016·018 의 분기(`/api/history/{premium,streaks,candles}`·`= /api/spreads`·`/api/ws/` → `api:8000`)는 같은 박스라 그대로다.
+파일은 루트 `docker-compose.yml` 하나 그대로이고 서비스·컨테이너 이름·이미지·로그 상한(`json-file` 50MB×3)·`restart: unless-stopped`·볼륨 이름(`influxdb-data`·`redis-data`, 프로젝트명 `marketlens`)도 그대로다. 바뀌는 것:
+- 서비스마다 profile 하나: `server` → `collect`, `redis`·`influxdb` → `data`, `api`·`web`·`caddy`(023) → `serve`, `cloudflared` → `tunnel`(030 — 박스 profile 이 아니라 serve 부속이다. 배포가 토큰 파일이 있을 때만 따로 띄운다). **`depends_on` 은 전부 없앤다** — 의존 대상이 다른 박스에 있다. 각 박스는 `docker compose --profile <역할> --env-file .env --env-file server/.env up -d --build` 로 자기 profile 만 띄운다. profile 을 안 주면 아무것도 안 뜬다(실수로 여섯이 한 박스에 뜨지 않게).
+- 박스 간 주소는 **루트 `.env`(비밀 아님)** 의 두 키로 준다. `DATA_HOST` = data 박스 사설 IP, `COLLECT_HOST` = collect 박스 사설 IP. compose 는 `server`·`api` 의 `INFLUX_URL` 을 `http://${DATA_HOST:-influxdb}:8086`, `REDIS_URL` 을 `redis://${DATA_HOST:-redis}:6379/0` 으로 덮고, `web` 에 `COLLECT_HOST`(기본 `server`)를 준다. 기본값이 서비스 이름이라 **키를 안 주면 007 의 한 박스 동작 그대로** 다 — 로컬 통합 기동은 `COMPOSE_PROFILES=collect,data,serve` 로 여섯이 한 망에 뜬다(cloudflared 는 profile `tunnel` 이라 뜨지 않는다). `server/.env` 는 007 대로 비밀만 든다(`INFLUX_URL`·`REDIS_URL` 의 localhost 값은 컨테이너 안에서 계속 덮인다).
+- 호스트 포트: `server` 8000, `redis` 6379, `influxdb` 8086 을 공개한다(위 보안그룹이 막는다). 공개 포트 `${WEB_PORT:-80}`·443 은 caddy 가 잡는다(023). `web`·`api` 는 비공개.
+- `web` 은 nginx 설정을 템플릿으로 두고 기동 시 **`COLLECT_HOST` 하나만** 치환한다 — 공개 `/api` 허용 목록(028) 중 수집기로 가는 정확 일치 location 의 업스트림이 `http://<COLLECT_HOST>:8000` 이 된다. nginx 자체 변수(`$http_host`·`$http_upgrade` 등)는 치환 대상이 아니어야 한다. 방식은 nginx 공식 이미지의 templates 기능: `web/nginx.conf` 를 `/etc/nginx/templates/default.conf.template` 로 넣고, compose 가 `NGINX_ENVSUBST_FILTER=^COLLECT_HOST$` 를 줘 치환 변수를 그 하나로 제한한다. api 로 가는 허용 경로(`/api/history/candles`·`/api/landing`·`/api/attention`·`/api/replay`·`/api/ws/spreads`·`/api/ws/gap`·`/api/ws/pp` → `api:8000`)는 같은 박스라 서비스 이름 그대로다.
 - Influx 첫 기동 설정(`DOCKER_INFLUXDB_INIT_*`)은 그대로 둔다 — 이전한 볼륨이 있으면 setup 이 건너뛰고, 빈 볼륨이면 새로 만든다.
 
 ### 3.3 배포
@@ -56,13 +56,13 @@ main push → 워크플로가 **data → collect → serve** 순서로 SSH 3번,
 
 ### 3.4 유지되는 계약 (복사)
 - Redis 키·채널(017·018): 채널 `spreads`, `spreads:latest`(TTL 10초), `spreads:want`(TTL 15초), 스트림 `ticks`(009). 주소만 바뀌고 이름·의미는 그대로.
-- nginx 경로(016·018): `/api/history/{premium,streaks,candles}`·`= /api/spreads`·`/api/ws/` → api, `= /api` 404, 그 외 `/api/*` → 수집(접두 제거), `index.html` no-store, `/assets/` immutable, SPA fallback.
-- `/health`(001)·`/health/collect`(011)·`/history/events`(013)·`/refresh`(003)·analysis(004)는 수집 프로세스가 답한다 — 외부에서는 `/api/...` 로 serve 를 거친다.
+- nginx 경로(028): 공개 `/api` 는 허용 목록만 정확 일치·접두 제거로 넘긴다 — 수집기로 `/api/health`·`/api/health/collect`·`/api/history/events`·`/api/flow/netflow`·`/api/flow/recent`(050), api 로 `/api/history/candles`·`/api/landing`·`/api/attention`(052)·`/api/replay`(073)·`/api/ws/spreads`·`/api/ws/gap`(048)·`/api/ws/pp`(049). 그 밖의 `/api`·`/api/*` 는 404 JSON. `index.html` no-store, `/assets/` immutable, SPA fallback 은 `/app/` 아래(022).
+- `/health`(001)·`/health/collect`(011)·`/history/events`(013)·`/flow/*`(050)·`/refresh`(003)·analysis(004)는 수집 프로세스가 답한다. 외부에는 그중 `/api/health`·`/api/health/collect`·`/api/history/events`·`/api/flow/netflow`·`/api/flow/recent` 만 serve 를 거쳐 열린다(028) — `/refresh`·analysis 는 박스 안이나 관리자 server(029)에서 부른다.
 - `ROLE` 은 `collector` | `api` 둘뿐(016). `server` 컨테이너에 `ROLE` 을 주지 않는다.
 
 ### 3.5 엣지
 - data 박스 불통: collect 는 뜨고 수집을 계속한다 — Redis 없으면 인계된 틱이 버려지고 표 발행이 멈추며(009·017), Influx 없으면 flusher 가 재시도한다. serve 는 `spreads:latest` 를 못 읽어 `GET /spreads` 404, `/ws/spreads` 는 `waiting`(018). 복구되면 사람 개입 없이 이어진다.
-- collect 불통: serve 의 `/api/*`(수집 경로)만 502, 스프레드 표는 `spreads:latest` TTL 10초 뒤 사라져 404/`waiting`. 이력 조회는 정상(016 의 존재 이유).
+- collect 불통: 공개 `/api` 중 수집기로 가는 다섯만 502(허용 목록 밖의 `/api/*` 는 언제나 404 — 028), 스프레드 표는 `spreads:latest` TTL 10초 뒤 사라져 404/`waiting`. 이력 조회는 정상(016 의 존재 이유).
 - serve 불통: 화면만 죽고 수집·저장은 계속.
 - collect 의 사설 IP 가 바뀌면(인스턴스 교체) 루트 `.env` 의 `COLLECT_HOST` 를 고치고 web 을 재기동해야 한다 — nginx 는 기동 시 주소를 푼다. data 도 같다(`DATA_HOST`, server·api 재기동).
 - 구 박스(t4g.medium, `i-0ccec33dba9e27017`)는 전환 확인 뒤 **정지 상태로 3일 보관**하고 종료한다. 정지 중엔 EBS 요금만 든다.
@@ -79,22 +79,22 @@ main push → 워크플로가 **data → collect → serve** 순서로 SSH 3번,
 
 ## 4. 검증
 실행 세션이 쓰는 테스트(`tests/test_deploy.py` 갱신 — Docker 없는 CI 의 유일한 회귀 장치):
-- 서비스 5개·컨테이너 이름·로그 상한·`restart` 는 007 그대로이고, profile 이 `server`=collect / `redis`·`influxdb`=data / `api`·`web`=serve 로 하나씩 있다
+- 컨테이너 이름·로그 상한·`restart` 는 007 그대로이고, profile 이 `server`=collect / `redis`·`influxdb`=data / `api`·`web`·`caddy`=serve / `cloudflared`=tunnel(030) 로 하나씩 있다
 - 어떤 서비스에도 `depends_on` 이 없다
-- 호스트 공개 포트: `server` 8000, `redis` 6379, `influxdb` 8086, `web` `${WEB_PORT:-80}:80`(023 부터 caddy `${WEB_PORT:-80}:80`·`443:443`, web 없음), `api` 없음
+- 호스트 공개 포트: `server` 8000, `redis` 6379, `influxdb` 8086, caddy `${WEB_PORT:-80}:80`·`443:443`(023), `web`·`api` 없음
 - `server`·`api` 의 `INFLUX_URL`·`REDIS_URL` 이 `DATA_HOST` 치환식이고 기본값이 서비스 이름이다; `web` 이 `COLLECT_HOST` 를 받는다
-- nginx 템플릿에서 `location /api/` 의 업스트림만 `COLLECT_HOST` 를 쓰고, api 로 가는 세 분기와 `$http_*` 변수는 그대로다
+- nginx 템플릿에서 수집기로 가는 location 의 업스트림만 `COLLECT_HOST` 를 쓰고, api 로 가는 분기와 `$http_*` 변수는 그대로다
 - deploy 워크플로가 3타깃을 data → collect → serve 순서로 돌고, 각 스크립트가 자기 profile 과 자기 가드 키만 검사한다; `EC2_HOST` 단독 시크릿 참조가 없다
 - `COMPOSE_PROFILES=collect,data,serve` + 주소 키 없음 = 007 §4 의 한 박스 기동이 그대로 통과한다(로컬 수동)
 - 메모리 상한: Influx 쿼리 256MB × 동시 2 = 전체 512MB·쓰기 캐시 256MB·`GOMEMLIMIT` 700MiB < `mem_limit` 1300m = `memswap_limit`, Redis `--maxmemory 600mb`·`noeviction`, Influx 상한 + Redis 상한 ≤ 2GiB, 009 틱 스트림 상한(10,800 × 41KB)이 Redis 상한의 80% 안
 
 수동(EC2, 런북 순서대로 한 뒤):
-1. 각 박스 `docker ps` 에 자기 profile 의 컨테이너만 있다(collect 1, data 2, serve 2).
-2. serve 에서 `curl localhost/api/spreads` 가 200 이고 행 1,400 이상, `curl localhost/api/health/collect` 가 5거래소 `ok`, 성공률 1시간 99% 이상.
+1. 각 박스 `docker ps` 에 자기 profile 의 컨테이너만 있다(collect 1, data 2, serve 3 — `api`·`web`·`caddy`, 토큰 파일이 있으면 `cloudflared` 까지 4).
+2. serve 에서 `docker exec marketlens-web wget -qO- http://api:8000/spreads` 가 표를 주고 행 1,400 이상, `curl localhost/api/health/collect` 의 `exchanges[]` 열 개(현물 6곳 + perp 원천 4개, 046·047)가 모두 `ok`, 성공률 1시간 99% 이상.
 3. collect `docker stats` 의 server CPU 가 코어 1개 기준 80~100% 이고 `top` 의 steal 이 0%.
 4. data `free -m` 에 스왑 1GB, Influx 컨테이너 env 에 쿼리 상한 세 값·캐시·`GOMEMLIMIT` 가 있고 `docker inspect` 의 메모리 상한 1300MiB 와 스왑 포함 상한(`MemorySwap`)도 1300MiB, `redis-cli config get maxmemory*` 가 600mb·noeviction, `curl localhost:8086/health` 200.
 5. main 에 빈 커밋 없이 실제 PR 하나로 워크플로 3타깃 success 1회.
-6. 브라우저에서 `http://3.34.104.16/` 스프레드 표가 매초 갱신되고 기록 탭 차트가 뜬다(탄력 IP 가 serve 에 붙음).
+6. 브라우저에서 `http://3.34.104.16/app/` 스프레드 표가 매초 갱신되고 기록 탭 차트가 뜬다(탄력 IP 가 serve 에 붙음).
 7. 구 박스를 정지한 뒤에도 2·6 이 유지된다. 정지 3일 뒤 종료.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)

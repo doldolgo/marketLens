@@ -87,6 +87,7 @@
 - 최근 전송 표(아래): 열 `시각 | 방향 | 코인 | 수량 | 원화 | 주소 | 상대 | tx`. 방향 칩 입금=accent·출금=회색, 원화 ≥ 1억 accent 굵게, 주소·상대는 `앞6…뒤4`(hover 로 전체), tx 는 `https://etherscan.io/tx/{hash}` 새 창, 확정 전 행은 `확정 전` 칩(neutral). 100행. 빈 결과 `해당 조건의 전송 없음`.
 - 조회: 탭이 보이는 동안 두 경로를 **5초마다**(상수 `FLOW_POLL_MS`, `shared/config.ts`) 다시 부른다 — 013 과 같이 다른 탭·가려진 브라우저 탭에서는 멈춘다. 실패하면 직전 표를 유지하고 바 1 우측에 `불러오지 못했습니다 (HTTP n)`.
 - 푸터: 좌 `업비트 · 이더리움 네트워크 ERC-20 {feed.contracts}종 · 블록 2개 확정 전은 '확정 전'`, 우 `입금주소 {depositAddrs} · 핫월렛 {hotWallets} · 자동 확장`. mock 경고 문구는 없앤다.
+- 바 1·두 표 덩어리에 `data-area`(052), 조작과 순유입 표의 코인 행(`row:<심볼>` — 클릭만 센다)에 `data-el`(061)을 단다 — 화면 이용 통계의 이름일 뿐 모양·동작과 무관하다. 덩어리를 바꾸면 영역 id 도 함께 `server/tests/test_attention.py` 목록과 053 이름표(`AREA_NAMES`)를, 조작을 더하거나 바꾸면 `data-el` 도 함께 065 이름표(`EL_NAMES` — 둘 다 `web/admin/screensnames.js`)와 `server/tests/test_attention_elements.py` 목록을 고친다.
 
 ## 4. 검증
 - to 가 입금주소인 전송은 `in`, 상대 = from, 주소 = to 로 저장된다.

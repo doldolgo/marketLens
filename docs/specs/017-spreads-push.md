@@ -58,8 +58,8 @@
 - `/health/collect` 5초 폴링(011)은 그대로.
 
 ### 3.5 프록시
-- nginx: `location /api/ws/` (앞부분 일치) 를 `proxy_pass http://api:8000/ws/;` 로 넘긴다 — 접두 위치라 016 의 정규식 rewrite 는 필요 없다. `proxy_http_version 1.1` + `Upgrade`·`Connection "upgrade"` 헤더, 기존 프록시 헤더 4개 동일. `proxy_read_timeout` 은 **손대지 않는다**(기본 60초 — 1초 하트비트가 있어 안 끊긴다, 016 과 같은 입장).
-- compose: `api` 에 `REDIS_URL: redis://redis:6379/0` 과 `depends_on: redis` — 없으면 `server/.env` 의 로컬 값(localhost)을 컨테이너 안에서 쓰게 된다.
+- nginx: 공개 허용 목록(028)의 **정확 일치** `location = /api/ws/spreads` 하나 — 다른 허용 경로와 같은 모양으로 `rewrite ^/api/(.*)$ /$1 break` 가 `/api` 를 떼고 URI 없는 `proxy_pass http://api:8000` 이 그 경로를 넘긴다. 접두 위치(`/api/ws/`)는 두지 않는다 — api 에 새 `/ws/*` 가 생기면 저절로 공개되기 때문이다(다른 표의 WebSocket 은 그 스펙이 정확 일치 한 줄을 더한다 — 048·049). `proxy_http_version 1.1` + `Upgrade`·`Connection "upgrade"` 헤더, 기존 프록시 헤더 4개 동일. `proxy_read_timeout` 은 **손대지 않는다**(기본 60초 — 1초 하트비트가 있어 안 끊긴다, 016 과 같은 입장).
+- compose: `api` 에 `REDIS_URL` 을 `server` 와 같은 `redis://${DATA_HOST:-redis}:6379/0` 으로 준다(021 — 기본값은 서비스 이름) — 없으면 `server/.env` 의 로컬 값(localhost)을 컨테이너 안에서 쓰게 된다. `depends_on` 은 두지 않는다(021).
 - vite dev 프록시: `/api` 항목에 `ws: true`.
 
 ### 3.6 엣지
@@ -79,7 +79,7 @@
 - `/ws/spreads`: 접속 → snapshot, 표 없음 → waiting → 첫 표에 snapshot, 1초 무전송 → heartbeat, 클라이언트 메시지는 무시
 - 서빙: 첫 접속자가 `spreads:latest` 로 즉시 snapshot 을 받는다 / 접속자가 있으면 `spreads:want` 가 5초마다 갱신된다 / 0명이면 갱신하지 않는다(수집은 이 키를 읽지 않는다)
 - 느린 클라이언트 대기열 5개 → 1008, 다른 접속자는 지연 없음
-- nginx·compose 계약: `/api/ws/` 위치의 Upgrade 헤더·`proxy_http_version 1.1`·목적지 `api:8000/ws/`·`proxy_read_timeout` 없음, `api` 의 `REDIS_URL`·`depends_on` (`tests/test_deploy.py`)
+- nginx·compose 계약: `= /api/ws/spreads` 정확 일치의 접두 제거 rewrite·목적지 `api:8000`·Upgrade 헤더·`proxy_http_version 1.1`·`proxy_read_timeout` 없음, `/api/ws`·`/api/ws/spreads/`·다른 `/api/ws/*` 는 404 JSON, `api` 의 `REDIS_URL` 이 `server` 와 같은 값·`depends_on` 없음 (`tests/test_deploy.py`)
 - 역할: `api` 역할의 백그라운드 태스크는 구독 태스크 1개, `/ws/spreads` 는 두 역할 모두 (`tests/test_role.py`)
 - FE: snapshot 교체·delta 병합·removed 삭제·age 자체 증가·10초 무응답 재연결·백오프·WebSocket 차단 시 `GET /spreads` 호출 0건·재연결만 반복 (러너 없음 — 수동)
 - FE: 재연결 대기가 백오프의 0.5~1.5배다 — 1초 백오프 0.5~1.5초, 30초 상한 15~45초, 백오프 상수(1초·30초·3초)는 그대로 / 제자리 병합 뒤 피드 행이 복사 병합과 같다 — snapshot 1,458행 + delta 3장(1,703행·removed 포함), 사이마다 tick 이 age 를 키운 뒤 되돌림까지 (node)
@@ -167,7 +167,7 @@ cd web && npm run lint && npm run build                                    # 통
 - 남은 빚:
   - 송신 네트워크: 400명이면 압축 후 약 190Mbps. t4g.micro 는 버스트형이라 지속 부하에서 CPU 보다 먼저 한계일 수 있다 — 미실측.
   - 표 생성은 틱 루프 안 동기 — 해외 3거래소(1,463행) 뒤 EC2 실측 450ms 로 상한 300ms 를 매초 넘겨, 게시기는 모델·`camelize_json` 을 거치지 않는 dict 경로(`build_table`)·spark 삽입 시 반올림·마켓별 사는 쪽 걷기 메모로 줄였다(로컬 M4 66→19ms). 그래도 경고가 남으면 표 생성을 별도 프로세스로 옮기는 것을 검토한다("await 없음" 원칙은 유지). 다른 라우터의 `camelize_json`(004·005) 은 그대로다.
-  - api 프로세스가 멈추면 브라우저는 10초 무응답으로 먼저 재연결하고 nginx 는 60초 뒤 끊는다 — 둘 다 스펙대로지만 외부 헬스체크는 여전히 없다(016 남은 빚 그대로).
+  - api 프로세스가 멈추면 브라우저는 10초 무응답으로 먼저 재연결하고 nginx 는 60초 뒤 끊는다 — 둘 다 스펙대로이고, 밖에서는 canary 가 5분마다 `/api/ws/spreads` 의 snapshot·delta 까지 본다(027).
   - FE 테스트 러너 부재 — §4 FE 항목은 수동(Playwright)뿐이다.
 - 2026-09-28 성능 개선: 게시기 전용 인코더가 spark 조각을 끼운다(§3.1) — 실데이터 표 3장 합성 저장소에서 표 JSON 인코딩 7.6~7.8 → 4.3~4.4ms, 표 계산(003 §7) 포함 표 1장 18.8~19.6 → 8.6~9.2ms(로컬, gc 끔). 바이트 동일. 허브의 snapshot 칸(§3.2) — 실데이터 표 796KB 에서 첫 접속 뒤 100명이 한꺼번에 붙을 때 루프 최대 정지 2,344 → 0.7ms, 400명 9,420 → 1.1ms(로컬, 표 1장당 압축 1번 ≈ 23ms 는 그대로), 풀면 그 표의 snapshot 메시지 JSON 과 같다. 첫 접속자의 latest 읽기 중에 붙은 접속자가 `waiting` 뒤 delta 만 받던 경합을 같이 고쳤다(§3.2). 지연 구독(§3.2) — 접속자 없는 허브의 표 수신이 0 이 된다(구독 중 초당 약 2ms·796KB, 점검 실측). 이유: 배포 직후 전원 재접속 때 접속마다 790KB 를 압축했고(런북 ws-loadtest 3.4-1), 배포의 `server` 컨테이너가 쓰지 않는 표를 매초 받았다.
 - 2026-09-28 성능 개선(웹): delta 병합을 제자리 표시명 변환으로(행 복사·키 두 번 만들기 삭제), 재연결 대기에 ±50% 곱셈 지터(§3.4). 이유: 매초 행마다 19키 객체를 복사했고, 배포 직후 전원이 같은 1·2·4초 박자로 다시 붙었다. 측정: 1,458행 파싱+병합 2.82 → 2.67ms(파싱 2.49ms를 빼면 병합 0.33 → 0.18ms, node). 지터로 N명의 재접속이 한 물결 폭(1~8초)에 고르게 퍼진다(미측정).

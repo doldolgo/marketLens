@@ -20,7 +20,7 @@
 ## 3. 동작
 
 ### 3.1 공개 허용 목록
-공개 server 의 `/api` 는 아래 열 경로만 백엔드로 넘긴다(여섯으로 시작해 048 이 하나, 050 이 둘, 052 가 하나를 더했다 — 049 뒤 열하나). 전부 **정확 일치**다(끝에 `/` 가 붙거나 하위 경로면 404). 매칭은 경로만 보고 쿼리스트링은 그대로 따라간다. 넘길 때 `/api` 접두를 뗀다 — 모양은 018·022 와 같은 "접두 제거 rewrite + URI 없는 `proxy_pass`" 하나로 고정한다. 헤더 4개(`Host`·`X-Real-IP`·`X-Forwarded-For`·`X-Forwarded-Proto`)는 지금과 같다.
+공개 server 의 `/api` 는 아래 표의 경로만 백엔드로 넘긴다(048·049·050·052·073 이 더한 경로 포함). 전부 **정확 일치**다(끝에 `/` 가 붙거나 하위 경로면 404). 매칭은 경로만 보고 쿼리스트링은 그대로 따라간다. 넘길 때 `/api` 접두를 뗀다 — 모양은 018·022 와 같은 "접두 제거 rewrite + URI 없는 `proxy_pass`" 하나로 고정한다. 헤더 4개(`Host`·`X-Real-IP`·`X-Forwarded-For`·`X-Forwarded-Proto`)는 지금과 같다.
 
 | 경로 | 가는곳 |
 |---|---|
@@ -35,10 +35,11 @@
 | `/api/ws/gap` | api |
 | `/api/ws/pp` | api |
 | `/api/attention` | api |
+| `/api/replay` | api |
 
 - `/api/ws/spreads`·`/api/ws/gap`(048)·`/api/ws/pp`(049) 은 WebSocket 업그레이드 헤더(`Upgrade`·`Connection`, HTTP/1.1)를 지금처럼 붙인다. 접두 location `/api/ws/` 는 없앤다 — 접두면 api 에 새 `/ws/*` 가 생길 때 자동 공개되고, `/api/ws` 가 nginx 의 자동 301 을 받는다.
-- 누가 쓰나: 대시보드 — `/api/health/collect`(수집 상태 탭 5초), `/api/history/events`·`/api/history/candles`(기록 탭), `/api/ws/spreads`(스프레드 탭), `/api/ws/gap`(갭 탭, 048), `/api/ws/pp`(선선갭 탭, 049), `/api/flow/netflow`·`/api/flow/recent`(입출금 레이더 탭, 050). 랜딩 — `/api/landing`. 모든 화면의 `attention.js`(052) — `/api/attention`. 감시 — uptime(025)은 `/api/health`, canary(027)는 `/api/health`·`/api/history/candles`·`/api/ws/spreads`.
-- `/api/attention`(052)은 **POST 만** 넘긴다 — location 첫 줄이 `if ($request_method != POST) { return 405; }`(location 안 `return` 만 쓰는 if), `client_max_body_size 16k`(061 — 요소를 싣는 몸통 v2, 앱 상한 16,384바이트와 같다. 넘으면 nginx 기본 413), 헤더 4개에 더해 `X-Client-IP $http_x_forwarded_for`(caddy 에 trusted_proxies 가 없어 caddy 가 넣은 값이 방문자 IP 하나다 — api 가 IP 10분 제한에만 쓴다).
+- 누가 쓰나: 대시보드 — `/api/health/collect`(수집 상태 탭 5초), `/api/history/events`·`/api/history/candles`(기록 탭), `/api/ws/spreads`(스프레드 탭), `/api/ws/gap`(갭 탭, 048), `/api/ws/pp`(선선갭 탭, 049), `/api/flow/netflow`·`/api/flow/recent`(입출금 레이더 탭, 050). 랜딩 — `/api/landing`. 모든 화면의 `attention.js`(052) — `/api/attention`, `replay.js`(073) — `/api/replay`. 감시 — uptime(025)은 `/api/health`, canary(027)는 `/api/health`·`/api/history/candles`·`/api/ws/spreads`.
+- `/api/attention`(052)·`/api/replay`(073)는 **POST 만** 넘긴다 — location 첫 줄이 `if ($request_method != POST) { return 405; }`(location 안 `return` 만 쓰는 if), `client_max_body_size 16k`(attention 은 061 — 요소를 싣는 몸통 v2, 둘 다 앱 상한 16,384바이트와 같다. 넘으면 nginx 기본 413), 헤더 4개에 더해 `X-Client-IP $http_x_forwarded_for`(caddy 에 trusted_proxies 가 없어 caddy 가 넣은 값이 방문자 IP 하나다 — api 가 attention 은 IP 10분 제한에만, replay 는 IP 10분 제한과 조각 기록에 쓴다).
 - 공개 server 에는 `/api` 에 걸리는 **정규식 location 을 두지 않는다** — 정규식은 접두 location(아래 404)보다 먼저 이겨 허용 목록을 우회한다(예: 남겨 둔 `~ ^/api/history/(premium|…)` 가 `premium` 을 api 로 넘긴다).
 
 ### 3.2 그 밖의 `/api` — 404
@@ -68,7 +69,7 @@
 ## 4. 검증
 **PR 안 — 실행 세션(완료 조건)**. 단언은 `listen 80` server 블록 안만 본다 — 029 가 같은 파일에 관리자 server 를 더해도 그대로다.
 - nginx 계약(`server/tests/test_deploy.py`):
-  - 백엔드로 넘기는 location 이 §3.1 표 열과 정확히 같다(전부 `=`, 가는 곳 포함). 각 location 이 접두 제거 rewrite + URI 없는 `proxy_pass` 모양이다. `/api/ws/spreads` 에 업그레이드 헤더.
+  - 백엔드로 넘기는 location 이 §3.1 표와 정확히 같다(전부 `=`, 가는 곳 포함). 각 location 이 접두 제거 rewrite + URI 없는 `proxy_pass` 모양이다. `/api/ws/spreads`·`/api/ws/gap`·`/api/ws/pp` 에만 업그레이드 헤더.
   - `location /api/` 와 `location = /api` 는 404 만 답하고 `proxy_pass` 가 없다. 본문이 §3.2 JSON 이고 MIME 추정이 꺼져 있다.
   - `/api` 에 걸리는 정규식 location 이 없다. 접두 location `/api/ws/` 가 없다.
   - nginx 버전 숨김 설정이 있다.

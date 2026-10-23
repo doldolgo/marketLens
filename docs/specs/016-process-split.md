@@ -23,65 +23,56 @@ Influx 를 읽는 무거운 조회(`/history/premium`·`/history/streaks`·`/his
 | `collector` | 지금의 전체 동작 |
 | `api` | Influx 조회 전용 |
 
-- `collector`: 오늘의 `server` 컨테이너와 **완전히 같다.** 스트림·우주·틱 루프·인계·flusher·writer 태스크·원문 아카이브·입출금 조회 전부 돌고, 모든 엔드포인트를 서빙한다. 로컬 개발(`uvicorn app.main:app`)은 `ROLE` 을 안 주므로 이 역할이다.
-- `api`: 기동 시 **Influx 클라이언트 생성·ping 만** 한다. 거래소 REST·WebSocket 에 연결하지 않고, Redis 는 017 의 구독과 018 의 `spreads:latest` 읽기·`spreads:want` 쓰기(`GET /spreads` 요청 단위), 022 의 `spreads:latest` 읽기(`GET /landing`)에만 연결하며(스트림 `ticks` 는 안 읽는다), S3 를 만지지 않고, 백그라운드 태스크는 017 의 구독 태스크 하나뿐이다. 기동 시 복원(수집 실패 이력·사건·봉 버킷·spark)도 하지 않는다 — 이 중 하나라도 하면 두 프로세스가 같은 measurement 를 중복으로 쓰거나(`collect_fail`·`premium_event`·롤업) 거래소를 이중 구독한다.
-- `api` 가 서빙하는 경로는 `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles` 다섯과 017 의 `/ws/spreads`, 018 의 `/spreads`(Redis 읽기), 022 의 `/landing`(Redis·Influx 읽기 요약 — 저장소가 안 되면 그 부분만 null, 항상 200). `/history/*` 의 응답·파라미터·에러는 005·014 계약 그대로(Influx 불달·토큰 없음이면 503). **그 외 경로는 404.** `/history/events` 도 404 다 — 진행 중 사건을 메모리에서 읽는 엔드포인트라 `collector` 만 답할 수 있다.
+- `collector`: 오늘의 `server` 컨테이너와 **완전히 같다.** 스트림·우주·틱 루프·인계·flusher·writer 태스크·원문 아카이브·입출금 조회 전부 돌고, api 에만 있는 경로(아래 관리자 피드·브라우저 수신)를 뺀 모든 엔드포인트를 서빙한다. 수집기에만 있는 관리자 피드 — 034 의 `/admin/aws`·`/admin/alerts`, 063 의 `/admin/aws/series`, 078 의 `/admin/replay/archive` — 도 이 역할이 답한다(AWS 자격증명이 collect 박스 역할에만 있다). 로컬 개발(`uvicorn app.main:app`)은 `ROLE` 을 안 주므로 이 역할이다.
+- `api`: 기동 시 저장소에는 **Influx 클라이언트 생성·ping 만** 한다. 거래소 REST·WebSocket 에 연결하지 않고, Redis 는 표 구독(017 `spreads`·048 `gap`·049 `pp`), 요청 단위 읽기·쓰기(018 `GET /spreads` 의 `spreads:latest` 읽기·`spreads:want` 쓰기, 022 `GET /landing` 의 `spreads:latest` 읽기, 025 `/health` 의 심장박동 읽기, 029·035·052·073 의 관리자 피드와 073 화면 이동 기록 수신), 052 화면 영역 통계 묶음 쓰기, 보낸 알림 기록(034)에만 쓰며(스트림 `ticks` 는 안 읽는다), S3 를 만지지 않는다. 백그라운드 태스크는 017 구독 태스크(표마다 1개 — `spreads`·`gap`(048)·`pp`(049), 구독은 각각 접속자가 있을 때만) + 접속마다 보내기 태스크 + 052 화면 영역 통계 10초 묶음 쓰기 태스크 1개(끌 때 한 번 더 보낸다) + `SLACK_WEBHOOK_URL` 이 있으면 025 알림 태스크 + `STATSD_ADDR` 가 있으면 027 게이지 태스크다. 그 밖에 관리자 피드가 필요로 할 때만 뜨는 데몬 스레드(039 DB-IP 받기, 069 도시 판·역방향 DNS — 도시 판은 볼륨에 파일이 있으면 기동 때도 한 번 읽는다)가 있다. 기동 시 복원(수집 실패 이력·사건·봉 버킷·spark)도 하지 않는다 — 이 중 하나라도 하면 두 프로세스가 같은 measurement 를 중복으로 쓰거나(`collect_fail`·`premium_event`·롤업) 거래소를 이중 구독한다.
+- `api` 가 서빙하는 경로는 `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles` 다섯과 WebSocket 셋(017 의 `/ws/spreads`·048 의 `/ws/gap`·049 의 `/ws/pp`), 018 의 `/spreads`(Redis 읽기), 022 의 `/landing`(Redis·Influx 읽기 요약 — 저장소가 안 되면 그 부분만 null, 항상 200), 그리고 api 에만 있는 관리자 피드·브라우저 수신 — 029 의 `/admin/status`, 035 의 `/admin/access`(067·069 의 `/admin/access/ips`·`ip`·`addrs`·`addr`)·`/admin/clarity`(068 의 `history`·077 의 `recordings`), 052 의 `POST /attention`·`/admin/attention`, 073 의 `POST /replay`·`/admin/replay/live`·`sessions`·`session`. `/history/*` 의 응답·파라미터·에러는 005·014 계약 그대로(Influx 불달·토큰 없음이면 503). **그 외 경로는 404**(FastAPI 문서 `/docs`·`/redoc`·`/openapi.json` 은 두 역할 모두 있다). `/history/events` 도 404 다 — 진행 중 사건을 메모리에서 읽는 엔드포인트라 `collector` 만 답할 수 있다.
 - 두 역할 모두 기동을 마친 직후(요청을 받기 직전) GC 를 정리한다 — `gc.collect()` → `gc.freeze()` → 세대 임계 (2000, 10, 10)(001 §3.1, 2026-09-28 사람 결정). 프로세스 전역 설정이라 두 lifespan 이 각자 한다.
 - `ROLE` 이 둘 중 하나가 아니면 **설정을 읽는 시점에** 실패한다(앱 객체를 만들기 전, lifespan 이 아니다 — 설정 오류 메시지에 허용값 둘을 적는다). 잘못 뜬 채로 조용히 수집이 두 벌 돌지 않게. 설정은 지금처럼 env 에서 읽되 모르는 키는 무시하는 규칙이라, `ROLE` 은 명시적 설정 항목이어야 검사가 된다.
 
 ### 3.2 compose
-컨테이너 5개. 기존 4개(`server`·`web`·`influxdb`·`redis`)는 이름·설정 그대로 두고 `api` 를 더한다.
+compose 의 컨테이너는 일곱 — `server`·`api`·`web`·`caddy`(023)·`influxdb`·`redis`·`cloudflared`(030, profile `tunnel`)다. 이 스펙이 더한 것은 `api` 다. 로컬 통합 기동(`COMPOSE_PROFILES=collect,data,serve`, dev-setup.md)은 cloudflared 를 뺀 여섯이 한 망에 뜨고, EC2 는 박스마다 자기 profile 만 띄운다(021 — serve 는 `api`·`web`·`caddy` + 토큰 파일이 있을 때 `cloudflared`).
 
 | 서비스 | 역할 |
 |---|---|
 | `server` | `collector` |
 | `api` | `api` |
 
-- `api` 는 `server` 와 **같은 빌드 컨텍스트·같은 이미지**다. `ROLE=api` 만 `environment` 로 준다. `server/.env` 를 같은 `env_file` 로 주입하고 `INFLUX_URL`·`REDIS_URL` 을 server 와 같은 `DATA_HOST` 치환식으로 덮는다(021 — 둘 다 data 박스를 본다, 기본값은 서비스 이름). `REDIS_URL` 은 017 의 구독용(안 덮으면 env_file 의 로컬 값을 컨테이너 안에서 쓴다). 컨테이너명 `marketlens-api`, 로그 상한 `json-file` 50MB × 3, `restart: unless-stopped`, 호스트 포트 없음, `depends_on` 없음(021 — 저장소는 다른 박스).
+- `api` 는 `server` 와 **같은 빌드 컨텍스트·같은 이미지**다. `environment` 로 `ROLE=api` 와 api 쪽 기능의 경로 셋 — `STATSD_ADDR`(027 게이지, 이름은 `extra_hosts` 로 호스트 게이트웨이)·`ACCESS_LOG_DIR`(035, caddy 접속 로그 읽기 전용 바인드 `./logs/caddy`)·`GEO_CACHE_DIR`(069, named volume `geo-cache`) — 을 준다. `server/.env` 를 같은 `env_file` 로 주입하고 `INFLUX_URL`·`REDIS_URL` 을 server 와 같은 `DATA_HOST` 치환식으로 덮는다(021 — 둘 다 data 박스를 본다, 기본값은 서비스 이름). `REDIS_URL` 은 017 의 구독용(안 덮으면 env_file 의 로컬 값을 컨테이너 안에서 쓴다). 컨테이너명 `marketlens-api`, 로그 상한 `json-file` 50MB × 3, `restart: unless-stopped`, 호스트 포트 없음, `depends_on` 없음(021 — 저장소는 다른 박스).
 - `server` 에는 `ROLE` 을 주지 않는다(기본값). 주면 `collector` 여야 한다.
-- `web` 은 `server`·`api` 둘 다에 `depends_on`.
-- 호스트에 여는 포트는 여전히 web 하나.
+- `depends_on` 은 어느 서비스에도 없다(021 — 의존 대상이 다른 박스에 있다). `web` 도 `server`·`api` 를 기다리지 않는다.
+- 호스트에 여는 포트는 caddy 의 `${WEB_PORT:-80}`·443(023)과 박스 간 포트 `server` 8000·`redis` 6379·`influxdb` 8086(021 — 보안그룹이 막는다)이다. `web`·`api` 는 열지 않는다.
 - dev compose(`docker-compose.dev.yml`)는 안 바뀐다 — 로컬은 프로세스 하나로 돈다.
 
 ### 3.3 nginx 경로 분기
-`/api/` 접두를 떼고 넘기는 규칙(007)은 그대로. 목적지만 경로에 따라 갈린다.
-
-| 경로 | 목적지 |
-|---|---|
-| `/api/history/premium` | `api:8000` |
-| `/api/history/streaks` | `api:8000` |
-| `/api/history/streaks/bulk` | `api:8000` |
-| `/api/history/candles` | `api:8000` |
-| `/api/ws/` | `api:8000/ws/` (017) |
-| 그 외 `/api/*` | `server:8000` |
-
-- 위 네 경로는 **앞부분 일치**다(쿼리스트링·하위 경로 포함). `/api/history/events` 는 "그 외"라 `server` 로 간다.
-- 어떻게 나눌지(정규식 location + rewrite, 접두 location + URI 치환 등)는 실행 세션이 정한다. 기존 `location /api/`(`proxy_pass http://server:8000/;`)와 `location = /api { return 404; }` 는 그대로 둔다.
+공개 server 의 `/api` 는 028 허용 목록만 백엔드로 넘긴다. 공개 분기는 전부 **정확 일치**이고(028), 넘길 때 `/api` 접두를 뗀다(쿼리스트링은 그대로 따라간다). 목적지는 그 경로를 답하는 역할이다.
+- `api:8000`(같은 박스): `/api/history/candles`·`/api/landing`(022)·`/api/ws/spreads`(017)·`/api/ws/gap`(048)·`/api/ws/pp`(049)·`/api/attention`(052)·`/api/replay`(073). 브라우저 비콘 둘(attention·replay)은 POST 만 넘긴다(028).
+- 수집기(`${COLLECT_HOST}:8000` — 021, 한 박스면 `server`): `/api/health`·`/api/health/collect`·`/api/history/events`·`/api/flow/netflow`·`/api/flow/recent`(050). `/api/history/events` 는 진행 중 사건을 메모리에서 읽으므로 수집기다.
+- 공개 server 의 그 밖의 `/api` 는 028 허용 목록이 정한다 — 목록 밖은 백엔드에 넘기지 않고 404 JSON 이고, `/api` 에 걸리는 정규식 location 은 두지 않는다. `/api/history/premium`·`streaks`·`streaks/bulk` 는 공개에 없다 — 관리자 server(029)가 api 로 넘기고, 박스 안에서는 `http://api:8000/<경로>` 로 부른다.
 - 프록시 헤더 4개(`Host`·`X-Real-IP`·`X-Forwarded-For`·`X-Forwarded-Proto`)는 두 목적지에 **기존 값 그대로** 붙인다(`Host` 는 `$http_host`).
-- `api` 컨테이너가 죽어 있으면 위 네 경로만 502(프로세스가 죽어 재시작 중이면 즉시, `stop` 으로 정지돼 있으면 nginx 가 기동 시 푼 IP 로 연결을 시도하다 수 초~60초 뒤 502 또는 504), 나머지는 정상. 반대로 `server` 가 죽으면 위 네 경로는 정상이다 — 이게 이 스펙의 존재 이유다.
+- `api` 컨테이너가 죽어 있으면 api 로 가는 공개 경로만 502(프로세스가 죽어 재시작 중이면 즉시, `stop` 으로 정지돼 있으면 nginx 가 기동 시 푼 IP 로 연결을 시도하다 수 초~60초 뒤 502 또는 504), 나머지는 정상. 반대로 `server` 가 죽으면 api 로 가는 공개 경로는 정상이다 — 이게 이 스펙의 존재 이유다.
 - `proxy_read_timeout` 은 손대지 않는다(기본 60초). 긴 조회는 005 §3.4 의 창 상한(streaks 7일·bulk 1시간·premium 1주)과 동시 1개 게이트가 막는다.
 
 ### 3.4 배포
-deploy 워크플로(007)는 안 바뀐다. `up -d --build` 가 `api` 도 같이 빌드·기동한다. 같은 컨텍스트라 빌드 캐시를 공유해 두 번째 빌드는 즉시 끝난다.
+배포(007·021)는 박스마다 자기 profile 을 `up -d --build` 한다 — `api` 는 serve 박스에서 `web`·`caddy` 와 함께, `server` 는 collect 박스에서 같은 `server/Dockerfile` 로 따로 빌드한다.
 
 ### 3.5 엣지
-- `api` 에서 Influx 토큰이 없으면 `/history/*` 503, `/health` 는 200 — 005 와 같다.
+- `api` 에서 Influx 토큰이 없으면 `/history/*` 503 — 005 와 같다. `/health` 는 Influx 와 무관하다(025 §3.5 판정).
 - `api` 프로세스에 `S3_BUCKET`·거래소 키가 있어도 무시한다(연결 시도 자체를 안 한다). 로그에 "S3 버킷 접근 실패"·거래소 줄이 **찍히지 않아야** 한다 — 찍히면 역할 분기가 샌 것이다. Redis 줄은 017 구독이 남길 수 있다.
 - `collector` 가 재시작해도 `api` 는 영향 없고, `api` 가 재시작해도 수집은 한 틱도 안 빠진다.
-- 두 컨테이너의 `/health` 는 구분되지 않는다(둘 다 `{"status":"ok","version":…}` — 001 의 본문 그대로). nginx 의 `/api/health` 는 `server` 로 간다. `api` 의 헬스는 serve 박스 안에서 `docker compose --profile serve exec api` 로만 본다 — 외부 헬스체크는 후속(인프라 스펙).
+- 두 역할의 `/health` 는 025 §3.5 판정을 따른다(본문 `{"status","version","lastTickAt"}` 은 같고, collector 는 메모리의 마지막 틱, api 는 Redis 심장박동을 본다). 밖에는 nginx 의 `/api/health`(`server`)만 열고, api 는 canary(027)가 밖에서 본다(`/api/history/candles`·`/api/ws/spreads`). api 의 `/health` 는 관리자 페이지 `/svc/api/health` 에서도 본다(029).
 
 ## 4. 검증
-- `ROLE=api` 로 만든 앱은 `/health` 200, `/history/premium` 이 Influx 계약대로 답하고(토큰 없으면 503), `/spreads`·`/refresh`·`/health/collect`·`/history/events`·`/orderbook/upbit` 이 404
-- `ROLE=api` 앱의 기동 로그에 S3·거래소 관련 줄이 없고, 백그라운드 태스크는 017 의 구독 태스크 1개(`/ws/spreads` 는 두 역할 모두)
+- `ROLE=api` 로 만든 앱의 경로 집합이 §3.1 목록과 같고(WebSocket 은 `/ws/spreads`·`/ws/gap`·`/ws/pp`), `/health` 는 025 판정대로(lifespan 전 503 `starting`), `/history/premium` 이 Influx 계약대로 답하며(토큰 없으면 503), `/refresh`·`/health/collect`·`/history/events`·`/orderbook/upbit`·수집기에만 있는 관리자 피드(`/admin/aws`·`/admin/alerts`·`/admin/aws/series`·`/admin/replay/archive`)가 404
+- `ROLE=api` 앱의 기동 로그에 S3·거래소 관련 줄이 없고, 백그라운드 태스크는 표 구독 태스크 셋(017 `spreads`·048 `gap`·049 `pp`)과 052 의 10초 묶음 쓰기 태스크 하나(웹훅·StatsD 설정이 없을 때 — `/ws/spreads`·`/ws/gap`·`/ws/pp` 은 두 역할 모두)
 - `ROLE` 없음 = `collector` = 오늘과 같은 라우트 집합(기존 테스트 전부 그대로 통과)
 - `ROLE=foo` 는 설정을 읽는 순간 실패(앱 객체 생성 전)
 - 두 역할 모두 기동을 마치면 GC 세대 임계가 (2000, 10, 10) 이고 기동 객체가 얼려져 있다
-- compose 계약(`tests/test_deploy.py` 갱신): 컨테이너 5개·고정 이름, `api` 는 `ROLE=api` + `env_file` + `INFLUX_URL` 덮어쓰기 + `REDIS_URL` 없음 + 로그 상한 + 호스트 포트 없음, `server` 에 `ROLE` 없음, `web` 이 둘 다 `depends_on`, 호스트 노출은 web 하나. README 의 컨테이너 수 문구 검사는 5개 기준으로
-- nginx 계약: 네 경로가 `api:8000` 으로 가고 접두가 떼지며, `/api/history/events` 는 `server:8000` 으로, `location /api/` 의 기존 `proxy_pass` 와 `location = /api` 404 유지
+- compose 계약(`tests/test_deploy.py`): 컨테이너 일곱·고정 이름, `api` 는 `server` 와 같은 빌드 + `ROLE=api` + `env_file` + `INFLUX_URL`·`REDIS_URL` 을 server 와 같은 `DATA_HOST` 치환식으로 덮어쓰기 + 로그 상한 + 호스트 포트 없음, `server` 에 `ROLE` 없음, 어느 서비스에도 `depends_on` 없음, 호스트 노출은 caddy `${WEB_PORT:-80}`·443 과 박스 간 포트 셋(server 8000·redis 6379·influxdb 8086). README 의 컨테이너 수 문구 검사는 로컬 여섯·배포 일곱 기준으로
+- nginx 계약: 공개 허용 경로가 §3.3 대로 `api:8000`·수집기(`${COLLECT_HOST}:8000`)로 나뉘어 가고 접두가 떼지며(`/api/history/events` 는 수집기로), 공개 `/api` 의 나머지는 028 허용 목록 계약(전부 정확 일치·목록 밖 404 JSON·정규식 location 없음)
 - `/history/events` 라우터 분리 뒤 005 의 기존 테스트가 전부 그대로 통과(경로·응답 무변경)
-- 007 §4 검증 항목 전부 재통과(4컨테이너 → 5컨테이너로 문구만)
-- 수동: 로컬 `WEB_PORT=8080 docker compose --env-file server/.env up -d --build` 후 `curl localhost:8080/api/history/premium?...` 이 `api` 컨테이너 로그에, `curl localhost:8080/api/spreads` 가 `server` 로그에 찍힌다. `docker compose stop api` 뒤 `/api/spreads`·`/api/history/candles` 둘 다 502/504(수 초~60초 뒤, 018 부터 `/api/spreads` 도 api 로 간다). `docker compose start api` 후 복구
-- 수동(EC2): 배포 후 `docker stats` 에서 `marketlens-api` 가 뜨고 `marketlens-server` CPU 가 배포 전과 같다(수집 부하는 그대로여야 한다)
+- 007 §4 검증 항목 전부 재통과
+- 수동: 로컬 `COMPOSE_PROFILES=collect,data,serve WEB_PORT=8080 docker compose --env-file server/.env up -d --build`(dev-setup.md docker 통합 기동 — 여섯 컨테이너, 아래 `stop`·`start` 에도 같은 `COMPOSE_PROFILES=…` 를 앞에 붙인다) 후 `curl localhost:8080/api/history/candles?base=BTC` 가 `api` 컨테이너 로그에, `curl localhost:8080/api/history/events` 가 `server` 로그에 찍힌다. `docker compose stop api` 뒤 `/api/history/candles` 는 502/504(수 초~60초 뒤), `/api/history/events`·`/api/health` 는 그대로 답한다. `docker compose start api` 후 복구
+- 수동(EC2): 배포 후 serve 박스 `docker stats` 에 `marketlens-api` 가 뜨고, collect 박스의 `marketlens-server` CPU 가 배포 전과 같다(수집 부하는 그대로여야 한다 — 둘은 다른 박스, 021)
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
