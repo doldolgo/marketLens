@@ -89,7 +89,7 @@
 - 모든 폭: 차트 위 터치의 세로 끌기는 차트가 잡지 않는다 — 문서 스크롤 구간에서 차트 위를 쓸어도 페이지가 스크롤된다. 가로 끌기·두 손가락 확대·마우스 동작은 그대로.
 
 ### 3.8 화면 이용 통계(052·061)
-`data-area` 는 넓은 화면과 같은 이름을 같은 덩어리에 단다(header·tabs·kpi·filters·table·summary·list·chart·filters-2·table-2). 폰에서 새로 생긴 조작은 새 `data-el` 을 받는다 — 메뉴 단추 `menu`, 필터 단추 `filter-toggle`, 정렬 줄 `sort:col`(고르기)·`sort:dir`(방향). 메뉴는 링크처럼 영역 밖이다(메뉴 안 두 링크는 넓은 헤더와 같은 열쇠). 061 계약대로 영역·열쇠는 화면 안에서 하나뿐이다 — 폰과 넓은 화면이 같은 영역·조작을 다르게 놓을 때도 영역 상자와 열쇠 단 요소는 소스에 한 번만 쓰고 자리·모양만 바꾼다. 공유 조각(필터 단추·정렬 줄)은 열쇠를 박지 않고 호출부에서 받는다. 새 열쇠는 061 §7 요소 목록·`server/tests/test_attention_elements.py`·관리자 이름표 `web/admin/screensnames.js` 에 함께 올린다.
+`data-area` 는 넓은 화면과 같은 이름을 같은 덩어리에 단다(header·tabs·kpi·filters·table·summary·list·chart·filters-2·table-2). 폰에서 새로 생긴 조작은 새 `data-el` 을 받는다 — 메뉴 단추 `menu`, 필터 단추 `filter-toggle`, 정렬 줄 `sort:col`(고르기)·`sort:dir`(방향). 메뉴는 링크처럼 영역 밖이다(메뉴 안 처리방침 링크는 넓은 헤더와 같은 열쇠). 061 계약대로 영역·열쇠는 화면 안에서 하나뿐이다 — 폰과 넓은 화면이 같은 영역·조작을 다르게 놓을 때도 영역 상자와 열쇠 단 요소는 소스에 한 번만 쓰고 자리·모양만 바꾼다. 공유 조각(필터 단추·정렬 줄)은 열쇠를 박지 않고 호출부에서 받는다. 새 열쇠는 061 §7 요소 목록·`server/tests/test_attention_elements.py`·관리자 이름표 `web/admin/screensnames.js` 에 함께 올린다.
 
 ## 4. 검증
 web 에는 테스트 러너가 없다(002) — 순수 판정만 타입·빌드로 묶고 화면은 브라우저로 확인한다.
