@@ -166,9 +166,10 @@ cd web && npm run lint && npm run build                                    # 통
 | diff 중앙값 (이벤트 루프) | 3.9ms | 6.6ms |
 | gzip 중앙값 (허브 스레드) | 14.5ms | 2.6ms |
 | 브라우저 파싱 + 병합 / 프레임 (node, 운영 표 70장) | 2.41ms | 1.31ms |
-| 운영 실측 접속자 1명 (`wss://kimptrack.com/api/ws/spreads`, 120초) | 136.2KB/s (delta 평균 135KB gz·중앙 1,077행, snapshot 213KB) | 배포 뒤 아래 |
+| 운영 실측 접속자 1명 (`wss://kimptrack.com/api/ws/spreads`, 120초, 배포 전) | 136.2KB/s (delta 평균 135KB gz·중앙 1,077행, snapshot 213KB) | — |
+| **운영 실측 배포 뒤, 같은 시각 두 연결 나란히 (120초)** | **129.8KB/s** (쿼리 없음 — delta 평균 128.9KB gz) | **40.6KB/s (−69%)** (`?v=2` — patch 평균 40.3KB gz·p90 57.9·최대 72.6KB) |
 
-루프의 diff 는 2.7ms 늘고 스레드의 gzip 은 11.9ms 줄어, 표 1장 처리 합은 18.4 → 9.2ms 다. patch 에 남은 바이트의 약 70% 는 전체 정밀도 부동소수(`age`·`slipFwd`·`slipRev`·`fwd`·`rev` 각 13~15%)이고 행 키 셋이 25%, `sparkEnd` 가 3.5% 다 — 더 줄이려면 값 정밀도(003, status.md 빚)다. 로컬 끝단: 같은 표 155장을 로컬 Redis 에 1초마다 다시 게시하고 api 역할 uvicorn + 운영 `web/nginx.conf`(업스트림만 바꿈) + 빌드한 웹 — 브라우저 앱은 `?v=2` 로 붙어 snapshot 1 뒤 patch 만 받고(코인 408·페어 1,860, 값이 매초 바뀜), 게시를 멈추면 heartbeat 만 와서 8초 안에 408행 전부 stale, 다시 게시하면 같은 연결에서 원래대로. 같은 nginx 를 거쳐 `?v=2` 는 patch 43~52KB, 쿼리 없음은 delta 164~181KB.
+운영 실측(2026-10-24 00:13 KST, PR #176 배포 직후 이 Mac 에서 두 연결을 같은 시각에 120초): 두 연결 모두 snapshot 206.3KB gz·프레임 120개·프레임당 바뀐 행 중앙 1,049 로 같은 표를 받았고, 수신은 delta 129.8 → patch 40.6KB/s 다. 운영 웹 번들은 `/api/ws/spreads?v=2` 로 붙는다. api 로그에 표 모양·압축 경고 0, 컨테이너 CPU 4.2%(두 판을 다 만들던 그 순간). 루프의 diff 는 2.7ms 늘고 스레드의 gzip 은 11.9ms 줄어, 표 1장 처리 합은 18.4 → 9.2ms 다. patch 에 남은 바이트의 약 70% 는 전체 정밀도 부동소수(`age`·`slipFwd`·`slipRev`·`fwd`·`rev` 각 13~15%)이고 행 키 셋이 25%, `sparkEnd` 가 3.5% 다. 로컬 끝단: 같은 표 155장을 로컬 Redis 에 1초마다 다시 게시하고 api 역할 uvicorn + 운영 `web/nginx.conf`(업스트림만 바꿈) + 빌드한 웹 — 브라우저 앱은 `?v=2` 로 붙어 snapshot 1 뒤 patch 만 받고(코인 408·페어 1,860, 값이 매초 바뀜), 게시를 멈추면 heartbeat 만 와서 8초 안에 408행 전부 stale, 다시 게시하면 같은 연결에서 원래대로. 같은 nginx 를 거쳐 `?v=2` 는 patch 43~52KB, 쿼리 없음은 delta 164~181KB.
 
 ```bash
 # server (2026-10-23)
@@ -212,5 +213,5 @@ cd web && npm run lint && npm run build                                    # 통
 - 2026-10-23 (patch — 바뀐 필드만, status.md 의 2026-09-28 점검 3단계 항목): §1·§3.2(patch 규칙)·§3.3(쿼리 `v=2`·`patch` 메시지·판 고르는 이유)·§3.4(주소·patch 병합)·§4·§5 를 바꿨다.
   - 만든 것: server `features/spreads/hub.py` — 표 글 diff 를 `diff_text`(한 번) + `delta_text`(delta 글, 바이트 그대로)로 나누고 `make_delta_text` 는 둘을 잇는 것으로, patch 의 기준 `spark_op`·`patch_entry`·`make_patch`(파싱 경로)와 글 경로 `patch_text`·`make_patch_text`, `Connection.slim`, `attach(slim=)`(spreads 표만), `on_table` 이 받는 접속자가 있는 판만 만들어 판마다 gzip 1회. `ws.py` — 쿼리 `v=2` → `slim`. 테스트 `tests/test_hub_patch.py`(신규 96개), `test_ws.py` +1, `test_hub_text.py`(운영 표 3장 펴기를 `real_texts()` 로 뺌). web `features/spreads/api.ts`(주소 `?v=2`, `RowTable.patch` — 제자리 필드 덮기·spark 새 배열·모르는 키면 false → 연결 닫기, delta 도 계속 병합), `types.ts`(`SpreadPatch`·`patch` 메시지).
   - 추측한 지점: 판은 쿼리 `v=2` 로 고른다(이유 §3.3). patch 항목의 키는 한 글자 `k` 대신 `sym`·`dom`·`fx` 그대로 — 글 경로가 받은 키 글을 그대로 잇고 웹의 키 함수도 그대로 돈다(gzip 뒤 차이는 작다). spark 의 길이 늘기(기동 뒤 30분)는 통째로 — 클라이언트가 상한 30 을 몰라도 되게. 모르는 키 patch 는 재연결로 snapshot 부터. 필드 이름 검사는 표마다 처음 자른 행 하나(키 꼴 검사와 같은 입장). canary(027)·부하 측정기는 쿼리 없이 delta 를 그대로 본다 — 바꾸지 않았다.
-  - 남은 빚: 남은 바이트의 약 70% 가 전체 정밀도 부동소수 — 003 값 정밀도 항목. 화면은 spark 를 그리지 않는데 snapshot gzip 224KB 의 50% 가 spark 다(1,860행 × 30개). delta 판은 옛 탭·canary 용으로 남긴다. gap(048)·pp(049) delta 는 그대로다(gap 은 접속자당 58~77KB/s — 같은 방식을 쓸 수 있다).
+  - 남은 빚: delta 판은 옛 탭·canary 용으로 남긴다. 전송량을 더 줄일 때도 spark 이력 길이·표에 싣는 기간·갱신 주기는 줄이지 않는다(2026-10-23 사용자 지시) — 같은 내용을 더 적은 바이트로 보내는 방법만 쓴다. gap(048)·pp(049) delta 는 그대로다(gap 은 접속자당 58~77KB/s — 같은 방식을 쓸 수 있다).
 - 2026-09-28 성능 개선(웹): delta 병합을 제자리 표시명 변환으로(행 복사·키 두 번 만들기 삭제), 재연결 대기에 ±50% 곱셈 지터(§3.4). 이유: 매초 행마다 19키 객체를 복사했고, 배포 직후 전원이 같은 1·2·4초 박자로 다시 붙었다. 측정: 1,458행 파싱+병합 2.82 → 2.67ms(파싱 2.49ms를 빼면 병합 0.33 → 0.18ms, node). 지터로 N명의 재접속이 한 물결 폭(1~8초)에 고르게 퍼진다(미측정).
