@@ -51,7 +51,7 @@ async def forget(
 
 async def _run(ip: str, dry_run: bool) -> int:
     settings = get_settings()
-    bus = RedisBus.from_url(settings.redis_url)
+    bus = RedisBus.from_url(settings.redis_url, password=settings.redis_password)
     store = (
         S3Uploader(bucket=settings.s3_bucket, region=settings.s3_region)
         if settings.s3_bucket

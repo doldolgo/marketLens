@@ -66,7 +66,11 @@ def fake_bus(monkeypatch: pytest.MonkeyPatch) -> Iterator[fakeredis.FakeServer]:
     monkeypatch.setattr(
         RedisBus,
         "from_url",
-        classmethod(lambda cls, url: cls(fakeredis.aioredis.FakeRedis(server=server))),
+        classmethod(
+            lambda cls, url, password=None: cls(
+                fakeredis.aioredis.FakeRedis(server=server)
+            )
+        ),
     )
     yield server
     get_settings.cache_clear()

@@ -162,7 +162,9 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
     _start_notifier(app)
     influx = await _open_influx(app.state.settings)
     app.state.influx = influx
-    bus = RedisBus.from_url(app.state.settings.redis_url)
+    bus = RedisBus.from_url(
+        app.state.settings.redis_url, password=app.state.settings.redis_password
+    )
     _plug_alert_log(app, bus)
     hub = SpreadsHub(bus=bus)
     hub.start()
@@ -268,7 +270,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.influx = influx
 
     # Redis — 틱 버퍼(009). 불달이면 경고 1줄, 인계된 틱은 버려지고 앱은 뜬다
-    tick_stream = RedisTickStream.from_url(settings.redis_url)
+    tick_stream = RedisTickStream.from_url(
+        settings.redis_url, password=settings.redis_password
+    )
     if not await tick_stream.ping():
         logger.warning(
             "Redis 연결 실패: %s — 인계된 틱은 버려진다 (명령마다 재시도)",
@@ -277,7 +281,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     spark = SparkBuffer()
     handoff = TickRelay(stream=tick_stream, store=store, spark=spark)
     # 017 — 표 게시(틱 직후)와 자기 게시를 자기 구독하는 허브(로컬 단일 프로세스용 — 접속자가 있을 때만 구독)
-    bus = RedisBus.from_url(settings.redis_url)
+    bus = RedisBus.from_url(settings.redis_url, password=settings.redis_password)
     _plug_alert_log(app, bus)
     # 026 — 일중 기준가 장부(KST 00시 첫 체결가, Redis 보존). 게시기가 매초 읽어 dayChg 를 만든다
     day_open = DayOpenBook(bus=bus)

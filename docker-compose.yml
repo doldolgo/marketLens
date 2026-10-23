@@ -239,9 +239,13 @@ services:
     # AOF — 재기동해도 Influx 로 아직 안 옮긴 틱이 남는다 (009 §3.4).
     # maxmemory 600mb·noeviction(2026-09-28 사람 결정) — 틱 스트림 상한(MAXLEN 10,800 ≈ 0.44GB)을 넘는 일이 생겨도
     # 박스 전체가 아니라 쓰기만 거부된다(인계기는 그 틱을 버리고 경고한다). 키를 지우는 정책은 쓰지 않는다.
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "600mb", "--maxmemory-policy", "noeviction"]
+    # requirepass(021 §3.7) — 값은 data 박스 server/.env 의 REDIS_PASSWORD(--env-file 치환). 비면 빈 문자열이 가고
+    # Redis 는 빈 requirepass 를 '비밀번호 없음'으로 읽는다 — 값을 넣기 전까지 인증 없이 그대로(redis 7.4 실측).
+    # 값은 docker inspect 의 Cmd 에 보이고 ps 에는 안 보인다(프로세스 제목). 켜고 끄는 순서는 runbooks/redis-auth.md —
+    # 클라이언트(collect·serve)에 먼저 넣고 data 를 마지막에. data 에 먼저 넣으면 다음 배포의 up 이 곧바로 켠다
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "600mb", "--maxmemory-policy", "noeviction", "--requirepass", "${REDIS_PASSWORD:-}"]
     ports:
-      # collect(server)·serve(api) 박스가 사설 IP 로 붙는다 — 인증 없음, 보안그룹만 (021 §3.1·알려진 빚)
+      # collect(server)·serve(api) 박스가 사설 IP 로 붙는다 — 보안그룹(021 §3.1) + REDIS_PASSWORD 가 있으면 비밀번호(§3.7)
       - "6379:6379"
     volumes:
       - redis-data:/data
