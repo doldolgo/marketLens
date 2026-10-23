@@ -44,6 +44,8 @@ _NAN = float("nan")
 _CONTRACT = "LinearPerpetual"
 _TRADING = "Trading"
 _QUOTE = "USDT"
+# 코인 계약의 symbolType — `stock`·`ETF`·`commodity`·`forex` 같은 전통 자산과 모르는 새 값은 뺀다 (§3.2·§3.6)
+_COIN_SYMBOL_TYPES = frozenset({"", "innovation"})
 _RATE_LIMIT_RET_CODE = 10006  # "Too many visits!" — HTTP 200 본문의 retCode (§3.6)
 
 
@@ -107,7 +109,7 @@ class BybitPerpStream:
     # --- 심볼 집합·펀딩 주기 (PerpSymbolSource, §3.2·§3.6) ---
 
     async def refresh(self, client: httpx.AsyncClient) -> int:
-        """instruments-info(linear) → LinearPerpetual·Trading·USDT 심볼 맵·주기. 페이지마다 호출 1회.
+        """instruments-info(linear) → LinearPerpetual·Trading·USDT·코인 symbolType 심볼 맵·주기. 페이지마다 호출 1회.
 
         HTTP 200 이어도 `retCode != 0` 이면 실패. 원문 기록은 매 페이지 하고, 꼬리 `time` 만 뺀 바이트가 직전 같은
         페이지와 같으면 그 페이지는 파싱하지 않는다 — 전 페이지가 같으면 맵도 그대로다 (§3.6).
@@ -211,6 +213,7 @@ class BybitPerpStream:
                 item.get("contractType") != _CONTRACT
                 or item.get("status") != _TRADING
                 or item.get("quoteCoin") != _QUOTE
+                or (item.get("symbolType") or "") not in _COIN_SYMBOL_TYPES
             ):
                 continue
             base, mult = split_multiplier(str(item["baseCoin"]).upper())

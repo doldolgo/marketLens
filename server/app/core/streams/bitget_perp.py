@@ -42,6 +42,7 @@ _QUOTE = "USDT"
 _OK_CODE = "00000"
 _PERPETUAL = "perpetual"
 _NORMAL = "normal"
+_RWA = "YES"  # isRwa — 토큰화 주식·ETF·원자재·외환. 코인 이름과 겹쳐 같은 base 로 묶이므로 뺀다 (§3.2·§3.7)
 
 
 def _now_ms() -> int:
@@ -93,7 +94,7 @@ class BitgetPerpStream:
     # --- 심볼 집합·펀딩 주기 (PerpSymbolSource, §3.2·§3.7) ---
 
     async def refresh(self, client: httpx.AsyncClient) -> int:
-        """contracts 1회 → perpetual·normal·USDT 심볼 맵·주기. requestTime 만 뺀 바이트가 같으면 파싱 생략 (§3.7)."""
+        """contracts 1회 → perpetual·normal·USDT·RWA 아님 심볼 맵·주기. requestTime 만 뺀 바이트가 같으면 파싱 생략 (§3.7)."""
         url = CONTRACTS_URL
         resp = await self._get(client, url)
         self._record(
@@ -113,6 +114,7 @@ class BitgetPerpStream:
                 item.get("symbolType") != _PERPETUAL
                 or item.get("symbolStatus") != _NORMAL
                 or item.get("quoteCoin") != _QUOTE
+                or item.get("isRwa") == _RWA
             ):
                 continue
             base, mult = split_multiplier(str(item["baseCoin"]).upper())

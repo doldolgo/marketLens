@@ -305,10 +305,11 @@ async def test_contracts_keeps_perpetual_normal_usdt_and_maps_interval() -> None
         contract("BTCUSDT-DELIVERY", symbolType="delivery", baseCoin="BTC"),
         contract("XYZUSDT", symbolStatus="maintain"),
         contract("ETHUSDC", quoteCoin="USDC", baseCoin="ETH"),
-        contract("TSLAUSDT"),  # 토큰화 주식 — 거르지 않는다
+        contract("TSLAUSDT", isRwa="YES"),  # 토큰화 주식 — 전통 자산은 뺀다 (§3.2)
+        contract("SOLUSDT", isRwa="NO"),
     ]
     stream, _, _, raw, _, store = await build(rest, universe={"BONK", "PEPE"})
-    assert stream.bases() == {"BONK", "PEPE", "TSLA"}
+    assert stream.bases() == {"BONK", "PEPE", "SOL"}
     assert str(rest.calls[0].url) == CONTRACTS_URL
     assert raw.keys(REST_SOURCE) == ["symbols:perp"]
     rest.tickers = [
@@ -321,6 +322,31 @@ async def test_contracts_keeps_perpetual_normal_usdt_and_maps_interval() -> None
     assert bonk.funding_interval_h == 4
     assert bonk.next_funding_ms == next_funding_ms(T0, 4)
     assert pepe.funding_interval_h == 1 and pepe.multiplier == 1
+
+
+async def test_rwa_contract_does_not_shadow_the_coin_with_the_same_base() -> None:
+    # 2026-10-23 운영: 캐터필러 주식 CATUSDT 가 'multiplier 1 우선' 으로 1000CATUSDT 를 밀어내
+    # 선선갭 CAT 이 +39,670,993,127.99% 였다 (§3.2)
+    rest = Rest([])
+    rest.contracts = [
+        contract("1000CATUSDT", baseCoin="1000CAT", isRwa="NO"),
+        contract("CATUSDT", baseCoin="CAT", isRwa="YES"),
+    ]
+    stream, _, _, _, _, store = await build(rest, universe={"CAT"})
+    assert stream.bases() == {"CAT"}
+    rest.tickers = [
+        httpx.Response(
+            200,
+            json=envelope(
+                [tick("1000CATUSDT"), tick("CATUSDT", bidPr="704.07", askPr="705.36")]
+            ),
+        )
+    ]
+    await stream.poll()
+    cat = store.perp_row(SRC, "CAT")
+    assert cat is not None
+    assert cat.native_symbol == "1000CATUSDT" and cat.multiplier == 1000
+    assert cat.bid == pytest.approx(0.0123 / 1000)
 
 
 async def test_contracts_that_differ_only_in_request_time_are_not_parsed() -> None:
