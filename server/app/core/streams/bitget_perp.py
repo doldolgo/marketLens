@@ -43,6 +43,8 @@ _OK_CODE = "00000"
 _PERPETUAL = "perpetual"
 _NORMAL = "normal"
 _RWA = "YES"  # isRwa — 토큰화 주식·ETF·원자재·외환. 코인 이름과 겹쳐 같은 base 로 묶이므로 뺀다 (§3.2·§3.7)
+# isRwa 여도 남기는 금 토큰 — 바이낸스·바이빗·Hyperliquid 는 코인으로 낸다 (§3.2·§3.7)
+_RWA_COINS = frozenset({"PAXG", "XAUT"})
 
 
 def _now_ms() -> int:
@@ -114,7 +116,10 @@ class BitgetPerpStream:
                 item.get("symbolType") != _PERPETUAL
                 or item.get("symbolStatus") != _NORMAL
                 or item.get("quoteCoin") != _QUOTE
-                or item.get("isRwa") == _RWA
+                or (
+                    item.get("isRwa") == _RWA
+                    and str(item.get("baseCoin")).upper() not in _RWA_COINS
+                )
             ):
                 continue
             base, mult = split_multiplier(str(item["baseCoin"]).upper())
