@@ -9,11 +9,13 @@ redis 라이브러리를 import 하는 곳은 `redis_stream.py` 와 이 모듈 �
 - 키 `spreads:latest`   — 같은 JSON, TTL 10초. 늦게 붙은 구독자의 첫 표. 수집이 멈추면 사라진다
 - 채널 `gap`·키 `gap:latest` — 현선갭 표(048 §3.3), 같은 규칙. 채널·키 이름은 표 id 하나에서 나온다(`<id>`·`<id>:latest`) —
   게시·구독·첫 표 읽기는 표 id 를 인자로 받고 기본값이 spreads 라 017 의 호출은 그대로다
+- 채널 `pp`·키 `pp:latest` — 선선갭 표(049 §3.3), 같은 규칙
 - 키 `spreads:want`     — 값 "1", TTL 15초. api 가 접속자가 있는 동안 5초마다(+ `GET /spreads` 요청마다, 018) 쓴다.
   읽는 쪽은 없다 — 수집은 2026-09-26 부터 접속자와 무관하게 매 틱 표를 만든다 (017 §3.1)
 - 키 `gap:want`         — 같은 모양(값 "1", TTL 15초). api 의 gap 허브가 접속자가 있는 동안 5초마다(첫 접속 때 곧바로) 쓰고,
   수집의 gap 게시기가 0.5초마다 읽어 **키가 있을 때만** 표를 만들어 게시한다 (048 §3.3) — 아무도 안 보는 동안
   표 1장(약 3,400행·760KB)을 매초 두 번(PUBLISH·SET) 보내지 않게
+- 키 `pp:want`          — 같은 모양·같은 규칙. api 의 pp 허브가 쓰고 수집의 pp 게시기가 읽는다 (049 §3.3)
 - 키 `collect:heartbeat` — 틱 시각(ms) 문자열, TTL 30초. 수집이 매 틱 쓰고 api 의 `/health` 가 읽는다 (025)
 - 키 `premium_events:open` — 열린 사건 전체의 JSON 사본, TTL 600초. 수집의 사건 쓰기 태스크가 60초 갱신 회차·닫힘 점을
   쓴 회차·종료 때 쓰고 수집 자신이 기동 복원 때 읽는다 (013 §3.3)
@@ -49,6 +51,7 @@ from app.core.redis_stream import CONNECT_TIMEOUT_SEC, SOCKET_TIMEOUT_SEC
 CHANNEL = "spreads"
 LATEST_KEY = "spreads:latest"
 GAP_CHANNEL = "gap"  # 048 — 현선갭 표. 키는 latest_key(GAP_CHANNEL)
+PP_CHANNEL = "pp"  # 049 — 선선갭 표. 키는 latest_key(PP_CHANNEL)
 WANT_KEY = "spreads:want"  # = want_key(CHANNEL)
 LATEST_TTL_SEC = 10
 WANT_TTL_SEC = 15

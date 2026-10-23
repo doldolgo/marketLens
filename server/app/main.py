@@ -57,7 +57,7 @@ from app.core.perp_universe import PerpUniverse
 from app.core.premium_events import PremiumEventDetector
 from app.core.quotes import QuoteSink
 from app.core.raw_archive import RawArchive
-from app.core.redis_bus import GAP_CHANNEL, RedisBus
+from app.core.redis_bus import GAP_CHANNEL, PP_CHANNEL, RedisBus
 from app.core.redis_stream import RedisTickStream
 from app.core.s3 import S3Uploader
 from app.core.serialization import camelize_json
@@ -93,6 +93,8 @@ from app.features.history.router import events_router as history_events_router
 from app.features.history.router import router as history_router
 from app.features.landing.router import router as landing_router
 from app.features.landing.service import LandingService
+from app.features.pp.push import PpPublisher
+from app.features.pp.ws import ws_router as pp_ws_router
 from app.features.replay.archive import ArchiveFeed, Archiver
 from app.features.replay.router import collector_router as replay_collector_router
 from app.features.replay.router import router as replay_router
@@ -170,6 +172,10 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
     gap_hub = SpreadsHub(bus=bus, table=GAP_CHANNEL)
     gap_hub.start()
     app.state.gap_hub = gap_hub
+    # 049 — 선선갭 허브는 세 번째 인스턴스(채널 `pp`), 같은 규칙
+    pp_hub = SpreadsHub(bus=bus, table=PP_CHANNEL)
+    pp_hub.start()
+    app.state.pp_hub = pp_hub
     # 052 — 받은 비콘의 하루 합계를 10초마다 같은 버스로
     attention: AttentionService = app.state.attention
     attention.start(bus)
@@ -192,6 +198,7 @@ async def _api_lifespan(app: FastAPI) -> AsyncIterator[None]:
         await attention.aclose()
         await hub.aclose()
         await gap_hub.aclose()
+        await pp_hub.aclose()
         await bus.aclose()
         if influx is not None:
             influx.close()
@@ -283,6 +290,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 048 — 현선갭 표 게시기와 허브. 틱 루프의 spreads 표 다음 자리에서 매 틱, 채널 `gap`·키 `gap:latest`
     gap_publisher = GapPublisher(store=store, bus=bus)
     gap_hub = SpreadsHub(bus=bus, table=GAP_CHANNEL)
+    # 049 — 선선갭 표 게시기와 허브. 갭표 다음 자리에서 `pp:want` 가 있는 틱마다, 채널 `pp`·키 `pp:latest`
+    pp_publisher = PpPublisher(store=store, bus=bus)
+    pp_hub = SpreadsHub(bus=bus, table=PP_CHANNEL)
 
     # 1. 마켓 우주(매초) → 스트림 기동 — 복원보다 먼저(001 §3.6 앱 시작 순서). 목록을 못 받은 거래소는 다음 초에 다시.
     # 해외 커넥터(012 바이낸스·019 바이빗·020 비트겟·045 OKX)가 심볼 집합 계약도 맡는다 — 우주가 확정되면 각자 자기 심볼만 구독한다.
@@ -373,6 +383,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         candles=candles,
         spreads=publisher,
         gap=gap_publisher,
+        pp=pp_publisher,
         heartbeat=heartbeat,
         wallet=wallet,
         day_open=day_open,
@@ -388,6 +399,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     gap_publisher.start()
     gap_hub.start()
     app.state.gap_hub = gap_hub
+    pp_publisher.start()
+    pp_hub.start()
+    app.state.pp_hub = pp_hub
     app.state.spreads_bus = (
         bus  # 018 — collector 역할도 GET /spreads 는 메모리가 아니라 Redis 를 읽는다
     )
@@ -448,6 +462,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await hub.aclose()  # 접속자 전원 1001
         await gap_publisher.aclose()  # 048 — 같은 규칙
         await gap_hub.aclose()
+        await pp_publisher.aclose()  # 049 — 같은 규칙
+        await pp_hub.aclose()
         await handoff.aclose()  # 큐에 남은 틱을 Redis 로 한 번씩 보내 본다(총 5초 상한)
         if flusher is not None:
             await flusher.aclose()
@@ -652,6 +668,7 @@ def create_app() -> FastAPI:
     app.include_router(history_router)
     app.include_router(spreads_ws_router)
     app.include_router(gap_ws_router)  # 048 — /ws/gap 도 두 역할 모두
+    app.include_router(pp_ws_router)  # 049 — /ws/pp 도 두 역할 모두
     app.include_router(spreads_router)
     app.include_router(landing_router)
     if api_only:
