@@ -142,6 +142,91 @@ def test_stream_premium_closes_the_connection_when_the_reader_stops_early(
     assert (resp.released, resp.closed) == (0, 1)
 
 
+PREMIUM_BASE_CSV = (
+    ",result,table,_time,_value,_field,dom,fx\r\n"
+    f",_result,0,{_iso(T0)},0.5,fwd,upbit,binance\r\n"
+    f",_result,0,{_iso(T0 + 1)},0.6,fwd,upbit,binance\r\n"
+    f",_result,1,{_iso(T0)},-0.7,rev,upbit,binance\r\n"
+    "\r\n"
+    # 표 모양이 바뀌어 열 순서가 달라도 이름으로 찾는다
+    ",result,table,fx,dom,_field,_value,_time\r\n"
+    f",_result,2,okx,bithumb,fwd,1e-07,{_iso(T0 + 5)}\r\n"
+    "\r\n"
+)
+
+
+def test_stream_premium_base_reads_every_pair_of_one_coin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 084 §3.3 — 코인 하나의 모든 거래소 쌍을 (dom, fx, field, ts, value) 로
+    for chunk in (1, 3, 64 * 1024):
+        client, resp, fluxes = _client(monkeypatch, PREMIUM_BASE_CSV, chunk)
+        got = list(client.stream_premium_base(base="btc", start=T0, stop=T0 + 60))
+        assert got == [
+            ("upbit", "binance", "fwd", T0, 0.5),
+            ("upbit", "binance", "fwd", T0 + 1, 0.6),
+            ("upbit", "binance", "rev", T0, -0.7),
+            ("bithumb", "okx", "fwd", T0 + 5, 1e-07),
+        ], chunk
+        assert (resp.released, resp.closed) == (1, 0)
+    flux = fluxes[0]
+    assert "pivot(" not in flux and "group(" not in flux and "sort(" not in flux
+    assert 'r.base == "BTC"' in flux and "r.dom ==" not in flux
+    assert '(r._field == "fwd" or r._field == "rev")' in flux
+    assert 'keep(columns: ["_time", "_value", "_field", "dom", "fx"])' in flux
+
+
+def test_stream_premium_base_error_table_midway_is_a_storage_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    text = (
+        ",result,table,_time,_value,_field,dom,fx\r\n"
+        f",_result,0,{_iso(T0)},0.5,fwd,upbit,binance\r\n"
+        "\r\n"
+        ",error,reference\r\n"
+        ",query exceeded memory limit,\r\n"
+    )
+    client, resp, _ = _client(monkeypatch, text)
+    with pytest.raises(InfluxUnavailableError):
+        list(client.stream_premium_base(base="BTC", start=T0, stop=T0 + 60))
+    assert (resp.released, resp.closed) == (0, 1)
+    cut = f",result,table,_time,_value,_field,dom,fx\r\n,_result,0,{_iso(T0)},0.5,fw"
+    client, resp, _ = _client(monkeypatch, cut)
+    with pytest.raises(InfluxUnavailableError):
+        list(client.stream_premium_base(base="BTC", start=T0, stop=T0 + 60))
+
+
+def test_premium_day_counts_sums_pairs_per_coin_and_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 084 §3.6 — 시리즈(쌍)마다 1일 창 count 를 코인·날로 더한다
+    d = 20_000 * 86_400
+    text = (
+        ",result,table,_time,_value,base\r\n"
+        f",_result,0,{_iso(d)},10,BTC\r\n"
+        f",_result,0,{_iso(d + 86_400)},5,BTC\r\n"
+        f",_result,1,{_iso(d)},7,BTC\r\n"
+        f",_result,2,{_iso(d)},3,ETH\r\n"
+        "\r\n"
+    )
+    client, _, fluxes = _client(monkeypatch, text)
+    assert client.premium_day_counts(start=0, stop=d + 2 * 86_400) == [
+        ("BTC", d, 17),
+        ("BTC", d + 86_400, 5),
+        ("ETH", d, 3),
+    ]
+    flux = fluxes[0]
+    assert 'r._field == "fwd"' in flux and "r.base ==" not in flux
+    assert (
+        'aggregateWindow(every: 1d, fn: count, createEmpty: false, timeSrc: "_start")'
+        in flux
+    )
+    assert "pivot(" not in flux
+    client, _, fluxes = _client(monkeypatch, text)
+    client.premium_day_counts(start=0, stop=d, base="eth")
+    assert 'r.base == "ETH"' in fluxes[0]
+
+
 def test_events_list_query_reads_only_the_listed_fields_without_group_or_sort(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

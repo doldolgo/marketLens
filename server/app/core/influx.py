@@ -784,6 +784,68 @@ from(bucket: "{self.bucket}")
                 )
             yield cells[ib], cells[ifd], _epoch_fast(cells[it]), float(cells[iv])
 
+    def stream_premium_base(
+        self, *, base: str, start: int, stop: int
+    ) -> Iterator[tuple[str, str, str, int, float]]:
+        """코인 하나의 [start, stop) premium 을 `(dom, fx, field, ts, value)` 로 — 모든 거래소 쌍, pivot·group·sort 없음.
+
+        사건 백필(084 §3.3)이 같은 초의 쌍들을 틱 하나로 묶는다. 같은 (dom, fx, field) 의 점은 한 줄기로 시각
+        오름차순이 이어서 온다(줄기 순서는 정하지 않는다). 도중 실패는 `InfluxUnavailableError`.
+        """
+        flux = f"""
+from(bucket: "{self.bucket}")
+  |> range(start: {_rfc3339(start)}, stop: {_rfc3339(stop)})
+  |> filter(fn: (r) => r._measurement == "premium" and r.base == "{_esc_flux(base.upper())}" and (r._field == "fwd" or r._field == "rev"))
+  |> keep(columns: ["_time", "_value", "_field", "dom", "fx"])
+"""
+        seen: dict[str, int] | None = None
+        idom = ifx = ifd = it = iv = 0
+        for cols, cells in self._table_rows(flux):
+            if cols is not seen:
+                seen = cols
+                idom, ifx, ifd, it, iv = (
+                    cols["dom"],
+                    cols["fx"],
+                    cols["_field"],
+                    cols["_time"],
+                    cols["_value"],
+                )
+            yield (
+                cells[idom],
+                cells[ifx],
+                cells[ifd],
+                _epoch_fast(cells[it]),
+                float(cells[iv]),
+            )
+
+    def premium_day_counts(
+        self, *, start: int, stop: int, base: str | None = None
+    ) -> list[tuple[str, int, int]]:
+        """[start, stop) 의 premium 점 수를 (코인, UTC 날 시작, fwd 점 수) 로 — 거래소 쌍을 합친다 (084 §3.6 조각 나누기).
+
+        시리즈마다 1일 창 count 라 Influx 가 저장소에서 접어 준다(점을 올리지 않는다). 점 없는 날은 없다.
+        """
+        base_clause = (
+            f' and r.base == "{_esc_flux(base.upper())}"' if base is not None else ""
+        )
+        flux = f"""
+from(bucket: "{self.bucket}")
+  |> range(start: {_rfc3339(start)}, stop: {_rfc3339(stop)})
+  |> filter(fn: (r) => r._measurement == "premium" and r._field == "fwd"{base_clause})
+  |> aggregateWindow(every: 1d, fn: count, createEmpty: false, timeSrc: "_start")
+  |> keep(columns: ["_time", "_value", "base"])
+"""
+        sums: dict[tuple[str, int], int] = {}
+        seen: dict[str, int] | None = None
+        ib = it = iv = 0
+        for cols, cells in self._table_rows(flux):
+            if cols is not seen:
+                seen = cols
+                ib, it, iv = cols["base"], cols["_time"], cols["_value"]
+            key = (cells[ib], _epoch_fast(cells[it]))
+            sums[key] = sums.get(key, 0) + int(cells[iv])
+        return sorted((b, day, n) for (b, day), n in sums.items())
+
     def _table_rows(self, flux: str) -> Iterator[tuple[dict[str, int], list[str]]]:
         """헤더 CSV 를 흘려 읽어 행마다 (열 이름 → 칸 번호, 칸) — 표 모양이 바뀌면 빈 줄 뒤에 헤더가 다시 온다.
 
