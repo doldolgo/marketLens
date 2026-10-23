@@ -33,6 +33,7 @@ marketlens/
       uptime-monitor.md       외부 uptime 감시 등록 (사람용, 025)
       cloudwatch.md           CloudWatch 에이전트·경보·canary·로그 전송 설치 (사람용, 027)
       admin-access.md         관리자 페이지 Cloudflare Access·Tunnel 설정 기록·토큰 교체·접속 기록 회전 (사람용, 030)
+      redis-auth.md           Redis 비밀번호 켜기(collect·serve 먼저, data 마지막)·확인·되돌리기·값 바꾸기 (사람용, 021)
       clarity.md              Clarity 대시보드 설정·켜고 끄기·삭제 요청(프로젝트 통째 삭제) (사람용, 033)
       google-analytics.md     GA4 속성 만들기·방침에 맞춘 설정값·켜고 끄기·삭제 요청 (사람용, 075)
   server/                     FastAPI 앱 (Python 3.12)
@@ -106,7 +107,7 @@ marketlens/
 | 018 | spreads-serve | DONE | `GET /spreads` 를 `api` 가 Redis `spreads:latest` 로 답하고 nginx `/api/spreads` 를 `api` 로 — 스프레드 탭이 보는 컨테이너는 api 하나, `notional` 쿼리 삭제, 요청마다 `spreads:want` 갱신 (BE·인프라) |
 | 019 | bybit | DONE | 바이빗 USDT 현물 추가 — WS 3샤드 orderbook.200(스냅샷+델타, 행 발행은 저장소 읽기 직전)+publicTrade, instruments-info 매초, 입출금(HMAC), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗), `/history/*` `fx=bybit`, web 표시명·기록 탭 Bybit 실데이터 |
 | 020 | bitget | DONE | 비트겟 USDT 현물 추가 — WS 3샤드 books15(스냅샷)+trade, symbols 매초, 입출금(public·키 없음), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟), `/history/*` `fx=bitget`, web 표시명·기록 탭 Bitget 실데이터 |
-| 021 | infra-split | DONE | EC2 3대 분리 — compose profile 3개(collect=server c7g.medium / data=redis·influxdb t4g.small / serve=api·web·caddy + tunnel=cloudflared t4g.micro), 박스 간 사설 IP(루트 .env DATA_HOST·COLLECT_HOST), nginx 업스트림 주입, 배포 3타깃(data→collect→serve), 런북 ec2-split.md (인프라) |
+| 021 | infra-split | DONE | EC2 3대 분리 — compose profile 3개(collect=server c7g.medium / data=redis·influxdb t4g.small / serve=api·web·caddy + tunnel=cloudflared t4g.micro), 박스 간 사설 IP(루트 .env DATA_HOST·COLLECT_HOST), nginx 업스트림 주입, 배포 3타깃(data→collect→serve), 런북 ec2-split.md, Redis 비밀번호(`REDIS_PASSWORD` 가 있을 때만 — 켜기는 런북 redis-auth.md) (인프라) |
 | 022 | landing | DONE | 정적 HTML 랜딩 `/` — 실시간 경로 카드·7일 사건·김프 뜻·계산 방법·질문과 답, 요약 API `GET /landing`(api), 대시보드는 `/app/`. 검색 구성(검색어 제목·설명·h1, JSON-LD, data-nosnippet, 자체 서브셋 글꼴, 아이콘, robots·sitemap, 대시보드 noindex, 404, www 301) |
 | 023 | domain-tls | DONE | `kimptrack.com`·`www` HTTPS — serve 박스에 caddy 컨테이너(호스트 80·443, Let's Encrypt 자동 발급·갱신, 볼륨 보존), web 은 호스트 비공개, `www` 는 apex 로 301(022), 탄력 IP 직접 접속은 평문 유지(noindex), DNS 는 Cloudflare(프록시 끔) (인프라·serve 전용) |
 | 024 | wallet-history | DONE | 틱 입출금 4상태 = 006 망 판정값 + 망 이름 2개 → 1분봉·사건 점 `net_dom`·`net_fx`, `/history/candles`·`events` 에 `netDom`·`netFx`, 기록 탭 읽기 줄·사건 표·로그에 망 표시 |

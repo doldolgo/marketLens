@@ -57,7 +57,7 @@
 
 ### 3.4 계층 ② — Redis
 - 컨테이너 `redis`(`redis:7-alpine`, `--appendonly yes`, named volume, 호스트 비노출). 재기동해도 아직 안 옮긴 틱이 남는다.
-- env `REDIS_URL`(기본 `redis://localhost:6379/0`). compose 는 `redis://redis:6379/0` 을 `environment` 로 덮는다. `server/.env.example` 에 키 추가.
+- env `REDIS_URL`(기본 `redis://localhost:6379/0`). compose 는 `redis://redis:6379/0` 을 `environment` 로 덮는다. `server/.env.example` 에 키 추가. 비밀번호는 `REDIS_PASSWORD` — 있을 때만 접속마다 `AUTH default <값>`(021 §3.7).
 - 키는 하나, **Stream `ticks`**. 틱당 엔트리 1건:
   ```
   XADD ticks MAXLEN ~ 10800 * ts <ts> data <gzip JSON>
@@ -103,7 +103,7 @@
 - 기동 순서(001 의 순서에 끼워 넣는다): Influx → Redis 연결 확인(`PING`) → 마켓 우주·스트림 → 011 이력 복원 → 013 사건 복원 → 014 봉 기준점 → **spark 복원** → 틱 루프 → Redis 보내기 태스크 → flusher. 스트림을 복원보다 먼저 여는 것은 스트림 준비가 거의 네트워크 대기라 복원 시간 뒤에 줄 세울 이유가 없어서다(2026-09-28 사람 결정) — 틱은 복원이 다 끝난 뒤에야 만들어지므로 spark 가 복원 전 상태로 갱신되는 일은 없다. 종료는 역순 — 틱 루프(마지막 틱 인계) → 보내기 태스크(큐 비우기) → flusher 취소 → Redis 연결 닫기.
 
 ### 3.8 compose
-- dev(`docker-compose.dev.yml`)·배포(`docker-compose.yml`) 둘 다 `redis` 서비스: `redis:7-alpine`, `--appendonly yes`, named volume. 배포 compose 는 `--maxmemory 600mb --maxmemory-policy noeviction` 을 더 준다(021 §3.1). 배포 compose 는 호스트 비노출 + server 에 `REDIS_URL: redis://redis:6379/0` 오버라이드·`depends_on`. dev compose 는 `6379` 를 호스트에 연다 — 서버가 compose 밖 호스트(:8000)에서 돌아 `REDIS_URL` 기본값으로 붙기 때문(Influx `8086` 과 같은 이유). 배포 가드·기존 컨테이너 무접촉 규칙(007)은 그대로.
+- dev(`docker-compose.dev.yml`)·배포(`docker-compose.yml`) 둘 다 `redis` 서비스: `redis:7-alpine`, `--appendonly yes`, named volume. 배포 compose 는 `--maxmemory 600mb --maxmemory-policy noeviction` 을 더 준다(021 §3.1). 둘 다 명령 끝에 `--requirepass ${REDIS_PASSWORD:-}`(021 §3.7 — 빈 값이면 비밀번호 없음). 배포 compose 는 호스트 비노출 + server 에 `REDIS_URL: redis://redis:6379/0` 오버라이드·`depends_on`. dev compose 는 `6379` 를 호스트에 연다 — 서버가 compose 밖 호스트(:8000)에서 돌아 `REDIS_URL` 기본값으로 붙기 때문(Influx `8086` 과 같은 이유). 배포 가드·기존 컨테이너 무접촉 규칙(007)은 그대로.
 
 ## 4. 검증
 네트워크 없음(Redis 는 fakeredis 로 흉내 — dev 의존성 추가 허용, Influx 는 fake writer).
