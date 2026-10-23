@@ -12,9 +12,12 @@ body { overflow: hidden; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* hover 유틸 — 시안의 style-hover 속성 대응.
-   인라인 스타일보다 우선해야 해서 !important 필요. */
-.hv-txt:hover { color: var(--color-accent-300) !important; }
-.hv-row:hover { background: color-mix(in srgb, #e9e9ed 5%, transparent) !important; }
-.hv-row4:hover { background: color-mix(in srgb, #e9e9ed 4%, transparent) !important; }
-.hv-bd:hover { border-color: var(--color-accent) !important; }
-.hv-bd-txt:hover { border-color: var(--color-accent) !important; color: var(--color-accent-300) !important; }
+   인라인 스타일보다 우선해야 해서 !important 필요.
+   마우스처럼 올릴 수 있는 기기만 — 터치 기기는 누르거나 쓸어 넘긴 자리에 hover 가 남아 행·탭이 밝은 채로 머문다. */
+@media (hover: hover) {
+  .hv-txt:hover { color: var(--color-accent-300) !important; }
+  .hv-row:hover { background: color-mix(in srgb, #e9e9ed 5%, transparent) !important; }
+  .hv-row4:hover { background: color-mix(in srgb, #e9e9ed 4%, transparent) !important; }
+  .hv-bd:hover { border-color: var(--color-accent) !important; }
+  .hv-bd-txt:hover { border-color: var(--color-accent) !important; color: var(--color-accent-300) !important; }
+}

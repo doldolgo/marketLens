@@ -5,7 +5,7 @@ import { useState, type CSSProperties } from 'react'
 import { fmtAgo, fmtKrw, fmtQty, fmtTime } from '../../shared/format'
 import {
   Empty, Pill, Seg, bar, bodyScroll, card, cardLeft, cardRight, cardRow, cardSub, gridHead, gridRow, headCell, kicker, phoneBar, phoneSearch,
-  searchInput, segOpt, type PillTone,
+  searchInput, segOpt, SYMBOL_INPUT, touchSearch, type PillTone,
 } from '../../shared/ui'
 import { oneOf, useUrlState } from '../../shared/urlState'
 import { useViewport } from '../../shared/viewport'
@@ -210,7 +210,7 @@ function RecentRowView({ r }: { r: RecentRow }) {
 }
 
 export default function FlowTab({ active }: { active: boolean }) {
-  const { phone, docScroll } = useViewport()
+  const { phone, docScroll, touch } = useViewport()
   // 창·방향은 URL 쿼리(f.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색은 URL 에 싣지 않는다(033 — Clarity 가 주소를 통째로 싣는다)
   const [win, setWin] = useUrlState<FlowWindow>('f.win', '1h', oneOf(['1h', '6h', '24h']))
   const [dir, setDir] = useUrlState<FlowDir>('f.dir', 'all', oneOf(['all', 'in', 'out']))
@@ -250,8 +250,8 @@ export default function FlowTab({ active }: { active: boolean }) {
         <input className="input" placeholder="코인 심볼 입력 후 Enter" value={q} data-el="search"
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') applySearch(q) }}
-          enterKeyHint="search"
-          style={phone ? { ...phoneSearch, flexBasis: '100%' } : { ...searchInput, width: 200 }} />
+          enterKeyHint="search" {...SYMBOL_INPUT}
+          style={phone ? { ...phoneSearch, flexBasis: '100%' } : { ...(touch ? touchSearch : searchInput), width: 200 }} />
         {status}
       </div>
 
