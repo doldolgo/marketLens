@@ -215,7 +215,7 @@ async def _value(value: Encoded) -> Encoded:
 
 
 async def test_event_cache_bytes_stay_under_the_cap() -> None:
-    assert EVENTS_CACHE_MAX_BYTES == 64 * 1024 * 1024
+    assert EVENTS_CACHE_MAX_BYTES == 160 * 1024 * 1024
     clock = Clock()
     cache = HistoryCache(clock=clock).events
     third = EVENTS_CACHE_MAX_BYTES // 3
