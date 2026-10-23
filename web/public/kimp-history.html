@@ -82,9 +82,11 @@
     .bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 72px; }
     .mark { display: inline-flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
     .mark svg { flex: none; color: var(--accent); }
-    .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 16px; border: 1px solid var(--accent); border-radius: var(--r-md); background: none; color: var(--n100); font-size: 15px; font-weight: 600; white-space: nowrap; }
-    .btn:hover { background: rgba(145, 132, 217, 0.12); }
-    .btn-lg { height: 48px; padding: 0 22px; font-size: 16px; }
+    /* 버튼 — 랜딩과 같다: 보라를 채우고 글자는 배경색(5.4:1, 흰 글자는 3.2:1 이라 안 쓴다), 올릴 때·누를 때 보라 단계 400·500 */
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 18px; border-radius: var(--r-md); background: var(--accent); color: var(--bg); font-size: 15px; font-weight: 700; line-height: 1; white-space: nowrap; }
+    .btn:hover { background: #b5abfc; }
+    .btn:active { background: #968ae0; }
+    .btn-lg { height: 56px; padding: 0 32px; font-size: 18px; }
 
     /* 본문은 가운데 한 칸 — 17px 글자로 34em(578px). h1·h2 처럼 글자가 큰 요소도 같은 왼쪽 선에 서도록 em 이 아니라 px 로 잰다 */
     .doc { padding-block: 48px 96px; --col: 578px; }
@@ -127,6 +129,7 @@
       h1 { font-size: 30px; }
       h2 { font-size: 21px; }
       .doc { padding-block: 32px 72px; }
+      .cta .btn-lg { flex: 1 1 100%; } /* 옆 링크가 어차피 다음 줄로 내려가므로 버튼이 폭을 다 쓴다 */
       .ev thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
       .ev, .ev tbody { display: block; }
       .ev tr { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; padding-block: 12px; border-bottom: 1px solid var(--divider); }
