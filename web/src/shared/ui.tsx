@@ -332,9 +332,11 @@ export function FoldButton({ open, active, onClick, el }: { open: boolean; activ
 export function SortBar({ headers, sortKey, sortDir, onSort, right, els }: {
   headers: Header[]; sortKey: string; sortDir: number; onSort: (k: string) => void; right?: ReactNode; els?: readonly [string, string]
 }) {
+  // 탭 줄 바로 아래 붙는 것은 문서 스크롤 구간만 — 탭 본문이 스스로 스크롤되는 배치(좁은 칸의 기록 순위 카드, 072 §3.9)에서는 붙이면 위에 빈 줄이 생긴다
+  const { docScroll } = useViewport()
   return (
     <div style={{
-      position: 'sticky', top: TAB_BAR_H, zIndex: 2, display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
+      ...(docScroll ? { position: 'sticky', top: TAB_BAR_H, zIndex: 2 } : null), display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
       padding: 'var(--space-2) var(--space-4)', background: 'var(--color-bg)', borderBottom: '1px solid var(--color-neutral-800)',
       fontSize: 12, color: 'var(--color-neutral-500)',
     }}>
