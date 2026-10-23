@@ -65,6 +65,7 @@
 
 ### 3.5 API 문서가 관리자 경로에서 동작하게
 - collect 박스 `server` 에만 env `UVICORN_ROOT_PATH=/api`(compose). 문서 화면이 `/api/openapi.json` 을 부르고 스키마의 서버 주소가 `/api` 가 된다. nginx 가 접두를 뗀 경로(`/health` 등)는 그대로 라우팅되고, 박스 안 `localhost:8000/…` 도 접두 없이 그대로 부른다. 수집기 로그·025 의 500 알림에 찍히는 경로에는 `/api` 가 붙어 보인다(요청 경로는 그대로). api 에는 주지 않는다.
+- 관리자 화면 왼쪽 내비 아래쪽의 'API 문서' 링크가 `/api/docs` 로 간다(066 §3.1).
 - **028 없이 이 설정만 들어가면** 지금 깨져 있는 공개 `/api/docs` 가 제대로 떠서 인터넷에서 Try it out 이 된다 — 그래서 028 머지가 시작 조건이고, 계약 테스트가 "`server` 에 이 env 가 있으면 공개 server 의 `location /api/` 에 `proxy_pass` 가 없다" 를 단언한다.
 - 앱의 문서는 켠 채로 두고 공개에서 막는 것은 028 이다. 문서 화면의 스크립트(Swagger·ReDoc)는 앱 기본값대로 jsDelivr 에서 받는다 — 관리자 출처에서 돌므로 공급망 위험을 빚으로 남긴다(status.md).
 

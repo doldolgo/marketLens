@@ -136,7 +136,7 @@ NAV_LINK = re.compile(
 
 
 def test_every_page_has_the_same_left_nav_shell_with_its_own_link_marked() -> None:
-    """066 §3.1 — 왼쪽 세로 내비(아이콘 + 이름, 지금 페이지 강조, 개요·서버·트래픽 옆 상태 모양 자리), 아래 마지막 갱신·로그아웃,
+    """066 §3.1 — 왼쪽 세로 내비(아이콘 + 이름, 지금 페이지 강조, 개요·서버·트래픽 옆 상태 모양 자리), 아래 마지막 갱신·API 문서(029 §3.5)·로그아웃,
     좁은 화면 ☰, 머리('10초마다 · 시각'), 거르기 칩 줄. 틀(내비·머리 위)과 상세 판은 페이지마다 같은 글자다."""
     shells, sheets = set(), set()
     for page, (home, _, sheet) in PAGES.items():
@@ -153,6 +153,7 @@ def test_every_page_has_the_same_left_nav_shell_with_its_own_link_marked() -> No
         for frag in (
             '<div class="app" id="app" data-menu="closed">',
             '<span id="updated">--:--:--</span>',
+            '<a href="/api/docs" title="API 문서"><svg class="i" aria-hidden="true"><use href="icons.svg#api"/></svg><span>API 문서</span></a>',
             '<a href="/cdn-cgi/access/logout" title="로그아웃">',
             '<button type="button" class="ibtn" id="menu-btn" aria-label="메뉴" aria-expanded="false" aria-controls="side">',
             '<span class="tick">10초마다 · <span id="clock">--:--:--</span></span>',
