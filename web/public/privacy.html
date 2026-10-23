@@ -45,14 +45,15 @@
     [hidden] { display: none !important; }
     .wrap { width: min(1120px, 100% - 64px); margin-inline: auto; }
     .link { color: var(--n100); text-decoration: underline; text-decoration-color: var(--n600); text-underline-offset: 4px; }
-    .link:hover { text-decoration-color: var(--n100); }
+    /* hover 는 마우스처럼 올릴 수 있는 기기만 — 터치 기기는 누르거나 쓸어 넘긴 자리에 남는다 (072 §3.9) */
+    @media (hover: hover) { .link:hover { text-decoration-color: var(--n100); } }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; color: var(--n100); }
 
     .bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 72px; }
     .mark { display: inline-flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
     .mark svg { flex: none; color: var(--accent); }
     .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 16px; border: 1px solid var(--accent); border-radius: var(--r-md); background: none; color: var(--accent); font: inherit; font-size: 15px; font-weight: 600; line-height: 1; white-space: nowrap; cursor: pointer; }
-    .btn:hover { background: rgba(145, 132, 217, 0.12); }
+    @media (hover: hover) { .btn:hover { background: rgba(145, 132, 217, 0.12); } }
     .btn:active { background: rgba(145, 132, 217, 0.22); }
 
     /* 본문은 가운데 한 칸 — 17px 글자로 약 47em(800px). h1·h2 처럼 글자가 큰 요소도 같은 왼쪽 선에 서도록 em 이 아니라 px 로 잰다 */
@@ -117,7 +118,7 @@
     .more > summary::-webkit-details-marker { display: none; }
     .more > summary::after { content: ""; width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); }
     .more[open] > summary::after { transform: translateY(2px) rotate(225deg); }
-    .more > summary:hover { color: var(--n100); }
+    @media (hover: hover) { .more > summary:hover { color: var(--n100); } }
     .more h4 { margin: 24px 0 0; font-size: 16px; line-height: 1.5; }
 
     .foot { padding-block: 32px 48px; border-top: 1px solid var(--divider); font-size: 13px; color: var(--n500); }

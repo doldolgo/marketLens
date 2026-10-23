@@ -3,17 +3,17 @@
 // matchMedia 의 change 로만 다시 그린다 — 창 크기를 끄는 동안 매 픽셀 다시 그리지 않는다.
 import { useSyncExternalStore } from 'react'
 
-/** 이 폭 이하 = 폰 배치(카드 행·필터 접기·KPI 격자·짧은 탭 이름). 정적 페이지들의 폰 경계와 같다. */
+/** 이 폭 이하 = 폰 배치(카드 행·필터 접기·KPI 격자·짧은 탭 이름). 정적 페이지들의 폰 경계와 같다. 가로로 눕힌 폰(터치 + 높이 ≤ 560)도 폰 배치다. */
 export const PHONE_MAX = 719
 /** 이 폭 이하 = 두 줄 헤더 + 메뉴. 한 줄 헤더는 1080px 아래에서 넘친다. */
 export const COMPACT_MAX = 1079
-/** 이 높이 이하 = 문서 스크롤(가로로 눕힌 폰). */
+/** 이 높이 이하 = 문서 스크롤(가로로 눕힌 폰·낮은 창). 터치 기기면 폰 배치까지. */
 export const SHORT_MAX_H = 560
 /** 문서 스크롤 때 화면 위에 붙는 탭 줄 높이 — 그 아래 붙는 정렬 줄의 top. */
 export const TAB_BAR_H = 40
 
 export interface Viewport {
-  /** 폭 ≤ 719 */
+  /** 폭 ≤ 719, 또는 터치 기기이면서 높이 ≤ 560(가로로 눕힌 폰 — 넓은 표·필터 줄이 화면 높이를 다 먹고 표 머리가 붙지 않았다, 072 §3.1) */
   phone: boolean
   /** 폭 ≤ 1079 — 두 줄 헤더 */
   compact: boolean
@@ -27,7 +27,7 @@ const QUERIES = [`(max-width: ${PHONE_MAX}px)`, `(max-width: ${COMPACT_MAX}px)`,
 
 // 조합 16가지를 미리 만들어 둔다 — useSyncExternalStore 는 같은 상태면 같은 객체를 돌려받아야 다시 그리지 않는다
 const STATES: Viewport[] = Array.from({ length: 16 }, (_, bits) => {
-  const phone = (bits & 1) !== 0
+  const phone = (bits & 1) !== 0 || ((bits & 4) !== 0 && (bits & 8) !== 0)
   return { phone, compact: phone || (bits & 2) !== 0, docScroll: phone || (bits & 4) !== 0, touch: (bits & 8) !== 0 }
 })
 const WIDE: Viewport = STATES[0]

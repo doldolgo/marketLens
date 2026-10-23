@@ -74,7 +74,8 @@
     [hidden] { display: none !important; }
     .wrap { width: min(1120px, 100% - 64px); margin-inline: auto; }
     .link { color: var(--n100); text-decoration: underline; text-decoration-color: var(--n600); text-underline-offset: 4px; }
-    .link:hover { text-decoration-color: var(--n100); }
+    /* hover 는 마우스처럼 올릴 수 있는 기기만 — 터치 기기는 누르거나 쓸어 넘긴 자리에 남는다 (072 §3.9) */
+    @media (hover: hover) { .link:hover { text-decoration-color: var(--n100); } }
     .up { color: var(--up); }
     .down { color: var(--down); }
     .flat { color: var(--n400); }
@@ -84,7 +85,7 @@
     .mark svg { flex: none; color: var(--accent); }
     /* 버튼 — 랜딩과 같다: 보라를 채우고 글자는 배경색(5.4:1, 흰 글자는 3.2:1 이라 안 쓴다), 올릴 때·누를 때 보라 단계 400·500 */
     .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 18px; border-radius: var(--r-md); background: var(--accent); color: var(--bg); font-size: 15px; font-weight: 700; line-height: 1; white-space: nowrap; }
-    .btn:hover { background: #b5abfc; }
+    @media (hover: hover) { .btn:hover { background: #b5abfc; } }
     .btn:active { background: #968ae0; }
     .btn-lg { height: 56px; padding: 0 32px; font-size: 18px; }
 
@@ -116,14 +117,14 @@
     .ev .c-sym a { font-weight: 650; color: var(--n100); }
     .ev .c-route, .ev .c-dir, .ev .c-dur, .ev .c-end { color: var(--n300); }
     .ev tbody tr { cursor: pointer; }
-    .ev tbody tr:hover { background: rgba(233, 233, 237, 0.03); }
+    @media (hover: hover) { .ev tbody tr:hover { background: rgba(233, 233, 237, 0.03); } }
     .msg { margin-top: 12px; font-size: 15px; color: var(--n400); }
     .more { margin-top: 20px; }
 
     .foot { padding-block: 32px 48px; border-top: 1px solid var(--divider); font-size: 13px; color: var(--n500); }
     .foot-nav { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-bottom: 16px; font-size: 14px; }
     .foot-nav a { color: var(--n300); }
-    .foot-nav a:hover { color: var(--n100); }
+    @media (hover: hover) { .foot-nav a:hover { color: var(--n100); } }
     @media (max-width: 719px) {
       .wrap { width: min(1120px, 100% - 32px); }
       h1 { font-size: 30px; }

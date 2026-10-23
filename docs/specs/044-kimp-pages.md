@@ -26,7 +26,7 @@
 
 - 공개 nginx(:80)의 정확 일치 위치. `= /<slug>` 는 `try_files /<slug>.html =404` 에 머리 둘을 `always` 로 붙인다 — `Cache-Control: no-cache`(고치면 다음 방문에 바로, 그대로면 304)와 CSP. `/app/<slug>.html` 을 막는 이유는 032 와 같다(dist 의 파일이 `/app/` alias 로 CSP 없이 200 으로 나간다). 정규식 위치는 두지 않는다(028).
 - 모양 — 본문은 내용 폭(최대 1120px) 가운데의 한 칸 578px(17px 기준 34em — 글자가 큰 h1·h2 도 같은 왼쪽 선에 서도록 px). 절 위 구분선도 그 폭으로 가운데에 긋고, 화면 그림·코인 바로 가기는 880px·지난 7일 사건 표는 48em 까지 넓혀 가운데에 둔다(2026-10-09 사람 요구 — 왼쪽으로 치우쳐 보임).
-- 버튼(기록 탭으로 가는 둘 — 상단 바·첫 절)은 랜딩과 같다 — 보라를 채우고 글자는 배경색·700(대비 5.4:1, 흰 글자는 3.2:1 이라 쓰지 않는다), 올렸을 때·눌렀을 때 바탕은 보라 단계 400·500. 상단 바 40px·15px, 첫 절 56px·18px(720px 미만은 줄 폭을 다 쓰고 옆 글 링크는 다음 줄).
+- 버튼(기록 탭으로 가는 둘 — 상단 바·첫 절)은 랜딩과 같다 — 보라를 채우고 글자는 배경색·700(대비 5.4:1, 흰 글자는 3.2:1 이라 쓰지 않는다), 올렸을 때·눌렀을 때 바탕은 보라 단계 400·500 — 올렸을 때 색은 마우스 기기만(072 §3.9, 페이지의 다른 hover 도 같다). 상단 바 40px·15px, 첫 절 56px·18px(720px 미만은 줄 폭을 다 쓰고 옆 글 링크는 다음 줄).
 - CSP — 두 페이지 모두 privacy(032)와 같은 값 `default-src 'none'; connect-src 'self'; img-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self' https://admin.kimptrack.com`. `script-src 'self'` 는 `<head>` 의 같은 출처 파일 셋(§3.2) 몫이고, `connect-src 'self'` 로 kimp-history 의 `/api/landing` 과 그 파일들의 비콘(`/api/attention`·`/api/replay`)이 나간다. 틀(`frame-ancestors`)은 자기 출처와 관리자 화면뿐이다 — 관리자 화면의 덮어 보기(053·065, `kt-overlay=1`)와 재생(074, `kt-replay=1`)이 이 페이지를 틀로 띄운다. 그 밖의 요청(외부 글꼴·그림·스크립트·WebSocket)은 막힌다.
 
 ### 3.2 공통 — 검색 구성

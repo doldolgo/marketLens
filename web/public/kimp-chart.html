@@ -71,14 +71,15 @@
     img { display: block; max-width: 100%; height: auto; }
     .wrap { width: min(1120px, 100% - 64px); margin-inline: auto; }
     .link { color: var(--n100); text-decoration: underline; text-decoration-color: var(--n600); text-underline-offset: 4px; }
-    .link:hover { text-decoration-color: var(--n100); }
+    /* hover 는 마우스처럼 올릴 수 있는 기기만 — 터치 기기는 누르거나 쓸어 넘긴 자리에 남는다 (072 §3.9) */
+    @media (hover: hover) { .link:hover { text-decoration-color: var(--n100); } }
 
     .bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 72px; }
     .mark { display: inline-flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
     .mark svg { flex: none; color: var(--accent); }
     /* 버튼 — 랜딩과 같다: 보라를 채우고 글자는 배경색(5.4:1, 흰 글자는 3.2:1 이라 안 쓴다), 올릴 때·누를 때 보라 단계 400·500 */
     .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 18px; border-radius: var(--r-md); background: var(--accent); color: var(--bg); font-size: 15px; font-weight: 700; line-height: 1; white-space: nowrap; }
-    .btn:hover { background: #b5abfc; }
+    @media (hover: hover) { .btn:hover { background: #b5abfc; } }
     .btn:active { background: #968ae0; }
     .btn-lg { height: 56px; padding: 0 32px; font-size: 18px; }
 
@@ -104,13 +105,13 @@
     .shot figcaption { margin-top: 12px; font-size: 13px; line-height: 1.6; color: var(--n400); }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 20px; }
     .grid a { display: block; padding: 14px 16px; border: 1px solid var(--divider); border-radius: var(--r-md); background: var(--surface); color: var(--n100); font-weight: 600; }
-    .grid a:hover { border-color: var(--accent); }
+    @media (hover: hover) { .grid a:hover { border-color: var(--accent); } }
     .grid small { display: block; margin-top: 2px; font-size: 13px; font-weight: 400; color: var(--n400); }
 
     .foot { padding-block: 32px 48px; border-top: 1px solid var(--divider); font-size: 13px; color: var(--n500); }
     .foot-nav { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-bottom: 16px; font-size: 14px; }
     .foot-nav a { color: var(--n300); }
-    .foot-nav a:hover { color: var(--n100); }
+    @media (hover: hover) { .foot-nav a:hover { color: var(--n100); } }
     @media (max-width: 719px) {
       .wrap { width: min(1120px, 100% - 32px); }
       h1 { font-size: 30px; }

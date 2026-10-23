@@ -141,7 +141,8 @@
     .flat { color: var(--n400); }
     /* 글 속 링크 — 밑줄로 링크임을 보인다 */
     .link { color: var(--n100); text-decoration: underline; text-decoration-color: var(--n600); text-underline-offset: 4px; }
-    .link:hover { text-decoration-color: var(--n100); }
+    /* hover 는 마우스처럼 올릴 수 있는 기기만 — 터치 기기는 누르거나 쓸어 넘긴 자리에 남는다 (072 §3.9) */
+    @media (hover: hover) { .link:hover { text-decoration-color: var(--n100); } }
     /* 그림 속 선 아이콘 — 글자색을 따른다 */
     .ico { flex: none; width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
@@ -150,13 +151,13 @@
     .mark { display: inline-flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
     .mark svg { flex: none; color: var(--accent); }
     .nav { display: flex; gap: 24px; margin-left: auto; font-size: 15px; color: var(--n300); }
-    .nav a:hover { color: var(--n100); }
+    @media (hover: hover) { .nav a:hover { color: var(--n100); } }
     .bar .btn { margin-left: 8px; }
 
     /* 버튼 — 보라를 채우고 글자는 배경색(대비 5.4:1). 테두리만 있는 디자인 시스템 primary 는 어두운 배경에 묻혀 /app/ 로 가는 버튼이 눈에 띄지 않았다.
        채운 보라 위 흰 글자는 대비가 3.2:1 이라 쓰지 않는다. 누를 때·올릴 때 색은 theme.css 보라 단계(400·500), 둘 다 배경색 글자와 4.5:1 이상 */
     .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 18px; border-radius: var(--r-md); background: var(--accent); color: var(--bg); font-size: 15px; font-weight: 700; line-height: 1; white-space: nowrap; }
-    .btn:hover { background: #b5abfc; }
+    @media (hover: hover) { .btn:hover { background: #b5abfc; } }
     .btn:active { background: #968ae0; }
     .btn-lg { height: 56px; padding: 0 32px; font-size: 18px; }
 
@@ -187,7 +188,7 @@
     /* 경로 카드 — 페이지에서 떠 있는 면은 이것 하나다. 값이 오기 전에도 카드 크기를 잡아 둬 아래 글이 밀리지 않게 */
     .card { position: relative; min-height: 480px; border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 0 0 1px var(--n700), 0 28px 64px rgba(0, 0, 0, 0.55); }
     .card-link { display: block; padding: 28px 32px 30px; border-radius: inherit; }
-    .card-link:hover { background: rgba(233, 233, 237, 0.025); }
+    @media (hover: hover) { .card-link:hover { background: rgba(233, 233, 237, 0.025); } }
     .card-link:focus-visible { outline-offset: 4px; border-radius: var(--r-lg); }
     .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; font-size: 13px; line-height: 1.6; color: var(--n400); }
     .age { color: var(--n500); text-align: right; }
@@ -230,7 +231,7 @@
     .next-title { padding: 0 2px 8px; font-size: 13px; color: var(--n400); }
     .next ol { list-style: none; padding: 0; border-top: 1px solid var(--divider); }
     .next a { display: grid; grid-template-columns: minmax(0, 7.5em) minmax(0, 1fr) auto; gap: 16px; align-items: baseline; padding: 11px 2px; border-bottom: 1px solid var(--divider); }
-    .next a:hover { background: rgba(233, 233, 237, 0.03); }
+    @media (hover: hover) { .next a:hover { background: rgba(233, 233, 237, 0.03); } }
     .n-sym { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
     .n-route { font-size: 15px; color: var(--n400); }
     .n-pct { font-weight: 600; text-align: right; }
@@ -292,7 +293,7 @@
     .ev .c-sym a { font-weight: 650; }
     .ev .c-route, .ev .c-dir, .ev .c-dur, .ev .c-end { color: var(--n300); }
     .ev tbody tr { cursor: pointer; }
-    .ev tbody tr:hover { background: rgba(233, 233, 237, 0.03); }
+    @media (hover: hover) { .ev tbody tr:hover { background: rgba(233, 233, 237, 0.03); } }
     .ev-title { margin-top: 56px; }
 
     /* 김프·역프 — 같은 가격 축 위의 두 점. 점 사이가 김프(국내가 비쌈, 빨강)·역프(국내가 쌈, 파랑) */
@@ -342,7 +343,7 @@
     .qa { border-bottom: 1px solid var(--divider); }
     .qa summary { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-block: 18px; cursor: pointer; list-style: none; }
     .qa summary::-webkit-details-marker { display: none; }
-    .qa summary:hover h3 { color: var(--n100); }
+    @media (hover: hover) { .qa summary:hover h3 { color: var(--n100); } }
     .qa summary::after { content: ""; flex: none; width: 9px; height: 9px; margin-right: 4px; border-right: 1.6px solid var(--n400); border-bottom: 1.6px solid var(--n400); transform: translateY(-3px) rotate(45deg); }
     .qa[open] summary::after { transform: translateY(2px) rotate(225deg); }
     .qa h3 { font-weight: 600; }
@@ -351,7 +352,7 @@
     /* 바닥 — 바로 가기, 참고값 안내 */
     .foot { display: grid; gap: 14px; padding-block: 32px 48px; border-top: 1px solid var(--divider); font-size: 13px; color: var(--n500); }
     .foot-nav { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 15px; color: var(--n300); }
-    .foot-nav a:hover { color: var(--n100); }
+    @media (hover: hover) { .foot-nav a:hover { color: var(--n100); } }
     /* 032 — 방침 링크는 바닥에서 가장 밝고 굵게(작성지침: 다른 고지와 구분해 보이게) */
     .foot-nav .foot-privacy { color: var(--n100); font-weight: 700; }
     .foot .notice { color: var(--n400); }
