@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     influx_token: str | None = None
     # 틱 버퍼 Redis(009) — compose 안에서는 redis://redis:6379/0 으로 덮는다. 불달이어도 앱은 뜬다.
     redis_url: str = "redis://localhost:6379/0"
+    # Redis 비밀번호(021 §3.7) — 사람이 세 박스 server/.env 에 같은 값으로 넣는다. 있으면 접속마다 `AUTH default <값>`,
+    # 비면 인증 없이 붙는다(지금 운영). data 박스 compose 는 같은 키로 `--requirepass` 를 준다. URL 에 넣지 않는다 — 기동 경고가 URL 을 찍는다
+    redis_password: str | None = None
     # S3 원문 아카이브(010) — 버킷이 없으면 원문 싱크가 무동작이고 앱은 뜬다.
     # AWS 키는 env 에 두지 않는다: SDK 기본 탐색(~/.aws, EC2 IAM 역할)을 쓴다.
     s3_bucket: str | None = None

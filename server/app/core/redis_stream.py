@@ -1,6 +1,6 @@
 """Redis Stream `ticks` 클라이언트 — 연결·XADD·XRANGE·XDEL (스펙 009 §3.4).
 
-redis 라이브러리를 import 하는 곳은 이 모듈뿐이다. 인계기·flusher 는 아래 메서드에만 의존하고,
+redis 라이브러리를 import 하는 곳은 이 모듈과 `redis_bus.py` 둘뿐이다. 인계기·flusher 는 아래 메서드에만 의존하고,
 테스트는 fakeredis 의 asyncio 클라이언트를 같은 자리에 꽂는다(Redis 를 띄우지 않는다).
 명령 자동 재시도는 끈다 — 실패는 그 자리에서 호출자(§3.3 버림·§3.5 회차 실패)가 처리한다.
 """
@@ -21,6 +21,19 @@ MAXLEN = 10_800
 PAGE = 1_000  # XRANGE 페이지·XDEL 묶음 크기
 CONNECT_TIMEOUT_SEC = 2.0
 SOCKET_TIMEOUT_SEC = 5.0
+# 비밀번호와 함께 보내는 사용자 이름(021 §3.7) — 비밀번호가 없을 때의 Redis 사용자와 같다
+AUTH_USERNAME = "default"
+
+
+def auth_kwargs(password: str | None) -> dict[str, str]:
+    """`REDIS_PASSWORD` 가 있을 때만 접속마다 `AUTH default <값>` — 비면 지금처럼 인증 없이 (021 §3.7).
+
+    사용자 이름을 함께 보내는 3인자 AUTH 는 비밀번호가 없는(nopass) Redis 도 받아 준다 — 클라이언트에 값을 먼저 넣고
+    Redis 를 나중에 켜도 끊기지 않는다(runbooks/redis-auth.md). 비밀번호만 보내는 2인자 AUTH 는 nopass 서버가 거절한다.
+    """
+    if not password:
+        return {}
+    return {"username": AUTH_USERNAME, "password": password}
 
 
 @dataclass(frozen=True)
@@ -37,14 +50,15 @@ class RedisTickStream:
         self._client = client
 
     @classmethod
-    def from_url(cls, url: str) -> "RedisTickStream":
-        """생성은 연결하지 않는다(lazy). 명령마다 필요하면 다시 연결한다."""
+    def from_url(cls, url: str, password: str | None = None) -> "RedisTickStream":
+        """생성은 연결하지 않는다(lazy). 명령마다 필요하면 다시 연결한다. `password` 는 `auth_kwargs` 규칙."""
         return cls(
             aioredis.from_url(
                 url,
                 socket_connect_timeout=CONNECT_TIMEOUT_SEC,
                 socket_timeout=SOCKET_TIMEOUT_SEC,
                 retry=Retry(NoBackoff(), 0),
+                **auth_kwargs(password),
             )
         )
 

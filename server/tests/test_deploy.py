@@ -190,6 +190,29 @@ def test_compose_redis_caps_memory_without_evicting_and_the_tick_stream_fits() -
     assert influx_limit + maxmemory <= 2 * 1024 * 1024 * 1024
 
 
+def test_compose_redis_requires_a_password_only_when_redis_password_is_set() -> None:
+    """021 §3.7 — redis 는 `--requirepass ${REDIS_PASSWORD:-}`(빈 값 = 비밀번호 없음 — 값을 넣기 전 운영 그대로).
+
+    값의 출처는 server/.env 하나다: data 는 --env-file 치환, server·api 는 env_file. compose 의 environment 로 따로 주지
+    않고 URL 에도 넣지 않는다(기동 경고가 URL 을 찍는다). 비어 있어도 되는 키라 배포 가드에 없다.
+    """
+    for rel in ("docker-compose.yml", "docker-compose.dev.yml"):
+        command = _yaml(rel)["services"]["redis"]["command"]
+        assert command[-2:] == ["--requirepass", "${REDIS_PASSWORD:-}"], rel
+    services = _yaml("docker-compose.yml")["services"]
+    for name, svc in services.items():
+        assert "REDIS_PASSWORD" not in (svc.get("environment") or {}), name
+    for name in ("server", "api"):
+        assert services[name]["env_file"] == ["./server/.env"]
+        assert "@" not in services[name]["environment"]["REDIS_URL"], name
+    assert "REDIS_PASSWORD" not in _text(".github/workflows/deploy.yml")
+    # 예시에는 빈 값 한 줄 — 복사한 server/.env 는 지금처럼 인증 없이 뜬다
+    example = _text("server/.env.example")
+    assert [ln for ln in example.splitlines() if ln.startswith("REDIS_PASSWORD")] == [
+        "REDIS_PASSWORD="
+    ]
+
+
 def test_compose_storage_containers_persist_and_match_dev_setup() -> None:
     compose = _yaml("docker-compose.yml")
     influx = compose["services"]["influxdb"]
