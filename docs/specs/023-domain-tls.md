@@ -8,9 +8,9 @@
 `https://kimptrack.com` 으로 연다. 지금은 탄력 IP 를 평문으로 치는데, 도메인이 없으면 공유가 안 되고 HTTPS 가 없으면 브라우저가 "안전하지 않음" 을 띄우고 클립보드·알림 같은 API 가 막힌다. 인증서 발급·갱신은 사람 손을 타지 않아야 한다 — 3개월마다 만료되는 인증서를 사람이 갱신하면 언젠가 잊는다.
 
 ## 2. 범위
-- 만드는 것: serve 박스 compose 에 `caddy` 컨테이너 하나(호스트 80·443), 루트 `Caddyfile`, 배포 계약 테스트. DNS 레코드는 Cloudflare 에 이미 있다(A `kimptrack.com`·`www` → `3.34.104.16`, 프록시 끔 — 인증서 발급을 원본이 직접 받도록).
-- 하지 않는 것: Cloudflare 프록시(주황 구름)·HSTS·HTTP/3·ALB·ACM. 백엔드 코드 변경 없음. 배포 워크플로 변경 없음(`--profile serve` 가 caddy 도 띄운다).
-- 바꾸는 기존 것: 호스트 포트 `WEB_PORT` 를 잡는 컨테이너가 web(nginx) 에서 caddy 로 바뀐다. web 은 호스트에 열지 않고 caddy 만 부른다. serve 보안그룹에 443 이 열린다(2026-09-25 열어 둠).
+- 만드는 것: serve 박스 compose 에 `caddy` 컨테이너 하나(호스트 80·443), `caddy/Caddyfile`(디렉터리째 바인드 — 027), 배포 계약 테스트. DNS 레코드는 Cloudflare 에 이미 있다(A `kimptrack.com`·`www` → `3.34.104.16`, 프록시 끔 — 인증서 발급을 원본이 직접 받도록).
+- 하지 않는 것: 루트·www 의 Cloudflare 프록시(주황 구름 — `admin.kimptrack.com` 만 터널용 프록시 CNAME, 030)·HSTS·HTTP/3·ALB·ACM. 백엔드 코드 변경 없음.
+- 바꾸는 기존 것: 호스트 포트 `WEB_PORT` 를 잡는 컨테이너가 web(nginx) 에서 caddy 로 바뀐다. web 은 호스트에 열지 않고 caddy 만 부른다. serve 보안그룹에 443 이 열린다(2026-09-25 열어 둠). serve 배포는 `--profile serve` 로 caddy 도 띄우고, `up` 뒤 `caddy reload` 로 설정을 다시 읽는다(027 — 정의가 안 바뀐 caddy 는 compose 가 다시 만들지 않는다).
 
 ## 3. 동작
 
@@ -31,14 +31,15 @@
 - 첫 발급은 컨테이너 기동 뒤 백그라운드 — 그 몇 초 동안 https 는 안 열리지만 평문 경로는 바로 산다.
 
 ### 3.3 헤더
-- caddy 는 `X-Forwarded-For`·`X-Forwarded-Proto: https` 를 붙여 nginx 로 넘기지만, nginx 가 자기 `$scheme`(http)·`$remote_addr`(caddy 의 컨테이너 IP) 로 **덮어쓴다**. 백엔드는 이 두 헤더를 읽지 않으므로 지금은 문제가 없다(nginx 가 `absolute_redirect off` 라 리다이렉트 주소도 스킴을 안 탄다). 백엔드가 접속 IP 나 스킴을 쓰게 되는 날 nginx 쪽을 고친다 — 이 스펙은 안 건드린다.
+- caddy 는 `X-Forwarded-For`(방문자 IP)·`X-Forwarded-Proto: https` 를 붙여 nginx 로 넘긴다. nginx 는 `X-Forwarded-Proto` 를 자기 `$scheme`(http)으로, `X-Real-IP` 를 `$remote_addr`(caddy 의 컨테이너 IP)로 **덮어쓰고** `X-Forwarded-For` 에는 그 주소를 덧붙인다. 백엔드는 스킴을 읽지 않는다(nginx 가 `absolute_redirect off` 라 리다이렉트 주소도 스킴을 안 탄다). 방문자 IP 를 쓰는 경로는 `/api/attention`·`/api/replay` 둘이고, 거기서만 nginx 가 caddy 의 `X-Forwarded-For` 를 그대로 `X-Client-IP` 로 넘긴다(052·073 — caddy 에 `trusted_proxies` 가 없어 그 값은 방문자 IP 하나다).
+- 도메인 블록(`kimptrack.com`)은 접속 로그를 남기고(027 §3.2 — 호스트 `logs/caddy/`, IP 는 전체(069), 검색어·헤더는 지운다, 폴링·비콘 경로는 뺀다) 응답에 `Referrer-Policy: strict-origin` 을 붙인다 — 브라우저가 같은 출처 요청에 검색어가 든 전체 주소를 Referer 로 보내지 않게. www 리다이렉트와 `http://` catch-all 은 기록하지 않는다.
 
 ### 3.4 로컬
 - `COMPOSE_PROFILES=collect,data,serve WEB_PORT=8090 …` 통합 기동은 그대로 된다. 다만 caddy 가 `kimptrack.com` 인증서를 받으려다 실패하는 로그가 몇 분 간격으로 남는다(로컬로는 도메인이 안 풀리므로). 평문 `http://localhost:8090/` 은 영향 없다. 호스트 443 도 잡으므로 로컬에서 443 을 쓰는 다른 것이 있으면 충돌한다.
 
 ## 4. 검증
-- `pytest server/tests/test_deploy.py` — 컨테이너 여섯, caddy 가 serve profile·호스트 `WEB_PORT`·443, web 은 호스트 포트 없음, Caddyfile 에 apex 블록 + www(http·https) 301 블록 + `http://` catch-all(`X-Robots-Tag noindex`) + `reverse_proxy web:80` 둘.
-- `docker run --rm -v ./Caddyfile:/etc/caddy/Caddyfile:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile` 이 통과한다.
+- `pytest server/tests/test_deploy.py` — 컨테이너 일곱(030), caddy 가 serve profile·호스트 `WEB_PORT`·443, web 은 호스트 포트 없음, Caddyfile 에 apex 블록 + www(http·https) 301 블록 + `http://` catch-all(`X-Robots-Tag noindex`) + `reverse_proxy web:80` 둘.
+- `docker run --rm -v ./caddy:/etc/caddy:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile` 이 통과한다.
 - 로컬 caddy + 더미 nginx(`web`) 로: `curl -s -o /dev/null -w '%{http_code}' localhost:8090/` = 200, `curl -sI -H 'Host: kimptrack.com' localhost:8090/` = 308 + `Location: https://kimptrack.com/`.
 - 배포 뒤(EC2): `curl -sI https://kimptrack.com/` 200, `curl -sI http://kimptrack.com/` 308, `curl -sI http://3.34.104.16/` 200, 대시보드 `/app/` 스프레드 표가 wss 로 갱신된다(개발자 도구 Network → WS 에 `wss://kimptrack.com/api/ws/spreads`).
 

@@ -6,14 +6,14 @@
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
 
 ## 1. 목적
-스프레드 탭이 받는 데이터가 **전부 `api` 컨테이너에서** 온다. 017 로 표 푸시(`/ws/spreads`)는 이미 `api` 가 맡았지만, `GET /spreads` 만 아직 수집 프로세스가 메모리에서 답한다. 이 스펙이 끝나면 `GET /spreads` 도 `api` 가 Redis 키 `spreads:latest` 를 읽어 답하고, nginx 는 `/api/spreads` 를 `api` 로 보낸다. 수집 프로세스는 스프레드 탭을 위해 HTTP 를 서빙하지 않는다 — 표를 만들어 Redis 에 넣는 것까지가 일이다.
+스프레드 탭이 받는 데이터가 **전부 `api` 컨테이너에서** 온다. 017 로 표 푸시(`/ws/spreads`)는 이미 `api` 가 맡았지만, `GET /spreads` 만 아직 수집 프로세스가 메모리에서 답한다. 이 스펙이 끝나면 `GET /spreads` 도 `api` 가 Redis 키 `spreads:latest` 를 읽어 답한다. 공개 주소에는 이 경로가 없고(028 — 브라우저는 부르지 않는다), 관리자 nginx(029)가 `/api/spreads` 를 `api` 로 보내며, 박스 안에서는 `http://api:8000/spreads` 로 부른다. 수집 프로세스는 스프레드 탭을 위해 HTTP 를 서빙하지 않는다 — 표를 만들어 Redis 에 넣는 것까지가 일이다.
 
 표 **계산**은 수집 프로세스에 남긴다(2026-09-14 결정). 표 한 장에 488종목 × 3거래소 호가창이 필요하고 그건 수집 메모리에만 있다. 계산을 옮기려면 호가창을 매초 Redis 로 퍼 날라야 하는데 메모리가 두 배가 되고 지연이 붙는다. 계산 자체는 회차당 약 50ms(017 §5) 로 가볍다. 비싼 건 서빙이 아니라 수신이다.
 
 이 스펙 뒤 스프레드 탭의 경로는 하나다: **수집 → Redis → api → 브라우저.** Redis 가 죽으면 표는 안 온다 — 이건 이 스펙이 받아들이는 결정이고, 답은 Redis 의 가용성(인프라 제안서)이지 우회 경로가 아니다.
 
 ## 2. 범위
-- 만드는 것: `api` 역할의 `GET /spreads`(Redis 읽기), nginx `/api/spreads` → `api` 분기, `GET /spreads` 가 `spreads:want` 를 갱신하는 규칙
+- 만드는 것: `api` 역할의 `GET /spreads`(Redis 읽기), nginx `/api/spreads` → `api` 분기(관리자 server 만 — 공개에는 없다, 028·029), `GET /spreads` 가 `spreads:want` 를 갱신하는 규칙
 - 하지 않는 것: `/refresh`·`/health`·`/health/collect`·`/history/events`·분석 엔드포인트의 이동(스프레드 탭이 안 쓴다 — 수집 프로세스의 나머지 HTTP 를 떼는 건 후속 스펙), 표 계산의 이동, FE 의 구독 규칙(017 §3.4 그대로), `api` 2대(상태는 이미 없지만 LB·compose 분리는 인프라 제안서)
 - 바꾸는 기존 것: **017 §3.4 — FE 의 5초 폴링 fallback 을 없앤다**(2026-09-15 결정: WebSocket 이 막히면 백오프 재연결만 반복, 브라우저는 `GET /spreads` 를 부르지 않는다). 003 §3.2 — `GET /spreads` 의 `notional` 쿼리(진단용)를 **없앤다**. 표는 017 이 `$1,000` 으로만 만들고 저장하므로 다른 규모의 표는 존재하지 않는다. 종목 하나의 규모별 슬리피지는 004 의 `/analysis/slippage` 가 있다. 003 §3.2 의 404 조건 1·2 는 HTTP 규칙이 아니라 **"표를 만들지 않는 조건"** 이 된다. 016 §3.1 — `api` 서빙 경로에 `/spreads` 추가, Redis 용도에 "키 읽기" 추가. 017 §2 — "`GET /spreads` 는 진단용으로 남긴다(`notional` 쿼리 유지)" 를 이 스펙으로 교체.
 
@@ -36,13 +36,14 @@
 그 외 표 규칙(페어 생성·행 19키·슬리피지·`age`·`status`·`spark`·`warnings`)은 003 §3.2 그대로다.
 
 ### 3.3 프록시 — nginx
-- `/api/spreads`(정확히 이 경로 — 쿼리는 무관하게 따라간다) 를 `api:8000/spreads` 로 보낸다. nginx 의 **정확 일치 location(`= /api/spreads`)** 하나 — 접두 제거(rewrite)·쿼리 유지·프록시 헤더 4개는 016 의 정규식 위치와 같은 방식. `/api/spreads/…` 같은 하위 경로는 없다 — 정확 일치라 그런 요청은 `location /api/` 가 받아 `server` 로 가고 거기서 404 다.
-- `location /api/`(그 외 → `server`)·`/api/ws/`(→ `api`)·`= /api` 404 는 그대로.
-- 배포 뒤 `docker compose stop api` 면 `/api/spreads` 는 **502**(016 §7 의 "stop 된 upstream" 과 같다), `/api/health` 는 200. 016 §4 의 격리 확인("stop api 뒤 `/api/spreads` 정상") 은 이 스펙으로 뒤집힌다 — dev-setup 의 그 문장을 고친다(§6).
+- 공개 server 에는 `/api/spreads` 가 없다 — 028 허용 목록 밖이라 nginx 가 백엔드에 넘기지 않고 404 JSON 으로 답한다(022 의 랜딩도 부르지 않는다). 공개 `/api` 의 나머지는 028 허용 목록이 정한다.
+- 관리자 server(029, :8081)는 `/api/spreads`(정확히 이 경로 — 쿼리는 무관하게 따라간다) 를 `api:8000/spreads` 로 보낸다. **정확 일치 location(`= /api/spreads`)** 하나 — 접두 제거(rewrite)·쿼리 유지는 공개 허용 경로와 같은 모양. `/api/spreads/…` 같은 하위 경로는 없다 — 정확 일치라 그런 요청은 관리자 server 의 `location /api/` 가 받아 수집기로 가고 거기서 404 다.
+- 박스 안에서는 nginx 를 거치지 않고 `http://api:8000/spreads` 로 부른다(serve 박스에서 `docker exec marketlens-web wget -qO- http://api:8000/spreads`, 028).
+- 배포 뒤 `docker compose stop api` 면 관리자 server 의 `/api/spreads` 는 **502**(016 §3.3 의 "stop 된 upstream" 과 같다 — 수 초~60초 뒤 502 또는 504), 공개 `/api/spreads` 는 그대로 404, `/api/health` 는 200.
 
 ### 3.4 역할 계약 — 016 §3.1 에 얹는 것
-- `api` 가 서빙하는 경로: `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles`, `/ws/spreads`, **`/spreads`**, `/landing`(022). 그 외 404 는 유지.
-- `api` 의 Redis 용도: 017 의 채널 구독 + **`spreads:latest` 읽기·`spreads:want` 쓰기**(`GET /spreads`) + `spreads:latest` 읽기만(`GET /landing`, 022)(요청 단위, 연결은 명령마다 lazy — 009 의 클라이언트와 같은 수명). 백그라운드 태스크는 여전히 017 의 구독 태스크 하나.
+- `api` 가 서빙하는 경로: `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles`, `/ws/spreads`·`/ws/gap`(048), **`/spreads`**, `/landing`(022), 그리고 api 에만 있는 관리자 피드·브라우저 수신(029 `/admin/status`, 035 `/admin/access`·`/admin/clarity` 와 그 하위 피드, 052 `POST /attention`·`/admin/attention`, 073 `POST /replay`·`/admin/replay/live`·`sessions`·`session` — 낱낱의 목록은 016 §3.1). 그 외 404 는 유지.
+- `api` 의 Redis 용도: 017·048 의 채널 구독 + **`spreads:latest` 읽기·`spreads:want` 쓰기**(`GET /spreads`) + `spreads:latest` 읽기만(`GET /landing`, 022)(요청 단위, 연결은 명령마다 lazy — 009 의 클라이언트와 같은 수명) + 그 밖의 관리자 피드·수신 용도(016 §3.1). 백그라운드 태스크는 017 구독 태스크(표마다 1개 — `spreads`·`gap`(048), 구독은 각각 접속자가 있을 때만) + 접속마다 보내기 태스크 + 052 화면 영역 통계 10초 묶음 쓰기 태스크 1개(끌 때 한 번 더 보낸다) + `SLACK_WEBHOOK_URL` 이 있으면 025 알림 태스크 + `STATSD_ADDR` 가 있으면 027 게이지 태스크.
 
 ### 3.5 엣지
 - **Redis 만 죽음**: `/ws/spreads` 는 `waiting`, `GET /spreads` 는 503 → FE 는 017 §3.4 규칙대로 직전 표를 지우지 않은 채 재연결을 반복한다. 표 갱신은 Redis 가 돌아올 때까지 멈춘다. 수집 프로세스의 메모리에는 표가 있지만 **꺼내는 길을 두지 않는다**(§1 결정).
@@ -58,9 +59,9 @@
 - 두 역할에서 `GET /spreads` 가 메모리를 읽지 않는다 — 메모리에 행이 있고 Redis 키가 없으면 404
 - 게시기: 환율 없음 / 국내 또는 해외 스냅샷 없음 → 그 회차 게시 없음, 경고 없음, 다음 회차에 조건이 풀리면 게시
 - 역할: `api` 라우트 집합에 `/spreads` 포함, 그 외 404 유지 (`tests/test_role.py`)
-- nginx 계약: `/api/spreads` 가 `api:8000` 으로 가고 접두가 제거되며 쿼리가 유지된다, `/api/spreads` 뒤에 붙는 하위 경로는 `server` 로 간다, 프록시 헤더 4개 (`tests/test_deploy.py`)
+- nginx 계약: 공개 server 의 `/api/spreads` 는 028 의 404 JSON 으로 간다(`tests/test_deploy.py`), 관리자 server 의 `/api/spreads` 는 `api:8000` 의 `/spreads` 로 가고 접두가 제거된다(`tests/test_admin.py`)
 - 003 의 기존 `GET /spreads` 테스트(`features/spreads/tests/test_spreads_api.py`)는 메모리 기반이라 이 스펙에 맞게 다시 쓴다 — 표 **계산** 규칙 검증(003·006·008·009·005 의 테스트가 `GET /spreads` 로 표를 받아 보던 곳 전부)은 HTTP 대신 게시기와 같은 함수·직렬화로 만든 표 JSON 을 본다. `test_slippage.py` 의 `?notional=` 범위(422) 테스트는 쿼리가 사라졌으므로 삭제하고, 규모별 슬리피지 비교는 계산 함수로 돌린다
-- 수동(로컬 5컨테이너): DevTools 에서 `/api/ws/` 만 차단하면 브라우저는 `/api/spreads` 를 **부르지 않고** 백오프(1→30초)로 WebSocket 재연결만 반복한다, 차단을 풀면 다음 재연결에 snapshot 이 와 표가 복구된다. curl `localhost:8090/api/spreads` 는 수집이 첫 표를 게시한 뒤부터 200. `docker compose stop api` → `/api/spreads` 502·`/api/health` 200. `stop redis` → `/api/spreads` 503·WS `waiting`·화면은 직전 표 유지. `start redis` 뒤 Redis 가 뜬 뒤 10초 안에 복구(실측 12초 — Redis 기동 포함)
+- 수동(로컬 5컨테이너): DevTools 에서 `/api/ws/` 만 차단하면 브라우저는 `/api/spreads` 를 **부르지 않고** 백오프(1→30초)로 WebSocket 재연결만 반복한다, 차단을 풀면 다음 재연결에 snapshot 이 와 표가 복구된다. 공개 `localhost:8090/api/spreads` 는 404(028)이고, 박스 안 `docker exec marketlens-web wget -qO- http://api:8000/spreads` 는 수집이 첫 표를 게시한 뒤부터 200. `docker compose stop api` → 관리자 server 의 `/api/spreads`(`docker exec marketlens-web wget -qO- http://localhost:8081/api/spreads`) 502·`/api/health` 200. `stop redis` → `GET /spreads` 503·WS `waiting`·화면은 직전 표 유지. `start redis` 뒤 Redis 가 뜬 뒤 10초 안에 복구(실측 12초 — Redis 기동 포함)
 - 수동(EC2): 배포 뒤 `docker logs marketlens-server` 에 `GET /spreads` 접근 로그가 **0건**(nginx 가 안 보낸다), `marketlens-api` 에만 있다
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
