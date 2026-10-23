@@ -153,11 +153,12 @@
     .nav a:hover { color: var(--n100); }
     .bar .btn { margin-left: 8px; }
 
-    /* 버튼 — 디자인 시스템의 primary(보라 테두리·보라 글자). 채운 보라 위 흰 글자는 대비가 3.2:1 이라 쓰지 않는다 */
-    .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 16px; border: 1px solid var(--accent); border-radius: var(--r-md); color: var(--accent); font-size: 15px; font-weight: 600; line-height: 1; white-space: nowrap; }
-    .btn:hover { background: rgba(145, 132, 217, 0.12); }
-    .btn:active { background: rgba(145, 132, 217, 0.22); }
-    .btn-lg { height: 52px; padding: 0 24px; font-size: 17px; }
+    /* 버튼 — 보라를 채우고 글자는 배경색(대비 5.4:1). 테두리만 있는 디자인 시스템 primary 는 어두운 배경에 묻혀 /app/ 로 가는 버튼이 눈에 띄지 않았다.
+       채운 보라 위 흰 글자는 대비가 3.2:1 이라 쓰지 않는다. 누를 때·올릴 때 색은 theme.css 보라 단계(400·500), 둘 다 배경색 글자와 4.5:1 이상 */
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 18px; border-radius: var(--r-md); background: var(--accent); color: var(--bg); font-size: 15px; font-weight: 700; line-height: 1; white-space: nowrap; }
+    .btn:hover { background: #b5abfc; }
+    .btn:active { background: #968ae0; }
+    .btn-lg { height: 56px; padding: 0 32px; font-size: 18px; }
 
     /* 히어로 — 글 5 : 카드 7 */
     .hero { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; align-items: start; padding-block: 64px 112px; }
@@ -378,6 +379,7 @@
       .card { min-height: 400px; }
       .card-link, .card-msg { padding: 22px 20px 24px; }
       .bar .btn { height: 36px; padding: 0 12px; font-size: 14px; }
+      .cta .btn-lg { flex: 1 1 100%; } /* 옆 링크가 어차피 다음 줄로 내려가므로 버튼이 폭을 다 쓴다 */
       .section { padding-block: 64px; }
       .stats { gap: 12px 24px; }
       .stats dd { font-size: 24px; }
