@@ -306,10 +306,13 @@ async def test_contracts_keeps_perpetual_normal_usdt_and_maps_interval() -> None
         contract("XYZUSDT", symbolStatus="maintain"),
         contract("ETHUSDC", quoteCoin="USDC", baseCoin="ETH"),
         contract("TSLAUSDT", isRwa="YES"),  # 토큰화 주식 — 전통 자산은 뺀다 (§3.2)
+        contract("XAUUSDT", isRwa="YES"),  # 금 현물 가격 — 원자재라 뺀다
+        contract("PAXGUSDT", isRwa="YES"),  # 금 토큰 — 다른 원천에선 코인이라 남긴다
+        contract("XAUTUSDT", isRwa="YES"),
         contract("SOLUSDT", isRwa="NO"),
     ]
     stream, _, _, raw, _, store = await build(rest, universe={"BONK", "PEPE"})
-    assert stream.bases() == {"BONK", "PEPE", "SOL"}
+    assert stream.bases() == {"BONK", "PEPE", "SOL", "PAXG", "XAUT"}
     assert str(rest.calls[0].url) == CONTRACTS_URL
     assert raw.keys(REST_SOURCE) == ["symbols:perp"]
     rest.tickers = [
