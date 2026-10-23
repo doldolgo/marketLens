@@ -1,6 +1,6 @@
 # 084 — premium-events-backfill
 
-상태: TODO | 의존: 013(사건 규칙·`premium_event` 점·감지기), 005(`premium` 점·백필의 변동분 기록), 024(망 이름 없음 `-`), 021(data 박스)
+상태: DONE | 의존: 013(사건 규칙·`premium_event` 점·감지기), 005(`premium` 점·백필의 변동분 기록), 024(망 이름 없음 `-`), 021(data 박스)
 
 > 이 문서는 이 기능이 **지금 어떻게 동작해야 하는지**를 적는다. 동작이 바뀌면 이 문서를 직접 고치고, 같은 PR 에서 코드·테스트도 맞춘다(CLAUDE.md §4·§6). 사람이 끝까지 읽는 문서다 — 코드를 산문으로 옮기지 않는다.
 > 구현 구조(클래스·함수·파일 내부)는 실행 세션의 몫이다. 여기엔 **무엇이 어떻게 동작해야 하는가**만 쓴다.
@@ -105,6 +105,18 @@ docker run --rm --name evbf --network marketlens_default --cpus 0.5 --memory 512
 … evbf-server:tmp nice -n 19 python -u -m scripts.premium_events_backfill --verify 1792454400 1792540800
 # 2026-10-20 하루·32종(운영 사건 상위 30 + BTC·ETH): 운영 1,846·재생 1,846·같음 1,846·운영만 0·재생만 0·값 다름 0,
 #   뺀 조합 0 — 528초·CPU 134초·최대 RSS 189MB, 박스 평균 23.7%·최대 58.0%
+# PR #182 머지(cd12a5b)·Deploy 성공 뒤, 머지본 app·scripts 로 같은 컨테이너(2026-10-23 16:29:47Z~17:41:28Z)
+… evbf-server:tmp nice -n 19 python -u -m scripts.premium_events_backfill --write
+# 합계: 사건 27,415(김프 2,802·역프 24,613) — dry-run 과 같다, 경계 닫음 88·버림 2, 4,301초·CPU 1,169초·최대 RSS 383MB
+#   박스(5초 표본 848개): 평균 26.4%·p95 54.9%·최대 98.8%(처음 날별 점 수 조회), Influx CPU 793초, 여유 메모리 최저 297MiB.
+#   CloudWatch data CPU 5분 평균 23~29%, 크레딧 576 → 561(dry-run·검증·쓰기 합), 초과 과금 0
+influx query … range(start: 0, stop: 2026-09-07T09:20:08Z) |> filter(premium_event, end_ts) |> group(columns: ["dir"]) |> count()
+# kimp 2,802 · reverse 24,613. 경계 전에 end_ts 0 이거나 end_ts ≥ 경계인 점 0
+curl -H 'Accept-Encoding: gzip' "localhost/api/history/events?dir=…&start=end−기간&end=60초 경계"   # serve 박스, 쓰기 전 → 뒤
+# 김프 30일 13,204 → 13,207건(창이 움직인 만큼, 3.1MB·gzip 0.42MB 그대로)
+# 김프 90일 19,864 → 21,918건, 4.6 → 5.1MB(gzip 0.63 → 0.69MB), 가장 이른 사건 09-07T09:20:08Z → 07-26
+# 역프 30일 151,464 → 151,157건(그대로), 역프 90일 227,618 → 251,976건, 53.8 → 59.5MB(gzip 7.2 → 7.9MB), 13.5 → 15.9초
+# 기록 탭(운영, 3달·김프): 표 21,919건, BONK 187건 전부 배포 전(로그 8/31~9/7 KST·망 –·타임라인 7/26~)
 ```
 
 ## 6. 갱신할 문서
@@ -128,3 +140,5 @@ docker run --rm --name evbf --network marketlens_default --cpus 0.5 --memory 512
 - 남은 빚:
   - 배포 전 사건의 `samples` 는 저장된 점 수(분당 1점 시대 = 분 수, 변동분 시대 = 값이 바뀐 초 수)이고, 변동분 시대의 600초 넘는 한산한 구간에서 사건이 끊긴다(§3.2). 망 이름은 `-`.
   - 배포 전 봉(014)이 없어 차트 음영에는 배포 전 사건이 보이지 않는다(§3.8).
+  - 90일 역프 전 코인 응답이 원본 59.5MB + gzip 7.9MB = 67.4MB 로 013 공유 캐시 상한(64MB, 원본 + gzip)을 넘어 이제 담기지 않는다(쓰기 전 61MB 는 담겼다) — 그 조건은 요청마다 조회한다(15.9초). 상한은 바꾸지 않았다(사람 결정 — 수치만 기록).
+  - 정리: data 박스의 옮겨 온 이미지(`evbf-server:tmp`)·`/tmp/evbf`(env 파일 포함)·샘플러를 지웠다. 운영 컨테이너는 건드리지 않았다.
