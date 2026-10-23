@@ -9,6 +9,8 @@
     <script defer src="/replay.js"></script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+    <!-- 002 §3.2 — 글꼴은 같은 출처의 Inter 서브셋 하나(src/shared/fonts.css). 앱 스크립트를 기다리지 않고 바로 받게 preload — 빌드가 /app/assets/ 해시 주소로 바꾼다 -->
+    <link rel="preload" href="/src/shared/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- 072 §3.9 — 정적 페이지와 같은 세 가지: 휴대폰 주소창 색, iOS 가 가로로 돌릴 때 글자를 키우지 않게,
          어두운 화면이라고 알려 체크박스·select·스크롤 막대 같은 브라우저 조각도 어둡게 그리게 -->
