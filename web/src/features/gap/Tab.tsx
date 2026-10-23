@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { fmtFunding3, fmtPct, fmtUsdt, pctColor } from '../../shared/format'
 import {
   Empty, FoldButton, GridHeader, gridRow, NumField, Seg, segOpt, SortBar, SymCell, TableFrame, ToggleBtn,
-  bar, cardLeft, cardRight, cardRow, cardSub, count, exTag, foldPanel, hint, label, phoneBar, phoneSearch, searchInput, type Header,
+  bar, cardLeft, cardRight, cardRow, cardSub, count, exTag, foldPanel, hint, label, phoneBar, phoneSearch, searchInput, SYMBOL_INPUT, touchSearch, type Header,
 } from '../../shared/ui'
 import { bool, num, oneOf, sortOf, useUrlState } from '../../shared/urlState'
 import { useViewport } from '../../shared/viewport'
@@ -19,7 +19,7 @@ const THR_DEFAULT = 0.5
 export default function GapTab({ active, now }: { active: boolean; now: number }) {
   // 탭이 보이는 동안만 구독 — 숨으면 닫고 표는 메모리에 둔다, 다시 보이면 snapshot 으로 통째 교체 (§3.6)
   const table = useGapSocket(active)
-  const { phone } = useViewport()
+  const { phone, touch } = useViewport()
   // 폰 필터 접기 — 메모리만, 기본 접힘 (072 §3.4)
   const [foldOpen, setFoldOpen] = useState(false)
   // 필터·정렬은 URL 쿼리(g.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색어는 메모리만 (033)
@@ -69,7 +69,7 @@ export default function GapTab({ active, now }: { active: boolean; now: number }
   ]
 
   // 조작 조각 — 넓은 바와 폰 바가 같은 조각을 쓴다. data-el 은 061 화면 이용 통계의 요소 열쇠(모양·동작과 무관)
-  const searchEl = <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={phone ? phoneSearch : searchInput} data-el="search" />
+  const searchEl = <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={phone ? phoneSearch : touch ? touchSearch : searchInput} data-el="search" {...SYMBOL_INPUT} />
   const modeSeg = <Seg pad="4px 10px" opts={[['entry', '진입 기준', 'mode:entry'], ['exit', '정리 기준', 'mode:exit']].map(([id, l, el]) => segOpt(l, mode === id, () => switchMode(id as Mode), el))} />
   const thrField = <NumField label="하이라이트 임계값" value={thr} step={0.1} onChange={setThr} el="threshold" />
   const onlyBtn = <ToggleBtn on={only} label="임계 초과만" onClick={() => setOnly(!only)} el="only-over" />

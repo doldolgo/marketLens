@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { fmtFundingHr, fmtPct, pctColor } from '../../shared/format'
 import {
   Empty, FoldButton, GridHeader, gridRow, NumField, SortBar, SymCell, TableFrame, ToggleBtn,
-  bar, cardLeft, cardRight, cardRow, count, exTag, foldPanel, hint, phoneBar, phoneSearch, searchInput, type Header,
+  bar, cardLeft, cardRight, cardRow, count, exTag, foldPanel, hint, phoneBar, phoneSearch, searchInput, SYMBOL_INPUT, touchSearch, type Header,
 } from '../../shared/ui'
 import { bool, num, sortOf, useUrlState } from '../../shared/urlState'
 import { useViewport } from '../../shared/viewport'
@@ -21,7 +21,7 @@ const THR_F = 20
 export default function PpTab({ active, now }: { active: boolean; now: number }) {
   // 탭이 보이는 동안만 구독 — 숨으면 닫고 표는 메모리에 둔다, 다시 보이면 snapshot 으로 통째 교체 (049 §3.5)
   const table = usePpSocket(active)
-  const { phone } = useViewport()
+  const { phone, touch } = useViewport()
   // 폰 필터 접기 — 메모리만, 기본 접힘 (072 §3.4)
   const [foldOpen, setFoldOpen] = useState(false)
   // 필터·정렬은 URL 쿼리(p.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색어는 메모리만 — Clarity 가 주소를 통째로 싣는다 (033)
@@ -51,7 +51,7 @@ export default function PpTab({ active, now }: { active: boolean; now: number })
   const headers: Header[] = [['sym', '심볼', 'left', 'sort:sym'], ['gap', '가격갭', 'right', 'sort:gap'], ['fund', '펀딩갭', 'right', 'sort:fund']]
 
   // 조작 조각 — 넓은 바와 폰 바가 같은 조각을 쓴다. data-el 은 061 화면 이용 통계의 요소 열쇠(모양·동작과 무관)
-  const searchEl = <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={phone ? phoneSearch : searchInput} data-el="search" />
+  const searchEl = <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={phone ? phoneSearch : touch ? touchSearch : searchInput} data-el="search" {...SYMBOL_INPUT} />
   const thrPField = <NumField label="가격갭 임계값" value={thrP} step={0.1} onChange={setThrP} el="threshold-price" />
   const thrFField = <NumField label="펀딩갭 임계값 · 연" value={thrF} step={5} onChange={setThrF} el="threshold-funding" />
   const onlyBtn = <ToggleBtn on={only} label="임계 초과만" onClick={() => setOnly(!only)} el="only-over" />

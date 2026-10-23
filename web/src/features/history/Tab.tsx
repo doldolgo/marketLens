@@ -3,10 +3,10 @@
 // 차트 음영은 선택 심볼만 차트 범위로 따로 조회 — 표 필터와 차트 설정은 서로 독립(맨 위 표 설정 → 표 → 차트 설정 → 차트 순서).
 // 참조 디자인(docs/design/reference/tabs/HistoryTab.tsx)의 김프/역프 열 분리 대신 서브탭 — 한 화면은 한 방향만.
 // 폭 1079px 이하는 표·요약 두 칸을 한 칸으로 쌓고, 폰(719px 이하)은 필터 접기·정렬 줄·카드 행 (072 §3.4~§3.6).
-import { memo, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { exName, fmtAgo, fmtPct, fmtTime, pctColor } from '../../shared/format'
 import {
-  Empty, FoldButton, Pill, Seg, SortBar, bodyScroll, card, cardLeft, cardRight, cardRow, cardSub, foldPanel, hint, kicker, phoneSearch, searchInput,
+  Empty, FoldButton, Pill, Seg, SortBar, bodyScroll, card, cardLeft, cardRight, cardRow, cardSub, foldPanel, hint, kicker, phoneSearch, searchInput, SYMBOL_INPUT, touchSearch,
   type Header, type SegOpt,
 } from '../../shared/ui'
 import { alias, isSymbol, list, oneOf, useUrlState, type Codec } from '../../shared/urlState'
@@ -52,6 +52,22 @@ const dirColor = (dir: Dir) => pctColor(dir === 'kimp' ? 1 : -1)
 const RANK_GRID = '64px 120px repeat(7, 1fr)'
 /** 거래소 | 시작 | 종료 | 지속 | 최대 스프레드 | 망 */
 const LOG_GRID = '108px 1fr 1fr 78px 100px 1.2fr'
+/** 사건 로그를 열 표로 그릴 칸 폭 하한 — 더 좁으면 폰과 같은 2줄 카드로 그린다(072 §3.9). 넓은 화면의 오른쪽 칸(3:2 의 2)은
+ * 화면 폭 1,560px 아래에서 이보다 좁아져 시작·종료·네트워크 머리 글자가 한 자씩 꺾였다 — 그래서 화면이 아니라 칸 폭으로 고른다 */
+const LOG_TABLE_MIN = 600
+
+/** 요소 폭이 min 보다 좁은가 — 경계를 넘을 때만 다시 그린다(같은 값이면 상태가 그대로라 React 가 건너뛴다). */
+function useNarrowerThan(min: number): [(el: HTMLElement | null) => void, boolean] {
+  const [el, setEl] = useState<HTMLElement | null>(null)
+  const [narrow, setNarrow] = useState(false)
+  useEffect(() => {
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([entry]) => setNarrow(entry.contentRect.width < min))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [el, min])
+  return [setEl, narrow]
+}
 /** 셋째 칸은 061 화면 이용 통계의 요소 열쇠(data-el) */
 const HEADERS: [SortKey, string, string][] = [
   ['ongoingSince', '상태', 'sort:ongoingsince'], ['cnt', '횟수', 'sort:cnt'], ['maxDur', '최대 지속', 'sort:maxdur'],
@@ -126,7 +142,8 @@ function sameProps(a: Props, b: Props): boolean {
 export default memo(HistoryTab, sameProps)
 
 function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
-  const { phone, compact, docScroll } = useViewport()
+  const { phone, compact, docScroll, touch } = useViewport()
+  const [logRef, logNarrow] = useNarrowerThan(LOG_TABLE_MIN)
   // 폰 필터 접기 — 메모리만, 기본 접힘 (072 §3.4)
   const [foldOpen, setFoldOpen] = useState(false)
   // 방향·기간·거래소·정렬·차트 선택은 URL 쿼리(h.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색 입력은 Enter 전까지 임시라 제외
@@ -255,7 +272,7 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
     ...REAL_FXS.map((id) => seg(exName(id), fxf === id, () => setFxf(id), `fx:${id}`)),
   ]} />)
   const searchEl = (
-    <input className="input" placeholder="심볼 검색 → Enter" value={q} style={phone ? phoneSearch : searchInput} data-el="search" enterKeyHint="search"
+    <input className="input" placeholder="심볼 검색 → Enter" value={q} style={phone ? phoneSearch : touch ? touchSearch : searchInput} data-el="search" enterKeyHint="search" {...SYMBOL_INPUT}
       onChange={(e) => setQ(e.target.value.toUpperCase())}
       onKeyDown={(e) => {
         const s = q.trim().toUpperCase()
@@ -364,7 +381,8 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
                   <button key={x.sym} onClick={() => onSelect(x.sym)} className="hv-row" data-el={`row:${x.sym}`}
                     style={{
                       display: 'grid', gridTemplateColumns: RANK_GRID, alignItems: 'center', width: '100%',
-                      appearance: 'none', border: 'none', font: 'inherit',
+                      // color — 버튼 기본 글자색을 쓰지 않는다(iOS 는 시스템 파랑, 데스크톱 밝은 화면 선언이면 검정) — 횟수 칸이 이 색을 물려받는다 (072 §3.9)
+                      appearance: 'none', border: 'none', font: 'inherit', color: 'inherit',
                       background: x.sym === selSym ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)' : 'transparent',
                       padding: '0 var(--space-6)', height: 30, cursor: 'pointer', textAlign: 'left',
                       borderBottom: '1px solid color-mix(in srgb, #e9e9ed 5%, transparent)',
@@ -435,14 +453,14 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
             </div>
 
             {/* 우: 사건 로그 — 최근 20건 */}
-            <div data-area="list" style={{ ...card, padding: 'var(--space-2) 0' }}>
+            <div ref={logRef} data-area="list" style={{ ...card, padding: 'var(--space-2) 0' }}>
               <div style={{ ...kicker, padding: 'var(--space-4) var(--space-6) var(--space-2)' }}>사건 로그 · {selSym} 최근 20건</div>
-              {phone ? (
-                // 폰 — 머리 줄 없이 2줄 카드: 거래소·네트워크 / 최대 스프레드, 시작 → 종료 · 지속 (072 §3.5)
+              {phone || logNarrow ? (
+                // 폰·좁은 칸 — 머리 줄 없이 2줄 카드: 거래소·네트워크 / 최대 스프레드, 시작 → 종료 · 지속 (072 §3.5·§3.9). 좁은 칸은 제목과 같은 안쪽 여백
                 <div style={{ borderTop: '1px solid var(--color-neutral-800)' }}>
                   {mine.slice(0, 20).map((e) => (
                     <div key={`${e.dom}-${e.fx}-${e.startTs}`} style={{
-                      ...cardRow({ rule: 6 }),
+                      ...cardRow({ rule: 6 }), ...(phone ? null : { padding: 'var(--space-3) var(--space-6)' }),
                       background: e.ongoing ? 'color-mix(in srgb, var(--color-accent) 6%, transparent)' : 'transparent',
                     }}>
                       <span style={cardLeft}>

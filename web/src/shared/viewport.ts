@@ -19,14 +19,16 @@ export interface Viewport {
   compact: boolean
   /** 폰 또는 높이 ≤ 560 — 셸이 화면 높이에 묶이지 않고 문서가 스크롤된다 */
   docScroll: boolean
+  /** 손가락이 주 입력인 기기(휴대폰·태블릿) — 폭과 무관. 입력칸 글자를 16px 로 둔다(iOS 는 더 작으면 누를 때 확대한다, 072 §3.9) */
+  touch: boolean
 }
 
-const QUERIES = [`(max-width: ${PHONE_MAX}px)`, `(max-width: ${COMPACT_MAX}px)`, `(max-height: ${SHORT_MAX_H}px)`] as const
+const QUERIES = [`(max-width: ${PHONE_MAX}px)`, `(max-width: ${COMPACT_MAX}px)`, `(max-height: ${SHORT_MAX_H}px)`, '(hover: none) and (pointer: coarse)'] as const
 
-// 조합 8가지를 미리 만들어 둔다 — useSyncExternalStore 는 같은 상태면 같은 객체를 돌려받아야 다시 그리지 않는다
-const STATES: Viewport[] = Array.from({ length: 8 }, (_, bits) => {
+// 조합 16가지를 미리 만들어 둔다 — useSyncExternalStore 는 같은 상태면 같은 객체를 돌려받아야 다시 그리지 않는다
+const STATES: Viewport[] = Array.from({ length: 16 }, (_, bits) => {
   const phone = (bits & 1) !== 0
-  return { phone, compact: phone || (bits & 2) !== 0, docScroll: phone || (bits & 4) !== 0 }
+  return { phone, compact: phone || (bits & 2) !== 0, docScroll: phone || (bits & 4) !== 0, touch: (bits & 8) !== 0 }
 })
 const WIDE: Viewport = STATES[0]
 
@@ -36,7 +38,7 @@ const lists = typeof window !== 'undefined' && typeof window.matchMedia === 'fun
 
 function snapshot(): Viewport {
   if (!lists) return WIDE
-  return STATES[(lists[0].matches ? 1 : 0) | (lists[1].matches ? 2 : 0) | (lists[2].matches ? 4 : 0)]
+  return STATES[(lists[0].matches ? 1 : 0) | (lists[1].matches ? 2 : 0) | (lists[2].matches ? 4 : 0) | (lists[3].matches ? 8 : 0)]
 }
 
 function subscribe(onChange: () => void): () => void {

@@ -54,6 +54,10 @@ export const count: CSSProperties = {
 }
 /** 검색 입력 — 전역 .input 클래스 위에 크기만 덮는다. */
 export const searchInput: CSSProperties = { width: 150, fontSize: 12, padding: '5px 10px' }
+/** 폰이 아닌 배치의 검색 칸을 터치 기기(가로 폰·태블릿)에서 — 16px 아래 글자는 iOS 가 누를 때 화면을 확대한다 (072 §3.9). */
+export const touchSearch: CSSProperties = { ...searchInput, fontSize: 16, padding: '3px 10px' }
+/** 심볼 입력칸 공통 속성 — 휴대폰 자판이 첫 글자를 대문자로 바꾸거나 자동 수정으로 심볼을 사전 낱말로 바꾸지 않게 (072 §3.9). */
+export const SYMBOL_INPUT = { autoCapitalize: 'characters', autoCorrect: 'off', autoComplete: 'off', spellCheck: false } as const
 
 /** KPI 스트립 블록 사이 세로 그라디언트 선. */
 export const vDivider = (
@@ -86,17 +90,17 @@ export function Seg({ opts, pad = '5px 12px' }: { opts: SegOpt[]; pad?: string }
   )
 }
 
-/** 숫자 입력 — 라벨 + 입력 + 단위(기본 %). 비숫자 입력은 0. 폰은 16px — 그보다 작으면 iOS 가 누를 때 화면을 확대한다 (072). */
+/** 숫자 입력 — 라벨 + 입력 + 단위(기본 %). 비숫자 입력은 0. 폰·터치 기기는 16px — 그보다 작으면 iOS 가 누를 때 화면을 확대한다 (072 §3.9). */
 export function NumField({ label, value, step, onChange, unit = '%', el }: {
   label: string; value: number; step: number; onChange: (v: number) => void; unit?: string; el?: string
 }) {
-  const { phone } = useViewport()
+  const { phone, touch } = useViewport()
   return (
     <label data-el={el} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 12, color: 'var(--color-neutral-400)' }}>
       {label}
       <input className="input" type="number" step={step} value={value}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-        style={{ width: phone ? 72 : 62, fontSize: phone ? 16 : 12, padding: phone ? '4px 8px' : '5px 8px', fontVariantNumeric: 'tabular-nums', textAlign: 'right' }} />
+        style={{ width: phone || touch ? 72 : 62, fontSize: phone || touch ? 16 : 12, padding: phone || touch ? '4px 8px' : '5px 8px', fontVariantNumeric: 'tabular-nums', textAlign: 'right' }} />
       <span>{unit}</span>
     </label>
   )
