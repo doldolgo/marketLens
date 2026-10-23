@@ -9,7 +9,7 @@
 | 기능 | server | web | 비고 |
 |---|---|---|---|
 | collect | 업비트·빗썸 WS 실시간 갱신·마켓 목록 REST 매초(우주 = 국내 ∪ ∩ 해외 ∪, 본문이 직전과 같으면 파싱 생략)·호가 정리(가격·잔량 0 초과·유한 단계만)·체결가도 같은 기준(0 이하·NaN·inf 는 무시)·1초 틱(단계별 소요 60초 로그)·기동 뒤 GC 정리·HTTP gzip 레벨 6·camelCase 키 변환 메모·/health(신선도, 025) | - | 바이낸스 스트림은 012, 바이빗은 019, 비트겟은 020, OKX 는 045, perp 는 046 |
-| perp-collect | server: perp 원천 4개(binance_perp bookTicker+premiumIndex / bybit_perp·bitget_perp 전체 티커 — 셋 다 REST 매초 1회 / hyperliquid_perp 는 047)·10초 목록·매초 perp 우주(2곳 이상 ∪ 김프∩1곳)·배수 정규화·펀딩 주기(fundingInfo 60초 / fundingInterval / fundInterval)·`/health/collect` 원천 4개 | web: 수집 상태 탭 카드 | 호가 1단계뿐, 세 원천 호가는 최대 1초 늦음, Hyperliquid 는 047 |
+| perp-collect | server: perp 원천 4개(binance_perp bookTicker+premiumIndex / bybit_perp·bitget_perp 전체 티커 — 셋 다 REST 매초 1회 / hyperliquid_perp 는 047)·10초 목록(전통 자산 perp 제외 — 바이낸스 TRADIFI·바이빗 symbolType·비트겟 isRwa)·매초 perp 우주(2곳 이상 ∪ 김프∩1곳)·배수 정규화·펀딩 주기(fundingInfo 60초 / fundingInterval / fundInterval)·`/health/collect` 원천 4개 | web: 수집 상태 탭 카드 | 호가 1단계뿐, 세 원천 호가는 최대 1초 늦음, Hyperliquid 는 047 |
 | perp-hyperliquid | server: Hyperliquid perp — `meta` 10초(isDelisted 제외)·코인마다 `bbo`+`activeAssetCtx` 3샤드·구독 전 코인 검증·ping 30초·펀딩 시간당(주기 1, 다음 정시 계산) · 150분마다 소켓 교대(080) | web: 수집 상태 카드 | 구독 1,000 한도, 배포 뒤 CPU 비교는 아래 빚 |
 | web-shell | - | 셸·KPI 동작(mock 탭 없음 — 049 뒤), 탭·심볼·탭별 필터가 URL 쿼리로 복원(검색어 제외, 033), 계속 숨은 탭은 리렌더 건너뜀, 기록 탭은 처음 볼 때 받는 별도 청크(첫 화면 JS 266KB·gzip 82KB — 072 뒤), 포맷·시계는 모듈 Intl 객체 재사용, 퍼센트·펀딩은 반올림 0 이면 부호 없는 0·중립색, 경과·지속 표기는 반올림 뒤 단위 올림 | spreads 탭은 003, history 탭은 005 실데이터 |
 | landing | server: GET /landing 요약(live 5초·trail·events 60초 캐시, Influx 는 3초까지만 기다리고 늦으면 직전 값, 두 역할 — events 는 core 요약 조회가 Flux 에서 접고, 진행 중은 `end_ts 0`·마지막 관측 600초 안인 조합 수, `over1` 은 원값 기준) | web: 정적 landing.html — 글은 줄이고 그림으로(2026-10-14): 히어로 정의 한 문장·숫자 셋·거래소 연결도, 경로 카드(값 전 정적 설명)·그다음 경로, "김프 히스토리로 분석하세요" 아이콘 세 줄 + 기록 탭 그림(정적, `depthGap`·`over1` 은 화면에 안 씀), 7일 사건 수·김프:역프 비율 막대·사건 뜻 그림·최근에 끝난 사건 5개, 김프·역프 가격 비교 그림과 계산식·용어 셋(USDT 환산·테더 김프·차익거래(아비트라지)·따리), 계산 방법 네 단계 + $1,000 체결 단가 그림, 접힌 질문과 답 7개, 참고값 안내, 보이는 동안 10초 폴링(bfcache 복원 때 1회). 검색 구성: 검색어 제목·설명·h1, JSON-LD(WebSite·Organization·WebPage·WebApplication), 실시간 자리 data-nosnippet, 같은 출처 서브셋 글꼴 KimpTrack Sans(54KB), 아이콘 5개(김치 항아리 마크), og-v4.png, robots(`/api/landing` 만 허용)·sitemap(lastmod), 대시보드 셸 noindex, 404.html, `/?tab=` 만 /app/ 로, `/landing.html`·www 301. 검색어 페이지 둘 `/kimp-chart`(정적)·`/kimp-history`(지난 7일 사건 표 — `GET /api/landing` 10초 폴링), privacy 와 같은 모양·sitemap 네 줄(044) | 스크린샷(PNG + WebP 1020·2040)·og 그림은 사람이 갱신 — og 는 바꿀 때 새 파일 이름으로(지금 og-v4.png, 022 §3.6) |
@@ -48,7 +48,7 @@
 - (047) Hyperliquid 의 다음 정산 시각은 계산값(정시)이다.
 - (046) 바이낸스 fundingInfo 에 없는 심볼의 주기 8시간은 가정이다(문서에 기본값 명문 없음).
 - (046) perp 호가는 1단계뿐 — 깊이·슬리피지는 없다.
-- (046) 비트겟 토큰화 주식·외환 perp 는 거르지 않는다 — 다른 원천에도 있으면 우주에 든다. 비트겟 티커 응답에 다음 정산 시각이 없어 주기의 다음 배수로 계산한다(정산 시각이 주기 배수가 아닌 심볼이 있으면 틀린다).
+- (046) 전통 자산 perp(주식·ETF·원자재·외환)는 거래소 표식으로 뺀다(2026-10-23 — 주식 티커가 코인 이름과 겹쳐 CAT·ON·PURR 선선갭이 수만~수백억 %였다) — 비트겟 금 토큰 PAXG·XAUT 도 함께 빠지고, 바이빗 `symbolType` 에 모르는 새 값이 오면 그 계약도 빠진다. 이름만 같은 다른 코인을 거르는 목록은 없다(같은 날 원천 간 중간가 비 최대 1.03). 비트겟 티커 응답에 다음 정산 시각이 없어 주기의 다음 배수로 계산한다(정산 시각이 주기 배수가 아닌 심볼이 있으면 틀린다).
 - (046) EC2 실측 대기: 현물만일 때의 EC2 RSS 기록이 없어 perp 의 메모리 증가분을 모른다(바이낸스 perp WS 때 647MB) — 바이낸스 REST·Hyperliquid 배포 12분 뒤 RSS 374MB(WS 때 647MB 는 기동 64분 뒤 값이라 같은 조건이 아니다). 1분 원문 객체 크기(bookTicker·premiumIndex 분당 마지막 1건)는 아직 안 봤다.
 - (048) 현선갭은 김프 우주(국내 상장 코인)에만 있다 — 해외 현물 우주를 perp 우주로 넓히면 전 코인이 되지만 현물 구독이 그만큼 늘어 collect CPU 를 다시 재야 한다
 - (048·049) gap·pp WebSocket 접속 수는 027 게이지·관리자 화면에 없다(spreads 만)

@@ -329,6 +329,30 @@ async def test_list_keeps_only_linear_perpetual_trading_usdt_and_maps_interval()
     assert store.perp_row(SRC, "SHIB").multiplier == 1000  # type: ignore[union-attr]
 
 
+async def test_list_drops_traditional_asset_symbol_types() -> None:
+    # 2026-10-23 운영: 온세미 주식 ONUSDT(symbolType stock)가 바이낸스 ON 코인과 묶여 선선갭 +57,825.57% (§3.2)
+    rest = Rest([])
+    rest.instruments = [
+        inst("BTCUSDT", symbolType=""),
+        inst("AIOUSDT", symbolType="innovation"),
+        inst("SOLUSDT"),  # symbolType 없음 — 코인으로 본다
+        inst("ONUSDT", symbolType="stock"),
+        inst("QQQUSDT", symbolType="ETF"),
+        inst("XAUUSDT", symbolType="commodity"),
+        inst("EURUSDUSDT", symbolType="forex"),
+        inst("NEWUSDT", symbolType="somethingnew"),  # 모르는 값도 뺀다
+    ]
+    stream, _, _, _, _, store = await build(rest, universe={"BTC", "AIO", "SOL", "ON"})
+    assert stream.bases() == {"BTC", "AIO", "SOL"}
+    rest.tickers = [
+        httpx.Response(
+            200, json=envelope([tick("ONUSDT", bid1Price="73.16", ask1Price="73.50")])
+        )
+    ]
+    await stream.poll()
+    assert store.perp_row(SRC, "ON") is None
+
+
 async def test_next_page_cursor_is_followed_and_unchanged_pages_are_not_parsed() -> (
     None
 ):
