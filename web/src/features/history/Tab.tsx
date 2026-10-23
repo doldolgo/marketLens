@@ -50,6 +50,9 @@ const dirColor = (dir: Dir) => pctColor(dir === 'kimp' ? 1 : -1)
 
 /** 티커 | 상태 | 횟수 | 최대 지속 | 평균 지속 | 최대 스프레드 | 평균 스프레드 | 망 | 최신 */
 const RANK_GRID = '64px 120px repeat(7, 1fr)'
+/** 순위 표의 최소 폭이자, 한 칸으로 쌓인 배치에서 열 표로 그릴 칸 폭 하한 — 더 좁으면 폰과 같은 정렬 줄 + 3줄 카드(072 §3.9).
+ * 2026-10-23 실측으로 아홉 열이 640px 까지 겹치지 않아 20px 여유를 뒀다. 예전 800 은 태블릿 세로에서 마지막 열을 가로 스크롤 뒤로 숨겼다 */
+const RANK_TABLE_MIN = 660
 /** 거래소 | 시작 | 종료 | 지속 | 최대 스프레드 | 망 */
 const LOG_GRID = '108px 1fr 1fr 78px 100px 1.2fr'
 /** 사건 로그를 열 표로 그릴 칸 폭 하한 — 더 좁으면 폰과 같은 2줄 카드로 그린다(072 §3.9). 넓은 화면의 오른쪽 칸(3:2 의 2)은
@@ -144,6 +147,10 @@ export default memo(HistoryTab, sameProps)
 function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
   const { phone, compact, docScroll, touch } = useViewport()
   const [logRef, logNarrow] = useNarrowerThan(LOG_TABLE_MIN)
+  const [rankRef, rankNarrow] = useNarrowerThan(RANK_TABLE_MIN)
+  // 넓은 배치(두 칸)는 표가 최소 폭으로 왼쪽 칸을 잡고 오른쪽 칸이 남은 폭을 쓴다 — 카드로 바꾸지 않는다. 칸 폭으로 고르는 것은 한 칸으로 쌓일 때만이라
+  // 카드·표를 오가며 칸 폭이 바뀌어도(표의 최소 폭이 칸을 넓힌다) 창 크기를 바꾼 순서와 무관하게 같은 모양이 된다
+  const rankCards = phone || (compact && rankNarrow)
   // 폰 필터 접기 — 메모리만, 기본 접힘 (072 §3.4)
   const [foldOpen, setFoldOpen] = useState(false)
   // 방향·기간·거래소·정렬·차트 선택은 URL 쿼리(h.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색 입력은 Enter 전까지 임시라 제외
@@ -327,16 +334,17 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
         <div style={{ display: 'grid', gridTemplateColumns: compact ? 'minmax(0, 1fr)' : '3fr 2fr', gap: 'var(--space-4)', alignItems: 'start' }}>
 
           {/* 좌: 티커별 사건 표 */}
-          <div data-area="table" style={{ ...card, padding: 'var(--space-4) 0' }}>
-            <div style={{ ...kicker, padding: '0 var(--space-6) var(--space-2)' }}>티커별 {DIR_LABEL[dir]} 사건 · {PER_LABEL[per]}{phone ? '' : ' — 열 클릭으로 정렬'}</div>
-            {phone ? (
-              // 폰 — 정렬 줄 + 3줄 카드 행: 티커·상태 / 최대 스프레드, 횟수·지속 / 평균 스프레드, 네트워크·최신 (072 §3.5)
+          <div ref={rankRef} data-area="table" style={{ ...card, padding: 'var(--space-4) 0' }}>
+            <div style={{ ...kicker, padding: '0 var(--space-6) var(--space-2)' }}>티커별 {DIR_LABEL[dir]} 사건 · {PER_LABEL[per]}{rankCards ? '' : ' — 열 클릭으로 정렬'}</div>
+            {rankCards ? (
+              // 폰·좁은 칸 — 정렬 줄 + 3줄 카드 행: 티커·상태 / 최대 스프레드, 횟수·지속 / 평균 스프레드, 네트워크·최신 (072 §3.5·§3.9)
               <>
                 <SortBar headers={SORT_HEADERS} sortKey={sortKey} sortDir={sortDir} onSort={(k) => onSort(k as SortKey)} els={['sort:col', 'sort:dir']} />
                 {rank.map((x) => (
                   <button key={x.sym} onClick={() => onSelect(x.sym)} className="hv-row" data-el={`row:${x.sym}`}
                     style={{
-                      ...cardRow({ rule: 5 }), width: '100%', appearance: 'none', border: 'none', font: 'inherit', color: 'inherit', cursor: 'pointer', textAlign: 'left',
+                      ...cardRow({ rule: 5 }), ...(phone ? null : { padding: 'var(--space-3) var(--space-6)' }),
+                      width: '100%', appearance: 'none', border: 'none', font: 'inherit', color: 'inherit', cursor: 'pointer', textAlign: 'left',
                       borderBottom: '1px solid color-mix(in srgb, #e9e9ed 5%, transparent)',
                       background: x.sym === selSym ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)' : 'transparent',
                     }}>
@@ -359,7 +367,7 @@ function HistoryTab({ now, selSym, onSelect, spreads, active }: Props) {
               </>
             ) : (
             <div style={{ overflowX: 'auto' }}>
-              <div style={{ minWidth: 800 }}>
+              <div style={{ minWidth: RANK_TABLE_MIN }}>
                 <div style={{ display: 'grid', gridTemplateColumns: RANK_GRID, padding: '0 var(--space-6)', borderBottom: '1px solid var(--color-neutral-800)' }}>
                   <button onClick={() => onSort('sym')} className="hv-txt" data-el="sort:sym"
                     style={{ appearance: 'none', background: 'none', border: 'none', font: 'inherit', fontSize: 10.5, letterSpacing: '0.07em', textTransform: 'uppercase', padding: '7px 0', cursor: 'pointer', textAlign: 'left', color: sortKey === 'sym' ? 'var(--color-accent-300)' : 'var(--color-neutral-600)' }}>
