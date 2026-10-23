@@ -86,9 +86,9 @@ def _strip_cells() -> list[str]:
 
 def test_settings_are_one_id_a_page_list_and_the_notice_version() -> None:
     assert re.fullmatch(r"[A-Za-z0-9]{0,32}", _clarity_id())
-    # 075 — GA 측정 ID 는 비었거나 G-<영문 대문자·숫자>, 쿠키 기간은 2개월(60일)
+    # 075 — GA 측정 ID 는 비었거나 G-<영문 대문자·숫자>, 쿠키 기간은 GA 기본값 2년(2026-10-24 — 기한을 줄이지 않는다)
     assert re.fullmatch(r"(G-[A-Z0-9]{4,16})?", _ga_id())
-    assert _const("GA_COOKIE_SECONDS") == "60 * 24 * 60 * 60"
+    assert _const("GA_COOKIE_SECONDS") == "2 * 365 * 24 * 60 * 60"
     pages = json.loads(_const("PAGES"))
     assert pages and set(pages) <= {"landing", "app"}
     # 032 동의 관리 스크립트의 판과 같다 — 다르면 한쪽의 동의가 다른 쪽에서 '정하지 않음' 이다
@@ -775,7 +775,7 @@ GA_CONSENT = [
 GA_CONFIG = {
     "allow_google_signals": False,
     "allow_ad_personalization_signals": False,
-    "cookie_expires": 60 * 24 * 60 * 60,
+    "cookie_expires": 2 * 365 * 24 * 60 * 60,
 }
 GA_TAG_ID = [GA_TAG + TEST_GA, True]
 
@@ -815,7 +815,7 @@ def test_agreed_visitor_gets_ga_consent_first_then_config_and_tag_after_parsing(
     None
 ):
     """동의 신호(광고 셋 거부·분석 허용)가 곧바로 첫 항목, config·태그는 DOMContentLoaded 뒤 — 주소는 검색어·# 를 뺀 주소, Google
-    신호·광고 개인화 신호 끔, 쿠키 2개월. Clarity 대기열·태그도 그대로 (§3.2)."""
+    신호·광고 개인화 신호 끔, 쿠키 2년. Clarity 대기열·태그도 그대로 (§3.2)."""
     for defer in (False, True):
         got = _run(
             [

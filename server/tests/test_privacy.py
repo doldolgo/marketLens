@@ -13,6 +13,8 @@ v9(075 — 새 날의 판)는 같은 세 칸 동의로 방문 통계를 Google A
 v10(079 — 같은 날 두 번째 판)은 동의 창의 버튼([모두 거부] → [하루 동안 안 보기]·[모두 동의])과 저장 규칙(일부만 체크한 저장은
 `later` — 24시간 뒤 다시 묻기, 판 있는 `denied` 만 다시 묻지 않기)을 바꿔 동의 상자의 글이 달라져 안내 판을 올린다(`2026-10-17-2`).
 받는 자·항목·목적·보유 기간은 그대로이고, v9 처럼 서버 게이트·시행일 상수가 없다.
+v11(2026-10-24)은 Google Analytics 의 기록 보관을 14개월로, 쿠키 _ga·_ga_* 를 GA 기본값 2년으로 되돌려(기한을 줄이지 않는다 — 사람 결정)
+보유 기간 글이 바뀌어 안내 판을 올린다(`2026-10-24`). 받는 자·항목·목적은 그대로다.
 실제로 브라우저에서 CSP·버튼을 보는 검증은 스펙 §5 의 로컬 Docker·브라우저 명령이다.
 """
 
@@ -46,7 +48,7 @@ from tests.test_deploy import (
 
 PUBLIC = ROOT / "web/public"
 CANONICAL = "https://kimptrack.com/privacy"
-EFFECTIVE = "2026-10-17"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1·067 §3.4)
+EFFECTIVE = "2026-10-24"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1·067 §3.4)
 # 052 — 같은 출처 스크립트 /attention.js 하나('self')와 그 비콘(connect-src 'self'). 세 정적 페이지가 같은 문자열이다.
 # 053 — 틀에는 자기 출처와 관리자 화면(덮어 보기)만
 CSP = (
@@ -177,9 +179,7 @@ GA_ITEMS = (
     "밖으로 나가는 링크를 누른 일·머문 시간, 기기 종류·브라우저·운영체제·화면 크기·언어, IP 주소(대략의 나라·도시 추정에 쓰고 "
     "저장하지 않음), Google Analytics가 브라우저와 방문을 알아보는 쿠키 _ga·_ga_*"
 )
-GA_PERIOD = (
-    "Google Analytics의 기록은 2개월(사람을 가리키지 않는 합계 보고서는 기간 없이 남음)"
-)
+GA_PERIOD = "Google Analytics의 기록은 14개월(사람을 가리키지 않는 합계 보고서는 기간 없이 남음)"
 # 060 §3.3-3 — 수집·이용 칸 항목 끝·2절이 함께 적는 KimpTrack 서버의 새 항목(요소·떠날 때 보던 곳·깊이)
 ELEMENT_ITEMS = (
     "영역 안의 요소(단추·링크·탭·입력칸·표의 코인 행 같은 것 — 입력한 글자·화면의 숫자는 빼고)별 클릭 수·마우스를 올려 둔 "
@@ -359,6 +359,7 @@ NOTICE_DIGESTS = {
     "2026-10-17": "9e3e5fc026394d9a13010ccbec89428dcf53ffbf545d6cc4cbe4d9090b2ffb8b",
     # 079 — 같은 날 두 번째 판: 국외 이전 칸 거부 방법에서 [모두 거부]를 뺌(동의 창에 그 버튼이 없다 — 받는 자·항목·목적·보유 기간은 그대로)
     "2026-10-17-2": "c6b8a8e81e75e2c6c39828ee3980c8a1ebd8d71968f4bf9c7431e37020e4dfcd",
+    "2026-10-24": "d2cd1d3575cb22379b676324b1e1c0b24ac85a6e8116056cf35489d6308c10a4",
 }
 # 바로 앞 판 — 이 판의 동의로는 켜지 않고 다시 묻는다 (060 §3.6 — 2026-10-09 의 granted 는 '정하지 않음'). 판 값의 글자 순이
 # 아니라 NOTICE_DIGESTS 에 더한 차례로 고른다
@@ -944,8 +945,8 @@ def test_notice_version_is_shown_and_is_the_last_digest_key() -> None:
     assert NOTICE == list(NOTICE_DIGESTS)[-1]
     # 051 §3.2 — v3 이 판 2026-10-09 를 열었고, 060 이 같은 날 두 번째 판을 더했다(예전 판 해시는 지우지 않는다)
     assert PRIVACY_V3_EFFECTIVE in NOTICE_DIGESTS
-    # 079 — 같은 날 두 번째 판(v9 의 판 2026-10-17 다음)
-    assert NOTICE == "2026-10-17-2" and OLD == "2026-10-17"
+    # 2026-10-24 — GA 기록 보관 14개월·쿠키 2년(v10 의 판 2026-10-17-2 다음)
+    assert NOTICE == "2026-10-24" and OLD == "2026-10-17-2"
 
 
 def test_notice_version_is_tied_to_the_notice_text() -> None:
@@ -1058,7 +1059,7 @@ def test_consent_box_splits_three_consents_before_the_buttons() -> None:
         assert f"sessionStorage _cltk). {GA_ITEMS}" in notes["항목"] or notes[
             "항목"
         ].endswith(f"sessionStorage _cltk). {GA_ITEMS}"), notes["항목"][:40]
-    assert "방문 통계 2개월(Google Analytics" in collect["보유 기간"]
+    assert "방문 통계 14개월(Google Analytics" in collect["보유 기간"]
     # 051 §3.3-4 — 수집·이용 칸에만 KimpTrack 서버의 통계(항목·보유 기간·칸 끝 국내 보관 한 줄). 제공·국외 이전 칸은 그대로.
     # 060 §3.3-4 — 항목 끝은 'KimpTrack 서버:' 뒤에 2절과 같은 항목(요소·떠날 때 보던 곳·깊이) — Clarity 항목 뒤에 둔다
     kimptrack = collect["항목"].split(". KimpTrack 서버: ")
@@ -1390,8 +1391,9 @@ REPLAY_FACTS = {
 def test_body_sections_state_the_replay_facts() -> None:
     """076 §3.2·§3.3·078 §3.7 — 화면 이동 기록을 동의 상자·한눈에 보기·1·2·3·7·8·9절이 빠짐없이 말하고, 2절 소제목은 화면 이용
     통계와 Clarity 사이. 서버 상수 `PRIVACY_V8_EFFECTIVE`(keep 기준)는 v8(사본 `privacy-20261016-2.html`)의 시행일,
-    `PRIVACY_V7_EFFECTIVE`(받기 게이트)는 같은 날이다. 075(v9)·079(v10)는 서버 게이트가 없어 상수를 더하지 않는다 — 바로 앞 판
-    (v9 — 사본 `privacy-20261017.html`)은 지금 판과 같은 날 먼저 게시한 판이다."""
+    `PRIVACY_V7_EFFECTIVE`(받기 게이트)는 같은 날이다. 075(v9)·079(v10)·v11 은 서버 게이트가 없어 상수를 더하지 않는다 — 마지막
+    사본은 v9(`privacy-20261017.html`)이고, 이전 판 링크를 싣지 않기로 한 뒤(사람 결정 2026-10-17)로는 사본을 새로 두지 않아 지금
+    시행일보다 이르다."""
     html, _ = _read(PUBLIC / "privacy.html")
     body = html
     for label, words in REPLAY_FACTS.items():
@@ -1406,10 +1408,10 @@ def test_body_sections_state_the_replay_facts() -> None:
     )
     y, m, d, nth = re.fullmatch(ARCHIVE_NAME, PREVIOUS).groups()
     assert PREVIOUS == "privacy-20261017.html" and nth is None
-    assert PRIVACY_V7_EFFECTIVE == PRIVACY_V8_EFFECTIVE < f"{y}-{m}-{d}" == EFFECTIVE
+    assert PRIVACY_V7_EFFECTIVE == PRIVACY_V8_EFFECTIVE < f"{y}-{m}-{d}" < EFFECTIVE
 
 
-# 075 §3.5 — 본문 절마다 방문 통계(Google Analytics)의 사실 — 받는 것·받지 않는 것·받는 곳·쓰임·끈 설정·2개월·쿠키·근거·지우는 길
+# 075 §3.5 — 본문 절마다 방문 통계(Google Analytics)의 사실 — 받는 것·받지 않는 것·받는 곳·쓰임·끈 설정·14개월·쿠키·근거·지우는 길
 GA_FACTS = {
     "glance": ("Google Analytics로 방문 통계를 보며", "Microsoft·Google 제공"),
     "consent-title": (
@@ -1421,20 +1423,20 @@ GA_FACTS = {
     "s1": ("방문 통계 — Google Analytics, 동의한 방문자만",),
     "s2": (
         "방문 통계 — Google Analytics",
-        "방문 통계(Google Analytics — 동의한 경우만) 2개월",
+        "방문 통계(Google Analytics — 동의한 경우만) 14개월",
         "페이지 주소(검색어와 # 뒤는 뺌)",
         "IP 주소는 저장하지 않음",
         "입력한 글자·마우스 위치·화면 내용은 받지 않고",
         "받는 곳은 Google LLC(미국)입니다",
         "광고용 저장·광고 개인화·Google 신호를 끈 채 보내고",
         "데이터 공유 설정을 모두 꺼",
-        "Google이 2개월 동안 두고 그 뒤 지웁니다",
+        "Google이 14개월 동안 두고 그 뒤 지웁니다",
         "합계 보고서(날짜별 방문 수 같은 것)는 기간 없이 남습니다",
-        "쿠키는 마지막 방문부터 2개월",
+        "쿠키는 마지막 방문부터 2년",
         "방문 통계(Google Analytics)도 같은 세 가지 동의로 처리합니다",
     ),
     "s3": (
-        "Google Analytics 기록은 Google이 보관하며, 2개월이 지나면 Google이 지웁니다",
+        "Google Analytics 기록은 Google이 보관하며, 14개월이 지나면 Google이 지웁니다",
     ),
     "s4": ("방문 통계는 Google에 제공됩니다", "Google LLC(미국)"),
     "s6": (
@@ -1444,7 +1446,7 @@ GA_FACTS = {
     "s7": (
         "쿠키 _ga — Google Analytics",
         "쿠키 _ga_* — Google Analytics",
-        "마지막 방문부터 2개월",
+        "마지막 방문부터 2년",
         "Google LLC(미국)",
     ),
     "s8": ("Google Analytics 기록은 쿠키 _ga의 값을 알려 주면",),
@@ -1472,7 +1474,7 @@ def _s2_block(page: str, title: str) -> str:
 
 def test_body_sections_state_the_google_analytics_facts() -> None:
     """075 §3.5 — 방문 통계(Google Analytics)를 본문 절마다 알리고, 2절의 소절은 Clarity 소절 바로 뒤, 보유 기간 표의 행은 Clarity
-    행 바로 뒤(2개월). v9 가 바꾼 글자는 그 판의 사본(`privacy-20261017.html`)이 얼려 두었다. 화면 이동 기록의 지난 보유 기간
+    행 바로 뒤(14개월). v9 가 바꾼 글자는 그 판의 사본(`privacy-20261017.html`)이 얼려 두었다. 화면 이동 기록의 지난 보유 기간
     꼴('14일')은 12절 이력 밖에 없다(078)."""
     html, _ = _read(PUBLIC / "privacy.html")
     body = html
@@ -1490,7 +1492,7 @@ def test_body_sections_state_the_google_analytics_facts() -> None:
     for old in REPLAY_OLD_PERIODS:
         assert old not in visible, old
     periods = list(_periods(html).items())
-    ga = ("방문 통계(Google Analytics — 동의한 경우만)", "2개월")
+    ga = ("방문 통계(Google Analytics — 동의한 경우만)", "14개월")
     assert periods[periods.index(ga) - 1][0] == "화면 녹화(Clarity — 동의한 경우만)"
 
 
