@@ -33,6 +33,7 @@ marketlens/
       uptime-monitor.md       외부 uptime 감시 등록 (사람용, 025)
       cloudwatch.md           CloudWatch 에이전트·경보·canary·로그 전송 설치 (사람용, 027)
       admin-access.md         관리자 페이지 Cloudflare Access·Tunnel 설정 기록·토큰 교체·접속 기록 회전 (사람용, 030)
+      redis-auth.md           Redis 비밀번호 켜기(collect·serve 먼저, data 마지막)·확인·되돌리기·값 바꾸기 (사람용, 021)
       clarity.md              Clarity 대시보드 설정·켜고 끄기·삭제 요청(프로젝트 통째 삭제) (사람용, 033)
       google-analytics.md     GA4 속성 만들기·방침에 맞춘 설정값·켜고 끄기·삭제 요청 (사람용, 075)
   server/                     FastAPI 앱 (Python 3.12)
@@ -47,7 +48,7 @@ marketlens/
       features/<name>/        기능 1개 = 폴더 1개: Tab.tsx api.ts types.ts
       App.tsx main.tsx
     admin/                    관리자 화면(페이지 여섯·왼쪽 내비·공통 모듈·아이콘 묶음 icons.svg·vendor/ECharts, 빌드 없음 — 기능 폴더 규칙의 예외, 029·064·065·066)
-    scripts/                  랜딩 글꼴 서브셋 스크립트·글자 목록·아이콘 PNG·ICO 만들기·미리보기 그림 원본·관리자 화면 가짜 피드 서버(uv run, 빌드에 들지 않음 — 022·064·065·066)
+    scripts/                  랜딩·대시보드 글꼴 서브셋 스크립트·랜딩 글자 목록·아이콘 PNG·ICO 만들기·미리보기 그림 원본·관리자 화면 가짜 피드 서버(uv run, 빌드에 들지 않음 — 002·022·064·065·066)
     nginx-admin.conf          관리자 server(:8081, 게시 안 함) 템플릿 — 전체 `/api` 분기·교차 사이트 403·접속 기록(029)
   caddy/                      Caddyfile — serve 박스 TLS 앞단·접속 로그 (디렉터리째 바인드, 023·027)
   ops/                        박스에 올리는 설정(앱 코드 아님) — cloudwatch/(에이전트 JSON)·canary/(Lambda 점검 스크립트) (027)
@@ -88,7 +89,7 @@ marketlens/
 | 번호 | 이름 | 상태 | 범위 |
 |---|---|---|---|
 | 001 | collect | DONE | 업비트·빗썸 WebSocket 실시간 수집 → 메모리, 마켓 우주, USDT 시세, 1초 틱, 원문 싱크·인계·판정 계약, `/health` |
-| 002 | web-shell | DONE | 화면 골격·탭·KPI·테마 |
+| 002 | web-shell | DONE | 화면 골격·탭·KPI·테마·같은 출처 글꼴(Inter 서브셋 하나, Google Fonts 없음) |
 | 003 | spreads | DONE | 김프 표 — `/spreads`(Redis 표 반환, 018) `/refresh`(즉시 갱신 트리거) + 스프레드 탭 |
 | 004 | analysis | DONE | 단일 종목 분석 — premium·scan·matrix·orderbook·slippage·arbitrage (BE 전용) |
 | 005 | history | DONE | Influx `premium` 점 규칙·`/history/*`(창 기본이자 상한 — streaks 7일·premium 1주·bulk 1시간)·백필 + 기록 탭 사건 로그 실데이터 (쓰기는 009) |
@@ -102,11 +103,11 @@ marketlens/
 | 013 | premium-events | DONE | 틱에서 김프/역프 사건 감지(1.0% 진입·0.5% 이탈·1분 초과) → Influx `premium_event` 1건 1점 + `/history/events` + 기록 탭 전 코인 사건 표 |
 | 014 | premium-1m | DONE | 틱에서 (국내·해외·코인) 1분 OHLC·가격·입출금 집계 → 버킷 `candles_1m…1d`(사슬 롤업, 보관 7일/30일/90일/1년/무제한) + `/history/candles`(`res`, 1,440점 상한) + 기록 탭 차트 실데이터 |
 | 016 | process-split | DONE | 서버 `ROLE`(collector | api) — Influx 조회(`/history/premium`·`streaks`·`streaks/bulk`·`candles`, 018 부터 `/spreads` 도)를 별도 컨테이너 `api` 에서, nginx 경로 분기 (BE·인프라) |
-| 017 | spreads-push | DONE | 스프레드 표 WebSocket 푸시 — 수집이 매 틱 $1,000 표를 만들어 Redis 채널로(2026-09-26 부터 접속자와 무관), `api` 가 구독해 바뀐 행만 `/ws/spreads` 로 접속자 전원에 같은 바이트, FE 폴링 대체(fallback 폴링 없음), 체결 규모 $1,000 고정 |
+| 017 | spreads-push | DONE | 스프레드 표 WebSocket 푸시 — 수집이 매 틱 $1,000 표를 만들어 Redis 채널로(2026-09-26 부터 접속자와 무관), `api` 가 구독해 바뀐 행만 `/ws/spreads` 로 접속자 전원에 같은 바이트(`?v=2` 는 바뀐 필드만 싣는 patch — 2026-10-23), FE 폴링 대체(fallback 폴링 없음), 체결 규모 $1,000 고정 |
 | 018 | spreads-serve | DONE | `GET /spreads` 를 `api` 가 Redis `spreads:latest` 로 답하고 nginx `/api/spreads` 를 `api` 로 — 스프레드 탭이 보는 컨테이너는 api 하나, `notional` 쿼리 삭제, 요청마다 `spreads:want` 갱신 (BE·인프라) |
 | 019 | bybit | DONE | 바이빗 USDT 현물 추가 — WS 3샤드 orderbook.200(스냅샷+델타, 행 발행은 저장소 읽기 직전)+publicTrade, instruments-info 매초, 입출금(HMAC), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗), `/history/*` `fx=bybit`, web 표시명·기록 탭 Bybit 실데이터 |
 | 020 | bitget | DONE | 비트겟 USDT 현물 추가 — WS 3샤드 books15(스냅샷)+trade, symbols 매초, 입출금(public·키 없음), 우주 = 국내 ∪ ∩ (바이낸스 ∪ 바이빗 ∪ 비트겟), `/history/*` `fx=bitget`, web 표시명·기록 탭 Bitget 실데이터 |
-| 021 | infra-split | DONE | EC2 3대 분리 — compose profile 3개(collect=server c7g.medium / data=redis·influxdb t4g.small / serve=api·web·caddy + tunnel=cloudflared t4g.micro), 박스 간 사설 IP(루트 .env DATA_HOST·COLLECT_HOST), nginx 업스트림 주입, 배포 3타깃(data→collect→serve), 런북 ec2-split.md (인프라) |
+| 021 | infra-split | DONE | EC2 3대 분리 — compose profile 3개(collect=server c7g.medium / data=redis·influxdb t4g.small / serve=api·web·caddy + tunnel=cloudflared t4g.micro), 박스 간 사설 IP(루트 .env DATA_HOST·COLLECT_HOST), nginx 업스트림 주입, 배포 3타깃(data→collect→serve), 런북 ec2-split.md, Redis 비밀번호(`REDIS_PASSWORD` 가 있을 때만 — 켜기는 런북 redis-auth.md) (인프라) |
 | 022 | landing | DONE | 정적 HTML 랜딩 `/` — 실시간 경로 카드·7일 사건·김프 뜻·계산 방법·질문과 답, 요약 API `GET /landing`(api), 대시보드는 `/app/`. 검색 구성(검색어 제목·설명·h1, JSON-LD, data-nosnippet, 자체 서브셋 글꼴, 아이콘, robots·sitemap, 대시보드 noindex, 404, www 301) |
 | 023 | domain-tls | DONE | `kimptrack.com`·`www` HTTPS — serve 박스에 caddy 컨테이너(호스트 80·443, Let's Encrypt 자동 발급·갱신, 볼륨 보존), web 은 호스트 비공개, `www` 는 apex 로 301(022), 탄력 IP 직접 접속은 평문 유지(noindex), DNS 는 Cloudflare(프록시 끔) (인프라·serve 전용) |
 | 024 | wallet-history | DONE | 틱 입출금 4상태 = 006 망 판정값 + 망 이름 2개 → 1분봉·사건 점 `net_dom`·`net_fx`, `/history/candles`·`events` 에 `netDom`·`netFx`, 기록 탭 읽기 줄·사건 표·로그에 망 표시 |
@@ -153,7 +154,7 @@ marketlens/
 | 072 | responsive | DONE | 대시보드 좁은 화면 배치 — 폭·높이 세 구간(폰 ≤719 또는 가로로 눕힌 터치 기기·좁은 헤더 ≤1079·문서 스크롤 = 폰 또는 높이 ≤560, 공유 훅 하나), 두 줄 헤더·메뉴(처리방침)·폰 탭 짧은 이름, 폰 KPI 3칸 격자·필터 접기·정렬 줄·카드 행, 좁은 폭 표 틀 왼쪽부터·기록 탭 한 칸 쌓기, 차트 터치 세로 끌기는 페이지 스크롤, 브라우저·기기 차이(iOS 가로 글자 크기 고정·어두운 화면 선언·hover 는 마우스 기기만·터치 기기 입력칸 16px·심볼 칸 자동 수정 끔·좁은 칸 사건 로그·순위 표 카드·정적 페이지 hover 도 마우스 기기만). 넓은 화면(≥1080)은 그대로, 관리자 화면 제외 (web) |
 | 073 | replay-collect | DONE | 화면 이동 기록 수집 — `public/replay.js`(봇 판별을 위해 동의와 관계없이 모든 방문 — 2026-10-18 사람 결정, 처리방침은 그대로·`RECORD_ALL` 스위치, 묶음마다 동의 상태 `c` 다섯, 조각 sid·사건 m·c·s·e·r·v·p·a, 2초 묶음), api `POST /replay`(공개 허용 +1·검사·게이트·IP 10분 600·그날 8MB·조각 1MB), Redis `rp:*` 14일, 관리자 피드 `live`·`sessions`·`session` (BE·web·인프라) |
 | 074 | admin-replay | DONE | 관리자 방문자 페이지 '지금 보는 중'·'화면 기록'·IP 판 '화면 기록'(표마다 동의 칸 — 동의·미동의(거부함·하루 동안 안 보기·답 안 함·GPC 거부)), 재생 판(실제 페이지 틀 + 커서·누름·스크롤, 속도·빈 시간 건너뛰기·시간 막대·사건 목록, 따라 보기 2초), `replay.js` 재생 쪽(kt-replay=1) (web) |
-| 075 | privacy-v9-ga | DONE | 처리방침 v9(2026-10-17) — Google Analytics 4(방문 통계: 본 페이지·머문 시간·유입 경로, `clarity.js` 안에서 Clarity 와 같은 판정 — 2026-10-18 부터 033 `TRACK_ALL` 로 모든 방문자, 끄면 세 칸 동의자만·동의 전 Google 요청 0·광고 신호 거부·Google 신호 끔·검색어 뺀 주소·쿠키 2개월), 받는 자·국외 이전에 Google LLC, GA 보관 2개월, 안내 판 올림(다시 묻기), 이전 판 `privacy-20261016-2.html`, 서버 상수 없음, 측정 ID `G-RJ732XDRKM`(뒤따른 PR — 그 머지가 켜기), 런북 google-analytics.md. 078 위 (web) |
+| 075 | privacy-v9-ga | DONE | 처리방침 v9(2026-10-17) — Google Analytics 4(방문 통계: 본 페이지·머문 시간·유입 경로, `clarity.js` 안에서 Clarity 와 같은 판정 — 2026-10-18 부터 033 `TRACK_ALL` 로 모든 방문자, 끄면 세 칸 동의자만·동의 전 Google 요청 0·광고 신호 거부·Google 신호 끔·검색어 뺀 주소·쿠키 2년), 받는 자·국외 이전에 Google LLC, GA 보관 14개월(2026-10-24 — v11·판 `2026-10-24` 로 2개월에서 되돌림), 안내 판 올림(다시 묻기), 이전 판 `privacy-20261016-2.html`, 서버 상수 없음, 측정 ID `G-RJ732XDRKM`(뒤따른 PR — 그 머지가 켜기), 런북 google-analytics.md. 078 위 (web) |
 | 076 | privacy-v7 | DONE | 처리방침 v7 — 화면 이동 기록(동의한 방문의 마우스·손가락 위치·누른 곳·스크롤·보던 영역·탭 바꿈 + 시각·IP, KimpTrack 서버 14일, 관리자 재생), 동의 창·방침 동의 상자 글, 안내 판 `2026-10-16`(다시 묻기), `PRIVACY_V7_EFFECTIVE`, 이전 판 `privacy-20261014-2.html`. 법률 확인 뒤 머지 = 게시 (web·BE) |
 | 077 | clarity-recordings | DONE | Clarity 녹화 목록 — api `GET /admin/clarity/recordings?days=1·3·7·30`(Clarity MCP 서버의 녹화 경로, 040 토큰, 창마다 30분 메모리 캐시·실패도, 행 = 시작·길이·페이지·클릭·재생 링크(Clarity 출처·허용 글자만)·페이지별 시간선(주소 줄이기·클릭 글자)), 관리자 nginx 정확 일치 +1, Clarity 페이지 카드 '녹화'(기간 탭·최근 10행)·목록 판 `recs`·녹화 판 `rec:<행 번호>`(시간선·Clarity 에서 재생 ↗). 영상·IP 는 Clarity 가 주지 않는다 (BE·web·인프라) |
 | 078 | replay-archive | DONE | 화면 이동 기록 서비스 종료까지 보관(사람 결정 2026-10-16) — v8 뒤 조각은 머리 `keep`·만료 없음, 수집기가 10분마다 3시간 조용한 조각을 S3 `replay/…ndjson.gz` 로(collect 박스 자격), 수집기 `GET /admin/replay/archive`(관리자 nginx 정확 일치 +1)·api `session` 의 `archived`·관리자 재생 판이 옮긴 조각을 archive 로, IP 지우기 스크립트, 처리방침 v8(보관 기간·저장 장소만, 안내 판 `2026-10-16-2`) (BE·web·인프라) |

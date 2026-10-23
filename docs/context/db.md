@@ -47,7 +47,7 @@
   - 정수 **`rp:b:<YYYYMMDD>`**(KST) — 그날 쓴 누른 바이트 합(INCRBY).
   - 상한: 그날 8MiB(누른 바이트 — 넘을 묶음은 버린다)·조각마다 1MiB·묶음 3,600. 묶음은 14일 × 8MiB = 112MiB 가 최악 — `maxmemory 600mb`·noeviction 의 시세 키를 밀어내지 않는 몫. keep 머리·집합은 조각마다 수백 바이트씩 쌓인다(조각 1,000/일이면 연 약 200MB — status 빚).
   - S3(078): 010 과 같은 버킷의 `replay/<YYYY>/<MM>/<DD>/<sid>.ndjson.gz`(first 의 KST 날) — gzip JSON Lines, 첫 줄 머리(해시 그대로), 다음 줄부터 묶음 `{"at","seq","ev"}` 그대로. 쓰고 읽는 쪽은 수집기(collect 박스 역할 — serve 엔 자격이 없다).
-- env `REDIS_URL`(기본 `redis://localhost:6379/0`, compose 안에서는 `redis://redis:6379/0` — server·api 둘 다). Redis 가 없어도 앱은 뜬다 — 인계된 틱은 버려지고(경고 로그) 원문은 S3 에 있어 재생 가능하다.
+- env `REDIS_URL`(기본 `redis://localhost:6379/0`, compose 안에서는 `redis://redis:6379/0` — server·api 둘 다). `REDIS_PASSWORD` 가 있으면 redis 가 `--requirepass` 로 요구하고 server·api 가 접속마다 `AUTH default <값>` 을 보낸다 — 비면 인증 없음(021 §3.7, 켜기는 runbooks/redis-auth.md). Redis 가 없어도 앱은 뜬다 — 인계된 틱은 버려지고(경고 로그) 원문은 S3 에 있어 재생 가능하다.
 
 ## S3 원문 아카이브
 - 객체 키 `raw/exchange=<id>/dt=YYYY-MM-DD/hh=HH/YYYYMMDDTHHMM00Z.jsonl.gz`(UTC, 시각 = 분 창의 시작). 거래소·분마다 객체 1개. 시세 프레임·마켓 목록 응답은 그 분의 `(source, key)` 별 마지막 1건만(목록의 key 는 `markets:all`·`symbols:all`), 나머지(입출금·핸드셰이크 거부 본문·구독 응답)는 전량.

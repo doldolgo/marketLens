@@ -1,4 +1,4 @@
-// /ws/spreads 구독 — 폴링 대신 snapshot + delta 푸시 (스펙 017 §3.4). WebSocket 이 막히면 백오프 재연결만 반복한다(폴링 fallback 없음).
+// /ws/spreads 구독 — 폴링 대신 snapshot + patch 푸시 (스펙 017 §3.4). WebSocket 이 막히면 백오프 재연결만 반복한다(폴링 fallback 없음).
 // 거래소 id→표시명 변환은 shared/format 의 exName (011 이 같이 쓴다). 구독은 이 기능 폴더 안에 살고,
 // 셸이 공유 피드를 만든 직후 시작한다.
 import { useEffect, useReducer } from 'react'
@@ -7,11 +7,15 @@ import {
 } from '../../shared/config'
 import { exName } from '../../shared/format'
 import type { Feed, SpreadRow } from '../../shared/types'
-import type { SpreadsMessage, SpreadsResponse } from './types'
+import type { SpreadPatch, SpreadsMessage, SpreadsResponse } from './types'
 
-/** ws(s)://<host>/api/ws/spreads — API_BASE 가 상대경로라 페이지 origin 으로 절대화한 뒤 스킴만 바꾼다 (§3.4). */
+/**
+ * ws(s)://<host>/api/ws/spreads?v=2 — API_BASE 가 상대경로라 페이지 origin 으로 절대화한 뒤 스킴만 바꾼다 (§3.4).
+ * `v=2` 는 새 표마다 바뀐 행을 통째로 싣는 delta 대신 바뀐 필드만 싣는 patch 를 받겠다는 표시다(§3.3) — 쿼리가 없는 옛 탭은
+ * delta 를 그대로 받는다. 쿼리가 어디서 빠져도 delta 를 그대로 병합하므로 표는 맞다.
+ */
 function socketUrl(): string {
-  const url = new URL(`${API_BASE}/ws/spreads`, window.location.origin)
+  const url = new URL(`${API_BASE}/ws/spreads?v=2`, window.location.origin)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   return url.toString()
 }
@@ -26,12 +30,14 @@ async function inflate(data: ArrayBuffer): Promise<string> {
 }
 
 /** 서버 키 `sym|dom|fx` — 서버 id 기준이라 표시명으로 바꾸기 전에 만든다. */
-const rowKey = (r: SpreadRow) => `${r.sym}|${r.dom}|${r.fx}`
+const rowKey = (r: Pick<SpreadRow, 'sym' | 'dom' | 'fx'>) => `${r.sym}|${r.dom}|${r.fx}`
 
-/** 서버 키 → 피드 행. snapshot 은 통째 교체, delta 는 키로 병합·삭제한다 (§3.4). */
+/** 서버 키 → 피드 행. snapshot 은 통째 교체, delta·patch 는 키로 병합·삭제한다 (§3.4). */
 export interface RowTable {
   snapshot(rows: SpreadRow[]): void
   delta(rows: SpreadRow[], removed: string[]): void
+  /** `rows` 는 행 통째(새 키), `patches` 는 있던 행의 바뀐 필드. 모르는 키의 patch 가 있으면 false — 표가 어긋났다. */
+  patch(rows: SpreadRow[], patches: SpreadPatch[], removed: string[]): boolean
   /** 피드에 걸 행 배열 — 부를 때마다 새 배열(행 객체는 그대로). */
   rows(): SpreadRow[]
 }
@@ -50,6 +56,38 @@ export function createRowTable(): RowTable {
     rows.set(k, r)
   }
 
+  // patch 항목의 필드를 있던 행에 그 자리에서 덮는다 — 행 키 셋은 서버 id 라 건너뛴다(행은 표시명을 들고 있다).
+  // spark 는 새 배열로 바꾼다(끝값 바꾸기·앞 하나 버리고 붙이기) — 화면은 spark 를 읽지 않지만 배열을 고쳐 쓰지는 않는다
+  function merge(r: SpreadRow, p: SpreadPatch): void {
+    const dst = r as unknown as Record<string, unknown>
+    const src = p as unknown as Record<string, unknown>
+    for (const f in src) {
+      switch (f) {
+        case 'sym':
+        case 'dom':
+        case 'fx':
+          break
+        case 'sparkEnd':
+          r.spark = [...r.spark.slice(0, -1), p.sparkEnd as number]
+          break
+        case 'sparkPush':
+          r.spark = [...r.spark.slice(1), p.sparkPush as number]
+          break
+        default:
+          dst[f] = src[f]
+      }
+    }
+  }
+
+  function settle(removed: string[]): void {
+    for (const k of removed) {
+      rows.delete(k)
+      serverAge.delete(k)
+    }
+    // 안 실린 행 = 서버 판정 그대로 → tick 이 키운 age 를 서버 값으로 되돌린다 (§3.4)
+    for (const [k, r] of rows) r.age = serverAge.get(k) ?? r.age
+  }
+
   return {
     snapshot(list) {
       rows.clear()
@@ -58,12 +96,23 @@ export function createRowTable(): RowTable {
     },
     delta(list, removed) {
       for (const r of list) put(r)
-      for (const k of removed) {
-        rows.delete(k)
-        serverAge.delete(k)
+      settle(removed)
+    },
+    patch(list, patches, removed) {
+      for (const r of list) put(r)
+      let known = true
+      for (const p of patches) {
+        const k = rowKey(p)
+        const r = rows.get(k)
+        if (r === undefined) {
+          known = false
+          continue
+        }
+        merge(r, p)
+        serverAge.set(k, p.age)
       }
-      // 안 실린 행 = 서버 판정 그대로 → tick 이 키운 age 를 서버 값으로 되돌린다 (§3.4)
-      for (const [k, r] of rows) r.age = serverAge.get(k) ?? r.age
+      settle(removed)
+      return known
     },
     rows: () => [...rows.values()],
   }
@@ -75,7 +124,7 @@ export function reconnectDelay(backoff: number, r: number = Math.random()): numb
 }
 
 /**
- * 연결 하나를 열고 snapshot 은 통째 교체, delta 는 키로 병합·삭제한다. delta 에 안 실린 행의 age 는 서버가 마지막에 준
+ * 연결 하나를 열고 snapshot 은 통째 교체, patch(옛 경로면 delta)는 키로 병합·삭제한다. 안 실린 행의 age 는 서버가 마지막에 준
  * 값으로 되돌린다 — 안 실렸다는 건 서버 판정이 안 바뀌었다는 뜻이다(조용한 코인도 현재값). 셸의 1.5초 tick 은 그대로
  * age 를 키우므로 delta 가 끊기면(수집 정지·반쯤 죽은 연결) 5초 뒤 전 행이 stale 로 간다 (§3.4).
  */
@@ -126,8 +175,12 @@ export function useSpreadSocket(feed: Feed): void {
         case 'snapshot':
           applyTable(msg)
           break
-        case 'delta':
+        case 'delta': // 쿼리가 빠진 경로·배포 중 옛 api — 행 통째라 그대로 병합한다
           table.delta(msg.rows, msg.removed)
+          apply(msg.rate)
+          break
+        case 'patch':
+          if (!table.patch(msg.rows, msg.patch, msg.removed)) ws?.close() // 모르는 키 — 다시 붙어 snapshot 부터
           apply(msg.rate)
           break
         case 'waiting':

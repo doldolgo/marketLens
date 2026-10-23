@@ -1,5 +1,5 @@
 /* Nocturne — design-system tokens and component classes. This file is the source of truth for the system's look; retune it here and see readme.md. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* Inter 글꼴 파일은 이 파일이 부르지 않는다 — 앱은 같은 출처의 서브셋을 싣는다(web/src/shared/fonts.css, 스펙 002 §3.2). Google Fonts 를 부르지 않는다. */
 
 :root {
   /* 상태색 (한국식: 빨강=상승, 파랑=하락) */

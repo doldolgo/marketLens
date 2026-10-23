@@ -32,6 +32,7 @@ vite proxy 는 허용 목록과 무관하게 모든 `/api/*` 를 넘긴다 — �
 테스트 러너 없음 (현재). 스펙에서 도입하기 전까지 FE 검증은 `build` + `lint` + 수동 확인.
 
 랜딩(022)은 dev 서버에서 `http://localhost:5173/app/landing.html` 로 연다 — `public/` 이 base(`/app/`) 아래로 서빙되기 때문이다(본문 그림·글꼴은 상대 경로라 그대로 보이고, 아이콘·og 그림·JSON-LD 는 운영 절대 주소 `https://kimptrack.com/…` 를 가리킨다. `/api/landing` 은 위 프록시를 탄다. 랜딩 글을 고치면 `uv run web/scripts/subset-landing-font.py` 로 글꼴 서브셋을 다시 만든다 — 안 하면 `test_landing_seo.py` 가 멈춘다). 배포와 같은 `/` 는 docker 통합 기동(:8080)에서 본다. oxlint 는 `src` 만 보므로 `landing.html` 의 스크립트는 lint 대상이 아니다. `web/admin/`(관리자 화면, 029)도 oxlint·vite 빌드 대상이 아니다 — web 이미지가 그대로 복사한다.
+대시보드 글꼴(002 §3.2)은 같은 출처의 Inter 서브셋 `web/src/shared/fonts/inter-latin.woff2` 하나다 — 화면 글을 고쳐도 다시 만들 필요가 없고(라틴 범위 전체 + ₩), 글자 범위를 바꿀 때만 `uv run web/scripts/subset-dashboard-font.py`(원본을 받느라 샌드박스 밖, 다시 돌려도 같은 바이트) 뒤 `fonts.css` 의 `unicode-range` 를 함께 고친다(`test_dashboard_font`).
 관리자 화면 v4(066)는 `uv run web/scripts/admin-fake-feeds.py [--port 18064] [--scenario ok|problem|old|missing|empty|bands|nobands|xss|expired|noaddrs|many]` 로 본다 — `web/admin` 정적 파일을 관리자 nginx 와 같은 헤더(CSP·`X-Frame-Options`·`Cache-Control`)로 주고 화면이 부르는 피드 열다섯(067 대역 목록·상세, 069 IP 목록·상세(070), 068 날별 기록·`offset=prev`·`dims`, 052·061 화면 이용 통계 `attention` — `page` 를 주면 요소까지 포함)과 `POST /api/refresh` 를 지어낸 값으로 답한다(표준 라이브러리만·127.0.0.1 에만·실서버 호출 없음, 배포 이미지에 들지 않는다). `http://127.0.0.1:18064/`·`/server.html`·`/traffic.html`·`/visitors.html`·`/clarity.html`·`/screens.html` 을 열고(상세 판은 주소 끝 `#detail=<카드 id>`, 기간·비교·거르기는 `?range=…&cmp=…&f=<키>:<값>`), 돌던 중 경우는 `/__scenario/<이름>` 으로 바꾼다(`old` = 067·068 배포 전 — 대역·날별 기록 404·offset 모름·dims 없음, `missing` = 062·063·067·068 배포 전, `empty` = AWS·Clarity·접속 로그 없음, `bands` = 대역 1,200개(200행씩), `nobands` = 대역 없음, `xss` = 글자 칸마다 `<img onerror>`, `expired` = 헬스 401 비JSON. IP 단위(069 — 070 방문자 IP 별)는 `old`·`missing`·`noaddrs`(069 만 배포 전 — 대역 별은 그대로) = 404, `empty` = 연결 안 됨, `many` = IP 1,200개·IP 판 partial, `nobands` = IP 없음·since 없음, `xss` = 근거·도시·망 사업자·PTR 에 `<img onerror>` — 방문자는 `/visitors.html`(IP 별)·`/visitors.html?view=band`(대역 별), IP 판은 `#detail=addr:<ip>`. 화면 이용 통계는 `problem` = Redis 실패 error, `empty` = 시행 전 before_gate, `nobands` = 기록 없음, `bands` = 랜딩 요소 300(그중 `(기타)`), `xss` = `<img onerror>` 열쇠. 화면 페이지(065)의 틀은 실제 공개 사이트를 띄운다 — 덮어 보기까지 보려면 053 의 시험 사본(attention.js 의 `HOST`·`ADMIN_ORIGIN`, screens.js 의 `SITE_ORIGIN` 을 로컬로 바꾼 커밋하지 않는 사본)). 스크립트 문법은 `node --check web/admin/*.js`, 계산·부르기·상세 판·툴팁 글자는 server `pytest` 의 node 시험(`test_admin_rules`·`calc`·`models`·`pages`·`session`·`detail`·`xss`·`fake`·방문자 IP 별 `addrs`·`addr_sheet`(070)·화면 `screens_calc`·`screens_page`, 진짜 ECharts 로 그리는 `render`, 진짜 피드 코드 응답 `contract`·`contract_visits` — 모듈을 ES 모듈로 import 한다, web/package.json 이 `"type": "module"` 이라서다. node 가 없으면 건너뛰고 `CI` 면 실패. node 18·26 에서 돌려 봤다)이 본다. 실제 nginx(:8081)는 docker 통합 기동에서 `docker exec marketlens-caddy wget -qO- http://web:8081/` 로 본다(029).
 ECharts 사본을 올릴 때: 빈 디렉터리에서 `npm pack echarts@<판>`(registry 가 막히면 샌드박스 밖) → 꾸러미의 `package/dist/echarts.min.js` 하나를 `web/admin/vendor/echarts-<판>.min.js` 로(고치지 않는다), `package/LICENSE`·`NOTICE`·`licenses/LICENSE-d3` 를 `vendor/ECHARTS-LICENSE.txt`·`ECHARTS-NOTICE.txt`·`ECHARTS-LICENSE-d3.txt` 로 옮긴다. 여섯 페이지의 `<script src>`·`test_admin_screen.py` 의 파일 이름과 sha256 을 같이 바꾸고 옛 파일은 지운다 — 이름이 바뀌어야 브라우저의 1년 캐시(`/vendor/` 는 private·immutable)가 새 판을 받는다.
 처리방침(032)은 dev 서버에서 `http://localhost:5173/app/privacy.html` 로 연다(랜딩과 같은 이유). 번들 밖 정적 파일이라 oxlint 대상이 아니다. 배포와 같은 `/privacy`(`Cache-Control: no-cache`·CSP)는 docker 통합 기동에서 본다 — dev 서버는 CSP 를 붙이지 않는다. 분석 동의 저장값은 브라우저 개발자 도구의 localStorage `kt.analytics`·`kt.analytics.v` 로 본다(없음·그 밖·다른 판 = 정하지 않음). server `pytest` 의 `test_privacy.py` 는 이 페이지의 동의 스크립트를 node 로 돌린다 — node 가 없으면 그 테스트만 건너뛰고, `CI` 환경 변수가 있으면 실패한다(CI 러너에는 node 가 있다).
@@ -48,6 +49,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 | INFLUX_URL | `http://localhost:8086` |
 | INFLUX_TOKEN | 없음 |
 | REDIS_URL | `redis://localhost:6379/0` |
+| REDIS_PASSWORD | 없음 |
 | REFRESH_TOKEN | 없음 |
 | UPBIT_API_KEY | 없음 |
 | UPBIT_SECRET_KEY | 없음 |
@@ -69,6 +71,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 - `ROLE`: 프로세스 역할(016) — `collector`(전체 동작) | `api`(Influx 조회 + `/ws/spreads`·`/ws/gap`·`/ws/pp` + `GET /spreads` Redis 읽기 + `GET /landing`·`POST /attention`·`POST /replay`·관리자 피드, 백그라운드 태스크는 017·048·049 구독 태스크 셋 + 052 10초 묶음 쓰기 태스크 1개(끌 때 한 번 더 보낸다) + `SLACK_WEBHOOK_URL` 이 있으면 025 알림 태스크 + `STATSD_ADDR` 가 있으면 027 게이지 태스크(+ 접속마다 보내기 태스크)). 로컬은 비워 둔다. `api` 는 compose 의 `api` 서비스가 `environment` 로만 준다. 둘 밖의 값이면 설정을 읽는 순간 실패한다.
 - `INFLUX_URL`·`INFLUX_TOKEN`: InfluxDB 2.7 접속(org·bucket 은 `marketlens` 고정). 토큰이 없으면 flusher 비활성·`/history/*` 503 — 앱은 뜬다. 사람용 UI 는 `http://localhost:8086`(같은 토큰).
 - `REDIS_URL`: Redis 7 접속(009 틱 버퍼). compose 안에서는 `redis://redis:6379/0` 으로 덮어쓴다. 없으면 인계된 틱이 버려진다(앱은 뜬다).
+- `REDIS_PASSWORD`: Redis 비밀번호(021 §3.7). 있으면 dev·배포 compose 의 redis 가 요구하고(`--requirepass`) server·api 가 접속마다 `AUTH default <값>` 을 보낸다. 비면 인증 없음 — 로컬은 비워 둔다(넣었다면 `redis-cli` 에 `--user default --askpass`). 운영은 세 박스에 같은 값, 넣는 순서(collect·serve 먼저, data 마지막)는 `docs/runbooks/redis-auth.md`.
 - `REFRESH_TOKEN`: 설정 시 `POST /refresh` 에 `X-Refresh-Token` 헤더가 필요하다.
 - 거래소 API 키 4개: 입출금 상태 조회용. 없으면 해당 거래소 상태는 `null`(모름). 빗썸은 키 불필요. 업비트는 호출 IP 가 Open API 허용 목록에 있어야 한다.
 - `S3_BUCKET`: 거래소 원문 아카이브 S3 저장(010, 접두사 `raw/`). 없으면 아카이브 비활성, 앱은 뜬다.
@@ -121,7 +124,7 @@ async def main():
 asyncio.run(main())
 EOF
 ```
-접속 직후 바로 `snapshot`(행 수 = `/spreads` 와 같음 — 수집이 매 틱 표를 만들어 `spreads:latest` 가 늘 살아 있다, `waiting` 은 수집 기동 직후뿐), 이후 매초 `delta`(바뀐 행만, 평상시 30~50%)·빈 초는 `heartbeat` 면 정상 (017).
+접속 직후 바로 `snapshot`(행 수 = `/spreads` 와 같음 — 수집이 매 틱 표를 만들어 `spreads:latest` 가 늘 살아 있다, `waiting` 은 수집 기동 직후뿐), 이후 매초 `delta`(바뀐 행만, 평상시 30~70%)·빈 초는 `heartbeat` 면 정상 (017). 주소에 `?v=2` 를 붙이면(브라우저가 붙는 주소) `delta` 대신 바뀐 필드만 싣는 `patch` 가 온다.
 ```bash
 docker compose -f docker-compose.dev.yml exec redis redis-cli GET gap:latest | head -c 400
 ```

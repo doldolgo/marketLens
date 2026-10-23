@@ -46,7 +46,7 @@ from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import RedisError
 
-from app.core.redis_stream import CONNECT_TIMEOUT_SEC, SOCKET_TIMEOUT_SEC
+from app.core.redis_stream import CONNECT_TIMEOUT_SEC, SOCKET_TIMEOUT_SEC, auth_kwargs
 
 CHANNEL = "spreads"
 LATEST_KEY = "spreads:latest"
@@ -136,14 +136,15 @@ class RedisBus:
         self._client = client
 
     @classmethod
-    def from_url(cls, url: str) -> "RedisBus":
-        """생성은 연결하지 않는다(lazy) — 009 의 스트림 클라이언트와 같다."""
+    def from_url(cls, url: str, password: str | None = None) -> "RedisBus":
+        """생성은 연결하지 않는다(lazy) — 009 의 스트림 클라이언트와 같다. 구독 연결도 같은 인증을 쓴다(021 §3.7)."""
         return cls(
             aioredis.from_url(
                 url,
                 socket_connect_timeout=CONNECT_TIMEOUT_SEC,
                 socket_timeout=SOCKET_TIMEOUT_SEC,
                 retry=Retry(NoBackoff(), 0),
+                **auth_kwargs(password),
             )
         )
 

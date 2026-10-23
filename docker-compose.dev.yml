@@ -28,7 +28,8 @@ services:
     image: redis:7-alpine
     container_name: marketlens-redis-dev
     # AOF — 재기동해도 Influx 로 아직 안 옮긴 틱이 남는다 (009 §3.4)
-    command: ["redis-server", "--appendonly", "yes"]
+    # requirepass — server/.env 의 REDIS_PASSWORD(배포와 같은 키, 021 §3.7). 로컬은 비워 둔다 — 빈 값 = 인증 없음
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-}"]
     ports:
       # 로컬 서버(:8000)가 host 에서 붙는다 — REDIS_URL 기본값 redis://localhost:6379/0
       - "6379:6379"

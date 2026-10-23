@@ -86,3 +86,30 @@ def test_three_clients_receive_the_same_frames() -> None:
         finally:
             for ws in sockets:
                 ws.__exit__(None, None, None)
+
+
+def test_v2_query_gets_patch_and_plain_path_keeps_delta() -> None:
+    """017 §3.3 — `?v=2` 접속자는 바뀐 필드만 싣는 patch, 쿼리 없는 옛 탭은 delta 그대로. snapshot 은 같다."""
+    app, bus = make_ws_app()
+    with (
+        TestClient(app) as client,
+        client.websocket_connect("/ws/spreads?v=2") as new,
+        client.websocket_connect("/ws/spreads") as old,
+    ):
+        assert recv(new) == recv(old) == {"type": "waiting"}
+        client.portal.call(
+            bus.publish_table, json.dumps(table([row("BTC"), row("ETH")]))
+        )
+        assert recv(new) == recv(old)
+        client.portal.call(
+            bus.publish_table,
+            json.dumps(table([row("BTC", fwd=3.0, age=0.7), row("ETH", age=0.7)])),
+        )
+        patch = recv(new)
+        assert patch["type"] == "patch" and patch["rows"] == []
+        assert patch["patch"] == [
+            {"sym": "BTC", "dom": "upbit", "fx": "binance", "fwd": 3.0, "age": 0.7}
+        ]
+        delta = recv(old)
+        assert delta["type"] == "delta" and [r["sym"] for r in delta["rows"]] == ["BTC"]
+        assert len(delta["rows"][0]) == len(row("BTC"))
