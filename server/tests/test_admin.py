@@ -348,16 +348,19 @@ def test_every_proxy_clears_cookie_and_access_jwt_and_hides_cors() -> None:
         assert ["Access-Control-Allow-Origin"] in hidden, key
 
 
-# 053 §3.7 — 공개 페이지는 자기 출처와 관리자 화면의 덮어 보기 틀 안에서만. 랜딩·대시보드(index.html 을 주는 location)는
-# 이 지시어 하나짜리 CSP, 세 정적 페이지는 052 문자열 끝의 frame-ancestors 만 이 값이다
+# 053 §3.7 — 공개 페이지는 자기 출처와 관리자 화면의 덮어 보기 틀 안에서만. 랜딩은 이 지시어 하나짜리 CSP, 대시보드(index.html 을
+# 주는 location)는 그 앞에 글꼴을 같은 출처로만 받는 font-src 'self'(002 §3.2), 세 정적 페이지는 052 문자열 끝의 frame-ancestors 만 이 값이다
 FRAME_ANCESTORS = "frame-ancestors 'self' https://admin.kimptrack.com"
-FRAMED_ONLY = {("=", "/"), ("=", "/index.html"), ("=", "/app/index.html"), ("/app/",)}
+DASHBOARD_CSP = f"font-src 'self'; {FRAME_ANCESTORS}"
+FRAMED_ONLY = {("=", "/"): FRAME_ANCESTORS} | dict.fromkeys(
+    [("=", "/index.html"), ("=", "/app/index.html"), ("/app/",)], DASHBOARD_CSP
+)
 FRAMED_STATIC = {("=", "/privacy"), ("=", "/kimp-chart"), ("=", "/kimp-history")}
 
 
 def test_public_pages_can_be_framed_only_by_the_admin_overlay() -> None:
     public = _locations(_public_server())
-    for key in FRAMED_ONLY | FRAMED_STATIC:
+    for key in FRAMED_ONLY.keys() | FRAMED_STATIC:
         csps = [
             h
             for h in _args(public[key], "add_header")
@@ -369,7 +372,7 @@ def test_public_pages_can_be_framed_only_by_the_admin_overlay() -> None:
         found = [d.strip() for d in value.split(";") if "frame-ancestors" in d]
         assert found == [FRAME_ANCESTORS], key
         if key in FRAMED_ONLY:
-            assert value == FRAME_ANCESTORS, key
+            assert value == FRAMED_ONLY[key], key
     # 대시보드 주소(/app/·?tab=)는 index.html 을 주는 location 으로 간다
     assert _route("/app/") == ("/app/",)
     # X-Frame-Options 는 두지 않는다 — CSP 와 다르면 브라우저가 관리자 틀을 막는다(공개 nginx·caddy 어디에도)

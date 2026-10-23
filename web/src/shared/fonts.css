@@ -1,0 +1,12 @@
+/* 대시보드 글꼴 — Inter(OFL 1.1, fonts/OFL.txt)를 Google Fonts 가 주던 라틴 범위 + ₩ 만 남긴 같은 출처 파일 하나 (스펙 002 §3.2).
+   다시 만들기: uv run web/scripts/subset-dashboard-font.py — unicode-range 는 그 스크립트의 글자 목록과 같다(test_dashboard_font).
+   빌드가 내용 해시를 붙여 /app/assets/ 로 낸다(1년 immutable). 한글은 Inter 에 없어 --font-body 뒤의 system-ui 로 보인다.
+   index.html 이 같은 파일을 preload 한다 — 파일 이름을 바꾸면 함께 고친다. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20A9, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
