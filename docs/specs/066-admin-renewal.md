@@ -16,7 +16,7 @@
 ## 3. 동작
 
 ### 3.1 틀
-- **왼쪽 세로 내비**(조사 §3.1): 아이콘+이름 200px, 768~1279px 아이콘만 56px, 768px 미만은 위 줄 ☰ 로 펼치는 시트. 항목: 개요·서버·트래픽·방문자·Clarity·화면. 항목 옆에 그 페이지의 상태 모양(▲ 주의·■ 문제 — 개요 규칙 §3.3 으로 셈). 아래쪽: 마지막 갱신·로그아웃.
+- **왼쪽 세로 내비**(조사 §3.1): 아이콘+이름 200px, 768~1279px 아이콘만 56px, 768px 미만은 위 줄 ☰ 로 펼치는 시트. 항목: 개요·서버·트래픽·방문자·Clarity·화면. 항목 옆에 그 페이지의 상태 모양(▲ 주의·■ 문제 — 개요 규칙 §3.3 으로 셈). 아래쪽: 마지막 갱신·API 문서(`/api/docs` — 029 §3.5 의 수집기 Swagger, 다른 링크처럼 같은 탭)·로그아웃.
 - **페이지 머리**: 제목(20px) · 오른쪽에 기간 프리셋 단추 · '비교'(없음·이전 기간·지난주 같은 때, 단축키 X) · '10초마다 · HH:MM:SS'. 고른 값은 주소 `?range=…&cmp=…` 에 둔다(새로고침·링크 유지). 걸어 둔 거르기는 머리 아래 칩 줄(×로 지움), 주소 `&f=<키>:<값>`.
 - **토큰**: 조사 §5 의 CSS 변수 그대로(바탕 3단·선·글 3단·강조·상태 4색·차트 8색·진하기 5단·글자·간격·모서리·그림자). **상자 색 고정** collect `--c1` 파랑·data `--c2` 주황·serve `--c3` 청록, 거래소는 `--c1~--c8` 순서. 상태 4색은 상태 표시에만 쓰고 늘 모양(● ▲ ■ ○)+글과 함께. 차트 테마는 CSS 변수에서 읽어 `echarts.registerTheme('kt')`.
 - **카드 해부**(조사 §2-2): 머리 = 제목 + 흐린 단위·기간 + 오른쪽 부분 상태 배지 + 상세 단추(⤢) · 몸 = 그림 하나 · 바닥(있을 때) = 비교 한 줄('어제 같은 때보다 ▲ 12%' — 증감에 상태색 없음). 설명은 제목 옆 '?' 말풍선(071 — 마우스 올림·누름·Enter 로 뜨는 보여 주는 것·낱말 뜻·자료 출처·읽는 법). Clarity 페이지만 몸 위에 그 카드의 답 한 문장을 더 둔다(§3.5).
@@ -98,7 +98,7 @@ cd web && npm ci && npm run lint && npm run build     # oxlint 1.80 종료 0(지
 
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록):
-  - `web/admin/`: 페이지 여섯 `index.html`·`server.html`·`traffic.html`·`visitors.html`·`clarity.html`·`screens.html`(같은 틀 — 왼쪽 내비·머리·거르기 칩 줄·상세 판), `admin.css`(조사 §5 토큰·12칸 격자·1279/767px 꺾임), `icons.svg`(직접 그린 24×24 선 아이콘 22개, currentColor), 틀 `app.js`·`view.js`·`store.js`·`common.js`·`rules.js`·`names.js`, 계산·그림 `calc.js`·`models.js`·`charts.js`·`ui.js`·`tables.js`·`detail.js`, 페이지 `overview.js`·`server.js`·`traffic.js`·`visitors.js`·`insight.js`·`screens.js`, 페이지 모델 `ops.js`·`opsdetail.js`·`trafficmodel.js`·`trafficdetail.js`·`ipmodel.js`·`insightdetail.js`. v3 의 화면 파일은 지우고 새로 썼다(ECharts 사본·라이선스는 그대로).
+  - `web/admin/`: 페이지 여섯 `index.html`·`server.html`·`traffic.html`·`visitors.html`·`clarity.html`·`screens.html`(같은 틀 — 왼쪽 내비·머리·거르기 칩 줄·상세 판), `admin.css`(조사 §5 토큰·12칸 격자·1279/767px 꺾임), `icons.svg`(직접 그린 24×24 선 아이콘 23개, currentColor), 틀 `app.js`·`view.js`·`store.js`·`common.js`·`rules.js`·`names.js`, 계산·그림 `calc.js`·`models.js`·`charts.js`·`ui.js`·`tables.js`·`detail.js`, 페이지 `overview.js`·`server.js`·`traffic.js`·`visitors.js`·`insight.js`·`screens.js`, 페이지 모델 `ops.js`·`opsdetail.js`·`trafficmodel.js`·`trafficdetail.js`·`ipmodel.js`·`insightdetail.js`. v3 의 화면 파일은 지우고 새로 썼다(ECharts 사본·라이선스는 그대로).
   - `web/scripts/admin-fake-feeds.py`: 067 대역 목록·상세(400 `bad_band` 포함)·068 날별 기록·series `offset`·Clarity `dims`(refreshSec 21600), 경우 `old`(067·068 배포 전)·`bands`(1,200개)·`nobands`.
   - 테스트(`server/tests/`): `admin_dom.py`(가짜 DOM — history·hash·키·Blob·URL), `test_admin.py`(nginx·compose 만 남김), 정적 `test_admin_screen.py`·`test_admin_scripts.py`, node `test_admin_rules.py`·`calc`·`models`·`pages`·`session`·`detail`·`xss`·`fake`, 진짜 ECharts `test_admin_render.py`, 진짜 피드 코드 응답 `test_admin_contract.py`·`test_admin_contract_visits.py`.
   - 문서: 이 스펙(§3.2 비교 원천 두 줄·§5·§7), `docs/admin-design-research.md`(근거 — 설계 세션), `CLAUDE.md`(066 DONE·§2), `docs/context/status.md`·`architecture.md`·`dev-setup.md`, `docs/specs/064-admin-v3.md`.
