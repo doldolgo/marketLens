@@ -154,7 +154,7 @@
 
   <main class="wrap doc">
     <h1>개인정보 처리방침</h1>
-    <p class="meta">시행일 <time datetime="2026-10-17">2026년 10월 17일</time></p>
+    <p class="meta">시행일 <time datetime="2026-10-24">2026년 10월 24일</time></p>
 
     <section id="consent" aria-labelledby="consent-title" data-area="consent" hidden>
       <h2 id="consent-title">화면 분석 동의 관리</h2>
@@ -288,8 +288,8 @@
         <p><code>admin.kimptrack.com</code> 요청마다 시각·로그인 이메일·IP·메서드·경로와 쿼리·상태·처리 시간·Cloudflare 요청 ID·<code>Sec-Fetch-Site</code>를 AWS 서울 리전의 서버 파일에 남깁니다. 로그인은 Cloudflare Access(허용한 이메일로 받는 일회용 코드)가 하며, Cloudflare가 이메일·IP를 처리하고 인증 기록을 24시간 둡니다.</p>
         <h3>문의 메일</h3>
         <p>권리 행사·문의로 받은 이메일 주소와 내용을 답변에만 씁니다. 메일 서비스는 Gmail(Google LLC, 미국)입니다.</p>
-        <h3>외부 글꼴 요청</h3>
-        <p>대시보드(<code>/app/</code>)를 열면 방문자의 브라우저가 Google Fonts(Google LLC, 미국)에서 글꼴을 직접 받습니다. 이때 IP·User-Agent·요청 주소·이전 페이지 도메인이 Google로 가고 쿠키는 가지 않으며, Google이 요청 기록을 남깁니다. 운영자만 보는 관리자 화면의 API 문서는 jsDelivr·<code>fastapi.tiangolo.com</code>·Google Fonts에서 화면 파일을 받습니다. 랜딩과 이 페이지는 외부 글꼴을 부르지 않습니다.</p>
+        <h3>외부 자원 요청</h3>
+        <p>랜딩·대시보드·검색어 페이지와 이 페이지는 외부 글꼴을 부르지 않습니다 — 랜딩과 대시보드의 글꼴도 KimpTrack 서버에서 받습니다. 운영자만 보는 관리자 화면의 API 문서는 jsDelivr·<code>fastapi.tiangolo.com</code>·Google Fonts에서 화면 파일을 받습니다.</p>
         <h3>방문자 정보가 가지 않는 곳</h3>
         <p>운영 알림(Slack·AWS 경보·가동 감시)에는 방문자 정보가 가지 않습니다 — 알림에는 거래소 수집 상태와 오류 내용, 오류가 난 요청의 경로(쿼리 없음)만 실립니다. 거래소 원문 보관과 시세 저장소(InfluxDB)에는 방문자 정보가 없습니다 — 시세와 함께 쓰는 Redis에는 화면 이용 통계의 날짜별 합계와 화면 이동 기록(최근 14일 몫)을 두고, 거래소 원문을 두는 파일 저장소(Amazon S3)에는 화면 이동 기록을 원문과 나눠 둡니다.</p>
         <h3>처리 근거</h3>
@@ -369,15 +369,6 @@
           <dt>목적·보유 기간</dt><dd>문의 수신·보관 — 답변을 마친 날부터 1년</dd>
           <dt>거부 방법·절차·효과</dt><dd>메일을 보내지 않으면 이전되지 않습니다. 문의는 이 메일로만 받습니다.</dd>
           <dt>근거</dt><dd>처리위탁·보관 사항을 이 방침에 공개(개인정보 보호법 제28조의8 제1항 제3호 가목)</dd>
-        </dl>
-        <h4>Google LLC — 대시보드 글꼴(Google Fonts)</h4>
-        <dl class="kv">
-          <dt>항목</dt><dd>IP, User-Agent, 요청 주소, 이전 페이지 도메인</dd>
-          <dt>국가·시기·방법</dt><dd>미국 — 대시보드를 열 때 방문자의 브라우저가 직접 요청</dd>
-          <dt>받는 자·연락처</dt><dd>Google LLC(위와 같음)</dd>
-          <dt>목적·보유 기간</dt><dd>글꼴 전달 — 요청 기록은 Google의 방침에 따름</dd>
-          <dt>거부 방법·절차·효과</dt><dd>브라우저·확장 프로그램으로 외부 글꼴을 막으면 기본 글꼴로 보입니다.</dd>
-          <dt>근거</dt><dd>KimpTrack이 넘기지 않고 방문자의 브라우저가 직접 요청합니다 — 받는 곳을 알리려고 적습니다.</dd>
         </dl>
         <h4>Cloudflare, Inc. — 관리자 로그인(운영자만)</h4>
         <dl class="kv">
@@ -463,7 +454,7 @@
 
     <section aria-labelledby="s12" data-area="s12">
       <h2 id="s12">11. 개인정보 처리방침의 변경</h2>
-      <p>이 방침은 <time datetime="2026-10-17">2026년 10월 17일</time>부터 시행합니다. 방침이 바뀌면 이 페이지에 새 시행일을 적고, 동의받은 내용이 바뀌면 랜딩·대시보드에서 다시 묻습니다.</p>
+      <p>이 방침은 <time datetime="2026-10-24">2026년 10월 24일</time>부터 시행합니다. 방침이 바뀌면 이 페이지에 새 시행일을 적고, 동의받은 내용이 바뀌면 랜딩·대시보드에서 다시 묻습니다.</p>
     </section>
   </main>
 

@@ -13,6 +13,9 @@ v9(075 — 새 날의 판)는 같은 세 칸 동의로 방문 통계를 Google A
 v10(079 — 같은 날 두 번째 판)은 동의 창의 버튼([모두 거부] → [하루 동안 안 보기]·[모두 동의])과 저장 규칙(일부만 체크한 저장은
 `later` — 24시간 뒤 다시 묻기, 판 있는 `denied` 만 다시 묻지 않기)을 바꿔 동의 상자의 글이 달라져 안내 판을 올린다(`2026-10-17-2`).
 받는 자·항목·목적·보유 기간은 그대로이고, v9 처럼 서버 게이트·시행일 상수가 없다.
+v11(2026-10-24 — 002·032)은 대시보드 글꼴을 같은 출처로 옮겨 2절 외부 글꼴 문단과 국외 이전의 Google Fonts 묶음을 지운다 — 줄어드는
+변경이고 동의 상자의 글은 그대로라 안내 판을 올리지 않는다(다시 묻지 않는다). 사람 결정(2026-10-17) 뒤로는 이력·사본 링크를 싣지 않아
+v10 의 사본도 두지 않는다 — 마지막 사본은 v9(`privacy-20261017.html`)다.
 실제로 브라우저에서 CSP·버튼을 보는 검증은 스펙 §5 의 로컬 Docker·브라우저 명령이다.
 """
 
@@ -46,7 +49,7 @@ from tests.test_deploy import (
 
 PUBLIC = ROOT / "web/public"
 CANONICAL = "https://kimptrack.com/privacy"
-EFFECTIVE = "2026-10-17"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1·067 §3.4)
+EFFECTIVE = "2026-10-24"  # 지금 판의 시행일 — 페이지의 <time> 넷과 sitemap lastmod 가 같다 (037 §3.1·051 §3.1·067 §3.4)
 # 052 — 같은 출처 스크립트 /attention.js 하나('self')와 그 비콘(connect-src 'self'). 세 정적 페이지가 같은 문자열이다.
 # 053 — 틀에는 자기 출처와 관리자 화면(덮어 보기)만
 CSP = (
@@ -1168,6 +1171,29 @@ def test_every_overseas_recipient_lists_the_five_items() -> None:
         assert _terms(body) == TRANSFER_TERMS, name
 
 
+def test_dashboard_font_is_no_longer_a_transfer() -> None:
+    """v11(002 §3.2) — 대시보드 글꼴은 같은 출처라 국외 이전 묶음에 글꼴이 없고, Google Fonts 는 운영자만 보는 API 문서의
+    화면 파일로만 남는다. 2절은 공개 페이지가 외부 글꼴을 부르지 않는다고 적는다."""
+    html, _ = _read(PUBLIC / "privacy.html")
+    groups = re.findall(
+        r"<h4>(.*?)</h4>\s*<dl[^>]*>(.*?)</dl>", _section(html, "s6"), flags=re.S
+    )
+    assert not [name for name, _ in groups if "글꼴" in name]
+    assert [name for name, body in groups if "Google Fonts" in body] == [
+        "관리자 화면의 API 문서(운영자만)"
+    ]
+    s2 = _section(html, "s2")
+    paragraphs = re.findall(r"<p>(.*?)</p>", s2, flags=re.S)
+    fonts = [_text(p) for p in paragraphs if "글꼴" in p or "Google Fonts" in p]
+    assert len(fonts) == 1
+    assert (
+        "랜딩·대시보드·검색어 페이지와 이 페이지는 외부 글꼴을 부르지 않습니다"
+        in fonts[0]
+    )
+    assert "KimpTrack 서버에서 받습니다" in fonts[0] and "API 문서" in fonts[0]
+    assert "대시보드 글꼴" not in _text(_body(html))
+
+
 def test_archived_versions_are_static_and_external_free() -> None:
     """이전 판 privacy-<시행일>.html 은 location / 로 CSP 없이 나간다 — 스크립트 없는 정적 사본이고, 검색에는 지금 판만
     나오며, 그 판에서 방문자가 무엇에 동의했는지(세 칸의 알릴 사항)를 입력칸 없이 보여 준다 (032 §3.6·037 §3.3)."""
@@ -1390,8 +1416,8 @@ REPLAY_FACTS = {
 def test_body_sections_state_the_replay_facts() -> None:
     """076 §3.2·§3.3·078 §3.7 — 화면 이동 기록을 동의 상자·한눈에 보기·1·2·3·7·8·9절이 빠짐없이 말하고, 2절 소제목은 화면 이용
     통계와 Clarity 사이. 서버 상수 `PRIVACY_V8_EFFECTIVE`(keep 기준)는 v8(사본 `privacy-20261016-2.html`)의 시행일,
-    `PRIVACY_V7_EFFECTIVE`(받기 게이트)는 같은 날이다. 075(v9)·079(v10)는 서버 게이트가 없어 상수를 더하지 않는다 — 바로 앞 판
-    (v9 — 사본 `privacy-20261017.html`)은 지금 판과 같은 날 먼저 게시한 판이다."""
+    `PRIVACY_V7_EFFECTIVE`(받기 게이트)는 같은 날이다. 075(v9)·079(v10)·v11 은 서버 게이트가 없어 상수를 더하지 않는다 — 마지막
+    사본은 v9(`privacy-20261017.html`)이고, 그 뒤 판(v10·v11)은 사본 없이 지금 판을 고쳤다(사람 결정 2026-10-17)."""
     html, _ = _read(PUBLIC / "privacy.html")
     body = html
     for label, words in REPLAY_FACTS.items():
@@ -1406,7 +1432,7 @@ def test_body_sections_state_the_replay_facts() -> None:
     )
     y, m, d, nth = re.fullmatch(ARCHIVE_NAME, PREVIOUS).groups()
     assert PREVIOUS == "privacy-20261017.html" and nth is None
-    assert PRIVACY_V7_EFFECTIVE == PRIVACY_V8_EFFECTIVE < f"{y}-{m}-{d}" == EFFECTIVE
+    assert PRIVACY_V7_EFFECTIVE == PRIVACY_V8_EFFECTIVE < f"{y}-{m}-{d}" < EFFECTIVE
 
 
 # 075 §3.5 — 본문 절마다 방문 통계(Google Analytics)의 사실 — 받는 것·받지 않는 것·받는 곳·쓰임·끈 설정·2개월·쿠키·근거·지우는 길
