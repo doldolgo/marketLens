@@ -563,7 +563,7 @@ def test_script_writes_no_storage_or_cookie_and_posts_to_one_path() -> None:
         ADMIN,
         "http://www.w3.org/2000/svg",
     ]
-    assert f'const NOTICE_VERSION = "{NOTICE}"' in JS and NOTICE == "2026-10-17-2"
+    assert f'const NOTICE_VERSION = "{NOTICE}"' in JS and NOTICE == "2026-10-24"
     got = one(ls=ON, steps=MOVES + [["click", 1, 1], ["pagehide"]])
     assert got["writes"] == []
 
