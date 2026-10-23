@@ -18,6 +18,8 @@ snapshot 도 표 1장당 한 번만 압축해 둔다(2026-09-28) — 배포 직�
 뺀 글끼리 비교하고, 바뀐 행은 받은 조각을 그대로 이어 delta 를 만든다. snapshot 은 표 글 앞에 `type` 키만 끼운다.
 표 1장(spreads 약 1,800행·930KB, gap 약 3,400행·710KB)을 매초 json.loads → 행 사본 → json.dumps 하던 왕복을 없앤
 것이고, 나가는 바이트는 파싱해서 다시 쓰던 때와 같다. 글 모양이 다르면(공백 있는 인코더 등) 예전처럼 파싱해서 diff 한다.
+`?v=2` 로 붙은 spreads 접속자는 delta 대신 patch 를 받는다(2026-10-23) — 바뀐 행의 행 키 + 바뀐 필드 + age 만, spark 는
+끝값 하나. diff 는 표마다 한 번이고 delta·patch 는 그것을 받는 접속자가 있을 때만 만든다(종류마다 gzip 1회).
 gzip 은 허브마다 전용 스레드 1개가 한다(2026-10-09). zlib 은 압축하는 동안 GIL 을 놓으므로 표 1장의 압축(로컬 spreads
 delta 약 16ms·snapshot 약 33ms)이 이벤트 루프를 멈추지 않는다. 프레임은 만든 순서대로 줄을 서고 앞 프레임의 압축이
 끝나야 뒤 프레임이 나간다. 받을 접속자는 프레임을 만든 순간에 정한다 — 압축을 기다리는 사이 붙은 접속자는 그 뒤에
@@ -36,6 +38,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import NamedTuple
 
 from fastapi import WebSocket
 
@@ -232,10 +235,20 @@ def index_text(text: str, table_id: str) -> dict[str, str] | None:
     return out
 
 
-def make_delta_text(
-    prev: dict[str, str], text: str, table_id: str
-) -> tuple[str, dict[str, str]] | None:
-    """직전 글 인덱스와 새 표 글 → (delta 메시지, 새 글 인덱스) — `make_delta` 와 같은 바이트. 모양이 다르면 None."""
+class TextDiff(NamedTuple):
+    """표 글 diff 한 번의 결과 — delta(v1)와 patch(v2)가 같이 쓴다."""
+
+    meta: dict  # rows 를 뺀 최상위 — 키 순서가 표 그대로
+    changed: list[str]  # 바뀐 행 조각(표 순서) — `{"sym":` 와 끝 `}` 를 뗀 가운데
+    keys: list[str]  # 그 행들의 키 글자
+    cur: dict[str, str]  # 새 글 인덱스
+    removed: list[str]  # 사라진 키 — 행 키 함수로 만든 글, 직전 표의 행 순서
+    # 값 -0.0 을 0.0 으로 바꿔 적은 바뀐 행의 키 글자 — patch 가 그 행만 파싱한다
+    zeroed: set[str]
+
+
+def diff_text(prev: dict[str, str], text: str, table_id: str) -> TextDiff | None:
+    """직전 글 인덱스와 새 표 글 → 바뀐 행·새 인덱스·사라진 키. 게시기 글 모양이 아니면 None."""
     sp = split_table(text, table_id)
     if sp is None:
         return None
@@ -244,6 +257,8 @@ def make_delta_text(
     shape = KEY_SHAPES[table_id]
     cur: dict[str, str] = {}
     changed: list[str] = []
+    keys: list[str] = []
+    zeroed: set[str] = set()
     get = prev.get
     for p in parts:
         k = p.find(key_end)
@@ -254,12 +269,16 @@ def make_delta_text(
             return None  # 키 필드 셋의 꼴 — `index_text` 와 같은 검사
         b = p.find(",", a + 7)
         cmp = p[:a] + p[b:] if b >= 0 else p[:a]
-        if "-0.0" in cmp:
-            cmp = _zero(cmp)
         kt = p[:k]
+        if "-0.0" in cmp:
+            z = _zero(cmp)
+            if z is not cmp and z != cmp:
+                zeroed.add(kt)
+            cmp = z
         cur[kt] = cmp
         if get(kt) != cmp:
             changed.append(p)
+            keys.append(kt)
     if len(cur) != len(parts):
         return None
     key = ROW_KEYS[table_id]
@@ -270,16 +289,216 @@ def make_delta_text(
         meta = json.loads(head + tail)
     except (ValueError, KeyError, TypeError):
         return None
-    rows = ROW_HEAD + ROW_SEP.join(changed) + "}" if changed else ""
-    message = (
-        _dumps({"type": "delta", **meta})[:-1]
+    return TextDiff(meta, changed, keys, cur, removed, zeroed)
+
+
+def delta_text(d: TextDiff) -> str:
+    """diff → delta 메시지 — `make_delta` 와 같은 바이트."""
+    rows = ROW_HEAD + ROW_SEP.join(d.changed) + "}" if d.changed else ""
+    return (
+        _dumps({"type": "delta", **d.meta})[:-1]
         + ',"rows":['
         + rows
         + '],"removed":'
-        + _dumps(removed)
+        + _dumps(d.removed)
         + "}"
     )
-    return message, cur
+
+
+def make_delta_text(
+    prev: dict[str, str], text: str, table_id: str
+) -> tuple[str, dict[str, str]] | None:
+    """직전 글 인덱스와 새 표 글 → (delta 메시지, 새 글 인덱스) — `make_delta` 와 같은 바이트. 모양이 다르면 None."""
+    d = diff_text(prev, text, table_id)
+    if d is None:
+        return None
+    return delta_text(d), d.cur
+
+
+# --- 바뀐 필드만 싣는 patch (017 §3.3 v2, 2026-10-23) ---
+# delta 는 바뀐 행을 19키 통째로 싣는다 — 운영 실측(2026-10-23, 1,860행)에서 매초 68% 행이 바뀌는데 바뀐 행의 바뀐
+# 필드는 평균 3.7개였고, 행 글의 절반 넘게 차지하는 spark(30개)는 같은 분 안에서 끝값 하나만 바뀐다. patch 는 행 키 +
+# 바뀐 필드 + age 만, spark 는 끝값 하나로 싣는다. `?v=2` 로 붙은 spreads 접속자만 받는다 — 옛 탭과 gap·pp 는 delta.
+PATCH_TABLES = frozenset({CHANNEL})
+# spreads 행의 필드 순서(003 §3.2·`SpreadRow`). 행 조각을 `,"` 로 자르면 이 자리에 이 이름이 온다 — 0 은 sym 값뿐이다
+ROW_FIELDS = (
+    "sym", "dom", "fx", "fwd", "rev", "usd", "spark", "status", "age", "slipFwd", "slipRev", "krw",
+    "netDom", "depDom", "wdDom", "depFx", "wdFx", "netFx", "dayChg",
+)  # fmt: skip
+PATCH_KEYS = ("sym", "dom", "fx")  # patch 항목이 늘 싣는 행 키 필드
+_FIELD_HEADS = tuple(f + '":' for f in ROW_FIELDS)
+# 직전 비교 글은 age 를 뺐다
+_OLD_HEADS = tuple(h for h in _FIELD_HEADS if h != 'age":')
+_AGE_AT = ROW_FIELDS.index("age")
+_SPARK_OPEN = len('spark":[')
+
+
+def spark_op(prev: object, cur: object) -> tuple[str, object]:
+    """바뀐 spark → (실을 필드 이름, 값). 같은 분 안이면 끝값만(`sparkEnd`), 분이 바뀌어 한 칸 밀렸으면 새 끝값만
+    (`sparkPush` — 앞 하나를 버리고 붙인다, 길이 그대로), 그 밖(길이가 늘어남·여러 칸·비었음)은 목록 통째(`spark`)."""
+    if (
+        isinstance(prev, list)
+        and isinstance(cur, list)
+        and prev
+        and len(cur) == len(prev)
+    ):
+        if cur[:-1] == prev[:-1]:
+            return "sparkEnd", cur[-1]
+        if cur[:-1] == prev[1:]:
+            return "sparkPush", cur[-1]
+    return "spark", cur
+
+
+def patch_entry(prev: dict, cur: dict) -> dict | None:
+    """직전 행(age 뺌)과 새 행 → patch 항목 — 행 키 셋 + age 를 뺀 바뀐 필드 + age, 행의 필드 순서대로.
+
+    필드 집합이 다르면(계약이 바뀐 배포 직후 등) None — 그 행은 patch 가 아니라 행 통째로(`rows`) 보낸다.
+    """
+    if len(cur) != len(prev) + 1 or "age" not in cur or any(k not in cur for k in prev):
+        return None
+    out: dict = {}
+    for k, v in cur.items():
+        if k in PATCH_KEYS or k == "age":
+            out[k] = v
+        elif v != prev[k]:
+            if k == "spark":
+                name, v = spark_op(prev[k], v)
+                out[name] = v
+            else:
+                out[k] = v
+    return out
+
+
+def make_patch(
+    prev: dict[str, dict], table: dict, key: RowKey = row_key
+) -> tuple[str, dict[str, dict]]:
+    """직전 인덱스와 새 표 → (patch 메시지, 새 인덱스) — 파싱 경로이자 글 경로(`patch_text`)가 맞춰야 할 기준.
+
+    바뀐 행 중 직전에 있던 키는 `patch`, 새 키(와 필드 집합이 달라진 행)는 `rows` 에 19키 그대로, 사라진 키는 `removed`.
+    """
+    cur = index_rows(table, key)
+    rows: list[dict] = []
+    patches: list[dict] = []
+    for r in table["rows"]:
+        k = key(r)
+        old = prev.get(k)
+        if old == cur[k]:
+            continue
+        entry = None if old is None else patch_entry(old, r)
+        if entry is None:
+            rows.append(r)
+        else:
+            patches.append(entry)
+    removed = [k for k in prev if k not in cur]
+    message = {"type": "patch", **{k: v for k, v in table.items() if k != "rows"}}
+    message["rows"] = rows
+    message["patch"] = patches
+    message["removed"] = removed
+    return _dumps(message), cur
+
+
+def _spark_text(cur: str, prev: str) -> str:
+    """spark 조각 글 둘(`spark":[…]`) → 실을 조각 — `spark_op` 의 글 판. 같은 글자 = 같은 값(-0.0 행은 오지 않는다)."""
+    lc = cur[_SPARK_OPEN:-1]
+    lp = prev[_SPARK_OPEN:-1]
+    if lc and lp:
+        head, _, last = lc.rpartition(",")
+        if head == lp.rpartition(",")[0]:
+            return 'sparkEnd":' + last
+        if head == lp.partition(",")[2]:
+            return 'sparkPush":' + last
+    return cur
+
+
+def _patch_parsed(p: str, old: str) -> str | None:
+    """행 하나를 파싱해 patch 항목 글로 — 글로 자를 수 없는 드문 행(-0.0 이 든 행·쉼표로 끝나는 문자열)."""
+    entry = patch_entry(
+        json.loads(ROW_HEAD + old + "}"), json.loads(ROW_HEAD + p + "}")
+    )
+    return None if entry is None else _dumps(entry)
+
+
+def _names_ok(pc: list[str], po: list[str]) -> bool:
+    """자른 행 조각 둘의 필드 이름·순서가 `ROW_FIELDS` 그대로인가 — 새 행은 age 가 있고 직전 비교 글은 없다."""
+    return all(
+        a.startswith(n) for a, n in zip(pc[1:], _FIELD_HEADS[1:], strict=True)
+    ) and all(b.startswith(n) for b, n in zip(po[1:], _OLD_HEADS[1:], strict=True))
+
+
+def _patch_split(pc: list[str], po: list[str]) -> str:
+    """같은 자리끼리 다른 조각만 — 행 키 셋, age 앞 필드, age, age 뒤 필드 순서. spark 는 `_spark_text`."""
+    out = pc[:3]
+    out += [
+        _spark_text(a, b) if a.startswith('spark"') else a
+        for a, b in zip(pc[3:_AGE_AT], po[3:_AGE_AT], strict=True)
+        if a != b
+    ]
+    out.append(pc[_AGE_AT])
+    out += [a for a, b in zip(pc[_AGE_AT + 1 :], po[_AGE_AT:], strict=True) if a != b]
+    return ROW_HEAD + ',"'.join(out) + "}"
+
+
+def patch_text(d: TextDiff, prev: dict[str, str]) -> str | None:
+    """diff → patch 메시지 — `make_patch` 와 같은 바이트. 행을 파싱하다 실패하면 None(허브는 파싱 경로로).
+
+    바뀐 행 조각과 직전 비교 글을 `,"` 로 잘라 같은 자리끼리 견준다. 문자열 안의 따옴표는 `\\"` 라 `,"` 는 필드 경계와
+    쉼표로 끝나는 문자열 끝에만 생기고, 뒤의 것은 조각 수가 늘어 걸린다. 필드 이름·순서는 표마다 처음 자른 행 하나로 본다
+    (`KEY_SHAPES` 와 같은 입장 — 표 1장의 행은 한 인코더가 쓴다). 값 -0.0 이 든 행은 비교 글이 0.0 으로 바뀌어 있어
+    내보낼 글이 달라지므로 그 행만 파싱한다(운영 표에서 바뀐 행의 1.1%).
+    """
+    rows: list[str] = []
+    patches: list[str] = []
+    zeroed = d.zeroed
+    n = len(ROW_FIELDS)
+    checked = False
+    try:
+        for p, kt in zip(d.changed, d.keys, strict=True):
+            old = prev.get(kt)
+            if old is None:
+                rows.append(p)
+                continue
+            entry: str | None
+            if kt in zeroed:
+                entry = _patch_parsed(p, old)
+            else:
+                pc = p.split(',"')
+                po = old.split(',"')
+                if (
+                    len(pc) != n
+                    or len(po) != n - 1
+                    or not (checked or _names_ok(pc, po))
+                ):
+                    entry = _patch_parsed(p, old)
+                else:
+                    checked = True
+                    entry = _patch_split(pc, po)
+            if entry is None:
+                rows.append(p)
+            else:
+                patches.append(entry)
+    except (ValueError, KeyError, TypeError):
+        return None
+    return (
+        _dumps({"type": "patch", **d.meta})[:-1]
+        + ',"rows":['
+        + (ROW_HEAD + ROW_SEP.join(rows) + "}" if rows else "")
+        + '],"patch":['
+        + ",".join(patches)
+        + '],"removed":'
+        + _dumps(d.removed)
+        + "}"
+    )
+
+
+def make_patch_text(
+    prev: dict[str, str], text: str, table_id: str
+) -> tuple[str, dict[str, str]] | None:
+    """직전 글 인덱스와 새 표 글 → (patch 메시지, 새 글 인덱스) — `make_patch` 와 같은 바이트. 모양이 다르면 None."""
+    d = diff_text(prev, text, table_id)
+    if d is None:
+        return None
+    message = patch_text(d, prev)
+    return None if message is None else (message, d.cur)
 
 
 def snapshot_text(text: str) -> str:
@@ -291,8 +510,9 @@ def snapshot_text(text: str) -> str:
 
 
 class Connection:
-    def __init__(self, ws: WebSocket) -> None:
+    def __init__(self, ws: WebSocket, *, slim: bool = False) -> None:
         self._ws = ws
+        self.slim = slim  # `?v=2` 로 붙어 delta 대신 patch 를 받는 접속자 (017 §3.3)
         self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=SEND_QUEUE_LIMIT)
         self._sender: asyncio.Task[None] | None = None
         self._closing = False
@@ -393,9 +613,12 @@ class SpreadsHub:
     def table_id(self) -> str:
         return self._table_id
 
-    async def attach(self, ws: WebSocket) -> Connection:
-        """접속 등록 → 첫 접속자면 `spreads:latest` 로 시작 표 → snapshot 또는 waiting."""
-        conn = Connection(ws)
+    async def attach(self, ws: WebSocket, *, slim: bool = False) -> Connection:
+        """접속 등록 → 첫 접속자면 `spreads:latest` 로 시작 표 → snapshot 또는 waiting.
+
+        `slim` 이면 새 표마다 delta 대신 patch 를 받는다 — patch 가 있는 표(spreads)만, 다른 표는 무시하고 delta 다.
+        """
+        conn = Connection(ws, slim=slim and self._table_id in PATCH_TABLES)
         conn.start()
         first = not self._conns
         self._conns.add(conn)
@@ -436,7 +659,8 @@ class SpreadsHub:
             self._idle_since = time.monotonic()
 
     def on_table(self, text: str) -> None:
-        """새 표 1장 — 접속자가 없으면 파싱조차 안 한다. 있으면 diff 1회·gzip 1회, 전원에게 같은 바이트.
+        """새 표 1장 — 접속자가 없으면 파싱조차 안 한다. 있으면 diff 1회, 메시지 종류마다 gzip 1회, 같은 종류를 받는
+        접속자 전원에게 같은 바이트. delta(v1)·patch(v2)는 그것을 받는 접속자가 있을 때만 만든다.
 
         표 상태는 여기서 바로 바꾸고 압축만 스레드로 보낸다 — 압축을 기다리는 사이 붙는 접속자는 이 표의 snapshot 을 받고,
         이 delta 는 받지 않는다(받을 접속자를 지금 정한다). 그 접속자에게도 다음 표부터는 delta 가 이어진다.
@@ -446,14 +670,20 @@ class SpreadsHub:
         if self._index is None:
             # waiting 중이던 접속자들의 첫 표 — 이 프레임이 곧 이 표의 snapshot 이라 그대로 칸에 둔다
             index, by_text, table = self._index_of(text)
-            message = self._snapshot(text, by_text, table)
-            first = True
-        else:
-            message, index, by_text = self._delta(text)
-            first = False
+            self._text, self._index, self._text_index = text, index, by_text
+            self._snap = self._send(
+                self._snapshot(text, by_text, table), list(self._conns)
+            )
+            return
+        full = [c for c in self._conns if not c.slim]
+        slim = [c for c in self._conns if c.slim]
+        delta, patch, index, by_text = self._diff(text, bool(full), bool(slim))
         self._text, self._index, self._text_index = text, index, by_text
-        out = self._send(message, list(self._conns))
-        self._snap = out if first else None  # 새 표(delta) — 다음 접속자가 한 번 만든다
+        if delta is not None:
+            self._send(delta, full)
+        if patch is not None:
+            self._send(patch, slim)
+        self._snap = None  # 새 표 — 다음 접속자가 snapshot 을 한 번 만든다
 
     # --- 표 글 → 메시지 ---
 
@@ -476,25 +706,37 @@ class SpreadsHub:
             return snapshot_text(text)
         return make_snapshot(table if table is not None else json.loads(text))
 
-    def _delta(self, text: str) -> tuple[str, dict, bool]:
-        """(delta 메시지, 새 인덱스, 글 인덱스인가). 글 경로가 안 되는 표만 파싱하고, 다음 표는 다시 글 경로부터 본다."""
+    def _diff(
+        self, text: str, full: bool, slim: bool
+    ) -> tuple[str | None, str | None, dict, bool]:
+        """(delta, patch, 새 인덱스, 글 인덱스인가) — delta 는 `full`, patch 는 `slim` 일 때만 만든다.
+
+        글 경로가 안 되는 표만 파싱하고, 다음 표는 다시 글 경로부터 본다.
+        """
+        assert self._index is not None
         if self._text_index:
-            assert self._index is not None
-            done = make_delta_text(self._index, text, self._table_id)
-            if done is not None:
-                return done[0], done[1], True
+            d = diff_text(self._index, text, self._table_id)
+            if d is not None:
+                patch = patch_text(d, self._index) if slim else None
+                if patch is not None or not slim:
+                    return (delta_text(d) if full else None), patch, d.cur, True
             # 이 표가 글 모양에서 벗어났다 — 직전 표 글을 이번 한 번만 파싱해 파싱 경로로
             assert self._text is not None
             prev = index_rows(json.loads(self._text), self._key)
         else:
-            assert self._index is not None
             prev = self._index
-        message, cur = make_delta(prev, json.loads(text), self._key)
+        table = json.loads(text)
+        delta = patch = None
+        cur: dict = {}
+        if full:
+            delta, cur = make_delta(prev, table, self._key)
+        if slim:
+            patch, cur = make_patch(prev, table, self._key)
         index = index_text(text, self._table_id)
         if index is not None:
-            return message, index, True  # 모양이 돌아왔다 — 다음 표부터 글 경로
+            return delta, patch, index, True  # 모양이 돌아왔다 — 다음 표부터 글 경로
         self._warn_shape(text)
-        return message, cur, False
+        return delta, patch, cur, False
 
     def _warn_shape(self, text: str) -> None:
         now = time.monotonic()
