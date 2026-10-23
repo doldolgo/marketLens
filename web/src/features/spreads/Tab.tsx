@@ -7,7 +7,7 @@ import { FX_EXS } from '../../shared/mock'
 import type { IoState, SpreadRow } from '../../shared/types'
 import {
   Empty, FoldButton, GridHeader, gridRow, NumField, Seg, segOpt, SortBar, SymCell, TableFrame, ToggleBtn,
-  bar, cardLeft, cardRight, cardRow, cardSub, count, exTag, foldPanel, hint, label, phoneBar, phoneSearch, searchInput, vDivider, type Header,
+  bar, cardLeft, cardRight, cardRow, cardSub, count, exTag, foldPanel, hint, label, phoneBar, phoneSearch, searchInput, SYMBOL_INPUT, touchSearch, vDivider, type Header,
 } from '../../shared/ui'
 import { alias, bool, num, oneOf, sortOf, useUrlState, type Codec } from '../../shared/urlState'
 import { useViewport } from '../../shared/viewport'
@@ -226,7 +226,7 @@ interface Props {
 }
 
 export default memo(function SpreadsTab({ rows, onPick }: Props) {
-  const { phone } = useViewport()
+  const { phone, touch } = useViewport()
   // 폰 필터 접기 — 메모리만, 기본 접힘 (072 §3.4)
   const [foldOpen, setFoldOpen] = useState(false)
   // 필터·정렬은 URL 쿼리(s.*)에 실려 새로고침해도 같은 화면 (002 §3.5). 검색어는 메모리만 — Clarity 가 주소를 통째로 싣는다 (033)
@@ -275,7 +275,7 @@ export default memo(function SpreadsTab({ rows, onPick }: Props) {
   ]
 
   // 조작 조각 — 넓은 바와 폰 바가 같은 조각을 다른 순서로 놓는다. data-el 은 061 요소 열쇠(모양·동작과 무관)
-  const searchEl = <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={phone ? phoneSearch : searchInput} data-el="search" />
+  const searchEl = <input className="input" placeholder="심볼 검색" value={q} onChange={(e) => setQ(e.target.value)} style={phone ? phoneSearch : touch ? touchSearch : searchInput} data-el="search" {...SYMBOL_INPUT} />
   const domSeg = <Seg opts={[['all', '모두', 'dom:all'], ['업비트', '업비트', 'dom:upbit'], ['빗썸', '빗썸', 'dom:bithumb']].map(([id, l, el]) => segOpt(l, domFilter === id, () => setDomFilter(id as DomFilter), el))} />
   const thrField = <NumField label="하이라이트 임계값" value={thr} step={0.1} onChange={setThr} el="threshold" />
   const onlyThrBtn = <ToggleBtn on={onlyThr} label="임계 초과만" onClick={() => setOnlyThr(!onlyThr)} el="only-over" />

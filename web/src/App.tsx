@@ -208,10 +208,11 @@ export default function App() {
 
   const wrap = (id: TabId, node: ReactNode) => HIDDEN_TABS.has(id) ? null : <Pane key={id} active={tab === id}>{node}</Pane>
 
-  // 마크·로고 + 깜빡이는 점 + 상태 글 — 넓은 헤더와 좁은 헤더 첫 줄이 같이 쓴다. 폰은 점만(072 §3.2)
+  // 마크·로고 + 깜빡이는 점 + 상태 글 — 넓은 헤더와 좁은 헤더 첫 줄이 같이 쓴다. 폰은 점만(072 §3.2).
+  // 세로 가운데 맞춤 — 마크를 품은 로고 덩어리에는 글자 기준선이 없어, 기준선 맞춤이면 점·상태 글이 덩어리 위쪽에 떠 있었다(072 §3.9)
   const brand = (
-    <div data-area="header" style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)', flex: 'none' }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, alignSelf: 'center' }}><BrandMark /><span style={{ fontFamily: 'var(--font-heading)', fontWeight: 600, fontSize: 16, letterSpacing: '-0.01em' }}>Kimp<span style={{ color: 'var(--color-accent)' }}>Track</span></span></span>
+    <div data-area="header" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flex: 'none' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><BrandMark /><span style={{ fontFamily: 'var(--font-heading)', fontWeight: 600, fontSize: 16, letterSpacing: '-0.01em' }}>Kimp<span style={{ color: 'var(--color-accent)' }}>Track</span></span></span>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--color-neutral-500)' }}>
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-ok)', animation: 'tr-pulse 1.6s ease-in-out infinite' }} />{!vp.phone && '실시간 수집 중'}
       </span>
@@ -283,7 +284,8 @@ export default function App() {
         : { display: 'flex', alignItems: 'center', gap: 'var(--space-8)', padding: 'var(--space-4) var(--space-6)', borderBottom: '1px solid var(--color-divider)', flex: 'none', overflowX: 'auto', ...(vp.compact ? { flexWrap: 'wrap', rowGap: 'var(--space-3)' } : null) }}>
         {vp.phone ? (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 'var(--space-3)' }}>
+            {/* 라벨은 낱말 단위로만 꺾는다 — 320px 폭에서 `암묵환율` 의 마지막 글자 하나가 다음 줄로 떨어졌다(072 §3.9) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 'var(--space-3)', wordBreak: 'keep-all' }}>
               <div>
                 <div style={{ ...kicker, marginBottom: 2 }}>USDT/KRW 암묵환율</div>
                 <div style={{ fontSize: 16 }}>{hasRate ? '₩' + RATE_1.format(feed.rate) : '–'}</div>
