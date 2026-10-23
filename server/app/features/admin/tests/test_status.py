@@ -182,7 +182,7 @@ def test_lifespan_wires_the_hub_so_two_ws_clients_count_two(
     # 실제 api lifespan(허브·버스) 위에서 /ws/spreads 둘을 열면 2, Influx 는 토큰이 없어 down
     server = fakeredis.FakeServer()
 
-    def make_bus(url: str) -> RedisBus:
+    def make_bus(url: str, password: str | None = None) -> RedisBus:
         return fake_bus(server)
 
     monkeypatch.setattr("app.main.RedisBus.from_url", make_bus)

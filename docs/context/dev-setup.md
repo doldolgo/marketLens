@@ -48,6 +48,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 | INFLUX_URL | `http://localhost:8086` |
 | INFLUX_TOKEN | 없음 |
 | REDIS_URL | `redis://localhost:6379/0` |
+| REDIS_PASSWORD | 없음 |
 | REFRESH_TOKEN | 없음 |
 | UPBIT_API_KEY | 없음 |
 | UPBIT_SECRET_KEY | 없음 |
@@ -69,6 +70,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 - `ROLE`: 프로세스 역할(016) — `collector`(전체 동작) | `api`(Influx 조회 + `/ws/spreads`·`/ws/gap`·`/ws/pp` + `GET /spreads` Redis 읽기 + `GET /landing`·`POST /attention`·`POST /replay`·관리자 피드, 백그라운드 태스크는 017·048·049 구독 태스크 셋 + 052 10초 묶음 쓰기 태스크 1개(끌 때 한 번 더 보낸다) + `SLACK_WEBHOOK_URL` 이 있으면 025 알림 태스크 + `STATSD_ADDR` 가 있으면 027 게이지 태스크(+ 접속마다 보내기 태스크)). 로컬은 비워 둔다. `api` 는 compose 의 `api` 서비스가 `environment` 로만 준다. 둘 밖의 값이면 설정을 읽는 순간 실패한다.
 - `INFLUX_URL`·`INFLUX_TOKEN`: InfluxDB 2.7 접속(org·bucket 은 `marketlens` 고정). 토큰이 없으면 flusher 비활성·`/history/*` 503 — 앱은 뜬다. 사람용 UI 는 `http://localhost:8086`(같은 토큰).
 - `REDIS_URL`: Redis 7 접속(009 틱 버퍼). compose 안에서는 `redis://redis:6379/0` 으로 덮어쓴다. 없으면 인계된 틱이 버려진다(앱은 뜬다).
+- `REDIS_PASSWORD`: Redis 비밀번호(021 §3.7). 있으면 dev·배포 compose 의 redis 가 요구하고(`--requirepass`) server·api 가 접속마다 `AUTH default <값>` 을 보낸다. 비면 인증 없음 — 로컬은 비워 둔다(넣었다면 `redis-cli` 에 `--user default --askpass`). 운영은 세 박스에 같은 값, 넣는 순서(collect·serve 먼저, data 마지막)는 `docs/runbooks/redis-auth.md`.
 - `REFRESH_TOKEN`: 설정 시 `POST /refresh` 에 `X-Refresh-Token` 헤더가 필요하다.
 - 거래소 API 키 4개: 입출금 상태 조회용. 없으면 해당 거래소 상태는 `null`(모름). 빗썸은 키 불필요. 업비트는 호출 IP 가 Open API 허용 목록에 있어야 한다.
 - `S3_BUCKET`: 거래소 원문 아카이브 S3 저장(010, 접두사 `raw/`). 없으면 아카이브 비활성, 앱은 뜬다.
@@ -121,7 +123,7 @@ async def main():
 asyncio.run(main())
 EOF
 ```
-접속 직후 바로 `snapshot`(행 수 = `/spreads` 와 같음 — 수집이 매 틱 표를 만들어 `spreads:latest` 가 늘 살아 있다, `waiting` 은 수집 기동 직후뿐), 이후 매초 `delta`(바뀐 행만, 평상시 30~50%)·빈 초는 `heartbeat` 면 정상 (017).
+접속 직후 바로 `snapshot`(행 수 = `/spreads` 와 같음 — 수집이 매 틱 표를 만들어 `spreads:latest` 가 늘 살아 있다, `waiting` 은 수집 기동 직후뿐), 이후 매초 `delta`(바뀐 행만, 평상시 30~70%)·빈 초는 `heartbeat` 면 정상 (017). 주소에 `?v=2` 를 붙이면(브라우저가 붙는 주소) `delta` 대신 바뀐 필드만 싣는 `patch` 가 온다.
 ```bash
 docker compose -f docker-compose.dev.yml exec redis redis-cli GET gap:latest | head -c 400
 ```

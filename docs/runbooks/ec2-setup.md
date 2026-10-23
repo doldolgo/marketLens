@@ -9,6 +9,7 @@
 2. 인바운드는 박스별(`ec2-split.md` 1번 표): serve 80·443·22, collect 8000(serve 그룹에서만)·22, data 6379·8086(collect·serve 그룹에서만)·22. 22 는 전체(0.0.0.0/0) — 배포 워크플로(GitHub Actions 러너, 동적 IP)가 세 박스에 SSH 로 붙어야 해서 내 IP 로 좁히지 못한다. 키 인증만 받는다.
 3. `git clone <repo> ~/marketlens` — 기존 `~/marketlens-be`·`~/marketlens-fe` 와 별개 폴더.
 4. `~/marketlens/server/.env` 작성 (git 에 없음):
+   - `REDIS_PASSWORD` — 다른 박스에 이미 값이 있으면 같은 값, 없으면 비워 둔다(인증 없음). 켜는 순서는 `redis-auth.md`(021 §3.7).
    - `INFLUX_URL`·`REDIS_URL` — `server/.env.example` 의 기본값(localhost) 그대로 둔다. compose 가 `environment` 로 `http://${DATA_HOST:-influxdb}:8086`·`redis://${DATA_HOST:-redis}:6379/0` 을 덮어쓰므로 컨테이너 안에서는 이 값이 쓰이지 않는다(007 §3·021).
    - `INFLUX_TOKEN`, `REFRESH_TOKEN` — `openssl rand -hex 32`. `INFLUX_TOKEN` 은 Influx **첫 기동 전**에 정해야 한다 (setup 이 그 값을 admin 토큰으로 쓴다).
    - 거래소 키는 선택 — 같은 계정을 쓰면 기존 `~/marketlens-be/.env` 의 `UPBIT_*`·`BINANCE_*` 값을 복사해도 된다(업비트 허용 목록에 EC2 IP 는 이미 등록돼 있다).

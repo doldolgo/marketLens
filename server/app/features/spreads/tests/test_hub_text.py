@@ -224,7 +224,7 @@ def test_zero_sign_only_change_is_not_a_changed_row_but_strings_with_zero_are() 
     assert [len(json.loads(m)["rows"]) for m in got[1:]] == [0, 1, 1]
 
 
-def test_real_tables_with_minute_rollover_values() -> None:
+def real_texts() -> list[str]:
     """운영 표 3장(1,458행, spark 의 -0.0 6행) — 행 열 그대로 19키로 펴서 게시기 인코더로 쓴 글."""
     tables = json.loads(lzma.decompress(DATA.read_bytes()))
     texts: list[str] = []
@@ -244,6 +244,11 @@ def test_real_tables_with_minute_rollover_values() -> None:
                 }
             )  # fmt: skip
         texts.append(encode_table(_table(rows, rate=t["rate"], at=i)))
+    return texts
+
+
+def test_real_tables_with_minute_rollover_values() -> None:
+    texts = real_texts()
     assert (
         sum('"spark":[' in p and "-0.0" in p for p in split_table(texts[0], CHANNEL)[2])
         > 0

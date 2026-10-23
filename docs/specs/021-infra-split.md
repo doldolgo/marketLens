@@ -9,8 +9,8 @@
 EC2 1대에 몰린 컨테이너 5개를 **역할별 EC2 3대**(수집 · 데이터 · 조회)로 나눈다. 수집기가 코어 1개를 온전히 쓰고, 무거운 이력 조회나 Influx 메모리 폭주가 수집을 굳히지 못하며, 조회 박스는 나중에 복제만 하면 늘어난다. 사용자·화면·API 계약은 하나도 안 바뀐다.
 
 ## 2. 범위
-- 만드는 것: compose **profile 3개**(`collect`·`data`·`serve`), 박스별 배포 워크플로(SSH 3타깃), web 의 수집 업스트림 주소 주입, 사람용 런북 `docs/runbooks/ec2-split.md`(보안그룹·볼륨 이전·탄력 IP 이동·구 박스 정지)
-- 하지 않는 것: 로드밸런서·HTTPS·도메인, 수집기 이중화, 컨테이너 레지스트리(이미지는 각 박스에서 빌드), Redis 인증, 외부 헬스체크·자동 롤백, 새 `ROLE` 값(수집 프로세스 자체는 016 의 `collector` 그대로), Influx 쿼리 기간 상한(022 후보)
+- 만드는 것: compose **profile 3개**(`collect`·`data`·`serve`), 박스별 배포 워크플로(SSH 3타깃), web 의 수집 업스트림 주소 주입, 사람용 런북 `docs/runbooks/ec2-split.md`(보안그룹·볼륨 이전·탄력 IP 이동·구 박스 정지), Redis 비밀번호 스위치(§3.7 — 값이 있을 때만, 켜기는 사람·런북 `redis-auth.md`)
+- 하지 않는 것: 로드밸런서·HTTPS·도메인, 수집기 이중화, 컨테이너 레지스트리(이미지는 각 박스에서 빌드), 외부 헬스체크·자동 롤백, 새 `ROLE` 값(수집 프로세스 자체는 016 의 `collector` 그대로), Influx 쿼리 기간 상한(022 후보)
 - 바꾸는 기존 것: 007 의 compose(서비스 5개 그대로, profile 부여·`depends_on` 제거·박스 간 포트 공개)와 deploy 워크플로(1타깃 → 3타깃), 016 §3.2 의 "`api` 는 같은 compose 망에서 `server` 와 같은 Influx 주소" 문장, `web/nginx.conf` 의 `server:8000` 업스트림을 주입값으로, `tests/test_deploy.py` 계약(§4), 런북 `ec2-setup.md`(1대 전제 → 3대 참조)
 
 ## 3. 동작
@@ -37,13 +37,13 @@ EC2 1대에 몰린 컨테이너 5개를 **역할별 EC2 3대**(수집 · 데이�
 | data | 6379·8086·22 |
 | serve | 80·443·22 |
 
-8000 은 serve 보안그룹에서만, 6379·8086 은 collect·serve 보안그룹에서만, 22·80·443 은 전체 — 22 는 배포 워크플로(GitHub Actions 러너, 동적 IP)가 붙어야 해서 좁힐 수 없고 키 인증만 받는다. 아웃바운드는 전부 열어 둔다(거래소·S3·apt·Docker Hub).
+8000 은 serve 보안그룹에서만, 6379·8086 은 collect·serve 보안그룹에서만(6379 는 `REDIS_PASSWORD` 를 넣으면 비밀번호도 — §3.7), 22·80·443 은 전체 — 22 는 배포 워크플로(GitHub Actions 러너, 동적 IP)가 붙어야 해서 좁힐 수 없고 키 인증만 받는다. 아웃바운드는 전부 열어 둔다(거래소·S3·apt·Docker Hub).
 
 ### 3.2 compose
 파일은 루트 `docker-compose.yml` 하나 그대로이고 서비스·컨테이너 이름·이미지·로그 상한(`json-file` 50MB×3)·`restart: unless-stopped`·볼륨 이름(`influxdb-data`·`redis-data`, 프로젝트명 `marketlens`)도 그대로다. 바뀌는 것:
 - 서비스마다 profile 하나: `server` → `collect`, `redis`·`influxdb` → `data`, `api`·`web`·`caddy`(023) → `serve`, `cloudflared` → `tunnel`(030 — 박스 profile 이 아니라 serve 부속이다. 배포가 토큰 파일이 있을 때만 따로 띄운다). **`depends_on` 은 전부 없앤다** — 의존 대상이 다른 박스에 있다. 각 박스는 `docker compose --profile <역할> --env-file .env --env-file server/.env up -d --build` 로 자기 profile 만 띄운다. profile 을 안 주면 아무것도 안 뜬다(실수로 여섯이 한 박스에 뜨지 않게).
 - 박스 간 주소는 **루트 `.env`(비밀 아님)** 의 두 키로 준다. `DATA_HOST` = data 박스 사설 IP, `COLLECT_HOST` = collect 박스 사설 IP. compose 는 `server`·`api` 의 `INFLUX_URL` 을 `http://${DATA_HOST:-influxdb}:8086`, `REDIS_URL` 을 `redis://${DATA_HOST:-redis}:6379/0` 으로 덮고, `web` 에 `COLLECT_HOST`(기본 `server`)를 준다. 기본값이 서비스 이름이라 **키를 안 주면 007 의 한 박스 동작 그대로** 다 — 로컬 통합 기동은 `COMPOSE_PROFILES=collect,data,serve` 로 여섯이 한 망에 뜬다(cloudflared 는 profile `tunnel` 이라 뜨지 않는다). `server/.env` 는 007 대로 비밀만 든다(`INFLUX_URL`·`REDIS_URL` 의 localhost 값은 컨테이너 안에서 계속 덮인다).
-- 호스트 포트: `server` 8000, `redis` 6379, `influxdb` 8086 을 공개한다(위 보안그룹이 막는다). 공개 포트 `${WEB_PORT:-80}`·443 은 caddy 가 잡는다(023). `web`·`api` 는 비공개.
+- 호스트 포트: `server` 8000, `redis` 6379, `influxdb` 8086 을 공개한다(위 보안그룹이 막는다). `redis` 명령 끝에 `--requirepass ${REDIS_PASSWORD:-}`(§3.7). 공개 포트 `${WEB_PORT:-80}`·443 은 caddy 가 잡는다(023). `web`·`api` 는 비공개.
 - `web` 은 nginx 설정을 템플릿으로 두고 기동 시 **`COLLECT_HOST` 하나만** 치환한다 — 공개 `/api` 허용 목록(028) 중 수집기로 가는 정확 일치 location 의 업스트림이 `http://<COLLECT_HOST>:8000` 이 된다. nginx 자체 변수(`$http_host`·`$http_upgrade` 등)는 치환 대상이 아니어야 한다. 방식은 nginx 공식 이미지의 templates 기능: `web/nginx.conf` 를 `/etc/nginx/templates/default.conf.template` 로 넣고, compose 가 `NGINX_ENVSUBST_FILTER=^COLLECT_HOST$` 를 줘 치환 변수를 그 하나로 제한한다. api 로 가는 허용 경로(`/api/history/candles`·`/api/landing`·`/api/attention`·`/api/replay`·`/api/ws/spreads`·`/api/ws/gap`·`/api/ws/pp` → `api:8000`)는 같은 박스라 서비스 이름 그대로다.
 - Influx 첫 기동 설정(`DOCKER_INFLUXDB_INIT_*`)은 그대로 둔다 — 이전한 볼륨이 있으면 setup 이 건너뛰고, 빈 볼륨이면 새로 만든다.
 
@@ -64,6 +64,7 @@ main push → 워크플로가 **data → collect → serve** 순서로 SSH 3번,
 - data 박스 불통: collect 는 뜨고 수집을 계속한다 — Redis 없으면 인계된 틱이 버려지고 표 발행이 멈추며(009·017), Influx 없으면 flusher 가 재시도한다. serve 는 `spreads:latest` 를 못 읽어 `GET /spreads` 404, `/ws/spreads` 는 `waiting`(018). 복구되면 사람 개입 없이 이어진다.
 - collect 불통: 공개 `/api` 중 수집기로 가는 다섯만 502(허용 목록 밖의 `/api/*` 는 언제나 404 — 028), 스프레드 표는 `spreads:latest` TTL 10초 뒤 사라져 404/`waiting`. 이력 조회는 정상(016 의 존재 이유).
 - serve 불통: 화면만 죽고 수집·저장은 계속.
+- Redis 비밀번호가 data 에만 있거나 값이 다르면: 그 클라이언트 쪽은 data 박스 불통과 같다(위 첫 줄). data 의 `INFO errorstats` 에 `NOAUTH`(값 없이 온 접속)·`WRONGPASS`(틀린 값)가 는다. 클라이언트에만 있으면 아무 일 없다(§3.7).
 - collect 의 사설 IP 가 바뀌면(인스턴스 교체) 루트 `.env` 의 `COLLECT_HOST` 를 고치고 web 을 재기동해야 한다 — nginx 는 기동 시 주소를 푼다. data 도 같다(`DATA_HOST`, server·api 재기동).
 - 구 박스(t4g.medium, `i-0ccec33dba9e27017`)는 전환 확인 뒤 **정지 상태로 3일 보관**하고 종료한다. 정지 중엔 EBS 요금만 든다.
 
@@ -77,6 +78,14 @@ main push → 워크플로가 **data → collect → serve** 순서로 SSH 3번,
 
 합계 약 $63/월(미국 동부 기준 온디맨드, 서울 리전 원문 미확인 — 10% 안팎 높다). 지금 t4g.medium 1대는 $30 + CPU 크레딧 초과 약 $12. 수집 박스를 c7g 로 두는 이유: 수집기는 단일 스레드라 코어 1개를 상시 쓰는데, 2026-09-15 t4g.small 실측에서 크레딧 standard 는 시작부터 기준선(인스턴스 20%) 으로 제한돼 수집이 무너졌고(steal 43~53%), unlimited 로 사면 초과분이 c7g.medium 값과 같아진다. 2026-09-15 c7g.medium 실험이 12분 만에 실패한 원인은 그 위에 Redis·Influx·api 까지 올려 2GB 를 넘긴 것이지 수집기가 아니다(수집기 단독 0.35GB).
 
+### 3.7 Redis 비밀번호
+- 키는 `REDIS_PASSWORD` 하나, 세 박스 `server/.env` 에 같은 값. 값을 정하고 넣는 것은 사람이다(`openssl rand -hex 32` — 16진 글자라 compose 치환·따옴표 문제가 없다). **비어 있거나 없으면 지금처럼 인증 없이** 돈다 — 이 스위치를 넣은 배포 자체는 동작을 바꾸지 않는다.
+- data: compose 가 `--requirepass "${REDIS_PASSWORD:-}"`(data 의 `--env-file server/.env` 치환). Redis 는 빈 requirepass 를 비밀번호 없음으로 읽는다. 값은 `docker inspect` 의 명령 줄에 보이고 `ps` 에는 안 보인다(프로세스 제목) — 박스에 들어올 수 있는 사람은 `.env` 도 읽으므로 받아들인다.
+- 클라이언트(`server`·`api` 와 078 의 IP 지우기 스크립트): 값이 있으면 접속마다 `AUTH default <값>`(사용자 이름을 함께 보내는 3인자 — 구독 연결 포함), 비면 AUTH 를 보내지 않는다. 값은 env_file 로 받고 `REDIS_URL` 에 넣지 않는다(기동 경고가 URL 을 찍는다).
+- 3인자를 고른 이유: 비밀번호 없는 Redis 는 3인자 AUTH 를 어떤 값이든 받고, 2인자는 오류로 거절한다(redis 7.4 실측). 그래서 **collect·serve 먼저, data 마지막**이면 어느 순간에도 거절이 없다. 거꾸로면 클라이언트가 다시 뜰 때까지 인계·표 발행이 멈춘다 — data 에만 값을 둔 채 머지가 일어나면 배포(data → collect → serve)가 data 를 먼저 켜 collect 빌드 1~2분 동안 끊긴다.
+- 켜기·확인·되돌리기·값 바꾸기는 런북 `docs/runbooks/redis-auth.md`. 되돌리기는 재기동 없이 `ACL SETUSER default nopass`(값을 든 클라이언트도 그대로 붙는다). 끊김 없이 켜는 길은 `ACL SETUSER default on >값` — 붙어 있던 연결은 이어지고 새 연결부터 비밀번호가 필요하다.
+- compose 는 명령이 바뀐 redis 를 다시 만든다 — 이 스위치를 넣은 배포 한 번, 값을 바꾼 뒤 `up` 마다 한 번. 1~2초 끊기고(운영 AOF 적재 0.1초 — 2026-10-13 로그) 그 사이 인계된 틱은 버려지며(009) 허브는 1초 백오프로 다시 구독한다.
+
 ## 4. 검증
 실행 세션이 쓰는 테스트(`tests/test_deploy.py` 갱신 — Docker 없는 CI 의 유일한 회귀 장치):
 - 컨테이너 이름·로그 상한·`restart` 는 007 그대로이고, profile 이 `server`=collect / `redis`·`influxdb`=data / `api`·`web`·`caddy`=serve / `cloudflared`=tunnel(030) 로 하나씩 있다
@@ -86,6 +95,7 @@ main push → 워크플로가 **data → collect → serve** 순서로 SSH 3번,
 - nginx 템플릿에서 수집기로 가는 location 의 업스트림만 `COLLECT_HOST` 를 쓰고, api 로 가는 분기와 `$http_*` 변수는 그대로다
 - deploy 워크플로가 3타깃을 data → collect → serve 순서로 돌고, 각 스크립트가 자기 profile 과 자기 가드 키만 검사한다; `EC2_HOST` 단독 시크릿 참조가 없다
 - `COMPOSE_PROFILES=collect,data,serve` + 주소 키 없음 = 007 §4 의 한 박스 기동이 그대로 통과한다(로컬 수동)
+- Redis 비밀번호(§3.7): 배포·dev compose 의 redis 명령 끝이 `--requirepass ${REDIS_PASSWORD:-}`, 어느 서비스 `environment` 에도 `REDIS_PASSWORD` 가 없고 `REDIS_URL` 에 자격이 없으며 배포 가드에도 없다, `server/.env.example` 에 빈 키 한 줄(`test_deploy.py`). 두 클라이언트는 값이 있을 때만 `default`·값을 접속 인자로 갖고, collector·api lifespan 이 값을 넘긴다(`tests/test_redis_auth.py`)
 - 메모리 상한: Influx 쿼리 256MB × 동시 2 = 전체 512MB·쓰기 캐시 256MB·`GOMEMLIMIT` 700MiB < `mem_limit` 1300m = `memswap_limit`, Redis `--maxmemory 600mb`·`noeviction`, Influx 상한 + Redis 상한 ≤ 2GiB, 009 틱 스트림 상한(10,800 × 41KB)이 Redis 상한의 80% 안
 
 수동(EC2, 런북 순서대로 한 뒤):
@@ -96,6 +106,7 @@ main push → 워크플로가 **data → collect → serve** 순서로 SSH 3번,
 5. main 에 빈 커밋 없이 실제 PR 하나로 워크플로 3타깃 success 1회.
 6. 브라우저에서 `http://3.34.104.16/app/` 스프레드 표가 매초 갱신되고 기록 탭 차트가 뜬다(탄력 IP 가 serve 에 붙음).
 7. 구 박스를 정지한 뒤에도 2·6 이 유지된다. 정지 3일 뒤 종료.
+8. Redis 비밀번호를 켠 뒤(런북 `redis-auth.md`): data `redis-cli ping` 이 `NOAUTH`, `INFO errorstats` 의 `NOAUTH`·`WRONGPASS` 가 늘지 않음, 수집기 로그에 Redis 오류 0, `api` 의 `/admin/status` 가 `"redis":"ok"`.
 
 ## 5. 완료 기준 (실행 세션이 채움 — 실제로 돌린 명령)
 ```bash
@@ -122,10 +133,22 @@ docker inspect marketlens-influxdb --format '{{.Config.Env}}' | tr ' ' '\n' | gr
 COMPOSE_PROFILES=collect,data,serve WEB_PORT=8090 docker compose -f docker-compose.yml -f <override> --env-file server/.env down   # 볼륨 유지
 ```
 §4 수동(EC2) 1~7 은 런북 `ec2-split.md` 전환 뒤 사람이 확인한다 — 이 커밋 시점 미실행.
+```bash
+# 2026-10-23 Redis 비밀번호(§3.7) — 로컬(M4, OrbStack, redis:7-alpine = 7.4.11 — 운영과 같은 판)
+docker compose --profile data --env-file <빈 root> --env-file <키 없음> config redis    # 명령 끝 --requirepass ""
+docker compose --profile data --env-file <빈 root> --env-file <키 있음> config redis    # 명령 끝 --requirepass <값>
+# 키 없이 띄운 compose redis: redis-cli ping → PONG, ACL LIST → default on nopass, AUTH default <아무 값> → OK, AUTH <값>(2인자) → ERR
+# 값을 든 RedisTickStream 이 그 Redis 에 XADD → 키를 넣고 up -d redis(다시 만들기) → up 시작부터 PONG 0.38초, XLEN ticks 1(AOF 유지)
+#   → 값 없는 클라이언트 AuthenticationError·값 든 클라이언트 PONG, redis-cli ping → NOAUTH, INFO errorstats 에 NOAUTH·WRONGPASS 가 따로 센다
+# ACL SETUSER default on >값(살아 있는 Redis): 붙어 있던 인증 없는 연결·구독은 이어짐, 새 인증 없는 연결만 거절 / ACL SETUSER default nopass → 둘 다 다시 됨
+# ROLE=api uvicorn + REDIS_PASSWORD: 맞는 값 /admin/status redis ok, 틀린 값·빈 값 down. docker exec 안 ps·/proc/1/cmdline 에 값 없음(redis-server *:6379)
+cd server && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q   # 3174 passed, 2 skipped
+```
 
 ## 6. 갱신할 문서
-- `docs/context/status.md` — deploy 행 server 열을 "compose profile 3개(collect=server / data=redis·influxdb / serve=api·web), EC2 3대, 배포 워크플로 3타깃(data→collect→serve), 박스 간 주소는 루트 .env 의 DATA_HOST·COLLECT_HOST" 로. 알려진 빚에 "Redis 인증 없음(보안그룹만) / 이미지 박스별 빌드(collect 1 vCPU 라 배포 중 수집 지연) / Influx 쿼리 기간 상한 미적용(022 후보)" 추가.
+- `docs/context/status.md` — deploy 행 server 열을 "compose profile 3개(collect=server / data=redis·influxdb / serve=api·web), EC2 3대, 배포 워크플로 3타깃(data→collect→serve), 박스 간 주소는 루트 .env 의 DATA_HOST·COLLECT_HOST" 로. 알려진 빚에 "이미지 박스별 빌드(collect 1 vCPU 라 배포 중 수집 지연) / Influx 쿼리 기간 상한 미적용(022 후보)" 추가.
 - `CLAUDE.md` — 스펙 인덱스 021 행 상태 → DONE.
+- §3.7(Redis 비밀번호) — `status.md` 빚 줄(값은 사람이 넣는다), `architecture.md` data 줄·현재 구조, `dev-setup.md`·`db.md` env, 007 §3, 009 §3.8, 런북 `redis-auth.md`·`ec2-setup.md`, `CLAUDE.md` 런북 목록.
 - `docs/context/architecture.md` — "배포 토폴로지" 절을 EC2 3대(역할·인스턴스·포트·보안그룹 한 줄씩)로 다시 쓰고 "메모리 저장소 공유·EC2 분리는 후속" 문장을 지운다. "런타임 구성" 의 저장소 문단에 "Redis·Influx 는 data 박스, 사설 IP" 한 줄. mermaid 데이터 흐름에 박스 경계가 없으면 그대로 둔다.
 - `docs/context/dev-setup.md` — "docker 통합 기동" 절의 명령을 `COMPOSE_PROFILES=collect,data,serve WEB_PORT=8080 docker compose --env-file server/.env up -d --build` 로, env 절에 루트 `.env` 의 `DATA_HOST`·`COLLECT_HOST`(배포 전용, 로컬은 비움) 두 줄.
 - `docs/specs/007-deploy.md` — §3 "서버는 EC2 1대" 와 deploy 워크플로 단락을 "EC2 3대·profile·3타깃(021)" 로, §3 "호스트에 여는 포트는 web 하나" 를 "serve 는 web 하나, collect 8000·data 6379/8086 은 보안그룹으로(021)" 로, §4 의 "호스트에 8000·8086 이 새로 열리지 않는다" 항목을 profile 별 표현으로.
@@ -135,5 +158,6 @@ COMPOSE_PROFILES=collect,data,serve WEB_PORT=8090 docker compose -f docker-compo
 ## 7. 실행 보고 (실행 세션이 채움)
 - 만든 것 (파일 목록): `docker-compose.yml`(profile 3개·`depends_on` 제거·`DATA_HOST`/`COLLECT_HOST` 치환·호스트 포트·Influx 쿼리 상한 3개·web 에 `NGINX_ENVSUBST_FILTER`), `web/nginx.conf`(`location /api/` 업스트림 `${COLLECT_HOST}`), `web/Dockerfile`(templates 경로로 복사), `.github/workflows/deploy.yml`(job 3개 data→collect→serve, 박스별 시크릿·가드·profile), `server/tests/test_deploy.py`(§4 계약 — profile·depends_on 없음·포트·치환식·템플릿 변수 1개·워크플로 3타깃·박스별 가드·README), `README.md`, 문서 6종(`status.md`·`architecture.md`·`dev-setup.md`·`007`·`016`·`ec2-setup.md`) + `CLAUDE.md` 021 DONE·런북 목록.
 - 추측한 지점 (묻지 않고 정한 사소한 것) / 실행 중 함께 고친 스펙 절: ① nginx 치환은 공식 이미지 templates 기능 + `NGINX_ENVSUBST_FILTER=^COLLECT_HOST$`(§3.2 에 적음). 컨테이너 안에서 `sh -c` 로 띄우면 entrypoint 가 안 돌아 치환이 안 된다 — 디버그 때 주의. ② 워크플로는 step 이 아니라 **job 3개 + needs** — 실패 박스가 Actions 에서 바로 보이고 뒤 job 이 자동으로 멈춘다. ③ Influx 상한 값 256MB×3=768MB(§3.1 에 적음). ④ data 박스 가드는 `INFLUX_TOKEN` 만(루트 `.env` 는 빈 파일이라 검사 없음). ⑤ 로컬 통합 기동은 dev compose 와 6379·8086 이 겹쳐 먼저 내려야 한다(dev-setup.md 에 적음). ⑥ `depends_on` 이 없어 serve 박스에서 web 이 api 보다 먼저 뜨면 nginx 가 "host not found in upstream api" 로 한 번 죽고 restart 로 다시 뜬다(로컬 실측에선 RestartCount 0 — status.md 알려진 빚에 적음).
-- 남은 빚: EC2 전환 자체(런북 11단계, 사람) 와 §4 수동 1~7. 007 §5 의 옛 기록("호스트 8000·8086 LISTEN 0건")은 그 시점 기록이라 손대지 않음. Redis 인증 없음·박스별 이미지 빌드·Influx 쿼리 기간 상한 미적용은 status.md 알려진 빚.
+- 남은 빚: EC2 전환 자체(런북 11단계, 사람) 와 §4 수동 1~7. 007 §5 의 옛 기록("호스트 8000·8086 LISTEN 0건")은 그 시점 기록이라 손대지 않음. 박스별 이미지 빌드·Influx 쿼리 기간 상한 미적용은 status.md 알려진 빚.
 - 2026-09-28 성능 개선 — data 박스 메모리 상한(§3.1): Influx 동시 3 → 2·전체 768 → 512MB·쓰기 캐시 256MB·`GOMEMLIMIT` 700MiB·`mem_limit` 1300m, Redis `maxmemory` 600mb·`noeviction`. 이유: 쿼리 몫 상한만으로는 거부되는 쿼리의 힙까지 막지 못했고, 009 틱 스트림(24시간 상한 ≈3.5GB)과 Redis 에 상한이 없어 Influx 장애가 박스 전체 OOM 으로 번질 수 있었다. 측정은 앞선 점검의 로컬 influxdb:2.7 재현값(§3.1 본문) — 운영 확인은 §4 수동 4. 계약은 `tests/test_deploy.py`. 서버 검증 951 passed.
+- 2026-10-23 Redis 비밀번호(§3.7): compose 2개의 redis 명령에 `--requirepass ${REDIS_PASSWORD:-}`, `Settings.redis_password`, `core/redis_stream.py` `auth_kwargs`(두 클라이언트의 `from_url` 이 `password` 를 받는다)·`main.py` 두 lifespan·`scripts/replay_forget.py`, `server/.env.example` 빈 키, 런북 `redis-auth.md`, 계약 테스트 `test_deploy.py` 1개·`tests/test_redis_auth.py`. 정한 것: 키 하나를 세 박스에 같은 값(박스마다 다른 사용자·ACL 파일은 두지 않았다 — 클라이언트가 둘뿐이고 권한도 같다), 3인자 AUTH(클라이언트 먼저 켜기), 배포 가드 없음(비어도 되는 키). 값은 아직 없다 — 운영은 이 배포 뒤에도 인증 없이 돈다(redis 컨테이너만 한 번 다시 만들어진다). fakeredis 는 nopass 서버의 3인자 AUTH 를 거절해 실제 Redis 와 달라, 그 성질은 위 §5 실측으로 남겼다.
