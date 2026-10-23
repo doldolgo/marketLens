@@ -4,7 +4,7 @@
 export const HIGHLIGHT_PCT = 1.5
 /** stale 기준(초) — 마지막 수신 후 이 시간이 지나면 행을 흐리게 그린다. */
 export const STALE_SEC = 5
-/** mock tick(ms) — 셸 전체의 심장 박동. 시계·age·mock 흔들림이 전부 이 주기를 따른다. */
+/** 셸 tick(ms) — 셸 전체의 심장 박동. 시계·age 가 이 주기를 따른다(이름은 mock 시절 그대로). */
 export const MOCK_TICK_MS = 1500
 /** 서버 메시지가 이 시간 동안 없으면 반쯤 죽은 연결로 보고 재연결(ms) (017 §3.4). */
 export const SPREAD_WS_SILENCE_MS = 10000

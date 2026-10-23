@@ -35,33 +35,6 @@ export interface SpreadRow {
   dayChg: number | null
 }
 
-// ── mock 탭용 데이터 모양 (§3.6~3.9) ──────────────────────────────────────
-
-/** 현물 항목 — off 는 기준가 대비 편차 %. */
-export interface SpotItem {
-  ex: string
-  off: number
-  status: FeedStatus
-  age: number
-}
-
-/** 선물 항목 — prem 은 현물 대비 프리미엄 %, funding 은 소수 3자리 %. */
-export interface PerpItem {
-  ex: string
-  prem: number
-  funding: number
-  status: FeedStatus
-  age: number
-}
-
-/** 코인 1개의 mock 마켓 (갭·선선갭 탭 공용). */
-export interface MockMarket {
-  sym: string
-  base: number
-  spot: SpotItem[]
-  perp: PerpItem[]
-}
-
 // ── 수집 상태 — GET /health/collect 응답 (011 §3.5, BE features/health/models.py 와 1:1) ──
 // 셸 KPI 와 공유 피드가 알아야 해서 shared 에 둔다. 시각은 전부 epoch ms.
 
@@ -126,7 +99,6 @@ export interface Feed {
   spreads: SpreadRow[]
   /** USDT/KRW 암묵환율. 0 = 아직 없음. */
   rate: number
-  markets: MockMarket[]
   /** /health/collect 마지막 응답 — 첫 응답 전 null (011). */
   health: HealthData | null
   /** spreads 행 + rate 통째 교체 — 017 구독이 snapshot·delta 마다 호출. 받은 배열을 그대로 쓴다. */
