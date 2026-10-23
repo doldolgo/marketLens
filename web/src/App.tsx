@@ -345,7 +345,7 @@ export default function App() {
         </TabLoadGuard>
       ))}
       {wrap('gap', <GapTab active={tab === 'gap'} now={now} />)}
-      {wrap('pp', <PpTab feed={feed} />)}
+      {wrap('pp', <PpTab active={tab === 'pp'} now={now} />)}
       {wrap('health', <HealthTab feed={feed} now={now} />)}
       {wrap('flow', <FlowTab active={tab === 'flow'} />)}
 

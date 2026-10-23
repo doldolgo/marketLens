@@ -23,7 +23,7 @@ ruff check . && ruff format .
 ```bash
 cd web
 npm ci
-npm run dev        # http://localhost:5173/app/ (base 가 /app/, 022) , /api → localhost:8000 프록시 (ws: true — /api/ws/spreads·/api/ws/gap 업그레이드 포함)
+npm run dev        # http://localhost:5173/app/ (base 가 /app/, 022) , /api → localhost:8000 프록시 (ws: true — /api/ws/spreads·/api/ws/gap·/api/ws/pp 업그레이드 포함)
 npm run build      # tsc -b && vite build
 npm run lint       # oxlint
 ```
@@ -65,7 +65,7 @@ curl -s -D - localhost:8000/landing | head -c 600   # 022 — 항상 200·no-sto
 | ETH_WS_URL | 없음 |
 | ETH_HTTP_URL | 없음 |
 
-- `ROLE`: 프로세스 역할(016) — `collector`(전체 동작) | `api`(Influx 조회 + `/ws/spreads`·`/ws/gap` + `GET /spreads` Redis 읽기, 백그라운드 태스크는 017·048 구독 태스크 둘 + `SLACK_WEBHOOK_URL` 이 있으면 025 알림 태스크 + `STATSD_ADDR` 가 있으면 027 게이지 태스크(+ 접속마다 보내기 태스크)). 로컬은 비워 둔다. `api` 는 compose 의 `api` 서비스가 `environment` 로만 준다. 둘 밖의 값이면 설정을 읽는 순간 실패한다.
+- `ROLE`: 프로세스 역할(016) — `collector`(전체 동작) | `api`(Influx 조회 + `/ws/spreads`·`/ws/gap`·`/ws/pp` + `GET /spreads` Redis 읽기, 백그라운드 태스크는 017·048·049 구독 태스크 셋 + `SLACK_WEBHOOK_URL` 이 있으면 025 알림 태스크 + `STATSD_ADDR` 가 있으면 027 게이지 태스크(+ 접속마다 보내기 태스크)). 로컬은 비워 둔다. `api` 는 compose 의 `api` 서비스가 `environment` 로만 준다. 둘 밖의 값이면 설정을 읽는 순간 실패한다.
 - `INFLUX_URL`·`INFLUX_TOKEN`: InfluxDB 2.7 접속(org·bucket 은 `marketlens` 고정). 토큰이 없으면 flusher 비활성·`/history/*` 503 — 앱은 뜬다. 사람용 UI 는 `http://localhost:8086`(같은 토큰).
 - `REDIS_URL`: Redis 7 접속(009 틱 버퍼). compose 안에서는 `redis://redis:6379/0` 으로 덮어쓴다. 없으면 인계된 틱이 버려진다(앱은 뜬다).
 - `REFRESH_TOKEN`: 설정 시 `POST /refresh` 에 `X-Refresh-Token` 헤더가 필요하다.
@@ -125,6 +125,10 @@ EOF
 docker compose -f docker-compose.dev.yml exec redis redis-cli GET gap:latest | head -c 400
 ```
 048 — 기동 10초 뒤(perp 목록 첫 회차 + 현물·perp 스트림 한 바퀴) 행 키가 정확히 다음 11개면 정상: `sym, spot, perp, spotPrice, entry, exit, funding, intervalH, nextFundingTs, status, age`. 최상위는 `rows warnings dataReceivedAt fetchedAt` 넷(`rate`·`notional` 없음). 행 수는 김프 우주 ∩ perp 우주 코인 × (현물 4 × perp 3) — 로컬 실측 2,923행(359코인). 위 python 스니펫의 주소를 `ws://localhost:8000/ws/gap` 으로 바꾸면 같은 모양의 `snapshot` → 매초 `delta`(perp 최우선 호가가 매초 바뀌어 행의 70~97% 가 실린다) 가 온다.
+```bash
+docker compose -f docker-compose.dev.yml exec redis redis-cli GET pp:latest | head -c 400
+```
+049 — 위 python 스니펫의 주소를 `ws://localhost:8000/ws/pp` 로 바꿔 먼저 연결하면(`pp:want` — 아무도 안 보면 표를 만들지 않는다) `waiting` 뒤 1~2초 안에 `snapshot`, 이후 매초 `delta` 가 오고, 그동안 `pp:latest` 의 행 키가 정확히 13개면 정상: `sym, a, b, longA, longB, fundA, intA, nextA, fundB, intB, nextB, status, age`. `a` 는 원천 순서에서 `b` 보다 앞이다.
 ```bash
 curl -s "localhost:8000/slippage/upbit?symbol=BTC/KRW&amount=1000000" | head -c 300
 ```

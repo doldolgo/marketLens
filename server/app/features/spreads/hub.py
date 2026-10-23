@@ -10,8 +10,9 @@ snapshot 도 표 1장당 한 번만 압축해 둔다(2026-09-28) — 배포 직�
 채널은 첫 접속자가 붙을 때 구독하고 마지막 접속자가 떠난 뒤 30초가 지나면 닫는다(2026-09-28) — 접속자가
 없는 허브(배포의 `server` 컨테이너, 아무도 안 보는 api)가 매초 790KB 를 받아 버리지 않게.
 허브는 표 id 하나로 매개변수화된다(048 §3.4) — 채널 `<id>`·시작 키 `<id>:latest`·행 키 함수만 다르고 나머지 규칙은
-같다. 인스턴스와 구독 연결은 표마다 하나(`spreads`·`gap`)이고 보는 사람 흔적 `<id>:want` 도 표마다 따로 쓴다 —
-`spreads:want` 는 spreads 허브만, `gap:want` 는 gap 허브만. 수집은 `gap:want` 가 있을 때만 gap 표를 만든다(048 §3.3).
+같다. 인스턴스와 구독 연결은 표마다 하나(`spreads`·`gap`·`pp`)이고 보는 사람 흔적 `<id>:want` 도 표마다 따로 쓴다 —
+`spreads:want` 는 spreads 허브만, `gap:want` 는 gap 허브만, `pp:want` 는 pp 허브만. 수집은 `gap:want`·`pp:want` 가 있을
+때만 그 표를 만든다(048 §3.3·049 §3.3).
 
 표는 파싱하지 않는다(2026-10-09). 수집의 게시기가 쓴 표 글(공백 없음·ensure_ascii=False)을 행 조각으로 잘라 `age` 를
 뺀 글끼리 비교하고, 바뀐 행은 받은 조각을 그대로 이어 delta 를 만든다. snapshot 은 표 글 앞에 `type` 키만 끼운다.
@@ -38,7 +39,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import WebSocket
 
-from app.core.redis_bus import CHANNEL, GAP_CHANNEL, RedisBus
+from app.core.redis_bus import CHANNEL, GAP_CHANNEL, PP_CHANNEL, RedisBus
 
 logger = logging.getLogger("marketlens.spreads_hub")
 
@@ -83,8 +84,17 @@ def gap_row_key(row: dict) -> str:
     return f"{row['sym']}|{row['spot']}|{row['perp']}"
 
 
-# 표 id → 행 키 함수. 허브가 다루는 표는 이 둘뿐이다 (048 §3.4 — 049 가 `pp` 를 더한다)
-ROW_KEYS: dict[str, RowKey] = {CHANNEL: row_key, GAP_CHANNEL: gap_row_key}
+def pp_row_key(row: dict) -> str:
+    """049 §3.3 — 선선갭 행의 키 `sym|a|b`."""
+    return f"{row['sym']}|{row['a']}|{row['b']}"
+
+
+# 표 id → 행 키 함수. 허브가 다루는 표는 이 셋뿐이다 (048 §3.4·049 §3.3)
+ROW_KEYS: dict[str, RowKey] = {
+    CHANNEL: row_key,
+    GAP_CHANNEL: gap_row_key,
+    PP_CHANNEL: pp_row_key,
+}
 
 
 def index_rows(table: dict, key: RowKey = row_key) -> dict[str, dict]:
@@ -124,12 +134,17 @@ def _dumps(value: dict) -> str:
 # 다시 쓰면 받은 글 그대로다. 그래서 행 조각 글끼리 비교하고 조각을 그대로 이어 붙이면 파싱 경로와 바이트가 같다.
 # JSON 문자열 안의 따옴표는 `\"` 로 나가므로 아래 표식(맨 따옴표가 든 글자)은 문자열 안에 생기지 않는다.
 ROWS_OPEN = '"rows":['
-ROWS_CLOSE = '],"warnings":'  # 두 표 모두 최상위에서 rows 다음 키가 warnings 다 (003 build_table·048 build_gap_table)
+ROWS_CLOSE = '],"warnings":'  # 세 표 모두 최상위에서 rows 다음 키가 warnings 다 (003 build_table·048 build_gap_table·049 build_pp_table)
 ROW_HEAD = '{"sym":'  # 행은 늘 sym 으로 시작한다
 ROW_SEP = '},{"sym":'
 AGE = ',"age":'
-# 표 id → 행 키 필드 셋 바로 뒤 필드의 표식. 행 조각에서 이 표식 앞이 키 글자다(spreads sym·dom·fx, gap sym·spot·perp)
-KEY_ENDS: dict[str, str] = {CHANNEL: ',"fwd":', GAP_CHANNEL: ',"spotPrice":'}
+# 표 id → 행 키 필드 셋 바로 뒤 필드의 표식. 행 조각에서 이 표식 앞이 키 글자다(spreads sym·dom·fx, gap sym·spot·perp,
+# pp sym·a·b)
+KEY_ENDS: dict[str, str] = {
+    CHANNEL: ',"fwd":',
+    GAP_CHANNEL: ',"spotPrice":',
+    PP_CHANNEL: ',"longA":',
+}
 _JSON_STR = r'"(?:[^"\\]|\\.)*"'
 # 키 글자의 꼴 — 표마다 첫 행 하나로 키 필드 이름·순서를 본다. 계약이 바뀌어 키 필드와 표식 사이에 필드가 끼면 파싱 경로로
 KEY_SHAPES: dict[str, re.Pattern[str]] = {
@@ -137,6 +152,7 @@ KEY_SHAPES: dict[str, re.Pattern[str]] = {
     GAP_CHANNEL: re.compile(
         _JSON_STR + ',"spot":' + _JSON_STR + ',"perp":' + _JSON_STR
     ),
+    PP_CHANNEL: re.compile(_JSON_STR + ',"a":' + _JSON_STR + ',"b":' + _JSON_STR),
 }
 # 값 자리의 -0.0 — 문자열은 그룹 1 로 통째 건너뛴다. dict 비교(파싱 경로)는 0.0 == -0.0 이라 같은 값으로 본다.
 # spark 의 round(-0.0004, 3) 이 -0.0 을 만들고(실데이터 행의 1.5%), gap 의 funding 도 거래소가 "-0" 을 주면 -0.0 이다
@@ -340,7 +356,7 @@ class _Out:
 
 
 class SpreadsHub:
-    """표 1장의 구독·diff·브로드캐스트 허브 — `table` 은 표 id(`spreads` 기본, 048 은 `gap`)."""
+    """표 1장의 구독·diff·브로드캐스트 허브 — `table` 은 표 id(`spreads` 기본, 048 은 `gap`, 049 는 `pp`)."""
 
     def __init__(self, *, bus: RedisBus, table: str = CHANNEL) -> None:
         self._bus = bus
