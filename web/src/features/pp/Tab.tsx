@@ -1,15 +1,15 @@
-// 선선갭(선물–선물 갭) 탭 (mock) — 스펙 002 §3.8, 구조는 docs/design/reference/tabs/PPTab.tsx.
+// 선선갭(선물–선물 갭) 탭 — /ws/pp 실데이터 (스펙 049 §3.5, 화면·조작은 002 §3.8, 구조는 docs/design/reference/tabs/PPTab.tsx).
 // 폰(폭 719px 이하)은 필터 접기·정렬 줄·3줄 카드 행 (072 §3.4·§3.5).
 import { useState } from 'react'
-import { STALE_SEC } from '../../shared/config'
 import { fmtFundingHr, fmtPct, pctColor } from '../../shared/format'
-import type { Feed } from '../../shared/types'
 import {
-  FoldButton, GridHeader, gridRow, NumField, SortBar, SymCell, TableFrame, ToggleBtn,
+  Empty, FoldButton, GridHeader, gridRow, NumField, SortBar, SymCell, TableFrame, ToggleBtn,
   bar, cardLeft, cardRight, cardRow, count, exTag, foldPanel, hint, phoneBar, phoneSearch, searchInput, type Header,
 } from '../../shared/ui'
 import { bool, num, sortOf, useUrlState } from '../../shared/urlState'
 import { useViewport } from '../../shared/viewport'
+import { usePpSocket } from './api'
+import { aggregateCoins, overThreshold, perpName, sortCoins, type SortCol } from './coins'
 
 /** 심볼 | 가격갭(가변) | 펀딩갭. 행 높이는 참조대로 48px(2줄 셀). */
 const GRID = '100px 2.2fr 150px'
@@ -18,30 +18,9 @@ const ROW_H = 48
 const THR_P = 0.3
 const THR_F = 20
 
-/** 펀딩 주기(시간): Hyperliquid 1, Bitget 4, 그 외 8 — 시간당 정규화용. */
-function cyc(ex: string): number {
-  return ex === 'Hyperliquid' ? 1 : ex === 'Bitget' ? 4 : 8
-}
-
-interface Pair {
-  lowEx: string
-  highEx: string
-  gap: number
-  fundDiffHr: number
-  age: number
-}
-
-interface Row {
-  sym: string
-  pair: Pair | null
-  maxFundHr: number
-}
-
-type SortCol = 'sym' | 'gap' | 'fund'
-
-/** 거래소 칩 — 선선갭은 양쪽 다 accent, 참조대로 한 치수 작게. */
-
-export default function PpTab({ feed }: { feed: Feed }) {
+export default function PpTab({ active, now }: { active: boolean; now: number }) {
+  // 탭이 보이는 동안만 구독 — 숨으면 닫고 표는 메모리에 둔다, 다시 보이면 snapshot 으로 통째 교체 (049 §3.5)
+  const table = usePpSocket(active)
   const { phone } = useViewport()
   // 폰 필터 접기 — 메모리만, 기본 접힘 (072 §3.4)
   const [foldOpen, setFoldOpen] = useState(false)
@@ -52,45 +31,16 @@ export default function PpTab({ feed }: { feed: Feed }) {
   const [only, setOnly] = useUrlState('p.only', false, bool)
   const [sort, setSort] = useUrlState<{ col: SortCol; asc: boolean }>('p.sort', { col: 'gap', asc: false }, sortOf(['sym', 'gap', 'fund']))
 
-  // fail 아닌 선물 거래소 모든 쌍 — 최대 가격갭 쌍과 최대 펀딩갭(시간당) 값을 각각 채택.
-  const all: Row[] = feed.markets.map((m) => {
-    const perps = m.perp.filter((p) => p.status !== 'fail')
-    let pair: Pair | null = null
-    let maxFundHr = 0
-    for (let i = 0; i < perps.length; i++) {
-      for (let j = i + 1; j < perps.length; j++) {
-        const a = perps[i]
-        const b = perps[j]
-        const [low, high] = a.prem <= b.prem ? [a, b] : [b, a]
-        const gap = ((1 + high.prem / 100) / (1 + low.prem / 100) - 1) * 100
-        const fundDiffHr = high.funding / cyc(high.ex) - low.funding / cyc(low.ex)
-        maxFundHr = Math.max(maxFundHr, Math.abs(fundDiffHr))
-        if (!pair || gap > pair.gap) {
-          pair = { lowEx: low.ex, highEx: high.ex, gap, fundDiffHr, age: Math.max(a.age, b.age) }
-        }
-      }
-    }
-    return { sym: m.sym, pair, maxFundHr }
-  })
+  // 마지막 프레임 이후 경과 초 — 셸의 1.5초 tick(now)으로 age 가 자라 delta 가 끊기면 5초 뒤 전 행이 stale
+  let elapsedSec = 0
+  if (table.receivedAt > 0) elapsedSec = Math.max(0, (now - table.receivedAt) / 1000)
+  const all = aggregateCoins(table.rows.values(), elapsedSec)
 
   const ql = q.trim().toLowerCase()
   let rows = all.filter((r) => r.sym.toLowerCase().includes(ql))
-  if (only) {
-    // 가격갭 ≥ 임계 또는 연환산(×24×365) 펀딩갭 ≥ 임계.
-    rows = rows.filter((r) => r.pair !== null && (r.pair.gap >= thrP || r.maxFundHr * 24 * 365 >= thrF))
-  }
-
+  if (only) rows = rows.filter((r) => overThreshold(r, thrP, thrF))
+  rows = sortCoins(rows, sort.col, sort.asc)
   const mul = sort.asc ? 1 : -1
-  rows = [...rows].sort((a, b) => {
-    if (!a.pair && !b.pair) return a.sym.localeCompare(b.sym)
-    if (!a.pair) return 1
-    if (!b.pair) return -1
-    const d =
-      sort.col === 'sym' ? a.sym.localeCompare(b.sym)
-      : sort.col === 'gap' ? a.pair.gap - b.pair.gap
-      : Math.abs(a.pair.fundDiffHr) - Math.abs(b.pair.fundDiffHr)
-    return d * mul
-  })
 
   function clickSort(col: string) {
     const c = col as SortCol
@@ -132,33 +82,42 @@ export default function PpTab({ feed }: { feed: Feed }) {
         {phone
           ? <SortBar headers={headers} sortKey={sort.col} sortDir={mul} onSort={clickSort} right={`${rows.length} / ${all.length} 코인`} els={['sort:col', 'sort:dir']} />
           : <GridHeader cols={GRID} headers={headers} sortKey={sort.col} sortDir={mul} onSort={clickSort} />}
+        {all.length === 0 && <Empty>백엔드에서 선선갭 표를 받는 중입니다…</Empty>}
         {rows.map((r) => {
-          const p = r.pair
-          const stale = p !== null && p.age >= STALE_SEC
-          const hot = p !== null && !stale && p.gap >= thrP
+          const d = r.best
+          const hot = d !== null && !r.stale && d.gap >= thrP
+          const longName = d ? perpName(d.long) : '–'
+          const shortName = d ? perpName(d.short) : '–'
           const chips = (
             <>
-              <span style={exTag(true, true)}>{p ? p.lowEx : '–'}</span>
+              <span style={exTag(true, true)}>{longName}</span>
               <span style={{ fontSize: 10, color: 'var(--color-neutral-600)' }}>↔</span>
-              <span style={exTag(true, true)}>{p ? p.highEx : '–'}</span>
+              <span style={exTag(true, true)}>{shortName}</span>
             </>
           )
+          // 음수 가격갭은 파랑 그대로 — 최우선 호가로는 벌어진 게 없다는 뜻이다 (049 §3.5)
           const gapText = (
-            <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 84, textAlign: 'right', color: p ? pctColor(p.gap) : 'var(--color-neutral-700)' }}>
-              {p ? fmtPct(p.gap) : '–'}
+            <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 84, textAlign: 'right', color: d ? pctColor(d.gap) : 'var(--color-neutral-700)' }}>
+              {d ? fmtPct(d.gap) : '–'}
             </span>
           )
           const legs = (
             <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--color-neutral-500)', whiteSpace: 'nowrap' }}>
-              {p ? `${p.lowEx} 롱 / ${p.highEx} 숏` : '–'}
+              {d ? `${longName} 롱 / ${shortName} 숏` : '–'}
             </span>
           )
-          const fund = <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: p ? pctColor(p.fundDiffHr, 4) : 'var(--color-neutral-700)' }}>{p ? fmtFundingHr(p.fundDiffHr) : '–'}</span>
+          let fundText = '–'
+          let fundColor = 'var(--color-neutral-700)'
+          if (d && d.fundGap !== null) {
+            fundText = fmtFundingHr(d.fundGap)
+            fundColor = pctColor(d.fundGap, 4)
+          }
+          const fund = <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: fundColor }}>{fundText}</span>
           const fundNote = <span style={{ fontSize: 10, color: 'var(--color-neutral-600)' }}>해당 조합 펀딩갭</span>
           // 폰 3줄 카드 — 1줄 = 심볼 / 가격갭, 2줄 = 두 칩 / 펀딩갭, 3줄 = 롱·숏 / 설명 (072 §3.5)
           if (phone) {
             return (
-              <div key={r.sym} className="hv-row" style={cardRow({ hot, stale })}>
+              <div key={r.sym} className="hv-row" style={cardRow({ hot, stale: r.stale })}>
                 <span style={{ fontWeight: 600, fontSize: 14, color: hot ? 'var(--color-accent-300)' : 'var(--color-text)' }}>{r.sym}</span>
                 <div style={cardRight}>{gapText}</div>
                 <div style={cardLeft}>{chips}</div>
@@ -169,7 +128,7 @@ export default function PpTab({ feed }: { feed: Feed }) {
             )
           }
           return (
-            <div key={r.sym} className="hv-row" style={gridRow(GRID, { hot, stale, height: ROW_H })}>
+            <div key={r.sym} className="hv-row" style={gridRow(GRID, { hot, stale: r.stale, height: ROW_H })}>
               <SymCell sym={r.sym} hot={hot} />
               <div style={{ padding: '0 8px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

@@ -58,7 +58,7 @@
 - `/health/collect` 5초 폴링(011)은 그대로.
 
 ### 3.5 프록시
-- nginx: 공개 허용 목록(028)의 **정확 일치** `location = /api/ws/spreads` 하나 — 다른 허용 경로와 같은 모양으로 `rewrite ^/api/(.*)$ /$1 break` 가 `/api` 를 떼고 URI 없는 `proxy_pass http://api:8000` 이 그 경로를 넘긴다. 접두 위치(`/api/ws/`)는 두지 않는다 — api 에 새 `/ws/*` 가 생기면 저절로 공개되기 때문이다(다른 표의 WebSocket 은 그 스펙이 정확 일치 한 줄을 더한다 — 048). `proxy_http_version 1.1` + `Upgrade`·`Connection "upgrade"` 헤더, 기존 프록시 헤더 4개 동일. `proxy_read_timeout` 은 **손대지 않는다**(기본 60초 — 1초 하트비트가 있어 안 끊긴다, 016 과 같은 입장).
+- nginx: 공개 허용 목록(028)의 **정확 일치** `location = /api/ws/spreads` 하나 — 다른 허용 경로와 같은 모양으로 `rewrite ^/api/(.*)$ /$1 break` 가 `/api` 를 떼고 URI 없는 `proxy_pass http://api:8000` 이 그 경로를 넘긴다. 접두 위치(`/api/ws/`)는 두지 않는다 — api 에 새 `/ws/*` 가 생기면 저절로 공개되기 때문이다(다른 표의 WebSocket 은 그 스펙이 정확 일치 한 줄을 더한다 — 048·049). `proxy_http_version 1.1` + `Upgrade`·`Connection "upgrade"` 헤더, 기존 프록시 헤더 4개 동일. `proxy_read_timeout` 은 **손대지 않는다**(기본 60초 — 1초 하트비트가 있어 안 끊긴다, 016 과 같은 입장).
 - compose: `api` 에 `REDIS_URL` 을 `server` 와 같은 `redis://${DATA_HOST:-redis}:6379/0` 으로 준다(021 — 기본값은 서비스 이름) — 없으면 `server/.env` 의 로컬 값(localhost)을 컨테이너 안에서 쓰게 된다. `depends_on` 은 두지 않는다(021).
 - vite dev 프록시: `/api` 항목에 `ws: true`.
 

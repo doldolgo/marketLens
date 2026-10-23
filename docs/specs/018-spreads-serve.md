@@ -42,8 +42,8 @@
 - 배포 뒤 `docker compose stop api` 면 관리자 server 의 `/api/spreads` 는 **502**(016 §3.3 의 "stop 된 upstream" 과 같다 — 수 초~60초 뒤 502 또는 504), 공개 `/api/spreads` 는 그대로 404, `/api/health` 는 200.
 
 ### 3.4 역할 계약 — 016 §3.1 에 얹는 것
-- `api` 가 서빙하는 경로: `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles`, `/ws/spreads`·`/ws/gap`(048), **`/spreads`**, `/landing`(022), 그리고 api 에만 있는 관리자 피드·브라우저 수신(029 `/admin/status`, 035 `/admin/access`·`/admin/clarity` 와 그 하위 피드, 052 `POST /attention`·`/admin/attention`, 073 `POST /replay`·`/admin/replay/live`·`sessions`·`session` — 낱낱의 목록은 016 §3.1). 그 외 404 는 유지.
-- `api` 의 Redis 용도: 017·048 의 채널 구독 + **`spreads:latest` 읽기·`spreads:want` 쓰기**(`GET /spreads`) + `spreads:latest` 읽기만(`GET /landing`, 022)(요청 단위, 연결은 명령마다 lazy — 009 의 클라이언트와 같은 수명) + 그 밖의 관리자 피드·수신 용도(016 §3.1). 백그라운드 태스크는 017 구독 태스크(표마다 1개 — `spreads`·`gap`(048), 구독은 각각 접속자가 있을 때만) + 접속마다 보내기 태스크 + 052 화면 영역 통계 10초 묶음 쓰기 태스크 1개(끌 때 한 번 더 보낸다) + `SLACK_WEBHOOK_URL` 이 있으면 025 알림 태스크 + `STATSD_ADDR` 가 있으면 027 게이지 태스크.
+- `api` 가 서빙하는 경로: `/health`, `/history/premium`, `/history/streaks`, `/history/streaks/bulk`, `/history/candles`, `/ws/spreads`·`/ws/gap`(048)·`/ws/pp`(049), **`/spreads`**, `/landing`(022), 그리고 api 에만 있는 관리자 피드·브라우저 수신(029 `/admin/status`, 035 `/admin/access`·`/admin/clarity` 와 그 하위 피드, 052 `POST /attention`·`/admin/attention`, 073 `POST /replay`·`/admin/replay/live`·`sessions`·`session` — 낱낱의 목록은 016 §3.1). 그 외 404 는 유지.
+- `api` 의 Redis 용도: 017·048 의 채널 구독 + **`spreads:latest` 읽기·`spreads:want` 쓰기**(`GET /spreads`) + `spreads:latest` 읽기만(`GET /landing`, 022)(요청 단위, 연결은 명령마다 lazy — 009 의 클라이언트와 같은 수명) + 그 밖의 관리자 피드·수신 용도(016 §3.1). 백그라운드 태스크는 017 구독 태스크(표마다 1개 — `spreads`·`gap`(048)·`pp`(049), 구독은 각각 접속자가 있을 때만) + 접속마다 보내기 태스크 + 052 화면 영역 통계 10초 묶음 쓰기 태스크 1개(끌 때 한 번 더 보낸다) + `SLACK_WEBHOOK_URL` 이 있으면 025 알림 태스크 + `STATSD_ADDR` 가 있으면 027 게이지 태스크.
 
 ### 3.5 엣지
 - **Redis 만 죽음**: `/ws/spreads` 는 `waiting`, `GET /spreads` 는 503 → FE 는 017 §3.4 규칙대로 직전 표를 지우지 않은 채 재연결을 반복한다. 표 갱신은 Redis 가 돌아올 때까지 멈춘다. 수집 프로세스의 메모리에는 표가 있지만 **꺼내는 길을 두지 않는다**(§1 결정).

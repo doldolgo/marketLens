@@ -311,6 +311,7 @@ class TickLoop:
         candles: EventSink | None = None,
         spreads: EventSink | None = None,
         gap: EventSink | None = None,
+        pp: EventSink | None = None,
         heartbeat: EventSink | None = None,
         wallet: WalletStatusProvider | None = None,
         day_open: EventSink | None = None,
@@ -327,6 +328,7 @@ class TickLoop:
         self._candles = candles
         self._spreads = spreads
         self._gap = gap
+        self._pp = pp
         self._heartbeat = heartbeat
         self._day_open = day_open
         self._wallet = wallet
@@ -469,6 +471,10 @@ class TickLoop:
             # 048 — 현선갭 표는 spreads 표 다음 같은 회차에서. 같은 메모리 호가로 두 표가 한 초에 나간다
             self._gap.observe(tick)
             lap = self._lap("갭표", lap)
+        if self._pp is not None:
+            # 049 — 선선갭 표는 gap 표 다음 같은 회차에서. 보는 사람이 없으면 게시기가 곧바로 돌아온다(단계 ≈0)
+            self._pp.observe(tick)
+            lap = self._lap("선선표", lap)
         if self._heartbeat is not None:
             # 025 — 맨 끝: 여기까지 왔다 = 이 초의 틱이 온전히 끝났다. 위에서 예외가 나면 이 초는 안 쓴다
             self._heartbeat.observe(tick)

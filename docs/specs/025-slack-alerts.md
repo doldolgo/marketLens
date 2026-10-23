@@ -20,7 +20,7 @@
 
 ### 3.1 읽는 계약 (복사)
 - 011: 매 틱(1초) 거래소 6곳(`upbit`·`bithumb`·`binance`·`bybit`·`bitget`·`okx`) + perp 원천 4개(046·047 — `binance_perp`·`bybit_perp`·`bitget_perp`·`hyperliquid_perp`)를 판정한다. 실패는 kind 8종(`network`·`timeout`·`rate_limit`·`banned`·`unavailable`·`bad_request`·`bad_response`·`stale_stream`) 과 `message`(300자 상한)·`status_code`·`url`·`retry_after_sec` 를 갖고, 같은 거래소·같은 kind 의 연속 실패는 **한 구간**(`started_at`·`ended_at`·`count`)이다. kind 가 바뀌면 구간을 닫고 새로 연다. 연속 성공 3사이클이면 닫히고 종료 시각은 그 연속의 첫 성공 사이클이다(플래핑은 한 구간).
-- 016: 같은 이미지가 `ROLE=collector|api` 로 나뉜다. collector 는 수집 전체, api 는 Influx 조회·표(`/ws/spreads`·`/ws/gap`·`GET /spreads`)·`/landing`·api 쪽 관리자 피드와 브라우저 수신(016 §3.1). 두 역할 모두 `/health` 를 연다.
+- 016: 같은 이미지가 `ROLE=collector|api` 로 나뉜다. collector 는 수집 전체, api 는 Influx 조회·표(`/ws/spreads`·`/ws/gap`·`/ws/pp`·`GET /spreads`)·`/landing`·api 쪽 관리자 피드와 브라우저 수신(016 §3.1). 두 역할 모두 `/health` 를 연다.
 - 018: RedisBus 는 collector 가 접속자와 무관하게 매 틱 표를 `spreads:latest`(TTL 10초) 에 두고(채널 `PUBLISH` 는 구독자가 있을 때만 — 017), api 는 요청마다 `spreads:latest` 를 읽는다. 그래도 **표 키는 수집 생존의 증거가 못 된다** — 틱이 돌아도 기준 거래소(`upbit`) 환율이나 국내·해외 스냅샷이 없으면 그 회차 표를 만들지 않는다(018 §3.2). 그래서 §3.4 의 심장박동 키를 따로 둔다.
 - 001: 앱 로그는 표준 `logging` 으로 stderr 에 `%(asctime)s %(levelname)s %(name)s %(message)s`. `marketlens.*` 로거만 INFO. 모든 루프는 예외를 `logger.exception`/`logger.error` 로 남기고 계속 돈다.
 
