@@ -144,7 +144,7 @@
 - (032) caddy 접속 로그의 `output file` 블록(회전 설정)은 배포의 `caddy reload` 로 바뀌지 않는다 — 그 블록을 고친 배포 뒤엔 사람이 serve 에서 `docker compose --profile serve --env-file .env --env-file server/.env up -d --force-recreate caddy`(몇 초 끊김)
 - (032) caddy 는 기록할 요청이 없는 날 회전·삭제도 하지 않는다 — 방문이 며칠 없으면 90일 지난 파일이 다음 방문 때 지워진다
 - (022) 랜딩 스크린샷은 정적이다 — 화면이 바뀌면 사람이 다시 찍는다(WebP 두 크기도).
-- (022) 검색엔진 등록(구글 Search Console 도메인 속성·네이버 서치어드바이저·다음 PIN)과 사이트맵 제출, 배포 뒤 카카오 OG 캐시 초기화는 사람 몫이다 — 아직 안 했다.
+- (022) 구글 Search Console 은 URL 접두어 속성 `https://kimptrack.com/` 을 HTML 파일로 소유 확인한다(2026-10-24 — 그 전엔 속성만 만들고 확인이 안 돼 있었다). 네이버 서치어드바이저·다음 PIN·사이트맵 제출, 배포 뒤 카카오 OG 캐시 초기화는 사람 몫이다.
 - (022) 구글 리치 결과 테스트·Search Console 'Software apps' 에 WebApplication 이 invalid 로 뜬다 — 평점·리뷰를 지어내지 않으므로 실제 평점 기능이 생기기 전까지 감수한다(리치 결과 대상이 아닐 뿐 순위 불이익은 없다).
 - (022) 크롤러가 받는 HTML 에는 실데이터가 없다(구글만 `/api/landing` 을 렌더링으로 받는다). 서버가 최근 사건·상위 경로를 HTML 에 미리 넣는 렌더링은 후속 후보.
 - (022) 랜딩 글을 고치면 `uv run web/scripts/subset-landing-font.py` 로 글꼴 서브셋을 다시 만든다 — 안 하면 `test_landing_seo.py` 가 멈춘다.
