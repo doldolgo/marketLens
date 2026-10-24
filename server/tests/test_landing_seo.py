@@ -326,6 +326,14 @@ def test_font_subset_covers_every_character_on_the_page() -> None:
     assert "cdn.jsdelivr.net" not in (PUBLIC / "landing.html").read_text("utf-8")
 
 
+def test_google_ownership_file_stays_at_the_root() -> None:
+    """Search Console URL 접두어 속성 `https://kimptrack.com/` 의 소유 확인 파일 — 지우면 구글이 소유 확인을 다시 거둔다(§3.6).
+    내용은 구글이 내려 준 한 줄 그대로, 루트 정적 파일이라 nginx `location /` 가 그대로 준다."""
+    name = "google00e147a0817b5169.html"
+    text = (PUBLIC / name).read_text("utf-8")
+    assert text.strip() == f"google-site-verification: {name}"
+
+
 def test_robots_opens_only_the_landing_summary_under_api() -> None:
     """검색 로봇이 랜딩을 그릴 때 실데이터를 받게 /api/landing 만 연다 — 더 긴 규칙이 이긴다(RFC 9309)."""
     text = (PUBLIC / "robots.txt").read_text("utf-8")

@@ -142,7 +142,7 @@ KimpTrack                  김프·역프란  계산 방법  자주 묻는 질�
 - `robots.txt` — 규칙 네 줄 `User-agent: *` / `Allow: /api/landing` / `Disallow: /api/` / `Sitemap: https://kimptrack.com/sitemap.xml`(주석 줄 — 다음 PIN — 은 더해도 된다). 더 긴 규칙이 이겨(RFC 9309) 검색 로봇은 랜딩을 그릴 때 실데이터를 받고, 그 밖의 API 는 막힌다. 학습용 봇도 막지 않는다(따로 정할 일).
 - `sitemap.xml` — `https://kimptrack.com/`, `https://kimptrack.com/kimp-chart`·`/kimp-history`(044 — `lastmod` 는 그 페이지를 고친 날), `https://kimptrack.com/privacy`(032 — `lastmod` 는 방침 시행일) 네 줄, 각각 `lastmod`. `/app/` 은 넣지 않는다.
 - **대시보드 셸**(`web/index.html`) — 정적 `<meta name="robots" content="noindex, follow">`(스크립트로 바꾸지 않는다 — 구글은 noindex 를 보면 렌더링 전에 건너뛴다), description, 공유 미리보기용 og(title "KimpTrack - 실시간 김프 표", 그림은 랜딩과 같은 `og-v4.png`, url `/app/`). `<title>KimpTrack</title>` 은 007 의 스모크 문자열이라 그대로.
-- **검색엔진 등록은 사람 몫** — 구글 Search Console 은 도메인 속성(Cloudflare DNS TXT), 네이버 서치어드바이저는 `https://kimptrack.com` 을 등록하고 소유 확인(메타 태그면 head 에 `naver-site-verification` 한 줄, HTML 파일이면 `web/public/` 에), 두 곳 모두 `sitemap.xml` 제출. 다음 웹마스터도구는 `robots.txt` 맨 위에 PIN 주석 줄. 문구·그림을 바꾼 뒤에는 카카오 공유 디버거로 OG 캐시를 지운다.
+- **검색엔진 등록은 사람 몫** — 구글 Search Console 은 URL 접두어 속성 `https://kimptrack.com/` 이고 소유 확인은 HTML 파일 `web/public/google00e147a0817b5169.html`(구글이 내려 준 한 줄 그대로 — 지우면 확인이 풀린다, 2026-10-24), 네이버 서치어드바이저는 `https://kimptrack.com` 을 등록하고 소유 확인(메타 태그면 head 에 `naver-site-verification` 한 줄, HTML 파일이면 `web/public/` 에), 두 곳 모두 `sitemap.xml` 제출. 다음 웹마스터도구는 `robots.txt` 맨 위에 PIN 주석 줄. 문구·그림을 바꾼 뒤에는 카카오 공유 디버거로 OG 캐시를 지운다.
 - `spreads.png`·`history.png`: `https://kimptrack.com/app/` 실화면을 1360×820 @1.5x 로 찍는다(스프레드 탭 기본 화면, 기록 탭 `?tab=history&sym=BTC`). 다시 찍으면 WebP 두 크기(1020·2040)도 다시 만든다.
 
 ### 3.7 반응형
